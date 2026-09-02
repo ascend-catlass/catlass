@@ -1,0 +1,107 @@
+name: Test a GitCode pull request
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number in cann/catlass on GitCode
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  merge-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Read pull request metadata from GitCode
+        id: pr
+        shell: bash
+        env:
+          PR_NUMBER: ${{ inputs.pr_number }}
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "${PR_NUMBER}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "pr_number must be a positive integer" >&2
+            exit 1
+          fi
+
+          api_url="https://api.gitcode.com/api/v5/repos/cann/catlass/pulls/${PR_NUMBER}"
+          curl_args=(--fail --silent --show-error --location)
+          if [[ -n "${GITCODE_TOKEN}" ]]; then
+            curl_args+=(--header "PRIVATE-TOKEN: ${GITCODE_TOKEN}")
+          fi
+          pr_json="$(curl "${curl_args[@]}" "${api_url}")"
+
+          state="$(jq -er '.state' <<<"${pr_json}")"
+          base_ref="$(jq -er '.base.ref // .target_branch' <<<"${pr_json}")"
+          head_ref="$(jq -er '.head.ref // .source_branch' <<<"${pr_json}")"
+          head_sha="$(jq -er '.head.sha' <<<"${pr_json}")"
+          head_repo_url="$(jq -er '.head.repo.html_url' <<<"${pr_json}")"
+
+          if [[ "${state}" != "open" && "${state}" != "opened" ]]; then
+            echo "PR #${PR_NUMBER} is not open (state: ${state})" >&2
+            exit 1
+          fi
+          git check-ref-format --branch "${base_ref}" >/dev/null
+          git check-ref-format --branch "${head_ref}" >/dev/null
+          if [[ ! "${head_sha}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "GitCode returned an invalid head SHA" >&2
+            exit 1
+          fi
+          if [[ ! "${head_repo_url}" =~ ^https://gitcode\.com/[^[:space:]]+\.git$ ]]; then
+            echo "GitCode returned an unexpected source repository URL" >&2
+            exit 1
+          fi
+
+          {
+            echo "base_ref=${base_ref}"
+            echo "head_ref=${head_ref}"
+            echo "head_sha=${head_sha}"
+            echo "head_repo_url=${head_repo_url}"
+          } >>"${GITHUB_OUTPUT}"
+
+          echo "PR #${PR_NUMBER}: ${head_repo_url}@${head_ref} -> cann/catlass@${base_ref}"
+
+      - name: Merge the pull request into its target branch
+        shell: bash
+        env:
+          BASE_REF: ${{ steps.pr.outputs.base_ref }}
+          HEAD_REF: ${{ steps.pr.outputs.head_ref }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+          HEAD_REPO_URL: ${{ steps.pr.outputs.head_repo_url }}
+        run: |
+          set -euo pipefail
+
+          git remote add gitcode https://gitcode.com/cann/catlass.git
+          git remote add gitcode-pr "${HEAD_REPO_URL}"
+          git fetch --no-tags gitcode \
+            "+refs/heads/${BASE_REF}:refs/remotes/gitcode/target"
+          git fetch --no-tags gitcode-pr \
+            "+refs/heads/${HEAD_REF}:refs/remotes/gitcode-pr/head"
+
+          fetched_head="$(git rev-parse refs/remotes/gitcode-pr/head)"
+          if [[ "${fetched_head}" != "${HEAD_SHA}" ]]; then
+            echo "PR head changed while this workflow was starting; run it again" >&2
+            exit 1
+          fi
+
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git switch --detach refs/remotes/gitcode/target
+          git merge --no-ff --no-commit "${HEAD_SHA}"
+
+      - name: Build CATLASS examples for Ascend 3510
+        shell: bash
+        working-directory: scripts
+        run: bash build.sh catlass_examples -DCATLASS_ARCH=3510
