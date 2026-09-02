@@ -9,36 +9,6 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: sync-gitcode-master-and-tags
-  cancel-in-progress: false
-
 jobs:
   sync:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - name: Check out the automation branch
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Fetch GitCode master and tags
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          git remote add gitcode https://gitcode.com/cann/catlass.git
-          git fetch --force --prune --prune-tags gitcode \
-            +refs/heads/master:refs/remotes/gitcode/master \
-            +refs/tags/*:refs/tags/*
-
-      - name: Update GitHub master and tags
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          git push --force origin \
-            refs/remotes/gitcode/master:refs/heads/master
-          git push --force --prune origin \
-            'refs/tags/*:refs/tags/*'
+    uses: ascend-catlass/actions/.github/workflows/sync-gitcode.yml@main
