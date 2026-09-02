@@ -20,12 +20,6 @@ jobs:
     runs-on: [self-hosted, ascend950]
     timeout-minutes: 60
     steps:
-      - name: Check out the repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
       - name: Read pull request metadata from GitCode
         id: pr
         shell: bash
@@ -114,6 +108,7 @@ jobs:
             --data '["RDV-RUNNING"]' >/dev/null
 
       - name: Merge the pull request into its target branch
+        id: merge
         shell: bash
         env:
           BASE_REF: ${{ steps.pr.outputs.base_ref }}
@@ -123,30 +118,84 @@ jobs:
         run: |
           set -euo pipefail
 
-          git remote remove gitcode 2>/dev/null || true
-          git remote remove gitcode-pr 2>/dev/null || true
-          git remote add gitcode https://gitcode.com/cann/catlass.git
-          git remote add gitcode-pr "${HEAD_REPO_URL}"
-          git fetch --no-tags gitcode \
-            "+refs/heads/${BASE_REF}:refs/remotes/gitcode/target"
-          git fetch --no-tags gitcode-pr \
-            "+refs/heads/${HEAD_REF}:refs/remotes/gitcode-pr/head"
+          init_worktree() {
+            local worktree="$1"
+            mkdir -p "${worktree}"
+            git -C "${worktree}" init --quiet
+            git -C "${worktree}" remote add gitcode \
+              https://gitcode.com/cann/catlass.git
+            git -C "${worktree}" remote add gitcode-pr "${HEAD_REPO_URL}"
+          }
 
-          fetched_head="$(git rev-parse refs/remotes/gitcode-pr/head)"
+          rdv_temp_root="${RUNNER_TEMP}/catlass-rdv-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          shallow_worktree="${rdv_temp_root}/shallow"
+          init_worktree "${shallow_worktree}"
+
+          fetch_depth=32
+          git -C "${shallow_worktree}" fetch --no-tags --depth="${fetch_depth}" \
+            gitcode "+refs/heads/${BASE_REF}:refs/remotes/gitcode/target"
+          git -C "${shallow_worktree}" fetch --no-tags --depth="${fetch_depth}" \
+            gitcode-pr "+refs/heads/${HEAD_REF}:refs/remotes/gitcode-pr/head"
+
+          for _ in 1 2 3 4 5 6; do
+            if git -C "${shallow_worktree}" merge-base \
+              refs/remotes/gitcode/target refs/remotes/gitcode-pr/head >/dev/null; then
+              break
+            fi
+            git -C "${shallow_worktree}" fetch --no-tags --deepen="${fetch_depth}" \
+              gitcode "+refs/heads/${BASE_REF}:refs/remotes/gitcode/target"
+            git -C "${shallow_worktree}" fetch --no-tags --deepen="${fetch_depth}" \
+              gitcode-pr "+refs/heads/${HEAD_REF}:refs/remotes/gitcode-pr/head"
+            fetch_depth=$((fetch_depth * 2))
+          done
+
+          if git -C "${shallow_worktree}" merge-base \
+            refs/remotes/gitcode/target refs/remotes/gitcode-pr/head >/dev/null; then
+            worktree="${shallow_worktree}"
+          else
+            echo "Shallow history does not contain the merge base; fetching only the two required branches with full history."
+            worktree="${rdv_temp_root}/full"
+            init_worktree "${worktree}"
+            git -C "${worktree}" fetch --no-tags gitcode \
+              "+refs/heads/${BASE_REF}:refs/remotes/gitcode/target"
+            git -C "${worktree}" fetch --no-tags gitcode-pr \
+              "+refs/heads/${HEAD_REF}:refs/remotes/gitcode-pr/head"
+          fi
+
+          fetched_head="$(git -C "${worktree}" rev-parse refs/remotes/gitcode-pr/head)"
           if [[ "${fetched_head}" != "${HEAD_SHA}" ]]; then
             echo "PR head changed while this workflow was starting; run it again" >&2
             exit 1
           fi
 
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git switch --detach refs/remotes/gitcode/target
-          git merge --no-ff --no-commit "${HEAD_SHA}"
+          git -C "${worktree}" config user.name github-actions[bot]
+          git -C "${worktree}" config user.email \
+            41898282+github-actions[bot]@users.noreply.github.com
+          git -C "${worktree}" switch --detach refs/remotes/gitcode/target
+          git -C "${worktree}" merge --no-ff --no-commit "${HEAD_SHA}"
+          echo "worktree=${worktree}" >>"${GITHUB_OUTPUT}"
 
       - name: Build CATLASS examples for Ascend 3510
         shell: bash
-        working-directory: scripts
-        run: bash build.sh catlass_examples -DCATLASS_ARCH=3510
+        env:
+          RDV_WORKTREE: ${{ steps.merge.outputs.worktree }}
+        run: |
+          set -eo pipefail
+
+          if [[ -f /workspace/Ascend/cann/set_env.sh ]]; then
+            cann_env=/workspace/Ascend/cann/set_env.sh
+          elif [[ -f /usr/local/Ascend/cann/set_env.sh ]]; then
+            cann_env=/usr/local/Ascend/cann/set_env.sh
+          else
+            echo "CANN environment script was not found in either fallback path" >&2
+            exit 1
+          fi
+
+          echo "Activating CANN environment from ${cann_env}"
+          # shellcheck source=/dev/null
+          source "${cann_env}"
+          cd "${RDV_WORKTREE}/scripts"
+          bash build.sh catlass_examples -DCATLASS_ARCH=3510
 
       - name: Report the result to GitCode
         if: ${{ always() && steps.pr.outcome == 'success' }}
