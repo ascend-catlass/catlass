@@ -15,13 +15,22 @@ inputs:
     description: Job result used by the finish phase
     required: false
   result-url:
-    description: CI result URL published by the finish phase
+    description: CI result URL published in the status comment
+    required: true
+  comment-id:
+    description: Comment created by the start phase and edited by the finish phase
     required: false
+
+outputs:
+  comment-id:
+    description: GitCode comment ID created by the start phase
+    value: ${{ steps.status.outputs.comment-id }}
 
 runs:
   using: composite
   steps:
     - name: Update RDV status
+      id: status
       shell: bash
       env:
         RDV_PHASE: ${{ inputs.phase }}
@@ -29,4 +38,5 @@ runs:
         GITCODE_TOKEN: ${{ inputs.token }}
         RDV_RESULT: ${{ inputs.result }}
         RDV_RESULT_URL: ${{ inputs.result-url }}
+        RDV_COMMENT_ID: ${{ inputs.comment-id }}
       run: bash "${GITHUB_ACTION_PATH}/rdv-status.sh"

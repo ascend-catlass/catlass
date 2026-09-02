@@ -68,11 +68,13 @@ jobs:
           echo "PR #${PR_NUMBER}: ${head_ref}@${head_sha} -> cann/catlass@${base_ref}"
 
       - name: Mark the pull request as running
+        id: rdv_start
         uses: ascend-catlass/catlass/.github/actions/rdv-status@main
         with:
           phase: start
           pr-number: ${{ inputs.pr_number }}
           token: ${{ secrets.GITCODE_TOKEN }}
+          result-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
       - name: Merge the pull request into its target branch
         id: merge
@@ -157,3 +159,4 @@ jobs:
           token: ${{ secrets.GITCODE_TOKEN }}
           result: ${{ job.status }}
           result-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          comment-id: ${{ steps.rdv_start.outputs.comment-id }}
