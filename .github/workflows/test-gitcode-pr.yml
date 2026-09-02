@@ -11,6 +11,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: test-gitcode-pr-${{ inputs.pr_number }}
+  cancel-in-progress: false
+
 jobs:
   merge-and-test:
     runs-on: [self-hosted, ascend950]
@@ -73,6 +77,42 @@ jobs:
 
           echo "PR #${PR_NUMBER}: ${head_repo_url}@${head_ref} -> cann/catlass@${base_ref}"
 
+      - name: Mark the pull request as running
+        shell: bash
+        env:
+          PR_NUMBER: ${{ inputs.pr_number }}
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${GITCODE_TOKEN}" ]]; then
+            echo "GITCODE_TOKEN is required to update pull request labels" >&2
+            exit 1
+          fi
+
+          labels_url="https://api.gitcode.com/api/v5/repos/cann/catlass/pulls/${PR_NUMBER}/labels"
+          gitcode_api() {
+            local method="$1"
+            local url="$2"
+            shift 2
+            curl --fail --silent --show-error --location \
+              --request "${method}" \
+              --header "PRIVATE-TOKEN: ${GITCODE_TOKEN}" \
+              "${url}" "$@"
+          }
+
+          current_labels="$(gitcode_api GET "${labels_url}")"
+          for label in RDV-SUCC RDV-RUNNING RDV-FAIL; do
+            if jq -e --arg label "${label}" \
+              'any(.[]; .name == $label)' <<<"${current_labels}" >/dev/null; then
+              gitcode_api DELETE "${labels_url}/${label}" >/dev/null
+            fi
+          done
+
+          gitcode_api POST "${labels_url}" \
+            --header "Content-Type: application/json" \
+            --data '["RDV-RUNNING"]' >/dev/null
+
       - name: Merge the pull request into its target branch
         shell: bash
         env:
@@ -83,6 +123,8 @@ jobs:
         run: |
           set -euo pipefail
 
+          git remote remove gitcode 2>/dev/null || true
+          git remote remove gitcode-pr 2>/dev/null || true
           git remote add gitcode https://gitcode.com/cann/catlass.git
           git remote add gitcode-pr "${HEAD_REPO_URL}"
           git fetch --no-tags gitcode \
@@ -105,3 +147,53 @@ jobs:
         shell: bash
         working-directory: scripts
         run: bash build.sh catlass_examples -DCATLASS_ARCH=3510
+
+      - name: Report the result to GitCode
+        if: ${{ always() && steps.pr.outcome == 'success' }}
+        shell: bash
+        env:
+          PR_NUMBER: ${{ inputs.pr_number }}
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${GITCODE_TOKEN}" ]]; then
+            echo "GITCODE_TOKEN is required to update pull request labels" >&2
+            exit 1
+          fi
+          if [[ "${JOB_STATUS}" == "success" ]]; then
+            result_label="RDV-SUCC"
+          else
+            result_label="RDV-FAIL"
+          fi
+
+          labels_url="https://api.gitcode.com/api/v5/repos/cann/catlass/pulls/${PR_NUMBER}/labels"
+          comments_url="https://api.gitcode.com/api/v5/repos/cann/catlass/pulls/${PR_NUMBER}/comments"
+          gitcode_api() {
+            local method="$1"
+            local url="$2"
+            shift 2
+            curl --fail --silent --show-error --location \
+              --request "${method}" \
+              --header "PRIVATE-TOKEN: ${GITCODE_TOKEN}" \
+              "${url}" "$@"
+          }
+
+          current_labels="$(gitcode_api GET "${labels_url}")"
+          if jq -e 'any(.[]; .name == "RDV-RUNNING")' \
+            <<<"${current_labels}" >/dev/null; then
+            gitcode_api DELETE "${labels_url}/RDV-RUNNING" >/dev/null
+          fi
+
+          gitcode_api POST "${labels_url}" \
+            --header "Content-Type: application/json" \
+            --data "[\"${result_label}\"]" >/dev/null
+
+          result_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          comment_body="${result_label}: [查看 RDV 运行结果](${result_url})"
+          comment_json="$(jq -cn --arg body "${comment_body}" '{body: $body}')"
+          gitcode_api POST "${comments_url}" \
+            --header "Content-Type: application/json" \
+            --data "${comment_json}" >/dev/null
+          echo "Set PR #${PR_NUMBER} label to ${result_label}"
