@@ -111,7 +111,7 @@ jobs:
           git -C "${worktree}" merge --no-ff --no-commit "${HEAD_SHA}"
           echo "worktree=${worktree}" >>"${GITHUB_OUTPUT}"
 
-      - name: Build CATLASS examples for Ascend 3510
+      - name: Run all tests for Ascend 3510
         shell: bash
         env:
           RDV_WORKTREE: ${{ steps.merge.outputs.worktree }}
@@ -145,8 +145,8 @@ jobs:
           source "${conda_env_script}"
           conda activate catlass-ci-py311-torch290
 
-          cd "${RDV_WORKTREE}/scripts"
-          bash build.sh catlass_examples -DCATLASS_ARCH=3510
+          cd "${RDV_WORKTREE}"
+          bash tests/run_all_test.sh 3510
 
       - name: Report the result to GitCode
         if: ${{ always() && steps.pr.outcome == 'success' }}
