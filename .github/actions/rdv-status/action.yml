@@ -1,0 +1,32 @@
+name: Update GitCode RDV status
+description: Maintain RDV labels and publish the final CI result on a GitCode pull request
+
+inputs:
+  phase:
+    description: Status transition to perform (start or finish)
+    required: true
+  pr-number:
+    description: Pull request number in cann/catlass
+    required: true
+  token:
+    description: GitCode personal access token
+    required: true
+  result:
+    description: Job result used by the finish phase
+    required: false
+  result-url:
+    description: CI result URL published by the finish phase
+    required: false
+
+runs:
+  using: composite
+  steps:
+    - name: Update RDV status
+      shell: bash
+      env:
+        RDV_PHASE: ${{ inputs.phase }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        GITCODE_TOKEN: ${{ inputs.token }}
+        RDV_RESULT: ${{ inputs.result }}
+        RDV_RESULT_URL: ${{ inputs.result-url }}
+      run: bash "${GITHUB_ACTION_PATH}/rdv-status.sh"
