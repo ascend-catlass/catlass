@@ -43,9 +43,9 @@ jobs:
 
           state="$(jq -er '.state' <<<"${pr_json}")"
           base_ref="$(jq -er '.base.ref // .target_branch' <<<"${pr_json}")"
+          base_sha="$(jq -er '.base.sha' <<<"${pr_json}")"
           head_ref="$(jq -er '.head.ref // .source_branch' <<<"${pr_json}")"
           head_sha="$(jq -er '.head.sha' <<<"${pr_json}")"
-          head_repo_url="$(jq -er '.head.repo.html_url' <<<"${pr_json}")"
 
           if [[ "${state}" != "open" && "${state}" != "opened" ]]; then
             echo "PR #${PR_NUMBER} is not open (state: ${state})" >&2
@@ -53,23 +53,19 @@ jobs:
           fi
           git check-ref-format --branch "${base_ref}" >/dev/null
           git check-ref-format --branch "${head_ref}" >/dev/null
-          if [[ ! "${head_sha}" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "GitCode returned an invalid head SHA" >&2
-            exit 1
-          fi
-          if [[ ! "${head_repo_url}" =~ ^https://gitcode\.com/[^[:space:]]+\.git$ ]]; then
-            echo "GitCode returned an unexpected source repository URL" >&2
+          if [[ ! "${base_sha}" =~ ^[0-9a-f]{40}$ || ! "${head_sha}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "GitCode returned an invalid base or head SHA" >&2
             exit 1
           fi
 
           {
             echo "base_ref=${base_ref}"
+            echo "base_sha=${base_sha}"
             echo "head_ref=${head_ref}"
             echo "head_sha=${head_sha}"
-            echo "head_repo_url=${head_repo_url}"
           } >>"${GITHUB_OUTPUT}"
 
-          echo "PR #${PR_NUMBER}: ${head_repo_url}@${head_ref} -> cann/catlass@${base_ref}"
+          echo "PR #${PR_NUMBER}: ${head_ref}@${head_sha} -> cann/catlass@${base_ref}"
 
       - name: Mark the pull request as running
         shell: bash
@@ -111,58 +107,28 @@ jobs:
         id: merge
         shell: bash
         env:
+          PR_NUMBER: ${{ inputs.pr_number }}
           BASE_REF: ${{ steps.pr.outputs.base_ref }}
-          HEAD_REF: ${{ steps.pr.outputs.head_ref }}
+          BASE_SHA: ${{ steps.pr.outputs.base_sha }}
           HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
-          HEAD_REPO_URL: ${{ steps.pr.outputs.head_repo_url }}
         run: |
           set -euo pipefail
 
-          init_worktree() {
-            local worktree="$1"
-            mkdir -p "${worktree}"
-            git -C "${worktree}" init --quiet
-            git -C "${worktree}" remote add gitcode \
-              https://gitcode.com/cann/catlass.git
-            git -C "${worktree}" remote add gitcode-pr "${HEAD_REPO_URL}"
-          }
-
           rdv_temp_root="${RUNNER_TEMP}/catlass-rdv-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          shallow_worktree="${rdv_temp_root}/shallow"
-          init_worktree "${shallow_worktree}"
+          worktree="${rdv_temp_root}/worktree"
+          git clone --quiet --no-tags --single-branch \
+            --branch "${BASE_REF}" \
+            https://gitcode.com/cann/catlass.git "${worktree}"
 
-          fetch_depth=32
-          git -C "${shallow_worktree}" fetch --no-tags --depth="${fetch_depth}" \
-            gitcode "+refs/heads/${BASE_REF}:refs/remotes/gitcode/target"
-          git -C "${shallow_worktree}" fetch --no-tags --depth="${fetch_depth}" \
-            gitcode-pr "+refs/heads/${HEAD_REF}:refs/remotes/gitcode-pr/head"
-
-          for _ in 1 2 3 4 5 6; do
-            if git -C "${shallow_worktree}" merge-base \
-              refs/remotes/gitcode/target refs/remotes/gitcode-pr/head >/dev/null; then
-              break
-            fi
-            git -C "${shallow_worktree}" fetch --no-tags --deepen="${fetch_depth}" \
-              gitcode "+refs/heads/${BASE_REF}:refs/remotes/gitcode/target"
-            git -C "${shallow_worktree}" fetch --no-tags --deepen="${fetch_depth}" \
-              gitcode-pr "+refs/heads/${HEAD_REF}:refs/remotes/gitcode-pr/head"
-            fetch_depth=$((fetch_depth * 2))
-          done
-
-          if git -C "${shallow_worktree}" merge-base \
-            refs/remotes/gitcode/target refs/remotes/gitcode-pr/head >/dev/null; then
-            worktree="${shallow_worktree}"
-          else
-            echo "Shallow history does not contain the merge base; fetching only the two required branches with full history."
-            worktree="${rdv_temp_root}/full"
-            init_worktree "${worktree}"
-            git -C "${worktree}" fetch --no-tags gitcode \
-              "+refs/heads/${BASE_REF}:refs/remotes/gitcode/target"
-            git -C "${worktree}" fetch --no-tags gitcode-pr \
-              "+refs/heads/${HEAD_REF}:refs/remotes/gitcode-pr/head"
+          fetched_base="$(git -C "${worktree}" rev-parse HEAD)"
+          if [[ "${fetched_base}" != "${BASE_SHA}" ]]; then
+            echo "PR target branch changed while this workflow was starting; run it again" >&2
+            exit 1
           fi
 
-          fetched_head="$(git -C "${worktree}" rev-parse refs/remotes/gitcode-pr/head)"
+          git -C "${worktree}" fetch --quiet --no-tags origin \
+            "+refs/merge-requests/${PR_NUMBER}/head:refs/remotes/origin/pr-head"
+          fetched_head="$(git -C "${worktree}" rev-parse refs/remotes/origin/pr-head)"
           if [[ "${fetched_head}" != "${HEAD_SHA}" ]]; then
             echo "PR head changed while this workflow was starting; run it again" >&2
             exit 1
@@ -171,7 +137,6 @@ jobs:
           git -C "${worktree}" config user.name github-actions[bot]
           git -C "${worktree}" config user.email \
             41898282+github-actions[bot]@users.noreply.github.com
-          git -C "${worktree}" switch --detach refs/remotes/gitcode/target
           git -C "${worktree}" merge --no-ff --no-commit "${HEAD_SHA}"
           echo "worktree=${worktree}" >>"${GITHUB_OUTPUT}"
 
@@ -194,6 +159,21 @@ jobs:
           echo "Activating CANN environment from ${cann_env}"
           # shellcheck source=/dev/null
           source "${cann_env}"
+
+          if [[ -f /workspace/miniforge3/etc/profile.d/conda.sh ]]; then
+            conda_env_script=/workspace/miniforge3/etc/profile.d/conda.sh
+          elif [[ -f "${HOME}/miniforge3/etc/profile.d/conda.sh" ]]; then
+            conda_env_script="${HOME}/miniforge3/etc/profile.d/conda.sh"
+          else
+            echo "Conda was not found in either fallback path" >&2
+            exit 1
+          fi
+
+          echo "Activating Conda from ${conda_env_script}"
+          # shellcheck source=/dev/null
+          source "${conda_env_script}"
+          conda activate catlass-ci-py311-torch290
+
           cd "${RDV_WORKTREE}/scripts"
           bash build.sh catlass_examples -DCATLASS_ARCH=3510
 
