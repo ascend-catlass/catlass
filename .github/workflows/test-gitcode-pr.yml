@@ -111,44 +111,49 @@ jobs:
           git -C "${worktree}" config user.email \
             41898282+github-actions[bot]@users.noreply.github.com
           git -C "${worktree}" merge --no-ff --no-commit "${HEAD_SHA}"
-          echo "worktree=${worktree}" >>"${GITHUB_OUTPUT}"
 
-      - name: Run all tests for Ascend 3510
-        shell: bash
-        env:
-          RDV_WORKTREE: ${{ steps.merge.outputs.worktree }}
-        run: |
-          set -eo pipefail
+          run_dsl=false
+          run_all=false
+          while IFS= read -r -d '' changed_path; do
+            case "${changed_path}" in
+              docs/* | *.md | *.rst | *.png | *.jpg | *.jpeg | *.gif | *.svg | *.webp | *.bmp | *.ico)
+                change_type=non-code
+                ;;
+              python/tla_dsl/*)
+                change_type=dsl
+                run_dsl=true
+                ;;
+              *)
+                change_type=non-dsl
+                run_all=true
+                ;;
+            esac
+            printf '%s: %s\n' "${change_type}" "${changed_path}"
+          done < <(git -C "${worktree}" diff --name-only -z "${BASE_SHA}...${HEAD_SHA}")
 
-          if [[ -f /workspace/Ascend/cann/set_env.sh ]]; then
-            cann_env=/workspace/Ascend/cann/set_env.sh
-          elif [[ -f /usr/local/Ascend/cann/set_env.sh ]]; then
-            cann_env=/usr/local/Ascend/cann/set_env.sh
-          else
-            echo "CANN environment script was not found in either fallback path" >&2
-            exit 1
-          fi
+          {
+            echo "worktree=${worktree}"
+            echo "run_dsl=${run_dsl}"
+            echo "run_all=${run_all}"
+          } >>"${GITHUB_OUTPUT}"
 
-          echo "Activating CANN environment from ${cann_env}"
-          # shellcheck source=/dev/null
-          source "${cann_env}"
+      - name: Pass non-code-only changes
+        if: ${{ steps.merge.outputs.run_dsl != 'true' && steps.merge.outputs.run_all != 'true' }}
+        run: echo "Only documentation or image files changed; no tests are required."
 
-          if [[ -f /workspace/miniforge3/etc/profile.d/conda.sh ]]; then
-            conda_env_script=/workspace/miniforge3/etc/profile.d/conda.sh
-          elif [[ -f "${HOME}/miniforge3/etc/profile.d/conda.sh" ]]; then
-            conda_env_script="${HOME}/miniforge3/etc/profile.d/conda.sh"
-          else
-            echo "Conda was not found in either fallback path" >&2
-            exit 1
-          fi
+      - name: Run DSL test stage
+        if: ${{ steps.merge.outputs.run_dsl == 'true' }}
+        uses: ascend-catlass/catlass/.github/actions/run-ci-tests@main
+        with:
+          suite: dsl
+          worktree: ${{ steps.merge.outputs.worktree }}
 
-          echo "Activating Conda from ${conda_env_script}"
-          # shellcheck source=/dev/null
-          source "${conda_env_script}"
-          conda activate catlass-ci-py311-torch290
-
-          cd "${RDV_WORKTREE}"
-          bash tests/run_all_test.sh 3510
+      - name: Run non-DSL test stage
+        if: ${{ !cancelled() && steps.merge.outputs.run_all == 'true' }}
+        uses: ascend-catlass/catlass/.github/actions/run-ci-tests@main
+        with:
+          suite: all
+          worktree: ${{ steps.merge.outputs.worktree }}
 
       - name: Report the result to GitCode
         if: ${{ always() && steps.pr.outcome == 'success' }}
