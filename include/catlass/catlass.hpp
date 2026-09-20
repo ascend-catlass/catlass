@@ -47,6 +47,9 @@ class EmptyClass {};
 constexpr uint32_t MX_SCALE_COPY_GROUP_NUM = 2; // Mx-scale matrix 2-byte aligned
 constexpr uint32_t MX_SCALE_GROUP_NUM = 32;     // Data count for one MX-scale factor per group
 constexpr uint32_t MX_BASEK_FACTOR = 64;        // Data matrix alignment at K-dimension
+constexpr uint32_t SIMT_WARP_SIZE = 32;
+constexpr uint32_t SIMT_WARP_NUM = 32;
+constexpr uint32_t SIMT_THREAD_NUM = SIMT_WARP_SIZE * SIMT_WARP_NUM;
 #endif
 } // namespace Catlass
 

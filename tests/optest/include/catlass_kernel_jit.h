@@ -76,6 +76,13 @@ struct MatmulParams {
     bool hasQuantBias = false;        ///< Example 57 optional bias flag.
 };
 
+/**
+ * @brief Runtime parameters for experimental/matmul/ascend950_matmul_gather_scatter.
+ */
+struct MatmulGatherScatterParams : public MatmulParams {
+    uint32_t j = 1; ///< Number of selected rows and logical matmul M dimension.
+};
+
 struct MatmulEvgParams : public MatmulParams {
     std::string evgType; ///< EVG postprocess mode (example 64 matmul_evg).
     float negativeSlope = 1;
@@ -565,6 +572,12 @@ void Ascend950Fp4MxQuantMatmul(
  */
 void Ascend950Fp8E4M3QuantMatmul(
     const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const MatmulParams& params);
+
+/**
+ * @brief JIT interface for experimental/matmul/ascend950_matmul_gather_scatter.
+ */
+void Ascend950MatmulGatherScatter(
+    const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const MatmulGatherScatterParams& params);
 
 /**
  * @brief Reserved JIT interface for example 102_dynamic_optimized_matmul.

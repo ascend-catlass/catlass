@@ -14,6 +14,7 @@ from catlass_cppgen.catlass.gemm.dispatch_policy import (
     MmadPingpongTlaV2,
     MmadPreloadAsyncWithCallback,
     MmadMultiBatch,
+    MatmulGatherScatterDispatchPolicy,
 )
 from catlass_cppgen.catlass.arch.arch import Arch
 
@@ -100,6 +101,20 @@ class TestMmadMultiBatch(unittest.TestCase):
         self.assertEqual(mmad.stages, 2)
         self.assertTrue(mmad.use_hf32_mode)
         self.assertEqual(mmad.l0c_stages, 3)
+
+
+class TestMatmulGatherScatterDispatchPolicy(unittest.TestCase):
+    def test_to_cpp(self):
+        policy = MatmulGatherScatterDispatchPolicy(
+            arch_tag=Arch.Ascend950,
+            output_ub_stages=2,
+            aiv_gather=False,
+            max_gather_k=768,
+        )
+        self.assertEqual(
+            policy.to_cpp(),
+            "Gemm::MatmulGatherScatterDispatchPolicy<Arch::Ascend950, 2, false, 768>",
+        )
 
 
 if __name__ == "__main__":

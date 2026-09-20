@@ -30,6 +30,7 @@ public:
 private:
     /// kernel API parameters object
     Params params_;
+    size_t simtDynamicMemSize_ = 0;
 
 public:
     DeviceGemm()
@@ -69,6 +70,12 @@ public:
         return Status::kSuccess;
     }
 
+    /// Configures the dynamic UB window used by an Ascend 950 MIX kernel with SIMT code.
+    void SetSimtDynamicMemSize(size_t bufSize)
+    {
+        simtDynamicMemSize_ = bufSize;
+    }
+
     /// Primary run() entry point API that is static allowing users to create and manage their own params.
     /// Supplied params struct must be construct by calling matmul Kernel::to_underlying arguments
     inline Status Run(aclrtStream stream, uint32_t blockDim, uint64_t hardwareSyncAddr)
@@ -84,6 +91,15 @@ public:
 #endif
         return Status::kSuccess;
     }
+
+#if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+    /// Launches an Ascend 950 kernel with the configured dynamic UB window.
+    inline Status RunSimt(aclrtStream stream, uint32_t blockDim)
+    {
+        Catlass::KernelAdapter<GemmKernel><<<blockDim, simtDynamicMemSize_, stream>>>(params_);
+        return Status::kSuccess;
+    }
+#endif
 
     /// Runs the kernel using initialized state
     inline Status operator()(aclrtStream stream, uint32_t blockDim)

@@ -31,6 +31,7 @@
 #include "template/matmul_evg.h"
 #include "template/matmul_extra.h"
 #include "template/matmul_full_dequant.h"
+#include "template/matmul_gather_scatter.h"
 #include "template/mla.h"
 #include "template/mx_matmul.h"
 #include "template/mx_grouped_matmul.h"
@@ -256,6 +257,10 @@ REGISTER_TORCH_FUNC(matmul_evg);
 using Ascend950MatmulFullLoadAOp = MatmulLike<CatlassKernel::Ascend950MatmulFullLoadA>;
 static auto& ascend950_matmul_full_loadA = Ascend950MatmulFullLoadAOp::Run;
 REGISTER_TORCH_FUNC(ascend950_matmul_full_loadA);
+
+using Ascend950MatmulGatherScatterOp = MatmulGatherScatterLike<CatlassKernel::Ascend950MatmulGatherScatter>;
+static auto& ascend950_matmul_gather_scatter = Ascend950MatmulGatherScatterOp::Run;
+REGISTER_TORCH_FUNC(ascend950_matmul_gather_scatter);
 using A2Fp8E4M3MatmulOp = MatmulLike<CatlassKernel::A2Fp8E4M3Matmul>;
 static auto& a2_fp8_e4m3_matmul = A2Fp8E4M3MatmulOp::Run;
 REGISTER_TORCH_FUNC(a2_fp8_e4m3_matmul);

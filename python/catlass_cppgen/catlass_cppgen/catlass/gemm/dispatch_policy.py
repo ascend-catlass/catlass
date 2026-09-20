@@ -13,6 +13,8 @@ from typing import List, Tuple, Union
 from catlass_cppgen.catlass.arch.arch import Arch
 from catlass_cppgen.common.utils import _get_cpp_value, _snake_to_camel, _get_cpp_type
 
+MATMUL_GATHER_SCATTER_MAX_GATHER_K = 768
+
 
 class MmadBase(ABC):
     """Base class for MMAD policies."""
@@ -240,6 +242,22 @@ class MmadAtlasA2DynamicCommon(MmadAtlasA2):
         self.stages = 2
         self.enable_unit_flag = enable_unit_flag
         self.enable_shuffle_k = enable_shuffle_k
+
+
+class MatmulGatherScatterDispatchPolicy(MmadBase):
+    """Gather-mode and output-buffer policy for the MatmulGatherScatter MIX kernel."""
+
+    def __init__(
+        self,
+        arch_tag: Arch,
+        output_ub_stages: int = 1,
+        aiv_gather: bool = True,
+        max_gather_k: int = MATMUL_GATHER_SCATTER_MAX_GATHER_K,
+    ):
+        super().__init__(arch_tag, False)
+        self.output_ub_stages = output_ub_stages
+        self.aiv_gather = aiv_gather
+        self.max_gather_k = max_gather_k
 
 
 class MmadAtlasA2Small(MmadAtlasA2):

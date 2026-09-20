@@ -84,6 +84,7 @@ Python API (`torch_catlass.ops.*`)
 - [x] 73_ascend950_matmul_full_loadA (Ascend950)
 - [x] 74_ascend950_weight_quant_a8w4_grouped_mx_matmul (Ascend950)
 - [x] 78_x_attention
+- [x] 79_ascend950_matmul_gather_scatter (Ascend950)
 - [x] 82_ascend950_basic_syrk (Ascend950)
 - [x] 84_ascend950_syrk (Ascend950)
 

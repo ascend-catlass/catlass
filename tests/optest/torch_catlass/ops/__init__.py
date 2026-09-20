@@ -58,6 +58,7 @@ from .svd_quant_matmul import ascend950_svd_quant_matmul  # example 61
 from .broadcast_matmul_perblock_quant import broadcast_matmul_perblock_quant  # example 62
 from .ascend950_matmul_evg import EvgPostprocessMode, ascend950_matmul_evg  # example 64
 from .ascend950_matmul_full_loadA import ascend950_matmul_full_loadA  # example 73
+from .matmul_gather_scatter import ascend950_matmul_gather_scatter  # example 79
 from .ascend950_batched_matmul import ascend950_batched_matmul  # example 67
 from .ascend950_basic_matmul_gemv import ascend950_basic_matmul_gemv  # example 50
 from .ascend950_quant_matmul_per_group_per_block_tla import ascend950_quant_matmul_per_group_per_block_tla  # example 51
@@ -215,6 +216,7 @@ __all__ = [
     "symm",  # example 75
     "trmm",  # example 76
     "planar_complex_matmul",  # example 77
+    "ascend950_matmul_gather_scatter",  # example 79
     "grouped_matmul_slice_m_gelu",  # example 80
     "matrix_inverse",  # example 78
     "x_attention",  # example 78

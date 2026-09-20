@@ -40,7 +40,13 @@
 
 namespace Catlass {
 
-// ── 设备端 kernel 入口 ──
+template <class Kernel, class = void>
+struct HasUbSize : std::false_type {};
+
+template <class Kernel>
+struct HasUbSize<Kernel, std::void_t<decltype(Kernel::UB_SIZE)>> : std::true_type {};
+
+// 设备端 kernel 入口
 
 template <class Kernel>
 CATLASS_GLOBAL KERNEL_TYPE void KERNEL_NAME(typename Kernel::Params params)
@@ -49,7 +55,7 @@ CATLASS_GLOBAL KERNEL_TYPE void KERNEL_NAME(typename Kernel::Params params)
     kernel(params);
 }
 
-// ── 一站式 host 启动 ──
+// 一站式 host 启动
 
 template <class Kernel>
 inline void RunKernel(typename Kernel::Arguments args, aclrtStream stream, uint32_t coreNum)
@@ -63,7 +69,11 @@ inline void RunKernel(typename Kernel::Arguments args, aclrtStream stream, uint3
         ws = g_catlassWorkspaceAlloc(wsSize);
     }
     auto params = Kernel::ToUnderlyingArguments(args, ws);
-    KERNEL_NAME<Kernel><<<coreNum, nullptr, stream>>>(params);
+    if constexpr (HasUbSize<Kernel>::value) {
+        KERNEL_NAME<Kernel><<<coreNum, Kernel::UB_SIZE, stream>>>(params);
+    } else {
+        KERNEL_NAME<Kernel><<<coreNum, nullptr, stream>>>(params);
+    }
 
     if (ws != nullptr && g_catlassWorkspaceFree != nullptr && aclrtSynchronizeStream(stream) == ACL_ERROR_NONE) {
         g_catlassWorkspaceFree(ws, wsSize);

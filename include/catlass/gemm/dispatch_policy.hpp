@@ -258,6 +258,15 @@ struct MmadAscend950FullLoadA : public MmadBase<ArchTag_, false> {
     static constexpr bool ENABLE_L1_RESIDENT = ENABLE_L1_RESIDENT_;
 };
 
+template <class ArchTag_, uint32_t OUTPUT_UB_STAGES_, bool AIV_GATHER_, uint32_t MAX_GATHER_K_>
+struct MatmulGatherScatterDispatchPolicy : public MmadBase<ArchTag_, false> {
+    static constexpr uint32_t OUTPUT_UB_STAGES = OUTPUT_UB_STAGES_;
+    static constexpr bool AIV_GATHER = AIV_GATHER_;
+    static constexpr uint32_t MAX_GATHER_K = MAX_GATHER_K_;
+    static_assert(
+        OUTPUT_UB_STAGES == 1 || OUTPUT_UB_STAGES == 2, "output UB buffering supports one or two stages only");
+};
+
 template <bool ENABLE_UNIT_FLAG_ = false, bool ENABLE_SHUFFLE_K_ = false>
 struct MmadAtlasA2W8A16 : public MmadAtlasA2 {
     static constexpr uint32_t STAGES = 2;
