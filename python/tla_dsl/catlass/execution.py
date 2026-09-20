@@ -1903,8 +1903,7 @@ def _cache_key(
         "compiler_bridge": str(compiler_bridge_path) if compiler_bridge_path else None,
         "hivmc": str(hivmc),
         "compiler_bridge_fingerprint": _tool_fingerprint(compiler_bridge_path),
-        "hivmc_version": _tool_version(hivmc),
-        "hivmc_fingerprint": _tool_fingerprint(hivmc),
+        "hivmc_fingerprint": _tool_metadata_fingerprint(hivmc),
         "mlir": tlair_mlir,
         "print_ir": compile_option.print_ir,
         "cce_disable_asc_reserved_ubuf": compile_option.cce_disable_asc_reserved_ubuf,
@@ -1963,6 +1962,19 @@ def _tool_fingerprint(binary: Path | None) -> str:
     except OSError:
         return f"stat:{stat.st_size}:{stat.st_mtime_ns}"
     return f"{stat.st_size}:{stat.st_mtime_ns}:{digest}"
+
+
+def _tool_metadata_fingerprint(binary: Path) -> str:
+    """Identify a compiler by its resolved path and filesystem change metadata."""
+    try:
+        resolved = binary.resolve()
+        stat = resolved.stat()
+    except (OSError, RuntimeError):  # Missing/inaccessible files or symlink loops.
+        return "missing"
+    return (
+        f"stat:{resolved}:{stat.st_dev}:{stat.st_ino}:{stat.st_size}:"
+        f"{stat.st_mtime_ns}:{stat.st_ctime_ns}"
+    )
 
 
 def _default_cache_dir() -> Path:

@@ -3073,6 +3073,68 @@ def test_non_print_kernel_keeps_normal_pointer_payload(tmp_path) -> None:
     assert plan.uses_scalar_print is False
 
 
+@pytest.mark.parametrize(
+    "field", ["st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns"]
+)
+def test_cache_key_tracks_hivmc_metadata_without_reading_binary(
+    monkeypatch, tmp_path, field
+) -> None:
+    hivmc = tmp_path / "hivmc-a5"
+    hivmc.write_bytes(b"compiler")
+    metadata = types.SimpleNamespace(
+        st_dev=1, st_ino=2, st_size=8, st_mtime_ns=4, st_ctime_ns=5
+    )
+    original_stat = Path.stat
+
+    def stat(path, *args, **kwargs):
+        return metadata if path == hivmc else original_stat(path, *args, **kwargs)
+
+    def unexpected_read(_path):
+        pytest.fail("hivmc cache identity must not hash or execute the compiler")
+
+    monkeypatch.setattr(Path, "stat", stat)
+    monkeypatch.setattr(execution, "_file_sha256", unexpected_read)
+    monkeypatch.setattr(execution, "_tool_version", unexpected_read)
+    kwargs = dict(
+        tlair_mlir="module {}",
+        entrypoint="kernel",
+        compile_option=execution.TlaCompileOption(),
+        compiler_bridge_path=None,
+        hivmc=hivmc,
+        target=execution.TlaKernelTarget("aiv.c310", "c310", "aiv", "dav-c310-vec"),
+    )
+    first = execution._cache_key(**kwargs)
+    assert execution._cache_key(**kwargs) == first
+    setattr(metadata, field, getattr(metadata, field) + 1)
+    assert execution._cache_key(**kwargs) != first
+
+
+def test_tool_metadata_fingerprint_resolves_symlinks_and_tracks_replacement(
+    tmp_path,
+) -> None:
+    compiler = tmp_path / "compiler"
+    compiler.write_bytes(b"old")
+    alias = tmp_path / "hivmc-a5"
+    alias.symlink_to(compiler)
+    first = execution._tool_metadata_fingerprint(alias)
+    assert first == execution._tool_metadata_fingerprint(compiler)
+    stat = compiler.stat()
+
+    replacement = tmp_path / "replacement"
+    replacement.write_bytes(b"new")
+    os.utime(replacement, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+    replacement.replace(compiler)
+    assert execution._tool_metadata_fingerprint(alias) != first
+
+
+@pytest.mark.parametrize("symlink_loop", [False, True])
+def test_tool_metadata_fingerprint_unavailable_binary(tmp_path, symlink_loop) -> None:
+    binary = tmp_path / "hivmc-a5"
+    if symlink_loop:
+        binary.symlink_to(binary)
+    assert execution._tool_metadata_fingerprint(binary) == "missing"
+
+
 def test_cache_key_uses_ir_and_debug_print_workspace_abi_revision(
     monkeypatch, tmp_path
 ) -> None:
