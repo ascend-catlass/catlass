@@ -216,7 +216,7 @@ private:
     static constexpr ElementInput MIN_VALUE = __builtin_bit_cast(ElementInput, static_cast<uint16_t>(0xFF7F));
 
     template <KvBaseTileRegSplitStagesBf16 kvBaseTileRegSplitStages>
-    __simd_vf__ static inline void ComputeScaleAndMax(
+    CATLASS_DEVICE_SIMD_VF void ComputeScaleAndMax(
         __ubuf__ ElementInput* srcUb, __ubuf__ float* newMaxUb, uint16_t m, uint32_t tailN, ElementInput dScale,
         uint16_t s2BaseSize)
     {
@@ -227,7 +227,7 @@ private:
     }
 
     template <>
-    __simd_vf__ static inline void ComputeScaleAndMax<KvBaseTileRegSplitStagesBf16::ONE>(
+    CATLASS_DEVICE_SIMD_VF void ComputeScaleAndMax<KvBaseTileRegSplitStagesBf16::ONE>(
         __ubuf__ ElementInput* srcUb, __ubuf__ float* newMaxUb, uint16_t m, uint32_t tailN, ElementInput dScale,
         uint16_t s2BaseSize)
     {
@@ -276,7 +276,7 @@ private:
     }
 
     template <>
-    __simd_vf__ static inline void ComputeScaleAndMax<KvBaseTileRegSplitStagesBf16::TWO>(
+    CATLASS_DEVICE_SIMD_VF void ComputeScaleAndMax<KvBaseTileRegSplitStagesBf16::TWO>(
         __ubuf__ ElementInput* srcUb, __ubuf__ float* newMaxUb, uint16_t m, uint32_t tailN, ElementInput dScale,
         uint16_t s2BaseSize)
     {
@@ -327,7 +327,7 @@ private:
         vstas(maxUreg, newMaxUb, 0, POST_UPDATE);
     }
 
-    __simd_vf__ static inline void UpdateMax(
+    CATLASS_DEVICE_SIMD_VF void UpdateMax(
         __ubuf__ float* nowMaxUb, __ubuf__ float* lastMaxUb, uint16_t mFullVecCnt, uint32_t tailM)
     {
         using namespace AscendC::MicroAPI;
@@ -352,7 +352,7 @@ private:
     }
 
     template <KvBaseTileRegSplitStagesBf16 kvBaseTileRegSplitStages>
-    __simd_vf__ static inline void ComputeExpSubSumB16(
+    CATLASS_DEVICE_SIMD_VF void ComputeExpSubSumB16(
         __ubuf__ ElementOutput* expUb, __ubuf__ ElementInput* srcUb, __ubuf__ float* nowMaxUb, __ubuf__ float* expSumUb,
         uint16_t m, uint32_t tailN, uint32_t blockStride, uint16_t s2BaseSize, uint32_t tailNOdd, uint32_t tailNEven)
     {
@@ -363,7 +363,7 @@ private:
     }
 
     template <>
-    __simd_vf__ static inline void ComputeExpSubSumB16<KvBaseTileRegSplitStagesBf16::ONE>(
+    CATLASS_DEVICE_SIMD_VF void ComputeExpSubSumB16<KvBaseTileRegSplitStagesBf16::ONE>(
         __ubuf__ ElementOutput* expUb, __ubuf__ ElementInput* srcUb, __ubuf__ float* nowMaxUb, __ubuf__ float* expSumUb,
         uint16_t m, uint32_t tailN, uint32_t blockStride, uint16_t s2BaseSize, uint32_t tailNOdd, uint32_t tailNEven)
     {
@@ -439,7 +439,7 @@ private:
     }
 
     template <>
-    __simd_vf__ static inline void ComputeExpSubSumB16<KvBaseTileRegSplitStagesBf16::TWO>(
+    CATLASS_DEVICE_SIMD_VF void ComputeExpSubSumB16<KvBaseTileRegSplitStagesBf16::TWO>(
         __ubuf__ ElementOutput* expUb, __ubuf__ ElementInput* srcUb, __ubuf__ float* nowMaxUb, __ubuf__ float* expSumUb,
         uint16_t m, uint32_t tailN, uint32_t blockStride, uint16_t s2BaseSize, uint32_t tailNOdd, uint32_t tailNEven)
     {
@@ -534,7 +534,7 @@ private:
         vstas(expSumUreg, expSumUb, 0, POST_UPDATE);
     }
 
-    __simd_vf__ static inline void UpdateExpSumAndExpMax(
+    CATLASS_DEVICE_SIMD_VF void UpdateExpSumAndExpMax(
         __ubuf__ float* sumUb, __ubuf__ float* expMaxUb, __ubuf__ float* maxUb, __ubuf__ float* expSumUb,
         __ubuf__ float* nowMaxUb, uint16_t mFullVecCnt, uint32_t tailM)
     {

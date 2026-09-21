@@ -72,7 +72,7 @@ struct TileElemWiseSiluScaleRegBase {
     TileElemWiseSiluScaleRegBase()
     {}
 
-    __simd_vf__ static void SiluScaleVf_b32tob16_nd2nz(
+    CATLASS_DEVICE_SIMD_VF void SiluScaleVf_b32tob16_nd2nz(
         __ubuf__ ElementDst* dstUb, __ubuf__ ElementSrc* srcUb, uint32_t actualRowNum, uint32_t actualColumnNum,
         uint32_t dstEleNumInC0, uint32_t dstC0Num, uint32_t dstRowStrideInnerFractal,
         uint32_t dstColumnStrideInterFractal, uint32_t srcRowStride, float scale)
@@ -148,7 +148,7 @@ struct TileElemWiseSiluScaleRegBase {
             srcRowStride, scale);
     }
 
-    __simd_vf__ static void FillZero_vf_b32tob16_nd2nz_1vl(
+    CATLASS_DEVICE_SIMD_VF void FillZero_vf_b32tob16_nd2nz_1vl(
         __ubuf__ ElementDst* ubDst, __ubuf__ ElementSrc* ubSrc, uint32_t rowNum, uint32_t dstC0Num,
         uint32_t srcRowStride, float scale)
     {
@@ -164,7 +164,7 @@ struct TileElemWiseSiluScaleRegBase {
         }
     }
 
-    __simd_vf__ static void SiluScale_vf_b32tob16_nd2nz_1vl(
+    CATLASS_DEVICE_SIMD_VF void SiluScale_vf_b32tob16_nd2nz_1vl(
         __ubuf__ ElementDst* dstRowStart, __ubuf__ ElementSrc* srcRowStart, uint32_t rowNum, uint32_t dstC0Num,
         uint32_t srcRowStride, float scale, uint32_t firstRowValidNum)
     {

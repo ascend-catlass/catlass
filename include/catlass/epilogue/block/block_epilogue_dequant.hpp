@@ -139,7 +139,7 @@ public:
 
 private:
     template <bool isPertensor, QuantMode x1QuantMode, bool isBiasEpilogue, class BiasDtype>
-    __simd_vf__ static void VFDoDequant(
+    CATLASS_DEVICE_SIMD_VF void VFDoDequant(
         __ubuf__ DataTypeOut* dst, __ubuf__ DataTypeIn* l0cOut, __ubuf__ DataTypeX2Scale* scale2,
         __ubuf__ DataTypeX1Scale* x1Scale, __ubuf__ BiasDtype* bias, float x1ScaleScalar, float x2ScaleScalar,
         uint16_t mSize, uint16_t nSize)

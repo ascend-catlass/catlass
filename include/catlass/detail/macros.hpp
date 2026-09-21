@@ -21,6 +21,10 @@
 #else
 #define CATLASS_HOST_DEVICE
 #endif
+#if defined(CATLASS_ARCH) && CATLASS_ARCH == 3510
+#define CATLASS_DEVICE_SIMD_VF __simd_vf__ static
+#define CATLASS_DEVICE_SIMD_CALLEE __simd_callee__ static
+#endif
 #define CATLASS_GLOBAL __global__ __aicore__
 
 #endif // CATLASS_DETAIL_MACROS_HPP

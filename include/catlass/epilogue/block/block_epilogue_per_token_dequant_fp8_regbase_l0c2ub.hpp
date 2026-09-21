@@ -327,7 +327,7 @@ private:
     }
 
     /// Cast float8_e8m0_t to fp32 using MicroAPI
-    __simd_vf__ inline void CastFp8E8m0ToFp32(
+    CATLASS_DEVICE_SIMD_VF void CastFp8E8m0ToFp32(
         __ubuf__ float* dstPtr, __ubuf__ ElementPerTokenScale* srcPtr, uint32_t count)
     {
         namespace MicroAPI = AscendC::MicroAPI;

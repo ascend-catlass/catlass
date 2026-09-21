@@ -186,7 +186,7 @@ private:
     };
 
     template <typename ElementS, uint16_t S2BaseSize, NRangeIndex NRange>
-    __simd_vf__ static inline void ComputeScaleandMax(
+    CATLASS_DEVICE_SIMD_VF void ComputeScaleandMax(
         __ubuf__ ElementS* srcUb, __ubuf__ ElementS* newMaxUb, uint16_t m, uint32_t tailN, ElementS dScale)
     {
         using namespace AscendC::Reg;
@@ -228,7 +228,7 @@ private:
     }
 
     template <typename ElementS>
-    __simd_vf__ static inline void UpdateMax(__ubuf__ ElementS* nowMaxUb, __ubuf__ ElementS* lastMaxUb, uint32_t tailM)
+    CATLASS_DEVICE_SIMD_VF void UpdateMax(__ubuf__ ElementS* nowMaxUb, __ubuf__ ElementS* lastMaxUb, uint32_t tailM)
     {
         using namespace AscendC::Reg;
         RegTensor<ElementS> nowMaxVreg;
@@ -243,7 +243,7 @@ private:
     }
 
     template <typename ElementP, typename ElementS, uint16_t S2BaseSize, NRangeIndex NRange>
-    __simd_vf__ static inline void ComputeExpSubSum(
+    CATLASS_DEVICE_SIMD_VF void ComputeExpSubSum(
         __ubuf__ ElementP* expUb, __ubuf__ ElementS* srcUb, __ubuf__ ElementS* nowMaxUb, __ubuf__ ElementS* expSumUb,
         uint16_t m, uint32_t blockStride)
     {
@@ -305,7 +305,7 @@ private:
     }
 
     template <typename ElementS>
-    __simd_vf__ static inline void UpdateExpSumAndExpMax(
+    CATLASS_DEVICE_SIMD_VF void UpdateExpSumAndExpMax(
         __ubuf__ ElementS* sumUb, __ubuf__ ElementS* expMaxUb, __ubuf__ ElementS* maxUb, __ubuf__ ElementS* expSumUb,
         __ubuf__ ElementS* nowMaxUb, uint32_t tailM)
     {

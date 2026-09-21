@@ -105,7 +105,7 @@ private:
     static constexpr int32_t eventOMTE3V = 3;
 
     template <class T, uint16_t DBaseSize>
-    __simd_vf__ static inline void FlashUpdateNew(
+    CATLASS_DEVICE_SIMD_VF void FlashUpdateNew(
         __ubuf__ T* updateUb, __ubuf__ T* curUb, __ubuf__ T* expMaxUb, uint16_t m, uint16_t nLoops, uint32_t tailN)
     {
         using namespace AscendC::MicroAPI;
@@ -137,7 +137,7 @@ private:
         }
     }
     template <class T, uint16_t DBaseSize>
-    __simd_vf__ static inline void FlashUpdateLastNew(
+    CATLASS_DEVICE_SIMD_VF void FlashUpdateLastNew(
         __ubuf__ T* updateUb, __ubuf__ T* curUb, __ubuf__ T* expMaxUb, __ubuf__ T* expSumUb, uint16_t m,
         uint16_t nLoops, uint32_t tailN)
     {
@@ -175,7 +175,7 @@ private:
         }
     }
     template <class T, uint16_t DBaseSize>
-    __simd_vf__ static inline void LastDivNew(
+    CATLASS_DEVICE_SIMD_VF void LastDivNew(
         __ubuf__ T* updateUb, __ubuf__ T* curUb, __ubuf__ T* expSumUb, uint16_t m, uint16_t nLoops, uint32_t tailN)
     {
         using namespace AscendC::MicroAPI;

@@ -135,7 +135,7 @@ public:
     }
 
     template <typename T, uint32_t VHeadSize>
-    __simd_vf__ static inline void RescaleFunc(
+    CATLASS_DEVICE_SIMD_VF void RescaleFunc(
         __ubuf__ T* goUb, __ubuf__ T* loUb, __ubuf__ T* dmUb, uint32_t row, uint32_t colFullLoop, uint32_t colTail,
         uint32_t vlElemNum)
     {
@@ -167,7 +167,7 @@ public:
     }
 
     template <typename T, uint32_t VHeadSize>
-    __simd_vf__ static inline void RescaleFuncLastNotFirst(
+    CATLASS_DEVICE_SIMD_VF void RescaleFuncLastNotFirst(
         __ubuf__ T* goUb, __ubuf__ T* loUb, __ubuf__ T* dmUb, __ubuf__ T* glUb, uint32_t row, uint32_t colFullLoop,
         uint32_t colTail, uint32_t vlElemNum)
     {
@@ -205,7 +205,7 @@ public:
     }
 
     template <typename T, uint32_t VHeadSize>
-    __simd_vf__ static inline void DivFuncLastAndFirst(
+    CATLASS_DEVICE_SIMD_VF void DivFuncLastAndFirst(
         __ubuf__ T* goUb, __ubuf__ T* loUb, __ubuf__ T* glUb, uint32_t row, uint32_t colFullLoop, uint32_t colTail,
         uint32_t vlElemNum)
     {

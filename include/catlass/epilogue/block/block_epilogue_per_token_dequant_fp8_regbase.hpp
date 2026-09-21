@@ -320,7 +320,7 @@ private:
     }
 
     /// Cast float8_e8m0_t to fp32 using MicroAPI
-    __simd_vf__ inline void CastFp8E8m0ToFp32(
+    CATLASS_DEVICE_SIMD_VF void CastFp8E8m0ToFp32(
         __ubuf__ float* dstPtr, __ubuf__ ElementPerTokenScale* srcPtr, uint32_t count)
     {
         namespace MicroAPI = AscendC::MicroAPI;
@@ -353,7 +353,7 @@ private:
     }
 
     /// Cast float8_e8m0_t to fp32 using MicroAPI
-    __simd_vf__ inline void MulCompute(
+    CATLASS_DEVICE_SIMD_VF void MulCompute(
         __ubuf__ float* dstPtr, __ubuf__ float* srcPtr, __ubuf__ ElementPerTokenScale* src1Ptr, __ubuf__ float* src2Ptr)
     {
         namespace MicroAPI = AscendC::MicroAPI;
@@ -479,7 +479,7 @@ private:
         }
     }
 
-    __simd_vf__ inline void MulComputeGeneric(
+    CATLASS_DEVICE_SIMD_VF void MulComputeGeneric(
         __ubuf__ float* dstPtr, __ubuf__ float* srcPtr, __ubuf__ ElementScale* src1Ptr, __ubuf__ float* src2Ptr)
     {
         namespace MicroAPI = AscendC::MicroAPI;

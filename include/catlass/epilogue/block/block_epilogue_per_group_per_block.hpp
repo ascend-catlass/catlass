@@ -182,7 +182,7 @@ private:
 
 private:
     template <bool isFirstKLoop, uint32_t ndNum>
-    __simd_vf__ static void AivPerTensor(
+    CATLASS_DEVICE_SIMD_VF void AivPerTensor(
         __ubuf__ CalcType* dst, __ubuf__ CType* l0cOut, __ubuf__ X1ScaleType* x1Scale, uint16_t mSize, uint32_t nSize0,
         uint32_t nSize1, uint16_t kSize, X2ScaleType x2Scale0, X2ScaleType x2Scale1, uint64_t x1ScaleKIdxInCache)
     {
@@ -261,7 +261,7 @@ private:
     }
 
     template <bool isFirstKLoop, uint32_t ndNum>
-    __simd_vf__ static void AivPerTensor(
+    CATLASS_DEVICE_SIMD_VF void AivPerTensor(
         __ubuf__ CType* dst, __ubuf__ CType* l0cOut, X1ScaleType x1Scale, uint16_t mSize, uint32_t nSize0,
         uint32_t nSize1, X2ScaleType x2Scale0, X2ScaleType x2Scale1)
     {
@@ -319,7 +319,7 @@ private:
     }
 
     template <uint32_t ndNum>
-    __simd_vf__ static void AddBias(
+    CATLASS_DEVICE_SIMD_VF void AddBias(
         __ubuf__ CalcType* mmAdd, __ubuf__ BiasType* bias, uint16_t mSize, uint32_t nSize0, uint32_t nSize1)
     {
         {

@@ -233,7 +233,7 @@ private:
     };
 
     template <typename ElementS, uint16_t S2BaseSize, NRangeIndex NRange, bool HasAtten = false>
-    __simd_vf__ static inline void ComputeMaskandScale(
+    CATLASS_DEVICE_SIMD_VF void ComputeMaskandScale(
         __ubuf__ ElementS* srcUb, __ubuf__ uint8_t* maskUb, __ubuf__ uint8_t* maskUbUnroll, __ubuf__ ElementS* newMaxUb,
         uint16_t m, uint32_t tailN, ElementS dScale)
     {
@@ -292,7 +292,7 @@ private:
     }
 
     template <typename ElementS>
-    __simd_vf__ static inline void UpdateMax(__ubuf__ ElementS* nowMaxUb, __ubuf__ ElementS* lastMaxUb, uint32_t tailM)
+    CATLASS_DEVICE_SIMD_VF void UpdateMax(__ubuf__ ElementS* nowMaxUb, __ubuf__ ElementS* lastMaxUb, uint32_t tailM)
     {
         using namespace AscendC::MicroAPI;
         RegTensor<float> nowMaxVreg;
@@ -307,7 +307,7 @@ private:
     }
 
     template <typename ElementP, typename ElementS, uint16_t S2BaseSize, NRangeIndex NRange>
-    __simd_vf__ static inline void ComputeExpSubSum(
+    CATLASS_DEVICE_SIMD_VF void ComputeExpSubSum(
         __ubuf__ ElementP* expUb, __ubuf__ ElementS* srcUb, __ubuf__ ElementS* nowMaxUb, __ubuf__ ElementS* expSumUb,
         ElementS pScaleValue, uint16_t m, uint32_t blockStride)
     {
@@ -376,7 +376,7 @@ private:
     }
 
     template <typename ElementP, typename ElementS, uint16_t S2BaseSize, NRangeIndex NRange>
-    __simd_vf__ static inline void ComputeExpSubSumFp8(
+    CATLASS_DEVICE_SIMD_VF void ComputeExpSubSumFp8(
         __ubuf__ ElementP* expUb, __ubuf__ ElementS* srcUb, __ubuf__ ElementS* nowMaxUb, __ubuf__ ElementS* expSumUb,
         ElementS pScaleValue, uint16_t m, uint32_t blockStride)
     {
@@ -456,7 +456,7 @@ private:
     }
 
     template <typename ElementS>
-    __simd_vf__ static inline void UpdateExpSumAndExpMax(
+    CATLASS_DEVICE_SIMD_VF void UpdateExpSumAndExpMax(
         __ubuf__ ElementS* sumUb, __ubuf__ ElementS* expMaxUb, __ubuf__ ElementS* maxUb, __ubuf__ ElementS* expSumUb,
         __ubuf__ ElementS* nowMaxUb, uint32_t tailM)
     {

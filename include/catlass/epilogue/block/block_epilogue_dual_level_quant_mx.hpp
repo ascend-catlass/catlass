@@ -308,12 +308,12 @@ private:
     // -----------------------------------------------------------------------
     // ComputeLevel0AndXTmp (verbatim copy)
     // -----------------------------------------------------------------------
-    __simd_vf__ static inline void ComputeLevel0AndXTmp(__ubuf__ ElementInput* xAddr, __ubuf__ float* s1Addr)
+    CATLASS_DEVICE_SIMD_VF void ComputeLevel0AndXTmp(__ubuf__ ElementInput* xAddr, __ubuf__ float* s1Addr)
     {
         ComputeLevel0AndXTmpImpl(xAddr, s1Addr);
     }
 
-    __simd_callee__ static inline void ComputeLevel0AndXTmpImpl(__ubuf__ ElementInput* xAddr, __ubuf__ float* s1Addr)
+    CATLASS_DEVICE_SIMD_CALLEE void ComputeLevel0AndXTmpImpl(__ubuf__ ElementInput* xAddr, __ubuf__ float* s1Addr)
     {
         namespace MAPI = AscendC::MicroAPI;
         CATLASS_DUAL_LEVEL_QUANT_MX_CAST_TRAIT(kCastXToFp32Zero, ZERO, UNKNOWN, UNKNOWN);
@@ -392,7 +392,7 @@ private:
     // CalcXTmp (verbatim copy)
     // -----------------------------------------------------------------------
     template <class RegTensorFloat, class RegTensorInput>
-    __simd_callee__ static inline void CalcXTmp(
+    CATLASS_DEVICE_SIMD_CALLEE void CalcXTmp(
         __ubuf__ ElementInput* xTmpAddr, RegTensorFloat level0ScaleReg, RegTensorInput xReg, RegTensorFloat& xZeroFP32,
         RegTensorFloat& xOneFP32)
     {
@@ -432,7 +432,7 @@ private:
     // -----------------------------------------------------------------------
     // ComputeLevel1ScaleAndReciprocal (verbatim copy)
     // -----------------------------------------------------------------------
-    __simd_vf__ static inline void ComputeLevel1ScaleAndReciprocal(
+    CATLASS_DEVICE_SIMD_VF void ComputeLevel1ScaleAndReciprocal(
         __ubuf__ ElementInput* xTmpAddr, __ubuf__ uint8_t* s2Addr, __ubuf__ uint16_t* recipAddr)
     {
         ComputeLevel1ScaleAndReciprocalImpl(xTmpAddr, s2Addr, recipAddr);
@@ -440,7 +440,7 @@ private:
 
     // Keep CATLASS task ownership and the 128x512 UB tile, but amortize one
     // vector-function launch over all valid rows in the tile.
-    __simd_vf__ static inline void ComputeAllQuantRows(
+    CATLASS_DEVICE_SIMD_VF void ComputeAllQuantRows(
         __ubuf__ ElementInput* xBase, __ubuf__ float* s1Base, __ubuf__ uint8_t* s2Base, __ubuf__ uint8_t* yBase,
         __ubuf__ uint16_t* recipBase, uint32_t rows, uint32_t xStride, uint32_t s1Stride, uint32_t s2Stride,
         uint32_t yStride)
@@ -458,7 +458,7 @@ private:
             ComputeFp4PackedImpl(x, y, recipBase);
         }
     }
-    __simd_callee__ static inline void ComputeLevel1ScaleAndReciprocalImpl(
+    CATLASS_DEVICE_SIMD_CALLEE void ComputeLevel1ScaleAndReciprocalImpl(
         __ubuf__ ElementInput* xTmpAddr, __ubuf__ uint8_t* s2Addr, __ubuf__ uint16_t* recipAddr)
     {
         namespace MAPI = AscendC::MicroAPI;
@@ -544,13 +544,13 @@ private:
     // -----------------------------------------------------------------------
     // ComputeFp4Packed (verbatim copy)
     // -----------------------------------------------------------------------
-    __simd_vf__ static inline void ComputeFp4Packed(
+    CATLASS_DEVICE_SIMD_VF void ComputeFp4Packed(
         __ubuf__ ElementInput* xTmpAddr, __ubuf__ uint8_t* yAddr, __ubuf__ uint16_t* recipAddr)
     {
         ComputeFp4PackedImpl(xTmpAddr, yAddr, recipAddr);
     }
 
-    __simd_callee__ static inline void ComputeFp4PackedImpl(
+    CATLASS_DEVICE_SIMD_CALLEE void ComputeFp4PackedImpl(
         __ubuf__ ElementInput* xTmpAddr, __ubuf__ uint8_t* yAddr, __ubuf__ uint16_t* recipAddr)
     {
         namespace MAPI = AscendC::MicroAPI;
@@ -603,7 +603,7 @@ private:
     }
 
     template <class HalfReg, class MaskReg>
-    __simd_callee__ static inline void FP16Convert(HalfReg& output, HalfReg& input, MaskReg& mask)
+    CATLASS_DEVICE_SIMD_CALLEE void FP16Convert(HalfReg& output, HalfReg& input, MaskReg& mask)
     {
         namespace MAPI = AscendC::MicroAPI;
         MAPI::RegTensor<uint16_t> specialValueTensor, newMantissa, andResult, newValue;

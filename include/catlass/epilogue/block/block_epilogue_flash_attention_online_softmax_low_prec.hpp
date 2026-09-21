@@ -339,7 +339,7 @@ private:
     uint32_t subBlockIdx_;
 
     template <typename ElementS>
-    __simd_vf__ static inline void ComputeScaleAndMax(
+    CATLASS_DEVICE_SIMD_VF void ComputeScaleAndMax(
         __ubuf__ ElementS* srcUb, __ubuf__ ElementS* newMaxUb, uint16_t m, uint16_t nLoops, uint32_t tailN,
         uint32_t nPadding, ElementInput dScale, uint16_t S2BaseSize)
     {
@@ -378,7 +378,7 @@ private:
     }
 
     template <typename ElementS>
-    __simd_vf__ static inline void ComputeScaleAndMaxMask(
+    CATLASS_DEVICE_SIMD_VF void ComputeScaleAndMaxMask(
         __ubuf__ ElementS* srcUb, __ubuf__ ElementS* newMaxUb, __ubuf__ ElementMask* maskUb, uint16_t m,
         uint16_t nLoops, uint32_t tailN, uint32_t nPadding, ElementInput dScale, uint16_t S2BaseSize)
     {
@@ -437,7 +437,7 @@ private:
     }
 
     template <typename ElementS>
-    __simd_vf__ static inline void UpdateMax(
+    CATLASS_DEVICE_SIMD_VF void UpdateMax(
         __ubuf__ ElementS* nowMaxUb, __ubuf__ float* lastMaxUb, uint16_t mLoops, uint32_t tailM)
     {
         using namespace AscendC::MicroAPI;
@@ -498,7 +498,7 @@ private:
     }
 
     template <typename ElementP, typename ElementS>
-    __simd_vf__ static inline void ComputeExpSubSum16(
+    CATLASS_DEVICE_SIMD_VF void ComputeExpSubSum16(
         __ubuf__ ElementP* expUb, __ubuf__ ElementS* srcUb, __ubuf__ ElementS* nowMaxUb, __ubuf__ ElementS* expSumUb,
         uint16_t m, uint16_t nLoops, uint32_t tailN, uint32_t blockStride, uint16_t S2BaseSize)
     {
@@ -555,7 +555,7 @@ private:
     }
 
     template <typename ElementS>
-    __simd_vf__ static inline void CastExpSumAndExpMax(
+    CATLASS_DEVICE_SIMD_VF void CastExpSumAndExpMax(
         __ubuf__ float* sumUb, __ubuf__ float* maxUb, __ubuf__ ElementS* expSumUb, __ubuf__ ElementS* nowMaxUb,
         uint16_t mLoops, uint32_t tailM)
     {
@@ -602,7 +602,7 @@ private:
     }
 
     template <typename ElementS>
-    __simd_vf__ static inline void UpdateExpSumAndExpMax(
+    CATLASS_DEVICE_SIMD_VF void UpdateExpSumAndExpMax(
         __ubuf__ float* sumUb, __ubuf__ float* expMaxUb, __ubuf__ float* maxUb, __ubuf__ ElementS* expSumUb,
         __ubuf__ ElementS* nowMaxUb, uint16_t mLoops, uint32_t tailM)
     {

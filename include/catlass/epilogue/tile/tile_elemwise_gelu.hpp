@@ -82,7 +82,7 @@ struct TileElemWiseGeluRegBase {
     TileElemWiseGeluRegBase()
     {}
 
-    __simd_vf__ static void GeluVf(
+    CATLASS_DEVICE_SIMD_VF void GeluVf(
         __ubuf__ ElementDst* dstUb, __ubuf__ ElementSrc* srcUb, uint32_t actualRowNum, uint32_t actualColumnNum,
         uint32_t dstRowStride, uint32_t srcRowStride)
     {

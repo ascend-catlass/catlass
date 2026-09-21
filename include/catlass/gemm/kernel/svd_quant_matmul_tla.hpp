@@ -384,7 +384,7 @@ struct SmoothQuant {
         AscendC::DataCopyPad(dstTensor.data()[dstOffset], srcTensor.data()[srcOffset], dataCopyParams);
     }
 
-    __simd_vf__ static inline void ComputeSmoothX(
+    CATLASS_DEVICE_SIMD_VF void ComputeSmoothX(
         __ubuf__ T* srcAddr, __ubuf__ T* srcSmoothAddr, __ubuf__ T* smoothXAddr, uint16_t dim0, uint16_t dim1)
     {
         using namespace AscendC::MicroAPI;
@@ -408,7 +408,7 @@ struct SmoothQuant {
         }
     }
 
-    __simd_vf__ static inline void ComputeMaxExp(
+    CATLASS_DEVICE_SIMD_VF void ComputeMaxExp(
         __ubuf__ T* srcAddr, __ubuf__ uint16_t* maxExpAddr, uint32_t totalCountInUB, uint16_t loopNum, T qmaxInv)
     {
         using namespace AscendC::MicroAPI;
@@ -505,7 +505,7 @@ struct SmoothQuant {
         DataCopyUnAlignPost(maxExpAddr, u1, 0);
     }
 
-    __simd_vf__ static inline void ComputeScale(
+    CATLASS_DEVICE_SIMD_VF void ComputeScale(
         __ubuf__ uint16_t* maxExpAddr, __ubuf__ uint16_t* mxScaleLocalAddr, __ubuf__ uint16_t* halfScaleLocalAddr,
         uint32_t totalScaleInUB, uint16_t loopNumScale)
     {
@@ -567,7 +567,7 @@ struct SmoothQuant {
     }
 
     template <AscendC::RoundMode toBf16RoundMode, AscendC::RoundMode roundMode>
-    __simd_vf__ static inline void ComputeFp4x2(
+    CATLASS_DEVICE_SIMD_VF void ComputeFp4x2(
         __ubuf__ T* srcAddr, __ubuf__ uint16_t* halfScaleLocalAddr, __ubuf__ int8_t* outLocalAddr,
         uint32_t totalCountInUB, uint16_t loopNum)
     {
@@ -625,7 +625,7 @@ struct SmoothQuant {
     }
 
     template <class HalfReg, class MaskReg>
-    __simd_callee__ static inline void FP16Convert(HalfReg& output, HalfReg& input, MaskReg& mask)
+    CATLASS_DEVICE_SIMD_CALLEE void FP16Convert(HalfReg& output, HalfReg& input, MaskReg& mask)
     {
         using namespace AscendC::MicroAPI;
         RegTensor<uint16_t> specialValueTensor;

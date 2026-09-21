@@ -154,7 +154,7 @@ public:
 
 private:
     template <typename ElementInput>
-    __simd_vf__ static inline void ComputeExpSumAndExpMax(
+    CATLASS_DEVICE_SIMD_VF void ComputeExpSumAndExpMax(
         __ubuf__ ElementInput* sharedGm, __ubuf__ ElementInput* sharedGl, __ubuf__ ElementInput* unsharedGm,
         __ubuf__ ElementInput* unsharedGl, __ubuf__ ElementInput* finalGl, __ubuf__ ElementInput* expMaxShared,
         __ubuf__ ElementInput* expMaxUnShared, uint32_t tailM)
@@ -186,7 +186,7 @@ private:
     }
 
     template <class ElementInput>
-    __simd_vf__ static inline void ComputeFinalAttn(
+    CATLASS_DEVICE_SIMD_VF void ComputeFinalAttn(
         __ubuf__ ElementInput* sharedO, __ubuf__ ElementInput* unsharedO, __ubuf__ ElementInput* expMaxShared,
         __ubuf__ ElementInput* expMaxUnShared, __ubuf__ ElementInput* finalGl, __ubuf__ ElementInput* finalAttn,
         uint16_t m, uint32_t headDim, uint16_t nLoops, uint32_t tailN)

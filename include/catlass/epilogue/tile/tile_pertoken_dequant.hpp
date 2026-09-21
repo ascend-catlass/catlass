@@ -60,7 +60,7 @@ struct TilePerTokenDequant {
         RegLayout::ONE, SatMode::UNKNOWN, MaskMergeMode::ZEROING, AscendC::RoundMode::UNKNOWN};
 
     template <class T, LoadDist Dist = LoadDist::DIST_NORM>
-    __simd_callee__ static inline void LoadIn(
+    CATLASS_DEVICE_SIMD_CALLEE void LoadIn(
         RegTensor<float>& dstVreg, __ubuf__ T* srcUb, MaskReg& mask, MaskReg& maskB16)
     {
         if constexpr (AscendC::IsSameType<T, float>::value) {
@@ -80,7 +80,7 @@ struct TilePerTokenDequant {
     }
 
     template <class T>
-    __simd_callee__ static inline void StoreOut(__ubuf__ T* dstUb, RegTensor<float>& srcVreg, MaskReg& mask)
+    CATLASS_DEVICE_SIMD_CALLEE void StoreOut(__ubuf__ T* dstUb, RegTensor<float>& srcVreg, MaskReg& mask)
     {
         if constexpr (AscendC::IsSameType<T, float>::value) {
             StoreAlign<T, StoreDist::DIST_NORM_B32>(dstUb, srcVreg, mask);
@@ -91,7 +91,7 @@ struct TilePerTokenDequant {
         }
     }
 
-    __simd_vf__ static void perTokenScaleDequant(
+    CATLASS_DEVICE_SIMD_VF void perTokenScaleDequant(
         __ubuf__ ElementDst* dstUb, __ubuf__ ElementSrc* srcUb, __ubuf__ ElementScale* scaleUb,
         __ubuf__ ElementPerToken* perTokenUb, uint16_t m, uint16_t nLoops, uint32_t tailN)
     {

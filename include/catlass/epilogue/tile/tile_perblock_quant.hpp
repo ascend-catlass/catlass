@@ -44,7 +44,7 @@ struct TilePerBlockQuant {
     static constexpr int32_t VL_B32 = static_cast<int32_t>(BYTE_PER_VECTOR_FRACTAL / sizeof(uint32_t));
     static constexpr float FP8_E4M3FN_MAX = 448;
 
-    __simd_vf__ static void perBlockScaleQuant(
+    CATLASS_DEVICE_SIMD_VF void perBlockScaleQuant(
         __ubuf__ ElementSrc* srcUb, __ubuf__ ElementDst* dstUb, __ubuf__ ElementScale* scaleUb, uint16_t nLoops)
     {
         static constexpr CastTrait ctFp322Fp8 = {
