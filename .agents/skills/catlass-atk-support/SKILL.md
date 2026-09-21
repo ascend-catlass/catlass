@@ -382,6 +382,54 @@ part = part.to(torch.float32) * scale[i] * per_token_scale[start:end].unsqueeze(
 - **例外**：仅当 kernel **本身就以浮点做 matmul** 时（如 w4a4 fp16 累加、w8a16 fp16 激活、
   fp8 / per-block 预缩放），golden 才按对应浮点 dtype 计算，**不**强行转 int32。
 
+### MX 反量化 golden 的 scale 构造（灾难性抵消看护）
+
+MX 类算子（fp8/fp4 输入 + MX e8m0 scale，如 53/54/55/58/65/71/74 等）的 cpu golden 需要构造
+MX scale 做反量化 `dequant = quant * scale`。**scale 必须用「真实 per-block scale」（基于数据
+max_abs），禁止用「确定性 2^整数幂 scale」且指数范围过大（如 `2^((arange % 16) - 8)`，最大
+`2^7 = 128`）**，否则会触发**灾难性抵消（catastrophic cancellation）**导致精度误判。
+
+**现象**：全量 case 中极少数（通常 1~2 个）元素点报
+`存在 N 个元素点的 abs_error 同时大于 max_abs_error_limit 阈值 0.01 和 1000000 倍 ULP 值`。
+定位该元素可见其 golden 结果接近 0（如 0.5625），npu 结果差 0.06 左右（如 0.5）。
+
+**根因**：scale 过大（2^7=128）把 dequant 值放大 128 倍，matmul 中间累加量级可达 ±1e6~1e7。
+当某个输出元素的结果恰好接近 0（正负项相消）时，fp32 累加的舍入误差（~ulp(中间和) ≈ 0.06~1）
+相对接近 0 的结果太大；npu kernel 与 cpu `torch.matmul` 累加顺序不同，该元素即超差。
+这是 fp32 数值的固有现象，**不是算子 bug**，但会误判精度。
+
+**触发三条件（同时满足才发生）**：
+1. 输入是 fp8（E4M3，3 位尾数）——乘积项尾数位多，累加有舍入；
+2. 输出 fp32 且 atol 较小（0.01）——接近 0 的结果容不下 ~0.06 的舍入误差；
+3. scale 范围过大（含 2^7 等大值）——放大 dequant 与舍入误差。
+
+**豁免（不触发，或更难触发）**：
+- 输出被量化（bf16 / fp8 输出）：抵消误差被输出量化过程淹没（且 atol≥0.0625）。
+- atol 足够大（0.1 及以上）：能容纳 ~0.06~1 的抵消误差。
+- fp4（E2M1，1 位尾数）输入：乘积项在 fp32 中精确表示，**只有累加有舍入**，比 fp8 更难触发；
+  但 **K 较大（如 129）且 scale 过大时仍会触发**（实测 54 算子 k=129 超差 1 个元素）。
+  **不能据此豁免 fp4**——只要输入是 fp4 且 scale 用确定性大范围，仍要改真实 per-block scale。
+
+**正确写法（真实 per-block scale，与官方 gen_data.py 一致）**：
+```python
+_EPS = 1e-12
+_FP8_E4M3_EMAX = 8    # E4M3 emax（以 gen_data.py _FP8_FORMATS["E4M3"]["emax"] 为准）
+
+def _per_block_scale(max_abs, emax):
+    exp = torch.floor(torch.log2(max_abs.clamp(min=_EPS))) - emax
+    exp = torch.where(max_abs < _EPS, torch.zeros_like(exp), exp)
+    exp = exp.clamp(-128, 127)
+    return torch.exp2(exp)   # 2^整数幂，e8m0 无损表示
+```
+- 每 32-K block 取 `max_abs`，再 `scale = _per_block_scale(max_abs, emax)`，pad 到 `ks`。
+- 真实 scale 最大只有 `2^0=1`，不再放大 dequant；且仍是 2^整数幂，e8m0 无损，
+  cpu golden 与 npu kernel 两端一致。
+- A 的 scale 沿 K 轴 → 逻辑 `(m, blocks)`；B 的 scale 沿 K 轴 → 逻辑 `(blocks, n)` 或
+  `(g, blocks, n)`（grouped）。
+
+**排障口诀**：MX 类算子的精度比对若出现「极少数（1~2 个）元素点超差」且这些元素结果接近 0，
+先查 scale 是否是确定性大范围（`2^((arange % 16) - 8)`），是则改为真实 per-block scale。
+
 ### NZ / 格式处理
 如果算子暴露 `formatA/formatB` 或 `useNzA/useNzB` 属性，则**仅在 npu 分支内联**做 NZ 转换
 （实现见 `template/execute_00_basic_matmul.py` 的 `apply_npu_nz_format`）：
