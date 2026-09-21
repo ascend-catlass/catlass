@@ -562,6 +562,12 @@ void Ascend950A8W4GroupedMxMatmul(
     const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const GroupedMatmulParams& params);
 
 /**
+ * @brief JIT interface for example 78_ascend950_dual_matmul_silu_mul.
+ */
+void Ascend950DualMatmulSiluMul(
+    const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const MatmulParams& params);
+
+/**
  * @brief JIT interface for experimental/matmul/ascend950_fp4_mx_quant_matmul.
  */
 void Ascend950Fp4MxQuantMatmul(

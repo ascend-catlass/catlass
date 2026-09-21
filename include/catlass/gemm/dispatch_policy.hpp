@@ -24,6 +24,13 @@ struct MmadBase {
     static constexpr uint32_t ASYNC = ASYNC_;
 };
 
+template <class BaseDispatchPolicy_>
+struct MmadDualSharedA : public BaseDispatchPolicy_ {
+    using BaseDispatchPolicy = BaseDispatchPolicy_;
+    using ArchTag = typename BaseDispatchPolicy::ArchTag;
+    static constexpr bool USE_FULL_LOAD_A = BaseDispatchPolicy::USE_FULL_LOAD_A;
+};
+
 using MmadAtlasA2 = MmadBase<Arch::AtlasA2, false>;
 using MmadAtlasA2Async = MmadBase<Arch::AtlasA2, true>;
 
@@ -248,6 +255,7 @@ template <
     bool ENABLE_L1_RESIDENT_ = false, uint32_t L1A_STAGES_ = 1, uint32_t L1B_STAGES_ = 2, uint32_t L0A_STAGES_ = 2,
     uint32_t L0B_STAGES_ = 2>
 struct MmadAscend950FullLoadA : public MmadBase<ArchTag_, false> {
+    static constexpr bool USE_FULL_LOAD_A = true;
     static constexpr uint32_t L1A_STAGES = L1A_STAGES_;
     static constexpr uint32_t L1B_STAGES = L1B_STAGES_;
     static constexpr uint32_t L0A_STAGES = L0A_STAGES_;
@@ -345,6 +353,7 @@ template <
     bool ENABLE_L1_RESIDENT_ = false, uint32_t L1A_STAGES_ = 2, uint32_t L1B_STAGES_ = 2, uint32_t L0A_STAGES_ = 2,
     uint32_t L0B_STAGES_ = 2>
 struct MmadPingpong : public MmadBase<ArchTag_, false> {
+    static constexpr bool USE_FULL_LOAD_A = false;
     static constexpr uint32_t L1A_STAGES = L1A_STAGES_;
     static constexpr uint32_t L1B_STAGES = L1B_STAGES_;
     static constexpr uint32_t L0A_STAGES = L0A_STAGES_;
