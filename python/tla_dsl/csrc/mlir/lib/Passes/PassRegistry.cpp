@@ -10,6 +10,10 @@
 #include "mlir/Dialect/MemRef/Transforms/Passes.h"
 #include "mlir/Pass/PassRegistry.h"
 
+#include "llvm/ADT/Twine.h"
+#include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/raw_ostream.h"
+
 #include <memory>
 
 namespace tla {
@@ -78,7 +82,24 @@ void buildTlaPipeline(OpPassManager& pm)
     pm.addPass(mlir::createConvertHIVMToStandardPass(hivmToStdOptions));
     pm.addPass(mlir::createConvertHIVMAVEToStandardPass());
     pm.addPass(mlir::memref::createExpandStridedMetadataPass());
-    pm.addPass(mlir::createConvertHIVMAVEToAVEIntrinPass());
+    // Prefer NPU-IR's built-in ForOpIVNarrowing (enable-i16-indvar) over a
+    // duplicated TLA pass. Frontend ``tla.range`` emits i32 IVs; ccec VLOOPv2
+    // recognition benefits from i16 when bounds fit. Default TableGen option is
+    // false, so turn it on here when constructing the pass.
+    {
+        std::unique_ptr<mlir::Pass> hivmaveToIntrin =
+            mlir::createConvertHIVMAVEToAVEIntrinPass();
+        if (failed(hivmaveToIntrin->initializeOptions(
+                "enable-i16-indvar=true", [](const llvm::Twine& msg) {
+                    llvm::errs() << "convert-hivmave-to-ave-intrin options: " << msg
+                                 << "\n";
+                    return mlir::failure();
+                }))) {
+            llvm::report_fatal_error(
+                "failed to set enable-i16-indvar=true on convert-hivmave-to-ave-intrin");
+        }
+        pm.addPass(std::move(hivmaveToIntrin));
+    }
     pm.addPass(createTlaLowerAVEToRegbaseIntrinsPass());
     pm.addPass(createConvertSCFToCFPass());
 }
