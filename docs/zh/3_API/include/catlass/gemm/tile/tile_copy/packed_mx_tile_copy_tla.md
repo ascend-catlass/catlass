@@ -6,7 +6,7 @@
 
 ## 功能说明
 
-`PackedMxTileCopyTla` 继承自 [PackedTileCopyTla](./packed_tile_copy_tla.md)，**新增** MX Scale（微缩缩放）搬运通道：`CopyGmToL1MxScaleA` / `CopyGmToL1MxScaleB`。
+`PackedMxTileCopyTla` 继承自 [PackedTileCopyTla](./packed_tile_copy_tla.md)，**新增** MX Scale（微缩放）搬运通道：`CopyGmToL1MxScaleA` / `CopyGmToL1MxScaleB`。
 
 MX Scale 是一种 FP8 量化中使用的块级（block-wise）scale，以 `float8_e8m0_t` 存储。Pack 阶段将 GM 上的 scale 通过 TLA 搬入 L1（A 侧转换为 zZ 布局，B 侧转换为 nN 布局），再由 `PackedMxTileCopyTla` 管理后续 Tile 操作的调度。
 

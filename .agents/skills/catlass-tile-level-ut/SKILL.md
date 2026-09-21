@@ -3,7 +3,7 @@ name: catlass-tile-level-ut
 description: Catlass Gemm/Tile组件单元测试编写技能。当需要为 CopyGmToL1 / CopyL1ToL0A / CopyL1ToL0B / CopyL0CToGm / CopyL0CToUb / CopyUbToGm / CopyGmToUb 及其 TLA 变体 (TileCopyTla / TileCopyTlaExt) 编写或补充 UT 测试用例时使用。
 ---
 
-# Writing an unittest for CATLASS tile-level utilties
+# Writing an unittest for CATLASS tile-level utilities
 
 本技能覆盖 CATLASS Gemm/Epilogue Tile 层各条搬运通路的 UT 编写方法。各通路共性方法论写在本文，**大段的组件族谱、断言模式、测试模板、分支覆盖清单等参考材料按通路拆分到 `referrence/` 目录**：
 
@@ -38,7 +38,7 @@ description: Catlass Gemm/Tile组件单元测试编写技能。当需要为 Copy
 4. 运行验证     → cmake 构建 + gtest 测试
 ```
 
-## 1. About Tile-level utilties
+## 1. About Tile-level utilities
 
 ### 1.1 Top to down
 
@@ -49,7 +49,7 @@ Tile 层搬运组件的公共入口头文件按 `CATLASS_ARCH` 宏分发到架�
 
 每条通路的 Struct 族谱（各特化 + 关键分支逻辑）见对应 `referrence/` 文件的「组件族谱」章节。
 
-### 1.2 What is the kind of this utilty?
+### 1.2 What is the kind of this utility?
 
 编写 UT 前先定位组件的三个特征：
 

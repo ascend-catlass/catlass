@@ -4,7 +4,7 @@
 - 演示 Ascend 950 上的伪量化场景下的 Group Mx Matmul 矩阵乘法：左矩阵 A 与伪量化后的右矩阵 B 经 MX 缩放（`float8_e8m0`）后在 Cube 上完成乘加，输出为 FP16。
 - 本示例中 A 元素类型为 `float8_e4m3_t`，B 元素类型为 `float4_e2m1x2_t`；缩放因子为 `float8_e8m0_t`。未启用 Bias（`ElementBias` 为 `void`）。
 - 默认布局为 A `RowMajor`、B `Weight4BitnZ`、C `RowMajor`。
-- B矩阵布局仅支持`Weight4BitnZ`, `ColumnMajor`。通常的fp4内部分型为16x64，但这里的Weight4BitnZ内部分型为16x32，和fp8分型保持一致，目的是为了方便vector将fp4 cast到fp8，省去的分型转换，提高算子性能，Weight4BitnZ分型结构如下图：
+- B矩阵布局仅支持`Weight4BitnZ`, `ColumnMajor`。通常的fp4内部分形为16x64，但这里的Weight4BitnZ内部分形为16x32，和fp8分形保持一致，目的是为了方便vector将fp4 cast到fp8，省去的分形转换，提高算子性能，Weight4BitnZ分形结构如下图：
 
 ![image-20260721093458714](https://raw.gitcode.com/weixin_42818618/picture0/raw/main/image-20260721093458714.png)
 
@@ -46,7 +46,7 @@ python3 examples/74_ascend950_weight_quant_a8w4_grouped_mx_matmul/gen_data.py ex
 | `isNz` | 0 为 nd 布局，1 为 nZ 布局 |
 
 需要注意的是，脚本可以生成任意大小n、k数据。
-对于本例matmul，nd支持任意shape，Weight4BitnZ需要按分型对齐
+对于本例matmul，nd支持任意shape，Weight4BitnZ需要按分形对齐
 
 **执行测试样例：**
 ```bash

@@ -37,7 +37,7 @@ struct TileVmad;
 
 1. `Duplicate` 初始化累加缓冲区 temp 为 0
 2. 分块 `MulAddDst` 计算 `A[i:*n] * X[i:*n]`，累加到 temp
-3. `WholeReduceSum` 规约 temp 到列向量
+3. `WholeReduceSum` 归约 temp 到列向量
 4. `Cast` 转回 ElementA 类型
 5. `Add` 累加到 Y
 

@@ -128,7 +128,7 @@ using L0TileShape = GemmShape<128, 256, 64>;
 // ...
 ```
 
-此外，与AtlasA2不同地，`aclrtGetHardwareSyncAddr` 调用及 `hardwareSyncAddr` 变量应从Ascend950相关代码中移除，`RunAdapter` 调用签名同步简化：
+此外，与AtlasA2不同的是，`aclrtGetHardwareSyncAddr` 调用及 `hardwareSyncAddr` 变量应从Ascend950相关代码中移除，`RunAdapter` 调用签名同步简化：
 
 ```diff
 -    // Prepare hardware sync address

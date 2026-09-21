@@ -152,7 +152,7 @@ mxmmad的指令接口对累加轴的大小有要求，需要是K是64的倍数�
 1. rowmajor下，K方向是内轴，(32, 30)下的最后两个数据会自动补0，只需对后半段补0
 
 2. columnmajor下，M方向是内轴，(32, 30)搬到L1的时候，K方向就不会自动置0了，所以K方向有34列数据要置零
-   ![左图为RowMajor示意图，K轴自动补0; 右图为ColumnMajor示意图，K轴需显示补0|697](<../../assets/images/CATLASS 新版本能力介绍-zeropadding.png>)
+   ![左图为RowMajor示意图，K轴自动补0; 右图为ColumnMajor示意图，K轴需显式补0|697](<../../assets/images/CATLASS 新版本能力介绍-zeropadding.png>)
 
 ```c++
 // Init Zero for k axis
@@ -755,7 +755,7 @@ auto tensorL1A = tla::MakeTensorLike<LayoutTagL1A>(
 // 3. 即使当前 tile 是尾块，逻辑有效范围也不会丢失
 ```
 
-#### Getile
+#### GetTile
 
 `GetTile` 接口用来获取TileTensor。`GetTile` 用于从父 tensor 上切出一个 tile **视图**（不拷贝数据）。其中 `coord` 是**元素坐标**：返回 tensor 的 `coord()` 会在父 tensor 的基础上加上该偏移；返回的 `layout()` 以 `tileShape` 指定 tile 的期望尺寸（rows/cols），并在需要时按父 layout 的结构转换成对应的 `shape()`；同时根据父 tensor 的 `origin_shape()` 自动裁剪新的 `origin_shape()` 来表达 tail tile（边界处的实际逻辑尺寸）。
 
@@ -866,7 +866,7 @@ auto vec_tile2 = tla::LocalTile(vec, tla::MakeCoord(3), tla::MakeShape(256));
 
 ## EVG
 
-EVG（Epilogue Visitor Graph） 是用于 GEMM 后处理（Epilogue）的声明式框架。它将后处理操作（如加法、类型转换、广播、规约等）抽象为可组合的模板节点，通过树形或拓扑结构拼接，形成计算图
+EVG（Epilogue Visitor Graph） 是用于 GEMM 后处理（Epilogue）的声明式框架。它将后处理操作（如加法、类型转换、广播、归约等）抽象为可组合的模板节点，通过树形或拓扑结构拼接，形成计算图
 
 开发者只需用"表达式"声明计算逻辑（如 `D = C + X`），框架自动处理数据搬运、UB 空间分配、事件同步和流水调度
 
@@ -893,7 +893,7 @@ EVG在UB支持的语义上更抽象的节点，在不同阶段支持的节点如
 
 加法操作`Epilogue::Fusion::Add`是对`AscendC::Add`的封装，EVG在使用时只需声明计算逻辑，无需关注搬运/事件/布局细节
 
-TreeVistor示例代码如下
+TreeVisitor示例代码如下
 
 ```c++
 // ...

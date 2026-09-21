@@ -151,7 +151,7 @@ else:
 
 **文件**：`basic_matmul_mutex.py`
 
-`Mutex` 原语是一种互斥锁，是面向数据层面的依赖，较 `set` / `wait` 原语可以更简洁的描述同步关系。
+`Mutex` 原语是一种互斥锁，是面向数据层面的依赖，较 `set` / `wait` 原语可以更简洁地描述同步关系。
 
 可以使用显式 Mutex 锁/解锁 （`mutex.lock(pipe)` / `mutex.unlock(pipe)`）操作，当某条流水线申请到对某个`mutex`资源的 `lock` 操作后，该锁供其所有，阻塞其他申请该 `mutex` 资源的流水，直至其释放（ `unlock` 操作），`lock` / `unlock` 操作必须配对。
 

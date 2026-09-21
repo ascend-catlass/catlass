@@ -166,7 +166,7 @@ CATLASS adopts a hierarchical design. Therefore, new features are introduced bas
 
 ### New Features at the Tile Layer
 
-##### GMToL1
+#### GMToL1
 
 1. Data movement: DN2NZ movement
 
@@ -207,7 +207,7 @@ struct TileCopyTla<
 }
 ```
 
-1. Extended support for FP4 data movement
+2. Extended support for FP4 data movement
 
 ```c++
 /// Partial specialization for CopyGmToL1, Ascend950, RowMajor in and zN out.
@@ -242,7 +242,7 @@ struct TileCopyTla<
 }
 ```
 
-2. Specialized TileCopyTla for MxScale movement (see the MxScale section above)
+3. Specialized TileCopyTla for MxScale movement (see the MxScale section above)
 
 ##### L1ToL0
 
@@ -336,7 +336,7 @@ template <
     class TensorDst,
     ScaleGranularity DEQUANT_GRANULARITY = ScaleGranularity::NO_QUANT,
     bool ReluEnable = false,
-    class L0CCopyMode // New template parameter
+    class L0CCopyMode, // New template parameter
     class Enable = void>
 struct CopyL0CToUBTla {
     // ....
@@ -892,7 +892,7 @@ EVG provides nodes with more abstract semantics that operate on UB. The nodes su
 
 The addition operation `Epilogue::Fusion::Add` encapsulates `AscendC::Add`. When using EVG, you only need to declare the computation logic without worrying about the details of movement, events, or layout.
 
-Sample code for TreeVistor:
+Sample code for TreeVisitor:
 
 ```c++
 // ...

@@ -117,7 +117,7 @@ if constexpr (AscendC::IsSameType<T, half>::value && AscendC::IsSameType<U, floa
 
 - L1->L0A
 
-当A矩阵排布为ColumnMajor时，小分型在L1上为n，在L0A上为z。针对这种情况，使用LoadData指令完成数据搬运，并且设置ifTranspose=True
+当A矩阵排布为ColumnMajor时，小分形在L1上为n，在L0A上为z。针对这种情况，使用LoadData指令完成数据搬运，并且设置ifTranspose=True
 
 如图2所示，以M轴方向作为外轴进行for循环，以K轴方向作为内轴来配置loadDataParams.repeatTimes。在这里对于srcoffset和dstoffset的值为CeilDivision(k, FractalShape\[0]) \* fractalSize
 
@@ -146,7 +146,7 @@ for (int i = 0; i < CeilDivision(m, fractalShape[1]); ++i) {
 
 - L1->L0A
 
-矩阵在GM、L1、L0A上的数据排布分别是RowMajor，nZ和zZ，从nZ到zZ的小分形是转置的，所以需要调用LoadDataWithTranspose接口。如图3所示，以M轴方向作为外轴进行for循环，以K轴方向作为内轴来配置loadDataParams.repeatTimes。需要注意的是，由于转置时连续两个分形合并成一个方阵，因此loadDataParams.repeatTimes=CeilDivision(k, fractalShape\[0] \* fractalNum)。另外，如图2所示，L0A中转置前处于同一个方阵中的两个分形在L1的物理排布上是连续的，转置后前一个分形结束的地址与后一个分形其实地址的间隔为CeilDivision(k, fractalShape\[1]) - 1，单位是512B(16\*32)
+矩阵在GM、L1、L0A上的数据排布分别是RowMajor，nZ和zZ，从nZ到zZ的小分形是转置的，所以需要调用LoadDataWithTranspose接口。如图3所示，以M轴方向作为外轴进行for循环，以K轴方向作为内轴来配置loadDataParams.repeatTimes。需要注意的是，由于转置时连续两个分形合并成一个方阵，因此loadDataParams.repeatTimes=CeilDivision(k, fractalShape\[0] \* fractalNum)。另外，如图2所示，L0A中转置前处于同一个方阵中的两个分形在L1的物理排布上是连续的，转置后前一个分形结束的地址与后一个分形起始地址的间隔为CeilDivision(k, fractalShape\[1]) - 1，单位是512B(16\*32)
 
 ```cpp
 // dstoffset要根据A矩阵在L0上，宽度方向的对齐来求解
@@ -171,7 +171,7 @@ for (int i = 0; i < CeilDivision(m, fractalShape[1]); ++i) {
 
 ![图4：L1上排布的A矩阵，无法调用LoadDataWithTranspose指令示意图](https://raw.gitcode.com/user-images/assets/9091846/27c54a9f-f0ea-49bf-92cb-ae68dfe74d44/AscendC-basic-knowledge-image-3.png)
 
-在L1上的数据不能直接调用LoadDataWithTranspose指令进行转置，因为在K轴方向两个连续的分型不能合并为一个16\*16的方阵
+在L1上的数据不能直接调用LoadDataWithTranspose指令进行转置，因为在K轴方向两个连续的分形不能合并为一个16\*16的方阵
 
 1. GM->L1
 
@@ -196,16 +196,16 @@ nd2nzA1Params.dstNzMatrixStride = 0;
 
 - L1->L0
 
-因为无法合并为方阵进行搬运，需要调用LoadData3DV2接口，在写入L0A之前会先分别将A矩阵高度和宽度轴向16, 8对齐，接着该指令会将A矩阵的大小分型都进行转置，最终以zZ排布写入到L0A
+因为无法合并为方阵进行搬运，需要调用LoadData3DV2接口，在写入L0A之前会先分别将A矩阵高度和宽度轴向16, 8对齐，接着该指令会将A矩阵的大小分形都进行转置，最终以zZ排布写入到L0A
 
 下面介绍如何配置Load3Dv2指令的LoadData3DParamsV2结构体成员
 
 根据Load3Dv2指令完成img2col的过程，可知 img2col后A矩阵高度为ho \* wo,根据ho和wo的计算公式，代入卷积核宽度、卷积核滑动步长、卷积核膨胀系数等参数可知：A矩阵的高度为 CeilAlign(k, fractalShape\[0])；img2col后A矩阵宽度为ci \* kh \* kw,代入kh=1,kw=1，可知A矩阵的宽度为CeilAlign(m, fractalShape\[1])。最后，配置loadDataParams.enTranspose = true，将整个A 矩阵转置并且将其中每一个分形转置。
 
-```json
+```cpp
 // 源操作数height
 loadDataParams.l1H = CeilAlign(k, fractalShape[0]);
-// 源操作数wight
+// 源操作数width
 loadDataParams.l1W = 1;
 // 源操作数的通道数，
 // img2col的结果矩阵高度为ho * wo,根据ho和wo的计算公式，代入卷积核宽度、卷积核滑动步长、卷积核膨胀系数等参数可知：ho * wo = loadDataParams.l1H * loadDataParams.l1w
@@ -300,7 +300,7 @@ nd2nzB1Params.dstNzMatrixStride = 0;
 
 由于L1上分形到L0B上的分形发生了转置，且是非FP16方阵场景，调用LoadDataWithTranspose接口
 
-如图6所示，以K轴方向作为外轴进行for循环，以N轴方向作为N轴来配置loadDataParams.repeatTimes。需要注意的是，由于转置时连续两个分形和行为一个方阵因此loadDataPrams.repeatTimes=CeilDivision(k, fractalShape\[0]\*fractalNum)。另外，如图6所示，L0A中转置前同一块方阵中的两个分形在L1上是连续的，转置后依然是连续的，因此前一个分形地址和后一个分形地址的间隔为0
+如图6所示，以K轴方向作为外轴进行for循环，以N轴方向作为N轴来配置loadDataParams.repeatTimes。需要注意的是，由于转置时连续两个分形和行为一个方阵因此loadDataParams.repeatTimes=CeilDivision(k, fractalShape\[0]\*fractalNum)。另外，如图6所示，L0A中转置前同一块方阵中的两个分形在L1上是连续的，转置后依然是连续的，因此前一个分形地址和后一个分形地址的间隔为0
 
 ```cpp
 uint32_t dstOffset = CeilDivision(n, fractalShape[0] * fractalNum) * fractalSize * fractalNum;
@@ -428,7 +428,7 @@ __aicore__ inline void SplitB()
 
 #### Fixpipe
 
-通过Fixpipe指令进行搬运时，需要配置MmadParams的结构体成员，具体的含义可参考[Fixpipe-数据搬运](https://www.hiascend.com/document/detail/zh/canncommercial/850/API/ascendcopapi/atlasascendc_api_07_0251.html)。其中，fixpipeParams.srcStride的单位是32/sizeof(T)个元素，其含义是源NZ矩阵中相邻小分型的其实地址偏移(RowMajor)矩阵中同一行的元素在源NZ矩阵中处于相邻的Z排布，该参数的取值是L0C上C矩阵M轴向16对齐后的长度
+通过Fixpipe指令进行搬运时，需要配置MmadParams的结构体成员，具体的含义可参考[Fixpipe-数据搬运](https://www.hiascend.com/document/detail/zh/canncommercial/850/API/ascendcopapi/atlasascendc_api_07_0251.html)。其中，fixpipeParams.srcStride的单位是32/sizeof(T)个元素，其含义是源NZ矩阵中相邻小分形的起始地址偏移(RowMajor)矩阵中同一行的元素在源NZ矩阵中处于相邻的Z排布，该参数的取值是L0C上C矩阵M轴向16对齐后的长度
 
 ```cpp
 AscendC::FixpipeParamsV220 fixpipeParams;
@@ -459,13 +459,13 @@ fixpipeParams.dstNdStride = 0;
 
 如图8左图所示，如果设置mmadParams.n = 70，就会导致读入编号为5的分形，同时没能包含编号为10的分形的有效数据
 
-如图8右图所示，如果设置mmadParams.n=CeilAlign(n, FractalShape\[0]\*FractalNum)=96, 此时会读入所有分形。虽然矩阵计算结果中包含了无效数据，但是在Fixpipe指令搬出数据时通过设置fixpipePrams.nSize可以保证无效数据参与计算的结果不会被搬出。
+如图8右图所示，如果设置mmadParams.n=CeilAlign(n, FractalShape\[0]\*FractalNum)=96, 此时会读入所有分形。虽然矩阵计算结果中包含了无效数据，但是在Fixpipe指令搬出数据时通过设置fixpipeParams.nSize可以保证无效数据参与计算的结果不会被搬出。
 
 ![图8: B矩阵RowMajor，int8数据类型下, N轴实际对齐要求](https://raw.gitcode.com/user-images/assets/9091846/70f3155f-4db7-4c4c-a6a4-95a42c1aa6c1/AscendC-basic-knowledge-image-7.png)
 
 与上述场景类似，当输入数据类型为float且A矩阵为ColumnMajor时，K轴实际对齐要求与MMad指令默认的对齐要求也不一致，但是此种场景下的解决方案与上述场景有所不同，需要单独引入mmadParams.kDirectionAlign参数来解决
 
-根据矩阵乘法的计算公式可知，K轴作为A/B矩阵的公共维度，此时如果像上述场景那样设置mmadParams.k=CeilAlign(k, fractalSh2ape\[1]\*fractalNum)会导致C矩阵中每个元素的数值都收到多读入的无效数据的影响，并且也不同通过设置fixpipeParams的参数在搬出阶段舍弃无效数据
+根据矩阵乘法的计算公式可知，K轴作为A/B矩阵的公共维度，此时如果像上述场景那样设置mmadParams.k=CeilAlign(k, fractalSh2ape\[1]\*fractalNum)会导致C矩阵中每个元素的数值都受到多读入的无效数据的影响，并且也不同通过设置fixpipeParams的参数在搬出阶段舍弃无效数据
 
 如图9所示，mmadParams.kDirectionAlign仅在输入数据类型为float时生效。当A矩阵是ColumnMajor时，kDirectionAlign设置为true，此时L0A上A矩阵在K方向16对齐，矩阵计算单元从L0A读取数据会跳过填充的无效数据，其余场景下该参数取默认值为false，此时L0A上A矩阵在K方向按8对齐
 
@@ -475,7 +475,7 @@ fixpipeParams.dstNdStride = 0;
 
 如果kDirectionAlign=true，K方向即按16元素对齐，并且在连续物理地址读取时跳过5号分形，正确读入数据到cube
 
-所以设置kDirectionAlign=ture的目的，就是把L0A上对齐到16并且在计算时候skip不该算的那部分
+所以设置kDirectionAlign=true的目的，就是把L0A上对齐到16并且在计算时候skip不该算的那部分
 
 ![图9: A矩阵转置，float数据类型下，K轴实际对齐情况](https://raw.gitcode.com/user-images/assets/9091846/717fe7f3-2267-4603-8e45-a894ad6f5569/AscendC-basic-knowledge-image-8.png)
 

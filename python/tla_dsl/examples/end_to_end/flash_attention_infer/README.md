@@ -124,8 +124,8 @@ flash_attention_infer.py [-h] [--device DEVICE] [--dtype {fp16,bf16}]
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
 | `--device` | `0` | 上板执行使用的 NPU 设备号。 |
-| `--dtype` | `"fp16"` | 输入/输出数据类型，可选 `"fp16"` 或 `"bf16"`，中间计算恒为 FP32。改值触发重新编译。 |
-| `--batch` | `1` | batch 数，覆盖编译期 `BATCH`。改值触发重新编译。 |
+| `--dtype` | `"fp16"` | 输入/输出数据类型，可选 `"fp16"` 或 `"bf16"`，中间计算恒为 FP32。该值触发重新编译。 |
+| `--batch` | `1` | batch 数，覆盖编译期 `BATCH`。该值触发重新编译。 |
 | `--headnum` | `8` | Q 头数，覆盖 `HEAD_NUM`，须被 `--kvheadnum` 整除。 |
 | `--kvheadnum` | `1` | KV 头数，覆盖 `KV_HEAD_NUM`。 |
 | `--qseqlen` | `117` | Q 序列长度，覆盖 `Q_SEQ`。 |

@@ -23,13 +23,13 @@
 
 | 逻辑位置    | 物理位置        | 搬入指令                             | 支持格式                             |
 | ----------- | --------------- | ------------------------------------ | ------------------------------------ |
-| GM          | GM              | DataCopy                             | RowMajor/ColumMajor/nZ/zN            |
+| GM          | GM              | DataCopy                             | RowMajor/ColumnMajor/nZ/zN           |
 | A1/B1/C1    | L1              | DataCopy                             | zN(RowMajor)/nZ(ColumnMajor)/ND(m=1) |
 | A2          | L0A             | LoadData                             | zZ                                   |
 | B2          | L0B             | LoadData                             | nZ                                   |
 | CO1         | L0C             | -                                    | zN                                   |
 | CO2         | BiasTableBuffer | DataCopy                             | -                                    |
-| C2PIPE2GM   | FixpipeBuffer   | Datacopy                             | -                                    |
+| C2PIPE2GM   | FixpipeBuffer   | DataCopy                             | -                                    |
 | tbufVECIN   | UB              | GM->UB DataCopy<br />UB->UB DataCopy | ND/NZ                                |
 | tbufVECOUT  | UB              |                                      | ND/NZ                                |
 | tbufVECCALC | UB              |                                      | ND/NZ                                |

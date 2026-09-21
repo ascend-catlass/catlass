@@ -56,7 +56,7 @@ for gmTileN1 in N:
 
 - 对齐写出
 
-  由于在workspace上完成使用原子加完成累加，Fixpipe写出到workspace上的时候将stride对齐到512B进行写出，这样能充分发挥NZ2ND写出带宽。
+  由于在workspace上使用原子加完成累加，Fixpipe写出到workspace上的时候将stride对齐到512B进行写出，这样能充分发挥NZ2ND写出带宽。
 
 - SetMMLayoutTransform
 

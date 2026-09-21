@@ -157,7 +157,7 @@ Kernel 对象（调优与特性查询）
 配置完成的 Kernel
 ```
 
-详细参考使用示例和 API 文档请参考下述文档：
+详细使用示例和 API 文档请参考下述文档：
 
  - [Kernel API 基础文档](docs/kernel_api.md)
  - [`OpTensor` 基础文档](docs/optensor_api.md)

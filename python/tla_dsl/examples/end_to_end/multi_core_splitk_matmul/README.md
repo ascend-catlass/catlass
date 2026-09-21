@@ -25,7 +25,7 @@ Split-K 将 K 维度的计算切分到多个核上并行执行，各核的计算
 
 | 文件 | 概述 |
 |------|------|
-| [**`multi_core_splitk_matmul.py`**](multi_core_splitk_matmul.py) | 全部 Tile 块在累加轴 K方向上做切分，并在 AIV 核进行规约（ReduceAdd）写回 GM。 |
+| [**`multi_core_splitk_matmul.py`**](multi_core_splitk_matmul.py) | 全部 Tile 块在累加轴 K方向上做切分，并在 AIV 核进行归约（ReduceAdd）写回 GM。 |
 | [**`tail_multi_core_splitk_matmul.py`**](tail_multi_core_splitk_matmul.py) | 针对尾轮采取上述多核切K优化，以达成负载均衡。 |
 
 ## 约束说明

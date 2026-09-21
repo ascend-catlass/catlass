@@ -4,7 +4,7 @@
 
 ## Description
 
-Basic matrix multiplication, Cube-core operator, without AIV computation or TLA implementation
+Basic matrix multiplication, Cube Core operator, without AIV computation or TLA implementation
 
 ## Class Template Overview
 

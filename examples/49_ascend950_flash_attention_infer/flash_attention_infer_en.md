@@ -927,7 +927,7 @@ Initialization:
   max[i] = -inf
   sum[i] = 0
 
-For each KV bloc's k:
+For each KV block's k:
   1. Calculate current block S[i,k] = Q[i] * K[k]^T / scale
   2. Calculate max_k[i] = max(S[i,k]) for current basic block
   3. Update global max for a row: max[i] = max(max[i], max_k[i])
