@@ -50,3 +50,9 @@ lit/
 - **pytest** = snake_case: `tests/<area>[/<sub>]/test_<feature>.py`
 - **lit** = kebab-case: positive → `topic-case.mlir`; errors → `topic-diagnostics.test`
   (multi-case → `BEGIN/END` blocks)
+
+## API Documentation Translation
+
+For paired API reference documents under `docs/en/api/**` and `docs/zh/api/**`, English is the authoritative source and the translation direction is English → Chinese. Apply the repository translation skill's Git-diff and block-alignment process with `docs/en/api/**` as the source and the matching `docs/zh/api/**` file as the target.
+
+This direction override applies only to paired API references; do not infer a direction for unpaired or generated documentation.
