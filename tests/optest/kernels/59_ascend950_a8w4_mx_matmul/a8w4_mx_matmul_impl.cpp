@@ -64,7 +64,13 @@ using LayoutTagC = Catlass::layout::RowMajor;
 using LayoutTagB = Catlass::layout::nZ;
 
 using ArchTag = Catlass::Arch::Ascend950;
-constexpr bool enableUnitFlag = false;
+constexpr bool enableUnitFlag = true;
+static constexpr uint32_t L1_SCALE_FACTOR_K = 16;
+static constexpr uint32_t L1A_STAGES = 2;
+static constexpr uint32_t L1B_STAGES = 2;
+static constexpr uint32_t L0A_STAGES = 2;
+static constexpr uint32_t L0B_STAGES = 2;
+static constexpr uint32_t L0C_STAGES = 1;
 
 using L1TileShape = tla::Shape<tla::Int<128>, tla::Int<128>, tla::Int<128>>;
 using L0TileShape = tla::Shape<tla::Int<128>, tla::Int<128>, tla::Int<128>>;
@@ -72,8 +78,9 @@ using L0TileShape = tla::Shape<tla::Int<128>, tla::Int<128>, tla::Int<128>>;
 using PrologueSrcType = Catlass::Gemm::GemmType<ElementPrologueB, LayoutTagPrologueB>;
 using PrologueDstType = Catlass::Gemm::GemmType<ElementB, LayoutTagB>;
 
-using DispatchPolicyMmad = Catlass::Gemm::MmadA8W4Mx<ArchTag, enableUnitFlag>;
-using DispatchPolicyPrologue = Catlass::Gemm::MxA8W4Prologue<ArchTag>;
+using DispatchPolicyMmad = Catlass::Gemm::MmadA8W4Mx<
+    ArchTag, enableUnitFlag, false, L1_SCALE_FACTOR_K, L0C_STAGES, L1A_STAGES, L1B_STAGES, L0A_STAGES, L0B_STAGES>;
+using DispatchPolicyPrologue = Catlass::Gemm::MxA8W4Prologue<ArchTag, L1B_STAGES>;
 
 #ifndef CATLASS_JIT_BLOCK_SCHEDULER
 #define CATLASS_JIT_BLOCK_SCHEDULER 30
