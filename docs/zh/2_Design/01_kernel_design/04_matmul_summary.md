@@ -2,7 +2,7 @@
 
 当前库上`examples`内包含多种矩阵乘的`样例模板`，其来源是不同的matmul`理论模板`与工程实践中发现的`工程优化`点的组合。在充分理解了各个`理论模板`和`工程优化`后，开发者可以基于问题场景选择适合的`样例模板`、甚至进一步自行组合出库上没有的新的`样例模板`，来达成矩阵乘的高性能优化。
 
-注意，本文档仅总结矩阵乘方案相关的样例，其他涉及量化、groupMatmul、后处理等的矩阵乘不在此处总结（新增StreamK等Matmul样例待更新）。
+注意，本文档仅总结矩阵乘方案相关的样例，其他涉及量化、groupMatmul、后处理等的矩阵乘不在此处总结。
 
 ## 样例模板清单
 
@@ -151,6 +151,23 @@
   - blockMmad：[block_mmad_single_core_splitk.hpp](../../../../include/catlass/gemm/block/block_mmad_single_core_splitk.hpp)
 - dispatchPolicy：`MmadAtlasA2SingleCoreSplitk`
 - BlockScheduler：`SingleCoreSplitkGemmIdentityBlockSwizzle`
+
+</details>
+
+<details>
+<summary><strong><font size="4">37_streamk_matmul</font></strong></summary>
+
+- 理论模板：`尾轮多核切K`的 StreamK 方案，详见[设计文档](../../../../examples/102_dynamic_optimized_matmul/docs/zh/StreamkMatmul.md)
+- 工程优化：
+  - `流水优化（Multi Buffer）`
+  - `读取带宽优化（ShuffleK）`
+- 关键交付件
+  - host：[37_streamk_matmul](../../../../examples/37_streamk_matmul/streamk_matmul.cpp)
+  - kernel：[streamk_matmul.hpp](../../../../include/catlass/gemm/kernel/streamk_matmul.hpp)
+  - StreamkReduceAdd后处理组件：[streamk_matmul.hpp](../../../../include/catlass/gemm/kernel/streamk_matmul.hpp)
+  - blockMmad：[block_mmad_streamk.hpp](../../../../include/catlass/gemm/block/block_mmad_streamk.hpp)
+- dispatchPolicy：`MmadAtlasA2Streamk`
+- BlockScheduler：`StreamkGemmIdentityBlockSwizzle`
 
 </details>
 
@@ -605,6 +622,6 @@ struct TileCopyOpt : public Catlass::Gemm::Tile::TileCopy<ArchTag, AType, BType,
 
 当Stride非512Byte对齐时可以考虑使用Padding前处理，但需要考虑Padding带来的开销以及MIX算子编译启动的开销（小shape[31_small_matmul](../../../../examples/31_small_matmul/small_matmul.cpp)方法不推荐额外适配Padding）
 
-`PaddingMatrixND`、`PaddingMatrixBlockND`和`PaddingMatrixNZ`各自的适用场景待完善，泛化上`PaddingMatrixNZ`更具有优势。
+`PaddingMatrixND`、`PaddingMatrixBlockND`和`PaddingMatrixNZ`建议开发者自行尝试，泛化上`PaddingMatrixNZ`更具有优势。
 
 </details>

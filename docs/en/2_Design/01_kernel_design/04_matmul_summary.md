@@ -154,6 +154,23 @@ Note that this document only summarizes samples related to matrix multiplication
 
 </details>
 
+<details>
+<summary><strong><font size="4">37_streamk_matmul</font></strong></summary>
+
+- Theoretical template: StreamK (`tail-round multi-core split-K`); see the [design document](../../../../examples/102_dynamic_optimized_matmul/docs/en/StreamkMatmul_en.md)
+- Engineering optimization:
+  - `Pipeline optimization (Multi-Buffer)`
+  - `Read bandwidth optimization (ShuffleK)`
+- Key deliverables
+  - host: [37_streamk_matmul](../../../../examples/37_streamk_matmul/streamk_matmul.cpp)
+  - kernel: [streamk_matmul.hpp](../../../../include/catlass/gemm/kernel/streamk_matmul.hpp)
+  - StreamkReduceAdd epilogue component: [streamk_matmul.hpp](../../../../include/catlass/gemm/kernel/streamk_matmul.hpp)
+  - blockMmad: [block_mmad_streamk.hpp](../../../../include/catlass/gemm/block/block_mmad_streamk.hpp)
+- dispatchPolicy: `MmadAtlasA2Streamk`
+- BlockScheduler: `StreamkGemmIdentityBlockSwizzle`
+
+</details>
+
 ## Theoretical Template List
 
 <details>
@@ -605,6 +622,6 @@ Then, identify whether the scenario fits each template and compare with the perf
 
 Consider padding prologue when Stride is not 512-byte aligned. However, the overhead introduced by padding and the MIX operator compilation and launch overhead must be considered (the small-shape method in [31_small_matmul](../../../../examples/31_small_matmul/small_matmul.cpp) is not recommended for additional padding adaptation).
 
-The applicable scenarios for `PaddingMatrixND`, `PaddingMatrixBlockND`, and `PaddingMatrixNZ` are yet to refine. In terms of generalization, `PaddingMatrixNZ` has more advantages.
+Developers are advised to try `PaddingMatrixND`, `PaddingMatrixBlockND`, and `PaddingMatrixNZ` themselves. In terms of generalization, `PaddingMatrixNZ` has more advantages.
 
 </details>
