@@ -126,7 +126,7 @@ msprof op ./00_basic_matmul 256 512 1024 0
 
 #### 性能数据可视化查看
 
-- 数据可视化依赖[MindStudio Insight](https://www.hiascend.com/developer/download/community/result?module=sto%2Bcann)工具，需要提前下载安装。
+- 数据可视化依赖[MindStudio Insight](https://www.hiascend.com/zh/developer/software/mindstudio/download?versionId=148)工具，需要提前下载安装。
 
 ##### 代码热点图
 

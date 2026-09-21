@@ -126,7 +126,7 @@ Through simulation, you can obtain visual data such as **pipeline diagrams**, **
 
 #### Visualizing Profile Data
 
-- Data visualization relies on the [MindStudio Insight](https://www.hiascend.com/developer/download/community/result?module=sto%2Bcann), which must be downloaded and installed in advance.
+- Data visualization relies on the [MindStudio Insight](https://www.hiascend.com/en/developer/software/mindstudio/download?versionId=148), which must be downloaded and installed in advance.
 
 ##### Code Hotspot Maps
 
