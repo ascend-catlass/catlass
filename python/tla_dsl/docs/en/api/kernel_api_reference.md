@@ -16,29 +16,29 @@ All APIs must be called inside a `@tla.kernel`-decorated kernel function body.
 
 ## Table of Contents
 
-- [1. Basic Data Types and Operations](#basic-data-types-and-operations)
-- [2. Data Movement](#data-movement)
-- [3. Matrix Compute](#matrix-compute)
-- [4. Vector Compute](#vector-compute)
-  - [4.1 Mask Compute](#mask-compute)
-  - [4.2 Basic Arithmetic](#basic-arithmetic)
-  - [4.3 Logical Compute](#logical-compute)
-  - [4.4 Compare and Select](#compare-and-select)
-  - [4.5 Data Fill](#data-fill)
-  - [4.6 Discrete and Aggregate](#discrete-and-aggregate)
-  - [4.7 Data Rearrange](#data-rearrange)
-  - [4.8 Data Compress](#data-compress)
-  - [4.9 Type Conversion](#type-conversion)
-- [5. Sync Control](#sync-control)
-- [6. System Variable Access](#system-variable-access)
-- [7. Resource Management](#resource-management)
-- [8. Debug APIs](#debug-apis)
-- [9. Scopes and Control Flow](#scopes-and-control-flow)
-- [10. Data fill](#data-fill-1)
+- [1. Basic Data Types and Operations](#1-basic-data-types-and-operations)
+- [2. Data Movement](#2-data-movement)
+- [3. Matrix Compute](#3-matrix-compute)
+- [4. Vector Compute](#4-vector-compute)
+  - [4.1 Mask Compute](#41-mask-compute)
+  - [4.2 Basic Arithmetic](#42-basic-arithmetic)
+  - [4.3 Logical Compute](#43-logical-compute)
+  - [4.4 Compare and Select](#44-compare-and-select)
+  - [4.5 Data Fill](#45-data-fill)
+  - [4.6 Discrete and Aggregate](#46-discrete-and-aggregate)
+  - [4.7 Data Rearrange](#47-data-rearrange)
+  - [4.8 Data Compress](#48-data-compress)
+  - [4.9 Type Conversion](#49-type-conversion)
+- [5. Sync Control](#5-sync-control)
+- [6. System Variable Access](#6-system-variable-access)
+- [7. Resource Management](#7-resource-management)
+- [8. Debug APIs](#8-debug-apis)
+- [9. Scopes and Control Flow](#9-scopes-and-control-flow)
+- [10. Data fill](#10-data-fill)
 
 ---
 
-## Basic Data Types and Operations
+## 1. Basic Data Types and Operations
 
 Construction and views for front-end structured values such as Shape / Coord / Stride / Layout / Tensor, plus pointer helpers.
 
@@ -536,7 +536,7 @@ ptr_f32 = tla.recast_ptr(ptr_f16, dtype=tla.Float32)
 
 ---
 
-## Data Movement
+## 2. Data Movement
 
 Tensor copies between on-chip and global memory, and UB register load/store.
 
@@ -809,7 +809,7 @@ with tla.vec.func(mode="simd"):
 
 ---
 
-## Matrix Compute
+## 3. Matrix Compute
 
 Cube-side matrix multiply-accumulate (`tla.mmad`).
 
@@ -947,11 +947,11 @@ Supported mmad_mx dtypes
 
 ---
 
-## Vector Compute
+## 4. Vector Compute
 
 Compute and mask ops on the register-vector path; usually must be called inside `tla.vec.func()`.
 
-### Mask Compute
+### 4.1 Mask Compute
 
 Mask creation and tail-mask updates.
 
@@ -1044,7 +1044,7 @@ with tla.vec.func(mode="simd"):
 
 ---
 
-### Basic Arithmetic
+### 4.2 Basic Arithmetic
 
 Element-wise arithmetic and unary math ops. `VectorSSA` overloads `+` / `-` / `*` / `/` for `add` / `sub` / `mul` / `div` when no `mask=` is needed.
 
@@ -1237,7 +1237,7 @@ with tla.vec.func(mode="simd"):
 
 ---
 
-### Logical Compute
+### 4.3 Logical Compute
 
 Bitwise and logical ops on Mask / Vector.
 
@@ -1458,7 +1458,7 @@ with tla.vec.func(mode="simd"):
 
 ---
 
-### Compare and Select
+### 4.4 Compare and Select
 
 Vector compares that produce masks, and masked select.
 
@@ -1533,7 +1533,7 @@ with tla.vec.func(mode="simd"):
 
 ---
 
-### Data Fill
+### 4.5 Data Fill
 
 Constant fill and lane-index sequence construction.
 
@@ -1615,7 +1615,7 @@ with tla.vec.func(mode="simd"):
 
 ---
 
-### Discrete and Aggregate
+### 4.6 Discrete and Aggregate
 
 Gather elements from a UB tensor by index.
 
@@ -1653,7 +1653,7 @@ with tla.vec.func(mode="simd"):
 
 ---
 
-### Data Rearrange
+### 4.7 Data Rearrange
 
 Interleave / deinterleave and related lane reshuffles.
 
@@ -1723,7 +1723,7 @@ with tla.vec.func(mode="simd"):
 
 ---
 
-### Data Compress
+### 4.8 Data Compress
 
 Compress valid lanes under a mask.
 
@@ -1760,7 +1760,7 @@ with tla.vec.func(mode="simd"):
 
 ---
 
-### Type Conversion
+### 4.9 Type Conversion
 
 Element-type conversion on the register-vector path.
 
@@ -1826,7 +1826,7 @@ with tla.vec.func(mode="simd"):
 
 ---
 
-## Sync Control
+## 5. Sync Control
 
 In-core / cross-core flags, pipe barriers, mutexes, and local-memory barriers.
 
@@ -2226,7 +2226,7 @@ with tla.vec.func(mode="simd"):
 
 ---
 
-## System Variable Access
+## 6. System Variable Access
 
 Architecture attributes on `tla.arch` (layout tags, pipe identifiers, block helpers, etc.).
 
@@ -2303,7 +2303,7 @@ ub_bytes = tla.arch.get_capacity_in_bytes(tla.AddressSpace.ub)
 
 ---
 
-## Resource Management
+## 7. Resource Management
 
 On-chip scratch allocation via `allocate`.
 
@@ -2346,7 +2346,7 @@ ptr = tla.allocate(
 
 ---
 
-## Debug APIs
+## 8. Debug APIs
 
 In-kernel scalar / tensor debug printing.
 
@@ -2391,7 +2391,7 @@ with tla.cube():
 
 ---
 
-## Scopes and Control Flow
+## 9. Scopes and Control Flow
 
 Cube / Vector / `vec.func` regions and kernel-side loop ranges.
 
@@ -2570,7 +2570,7 @@ with tla.vector():
 
 ---
 
-## Data fill
+## 10. Data fill
 
 ### `Tensor.fill`
 

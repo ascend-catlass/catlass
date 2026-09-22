@@ -1271,6 +1271,78 @@ with tla.vec.func(mode="simd"):
 
 ---
 
+#### `shift_left`
+
+**源码：** [`catlass.core_api.shift_left`](../../../catlass/core_api.py#L7489)
+
+功能说明：
+
+逐元素左移，移位量可按通道或标量指定。
+
+函数原型：
+
+```python
+tla.shift_left(source: VectorSSA, shift: Any, *, mask: MaskSSA | None = None) -> VectorSSA
+```
+
+参数说明：
+
+- `source`（`VectorSSA`）：待移位的源向量。必填。
+- `shift`（`VectorSSA | Numeric | int`）：每通道移位量。与 `source` 元素宽度相同的有符号 `VectorSSA`，或可转换为 i16 的整数标量。必填。
+- `mask`（`MaskSSA | None`）：执行掩码。可选，默认 `None`（全通道使能）；被掩码的通道置零。
+
+约束说明：
+
+- 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
+- 须在 `tla.vec.func()` 内调用。
+- 源元素须为有符号 8/16/32 位整数（i8/i16/i32）；不支持 64 位和无符号移位。
+- 移位量须为非负数。
+
+调用示例：
+
+```python
+with tla.vec.func(mode="simd"):
+    _tile = tla.shift_left(tile, bit_shift_reg, mask=mask)
+```
+
+---
+
+#### `shift_right`
+
+**源码：** [`catlass.core_api.shift_right`](../../../catlass/core_api.py#L7525)
+
+功能说明：
+
+逐元素右移，移位量可按通道或标量指定。带符号源向量使用算术右移。
+
+函数原型：
+
+```python
+tla.shift_right(source: VectorSSA, shift: Any, *, mask: MaskSSA | None = None) -> VectorSSA
+```
+
+参数说明：
+
+- `source`（`VectorSSA`）：待移位的源向量。必填。
+- `shift`（`VectorSSA | Numeric | int`）：每通道移位量。与 `source` 元素宽度相同的有符号 `VectorSSA`，或可转换为 i16 的整数标量。必填。
+- `mask`（`MaskSSA | None`）：执行掩码。可选，默认 `None`（全通道使能）；被掩码的通道置零。
+
+约束说明：
+
+- 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
+- 须在 `tla.vec.func()` 内调用。
+- 源元素须为有符号 8/16/32 位整数（i8/i16/i32）；不支持 64 位和无符号移位。
+- 移位量须为非负数。
+
+调用示例：
+
+```python
+with tla.vec.func(mode="simd"):
+    _tile = tla.shift_right(tile, bit_shift_reg, mask=mask)
+```
+
+---
+
 ### 比较与选择
 
 #### `where`

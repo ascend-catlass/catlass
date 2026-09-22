@@ -532,7 +532,7 @@ AIC/AIV内并行的指令流水一共有8条
 - [SyncAll](https://www.hiascend.com/document/detail/zh/canncommercial/900/API/ascendcopapi/atlasascendc_api_07_0204.html)
 - [CrossCoreSetFlag](https://www.hiascend.com/document/detail/zh/canncommercial/900/API/ascendcopapi/atlasascendc_api_07_0273.html)配套[CrossCoreWaitFlag](https://www.hiascend.com/document/detail/zh/canncommercial/900/API/ascendcopapi/atlasascendc_api_07_0274.html)
 
-其中`CrossCoreSetFlag`配套`CrossCoreWaitFlag`实现的同步控制分为以下几种模式，：
+其中`CrossCoreSetFlag`配套`CrossCoreWaitFlag`实现的同步控制分为以下几种模式：
 
 - `模式0`：AI Core核间的同步控制。对于AIC场景，同步所有的AIC核，直到所有的AIC核都执行到CrossCoreSetFlag时，CrossCoreWaitFlag后续的指令才会执行；对于AIV场景，同步所有的AIV核，直到所有的AIV核都执行到CrossCoreSetFlag时，CrossCoreWaitFlag后续的指令才会执行。
 - `模式1`：AI Core内部，AIV核之间的同步控制。如果两个AIV核都运行了CrossCoreSetFlag，CrossCoreWaitFlag后续的指令才会执行。

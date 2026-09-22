@@ -140,8 +140,8 @@ Obtain the `visualize_data.bin` file from the `simulator` output folder and load
 
 Choose the appropriate tool based on your browser:
 
-- Edge Trace Viewer（在 Edge 浏览器地址栏输入 `edge://tracing`） (Microsoft Edge)
-- Chrome Trace Viewer（在 Chrome 浏览器地址栏输入 `chrome://tracing`） (Google Chrome or Chrome-based browsers)
+- Edge Trace Viewer (enter `edge://tracing` in the Edge address bar) (Microsoft Edge)
+- Chrome Trace Viewer (enter `chrome://tracing` in the Chrome address bar) (Google Chrome or Chrome-based browsers)
 - [Perfetto](https://ui.perfetto.dev/) (general)
 
 Import the `trace.json` file to view the simulation instruction pipeline chart.

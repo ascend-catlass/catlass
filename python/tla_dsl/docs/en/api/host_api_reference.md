@@ -19,18 +19,18 @@ These APIs are called from Python Host scripts, **outside** a `@tla.kernel` func
 
 ## Table of Contents
 
-- [1. Decorators](#decorators)
-- [2. Compile and Launch](#compile-and-launch)
-  - [2.1 Compile](#compile)
-  - [2.2 Launch](#launch)
-  - [2.3 Inspect](#inspect)
-- [3. Host Tensor](#host-tensor)
-  - [3.1 Binding](#binding)
-  - [3.2 Dynamic Layout](#dynamic-layout)
+- [1. Decorators](#1-decorators)
+- [2. Compile and Launch](#2-compile-and-launch)
+  - [2.1 Compile](#21-compile)
+  - [2.2 Launch](#22-launch)
+  - [2.3 Inspect](#23-inspect)
+- [3. Host Tensor](#3-host-tensor)
+  - [3.1 Binding](#31-binding)
+  - [3.2 Dynamic Layout](#32-dynamic-layout)
 
 ---
 
-## Decorators
+## 1. Decorators
 
 Host-side `@tla.kernel` entry, `@tla.jit` device helpers, `@tla.extern` declarations, and Host `@dataclass` packing. Decorated kernel, helper, and extern declaration bodies are not executed on the Host.
 
@@ -343,11 +343,11 @@ def kernel(dst: tla.Tensor) -> None:
 
 ---
 
-## Compile and Launch
+## 2. Compile and Launch
 
 Compile a decorated kernel and launch it on the NPU. Use `tla.compile` to obtain a callable `JitCompiledFunction`; call it directly to lazily create and then reuse its executor. Cache / arch / IR-dump knobs that are not function arguments are in `docs/zh/kernel_development/core_concepts/env_vars.md`.
 
-### Compile
+### 2.1 Compile
 
 Build a device binary. Primary entry: `tla.compile`. `TlaJitFunction.compile` is a lower-level helper on the decorated function.
 
@@ -461,7 +461,7 @@ compiled = my_kernel.compile(
 
 ---
 
-### Launch
+### 2.2 Launch
 
 Run a compiled kernel on the NPU by calling the `JitCompiledFunction` returned by `tla.compile`.
 
@@ -519,7 +519,7 @@ compiled(args=(tx, ty), block_num=1)
 
 ---
 
-### Inspect
+### 2.3 Inspect
 
 Dump frontend TLA IR without building a device binary or launching. See `TlaJitFunction.dump_mlir`.
 
@@ -558,11 +558,11 @@ print(text[:500])
 
 ---
 
-## Host Tensor
+## 3. Host Tensor
 
 Build Host `tla.Tensor` objects and mark layout extents dynamic so one artifact can run at different shapes. See also `docs/zh/kernel_development/core_concepts/layout.md`.
 
-### Binding
+### 3.1 Binding
 
 Bind a real NPU buffer with `from_dlpack`, or a metadata-only sample with `make_fake_tensor`.
 
@@ -681,7 +681,7 @@ fzn = make_fake_tensor(
 
 ---
 
-### Dynamic Layout
+### 3.2 Dynamic Layout
 
 Mark static layout extents dynamic. See also `docs/zh/kernel_development/core_concepts/layout.md`.
 

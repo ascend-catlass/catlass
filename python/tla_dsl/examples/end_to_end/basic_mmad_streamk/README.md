@@ -20,14 +20,12 @@ StreamK 通过将 K 维度的计算分摊到多个核上以均衡负载：normal
 ```plain
 ./basic_mmad_streamk
 ├── basic_mmad_streamk.py
-├── streamk_config.py
 └── README.md
 ```
 
 | 文件 | 概述 |
 |------|------|
-| [**`basic_mmad_streamk.py`**](basic_mmad_streamk.py) | 设备侧 `@tla.kernel` 与 host 侧运行/校验逻辑同文件。其中 host 侧可配置 GM 布局与元素类型，多 block、K 维分块、L1/L0 双缓冲与 StreamK workspace；默认用 torch + torch_npu 上板并校验精度。 |
-| [**`streamk_config.py`**](streamk_config.py) | 问题规模 / dtype / L1·L0 分块等编译期常量（host 在 compile 前写入）。 |
+| [**`basic_mmad_streamk.py`**](basic_mmad_streamk.py) | 设备侧 `@tla.kernel` 与 host 侧运行/校验逻辑同文件。其中 host 侧可配置 GM 布局与元素类型，多 block、K 维分块、L1/L0 双缓冲与 StreamK workspace；默认用 torch + torch_npu 上板并校验精度。问题规模（m/n/k）由 CLI 参数动态指定，dtype、L1/L0 分块等编译期常量直接在源码中定义。 |
 
 ## 约束说明
 
