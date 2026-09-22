@@ -68,7 +68,7 @@ examples/${id}_${op_name}/
 bash scripts/build.sh ${id}_${op_name}
 
 # 运行测试
-./output/${id}_${op_name}
+./output/bin/${id}_${op_name}
 ```
 
 ## 测试阶段

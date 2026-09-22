@@ -68,7 +68,7 @@ Run the following commands to build and test (using A2 as an example):
 bash scripts/build.sh ${id}_${op_name}
 
 # Run the test.
-./output/${id}_${op_name}
+./output/bin/${id}_${op_name}
 ```
 
 ## Test

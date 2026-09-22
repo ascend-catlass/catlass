@@ -202,7 +202,7 @@ Tile组件是CATLASS中最底层的计算和数据操作单元，直接与硬件
 bash scripts/build.sh 44_quant_matmul_full_loadA_tla
 
 # 运行
-./output/44_quant_matmul_full_loadA_tla 512 4096 1024 0
+./output/bin/44_quant_matmul_full_loadA_tla 512 4096 1024 0
 ```
 
 开发过程中建议使用[性能调测工具](./08_evaluation.md)进行仿真验证，通过流水图检查数据搬运和计算的重叠情况是否符合预期。
