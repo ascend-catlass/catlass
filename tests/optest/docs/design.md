@@ -11,7 +11,7 @@ the software repository for the full text of the License.
 
 # torch-catlass 测试框架设计文档
 
-## 1. 总览
+## 总览
 
 `tests/optest` 是 CATLASS 示例算子接入 PyTorch 的端到端测试框架。框架将 CATLASS AscendC kernel 封装为 `torch.ops.catlass.*` 算子，并通过 Python 包 `torch_catlass` 提供测试入口。
 
@@ -46,7 +46,7 @@ Kernel implementation
 - kernel 层负责 AscendC/CATLASS 代码执行。
 - JIT 子系统负责模板参数宏生成、编译、缓存和动态加载。
 
-## 2. 目录模块
+## 目录模块
 
 ```text
 tests/optest/
@@ -91,9 +91,9 @@ tests/optest/
 | `kernels/`       | kernel 构建、JIT compiler、JIT template、kernel entry      |
 | `tests/`         | pytest 集成测试                                            |
 
-## 3. Python 包模块
+## Python 包模块
 
-### 3.1 包初始化
+### 包初始化
 
 `torch_catlass/__init__.py` 在 import 时完成运行时初始化：
 
@@ -115,7 +115,7 @@ lib/libcatlass_torch.so
 
 JIT compiler 和 kernel entry 必须先于 PyTorch extension 加载，保证 extension 中引用的 kernel 符号可解析。
 
-### 3.2 架构识别
+### 架构识别
 
 Python loader 通过 `torch_npu.npu.get_device_name()` 识别设备并映射为 CATLASS arch id：
 
@@ -127,7 +127,7 @@ Python loader 通过 `torch_npu.npu.get_device_name()` 识别设备并映射为 
 
 当 `torch_npu.npu.device_count()` 为 0 时，loader 抛出明确错误。测试代码在无 NPU 环境下通过 pytest skip 处理，避免在 collection 阶段触发 TorchNPU 内部错误。
 
-### 3.3 Python op wrapper
+### Python op wrapper
 
 `torch_catlass/ops/` 保存 Python 用户接口。以 `basic_matmul` 为例：
 
@@ -145,9 +145,9 @@ torch_catlass.basic_matmul(
 
 Python wrapper 只做用户友好的轻量转换，例如 dtype 字符串白名单解析。shape 推导、输出分配、stream 获取和 kernel launch 都在 C++ 层完成，避免 Python 和 C++ 维护两套语义。
 
-## 4. PyTorch C++ Extension 模块
+## PyTorch C++ Extension 模块
 
-### 4.1 注册入口
+### 注册入口
 
 `src/catlass_torch.cpp` 是 PyTorch extension 的注册入口：
 
@@ -165,7 +165,7 @@ REGISTER_TORCH_FUNC(basic_matmul);
 
 `PrivateUse1` 是 TorchNPU 使用的 NPU dispatch key。Python 调用 `torch.ops.catlass.basic_matmul` 时，PyTorch 根据输入 Tensor device 走到该 backend 实现。
 
-### 4.2 kernel launch 包装
+### kernel launch 包装
 
 `RUN_NPU_FUNC` 位于 `src/include/common/run_npu_func.h`。它通过 TorchNPU 的 `OpCommand::RunOpApiV2` 执行 kernel launch：
 
@@ -173,7 +173,7 @@ REGISTER_TORCH_FUNC(basic_matmul);
 - 将 C++ 异常转为 ACL error code。
 - 将 kernel 调用交给 TorchNPU runtime 管理。
 
-## 5. Matmul Adapter 模块
+## Matmul Adapter 模块
 
 `src/include/template/matmul.h` 提供 `MatmulLike<KernelFunc>`。该模板封装 matmul 类算子的通用流程：
 
@@ -186,7 +186,7 @@ Run()
   └─ RUN_NPU_FUNC(KernelFunc, ...)
 ```
 
-### 5.1 参数拆分
+### 参数拆分
 
 Matmul 参数拆分为两类：
 
@@ -197,7 +197,7 @@ Matmul 参数拆分为两类：
 
 这种拆分保证 dtype/layout 变化会生成新的模板实例，而 shape 和 Tensor 地址变化不会导致重复编译。
 
-### 5.2 `GetKernelInfo`
+### `GetKernelInfo`
 
 `GetKernelInfo()` 负责将 PyTorch Tensor 转为 kernel 参数：
 
@@ -208,15 +208,15 @@ Matmul 参数拆分为两类：
 - 填充 `MatmulParams`。
 - 将输入 Tensor storage 地址写入 `params.inputAddr`。
 
-### 5.3 `AllocOutput`
+### `AllocOutput`
 
 `AllocOutput()` 根据 `params.m`、`params.n` 和 `tParams.elementC` 创建输出 Tensor，并将其 storage 地址写入 `params.outputAddr[0]`。输出 Tensor 生命周期由 PyTorch 管理，kernel ABI 只接收裸地址。
 
-## 6. 公共 ABI 模块
+## 公共 ABI 模块
 
 `include/catlass_kernel.h` 定义 C++ wrapper 和 kernel 实现之间共享的数据结构和函数声明。
 
-### 6.1 matmul ABI
+### matmul ABI
 
 `TParams` 表示编译期参数：
 
@@ -248,11 +248,11 @@ void BasicMatmul(
     const MatmulParams& params);
 ```
 
-### 6.2 扩展 ABI
+### 扩展 ABI
 
 `catlass_kernel.h` 中还保留了 grouped matmul、quant matmul、conv、flash attention 等参数结构和函数声明。新增算子时优先复用已有 ABI 结构；当参数语义明显不同，再新增独立结构。
 
-## 7. Utils 模块
+## Utils 模块
 
 `utils/` 将工具函数拆成两个 target：
 
@@ -261,7 +261,7 @@ void BasicMatmul(
 | `catlass_kernel_utils` | `kernel_utils.cpp` | ACL                   | JIT compiler 使用的 dtype 到 bisheng type 转换  |
 | `catlass_torch_utils`  | `torch_utils.cpp`  | ACL、torch、torch-npu | PyTorch wrapper 使用的 Tensor/dtype/layout 工具 |
 
-### 7.1 dtype 映射
+### dtype 映射
 
 `utils/type_utils.hpp` 维护 dtype 映射表：
 
@@ -274,7 +274,7 @@ void BasicMatmul(
 
 部分 dtype 在 TorchNPU 随包 ACL 头中没有枚举名，但 ABI 数值与 CANN 定义一致。此类 dtype 使用 `static_cast<aclDataType>(value)` 表达，避免混用系统 CANN ACL 头和 TorchNPU 随包 ACL 头导致重复定义。
 
-### 7.2 Tensor 工具
+### Tensor 工具
 
 `torch_utils.cpp` 提供：
 
@@ -284,7 +284,7 @@ void BasicMatmul(
 - `AclDtypeToTorchDtype()`：ACL dtype 到 torch dtype。
 - `GetTransposeStatus()`：根据 tensor stride 和 NPU format 判断矩阵布局。
 
-## 8. JIT 子系统
+## JIT 子系统
 
 JIT 子系统由四部分组成：
 
@@ -295,7 +295,7 @@ JIT 子系统由四部分组成：
 | JIT compiler    | `kernels/jit/jit_compiler.cpp`                  | 编译、缓存、加载 `.so`                    |
 | macro generator | `kernels/include/jit_macro_generator.h`         | 将模板参数转为 `-D` 宏                    |
 
-### 8.1 JIT entry
+### JIT entry
 
 JIT entry 固定编译进 `libcatlass_kernel_jit.so`。以 `BasicMatmul` 为例：
 
@@ -310,7 +310,7 @@ if (entry) {
 
 entry 的职责是连接 stable ABI 和 runtime-compiled template，不承载具体 GEMM 模板逻辑。
 
-### 8.2 JIT template
+### JIT template
 
 JIT template 使用宏注入类型和布局：
 
@@ -337,7 +337,7 @@ JIT loader 固定解析 `run` 符号。device kernel 名只用于编译产物可
 
 template 内部通过 `Catlass::RunKernel<Kernel>(arguments, stream, blockNum)` 启动内核（来自 `common/kernel_runner.h`），不使用 `device_gemm.hpp`。
 
-### 8.3 宏生成
+### 宏生成
 
 `JitMacroGenerator<TParams>` 是模板策略类。默认模板不生成任何宏，具体参数类型通过特化实现。
 
@@ -354,7 +354,7 @@ template 内部通过 `Catlass::RunKernel<Kernel>(arguments, stream, blockNum)` 
 
 新增非 matmul JIT kernel 时，应新增对应参数结构的 `JitMacroGenerator` 特化。
 
-### 8.4 编译和缓存
+### 编译和缓存
 
 `JitCompiler` 是进程级单例。初始化内容包括：
 
@@ -372,7 +372,7 @@ cache key 通过 SHA256 对 (key=value&) 拼接串做哈希生成 UUID，文件�
 
 宏按 key 排序后拼接，保证 `unordered_map` 遍历顺序不影响缓存路径。
 
-### 8.5 环境变量
+### 环境变量
 
 | 环境变量                  | 作用                                                                                   | 可接受值                      | 默认值                       |
 | ------------------------- | -------------------------------------------------------------------------------------- | ----------------------------- | ---------------------------- |
@@ -393,11 +393,11 @@ JIT 编译使用的 NPU arch 只通过 AscendC platform API 获取，即 `GetCur
 - **外部配置**：`ASCEND_HOME_PATH`、`TORCH_CATLASS_CACHE_DIR`、`CATLASS_JIT_LOG_LEVEL`、`MS_SANITIZE_MEMORY`、`CATLASS_JIT_{AIC,AIV,MIX}_*` — 用户按需设置。
 - **包内注入**：`TORCH_CATLASS_VERSION`、`TORCH_CATLASS_PKG_DIR` — 由 Python loader 在 import 时自动设置，用户不直接修改。
 
-## 9. Kernel 构建模块
+## Kernel 构建模块
 
 `kernels/CMakeLists.txt` 提供 `add_kernel()`，统一 JIT 和 prebuilt kernel 的构建入口。
 
-### 9.1 JIT kernel
+### JIT kernel
 
 ```cmake
 add_kernel(
@@ -415,7 +415,7 @@ JIT kernel 构建流程：
 3. `jit_verify_template()` 在构建期检查 template 可被 bisheng 编译。
 4. 运行时由 `JitCompiler` 根据模板参数编译具体 `.so`。
 
-### 9.2 prebuilt kernel
+### prebuilt kernel
 
 prebuilt kernel 按 arch 构建独立动态库：
 
@@ -425,9 +425,9 @@ lib/<arch>/libcatlass_kernel_<arch>_<name>.so
 
 prebuilt 模式用于固定参数组合或无需运行时模板编译的 kernel。默认每个 arch 同时编译普通版本和 `_ms` (sanitizer) 版本，无需额外选项。
 
-## 10. 顶层构建模块
+## 顶层构建模块
 
-### 10.1 Python 构建入口
+### Python 构建入口
 
 `build.sh` 是主要构建入口：
 
@@ -444,7 +444,7 @@ bash build.sh --build-type Debug --skip-wheel
 bash build.sh --clean
 ```
 
-### 10.2 CMake target
+### CMake target
 
 顶层 `CMakeLists.txt` 负责：
 
@@ -465,7 +465,7 @@ bash build.sh --clean
 | `catlass_kernel_jit`          | shared lib | JIT entry 集合                   |
 | `catlass_torch`               | shared lib | PyTorch extension                |
 
-## 11. 测试模块
+## 测试模块
 
 pytest 集成测试验证 Python API 到 kernel 执行的完整链路。
 
@@ -492,9 +492,9 @@ bash build.sh --skip-wheel
 pytest tests/test_00_basic_matmul.py -v -s
 ```
 
-## 12. 扩展流程
+## 扩展流程
 
-### 12.1 新增 matmul 类 JIT 算子
+### 新增 matmul 类 JIT 算子
 
 1. 在 `kernels/<nn_name>/` 下添加 entry `.cpp` 和 template `.cpp`。
 2. 在 entry 中调用 `JitCompiler::instance().getKernel()`。
@@ -507,7 +507,7 @@ pytest tests/test_00_basic_matmul.py -v -s
 9. 在 `torch_catlass/ops/` 添加 Python wrapper。
 10. 在 `tests/` 添加 pytest，与 PyTorch 参考实现比对。
 
-### 12.2 新增非 matmul 算子
+### 新增非 matmul 算子
 
 非 matmul 算子应新增独立 adapter，而不是扩展 `MatmulLike`：
 
@@ -520,7 +520,7 @@ src/include/template/<op_family>.h
 
 同时新增对应的参数结构和 `JitMacroGenerator` 特化，保持参数解析、宏生成和 kernel ABI 各自独立。
 
-### 12.3 新增 dtype 或 layout
+### 新增 dtype 或 layout
 
 新增 dtype/layout 时需要同步更新：
 

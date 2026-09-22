@@ -19,7 +19,7 @@ Q @ K^T ──► (S) ──► FAUnsharedSoftmax ──► P(f16/bf16), gm(rowM
                                                                    UnsharedFAPV
 ```
 
-## 1. DispatchPolicy 定义
+## DispatchPolicy 定义
 
 `include/catlass/gemm/dispatch_policy.hpp`：
 
@@ -45,9 +45,9 @@ struct EpilogueAscend950FAUnsharedSoftmax {
 };
 ```
 
-## 2. BlockMmad MmadAtlasA2UnsharedFAQK 设计方案
+## BlockMmad MmadAtlasA2UnsharedFAQK 设计方案
 
-### 2.1 模板参数
+### 模板参数
 
 ```cpp
 template <class L1TileShape_, class L0TileShape_, class AType_, class BType_, class CType_,
@@ -61,13 +61,13 @@ struct BlockMmad<MmadAtlasA2UnsharedFAQK, L1TileShape_, L0TileShape_, AType_, BT
 - `AType_`/`BType_`：Q（RowMajor）与 K（ColumnMajor）的 `GemmType<Element, Layout>`。
 - `CType_`：输出 S 矩阵，**仅支持 RowMajor**（`static_assert` 约束）。
 
-### 2.2 内存布局
+### 内存布局
 
 - L1：`l1A` 与 `l1B` 连续分配（`l1B` 起始偏移为 `L1A_SIZE = M*K*sizeof(ElementA)`）。
 - L0A/L0B/L0C：按 `STAGES = 2` 计算 pingpong buffer 尺寸（本模板单次调用完成一个 block，实际按单缓冲使用）。
 - L0C 中 S 的布局为 `layout::zN`（MMAD 原生输出布局）。
 
-### 2.3 事件同步与执行流程
+### 事件同步与执行流程
 
 构造函数完成缓冲初始化，并预置三组硬件事件（`EVENT_ID0`）：`MTE1_MTE2`、`M_MTE1`、`FIX_M`；析构函数对称 Wait，保证 Kernel 退出时流水排空。
 
@@ -81,13 +81,13 @@ struct BlockMmad<MmadAtlasA2UnsharedFAQK, L1TileShape_, L0TileShape_, AType_, BT
 
 m/n/k 维度均按 `L1AlignHelper` 对齐规则 `RoundUp` 后参与 L0 布局，`tileMmad` 的 K 用真实值 `actualShape.k()`。
 
-## 3. BlockMmad MmadAtlasA2UnsharedFAPV 设计方案
+## BlockMmad MmadAtlasA2UnsharedFAPV 设计方案
 
-### 3.1 与 FAQK 的差异
+### 与 FAQK 的差异
 
 - 数据通路相同（GM→L1→L0→MMAD→L0C→GM），差异在于 **A（即 P 矩阵）的搬运时机由跨核同步控制**。
 
-### 3.2 跨核同步设计
+### 跨核同步设计
 
 ```cpp
 void operator()(..., GemmCoord actualShape, Arch::CrossCoreFlag softmaxReady)
@@ -108,9 +108,9 @@ PV GEMM 与 softmax epilogue 通常运行在不同核（或不同 subBlock）上
 
 PV 场景典型 L1TileShape 为 `GemmShape<128, 128, 256>`（K 维为 KV 序列长度方向，单 tile 内完成整个短序列）。
 
-## 4. BlockEpilogue EpilogueAtlasA2FAUnsharedSoftmax 设计方案
+## BlockEpilogue EpilogueAtlasA2FAUnsharedSoftmax 设计方案
 
-### 4.1 模板参数与构造
+### 模板参数与构造
 
 ```cpp
 BlockEpilogue(Arch::Resource<ArchTag>& resource, float tor_,
@@ -123,7 +123,7 @@ BlockEpilogue(Arch::Resource<ArchTag>& resource, float tor_,
 - `MaskType_`：mask 类型。
 - 构造参数：softmax scale `tor`、每个 head 的 KV 有效长度 `unsharedKvSeqLen`、最大 decode 步数、head 数与 GQA group 大小。
 
-### 4.2 UB 内存布局
+### UB 内存布局
 
 | Tensor | 元素类型 | 起始偏移（字节） | 用途 |
 | --- | --- | --- | --- |
@@ -134,7 +134,7 @@ BlockEpilogue(Arch::Resource<ArchTag>& resource, float tor_,
 | tvUbTensor | float | `3 * 32768 + 8 * 512` | 临时向量（Brcb 展开等） |
 | unsharedMaskUbTensor | float | `3 * 32768 + 12 * 512` | 按 head 构造的加法 mask |
 
-### 4.3 Unshared mask 的设备侧构造（InitUnsharedMaskV2）
+### Unshared mask 的设备侧构造（InitUnsharedMaskV2）
 
 mask 尺寸为 `[headNum * groupSize, kSeqTileRound]`（`kSeqTileRound = ceil(maxDecodeStep*headNum / 8) * 8`）。构造逻辑：
 
@@ -145,7 +145,7 @@ mask 尺寸为 `[headNum * groupSize, kSeqTileRound]`（`kSeqTileRound = ceil(ma
 
 由于每个 head 的有效区间起点随 `round * maxDecodeStep` 平移，**不同 head 的 mask 不同**——这正是 "Unshared" 的含义。
 
-### 4.4 算法流程（SubCoreCompute）
+### 算法流程（SubCoreCompute）
 
 ```
 S = DataCopy(GM)                          // MTE2, EVENT_ID3
@@ -162,7 +162,7 @@ ll = ReduceSum(ls, row)                   // WholeReduceSum + Add 折叠
 
 由于 KV 序列一次处理完，本模板**不做 O 的 rescale 与归一化**，`gm/gl` 交由外部（上层 kernel 或 combine kernel）完成 `O = OTmp / gl`。双 subBlock 场景下按 head 切分行区间并行计算，事件全部使用 `EVENT_ID3` 避免与 GEMM 侧冲突。
 
-## 5. Ascend950 特化
+## Ascend950 特化
 
 `EpilogueAscend950FAUnsharedSoftmax` 直接继承 AtlasA2 实现（Ascend C 向量 API 兼容）：
 
@@ -174,7 +174,7 @@ class BlockEpilogue<EpilogueAscend950FAUnsharedSoftmax, OutputType_, InputType_,
 };
 ```
 
-## 6. 使用示例
+## 使用示例
 
 摘自 xllm-ops（https://gitcode.com/xLLM-AI/xllm_ops）`x_attention/op_kernel/x_attention_catlass_helper.h` 的 `CallUnsharedInferKernel`（真实工程用法）：
 
@@ -202,7 +202,7 @@ unsharedInferKernel(params);
 
 类型约定：Q/K/V/P/O/Mask 为 `INPUT_T`（fp16/bf16），S/OTmp 为 float；上层 `UnsharedFAInferKernel` 负责 QK→softmax→PV 的调度与 `softmaxReady` 跨核通知。
 
-## 7. 与其他系列的差异
+## 与其他系列的差异
 
 - 相比 Shared FA 系列（`FAIQKSplitRow` + `OnlineSoftmaxCopySumMax` + `RescaleOWithoutDivSum`）：Unshared 场景 KV 短且每 head 独立，softmax **单趟完成**，不维护跨 KV tile 的在线状态（rowMax/rowSum 的历史累积与 O rescale），因此无需 SplitRow 与 RescaleO 模板。
 - 相比 FAI（PagedAttention 共享前缀）系列：不依赖 blockTables 分页 KV 索引，mask 在设备侧按 head 静态构造。

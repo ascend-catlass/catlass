@@ -4,9 +4,9 @@
 
 ---
 
-## 1. 组件族谱
+## 组件族谱
 
-### 1.1 Non-TLA 特化（3-param: L1Type + L0Type）
+### Non-TLA 特化（3-param: L1Type + L0Type）
 
 | # | L1Type | L0Type | Element | 搬运API | Params类型 | Trans |
 |---|--------|--------|---------|---------|-----------|------|
@@ -16,7 +16,7 @@
 | 4 | `nZ(A1)` | `zZ(A2)` | `int8_t` | `LoadDataWithTranspose` | `LoadData2dTransposeParams` | 是 |
 | 5 | `NDC1HWC0(A1)` | `zZ` | generic | `LoadData<config>` | `LoadData3DParamsV2` | — |
 
-### 1.2 Non-TLA 特化（2-param: L1Type only）
+### Non-TLA 特化（2-param: L1Type only）
 
 | # | L1Type | Element | 搬运API | Params类型 | Trans |
 |---|--------|---------|---------|-----------|------|
@@ -26,7 +26,7 @@
 | 9 | `nZ(A1)` | `int8_t` | `LoadDataWithTranspose` | `LoadData2dTransposeParams` | 是 |
 | 10 | `nZ(A1)` | `float` | `LoadData<config>` | `LoadData3DParamsV2` | 是 |
 
-### 1.3 TLA 变体（TileCopyTla）
+### TLA 变体（TileCopyTla）
 
 | # | Src→Dst | Element | 搬运API | Params类型 |
 |---|---------|---------|---------|-----------|
@@ -36,13 +36,13 @@
 | 14 | `nZ→zZ` | `int8_t` | `LoadDataWithTranspose` | `LoadData2dTransposeParams` |
 | 15 | `nZ→zZ` | `float` | `LoadData<config>` | `LoadData3DParamsV2` (trans) |
 
-### 1.4 Sparse TLA 变体（TileCopySparseTla）
+### Sparse TLA 变体（TileCopySparseTla）
 
 | # | Src→Dst | 搬运API | Params类型 |
 |---|---------|---------|-----------|
 | 16 | `zN→zZ` | `LoadData` | `LoadData3DParamsV2Pro` |
 
-### 1.5 断言必验字段
+### 断言必验字段
 
 |API|Params 类型|必验字段|
 |---|---|---|
@@ -53,9 +53,9 @@
 
 ---
 
-## 2. 测试基础设施
+## 测试基础设施
 
-### 2.1 关联Stub文件
+### 关联Stub文件
 
 | 文件 | 作用 |
 |------|------|
@@ -65,7 +65,7 @@
 | `stub/kernel_operator_mm_intf.h` | `LoadData` / `LoadDataWithTranspose` stub 实现 |
 | `common/helper.hpp` | `GetEleNumPerC0()` / `setLayout()` / `isContiguous()` / `setShapeImpl()`
 
-### 2.2 测试Fixture成员
+### 测试Fixture成员
 
 `TileCopyL1ToL0ATest` 继承 `AscendCTest`，`setShape<Element, isTrans>(row, col)` 依据是否转置预算好 round 与 fractal 值供各用例复用：
 
@@ -82,7 +82,7 @@ uint32_t _row_round = _0, _col_round = _0;
 uint32_t _row_per_fractal = _0, _col_per_fractal = _0;
 ```
 
-### 2.3 日志索引约定
+### 日志索引约定
 
 ```cpp
 argsT[0] = MakeArg<Element>()   →  GetArgsTAt(0).Type() = typeid(Element)
@@ -95,9 +95,9 @@ args[2]  = params               →  LoadData2DParams / LoadData2dTransposeParam
 
 ---
 
-## 3. 断言模式参考
+## 断言模式参考
 
-### 3.1 LoadData2DParams 无转置
+### LoadData2DParams 无转置
 
 zN→zZ 标准搬运场景，使用 `LoadData` API 通过 `LoadData2DParams` 参数搬运，无转置。每行搬运一次，repeatTimes 等于分形数。
 
@@ -111,7 +111,7 @@ ASSERT_EQ(p->ifTranspose, _0);
 ASSERT_EQ(p->addrMode,   _0);
 ```
 
-### 3.2 LoadData2DParams 转置
+### LoadData2DParams 转置
 
 nN/nZ→zZ 需要转置的搬运场景，仍通过 `LoadData` API 配合 `LoadData2DParams` 参数，但 `ifTranspose` 设为 true。
 
@@ -125,7 +125,7 @@ ASSERT_EQ(p->ifTranspose, _1);
 ASSERT_EQ(p->addrMode,   _0);
 ```
 
-### 3.3 LoadData2dTransposeParams
+### LoadData2dTransposeParams
 
 float/int8_t 类型的转置搬运，使用专用的 `LoadDataWithTranspose` API 和 `LoadData2dTransposeParams` 参数结构。`srcStride` 固定为 1。
 
@@ -138,7 +138,7 @@ ASSERT_EQ(p->dstGap,     0);
 ASSERT_EQ(p->dstFracGap, 0);
 ```
 
-### 3.4 循环地址验证
+### 循环地址验证
 
 搬运循环次数等于目标行数（`_row_per_fractal`）。每次迭代验证 src/dst 的 offset 递增是否正确，以及 params 字段不变。
 

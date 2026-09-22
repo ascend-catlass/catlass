@@ -1,6 +1,6 @@
 # CATLASS FlashAttention Infer Design Document
 
-## 1. Overview
+## Overview
 
 CATLASS FlashAttention Infer is a FlashAttention inference operator optimized for Ascend950 hardware, implemented based on the CATLASS Gemm API. The operator structure consists of the following parts:
 
@@ -11,7 +11,7 @@ CATLASS FlashAttention Infer is a FlashAttention inference operator optimized fo
 
 This document describes in detail the Kernel implementation of the Flash Attention Infer operator, including key designs such as main process logic, Cube/Vector pipeline, L1/UB memory allocation, as well as the Tiling segmentation strategy.
 
-### 1.1 Operator Functionality
+### Operator Functionality
 
 The Flash Attention Infer operator implements the following calculation process:
 
@@ -44,9 +44,9 @@ Where:
 
 ---
 
-## 2. Data Structures and Type Definitions
+## Data Structures and Type Definitions
 
-### 2.1 Core Type Definitions
+### Core Type Definitions
 
 ```cpp
 // L1 Tile Shape: <qSeqlen, kvSeqlen, embed>
@@ -72,7 +72,7 @@ using LayoutTagP = layout::zN;         // P: zN format
 using LayoutTagO = layout::RowMajor;   // O: Row-major
 ```
 
-### 2.2 Core Component Types
+### Core Component Types
 
 ```cpp
 // Q * K^T matrix multiplication component
@@ -131,9 +131,9 @@ These Tile components are responsible for data movement between GM, L1, L0 and U
 
 ---
 
-## 3. Main Kernel Class: FAInferKernel
+## Main Kernel Class: FAInferKernel
 
-### 3.1 Class Definition
+### Class Definition
 
 **Location**:`fai_kernel.h:47-545`
 
@@ -149,7 +149,7 @@ class FAInferKernel {
 };
 ```
 
-### 3.2 Member Variables
+### Member Variables
 
 | Variable Name                       | Type                     | Description                                  |
 | ----------------------------------- | ------------------------ | -------------------------------------------- |
@@ -165,9 +165,9 @@ class FAInferKernel {
 | `blockIdx`                          | uint32_t                 | Current AI Core index                        |
 | `subBlockIdx`                       | uint32_t                 | AIV core sub-index                           |
 
-### 3.3 Memory Layout
+### Memory Layout
 
-#### 3.3.1 Memory Layout
+#### Memory Layout
 
 ```text
 +------------------------+  ubBufAddrStart = 0
@@ -201,7 +201,7 @@ class FAInferKernel {
 +------------------------+
 ```
 
-#### 3.3.2 L1 Memory Layout
+#### L1 Memory Layout
 
 ```text
 +------------------------+  l1BufAddrStart = 0
@@ -219,19 +219,19 @@ class FAInferKernel {
 
 ---
 
-## 4. Multi-Core Tiling Algorithm
+## Multi-Core Tiling Algorithm
 
 The Tiling segmentation algorithm is mainly used to evenly distribute computing tasks to multiple AI Cores to achieve efficient parallel computing.
 
-### 4.1 Core Objectives
+### Core Objectives
 
 - **Load balancing**: Make the computation load of each AI core as balanced as possible
 - **Memory efficiency**: Rational utilization of on-chip memory (UB/L1)
 - **Parallel optimization**: Maximum multi-core parallelism
 
-### 4.2. Data Structures
+### Data Structures
 
-#### 4.2.1 FAInfo - Input Parameter Structure
+#### FAInfo - Input Parameter Structure
 
 ```cpp
 struct FAInfo {
@@ -253,7 +253,7 @@ struct FAInfo {
 };
 ```
 
-#### 4.2.2 FATilingData - Output Tiling Data Structure
+#### FATilingData - Output Tiling Data Structure
 
 ```cpp
 class FATilingData {
@@ -299,9 +299,9 @@ MultiCoreParamsRegbase - Multi-core Parameters
 | bnAxisStartIdx[MAX_CORE_NUM] | uint32_t | Batch-Head axis start index array           |
 | sparseStartIdx[MAX_CORE_NUM] | int64_t  | qSeq start index array                      |
 
-### 4.3. Core Algorithm Flow
+### Core Algorithm Flow
 
-#### 4.3.1 Main Function: GetFATilingParam
+#### Main Function: GetFATilingParam
 
 **Location**:`fai_tiling.h:283-333`
 
@@ -352,7 +352,7 @@ int32_t GetFATilingParam(const FAInfo &faInfo, uint32_t blockDim, FATilingData& 
    └─ splitFactorTailSize = totalSize % splitFactorSize
 ```
 
-#### 4.3.2 ComputeSplitNBSeq - Greedy Multi-Core Segmentation
+#### ComputeSplitNBSeq - Greedy Multi-Core Segmentation
 
 **Location**: `fai_tiling.h:183-235`
 
@@ -408,9 +408,9 @@ Iterate over three axes:
 
 ---
 
-## 5. Main Process Logic
+## Main Process Logic
 
-### 5.1 Init Function
+### Init Function
 
 **Location**: `fai_kernel.h:82-161`
 
@@ -453,7 +453,7 @@ CATLASS_DEVICE void Init(FAIKernelParams const& params)
    └─ mm2AL1TensorList[3] (shared by AIC/AIV)
 ```
 
-### 5.2 operator() Function
+### operator() Function
 
 **Location**:`fai_kernel.h:163-457`
 
@@ -501,9 +501,9 @@ CATLASS_DEVICE void operator()(FAIKernelParams const &params)
        └─ qSeqAxisStartIdx = 0
 ```
 
-### 5.3 Detailed Explanation of Triple Loop
+### Detailed Explanation of Triple Loop
 
-#### 5.3.1 First Layer Loop: Batch-Head Axis
+#### First Layer Loop: Batch-Head Axis
 
 **Location**:`fai_kernel.h:249-454`
 
@@ -531,7 +531,7 @@ for (uint32_t bnIdx = bnAxisStartIdx; bnIdx < bnAxisEndIdx; ++bnIdx) {
 - Iterate over Batch-Head axis according to Tiling segmentation results
 - Support GQA (Grouped Query Attention): Multiple Query heads share KV heads
 
-#### 5.3.2 Second Layer Loop: Q Sequence Axis
+#### Second Layer Loop: Q Sequence Axis
 
 **Location**:`fai_kernel.h:256-453`
 
@@ -569,7 +569,7 @@ for (int64_t qSeqAxisIndex = qSeqAxisStartIdx; qSeqAxisIndex < tempQSeqAxisEnd; 
 - Q sequence is segmented by 128 (BLOCK_BASE_SIZE)
 - Last 3 loops are used for pipelined execution of tail blocks (ensure all tasks are completed)
 
-#### 5.3.3 Third Layer Loop: KV Sequence Axis
+#### Third Layer Loop: KV Sequence Axis
 
 **Location**:`fai_kernel.h:291-452`
 
@@ -655,15 +655,15 @@ for (int64_t kvSeqLoopCount = runParam.kvSeqLoopStartIdx; kvSeqLoopCount <= kvSe
 
 ---
 
-## 6. Pipeline Detailed Explanation
+## Pipeline Detailed Explanation
 
-### 6.1 Pipeline Timing Diagram
+### Pipeline Timing Diagram
 
 <img src="../../docs/assets/images/flash_attention_infer_cv_pipeline.png" width="50%">
 
-### 6.2 Synchronization Mechanism
+### Synchronization Mechanism
 
-#### 6.2.1 Event Definitions
+#### Event Definitions
 
 ```cpp
 // AIC → AIV synchronization events
@@ -676,7 +676,7 @@ constexpr uint64_t MM1_RES_INTRA_EVENT[2] = {9, 10}; // BMM1 internal synchroniz
 constexpr uint64_t MM2_RES_INTRA_EVENT[2] = {7, 8};  // BMM2 internal synchronization
 ```
 
-#### 6.2.2 Synchronization Flow
+#### Synchronization Flow
 
 ```text
 Step 1: AIC executes Q*K^T
@@ -709,9 +709,9 @@ Step 4: AIV executes O update
 
 ---
 
-## 7. BlockMmadQK: Q*K^T Matrix Multiplication
+## BlockMmadQK: Q*K^T Matrix Multiplication
 
-### 7.1 Class Definition
+### Class Definition
 
 **Location**:`block_mmad_fai_qk_tla.hpp:43-362`
 
@@ -733,9 +733,9 @@ struct BlockMmadTla<MmadFAIQK<Arch::Ascend950, ...>, ...> {
 };
 ```
 
-### 7.2 Memory Layout
+### Memory Layout
 
-#### 7.2.1 L1 Memory Layout
+#### L1 Memory Layout
 
 ```text
 +------------------------+  l1BufAddrStart
@@ -751,7 +751,7 @@ struct BlockMmadTla<MmadFAIQK<Arch::Ascend950, ...>, ...> {
 +------------------------+
 ```
 
-#### 7.2.2 L0 Memory Layout
+#### L0 Memory Layout
 
 ```text
 L0A Buffer:
@@ -776,15 +776,15 @@ L0C Buffer:
 +------------------------+
 ```
 
-### 7.3 Multi-Level Pipeline
+### Multi-Level Pipeline
 
-#### 7.3.1 Pipeline Stages
+#### Pipeline Stages
 
 ```cpp
 Stage:  GM → L1  → L0  → Cube → L0C → UB
 ```
 
-#### 7.3.2 Stream Operation Flow
+#### Stream Operation Flow
 
 ```cpp
 void operator()(TensorA& tensorA, TensorB& tensorB, TensorC& tensorC, ...) {
@@ -845,7 +845,7 @@ void operator()(TensorA& tensorA, TensorB& tensorB, TensorC& tensorC, ...) {
 }
 ```
 
-### 7.4 Paged Attention Support
+### Paged Attention Support
 
 ```cpp
 void CopyInL1B(TensorL1B& tensorL1B, TensorB& tensorB, ...) {
@@ -871,9 +871,9 @@ void CopyInL1B(TensorL1B& tensorL1B, TensorB& tensorB, ...) {
 
 ---
 
-## 8. EpilogueOnlineSoftmax: Online Softmax
+## EpilogueOnlineSoftmax: Online Softmax
 
-### 8.1 Class Definition
+### Class Definition
 
 **Location**:`block_epilogue_fa_softmax_ascend950.hpp:32-424`
 
@@ -890,9 +890,9 @@ class BlockEpilogue<EpilogueAscend950FASoftmax<ATTENTION_MASK_FLAG_>, ...> {
 };
 ```
 
-### 8.2 Memory Layout
+### Memory Layout
 
-#### 8.2.1 UB Memory Layout
+#### UB Memory Layout
 
 ```text
 +------------------------+
@@ -910,9 +910,9 @@ class BlockEpilogue<EpilogueAscend950FASoftmax<ATTENTION_MASK_FLAG_>, ...> {
 +------------------------+
 ```
 
-### 8.3 Online Softmax Algorithm
+### Online Softmax Algorithm
 
-#### 8.3.1 Mathematical Principle
+#### Mathematical Principle
 
 Standard Softmax:
 
@@ -936,7 +936,7 @@ For each KV block's k:
   6. Calculate P[i,k] = exp_k[i] / sum[i]
 ```
 
-#### 8.3.2 Implementation Flow
+#### Implementation Flow
 
 ```cpp
 void operator()(TensorDst &vf1OutL1, LocalTensor<ElementS>&sumUb, ...) {
@@ -1000,9 +1000,9 @@ void operator()(TensorDst &vf1OutL1, LocalTensor<ElementS>&sumUb, ...) {
 
 ---
 
-## 9. BlockMmadPV: P*V Matrix Multiplication
+## BlockMmadPV: P*V Matrix Multiplication
 
-### 9.1 **Class Definition**
+### **Class Definition**
 
 **Location**:`block_mmad_fai_pv_tla.hpp:43-317`
 
@@ -1024,7 +1024,7 @@ struct BlockMmadTla<MmadFAIPV<Arch::Ascend950, ...>, ...> {
 };
 ```
 
-### 9.2 Differences from BlockMmadQK
+### Differences from BlockMmadQK
 
 | Feature  | BlockMmadQK                     | BlockMmadPV                     |
 | -------- | ------------------------------- | ------------------------------- |
@@ -1036,7 +1036,7 @@ struct BlockMmadTla<MmadFAIPV<Arch::Ascend950, ...>, ...> {
 | K Loop   | Segmented along embed dimension | None                            |
 | N Loop   | None                            | Segmented along embed dimension |
 
-### 9.3 Stream Operation Flow
+### Stream Operation Flow
 
 ```cpp
 void operator()(TensorA& tensorA, TensorB& tensorB, TensorC& tensorC, ...) {
@@ -1102,9 +1102,9 @@ void operator()(TensorA& tensorA, TensorB& tensorB, TensorC& tensorC, ...) {
 
 ---
 
-## 10. EpilogueRescaleO: O Update and Normalization
+## EpilogueRescaleO: O Update and Normalization
 
-### 10.1 **Class Definition**
+### **Class Definition**
 
 **Location**:`block_epilogue_fa_rescale_o_ascend950.hpp:29-216`
 
@@ -1119,7 +1119,7 @@ class BlockEpilogue<EpilogueAscend950FARescaleO, ...> {
 };
 ```
 
-### 10.2 Memory Layout
+### Memory Layout
 
 ```text
 +------------------------+
@@ -1127,9 +1127,9 @@ class BlockEpilogue<EpilogueAscend950FARescaleO, ...> {
 +------------------------+
 ```
 
-### 10.3 O Update Algorithm
+### O Update Algorithm
 
-#### 10.3.1 Mathematical Principle
+#### Mathematical Principle
 
 Standard Flash Attention:
 
@@ -1157,7 +1157,7 @@ For each KV block k:
   8. Normalize: O[i] = O[i] / sum[i]
 ```
 
-#### 10.3.2 Implementation Flow
+#### Implementation Flow
 
 ```cpp
 void operator()(TensorDst &attenOutGm, const LocalTensor<ElementOTmp> &expMaxUb,
@@ -1216,7 +1216,7 @@ void operator()(TensorDst &attenOutGm, const LocalTensor<ElementOTmp> &expMaxUb,
 
 ---
 
-## 11. Next Step Optimization Suggestions
+## Next Step Optimization Suggestions
 
 1. Currently, only BlockMmadQK L0c output-> UB -> EpilogueSoftMax is implemented. Due to UB space limitations, the current template only supports embed <= 128. To support larger embedSize, it is necessary to extend the L0c output-> GM -> UB -> EpilogueSoftMax flow.
 2. The current template Kernel does not support the variable-length ActualSeq feature and needs to be adapted.

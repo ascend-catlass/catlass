@@ -26,7 +26,7 @@ Every fixed fact cites the immutable revision plus the file or symbol read. A pi
 illustrate a pattern but is never a default for the target tree. Do not use a branch, tag, short hash,
 third-party source, or remembered behavior as evidence.
 
-## 1. Analysis order and evidence rule
+## Analysis order and evidence rule
 
 For each unit, in this order:
 
@@ -54,7 +54,7 @@ Never silently remove a named FRAME candidate. An apparent existing target imple
 `AscendC::int4b_t`; report that refusal to the human as specified in FRAME. Storage int4 converted to
 int8 before Cube is not that refusal and requires normal analysis.
 
-## 2. `findings.json` shape
+## `findings.json` shape
 
 Keys are closed. This template gives the complete artifact shape; every placeholder is a reading from the
 current source tree, not a value to reuse.
@@ -141,7 +141,7 @@ one `contract.tensors[].name`. `golden.compared_dtype` is the exact, whitespace-
 the example emits as `CATLASS_EVIDENCE.dtype`; it is not inferred from storage, Cube-operand, or
 upgraded-golden precision.
 
-## 3. Freeze the external contract first
+## Freeze the external contract first
 
 The contract records the source behavior that migration must preserve:
 
@@ -162,7 +162,7 @@ A later change to dtype, layout, stride, scale or mask representation, tensor se
 region, zero-work behavior, or supported domain is `redesign`, not migration. Do not edit a golden,
 comparator, or tolerance to make a proposed implementation fit the freeze.
 
-## 4. Walk every selected type stack
+## Walk every selected type stack
 
 All nine `type_stack` layers are required: `host`, `dispatch`, `block`, `tilecopy_ab`, `tilecopy_cd`,
 `epilogue`, `scheduler_tiles`, `kernel`, and `adapter`.
@@ -188,7 +188,7 @@ separate facts. A type name, directory name, or generic-looking template proves 
 primary-template `static_assert` by expanding the selected specialization key; it proves only that no
 matching specialization was selected, not why.
 
-## 5. Adjudicate the route ladder
+## Adjudicate the route ladder
 
 The default preserves the source form: non-TLA sources remain non-TLA; TLA sources remain TLA. Do not
 silently switch a non-TLA source to a TLA stack merely because one exists. The human makes that **form
@@ -216,7 +216,7 @@ A missing target consumer or specialization is a repository gap, not a hardware 
 path; continue investigating legal implementations within the same class. Cite the pinned source for
 any such fixed hardware statement.
 
-## 6. Counterpart finding
+## Counterpart finding
 
 `counterpart` is required and nullable.
 
@@ -238,7 +238,7 @@ Compare the suspect's type stack and every frozen contract field. A matching slu
 or TLA label is not counterpart evidence. GATE 1 renders this finding so the human, not FRAME or
 ANALYZE, decides whether an already-migrated unit is excluded.
 
-## 7. Shared declarations and post-unit registrations
+## Shared declarations and post-unit registrations
 
 `shared_components` is a closed list of `{path, symbol, kind, why, consumers_of}`. `kind` is exactly
 `generalize` or `add`.
@@ -265,7 +265,7 @@ The route, source reading, `why`, consumer set, or registration rationale is not
 unit merely because its shape matches. Reinvestigate it for each unit; the ledger then merges identical
 `(path, symbol)` rows and measures existing `consumers_of` use.
 
-## 8. Discover the proof block
+## Discover the proof block
 
 `prove` is discovered now and executed unchanged in Phases 6 and 7. Commands are argv lists used without
 an implicit shell, glob expansion, or environment injection.
@@ -284,7 +284,7 @@ trace artifact naming before recording `run[0]`. Environment availability remain
 unavailable prerequisite as evidence for later attribution, not as a reason to invent a command or alter
 the contract.
 
-## 9. GATE 1 decisions
+## GATE 1 decisions
 
 After all unit findings are validated, render the migration gate:
 

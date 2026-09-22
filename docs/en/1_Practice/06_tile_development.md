@@ -1,6 +1,6 @@
 # Tile Component Code Explained
 
-## 1. Tile Component Overview
+## Tile Component Overview
 
 Tile components are the lowest-level computation and data operation units in the CATLASS template library. They reside at the end of the entire hierarchy and interact directly with the hardware. Their primary responsibility is to implement basic operations such as matrix multiplication (TileMmad) and data copy (TileCopy), serving as the foundation for building high-performance operators.
 
@@ -13,7 +13,7 @@ Tile components adopt highly optimized implementations that fully exploit hardwa
 
 This document uses `TileMmad` as an example to dive into the code structure, main interfaces, and design ideas of tile components. It also covers commonalities of other tile components such as TileCopy.
 
-## 2. Template Assembly Mechanism
+## Template Assembly Mechanism
 
 Tile components adopt a template-based design that supports flexible configuration and extension. Using TileMmad as an example, its basic template structure is as follows:
 
@@ -33,7 +33,7 @@ struct TileMmad {
 };
 ```
 
-### 2.1 Core Template Parameters
+### Core Template Parameters
 
 | Parameter | Description                                                                         |
 | --------- | ----------------------------------------------------------------------------------- |
@@ -44,7 +44,7 @@ struct TileMmad {
 
 These template parameters allow tile components to flexibly adapt to different hardware architectures and computation requirements.
 
-### 2.2 Type Export
+### Type Export
 
 Tile components define a series of exported types using the `using` keyword, ensuring type consistency and maintainability:
 
@@ -57,15 +57,15 @@ using ElementAccumulator =
 
 ElementAccumulatorSelector is a helper tool that automatically selects an appropriate accumulator type based on the input ElementA and ElementB types. This ensures a balance between computation precision and performance.
 
-## 3. Core Data Structure
+## Core Data Structure
 
 Tile components typically contain few data members, relying mainly on template parameters and input parameters to perform computations. Take TileMmad as an example. It has no additional data members. All information required for computation is passed through template parameters and the parameters of the operator() method.
 
 This design makes tile components highly lightweight and flexible for frequent calls.
 
-## 4. Main Interfaces
+## Main Interfaces
 
-### 4.1 Constructor
+### Constructor
 
 ```cpp
 CATLASS_DEVICE
@@ -74,11 +74,11 @@ TileMmad() {}
 
 TileMmad provides a default constructor for creating TileMmad objects. Since TileMmad has no data members, the constructor is null.
 
-### 4.2 operator() Method
+### operator() Method
 
 The operator() method is the core interface of tile components, executing actual computation or data operations. TileMmad provides multiple overload versions of the operator() method to support different combinations of input parameters.
 
-#### 4.2.1 Basic Matrix Multiplication
+#### Basic Matrix Multiplication
 
 ```cpp
 CATLASS_DEVICE
@@ -103,7 +103,7 @@ This method performs a basic matrix multiplication operation. It stores the resu
 - initC: Whether to initialize the result matrix C. Defaults to true.
 - unitFlag: Compute unit flag. Defaults to 0.
 
-#### 4.2.2 Matrix Multiplication with Bias
+#### Matrix Multiplication with Bias
 
 ```cpp
 CATLASS_DEVICE
@@ -120,9 +120,9 @@ void operator()(AscendC::LocalTensor<ElementAccumulator> const &l0CTensor,
 
 This method adds support for the bias matrix l0BiasTensor on top of the basic matrix multiplication.
 
-## 5. Implementation Details and Optimization Strategies
+## Implementation Details and Optimization Strategies
 
-### 5.1 Architecture-specific Optimization
+### Architecture-specific Optimization
 
 Tile components implement specific optimizations for different NPU architectures:
 
@@ -136,7 +136,7 @@ Tile components implement specific optimizations for different NPU architectures
 
 This conditional compilation approach ensures that tile components can fully utilize different architectures while maintaining code uniformity.
 
-### 5.2 MmadParams Configuration
+### MmadParams Configuration
 
 MmadParams is a parameter structure in Ascend C, which configures matrix multiplication operations:
 
@@ -151,7 +151,7 @@ mmadParams.cmatrixInitVal = initC;
 
 TileMmad configures appropriate MmadParams based on different input parameters and architectures to achieve optimal performance.
 
-### 5.3 Pipe Barrier Optimization
+### Pipe Barrier Optimization
 
 To ensure computation correctness and performance, TileMmad inserts pipe barriers where appropriate:
 
@@ -164,7 +164,7 @@ if ((m / C0_NUM_PER_FRACTAL) * (n / C0_NUM_PER_FRACTAL) < PIPE_M_BARRIER_THRESHO
 
 Pipe barriers are inserted based on the matrix size and only when the matrix is relatively small to avoid unnecessary performance overhead.
 
-## 6. TileCopy Overview
+## TileCopy Overview
 
 TileCopy is another important tile component responsible for copying data among cache levels. Similar to TileMmad, it adopts a template-based design and supports multiple data types and layouts.
 
@@ -197,25 +197,25 @@ TileCopy internally combines multiple specific copy components, including but no
 
 This design allows TileCopy to flexibly handle data transfers between different levels of the memory hierarchy.
 
-## 7. Execution Flow Analysis
+## Execution Flow Analysis
 
 The typical execution flow of tile components is as follows:
 
-### 7.1 TileMmad Execution Flow
+### TileMmad Execution Flow
 
 1. **Initialization**: Create a TileMmad object.
 2. **Parameter configuration**: Prepare the input tensor and computation parameters.
 3. **Computation**: Call the operator() method to perform matrix multiplication.
 4. **Result return**: Store the computation result in the output tensor.
 
-### 7.2 TileCopy Execution Flow
+### TileCopy Execution Flow
 
 1. **Initialization**: Create a TileCopy object.
 2. **Parameter configuration**: Prepare the source and destination tensors.
 3. **Copy**: Call the appropriate copy method to perform data transfer.
 4. **Transfer**: Transfer data from the source to the destination location.
 
-## 8. Relationship with Other Components
+## Relationship with Other Components
 
 The relationship between tile components and other components is as follows:
 
@@ -225,7 +225,7 @@ The relationship between tile components and other components is as follows:
 
 This layered design gives the CATLASS template library good modularity and maintainability.
 
-## 9. Summary
+## Summary
 
 Tile components are the underlying computation and data operation units in the CATLASS template library. They interact directly with hardware. They adopt a template-based design, support multiple data types and layouts, and implement specific optimizations for different architectures.
 

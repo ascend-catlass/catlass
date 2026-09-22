@@ -1,6 +1,6 @@
 # FD 系列 Flash Attention 推理核设计文档
 
-## 1. 系列概述
+## 系列概述
 
 FD 系列是 XFAI 系列（见 [03_xfai_kernel.md](./03_xfai_kernel.md)）在 **causal 三角 mask** 场景下的增强实现。其核心思路是：
 
@@ -18,7 +18,7 @@ FD 系列共 3 个新增模板：
 
 其中 OnlineSoftmax_FD 与 CombineScale 在文件末尾均提供了 `EpilogueAscend950*` 同名特化（直接继承 AtlasA2 版本），用于 950 平台的 Policy 名注册。
 
-## 2. DispatchPolicy 定义
+## DispatchPolicy 定义
 
 ```cpp
 // 1. FD 在线 softmax epilogue（QK 后：行归约 + P 下搬运）
@@ -46,9 +46,9 @@ struct EpilogueAscend950OnlineSoftmax_FD : EpilogueAtlasA2OnlineSoftmax_FD<LSE_M
 struct EpilogueAscend950CombineScale : EpilogueAtlasA2CombineScale {};
 ```
 
-## 3. EpilogueAtlasA2OnlineSoftmax_FD 设计
+## EpilogueAtlasA2OnlineSoftmax_FD 设计
 
-### 3.1 类形态与构造
+### 类形态与构造
 
 ```cpp
 template <typename Policy_, typename OutputType_, typename InputType_, typename MaskType_>
@@ -60,7 +60,7 @@ public:
 
 与 XFAI OnlineSoftmax 一致，构造时传入 softmax scale；区别在于 operator() 提供了带三角 mask 参数的版本。
 
-### 3.2 UB 空间布局
+### UB 空间布局
 
 | 区域 | 偏移（单位：fp32 元素） | 大小 | 用途 |
 | --- | --- | --- | --- |
@@ -72,7 +72,7 @@ public:
 
 关键点：**dm（重缩放系数区）按 stackTile 周期分区**，`dmUbOffsetCurCycle = curStackTileMod * MAX_ROW_NUM_SUB_CORE(256) + rowOffset`，即每个 stackTile 周期拥有独立的 256 行 dm 槽位，避免跨周期覆盖。
 
-### 3.3 行归约三分支
+### 行归约三分支
 
 按行块长度选择归约策略（与 XFAI 相同）：
 
@@ -80,7 +80,7 @@ public:
 - **SPECTILE256**：`SetVecMask(32)` + `SetBlockReduceMask(4)` 的短行归约；
 - **TAILTILE**：整段归约 + 尾段 `SetMask` 处理非对齐行。
 
-### 3.4 SubCoreCompute 六步流程（doTriUMask 模板参数）
+### SubCoreCompute 六步流程（doTriUMask 模板参数）
 
 ```cpp
 template <bool doTriUMask>
@@ -94,7 +94,7 @@ void SubCoreCompute(...) {
 }
 ```
 
-### 3.5 双 operator() 与三角 mask 机制
+### 双 operator() 与三角 mask 机制
 
 提供两个调用入口：
 
@@ -114,9 +114,9 @@ if (triDown < kvSEndIdx) { maskEnd = ...; } else { 全列有效; }
 
 即：triUp 为左上三角起点（query 相对位置），triDown 为右下止点，二者把当前 KV stackTile 划分为「全 mask / 部分三角 / 全有效」三段，仅部分三角段执行逐列 mask 计算。
 
-## 4. EpilogueAtlasA2RescaleO_FD 设计
+## EpilogueAtlasA2RescaleO_FD 设计
 
-### 4.1 类形态与构造
+### 类形态与构造
 
 ```cpp
 template <typename Policy_, typename OutputType_, typename InputType_, typename UpdateType_, typename LseType_>
@@ -128,7 +128,7 @@ public:
 
 比 OnlineSoftmax 多两个类型参数：`UpdateType_`（中间结果 gOUpdate 的精度，通常 fp32）与 `LseType_`（LSE 输出精度）。
 
-### 4.2 UB 空间布局
+### UB 空间布局
 
 | 区域 | 偏移（fp32 元素） | 用途 |
 | --- | --- | --- |
@@ -139,7 +139,7 @@ public:
 | gl 与 lse32 共享 | 10*16384 + 12*1024 | 行 sum / LSE 中间量 |
 | dm | 10*16384 + 13*1024 | 重缩放系数（与 OnlineSoftmax 的 dm 分区对齐） |
 
-### 4.3 核心 algorithm：首 / 中 / 末 tile 三分支
+### 核心 algorithm：首 / 中 / 末 tile 三分支
 
 对每个 stackTile 周期：
 
@@ -161,11 +161,11 @@ public:
     isSplitkv:   CopyOToGmFp32   → gCombineo（fp32，不 cast，供后续 CombineScale 合并）
 ```
 
-### 4.4 CopyOToGm 三段式搬运
+### CopyOToGm 三段式搬运
 
 `CopyOToGm` / `CopyOToGmFp32` 均按 **prologue（前缀 token）/ integral（整 head）/ epilogue（尾 token）** 三段执行 `DataCopyPad`：每行搬运 `embed` 列有效数据 + `oHiddenSize - embed` 列 pad。行切分由 `rowNumTile = RoundDown(8192/embed, 8)` 决定，行循环内按 token-head 折算 `proTokenIdx / proTokenNum / integralHeadNum / epiTokenNum`。
 
-### 4.5 LSE 处理与中间结果回写
+### LSE 处理与中间结果回写
 
 - **LSE_OUT 模式**：`isLastRowLoop` 时 `lse = ln(gl) + gm`，Brcb 广播后写 `gLse`（DataCopyPad，带 `(qHeads-1)*4` 列 pad）；
 - **isSplitkv**：仅写 `gCombineLse`（fp32 中间量，供 CombineScale 合并）；
@@ -173,9 +173,9 @@ public:
 
 事件对：EVENT_ID0/1/3/4/5/6，其中 `MTE3_MTE2(EVENT_ID6)` 作为跨周期栅栏。
 
-## 5. EpilogueAtlasA2CombineScale 设计
+## EpilogueAtlasA2CombineScale 设计
 
-### 5.1 类形态
+### 类形态
 
 ```cpp
 template <typename Policy_, typename OutputType_, typename InputType_>
@@ -187,7 +187,7 @@ public:
 
 仅两个类型参数（无 mask / lse 模板参数），是纯通用合并模板。
 
-### 5.2 UB 空间布局（按字节）
+### UB 空间布局（按字节）
 
 | 区域 | 偏移 | 说明 |
 | --- | --- | --- |
@@ -198,7 +198,7 @@ public:
 | realGm / realGl | 144k / 148k | 合并后全局 max / sum |
 | out | 152k - 184k | 输出暂存 |
 
-### 5.3 合并算法（五步）
+### 合并算法（五步）
 
 ```
 ① BlockReduceMax(8→1) 压缩 sharedGm/Gl（shared 路每行按 SOFTMAX_BROAD_SIZE=8 重复存放）
@@ -210,15 +210,15 @@ public:
 → Cast 到 ElementOutput（bf16 用 CAST_RINT）→ DataCopy gFinalOutput
 ```
 
-### 5.4 流水组织
+### 流水组织
 
 主循环 `rowLoopNum + preLoad=1` 双缓冲（pingpongFlag 切换）：加载段 DataCopy 两路 gm/gl（shared 路每行 8 个，`sumMaxOffsetIoShared = row * 8`；unshared 路整行，非 8 对齐用 DataCopyPad）与两路 Out；计算段执行上述五步。事件对 `MTE3_MTE2` 乒乓 + `EVENT_ID4`（MTE2_V / V_MTE3）。
 
-## 6. 使用示例
+## 使用示例
 
 以下摘自 xllm-ops（https://gitcode.com/xLLM-AI/xllm_ops）真实工程 `x_flash_attention_infer/op_kernel/x_flash_attention_infer_fd.h`。
 
-### 6.1 类型组装（FDInfer 入口）
+### 类型组装（FDInfer 入口）
 
 ```cpp
 // GEMM 层：复用 XFAI Policy
@@ -236,7 +236,7 @@ using CombineScale = Epilogue::Block::CombineScale<OType, LseType>;  // 预组�
 template <...> using FAInferKernelFD = ...;
 ```
 
-### 6.2 构造与 causal 三分支调用（vec 核）
+### 构造与 causal 三分支调用（vec 核）
 
 ```cpp
 // 构造：OnlineSoftmax 带 scale，其余仅传 resource
@@ -260,7 +260,7 @@ if (doTriUMask) {
 // softmaxReady 通过 CrossCoreSetFlag<0x2, PIPE_MTE3> 通知 PV GEMM
 ```
 
-### 6.3 RescaleO 调用（PV 后，vec 核）
+### RescaleO 调用（PV 后，vec 核）
 
 ```cpp
 Arch::CrossCoreWaitFlag(pvReady);   // 等待 PV GEMM 完成
@@ -275,7 +275,7 @@ epilogueRescaleO(
     layoutgmLse, layoutgmLo);                    // splitkv 中间量布局
 ```
 
-### 6.4 CombineScale 调用（全核 SyncAll 后）
+### CombineScale 调用（全核 SyncAll 后）
 
 ```cpp
 AscendC::SyncAll();
@@ -293,7 +293,7 @@ combineScale(
 
 另见 `x_attention/op_kernel/x_attention_catlass_helper.h` 中 `CallCombineScale`：以 `EpilogueAtlasA2CombineScale` + `BlockEpilogue<Policy, OutputType(INPUT_T), InputType(float)>` 组装独立 CombineScaleKernel，在 vec 核 SyncAll 后调用。
 
-## 7. 与 XFAI 系列差异对比
+## 与 XFAI 系列差异对比
 
 | 维度 | XFAI（EpilogueAtlasA2OnlineSoftmax/RescaleO） | FD（本系列） |
 | --- | --- | --- |

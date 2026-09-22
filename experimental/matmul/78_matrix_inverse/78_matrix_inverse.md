@@ -2,9 +2,9 @@
 
 本文档用于说明 `experimental/matmul/78_matrix_inverse` 矩阵求逆算子示例所依赖的 Catlass GEMM 模板库能力、外部接口、分层设计方案。
 
-## 1. 功能说明
+## 功能说明
 
-### 1.1 算子功能
+### 算子功能
 
 | 项 | 说明 |
 |------|------|
@@ -17,7 +17,7 @@
 
 核心实现位于 `include/catlass/gemm/kernel/matrix_inverse.hpp`，类 `Catlass::Gemm::Kernel::MatrixInverse`。
 
-### 1.2 计算流程
+### 计算流程
 
 基于 LU 分解与部分选主元（LU decomposition with partial pivoting）：
 
@@ -45,15 +45,15 @@ $$
 | ApplyL | $A \leftarrow A \times L^{-1}$ | 应用 L 逆矩阵（分块算法） |
 | SwapCols | $A^{-1} = A \times P$ | 按 P 置换列，得到最终逆矩阵 |
 
-### 1.3 约束说明
+### 约束说明
 
 - 输入矩阵必须是方阵（行数等于列数），即 $N \times N$
 - 输入矩阵必须是非奇异矩阵（行列式不为零）
 - 为保证数值稳定性，本样例生成对角占优（diagonally dominant）的随机测试矩阵
 
-## 2. 参数说明
+## 参数说明
 
-### 2.1 运行参数
+### 运行参数
 
 以下是本样例可执行文件的运行参数：
 
@@ -62,7 +62,7 @@ $$
 | `N` | 方阵的行/列数 | 正整数，矩阵必须非奇异 |
 | `device_id` | 使用的 NPU 卡 ID（默认 0） | 在设备 NPU 有效范围内 |
 
-### 2.2 模板参数
+### 模板参数
 
 MatrixInverse kernel 模板定义：
 
@@ -78,7 +78,7 @@ class MatrixInverse
 | `BlockMmad_` | 块级 GEMM 计算单元（决定 L1/L0 分块与搬运策略） | `BlockMmadTla<...>` |
 | `BlockScheduler_` | 块调度器（多核 tile 分发） | `GemmIdentityBlockSwizzle<>` |
 
-### 2.3 参数结构
+### 参数结构
 
 算子提供 Host 端 `Arguments` 与设备端 `Params` 两套一一对应的参数结构：
 
@@ -90,9 +90,9 @@ class MatrixInverse
 | `ptrIpiv` | `GM_ADDR` / `uint8_t*` | 主元索引数组地址（int32） |
 | `ptrWorkspace` | `GM_ADDR` / `uint8_t*` | 工作空间地址 |
 
-## 3. 具体设计方案
+## 具体设计方案
 
-### 3.1 AIC / AIV 异构分工
+### AIC / AIV 异构分工
 
 | 阶段 | AIC（Cube 核，多核并行） | AIV（Vector 核，Core 0 串行） |
 |------|------------------------|------------------------------|
@@ -101,9 +101,9 @@ class MatrixInverse
 
 **设计要点**：把适合 Cube 单元的密集 GEMM 交给 AIC 多核并行加速，把逐列主元选取、向量化的标量消元、三角结构化拷贝交给 AIV。
 
-### 3.2 Host 层
+### Host 层
 
-#### 3.2.1 参数解析
+#### 参数解析
 
 `78_matrix_inverse` 命令执行参数：
 
@@ -113,7 +113,7 @@ N, device_id
 
 矩阵求逆仅需矩阵维度 N 和设备 ID，相比普通 GEMM 参数更简单。
 
-#### 3.2.2 测试数据构造
+#### 测试数据构造
 
 host 侧生成对角占优的随机矩阵以确保数值稳定性：
 
@@ -122,9 +122,9 @@ host 侧生成对角占优的随机矩阵以确保数值稳定性：
 
 对角占优矩阵具有良好的条件数，能保证 LU 分解的数值稳定性。
 
-### 3.3 Kernel 层
+### Kernel 层
 
-#### 3.3.1 并行化策略
+#### 并行化策略
 
 矩阵求逆采用 AIV/AIC 混合并行：
 
@@ -136,33 +136,33 @@ host 侧生成对角占优的随机矩阵以确保数值稳定性：
 
 通过 AIV/AIC 协同，将 $O(N^3)$ 的 GEMM 计算剥离到 AIC，充分利用 Cube 加速能力。
 
-#### 3.3.2 Kernel 定义
+#### Kernel 定义
 
 MatrixInverse kernel 针对不同核心类型（AIC/AIV）有特化实现。
 
-### 3.4 AIC 核心设计
+### AIC 核心设计
 
-#### 3.4.1 GETRF 阶段 AIC 职责
+#### GETRF 阶段 AIC 职责
 
 AIC 负责：
 
 1. **TRSM**：用已计算的 $L_{diag}^{-1}$ 更新右侧矩阵
 2. **Schur GEMM**：计算 Schur 补项 $A_{22} - L_{21}U_{12}$
 
-#### 3.4.2 TRTRI 阶段 AIC 职责
+#### TRTRI 阶段 AIC 职责
 
 AIC 负责 TRTRI 的 GEMM 部分，将密集矩阵乘法剥离到 Cube。
 
-#### 3.4.3 ApplyLInverse 阶段 AIC 职责
+#### ApplyLInverse 阶段 AIC 职责
 
 AIC 负责：
 
 1. 块间 GEMM：更新右侧列块
 2. 块内 GEMM：应用当前块的 $L^{-1}$
 
-### 3.5 AIV 核心设计
+### AIV 核心设计
 
-#### 3.5.1 GETRF 阶段 AIV 职责
+#### GETRF 阶段 AIV 职责
 
 **Core 0** 负责：
 
@@ -172,7 +172,7 @@ AIC 负责：
 
 **全核** 负责 Schur epilogue：多核并行执行 `gmA -= gmInvLDense`
 
-#### 3.5.2 TRTRI 阶段 AIV 职责
+#### TRTRI 阶段 AIV 职责
 
 **Core 0** 负责：
 
@@ -182,17 +182,17 @@ AIC 负责：
 
 **全核** 负责 epilogue：多核并行执行 `gmInvUDense -= gmGemmTemp`
 
-#### 3.5.3 ApplyLInverse 阶段 AIV 职责
+#### ApplyLInverse 阶段 AIV 职责
 
 **全核** 负责 epilogue：多核并行执行 `gmA -= gmInvU`
 
 **Core 0** 负责计算 $L_{diag}$ 的逆
 
-#### 3.5.4 SwapColumns 阶段
+#### SwapColumns 阶段
 
 **Core 0** 串行执行：按 pivot 信息的逆序交换列，完成 $A^{-1} = U^{-1}L^{-1}P$。
 
-### 3.6 DispatchPolicy 设计
+### DispatchPolicy 设计
 
 #### MmadPingpong 模板参数含义
 
@@ -202,9 +202,9 @@ AIC 负责：
 | `ENABLE_UNIT_FLAG` | 是否启用 unit 标记 | `true` |
 | `useHF32` | 是否使用 HF32 | `false` |
 
-## 4. 空间分配
+## 空间分配
 
-### 4.1 Tile Shape
+### Tile Shape
 
 | 常量 | 取值 | 含义 |
 |------|-----|------|
@@ -214,7 +214,7 @@ AIC 负责：
 
 Tile Shape 由 BlockMmad 模板参数决定，在示例代码中实例化指定。
 
-### 4.2 Workspace 布局
+### Workspace 布局
 
 工作空间在 GM 上连续划分，总大小为 `2×N×N + 2×N×NB` 个元素字节：
 
@@ -224,13 +224,13 @@ Tile Shape 由 BlockMmad 模板参数决定，在示例代码中实例化指定�
 | gmInvUDense | N×N | U 因子 / invU（TRTRI 用） |
 | gmGemmTemp | N×NB | 各阶段 GEMM 临时输出 |
 
-## 5. 同步与 Cache 一致性
+## 同步与 Cache 一致性
 
-### 5.1 AIV/AIC 同步点
+### AIV/AIC 同步点
 
 AIV 与 AIC 之间通过 `AscendC::SyncAll<false>()` 同步。每个 GETRF 迭代包含 4 个同步点（B1-B4），确保阶段间数据依赖正确。
 
-### 5.2 Cache 操作
+### Cache 操作
 
 硬件架构中缓存一致性需要软件显式维护。
 
@@ -241,15 +241,15 @@ AIV 与 AIC 之间通过 `AscendC::SyncAll<false>()` 同步。每个 GETRF 迭�
 3. AIV TRTRIdiag 后：flush gmInvUDense
 4. AIV ComputeInvLDiag 后：flush gmGemmTemp
 
-## 6. 使用示例
+## 使用示例
 
-### 6.1 编译
+### 编译
 
 ```bash
 bash scripts/build.sh 78_matrix_inverse
 ```
 
-### 6.2 运行
+### 运行
 
 计算 128×128 矩阵的逆：
 
@@ -263,7 +263,7 @@ bash scripts/build.sh 78_matrix_inverse
 ./78_matrix_inverse 512 0
 ```
 
-### 6.3 预期输出
+### 预期输出
 
 成功执行输出：
 

@@ -1,6 +1,6 @@
 # CATLASS FlashAttention Infer设计文档
 
-## 1. 概述
+## 概述
 
 CATLASS FlashAttention Infer是基于CATLASS Gemm API实现的亲和昇腾Ascend950硬件的FlashAttention推理算子，算子的结构可以分为以下几部分：
 
@@ -11,7 +11,7 @@ CATLASS FlashAttention Infer是基于CATLASS Gemm API实现的亲和昇腾Ascend
 
 本文档详细描述 Flash Attention Infer算子的Kernel实现，包括主流程逻辑、Cube/Vector 流水线、L1/UB 内存分配等关键设计，以及Tiling切分策略描述。
 
-### 1.1 算子功能
+### 算子功能
 
 Flash Attention Infer 算子实现以下计算流程：
 
@@ -40,9 +40,9 @@ O = FlashAttention(Q, K, V, mask)
 
 ---
 
-## 2. 数据结构与类型定义
+## 数据结构与类型定义
 
-### 2.1 核心类型定义
+### 核心类型定义
 
 ```cpp
 // L1 Tile Shape: <qSeqlen, kvSeqlen, embed>
@@ -68,7 +68,7 @@ using LayoutTagP = layout::zN;         // P: zN格式
 using LayoutTagO = layout::RowMajor;   // O: 行优先
 ```
 
-### 2.2 核心组件类型
+### 核心组件类型
 
 ```cpp
 // Q * K^T 矩阵乘法组件
@@ -127,9 +127,9 @@ using CopyUbToL1P = Tile::CopyUb2L1Tla<ArchTag, decltype(vf1OutUb), TensorDst>;
 
 ---
 
-## 3. 主Kernel类：FAInferKernel
+## 主Kernel类：FAInferKernel
 
-### 3.1 类定义
+### 类定义
 
 **位置**：`fai_kernel.h:47-545`
 
@@ -145,7 +145,7 @@ class FAInferKernel {
 };
 ```
 
-### 3.2 成员变量
+### 成员变量
 
 | 变量名                              | 类型                     | 说明                    |
 | ----------------------------------- | ------------------------ | ----------------------- |
@@ -161,9 +161,9 @@ class FAInferKernel {
 | `blockIdx`                          | uint32_t                 | 当前AI Core索引         |
 | `subBlockIdx`                       | uint32_t                 | AIV核子索引             |
 
-### 3.3 内存布局
+### 内存布局
 
-#### 3.3.1 UB内存布局
+#### UB内存布局
 
 ```text
 +------------------------+  ubBufAddrStart = 0
@@ -197,7 +197,7 @@ class FAInferKernel {
 +------------------------+
 ```
 
-#### 3.3.2 L1内存布局
+#### L1内存布局
 
 ```text
 +------------------------+  l1BufAddrStart = 0
@@ -215,19 +215,19 @@ class FAInferKernel {
 
 ---
 
-## 4. 多核Tiling算法
+## 多核Tiling算法
 
 Tiling 切分算法，主要用于将计算任务均匀分配到多个 AI Core 上，实现高效的并行计算。
 
-### 4.1 核心目标
+### 核心目标
 
 - **负载均衡**：使每个 AI Core 的计算量尽可能均衡
 - **内存高效**：合理利用片上内存（UB/L1）
 - **并行优化**：最大化多核并行度
 
-### 4.2. 数据结构
+### 数据结构
 
-#### 4.2.1 FAInfo - 输入参数结构
+#### FAInfo - 输入参数结构
 
 ```cpp
 struct FAInfo {
@@ -249,7 +249,7 @@ struct FAInfo {
 };
 ```
 
-#### 4.2.2 FATilingData - 输出Tiling数据结构
+#### FATilingData - 输出Tiling数据结构
 
 ```cpp
 class FATilingData {
@@ -295,9 +295,9 @@ MultiCoreParamsRegbase - 多核参数
 | bnAxisStartIdx[MAX_CORE_NUM] | uint32_t | Batch-Head轴起始索引数组 |
 | sparseStartIdx[MAX_CORE_NUM] | int64_t  | qSeq起始索引数组         |
 
-### 4.3. 核心算法流程
+### 核心算法流程
 
-#### 4.3.1 主函数：GetFATilingParam
+#### 主函数：GetFATilingParam
 
 **位置**：`fai_tiling.h:283-333`
 
@@ -348,7 +348,7 @@ int32_t GetFATilingParam(const FAInfo &faInfo, uint32_t blockDim, FATilingData& 
    └─ splitFactorTailSize = totalSize % splitFactorSize
 ```
 
-#### 4.3.2 ComputeSplitNBSeq - 贪心多核切分
+#### ComputeSplitNBSeq - 贪心多核切分
 
 **位置**：`fai_tiling.h:183-235`
 
@@ -404,9 +404,9 @@ int32_t GetFATilingParam(const FAInfo &faInfo, uint32_t blockDim, FATilingData& 
 
 ---
 
-## 5. 主流程逻辑
+## 主流程逻辑
 
-### 5.1 Init函数
+### Init函数
 
 **位置**：`fai_kernel.h:82-161`
 
@@ -449,7 +449,7 @@ CATLASS_DEVICE void Init(FAIKernelParams const& params)
    └─ mm2AL1TensorList[3]（AIC/AIV共享）
 ```
 
-### 5.2 operator()函数
+### operator()函数
 
 **位置**：`fai_kernel.h:163-457`
 
@@ -497,9 +497,9 @@ CATLASS_DEVICE void operator()(FAIKernelParams const &params)
        └─ qSeqAxisStartIdx = 0
 ```
 
-### 5.3 三重循环详解
+### 三重循环详解
 
-#### 5.3.1 第一层循环：Batch-Head轴
+#### 第一层循环：Batch-Head轴
 
 **位置**：`fai_kernel.h:249-454`
 
@@ -527,7 +527,7 @@ for (uint32_t bnIdx = bnAxisStartIdx; bnIdx < bnAxisEndIdx; ++bnIdx) {
 - 按照Tiling切分的结果遍历Batch-Head轴
 - 支持GQA（Grouped Query Attention）：多个Query head共享KV head
 
-#### 5.3.2 第二层循环：Q序列轴
+#### 第二层循环：Q序列轴
 
 **位置**：`fai_kernel.h:256-453`
 
@@ -565,7 +565,7 @@ for (int64_t qSeqAxisIndex = qSeqAxisStartIdx; qSeqAxisIndex < tempQSeqAxisEnd; 
 - Q序列按128（BLOCK_BASE_SIZE）切分
 - 最后3个循环用于尾块流水执行（确保所有任务完成）
 
-#### 5.3.3 第三层循环：KV序列轴
+#### 第三层循环：KV序列轴
 
 **位置**：`fai_kernel.h:291-452`
 
@@ -651,15 +651,15 @@ for (int64_t kvSeqLoopCount = runParam.kvSeqLoopStartIdx; kvSeqLoopCount <= kvSe
 
 ---
 
-## 6. 流水线详解
+## 流水线详解
 
-### 6.1 流水线时序图
+### 流水线时序图
 
 <img src="../../docs/assets/images/flash_attention_infer_cv_pipeline.png" width="50%">
 
-### 6.2 同步机制
+### 同步机制
 
-#### 6.2.1 事件定义
+#### 事件定义
 
 ```cpp
 // AIC → AIV 同步事件
@@ -672,7 +672,7 @@ constexpr uint64_t MM1_RES_INTRA_EVENT[2] = {9, 10}; // BMM1内部同步
 constexpr uint64_t MM2_RES_INTRA_EVENT[2] = {7, 8};  // BMM2内部同步
 ```
 
-#### 6.2.2 同步流程
+#### 同步流程
 
 ```text
 Step 1: AIC执行Q*K^T
@@ -705,9 +705,9 @@ Step 4: AIV执行O更新
 
 ---
 
-## 7. BlockMmadQK：Q*K^T矩阵乘法
+## BlockMmadQK：Q*K^T矩阵乘法
 
-### 7.1 类定义
+### 类定义
 
 **位置**：`block_mmad_fai_qk_tla.hpp:43-362`
 
@@ -729,9 +729,9 @@ struct BlockMmadTla<MmadFAIQK<Arch::Ascend950, ...>, ...> {
 };
 ```
 
-### 7.2 内存布局
+### 内存布局
 
-#### 7.2.1 L1内存布局
+#### L1内存布局
 
 ```text
 +------------------------+  l1BufAddrStart
@@ -747,7 +747,7 @@ struct BlockMmadTla<MmadFAIQK<Arch::Ascend950, ...>, ...> {
 +------------------------+
 ```
 
-#### 7.2.2 L0内存布局
+#### L0内存布局
 
 ```text
 L0A Buffer:
@@ -772,15 +772,15 @@ L0C Buffer:
 +------------------------+
 ```
 
-### 7.3 多级流水线
+### 多级流水线
 
-#### 7.3.1 流水线阶段
+#### 流水线阶段
 
 ```cpp
 Stage:  GM → L1  → L0  → Cube → L0C → UB
 ```
 
-#### 7.3.2 流操作流程
+#### 流操作流程
 
 ```cpp
 void operator()(TensorA& tensorA, TensorB& tensorB, TensorC& tensorC, ...) {
@@ -841,7 +841,7 @@ void operator()(TensorA& tensorA, TensorB& tensorB, TensorC& tensorC, ...) {
 }
 ```
 
-### 7.4 Paged Attention支持
+### Paged Attention支持
 
 ```cpp
 void CopyInL1B(TensorL1B& tensorL1B, TensorB& tensorB, ...) {
@@ -867,9 +867,9 @@ void CopyInL1B(TensorL1B& tensorL1B, TensorB& tensorB, ...) {
 
 ---
 
-## 8. EpilogueOnlineSoftmax：在线Softmax
+## EpilogueOnlineSoftmax：在线Softmax
 
-### 8.1 类定义
+### 类定义
 
 **位置**：`block_epilogue_fa_softmax_ascend950.hpp:32-424`
 
@@ -886,9 +886,9 @@ class BlockEpilogue<EpilogueAscend950FASoftmax<ATTENTION_MASK_FLAG_>, ...> {
 };
 ```
 
-### 8.2 内存布局
+### 内存布局
 
-#### 8.2.1 UB内存布局
+#### UB内存布局
 
 ```text
 +------------------------+
@@ -906,9 +906,9 @@ class BlockEpilogue<EpilogueAscend950FASoftmax<ATTENTION_MASK_FLAG_>, ...> {
 +------------------------+
 ```
 
-### 8.3 在线Softmax算法
+### 在线Softmax算法
 
-#### 8.3.1 数学原理
+#### 数学原理
 
 标准Softmax：
 
@@ -932,7 +932,7 @@ P[i,j] = exp(S[i,j] - max(S[i,:])) / sum(exp(S[i,:] - max(S[i,:])))
   6. 计算P[i,k] = exp_k[i] / sum[i]
 ```
 
-#### 8.3.2 实现流程
+#### 实现流程
 
 ```cpp
 void operator()(TensorDst &vf1OutL1, LocalTensor<ElementS>&sumUb, ...) {
@@ -996,9 +996,9 @@ void operator()(TensorDst &vf1OutL1, LocalTensor<ElementS>&sumUb, ...) {
 
 ---
 
-## 9. BlockMmadPV：P*V矩阵乘法
+## BlockMmadPV：P*V矩阵乘法
 
-### 9.1 类定义
+### 类定义
 
 **位置**：`block_mmad_fai_pv_tla.hpp:43-317`
 
@@ -1020,7 +1020,7 @@ struct BlockMmadTla<MmadFAIPV<Arch::Ascend950, ...>, ...> {
 };
 ```
 
-### 9.2 与BlockMmadQK的区别
+### 与BlockMmadQK的区别
 
 | 特性  | BlockMmadQK     | BlockMmadPV     |
 | ----- | --------------- | --------------- |
@@ -1032,7 +1032,7 @@ struct BlockMmadTla<MmadFAIPV<Arch::Ascend950, ...>, ...> {
 | K循环 | 沿embed维度切分 | 无              |
 | N循环 | 无              | 沿embed维度切分 |
 
-### 9.3 流操作流程
+### 流操作流程
 
 ```cpp
 void operator()(TensorA& tensorA, TensorB& tensorB, TensorC& tensorC, ...) {
@@ -1098,9 +1098,9 @@ void operator()(TensorA& tensorA, TensorB& tensorB, TensorC& tensorC, ...) {
 
 ---
 
-## 10. EpilogueRescaleO：O更新和归一化
+## EpilogueRescaleO：O更新和归一化
 
-### 10.1 类定义
+### 类定义
 
 **位置**：`block_epilogue_fa_rescale_o_ascend950.hpp:29-216`
 
@@ -1115,7 +1115,7 @@ class BlockEpilogue<EpilogueAscend950FARescaleO, ...> {
 };
 ```
 
-### 10.2 内存布局
+### 内存布局
 
 ```text
 +------------------------+
@@ -1123,9 +1123,9 @@ class BlockEpilogue<EpilogueAscend950FARescaleO, ...> {
 +------------------------+
 ```
 
-### 10.3 O更新算法
+### O更新算法
 
-#### 10.3.1 数学原理
+#### 数学原理
 
 标准Flash Attention：
 
@@ -1153,7 +1153,7 @@ O = softmax(Q * K^T / sqrt(d)) * V
   8. 归一化: O[i] = O[i] / sum[i]
 ```
 
-#### 10.3.2 实现流程
+#### 实现流程
 
 ```cpp
 void operator()(TensorDst &attenOutGm, const LocalTensor<ElementOTmp> &expMaxUb,
@@ -1212,7 +1212,7 @@ void operator()(TensorDst &attenOutGm, const LocalTensor<ElementOTmp> &expMaxUb,
 
 ---
 
-## 11. 下一步优化建议
+## 下一步优化建议
 
 1. 当前仅实现了BlockMmadQK L0C输出-> UB -> EpilogueSoftMax，受UB空间限制，当前模板仅支持embed <= 128，若需支持更大embedSize需要扩展L0C输出-> GM -> UB -> EpilogueSoftMax流程。
 2. 当前模板Kernel未支持ActualSeq可变长特性，需适配。

@@ -191,7 +191,7 @@ int main(int argc, const char **argv) {
 
 ## 核心实现代码详解
 
-### 1. 环境初始化与资源申请
+### 环境初始化与资源申请
 
 这部分代码主要完成以下工作：
 
@@ -227,7 +227,7 @@ LayoutB layoutB{k, n};
 LayoutC layoutC{m, n};
 ```
 
-### 2. 输入数据准备
+### 输入数据准备
 
 这部分代码主要完成以下工作：
 
@@ -241,7 +241,7 @@ golden::FillRandomData<fp16_t>(hostA, -5.0f, 5.0f);
 golden::FillRandomData<fp16_t>(hostB, -5.0f, 5.0f);
 ```
 
-### 3. 设备内存申请与数据拷贝
+### 设备内存申请与数据拷贝
 
 这部分代码主要完成以下工作：
 
@@ -264,7 +264,7 @@ uint8_t *deviceC{nullptr};
 ACL_CHECK(aclrtMalloc(reinterpret_cast<void **>(&deviceC), sizeC, ACL_MEM_MALLOC_HUGE_FIRST));
 ```
 
-### 4. 算子参数配置与调用
+### 算子参数配置与调用
 
 这部分代码主要完成以下工作：
 
@@ -315,7 +315,7 @@ matmulOp(stream, aicCoreNum);
 ACL_CHECK(aclrtSynchronizeStream(stream));
 ```
 
-### 5. 结果数据拷贝与验证
+### 结果数据拷贝与验证
 
 这部分代码主要完成以下工作：
 
@@ -338,7 +338,7 @@ if (errorIndices.empty()) {
 }
 ```
 
-### 6. 资源释放
+### 资源释放
 
 这部分代码主要完成以下工作：
 

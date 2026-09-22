@@ -16,7 +16,7 @@
 
 ## 2 文档索引和约束说明
 
-### 2.1 工程说明
+### 工程说明
 
 泛化量化Matmul工程结构说明可参考：[工程结构说明](../102_dynamic_optimized_matmul/docs/zh/工程结构介绍.md)。本工程遵循与样例102类似的模板生成、Tiling计算、模板选择等流程，并根据量化Matmul计算特点进行了适配修改。
 
@@ -28,7 +28,7 @@
 export LD_LIBRARY_PATH=/path/to/catlass/output/shared_lib/lib/:$LD_LIBRARY_PATH
 ```
 
-### 2.2 工程结构
+### 工程结构
 
 ```shell
 ├── CMakeLists.txt
@@ -58,13 +58,13 @@ export LD_LIBRARY_PATH=/path/to/catlass/output/shared_lib/lib/:$LD_LIBRARY_PATH
     └── utils.h
 ```
 
-### 2.3 模板文档
+### 模板文档
 
 | 模板名称            | 说明                               |
 | ------------------- | ---------------------------------- |
 | PerTokenBasicMatmul | PerToken 基础模板（文档待补充...） |
 
-### 2.4 约束说明
+### 约束说明
 
 - A、B矩阵的数据类型支持int8。
 - C矩阵的数据类型支持fp16。

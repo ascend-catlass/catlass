@@ -26,7 +26,7 @@ The code of all LayoutTags is located in [`include/catlass/layout/matrix.hpp`](.
 
 `LayoutTag` is the legacy design, and `tla::Layout` is the new design. The two are bridged through the following mechanisms:
 
-### 1. `tla::MakeLayout<Element, LayoutTag>`
+### `tla::MakeLayout<Element, LayoutTag>`
 
 Recommended usage for the new design. Construct a `tla::Layout` directly by specifying the LayoutTag and element type as template parameters:
 
@@ -36,7 +36,7 @@ auto layout = tla::MakeLayout<ElementA, Catlass::layout::RowMajor>(m, k);
 
 Internally, it dispatches based on the LayoutTag type and constructs the corresponding nested or non-nested `tla::Layout`. This is the most common approach in real-world development.
 
-### 2. `tla::MakeLayoutFromTag`
+### `tla::MakeLayoutFromTag`
 
 Defined in [`include/tla/layout.hpp`](../../../../include/tla/layout.hpp), it converts any LayoutTag instance into a `tla::Layout`:
 
@@ -52,7 +52,7 @@ Internally, based on the specific type of LayoutTag, it extracts its `shape()` a
 - `VectorLayout` → `Layout<Shape<len>, Stride<_1>>`
 - `zN` / `nZ` → Nested `Layout<Shape<Shape<...>, Shape<...>>, Stride<Stride<...>, Stride<...>>>`
 
-### 3. `Catlass::detail::TagToLayout`
+### `Catlass::detail::TagToLayout`
 
 Defined in [`include/catlass/detail/tag_to_layout.hpp`](../../../../include/catlass/detail/tag_to_layout.hpp), it provides **compile-time type mapping** to map a LayoutTag to the corresponding `tla::Layout` type:
 

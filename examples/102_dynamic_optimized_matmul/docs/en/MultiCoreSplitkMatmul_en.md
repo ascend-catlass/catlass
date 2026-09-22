@@ -1,6 +1,6 @@
 # MultiCoreSplitkMatmul
 
-## 1. Template Description
+## Template Description
 
 Due to hardware instruction restrictions, m1 and n1 must be multiples of 16 (m1 and n1 are L1Tile parameters). When Matrix C is small, for example, with a size of 16 × 16, only one basic task block can be partitioned. If K is very large at this time, the computation efficiency will be very low because the computation workload is heavy, but only one core participates in the computation, causing a serious waste of computing power and bandwidth. Furthermore, when m1 and n1 are too small, it may lead to low efficiency of movement instructions. Using larger m1 and n1 might yield better results, but larger m1 and n1 will reduce the partitioned task blocks and use fewer cores, thereby resulting in more resource waste.
 
@@ -18,7 +18,7 @@ The key points of this template are explained as follows:
 4. For higher data write-out and data read efficiency, when the Vector accumulates partial sums, task partitioning is performed by element. For example, for a `16 × 16` Matrix C, assuming there are 6 Vectors, then each Vector is allocated `16 × 16/6 = 42` elements. Further considering the instruction efficiency of the Vector, a minimum partitioning block is set, and the number of elements is `256 / sizeof(ElementAccumulator)`. If `ElementAccumulator` is a 32-bit type, then at least 64 elements are partitioned per core. The `16 × 16` Matrix C is divided into 4 parts, which are processed by 4 Vectors, leaving the other 2 Vectors idle. This partitioning treats Matrix C as a continuous one-dimensional array, where each Vector processes a continuous segment of it, so that the data read and written out by the Vector is a continuous segment, resulting in higher instruction efficiency. This also results in this template being inapplicable to scenarios where Matrix C is non-contiguous, for example, where the Shape of Matrix C is 16 × 16 and the Stride of each row is 17.
 5. The MultiCoreSplitkMatmul template incorporates existing CommonMatmul optimizations, including [Preload, ShuffleK, Padding, and specialized read optimizations](./CommonMatmul_en.md).
 
-## 2. Application Scenarios
+## Application Scenarios
 
 1. When Matrix C is small and K is large, and the cores are not fully utilized.
 2. Requires Matrix C to be continuously stored on GM.

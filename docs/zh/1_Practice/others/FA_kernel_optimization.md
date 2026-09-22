@@ -8,7 +8,7 @@
 - 哪些参数是编译期模板参数，哪些参数来自tiling或runtime输入。
 - 调整TileShape、CV流水、分核策略、输入布局或Paged Attention参数时，会影响哪些片上资源和执行路径。
 
-## 1. 样例介绍
+## 样例介绍
 
 该样例面向Flash Attention推理前向算子`FlashAttentionInfer`，计算流程为：
 
@@ -47,7 +47,7 @@ constexpr uint32_t KERNEL_TASK_NUM = 3;
 
 需要特别注意，`BLOCK_BASE_SIZE`和`L1TileShape`不是两个完全独立的参数。`BLOCK_BASE_SIZE`用于tiling阶段统计q/kv基本块和多核权重，`L1TileShape`用于kernel实际执行的tile形状。只修改其中一侧，可能导致tiling权重模型和kernel实际循环粒度不一致。
 
-## 2. 优化方案
+## 优化方案
 
 ### 调整TileShape参数组合
 
@@ -179,6 +179,6 @@ kvSeqlen = RoundUp(kvSeqlen, blockSize);
 
 如果只有Paged Attention场景出现MTE2偏高或核间耗时差异，优先检查block table和KV cache物理布局，而不是直接缩小TileShape。TileShape只能改变单次计算粒度，不能消除由page组织方式造成的随机跳读。
 
-## 3. 总结
+## 总结
 
 融合算子场景可以参考此案例优化

@@ -1,10 +1,10 @@
 # GEMM Kernel Code Explained
 
-## 1. Kernel Code Structure Overview
+## Kernel Code Structure Overview
 
 The GEMM Kernel in the CATLASS template library adopts a highly modular design. It assembles different components through template parameters to implement various matrix multiplication operations. This document uses `BasicMatmul` as an example to break down the core structure and key components of the Kernel code.
 
-## 2. Template Assembly Mechanism
+## Template Assembly Mechanism
 
 All GEMM Kernels are defined in the form of template classes, which assemble different functional components through template parameters. Take `BasicMatmul` as an example:
 
@@ -32,7 +32,7 @@ public:
 };
 ```
 
-### 2.1 Core Template Parameters
+### Core Template Parameters
 
 | Parameter       | Description                                                                                     |
 | --------------- | ----------------------------------------------------------------------------------------------- |
@@ -40,7 +40,7 @@ public:
 | BlockEpilogue_  | Responsible for epilogues of the computation results (e.g., activation functions, quantization) |
 | BlockScheduler_ | Responsible for scheduling and distributing computational tasks to different compute cores      |
 
-### 2.2 Type Export
+### Type Export
 
 The types exported through the template parameters form the Kernel's core type system, which includes:
 
@@ -49,11 +49,11 @@ The types exported through the template parameters form the Kernel's core type s
 - Data types (ElementA/B/C/Accumulator)
 - Data layouts (LayoutA/B/C)
 
-## 3. Parameter Passing Mechanism
+## Parameter Passing Mechanism
 
 The Kernel uses a two-layer parameter structure: `Arguments` (user interface layer) and `Params` (kernel execution layer).
 
-### 3.1 Arguments
+### Arguments
 
 `Arguments` is the parameter structure used directly by users. It contains the most basic input and output information:
 
@@ -66,7 +66,7 @@ struct Arguments {
 };
 ```
 
-### 3.2 Params
+### Params
 
 `Params` is the parameter structure used during actual kernel execution. It contains more detailed execution information:
 
@@ -94,7 +94,7 @@ struct Params {
 };
 ```
 
-### 3.3 Parameter Conversion
+### Parameter Conversion
 
 The `ToUnderlyingArguments` function converts `Arguments` to `Params`:
 
@@ -109,9 +109,9 @@ static Params ToUnderlyingArguments(const Arguments &args, uint8_t *workspace)
 }
 ```
 
-## 4. Key Functions
+## Key Functions
 
-### 4.1 CanImplement
+### CanImplement
 
 Checks whether the current hardware and environment support the implementation of this Kernel:
 
@@ -122,7 +122,7 @@ static bool CanImplement(const Arguments &args)
 }
 ```
 
-### 4.2 GetWorkspaceSize
+### GetWorkspaceSize
 
 Gets the workspace size required for Kernel execution:
 
@@ -133,7 +133,7 @@ static size_t GetWorkspaceSize(const Arguments &args)
 }
 ```
 
-### 4.3 operator()
+### operator()
 
 This is the Kernel's core execution function. It supports different core types (such as AIC, AIV) through template specialization:
 
@@ -184,25 +184,25 @@ void operator()<AscendC::AIC>(Params const &params) {
 }
 ```
 
-## 5. Execution Flow Analysis
+## Execution Flow Analysis
 
 The Kernel's execution flow divides into the following steps:
 
-### 5.1 Initializing the Scheduler
+### Initializing the Scheduler
 
 ```cpp
 BlockScheduler matmulBlockScheduler(params.problemShape, MakeCoord(L1TileShape::M, L1TileShape::N));
 uint32_t coreLoops = matmulBlockScheduler.GetCoreLoops();
 ```
 
-### 5.2 Initializing Resources and Compute Components
+### Initializing Resources and Compute Components
 
 ```cpp
 Arch::Resource<ArchTag> resource;
 BlockMmad blockMmad(resource);
 ```
 
-### 5.3 Setting Global Memory Tensors
+### Setting Global Memory Tensors
 
 ```cpp
 AscendC::GlobalTensor<ElementA> gmA;
@@ -210,7 +210,7 @@ gmA.SetGlobalBuffer((__gm__ ElementA *)params.ptrA);
 // Set gmB and gmC...
 ```
 
-### 5.4 Looping Through Each Compute Block
+### Looping Through Each Compute Block
 
 ```cpp
 for (uint32_t loopIdx = AscendC::GetBlockIdx(); loopIdx < coreLoops; loopIdx += AscendC::GetBlockNum()) {
@@ -232,17 +232,17 @@ for (uint32_t loopIdx = AscendC::GetBlockIdx(); loopIdx < coreLoops; loopIdx += 
 }
 ```
 
-### 5.5 Synchronization
+### Synchronization
 
 ```cpp
 AscendC::PipeBarrier<PIPE_ALL>();
 ```
 
-## 6. Extensions and Differences Among Kernels
+## Extensions and Differences Among Kernels
 
 By comparing `BasicMatmul`, `BatchedMatmul`, `QuantMatmul`, and `OptimizedMatmul`, you can see their commonalities and differences in the base structure:
 
-### 6.1 BatchedMatmul Extension
+### BatchedMatmul Extension
 
 `BatchedMatmul` adds batch processing support to `BasicMatmul`:
 
@@ -264,7 +264,7 @@ struct Params {
 };
 ```
 
-### 6.2 QuantMatmul Extension
+### QuantMatmul Extension
 
 `QuantMatmul` adds quantization-related parameters and processing:
 
@@ -287,7 +287,7 @@ struct Params {
 };
 ```
 
-### 6.3 OptimizedMatmul Extension
+### OptimizedMatmul Extension
 
 `OptimizedMatmul` adds prologue processing and a more complex parameter structure:
 
@@ -314,7 +314,7 @@ class OptimizedMatmul {
 };
 ```
 
-## 7. Summary
+## Summary
 
 The CATLASS GEMM Kernel adopts a highly modular and template-based design with the following characteristics:
 

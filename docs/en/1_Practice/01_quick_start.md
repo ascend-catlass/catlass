@@ -4,7 +4,7 @@
 
 > **Note**: Ensure that [basic dependencies](../../../README_en.md#-software-and-hardware-requirements), [NPU driver](https://www.hiascend.com/hardware/firmware-drivers/community), and firmware have been installed before you start.
 
-### 1. **Installing the Community Edition CANN Toolkit**
+### **Installing the Community Edition CANN Toolkit**
 
 Download the CANN development kit `Ascend-cann-toolkit_{version}_linux-{arch}.run` based on the type of your [Ascend product](https://www.hiascend.com/document/detail/en/AscendFAQ/ProduTech/productform/hardwaredesc_0001.html). For details about the download link, see [CANN toolkit](https://www.hiascend.com/en/developer/download/community/result?module=cann). (For details about the CATLASS version support, see [Required Software and Hardware](../../../README_en.md#-software-and-hardware-requirements).)
 
@@ -23,7 +23,7 @@ chmod +x Ascend-cann-toolkit_{version}_linux-{arch}.run
 
 For details about other online installation methods, see [CANN Quick Installation](https://www.hiascend.com/cann/download).
 
-### 2. **Enabling the CANN Environment**
+### **Enabling the CANN Environment**
 
 After installation, execute the following command to enable the CANN environment.
 
@@ -34,7 +34,7 @@ source /usr/local/Ascend/ascend-toolkit/set_env.sh
 # source ${install_path}/set_env.sh
 ```
 
-### 3. **Downloading the Source Code**
+### **Downloading the Source Code**
 
 Download the CATLASS code repository to the local PC.
 
@@ -47,7 +47,7 @@ git clone https://gitcode.com/cann/catlass.git
 
 > The template library provides a set of reusable templates and basic components to empower matrix multiplication operator development. Operator samples can be found [here](../../../examples).
 
-### 1. **Building the Sample**
+### **Building the Sample**
 
 Go to the root directory of the project and run the following build command:
 
@@ -85,7 +85,7 @@ If the following prompt appears, the build succeeded.
 "[INFO] Target "{target}" built successfully."
 ```
 
-### 2. **Executing Operators**
+### **Executing Operators**
 
 The operator build output is located in the `output/bin` directory. Switch to this directory to run the operator sample program.
 Take the [basic_matmul] sample as an example. You can run the operator by executing the following commands:

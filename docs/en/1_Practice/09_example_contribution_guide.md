@@ -2,9 +2,9 @@
 
 This document details the process of contributing complete operator samples to the CATLASS template library. The process includes four stages: design, development, test, and merging. It aims to help developers contribute high-quality operator samples in a standardized manner.
 
-## 1. Design
+## Design
 
-### 1.1 Requirement Analysis
+### Requirement Analysis
 
 Before starting the implementation, the following points must be clarified:
 
@@ -13,7 +13,7 @@ Before starting the implementation, the following points must be clarified:
 - **Compatibility**: Confirm the operator's compatibility with the existing template library.
 - **New features**: Identify the unique features of the new operator to ensure it does not completely duplicate existing features in the repository.
 
-### 1.2 Solution Design
+### Solution Design
 
 Design a specific implementation solution based on the requirement analysis:
 
@@ -22,16 +22,16 @@ Design a specific implementation solution based on the requirement analysis:
 - **Optimization strategy**: Develop performance optimization strategies, such as Preload and SplitK.
 - **New components**: Design new components for new features to ensure complete functionality and good integration with existing components. For code that does not involve new features, reuse existing component templates in the repository whenever possible.
 
-### 1.3 Documentation Design
+### Documentation Design
 
 Design the document structure for the operator sample:
 
 - **README.md**: Contains brief operator description, usage examples, etc.
 - **Design document**: Explains the sample's prototype design, solution design, sample implementation, and performance testing. When evaluating performance, if a benchmark exists, describe the scenarios where the sample has advantages over the benchmark.
 
-## 2. Development
+## Development
 
-### 2.1 Environment Setup
+### Environment Setup
 
 Set up the development environment by referring to [Quick Start](./01_quick_start.md).
 
@@ -39,7 +39,7 @@ Set up the development environment by referring to [Quick Start](./01_quick_star
 2. Clone the code repository.
 3. Configure the build environment.
 
-### 2.2 Code Implementation
+### Code Implementation
 
 Implement the operator sample based on the following structure:
 
@@ -51,7 +51,7 @@ examples/${id}_${op_name}/
 └── ${op_name}.cpp        # Main implementation file
 ```
 
-### 2.3 Core Implementation
+### Core Implementation
 
 - **Host**: Assemble the operator on a host by referring to [Host Example Assembly](./02_host_example_assembly.md).
 - **Kernel**: Implement the operator logic at the kernel by referring to [Kernel Development](./03_kernel_development.md).
@@ -59,7 +59,7 @@ examples/${id}_${op_name}/
 - **Tile**: Implement the tile-layer logic by referring to [Tile Development](./06_tile_development.md).
 - **Epilogue**: Implement the epilogue logic by referring to [Epilogue Adaptation](./07_epilogue_adaptation.md).
 
-### 2.4 Build and Testing
+### Build and Testing
 
 Run the following commands to build and test (using A2 as an example):
 
@@ -71,26 +71,26 @@ bash scripts/build.sh ${id}_${op_name}
 ./output/${id}_${op_name}
 ```
 
-## 3. Test
+## Test
 
-### 3.1 Precision Test
+### Precision Test
 
 Perform generalization precision testing on at least 200 cases, covering different input shapes and data types. If the test benchmark cannot reuse an existing benchmark from `examples/common/golden`, supplement it with a custom benchmark. **The precision test results must be described in the pull request (PR).**
 
-### 3.2 Performance Test
+### Performance Test
 
 Conduct comparative testing against performance benchmarks to demonstrate performance advantages. Add detailed information such as performance results, test environment, and benchmark to the operator design document.
 
-## 4. Merge
+## Merge
 
-### 4.1 Code Preparation
+### Code Preparation
 
 - **Code standards**: Ensure that the code complies with the project's coding style and standards.
 - **Documentation improvement**: Complete the README.md and design document.
 - **Test coverage**: Ensure that the test covers sufficient scenarios.
 - **Test cases**: Add test cases for the new sample in `tests/test_example.py`.
 
-### 4.2 Submission Process
+### Submission Process
 
 Refer to [Contributing](../../../CONTRIBUTING.md) and follow the process below:
 
@@ -101,7 +101,7 @@ Refer to [Contributing](../../../CONTRIBUTING.md) and follow the process below:
 5. **Review code**: Wait for the project maintainer to review the code.
 6. **Merge code**: After the review is passed, the code will be merged into master.
 
-### 4.3 Subsequent Maintenance
+### Subsequent Maintenance
 
 - **Issue response**: Respond promptly to issues raised by the community.
 - **Documentation updates**: Update the documentation based on feedback.

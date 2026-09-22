@@ -4,7 +4,7 @@
 
 This document describes the basics of precision analysis in CATLASS sample development, including the meaning of sample precision, precision comparison methods, and how to use existing CATLASS golden functions to compute golden results and perform precision comparison.
 
-## 1. Sample Precision Definition
+## Sample Precision Definition
 
 In CATLASS operator development, "sample precision" refers to **the extent of consistency between the actual computation result of an operator on the NPU and the golden computation result on the CPU**. Precision is a core metric for operator correctness. Only operators that meet the precision requirements can be used in real-world applications.
 
@@ -14,11 +14,11 @@ The basic process of precision analysis is as follows:
 2. Compare the actual output of the operator on the NPU with the golden result.
 3. Determine whether the error is within the allowed tolerance based on the data type and computation scale.
 
-## 2. Precision Comparison Methods
+## Precision Comparison Methods
 
 CATLASS uses different precision comparison methods for different data types.
 
-### 2.1 Floating-Point Types: Relative Error Validation
+### Floating-Point Types: Relative Error Validation
 
 For floating-point types such as `half` (fp16), `float` (fp32), and `bfloat16`, slight relative error is allowed due to differences in rounding modes and accumulation order between NPU hardware computation and CPU computation. The comparison formula is:
 
@@ -40,7 +40,7 @@ For `bfloat16`, which has fewer mantissa bits and lower precision, the tolerance
 | < 2,048| 1/128 |
 | ≥ 2,048| 1/64 |
 
-### 2.2 Higher-Precision Computation for Floating-Point Golden Functions
+### Higher-Precision Computation for Floating-Point Golden Functions
 
 **Floating-point golden functions must use higher-precision computation**. This is the key to ensuring reliable precision analysis. Specifically,
 
@@ -61,7 +61,7 @@ std::vector<float> hostGolden(lenC);
 golden::ComputeMatmul(options.problemShape, hostA, layoutA, hostB, layoutB, hostGolden, layoutC);
 ```
 
-### 2.3 Integer Types: Bitwise Identity Validation
+### Integer Types: Bitwise Identity Validation
 
 For integer types such as `int32_t`, since integer operations involve no rounding errors, the NPU output must be **bitwise identical** to the golden result. The comparison directly checks whether the difference is zero:
 
@@ -81,7 +81,7 @@ std::vector<uint64_t> CompareData(const std::vector<int32_t>& result, const std:
 }
 ```
 
-### 2.4 Error Metrics Description
+### Error Metrics Description
 
 CATLASS also provides more refined error metrics, `ErrorMetrics`, to evaluate the error ratio of NPU output compared with the same-precision CPU computation result.
 
@@ -93,7 +93,7 @@ CATLASS also provides more refined error metrics, `ErrorMetrics`, to evaluate th
 
 These metrics compare the NPU output and the CPU output against the higher-precision golden output, and calculate the error ratios between them. If the ratios are within the threshold (default: MARE ≤ 5, MERE ≤ 1.5, RMSE ≤ 1.5), the precision is considered acceptable. This determines whether the NPU computation precision is on par with the same-precision CPU computation.
 
-## 3. CATLASS Golden Function Call
+## CATLASS Golden Function Call
 
 CATLASS provides a unified golden function entry in `examples/common/golden.hpp`. This header file aggregates the following modules:
 
@@ -112,7 +112,7 @@ Simply include `golden.hpp` to use these functions:
 
 All golden functions are in the `Catlass::golden` namespace.
 
-### 3.1 Generating Random Test Data: FillRandomData
+### Generating Random Test Data: FillRandomData
 
 `FillRandomData` generates random data within a specified range. It supports multiple data types:
 
@@ -140,7 +140,7 @@ std::vector<int8_t> hostA(lenA);
 golden::FillRandomData<int8_t, int>(hostA, -128, 127);  // Integer range used by int8_t
 ```
 
-### 3.2 Computing Golden Results: ComputeMatmul
+### Computing Golden Results: ComputeMatmul
 
 `ComputeMatmul` computes the theoretically correct result of matrix multiplication on the CPU with higher precision:
 
@@ -180,7 +180,7 @@ In addition to `ComputeMatmul`, the golden module also provides other golden fun
 
 If the above golden functions do not meet the requirements of a specific need, you can also add new golden functions.
 
-### 3.3 Precision Comparison: CompareData
+### Precision Comparison: CompareData
 
 `CompareData` compares the actual output of the NPU with the golden result and returns the index list of error elements.
 
@@ -208,7 +208,7 @@ if (errorIndices.empty()) {
 }
 ```
 
-### 3.4 Complete Sample
+### Complete Sample
 
 The following, taken from `examples/00_basic_matmul/basic_matmul.cpp`, demonstrates a complete precision analysis process:
 
@@ -241,7 +241,7 @@ if (errorIndices.empty()) {
 }
 ```
 
-## 4. Summary
+## Summary
 
 CATLASS precision analysis follows the principle of "higher-precision golden computation + type-specific comparison":
 

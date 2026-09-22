@@ -2,7 +2,7 @@
 
 该文档面向需要在 CATLASS模板库中开发创新算子样例的开发者，以[样例44](../../../examples/44_quant_matmul_full_loadA_tla/README.md) `quant_matmul_full_loadA_tla`（量化矩阵乘A矩阵全载）为案例，说明从需求分析、方案设计到组件开发、测试合入的完整流程，帮助开发者快速掌握创新样例的开发方法。
 
-## 1. 什么是创新样例
+## 什么是创新样例
 
 CATLASS模板库中的每个样例都是在已有样例基础上的创新和扩展，都带有各自的新特性。开发新样例的核心思路是：**最大化复用已有组件，仅在必要时进行创新开发**。当你的算子需求无法通过现有组件组合完全满足时——例如需要新的数据搬运策略、新的后处理计算逻辑、或新的多核调度方式——就需要在参考已有样例的基础上，开发新的Block层组件或Kernel逻辑。
 
@@ -10,9 +10,9 @@ CATLASS模板库中的每个样例都是在已有样例基础上的创新和扩�
 
 以[样例44](../../../examples/44_quant_matmul_full_loadA_tla/README.md)为例，它并非从零开始构建，而是结合了两个已有样例的特性：量化矩阵乘的后处理逻辑（BlockEpilogue）复用了[样例42](../../../examples/42_quant_optimized_matmul_tla/README.md)（`42_quant_optimized_matmul_tla`）的per-token反量化方案，A矩阵全载策略（包括BlockMmad和BlockScheduler）参考了[样例25](../../../examples/25_matmul_full_loadA/README.md)（`25_matmul_full_loadA`）。其BlockMmad组件（`block_mmad_pingpong_full_loadA_tla.hpp`）是在已有全载组件（`block_mmad_pingpong_full_loadA.hpp`）基础上做的TLA改写，BlockScheduler（`GemmIdentityBlockSwizzleL1FullLoad`）则直接复用了[样例25](../../../examples/25_matmul_full_loadA/README.md)的全载调度策略。[样例44](../../../examples/44_quant_matmul_full_loadA_tla/README.md)没有从零新增任何组件，所有模块均通过复用或TLA改写已有组件完成。
 
-## 2. 设计阶段
+## 设计阶段
 
-### 2.1 需求分析
+### 需求分析
 
 在动手编码之前，首先需要明确算子的核心需求，并**充分调研已有样例和模板组件**，判断哪些可以直接复用、哪些需要参考改写、哪些必须全新开发：
 
@@ -29,7 +29,7 @@ CATLASS模板库中的每个样例都是在已有样例基础上的创新和扩�
 - **创新特性**：在调研基础上，明确真正需要创新的点。样例44的核心创新在于将量化矩阵乘与A矩阵全载两种特性结合，通过复用样例25的BlockScheduler使每个核处理的基本块在N方向连续分布，最大化A矩阵的L1复用率。
 - **适用场景**：明确新特性的收益场景和限制条件。A矩阵全载在N轴较大时收益显著（A矩阵可被多次复用），但要求L1空间足够容纳`L1TileShape::M × K`的数据量，否则无法使用。
 
-### 2.2 方案设计
+### 方案设计
 
 根据需求分析和组件调研结果，设计算子的整体实现方案。样例44的方案设计体现了"参考复用为主、创新开发为辅"的原则：
 
@@ -67,7 +67,7 @@ CATLASS模板库中的每个样例都是在已有样例基础上的创新和扩�
 
 <img src="https://raw.gitcode.com/user-images/assets/7631999/1de46727-7c46-411e-936c-7a437d951a3a/3e9c799e1de0405d89f07a6bfd7d7c54.png_tplv-a9rns2rl98-image-qvalue.png" width="60%">
 
-### 2.3 文档设计
+### 文档设计
 
 在设计阶段就应规划好样例的文档结构。每个创新样例需要包含以下文档：
 
@@ -75,9 +75,9 @@ CATLASS模板库中的每个样例都是在已有样例基础上的创新和扩�
 - **设计文档（`${id}_${op_name}.md`）**：详细说明原型设计、方案设计、组件实现和性能收益
 - **代码注释**：关键接口和复杂逻辑需添加清晰的注释
 
-## 3. 开发阶段
+## 开发阶段
 
-### 3.1 环境准备与代码结构
+### 环境准备与代码结构
 
 参考[快速上手](./01_quick_start.md)搭建开发环境，然后按照以下目录结构组织代码：
 
@@ -99,7 +99,7 @@ include/catlass/epilogue/block/
 └── block_epilogue_per_token_dequant_tla.hpp # 复用自样例42的BlockEpilogue
 ```
 
-### 3.2 Host侧组装
+### Host侧组装
 
 Host侧代码负责设备初始化、内存分配、组件组装和Kernel调用，详细说明可参考[Host层样例组装](./02_host_example_assembly.md)。开发时主要关注以下几点：
 
@@ -124,7 +124,7 @@ Host侧代码负责设备初始化、内存分配、组件组装和Kernel调用�
 - 当`M > L1TileShape::M`时，M方向需要分核处理，使用`GemmIdentityBlockSwizzleL1FullLoad`策略，使每个核处理的基本块连续分布，提升A矩阵全载时的块间复用率
 - 当`M <= L1TileShape::M`时，M方向不需要分核，使用普通的`GemmIdentityBlockSwizzle`即可
 
-### 3.3 Kernel层开发
+### Kernel层开发
 
 Kernel层是算子的执行入口，负责调度器初始化、全局张量定义和核心循环控制，详细说明可参考[Kernel代码开发](./03_kernel_development.md)。创新样例的Kernel开发要点如下：
 
@@ -153,7 +153,7 @@ AIV核负责Epilogue后处理，核心流程为：
 
 通过CrossCoreFlag机制实现AIC和AIV核之间的流水同步：AIC核完成一个分块的计算后设置标志，AIV核等待该标志后开始后处理，处理完成后再设置标志通知AIC核复用该Workspace阶段。
 
-### 3.4 Block层组件开发
+### Block层组件开发
 
 Block层是创新样例开发的核心。以下结合样例44说明三类组件的开发要点，各组件详细开发指南请参考对应文档：
 
@@ -182,7 +182,7 @@ BlockScheduler负责将计算任务分配到多个AIC核。样例44复用了样�
 - 普通Swizzle：分块按`0-1-2-...-19-0-1-2-...`交替分配到各核，每个核处理的基本块跳跃分布
 - L1FullLoad Swizzle：分块按`0-0-...-0-1-1-...-1-2-2-...-19`连续分配，每个核处理的基本块在N方向连续，使得A矩阵全载后能被连续的基本块充分复用
 
-### 3.5 Tile层组件开发
+### Tile层组件开发
 
 Tile组件是CATLASS中最底层的计算和数据操作单元，直接与硬件交互，主要包括`TileMmad`（矩阵乘法计算）和`TileCopy`（各级缓存间的数据搬运）。详细开发指南请参考[Tile组件代码开发详解](./06_tile_development.md)。
 
@@ -193,7 +193,7 @@ Tile组件是CATLASS中最底层的计算和数据操作单元，直接与硬件
 
 以样例44为例，其BlockMmad和BlockEpilogue内部使用的TileMmad和TileCopy均直接复用了已有组件，无需开发新的Tile组件。开发者在设计自己的样例时，应优先遍历`include/catlass/gemm/tile/`目录下的已有Tile组件，确认是否满足需求后再决定是否需要新增。
 
-### 3.6 编译与调试
+### 编译与调试
 
 使用以下命令编译和运行样例：
 
@@ -207,35 +207,35 @@ bash scripts/build.sh 44_quant_matmul_full_loadA_tla
 
 开发过程中建议使用[性能调测工具](./08_evaluation.md)进行仿真验证，通过流水图检查数据搬运和计算的重叠情况是否符合预期。
 
-## 4. 测试阶段
+## 测试阶段
 
-### 4.1 精度测试
+### 精度测试
 
 - 使用`examples/common/golden.hpp`中的标杆函数或自行实现标杆，对比算子输出与标杆结果的误差
 - 执行至少200例泛化精度测试，覆盖不同的M/N/K组合
 - 样例44使用`golden::QuantMatmul`作为精度标杆，对比bf16输出的误差
 
-### 4.2 性能测试
+### 性能测试
 
 - 与标杆算子进行性能对比，验证新特性的收益。样例44以`12_quant_matmul`为标杆，在N轴较大的场景下性能提升5%~15%
 - 在算子设计文档中记录性能数据、测试环境和标杆信息
 - 若性能未达预期，参考[性能瓶颈分析及优化手段](./evaluation/bottleneck_analysis_and_optimization.md)进行定位和优化
 
-## 5. 合入阶段
+## 合入阶段
 
-### 5.1 代码规范检查
+### 代码规范检查
 
 - 确保代码符合项目的代码风格（参考`.clang-format`配置）
 - 检查命名规范：样例目录使用`${id}_${op_name}`格式，文件名使用小写下划线风格
 - 添加必要的版权声明和License头
 
-### 5.2 文档完善
+### 文档完善
 
 - README.md包含算子简介、编译运行步骤和参数说明
 - 设计文档包含原型设计、方案设计、组件说明和性能数据
 - 如有必要，补充新组件的使用说明或API文档
 
-### 5.3 提交流程
+### 提交流程
 
 参考[样例贡献流程](./09_example_contribution_guide.md)和[CONTRIBUTING.md](../../../CONTRIBUTING.md)：
 
@@ -245,7 +245,7 @@ bash scripts/build.sh 44_quant_matmul_full_loadA_tla
 4. 等待代码审查并根据反馈修改
 5. 审查通过后合入主分支
 
-## 6. 总结
+## 总结
 
 开发一个CATLASS创新样例的核心流程可以概括为以下四步：
 

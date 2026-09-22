@@ -26,7 +26,7 @@
 
 `LayoutTag` 是旧版设计，`tla::Layout` 是新版设计。两者通过以下机制桥接：
 
-### 1. `tla::MakeLayout<Element, LayoutTag>`
+### `tla::MakeLayout<Element, LayoutTag>`
 
 新版推荐用法，直接通过模板参数指定 LayoutTag 和元素类型来构造 `tla::Layout`：
 
@@ -36,7 +36,7 @@ auto layout = tla::MakeLayout<ElementA, Catlass::layout::RowMajor>(m, k);
 
 内部同样根据 LayoutTag 类型分发，构造对应的嵌套或非嵌套 `tla::Layout`。这是实际开发中最常用的方式。
 
-### 2. `tla::MakeLayoutFromTag`
+### `tla::MakeLayoutFromTag`
 
 定义在 [`include/tla/layout.hpp`](../../../../include/tla/layout.hpp)，将任意 LayoutTag 实例转换为 `tla::Layout`：
 
@@ -52,7 +52,7 @@ auto MakeLayoutFromTag(LayoutTag const& tag);
 - `VectorLayout` → `Layout<Shape<len>, Stride<_1>>`
 - `zN` / `nZ` → 嵌套 `Layout<Shape<Shape<...>, Shape<...>>, Stride<Stride<...>, Stride<...>>>`
 
-### 3. `Catlass::detail::TagToLayout`
+### `Catlass::detail::TagToLayout`
 
 定义在 [`include/catlass/detail/tag_to_layout.hpp`](../../../../include/catlass/detail/tag_to_layout.hpp)，提供**编译期类型映射**，将 LayoutTag 映射为对应的 `tla::Layout` 类型：
 

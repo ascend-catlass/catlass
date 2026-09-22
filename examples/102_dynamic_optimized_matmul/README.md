@@ -6,7 +6,7 @@
 
 ## 2 文档索引和约束说明
 
-### 2.1 工程说明
+### 工程说明
 
 泛化Matmul工程结构说明请参考：[工程结构说明](./docs/zh/工程结构介绍.md)
 
@@ -15,7 +15,7 @@
 
 DynamicOptimizedMatmul根据shape动态确定Tiling参数，并尝试选择最好的模板进行计算，尽力获取最优性能，但是不保证是最优性能。
 
-### 2.2 模板文档
+### 模板文档
 
 | 模板名称                                                      | 说明                               |
 | ------------------------------------------------------------- | ---------------------------------- |
@@ -25,7 +25,7 @@ DynamicOptimizedMatmul根据shape动态确定Tiling参数，并尝试选择最�
 | [StreamkMatmul](./docs/zh/StreamkMatmul.md)                   | 负载更均衡的多核切K模板            |
 | [SingleCoreSplitkMatmul](./docs/zh/SingleCoreSplitkMatmul.md) | 单核切K模板                        |
 
-### 2.3 相关约束
+### 相关约束
 
 1. A、B、C矩阵的数据类型支持fp16。
 

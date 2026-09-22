@@ -1,6 +1,6 @@
 # CATLASS MXFP8 FlashAttention Infer设计文档
 
-## 1. 概述
+## 概述
 
 CATLASS MXFP8 FlashAttention Infer 是基于 [49_ascend950_flash_attention_infer](../../../examples/49_ascend950_flash_attention_infer/flash_attention_infer.md) 样例，额外适配以下两个独立特性的推理算子：
 
@@ -16,7 +16,7 @@ O = FlashAttention(Q, K, V, mask)
 
 ---
 
-## 2. 与样例49的总体差异概览
+## 与样例49的总体差异概览
 
 下图对比展示了样例49与样例62在数据流层面的主要差异：
 
@@ -73,9 +73,9 @@ O = FlashAttention(Q, K, V, mask)
 
 ---
 
-## 3. MXFP8 量化特性
+## MXFP8 量化特性
 
-### 3.1 MXFP8 数据格式
+### MXFP8 数据格式
 
 MXFP8（Microscale FP8）是一种基于分块的浮点量化方案：
 
@@ -91,7 +91,7 @@ MXFP8（Microscale FP8）是一种基于分块的浮点量化方案：
      scale_0                  scale_1        (float8_e8m0)
 ```
 
-### 3.2 算子中的数据布局
+### 算子中的数据布局
 
 | 输入     | 数据类型        | Shape              | 说明                             |
 | -------- | --------------- | ------------------ | -------------------------------- |
@@ -104,7 +104,7 @@ MXFP8（Microscale FP8）是一种基于分块的浮点量化方案：
 
 > **注意**：MX Scale 的量化轴方向由矩阵乘的语义决定。Q×K^T 中，Q 沿 embed 维度分块，K 沿 embed 维度分块；P×V 中，V 沿 seq 维度分块。
 
-### 3.3 Q×K^T（BMM1）的 MXFP8 矩阵乘
+### Q×K^T（BMM1）的 MXFP8 矩阵乘
 
 Q×K^T 的 BlockMmad 从样例49的 [block_mmad_fai_qk_tla.hpp](../../../include/catlass/gemm/block/block_mmad_fai_qk_tla.hpp) 切换到 MX 版本的 [block_mmad_fai_qk_mx_tla.hpp](../../../include/catlass/gemm/block/block_mmad_fai_qk_mx_tla.hpp)，核心变化如下：
 
@@ -120,9 +120,9 @@ Q×K^T 的 BlockMmad 从样例49的 [block_mmad_fai_qk_tla.hpp](../../../include
 
 ---
 
-## 4. P矩阵静态量化特性
+## P矩阵静态量化特性
 
-### 4.1 设计动机
+### 设计动机
 
 在 FlashAttention 推理场景中，Online Softmax 产出的中间结果 P 矩阵需要传递给后续的 P×V 矩阵乘。在样例49中，P 矩阵以 FP16/BF16 格式存储，占用 L1 带宽和存储较大。
 
@@ -130,7 +130,7 @@ P 矩阵 cast 到 `float8_e4m3_t` 是 MXFP8 路径下**必定执行**的步骤�
 
 在此基础上，模板参数 `ENABLE_P_SCALE` 和命令行参数 `usePscale` 控制的是：是否在 cast 之前额外对 P 矩阵乘一个全局静态量化系数（pScale），即 **P矩阵静态量化**。这是一个独立于 cast 的可选特性——当 `usePscale=1` 时，`P_fp8 = quantize(P_fp32 × pScale)`；当 `usePscale=0` 时，`P_fp8 = cast(P_fp32)`。
 
-### 4.2 Softmax + P量化流程
+### Softmax + P量化流程
 
 ```text
 Q×K^T 结果 (UB, float32)
@@ -173,9 +173,9 @@ if constexpr (AscendC::IsSameType<ElementP, float8_e4m3_t>::value) {
 
 ---
 
-## 5. P×V（BMM2）的 MXFP8 矩阵乘及全1 Scale 初始化
+## P×V（BMM2）的 MXFP8 矩阵乘及全1 Scale 初始化
 
-### 5.1 P 矩阵的特殊性
+### P 矩阵的特殊性
 
 P×V 的 BlockMmad 从样例49的 [block_mmad_fai_pv_tla.hpp](../../../include/catlass/gemm/block/block_mmad_fai_pv_tla.hpp) 切换到 MX 版本的 [block_mmad_fai_pv_mx_tla.hpp](../../../include/catlass/gemm/block/block_mmad_fai_pv_mx_tla.hpp)。
 
@@ -184,7 +184,7 @@ P×V 的 BlockMmad 从样例49的 [block_mmad_fai_pv_tla.hpp](../../../include/c
 - **矩阵B（V）**：V(fp8) 和其 MX Scale（mxScaleV）从 GM 搬运到 L1，L1→L0 时一并搬运到 L0，Cube Mmad 中按 MXFP8 格式完成计算，输出 fp32。
 - **矩阵A（P）**：P 矩阵由 AIV 端的 Softmax 分 tile 写入 L1，**不来自 GM**，没有 MX Scale 输入。但 MXFP8 矩阵乘要求 A 侧必须传入 scale 参与计算，因此在 BlockMmadPV 构造时，L1 上预先初始化一份**全1的 MX Scale**（L1 常驻）作为 P 的缩放因子。
 
-### 5.2 全1 Scale 初始化
+### 全1 Scale 初始化
 
 在 [block_mmad_fai_pv_mx_tla.hpp](../../../include/catlass/gemm/block/block_mmad_fai_pv_mx_tla.hpp) 的构造函数中调用 `InitOneInL1MxScaleA()`：
 
@@ -206,7 +206,7 @@ void InitOneInL1MxScaleA()
 
 该全1 Scale 在 L1 上只分配**一份**（L1 常驻，不参与多级流水），因为 P 矩阵的缩放因子固定为 1，不随 KV 循环更新。
 
-### 5.3 P×V BlockMmad 数据流
+### P×V BlockMmad 数据流
 
 ```text
     A侧：P矩阵（来自AIV）                B侧：V矩阵（来自GM）

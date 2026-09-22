@@ -8,7 +8,7 @@ The only fixed-code illustrations in this document are from [CATLASS](https://gi
 
 `references/08-l0c-to-ub-rewrite.md` is the implementation guide. Do not read or use its implementation steps until GATE 2 authorizes the manifest.
 
-## 1. Boundaries and decisions
+## Boundaries and decisions
 
 | Phase | Actor | Reads or writes | Outcome |
 |---|---|---|---|
@@ -27,11 +27,11 @@ Optimization is enabled by default at FRAME. A campaign can opt out globally onl
 
 GATE 2 snapshots the strategy and exact `screen.manifest` paths. That snapshot is the whole write grant. If an implementation reveals that the manifest is wrong, stop, correct the SCREEN artifact, re-run `check --phase screened`, re-render GATE 2, and obtain a new decision; do not widen the grant while writing.
 
-## 2. SCREEN
+## SCREEN
 
 SCREEN is read-only with respect to the target source tree. It has three products: a compact committed-TLA preflight, five applicability readings, and a repeated baseline measurement. Only after those are complete may it propose a strategy and manifest.
 
-### 2.1 Compact committed-TLA manifest preflight
+### Compact committed-TLA manifest preflight
 
 Before tracing the non-TLA unit, inspect the **committed TLA** `L0C → UB` implementation at the CATLASS pin. Record this compact role manifest in the SCREEN working record (and summarize it in `screen.notes`); it is a preflight, **not** the eventual write grant.
 
@@ -46,7 +46,7 @@ Before tracing the non-TLA unit, inspect the **committed TLA** `L0C → UB` impl
 
 Treat the pinned TLA implementation as an illustration of **roles**, not as a list of target-tree filenames. Trace each role from the migrated example's actual includes and aliases. The result prevents authorizing a manifest that names an incompatible plain `BlockMmad` when the selected direct path requires the callback-capable form.
 
-### 2.2 The five applicability rows
+### The five applicability rows
 
 Read the five rows in order from the migrated unit. Each `screen.rows` value must be a current reading: the selected file, symbol or source location, what was observed, and the resulting verdict. Do not copy a prior run's wording. All five rows are required even when an earlier row makes the unit inapplicable.
 
@@ -62,7 +62,7 @@ The rewrite is applicable only if every row passes and the two traced relay legs
 
 The rows are necessary, not sufficient. Also reject a unit when the selected epilogue couples M halves and no safe `NO_SPLIT` budget exists, when the direct destination layout cannot meet its transfer alignment, or when the selected stack needs a different dataflow. Record the discovered reason; do not invent an extra route or adapt a source reading from another unit.
 
-### 2.3 Manifest and tiers
+### Manifest and tiers
 
 For an applicable unit, trace from the migrated example through selected includes, aliases, policies, and registration surfaces. `screen.manifest` lists every path the rewrite would add or modify. It includes only paths actually touched, categorized by role rather than a memorized tree layout:
 
@@ -81,7 +81,7 @@ Every row is `add` or `modify` and has a tier:
 
 A path that is already present is not automatically a manifest row; inspect whether this rewrite must modify it. Conversely, no projected role is optional once it is actually touched. The manifest becomes a write grant only after GATE 2.
 
-### 2.4 Repeated baseline measurement
+### Repeated baseline measurement
 
 Every migrated unit with a current hardware-bound `PROVEN` proof receives a baseline measurement, applicable or not. Use the discovered build and run entries; never assemble an invocation from a target name. Put profiler output under that unit's run-directory logs and supply an explicit output directory for every profiler invocation.
 
@@ -89,7 +89,7 @@ Take repeated launches of the unchanged baseline configuration, normally two or 
 
 `screen.baseline` is the baseline configuration, duration list, and source directory. It is a measurement record, not a claim of improvement. Do not estimate missing measurements, reuse measurements from another run, or profile in the target tree.
 
-## 3. GATE 2
+## GATE 2
 
 Run the optimization gate only after SCREEN has passed and each candidate still has a current
 hardware-bound proof. The packet shows, for each unit, the five current readings, TLA preflight summary,
@@ -100,7 +100,7 @@ description of work, not an assumed result. A unit skipped at GATE 2 retains its
 baseline; it is not rewritten. If the same campaign returns to an already authorized unit because its
 manifest changed, it must be re-screened and re-authorized as above.
 
-## 4. APPLY — only after GATE 2
+## APPLY — only after GATE 2
 
 Now, and only now, open `references/08-l0c-to-ub-rewrite.md` and implement the authorized direct path.
 Before APPLY, the SCREEN/GATE-2 proof must still be current; a historical `PROVEN` rank cannot authorize
@@ -118,7 +118,7 @@ The order is material: **APPLY and measurement → `check applied` → unchanged
 
 `optimize.json` records the chosen `SPLIT_M` or `NO_SPLIT` mode, the written manifest paths, and repeated profile samples. Each `task_us` may be a list; every list element needs a matching profiler result in the sample's source directory. A `coexist` artifact must include the remeasured same-session baseline beside the direct-path sample; both samples are validated for non-empty durations and profiler output. A `replace` artifact records the direct-path sample and relies on SCREEN for the removed baseline, so it need not include a baseline field.
 
-## 5. Non-negotiable limits
+## Non-negotiable limits
 
 - Do not change the frozen contract, oracle, golden, tolerance, compared region, dtype, layout, scale, mask, aliasing, or supported domain to make this rewrite fit.
 - Do not select `SPLIT_N`, alter tile/block/core counts, or attach unrelated performance tuning to this rewrite.

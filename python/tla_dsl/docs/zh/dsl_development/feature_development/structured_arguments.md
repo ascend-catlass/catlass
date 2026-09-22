@@ -68,7 +68,7 @@ lowering 按绑定类别生成实际参数类型列表，并按列表长度分�
 沿用用户指南的 `add_bias(x, aux, out)`，完整逻辑叶子顺序是
 `[x, bias, 0.5, out]`。
 
-### 1. 绑定 Python 调用并建树
+### 绑定 Python 调用并建树
 
 `tla.compile` 通过 `_bind_kernel_call_args()` 按函数签名绑定位置参数、关键字参数和
 默认值，分离编译选项，将实参原样交给 lowering。无参调用使用 `type_args=None`；
@@ -80,7 +80,7 @@ lowering 按绑定类别生成实际参数类型列表，并按列表长度分�
 NamedTuple 在普通 tuple 之前识别，以保存具体类型。字段级 Constexpr 和 Unit
 保留在树中，但不生成运行时绑定。
 
-### 2. 分配 MLIR 参数并重建对象
+### 分配 MLIR 参数并重建对象
 
 `execution_lowering.py` 中的 `_build_runtime_physical_argument_layout()`
 按绑定顺序分配 block arguments，即设备函数的形式参数。
@@ -103,7 +103,7 @@ dataclass 按全部声明字段调用 `cls(**fields)` 重建，构造器须接�
 派生属性声明为字段只是必要条件；构造器及其调用的 `__post_init__` 等逻辑也在
 编译期执行，须能处理重建后的 Tensor/Numeric 值。字段的读取允许使用类默认值。
 
-### 3. 生成产物与 ABI 描述
+### 生成产物与 ABI 描述
 
 TLA IR 经 lowering 后，TypeBridge 根据 lowered 参数类型和当前后端调用约定生成
 `KernelAbiLayout`，后端编译器生成设备二进制。布局由 TypeBridge 推导，并非 hivmc
@@ -113,7 +113,7 @@ memref 可能继续展开为多个地址、尺寸和步长字段。
 
 host packer 按 `KernelAbiLayout` 准备字段组和打包器，确定 payload 大小与字段位置。
 
-### 4. 回放当前参数并启动
+### 回放当前参数并启动
 
 `ExecutionArgs` 的树路径先校验 Python 逻辑参数数量，再按编译时的树回放当前对象。
 全部参数为普通 Tensor/scalar 时，每个顶层参数就是一个运行时叶子，可直接交给

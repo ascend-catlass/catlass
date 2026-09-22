@@ -4,7 +4,7 @@ Read this guide **only after GATE 2 authorizes an applicable unit's manifest and
 
 The fixed illustrations below come only from [CATLASS](https://gitcode.com/cann/catlass) at `89e1fc39881a715882b9b47459add06ba270105c`. They are role models: resolve the corresponding committed target-tree symbols before editing. Do not copy a path, constant, flag range, tile value, or source reading from another unit.
 
-## 1. Build the direct path by roles
+## Build the direct path by roles
 
 The committed CATLASS TLA direct-path implementation is the structural reference. Follow the roles, not a filename:
 
@@ -19,7 +19,7 @@ The non-TLA implementation follows the same dependency direction. Derive the new
 
 Do not add a duplicate Fixpipe configuration, selector, policy, or aggregator registration if the target tree already supplies the resolved role. Conversely, do not assume a role is available because a different operator or TLA path has one.
 
-## 2. Choose the in-scope mode from allocation arithmetic
+## Choose the in-scope mode from allocation arithmetic
 
 Only two modes are in scope.
 
@@ -60,7 +60,7 @@ All GM tensors touched by the epilogue need separate classification:
 
 A zero-row runtime half is still a synchronization participant. It may skip data processing, but it must not skip the wait, set, release, seed, or drain actions that keep the cross-core credits balanced. Prove an input that exercises an odd final block when hardware access is available.
 
-## 3. Cross-core protocol
+## Cross-core protocol
 
 The protocol belongs to the selected kernel's local conventions. Reinvestigate its flag bases, valid range, synchronization mode, and pipe ownership from the committed matching implementation. There is no repository-wide flag census to import and no reason to create a shared constant solely for this rewrite.
 
@@ -73,7 +73,7 @@ The invariant is independent of local names:
 
 Express the local flag-range and stage constraints as compile-time checks next to the implementation when the selected APIs permit it. Such checks protect identifier overlap; they do not prove token balance, order, or liveness. A device proof remains required.
 
-## 4. Buffer lifetime and epilogue adaptation
+## Buffer lifetime and epilogue adaptation
 
 The epilogue's direct-path specialization must agree with the producer on all of the following:
 
@@ -85,7 +85,7 @@ The epilogue's direct-path specialization must agree with the producer on all of
 
 Keep address-space conversions and parameter bridging in the style already used by the selected kernel family. In particular, retain the existing ABI ownership boundary for argument pointers, layouts, and parameter conversion; do not introduce an ad hoc address-space cast just because a direct-path sibling happens to have a similar tensor list. Trace per-token, scale, and output tensors to their actual tile-copy contracts before changing their layouts or offsets.
 
-## 5. Strategy-specific selection
+## Strategy-specific selection
 
 The GATE-2 decision is already fixed; implement it exactly.
 
@@ -94,7 +94,7 @@ The GATE-2 decision is already fixed; implement it exactly.
 
 The build file or selection mechanism is a manifest path when it changes. A compiler definition, cache variable, or target name is not assumed portable between target trees; reuse the convention identified in `profile.json`.
 
-## 6. Implementation invariants
+## Implementation invariants
 
 Before handing the finished tree back to the workflow, inspect the authorized diff against these invariants:
 

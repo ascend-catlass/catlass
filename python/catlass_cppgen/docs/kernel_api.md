@@ -138,7 +138,7 @@ print(gemm_kernel.gen_layout_template())
 
 ### 所有 Kernel 类型的使用示例
 
-#### 1. BasicMatmulKernel（基础矩阵乘法）
+#### BasicMatmulKernel（基础矩阵乘法）
 
 适用于标准的 2D 矩阵乘法运算，支持可选的 Bias 参数。
 
@@ -190,7 +190,7 @@ def test_basic_matmul_kernel():
     print(basic_kernel.gen_layout_template())
 ```
 
-#### 2. BatchedMatmulKernel（批处理矩阵乘法）
+#### BatchedMatmulKernel（批处理矩阵乘法）
 
 适用于批处理场景，输入张量 A 和 B 为 3 维（batchCount, M, K）和（batchCount, K, N）。
 
@@ -243,7 +243,7 @@ def test_batched_matmul_kernel():
     print(batched_kernel.gen_layout_template())
 ```
 
-#### 3. StreamkMatmulKernel（StreamK 矩阵乘法）
+#### StreamkMatmulKernel（StreamK 矩阵乘法）
 
 适用于大规模矩阵乘法，使用 StreamK 调度策略优化性能。
 
@@ -296,7 +296,7 @@ def test_streamk_matmul_kernel():
     print(streamk_kernel.gen_layout_template())
 ```
 
-#### 4. MultiCoreSplitkMatmulKernel（多核 SplitK 矩阵乘法）
+#### MultiCoreSplitkMatmulKernel（多核 SplitK 矩阵乘法）
 
 适用于需要多核并行计算的大规模矩阵乘法，通过 SplitK 策略提高并行度。
 
@@ -349,7 +349,7 @@ def test_multi_core_splitk_matmul_kernel():
     print(splitk_kernel.gen_layout_template())
 ```
 
-#### 5. TailMultiCoreSplitkMatmulKernel（尾部多核 SplitK 矩阵乘法）
+#### TailMultiCoreSplitkMatmulKernel（尾部多核 SplitK 矩阵乘法）
 
 适用于处理 SplitK 策略中的尾部计算，与 MultiCoreSplitkMatmulKernel 配合使用。
 
@@ -402,7 +402,7 @@ def test_tail_multi_core_splitk_matmul_kernel():
     print(tail_splitk_kernel.gen_layout_template())
 ```
 
-#### 6. GroupedMatmulSliceMKernel（分组矩阵乘法 - Slice M）
+#### GroupedMatmulSliceMKernel（分组矩阵乘法 - Slice M）
 
 适用于分组 GEMM 场景，多个不同大小的矩阵乘法问题，通过 Slice M 策略优化。
 

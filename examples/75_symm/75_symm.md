@@ -2,7 +2,7 @@
 
 本文档用于说明 `./examples/75_symm` 对称矩阵乘算子示例所依赖的 Catlass GEMM 模板库能力、外部接口、分层设计方案。
 
-## 1. 功能说明
+## 功能说明
 
  - 算子功能：完成对称矩阵乘计算。当左操作数或右操作数为对称矩阵时，仅存储上三角或下三角作为有效数据，另一半通过对称性推导得到，从而减少访存。
  - 计算公式：
@@ -25,7 +25,7 @@ $$
 | RIGHT | UPPER | `C = B * A`，`A` 上三角有效 | `K == N` |
 | RIGHT | LOWER | `C = B * A`，`A` 下三角有效 | `K == N` |
 
-## 2. 参数说明
+## 参数说明
 
 以下是本样例可执行文件的运行参数：
 
@@ -50,18 +50,18 @@ SymmMatmul 所涉及的关键模板参数如下：
 | `LayoutC` | 输出矩阵排布方式 | `layout::RowMajor` |
 | `ArchTag` | 目标架构 | `Arch::AtlasA2` |
 
-## 3. 约束说明
+## 约束说明
 
  - 输入矩阵均为 fp32，对称矩阵的无效三角区域在 host 侧通过镜像补全。
  - 左乘要求 `M == K`，右乘要求 `K == N`，这是因为对称矩阵必须是方阵。
  - 对称矩阵通过 `tla::MakeLayout` 构造 RowMajor（direct 路径）和 ColumnMajor（transpose 路径）两套 TLA layout，kernel 侧根据 tile 位置在两条路径间切换。
  - side 和 fill 作为编译期模板参数确定，避免 device 端运行时分支。
 
-## 4. 具体设计方案
+## 具体设计方案
 
-### 4.1 Host 层
+### Host 层
 
-#### 4.1.1 参数解析
+#### 参数解析
 
 `symm` 命令执行参数：
 
@@ -83,7 +83,7 @@ RIGHT + UPPER
 RIGHT + LOWER
 ```
 
-#### 4.1.2 shape 校验
+#### shape 校验
 
 普通 GEMM 只需要满足：
 
@@ -102,7 +102,7 @@ C: M x N
 
 这是因为对称矩阵必须是方阵。
 
-#### 4.1.3 host 数据构造
+#### host 数据构造
 
 `symm` 生成随机数据后，还需要根据 side/fill 对对称矩阵做镜像补全。
 
@@ -116,9 +116,9 @@ C: M x N
 - upper 模式：保留上三角，用上三角补下三角；
 - lower 模式：保留下三角，用下三角补上三角。
 
-### 4.2 Kernel 层
+### Kernel 层
 
-#### 4.2.1 对称矩阵乘 kernel
+#### 对称矩阵乘 kernel
 
 `symm` 使用统一的对称矩阵乘 kernel producer：
 
@@ -174,9 +174,9 @@ Gemm::Kernel::SymmMatmulTlaSingleKernelProducer<
        tensorBlockNonSym, tensorBlockSym, tensorBlockSymQ, tensorBlockC, ...);
    ```
 
-### 4.3 Block 层
+### Block 层
 
-#### 4.3.1 左侧对称 block
+#### 左侧对称 block
 
 左侧对称使用：
 
@@ -218,7 +218,7 @@ Gemm::Block::BlockMmadPingpongSymmLeftTla
 
    这样 MMAD 看到的是完整对称 tile，不需要在 MMAD 内部做三角判断。
 
-#### 4.3.2 右侧对称 block
+#### 右侧对称 block
 
 右侧对称使用：
 
@@ -261,7 +261,7 @@ Gemm::Block::BlockMmadPingpongSymmRightTla
 
    虽然判断逻辑形式相似，但实际涉及的 buffer、layout、copy primitive、MMAD operand 类型不同。因此 block 层保留两个实现更清晰，也更便于分别调试和优化。
 
-### 4.4 DispatchPolicy 设计
+### DispatchPolicy 设计
 
 #### MmadPingpongSymmLeft/Right模板参数含义
 
@@ -305,9 +305,9 @@ event 按流水方向配对，实现阶段间同步与切换：
 - 对角 tile 在 L1 补全完成后才释放 event 给 MTE1，确保 MTE1 消费的是完整对称 tile。
 - Kernel `operator()` 末尾调用 `PipeBarrier<PIPE_ALL>()` 等待所有 block 的流水线排空后才返回。
 
-## 5. 空间分配
+## 空间分配
 
-### 5.1 Tile Shape 设计
+### Tile Shape 设计
 
 左乘 SYMM tile：
 
@@ -327,7 +327,7 @@ using L0TileShape = Shape<256, 128, 32>;
 
 右乘要求 `L1TileShape::K == L1TileShape::N`（K=N=128 方形 tile），因为右侧对称矩阵位于 `K x N` 平面。右乘将 M tile 扩大到 256，在 M 较大、K=N 中等的场景（如 M=4096）可将 block 数量从 192 减半到 96。
 
-### 5.2 存储空间计算
+### 存储空间计算
 
 数据类型为 float（4 字节），pingpong STAGES = 2，硬件 buffer 容量为 L1 = 512 KB、L0A = 64 KB、L0B = 64 KB、L0C = 128 KB。
 
@@ -357,15 +357,15 @@ using L0TileShape = Shape<256, 128, 32>;
 
 此外，对称矩阵乘只将上三角（或下三角）作为有效数据来源：direct 路径从有效三角区域直读，transpose 路径将位于无效三角区域的 tile 重定向到转置后的有效三角位置读取。这意味着 GM 中对称矩阵的实际 "热数据" 仅集中在有效三角区域（约为完整矩阵的一半），缩小了 GM→L1 搬运时的数据工作集，提高了 L2 cache 的命中率。
 
-## 6. 使用示例
+## 使用示例
 
-### 6.1 编译
+### 编译
 
 ```bash
 bash scripts/build.sh 75_symm
 ```
 
-### 6.2 运行
+### 运行
 
 左乘，上三角：
 

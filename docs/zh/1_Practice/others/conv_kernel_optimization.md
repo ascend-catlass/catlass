@@ -20,7 +20,7 @@
 totalLoops = batch * ceilDiv(Ho, 8) * ceilDiv(Wo, 12) * ceilDiv(Cout, 96)
 ```
 
-## 1. 调优总流程
+## 调优总流程
 
 Conv算子极致性能调优建议按以下顺序推进：
 
@@ -31,7 +31,7 @@ Conv算子极致性能调优建议按以下顺序推进：
 5. 用仿真流水图检查MTE2、MTE3、Cube、Vector之间是否存在长空泡或互等。
 6. 在多个候选配置性能接近时，优先选择启动开销小、workspace小、维护成本低的方案。
 
-## 2. 案例集
+## 案例集
 
 ### 案例一：任务块负载均衡
 
@@ -227,6 +227,6 @@ if constexpr (isFullTile) {
 - 规则shape（Ho/Wo能被tile整除）的收益最大，因为可以完全消除`actualBlockShape`的运行时计算和尾块分支。
 - Profiling中Scalar占比高于10%时，边界处理优化值得投入。
 
-## 3. 总结
+## 总结
 
 Conv算子的性能优化可以参考此文档。

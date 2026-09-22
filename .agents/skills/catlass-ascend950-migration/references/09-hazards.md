@@ -4,7 +4,7 @@ Read this as a conditional reference during ANALYZE, IMPLEMENT, and PROVE. It do
 
 Fixed facts in this file come only from [CATLASS](https://gitcode.com/cann/catlass) at `89e1fc39881a715882b9b47459add06ba270105c` and [asc-devkit](https://gitcode.com/cann/asc-devkit) at `512674e996da0feaee6e7f435e4efc1cad1d74fb`. Pin citations name a source role or path, not a lasting line number. Re-read the pin before using a fact in a gate packet.
 
-## 1. Hardware limit versus repository gap
+## Hardware limit versus repository gap
 
 A hardware limit and an absent target-tree component require different action.
 
@@ -17,7 +17,7 @@ A hardware limit and an absent target-tree component require different action.
 
 For every proposed exclusion: name the exact capability, locate the scoped asc-devkit fact, and verify that the source path actually uses it. If that chain breaks, record a repository gap and the search that established it. Continue down the preservation ladder: a missing component may be a local generalization or an existing isomorphic dataflow, not a reason to abandon the source contract.
 
-## 2. 3510 capability changes that affect route decisions
+## 3510 capability changes that affect route decisions
 
 The asc-devkit compatibility guide at the pinned revision is the source for these migration facts. They are constraints, not invitations to tune unrelated code.
 
@@ -49,7 +49,7 @@ The following three facts must be held together; using only the Cube row produce
 
 Use that exception only after proving that the frozen external contract is preserved and that the selected target implementation performs the full conversion before Cube. Record the Vector Cast, converted storage, and int8 Cube operands in the route evidence. It does not waive the direct-Cube-s4 refusal, does not allow an unverified shortcut, and does not convert a required contract change into migration work.
 
-## 3. `BlockMmad` diagnostics are type-stack evidence
+## `BlockMmad` diagnostics are type-stack evidence
 
 At the CATLASS pin, `BlockMmad` aggregate templates and their architecture-gated specializations are source-level selection machinery. A `static_assert` from a primary template means the selected type arguments matched no specialization; it is not a hardware diagnosis.
 
@@ -63,7 +63,7 @@ Investigate in this order:
 
 A missing aggregate symbol and a primary-template assertion are distinct diagnostics. Treat each as a repository observation until a scoped hardware fact says otherwise. A clean 3510 build proves only that a type stack resolved; it says nothing about numerical correctness.
 
-## 4. Layout, selector, and provenance hazards
+## Layout, selector, and provenance hazards
 
 Pinned CATLASS provides architecture-sensitive layout selectors and separate Gemm, Conv, TLA, and non-TLA aggregate families. Follow the selector and the specialization actually instantiated; never hard-code an L0 layout from a name or carry a rule from one aggregate into another.
 
@@ -76,7 +76,7 @@ In particular:
 
 A layout error can compile and still produce wrong values. Compilation is therefore a routing signal, never accuracy evidence.
 
-## 5. Zero work and grouped axes
+## Zero work and grouped axes
 
 Expand the selected Block, Epilogue, Scheduler, and golden path before declaring a zero-work case safe. Check these independently:
 
@@ -92,7 +92,7 @@ For group lists, identify the partitioned axis and whether the encoding is cumul
 
 Source shape establishes a risk and a test case. Only an executed target-device case establishes a device outcome.
 
-## 6. Cross-core synchronization
+## Cross-core synchronization
 
 The paired-AIV direct path has two distinct protocols:
 
@@ -103,13 +103,13 @@ For either protocol, derive flag identities, valid ranges, synchronization mode,
 
 A runtime zero-row half may omit data computation but must still preserve those invariants. Static checks can establish range and arithmetic conditions; target-device proof establishes whether the selected implementation is live and correct.
 
-## 7. Resource budgets are not hardware capacities
+## Resource budgets are not hardware capacities
 
 Pinned CATLASS `Arch::Resource<ArchTag>` and `ArchTag` constants are compile-time allocation budgets for a particular architecture type. Sum live intervals against the selected architecture budget; do not derive a capacity, alignment rule, bank-conflict rule, or cross-generation sharing decision from a single budget constant.
 
 For any direct-path change, one byte expression must reconcile the producer allocation, consumer row pitch, ring stride, and compile-time ceiling. Use the selected API's alignment requirements separately. Preserve the original arch-specific specializations or extract a genuinely shared implementation only after checking specialization ordering and every existing consumer.
 
-## 8. Evidence hygiene
+## Evidence hygiene
 
 Accuracy evidence is exactly one parsed `CATLASS_EVIDENCE` line from the current run on matching declared hardware, with the frozen shape and `computeNum`. It is not established by any of the following:
 

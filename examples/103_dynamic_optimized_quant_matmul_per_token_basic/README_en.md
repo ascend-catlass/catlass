@@ -16,7 +16,7 @@ Generally, the left matrix represents activation (A), and the right matrix repre
 
 ## 2 Document Index and Constraints
 
-### 2.1 Project Description
+### Project Description
 
 For the structure of the generalized quantized Matmul project, see [Project Structure Description](<../102_dynamic_optimized_matmul/docs/en/Project Structure_en.md>). This project follows processes similar to example 102, such as template generation, Tiling computation, and template selection, and adapts them based on the compute characteristics of quantized Matmul.
 
@@ -28,7 +28,7 @@ This project is compiled as a dynamic library by default. Before executing the e
 export LD_LIBRARY_PATH=/path/to/catlass/output/shared_lib/lib/:$LD_LIBRARY_PATH
 ```
 
-### 2.2 Project Structure
+### Project Structure
 
 ```shell
 ├── CMakeLists.txt
@@ -58,13 +58,13 @@ export LD_LIBRARY_PATH=/path/to/catlass/output/shared_lib/lib/:$LD_LIBRARY_PATH
     └── utils.h
 ```
 
-### 2.3 Template Documentation
+### Template Documentation
 
 | Template Name       | Description                                            |
 | ------------------- | ------------------------------------------------------ |
 | PerTokenBasicMatmul | PerToken basic template (documentation to be added...) |
 
-### 2.4 Constraints
+### Constraints
 
 - The data types of matrices A and B support int8.
 - The data type of matrix C supports fp16.

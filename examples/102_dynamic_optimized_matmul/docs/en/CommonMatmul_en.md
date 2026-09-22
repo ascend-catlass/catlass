@@ -12,7 +12,7 @@ The typical feature of CommonMatmul is that the basic blocks on L1 are directly 
 
 The optimization points described here are those that are not included in [00_basic_matmul](../../../00_basic_matmul/README_en.md) but are included in CommonMatmul. The basic optimization points in 00_basic_matmul are not described here. The optimization points used in 00_basic_matmul are a subset of those used in CommonMatmul.
 
-### 2.1 Preload
+### Preload
 
 The pseudocode for implementing preload in CommonMatmul is as follows:
 
@@ -65,7 +65,7 @@ The core idea of preload is to load the data of the next tile to be computed bef
 
 For details about preload, see [Pipeline optimization (Preload) in Matrix Multiplication Template Summary](../../../../docs/en/2_Design/01_kernel_design/04_matmul_summary.md).
 
-### 2.2 ShuffleK
+### ShuffleK
 
 ![image-20251209170344805](https://raw.gitcode.com/weixin_42818618/picture0/raw/main/image-20251209170344805.png)
 
@@ -79,11 +79,11 @@ The right figure shows the computation mode after ShuffleK is used for optimizat
 
 The block computation sequence in the figure is `GemmIdentityBlockSwizzle<2,1>`. For details, see [the swizzle explanation](../../../../docs/en/2_Design/01_kernel_design/02_swizzle.md).
 
-### 2.3 Padding
+### Padding
 
 On A2 or A3, when matrix A or B is in ND format (Row-Major or Column-Major), if the stride of the matrix is not 512-byte aligned, the bandwidth of the ND2NZ transfer interface will significantly decrease. To avoid this problem, the AIV is used to convert the data format (or pad the data) of matrix A or B in advance. The purpose is to avoid accessing GM data with a non-512-byte aligned stride during the GM2L1 transfer.
 
-#### 2.3.1 Padding Modes of Matrix A or B
+#### Padding Modes of Matrix A or B
 
 Currently, generalized Matmul supports three padding modes. The enumerated values are defined in [Padding_matmul.hpp](../../../../include/catlass/gemm/kernel/padding_matmul.hpp).
 
@@ -123,7 +123,7 @@ PADDING_NZ has two implementations tailored to different scenarios:
 
 Because PADDING_NZ offers superior overall performance, it is the method actively used in generalized Matmul. The other two padding modes may provide better performance than PADDING_NZ for certain specific shapes, and can be evaluated during fine-tuning phases.
 
-#### 2.3.2 Padding Modes of Matrix C
+#### Padding Modes of Matrix C
 
 Because the computation results of basic blocks are stored in the zN layout on the L0C, a data layout conversion from NZ to ND is required when transferring data from the L0C to the UB. If the stride of matrix C is not 512-byte aligned, significant bandwidth degradation will occur.
 
@@ -148,7 +148,7 @@ if (static_cast<size_t>(m) * n > 2048 * 2048 && n > 256 && (n % 128 != 0)) {
 
 If the total data volume exceeds the L2 cache capacity, the AIV will likely have to read data from the GM when removing the padding. In this scenario, the unpadding overhead increases sharply, causing the execution penalty to outweigh the performance benefits.
 
-#### 2.3.3 Padding Modeling (Determining Whether Matrix A or B Needs to Be Padded)
+#### Padding Modeling (Determining Whether Matrix A or B Needs to Be Padded)
 
 Whether a matrix is padded directly impacts Matmul performance. Padding introduces fixed overheads. If the bandwidth gains realized from an aligned padding layout cannot offset these execution penalties, the padding operation yields a net negative performance return. The performance overhead of padding is driven primarily by two factors:
 
@@ -205,9 +205,9 @@ The parameters `B_aiv`, `B_aic512`, and `T_headcost` can be treated as constants
 
 The formulation above represents a simplified model of the padding selection process. Real-world implementations incorporate more granular constraints. See [select_kernel_bf16.h](../../include/select_kernel_b16.h) for details. Note that the polynomial regression coefficients provided are strictly optimized for A2 and A3 architectures. Targeting other platforms requires standalone profiling and curve fitting.
 
-### 2.4 Read Optimization in Special Scenarios
+### Read Optimization in Special Scenarios
 
-#### 2.4.1 Scenario 1
+#### Scenario 1
 
 ![image-20251210102254855](https://raw.gitcode.com/weixin_42818618/picture0/raw/main/image-20251210102254855.png)
 
@@ -228,13 +228,13 @@ for (int i = 0; i < nValue; ++i) {
 
 When `M` is exceptionally small (typically `M < 8`), the hardware execution overhead of on-the-fly `nd2nz` layout conversion is less efficient than executing explicit line-by-line copies. Consequently, CommonMatmul intercepts these shapes and deploys strided `DataCopy` operations to achieve higher overall instruction throughput.
 
-#### 2.4.2 Scenario 2
+#### Scenario 2
 
 ![image-20251210104718451](https://raw.gitcode.com/weixin_42818618/picture0/raw/main/image-20251210104718451.png)
 
 As illustrated above, when `K = 16`, the structural layout of matrix data on the GM is naturally congruent with its target arrangement inside L1. Under these conditions, the on-the-fly nd2nz unit is redundant. The system defaults to a direct contiguous bulk memory copy, which inherently yields significantly higher effective bandwidth than on-the-fly nd2nz.
 
-#### 2.4.3 Scenario 3
+#### Scenario 3
 
 When matrix A is in Column-Major order and `M = 1`, a naive GM2L1 read accesses exactly one element per row, crippling memory reading efficiency. To mitigate this, matrix A is handled as a `1 × K` Row-Major matrix during computation. Since matrix A represents a vector at this scale, Row-Major and Column-Major representations are functionally equivalent, but treating it as a row vector allows a contiguous layout that vastly increases read efficiency.
 

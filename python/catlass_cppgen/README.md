@@ -1,17 +1,17 @@
 # catlass_cppgen
 
-## 1. 项目介绍
+## 项目介绍
 
 `catlass_cppgen` 是一个基于 Python 的代码生成框架，用于构建和生成 CATLASS 高性能算子。该框架提供了灵活的接口来定义算子参数、选择优化策略，并自动生成对应的 C++ 核函数代码。
 
-### 1.1 主要特性
+### 主要特性
 
 - **算子代码生成**：通过 Python API 定义算子参数，自动生成优化的 C++ 核函数代码
 - **灵活的调优接口**：支持自定义TileShape、DispatchPolicy等参数
 - **多架构支持**：支持多种硬件架构（包括AtlasA2/A3, Ascend950）
 - **类型安全**：提供完整的数据类型和布局抽象
 
-### 1.2 工程结构
+### 工程结构
 
 以下是本项目目录结构说明：
 
@@ -59,9 +59,9 @@
 └── uv.lock
 ```
 
-## 2. 支持的算子
+## 支持的算子
 
-### 2.1 GEMM 类（矩阵乘法）
+### GEMM 类（矩阵乘法）
 
 | 算子类型 | Kernel 类 | 主要特性 | 切分轴 |
 |---------|----------|---------|--------|
@@ -73,13 +73,13 @@
 | **尾块多核 Split-K** | `TailMultiCoreSplitkMatmulKernel` | • 输入张量 A 和 B 为 2 维<br>•  多核切K的尾块优化变体<br>• 支持可选的 Bias 参数 | K |
 | **Stream-K** | `StreamkMatmulKernel` | • 输入张量 A 和 B 为 2 维<br>• 优化动作：Stream-K 调度策略<br>• 支持可选的 Bias 参数 | K |
 
-### 2.2 Group GEMM 类（分组矩阵乘法）
+### Group GEMM 类（分组矩阵乘法）
 
 | 算子类型 | Kernel 类 | 主要特性 | 切分轴 |
 |---------|----------|---------|--------|
 | **分组矩阵乘（M 轴切分）** | `GroupedMatmulSliceMKernel` | 多组不同 M 维度的矩阵乘法 | M |
 
-### 2.3 EVG 后处理 (Epilogue Visitor Graph)
+### EVG 后处理 (Epilogue Visitor Graph)
 
 支持通过EVG(Epilogue Visitor Graph)框架实现后处理功能，支持的后处理类别包括：
 
@@ -103,9 +103,9 @@
  - **组合计算**：支持多个计算节点拼接；
  - **广播计算**：支持行广播计算。
 
-## 3. 安装
+## 安装
 
-### 3.1 从源码安装
+### 从源码安装
 
 1. **构建分发包**：
 
@@ -136,7 +136,7 @@
 
    ```
 
-### 3.2 从本地目录安装
+### 从本地目录安装
 
 如果您想直接从项目目录安装：
 
@@ -145,7 +145,7 @@ pip install .
 
 ```
 
-## 4. 使用示例
+## 使用示例
 
 当前 `catlass_cppgen` 支持 matmul、grouped_matmul 以及 EVG 后处理特性的代码生成。以下是应用`cppgen`的环节示意：
 
@@ -163,7 +163,7 @@ Kernel 对象（调优与特性查询）
  - [`OpTensor` 基础文档](docs/optensor_api.md)
  - [`EVG` 基础文档](docs/evg_api.md)
 
-### 4.1 基础 GEMM
+### 基础 GEMM
 
 以下是一个基础的创建 matmul 算子cppgen对象的示例：
 
@@ -219,7 +219,7 @@ kernel = Gemm(
 ).get_kernels()[0]
 ```
 
-### 4.2 Group GEMM
+### Group GEMM
 
 以下是建立 matmul 算子cppgen对象的示例：
 
@@ -240,7 +240,7 @@ kernels = group_gemm.get_kernels()
 kernels[0].tune(GemmShape(256, 256, 256), GemmShape(256, 256, 64))
 ```
 
-### 4.3 EVG 后处理
+### EVG 后处理
 
 ```python
 # ...

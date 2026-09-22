@@ -1,10 +1,10 @@
 # GEMM Kernel 代码开发详解
 
-## 1. Kernel代码结构概述
+## Kernel代码结构概述
 
 CATLASS模板库中的GEMM Kernel采用了高度模块化的设计，通过模板参数组装不同的组件来实现各种矩阵乘法功能。本文将以`BasicMatmul`为例，详细拆解Kernel代码的核心结构和关键组件。
 
-## 2. 模板组装机制
+## 模板组装机制
 
 所有GEMM Kernel都采用模板类的形式定义，通过模板参数来组装不同的功能组件。以`BasicMatmul`为例：
 
@@ -32,7 +32,7 @@ public:
 };
 ```
 
-### 2.1 核心模板参数
+### 核心模板参数
 
 | 模板参数        | 描述                                       |
 | --------------- | ------------------------------------------ |
@@ -40,7 +40,7 @@ public:
 | BlockEpilogue_  | 负责计算结果的后处理（如激活函数、量化等） |
 | BlockScheduler_ | 负责调度和分配计算任务到不同的计算核心     |
 
-### 2.2 类型导出
+### 类型导出
 
 通过模板参数导出的类型形成了Kernel的核心类型系统，包括：
 
@@ -49,11 +49,11 @@ public:
 - 数据类型（ElementA/B/C/Accumulator）
 - 数据布局（LayoutA/B/C）
 
-## 3. 参数传递机制
+## 参数传递机制
 
 Kernel采用了两层参数结构：`Arguments`（用户接口层）和`Params`（内核执行层）。
 
-### 3.1 Arguments结构
+### Arguments结构
 
 `Arguments`是用户直接使用的参数结构，包含最基本的输入输出信息：
 
@@ -66,7 +66,7 @@ struct Arguments {
 };
 ```
 
-### 3.2 Params结构
+### Params结构
 
 `Params`是内核实际执行时使用的参数结构，包含更详细的执行信息：
 
@@ -94,7 +94,7 @@ struct Params {
 };
 ```
 
-### 3.3 参数转换
+### 参数转换
 
 通过`ToUnderlyingArguments`函数将`Arguments`转换为`Params`：
 
@@ -111,9 +111,9 @@ static Params ToUnderlyingArguments(const Arguments &args, uint8_t *workspace)
 
 `ToUnderlyingArguments`函数由`DeviceGemm`类的`Initialize`函数内部调用。
 
-## 4. 关键函数解析
+## 关键函数解析
 
-### 4.1 CanImplement
+### CanImplement
 
 检查当前硬件和环境是否支持实现该Kernel：
 
@@ -124,7 +124,7 @@ static bool CanImplement(const Arguments &args)
 }
 ```
 
-### 4.2 GetWorkspaceSize
+### GetWorkspaceSize
 
 获取Kernel执行所需的工作区大小：
 
@@ -135,7 +135,7 @@ static size_t GetWorkspaceSize(const Arguments &args)
 }
 ```
 
-### 4.3 operator()
+### operator()
 
 Kernel的核心执行函数，通过模板特化支持不同的核心类型（如AIC、AIV）：
 
@@ -186,25 +186,25 @@ void operator()<AscendC::AIC>(Params const &params) {
 }
 ```
 
-## 5. 执行流程分析
+## 执行流程分析
 
 Kernel的执行流程可以概括为以下几个步骤：
 
-### 5.1 初始化调度器
+### 初始化调度器
 
 ```cpp
 BlockScheduler matmulBlockScheduler(params.problemShape, MakeCoord(L1TileShape::M, L1TileShape::N));
 uint32_t coreLoops = matmulBlockScheduler.GetCoreLoops();
 ```
 
-### 5.2 初始化资源和计算组件
+### 初始化资源和计算组件
 
 ```cpp
 Arch::Resource<ArchTag> resource;
 BlockMmad blockMmad(resource);
 ```
 
-### 5.3 设置全局内存张量
+### 设置全局内存张量
 
 ```cpp
 AscendC::GlobalTensor<ElementA> gmA;
@@ -212,7 +212,7 @@ gmA.SetGlobalBuffer((__gm__ ElementA *)params.ptrA);
 // 设置gmB和gmC...
 ```
 
-### 5.4 循环处理每个计算块
+### 循环处理每个计算块
 
 ```cpp
 for (uint32_t loopIdx = AscendC::GetBlockIdx(); loopIdx < coreLoops; loopIdx += AscendC::GetBlockNum()) {
@@ -234,17 +234,17 @@ for (uint32_t loopIdx = AscendC::GetBlockIdx(); loopIdx < coreLoops; loopIdx += 
 }
 ```
 
-### 5.5 同步操作
+### 同步操作
 
 ```cpp
 AscendC::PipeBarrier<PIPE_ALL>();
 ```
 
-## 6. 不同Kernel的扩展与差异
+## 不同Kernel的扩展与差异
 
 通过对比`BasicMatmul`、`BatchedMatmul`、`QuantMatmul`和`OptimizedMatmul`，我们可以看到它们在基础结构上的共性和扩展差异：
 
-### 6.1 BatchedMatmul扩展
+### BatchedMatmul扩展
 
 `BatchedMatmul`在`BasicMatmul`的基础上增加了批处理支持：
 
@@ -266,7 +266,7 @@ struct Params {
 };
 ```
 
-### 6.2 QuantMatmul扩展
+### QuantMatmul扩展
 
 `QuantMatmul`增加了量化相关的参数和处理：
 
@@ -289,7 +289,7 @@ struct Params {
 };
 ```
 
-### 6.3 OptimizedMatmul扩展
+### OptimizedMatmul扩展
 
 `OptimizedMatmul`增加了Prologue处理和更复杂的参数结构：
 
@@ -316,7 +316,7 @@ class OptimizedMatmul {
 };
 ```
 
-## 7. 总结
+## 总结
 
 CATLASS GEMM Kernel采用了高度模块化和模板化的设计，具有以下特点：
 

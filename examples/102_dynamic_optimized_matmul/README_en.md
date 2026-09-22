@@ -1,12 +1,12 @@
 # DynamicOptimizedMatmul Example Readme
 
-## 1. Introduction
+## Introduction
 
 In the field of high-performance computing and deep learning, matrix multiplication (Matmul) serves as a core operator, making its computational efficiency and generalization capability highly critical. For computational efficiency, the standard evaluation metric is hardware utilization, defined as actual FLOPS divided by theoretical FLOPS. Generalization, however, is difficult to quantify with a single metric. In certain service scenarios, such as recommendation systems, the dimensions of M, N, and K can vary across a range of 10<sup>5</sup>, requiring robust performance across this entire spectrum. Compared to optimization targeting a specific shape or domain, this broad generalization requirement poses a much higher technical challenge.
 
 ## 2 Document Index and Constraints
 
-### 2.1 Project Description
+### Project Description
 
 For details about the generalized Matmul project structure, see [Project Structure Description](<./docs/en/Project Structure_en.md>).
 
@@ -15,7 +15,7 @@ Before compilation, the build system invokes a Python script to generate code, w
 
 DynamicOptimizedMatmul dynamically determines the tiling parameters based on the runtime shape and attempts to select the best template for execution to maximize performance. However, absolute optimal performance is not guaranteed.
 
-### 2.2 Template Documents
+### Template Documents
 
 | Template Name                                                    | Description                                                                   |
 | ---------------------------------------------------------------- | ----------------------------------------------------------------------------- |
@@ -25,7 +25,7 @@ DynamicOptimizedMatmul dynamically determines the tiling parameters based on the
 | [StreamkMatmul](./docs/en/StreamkMatmul_en.md)                   | Multi-core Split-K template with more balanced load                           |
 | [SingleCoreSplitkMatmul](./docs/en/SingleCoreSplitkMatmul_en.md) | Single-core Split-K template                                                  |
 
-### 2.3 Related Constraints
+### Related Constraints
 
 1. The data types of matrices A, B, and C support fp16.
 

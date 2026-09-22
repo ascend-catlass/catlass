@@ -38,7 +38,7 @@ example source
 
 ## Phase 0: Intake & Classification
 
-### 0.1 解析 example
+### 解析 example
 
 - 读取：
   - `examples/<dir>/CMakeLists.txt`
@@ -49,7 +49,7 @@ example source
   - 入口函数名（建议 PascalCase C++ + snake_case Python）
   - 参数特征：是否包含 bias / quant / grouped / rope / mask / workspace
 
-### 0.2 分类规则
+### 分类规则
 
 - dirname 含 `matmul|gemm|gemv` -> JIT 类
 - dirname 含 `conv|flash_attention|mla|fai` -> prebuilt 类
@@ -57,7 +57,7 @@ example source
   - 先按源码依赖（是否强依赖模板宏生成/JIT）判断
   - 仍不明确则问用户
 
-### 0.3 重名检测
+### 重名检测
 
 检查以下是否已存在：
 
@@ -68,7 +68,7 @@ example source
 
 重复时默认"增量更新不覆盖"，除非用户明确要求覆盖。
 
-### 0.4 自动提取 kernel 类型
+### 自动提取 kernel 类型
 
 从 example 的 `CMakeLists.txt` 读取 `cube`/`mix`，自动填入入口 cpp：
 
@@ -111,7 +111,7 @@ python scripts/gen_entry.py <nn> <name>
 
 先预留 ABI，再写实现，避免后续接口漂移。
 
-### 1.1 JIT ABI（matmul family）
+### JIT ABI（matmul family）
 
 在 `include/catlass_kernel_jit.h`：
 
@@ -124,7 +124,7 @@ python scripts/gen_entry.py <nn> <name>
 - 添加函数声明，并写明 example 编号和目录名的 docstring：
   - `@brief Reserved JIT interface for example <nn>_<name>.`
 
-### 1.2 Prebuilt ABI（others）
+### Prebuilt ABI（others）
 
 在 `include/catlass_kernel_prebuilt.h`：
 
@@ -135,13 +135,13 @@ python scripts/gen_entry.py <nn> <name>
   - `MlaParams`
 - 添加函数声明并保留编号 docstring。
 
-### 1.3 聚合头
+### 聚合头
 
 - `include/catlass_kernel.h` 只做聚合 include，不承载具体参数定义。
 
 ## Phase 2: Kernel Integration
 
-### 2.1 JIT 类接入
+### JIT 类接入
 
 在 `kernels/<nn>_<name>/` 创建或更新：
 
@@ -166,20 +166,20 @@ python scripts/gen_entry.py <nn> <name>
 - **Padding 路径需为 `deviceWA`/`deviceWB` 单独分配缓冲区**，通过 `g_catlassWorkspaceAlloc`，不可复用原始 `deviceA`/`deviceB` 指针。模板变更后须清除 JIT 缓存目录（`torch_catlass.clear_jit_cache()`），否则旧 `.so` 仍被命中。
 - 不把 example 的命令行/数据生成逻辑带入内核模板。
 
-### 2.2 Prebuilt 类接入
+### Prebuilt 类接入
 
 在 `kernels/<nn>_<name>/`：
 
 - 使用 prebuilt 方式编译并导出与 ABI 一致的入口函数。
 - 若需 workspace，参数和实际 launch 必须一致（shape、dtype、flags 全对齐）。
 
-### 2.3 构建入口
+### 构建入口
 
 在 `kernels/CMakeLists.txt` 补 `add_subdirectory(<nn>_<name>)`（保持编号顺序）。
 
 ## Phase 3: Torch Adapter & Python Wrapper
 
-### 3.1 C++ 注册
+### C++ 注册
 
 在 `src/catlass_torch.cpp`：
 
@@ -187,7 +187,7 @@ python scripts/gen_entry.py <nn> <name>
 - 非 matmul：按参数语义新增轻量 adapter。
 - 使用既有 `REGISTER_TORCH_FUNC(...)` 注册到 `torch.ops.catlass.*`。
 
-### 3.2 Python 包装
+### Python 包装
 
 在 `torch_catlass/ops/<name>.py`：
 
@@ -205,7 +205,7 @@ python scripts/gen_entry.py <nn> <name>
 
 ## Phase 4: Tests
 
-### 4.1 pytest 用例
+### pytest 用例
 
 新增 `tests/test_<nn>_<name>.py`（建议保留编号，避免重名）。
 
@@ -216,7 +216,7 @@ python scripts/gen_entry.py <nn> <name>
 3. device 为 NPU
 4. 与基线（`torch.matmul` 或 reference kernel）数值对齐（给定 `rtol/atol`）
 
-### 4.2 无设备处理
+### 无设备处理
 
 - 用 `pytest.mark.skipif(torch_npu.npu.device_count() <= 0, ...)` 检查是否有可用的NPU卡。
 - 根据算子适用架构，用`@only_on_2201`或者`@only_on_3510`做隔离，确保测试脚本只在支持的硬件环境下工作。

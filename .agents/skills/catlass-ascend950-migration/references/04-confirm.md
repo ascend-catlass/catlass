@@ -16,7 +16,7 @@ The full phase order is: 1 FRAME, 2 PROBE, 3 ANALYZE, 4 **CONFIRM**, 5
 **IMPLEMENT**, 6 COMPILE, 7 **PROVE**, 8 SCREEN, 9 **CONFIRM-OPT**, 10 APPLY,
 11 REPORT.
 
-## 1. FRAME decisions that bound both gates
+## FRAME decisions that bound both gates
 
 `init` freezes the FRAME decision. Access is declared there, not inferred later:
 
@@ -33,7 +33,7 @@ A campaign with optimization enabled can still set aside a specific unit at GATE
 with `--skip-optimize`. That decision preserves the migration work but prevents that
 unit from entering the optimization path after it reaches `PROVEN`.
 
-## 2. Phase 4 — CONFIRM / GATE 1
+## Phase 4 — CONFIRM / GATE 1
 
 ANALYZE is read-only. After every unparked unit has passed its analyzed check, render
 rather than write:
@@ -90,7 +90,7 @@ IMPLEMENT and PROVE compare it to the present artifacts before a build or device
 required after any packet drift. This detects drift between packet and command; it does not authenticate
 an operator. The human decision remains an attended review responsibility.
 
-## 3. Phase 9 — CONFIRM-OPT / GATE 2
+## Phase 9 — CONFIRM-OPT / GATE 2
 
 GATE 2 exists only when campaign optimization is enabled. It follows Phase 8 SCREEN,
 which reads the migrated, proven unit and records fresh applicability, manifest,
@@ -128,7 +128,7 @@ authorizes no rewrite for that unit. GATE 2 binds only the screened manifest and
 chosen apply/skip and coexist/replace decision. It does not reopen the migration
 route, contract, or GATE-1 authorization.
 
-## 4. Repair and evidence boundary
+## Repair and evidence boundary
 
 A structural repair may be declared: for example, a missing required artifact field,
 an invalid path, or a manifest that no longer describes the files it names. Declare

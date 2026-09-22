@@ -38,9 +38,9 @@ description: Catlass Gemm/Tile组件单元测试编写技能。当需要为 Copy
 4. 运行验证     → cmake 构建 + gtest 测试
 ```
 
-## 1. About Tile-level utilities
+## About Tile-level utilties
 
-### 1.1 Top to down
+### Top to down
 
 Tile 层搬运组件的公共入口头文件按 `CATLASS_ARCH` 宏分发到架构实现，测试时只需 include 公共头即可（如 `catlass/gemm/tile/copy_gm_to_l1.hpp`）。以 GM→L1 为例：
 
@@ -49,7 +49,7 @@ Tile 层搬运组件的公共入口头文件按 `CATLASS_ARCH` 宏分发到架�
 
 每条通路的 Struct 族谱（各特化 + 关键分支逻辑）见对应 `referrence/` 文件的「组件族谱」章节。
 
-### 1.2 What is the kind of this utility?
+### What is the kind of this utilty?
 
 编写 UT 前先定位组件的三个特征：
 
@@ -59,7 +59,7 @@ Tile 层搬运组件的公共入口头文件按 `CATLASS_ARCH` 宏分发到架�
 
 确定后可直接查阅对应 `referrence/` 文件里的族谱表以选定待测特化，已有的测试组件位于 `tests/unittest/catlass/gemm/tile/` 目录下。
 
-### 1.3 Evaluation metrics
+### Evaluation metrics
 <!-- 从Tile组件到单元测试件需包含的测试维度 -->
 
 对每个待测特化，需覆盖以下测试维度的组合：
@@ -72,9 +72,9 @@ Tile 层搬运组件的公共入口头文件按 `CATLASS_ARCH` 宏分发到架�
 | **Layout (Src→Dst)** | RowMajor↔zN、ColumnMajor↔nZ、zN↔zZ、nZ↔zN、Padding*、VectorLayout、NDC1HWC0 … |
 | **分支路径** | 正常 stride / 长 stride(逐行逐列) / 1-row 或少行 / C0 精确对齐 / 转置 / 量化(NO_QUANT/PER_TENSOR/PER_CHANNEL) |
 
-## 2. Begin writing the unittest case
+## Begin writing the unittest case
 
-### 2.1 Key notes for the stub
+### Key notes for the stub
 
 测试通过 **stub + logger** 捕获底层 AscendC API 调用并对参数做断言，不做真实数据搬运。
 
@@ -103,7 +103,7 @@ args[3]  = (可选) padParams / scale / 附加参数
 
 > **注意 `Value<T>()` 的类型必须与实际 stub 捕获的结构体类型一致**，否则字段错位。`LoadData2DParams` 与 `LoadData2dTransposeParams` 字段偏移不同（见 L1→L0A/L0B 参考文件的字段布局对照表）。
 
-### 2.2 The test fixture
+### The test fixture
 
 Fixture 继承基类 `AscendCTest`，在 `setShape<Element[, isTrans]>()` 中按布局是否转置预算好 round / fractal 成员，供各用例复用（矩阵类关键常量如 `BYTE_PER_C0=32` 等定义在 `catlass/catlass.hpp`）。
 
@@ -111,7 +111,7 @@ Fixture 继承基类 `AscendCTest`，在 `setShape<Element[, isTrans]>()` 中按
 
 用例主体的通用步骤：定义类型 → 实例化被测组件 → 创建 dummy tensor → `setShape` + `setLayout` → （可选）校验 layout 属性以确认进入目标分支 → 执行被测算子 → 从 logger 取日志做断言。各通路的完整测试文件模板可见对应的 `referrence/` 文件。
 
-### 2.3 Make assertions
+### Make assertions
 
 断言的核心：验证内容： 
  - API 名称
@@ -133,7 +133,7 @@ Fixture 继承基类 `AscendCTest`，在 `setShape<Element[, isTrans]>()` 中按
 |`LoadDataWithTranspose`|`LoadData2dTransposeParams`|`startIndex, repeatTimes, srcStride, dstGap, dstFracGap`|
 |`Mmad`|`MmadParams`|`m, n, k`|
 
-## 3. Build and run
+## Build and run
 
 切换至CATLASS根目录下，执行编译和测试动作：
 
@@ -144,9 +144,9 @@ cmake --build . --target catlass_unittest
 
 各通路精确的 target 名与可执行名见对应 `referrence/` 文件的「编译与运行」章节。
 
-## 4. Styles, questions and common problems
+## Styles, questions and common problems
 
-### 4.1 Style
+### Style
 <!-- 关于注释、变量，尽可能使用Fixture内的规则 -->
 
 **变量命名规范**：从日志提取结构体指针时变量名必须与结构体类型对应，一律用 `const auto*` 或 `const AscendC::XxxParams*`，禁止无 cv 限定的裸指针，禁止 `p` / `params` 等不规范简称。
@@ -171,7 +171,7 @@ LayoutSrc layoutSrc(_row, _col, C0_NUM_PER_FRACTAL, _row_round / C0_NUM_PER_FRAC
 
 > `isTrans` 必须与待测布局匹配：zN 用默认（`false`），nZ 用 `setShape<Element, true>()`，否则 round 基数与布局不符。
 
-### 4.2 Questions commonly asked
+### Questions commonly asked
 
 - **架构守卫宏**：每个测试文件必须包裹 `#if !defined(CATLASS_ARCH) || CATLASS_ARCH == 2201`（或 `3510`）… `#endif`，避免在错误 ARCH 配置下被编译。
 - **ELE_NUM_PER_C0 计算**：推荐 bit-level 以支持子字节类型（`BytesToBits(BYTE_PER_C0) / SizeOfBits<Element>::value`）；byte-level 类型可用 `BYTE_PER_C0 / sizeof(Element)`。辅助函数 `GetEleNumPerC0<Element>()` 已封装。
@@ -179,7 +179,7 @@ LayoutSrc layoutSrc(_row, _col, C0_NUM_PER_FRACTAL, _row_round / C0_NUM_PER_FRAC
 - **布局连续性验证**：`isContiguous()` 需 include `common/helper.hpp`，重载支持 RowMajor / ColumnMajor / zN / nZ / zZ / nN / VectorLayout。
 - **zN 布局创建**：zN 是 Element-dependent 的，须用目标类型 `LayoutDst::template MakeLayout<ElementDst>(m, n)` 创建。
 
-### 4.3 Problems commonly met
+### Problems commonly met
 
 - **Nd2NzParams 单位**：`nValue` / `dValue` / `srcDValue` 为元素个数；`dstNzC0Stride` / `dstNzNStride` / `dstNzMatrixStride` 为 **C0 个数**（需除 `ELE_NUM_PER_C0`，勿填元素数）。
 - **ColumnMajor 语义反转**：ColumnMajor→nZ 时 `nValue`=cols、`dValue`=rows，是 RowMajor→zN 的镜像。
@@ -187,7 +187,7 @@ LayoutSrc layoutSrc(_row, _col, C0_NUM_PER_FRACTAL, _row_round / C0_NUM_PER_FRAC
 - **DataCopyPad 参数个数差异**：CopyGm2Ub 是 4-param（含 `padParams`），CopyUb2Gm 是 3-param（无 `padParams`），断言 `args.size()` 时勿混。
 - **量化路径日志序列**（L0C→GM）：NO_QUANT RowMajor 出口是 `SetFixpipeNz2ndFlag` + `DataCopy` 两条日志；PER_TENSOR/PER_CHANNEL 走单条 `Fixpipe`（PER_CHANNEL 为 4-param）。
 
-## 5. Checklists and output
+## Checklists and output
 
 **输出物**：每条通路一个测试文件（`tests/unittest/catlass/.../test_tile_copy_<src>_to_<dst>.cpp`），按对应 `referrence/` 文件的分支覆盖率清单逐项建 `TEST_F`（或`TEST_P`）。
 

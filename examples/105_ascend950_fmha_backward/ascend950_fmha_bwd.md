@@ -43,7 +43,7 @@ FMHA Backward面向 Ascend 950，采用 packed TND 布局，支持 `fp16`、`bf1
 
 ## 四、计算流程
 
-### 1、数学定义
+### 数学定义
 
 ```text
 dp = dO @ V^T                  (mm1)
@@ -60,7 +60,7 @@ dQ,dK *= scale；GQA 归约        (Post)
 - LSE 前向给出 → P 在线重算：不存 P（省一次 128×128 中间量的存储与搬运）；
 - scale 分两处乘：V2 提前乘入 S，Post 再对 dQ/dK 补乘、dV 不乘——与梯度公式的 scale 归属对齐；
 
-### 2、单块执行过程
+### 单块执行过程
 
 ```text
 1. AIC 执行 mm2(S) / mm1(dp)，L0C 经 FixPipe SPLIT_M 按行拆半双写配对 AIV UB，发 C2/C1

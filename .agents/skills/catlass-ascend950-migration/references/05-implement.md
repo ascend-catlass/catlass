@@ -4,7 +4,7 @@ IMPLEMENT begins only after Phase 4 CONFIRM / GATE 1 has authorized the unit. It
 not a design phase: the approved route, frozen external contract, writable paths,
 shared-component ledger, registration surfaces, and proof plan are its inputs.
 
-## 1. Ownership and order
+## Ownership and order
 
 The lead owns every shared change and all execution. An Implementer owns code only
 inside one authorized unit directory. Work one unit at a time in the ledger order:
@@ -27,7 +27,7 @@ surface and can make configuration observe a directory before it has been create
 An Implementer never writes a registry, shared header, another unit, or the A2
 source. It never performs a build, proof, profile, or device run.
 
-## 2. Preserve the migration contract
+## Preserve the migration contract
 
 The target implementation preserves the source's:
 
@@ -61,7 +61,7 @@ external contract:
 
 Phase 7 defines the evidence schema and verdict.
 
-## 3. Shared changes and regression ownership
+## Shared changes and regression ownership
 
 A shared-component ledger row is either `generalize` or `add`. Before changing its
 file, inspect the current target tree's complete declaration and specialization set,
@@ -81,7 +81,7 @@ member spelling, and registration form. The pinned CATLASS source is a technical
 reference for patterns; the target tree and `profile.json` are the source of truth
 for names, macros, signatures, build targets, and registration locations.
 
-## 4. Architecture-bound details to investigate
+## Architecture-bound details to investigate
 
 The following are investigation prompts, not templates to paste:
 
@@ -110,7 +110,7 @@ whole path is evidenced from the unit: storage is int4, the Vector stage perform
 cast, and Cube receives int8. Do not infer that exception from a type name or a
 single declaration.
 
-## 5. Registration and executable identity
+## Registration and executable identity
 
 `profile.json` owns registration facts. The lead uses its declared surfaces and the
 unit's discovered leaf build declaration to determine:
@@ -124,7 +124,7 @@ A directory, aggregate target, or test row is not automatically a runnable leaf.
 Do not derive an executable name from a directory name. The Implementer returns text;
 the lead reviews and lands it on each declared surface.
 
-## 6. Scope check and repair boundary
+## Scope check and repair boundary
 
 `check --phase implemented` checks the target-tree diff against the baseline
 recorded at `init`. It requires a change within the current unit's write grant and

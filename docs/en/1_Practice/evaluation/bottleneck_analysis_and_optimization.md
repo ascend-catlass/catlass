@@ -4,7 +4,7 @@
 
 This document describes how to use performance tuning tools to obtain profile data, locate performance bottlenecks, and select corresponding tuning strategies for different bottleneck types during CATLASS operator development.
 
-## 1. Profile Data Collection Tools
+## Profile Data Collection Tools
 
 CATLASS sample projects adapt to the mainstream performance tuning tools provided by CANN. For details about how to use these tools, see [CATLASS Performance Profiling and Tuning](../08_evaluation.md).
 
@@ -109,7 +109,7 @@ Each output line contains information such as `case_id`, `task_duration(us)`, `o
 | Whole-network scenario| Profiling (`msprof`)| Profile operator performance in the context of the whole network|
 | Tiling parameter selection| msTuner_CATLASS | Auto search for optimal combinations of TileShape and Swizzle|
 
-## 2. Theoretical Performance Calculation
+## Theoretical Performance Calculation
 
 Before analyzing profile data, calculate the theoretical performance values as a reference. Theoretical values represent the ideal upper bound of operator performance and are used to gauge the room for tuning.
 
@@ -133,7 +133,7 @@ The theoretical execution time of computation-related pipelines (Cube/Vector/Sca
 
 Cube and Vector/Scalar are calculated separately and then summed, because the three can execute in parallel to a certain extent. In practice, the larger of the two is used as the primary reference.
 
-## 3. Performance Bottleneck Analysis Methods
+## Performance Bottleneck Analysis Methods
 
 After obtaining profile data and calculating theoretical values, processes that differ significantly from theoretical values or have high execution times are the bottlenecks. The following four analysis methods are recommended; use them in combination based on the actual situation.
 
@@ -185,7 +185,7 @@ Launch overhead includes kernel launch, instruction fetch TLB misses, bank confl
 
 Method: Use the TaskDuration data of an empty kernel in on-board profiling to view the launch overhead of each core, and then find the optimal configuration by adjusting the number of cores and the kernel type.
 
-## 4. Optimization Methods
+## Optimization Methods
 
 Select the corresponding optimization strategy based on the bottleneck analysis results.
 
@@ -213,7 +213,7 @@ Applicable scenarios: Inference latency is in microseconds, and launch overhead 
 
 Methods: Adjust the number of cores to balance compute parallelism and kernel launch overhead. Select kernel types that reduce unnecessary resource initialization.
 
-## 5. Tools and Documents
+## Tools and Documents
 
 | Tool| Purpose| CATLASS Documentation|
 | --- | --- | --- |

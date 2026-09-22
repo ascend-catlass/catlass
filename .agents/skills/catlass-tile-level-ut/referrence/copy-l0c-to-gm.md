@@ -4,9 +4,9 @@
 
 ---
 
-## 1. 组件族谱
+## 组件族谱
 
-### 1.1 Non-TLA 特化
+### Non-TLA 特化
 
 | # | LayoutDst | ScaleGranularity | ElementSrc→Dst | 搬运API | Params类型 | Log序列 |
 |---|-----------|-----------------|-----------------|---------|-----------|---------|
@@ -16,7 +16,7 @@
 | 4 | `zN` | `NO_QUANT` | float→float | `DataCopy` | `DataCopyCO12DstParams` | `DataCopy` (nz2ndEn=false, channelSplit=true) |
 | 5 | `zN` | `NO_QUANT` | float→half | `DataCopy` | `DataCopyCO12DstParams` | `DataCopy` (nz2ndEn=false) |
 
-### 1.2 TLA 变体（CopyL0CToGmTla）
+### TLA 变体（CopyL0CToGmTla）
 
 | # | LayoutDst | ScaleGranularity | 搬运API | 特点 |
 |---|-----------|-----------------|---------|------|
@@ -25,7 +25,7 @@
 | 9 | RowMajor | PER_TENSOR | `Fixpipe<CFG_ROW_MAJOR>` | 有 `Params{float scale}` 成员 |
 | 10 | RowMajor | PER_CHANNEL | `Fixpipe<CFG_ROW_MAJOR>` + quant tensor | 4-param |
 
-### 1.3 QuantMode 映射（CopyL0CToDstQuantMode）
+### QuantMode 映射（CopyL0CToDstQuantMode）
 
 | ElementSrc | ElementDst | NO_QUANT | PER_TENSOR | PER_CHANNEL |
 |-----------|-----------|----------|------------|-------------|
@@ -35,7 +35,7 @@
 
 ---
 
-### 1.4 断言必验字段
+### 断言必验字段
 
 |API|Params 类型|必验字段|
 |---|---|---|
@@ -45,9 +45,9 @@
 
 ---
 
-## 2. 测试基础设施
+## 测试基础设施
 
-### 2.1 关联Stub文件
+### 关联Stub文件
 
 | 文件 | 作用 |
 |------|------|
@@ -58,7 +58,7 @@
 | `common/helper.hpp` | `setLayout()` / `isContiguous()` |
 | `common/shape.hpp` | `TestMatrixShapeWithUnitflag` |
 
-### 2.2 测试Fixture成员
+### 测试Fixture成员
 
 `TileCopyTest` 提供矩阵 shape 与量化相关成员，`TestMatrixShapeWithUnitflag` 用于参数化 shape：
 
@@ -76,7 +76,7 @@ struct TestMatrixShapeWithUnitflag : public TestMatrixShape {
 };
 ```
 
-### 2.3 日志索引约定
+### 日志索引约定
 
 ```cpp
 // DataCopy 路径 (NO_QUANT):
@@ -89,9 +89,9 @@ logs[0] = Fixpipe(dst, src, [scale,] FixpipeParamsC310)          // 单步完成
 
 ---
 
-## 3. 断言模式
+## 断言模式
 
-### 3.1 RowMajor NO_QUANT (#1)
+### RowMajor NO_QUANT (#1)
 
 RowMajor 布局下无量化出口，日志包含两步：先 `SetFixpipeNz2ndFlag` 设置 ND→NZ 标志，再 `DataCopy` 执行实际搬运。`nz2ndEn=true` 表示启用 NZ2ND 转换。
 
@@ -110,7 +110,7 @@ ASSERT_EQ(p->unitFlag, _unitFlag);
 ASSERT_EQ(p->quantPre, QuantMode_t::NoQuant);
 ```
 
-### 3.2 RowMajor PER_TENSOR
+### RowMajor PER_TENSOR
 
 PER_TENSOR 量化出口，使用 `Fixpipe<CFG_ROW_MAJOR>` API 一次性完成反量化+搬运。需额外验证 `deqScalar` 和 `FixpipeConfig` 的 `format` 字段。
 
@@ -130,7 +130,7 @@ auto* cfg = logs[0].GetArgsTAt(2).Value<AscendC::FixpipeConfig>();
 ASSERT_EQ(cfg->format, CO2Layout::ROW_MAJOR);
 ```
 
-### 3.3 RowMajor PER_CHANNEL (#3)
+### RowMajor PER_CHANNEL (#3)
 
 PER_CHANNEL 量化出口，与 PER_TENSOR 类似但多一个 scale tensor 参数（args.size()==4）。需验证量化为 `VQ*_PRE` 模式。
 
@@ -144,7 +144,7 @@ ASSERT_EQ(p->nSize, _n);
 ASSERT_EQ(p->quantPre, QuantMode_t::VQF322F16_PRE);
 ```
 
-### 3.4 zN NO_QUANT (#4, #5)
+### zN NO_QUANT (#4, #5)
 
 zN 布局下无量化出口，与 RowMajor 不同——没有 `SetFixpipeNz2ndFlag` 前置调用。`nz2ndEn=false`，`float→float` 时 `channelSplit=true`。
 

@@ -4,7 +4,7 @@
 
 该文档主要说明CATLASS样例开发中精度分析的基础知识，包括样例精度的含义、精度比对方式，以及如何调用CATLASS已有的Golden函数计算标杆结果并进行精度比对。
 
-## 1. 样例精度的含义
+## 样例精度的含义
 
 在CATLASS算子开发中，"样例精度"指的是**NPU上算子实际计算结果与CPU上标杆（Golden）计算结果之间的一致性程度**。精度是衡量算子正确性的核心指标，只有精度达标的算子才能用于实际业务场景。
 
@@ -14,11 +14,11 @@
 2. 将NPU侧算子的实际输出与标杆进行比对；
 3. 根据数据类型和计算规模，判断误差是否在允许范围内。
 
-## 2. 精度比对方式
+## 精度比对方式
 
 CATLASS针对不同数据类型采用不同的精度比对策略。
 
-### 2.1 浮点类型：相对误差校验
+### 浮点类型：相对误差校验
 
 对于`half`（fp16）、`float`（fp32）、`bfloat16`等浮点类型，由于NPU硬件计算与CPU计算在舍入方式、累加顺序等方面存在差异，允许一定的相对误差。比对公式为：
 
@@ -40,7 +40,7 @@ $$
 | < 2048   | 1/128 |
 | ≥ 2048   | 1/64  |
 
-### 2.2 浮点标杆的升精度计算
+### 浮点标杆的升精度计算
 
 **浮点类型的标杆计算必须采用升精度策略**，这是保证精度分析可靠性的关键。具体来说：
 
@@ -61,7 +61,7 @@ std::vector<float> hostGolden(lenC);
 golden::ComputeMatmul(options.problemShape, hostA, layoutA, hostB, layoutB, hostGolden, layoutC);
 ```
 
-### 2.3 整数类型：二进制一致性校验
+### 整数类型：二进制一致性校验
 
 对于`int32_t`等整数类型，由于整数运算不存在舍入误差，要求**NPU输出与标杆完全一致（二进制一致）**。比对时直接检查差值是否为0：
 
@@ -81,7 +81,7 @@ std::vector<uint64_t> CompareData(const std::vector<int32_t>& result, const std:
 }
 ```
 
-### 2.4 误差指标说明
+### 误差指标说明
 
 CATLASS还提供了更精细的误差指标`ErrorMetrics`，用于评估NPU输出相对于同精度CPU计算结果的误差比率：
 
@@ -93,7 +93,7 @@ CATLASS还提供了更精细的误差指标`ErrorMetrics`，用于评估NPU输�
 
 这些指标将NPU输出和同精度CPU输出分别与高精度Golden比对，计算两者的误差比率。若比率在阈值范围内（默认MARE ≤ 5、MERE ≤ 1.5、RMSE ≤ 1.5），则认为精度合格。这用于判断NPU计算精度是否与同精度CPU计算处于同一水平。
 
-## 3. CATLASS Golden函数调用
+## CATLASS Golden函数调用
 
 CATLASS在`examples/common/golden.hpp`中提供了统一的Golden函数入口，该头文件聚合了以下模块：
 
@@ -112,7 +112,7 @@ CATLASS在`examples/common/golden.hpp`中提供了统一的Golden函数入口，
 
 所有Golden函数位于`Catlass::golden`命名空间下。
 
-### 3.1 生成随机测试数据：FillRandomData
+### 生成随机测试数据：FillRandomData
 
 `FillRandomData`用于生成指定范围内的随机数据，支持多种数据类型：
 
@@ -140,7 +140,7 @@ std::vector<int8_t> hostA(lenA);
 golden::FillRandomData<int8_t, int>(hostA, -128, 127);  // int8_t 使用整数范围
 ```
 
-### 3.2 计算标杆结果：ComputeMatmul
+### 计算标杆结果：ComputeMatmul
 
 `ComputeMatmul`在CPU侧以升精度方式计算矩阵乘法的理论正确结果：
 
@@ -180,7 +180,7 @@ golden::ComputeMatmul(options.problemShape, hostA, layoutA, hostB, layoutB, host
 
 上述标杆函数若不满足业务场景需要，开发者也可自行增加新的标杆函数。
 
-### 3.3 精度比对：CompareData
+### 精度比对：CompareData
 
 `CompareData`将NPU实际输出与标杆结果进行比对，返回错误元素的索引列表：
 
@@ -208,7 +208,7 @@ if (errorIndices.empty()) {
 }
 ```
 
-### 3.4 完整示例
+### 完整示例
 
 以下摘自`examples/00_basic_matmul/basic_matmul.cpp`，展示了一个完整的精度分析流程：
 
@@ -241,7 +241,7 @@ if (errorIndices.empty()) {
 }
 ```
 
-## 4. 总结
+## 总结
 
 CATLASS的精度分析遵循"**升精度计算标杆 + 分类型比对**"的核心原则：
 

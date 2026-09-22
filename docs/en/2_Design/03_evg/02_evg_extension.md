@@ -86,7 +86,7 @@ typename ClampMinOp::Arguments args{{0.0f}};
 
 ### Current Constraints
 
-#### 1. Only Pure Computation
+#### Only Pure Computation
 
 In the current implementation, `ComputeFn` only carries out computation within UB. The following responsibilities remain at the node layer:
 
@@ -98,14 +98,14 @@ In the current implementation, `ComputeFn` only carries out computation within U
 
 These responsibilities are not handled in `ComputeFn`.
 
-#### 2. Type Rules Follow `VisitorCompute`
+#### Type Rules Follow `VisitorCompute`
 
 Currently, `VisitorCompute` requires that all input types be equal to `ElementCompute`. Therefore:
 
 - In mixed precision scenarios, `VisitorCast` is typically inserted first.
 - Input type compatibility is still handled in the graph, not expanded in `ComputeFn`.
 
-#### 3. Barriers Added for Multi-Step V Computation
+#### Barriers Added for Multi-Step V Computation
 
 If an `operator()` contains multi-step V computation, `AscendC::PipeBarrier<PIPE_V>()` should be added between steps, similar to `AddRelu`.
 
@@ -114,11 +114,11 @@ In short:
 - Single atomic instructions usually do not require additional barriers.
 - Multi-step chained computation usually requires barriers.
 
-#### 4. Multi-Input Operators Follow Existing Expansion
+#### Multi-Input Operators Follow Existing Expansion
 
 Multi-input operators like `Add` and `Mul` are currently implemented using chained expansion. When adding a multi-input operator, try to follow existing patterns to avoid introducing a new call convention.
 
-#### 5. Keep Aggregate Initialization Friendly
+#### Keep Aggregate Initialization Friendly
 
 `VisitorCompute` constructs operators as `Op<ElementCompute>{...}`. When adding a `ComputeFn`, keeping simple fields and aggregate initialization better aligns with the existing implementation.
 
@@ -213,7 +213,7 @@ struct VisitorSomeNode : VisitorImpl<> {
 
 ### Current Constraints
 
-#### 1. Stage Semantics Must Not Be Disrupted
+#### Stage Semantics Must Not Be Disrupted
 
 Node logic is organized in three stages:
 
@@ -227,16 +227,16 @@ Clear rules:
 - Cross-stage nodes are allowed, but each step is placed separately.
 - Actions that belong in `STORE` should not be moved to `COMPUTE`.
 
-#### 2. Node Responsibilities Remain Single
+#### Node Responsibilities Remain Single
 
 The current implementation favors letting one node take on only one type of responsibility, such as reading, computing, writing, or broadcasting.
 Compound behaviors like "Read GM + Compute + Write GM" are better split into multiple nodes, which better aligns with the existing graph organization.
 
-#### 3. Layouts Are Always Interpreted as Full Tensors
+#### Layouts Are Always Interpreted as Full Tensors
 
 If a node has a `layout`, it describes a full GM tensor, not the current tile. The current implementation follows this principle. When adding a new node, keep consistency.
 
-#### 4. UB Allocation Convention Remains Consistent
+#### UB Allocation Convention Remains Consistent
 
 If `get_callbacks` allocates UB, follow these principles:
 
@@ -245,11 +245,11 @@ If `get_callbacks` allocates UB, follow these principles:
 - The size is deduced from `compute_length` and element size.
 - The allocation result must not exceed the UB upper limit allowed by the current architecture.
 
-#### 5. Do Not Manage Outer Events Inside a Node
+#### Do Not Manage Outer Events Inside a Node
 
 EVG's double buffering and event synchronization are managed uniformly by `BlockEpilogue`. Nodes are only responsible for executing by stage. If a node has multi-step V computation, you may add `AscendC::PipeBarrier<PIPE_V>()`. Outer synchronization is still managed by `BlockEpilogue`.
 
-#### 6. `Arguments` Continues to Support Direct Write
+#### `Arguments` Continues to Support Direct Write
 
 After adding a new node, the user should still be able to directly write aggregate initialization for the entire graph.
 
@@ -264,7 +264,7 @@ typename EVG::Arguments args{
 
 If a node significantly complicates the parameter initialization of the entire graph, it usually indicates that the interface design is somewhat distant from existing conventions.
 
-#### 7. Reuse Existing Nodes First, Then Decide Whether to Add a New One
+#### Reuse Existing Nodes First, Then Decide Whether to Add a New One
 
 If the requirement is simply to add an element-wise operator, continue with `ComputeFn + VisitorCompute`.
 Add a new node only when the existing nodes cannot express the required data access, layout, or resource behavior.

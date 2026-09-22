@@ -6,7 +6,7 @@ The StreamkMatmul template is designed for more granular load balancing. Compare
 
 For detailed principles of the StreamkMatmul template, refer to the paper [Stream-K: Work-centric Parallel Decomposition for Dense Matrix-Matrix Multiplication on the GPU](https://arxiv.org/abs/2301.03598).
 
-### 1.1 Template Principles
+### Template Principles
 
 ![image-20260121101922888](https://raw.gitcode.com/weixin_42818618/picture0/raw/main/image-20260121101922888.png)
 
@@ -24,11 +24,11 @@ This ensures the second-round load is perfectly balanced. Some cores will proces
 
 Each core is allocated two workspace slots. Total workspace size is 2 × m1 × n1 × sizeof(ElementAccumulator) × CoreNum. The workspace size is fixed and independent of the input shape. Upon completion of the Matmul kernel, the AIV units accumulate partial sums to produce the final result. For instance, if task block 20 consists of two partial sums computed by core 0 and core 1, the two AIVs associated with core 0 perform the reduction. If task block 21 is split across core 1, core 2, and core 3, the four AIVs for core 1 and core 2 handle the reduction.
 
-### 1.2 Key Optimization: Tail-Round Splitting
+### Key Optimization: Tail-Round Splitting
 
 Only the final round of tasks is split. In all preceding rounds, the K-dimension is not partitioned, and results are written directly to GM_C. During the tail round, each core writes its partial sums to the workspace, which are then reduced by the corresponding AIVs. Since non-tail rounds are inherently balanced, bypassing K-splitting for them reduces synchronization and accumulation overhead.
 
-### 1.3 Key Optimization: Early Execution of the Tail Round
+### Key Optimization: Early Execution of the Tail Round
 
 The tail round is advanced to the second-to-last position in the execution sequence:
 
@@ -36,10 +36,10 @@ The tail round is advanced to the second-to-last position in the execution seque
 
 By initiating the tail round early, the Vector engine can begin partial sum accumulation in parallel with the Cube engine's remaining computations, effectively masking the Vector reduction overhead.
 
-### 1.4 Other Optimizations
+### Other Optimizations
 
 The StreamkMatmul template incorporates existing CommonMatmul optimizations, including [Preload, ShuffleK, Padding, and specialized read optimizations](./CommonMatmul_en.md).
 
-## 2. Application Scenarios
+## Application Scenarios
 
 1. Scenarios with significant load imbalance in the tail round.

@@ -29,18 +29,18 @@ DLPack 接入教程见 [Host Tensor 接入](../kernel_development/core_concepts/
 
 ## 目录
 
-- [1. 装饰器](#1-装饰器)
-- [2. 编译与启动](#2-编译与启动)
-  - [2.1 编译](#21-编译)
-  - [2.2 启动](#22-启动)
-  - [2.3 查看 IR](#23-查看-ir)
-- [3. Host Tensor](#3-host-tensor)
-  - [3.1 创建与绑定](#31-创建与绑定)
-  - [3.2 动态 Layout](#32-动态-layout)
+- [1. 装饰器](#%E8%A3%85%E9%A5%B0%E5%99%A8)
+- [2. 编译与启动](#%E7%BC%96%E8%AF%91%E4%B8%8E%E5%90%AF%E5%8A%A8)
+  - [2.1 编译](#%E7%BC%96%E8%AF%91)
+  - [2.2 启动](#%E5%90%AF%E5%8A%A8)
+  - [2.3 查看 IR](#%E6%9F%A5%E7%9C%8B-ir)
+- [3. Host Tensor](#host-tensor)
+  - [3.1 创建与绑定](#%E5%88%9B%E5%BB%BA%E4%B8%8E%E7%BB%91%E5%AE%9A)
+  - [3.2 动态 Layout](#%E5%8A%A8%E6%80%81-layout)
 
 ---
 
-## 1. 装饰器
+## 装饰器
 
 Host 侧 `@tla.kernel` 入口、`@tla.jit` device helper，以及 Host 侧 `@dataclass` 打包。
 被装饰的 kernel 函数体在 Host 端不执行。
@@ -272,14 +272,14 @@ artifact(tiling, block_num=1)
 
 ---
 
-## 2. 编译与启动
+## 编译与启动
 
 将装饰后的 kernel 编译为设备二进制并启动。同一份二进制需要多次启动时，用
 `tla.compile` 获取可调用的 `JitCompiledFunction`；直接调用它时会延迟创建并复用内部
 executor。缓存 / 架构 / IR dump 等非函数参数见
 [环境变量](../kernel_development/core_concepts/env_vars.md)。
 
-### 2.1 编译
+### 编译
 
 生成设备二进制。日常入口是 `tla.compile`；
 `TlaJitFunction.compile` 是装饰后函数上的底层辅助接口。
@@ -409,7 +409,7 @@ compiled = tla.compile(
 
 ---
 
-### 2.2 启动
+### 启动
 
 在 NPU 上运行已编译的 kernel。直接调用 `tla.compile` 返回的
 `JitCompiledFunction`。
@@ -462,7 +462,7 @@ compiled(args=(tx, ty), block_num=1)
 
 ---
 
-### 2.3 查看 IR
+### 查看 IR
 
 导出前端 TLA IR，不生成设备二进制，也不启动。
 
@@ -500,11 +500,11 @@ print(text[:500])
 
 ---
 
-## 3. Host Tensor
+## Host Tensor
 
 构造 Host 侧 `tla.Tensor`，并可将静态 layout 尺寸标为动态，使同一份编译产物可在不同 shape 下运行。详见 [静态与动态 Layout](../kernel_development/core_concepts/layout.md)。
 
-### 3.1 创建与绑定
+### 创建与绑定
 
 用 `from_dlpack` 绑定真实 NPU 缓冲，或用 `make_fake_tensor` 造仅含元数据的类型样本。
 
@@ -612,7 +612,7 @@ fzn = make_fake_tensor(
 
 ---
 
-### 3.2 动态 Layout
+### 动态 Layout
 
 将静态 layout 尺寸标为动态。详见 [静态与动态 Layout](../kernel_development/core_concepts/layout.md)。
 

@@ -221,7 +221,7 @@ int main(int argc, const char **argv) {
 
 ## Detailed Explanation of Core Implementation Code
 
-### 1. Environment Initialization and Resource Allocation
+### Environment Initialization and Resource Allocation
 
 This section of the code performs the following tasks:
 
@@ -257,7 +257,7 @@ LayoutB layoutB{k, n};
 LayoutC layoutC{m, n};
 ```
 
-### 2. Input Data Preparation
+### Input Data Preparation
 
 This section of the code performs the following tasks:
 
@@ -271,7 +271,7 @@ golden::FillRandomData<fp16_t>(hostA, -5.0f, 5.0f);
 golden::FillRandomData<fp16_t>(hostB, -5.0f, 5.0f);
 ```
 
-### 3. Device Memory Allocation and Data Copy
+### Device Memory Allocation and Data Copy
 
 This section of the code performs the following tasks:
 
@@ -294,7 +294,7 @@ uint8_t *deviceC{nullptr};
 ACL_CHECK(aclrtMalloc(reinterpret_cast<void **>(&deviceC), sizeC, ACL_MEM_MALLOC_HUGE_FIRST));
 ```
 
-### 4. Operator Parameter Configuration and Invocation
+### Operator Parameter Configuration and Invocation
 
 This section of the code performs the following tasks:
 
@@ -345,7 +345,7 @@ matmulOp(stream, aicCoreNum);
 ACL_CHECK(aclrtSynchronizeStream(stream));
 ```
 
-### 5. Result Data Copy and Verification
+### Result Data Copy and Verification
 
 This section of the code performs the following tasks:
 
@@ -368,7 +368,7 @@ if (errorIndices.empty()) {
 }
 ```
 
-### 6. Resource Deallocation
+### Resource Deallocation
 
 This section of the code performs the following tasks:
 

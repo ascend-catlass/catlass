@@ -17,7 +17,7 @@ in PROBE and ANALYZE; they are never inferred from either reference.
 A revision is an immutable, full lowercase hexadecimal commit identifier. Do not cite, configure, or
 accept a branch, tag, abbreviated revision, moving URL, or an unpinned checkout as evidence.
 
-## 1. Phase boundary and command sequence
+## Phase boundary and command sequence
 
 1. Resolve the request to source example directories and measure target-directory naming from the
    target tree (§3 and §4).
@@ -48,7 +48,7 @@ plan rejected by `init` is a question for the person who owns the request. Do no
 drop a named candidate, or continue with a plausible interpretation. Re-present the resolved state and
 ask for the correction needed.
 
-## 2. `plan.json`
+## `plan.json`
 
 Keys are closed at every level. The following schema is the FRAME artifact; placeholders describe shape,
 not values to freeze.
@@ -90,7 +90,7 @@ not values to freeze.
 `init` freezes the plan. Reuse the same run only with the identical plan; correct scope, name, access,
 or global optimization policy by creating a new run after the human resolves it.
 
-## 3. Resolve every requested unit
+## Resolve every requested unit
 
 Copy the request into `plan.request` before interpreting it. Resolve words, numeric identifiers, and
 family names mechanically against the target tree's source-architecture examples, then show the resulting
@@ -120,7 +120,7 @@ A target collision is likewise not a reason to remove the unit. State the existi
 the target name must change, the alleged counterpart must be investigated, or the human wants the unit
 set aside at GATE 1.
 
-## 4. Measure target-directory naming
+## Measure target-directory naming
 
 Measure naming from registered target-architecture entries in this target tree. Directory names on disk
 are not registration evidence.
@@ -139,7 +139,7 @@ The intake prompt must display each `source → target` mapping with the measure
 `proposed`, or `tied`) and its supporting build location. PROBE independently records the registration
 mechanism; a disagreement means the plan must be corrected before a target-tree write is authorized.
 
-## 5. Access is declared at `init`
+## Access is declared at `init`
 
 Access is measured before the intake prompt and declared when the run is initialized. It determines what
 later phases may claim; it never blocks discovery or compilation. An inaccessible target device means a
@@ -212,7 +212,7 @@ the old proof current. Record a structural declaration repair only from the orig
 measurement, then re-run `prove` before accuracy or optimization eligibility can be current. Never
 backfill, infer, or invent a missing identity.
 
-## 6. Pinned-reference resolution
+## Pinned-reference resolution
 
 `mig.py refs --run-dir <run-dir>` resolves only the two source/revision pairs listed at the top of this
 document into the run cache. It may use a valid cache, a local checkout containing the exact commit, or
@@ -224,7 +224,7 @@ A target-tree observation does not need a reference citation. A fixed architectu
 cite one of the two pinned sources and identify the file or symbol inspected; do not borrow facts from
 other repositories, articles, or performance guides.
 
-## 7. Performance cases
+## Performance cases
 
 Performance cases are optional human input. A supplied file is passed on the same `init` command as
 `--perf-cases <path>` and staged at `<run-dir>/perf_cases.md`.
@@ -238,7 +238,7 @@ If a supplied path is unreadable, not a usable table, or cannot be staged, retur
 human. They may correct or replace the input, or explicitly choose the bundled fallback. Never silently
 discard a supplied table or synthesize cases.
 
-## 8. One intake prompt and the optimization choices
+## One intake prompt and the optimization choices
 
 After scope, naming, and access are measured, issue one prompt containing all of the following:
 

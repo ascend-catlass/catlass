@@ -4,9 +4,9 @@
 
 ---
 
-## 1. 组件族谱
+## 组件族谱
 
-### 1.1 CopyUb2Gm Non-TLA 特化
+### CopyUb2Gm Non-TLA 特化
 
 | # | ArchTag | GmType | Element | 搬运API | Params类型 | 说明 |
 |---|---------|--------|---------|---------|-----------|------|
@@ -15,7 +15,7 @@
 | 3 | Ascend950 | RowMajor | float | DataCopyPad(3-param) | DataCopyExtParams | 无 padParams；srcStride 使用 ELE_NUM_PER_C0 |
 | 4 | Ascend950 | VectorLayout | — | — | — | 不存在此特化 |
 
-### 1.2 CopyUb2GmAligned 特化
+### CopyUb2GmAligned 特化
 
 | # | ArchTag | GmType | 搬运API | 说明 |
 |---|---------|--------|---------|------|
@@ -24,7 +24,7 @@
 
 ---
 
-### 1.3 断言必验字段
+### 断言必验字段
 
 |API|Params 类型|必验字段|
 |---|---|---|
@@ -33,9 +33,9 @@
 
 ---
 
-## 2. 测试基础设施
+## 测试基础设施
 
-### 2.1 关联Stub文件
+### 关联Stub文件
 
 | 文件 | 作用 |
 |------|------|
@@ -44,7 +44,7 @@
 | `common/helper.hpp` | `setLayout()` / `isContiguous()` |
 | `common/shape.hpp` | `TestVectorShape` / `TestVectorShapeWithStride` |
 
-### 2.2 测试Fixture成员
+### 测试Fixture成员
 
 `UBTileCopyTest` 以 block 粒度描述 UB 数据，成员在 `setShape(blkLen, blkCnt)` 中算好：
 
@@ -54,7 +54,7 @@ _blkCnt   = blkCnt;            // block 行数
 _totalLen = blkLen * blkCnt;  // 总元素数
 ```
 
-### 2.3 日志索引约定
+### 日志索引约定
 
 ```cpp
 // CopyUb2Gm (3-param DataCopyPad, 无 padParams):
@@ -75,9 +75,9 @@ args[2]  = count(uint32_t)
 
 ---
 
-## 3. 断言模式
+## 断言模式
 
-### 3.1 CopyUb2Gm RowMajor (#1, #3)
+### CopyUb2Gm RowMajor (#1, #3)
 
 UB→GM 标准搬运场景，使用 `DataCopyPad` API（3 参数，无 padParams）。连续布局下 `srcStride` 和 `dstStride` 均为 0。
 
@@ -92,7 +92,7 @@ ASSERT_EQ(dataCopyParams->srcStride, _0);  // 连续布局
 ASSERT_EQ(dataCopyParams->dstStride, _0);  // 连续布局
 ```
 
-### 3.2 CopyUb2Gm VectorLayout (#2)
+### CopyUb2Gm VectorLayout (#2)
 
 VectorLayout 场景将整个 UB buffer 视为单个连续 block，`blockCount=1`，`blockLen` 为总元素数的字节大小。
 
@@ -104,7 +104,7 @@ ASSERT_EQ(dataCopyParams->srcStride, _0);
 ASSERT_EQ(dataCopyParams->dstStride, _0);
 ```
 
-### 3.3 CopyUb2GmAligned 连续路径
+### CopyUb2GmAligned 连续路径
 
 CopyUb2GmAligned 在连续布局下走 `DataCopy` API，第三个参数直接传总元素个数 count。
 

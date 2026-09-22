@@ -1,6 +1,6 @@
 # Generalized Matmul Project Structure Description
 
-## 1. Project Structure
+## Project Structure
 
 ```shell
 ├── CMakeLists.txt
@@ -34,7 +34,7 @@
 
 ```
 
-### 1.1 Project Compilation
+### Project Compilation
 
 (1) Call the Python script to generate code, including the peripheral code of each template (that is, the files in the wrapper folder) and `launch_map.h` (containing `tilingKey` and specific mapping).
 
@@ -124,7 +124,7 @@ std::unordered_map<uint64_t, std::string> funcNameMap = {
 
 (2) After the compilation is complete, two files are generated. One is the binary executable file `output/bin/102_dynamic_optimized_matmul`, and the other is the static library file `output/shared_lib/lib/libdynamic_optimized_kernel.a`. The binary file calls the static library file.
 
-### 1.2 Running Process
+### Running Process
 
 ![Generalized Matmul running process](https://raw.gitcode.com/weixin_42818618/picture0/raw/main/泛化Matmul运行流程.jpg)
 
@@ -210,7 +210,7 @@ ACL_CHECK(aclrtMemcpy(hostC.data(), sizeC, dC, sizeC, ACL_MEMCPY_DEVICE_TO_HOST)
 
 ## 3 Implementation Principles
 
-### 3.1 DoTiling Implementation
+### DoTiling Implementation
 
 In this case, DoTiling determines the block size on L1 based on the shape (M, N, K, LayoutA, and LayoutB).
 
@@ -220,7 +220,7 @@ The rules are as follows:
 2. Load balancing is preferred.
 3. The number of computation rounds should be minimized.
 
-### 3.2 SelectKernel Implementation
+### SelectKernel Implementation
 
 ```c++
 bool PaddingMatmulB16Handler(TilingParams &params, PlatformInfo& platformInfo)

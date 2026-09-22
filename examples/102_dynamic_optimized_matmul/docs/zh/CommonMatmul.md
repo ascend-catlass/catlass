@@ -12,7 +12,7 @@ CommonMatmul的典型特征是使用L1上的基本块直接切分矩阵A、B、C
 
 此处介绍的优化点是[00_basic_matmul](../../../00_basic_matmul/README.md)里面没有，但是CommonMatmul中有的优化，至于00_basic_matmul中已有的基础优化在此不做介绍。00_basic_matmul用到的优化点为CommonMatmul的子集。
 
-### 2.1 Preload
+### Preload
 
 CommonMatmul中的Preload实现伪代码如下：
 
@@ -65,7 +65,7 @@ Preload的核心思想为，在计算当前Tile的Matmul前，预先加载下一
 
 关于Preload更细节的描述可以参考[矩阵乘模板总结-流水优化(Preload)](../../../../docs/zh/2_Design/01_kernel_design/04_matmul_summary.md)。
 
-### 2.2 ShuffleK
+### ShuffleK
 
 ![image-20251209170344805](https://raw.gitcode.com/weixin_42818618/picture0/raw/main/image-20251209170344805.png)
 
@@ -79,11 +79,11 @@ Preload的核心思想为，在计算当前Tile的Matmul前，预先加载下一
 
 图中的分块计算顺序采用GemmIdentityBlockSwizzle<2,1>，请参考[swizzle_explanation](../../../../docs/zh/2_Design/01_kernel_design/02_swizzle.md)
 
-### 2.3 Padding
+### Padding
 
 在A2或A3上，当A或B矩阵为ND（RowMajor或ColumnMajor）格式时，如果矩阵的Stride为非512B对齐，则ND2NZ搬运接口的带宽会显著下降。为了规避这个问题，采用AIV提前对A或B矩阵进行数据格式转换（或数据填充），目的是让GM2L1搬运的时候，避免用非512B对齐的Stride访问GM数据。
 
-#### 2.3.1 矩阵A或B的Padding模式说明
+#### 矩阵A或B的Padding模式说明
 
 当前泛化Matmul支持三种Padding方式，在[Padding_matmul.hpp](../../../../include/catlass/gemm/kernel/padding_matmul.hpp)中定义了枚举值：
 
@@ -123,7 +123,7 @@ PADDING_NZ有两种实现，分别用于不同的场景：
 
 由于PADDING_NZ有较优的总体性能，所以泛化Matmul中实际采用的是PADDING_NZ，至于其他两种Padding方式，在某些特定的Shape上可能有比PADDING_NZ更好的性能，可以多尝试进行调优。
 
-#### 2.3.2 C矩阵的Padding模式说明
+#### C矩阵的Padding模式说明
 
 由于基本块的计算结果在L0C上是zN排布的，L0C到UB也需要经过NZ2ND的数据转换，如果C矩阵的Stride非512B对齐，同样也存在带宽明显劣化的问题。
 
@@ -148,7 +148,7 @@ if (static_cast<size_t>(m) * n > 2048 * 2048 && n > 256 && (n % 128 != 0)) {
 
 如果总数据量大小超过了L2 Cache大小，那么AIV进行去Padding的时候，就可能从GM读取数据，这时候去Padding开销就很大，以至于开销大于收益。
 
-#### 2.3.3 Padding建模（决定A矩阵或B矩阵是否需要Padding）
+#### Padding建模（决定A矩阵或B矩阵是否需要Padding）
 
 是否Padding影响Matmul的性能，Padding有额外开销，如果Padding后带来的带宽收益无法抵消Padding的额外开销，那么Padding就会是负收益。Padding的开销主要来自下面两个方面：
 
@@ -205,9 +205,9 @@ B_aiv、B_aic512、T_headcost这几个值在硬件相同时，可以简化认为
 
 以上逻辑为Padding建模的简化过程，具体实现有更细节的考虑，参考[select_kernel_bf16.h](../../include/select_kernel_b16.h)，其中的多项式拟合公式仅适用于A2、A3，如果是其他型号，需要自测数据拟合曲线。
 
-### 2.4 特殊场景的读取优化
+### 特殊场景的读取优化
 
-#### 2.4.1 场景一
+#### 场景一
 
 ![image-20251210102254855](https://raw.gitcode.com/weixin_42818618/picture0/raw/main/image-20251210102254855.png)
 
@@ -228,13 +228,13 @@ for (int i = 0; i < nValue; ++i) {
 
 在M很小的时候，通常是M < 8，ND2NZ的随路转换的搬运效率没有上面的逐行拷贝效率高，所以CommonMatmul在这种场景下采用上面的间隔拷贝的DataCopy替换ND2NZ，以获取更高的搬运效率。
 
-#### 2.4.2 场景二
+#### 场景二
 
 ![image-20251210104718451](https://raw.gitcode.com/weixin_42818618/picture0/raw/main/image-20251210104718451.png)
 
 如图所示当K=16时候，矩阵数据在GM上的数据排布与在L1上的数据排布相同，此时不需要使用随路ND2NZ接口进行搬运，直接进行连续的数据拷贝即可。直接的连续拷贝肯定比ND2NZ的随路转换带宽更高。
 
-#### 2.4.3 场景三
+#### 场景三
 
 当矩阵A为ColumnMajor，且M=1的时候，此时GM2L1读取的时候，每行只有一个元素，读取效率会非常低，此时将A矩阵当作一个1 x K的RowMajor矩阵进行计算（因为A矩阵相当于是一个向量，既可以是行优先也可以是列优先，两者是等价的），这样读取A矩阵的时候，A矩阵就是一个行向量，读取效率就会高很多。
 

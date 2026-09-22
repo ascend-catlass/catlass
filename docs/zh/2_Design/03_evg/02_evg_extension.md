@@ -86,7 +86,7 @@ typename ClampMinOp::Arguments args{{0.0f}};
 
 ### 当前约束
 
-#### 1. 只做纯计算
+#### 只做纯计算
 
 当前实现中，`ComputeFn` 只承载 UB 内的计算，下面这些职责仍放在节点层：
 
@@ -98,14 +98,14 @@ typename ClampMinOp::Arguments args{{0.0f}};
 
 这些职责不放在 `ComputeFn` 内处理。
 
-#### 2. 类型规则沿用 `VisitorCompute`
+#### 类型规则沿用 `VisitorCompute`
 
 当前 `VisitorCompute` 要求所有输入类型都等于 `ElementCompute`。因此：
 
 - 混合精度场景通常先插 `VisitorCast`
 - 输入类型兼容仍放在图里处理，不放在 `ComputeFn` 内展开
 
-#### 3. 多步 V 计算自己补 barrier
+#### 多步 V 计算自己补 barrier
 
 如果一个 `operator()` 内包含多步 V 计算，应像 `AddRelu` 一样在步骤之间补 `AscendC::PipeBarrier<PIPE_V>()`。
 
@@ -114,11 +114,11 @@ typename ClampMinOp::Arguments args{{0.0f}};
 - 单条原子指令通常不用额外补
 - 多步串联计算通常要补齐
 
-#### 4. 多输入算子沿用现有展开方式
+#### 多输入算子沿用现有展开方式
 
 像 `Add`、`Mul` 这类多输入算子，当前实现采用链式展开。新增多输入算子时，尽量沿用现有模式，避免单独引入新的调用约定。
 
-#### 5. 保持聚合初始化友好
+#### 保持聚合初始化友好
 
 `VisitorCompute` 当前按 `Op<ElementCompute>{...}` 构造算子。新增 `ComputeFn` 时，保持简单字段和聚合初始化会更贴合现有实现。
 
@@ -213,7 +213,7 @@ struct VisitorSomeNode : VisitorImpl<> {
 
 ### 当前约束
 
-#### 1. 阶段语义不能打乱
+#### 阶段语义不能打乱
 
 节点逻辑按三阶段组织：
 
@@ -227,16 +227,16 @@ struct VisitorSomeNode : VisitorImpl<> {
 - 跨阶段节点可以存在，但每一步分开放置
 - 本该在 `STORE` 的动作通常不前置到 `COMPUTE`
 
-#### 2. 节点职责保持单一
+#### 节点职责保持单一
 
 当前实现更适合让一个节点只承担一类职责，例如读、算、写、广播。
 “读 GM + 算 + 写 GM”这类复合行为拆成多个节点后，更贴合现有图组织方式。
 
-#### 3. layout 一律按完整张量理解
+#### layout 一律按完整张量理解
 
 如果节点带 `layout`，它描述的是完整 GM 张量，不是当前 tile。当前实现都按这个口径处理，新增节点时保持一致即可。
 
-#### 4. UB 分配口径保持一致
+#### UB 分配口径保持一致
 
 `get_callbacks` 中如果申请 UB，通常按下面的口径处理：
 
@@ -245,11 +245,11 @@ struct VisitorSomeNode : VisitorImpl<> {
 - 大小按 `compute_length` 和元素大小推导
 - 分配结果不超过当前架构允许的 UB 上限
 
-#### 5. 不在节点里接管外层事件
+#### 不在节点里接管外层事件
 
 EVG 的双缓冲和事件同步由 `BlockEpilogue` 统一管理。节点内部只负责按阶段执行；如果节点内有多步 V 计算，可以补 `AscendC::PipeBarrier<PIPE_V>()`，外层同步节奏仍由 `BlockEpilogue` 管理。
 
-#### 6. `Arguments` 继续支持直写
+#### `Arguments` 继续支持直写
 
 新增节点后，用户侧通常仍可直接写出整张图的聚合初始化：
 
@@ -264,7 +264,7 @@ typename EVG::Arguments args{
 
 如果一个节点让整张图的参数初始化显著变复杂，通常说明接口设计和现有规范还有些距离。
 
-#### 7. 先复用现有节点，再决定是否新增
+#### 先复用现有节点，再决定是否新增
 
 如果诉求只是多一个逐元素算子，通常继续走 `ComputeFn + VisitorCompute`。
 只有当现有节点无法表达所需的数据访问、layout 或资源行为时，再新增节点。

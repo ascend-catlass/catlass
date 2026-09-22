@@ -1,6 +1,6 @@
 # HSTU Infer Example ReadMe（Ascend950）
 
-## 1. 算子介绍
+## 算子介绍
 
 本样例实现了 HSTU（Hierarchical Sequential Transducer Units）推理场景下的注意力计算算子，运行于 Ascend950（CATLASS_ARCH=3510），基于 CATLASS 模板库的 Cube-Vector（CV）融合框架开发。
 
@@ -26,7 +26,7 @@ O = P · V                           // Cube 侧 MMAD
 | Mask | `--mask 1` 启用 causal 掩码（乘法掩码，`mask[i,j] = 1 if j <= i`） |
 | CV 流水 | 2 级 CV stage（`CV_STAGES=2`）乒乓流水，PV 提前一拍发射（`PRE_LAUNCH_NUM=1`） |
 
-## 2. 代码组织
+## 代码组织
 
 ```
 ├── 83_ascend950_hstu_infer
@@ -40,9 +40,9 @@ O = P · V                           // Cube 侧 MMAD
 │   └── README.md
 ```
 
-## 3. 实现原理
+## 实现原理
 
-### 3.1 总体流程
+### 总体流程
 
 ```
                  GM (q / k / v)
@@ -64,7 +64,7 @@ O = P · V                           // Cube 侧 MMAD
 - **Silu 阶段（Vector）**：从 UB 读取 S，做 `siluScale · S · sigmoid(S)` 逐元素激活（maskType=1 时同时应用 causal 乘法掩码），结果 P（half）写入 L1 的 A1 位置。
 - **PV 阶段（Cube）**：以 P 为矩阵 A、V 为矩阵 B，累加计算 `O = P·V` 并写回 GM。PV 的 L0C 结果常驻（`ENABLE_PV_RESIDENT_L0C = true`），跨 KV block 累加。
 
-### 3.2 跨核同步
+### 跨核同步
 
 采用 `CROSS_CORE_SYNC_MODE_4` 硬件 flag 实现 Cube 与 Vector 间的生产者-消费者同步：
 
@@ -72,14 +72,14 @@ O = P · V                           // Cube 侧 MMAD
 - `SILU_TO_PV_FLAG_ID`（AIV → AIC）：Vector 通知 Cube P 数据就绪；
 - 两个 AIV 子块（AIV0/AIV1）的 flag 以 `FLAG_ID_MAX = 16` 偏移区分，避免硬件 flag 竞争。
 
-### 3.3 任务划分
+### 任务划分
 
 - 以 `(qSeqBlock, qHead)` 为最小任务粒度，`qSeqBlock` 大小为 `QK L1TileM`；
 - 所有 core 以 `globalTaskIdx = coreIdx` 起步、步长 `coreNum` 静态领取任务；
 - KV 方向按 `QK L1TileN` 分块循环，通过 `cvStageId` 在 2 级 CV stage 间乒乓切换；
 - maskType=1 时，`validKvSeqlen = min(kvSeqlen, Q_BLOCK_SIZE * qSeqBlockIdx + actualQSeqLen)`，跳过当前 Q 块全被掩蔽的 KV 块。
 
-### 3.4 Paged KV Cache
+### Paged KV Cache
 
 启用分页（`--paged_block_size > 0`）时：
 
@@ -87,7 +87,7 @@ O = P · V                           // Cube 侧 MMAD
 - 通过 `block_table`（shape 为 `[batch, maxNumBlocks]` 的 uint32 数组）完成逻辑 KV 序列到物理 block 的映射；
 - Kernel 内由 `PagedTensor` 封装 block table 间接寻址，逐 block 完成 K/V 的搬运。
 
-## 4. 使用示例
+## 使用示例
 
 - 获取代码之后编译相应的算子可执行文件，可参考 [quickstart](../../docs/zh/1_Practice/01_quick_start.md#样例编译)。
 
@@ -146,7 +146,7 @@ run_kernel
 Compare success.
 ```
 
-### 4.1 gen_data.py 参数
+### gen_data.py 参数
 
 | 序号 | 参数 | 说明 |
 | --- | --- | --- |
@@ -164,7 +164,7 @@ Compare success.
 | 12 | paged_block_size | 0：非分页；>0：Paged KV Cache 的 block 大小 |
 | 13 | data_path | 数据输出目录 |
 
-### 4.2 可执行文件参数
+### 可执行文件参数
 
 ```
 Usage: 83_ascend950_hstu_infer batch qSeqlen kvSeqlen numHeads kvHeads embeddingSize isVariedLen siluScale
@@ -185,7 +185,7 @@ Usage: 83_ascend950_hstu_infer batch qSeqlen kvSeqlen numHeads kvHeads embedding
 | --mask | 0：无 mask；1：causal mask，需与 gen_data.py 一致 |
 | --paged_block_size | 0：非分页；>0：启用 Paged KV Cache，需与 gen_data.py 一致 |
 
-## 5. 输入输出数据
+## 输入输出数据
 
 `gen_data.py` 在 data 目录下生成如下文件：
 
@@ -201,7 +201,7 @@ Usage: 83_ascend950_hstu_infer batch qSeqlen kvSeqlen numHeads kvHeads embedding
 
 输出 O 与 Q 同 shape、同布局。
 
-## 6. Tile 参数说明
+## Tile 参数说明
 
 样例运行 Tile 参数固定为一组静态值（见 [hstu_infer_launcher.hpp](launcher/hstu_infer_launcher.hpp)），非性能最优，若有需要调优请联系样例开发咨询内置 Tile 调优参数。当前配置为：
 

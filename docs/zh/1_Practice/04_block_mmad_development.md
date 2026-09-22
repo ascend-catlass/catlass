@@ -1,12 +1,12 @@
 # Block MMAD 代码开发详解
 
-## 1. Block MMAD 概述
+## Block MMAD 概述
 
 Block MMAD（Block Matrix Multiply-Add）是CATLASS模板库中负责块级矩阵乘法的核心组件，位于计算架构的中间层。它上接Kernel层，下接Tile层，负责将全局内存（GM）中的数据高效地加载到本地内存（L1/L0），并调度Tile级别的矩阵乘法运算。
 
 Block MMAD采用高度模块化和模板化的设计，支持多种调度策略、Tile形状和数据类型，能够灵活适应不同的硬件架构和计算需求，本文将以[BlockMmadPingpong](../../../include/catlass/gemm/block/block_mmad_pingpong.hpp)为例详细讲解（后文截取代码片段中，一些变量的构造方式可以查看源代码）。
 
-## 2. 模板组装机制
+## 模板组装机制
 
 Block MMAD实现基于以下基础模板结构：
 
@@ -27,7 +27,7 @@ struct BlockMmad {
 };
 ```
 
-### 2.1 核心模板参数
+### 核心模板参数
 
 | 参数名            | 描述                                                 |
 | ----------------- | ---------------------------------------------------- |
@@ -39,7 +39,7 @@ struct BlockMmad {
 | TileCopy          | Tile级别的数据拷贝组件，负责不同内存层级间的数据传输 |
 | TileMmad          | Tile级别的矩阵乘法组件，负责实际的计算操作           |
 
-### 2.2 类型导出
+### 类型导出
 
 Block MMAD通过类型导出系统建立统一的类型接口，方便上层组件使用：
 
@@ -70,11 +70,11 @@ public:
     using LayoutCInL0 = layout::zN;
 ```
 
-## 3. 内存管理与缓存设计
+## 内存管理与缓存设计
 
 Block MMAD负责管理不同层级的内存，包括全局内存（GM）、L1缓存和L0缓存：
 
-### 3.1 静态常量定义
+### 静态常量定义
 
 ```cpp
 static constexpr bool ENABLE_UNIT_FLAG = DispatchPolicy::ENABLE_UNIT_FLAG;
@@ -88,7 +88,7 @@ static constexpr uint32_t L0A_PINGPONG_BUF_SIZE = L0A_SIZE / STAGES;
 static constexpr uint32_t L0B_PINGPONG_BUF_SIZE = L0B_SIZE / STAGES;
 ```
 
-### 3.2 内存检查
+### 内存检查
 
 ```cpp
 // Check LayoutC
@@ -106,7 +106,7 @@ static_assert((L0B_TILE_SIZE * STAGES) <= L0B_SIZE, "L0TileShape exceeding the L
 static_assert(L0C_TILE_SIZE <= L0C_SIZE, "L0TileShape exceeding the L0C space!");
 ```
 
-### 3.3 多阶段缓存设计
+### 多阶段缓存设计
 
 Block MMAD采用多阶段流水线设计，使用pingpong技术隐藏内存访问延迟：
 
@@ -131,9 +131,9 @@ protected:
     uint32_t l0BListId{0};
 ```
 
-## 4. 核心接口实现
+## 核心接口实现
 
-### 4.1 构造函数
+### 构造函数
 
 ```cpp
 CATLASS_DEVICE
@@ -166,7 +166,7 @@ BlockMmad(Arch::Resource<ArchTag> &resource, uint32_t l1BufAddrStart = 0)
 }
 ```
 
-### 4.2 析构函数
+### 析构函数
 
 ```cpp
 CATLASS_DEVICE
@@ -182,7 +182,7 @@ CATLASS_DEVICE
 }
 ```
 
-### 4.3 核心计算接口 operator()
+### 核心计算接口 operator()
 
 operator()是Block MMAD的核心接口，负责执行块级矩阵乘法：
 
@@ -205,11 +205,11 @@ void operator()(
 }
 ```
 
-## 5. 执行流程分析
+## 执行流程分析
 
 以BlockMmadPingpong为例，其执行流程如下：
 
-### 5.1 数据预加载
+### 数据预加载
 
 ```cpp
 // load first matrix A tile from GM to L1
@@ -225,7 +225,7 @@ copyGmToL1B(l1BTensorList[l1ListId], gmB, layoutBInL1, layoutTileB);
 AscendC::SetFlag<AscendC::HardEvent::MTE2_MTE1>(l1BEventList[l1ListId]);
 ```
 
-### 5.2 主循环（多阶段流水线）
+### 主循环（多阶段流水线）
 
 ```cpp
 // main loop
@@ -253,7 +253,7 @@ for (uint32_t kLoopIdx = 0; kLoopIdx < kTileCount; kLoopIdx++) {
 }
 ```
 
-### 5.3 L0级处理与计算
+### L0级处理与计算
 
 ```cpp
 for (int mPartIdx = 0; mPartIdx < mPartLoop; mPartIdx++) {
@@ -273,7 +273,7 @@ for (int mPartIdx = 0; mPartIdx < mPartLoop; mPartIdx++) {
 }
 ```
 
-### 5.4 结果写回
+### 结果写回
 
 ```cpp
 // copy block out
@@ -289,7 +289,7 @@ if constexpr (!ENABLE_UNIT_FLAG) {
 }
 ```
 
-## 6. 多阶段流水线与事件同步
+## 多阶段流水线与事件同步
 
 Block MMAD使用事件驱动的同步机制确保多阶段流水线的正确执行：
 
@@ -304,7 +304,7 @@ copyGmToL1A(l1ATensorList[l1ListId], gmA, layoutAInL1, layoutTileA);
 AscendC::SetFlag<AscendC::HardEvent::MTE2_MTE1>(l1AEventList[l1ListId]);
 ```
 
-## 7. 不同Block MMAD实现的共性与差异
+## 不同Block MMAD实现的共性与差异
 
 CATLASS提供了多种Block MMAD实现，它们具有以下共性：
 
@@ -320,7 +320,7 @@ CATLASS提供了多种Block MMAD实现，它们具有以下共性：
 3. **特殊功能支持**：如量化、稀疏计算、偏置处理等
 4. **性能优化**：不同的流水线深度和内存访问模式
 
-## 8. 总结
+## 总结
 
 Block MMAD是CATLASS模板库中连接Kernel层和Tile层的关键组件，它通过以下设计实现了高效的块级矩阵乘法：
 

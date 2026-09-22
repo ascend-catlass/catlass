@@ -10,9 +10,9 @@
 
 ---
 
-## 1. 组件族谱
+## 组件族谱
 
-### 1.1 Struct 族系 (AtlasA2 / Ascend950 共性)
+### Struct 族系 (AtlasA2 / Ascend950 共性)
 
 | Struct | 用途 | 关键分支逻辑 |
 |--------|------|-------------|
@@ -21,7 +21,7 @@
 | **CopyGmToL1DynamicOptimized** | 动态选择最优搬运策略 | rows<=16 → 逐行DataCopyParams / stride<LIMIT + !exactMatch → Nd2Nz / stride<LIMIT + exactMatch → contiguous / stride>=LIMIT → 逐行Nd2Nz |
 | **CopyGmToL1IntervalDataCopy** | half 短宽矩阵专用 (逐行 DataCopyParams) | 仅 half + RowMajor/PaddingRowMajor/ColumnMajor/PaddingColumnMajor |
 
-### 1.2 TLA 变体 (AtlasA2)
+### TLA 变体 (AtlasA2)
 
 | Struct | 用途 |
 |--------|------|
@@ -30,13 +30,13 @@
 | **TileCopySparseTla** | 稀疏拷贝：RowMajor/ColumnMajor→zN, ColumnMajor→nZ, 稀疏zN→zN, 稀疏nZ→nZ |
 | **TileCopyFAQTla** | FlashAttention LoadQ: 多矩阵 ND→NZ |
 
-### 1.3 TLA 变体 (Ascend950)
+### TLA 变体 (Ascend950)
 
 | Struct | 用途 |
 |--------|------|
 | **TileCopyTla** | RowMajor→zN, zN→zN, ColumnMajor→nZ, nZ→nZ, Vector→Vector, MX fp8_e8m0 Scale |
 
-### 1.4 测试维度矩阵
+### 测试维度矩阵
 
 | 维度 | 取值范围 |
 |------|---------|
@@ -45,7 +45,7 @@
 | **LayoutSrc→LayoutDst** | RowMajor→zN, ColumnMajor→nZ, zN→zN, nZ→nZ, PaddingRowMajor→zN, PaddingColumnMajor→nZ, VectorLayout→zN, RowMajor→RowMajor, RowMajor→zZ, ColumnMajor→nN, NDC1HWC0, KDC1KHKWN1N0C0 |
 | **分支路径** | 正常stride(Nd2Nz), 长stride(逐行/逐col), 1-row/少rows(DataCopyParams), 精确C0对齐(contiguous), int4b_t修正 |
 
-### 1.5 断言必验字段
+### 断言必验字段
 
 |API|Params 类型|必验字段|
 |---|---|---|
@@ -54,9 +54,9 @@
 
 ---
 
-## 2. 测试基础设施
+## 测试基础设施
 
-### 2.1 关联Stub文件
+### 关联Stub文件
 
 | 文件 | 作用 |
 |------|------|
@@ -67,7 +67,7 @@
 | `stub/kernel_struct_mm.h` | `Nd2NzParams` / `DataCopyParams` stub 定义 |
 | `common/helper.hpp` | `GetEleNumPerC0()` / `setLayout()` / `isContiguous()` |
 
-### 2.2 测试Fixture成员
+### 测试Fixture成员
 
 `TileCopyGmToL1Test` 继承 `AscendCTest`，`setShape<Element>(row, col)` 依据 Element 预算好 round 值供各用例复用：
 
@@ -89,7 +89,7 @@ constexpr uint32_t BYTE_PER_FRACTAL   = 512;  // 32*16 = 512 bytes
 constexpr uint32_t STRIDE_LIMIT       = 65536;
 ```
 
-### 2.3 日志索引约定
+### 日志索引约定
 
 ```cpp
 argsT[0] = MakeArg<Element>()   →  GetArgsTAt(0).Type() = typeid(Element)
@@ -102,9 +102,9 @@ args[2]  = params               →  Nd2NzParams / DataCopyParams
 
 ---
 
-## 3. 断言模式参考
+## 断言模式参考
 
-### 3.1 Nd2Nz 分支 (DataCopy 调用)
+### Nd2Nz 分支 (DataCopy 调用)
 
 当被测组件走 Nd2Nz 路径 (stride < STRIDE_LIMIT 且非精确C0对齐) 时，调用**随路转换ND2NZ搬运**。
 
@@ -131,7 +131,7 @@ ASSERT_EQ(nd2nzArg->dstNzNStride, _1);                   // = layoutDst.stride(0
 ASSERT_EQ(nd2nzArg->dstNzMatrixStride, _0);
 ```
 
-### 3.2 DataCopyParams 分支 (逐行 interval-based)
+### DataCopyParams 分支 (逐行 interval-based)
 
 当走逐行 DataCopyParams 路径 (1-row / rows<=16 等) 时，搬运逻辑是**多轮循环的基础数据搬运**：
 
@@ -157,7 +157,7 @@ for (int i = 0; i < _row; i++) {
 }
 ```
 
-### 3.3 长 stride 逐行 Nd2Nz 分支
+### 长 stride 逐行 Nd2Nz 分支
 
 当 stride(0) >= STRIDE_LIMIT (65536) 时，搬运逻辑是**多轮循环的ND2NZ随路搬运**：
 
@@ -182,7 +182,7 @@ for (int i = 0; i < _row; i++) {
 }
 ```
 
-### 3.4 Contiguous DataCopy 分支 (C0精确对齐)
+### Contiguous DataCopy 分支 (C0精确对齐)
 
 当 shape(1)==ELE_NUM_PER_C0 && stride(0)==ELE_NUM_PER_C0 时，使用**基础数据搬运**：
 
@@ -195,7 +195,7 @@ ASSERT_EQ(logs[0].args.size(), 3);
 // 通过检查 GetArgsAt(2) 的类型来判断
 ```
 
-### 3.5 多参数重载 (Explicit Multi-Param)
+### 多参数重载 (Explicit Multi-Param)
 
 CopyGmToL1 和 CopyGmToL1GMMPTD 提供了带 ndNum/srcNdMatrixStride/dstNzNStride/dstNzMatrixStride/dstNzC0Stride 的多参数重载：
 
@@ -212,7 +212,7 @@ ASSERT_EQ(nd2nzArg->dstNzMatrixStride, dstNzMatrixStride);
 ASSERT_EQ(nd2nzArg->dstNzC0Stride, dstNzC0Stride);
 ```
 
-### 3.6 关于 ColumnMajor→nZ 分支
+### 关于 ColumnMajor→nZ 分支
 
 与 RowMajor→zN 镜像，区别在于：
 - `nValue` = shape(1) (cols), `dValue` = shape(0) (rows)
@@ -230,9 +230,9 @@ ASSERT_EQ(nd2nzArg->dstNzNStride, layoutDst.stride(2) / ELE_NUM_PER_C0);
 
 ---
 
-## 4. 测试场景清单
+## 测试场景清单
 
-### 4.1 CopyGmToL1<AtlasA2, RowMajor>
+### CopyGmToL1<AtlasA2, RowMajor>
 
 | # | 测试场景 | 关键 shape/stride | 预期 API |
 |---|---------|------------------|---------|
@@ -242,14 +242,14 @@ ASSERT_EQ(nd2nzArg->dstNzNStride, layoutDst.stride(2) / ELE_NUM_PER_C0);
 | 4 | 多参数重载 | 传入 5个额外参数 | Nd2NzParams 直接使用传入值 |
 | 5 | 多参数重载-长stride | srcNdMatrixStride >= 65536 | ndNum× 逐行 |
 
-### 4.2 CopyGmToL1<AtlasA2, ColumnMajor>
+### CopyGmToL1<AtlasA2, ColumnMajor>
 
 | # | 测试场景 | 预期 |
 |---|---------|------|
 | 6 | 正常 Nd2Nz | 1× DataCopy + Nd2NzParams (dValue=rows, nValue=cols) |
 | 7 | 长stride逐列 | stride(1)>=65536 → col× DataCopy |
 
-### 4.3 CopyGmToL1GMMPTD<AtlasA2, RowMajor>
+### CopyGmToL1GMMPTD<AtlasA2, RowMajor>
 
 | # | 测试场景 | 预期 |
 |---|---------|------|
@@ -258,7 +258,7 @@ ASSERT_EQ(nd2nzArg->dstNzNStride, layoutDst.stride(2) / ELE_NUM_PER_C0);
 | 10 | 长stride | stride(0)>=LIMIT → 逐行 |
 | 11 | 多参数重载 | 传入额外参数 |
 
-### 4.4 CopyGmToL1DynamicOptimized<AtlasA2, RowMajor>
+### CopyGmToL1DynamicOptimized<AtlasA2, RowMajor>
 
 | # | 测试场景 | 预期 |
 |---|---------|------|
@@ -266,7 +266,7 @@ ASSERT_EQ(nd2nzArg->dstNzNStride, layoutDst.stride(2) / ELE_NUM_PER_C0);
 | 13 | rows>16, 非C0对齐 | Nd2Nz |
 | 14 | rows>16, C0精确对齐 | 1× Contiguous DataCopy |
 
-### 4.5 CopyGmToL1IntervalDataCopy (half only)
+### CopyGmToL1IntervalDataCopy (half only)
 
 | # | 测试场景 | 预期 |
 |---|---------|------|
@@ -275,7 +275,7 @@ ASSERT_EQ(nd2nzArg->dstNzNStride, layoutDst.stride(2) / ELE_NUM_PER_C0);
 | 17 | half ColumnMajor→nZ | 逐列 DataCopyParams |
 | 18 | half PaddingColumnMajor→nZ | 逐列 DataCopyParams (use orgShape) |
 
-### 4.6 其他 Layout 特化 (AtlasA2)
+### 其他 Layout 特化 (AtlasA2)
 
 | # | 测试场景 | Struct |
 |---|---------|--------|
@@ -286,7 +286,7 @@ ASSERT_EQ(nd2nzArg->dstNzNStride, layoutDst.stride(2) / ELE_NUM_PER_C0);
 | 23 | VectorLayout→zN (A1) | CopyGmToL1 (Nd2Nz, 1-row) |
 | 24 | RowMajor→RowMajor (A1) | CopyGmToL1 (DataCopy/DataCopyParams) |
 
-### 4.7 3-Param GmType 特化 (AtlasA2)
+### 3-Param GmType 特化 (AtlasA2)
 
 | # | 测试场景 |
 |---|---------|
@@ -297,7 +297,7 @@ ASSERT_EQ(nd2nzArg->dstNzNStride, layoutDst.stride(2) / ELE_NUM_PER_C0);
 | 29 | ColumnMajor→nZ(A1) |
 | 30 | RowMajor→zN(B1) |
 
-### 4.8 TLA 变体 (AtlasA2)
+### TLA 变体 (AtlasA2)
 
 | # | 测试场景 |
 |---|---------|
@@ -316,7 +316,7 @@ ASSERT_EQ(nd2nzArg->dstNzNStride, layoutDst.stride(2) / ELE_NUM_PER_C0);
 | 43 | TileCopySparseTla nZ→nZ |
 | 44 | TileCopyFAQTla multi-matrix ND→NZ |
 
-### 4.9 Ascend950 特化
+### Ascend950 特化
 
 | # | 测试场景 |
 |---|---------|

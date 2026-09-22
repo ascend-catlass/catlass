@@ -4,9 +4,9 @@
 
 ---
 
-## 1. 组件族谱
+## 组件族谱
 
-### 1.1 CopyGm2Ub Non-TLA 特化
+### CopyGm2Ub Non-TLA 特化
 
 | # | ArchTag | GmType | Element | 搬运API | Params类型 | padParams |
 |---|---------|--------|---------|---------|-----------|-----------|
@@ -15,14 +15,14 @@
 | 3 | Ascend950 | RowMajor | float | DataCopyPad(4-param) | DataCopyExtParams | DataCopyPadExtParams |
 | 4 | Ascend950 | VectorLayout | float | DataCopyPad(4-param) | DataCopyExtParams | DataCopyPadExtParams |
 
-### 1.2 CopyGm2UbAligned 特化
+### CopyGm2UbAligned 特化
 
 | # | ArchTag | GmType | 搬运API | 说明 |
 |---|---------|--------|---------|------|
 | 5 | AtlasA2 | RowMajor | DataCopy(3-param) | 连续时一次性拷贝，非连续时分块 DataCopyParams |
 | 6 | Ascend950 | — | — | 不存在此特化 |
 
-### 1.3 CopyPerTokenScale2Ub 特化
+### CopyPerTokenScale2Ub 特化
 
 | # | ArchTag | GmType | 说明 |
 |---|---------|--------|------|
@@ -30,7 +30,7 @@
 
 ---
 
-### 1.4 断言必验字段
+### 断言必验字段
 
 |API|Params 类型|必验字段|
 |---|---|---|
@@ -41,9 +41,9 @@
 
 ---
 
-## 2. 测试基础设施
+## 测试基础设施
 
-### 2.1 关联Stub文件
+### 关联Stub文件
 
 | 文件 | 作用 |
 |------|------|
@@ -52,7 +52,7 @@
 | `common/helper.hpp` | `setLayout()` / `isContiguous()` |
 | `common/shape.hpp` | `TestVectorShape` / `TestVectorShapeWithStride` |
 
-### 2.2 测试Fixture成员
+### 测试Fixture成员
 
 `UBTileCopyTest` 以 block 粒度描述 UB 数据，成员在 `setShape(blkLen, blkCnt)` 中算好：
 
@@ -62,7 +62,7 @@ _blkCnt   = blkCnt;            // block 行数
 _totalLen = blkLen * blkCnt;  // 总元素数
 ```
 
-### 2.3 日志索引约定
+### 日志索引约定
 
 ```cpp
 // CopyGm2Ub (4-param DataCopyPad):
@@ -81,9 +81,9 @@ args[2]  = count(uint32_t)      →  一次拷贝 total elements
 
 ---
 
-## 3. 断言模式
+## 断言模式
 
-### 3.1 CopyGm2Ub RowMajor (#1, #3)
+### CopyGm2Ub RowMajor (#1, #3)
 
 GM→UB 标准搬运场景，使用 `DataCopyPad` API（4 参数，含 padParams）。连续布局下 `srcStride` 和 `dstStride` 均为 0，`isPad=false`。
 
@@ -97,7 +97,7 @@ ASSERT_EQ(dataCopyParams->dstStride, _0);  // 连续布局
 ASSERT_EQ(padParams->isPad, false);
 ```
 
-### 3.2 CopyGm2Ub VectorLayout (#2, #4)
+### CopyGm2Ub VectorLayout (#2, #4)
 
 VectorLayout 场景将整个 GM buffer 视为单个连续 block，`blockCount=1`，`blockLen` 为总元素数的字节大小。
 
@@ -109,7 +109,7 @@ ASSERT_EQ(dataCopyParams->srcStride, _0);
 ASSERT_EQ(dataCopyParams->dstStride, _0);
 ```
 
-### 3.3 CopyGm2UbAligned 连续路径 (#5)
+### CopyGm2UbAligned 连续路径 (#5)
 
 连续布局下走 `DataCopy` API，第三个参数直接传总元素个数 count。
 
@@ -119,7 +119,7 @@ const uint32_t* count = log.GetArgsAt(2).Value<uint32_t>();
 ASSERT_EQ(*count, _totalLen);
 ```
 
-### 3.4 CopyGm2UbAligned 非连续路径
+### CopyGm2UbAligned 非连续路径
 
 非连续布局时走逐块 `DataCopy` API，使用 `DataCopyParams` 参数。每块的 `blockLen`、`srcGap`、`dstGap` 根据实际 stride 和 block 长度计算。
 

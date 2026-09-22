@@ -1,6 +1,6 @@
 # PlanarComplexMatmul
 
-## 1. 功能说明
+## 功能说明
 
  - 算子功能：完成平面复数矩阵乘计算。复数矩阵以实部、虚部分离的 planar complex 形式输入，样例输出实部与虚部两路结果。
  - 计算公式：
@@ -17,7 +17,7 @@ $$
 
   其中 `A_real`、`A_imag` 是形如 `(m, k)` 的左矩阵实部和虚部，`B_real`、`B_imag` 是形如 `(k, n)` 的右矩阵实部和虚部，`C_real`、`C_imag` 是形如 `(m, n)` 的输出矩阵实部和虚部。
 
-## 2. 参数说明
+## 参数说明
 
 以下是本样例可执行文件的运行参数：
 
@@ -45,18 +45,18 @@ PlanarComplexMatmul 所涉及的关键模板参数如下：
 | `DispatchPolicy` (Four-Pass) | 4-pass 路径的 MMAD 调度策略 | `Gemm::MmadPingpong<ArchTag, true>` |
 | `DispatchPolicy` (Fused) | Fused 路径的 MMAD 调度策略 | `Gemm::MmadPlanarComplexFused<ArchTag, true>` |
 
-## 3. 约束说明
+## 约束说明
 
  - 输入矩阵实部和虚部均为 fp16，输出实部和虚部均为 fp32。
  - `B_real`、`B_imag` 在设备侧按 `layout::ColumnMajor` 读取；使用 `gen_data_compare.py` 校验时脚本会将 NumPy 生成的 B 矩阵转置后写入输入文件。
  - 样例根据 shape 在 Host 侧选择执行路径：当 `k >= 6000` 且每个 AIC core 分到的 MN tile 数不少于 3 时选择 Four-Pass，否则选择 Fused。
  - 样例根据 `m` 与 `n` 的关系选择对 `A_imag` 或 `B_imag` 取负后写入 workspace，用于计算 `C_real` 中的负号项。
 
-## 4. 具体设计方案
+## 具体设计方案
 
-### 4.1 Host 层
+### Host 层
 
-#### 4.1.1 参数解析
+#### 参数解析
 
 `77_planar_complex_matmul` 命令执行参数：
 
@@ -70,7 +70,7 @@ Host 层除了常规的 GEMM shape，还需要根据m, n, k,动态选择路径�
 2. 选择对 `A_imag` 还是 `B_imag` 取负（`NEGATE_A`）；
 3. 选择 block swizzle 方向（`m >= n` 时行优先扫描，`m < n` 时列优先扫描）。
 
-#### 4.1.2 路径选择
+#### 路径选择
 
 Host 侧基于 cost-model 选择 kernel 变体：
 
@@ -84,7 +84,7 @@ K >= 6000 AND per_core >= 3 tiles  -> Four-Pass
 
 Four-Pass 将 L2 工作集锁定为 2 个矩阵（每 pass 只读写一路 C），适合 K 大、per-core tile 多的场景；Fused 单遍完成，适合 K 小或 per-core tile 少的场景。
 
-#### 4.1.3 NEGATE_A 选择
+#### NEGATE_A 选择
 
 `C_real = A_real * B_real - A_imag * B_imag` 中的负号项通过预先对 `A_imag` 或 `B_imag` 取负实现：
 
@@ -93,7 +93,7 @@ Four-Pass 将 L2 工作集锁定为 2 个矩阵（每 pass 只读写一路 C）�
 
 选择较小的一侧可以减少 workspace 开销和 AIV 取负工作量。
 
-#### 4.1.4 device memory 与 copy
+#### device memory 与 copy
 
 设备内存分配：
 
@@ -113,9 +113,9 @@ op.Initialize(arguments, deviceWorkspace);
 op(stream, aicCoreNum, hardwareSyncAddr);   // hardwareSyncAddr 用于跨核同步
 ```
 
-### 4.2 Kernel 层
+### Kernel 层
 
-#### 4.2.1 统一 kernel 模板
+#### 统一 kernel 模板
 
 ```cpp
 Gemm::Kernel::PlanarComplexGemm<
@@ -128,7 +128,7 @@ Gemm::Kernel::PlanarComplexGemm<
 
 kernel 通过 `USE_FOUR_PASS` 编译期开关选择 block 类型，未选中的路径以 `void` 传入，不会被实例化。
 
-#### 4.2.2 AIV 取负预处理
+#### AIV 取负预处理
 
 `NegateMatrixAiv` 是 kernel 内的 AIV 组件：
 
@@ -138,7 +138,7 @@ kernel 通过 `USE_FOUR_PASS` 编译期开关选择 block 类型，未选中的�
 
 AIV 路径在 Mix kernel prologue 阶段执行取负，AIC 路径通过 `ptrAImagSigned`/`ptrBImagSigned` 消费结果。
 
-#### 4.2.3 Four-Pass 编排（`USE_FOUR_PASS=true`）
+#### Four-Pass 编排（`USE_FOUR_PASS=true`）
 
 4 次顺序 `BlockMmad` 调用，fixpipe atomic-add 把交叉项累加回 C：
 
@@ -155,7 +155,7 @@ pass4: C_imag += A_real * B_imag              (atomic add)
 
 \- `NEGATE_A = false`：`A_imag * B_imag_signed`
 
-#### 4.2.4 Fused 编排（`USE_FOUR_PASS=false`）
+#### Fused 编排（`USE_FOUR_PASS=false`）
 
 单遍 K-loop，C_real 与 C_imag 分时复用同一块 L0C：
 
@@ -173,13 +173,13 @@ Stage 2 (C_imag): 2K 个子迭代
 
 C_real 的 FixPipe 与 C_imag 首个子迭代的 MTE2（GM->L1）重叠，隐藏 fixpipe 延迟。
 
-### 4.3 Block 层
+### Block 层
 
-#### 4.3.1 Four-Pass block
+#### Four-Pass block
 
 Four-Pass 复用通用 BlockMmadTla。kernel 层负责 4 次调用的编排和 atomic-add。
 
-#### 4.3.2 Fused block
+#### Fused block
 
 Fused 使用 `BlockMmadTla` 针对 `MmadPlanarComplexFused` policy 的偏特化（`block_mmad_planar_complex_fused_tla.hpp`）：
 
@@ -189,9 +189,9 @@ Fused 使用 `BlockMmadTla` 针对 `MmadPlanarComplexFused` policy 的偏特化�
 4. **L0C 单缓冲**：C_real FixPipe 完成后 C_imag 才开始，分时复用。
 5. **K-shuffle**：`ENABLE_SHUFFLE_K=true` 时按 `GetBlockIdx()` 偏移 K tile 顺序，分散 L2 访问热点。
 
-### 4.4 DispatchPolicy 设计
+### DispatchPolicy 设计
 
-#### 4.4.1 Fused: `MmadPlanarComplexFused`
+#### Fused: `MmadPlanarComplexFused`
 
 模板参数：
 
@@ -200,16 +200,16 @@ Fused 使用 `BlockMmadTla` 针对 `MmadPlanarComplexFused` policy 的偏特化�
 | `ArchTag` | 目标架构 | `Arch::AtlasA2` |
 | `ENABLE_SHUFFLE_K` | 是否启用 K 维 shuffle | `true` |
 
-## 5. 空间分配
+## 空间分配
 
-### 5.1 Tile Shape 设计
+### Tile Shape 设计
 
 ```cpp
 using L1TileShape = tla::tuple<tla::Int<128>, tla::Int<256>, tla::Int<256>>;  // M, N, K
 using L0TileShape = tla::tuple<tla::Int<128>, tla::Int<256>, tla::Int<64>>;   // M, N, K
 ```
 
-### 5.2 存储空间计算
+### 存储空间计算
 
 数据类型：`ElementA = ElementB = half`（2 字节），`ElementAccumulator = float`（4 字节），pingpong `STAGES = 2`。硬件 buffer 容量：`L1 = 512 KB`、`L0A = 64 KB`、`L0B = 64 KB`、`L0C = 128 KB`。
 

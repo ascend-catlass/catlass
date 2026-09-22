@@ -2,7 +2,7 @@
 
 ## 环境准备
 
-### 0. **基础依赖确认**
+### **基础依赖确认**
 
 确认基础依赖（见[README-软硬件配套说明](../../../README.md#-软硬件配套说明)）满足要求，确认NPU驱动是否安装。
 
@@ -12,7 +12,7 @@ cmake --version
 npu-smi info    # 若回显异常则参考下文 1.安装CANN 的在线安装方式完成驱动安装
 ```
 
-### 1. **安装CANN**
+### **安装CANN**
 
 建议优先使用在线安装方式[CANN 快速安装](https://www.hiascend.com/cann/download)完成`CANN toolkit`和`NPU驱动`安装。
 
@@ -40,7 +40,7 @@ source /usr/local/Ascend/ascend-toolkit/set_env.sh
 # source ${install_path}/set_env.sh
 ```
 
-### 2. **下载源码**
+### **下载源码**
 
 将CATLASS代码仓下载到本地。
 
@@ -56,7 +56,7 @@ git clone https://gitcode.com/cann/catlass.git
 - 样例名称里带`ascend950`字样的仅支持Ascend 950PR/Ascend 950DT产品
 - 其他样例仅支持Atlas A2/Atlas A3产品，代码中架构标签`ArchTag`统一使用`Arch::AtlasA2`
 
-### 1. **样例编译**
+### **样例编译**
 
 进入项目根目录，可执行下述编译指令：
 
@@ -94,7 +94,7 @@ bash scripts/build.sh 00_basic_matmul
 "[INFO] Target "{target}" built successfully."
 ```
 
-### 2. **算子执行**
+### **算子执行**
 
 算子编译产物在`output/bin`路径下，切换至该目录下可运行算子样例程序。
 以[00_basic_matmul](../../../examples/00_basic_matmul/README.md)样例为例，可通过下述指令执行该算子：

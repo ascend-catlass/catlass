@@ -1,6 +1,6 @@
 # XA TLA 系列 x_attention 推理核设计文档
 
-## 1. 系列概述
+## 系列概述
 
 XA TLA 系列是面向 **Ascend 950（Arch::Ascend950）x_attention 推理场景**的 TLA 指令实现。与 FD/XFAI 系列（Atlas A2 硬件路径）不同，本系列：
 
@@ -48,7 +48,7 @@ graph LR
 
 > Shared 路通过流式 online softmax（isFirstKv/isLastKv 控制）直接在 UB 中累积出 partial O，仅在最后一块 KV 时写出；Unshared 路每个任务独立完成一次完整 softmax（含变长 mask），partial O 直写 GM。两路各写一份 O/max/sum 到 GM，最终由 CombineScale 按 LSE 数学完成合并。
 
-## 2. 注册机制：xa_register.hpp
+## 注册机制：xa_register.hpp
 
 XA TLA 系列在工程侧（xllm-ops 的 `common/catlass/include/catlass_patch/xa_register.hpp`）通过"**空壳 Policy + 条件 include**"的方式注册：
 
@@ -82,9 +82,9 @@ struct EpilogueXASharedSoftmax { using ArchTag = ArchTag_; };
 2. **通过 `-I` 搜索顺序覆盖**：工程 CMake 中 `common/catlass/include` 路径优先于第三方 `catlass/include`，使第三方子模块保持 xa-free 状态，XA 扩展全部收敛在项目自有代码内；
 3. 该机制是把"未提交到 CATLASS 主干的扩展"以工程 patch 形式落地的标准范式。
 
-## 3. GEMM 模板设计
+## GEMM 模板设计
 
-### 3.1 共性骨架
+### 共性骨架
 
 4 个 GEMM 均为如下偏特化形式：
 
@@ -105,7 +105,7 @@ class BlockMmadTla<MmadXASharedQK<ArchTag_>, L1TileShape_, L0TileShape_,
 - **QK/PV 分组事件段**：QK 类 GEMM `BLOCK_EVENT_ID = 0`，PV 类 `BLOCK_EVENT_ID = 4`，同一 kernel 内两组 GEMM 互不干扰；
 - **跨核同步**：`SYNC_MODE = 4`，通过 `CrossCoreWaitFlag<SYNC_MODE, PIPE_FIX>`（+16 偏移的 AIV1 事件）与 AIV 侧同步，等待 epilogue 释放 UB/L1 资源的 flag。
 
-### 3.2 差异矩阵
+### 差异矩阵
 
 | 维度 | MmadXASharedQK | MmadXAUnsharedQK | MmadXASharedPV | MmadXAUnsharedPV |
 | --- | --- | --- | --- | --- |
@@ -118,14 +118,14 @@ class BlockMmadTla<MmadXASharedQK<ArchTag_>, L1TileShape_, L0TileShape_,
 | 跨核 flag | QK_UB_RELEASE_FLAG（uint64_t） | QK_UB_RELEASE_FLAG（uint16_t） | PV_UB_RELEASE_FLAG（uint16_t） | 无 |
 | operator() 附加参数 | isFirstKv / isLastKv / releaseFlag | releaseFlag / taskIdL0C | releaseFlag | 无（三 taskId） |
 
-### 3.3 MmadXASharedQK：跨 KV 块 Q 复用
+### MmadXASharedQK：跨 KV 块 Q 复用
 
 - Q（beam 维 M 轴）对同一 (batch, qHead) 的所有 KV 块不变，因此仅在 `isFirstKv` 时执行 `CopyGm2L1` 加载 Q 到 L1A；后续 KV 块直接复用，省去重复搬运；
 - `isLastKv` 时翻转 l1A 双缓冲槽位（`l1AEvent = 1 - l1AEvent`），保证下一任务的 Q 加载与当前任务的消费不冲突；
 - K（N 轴 KV 块）每次从 GM 加载至 L1B；
 - 结果 S 写入 UB 的 `qkTensorList[taskIdMod2]` 双缓冲，通过 `QK_UB_RELEASE_FLAG`（uint64_t）向 AIV 侧授权消费。
 
-### 3.4 MmadXAUnsharedQK：N 轴内循环
+### MmadXAUnsharedQK：N 轴内循环
 
 - 每次调用 Q/K 均从 GM 加载（不同任务 Q 不同）；
 - L1 一次装载 `L1_TILE_N` 列，L0 仅 `L0_TILE_N` 列，`nLoops = L1_TILE_N / L0_TILE_N` 次内循环：
@@ -134,23 +134,23 @@ class BlockMmadTla<MmadXASharedQK<ArchTag_>, L1TileShape_, L0TileShape_,
 - 适配 unshared 路径 `blockKvLen = groupCountPerLoop × maxDecodeStep` 大 N 块（如 128×256）场景；
 - `operator()` 为 `(tensorA, tensorB, tensorC, actualShape, releaseFlag, taskIdL0A, taskIdL0B, taskIdL0C)` 三 taskId 形式。
 
-### 3.5 MmadXASharedPV：P 常驻 L1
+### MmadXASharedPV：P 常驻 L1
 
 - A 矩阵 P（softmax 输出）由 epilogue 直写 L1（`CopyUb2L1Tla`），因此构造函数**不分配 l1A 缓冲**，仅分配 l1B/l0A/l0B/l0C；
 - L1/L0 三轴 TileShape 必须一致（P 在 L1 中按 L1 粒度整块布局）；
 - V（B 矩阵）每次 GM→L1→L0；
 - 计算结果 O_tmp 写入 `pvTensorList[taskIdMod2]` UB 双缓冲，`PV_UB_RELEASE_FLAG` 由 SharedRescaleO epilogue 消费后置位释放。
 
-### 3.6 MmadXAUnsharedPV：K 轴内循环 + L0C 复用
+### MmadXAUnsharedPV：K 轴内循环 + L0C 复用
 
 - P（A）从传入的 L1 tensor 获取（epilogue 直写），V（B）GM→L1→L0；
 - `kLoops = L1_TILE_K / L0_TILE_K` 次 K 轴内循环切分，`kIdx == 0` 时 `init=false`（首矩阵），其后 `init=true` 累加；
 - **L0C 复用**：`SHARED_L0C_STAGE_SIZE = L1_TILE_M × L1_TILE_K × sizeof(acc)`，直接复用 QK GEMM 已申请的 128×256 L0C 区域的前 128×128 子区，PV 构造时 L0C 指针指向该区域，节省 L0C 总量（L0C 有限，QK 与 PV 分时复用是 950 上常见手法）；
 - 无跨核 release flag：O_tmp 结果由 AIC 直接经 FIX 通道写 GM（unshared 路 partial O 直写）。
 
-## 4. Epilogue 模板设计
+## Epilogue 模板设计
 
-### 4.1 EpilogueXASharedSoftmax：流式在线 softmax
+### EpilogueXASharedSoftmax：流式在线 softmax
 
 ```cpp
 template <typename Policy_, typename L1TileShape_, typename PType_, typename SType_>
@@ -173,7 +173,7 @@ class BlockEpilogue<EpilogueXASharedSoftmax<...>, ...> {
   7. `UpdateExpSumAndExpMax`：`nowExpSum = lastExpSum×exp(lastMax-nowMax) + curSum`；
   8. `isLastKv` 时 `CopyOutMaxAndSum`：Brcb + `DataCopyPad` 按 `qHeads` stride 把每行 max/sum 写 GM（供 CombineScale 消费）。
 
-### 4.2 EpilogueXAUnsharedSoftmax：mask + 独立 softmax
+### EpilogueXAUnsharedSoftmax：mask + 独立 softmax
 
 ```cpp
 BlockEpilogue(Resource *resource, uint32_t &ubBufAddrStart, float scaleValue,
@@ -186,7 +186,7 @@ BlockEpilogue(Resource *resource, uint32_t &ubBufAddrStart, float scaleValue,
 - **每步独立**：无 `isUpdate/isLastKv` 流式逻辑，每个任务一次完整 softmax（exp/max/sum 均为本步独立值），`CopyOutMaxAndSum` **每次调用都执行**（`DataCopyPad` 写 GM，V_MTE3 EVENT_ID7 同步）；
 - `QK_UB_RELEASE_FLAG` 为 uint16_t（与 Shared 路的 uint64_t 区分）。
 
-### 4.3 EpilogueXASharedRescaleO：O 累积 + PV 释放闭环
+### EpilogueXASharedRescaleO：O 累积 + PV 释放闭环
 
 ```cpp
 BlockEpilogue(Resource *resource, uint32_t &ubBufAddrStart);  // 仅 2 参数
@@ -200,7 +200,7 @@ BlockEpilogue(Resource *resource, uint32_t &ubBufAddrStart);  // 仅 2 参数
   3. `isLastKv`：`CopyUbToGmO` 写出最终 partial O；
   4. **`CrossCoreSetFlag(PV_RELEASE_FLAG)`**：消费完 `pvRes` 后释放 PV GEMM 的 UB 双缓冲——这是 `MmadXASharedPV` 中 `PV_UB_RELEASE_FLAG` 的消费者，形成完整生产者-消费者闭环。
 
-### 4.4 EpilogueXACombineScale：双路 LSE 合并
+### EpilogueXACombineScale：双路 LSE 合并
 
 ```cpp
 BlockEpilogue(Resource *resource, uint32_t &ubBufAddrStart,
@@ -220,7 +220,7 @@ O_final   = (O_shared × exp(sharedMax − finalMax) + O_unshared × exp(unshare
 
 - **执行流程**：DataCopy 搬入双路 O/max/sum → `ComputeExpSumAndExpMax` → `ComputeFinalAttn`（nLoops 按 vlSize 切 headDim）→ Cast 到 ElementOutput → DataCopy 写 `gFinalOutput` → `taskId = 1 - taskId` 翻转乒乓。
 
-## 5. 跨核同步 flag 总表
+## 跨核同步 flag 总表
 
 | Flag | 生产者 | 消费者 | 语义 |
 | --- | --- | --- | --- |
@@ -230,11 +230,11 @@ O_final   = (O_shared × exp(sharedMax − finalMax) + O_unshared × exp(unshare
 | `SYNC_PV_READY_FLAG[i]`（+16） | AIC：PV GEMM 完成 | AIV：Rescale 开始读 pvRes | PV O 就绪 |
 | `PV_UB_RELEASE_FLAG[i]` | AIV：Rescale 消费完 pvRes / kernel 尾部预置 | AIC：PV GEMM 复用 pvTensorList 槽 | PV UB 槽空闲 |
 
-## 6. Kernel 组装与软件流水
+## Kernel 组装与软件流水
 
 三个组装 kernel 位于 xllm-ops 的 `x_attention/op_kernel/arch35/` 目录。AIC 与 AIV 以"双核启动"方式绑定（`CV_RATIO = 2` 表示 1 个 Cube 核带 2 个 Vector 核），通过 `sharedInfo.usedCoreNum` 在同一批核上错峰启动 shared 与 unshared kernel。
 
-### 6.1 SharedFaInferKernel：4 级软件流水（shared_infer_catlass_kernel.h，444 行）
+### SharedFaInferKernel：4 级软件流水（shared_infer_catlass_kernel.h，444 行）
 
 ```cpp
 SharedFaInferKernel<BlockMmadQK, BlockMmadPV, EpilogueOnlineSoftmax, EpilogueRescaleO, KVLEN_T>;
@@ -267,7 +267,7 @@ graph LR
 - **预热 SetFlag**：kernel 入口 AIC 置 M_MTE1 EVENT_ID 0-3，AIV 置 4 个 UB_RELEASE flag，消除首轮等待；
 - 所有 `SYNC_*_READY` flag 均双份 Set（含 +16 偏移的 AIV1 镜像事件）。
 
-### 6.2 UnSharedInferKernel：3 级软件流水 + 页表寻址（unshared_infer_catlass_kernel.h，375 行）
+### UnSharedInferKernel：3 级软件流水 + 页表寻址（unshared_infer_catlass_kernel.h，375 行）
 
 ```cpp
 UnSharedInferKernel<BlockMmadQK, BlockMmadPV, EpilogueSoftmax, KVLEN_T, TABLE_T>;
@@ -290,7 +290,7 @@ UnSharedInferKernel<BlockMmadQK, BlockMmadPV, EpilogueSoftmax, KVLEN_T, TABLE_T>
 - **核偏移**：`coreIdx` 减去 `sharedInfo.usedCoreNum`——与 shared kernel 在同一物理核域内错峰启动；
 - UB 仅 `qkTensorList[2]`，L1 为 `pL1TensorList[3]`。
 
-### 6.3 CombineScaleKernel：纯 AIV 合并（combine_kernel.h，151 行）
+### CombineScaleKernel：纯 AIV 合并（combine_kernel.h，151 行）
 
 ```cpp
 CombineScaleKernel<EpilogueCombineScale>;
@@ -301,11 +301,11 @@ CombineScaleKernel<EpilogueCombineScale>;
 - **former/tail 两级任务切分**：`formerCoreNum / formerTaskNum / tailCoreNum` 做核间负载均衡，每核循环 `coreTaskNum` 次，每次按 `rowNumPerLoop` 行调用 epilogue（`realRowNum` 按剩余行数钳制）；
 - 7 个 GM tensor（shared/unshared 各 max/sum/O + gFinalOut）按 `gmglOffsetPerCore / attnOffsetPerCore` 计算各核偏移。
 
-## 7. 使用示例
+## 使用示例
 
 以下摘自 xllm-ops（https://gitcode.com/xLLM-AI/xllm_ops）`x_attention/op_kernel/x_attention_catlass_helper.h`（124 行），展示三个 kernel 的组装入口。
 
-### 7.1 Shared 路入口：CallSharedInferKernel
+### Shared 路入口：CallSharedInferKernel
 
 ```cpp
 template <typename INPUT_T, typename TILING_T>
@@ -334,7 +334,7 @@ __aicore__ inline void CallSharedInferKernel(const TILING_T &tiling, SharedInfo 
 }
 ```
 
-### 7.2 Unshared 路入口：CallUnsharedInferKernel
+### Unshared 路入口：CallUnsharedInferKernel
 
 ```cpp
 using BlockMmadQK = Catlass::Gemm::BlockMmadTla<Catlass::Gemm::MmadXAUnsharedQK<Arch::Ascend950>,
@@ -348,7 +348,7 @@ using Kernel = UnSharedInferKernel<BlockMmadQK, BlockMmadPV, EpilogueSoftmax, KV
 Kernel::Invoke(...);  // blockTableGm 页表 + unshared K/V
 ```
 
-### 7.3 Combine 入口：CallCombineScale
+### Combine 入口：CallCombineScale
 
 ```cpp
 using EpilogueCombineScale = Catlass::Epilogue::BlockEpilogue<
@@ -360,7 +360,7 @@ Kernel::Invoke(sharedMax, sharedSum, sharedAttn, unsharedMax, unsharedSum,
 
 三个入口在算子层（`x_attention` 的 `OpKernel` 实现）中按顺序调用：先 shared 与 unshared（同核域错峰），最后 combine 合并输出。调用方只需保证 tiling 中给出 `sharedKvLen / unsharedKvLen / groupSize / maxDecodeStep / qHeads` 等字段与 GM 张量布局一致。
 
-## 8. 约束与注意事项
+## 约束与注意事项
 
 1. **架构约束**：仅支持 Ascend 950（`CATLASS_ARCH == 3510`），注册头需置于 catlass 聚合头之后；
 2. **TileShape 约束**：

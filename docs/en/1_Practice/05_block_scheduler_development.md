@@ -1,6 +1,6 @@
 # Block Scheduler Code Explained
 
-## 1. Block Scheduler Overview
+## Block Scheduler Overview
 
 Block scheduler is a core component in the CATLASS template library responsible for block-level task scheduling. It resides in the block layer, responsible for managing and distributing matrix multiplication tasks to different compute units. It improves compute resource utilization and cache hit rates by optimizing task distribution order and data access patterns, thereby enhancing overall performance.
 
@@ -12,7 +12,7 @@ Block scheduler adopts a template-based design and supports multiple scheduling 
 
 This document uses `GemmIdentityBlockSwizzle` as an example to dive into the code structure, main interfaces, and scheduling policies of the block swizzle.
 
-## 2. Template Assembly Mechanism
+## Template Assembly Mechanism
 
 The GemmIdentityBlockSwizzle implementation is based on the following basic template structure:
 
@@ -23,7 +23,7 @@ struct GemmIdentityBlockSwizzle {
 };
 ```
 
-### 2.1 Core Template Parameters
+### Core Template Parameters
 
 | Parameter        | Description                                                            |
 | ---------------- | ---------------------------------------------------------------------- |
@@ -32,7 +32,7 @@ struct GemmIdentityBlockSwizzle {
 
 These template parameters are related to the **specific implementation** of scheduling algorithms. They allow users to flexibly configure the scheduling policies to adapt to different hardware architectures and performance requirements.
 
-## 3. Core Data Structure
+## Core Data Structure
 
 GemmIdentityBlockSwizzle contains the following core data members for maintaining scheduling state and computation parameters:
 
@@ -45,9 +45,9 @@ MatrixCoord loopsMN;     // Loop counts for M and N dimensions
 
 These data members together form the state of the scheduler and track the current computation progress and parameters.
 
-## 4. Main Interfaces
+## Main Interfaces
 
-### 4.1 Constructor
+### Constructor
 
 ```cpp
 CATLASS_DEVICE
@@ -71,7 +71,7 @@ GemmIdentityBlockSwizzle(GemmCoord const &problemShape_, MatrixCoord const &tile
 
 GemmIdentityBlockSwizzle provides three constructors for default initialization, initialization based on problem shape and tile shape, and initialization that directly specifies the loop counts.
 
-### 4.2 Update Method
+### Update Method
 
 ```cpp
 CATLASS_DEVICE
@@ -95,7 +95,7 @@ void Update(GemmCoord const &problemShape_, MatrixCoord const &tileMN_, MatrixCo
 
 The Update method dynamically adjusts the problem shape, tile shape, and loop counts.
 
-### 4.3 GetCoreLoops Method
+### GetCoreLoops Method
 
 ```cpp
 CATLASS_DEVICE
@@ -107,7 +107,7 @@ uint32_t GetCoreLoops() const
 
 This method returns the core loop count, which is the number of M-dimension loops multiplied by the number of N-dimension loops. It represents the total number of blocks to process.
 
-### 4.4 GetBatchIdx Method
+### GetBatchIdx Method
 
 ```cpp
 CATLASS_DEVICE
@@ -119,7 +119,7 @@ uint32_t GetBatchIdx(uint32_t taskIdx)
 
 Designed for batch processing, this method returns the batch index based on the task index.
 
-### 4.5 GetBlockCoord Method
+### GetBlockCoord Method
 
 ```cpp
 CATLASS_DEVICE
@@ -154,7 +154,7 @@ GetBlockCoord is the core method of GemmIdentityBlockSwizzle. It calculates the 
 
 This method also implements snake scanning. When the block index is odd, it reverses the N-dimension or M-dimension index to optimize the memory access pattern.
 
-### 4.6 GetActualBlockShape Method
+### GetActualBlockShape Method
 
 ```cpp
 CATLASS_DEVICE
@@ -171,9 +171,9 @@ GemmCoord GetActualBlockShape(GemmCoord blockCoord)
 
 This method calculates the actual size of a block based on its coordinate, especially handling the boundaries of tail blocks. When a block is in the last row or last column, this method adjusts the block size to fit the actual problem size.
 
-## 5. Scheduling Policies
+## Scheduling Policies
 
-### 5.1 Window-based Scheduling
+### Window-based Scheduling
 
 GemmIdentityBlockSwizzle adopts window-based scheduling. It divides the tiles in the M or N dimension into multiple windows for processing:
 
@@ -184,7 +184,7 @@ uint32_t tileBlockIdx = innerIdx / (SwizzleOffset * loopsMN.column());
 
 Window-based scheduling improves the cache hit rate and reduces cache thrashing, especially when processing large-scale matrices.
 
-### 5.2 Snake Scanning
+### Snake Scanning
 
 The GetBlockCoord method implements snake scanning:
 
@@ -196,7 +196,7 @@ if (tileBlockIdx % 2 == 1) {
 
 Snake scanning can optimize the memory access pattern, reduce memory bandwidth pressure, and improve data loading efficiency.
 
-### 5.3 Tail Block Processing
+### Tail Block Processing
 
 The scheduler performs special processing on tail blocks to ensure the correctness of computation:
 
@@ -207,7 +207,7 @@ uint32_t mActual = (blockCoord.m() == (loopsMN.row() - 1)) ?
 
 For incomplete tail blocks, the scheduler adjusts the block size to ensure the correctness of computation.
 
-## 6. Dynamic Scheduling Extension
+## Dynamic Scheduling Extension
 
 GemmIdentityBlockSwizzle also provides a dynamic version called `DynamicGemmIdentityBlockSwizzle`:
 
@@ -232,7 +232,7 @@ struct DynamicGemmIdentityBlockSwizzle : public GemmIdentityBlockSwizzle<>
 
 DynamicGemmIdentityBlockSwizzle allows runtime adjustment of SwizzleOffset and SwizzleDirection, allowing more flexible scheduling control.
 
-## 7. Execution Flow Analysis
+## Execution Flow Analysis
 
 The typical execution flow of the Block Scheduler is as follows:
 
@@ -243,7 +243,7 @@ The typical execution flow of the Block Scheduler is as follows:
    - Calculate the block coordinates based on the task index.
    - Calculate the actual size of a block based on its coordinates.
 
-## 8. Summary
+## Summary
 
 Block Scheduler is a core component in the CATLASS template library, responsible for block-level task scheduling. Through policies such as window-based scheduling, snake scanning, and tail block processing, it optimizes the memory access pattern and cache hit rate, thereby improving overall performance.
 

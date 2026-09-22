@@ -1,12 +1,12 @@
 # Epilogue Adaptation and Development Explained
 
-## 1. Epilogue Overview
+## Epilogue Overview
 
 Epilogue is the final stage of General Matrix Multiply (GEMM). It is responsible for post-processing operations on the result of matrix multiplication, such as activation functions, quantization/dequantization, and bias addition. In the CATLASS framework, epilogue adopts a modular design that supports flexible combination and extension of multiple post-processing operations.
 
-## 2. Host-layer Epilogue Adaptation
+## Host-layer Epilogue Adaptation
 
-### 2.1 Dispatch Policy Selection
+### Dispatch Policy Selection
 
 Based on different epilogue operation requirements, an appropriate dispatch policy must be selected. For example, in a per-token dequantization scenario, we select the `EpilogueAtlasA2PerTokenDequant` policy:
 
@@ -14,7 +14,7 @@ Based on different epilogue operation requirements, an appropriate dispatch poli
 using DispatchPolicy = EpilogueAtlasA2PerTokenDequant;
 ```
 
-### 2.2 Data Type Definitions
+### Data Type Definitions
 
 Define the various data types involved in the epilogue based on specific computation requirements:
 
@@ -27,7 +27,7 @@ using LayoutPerTokenScale = Layout<ScaleType::Vector>;
 using LayoutD = RowMajor;
 ```
 
-### 2.3 Tile Component Configuration
+### Tile Component Configuration
 
 Configure the corresponding tile components based on the type of epilogue operation:
 
@@ -37,7 +37,7 @@ using TileBroadcastOneBlk = TileBroadcastOneBlk<...>;
 using TileCopy = TileCopy<...>;
 ```
 
-### 2.4 BlockEpilogue Assembly
+### BlockEpilogue Assembly
 
 Assemble the configured tile components into a complete BlockEpilogue.
 
@@ -45,7 +45,7 @@ Assemble the configured tile components into a complete BlockEpilogue.
 using BlockEpilogue = BlockEpilogue<DispatchPolicy, CType, ScaleType, PerTokenScaleType, DType, TileRowBroadcastMul, TileBroadcastOneBlk, TileCopy>;
 ```
 
-### 2.5 Kernel Integration
+### Kernel Integration
 
 Integrate the BlockEpilogue into the kernel. For example, use `QuantMatmulMultiStageWorkspace`:
 
@@ -53,9 +53,9 @@ Integrate the BlockEpilogue into the kernel. For example, use `QuantMatmulMultiS
 using Kernel = QuantMatmulMultiStageWorkspace<BlockMmad, BlockEpilogue, BlockScheduler, WORKSPACE_STAGES>;
 ```
 
-## 3. Kernel-layer Epilogue Adaptation
+## Kernel-layer Epilogue Adaptation
 
-### 3.1 Parameter Definition
+### Parameter Definition
 
 Define a struct that contains the parameters required for epilogue operations:
 
@@ -77,7 +77,7 @@ struct Params {
 };
 ```
 
-### 3.2 AIV Core Implementation
+### AIV Core Implementation
 
 Implement epilogue operations of the AIV core:
 
@@ -89,7 +89,7 @@ void operator()<AscendC::AIV>(Params const &params) {
 }
 ```
 
-### 3.3 AIC/AIV Synchronization
+### AIC/AIV Synchronization
 
 Implement synchronization between the AIC core and the AIV core:
 
@@ -99,9 +99,9 @@ Arch::CrossCoreWaitFlag(flagAicFinishStoreList[stageId]);
 Arch::CrossCoreSetFlag<0x2, PIPE_MTE3>(flagAivFinishComputeList[stageId]);
 ```
 
-### 3.4 Workspace Adaptation
+### Workspace Adaptation
 
-#### 3.4.1 Workspace Size Calculation
+#### Workspace Size Calculation
 
 ```cpp
 static size_t GetWorkspaceSize(const Arguments &args) {
@@ -120,7 +120,7 @@ static size_t GetWorkspaceSize(const Arguments &args) {
 - `sizeof(uint32_t)`: Size of each element. This example assumes intermediate results are of type `uint32_t`.
 - The final workspace size is the size for a single core at a single stage multiplied by the number of cores and the number of stages.
 
-#### 3.4.2 AIC Core Writing into Workspace
+#### AIC Core Writing into Workspace
 
 Implementation where the AIC core writes matrix multiplication results to the workspace:
 
@@ -183,7 +183,7 @@ void operator()<AscendC::AIC>(Params const &params) {
 - `blockMmad`: Performs matrix multiplication and writes the results to the specified location in the workspace.
 - After matrix multiplication completes, `callbackAfterFixpipe` sets the completion flag.
 
-#### 3.4.3 AIV Core Reading from Workspace
+#### AIV Core Reading from Workspace
 
 Implementation where the AIV core reads results from the workspace and performs epilogues:
 
@@ -238,9 +238,9 @@ void operator()<AscendC::AIV>(Params const &params) {
 - `blockEpilogue`: Performs epilogues by reading intermediate results from the workspace.
 - `Arch::CrossCoreSetFlag`: Notifies the AIC core that epilogues in the current stage complete.
 
-## 4. BlockEpilogue Development
+## BlockEpilogue Development
 
-### 4.1 Template Parameters
+### Template Parameters
 
 Using [EpilogueAtlasA2PerTokenDequant](../../../include/catlass/epilogue/block/block_epilogue_per_token_dequant.hpp) as an example, the template parameters of BlockEpilogue are shown in the table below:
 
@@ -255,14 +255,14 @@ Using [EpilogueAtlasA2PerTokenDequant](../../../include/catlass/epilogue/block/b
 | TileBroadcastOneBlk | typename | Tile component for single-block broadcast       |
 | TileCopy            | typename | Tile component for data copy                    |
 
-### 4.2 Core Methods
+### Core Methods
 
 The core methods of BlockEpilogue include:
 
 - `UpdateParams()`: Updates the epilogue parameters.
 - `operator()`: Performs epilogues.
 
-### 4.3 UB Management
+### UB Management
 
 BlockEpilogue needs to manage Unified Buffer (UB) resources, including:
 
@@ -270,9 +270,9 @@ BlockEpilogue needs to manage Unified Buffer (UB) resources, including:
 - UB storage of the scaling factor
 - UB storage of the output matrix D
 
-## 5. Tile Component Development
+## Tile Component Development
 
-### 5.1 Tile Types
+### Tile Types
 
 Tile component types vary depending on the epilogues. For example:
 
@@ -280,7 +280,7 @@ Tile component types vary depending on the epilogues. For example:
 - `TileBroadcastOneBlk`: single-block broadcast
 - `TileCopy`: data copy
 
-### 5.2 Tile Struct
+### Tile Struct
 
 The struct of a tile component typically includes:
 
@@ -288,7 +288,7 @@ The struct of a tile component typically includes:
 - Core methods: Implement tile-level operations.
 - UB management: Manage the UB resources used by tiles.
 
-### 5.3 Using Tiles
+### Using Tiles
 
 In BlockEpilogue, the use of tile components typically includes:
 
@@ -296,6 +296,6 @@ In BlockEpilogue, the use of tile components typically includes:
 - Configuring tile parameters
 - Calling core tile methods to perform operations
 
-## 6. Summary
+## Summary
 
 Epilogue adaptation and development is an important part of matrix multiplication computation in CATLASS. By selecting an appropriate dispatch policy, configuring tile components, assembling BlockEpilogue, and implementing collaborative work between AIC and AIV cores, you can efficiently perform various epilogues on matrix multiplication results. Additionally, properly managing the workspace and UB resources can further improve the epilogue performance.

@@ -1,6 +1,6 @@
 # SingleCoreSplitkMatmul
 
-## 1. Template Description
+## Template Description
 
 ![image-20260210002058199](https://raw.gitcode.com/weixin_42818618/picture0/raw/main/image-20260210002058199.png)
 
@@ -10,11 +10,11 @@ The capacity of L0C is smaller than that of L1 (for example, on A2, L0C is 128 K
 
 The performance gains of single-core Split-K stem from scaling up L1TileM. Based on geometric modeling, larger L1TileM dimensions reduce input data reloading from GM. However, because the generated partial sums cannot complete their reduction within L0C, they must be written out to GM for atomic reduction, introducing additional write-out overhead.
 
-## 2. Optimization
+## Optimization
 
 Three SingleCoreSplitK template variants are derived based on distinct data-loop scheduling strategies.
 
-### 2.1 SingleCoreSplitkKLoopMiddleMatmul
+### SingleCoreSplitkKLoopMiddleMatmul
 
 ![image-20260210193559636](https://raw.gitcode.com/weixin_42818618/picture0/raw/main/image-20260210193559636.png)
 
@@ -36,7 +36,7 @@ for gmTileN1 in N:
                                 writeC(m0, n0)
 ```
 
-### 2.1.1 Engineering optimization
+### Engineering optimization
 
 - L1 residency
 
@@ -60,13 +60,13 @@ for gmTileN1 in N:
 
 - SetMMLayoutTransform
 
-### 2.1.2 Advantages and Disadvantages
+### Advantages and Disadvantages
 
 Advantage: `SingleCoreSplitkKLoopMiddleMatmul` facilitates the configuration of localized workspace partitions. Because Fixpipe consistently targets a highly localized workspace memory range, the write path maintains an exceptional cache hit rate, maximizing write-out bandwidth.
 
 Disadvantage: Each core is assigned a relatively large spatial tile of Matrix C, which increases vulnerability load imbalance.
 
-### 2.2 SingleCoreSplitkKLoopOuterMatmul
+### SingleCoreSplitkKLoopOuterMatmul
 
 ![image-20260210194055831](https://raw.gitcode.com/weixin_42818618/picture0/raw/main/image-20260210194055831.png)
 
@@ -89,7 +89,7 @@ for k1 in K:
 
 For `SingleCoreSplitkKLoopOuterMatmul`, a global workspace matching the total element count of Matrix C must be allocated whenever the accumulation data type differs from the final output precision, or when Matrix C dimensions violate hardware alignment rules.
 
-### 2.2.1 Engineering optimization
+### Engineering optimization
 
 - Optimizations such as L1 residency, disabling double-buffering for resident tensors, Disabling unitflag and enabling L0C double-buffering, aligned write-outs, and `SetMMLayoutTransform` map identically to those in `SingleCoreSplitkKLoopMiddleMatmul`.
 
@@ -97,13 +97,13 @@ For `SingleCoreSplitkKLoopOuterMatmul`, a global workspace matching the total el
 
   In the `SingleCoreSplitkKLoopOuterMatmul` template, basic blocks of Matrix C are interleaved evenly across all active AI Cores with a swizzle pattern.
 
-### 2.2.2 Advantages and Disadvantages
+### Advantages and Disadvantages
 
 Advantage: `SingleCoreSplitkKLoopOuterMatmul` achieves more uniform load balancing than `SingleCoreSplitkKLoopMiddleMatmul`.
 
 Disadvantage: This strategy requires backing workspace storage equivalent to the full footprint of Matrix C. The kernel computes an entire horizontal layer of partial sums across Matrix C before advancing to the next layer down the K-axis. If Matrix C is exceptionally large, this execution footprint thrashes the cache, drastically degrading write-out bandwidth.
 
-### 2.3 SingleCoreSplitkForSmallKMatmul
+### SingleCoreSplitkForSmallKMatmul
 
 This template targets a specialized scenario. When K is highly constrained (K ≤ L1TileK), tiling along the K-direction becomes unnecessary, bypassing the requirement for workspace-allocated atomic accumulation. For example, when source matrices A and B are provided in half precision, if Matrix C matches native alignment constraints, the half precision data can be streamed directly out to the memory space allocated for Matrix C. If Matrix C exhibits non-alignment, the half data blocks are instead staged out to a 512-byte stride-aligned workspace before a downstream AIV flushes the data back to GM C.
 

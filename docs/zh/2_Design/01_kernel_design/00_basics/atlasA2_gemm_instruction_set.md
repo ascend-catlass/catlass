@@ -1,6 +1,6 @@
 # AtlasA2 GEMM类硬件指令集介绍
 
-## 1. API
+## API
 
 ### 数据搬运
 
@@ -502,7 +502,7 @@ if constexpr (AscendC::IsSameType<T, float>::value && AscendC::IsSameType<U, flo
 }
 ```
 
-## 2. 同步指令
+## 同步指令
 
 于AIC核/AIV核内部的执行单元（如MTE2搬运单元、Vector计算单元等）以异步并行的方式运行，在读写同一存储资源时可能存在数据依赖关系。为确保数据一致性及计算正确性，需通过同步控制协调操作时序
 

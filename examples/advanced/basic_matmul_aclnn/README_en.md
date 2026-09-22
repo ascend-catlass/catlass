@@ -4,7 +4,7 @@ aclnn is the standard calling interface used throughout the CANN software stack.
 
 The following guide uses `basic_matmul` to demonstrate the end-to-end integration workflow with msOpGen.
 
-## 1. Creating an Operator Project
+## Creating an Operator Project
 
 Refer to the [Operator Project Creation Guide](https://www.hiascend.com/document/detail/en/canncommercial/850/opdevg/Ascendcopdevg/atlas_ascendc_10_0060.html) to define your operator prototype JSON file and generate the base engineering code.
 
@@ -24,7 +24,7 @@ msopgen gen -i catlass_basic_matmul.json -c ai_core-<soc_version> -lan cpp -out 
 - Ensure that the input JSON configuration file (`catlass_basic_matmul.json` in the preceding example) is configured with 644 file permissions.
 - Ensure that the target output directory (`catlass_basic_matmul` in the preceding example) is created with 755 permissions.
 
-## 2. Implementing Host-side Code
+## Implementing Host-side Code
 
 Refer to [Host-Side Tiling Implementation - Basic Process](https://www.hiascend.com/document/detail/en/canncommercial/850/opdevg/Ascendcopdevg/atlas_ascendc_10_00021.html) to implement the TilingFunc logic.
 
@@ -34,7 +34,7 @@ Sample code:
 [op_host/catlass_basic_matmul.cpp](./op_host/catlass_basic_matmul.cpp)
 [op_host/catlass_basic_matmul_tiling.h](./op_host/catlass_basic_matmul_tiling.h)
 
-## 3. Implementing Device-side Code
+## Implementing Device-side Code
 
 Refer to [Operator Implementation on the Kernel](https://www.hiascend.com/document/detail/en/canncommercial/850/opdevg/Ascendcopdevg/atlas_ascendc_10_0063.html) to write your device kernel code.
 
@@ -85,7 +85,7 @@ Sample code:
   }
   ```
 
-## 4. Compilation and Deployment
+## Compilation and Deployment
 
 Refer to [Operator Project Building](https://www.hiascend.com/document/detail/en/canncommercial/850/opdevg/Ascendcopdevg/atlas_ascendc_10_0068.html) and [OPP Deployment](https://www.hiascend.com/document/detail/en/canncommercial/850/opdevg/Ascendcopdevg/atlas_ascendc_10_0069.html) to build and install your custom operator implementation, then set the necessary environment variables.
 
@@ -96,9 +96,9 @@ $ASCEND_HOME_PATH/opp/vendors/customize/op_api/include/aclnn_catlass_basic_matmu
 $ASCEND_HOME_PATH/opp/vendors/customize/op_api/lib/libcust_opapi.so
 ```
 
-Utilize these locations when configuring target dependencies in your custom `Makefile` or `CMakeLists.txt`. You can view the CMake compilation example in [5. Invocation](#5-invocation).
+Utilize these locations when configuring target dependencies in your custom `Makefile` or `CMakeLists.txt`. You can view the CMake compilation example in [5. Invocation](#invocation).
 
-## 5. Invocation
+## Invocation
 
 Refer to the [API Overview](https://www.hiascend.com/document/detail/en/canncommercial/850/API/aolapi/operatorlist_00001.html) to familiarize yourself with foundational aclnn calling paradigms, then reference [basic_matmul_aclnn.cpp](./basic_matmul_aclnn.cpp) for invocation.
 

@@ -4,9 +4,9 @@
 
 ---
 
-## 1. 组件族谱（非TLA AtlasA2）
+## 组件族谱（非TLA AtlasA2）
 
-### 1.1 3-param 特化（L1Type + L0Type）
+### 3-param 特化（L1Type + L0Type）
 
 | # | L1Type | L0Type | Element | Params | API | Trans |
 |---|--------|--------|---------|--------|-----|------|
@@ -19,7 +19,7 @@
 | 7 | `nN(B1)` | `zN(B2)` | `float` | `LoadData2dTransposeParams` | `LoadDataWithTranspose` | 是 |
 | 8 | `nZ(B1)` | `zN(B2)` | `int8_t` | `LoadData2dTransposeParams` | `LoadDataWithTranspose` | 是 |
 
-### 1.2 2-param 特化（L1Type only）
+### 2-param 特化（L1Type only）
 
 | # | L1Type | Element | Params | API | Trans |
 |---|--------|---------|--------|-----|------|
@@ -31,7 +31,7 @@
 
 ---
 
-### 1.3 断言必验字段
+### 断言必验字段
 
 |API|Params 类型|必验字段|
 |---|---|---|
@@ -41,9 +41,9 @@
 
 ---
 
-## 2. 测试基础设施
+## 测试基础设施
 
-### 2.1 关联Stub文件
+### 关联Stub文件
 
 | 文件 | 作用 |
 |------|------|
@@ -53,7 +53,7 @@
 | `stub/kernel_operator_mm_intf.h` | `LoadData` / `LoadDataWithTranspose` stub 实现 |
 | `common/helper.hpp` | `GetEleNumPerC0()` / `setLayout()` / `isContiguous()` / `setShapeImpl()` |
 
-### 2.2 测试Fixture成员
+### 测试Fixture成员
 
 `TileCopyL1ToL0BTest` 继承 `AscendCTest`，`setShape<Element, isTrans>(row, col)` 依据是否转置预算好 round 与 fractal 值供各用例复用：
 
@@ -68,7 +68,7 @@ uint32_t _row_round = _0, _col_round = _0;
 uint32_t _rows_by_fractal = _0, _cols_by_fractal = _0;
 ```
 
-### 2.3 日志索引约定
+### 日志索引约定
 
 ```cpp
 argsT[0] = MakeArg<Element>()    →  GetArgsTAt(0).Type() = typeid(Element)
@@ -94,9 +94,9 @@ LoadData2DParams:               LoadData2dTransposeParams:
 
 ---
 
-## 3. 断言模式
+## 断言模式
 
-### 3.1 LoadData2DParams 非转置
+### LoadData2DParams 非转置
 
 zN→zN 或 nZ→nZ 同布局搬运，无转置，使用 `LoadData` API 配合 `LoadData2DParams`。L0B 的 `repeatTimes` 取 `shape(3)`。
 
@@ -110,7 +110,7 @@ ASSERT_EQ(p->ifTranspose, false);
 ASSERT_EQ(logs.size(), 1);  // 单次调用
 ```
 
-### 3.2 LoadData2DParams 转置
+### LoadData2DParams 转置
 
 zZ/zN→zN 需要转置，使用 `LoadData` API 但 `ifTranspose=true`。`repeatTimes` 基于目标形状的 `CeilDiv` 计算。
 
@@ -124,7 +124,7 @@ ASSERT_EQ(p->ifTranspose, true);
 ASSERT_EQ(logs.size(), CeilDiv<C0_NUM_PER_FRACTAL>(dst.orgShape(0)));
 ```
 
-### 3.3 LoadData2dTransposeParams
+### LoadData2dTransposeParams
 
 float/int8_t/int4b_t 的转置搬运，使用专有 `AscendC::LoadDataWithTranspose` API。
 

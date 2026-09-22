@@ -4,7 +4,7 @@ aclnn接口是CANN软件栈一直沿用的接口，msOpGen工具是CANN提供可
 
 下面以basic_matmul接入为例进行示例，利用msOpGen工具接入该算子模板。
 
-## 1. 创建算子工程
+## 创建算子工程
 
 参考[创建算子工程](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/850/opdevg/Ascendcopdevg/atlas_ascendc_10_0060.html)链接编写一个算子原型的json文件，并生成对应工程。
 
@@ -24,7 +24,7 @@ msopgen gen -i catlass_basic_matmul.json -c ai_core-<soc_version> -lan cpp -out 
 - 需保证输入的json配置文件（上例中的`catlass_basic_matmul.json`）具有644的权限
 - 需保证输出的文件路径（上例中的`catlass_basic_matmul`）具有755的权限
 
-## 2. 编写Host代码
+## 编写Host代码
 
 参考[Host侧Tiling实现-基本流程](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/850/opdevg/Ascendcopdevg/atlas_ascendc_10_00021.html)实现`TilingFunc`。
 
@@ -34,7 +34,7 @@ msopgen gen -i catlass_basic_matmul.json -c ai_core-<soc_version> -lan cpp -out 
 [op_host/catlass_basic_matmul.cpp](./op_host/catlass_basic_matmul.cpp)
 [op_host/catlass_basic_matmul_tiling.h](./op_host/catlass_basic_matmul_tiling.h)
 
-## 3. 编写Device代码
+## 编写Device代码
 
 参考[Kernel侧算子实现](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/850/opdevg/Ascendcopdevg/atlas_ascendc_10_0063.html)，实现kernel代码。
 
@@ -84,7 +84,7 @@ msopgen gen -i catlass_basic_matmul.json -c ai_core-<soc_version> -lan cpp -out 
   }
   ```
 
-## 4. 编译、部署
+## 编译、部署
 
 参考[算子工程编译](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/850/opdevg/Ascendcopdevg/atlas_ascendc_10_0068.html)、[算子包部署](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/850/opdevg/Ascendcopdevg/atlas_ascendc_10_0069.html)进行编译、部署，并设定环境变量。
 
@@ -95,9 +95,9 @@ $ASCEND_HOME_PATH/opp/vendors/customize/op_api/include/aclnn_catlass_basic_matmu
 $ASCEND_HOME_PATH/opp/vendors/customize/op_api/lib/libcust_opapi.so
 ```
 
-这可作为`Makefile`/`CMakeLists.txt`的编写参考。可在[5. 调用](#5-调用)中查看CMake编写示例。
+这可作为`Makefile`/`CMakeLists.txt`的编写参考。可在[5. 调用](#%E8%B0%83%E7%94%A8)中查看CMake编写示例。
 
-## 5. 调用
+## 调用
 
 参考[接口简介](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/850/API/aolapi/operatorlist_00001.html)了解aclnn接口的相关概念，并参考[basic_matmul_aclnn.cpp](./basic_matmul_aclnn.cpp)尝试调用。
 

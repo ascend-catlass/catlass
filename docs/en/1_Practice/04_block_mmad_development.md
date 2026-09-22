@@ -1,12 +1,12 @@
 # Block MMAD Code Explained
 
-## 1. Block MMAD Overview
+## Block MMAD Overview
 
 Block Matrix Multiply-Add (Block MMAD) is a core component in the CATLASS template library responsible for block matrix multiplication. It resides in the middle layer of the compute architecture. It interfaces with the Kernel layer above and the Tile layer below, efficiently loading data from global memory (GM) into local memory (L1/L0) and scheduling tile matrix multiplication tasks.
 
 Block MMAD adopts a highly modular and template-based design. It supports multiple scheduling strategies, tile shapes, and data types. This flexibility allows it to adapt to different hardware architectures and computational requirements. This document uses `BlockMmadPingpong` as an example.
 
-## 2. Template Assembly Mechanism
+## Template Assembly Mechanism
 
 The Block MMAD implementation is based on the following basic template structure:
 
@@ -27,7 +27,7 @@ struct BlockMmad {
 };
 ```
 
-### 2.1 Core Template Parameters
+### Core Template Parameters
 
 | Parameter         | Description                                                                        |
 | ----------------- | ---------------------------------------------------------------------------------- |
@@ -39,7 +39,7 @@ struct BlockMmad {
 | TileCopy          | Tile-level data copy component responsible for data transfer between memory levels |
 | TileMmad          | Tile-level matrix multiplication component responsible for the actual computation  |
 
-### 2.2 Type Export
+### Type Export
 
 Block MMAD establishes a unified type interface through its type export system, making it easier for upper-layer components to use:
 
@@ -70,11 +70,11 @@ public:
     using LayoutCInL0 = layout::zN;
 ```
 
-## 3. Memory Management and Cache Design
+## Memory Management and Cache Design
 
 Block MMAD manages different levels of memory, including global memory (GM), L1 cache, and L0 cache.
 
-### 3.1 Static Constant Definition
+### Static Constant Definition
 
 ```cpp
 static constexpr bool ENABLE_UNIT_FLAG = DispatchPolicy::ENABLE_UNIT_FLAG;
@@ -88,7 +88,7 @@ static constexpr uint32_t L0A_PINGPONG_BUF_SIZE = L0A_SIZE / STAGES;
 static constexpr uint32_t L0B_PINGPONG_BUF_SIZE = L0B_SIZE / STAGES;
 ```
 
-### 3.2 Memory Check
+### Memory Check
 
 ```cpp
 // Check LayoutC
@@ -106,7 +106,7 @@ static_assert((L0B_TILE_SIZE * STAGES) <= L0B_SIZE, "L0TileShape exceeding the L
 static_assert(L0C_TILE_SIZE <= L0C_SIZE, "L0TileShape exceeding the L0C space!");
 ```
 
-### 3.3 Multi-Stage Cache Design
+### Multi-Stage Cache Design
 
 Block MMAD adopts a multi-stage pipeline design, using ping-pong techniques to hide memory access latency:
 
@@ -131,9 +131,9 @@ protected:
     uint32_t l0BListId{0};
 ```
 
-## 4. Core Interface Implementation
+## Core Interface Implementation
 
-### 4.1 Constructor
+### Constructor
 
 ```cpp
 CATLASS_DEVICE
@@ -166,7 +166,7 @@ BlockMmad(Arch::Resource<ArchTag> &resource, uint32_t l1BufAddrStart = 0)
 }
 ```
 
-### 4.2 Destructor
+### Destructor
 
 ```cpp
 CATLASS_DEVICE
@@ -182,7 +182,7 @@ CATLASS_DEVICE
 }
 ```
 
-### 4.3 operator()
+### operator()
 
 operator() is the core interface of Block MMAD, responsible for executing block-level matrix multiplication.
 
@@ -205,11 +205,11 @@ void operator()(
 }
 ```
 
-## 5. Execution Flow Analysis
+## Execution Flow Analysis
 
 Using BlockMmadPingpong as an example, the execution flow is as follows:
 
-### 5.1 Data Preloading
+### Data Preloading
 
 ```cpp
 // load first matrix A tile from GM to L1
@@ -225,7 +225,7 @@ copyGmToL1B(l1BTensorList[l1ListId], gmB, layoutBInL1, layoutTileB);
 AscendC::SetFlag<AscendC::HardEvent::MTE2_MTE1>(l1BEventList[l1ListId]);
 ```
 
-### 5.2 Main Loop (Multi-Stage Pipeline)
+### Main Loop (Multi-Stage Pipeline)
 
 ```cpp
 // main loop
@@ -253,7 +253,7 @@ for (uint32_t kLoopIdx = 0; kLoopIdx < kTileCount; kLoopIdx++) {
 }
 ```
 
-### 5.3 L0 Processing and Computation
+### L0 Processing and Computation
 
 ```cpp
 for (int mPartIdx = 0; mPartIdx < mPartLoop; mPartIdx++) {
@@ -273,7 +273,7 @@ for (int mPartIdx = 0; mPartIdx < mPartLoop; mPartIdx++) {
 }
 ```
 
-### 5.4 Result Writeback
+### Result Writeback
 
 ```cpp
 // copy block out
@@ -289,7 +289,7 @@ if constexpr (!ENABLE_UNIT_FLAG) {
 }
 ```
 
-## 6. Multi-Stage Pipeline and Event Synchronization
+## Multi-Stage Pipeline and Event Synchronization
 
 Block MMAD uses event-driven synchronization to ensure the correct execution of the multi-stage pipeline.
 
@@ -304,7 +304,7 @@ copyGmToL1A(l1ATensorList[l1ListId], gmA, layoutAInL1, layoutTileA);
 AscendC::SetFlag<AscendC::HardEvent::MTE2_MTE1>(l1AEventList[l1ListId]);
 ```
 
-## 7. Commonalities and Differences Among Block MMAD Implementations
+## Commonalities and Differences Among Block MMAD Implementations
 
 CATLASS provides multiple Block MMAD implementations. They share the following commonalities:
 
@@ -320,7 +320,7 @@ The major differences among implementations are:
 3. **Special features**: quantization, sparse computation, bias processing, and more
 4. **Performance optimization**: different pipeline depths and memory access patterns
 
-## 8. Summary
+## Summary
 
 Block MMAD is a key component in the CATLASS template library that connects the kernel layer and the tile layer. It achieves efficient block-level matrix multiplication through the following designs:
 

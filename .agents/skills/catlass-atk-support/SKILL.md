@@ -4,7 +4,7 @@ description: 将 CATLASS 算子接入 ATK 测试框架。当需要把 torch_catl
 metadata:
   depends-on: atk-quality-guard, catlass-example-to-pytest
 ---
-## 0. 依赖加载(必须先做)
+## 依赖加载(必须先做)
 开始执行前，先调用 skill 工具加载：
 1. `atk-quality-guard` —— **本技能的基类**，权威来源：
    - 精度标准（`mixed_tolerance_bm`）、Tensor 值域分布、Attr 覆盖规则；
@@ -31,12 +31,12 @@ metadata:
 > - `template/node.yaml`（执行拓扑）
 > 下文所有模板代码均以这 4 个文件为准，本 SKILL 不再内联重复；只保留规则、映射表与各族配方。
 
-## 1. 工作流
+## 工作流
 
 把一个 CATLASS 算子接入 ATK，固定按下面 8 步执行。先建算子事实表，再决定交付物如何组织，
 最后验证与排障。所有模板、映射表与配方见第 3/4 节，不要从头发明。
 
-### 1.1 端到端总览
+### 端到端总览
 
 ```text
 前置：依赖加载（第 0 节：atk-quality-guard + catlass-example-to-pytest）
@@ -50,7 +50,7 @@ metadata:
 步骤 8：按层排障与迭代
 ```
 
-### 1.2 步骤明细
+### 步骤明细
 
 #### 步骤 1：读源测试，建立算子事实表
 按顺序识别并记录（这是所有交付物的唯一依据，映射见第 3/4 节）：
@@ -115,7 +115,7 @@ atk task -c result/NN_name/json/all_NN_name.json -n node.yaml --task accuracy -p
 4. **执行器或接口适配问题**：wrapper 位置参数顺序、golden dtype 落盘、NZ/转置、int32 累加；
 5. **算子语义或基准语义问题**：golden 与测试 `expected` 不一致，需回到步骤 1 核对事实表。
 
-### 1.3 家族决策表
+### 家族决策表
 
 | 源测试特征 | 家族 | yaml/generator 配方 | execute 配方 |
 |---|---|---|---|
@@ -134,7 +134,7 @@ atk task -c result/NN_name/json/all_NN_name.json -n node.yaml --task accuracy -p
 - 否则 → **基础/optimized**。
 归属拿不准时先询问用户，不要臆造。
 
-## 2. 交付物总览
+## 交付物总览
 
 将一个 CATLASS 算子接入到 ATK 测试框架中，基于测试件 optest `test_NN_name.py` 转换为一套完整的 ATK 用例，需要同时产出**用例定义**与**运行时**两半：
 
@@ -160,7 +160,7 @@ NN_name/                                 # 目标目录
   └─ node.yaml                           # backends/tasks（见第 3 节，对照 template）
 ```
 
-## 3. 用例定义交付物：`NN_name.yaml` + `generator_NN_name.py` + `node.yaml`
+## 用例定义交付物：`NN_name.yaml` + `generator_NN_name.py` + `node.yaml`
 
 把一个 optest `test_NN_name.py` 转换为 ATK 用例的**用例定义**那一半：
 `NN_name.yaml`（声明 inputs/attrs）+ `generator_NN_name.py`（对随机采样得到的
@@ -254,7 +254,7 @@ ATK 对每个张量独立地采样 `dim_values`，因此原始形状**不会**�
   **「GroupedMatmul 固定字段约定」**。generator 固定 A/B 形状、依赖的 scale/per_token 形状，
   并按 08 风格把逐组 `group_list` 写入 `Tiling` 字符串（由 generator 构造、execute 从 `Tiling` 还原）。
 
-## 4. 运行时交付物：`execute_NN_name.py`
+## 运行时交付物：`execute_NN_name.py`
 
 把一个 optest `test_NN_name.py` 转换为 ATK 用例的**运行时**那一半：
 `execute_NN_name.py`，一个 `BaseApi` 子类，ATK 对每个生成的用例调用它一次。它运行在
@@ -456,7 +456,7 @@ kernel 会基于原始存储形状来应用转置标志，因此在 NPU 上绝�
   然后 cpu golden 逐组循环（按前缀和切分 A，与 `b[g]` 做 matmul，应用 scale），
   npu 分支把 `group_list` 传给 wrapper。
 
-## 5. 一致性规则（必须全部成立）
+## 一致性规则（必须全部成立）
 - `name` == 目录名 == 文件后缀 `NN_name`。
 - yaml 中的 `generate:` == `@GENERATOR_REGISTRY.register("...")` 字符串。
 - yaml 中的 `api_type:` == execute 交付物中的 `@register("...")`。
@@ -465,7 +465,7 @@ kernel 会基于原始存储形状来应用转置标志，因此在 NPU 上绝�
 - 每个作为 matmul 操作数的张量都必须通过 `assign_matmul_storage_shapes` 设置其形状
   （绝不要信任原始采样得到的形状）。
 
-## 6. 可参照拷贝的实现
+## 可参照拷贝的实现
 本技能可参照的实现**只有**自身目录下可见的内容（技能加载时其余仓库路径不可见，禁止引用）：
 - `template/00_basic_matmul.yaml` + `template/generator_00_basic_matmul.py` +
   `template/execute_00_basic_matmul.py` + `template/node.yaml` —— 基础 matmul（00/06/21 族）的
@@ -474,7 +474,7 @@ kernel 会基于原始存储形状来应用转置标志，因此在 NPU 上绝�
 - 其它族（Batched/Epilogue/量化/Grouped）无模板文件，按第 3/4 节「各族配方」结合
   `template/` 基础结构改写；拿不准时询问用户。
 
-## 7. 参考资料
+## 参考资料
 
 - `atk-quality-guard` SKILL.md —— 本技能基类：精度标准 `mixed_tolerance_bm`、constraint 写法、
   Bug-Hunting 设计、INT32 溢出看护、Phase A/B 执行与精度比对判读。

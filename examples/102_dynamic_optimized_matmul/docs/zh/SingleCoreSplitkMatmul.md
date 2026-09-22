@@ -14,7 +14,7 @@ L0C的空间相比L1较小（在A2上L0C为128K，L1为256K），在增大L1Tile
 
 根据不同优化策略，分化出三个SingleCoreSplitK模板。
 
-### 2.1 SingleCoreSplitkKLoopMiddleMatmul
+### SingleCoreSplitkKLoopMiddleMatmul
 
 ![image-20260210193559636](https://raw.gitcode.com/weixin_42818618/picture0/raw/main/image-20260210193559636.png)
 
@@ -36,7 +36,7 @@ for gmTileN1 in N:
                                 writeC(m0, n0)
 ```
 
-### 2.1.1 工程优化
+### 工程优化
 
 - L1常驻
 
@@ -60,13 +60,13 @@ for gmTileN1 in N:
 
 - SetMMLayoutTransform
 
-### 2.1.2 优势与劣势
+### 优势与劣势
 
 SingleCoreSplitkKLoopMiddleMatmul的优势在于能够开辟局部workspace空间，每次Fixpipe都是写出到同一个workspace，写总是命中，写出带宽高。
 
 SingleCoreSplitkKLoopMiddleMatmul的劣势在于每个核心负责了比较大的C矩阵块，更容易负载不均衡。
 
-### 2.2 SingleCoreSplitkKLoopOuterMatmul
+### SingleCoreSplitkKLoopOuterMatmul
 
 ![image-20260210194055831](https://raw.gitcode.com/weixin_42818618/picture0/raw/main/image-20260210194055831.png)
 
@@ -89,7 +89,7 @@ for k1 in K:
 
 SingleCoreSplitkKLoopOuterMatmul必须开辟与C矩阵相同元素量的缓冲区（累加类型与输出类型不同或者C矩阵非对齐的时候）
 
-### 2.2.1 工程优化
+### 工程优化
 
 - L1常驻，取消常驻矩阵的double buffer，关闭unitflag，在L0C上采用double buffer，对齐写出，SetMMlayoutTransform等优化点与SingleCoreSplitkKLoopMiddleMatmul相同。
 
@@ -97,13 +97,13 @@ SingleCoreSplitkKLoopOuterMatmul必须开辟与C矩阵相同元素量的缓冲�
 
   SingleCoreSplitkKLoopOuterMatmul模板中，C矩阵基本块按swizzle次序均分到所有AICORE上。
 
-### 2.2.2 优势与劣势
+### 优势与劣势
 
 SingleCoreSplitkKLoopOuterMatmul的优势在于比SingleCoreSplitkKLoopMiddleMatmul更容易实现负载均衡。
 
 SingleCoreSplitkKLoopOuterMatmul的劣势在于需要开辟与C矩阵相同元素量的workspace空间，每次计算完整个C矩阵的一层部分和，然后计算下一层，C矩阵很大的时候，写命中率将会很低，也就导致写出带宽低。
 
-### 2.3 SingleCoreSplitkForSmallKMatmul
+### SingleCoreSplitkForSmallKMatmul
 
 此模板为针对特殊场景的模板。当K较小的时候，即K<=L1TileK时，K方向不需要进行切分，也就不需要在workspace上通过原子加累加部分和。例如当A、B矩阵类型为half时，如果C矩阵对齐，可以直接写出half数据到C矩阵空间，如果C矩阵非对齐，先将half数据按512B对齐的stride写出到workspace，然后由AIV将workspace中的数据写回到GM C。
 

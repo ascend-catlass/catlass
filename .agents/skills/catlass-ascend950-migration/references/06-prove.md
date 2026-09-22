@@ -16,7 +16,7 @@ mig.py prove --run-dir <run-dir> --unit <id>
 Run units serially. The build configuration and target device are shared campaign
 resources, and serial execution keeps each proof attributable to one unit.
 
-## 1. Access, environment, and outcomes
+## Access, environment, and outcomes
 
 Access is declared at FRAME with `init --access`, and `prove` uses that declaration.
 The build always runs before a device stage is considered. Environment preflight
@@ -73,7 +73,7 @@ A later build, run, or evidence failure revokes an earlier pass without changing
 Only a later passing proof bound to the declared matching Ascend950 identity clears that revocation;
 re-run `prove` before SCREEN, GATE 2, APPLY, or `OPTIMIZED`.
 
-## 2. The frozen accuracy contract
+## The frozen accuracy contract
 
 PROVE reuses the contract frozen at ANALYZE:
 
@@ -102,7 +102,7 @@ golden, relax a tolerance, change the comparator, or narrow accepted inputs to t
 a failure into a pass. If the evidence establishes that the frozen contract is false,
 park the unit and return it through analysis and GATE 1.
 
-## 3. `CATLASS_EVIDENCE` is the proof witness
+## `CATLASS_EVIDENCE` is the proof witness
 
 The migrated example emits exactly one JSON line prefixed `CATLASS_EVIDENCE` after
 its existing comparison. The line is additive: existing success and failure tokens
@@ -132,7 +132,7 @@ The evidence line is excluded from the frozen external contract only as an addit
 diagnostic. Its absence is an implementation defect. It does not justify parking the
 unit, changing the contract, or weakening the proof requirement.
 
-## 4. Evidence and repair boundary
+## Evidence and repair boundary
 
 `proof.json`, captured stage logs, artifact readings, and the parsed evidence line
 are evidence records. Do not edit them to repair an outcome. Re-run `prove` after
@@ -146,7 +146,7 @@ and optimization strategy must be reinvestigated from the target tree or fresh
 command output. If that investigation changes a gate-bound input, re-check it and
 obtain the required new confirmation.
 
-## 5. Revocation and retained records
+## Revocation and retained records
 
 A passing evidence line records `unit.proven`. Every later build, run, or evidence
 failure records `unit.prove_failed` and revokes the previous accuracy claim until a
@@ -157,7 +157,7 @@ not continue to present an earlier `errors: 0` result.
 `PROVEN` covers only the frozen contract shape and the evidence from that execution.
 It does not establish behavior for other shapes, performance, or a later rewrite.
 
-## 6. Phase 10 uses the same proof
+## Phase 10 uses the same proof
 
 After GATE 2 authorizes a rewrite, Phase 10 uses this order without changing the
 proof contract:

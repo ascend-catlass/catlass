@@ -11,7 +11,7 @@
 
 `EpilogueAscend950OnlineSoftmaxCopySumMax` 为 Ascend950 特化，直接继承 AtlasA2 实现（`using Base::Base`），不单独展开。
 
-## 1. 系列概述
+## 系列概述
 
 SplitRow 系列服务于**共享式（Shared）FA 推理 kernel**：QK GEMM 与 PV GEMM 分属两个 Cube 核，Softmax / RescaleO 作为 Vector epilogue 在 GM 中转数据上工作，通过 stackTile 外层循环遍历超长 KV 序列。相比 Unshared 系列（单核内完成 QK→softmax→PV），它把 softmax 卸载到 Vector 侧，两个 Cube 核可以分别满载 MMAD。
 
@@ -31,7 +31,7 @@ graph TB
 - PV SplitRow 预载全部 V，等待 softmax 侧就绪后按 stackTile 消费 P，累加输出 OTmp；
 - RescaleOWithoutDivSum 用 `dm = exp(oldMax - newMax)` 对历史累加结果重标度并累加新 OTmp，**lastStackTile 时只输出 fp32 累加和，不除 rowSum、不做 cast**，归一化交给后续 CombineScale epilogue。
 
-## 2. DispatchPolicy 定义
+## DispatchPolicy 定义
 
 ```cpp
 // gemm/dispatch_policy.hpp
@@ -55,9 +55,9 @@ struct EpilogueAscend950OnlineSoftmaxCopySumMax { using ArchTag = Arch::Ascend95
 - `PAGED_CACHE_FLAG`：KV 是否走 blockTable 分页缓存（PagedAttention）。`true` 时通过 `gBlockTable.GetValue(nowNIdx)` 查表计算 KV 偏移；`false` 时按 `nowNIdx * blockSize * strideKV` 连续寻址。
 - `ENABLE_UNIT_FLAG`：预留开关（当前示例均传 `false`）。
 
-## 3. BlockMmad FAIQKSplitRow：Q @ K^T
+## BlockMmad FAIQKSplitRow：Q @ K^T
 
-### 3.1 模板签名与约束
+### 模板签名与约束
 
 ```cpp
 template <bool PAGED_CACHE_FLAG_, bool ENABLE_UNIT_FLAG_,
@@ -71,7 +71,7 @@ static_assert 约束：
 - `LayoutC` 仅支持 `RowMajor`（S 矩阵按行写 GM，供 softmax 按行读）；
 - `N * K <= 32768`（L1B 双缓冲容量限制，K 即 embedding 维）。
 
-### 3.2 内存布局
+### 内存布局
 
 | 缓冲 | 大小 | 组织 |
 | ---- | ---- | ---- |
@@ -80,7 +80,7 @@ static_assert 约束：
 
 Q 通过 `loadQGM()` 一次搬运，采用扩展签名 `copyGmToL1A`，携带 `tokenNumPerGroup / qHeads * embed / BLOCK_SIZE` 参数实现 **GQA 分组搬运**（`layoutA.GetTileLayout(MakeCoord(singleGroupHeads, embed))`），即按"每组 Q 头"重排数据，避免逐头多次发起搬运。事件号 `EVENT_ID3`。
 
-### 3.3 主循环与流水
+### 主循环与流水
 
 `operator()` 三层循环结构：
 
@@ -98,9 +98,9 @@ nL1Loop  按 L1TileShape::N 切 stackSeqTile（末轮 getBlockShape 取余量）
   - `l0CPingPongFlag`：`M_FIX / FIX_M`，控制 L0C 结果经 FixPipe 写 GM 与下一轮覆写。
 - `tileMmad` 的 `initMmad` 标志保证 K 维首次累加时初始化 L0C，后续累加。
 
-## 4. BlockMmad FAIPVSplitRow：P @ V
+## BlockMmad FAIPVSplitRow：P @ V
 
-### 4.1 模板签名与约束
+### 模板签名与约束
 
 ```cpp
 template <...同上...>
@@ -109,14 +109,14 @@ class BlockMmad<MmadAtlasA2FAIPVSplitRow<PAGED_CACHE_FLAG_, ENABLE_UNIT_FLAG_>, 
 
 static_assert：`M * K <= 32768`（L1A 双缓冲容量限制）。
 
-### 4.2 内存布局
+### 内存布局
 
 | 缓冲 | 大小 | 组织 |
 | ---- | ---- | ---- |
 | L1A | `32768 * sizeof(A)` | 双缓冲，偏移 `l1BufAddrStart + L1A_SIZE * i`，P 分块流入 |
 | L1B | `N * K * sizeof(B)` | 单缓冲（全部 V 一次性常驻），偏移 `l1BufAddrStart + L1A_SIZE * 2` |
 
-### 4.3 执行时序（核心设计）
+### 执行时序（核心设计）
 
 ```
 1. kLoop = CeilDiv(stackSeqTile, blockSize)
@@ -132,9 +132,9 @@ static_assert：`M * K <= 32768`（L1A 双缓冲容量限制）。
 
 相比 QK 的三组乒乓，PV 侧的同步重点是**先 V 后 P**：V 预载可提前于 softmax 完成进行，`CrossCoreWaitFlag` 只阻塞 P 消费路径，V 装载时间被完全隐藏。
 
-## 5. BlockEpilogue OnlineSoftmaxCopySumMax：在线 Softmax
+## BlockEpilogue OnlineSoftmaxCopySumMax：在线 Softmax
 
-### 5.1 模板签名
+### 模板签名
 
 ```cpp
 template <class OutputType_, class InputType_, class MaskType_>
@@ -147,7 +147,7 @@ class BlockEpilogue<EpilogueAtlasA2OnlineSoftmaxCopySumMax, OutputType_, InputTy
 
 构造函数签名 `BlockEpilogue(resource, scaleValue_)`，`scaleValue_` 即 softmax 前的 `1/sqrt(d)` 缩放系数。
 
-### 5.2 UB 布局
+### UB 布局
 
 按 `UB_UINT8_BLOCK_SIZE`（16384 字节块）组织，关键偏移：
 
@@ -162,7 +162,7 @@ class BlockEpilogue<EpilogueAtlasA2OnlineSoftmaxCopySumMax, OutputType_, InputTy
 
 相邻行和/行最大采用乒乓布局（`ROW_SUM_PINGPONG_OFFSET = 64 * 8`），配合行分块循环隐藏 MTE2 装载。`MAX_ROW_NUM_SUB_CORE = 128` 限定单个 SubBlock 处理的最大行数。
 
-### 5.3 在线 Softmax 迭代式
+### 在线 Softmax 迭代式
 
 对每个 stackTile，按行维护全局 `gm`（max）与 `gl`（sum）：
 
@@ -178,7 +178,7 @@ gm = hm
 
 `isLastStackTile` 时：`gm`/`gl` 经 `Brcb` 展开 + `DataCopy(rowNum, 1, 0, headNum - 1)`（stride 间隔写）输出到 `gSharedMax`/`gSharedSum`，供 RescaleO 与后续 CombineScale 使用。非末 tile 期间 max/sum 只在 UB/寄存器中滚动，不产生 GM 流量。
 
-### 5.4 行归约三分支
+### 行归约三分支
 
 `Rowmax`/`Rowsum` 按 `columnNum`（stackTile 序列长）分三档实现：
 
@@ -188,17 +188,17 @@ gm = hm
 | `SPECTILE256` | columnNum == 256 | `SetVecMask(32)` + `SetBlockReduceMask(4)` |
 | `TAILTILE` | 其他 | 整 64 元素向量循环 + 尾部 `SetVecMask` 掩码处理 |
 
-### 5.5 P 的降精度输出
+### P 的降精度输出
 
 `CalcExp` 中 `hm` 经 `Brcb` 广播到整行后计算 `exp`，随后 `DownCastP` 将 fp32 的 P 转为 fp16（`CAST_NONE`）或 bf16（`CAST_RINT`，避免溢出），再 `CopyPUbToGm` 写 GM。bf16 场景选用 RINT 舍入是精度关键点。
 
-### 5.6 SubBlock 切分与预取流水
+### SubBlock 切分与预取流水
 
 `operator()` 将行维度对半切给两个 SubBlock（`qNBlockSize == 1` 时 `qSBlockSize / 2` 对半；否则按 qN 乘子扩大）。行方向再按 `maxRowNumPerLoop`（由 8192 元素容量折算）分块，采用 `preLoad = 1` 的乒乓预取：第 i 块计算时预搬第 i+1 块的 S，事件族 `V_MTE2 / MTE2_V / V_MTE3 / MTE3_V`（HardEvent）保证搬运、计算、写出三级流水。
 
-## 6. BlockEpilogue RescaleOWithoutDivSum：O 累加
+## BlockEpilogue RescaleOWithoutDivSum：O 累加
 
-### 6.1 模板签名
+### 模板签名
 
 ```cpp
 template <class OutputType_, class InputType_, class UpdateType_>
@@ -207,7 +207,7 @@ class BlockEpilogue<EpilogueAtlasA2RescaleOWithoutDivSum, OutputType_, InputType
 
 典型实例化：`OutputType_ = fp16`、`InputType_ = fp32`（OTmp）、`UpdateType_ = fp32`。构造仅接收 `resource`，无额外参数。
 
-### 6.2 UB 布局与共享设计
+### UB 布局与共享设计
 
 | 张量 | UB 偏移 |
 | ---- | ---- |
@@ -218,7 +218,7 @@ class BlockEpilogue<EpilogueAtlasA2RescaleOWithoutDivSum, OutputType_, InputType
 
 注意 hm/gl/dm 偏移与 OnlineSoftmax epilogue 的布局**完全一致**——两者在同一 kernel 的不同阶段运行，复用同一份 UB 规划，避免跨 epilogue 的布局冲突。`MAX_UB_O_ELEM_NUM = 4096` 限制单块行数 × 列数。
 
-### 6.3 核心算法
+### 核心算法
 
 ```
 WaitFlag(V_MTE2, EVENT_ID3)        // 等待 OTmp 可读（与 PV GEMM 握手）
@@ -238,13 +238,13 @@ if (isLastStackTile):
 - `CopyFloatOToGm` 内部按 `qNBlockSize == 0` 走单块 `DataCopyPad`，否则逐 qN 块输出。
 - 末 tile **不做 `O / rowSum`、不做 fp32→fp16 cast**——除法与降精度统一推迟到下游 CombineScale epilogue，一次性完成，减少中间精度损失与 GM 读写次数。
 
-### 6.4 SubBlock 切分
+### SubBlock 切分
 
 与 OnlineSoftmax 的行对半不同，本 epilogue 按 qN 维度自适应：`qNBlockSize == 1` 时两个 SubBlock 对分行；`qNBlockSize > 1` 时对分列（outCol 对半），inRow 则按 qN 乘子整体扩大。切分维度与数据的 GM 排布（qN 在行维展开时分行连续）对齐，保证每个 SubBlock 的搬运都是连续段。
 
-## 7. 使用示例
+## 使用示例
 
-### 7.1 真实工程组装（xllm_ops x_attention）
+### 真实工程组装（xllm_ops x_attention）
 
 摘自 xllm_ops（https://gitcode.com/xLLM-AI/xllm_ops）`x_attention/op_kernel/x_attention_catlass_helper.h` 的 `CallSharedInferKernelShort`：
 
@@ -283,11 +283,11 @@ kernel();   // 外层 stackTile 循环内由 kernel 依次驱动四个模板
 3. `isPAEnabled` 直接透传给两个 BlockMmad 的 `PAGED_CACHE_FLAG`，blockTable 指针随 kernel 参数传入；
 4. Mask 类型经 `maskType` 传给 OnlineSoftmax epilogue，`NO_MASK` 时走无掩码快路径。
 
-### 7.2 仓内测试
+### 仓内测试
 
 `tests/optest/kernels/23_flash_attention_infer/flash_attention_infer.cpp:741-768` 提供了 SplitRow 路径的完整调用样例（构造、传参、启动），可与上文组装代码互相印证。
 
-## 8. 与 FA Unshared 系列的差异
+## 与 FA Unshared 系列的差异
 
 | 维度 | FAI SplitRow（本文） | FA Unshared（见 01 文档） |
 | ---- | ---- | ---- |

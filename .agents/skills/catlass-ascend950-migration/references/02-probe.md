@@ -28,7 +28,7 @@ an **illustration only**, never a default, a naming convention, or evidence that
 that pattern. Cite a pinned source by its immutable revision and the file or symbol inspected; do not
 use a branch, tag, short hash, or third-party source.
 
-## 1. Profile envelope and discovery rules
+## Profile envelope and discovery rules
 
 Keep operational answers at the top of their concern. Record derivation and unresolved absences beside
 them, without stale line anchors:
@@ -68,7 +68,7 @@ Rules for every concern:
   **nonblocking** for discovery. It limits later proof claims; it does not justify a guessed result or
   prevent `profile` from completing.
 
-## 2. Concern `build`
+## Concern `build`
 
 Discover the actual path from the campaign's build entry to an installed or build-tree executable. Read
 the entry's argument parsing, configure invocation, build invocation, install behavior, artifact naming,
@@ -107,7 +107,7 @@ Required discovery:
 5. Check whether the environment loader named by the command exists in a fresh shell. Record the reading;
    do not block PROBE when it is absent.
 
-## 3. Concern `golden`
+## Concern `golden`
 
 Discover the source example's actual numerical contract: the leaf executable, its argument parsing,
 data generation or input files, comparator call, failure propagation, and device observation. A success
@@ -156,7 +156,7 @@ Required discovery:
    matching device is absent.
 6. If the source lacks a CPU golden, record the gap and its consequence. Do not nominate another oracle.
 
-## 4. Concern `registration`
+## Concern `registration`
 
 Discover how directories enter the architecture-specific build, how a leaf executable is declared, how
 tests or other runtime cases register it, and how target-directory names are measured. Fully expand one
@@ -227,7 +227,7 @@ Required discovery:
 5. Identify every central existing file that must receive registration text. These are `surfaces` and
    must later be declared by every unit's findings.
 
-## 5. Concern `arch-gating`
+## Concern `arch-gating`
 
 Discover the selector, every propagation path, and the host/device guard forms. The selector may live in
 a top-level CMake file, included module, toolchain file, preset, script, or CI configuration; the first
@@ -270,7 +270,7 @@ Required discovery:
 4. If a selector, target tag, or propagation role is absent, record the searched surface and consequence.
    Do not infer that an unset selector has a safe default.
 
-## 6. Convergence
+## Convergence
 
 Before invoking `mig.py profile`, re-read `profile.json` as one document. Check cross-concern consistency:
 

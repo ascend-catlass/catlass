@@ -6,11 +6,11 @@ This document describes how to systematically locate the root cause of precision
 
 Before reading this document, read [Precision Analysis Basics](./precision_analysis_basics.md) to understand CATLASS precision comparison methods and how to use the golden function.
 
-## 1. Classification of Precision Issues
+## Classification of Precision Issues
 
 Before locating the issue, determine which category the current precision issue falls into. Different categories require completely different troubleshooting paths.
 
-### 1.1 Complete Miscalculation
+### Complete Miscalculation
 
 **Symptoms**: The NPU output differs significantly from the golden result. Almost all elements do not match, or the output shows obvious anomalous patterns (all zeros, all NaN, all Inf, random garbage, etc.).
 
@@ -22,7 +22,7 @@ Before locating the issue, determine which category the current precision issue 
 
 **Troubleshooting priority**: Clear the cache first, then investigate pipeline synchronization and data movement issues, and finally check logic errors.
 
-### 1.2 Precision Error
+### Precision Error
 
 **Symptoms**: Most elements pass the comparison, only a few exceed the error tolerance, or the overall error is large but the numerical trend is correct (e.g., the output and the golden result are within the same order of magnitude).
 
@@ -35,21 +35,21 @@ Before locating the issue, determine which category the current precision issue 
 
 **Troubleshooting priority**: Check the accumulator precision and overflow first, then investigate the behavior of specific APIs.
 
-### 1.3 Quick Determination
+### Quick Determination
 
 After running precision comparison, observe the number and distribution of error indices returned by `CompareData`:
 
 | Symptom| Determination| Next Step|
 | --- | --- | --- |
-| Number of errors close to total element count, or output is all zeros/NaN/Inf| Complete miscalculation| Go to [Pre-checks](#2-pre-checks) → [Pipeline Synchronization Check](#51-missing-pipeline-synchronization)|
-| Small proportion of errors relative to total element count (e.g., < 10%), with error values within a reasonable range| Precision error| Go to [Diagnostic Mode](#4-diagnostic-patterns)|
-| Errors concentrated in specific locations (e.g., matrix edges, specific groups)| Boundary/Grouping issue| Go to [Modular Binary Search](#3-modular-binary-search)|
+| Number of errors close to total element count, or output is all zeros/NaN/Inf| Complete miscalculation| Go to [Pre-checks](#pre-checks) → [Pipeline Synchronization Check](#missing-pipeline-synchronization)|
+| Small proportion of errors relative to total element count (e.g., < 10%), with error values within a reasonable range| Precision error| Go to [Diagnostic Mode](#diagnostic-patterns)|
+| Errors concentrated in specific locations (e.g., matrix edges, specific groups)| Boundary/Grouping issue| Go to [Modular Binary Search](#modular-binary-search)|
 
-## 2. Pre-checks
+## Pre-checks
 
 Before diving into investigation, complete the following pre-checks. These checks are low-cost but can eliminate many common issues.
 
-### 2.1 Validating Golden Code Correctness
+### Validating Golden Code Correctness
 
 **This is the first step in CATLASS precision debugging, and also the most easily overlooked step.** If the golden function itself is incorrect, all subsequent comparisons are meaningless.
 
@@ -75,7 +75,7 @@ Key check points:
 
 5. **Cross-validation with a simple case**: Manually compute the expected result for a simple case (e.g., M=N=K=2, with all data being 1.0) and compare with the golden function output to confirm that the golden function logic is correct.
 
-### 2.2 Clearing Build Cache
+### Clearing Build Cache
 
 Uncleared build caches can cause modifications to not take effect, leading to repeated debugging of the same old code:
 
@@ -88,7 +88,7 @@ Alternatively, add the `--clean` option when building the sample.
 
 After clearing, rebuild and run to confirm whether the issue still exists.
 
-### 2.3 Fixing a Minimum Reproducible Case
+### Fixing a Minimum Reproducible Case
 
 Reduce the issue to the minimum reproducible scale:
 
@@ -98,13 +98,13 @@ Reduce the issue to the minimum reproducible scale:
 
 A minimal case reduces debugging data volume, shortens build-run cycles, and eliminates interference from multi-core interactions.
 
-### 2.4 Verifying That Modifications Have Taken Effect
+### Verifying That Modifications Have Taken Effect
 
 Insert an explicit output (e.g., `std::cout << "check" << std::endl;`) in the code to confirm that the modified binary has been indeed executed.
 
-## 3. Modular Binary Search
+## Modular Binary Search
 
-### 3.1 CATLASS Sample Classification: With or Without Tiling
+### CATLASS Sample Classification: With or Without Tiling
 
 First, a critical distinction: **Most CATLASS samples do not have an independent tiling step.** Only a few FlashAttention and dynamic matmul samples include an explicit tiling stage. Before starting binary search, confirm which category your sample falls into.
 
@@ -118,7 +118,7 @@ First, a critical distinction: **Most CATLASS samples do not have an independent
 > - **For samples without tiling** (the majority), precision investigation goes directly to component binary search (Section 3.3). No need to consider tiling issues.
 > - **For samples with tiling** (FA/MLA/dynamic Matmul), first determine whether the issue is related to tiling or the kernel, and then proceed to component binary search.
 
-### 3.2 CATLASS Template-based Layered Architecture
+### CATLASS Template-based Layered Architecture
 
 CATLASS adopts a template-based layered design. A complete sample consists of four layers: Device → Kernel → Block → Tile. Understanding this structure is the prerequisite for accurately locating faulty components.
 
@@ -156,7 +156,7 @@ Block layer:
 
 **Insight**: The root cause of precision issues can exist at any layer—pipeline synchronization and assembly logic at the kernel layer, computation logic and component use at the block layer, or specific implementations at the tile layer. The goal of binary search is to **progressively narrow the troubleshooting scope**, but note that **each layer itself may pose independent issues** (e.g., missing pipeline synchronization at the kernel layer, incorrect component use logic at the block layer). Therefore, during binary search, do not assume that the issue must be in the next layer. First verify whether the current layer itself has issues.
 
-### 3.3 Binary Search Strategy
+### Binary Search Strategy
 
 #### Step 1 (only for FA/MLA/dynamic samples): Distinguish tiling vs. kernel issues.
 
@@ -235,7 +235,7 @@ BlockEpilogue
         - Check whether the tile execution order causes data overwriting or missing.
 ```
 
-### 3.4 Component Replacement Example
+### Component Replacement Example
 
 Using `44_quant_matmul_full_loadA_tla` as an example, this section shows how to replace specific components to narrow the troubleshooting scope:
 
@@ -256,7 +256,7 @@ For dynamic samples such as `102_dynamic_optimized_matmul`, the module breakdown
 | Wrapper launch| `impl/wrapper/*.cpp` (auto generated)| Replaceable with direct kernel template call| Bypass launch_map and instantiate directly.|
 | Kernel implementation| `impl/kernel/*.h` | Replaceable with a simple kernel| Replace with the kernel of basic_matmul.|
 
-### 3.5 Binary Search Process
+### Binary Search Process
 
 ```
 Precision comparison fails
@@ -279,11 +279,11 @@ Precision comparison fails
 
 > **Keep in mind**: Do not blindly try-and-error. Before each modification, clearly state your assumption (e.g., "I think the problem lies in the XXX module"). After the modification, verify whether the assumption holds true. If consecutive modifications don't yield the expected result, you may troubleshoot the wrong way. Return to the decision tree and reassess.
 
-## 4. Diagnostic Patterns
+## Diagnostic Patterns
 
 The following diagnostic patterns cover the most common precision issues in CATLASS development. Each pattern provides a troubleshooting path from symptom to root cause.
 
-### 4.1 Pass for FP32 But Failure for FP16/BF16
+### Pass for FP32 But Failure for FP16/BF16
 
 **Symptom**: For the same sample, the precision comparison passes for the FP32 data type but fails for the FP16 or BF16.
 
@@ -315,7 +315,7 @@ Pass for FP32 but fail for FP16/BF16
             This issue is less noticeable with FP32 but is amplified under low precision.
 ```
 
-### 4.2 Failure for Specific Shapes or Parameter Ranges
+### Failure for Specific Shapes or Parameter Ranges
 
 **Symptom**: Precision issues only occur for specific shapes (e.g., non-aligned M/N/K dimensions, small shapes, large shapes) or specific parameter combinations.
 
@@ -347,7 +347,7 @@ Failure for specific shapes/parameters
             └─ Check whether the template specialization matches correctly.
 ```
 
-### 4.3 Obvious Abnormal Patterns in Output
+### Obvious Abnormal Patterns in Output
 
 **Symptom**: The output shows recognizable anomalous patterns rather than random errors.
 
@@ -361,11 +361,11 @@ Failure for specific shapes/parameters
 | Output different from the golden result by a fixed multiple| Scale/Bias processing missing| Check whether the scale multiplication in the epilogue is missing.|
 | Output matrix transposed| Layout parameters swapped| Check the RowMajor/ColumnMajor settings.|
 
-## 5. Common Pitfalls
+## Common Pitfalls
 
 The following are precision pitfalls that occur repeatedly in CATLASS development, listed in order of frequency.
 
-### 5.1 Missing Pipeline Synchronization
+### Missing Pipeline Synchronization
 
 **Symptom**: The output is all zeros or partially zeros, or data appears mixed between old and new.
 
@@ -378,7 +378,7 @@ The following are precision pitfalls that occur repeatedly in CATLASS developmen
 - Check whether the number of stages in each pipeline is properly configured (whether the event ID matches the number of stages).
 - In cross-core synchronization scenarios, check whether `CrossCoreSetFlag` and `CrossCoreWaitFlag` appear in pairs.
 
-### 5.2 DataCopy Non-Alignment
+### DataCopy Non-Alignment
 
 **Symptoms**: Precision comparison fails for small shapes (M, N, K smaller than TileShape) but works for large shapes.
 
@@ -388,7 +388,7 @@ The following are precision pitfalls that occur repeatedly in CATLASS developmen
 - Check whether DataCopyPad (with padding) is used for non-aligned scenarios.
 - Check whether masks are correctly used in tail block processing to limit the valid data range.
 
-### 5.3 Numeric Overflow
+### Numeric Overflow
 
 **Symptom**: Inf or excessively large values appear in the output.
 
@@ -402,7 +402,7 @@ The following are precision pitfalls that occur repeatedly in CATLASS developmen
 - Scale down the input data.
 - Use FP32 as the intermediate accumulation type.
 
-### 5.4 Insufficient Accumulator Precision
+### Insufficient Accumulator Precision
 
 **Symptoms**: Precision errors for FP16/BF16 are larger than expected, especially in large-K scenarios.
 
@@ -412,7 +412,7 @@ The following are precision pitfalls that occur repeatedly in CATLASS developmen
 - Ensure that the `ElementC` template parameter of BlockMmad is `float` (FP32 accumulation).
 - If FP32 accumulation is already in use but the issue persists, check the L0 C tiling strategy (l0CStages).
 
-### 5.5 Incorrect Quantization/Dequantization Formula in Epilogue
+### Incorrect Quantization/Dequantization Formula in Epilogue
 
 **Symptoms**: The output differs from the golden result by a fixed scaling factor, or error distribution shows systematic bias.
 
@@ -423,7 +423,7 @@ The following are precision pitfalls that occur repeatedly in CATLASS developmen
 - Compare with the golden computation formula item by item.
 - Validate the formula using simple data (e.g., all inputs = 1.0, all scales = 1.0).
 
-### 5.6 Layout Parameter Mismatch
+### Layout Parameter Mismatch
 
 **Symptoms**: The output matrix appears transposed, or errors are concentrated on specific dimensions.
 
@@ -433,7 +433,7 @@ The following are precision pitfalls that occur repeatedly in CATLASS developmen
 - Ensure that LayoutA, LayoutB, and LayoutC are consistent in the golden function and the sample.
 - Check the LayoutTag template parameters of DataCopy.
 
-### 5.7 Build Cache Not Cleared
+### Build Cache Not Cleared
 
 **Symptoms**: No change in the issue after code modifications, as if modifications did not take effect.
 
@@ -444,11 +444,11 @@ rm -rf build/
 rm -rf $HOME/atc_data/kernel_cache/
 Alternatively, add the `--clean` option during build.
 
-## 6. Debugging Strategy Hierarchy
+## Debugging Strategy Hierarchy
 
 When facing a precision issue, use debugging strategies in the following hierarchy. Start with the lowest-cost quick methods, then progressively move to more systematic methods.
 
-### 6.1 Level 1: Quick Methods (Try First)
+### Level 1: Quick Methods (Try First)
 
 | Method| Scenario| Operation|
 | --- | --- | --- |
@@ -459,7 +459,7 @@ When facing a precision issue, use debugging strategies in the following hierarc
 | Simplify layout| Complex layout combinations| Use RowMajor consistently|
 | Check golden function| Uncertain which side the issue is on| Manually verify the golden function output using a simple case.|
 
-### 6.2 Level 2: Modular Binary Search (Core Method)
+### Level 2: Modular Binary Search (Core Method)
 
 When quick methods cannot locate the issue, use modular binary search. This is the core strategy for CATLASS precision debugging.
 
@@ -492,7 +492,7 @@ Level 5: Binary search inside computation logic
 - Preferentially replace with the simplest implementation (such as identity epilogue or simple DataCopy).
 - Clearly state your assumption before each modification, and verify the assumption after the modification.
 
-### 6.3 Level 3: Comparison (Fallback)
+### Level 3: Comparison (Fallback)
 
 When binary search cannot locate the issue, use the comparison method as a fallback.
 
@@ -508,7 +508,7 @@ When binary search cannot locate the issue, use the comparison method as a fallb
 
 **Although time-consuming, comparison is often the most reliable method when facing complex or subtle precision issues.**
 
-### 6.4 Strategy Selection Decision-Making Tree
+### Strategy Selection Decision-Making Tree
 
 ```
 Precision comparison fails
@@ -529,7 +529,7 @@ Precision comparison fails
 
 CATLASS's modular architecture provides a natural advantage for precision debugging: every module can be independently replaced and validated. By fully utilizing this feature, combined with the golden function and decision-making tree, you can locate the causes of the majority of precision issues.
 
-## 7. Precision Tolerance Reference
+## Precision Tolerance Reference
 
 The default precision tolerances for different data types in CATLASS are as follows. If the sample development plan has explicit precision requirements, those take precedence.
 
@@ -547,7 +547,7 @@ The `CompareData` function of CATLASS dynamically adjusts rtol based on `compute
 | < 2,048| 1/256 | 1/128 |
 | ≥ 2,048| 1/128 | 1/64 |
 
-## 8. Debugging Checklist
+## Debugging Checklist
 
 When debugging precision issues each time, check the following items one by one:
 
@@ -579,7 +579,7 @@ When debugging precision issues each time, check the following items one by one:
 - [ ] Try tile-level binary search (locate the specific tile inside the faulty block).
 - [ ] Try replacing with a simple kernel.
 
-## 9. Summary
+## Summary
 
 Locating a precision issue in CATLASS goes in three steps: **classify, binary search, and diagnose**.
 
