@@ -303,7 +303,7 @@ def run(args: argparse.Namespace) -> int:
     torch.npu.set_device(args.device)
     print(
         f"--- mnk=({args.m},{args.n},{args.k}) "
-        f"layout={args.layout_a}/{args.layout_b} "
+        f"layout={args.layout_a}/{args.layout_b}/{args.layout_c} "
         f"dtype={args.dtype_a}/{args.dtype_b}/{args.dtype_c} ---"
     )
     torch.manual_seed(0)
@@ -373,10 +373,15 @@ def run(args: argparse.Namespace) -> int:
     b = (
         b.contiguous() if args.layout_b == "row" else b.permute(1, 0).contiguous()
     ).npu()
+    # A ColumnMajor (m, n) result is stored as an (n, m) buffer; the fixpipe
+    # writes it transposed on its way out of L0C (nz2dn), so the kernel body is
+    # unchanged -- the route follows the destination tensor's layout tag.
+    if args.layout_c == "col":
+        c = c.permute(1, 0)
     c = c.contiguous().npu()
     a_tensor = create_tla_tensor(a, args.layout_a, _FP8_TLA_TYPES.get(args.dtype_a))
     b_tensor = create_tla_tensor(b, args.layout_b, _FP8_TLA_TYPES.get(args.dtype_b))
-    c_tensor = create_tla_tensor(c, "row", _FP8_TLA_TYPES.get(args.dtype_c))
+    c_tensor = create_tla_tensor(c, args.layout_c, _FP8_TLA_TYPES.get(args.dtype_c))
 
     artifact = tla.compile(
         basic_mmad_kernel,
@@ -394,6 +399,8 @@ def run(args: argparse.Namespace) -> int:
     torch.npu.synchronize()
 
     result = c.detach().cpu()
+    if args.layout_c == "col":
+        result = result.transpose(0, 1).contiguous()
     if args.relu_enable:
         torch.nn.functional.relu_(ref)
     if is_int_route:
@@ -417,6 +424,8 @@ def main() -> int:
     parser.add_argument("--k", type=int, default=1024)
     parser.add_argument("--layout-a", choices=("row", "col"), default="row")
     parser.add_argument("--layout-b", choices=("row", "col"), default="row")
+    # `col` sends the L0C -> GM store through the transposing (nz2dn) fixpipe.
+    parser.add_argument("--layout-c", choices=("row", "col"), default="row")
     dtypes_ab = ("f16", "bf16", "f32", "i8", "f8e4m3fn", "f8e5m2")
     parser.add_argument("--dtype-a", choices=dtypes_ab, default="f16")
     parser.add_argument("--dtype-b", choices=dtypes_ab, default="f16")

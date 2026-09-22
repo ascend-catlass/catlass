@@ -58,6 +58,7 @@ $$
 ```text
 basic_matmul.py [-h] [--device DEVICE] [--m M] [--n N] [--k K]
                 [--layout-a {row,col}] [--layout-b {row,col}]
+                [--layout-c {row,col}]
                 [--dtype-a {f16,bf16,f32}]
                 [--dtype-b {f16,bf16,f32}]
                 [--dtype-c {f16,bf16,f32}]
@@ -74,6 +75,7 @@ basic_matmul.py [-h] [--device DEVICE] [--m M] [--n N] [--k K]
 | `--n`                                       | `512`                                                 | 矩阵乘右矩阵 B 的列数                                                                      |
 | `--k`                                       | `1024`                                                | 矩阵乘累加轴的大小                                                                         |
 | `--layout-a` / `--layout-b`               | `"row"` / `"row"`                                   | 左、右矩阵 A、B 的数据排布格式，可选`"row"` 或 `"col"`，表示行优先或列优先布局。       |
+| `--layout-c`                                | `"row"`                                             | 结果矩阵 C 的数据排布格式。选`"col"` 时，L0C→GM 走转置搬出（nz2dn）通路，直接写出 C 的列优先布局。 |
 | `--dtype-a` / `--dtype-b` / `--dtype-c` | `"f16"` / `"f16"` / `"f32"`                       | 左、右矩阵 A、B 和结果矩阵 C 的数据类型，可选范围包括`"f16"`, `"bf16"` 和 `"f32"` 。 |
 | `--relu-enable`                             | `0`                                         | fixpipe是否开启随路relu                                                                       |
 | `--block-num`                               | `-1`                                        | 启用的核数，`-1` 表示自动探测可用核数（满核）。                                               |
@@ -101,7 +103,7 @@ python examples/end_to_end/basic_mmad/basic_matmul.py \
 执行测试后，预期输出：
 
 ```plain
---- mnk=(<m>, <n>, <k>) layout=<layout_a>/<layout_b> dtype=<dtype_a>/<dtype_b>/<dtype_c> ---
+--- mnk=(<m>, <n>, <k>) layout=<layout_a>/<layout_b>/<layout_c> dtype=<dtype_a>/<dtype_b>/<dtype_c> ---
 passed=True cache_key=<cache_key>
 kernel.o=<cache_dir>/<cache_key>/kernel.o
 ```

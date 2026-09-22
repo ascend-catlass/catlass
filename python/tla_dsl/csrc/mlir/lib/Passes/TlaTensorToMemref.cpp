@@ -803,6 +803,17 @@ std::string getCopyRouteCallee(
             return {};
         return Twine("copy_l0c_to_gm_RowMajor_").concat(extraDesc).concat(suffix).str();
     }
+    // L0C -> GM col-major: the fixpipe NZ2DN path transposes the tile on the way
+    // out, so the mirrored store needs no UB staging.
+    if (*srcSpace == hivm::AddressSpace::L0C && *dstSpace == hivm::AddressSpace::GM &&
+        srcLayout == LayoutTag::L0Clayout && dstLayout == LayoutTag::ColumnMajor) {
+        if (!isLegalFixpipeElementType(srcElementType, dstElem))
+            return {};
+        StringRef suffix = copyRuntimeElemSuffix(dstElem);
+        if (suffix.empty())
+            return {};
+        return Twine("copy_l0c_to_gm_ColumnMajor_").concat(extraDesc).concat(suffix).str();
+    }
     // L0C (fp32 MMAD acc) -> UB row-major: dst may be f32 / f16 / bf16 (narrowing on fixpipe).
     if (*srcSpace == hivm::AddressSpace::L0C && *dstSpace == hivm::AddressSpace::UB &&
         srcLayout == LayoutTag::L0Clayout && dstLayout == LayoutTag::RowMajor) {
@@ -922,7 +933,8 @@ static bool isAicTemplateRuntimeCall(StringRef name)
            name.starts_with("copy_l1_zN_to_l0a_zN_") || name.starts_with("copy_l1_nZ_to_l0a_zN_") ||
            name.starts_with("copy_l1_zN_to_l0b_nZ_") || name.starts_with("copy_l1_nZ_to_l0b_nZ_") ||
            name.starts_with("copy_l0c_to_ub_RowMajor_") || name.starts_with("copy_l0c_to_gm_RowMajor_") ||
-           name.starts_with("copy_l0c_to_ub_ColumnMajor_") || name.starts_with("copy_l0c_to_l1_zN_");
+           name.starts_with("copy_l0c_to_gm_ColumnMajor_") || name.starts_with("copy_l0c_to_ub_ColumnMajor_") ||
+           name.starts_with("copy_l0c_to_l1_zN_");
 }
 
 static bool isAivTemplateRuntimeCall(StringRef name)

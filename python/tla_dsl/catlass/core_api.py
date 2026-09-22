@@ -4893,6 +4893,7 @@ _SUPPORTED_VECTOR_COPY_ROUTES = {
 _SUPPORTED_CUBE_FIXPIPE_ROUTES = {
     # (dst_addr, dst_layout, split_mode, quant_mode, relu) : {src_dtype: dst_dtypes}
     ("gm", "RowMajor", "-", "NO_QUANT", False): {"f32": ("f32", "f16", "bf16"), "i32": ("i32",)},
+    ("gm", "ColumnMajor", "-", "NO_QUANT", False): {"f32": ("f32", "f16", "bf16"), "i32": ("i32",)},
     ("l1", "zN",  "-", "NO_QUANT", False): {"f32": ("f32", "f16", "bf16"), "i32": ("i32",)},
 
     ("ub", "RowMajor", "nosplit", "NO_QUANT", False): {"f32": ("f32", "f16", "bf16"), "i32": ("i32",)},
@@ -4902,6 +4903,7 @@ _SUPPORTED_CUBE_FIXPIPE_ROUTES = {
     # ReLU rides on the fixpipe transfer itself, so it exists only where a
     # no-split variant is registered: split_M / split_N have no ReLU symbol.
     ("gm", "RowMajor", "-", "NO_QUANT", True): {"f32": ("f32", "f16", "bf16"), "i32": ("i32",)},
+    ("gm", "ColumnMajor", "-", "NO_QUANT", True): {"f32": ("f32", "f16", "bf16"), "i32": ("i32",)},
     ("l1", "zN",  "-", "NO_QUANT", True): {"f32": ("f32", "f16", "bf16"), "i32": ("i32",)},
 
     ("ub", "RowMajor", "nosplit", "NO_QUANT", True): {"f32": ("f32", "f16", "bf16"), "i32": ("i32",)},

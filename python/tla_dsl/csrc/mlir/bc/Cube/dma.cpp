@@ -432,6 +432,13 @@ REGISTER_L0C_TO_GM(RowMajor, float, half)
 REGISTER_L0C_TO_GM(RowMajor, float, bf16)
 REGISTER_L0C_TO_GM(RowMajor, int32_t, int32_t)
 
+// L0C -> GM ColumnMajor: the fixpipe NZ2DN path writes the tile transposed
+// straight to GM, so no UB staging (and no vector-side pass) is needed.
+REGISTER_L0C_TO_GM(ColumnMajor, float, float)
+REGISTER_L0C_TO_GM(ColumnMajor, float, half)
+REGISTER_L0C_TO_GM(ColumnMajor, float, bf16)
+REGISTER_L0C_TO_GM(ColumnMajor, int32_t, int32_t)
+
 REGISTER_L0C_TO_L1(zN, float, float)
 REGISTER_L0C_TO_L1(zN, float, half)
 REGISTER_L0C_TO_L1(zN, float, bf16)
