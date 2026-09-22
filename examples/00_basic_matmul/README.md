@@ -13,79 +13,48 @@
   $$
 
   其中$A$和$B$分别是形如`(m,k)`，`(k,n)`的输入矩阵，$C$是形如`(m,n)`的输出矩阵。
+- 支持产品型号：Atlas A2/A3 训练/推理系列产品
 
-## 参数说明
+## 样例参数说明
 
-以下是本样例的运行参数：
-
-| 参数名     | 描述                                        | 约束                |
-| ---------- | ------------------------------------------- | ------------------- |
-| `m`        | 矩阵乘中左矩阵A的行                         | -                   |
-| `n`        | 矩阵乘中右矩阵B的列                         | -                   |
-| `k`        | 矩阵乘中左矩阵A的列<br>（也即右矩阵的行数） | -                   |
-| `deviceId` | 使用的NPU卡ID（默认0）                      | 在设备NPU有效范围内 |
-
-BasicMatmul所涉及的关键模板参数如下:
-
-| 模板参数   | 说明               | 有效范围                                        |
-| ---------- | ------------------ | ----------------------------------------------- |
-| `ElementA` | 左矩阵的数据类型   | `float` \| `fp16_t` \| `bfloat16_t` \| `int8_t` |
-| `ElementB` | 右矩阵的数据类型   | `float` \| `fp16_t` \| `bfloat16_t` \| `int8_t` |
-| `ElementC` | 结果矩阵的数据类型 | `float` \| `fp16_t` \| `bfloat16_t` \| `int8_t` |
-| `LayoutA`  | 左矩阵的排布方式   | `layout::RowMajor` \| `layout::ColumnMajor`     |
-| `LayoutB`  | 右矩阵的排布方式   | `layout::RowMajor` \| `layout::ColumnMajor`     |
-| `LayoutC`  | 结果矩阵的排布方式 | `layout::RowMajor`                              |
+| 参数       | 属性 |shape|dtype| 说明                                                             |
+| ---------- | ------ | --------|---------|----------------------------------------------- |
+| `A`        | Input  | `(m,k)` | `float16/bfloat16` | 左矩阵，layout支持`RowMajor`和`ColumnMajor`          |
+| `B`        | Input  | `(k,n)` | `float16/bfloat16` | 右矩阵，layout支持`RowMajor`和`ColumnMajor`，数据类型与左矩阵一致 |
+| `C`        | Output | `(m,n)` | `float16/bfloat16` | 矩阵乘结果，layout仅支持`RowMajor`，数据类型与左矩阵一致 |
 
 ## 约束说明
 
-左、右矩阵及结果矩阵的类型应满足下述类型映射条件。
-
-| `ElementA`   | `ElementB`   | `ElementC`                          |
-| ------------ | ------------ | ----------------------------------- |
-| `float`      | `float`      | `float` \| `fp16_t` \| `bfloat16_t` |
-| `fp16_t`     | `fp16_t`     | `float` \| `fp16_t` \| `bfloat16_t` |
-| `bfloat16_t` | `bfloat16_t` | `float` \| `fp16_t` \| `bfloat16_t` |
-| `int8_t`     | `int8_t`     | `int32_t`                           |
-
-## 代码组织
-
-```text
-├── 00_basic_matmul
-│   ├── CMakeLists.txt   # CMake编译文件
-│   ├── README.md
-│   └── basic_matmul.cpp # 主文件
-```
+本样例无 Padding/Preload/切K 等优化，为各优化样例的公共基线。
+推荐 MNK 范围：`M ≥ 256、N ≥ 256、256 < K ≤ 3072`，且 K、N 均 512B 对齐，数据类型参考样例代码。
 
 ## 使用示例
 
-1. 编译样例代码，并编译生成相应的算子可执行文件。
+### 命令行参数
+
+```bash
+# 可执行文件名|矩阵m轴|n轴|k轴|Device ID
+# Device ID可选，默认为0
+00_basic_matmul [m] [n] [k] [deviceId]
+```
+
+### 执行示例
+
+1. 编译样例代码生成相应的算子可执行文件。
 
     ```bash
     bash scripts/build.sh 00_basic_matmul
     ```
 
-2. 切换到可执行文件的编译目录`output/bin`下，执行算子样例程序。测试样例数据随机生成，尺寸从命令行输入。
+2. 切换到可执行文件的编译目录 `output/bin`，执行算子样例程序。
 
     ```bash
     cd output/bin
     ./00_basic_matmul 256 512 1024 0
     ```
 
-    • 256：矩阵m轴
-
-    • 512：n轴
-
-    • 1024：k轴
-
-    • 0：Device ID，可选，默认为0
-
-    执行结果如下，说明样例执行成功。
+3. 执行结果如下，说明样例执行成功，精度通过：
 
     ```text
     Compare success.
     ```
-
-## 模板推荐场景
-
-本样例无 Padding/Preload/切K 等优化，为各优化样例的公共基线。
-推荐 MNK 范围：`M ≥ 256、N ≥ 256、256 < K ≤ 3072`，且 K、N 均 512B 对齐，具体以 `102_dynamic_optimized_matmul` 泛化工程的路由结论为准。
