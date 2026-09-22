@@ -18,12 +18,12 @@ on:
       keyword: '^(?:\/)?compile*'
 
 env:
-  org_name: "cann"
-  repo_name: "catlass"
+  org_name: ${{ vars.ORG_NAME }}
+  repo_name: ${{ atomgit.event.repository.name }}
   MERGE_ID: ${{atomgit.event.pull_request.number}}
   TARGET_BRANCH: ${{atomgit.ref_name}}
   SOURCE_BRANCH: ${{atomgit.head_ref}}
-  obs_path: "${{ vars.OBS_PATH }}/${{ env.MERGE_ID }}"
+  obs_path: "${{ env.org_name }}/${{ env.repo_name }}/ci/package/${{ env.MERGE_ID }}"
   obs_ut_path: "${{ env.obs_path }}/ut"
   obs_pre_smoke_path: "${{ env.obs_path }}/pre_smoke"
 
@@ -38,7 +38,7 @@ stages:
             identifier: revise_image
             uses: cann/.gitcode/actions/revise-img@master
             with:
-              repo_name: 'catlass'
+              repo_name: ${{ env.repo_name }}
               target_branch: ${{ env.TARGET_BRANCH }}
               comment: ${{ atomgit.event.comment.body }}
               token: ${{ secrets.TESTTOKEN }}
