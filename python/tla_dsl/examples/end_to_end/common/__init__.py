@@ -8,6 +8,13 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 # -----------------------------------------------------------------------------------------------------------
 
+from .elem_types import (
+    ELEM_CHOICES,
+    ELEM_SPECS,
+    ElemSpec,
+    elem_spec,
+    make_operand_tensors,
+)
 from .golden import compare, tolerance
 from .params import TilingParams, SwizzleParams
 from .utils import (
@@ -28,6 +35,12 @@ __all__ = [
     "create_tla_tensor",
     "get_block_num",
     "to_hf32",
+    # element-type table for the staging examples
+    "ELEM_CHOICES",
+    "ELEM_SPECS",
+    "ElemSpec",
+    "elem_spec",
+    "make_operand_tensors",
     # golden compare
     "compare",
     "tolerance",

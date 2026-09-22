@@ -428,6 +428,28 @@ ptr_f32 = tla.recast_ptr(ptr_f16, dtype=tla.Float32)
 在 tile 之间拷贝数据。硬件通路由 `src`/`dst` 地址空间决定（vector：GM↔UB、UB→L1；
 cube：GM→L1、L1→L0A/L0B、L0C→GM|UB|L1）。两侧 layout tag 选择格式转换（例如 ND→zN）。
 
+vector 通路支持的元素类型：
+
+| 通路 | 源 layout → 目的 layout | 元素类型 |
+|---|---|---|
+| GM → UB | `RowMajor` → `RowMajor` | `f32`、`f16`、`bf16`、`i32`、`i16`、`i8`、`f8e4m3fn`、`f8e5m2` |
+| UB → GM | `RowMajor` → `RowMajor` | 同上 |
+| UB → L1 | `RowMajor` → `zN` | `f32`、`f16`、`bf16`、`i8`、`f8e4m3fn`、`f8e5m2` |
+| UB → L1 | `zN` → `zN` | 同上 |
+| UB → L1 | `zNUnAlign` → `zN` | 同上 |
+
+UB → L1 的目的 layout 只能是 `zN`；没有以 UB 为源、`nZ` 为目的的通路。`i16` /
+`i32` 只有 GM↔UB，没有 UB→L1。
+
+`zN` 源的 UB tile 需要先在 UB 里按 zN 摆好：用 `BlockStoreParams` 的带 stride
+block store 把每行分块写入打了 `zN` tag 的 UB view（见
+`examples/end_to_end/basic_mixed/basic_mixed_store_zN.py` 与
+`basic_mixed_store_zNUnAlign.py`，两者都用 `--dtype` 跑遍该通路支持的全部元素
+类型）。分块长度按元素类型算：一个 vector register 是 256 字节，`vsstb` 一次
+搬满它的 8 个 DataBlock，所以一块是 `256 / sizeof(T)` 个元素。8 位类型（`i8` /
+fp8）的 block store 与 GM↔UB、UB→L1 拷贝一样，在 bc 层按 `int8_t` 实例化：搬运
+只用到宽度与 stride，不解释元素类型，而 AIV 后端对 fp8 没有标量语义。
+
 拷贝 / 切块大小按各 tile 的逻辑 `origin_shape`（不是嵌套物理 `shape`）。
 物理 `shape` / `stride` 描述这些逻辑元素如何存放（凑齐对齐长度、zN 打包等）。
 

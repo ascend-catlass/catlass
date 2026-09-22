@@ -575,8 +575,27 @@ static std::string getStoreWithStrideLibraryCallName(Type elementType)
         return "store_with_stride_half";
     } else if (elementType.isBF16()) {
         return "store_with_stride_bf16";
+    } else if (isa<Float8E4M3FNType>(elementType)) {
+        return "store_with_stride_fp8_e4m3fn";
+    } else if (isa<Float8E5M2Type>(elementType)) {
+        return "store_with_stride_fp8_e5m2";
+    } else if (elementType.isInteger(8) && !elementType.isUnsignedInteger()) {
+        return "store_with_stride_int8";
     }
     return {};
+}
+
+// The 8-bit block load/store stubs take the register as int8_t, because the AIV
+// backend has no scalar semantics for fp8 and so no VectorReg<fp8_*>. The move
+// itself is width-and-stride only, so bitcasting the register costs nothing.
+static bool blockStrideUsesByteRegister(Type elementType)
+{
+    return isa<Float8E4M3FNType, Float8E5M2Type>(elementType);
+}
+
+static VectorType byteRegisterTypeFor(VectorType vecType)
+{
+    return VectorType::get(vecType.getShape(), IntegerType::get(vecType.getContext(), 8));
 }
 
 static void annotateStoreWithStrideLibraryCall(func::FuncOp callee)
@@ -601,6 +620,12 @@ static std::string getLoadWithStrideLibraryCallName(Type elementType)
         return elementType.isUnsignedInteger() ? "load_with_stride_uint32" : "load_with_stride_int32";
     } else if (elementType.isInteger(16)) {
         return elementType.isUnsignedInteger() ? "load_with_stride_uint16" : "load_with_stride_int16";
+    } else if (isa<Float8E4M3FNType>(elementType)) {
+        return "load_with_stride_fp8_e4m3fn";
+    } else if (isa<Float8E5M2Type>(elementType)) {
+        return "load_with_stride_fp8_e5m2";
+    } else if (elementType.isInteger(8) && !elementType.isUnsignedInteger()) {
+        return "load_with_stride_int8";
     }
     return {};
 }
@@ -1710,8 +1735,10 @@ static LogicalResult lowerNestedVectorOp(
                 return loadOp.emitError("unsupported element type for tla.load with block_stride: ")
                            << sourceType.getElementType(),
                        failure();
+            bool viaBytes = blockStrideUsesByteRegister(sourceType.getElementType());
+            Type resultVecType = viaBytes ? byteRegisterTypeFor(opCtx->vecType) : Type(opCtx->vecType);
             auto callee =
-                getOrCreateLoadWithStrideLibraryCall(module, loc, opCtx->vecType, source.getType(), calleeName);
+                getOrCreateLoadWithStrideLibraryCall(module, loc, resultVecType, source.getType(), calleeName);
             if (!callee)
                 return failure();
             // The gather reads all 8 DataBlocks, so the predicate is all-true;
@@ -1720,7 +1747,10 @@ static LogicalResult lowerNestedVectorOp(
             Value allTrue = allTrueMaskFor(fullMasks, loc, opCtx->vecType, loadOp.getResult().getType());
             auto call =
                 b.create<func::CallOp>(loc, callee, ValueRange{source, blockStrideVal, repeatStrideVal, allTrue});
-            valueMap[loadOp.getResult()] = call.getResult(0);
+            Value loaded = call.getResult(0);
+            if (viaBytes)
+                loaded = b.create<mlir::vector::BitCastOp>(loc, opCtx->vecType, loaded).getResult();
+            valueMap[loadOp.getResult()] = loaded;
             return success();
         }
         // DINTLV_* still takes a VL-wide tile view (same as AVE ProcessVsstb /
@@ -2256,13 +2286,17 @@ static LogicalResult lowerNestedVectorOp(
                 return storeOp.emitError("unsupported element type for tla.store with BlockStoreParams: ")
                            << sourceTy.getElementType(),
                        failure();
+            Value storeSrc = source;
+            if (blockStrideUsesByteRegister(sourceTy.getElementType())) {
+                storeSrc = b.create<mlir::vector::BitCastOp>(loc, byteRegisterTypeFor(sourceTy), source).getResult();
+            }
             auto callee =
-                getOrCreateStoreWithStrideLibraryCall(module, loc, source.getType(), dest.getType(), calleeName);
+                getOrCreateStoreWithStrideLibraryCall(module, loc, storeSrc.getType(), dest.getType(), calleeName);
             if (!callee)
                 return failure();
             VectorType pregVecType = fullPregVecType(b.getContext());
             Value pregMask = castMaskToPregType(b, loc, mask, pregVecType);
-            b.create<func::CallOp>(loc, callee, ValueRange{source, dest, blockStrideVal, pregMask});
+            b.create<func::CallOp>(loc, callee, ValueRange{storeSrc, dest, blockStrideVal, pregMask});
         } else {
             auto storeDistAttr = storeOp.getStoreDist();
             if (storeDistAttr && storeDistAttr->getStoreDist() != ::StoreDist::norm) {

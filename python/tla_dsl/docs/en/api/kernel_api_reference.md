@@ -700,9 +700,9 @@ Supported vector copy routes
 |----------|------------|----------|------------|--------|
 |`gm`|`RowMajor`|`ub`|`RowMajor`|`f32`,`f16`,`bf16`,`i32`,`i16`,`i8`,`f8e4m3fn`,`f8e5m2`|
 |`ub`|`RowMajor`|`gm`|`RowMajor`|`f32`,`f16`,`bf16`,`i32`,`i16`,`i8`,`f8e4m3fn`,`f8e5m2`|
-|`ub`|`RowMajor`|`l1`|`zN`|`f32`,`f16`,`bf16`,`f8e4m3fn`,`f8e5m2`|
-|`ub`|`zN`|`l1`|`zN`|`f32`,`f16`,`bf16`|
-|`ub`|`zNUnAlign`|`l1`|`zN`|`f32`,`f16`,`bf16`|
+|`ub`|`RowMajor`|`l1`|`zN`|`f32`,`f16`,`bf16`,`i8`,`f8e4m3fn`,`f8e5m2`|
+|`ub`|`zN`|`l1`|`zN`|`f32`,`f16`,`bf16`,`i8`,`f8e4m3fn`,`f8e5m2`|
+|`ub`|`zNUnAlign`|`l1`|`zN`|`f32`,`f16`,`bf16`,`i8`,`f8e4m3fn`,`f8e5m2`|
 
 ---
 

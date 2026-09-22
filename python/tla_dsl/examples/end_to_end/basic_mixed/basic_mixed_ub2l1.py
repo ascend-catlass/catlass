@@ -22,16 +22,20 @@ import argparse
 
 import catlass.tla as tla
 
+
+# Shape and element type both come from the CLI. They are module globals
+# because the kernel body reads them at trace time; run() rebinds them before
+# compiling, so --m/--n/--k actually take effect rather than being ignored
+# while the kernel stays pinned to 32x32.
 M_DIM = 32
 N_DIM = 32
 K_DIM = 32
-UB_A_TILE_BYTES = M_DIM // 2 * K_DIM * 4
-L1_STAGE_BYTES = 32 * 32 * 4
-L0A_BYTES = 32 * 32 * 4
-L0B_BYTES = 32 * 32 * 4
-L0C_BYTES = 32 * 32 * 4
+ELEM = None  # ElemSpec, bound by run()
 
-DESCRIPTION = "Basic Mixed UB→L1 + cross_core sync; f32 only."
+DESCRIPTION = (
+    "Basic Mixed UB→L1 (RowMajor→zN) + cross_core sync, over every element "
+    "type the route supports."
+)
 
 # ---------------------------------------------------------------------------
 # Kernel
@@ -54,13 +58,15 @@ def basic_mixed_ub2l1(
     ub2l1_ready = tla.cross_flag("ub2l1_ready")
     ub2l1_done = tla.cross_flag("ub2l1_done")
 
-    l1a_ptr = tla.allocate(L1_STAGE_BYTES // 4, tla.Float32, tla.AddressSpace.l1, 512)
-    l1b_ptr = tla.allocate(L1_STAGE_BYTES // 4, tla.Float32, tla.AddressSpace.l1, 512)
-    l0a_ptr = tla.allocate(L0A_BYTES // 4, tla.Float32, tla.AddressSpace.l0a, 512)
-    l0b_ptr = tla.allocate(L0B_BYTES // 4, tla.Float32, tla.AddressSpace.l0b, 512)
-    l0c_ptr = tla.allocate(L0C_BYTES // 4, tla.Float32, tla.AddressSpace.l0c, 512)
+    elem_t = ELEM.tla()
+    acc_t = ELEM.tla_acc()
+    l1a_ptr = tla.allocate(M_DIM * K_DIM, elem_t, tla.AddressSpace.l1, 512)
+    l1b_ptr = tla.allocate(K_DIM * N_DIM, elem_t, tla.AddressSpace.l1, 512)
+    l0a_ptr = tla.allocate(M_DIM * K_DIM, elem_t, tla.AddressSpace.l0a, 512)
+    l0b_ptr = tla.allocate(K_DIM * N_DIM, elem_t, tla.AddressSpace.l0b, 512)
+    l0c_ptr = tla.allocate(M_DIM * N_DIM, acc_t, tla.AddressSpace.l0c, 512)
 
-    ub_a_ptr = tla.allocate(UB_A_TILE_BYTES // 4, tla.Float32, tla.AddressSpace.ub, 256)
+    ub_a_ptr = tla.allocate(M_DIM // 2 * K_DIM, elem_t, tla.AddressSpace.ub, 256)
 
     with tla.cube():
         tla.cross_core_set_flag(ub2l1_ready, tla.arch.MTE1)
@@ -137,42 +143,30 @@ def basic_mixed_ub2l1(
 # ---------------------------------------------------------------------------
 
 
-def golden(lhs, rhs):
-    import torch
-
-    return lhs.to(torch.float32) @ rhs.to(torch.float32)
-
-
-def prepare_npu(buf, layout: str):
-    storage = buf.contiguous() if layout == "row" else buf.permute(1, 0).contiguous()
-    return storage.npu()
-
-
 def run(args: argparse.Namespace) -> int:
     import torch
-    import torch_npu
+    import torch_npu  # noqa: F401
 
-    from common import (
-        get_block_num,
-        create_tla_tensor,
-        compare,
-    )
+    from common import elem_spec, get_block_num, make_operand_tensors
 
-    mi, ni, ki = int(args.m), int(args.n), int(args.k)
+    global M_DIM, N_DIM, K_DIM, ELEM
+    M_DIM, N_DIM, K_DIM = int(args.m), int(args.n), int(args.k)
+    ELEM = elem_spec(args.dtype)
 
     torch.npu.set_device(args.device)
-    print(f"--- mnk=({mi},{ni},{ki}) ---")
-    lhs = torch.rand(mi, ki, dtype=torch.float32, device="cpu") * 10.0 - 5.0
-    rhs = torch.rand(ki, ni, dtype=torch.float32, device="cpu") * 10.0 - 5.0
-    out = torch.full((mi, ni), args.sentinel, dtype=torch.float32, device="cpu")
-    ref = golden(lhs, rhs)
+    torch.manual_seed(0)
+    print(f"--- ub2l1 dtype={args.dtype} mnk=({M_DIM},{N_DIM},{K_DIM}) ---")
 
-    lhs = prepare_npu(lhs, args.layout_a)
-    rhs = prepare_npu(rhs, args.layout_b)
-    out = prepare_npu(out, "row")
-    a_tensor = create_tla_tensor(lhs, args.layout_a)
-    b_tensor = create_tla_tensor(rhs, args.layout_b)
-    c_tensor = create_tla_tensor(out, "row")
+    a, b, ref = ELEM.operands(M_DIM, N_DIM, K_DIM)
+    out = torch.full(
+        (M_DIM, N_DIM),
+        ELEM.sentinel(args.sentinel),
+        dtype=ELEM.torch_acc(),
+        device="cpu",
+    ).npu()
+    a_tensor, b_tensor, c_tensor = make_operand_tensors(
+        ELEM, a, b, out, args.layout_a, args.layout_b
+    )
 
     artifact = tla.compile(
         basic_mixed_ub2l1, a_tensor, b_tensor, c_tensor, options="--npu-arch 3510"
@@ -181,18 +175,20 @@ def run(args: argparse.Namespace) -> int:
     artifact(a_tensor, b_tensor, c_tensor, block_num=block_num)
     torch.npu.synchronize()
 
-    passed = compare(out.detach().cpu(), ref, ki)
+    passed = ELEM.check(out.detach().cpu(), ref, K_DIM)
     print(f"passed={passed} cache_key={artifact.cache_key}")
-    print(f"kernel.o={artifact.kernel_binary_path}")
     return 0 if passed else 1
 
 
 def main() -> int:
+    from common import ELEM_CHOICES
+
     parser = argparse.ArgumentParser(description=DESCRIPTION)
     parser.add_argument("--device", type=int, default=0)
     parser.add_argument("--m", type=int, default=M_DIM)
     parser.add_argument("--n", type=int, default=N_DIM)
     parser.add_argument("--k", type=int, default=K_DIM)
+    parser.add_argument("--dtype", choices=ELEM_CHOICES, default="f32")
     parser.add_argument("--layout-a", choices=("row", "col"), default="row")
     parser.add_argument("--layout-b", choices=("row", "col"), default="row")
     parser.add_argument("--block-num", type=int, default=-1)

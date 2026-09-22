@@ -121,8 +121,12 @@ REGISTER_UB_TO_L1(RowMajor, zN, bf16)
 REGISTER_UB_TO_L1(zN, zN, float)
 REGISTER_UB_TO_L1(zN, zN, half)
 REGISTER_UB_TO_L1(zN, zN, bf16)
+REGISTER_UB_TO_L1(RowMajor, zN, int8_t)
+REGISTER_UB_TO_L1(zN, zN, int8_t)
 REGISTER_UB_TO_L1_AS_BYTES(RowMajor, zN, fp8_e4m3fn_t)
 REGISTER_UB_TO_L1_AS_BYTES(RowMajor, zN, fp8_e5m2_t)
+REGISTER_UB_TO_L1_AS_BYTES(zN, zN, fp8_e4m3fn_t)
+REGISTER_UB_TO_L1_AS_BYTES(zN, zN, fp8_e5m2_t)
 
 #endif
 }

@@ -30,17 +30,16 @@ def ceil_div(a: int, b: int) -> int:
 
 M_DIM = 60
 N_DIM = 64
-K_DIM = 128
+K_DIM = 256
 
 M_L1 = 64
 N_L1 = 64
-K_L1 = 128
+K_L1 = 256
 
-ELE_NUM_PER_BLK = 32 // 4
+ELEM = None  # ElemSpec, bound by run()
 UB_A_SIZE = M_L1 // 2 * K_L1
 UB_A_ZN_SIZE = M_L1 // 2 * K_L1
 
-VF_LEN = 256 // 4
 
 L1A_SIZE = M_L1 * K_L1
 L1B_SIZE = K_L1 * N_L1
@@ -49,7 +48,7 @@ L0A_SIZE = M_L1 * K_L1
 L0B_SIZE = K_L1 * N_L1
 L0C_SIZE = M_L1 * N_L1
 
-DESCRIPTION = "Basic Mixed UB RowMajor→zNUnAlign Store; f32 only."
+DESCRIPTION = "Basic Mixed UB RowMajor→zNUnAlign Store, over every element type the route supports."
 
 
 # ---------------------------------------------------------------------------
@@ -73,14 +72,14 @@ def basic_mixed_store_zNUnAlign(
 
     ub2l1_done = tla.cross_flag("ub2l1_done")
 
-    l1a_ptr = tla.allocate(L1A_SIZE, tla.Float32, tla.AddressSpace.l1, 512)
-    l1b_ptr = tla.allocate(L1B_SIZE, tla.Float32, tla.AddressSpace.l1, 512)
-    l0a_ptr = tla.allocate(L0A_SIZE, tla.Float32, tla.AddressSpace.l0a, 512)
-    l0b_ptr = tla.allocate(L0B_SIZE, tla.Float32, tla.AddressSpace.l0b, 512)
-    l0c_ptr = tla.allocate(L0C_SIZE, tla.Float32, tla.AddressSpace.l0c, 512)
+    l1a_ptr = tla.allocate(L1A_SIZE, ELEM.tla(), tla.AddressSpace.l1, 512)
+    l1b_ptr = tla.allocate(L1B_SIZE, ELEM.tla(), tla.AddressSpace.l1, 512)
+    l0a_ptr = tla.allocate(L0A_SIZE, ELEM.tla(), tla.AddressSpace.l0a, 512)
+    l0b_ptr = tla.allocate(L0B_SIZE, ELEM.tla(), tla.AddressSpace.l0b, 512)
+    l0c_ptr = tla.allocate(L0C_SIZE, ELEM.tla_acc(), tla.AddressSpace.l0c, 512)
 
-    ub_a_ptr = tla.allocate(UB_A_SIZE, tla.Float32, tla.AddressSpace.ub, 256)
-    ub_a_zN_ptr = tla.allocate(UB_A_ZN_SIZE, tla.Float32, tla.AddressSpace.ub, 256)
+    ub_a_ptr = tla.allocate(UB_A_SIZE, ELEM.tla(), tla.AddressSpace.ub, 256)
+    ub_a_zN_ptr = tla.allocate(UB_A_ZN_SIZE, ELEM.tla(), tla.AddressSpace.ub, 256)
 
     with tla.cube():
         gm_a = tla.tile_view(lhs, tla.make_shape(M_L1, K_L1), tla.make_coord(0, 0))
@@ -150,19 +149,20 @@ def basic_mixed_store_zNUnAlign(
         )
 
         vf_row_loops = ub_a.origin_shape[0]
-        vf_col_loops = ceil_div(K_L1, VF_LEN)
+        vf_len = ELEM.vf_len
+        vf_col_loops = ceil_div(K_L1, vf_len)
         block_stride = ub_a_zN.stride[1][1] // ub_a_zN.shape[1][0]
         for row_tile_idx in tla.range(vf_row_loops):
             for col_tile_idx in tla.range(vf_col_loops):
                 with tla.vec.func(mode="simd"):
                     a_chunk = tla.tile_view(
                         ub_a,
-                        tla.make_shape(1, VF_LEN),
+                        tla.make_shape(1, vf_len),
                         tla.make_coord(row_tile_idx, col_tile_idx),
                     )
                     a_zN_chunk = tla.tile_view(
                         ub_a_zN,
-                        tla.make_shape(1, VF_LEN),
+                        tla.make_shape(1, vf_len),
                         tla.make_coord(row_tile_idx, col_tile_idx),
                     )
                     a_zN_chunk.store(
@@ -191,38 +191,32 @@ def basic_mixed_store_zNUnAlign(
 # ---------------------------------------------------------------------------
 
 
-def golden(lhs, rhs):
-    import torch
-
-    return lhs.to(torch.float32) @ rhs.to(torch.float32)
-
-
-def prepare_npu(buf, layout: str):
-    storage = buf.contiguous() if layout == "row" else buf.permute(1, 0).contiguous()
-    return storage.npu()
-
-
 def run(args: argparse.Namespace) -> int:
     import torch
     import torch_npu  # noqa: F401
 
-    from common import create_tla_tensor, compare
+    from common import elem_spec, make_operand_tensors
 
+    global ELEM
+    ELEM = elem_spec(args.dtype)
     mi, ni, ki = int(args.m), int(args.n), int(args.k)
 
     torch.npu.set_device(args.device)
-    print(f"--- mnk=({mi},{ni},{ki}) ---")
-    lhs = torch.rand(mi, ki, dtype=torch.float32, device="cpu") * 10.0 - 5.0
-    rhs = torch.rand(ki, ni, dtype=torch.float32, device="cpu") * 10.0 - 5.0
-    out = torch.full((mi, ni), args.sentinel, dtype=torch.float32, device="cpu")
-    ref = golden(lhs, rhs)
+    torch.manual_seed(0)
+    print(
+        f"--- basic_mixed_store_zNUnAlign dtype={args.dtype} mnk=({mi},{ni},{ki}) ---"
+    )
 
-    lhs = prepare_npu(lhs, args.layout_a)
-    rhs = prepare_npu(rhs, args.layout_b)
-    out = prepare_npu(out, "row")
-    a_tensor = create_tla_tensor(lhs, args.layout_a)
-    b_tensor = create_tla_tensor(rhs, args.layout_b)
-    c_tensor = create_tla_tensor(out, "row")
+    # The GM shape is the CLI's, not the L1 tile's: the destination row count is
+    # a runtime value, so an M that is not a multiple of the fractal height is
+    # exactly what this route has to get right.
+    a, b, ref = ELEM.operands(mi, ni, ki)
+    out = torch.full(
+        (mi, ni), ELEM.sentinel(args.sentinel), dtype=ELEM.torch_acc(), device="cpu"
+    ).npu()
+    a_tensor, b_tensor, c_tensor = make_operand_tensors(
+        ELEM, a, b, out, args.layout_a, args.layout_b
+    )
 
     artifact = tla.compile(
         basic_mixed_store_zNUnAlign,
@@ -234,18 +228,20 @@ def run(args: argparse.Namespace) -> int:
     artifact(a_tensor, b_tensor, c_tensor, block_num=args.block_num)
     torch.npu.synchronize()
 
-    passed = compare(out.detach().cpu(), ref, ki)
+    passed = ELEM.check(out.detach().cpu(), ref, ki)
     print(f"passed={passed} cache_key={artifact.cache_key}")
-    print(f"kernel.o={artifact.kernel_binary_path}")
     return 0 if passed else 1
 
 
 def main() -> int:
+    from common import ELEM_CHOICES
+
     parser = argparse.ArgumentParser(description=DESCRIPTION)
     parser.add_argument("--device", type=int, default=0)
     parser.add_argument("--m", type=int, default=M_DIM)
     parser.add_argument("--n", type=int, default=N_DIM)
     parser.add_argument("--k", type=int, default=K_DIM)
+    parser.add_argument("--dtype", choices=ELEM_CHOICES, default="f32")
     parser.add_argument("--layout-a", choices=("row", "col"), default="row")
     parser.add_argument("--layout-b", choices=("row", "col"), default="row")
     parser.add_argument("--block-num", type=int, default=1)

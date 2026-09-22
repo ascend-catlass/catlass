@@ -44,6 +44,16 @@ template <>
 struct VectorTy<uint16_t> {
     using type = vector_u16;
 };
+// 8-bit registers. Needed by the strided block load/store stubs: fp8 has no
+// scalar semantics on AIV, so those move their payload as int8_t.
+template <>
+struct VectorTy<int8_t> {
+    using type = vector_s8;
+};
+template <>
+struct VectorTy<uint8_t> {
+    using type = vector_u8;
+};
 
 template <typename T>
 using VectorReg = typename VectorTy<T>::type;
