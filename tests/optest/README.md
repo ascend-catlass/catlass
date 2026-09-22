@@ -88,6 +88,7 @@ Python API (`torch_catlass.ops.*`)
 - [x] 79_ascend950_matmul_gather_scatter (Ascend950)
 - [x] 82_ascend950_basic_syrk (Ascend950)
 - [x] 84_ascend950_syrk (Ascend950)
+- [x] 87_fag_tla
 
 ### 暂未接入
 

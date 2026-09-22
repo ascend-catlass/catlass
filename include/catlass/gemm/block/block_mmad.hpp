@@ -86,6 +86,24 @@ struct BlockPrologue {
     static_assert(DEPENDENT_FALSE<DispatchPolicy>, "BlockPrologue is not implemented for this DispatchPolicy");
 };
 
+template <
+    class DispatchPolicy, class BlockTileShape, class L1TileShape, class L0TileShape, class AType, class BType,
+    class CType, class BiasType = void,
+    class TileCopy = Gemm::Tile::TileCopy<typename DispatchPolicy::ArchTag, AType, BType, CType, BiasType>,
+    class TileMmad = Gemm::Tile::TileMmad<typename DispatchPolicy::ArchTag, AType, BType, BiasType> >
+struct BlockMmadFagSdp {
+    static_assert(DEPENDENT_FALSE<DispatchPolicy>, "BlockMmadFagSdp is not implemented for this DispatchPolicy");
+};
+
+template <
+    class DispatchPolicy, class BlockTileShape, class L1ATileShape, class L1BTileShape, class L0TileShape, class AType,
+    class BType, class CType, class BiasType = void,
+    class TileCopy = Gemm::Tile::TileCopy<typename DispatchPolicy::ArchTag, AType, BType, CType, BiasType>,
+    class TileMmad = Gemm::Tile::TileMmad<typename DispatchPolicy::ArchTag, AType, BType, BiasType> >
+struct BlockMmadFAG {
+    static_assert(DEPENDENT_FALSE<DispatchPolicy>, "BlockMmadFAG is not implemented for this DispatchPolicy");
+};
+
 } // namespace Catlass::Gemm::Block
 
 #if (defined(CATLASS_ARCH) && CATLASS_ARCH == 2201)
@@ -132,6 +150,8 @@ struct BlockPrologue {
 #include "catlass/gemm/block/block_mmad_fai_qk_normal_tla.hpp"
 #include "catlass/gemm/block/block_mmad_fai_pv_head_tail_tla.hpp"
 #include "catlass/gemm/block/block_mmad_fai_pv_normal_tla.hpp"
+#include "catlass/gemm/block/block_mmad_fag_sdp.hpp"
+#include "catlass/gemm/block/block_mmad_fag_dqkv.hpp"
 #endif
 
 /// Compactible block utility

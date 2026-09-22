@@ -53,7 +53,12 @@ inline const std::vector<torch::Dtype> typeTorchVec = {
     torch::kComplexHalf,    torch::kFloat16,
     torch::kFloat8_e5m2,    torch::kFloat8_e4m3fn,
     torch::kFloat8_e8m0fnu, torch::kFloat16,
-    torch::kFloat16,        torch::kFloat4_e2m1fn_x2,
+    torch::kFloat16,
+#if TORCH_VERSION_MAJOR > 2 || (TORCH_VERSION_MAJOR == 2 && TORCH_VERSION_MINOR >= 9)
+    torch::kFloat4_e2m1fn_x2,
+#else
+    torch::kFloat16, // float4_e2m1fn_x2 not available before torch 2.9
+#endif
     torch::kFloat16,
 };
 

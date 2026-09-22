@@ -76,6 +76,7 @@ __all__ = [
     "x_attention",
     "conv_bias",
     "flash_attention_infer_tla",
+    "fag_tla",
     "ascend950_flash_attention_infer",
     "ascend950_fp8_mx_flash_attention_infer",
     "w4a4_matmul_per_token_per_channel_dequant",

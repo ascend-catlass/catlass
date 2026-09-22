@@ -37,6 +37,12 @@ target_link_libraries(catlass_torch PRIVATE
     dl
 )
 
+if(DISABLE_ASCEND950)
+    target_compile_definitions(catlass_torch PRIVATE ENABLE_ASCEND950=0)
+else()
+    target_compile_definitions(catlass_torch PRIVATE ENABLE_ASCEND950=1)
+endif()
+
 file(GLOB_RECURSE SRC_FILES "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
 if(SRC_FILES)
     target_sources(catlass_torch PRIVATE ${SRC_FILES})

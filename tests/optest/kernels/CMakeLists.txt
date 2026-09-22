@@ -305,6 +305,7 @@ add_subdirectory(81_ascend950_rain_fusion_attention)
 add_subdirectory(82_ascend950_basic_syrk)
 add_subdirectory(83_ascend950_hstu_infer)
 add_subdirectory(84_ascend950_syrk)
+add_subdirectory(87_fag_tla)
 
 if(_JIT_KERNEL_ENTRIES)
     set(_JIT_TARGET catlass_kernel_jit)

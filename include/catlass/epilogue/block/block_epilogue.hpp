@@ -48,6 +48,11 @@ class BlockEpilogue {
 #include "catlass/epilogue/block/block_epilogue_rescale_o_FD.hpp"
 #include "catlass/epilogue/block/block_epilogue_xfai_online_softmax.hpp"
 #include "catlass/epilogue/block/block_epilogue_xfai_rescale_o.hpp"
+#include "catlass/epilogue/block/block_epilogue_fag_pre.hpp"
+#include "catlass/epilogue/block/block_epilogue_fag_sfmg.hpp"
+#include "catlass/epilogue/block/block_epilogue_fag_op.hpp"
+#include "catlass/epilogue/block/block_epilogue_fag_post.hpp"
+#include "catlass/epilogue/block/block_epilogue_fag_deterministic_add.hpp"
 #if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
 #include "catlass/epilogue/block/block_epilogue_fa_softmax_ascend950.hpp"
 #include "catlass/epilogue/block/block_epilogue_fa_rescale_o_ascend950.hpp"

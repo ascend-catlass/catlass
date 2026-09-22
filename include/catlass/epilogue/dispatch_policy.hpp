@@ -336,6 +336,34 @@ struct EpilogueSilu {
     static constexpr uint32_t AIV_CORE_NUM = 2;
 };
 
+// For AtlasA2, FAG Pre
+struct EpilogueAtlasA2FAGPre {
+    using ArchTag = Arch::AtlasA2;
+};
+
+// For AtlasA2, FAG Sfmg
+template <uint32_t INPUT_LAYOUT_>
+struct EpilogueAtlasA2FAGSfmg {
+    using ArchTag = Arch::AtlasA2;
+};
+
+// For AtlasA2, FAG Op
+template <uint32_t INPUT_LAYOUT_>
+struct EpilogueAtlasA2CustomSabVec {
+    using ArchTag = Arch::AtlasA2;
+};
+
+// For AtlasA2, FAG Post
+struct EpilogueAtlasA2FAGPost {
+    using ArchTag = Arch::AtlasA2;
+};
+
+// For AtlasA2, FAG DeterministicAdd
+template <uint32_t INPUT_LAYOUT_>
+struct EpilogueAtlasA2FAGDtmAdd {
+    using ArchTag = Arch::AtlasA2;
+};
+
 } // namespace Catlass::Epilogue
 
 #endif // CATLASS_EPILOGUE_DISPATCH_POLICY_HPP

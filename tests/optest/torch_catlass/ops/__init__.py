@@ -76,6 +76,7 @@ from .broadcast_matmul_perblock_quant import broadcast_matmul_perblock_quant  # 
 from .conv_bias import conv_bias  # example 24
 from .flash_attention_infer import flash_attention_infer  # example 23
 from .flash_attention_infer_tla import flash_attention_infer_tla  # example 40
+from .fag_tla import fag_tla  # example 87
 from .gemm import gemm  # example 15
 from .gemv_aic import gemv_aic  # example 18
 from .gemv_aiv import gemv_aiv  # example 17
@@ -157,6 +158,7 @@ __all__ = [
     "flash_attention_infer",  # example 23
     "conv_bias",  # example 24
     "flash_attention_infer_tla",  # example 40
+    "fag_tla",  # example 87
     "ascend950_flash_attention_infer",  # example 49
     "ascend950_hstu_infer",  # example 83
     "ascend950_fp8_mx_flash_attention_infer",  # example 65

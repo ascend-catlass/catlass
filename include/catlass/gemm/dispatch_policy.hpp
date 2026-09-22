@@ -684,6 +684,20 @@ struct MmadHstuPV : public MmadBase<ArchTag_, false> {
     static constexpr uint32_t UBC_STAGES = 2;
 };
 
+template <uint32_t L1A_STAGES_, uint32_t L1B_STAGES_, bool ENABLE_UNIT_FLAG_ = false>
+struct MmadAtlasA2FagSdp : public MmadBase<Arch::AtlasA2, false> {
+    static constexpr uint32_t L1A_STAGES = L1A_STAGES_;
+    static constexpr uint32_t L1B_STAGES = L1B_STAGES_;
+    static constexpr bool ENABLE_UNIT_FLAG = ENABLE_UNIT_FLAG_;
+};
+
+template <uint32_t L1A_STAGES_, uint32_t L1B_STAGES_, bool ENABLE_UNIT_FLAG_ = false>
+struct MmadAtlasA2FagdQKV : public MmadBase<Arch::AtlasA2, false> {
+    static constexpr uint32_t L1A_STAGES = L1A_STAGES_;
+    static constexpr uint32_t L1B_STAGES = L1B_STAGES_;
+    static constexpr bool ENABLE_UNIT_FLAG = ENABLE_UNIT_FLAG_;
+};
+
 } // namespace Catlass::Gemm
 
 #endif // CATLASS_GEMM_DISPATCH_POLICY_HPP

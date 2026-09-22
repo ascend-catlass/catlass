@@ -23,6 +23,7 @@
 #include "template/batched_matmul.h"
 #include "template/dual_matmul.h"
 #include "template/flash_attention.h"
+#include "template/fag_tla.h"
 #include "template/flash_attention_chunk_prefill.h"
 #include "template/hstu_infer.h"
 #include "template/rain_fusion_attention.h"
@@ -52,7 +53,9 @@
 #include "template/a8w4_mx_matmul.h"
 #include "template/a8w4_grouped_mx_matmul.h"
 #include "template/svd_quant_matmul.h"
+#if ENABLE_ASCEND950
 #include "template/ascend950_quant_matmul.h"
+#endif
 #include "template/basic_syrk.h"
 #include "template/syrk.h"
 #include "template/trmm.h"
@@ -285,6 +288,9 @@ REGISTER_TORCH_FUNC(flash_attention_infer);
 static auto& flash_attention_infer_tla = FlashAttentionInferTLAOp::Run;
 REGISTER_TORCH_FUNC(flash_attention_infer_tla);
 
+static auto& fag_tla = FagTlaOp::Run;
+REGISTER_TORCH_FUNC(fag_tla);
+
 static auto& ascend950_flash_attention_infer = Ascend950FlashAttentionInferOp::Run;
 REGISTER_TORCH_FUNC(ascend950_flash_attention_infer);
 
@@ -323,10 +329,12 @@ using Ascend950BasicMatmulGemvOp = MatmulLike<CatlassKernel::Ascend950BasicMatmu
 static auto& ascend950_basic_matmul_gemv = Ascend950BasicMatmulGemvOp::Run;
 REGISTER_TORCH_FUNC(ascend950_basic_matmul_gemv);
 
+#if ENABLE_ASCEND950
 using Ascend950QuantMatmulPerGroupPerBlockTLAOp =
     QuantPerGroupPerBlockMatmulLike<CatlassKernel::Ascend950QuantMatmulPerGroupPerBlockTLA>;
 static auto& ascend950_quant_matmul_per_group_per_block_tla = Ascend950QuantMatmulPerGroupPerBlockTLAOp::Run;
 REGISTER_TORCH_FUNC(ascend950_quant_matmul_per_group_per_block_tla);
+#endif
 
 using Ascend950MatmulFullDequantOp = MatmulFullDequantLike<CatlassKernel::Ascend950MatmulFullDequant>;
 static auto& ascend950_matmul_full_dequant = Ascend950MatmulFullDequantOp::Run;
@@ -390,6 +398,7 @@ using Ascend950TailMultiCoreSplitkMatmulOp = MatmulLike<CatlassKernel::Ascend950
 static auto& ascend950_tail_multi_core_splitk_matmul = Ascend950TailMultiCoreSplitkMatmulOp::Run;
 REGISTER_TORCH_FUNC(ascend950_tail_multi_core_splitk_matmul);
 
+#if ENABLE_ASCEND950
 using Ascend950Fp4MxQuantMatmulOp = Fp4MxQuantMatmulLike<CatlassKernel::Ascend950Fp4MxQuantMatmul>;
 static auto& ascend950_fp4_mx_quant_matmul = Ascend950Fp4MxQuantMatmulOp::Run;
 REGISTER_TORCH_FUNC(ascend950_fp4_mx_quant_matmul);
@@ -397,6 +406,7 @@ REGISTER_TORCH_FUNC(ascend950_fp4_mx_quant_matmul);
 using Ascend950Fp8E4M3QuantMatmulOp = Fp8E4M3QuantMatmulLike<CatlassKernel::Ascend950Fp8E4M3QuantMatmul>;
 static auto& ascend950_fp8_e4m3_quant_matmul = Ascend950Fp8E4M3QuantMatmulOp::Run;
 REGISTER_TORCH_FUNC(ascend950_fp8_e4m3_quant_matmul);
+#endif
 using Ascend950GroupedMatmulSliceMPerTokenDequantOp =
     GroupedQuantMatmulLike<CatlassKernel::Ascend950GroupedMatmulSliceMPerTokenDequant, GmmSliceDir::M>;
 static auto& ascend950_grouped_matmul_slice_m_per_token_dequant = Ascend950GroupedMatmulSliceMPerTokenDequantOp::Run;

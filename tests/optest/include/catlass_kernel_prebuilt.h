@@ -276,6 +276,42 @@ struct MatrixInverseParams : public PrebuiltParams {
 __attribute__((weak)) void MatrixInverse(
     const uint32_t blockNum, aclrtStream stream, const MatrixInverseParams& params);
 
+/**
+ * @brief Runtime parameters for flash-attention gradient (FAG) examples.
+ *
+ * FlashAttentionScoreGrad computes dQ/dK/dV given the forward cached results
+ * (out and softmax log-sum-exp) plus the output gradient dout.
+ *
+ * inputAddr layout (TND):
+ *   [0] cu_seq_qlen  (int64, prefix-sum of per-batch Q lengths)
+ *   [1] cu_seq_kvlen (int64, prefix-sum of per-batch KV lengths)
+ *   [2] dout         (half/bf16, (totalQ, numHeads, qkHeadDim))
+ *   [3] q            (half/bf16, (totalQ, numHeads, qkHeadDim))
+ *   [4] k            (half/bf16, (totalKV, kvHeads, qkHeadDim))
+ *   [5] v            (half/bf16, (totalKV, kvHeads, vHeadDim))
+ *   [6] out          (forward output, same shape as q)
+ *   [7] softmax_lse  (float32, (totalQ, numHeads))
+ * outputAddr layout:
+ *   [0] dq  (same shape as q)
+ *   [1] dk  (same shape as k)
+ *   [2] dv  (same shape as v)
+ */
+struct FlashAttentionGradParams : public PrebuiltParams {
+    uint32_t batch = 0;        ///< Batch size (number of variable-length sequences).
+    uint32_t numHeads = 0;     ///< Number of Q heads.
+    uint32_t kvHeads = 0;      ///< Number of KV heads.
+    uint32_t qkHeadDim = 0;    ///< Per-head Q/K embedding dimension.
+    uint32_t vHeadDim = 0;     ///< Per-head V embedding dimension.
+    bool isDeterministic = false; ///< Whether to use deterministic DQKV path.
+    aclDataType dataType = ACL_FLOAT16; ///< Input/output element type (half/bf16).
+};
+
+/**
+ * @brief Reserved prebuilt interface for example 87_fag_tla.
+ */
+__attribute__((weak)) void FlashAttentionGradTLA(
+    const uint32_t blockNum, aclrtStream stream, const FlashAttentionGradParams& params);
+
 } // namespace CatlassKernel
 
 #endif // OPTEST_CATLASS_KERNEL_PREBUILT_H
