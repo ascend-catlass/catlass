@@ -284,13 +284,13 @@ MMAD/FIX 的 `unit_flag` 已经承担一部分 L0C 流水握手。AutoSync 必�
 
 AutoSync 的测试分成三层：
 
-1. Python 前端测试验证参数校验、默认关闭和 `tla.auto_sync` 属性传递，见 [test_local_autosync.py](../../../../tests/test_local_autosync.py)。
+1. Python 前端测试验证参数校验、默认关闭和 `tla.auto_sync` 属性传递，见 [test_local_autosync.py](../../../../tests/frontend/ops/sync/test_local_autosync.py)。
 2. MLIR lit 测试直接检查 pass 输出和失败诊断：
-   - [auto-mutex-instruction-pipes.mlir](../../../../tests/lit/tla-compile/auto-mutex-instruction-pipes.mlir)：指令资源、pipe、锁序和 unit flag；
-   - [auto-mutex-alias-root.mlir](../../../../tests/lit/tla-compile/auto-mutex-alias-root.mlir)：别名 root；
-   - [auto-mutex-dynamic-select.mlir](../../../../tests/lit/tla-compile/auto-mutex-dynamic-select.mlir)：动态选择；
-   - [auto-mutex-id-spaces.test](../../../../tests/lit/tla-compile/auto-mutex-id-spaces.test)：独立 ID 空间和 32-ID 上限；
-   - [auto-mutex-diagnostics.test](../../../../tests/lit/tla-compile/auto-mutex-diagnostics.test)：保守失败路径。
+   - [auto-mutex-instruction-pipes.mlir](../../../../tests/lit/sync/mutex/auto-mutex-instruction-pipes.mlir)：指令资源、pipe、锁序和 unit flag；
+   - [auto-mutex-alias-root.mlir](../../../../tests/lit/sync/mutex/auto-mutex-alias-root.mlir)：别名 root；
+   - [auto-mutex-dynamic-select.mlir](../../../../tests/lit/sync/mutex/auto-mutex-dynamic-select.mlir)：动态选择；
+   - [auto-mutex-id-spaces.test](../../../../tests/lit/sync/mutex/auto-mutex-id-spaces.test)：独立 ID 空间和 32-ID 上限；
+   - [auto-mutex-diagnostics.test](../../../../tests/lit/sync/mutex/auto-mutex-diagnostics.test)：保守失败路径。
 3. `basic_matmul_auto_sync.py` 端到端验证双缓冲、MMAD/FIX unit flag 和最终数值结果。
 
 ## 扩展 AutoSync 时的检查项
