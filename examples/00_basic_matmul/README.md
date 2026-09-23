@@ -19,28 +19,35 @@
 
 | 参数       | 属性 |shape|dtype| 说明                                                             |
 | ---------- | ------ | --------|---------|----------------------------------------------- |
-| `A`        | Input  | `(m,k)` | `float16/bfloat16` | 左矩阵，layout支持`RowMajor`和`ColumnMajor`          |
-| `B`        | Input  | `(k,n)` | `float16/bfloat16` | 右矩阵，layout支持`RowMajor`和`ColumnMajor`，数据类型与左矩阵一致 |
+| `A`        | Input  | `(m,k)` | `float16/bfloat16` | 左矩阵，layout支持`RowMajor`（默认）和`ColumnMajor`  |
+| `B`        | Input  | `(k,n)` | `float16/bfloat16` | 右矩阵，layout支持`RowMajor`（默认）和`ColumnMajor`，数据类型与左矩阵一致 |
 | `C`        | Output | `(m,n)` | `float16/bfloat16` | 矩阵乘结果，layout仅支持`RowMajor`，数据类型与左矩阵一致 |
 
-## 约束说明
+## 使用范围说明
 
 本样例无 Padding/Preload/切K 等优化，为各优化样例的公共基线。
-推荐 MNK 范围：`M ≥ 256、N ≥ 256、256 < K ≤ 3072`，且 K、N 均 512B 对齐，数据类型参考样例代码。
 
-## 使用示例
+推荐范围：
+- `m ≥ 256、n ≥ 256、256 < k ≤ 3072`
+- K轴、N轴对齐512B
 
 ### 命令行参数
 
 ```bash
-# 可执行文件名|矩阵m轴|n轴|k轴|Device ID
-# Device ID可选，默认为0
 00_basic_matmul [m] [n] [k] [deviceId]
 ```
+上述命令行参数具体说明如下：
+
+| 参数 | 默认值 | 参数说明 |
+| --- | --- | --- |
+| `m` | 无 | A 矩阵的 m 轴大小 |
+| `n` | 无 | B 矩阵的 n 轴大小 |
+| `k` | 无 | A/B 矩阵的 k 轴大小 |
+| `deviceId` | `0` | 指定运行设备ID |
 
 ### 执行示例
 
-1. 编译样例代码生成相应的算子可执行文件。
+1. 进入项目根目录，编译样例代码生成相应的算子可执行文件。
 
     ```bash
     bash scripts/build.sh 00_basic_matmul

@@ -13,73 +13,56 @@
   $$
 
   where $A$ and $B$ are input matrices in the shape of `(m, k)` and `(k, n)`, respectively. $C$ is the output matrix in the shape of `(m, n)`.
+- Supported products: Atlas A2/A3 training/inference series products
 
 ## Parameters
 
-The following are the running parameters of this example:
+| Parameter | Attribute | Shape   | dtype              | Description                                                                                                            |
+|-----------|-----------|---------|--------------------|------------------------------------------------------------------------------------------------------------------------|
+| `A`       | Input     | `(m,k)` | `float16/bfloat16` | Left matrix; the layout supports `RowMajor` (default) and `ColumnMajor`                                                |
+| `B`       | Input     | `(k,n)` | `float16/bfloat16` | Right matrix; the layout supports `RowMajor` (default) and `ColumnMajor`; the data type is the same as the left matrix |
+| `C`       | Output    | `(m,n)` | `float16/bfloat16` | Matrix multiplication result; only the `RowMajor` layout is supported; the data type is the same as the left matrix    |
 
-| Parameter  | Description                                                                                                           | Constraints                              |
-| ---------- | --------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
-| `m`        | Number of rows in the left matrix A in matrix multiplication                                                          | -                                        |
-| `n`        | Number of columns in the right matrix B in matrix multiplication                                                      | -                                        |
-| `k`        | Number of columns in the left matrix A in matrix multiplication<br>(That is, the number of rows in the right matrix.) | -                                        |
-| `deviceId` | ID of the used NPU card (default: 0)                                                                                  | Within the valid range of the device NPU |
+## Usage Scope
 
-The key template parameters involved in BasicMatmul are as follows:
+This example does not include optimizations such as Padding, Preload, or split-K, and serves as the common baseline for the optimized examples.
 
-| Parameter  | Description                    | Valid Range                                     |
-| ---------- | ------------------------------ | ----------------------------------------------- |
-| `ElementA` | Data type of the left matrix   | `float` \| `fp16_t` \| `bfloat16_t` \| `int8_t` |
-| `ElementB` | Data type of the right matrix  | `float` \| `fp16_t` \| `bfloat16_t` \| `int8_t` |
-| `ElementC` | Data type of the result matrix | `float` \| `fp16_t` \| `bfloat16_t` \| `int8_t` |
-| `LayoutA`  | Layout of the left matrix      | `layout::RowMajor` \| `layout::ColumnMajor`     |
-| `LayoutB`  | Layout of the right matrix     | `layout::RowMajor` \| `layout::ColumnMajor`     |
-| `LayoutC`  | Layout of the result matrix    | `layout::RowMajor`                              |
+Recommended range:
 
-## Constraints
+- `m ≥ 256, n ≥ 256, 256 < k ≤ 3072`
+- The K axis and N axis are aligned to 512B.
 
-The types of the left matrix, right matrix, and result matrix must meet the following mapping conditions:
+### Command Line Parameters
 
-| `ElementA`   | `ElementB`   | `ElementC`                          |
-| ------------ | ------------ | ----------------------------------- |
-| `float`      | `float`      | `float` \| `fp16_t` \| `bfloat16_t` |
-| `fp16_t`     | `fp16_t`     | `float` \| `fp16_t` \| `bfloat16_t` |
-| `bfloat16_t` | `bfloat16_t` | `float` \| `fp16_t` \| `bfloat16_t` |
-| `int8_t`     | `int8_t`     | `int32_t`                           |
-
-## Code Organization
-
-```text
-├── 00_basic_matmul
-│   ├── CMakeLists.txt # CMake build file
-│   ├── README.md
-│   └── basic_matmul.cpp # Main file
+```bash
+00_basic_matmul [m] [n] [k] [deviceId]
 ```
 
-## Example
+The command line parameters are described as follows:
 
-1. Compile the sample code and generate the corresponding operator executable file.
+| Parameter  | Default Value | Description                                |
+|------------|---------------|--------------------------------------------|
+| `m`        | None          | Size of the m axis of matrix A             |
+| `n`        | None          | Size of the n axis of matrix B             |
+| `k`        | None          | Size of the k axis of matrices A and B     |
+| `deviceId` | `0`           | ID of the device on which the program runs |
+
+### Example
+
+1. Go to the project root directory and compile the sample code to generate the corresponding operator executable file.
 
     ```bash
     bash scripts/build.sh 00_basic_matmul
     ```
 
-2. Go to the compilation directory `output/bin` of the executable file and run the operator sample program. The test sample data is randomly generated, and the size is specified by the command line input.
+2. Go to the compilation directory `output/bin` of the executable file and run the operator sample program.
 
     ```bash
     cd output/bin
     ./00_basic_matmul 256 512 1024 0
     ```
 
-    • 256: matrix m-axis
-
-    • 512: n-axis
-
-    • 1024: k-axis
-
-    • 0: Device ID (optional). Defaults to 0.
-
-    If the following result is displayed, the sample is successfully executed.
+3. If the following result is displayed, the sample is successfully executed and the precision verification passes:
 
     ```text
     Compare success.
