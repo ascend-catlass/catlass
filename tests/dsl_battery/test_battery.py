@@ -375,6 +375,15 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
             "--shape", "512", "--batch-size", "4", *dev,
         ]],
     )
+    # Predicate rearrangement: both outputs checked for b8/b16/b32.
+    for op in ("mask_interleave", "mask_deinterleave"):
+        yield (
+            f"vector-{op.replace('_', '-')}-op",
+            [[
+                "vector_ops/mask_interleave_op.py", op,
+                "--all-dtypes", "--shape", "512", *dev,
+            ]],
+        )
     yield (
         "vector-load-dintlv-op",
         [["vector_ops/load_dintlv_op.py", "dintlv_b32", "--sweep", "--shapes", "512", *dev]],

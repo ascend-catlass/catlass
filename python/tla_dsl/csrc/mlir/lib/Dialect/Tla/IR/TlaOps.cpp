@@ -528,13 +528,41 @@ static mlir::LogicalResult verifyInterleaveLikeElementTypes(
     return mlir::success();
 }
 
+static mlir::LogicalResult verifyInterleaveLikeMaskTypes(
+    mlir::Operation* op, MaskSSAType src0Type, MaskSSAType src1Type, MaskSSAType dst0Type, MaskSSAType dst1Type)
+{
+    if (src1Type != src0Type || dst0Type != src0Type || dst1Type != src0Type)
+        return op->emitOpError("requires all operands and results to have the same MaskSSA type");
+
+    int64_t lanes = src0Type.getPhysicalLanes();
+    if (lanes != 64 && lanes != 128 && lanes != 256)
+        return op->emitOpError("supports only mask<64>, mask<128>, and mask<256>; mask<32>/b64 is unsupported");
+
+    return mlir::success();
+}
+
 mlir::LogicalResult InterleaveOp::verify()
 {
     if (!hasEnclosingRegion<VecFuncOp>(getOperation()))
         return emitOpError("must be nested inside a tla.vec.func region");
 
-    return verifyInterleaveLikeElementTypes(
-        getOperation(), getSrc0().getType(), getSrc1().getType(), getDst0().getType(), getDst1().getType());
+    if (auto srcType = mlir::dyn_cast<VectorSSAType>(getSrc0().getType())) {
+        auto src1Type = mlir::dyn_cast<VectorSSAType>(getSrc1().getType());
+        auto dst0Type = mlir::dyn_cast<VectorSSAType>(getDst0().getType());
+        auto dst1Type = mlir::dyn_cast<VectorSSAType>(getDst1().getType());
+        if (!src1Type || !dst0Type || !dst1Type)
+            return emitOpError("requires all operands and results to be VectorSSA or all to be MaskSSA");
+        return verifyInterleaveLikeElementTypes(getOperation(), srcType, src1Type, dst0Type, dst1Type);
+    }
+    if (auto srcType = mlir::dyn_cast<MaskSSAType>(getSrc0().getType())) {
+        auto src1Type = mlir::dyn_cast<MaskSSAType>(getSrc1().getType());
+        auto dst0Type = mlir::dyn_cast<MaskSSAType>(getDst0().getType());
+        auto dst1Type = mlir::dyn_cast<MaskSSAType>(getDst1().getType());
+        if (!src1Type || !dst0Type || !dst1Type)
+            return emitOpError("requires all operands and results to be VectorSSA or all to be MaskSSA");
+        return verifyInterleaveLikeMaskTypes(getOperation(), srcType, src1Type, dst0Type, dst1Type);
+    }
+    return emitOpError("expects VectorSSA or MaskSSA operands");
 }
 
 mlir::LogicalResult DeInterleaveOp::verify()
@@ -542,8 +570,23 @@ mlir::LogicalResult DeInterleaveOp::verify()
     if (!hasEnclosingRegion<VecFuncOp>(getOperation()))
         return emitOpError("must be nested inside a tla.vec.func region");
 
-    return verifyInterleaveLikeElementTypes(
-        getOperation(), getSrc0().getType(), getSrc1().getType(), getDst0().getType(), getDst1().getType());
+    if (auto srcType = mlir::dyn_cast<VectorSSAType>(getSrc0().getType())) {
+        auto src1Type = mlir::dyn_cast<VectorSSAType>(getSrc1().getType());
+        auto dst0Type = mlir::dyn_cast<VectorSSAType>(getDst0().getType());
+        auto dst1Type = mlir::dyn_cast<VectorSSAType>(getDst1().getType());
+        if (!src1Type || !dst0Type || !dst1Type)
+            return emitOpError("requires all operands and results to be VectorSSA or all to be MaskSSA");
+        return verifyInterleaveLikeElementTypes(getOperation(), srcType, src1Type, dst0Type, dst1Type);
+    }
+    if (auto srcType = mlir::dyn_cast<MaskSSAType>(getSrc0().getType())) {
+        auto src1Type = mlir::dyn_cast<MaskSSAType>(getSrc1().getType());
+        auto dst0Type = mlir::dyn_cast<MaskSSAType>(getDst0().getType());
+        auto dst1Type = mlir::dyn_cast<MaskSSAType>(getDst1().getType());
+        if (!src1Type || !dst0Type || !dst1Type)
+            return emitOpError("requires all operands and results to be VectorSSA or all to be MaskSSA");
+        return verifyInterleaveLikeMaskTypes(getOperation(), srcType, src1Type, dst0Type, dst1Type);
+    }
+    return emitOpError("expects VectorSSA or MaskSSA operands");
 }
 
 // Register predicates describe the physical lane width of a 256-byte data

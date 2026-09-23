@@ -1,0 +1,76 @@
+// RUN: sed -n '/^\/\/ BEGIN_OUTSIDE$/,/^\/\/ END_OUTSIDE$/p' %s | sed '1d;$d;s|^// ||' > %t.OUTSIDE.mlir && not %tla_compile %t.OUTSIDE.mlir -o %t 2>&1 | %filecheck %s --check-prefix=OUTSIDE
+// RUN: sed -n '/^\/\/ BEGIN_INPUT$/,/^\/\/ END_INPUT$/p' %s | sed '1d;$d;s|^// ||' > %t.INPUT.mlir && not %tla_compile %t.INPUT.mlir -o %t 2>&1 | %filecheck %s --check-prefix=INPUT
+// RUN: sed -n '/^\/\/ BEGIN_DST0$/,/^\/\/ END_DST0$/p' %s | sed '1d;$d;s|^// ||' > %t.DST0.mlir && not %tla_compile %t.DST0.mlir -o %t 2>&1 | %filecheck %s --check-prefix=DST0
+// RUN: sed -n '/^\/\/ BEGIN_DST1$/,/^\/\/ END_DST1$/p' %s | sed '1d;$d;s|^// ||' > %t.DST1.mlir && not %tla_compile %t.DST1.mlir -o %t 2>&1 | %filecheck %s --check-prefix=DST1
+// RUN: sed -n '/^\/\/ BEGIN_B64$/,/^\/\/ END_B64$/p' %s | sed '1d;$d;s|^// ||' > %t.B64.mlir && not %tla_compile %t.B64.mlir -o %t 2>&1 | %filecheck %s --check-prefix=B64
+
+// OUTSIDE: 'tla.interleave' op {{.*}}must be nested inside a tla.vec.func region
+
+// BEGIN_OUTSIDE
+// module {
+//   tla.func @invalid(%a: !tla.mask<64>, %b: !tla.mask<64>) {
+//     %r0, %r1 = tla.interleave %a, %b : !tla.mask<64>, !tla.mask<64> -> !tla.mask<64>, !tla.mask<64>
+//     tla.return
+//   }
+// }
+// END_OUTSIDE
+
+// INPUT: 'tla.interleave' op {{.*}}same MaskSSA type
+
+// BEGIN_INPUT
+// module {
+//   tla.func @invalid(%a: !tla.mask<64>, %b: !tla.mask<128>) {
+//     "tla.vector"() ({
+//       "tla.vec.func"() ({
+//         %r0, %r1 = tla.interleave %a, %b : !tla.mask<64>, !tla.mask<128> -> !tla.mask<64>, !tla.mask<64>
+//       }) {mode = "simd"} : () -> ()
+//     }) : () -> ()
+//     tla.return
+//   }
+// }
+// END_INPUT
+
+// DST0: 'tla.interleave' op {{.*}}same MaskSSA type
+
+// BEGIN_DST0
+// module {
+//   tla.func @invalid(%a: !tla.mask<64>, %b: !tla.mask<64>) {
+//     "tla.vector"() ({
+//       "tla.vec.func"() ({
+//         %r0, %r1 = tla.interleave %a, %b : !tla.mask<64>, !tla.mask<64> -> !tla.mask<128>, !tla.mask<64>
+//       }) {mode = "simd"} : () -> ()
+//     }) : () -> ()
+//     tla.return
+//   }
+// }
+// END_DST0
+
+// DST1: 'tla.interleave' op {{.*}}same MaskSSA type
+
+// BEGIN_DST1
+// module {
+//   tla.func @invalid(%a: !tla.mask<64>, %b: !tla.mask<64>) {
+//     "tla.vector"() ({
+//       "tla.vec.func"() ({
+//         %r0, %r1 = tla.interleave %a, %b : !tla.mask<64>, !tla.mask<64> -> !tla.mask<64>, !tla.mask<128>
+//       }) {mode = "simd"} : () -> ()
+//     }) : () -> ()
+//     tla.return
+//   }
+// }
+// END_DST1
+
+// B64: 'tla.interleave' op {{.*}}b64 is unsupported
+
+// BEGIN_B64
+// module {
+//   tla.func @invalid(%a: !tla.mask<32>, %b: !tla.mask<32>) {
+//     "tla.vector"() ({
+//       "tla.vec.func"() ({
+//         %r0, %r1 = tla.interleave %a, %b : !tla.mask<32>, !tla.mask<32> -> !tla.mask<32>, !tla.mask<32>
+//       }) {mode = "simd"} : () -> ()
+//     }) : () -> ()
+//     tla.return
+//   }
+// }
+// END_B64

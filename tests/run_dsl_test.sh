@@ -18,7 +18,7 @@
 # basic_mixed_store_zNUnAlign.py, basic_mixed_fixpipe_nz2dn.py).
 # python/tla_dsl/examples/end_to_end/vector_ops (binary_op.py, masked_binary.py,
 # bitwise_ops.py, reduction_ops.py, compare_mask.py, unary_ops.py, arange_op.py,
-# interleave_op.py, load_dintlv_op.py, load_store_mask.py, squeeze_op.py,
+# interleave_op.py, mask_interleave_op.py, load_dintlv_op.py, load_store_mask.py, squeeze_op.py,
 # register_control_flow.py, load_and_store_scalar_after_reduction.py, load_us_b8_op.py,
 # cast_multi.py, gather_op.py, shift_op.py).
 # python/tla_dsl/examples/end_to_end/tensor_index (scalar_index_control_flow.py,
@@ -112,6 +112,7 @@ COMPARE_MASK_OPS=(
 UNARY_OPS_REL="examples/end_to_end/vector_ops/unary_ops.py"
 ARANGE_OP_REL="examples/end_to_end/vector_ops/arange_op.py"
 INTERLEAVE_OP_REL="examples/end_to_end/vector_ops/interleave_op.py"
+MASK_INTERLEAVE_OP_REL="examples/end_to_end/vector_ops/mask_interleave_op.py"
 LOAD_DINTLV_OP_REL="examples/end_to_end/vector_ops/load_dintlv_op.py"
 LOAD_US_B8_OP_REL="examples/end_to_end/vector_ops/load_us_b8_op.py"
 LOAD_DIST_OPS_REL="examples/end_to_end/vector_ops/load_dist_ops.py"
@@ -170,6 +171,8 @@ Run end-to-end validation for:
   - unary_ops (unary_ops.py <op> --all-dtypes for exp/log/sqrt/abs/neg/masked_unary/masked_abs/masked_neg)
   - arange_op (arange_op.py [increase/decrease] --all-dtypes)
   - interleave_op (interleave_op.py interleave/deinterleave --all-dtypes)
+  - mask_interleave_op (mask_interleave_op.py mask_interleave/mask_deinterleave
+    --all-dtypes --shape 512; i8/f16/f32, both outputs checked against CPU golden)
   - load_dintlv_op (load_dintlv_op.py dintlv_b32 --all-dtypes; f32 only)
   - load_us_b8_op (load_us_b8_op.py us_b8 --sweep --shapes 512; i8 only:
     DIST_US_B8 2x up-sample load of b8 elements)
@@ -440,6 +443,10 @@ if [[ ! -f "${CATLASS_DSL_DIR}/${LOAD_STORE_SCALAR_AFTER_REDUCTION_REL}" ]]; the
 fi
 if [[ ! -f "${CATLASS_DSL_DIR}/${COMPARE_MASK_REL}" ]]; then
     echo "error: missing ${COMPARE_MASK_REL} under ${CATLASS_DSL_DIR}" >&2
+    exit 1
+fi
+if [[ ! -f "${CATLASS_DSL_DIR}/${MASK_INTERLEAVE_OP_REL}" ]]; then
+    echo "error: missing ${MASK_INTERLEAVE_OP_REL} under ${CATLASS_DSL_DIR}" >&2
     exit 1
 fi
 if [[ ! -f "${CATLASS_DSL_DIR}/${LOAD_DIST_OPS_REL}" ]]; then

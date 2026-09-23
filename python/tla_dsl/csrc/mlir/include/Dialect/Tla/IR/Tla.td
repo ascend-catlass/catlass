@@ -1918,9 +1918,11 @@ def Tla_ReduceOp : Tla_Op<"reduce", [Pure]> {
 }
 
 def Tla_InterleaveOp : Tla_Op<"interleave", [Pure]> {
-  let summary = "Vector interleave on VectorSSA values";
-  let arguments = (ins Tla_VectorSSAType:$src0, Tla_VectorSSAType:$src1);
-  let results = (outs Tla_VectorSSAType:$dst0, Tla_VectorSSAType:$dst1);
+  let summary = "Interleave on VectorSSA or MaskSSA values";
+  let arguments = (ins AnyTypeOf<[Tla_VectorSSAType, Tla_MaskSSAType]>:$src0,
+                       AnyTypeOf<[Tla_VectorSSAType, Tla_MaskSSAType]>:$src1);
+  let results = (outs AnyTypeOf<[Tla_VectorSSAType, Tla_MaskSSAType]>:$dst0,
+                      AnyTypeOf<[Tla_VectorSSAType, Tla_MaskSSAType]>:$dst1);
   let assemblyFormat = [{
     $src0 `,` $src1 attr-dict `:`
     qualified(type($src0)) `,` qualified(type($src1)) `->` qualified(type($dst0)) `,` qualified(type($dst1))
@@ -1929,9 +1931,11 @@ def Tla_InterleaveOp : Tla_Op<"interleave", [Pure]> {
 }
 
 def Tla_DeInterleaveOp : Tla_Op<"deinterleave", [Pure]> {
-  let summary = "Vector deinterleave on VectorSSA values";
-  let arguments = (ins Tla_VectorSSAType:$src0, Tla_VectorSSAType:$src1);
-  let results = (outs Tla_VectorSSAType:$dst0, Tla_VectorSSAType:$dst1);
+  let summary = "Deinterleave on VectorSSA or MaskSSA values";
+  let arguments = (ins AnyTypeOf<[Tla_VectorSSAType, Tla_MaskSSAType]>:$src0,
+                       AnyTypeOf<[Tla_VectorSSAType, Tla_MaskSSAType]>:$src1);
+  let results = (outs AnyTypeOf<[Tla_VectorSSAType, Tla_MaskSSAType]>:$dst0,
+                      AnyTypeOf<[Tla_VectorSSAType, Tla_MaskSSAType]>:$dst1);
   let assemblyFormat = [{
     $src0 `,` $src1 attr-dict `:`
     qualified(type($src0)) `,` qualified(type($src1)) `->` qualified(type($dst0)) `,` qualified(type($dst1))

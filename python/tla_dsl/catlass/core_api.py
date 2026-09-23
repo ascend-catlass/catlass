@@ -7382,36 +7382,54 @@ _INTERLEAVE_ELEMENT_TYPES = frozenset(
 
 @dsl_user_op
 def interleave(
-    src0: VectorSSA,
-    src1: VectorSSA,
+    src0: VectorSSA | MaskSSA,
+    src1: VectorSSA | MaskSSA,
     *,
     loc: mlir_ir.Location | None = None,
-) -> tuple[VectorSSA, VectorSSA]:
+) -> tuple[VectorSSA, VectorSSA] | tuple[MaskSSA, MaskSSA]:
     """Directory: Vector Compute / Data Rearrange
     Description:
-        Interleave two vector registers lane-wise.
+        Interleave two vector registers or predicate masks lane-wise.
 
         Parameters:
-        - `src0` (`VectorSSA`): Even-lane input vector register. Required.
-        - `src1` (`VectorSSA`): Odd-lane input vector register. Required.
+        - `src0` (`VectorSSA` or `MaskSSA`): Even-lane input. Required.
+        - `src1` (`VectorSSA` or `MaskSSA`): Odd-lane input of the same category and type. Required.
 
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function.
-        - Must be called inside `tla.vec.func()`; both vectors must match element type and lane count.
+        - Must be called inside `tla.vec.func()`; inputs must match type. MaskSSA supports only mask<64>, mask<128>, and mask<256>.
 
         Example:
         ```python
         with tla.vec.func(mode="simd"):
             lo, hi = tla.interleave(a, b)
+            mask_lo, mask_hi = tla.interleave(mask0, mask1)
         ```
     """
-    _require_category("interleave", "src0", src0, "vector_ssa", 0)
-    _require_category("interleave", "src1", src1, "vector_ssa", 1)
+    src0_category = _category(src0)
+    src1_category = _category(src1)
+    expected = ("mask_ssa", "vector_ssa")
+    if src0_category not in expected:
+        _require_categories("interleave", "src0", src0, expected, 0)
+    if src1_category not in expected:
+        _require_categories("interleave", "src1", src1, expected, 1)
+    if src0_category != src1_category:
+        _op_error("interleave", "src0 and src1 must both be MaskSSA values or both be VectorSSA values")
     _require_frontend_state("interleave")
     _runtime._require_enclosing_region("interleave", "vec.func")
 
     src0_value = _as_value(src0)
     src1_value = _as_value(src1)
+
+    if src0_category == "mask_ssa":
+        if src0_value.type != src1_value.type:
+            _op_error("interleave", "MaskSSA operands must have the same type")
+        lanes = _mask_ssa_type_for_mlir_value(src0_value).physical_lanes
+        if lanes not in (64, 128, 256):
+            _op_error("interleave", "MaskSSA interleave supports mask<64>, mask<128>, and mask<256>; mask<32>/b64 is unsupported")
+        dst0, dst1 = _tla_ops_gen.interleave(
+            src0_value.type, src0_value.type, src0_value, src1_value, loc=loc)
+        return MaskSSA(dst0), MaskSSA(dst1)
 
     src_desc = _vector_ssa_type_for_mlir_value(src0_value)
     element_type = str(src_desc.element_type).lower()
@@ -7435,37 +7453,65 @@ def interleave(
 
 @dsl_user_op
 def deinterleave(
-    src0: VectorSSA,
-    src1: VectorSSA,
+    src0: VectorSSA | MaskSSA,
+    src1: VectorSSA | MaskSSA,
     *,
     loc: mlir_ir.Location | None = None,
-) -> tuple[VectorSSA, VectorSSA]:
+) -> tuple[VectorSSA, VectorSSA] | tuple[MaskSSA, MaskSSA]:
     """Directory: Vector Compute / Data Rearrange
 
     Description:
-        Deinterleave two vector registers lane-wise.
+        Concatenate two vector registers or predicate masks, then return
+        the even-position and odd-position lanes as two registers.
 
         Parameters:
-        - `src0` (`VectorSSA`): First half / one stream of interleaved input. Required.
-        - `src1` (`VectorSSA`): Second half / other stream of interleaved input. Required.
+        - `src0` (`VectorSSA` or `MaskSSA`): First half of the concatenated input. Required.
+        - `src1` (`VectorSSA` or `MaskSSA`): Second half, of the same category and type. Required.
 
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function.
         - Must be called inside `tla.vec.func()`; both vectors must match element type and lane count.
+        - MaskSSA operands and results have the same type; only mask<64>, mask<128>, and mask<256> are supported. mask<32>/b64 is unsupported.
 
         Example:
         ```python
         with tla.vec.func(mode="simd"):
             even, odd = tla.deinterleave(a, b)
+            mask_even, mask_odd = tla.deinterleave(mask0, mask1)
         ```
     """
-    _require_category("deinterleave", "src0", src0, "vector_ssa", 0)
-    _require_category("deinterleave", "src1", src1, "vector_ssa", 1)
+    src0_category = _category(src0)
+    src1_category = _category(src1)
+    expected = ("mask_ssa", "vector_ssa")
+    if src0_category not in expected:
+        _require_categories("deinterleave", "src0", src0, expected, 0)
+    if src1_category not in expected:
+        _require_categories("deinterleave", "src1", src1, expected, 1)
+    if src0_category != src1_category:
+        _op_error(
+            "deinterleave",
+            "src0 and src1 must both be MaskSSA values or both be VectorSSA values",
+        )
     _require_frontend_state("deinterleave")
     _runtime._require_enclosing_region("deinterleave", "vec.func")
 
     src0_value = _as_value(src0)
     src1_value = _as_value(src1)
+
+    if src0_category == "mask_ssa":
+        if src0_value.type != src1_value.type:
+            _op_error("deinterleave", "MaskSSA operands must have the same type")
+        lanes = _mask_ssa_type_for_mlir_value(src0_value).physical_lanes
+        if lanes not in (64, 128, 256):
+            _op_error(
+                "deinterleave",
+                "MaskSSA deinterleave supports mask<64>, mask<128>, and mask<256>; "
+                "mask<32>/b64 is unsupported",
+            )
+        dst0, dst1 = _tla_ops_gen.deinterleave(
+            src0_value.type, src0_value.type, src0_value, src1_value, loc=loc
+        )
+        return MaskSSA(dst0), MaskSSA(dst1)
 
     src_desc = _vector_ssa_type_for_mlir_value(src0_value)
     element_type = str(src_desc.element_type).lower()

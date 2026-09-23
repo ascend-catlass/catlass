@@ -2045,6 +2045,32 @@ static LogicalResult lowerNestedVectorOp(
         if (!src0 || !src1)
             return failure();
 
+        if (isa<::tla::MaskSSAType>(interleaveOp.getSrc0().getType())) {
+            auto maskType = cast<::tla::MaskSSAType>(interleaveOp.getSrc0().getType());
+            auto pregType = fullPregVecType(b.getContext());
+            src0 = castMaskToPregType(b, loc, src0, pregType);
+            src1 = castMaskToPregType(b, loc, src1, pregType);
+            auto pairType = LLVM::LLVMStructType::getLiteral(b.getContext(), {pregType, pregType});
+            Operation *intrinsic = nullptr;
+            switch (maskType.getPhysicalLanes()) {
+                case 256:
+                    intrinsic = b.create<hivm_regbaseintrins::PintlvB8InstrOp>(loc, pairType, src0, src1);
+                    break;
+                case 128:
+                    intrinsic = b.create<hivm_regbaseintrins::PintlvB16InstrOp>(loc, pairType, src0, src1);
+                    break;
+                case 64:
+                    intrinsic = b.create<hivm_regbaseintrins::PintlvB32InstrOp>(loc, pairType, src0, src1);
+                    break;
+                default:
+                    return interleaveOp.emitError("supports only b8, b16, and b32 predicate interleave"), failure();
+            }
+            Value aggregate = intrinsic->getResult(0);
+            valueMap[interleaveOp.getDst0()] = b.create<LLVM::ExtractValueOp>(loc, aggregate, 0);
+            valueMap[interleaveOp.getDst1()] = b.create<LLVM::ExtractValueOp>(loc, aggregate, 1);
+            return success();
+        }
+
         auto src0Type = dyn_cast<VectorType>(src0.getType());
         auto src1Type = dyn_cast<VectorType>(src1.getType());
         if (!src0Type || !src1Type || src0Type != src1Type)
@@ -2066,15 +2092,41 @@ static LogicalResult lowerNestedVectorOp(
         if (!src0 || !src1)
             return failure();
 
-        auto src0Type = dyn_cast<VectorType>(src0.getType());
-        auto src1Type = dyn_cast<VectorType>(src1.getType());
-        if (!src0Type || !src1Type || src0Type != src1Type)
-            return failure();
-
-        auto aveOp = b.create<hivmave::VFDeInterleaveOp>(loc, TypeRange{src0Type, src1Type}, ValueRange{src0, src1});
-
-        valueMap[op.getResult(0)] = aveOp->getResult(0);
-        valueMap[op.getResult(1)] = aveOp->getResult(1);
+        if (isa<::tla::MaskSSAType>(deInterleaveOp.getSrc0().getType())) {
+            // SCF carriers are vector<256xi1>; choose PDintlv from the original
+            // MaskSSA type rather than the converted carrier.
+            auto maskType = cast<::tla::MaskSSAType>(deInterleaveOp.getSrc0().getType());
+            auto pregType = fullPregVecType(b.getContext());
+            src0 = castMaskToPregType(b, loc, src0, pregType);
+            src1 = castMaskToPregType(b, loc, src1, pregType);
+            auto pairType = LLVM::LLVMStructType::getLiteral(b.getContext(), {pregType, pregType});
+            Operation* intrinsic = nullptr;
+            switch (maskType.getPhysicalLanes()) {
+                case 256:
+                    intrinsic = b.create<hivm_regbaseintrins::PDintlvB8InstrOp>(loc, pairType, src0, src1);
+                    break;
+                case 128:
+                    intrinsic = b.create<hivm_regbaseintrins::PDintlvB16InstrOp>(loc, pairType, src0, src1);
+                    break;
+                case 64:
+                    intrinsic = b.create<hivm_regbaseintrins::PDintlvB32InstrOp>(loc, pairType, src0, src1);
+                    break;
+                default:
+                    return deInterleaveOp.emitError("supports only b8, b16, and b32 predicate deinterleave"), failure();
+            }
+            Value aggregate = intrinsic->getResult(0);
+            valueMap[deInterleaveOp.getDst0()] = b.create<LLVM::ExtractValueOp>(loc, aggregate, 0);
+            valueMap[deInterleaveOp.getDst1()] = b.create<LLVM::ExtractValueOp>(loc, aggregate, 1);
+        } else {
+            auto src0Type = dyn_cast<VectorType>(src0.getType());
+            auto src1Type = dyn_cast<VectorType>(src1.getType());
+            if (!src0Type || !src1Type || src0Type != src1Type)
+                return failure();
+            auto aveOp = b.create<hivmave::VFDeInterleaveOp>(
+                loc, TypeRange{src0Type, src1Type}, ValueRange{src0, src1});
+            valueMap[deInterleaveOp.getDst0()] = aveOp->getResult(0);
+            valueMap[deInterleaveOp.getDst1()] = aveOp->getResult(1);
+        }
         return success();
     }
 
