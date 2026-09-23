@@ -78,21 +78,6 @@ Q  0  ■ ■ · · ·
 
 支持 KV cache 分页（`--paged` 开启）。开启后 host 自动将 K/V 按页打散并生成随机块表，kernel 侧按块表进行物理页寻址，避免对连续大块 KV 的内存申请。
 
-## 代码组织
-
-本目录组织结构如下所示：
-
-```plain
-./flash_attention_infer
-├── flash_attention_infer.py     # @tla.kernel + Host：构造输入、编译、调用 kernel、精度校验
-├── fa_tiling.py                 # Tiling 参数计算与打包
-└── README.md
-```
-
-| 文件 | 概述 |
-|------|------|
-| [**`flash_attention_infer.py`**](flash_attention_infer.py) | 设备侧 `@tla.kernel` 与 host 侧运行/校验逻辑同文件。编译期 shape 参数集中于文件顶部，CLI 可覆盖，kernel 在 `tla.compile` trace 时读取最新值。 |
-| [**`fa_tiling.py`**](fa_tiling.py) | Tilingdata 计算与打包。 |
 
 ## 约束说明
 
