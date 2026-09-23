@@ -140,6 +140,7 @@ mutex_l1a.unlock(pipe=tla.arch.MTE2)
 
 ```python
 import catlass.tla as tla
+from catlass.params import CopyL0C2DstParams, L0C2UBMode
 
 # ...
 ub_c = tla.make_tensor_like(ub_c_ptr, l0_c, tla.arch.ColumnMajor)
