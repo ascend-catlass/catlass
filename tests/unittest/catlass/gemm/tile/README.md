@@ -100,7 +100,7 @@ cd build && make coverage_collect
 Overall coverage rate:
   lines......: 100.0% (2516 of 2516 lines)
   functions..: 99.3% (1479 of 1489 functions)
-Reading tracefile /home/pacr_zhb/WKS/catlass_clean/build/coverage/coverage.info
+Reading tracefile build/coverage/coverage.info
                                                |Lines      |Functions|Branches
 Filename                                       |Rate    Num|Rate  Num|Rate   Num
 ================================================================================
