@@ -77,53 +77,79 @@ macro(add_kernel)
 
     if("${_K_KERNEL_TYPE}" STREQUAL "jit")
         # -------------------------------------------------------
-        # JIT 模式 — 收集源文件到统一库
+        # JIT 模式 — 仅收集 CATLASS_ARCH_LIST 中启用架构的 JIT kernel
         # -------------------------------------------------------
-        set(_KERNEL_ENTRY "${_K_UNPARSED_ARGUMENTS}")
+        # 与 prebuilt 分支保持一致：当声明的架构与 CATLASS_ARCH_LIST 无交集时，
+        # 该 JIT kernel 不进入统一入口库、不安装模板、也不做构建期校验。
 
-        # 收集 entry 源文件到列表，构建时统一编译
-        list(APPEND _JIT_KERNEL_ENTRIES "${_KERNEL_ENTRY}")
-        set(_JIT_KERNEL_ENTRIES ${_JIT_KERNEL_ENTRIES} PARENT_SCOPE)
+        set(_K_LEGAL_ARCH "")
+        foreach(_ARCH ${_K_NPU_ARCH_LIST})
+            list(FIND CATLASS_ARCH_LIST "${_ARCH}" _ARCH_INDEX)
+            if(NOT _ARCH_INDEX EQUAL -1)
+                list(APPEND _K_LEGAL_ARCH "${_ARCH}")
+            endif()
+        endforeach()
 
-        if(_K_TEMPLATE)
-            # 收集所有 template 源文件，用于运行时分发
-            foreach(_TEMPLATE_FILE ${_K_TEMPLATE})
-                list(APPEND _JIT_KERNEL_TEMPLATES "${_TEMPLATE_FILE}")
-            endforeach()
-            set(_JIT_KERNEL_TEMPLATES ${_JIT_KERNEL_TEMPLATES} PARENT_SCOPE)
+        if(_K_LEGAL_ARCH)
+            set(_KERNEL_ENTRY "${_K_UNPARSED_ARGUMENTS}")
 
-            set(_JIT_INCLUDE_DIRS
-                "${CATLASS_INCLUDE_DIR}"
-                "${CMAKE_CURRENT_SOURCE_DIR}"
-                "${CMAKE_CURRENT_SOURCE_DIR}/.."
-                "${CMAKE_CURRENT_SOURCE_DIR}/../../include"
-                "${CMAKE_CURRENT_SOURCE_DIR}/include"
-                "${CMAKE_BINARY_DIR}"
-            )
+            # 收集 entry 源文件到列表，构建时统一编译
+            list(APPEND _JIT_KERNEL_ENTRIES "${_KERNEL_ENTRY}")
+            set(_JIT_KERNEL_ENTRIES ${_JIT_KERNEL_ENTRIES} PARENT_SCOPE)
 
-            # 仅对 CATLASS_ARCH_LIST 中启用的架构做模板验证
-            set(_K_LEGAL_ARCH "")
-            foreach(_ARCH ${_K_NPU_ARCH_LIST})
-                list(FIND CATLASS_ARCH_LIST "${_ARCH}" _ARCH_INDEX)
-                if(NOT _ARCH_INDEX EQUAL -1)
-                    list(APPEND _K_LEGAL_ARCH "${_ARCH}")
+            if(_K_TEMPLATE)
+                # 收集所有 template 源文件，用于运行时分发与安装
+                foreach(_TEMPLATE_FILE ${_K_TEMPLATE})
+                    list(APPEND _JIT_KERNEL_TEMPLATES "${_TEMPLATE_FILE}")
+                endforeach()
+                set(_JIT_KERNEL_TEMPLATES ${_JIT_KERNEL_TEMPLATES} PARENT_SCOPE)
+
+                set(_JIT_INCLUDE_DIRS
+                    "${CATLASS_INCLUDE_DIR}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/.."
+                    "${CMAKE_CURRENT_SOURCE_DIR}/../../include"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+                    "${CMAKE_BINARY_DIR}"
+                )
+
+                # 从 entry 源文件推断运行期实际使用的 bisheng kernel 类型
+                # 使构建期校验与运行期保持一致，默认设置为 `__mix__(1,2)`
+                set(_K_BISHENG_TYPE "__mix__(1,2)")
+                foreach(_ENTRY_SRC ${_KERNEL_ENTRY})
+                    if(EXISTS "${_ENTRY_SRC}")
+                        file(READ "${_ENTRY_SRC}" _ENTRY_CONTENT)
+                        string(REGEX MATCH "JitKernelType::(AIC|AIV|MIX)" _KT_MATCH "${_ENTRY_CONTENT}")
+                        if(_KT_MATCH STREQUAL "JitKernelType::AIV")
+                            set(_K_BISHENG_TYPE "__vector__")
+                        elseif(_KT_MATCH STREQUAL "JitKernelType::MIX")
+                            set(_K_BISHENG_TYPE "__mix__(1,2)")
+                        endif()
+                        break()
+                    endif()
+                endforeach()
+
+                # 同名环境变量在构建期把 AIC/AIV/MIX 改写成对应的 __mix__ 形式。
+                if(_K_BISHENG_TYPE STREQUAL "__cube__" AND DEFINED ENV{CATLASS_JIT_AIC_AS_MIX})
+                    set(_K_BISHENG_TYPE "__mix__(1,0)")
+                elseif(_K_BISHENG_TYPE STREQUAL "__vector__" AND DEFINED ENV{CATLASS_JIT_AIV_AS_MIX})
+                    set(_K_BISHENG_TYPE "__mix__(0,1)")
+                elseif(_K_BISHENG_TYPE STREQUAL "__mix__(1,2)" AND DEFINED ENV{CATLASS_JIT_MIX_CV_11})
+                    set(_K_BISHENG_TYPE "__mix__(1,1)")
                 endif()
-            endforeach()
 
-            if(_K_LEGAL_ARCH)
                 # 为每个 template 生成独立的 verify 目标（target 名按文件 stem 区分）
                 foreach(_TEMPLATE_FILE ${_K_TEMPLATE})
                     get_filename_component(_TEMPLATE_STEM ${_TEMPLATE_FILE} NAME_WE)
                     jit_verify_template(
                         NAME "${_K_NAME}_${_TEMPLATE_STEM}"
                         TEMPLATE "${_TEMPLATE_FILE}"
+                        KERNEL_TYPE "${_K_BISHENG_TYPE}"
+                        KERNEL_NAME "${_K_NAME}"
                         NPU_ARCH_LIST ${_K_LEGAL_ARCH}
                         INCLUDE_DIRS ${_JIT_INCLUDE_DIRS}
                     )
                 endforeach()
-            else()
-                message(STATUS "add_kernel: skip JIT template verification for '${_K_NAME}' "
-                    "(declared archs: ${_K_NPU_ARCH_LIST}; CATLASS_ARCH_LIST: ${CATLASS_ARCH_LIST})")
             endif()
         endif()
 

@@ -359,7 +359,7 @@ void QuantOptimizedMatmulTLA(
 /**
  * @brief JIT interface for example 43_ascend950_basic_matmul.
  */
-void Ascend950BasicMatmul(
+__attribute__((weak)) void Ascend950BasicMatmul(
     const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const MatmulParams& params);
 
 /**
@@ -377,31 +377,31 @@ void StridedBatchedMatmulTLA(
 /**
  * @brief Reserved JIT interface for example 46_ascend950_matmul_fixpipe_opti.
  */
-void Ascend950MatmulFixpipeOpti(
+__attribute__((weak)) void Ascend950MatmulFixpipeOpti(
     const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const MatmulParams& params);
 
 /**
  * @brief Reserved JIT interface for example 47_ascend950_grouped_matmul_slice_m_per_token_dequant.
  */
-void Ascend950GroupedMatmulSliceMPerTokenDequant(
+__attribute__((weak)) void Ascend950GroupedMatmulSliceMPerTokenDequant(
     const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const GroupedMatmulParams& params);
 
 /**
  * @brief Reserved JIT interface for example 48_ascend950_grouped_matmul_slice_m_per_tensor_per_channel_dequant.
  */
-void Ascend950GroupedMatmulSliceMPerTensorPerChannelDequant(
+__attribute__((weak)) void Ascend950GroupedMatmulSliceMPerTensorPerChannelDequant(
     const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const GroupedMatmulParams& params);
 
 /**
  * @brief Reserved JIT interface for example 50_ascend950_basic_matmul_gemv.
  */
-void Ascend950BasicMatmulGemv(
+__attribute__((weak)) void Ascend950BasicMatmulGemv(
     const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const MatmulParams& params);
 
 /**
  * @brief Reserved JIT interface for example 51_ascend950_quant_matmul_per_group_per_block_tla.
  */
-void Ascend950QuantMatmulPerGroupPerBlockTLA(
+__attribute__((weak)) void Ascend950QuantMatmulPerGroupPerBlockTLA(
     const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const MatmulParams& params);
 
 /**
@@ -413,67 +413,67 @@ void QuantMultiCoreSplitkMatmulTLA(
 /**
  * @brief Reserved JIT interface for example 53_ascend950_fp8_mx_matmul.
  */
-void Ascend950Fp8MxMatmul(
+__attribute__((weak)) void Ascend950Fp8MxMatmul(
     const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const MatmulParams& params);
 
 /**
  * @brief JIT interface for example 53_ascend950_fp8_mx_matmul_aswt.
  */
-void Ascend950Fp8MxMatmulAswt(
+__attribute__((weak)) void Ascend950Fp8MxMatmulAswt(
     const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const MatmulParams& params);
 
 /**
  * @brief Reserved JIT interface for example 54_ascend950_fp4_mx_matmul.
  */
-void Ascend950Fp4MxMatmul(
+__attribute__((weak)) void Ascend950Fp4MxMatmul(
     const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const MatmulParams& params);
 
 /**
  * @brief JIT interface for example 54_ascend950_fp4_mx_matmul_aswt.
  */
-void Ascend950Fp4MxMatmulAswt(
+__attribute__((weak)) void Ascend950Fp4MxMatmulAswt(
     const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const MatmulParams& params);
 
 /**
  * @brief Reserved JIT interface for example 55_ascend950_mx_grouped_matmul_slice_m.
  */
-void Ascend950MxGroupedMatmulSliceM(
+__attribute__((weak)) void Ascend950MxGroupedMatmulSliceM(
     const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const GroupedMatmulParams& params);
 
 /**
  * @brief Reserved JIT interface for example 57_ascend950_matmul_full_dequant.
  */
-void Ascend950MatmulFullDequant(
+__attribute__((weak)) void Ascend950MatmulFullDequant(
     const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const MatmulParams& params);
 
 /**
  * @brief JIT interface for example 58_ascend950_fp8_mx_batch_matmul.
  */
-void Ascend950Fp8MxBatchMatmul(
+__attribute__((weak)) void Ascend950Fp8MxBatchMatmul(
     const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const MatmulParams& params);
 
 /**
  * @brief JIT interface for example 63_ascend950_dual_level_quant_mx_batch_matmul.
  */
-void Ascend950DualLevelQuantMxBatchMatmul(
+__attribute__((weak)) void Ascend950DualLevelQuantMxBatchMatmul(
     const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const MatmulParams& params);
 
 /**
  * @brief JIT interface for example 59_ascend950_a8w4_mx_matmul.
  */
-void Ascend950A8W4MxMatmul(
+__attribute__((weak)) void Ascend950A8W4MxMatmul(
     const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const MatmulParams& params);
 
 /**
  * @brief JIT interface for example 61_ascend950_svd_quant_matmul.
  */
-void Ascend950SvdQuantMatmul(
+__attribute__((weak)) void Ascend950SvdQuantMatmul(
     const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const SvdQuantMatmulParams& params);
 
 /**
  * @brief Reserved JIT interface for example 60_ascend950_grouped_matmul_slice_m.
  */
-void Ascend950GroupedMatmulSliceM(
+__attribute__((weak)) void Ascend950GroupedMatmulSliceM(
     const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const GroupedMatmulParams& params);
 
 /**
@@ -481,24 +481,25 @@ void Ascend950GroupedMatmulSliceM(
  *
  * Selects the JIT template via ``params.evgType`` (e.g. add, add_ub, bias, leaky_relu, ...).
  */
-void MatmulEvg(const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const MatmulEvgParams& params);
+__attribute__((weak)) void MatmulEvg(
+    const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const MatmulEvgParams& params);
 
 /**
  * @brief JIT interface for example 67_ascend950_batched_matmul.
  */
-void Ascend950BatchedMatmul(
+__attribute__((weak)) void Ascend950BatchedMatmul(
     const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const MatmulParams& params);
 
 /**
  * @brief Reserved JIT interface for example 65_ascend950_fp8_mx_grouped_matmul_slice_m_swiglu_mx_quant.
  */
-void Ascend950Fp8MxGroupedMatmulSliceMSwigluMxQuant(
+__attribute__((weak)) void Ascend950Fp8MxGroupedMatmulSliceMSwigluMxQuant(
     const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const GroupedMatmulParams& params);
 
 /**
  * @brief JIT interface for example 66_ascend950_streamk_matmul.
  */
-void Ascend950StreamkMatmul(
+__attribute__((weak)) void Ascend950StreamkMatmul(
     const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const MatmulParams& params);
 
 /**
@@ -515,19 +516,19 @@ struct GroupedMxFinalizeRoutingParams : public MatmulParams {
 /**
  * @brief Reserved JIT interface for example 71_ascend950_fp8_mx_grouped_matmul_finalize_routing.
  */
-void Ascend950Fp8MxGroupedMatmulFinalizeRouting(
+__attribute__((weak)) void Ascend950Fp8MxGroupedMatmulFinalizeRouting(
     const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const GroupedMxFinalizeRoutingParams& params);
 
 /**
  * @brief Reserved JIT interface for example 71_ascend950_fp8_mx_grouped_matmul_finalize_routing (no_deter variant).
  */
-void Ascend950Fp8MxGroupedMatmulFinalizeRoutingNoDeter(
+__attribute__((weak)) void Ascend950Fp8MxGroupedMatmulFinalizeRoutingNoDeter(
     const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const GroupedMxFinalizeRoutingParams& params);
 
 /**
  * @brief JIT interface for example 73_ascend950_matmul_full_loadA.
  */
-void Ascend950MatmulFullLoadA(
+__attribute__((weak)) void Ascend950MatmulFullLoadA(
     const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const MatmulParams& params);
 /**
  * @brief JIT interface for example 75_symm.
@@ -540,7 +541,7 @@ void Symm(const uint32_t blockNum, aclrtStream stream, const TParams& tParams, c
  * Y = X * X^T. ``params.m`` must equal ``params.n``; only ``inputAddr[0]`` (X) and
  * ``outputAddr[0]`` (Y) are consumed.
  */
-void Ascend950BasicSyrk(
+__attribute__((weak)) void Ascend950BasicSyrk(
     const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const MatmulParams& params);
 
 /**
@@ -558,7 +559,7 @@ void Ascend950Syrk(
  * B is the packed FP4 prologue (int8 bytes, Weight4BitnZ layout). Output is FP32.
  * ``params.batch`` carries the group (expert) count; ``inputAddr[2]`` is the group list.
  */
-void Ascend950A8W4GroupedMxMatmul(
+__attribute__((weak)) void Ascend950A8W4GroupedMxMatmul(
     const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const GroupedMatmulParams& params);
 
 /**
@@ -570,13 +571,13 @@ void Ascend950DualMatmulSiluMul(
 /**
  * @brief JIT interface for experimental/matmul/ascend950_fp4_mx_quant_matmul.
  */
-void Ascend950Fp4MxQuantMatmul(
+__attribute__((weak)) void Ascend950Fp4MxQuantMatmul(
     const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const MatmulParams& params);
 
 /**
  * @brief JIT interface for experimental/matmul/ascend950_fp8_e4m3_quant_matmul.
  */
-void Ascend950Fp8E4M3QuantMatmul(
+__attribute__((weak)) void Ascend950Fp8E4M3QuantMatmul(
     const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const MatmulParams& params);
 
 /**
@@ -600,13 +601,13 @@ void DynamicOptimizedQuantMatmulPerTokenBasic(
 /**
  * @brief JIT interface for example 68_ascend950_multi_core_splitk_matmul.
  */
-void Ascend950MultiCoreSplitkMatmul(
+__attribute__((weak)) void Ascend950MultiCoreSplitkMatmul(
     const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const MatmulParams& params);
 
 /**
  * @brief JIT interface for example 69_ascend950_tail_multi_core_splitk_matmul.
  */
-void Ascend950TailMultiCoreSplitkMatmul(
+__attribute__((weak)) void Ascend950TailMultiCoreSplitkMatmul(
     const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const MatmulParams& params);
 
 /**
@@ -623,7 +624,7 @@ void PlanarComplexMatmul(
 /**
  * @brief JIT interface for example 80_grouped_matmul_slice_m_gelu.
  */
-void GroupedMatmulSliceMGelu(
+__attribute__((weak)) void GroupedMatmulSliceMGelu(
     const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const GroupedMatmulParams& params);
 
 } // extern "C"
