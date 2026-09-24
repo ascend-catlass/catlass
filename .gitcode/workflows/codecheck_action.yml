@@ -37,6 +37,7 @@ jobs:
           merge_id: ${{ env.MERGE_ID }}
           repo_name: ${{ env.repo_name }}
           workspace: ${{ steps.process_checkout.outputs.path }}
+          block: ${{ vars.PRECOMMIT_BLOCK }}
       -
         name: upload
         uses: obs-upload

@@ -26,6 +26,7 @@ env:
   obs_path: "${{ env.org_name }}/${{ env.repo_name }}/ci/package/${{ env.MERGE_ID }}"
   obs_ut_path: "${{ env.obs_path }}/ut"
   obs_pre_smoke_path: "${{ env.obs_path }}/pre_smoke"
+  online: ${{ vars.APPLY_LABEL }}
 
 stages:
   stage1:
