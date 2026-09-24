@@ -13,7 +13,7 @@ nav_order: 15
 # TLA DSL Host API 参考
 
 本文档介绍 **TLA DSL 的 Host 侧 API**（通常以 `import catlass.tla as tla` 导入）。
-内容覆盖：`@tla.kernel` / `@tla.jit` 装饰器、Host 侧 `@dataclass` 打包、`tla.compile` /
+内容覆盖：`@tla.kernel` / `@tla.jit` / `@tla.extern` 装饰器、Host 侧 `@dataclass` 打包、`tla.compile` /
 `JitCompiledFunction` 启动、Host tensor。
 使用流程见 [编译与启动](../kernel_development/core_concepts/compile_and_launch.md)，环境变量见
 [环境变量](../kernel_development/core_concepts/env_vars.md)。Kernel 侧接口见
@@ -29,20 +29,20 @@ DLPack 接入教程见 [Host Tensor 接入](../kernel_development/core_concepts/
 
 ## 目录
 
-- [1. 装饰器](#%E8%A3%85%E9%A5%B0%E5%99%A8)
-- [2. 编译与启动](#%E7%BC%96%E8%AF%91%E4%B8%8E%E5%90%AF%E5%8A%A8)
-  - [2.1 编译](#%E7%BC%96%E8%AF%91)
-  - [2.2 启动](#%E5%90%AF%E5%8A%A8)
-  - [2.3 查看 IR](#%E6%9F%A5%E7%9C%8B-ir)
-- [3. Host Tensor](#host-tensor)
-  - [3.1 创建与绑定](#%E5%88%9B%E5%BB%BA%E4%B8%8E%E7%BB%91%E5%AE%9A)
-  - [3.2 动态 Layout](#%E5%8A%A8%E6%80%81-layout)
+- [装饰器](#装饰器)
+- [编译与启动](#编译与启动)
+  - [编译](#编译)
+  - [启动](#启动)
+  - [查看 IR](#查看-ir)
+- [Host Tensor](#host-tensor)
+  - [创建与绑定](#创建与绑定)
+  - [动态 Layout](#动态-layout)
 
 ---
 
 ## 装饰器
 
-Host 侧 `@tla.kernel` 入口、`@tla.jit` device helper，以及 Host 侧 `@dataclass` 打包。
+Host 侧 `@tla.kernel` 入口、`@tla.jit` device helper、`@tla.extern` Ascend C 复用，以及 Host 侧 `@dataclass` 打包。
 被装饰的 kernel 函数体在 Host 端不执行。
 
 ### `kernel`
@@ -213,7 +213,7 @@ compiled_ep(tx, ty, block_num=1)  # 不再传 abs_epilogue
 
 ### `dataclass`
 
-**源码：** [`dataclasses.dataclass`](../../../catlass/base_dsl/runtime/jit_arg_adapters.py)
+**源码：** [`dataclasses.dataclass`](../../../catlass/base_dsl/runtime/jit_arg_adapters.py#L135)
 
 功能说明：
 
@@ -268,6 +268,67 @@ def struct_arg_kernel(tiling: TilingData) -> None:
 tiling = TilingData(TILE_M=128, tiling_int=64, out=tout)
 artifact = tla.compile(struct_arg_kernel, tiling, options="--npu-arch 3510")
 artifact(tiling, block_num=1)
+```
+
+---
+
+### `extern`
+
+**源码：** [`catlass.tla.ffi.extern`](../../../catlass/tla/ffi.py#L70)
+
+功能说明：
+
+声明由内联 Ascend C 源实现的 Ascend C ABI 入口。被装饰的 Python 函数体
+不会执行；其名字与注解描述的是在 TLA kernel 内调用时发出的符号与参数 ABI。
+
+函数原型：
+
+```python
+tla.extern(*, source: str, name: str | None = None, include_dirs: str | os.PathLike[str] | Sequence[str | os.PathLike[str]] = ()) -> Callable[[Callable[..., None]], ExternFunction]
+```
+
+参数说明：
+
+- *`source`*（`str`）：非空的 Ascend C 翻译单元源，用于定义所声明的 C ABI 符号。
+- *`name`*（`str | None`）：可选 C 符号名。默认使用被装饰的 Python 函数名。
+- *`include_dirs`*（`str | os.PathLike[str] | Sequence[str | os.PathLike[str]]`）：
+  可选的头文件搜索目录，或按序目录列表。相对路径相对声明所在文件解析。
+
+约束说明：
+
+- `name` 必须是合法 C 标识符，且 `source` 非空。
+- 参数必须是位置参数、无默认值，并用
+  `tla.Pointer[dtype, address_space]` 或具体 TLA 数值类型注解。
+- 返回注解必须是 `None`。
+- 调用必须落在恰好一个 `tla.cube()` 或 `tla.vector()` 区域内，且在
+  `tla.vec.func()` 之外。
+- 同一 kernel 内，一个符号只能对应一个 extern 声明对象；共享同一份
+  `source` 的声明必须使用完全相同的有序 `include_dirs`。
+
+调用示例：
+
+```python
+SOURCE = r'''
+#include "kernel_operator.h"
+extern "C" {
+[aicore] __attribute__((always_inline)) void store_value(
+    uint64_t dst_addr, int32_t value) {
+  auto dst = reinterpret_cast<__gm__ int32_t *>(dst_addr);
+  dst[0] = value;
+}
+}
+'''
+
+@tla.extern(source=SOURCE, include_dirs="include")
+def store_value(
+    dst: tla.Pointer[tla.Int32, tla.AddressSpace.gm],
+    value: tla.Int32,
+) -> None: ...
+
+@tla.kernel
+def kernel(dst: tla.Tensor) -> None:
+    with tla.cube():
+        store_value(dst.ptr, 42)
 ```
 
 ---
@@ -329,7 +390,7 @@ compiled(tx, ty, block_num=1)  # 同一份二进制再次启动
 
 #### `TlaJitFunction.compile`
 
-**源码：** [`catlass.dsl.TlaJitFunction.compile`](../../../catlass/dsl.py#L249)
+**源码：** [`catlass.dsl.TlaJitFunction.compile`](../../../catlass/dsl.py#L198)
 
 功能说明：
 
@@ -416,7 +477,7 @@ compiled = tla.compile(
 
 #### `JitCompiledFunction.__call__`
 
-**源码：** [`catlass.base_dsl.jit_executor.JitCompiledFunction.__call__`](../../../catlass/base_dsl/jit_executor.py#L384)
+**源码：** [`catlass.base_dsl.jit_executor.JitCompiledFunction.__call__`](../../../catlass/base_dsl/jit_executor.py#L614)
 
 功能说明：
 
@@ -468,7 +529,7 @@ compiled(args=(tx, ty), block_num=1)
 
 #### `TlaJitFunction.dump_mlir`
 
-**源码：** [`catlass.dsl.TlaJitFunction.dump_mlir`](../../../catlass/dsl.py#L308)
+**源码：** [`catlass.dsl.TlaJitFunction.dump_mlir`](../../../catlass/dsl.py#L259)
 
 功能说明：
 
@@ -566,7 +627,7 @@ ty = from_dlpack(
 
 #### `make_fake_tensor`
 
-**源码：** [`catlass.tla.runtime.make_fake_tensor`](../../../catlass/tla/runtime.py#L858)
+**源码：** [`catlass.tla.runtime.make_fake_tensor`](../../../catlass/tla/runtime.py#L887)
 
 功能说明：
 
@@ -618,7 +679,7 @@ fzn = make_fake_tensor(
 
 #### `Tensor.mark_layout_dynamic`
 
-**源码：** [`catlass.tla.runtime._Tensor.mark_layout_dynamic`](../../../catlass/tla/runtime.py#L274)
+**源码：** [`catlass.tla.runtime._Tensor.mark_layout_dynamic`](../../../catlass/tla/runtime.py#L268)
 
 功能说明：
 
@@ -656,7 +717,7 @@ artifact = tla.compile(my_kernel, ta, options="--npu-arch 3510")
 
 #### `Tensor.mark_compact_shape_dynamic`
 
-**源码：** [`catlass.tla.runtime._Tensor.mark_compact_shape_dynamic`](../../../catlass/tla/runtime.py#L346)
+**源码：** [`catlass.tla.runtime._Tensor.mark_compact_shape_dynamic`](../../../catlass/tla/runtime.py#L366)
 
 功能说明：
 

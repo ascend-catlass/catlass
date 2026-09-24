@@ -70,7 +70,8 @@ DIRECTORY_SECTIONS: list[tuple[str, str]] = [
     ),
     (
         "Vector Compute / Discrete and Aggregate",
-        "Gather elements from a UB tensor by index.",
+        "Gather elements from a UB tensor by index, and masked reductions "
+        "(`VectorSSA.reduce`).",
     ),
     (
         "Vector Compute / Data Rearrange",
@@ -105,6 +106,9 @@ DIRECTORY_ORDER = [path for path, _ in DIRECTORY_SECTIONS]
 DIRECTORY_INTROS = dict(DIRECTORY_SECTIONS)
 
 
+_MAKE_UNARY_HELPERS = frozenset({"_make_unary_op", "_make_scalar_aware_unary_op"})
+
+
 def _unary_op_template(tree: ast.Module) -> APIEntry | None:
     for node in tree.body:
         if not isinstance(node, ast.FunctionDef) or node.name != "_make_unary_op":
@@ -126,6 +130,10 @@ def _doc_from_make_unary_call(call: ast.Call) -> str:
     if len(call.args) >= 2:
         return const_str(call.args[1]) or ""
     return ""
+
+
+def _function_defs_by_name(tree: ast.Module) -> dict[str, ast.FunctionDef]:
+    return {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
 
 
 def _collect_core_functions(
@@ -162,7 +170,7 @@ def _collect_unary_aliases(
         if not (
             isinstance(value, ast.Call)
             and isinstance(value.func, ast.Name)
-            and value.func.id == "_make_unary_op"
+            and value.func.id in _MAKE_UNARY_HELPERS
         ):
             continue
         name = target.id
@@ -174,6 +182,44 @@ def _collect_unary_aliases(
             returns=template.returns,
             docstring=_doc_from_make_unary_call(value),
         )
+    return entries
+
+
+def _collect_scalar_aware_binary_aliases(
+    tree: ast.Module, exported: set[str]
+) -> dict[str, APIEntry]:
+    """Public names built by ``_make_scalar_aware_binary_op`` (e.g. ``max`` / ``min``).
+
+    Docs and signatures live on the vector-form helper (``_vector_max`` / ``_vector_min``);
+    the Assign line is the public symbol users import.
+    """
+    defs = _function_defs_by_name(tree)
+    entries: dict[str, APIEntry] = {}
+    for node in tree.body:
+        if not (isinstance(node, ast.Assign) and len(node.targets) == 1):
+            continue
+        target, value = node.targets[0], node.value
+        if not isinstance(target, ast.Name) or target.id not in exported:
+            continue
+        if not (
+            isinstance(value, ast.Call)
+            and isinstance(value.func, ast.Name)
+            and value.func.id == "_make_scalar_aware_binary_op"
+        ):
+            continue
+        if len(value.args) < 2 or not isinstance(value.args[1], ast.Name):
+            continue
+        vector_def = defs.get(value.args[1].id)
+        if vector_def is None:
+            continue
+        name = target.id
+        entry = function_entry(
+            name,
+            vector_def,
+            qualified_name=f"catlass.core_api.{name}",
+        )
+        entry.source_line = node.lineno
+        entries[name] = entry
     return entries
 
 
@@ -293,6 +339,7 @@ def parse_core_api(path: Path) -> dict[str, APIEntry]:
     entries: dict[str, APIEntry] = {}
     entries.update(_collect_core_functions(tree, exported))
     entries.update(_collect_unary_aliases(tree, exported, _unary_op_template(tree)))
+    entries.update(_collect_scalar_aware_binary_aliases(tree, exported))
     entries.update(_collect_arch_namespace(tree, exported))
     entries.update(
         _collect_class_methods(

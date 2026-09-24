@@ -521,6 +521,33 @@ class VectorSSA(_RegisterSSA):
         reduction_profile: Any | None = None,
         loc: mlir_ir.Location | None = None,
     ) -> Any:
+        """Directory: Vector Compute / Discrete and Aggregate
+
+        Description:
+            Reduce this register-resident vector under a mask to a one-lane
+            fragment (`tla.ReductionOp.ADD` / `MAX` / `MIN`). Broadcast the
+            result back to full width with `tla.full(fragment, dtype=...)`.
+
+            Parameters:
+            - `kind` (`ReductionOp`): Reduction kind (`ADD`, `MAX`, or `MIN`). Required.
+            - `mask` (`MaskSSA`): Predicates which lanes participate. Required.
+            - `init_value`: Reserved; only `None` is supported today. Optional, default `None`.
+            - `reduction_profile`: Reserved; only `None` is supported today. Optional, default `None`.
+
+            Constraints:
+            - Must be called inside a `@tla.kernel`-decorated kernel function.
+            - Must be called inside `tla.vec.func()`.
+            - Element type must be one of f16/f32/i16/i32/u16/u32.
+            - `init_value` and `reduction_profile` must be omitted or `None`.
+
+            Example:
+            ```python
+            with tla.vec.func(mode="simd"):
+                m = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
+                total = src_reg.reduce(tla.ReductionOp.ADD, mask=m)
+                broadcast = tla.full(total, dtype=tla.Float32)
+            ```
+        """
         return _emit_vector_reduce(
             self,
             kind,
@@ -7452,7 +7479,10 @@ def interleave(
     if src1_category not in expected:
         _require_categories("interleave", "src1", src1, expected, 1)
     if src0_category != src1_category:
-        _op_error("interleave", "src0 and src1 must both be MaskSSA values or both be VectorSSA values")
+        _op_error(
+            "interleave",
+            "src0 and src1 must both be MaskSSA values or both be VectorSSA values",
+        )
     _require_frontend_state("interleave")
     _runtime._require_enclosing_region("interleave", "vec.func")
 
@@ -7464,9 +7494,13 @@ def interleave(
             _op_error("interleave", "MaskSSA operands must have the same type")
         lanes = _mask_ssa_type_for_mlir_value(src0_value).physical_lanes
         if lanes not in (64, 128, 256):
-            _op_error("interleave", "MaskSSA interleave supports mask<64>, mask<128>, and mask<256>; mask<32>/b64 is unsupported")
+            _op_error(
+                "interleave",
+                "MaskSSA interleave supports mask<64>, mask<128>, and mask<256>; mask<32>/b64 is unsupported",
+            )
         dst0, dst1 = _tla_ops_gen.interleave(
-            src0_value.type, src0_value.type, src0_value, src1_value, loc=loc)
+            src0_value.type, src0_value.type, src0_value, src1_value, loc=loc
+        )
         return MaskSSA(dst0), MaskSSA(dst1)
 
     src_desc = _vector_ssa_type_for_mlir_value(src0_value)

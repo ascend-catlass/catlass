@@ -40,6 +40,7 @@ kernel 函数体内调用。
 - [资源管理](#资源管理)
 - [调试接口](#调试接口)
 - [作用域和控制流](#作用域和控制流)
+- [Tile 数据填充](#tile-数据填充)
 
 ---
 
@@ -49,7 +50,7 @@ Shape / Coord / Stride / Layout / Tensor 等前端结构化值的构造与视图
 
 ### `make_shape`
 
-**源码：** [`catlass.core_api.make_shape`](../../../catlass/core_api.py#L3519)
+**源码：** [`catlass.core_api.make_shape`](../../../catlass/core_api.py#L3870)
 
 功能说明：
 
@@ -91,7 +92,7 @@ zn_shape = tla.make_shape((16, 8), (16, 4))
 
 ### `make_coord`
 
-**源码：** [`catlass.core_api.make_coord`](../../../catlass/core_api.py#L3560)
+**源码：** [`catlass.core_api.make_coord`](../../../catlass/core_api.py#L3911)
 
 功能说明：
 
@@ -122,7 +123,7 @@ coord = tla.make_coord(block_row, 0)
 
 ### `make_stride`
 
-**源码：** [`catlass.core_api.make_stride`](../../../catlass/core_api.py#L3589)
+**源码：** [`catlass.core_api.make_stride`](../../../catlass/core_api.py#L3940)
 
 功能说明：
 
@@ -183,7 +184,7 @@ nz_stride = tla.make_stride((1, 1024), (16, 256))
 
 ### `make_layout`
 
-**源码：** [`catlass.core_api.make_layout`](../../../catlass/core_api.py#L3649)
+**源码：** [`catlass.core_api.make_layout`](../../../catlass/core_api.py#L4000)
 
 功能说明：
 
@@ -241,9 +242,59 @@ zn = tla.make_layout(
 
 ---
 
+### `make_layout_with_tag`
+
+**源码：** [`catlass.core_api.make_layout_with_tag`](../../../catlass/core_api.py#L4135)
+
+功能说明：
+
+由扁平二维逻辑 shape、元素类型与 layout tag 直接合成 `!tla.layout`
+（前端重映射物理树后对应 `tla.make_layout`）。
+
+`make_layout_with_tag` 直接采用调用方给出的 extent，因此片上 tile 可以
+大于为其供数的 GM tile（例如 MX mmad 将 K 向上取整到 64）。
+
+函数原型：
+
+```python
+tla.make_layout_with_tag(shape: tuple, dtype: Any, layoutTag: _LayoutTag | None = None) -> TlaLayout
+```
+
+参数说明：
+
+- `shape`（`tuple`）：扁平二维逻辑 extent `(rows, cols)`。每个叶子为
+  `int` 或运行时 `Numeric`（动态叶子）。必填。
+- `dtype`（`Numeric` 子类）：元素类型；决定重映射物理树的 C0/分块几何。必填。
+- `layoutTag`（`_LayoutTag | None`）：布局标签（如 `tla.arch.zN`）。
+  可选，默认 `None`（RowMajor）。
+
+约束说明：
+
+- 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
+- 仅用于片上 tensor 布局：合成后的 layout 应通过
+  `tla.make_tensor(ptr, layout)` 落到片上指针，而不是绑定 GM Host 内存。
+- `shape` 必须是扁平二元组；嵌套树与 `None` 叶子会被拒绝——整个 extent
+  由调用方拥有。
+- 结果 layout 的 origin shape 等于 `shape`（对齐后的 extent）；配合
+  `tla.make_tensor(ptr, layout)` 落到片上指针。
+- 仅片上 tag：`zZMxScale` / `nNMxScale` 要求元素类型 `tla.Float8E8M0`
+  （其 C0 由 e8m0 格式固定为 2 元素 / 32 字节）。GM 侧 MxScale tag
+  （`RowMajorMxScaleA`、`ColMajorMxScaleA`、`RowMajorMxScaleB`、
+  `ColMajorMxScaleB`）会被拒绝。
+
+调用示例：
+
+```python
+# fp8 zN tile：M 运行时裁剪，K 向上取整到 64：
+lay = tla.make_layout_with_tag((m_valid, k_l0), dtype_a, tla.arch.zN)
+t_l1a = tla.make_tensor(l1a, lay)
+```
+
+---
+
 ### `tile_view`
 
-**源码：** [`catlass.core_api.tile_view`](../../../catlass/core_api.py#L3818)
+**源码：** [`catlass.core_api.tile_view`](../../../catlass/core_api.py#L4293)
 
 功能说明：
 
@@ -276,9 +327,64 @@ tile = tla.tile_view(
 
 ---
 
+### `get_tile`
+
+**源码：** [`catlass.core_api.get_tile`](../../../catlass/core_api.py#L4340)
+
+功能说明：
+
+从 tensor 抽取子 tile，基于源的底层指针用 `tla.make_tensor` 构造新的
+`!tla.tensor`。
+
+返回的 tensor 共享源的 buffer 几何——`stride` 树原样透传——并携带：
+
+- `coord`：`coord + source.coord`（各维元素偏移）；
+- `origin_shape`：相对源 `origin_shape` 裁剪后的 `shape`
+  （各维 `min(shape[d], origin[d] - coord[d])`），保证 tile 不会越过
+  源的逻辑范围；
+- `shape`：按裁剪后的 extent 重新生成的物理打包（zN/nZ 与
+  `make_layout_with_tag` 相同的分块分解；RowMajor/ColumnMajor 则为
+  extent 本身）。
+
+下游看到的是该 tile 的绝对坐标与自身逻辑范围；例如对结果调用
+`Tensor.fill` 只会填充这个 tile。
+
+函数原型：
+
+```python
+tla.get_tile(tensor: Tensor, coord: TlaCoord, shape: TlaShape) -> TlaTensor
+```
+
+参数说明：
+
+- `tensor`（`Tensor`）：源 `!tla.tensor`。必填。
+- `coord`（`TlaCoord`）：由 `tla.make_coord` 得到的起点，相对源的扁平
+  二维元素偏移。必填。
+- `shape`（`TlaShape`）：由 `tla.make_shape` 得到的请求 tile extent，
+  扁平二维。必填。
+
+约束说明：
+
+- 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
+- `coord` 偏移必须落在源的 `origin_shape` 内——裁剪只缩短 extent，
+  不会钳制偏移。
+- 支持的 layout tag 与 `tla.make_tensor` 一致（RowMajor、ColumnMajor、
+  zN、nZ、L0Clayout、zNUnAlign）。
+
+调用示例：
+
+```python
+# 将 L1 A tile 的 K-pad 尾部清零（见 Tensor.fill）：
+pad = tla.get_tile(t_l1a, tla.make_coord(0, k_valid),
+                   tla.make_shape(m, k_l0 - k_valid))
+pad.fill(0)
+```
+
+---
+
 ### `make_tensor`
 
-**源码：** [`catlass.core_api.make_tensor`](../../../catlass/core_api.py#L3865)
+**源码：** [`catlass.core_api.make_tensor`](../../../catlass/core_api.py#L4497)
 
 功能说明：
 
@@ -317,7 +423,7 @@ tensor = tla.make_tensor(ptr, layout, coord=tla.make_coord(0, 0))
 
 ### `make_tensor_like`
 
-**源码：** [`catlass.core_api.make_tensor_like`](../../../catlass/core_api.py#L4060)
+**源码：** [`catlass.core_api.make_tensor_like`](../../../catlass/core_api.py#L4692)
 
 功能说明：
 
@@ -351,7 +457,7 @@ dst = tla.make_tensor_like(ptr, like=src_tile, layoutTag=tla.arch.RowMajor)
 
 ### `make_ptr`
 
-**源码：** [`catlass.core_api.make_ptr`](../../../catlass/core_api.py#L7241)
+**源码：** [`catlass.core_api.make_ptr`](../../../catlass/core_api.py#L8865)
 
 功能说明：
 
@@ -385,7 +491,7 @@ ptr = tla.make_ptr(tla.Float16, addr, mem_space=tla.AddressSpace.gm)
 
 ### `recast_ptr`
 
-**源码：** [`catlass.core_api.recast_ptr`](../../../catlass/core_api.py#L7295)
+**源码：** [`catlass.core_api.recast_ptr`](../../../catlass/core_api.py#L8919)
 
 功能说明：
 
@@ -421,7 +527,7 @@ ptr_f32 = tla.recast_ptr(ptr_f16, dtype=tla.Float32)
 
 ### `copy`
 
-**源码：** [`catlass.core_api.copy`](../../../catlass/core_api.py#L4255)
+**源码：** [`catlass.core_api.copy`](../../../catlass/core_api.py#L5174)
 
 功能说明：
 
@@ -456,7 +562,7 @@ fp8）的 block store 与 GM↔UB、UB→L1 拷贝一样，在 bc 层按 `int8_t
 函数原型：
 
 ```python
-tla.copy(dst: Tensor, src: Tensor, params: CopyParams | None = None) -> None
+tla.copy(dst: Tensor, src: Tensor, params: CopyParams | None = None, *, scale: Tensor | None = None) -> None
 ```
 
 参数说明：
@@ -465,10 +571,21 @@ tla.copy(dst: Tensor, src: Tensor, params: CopyParams | None = None) -> None
 - `src`（`Tensor`）：源 tile。必填。
 - `params`（`CopyParams | None`）：可选通路参数
   （`CopyL0C2DstParams`、`CopyUbToGmParams` / atomic 等）。默认 `None`。
+- **MX scale tile**（目的为 `zZMxScale` / `nNMxScale`）在 L1 上按整行字节平铺，
+  源 tile 须覆盖缓冲区整行；按行堆叠各 chunk 的 scale block，不要沿列切宽 buffer。
+  仅在行 pitch 为编译期常量时可检查；layout 动态的 tensor 无法在编译期校验。
+- `scale`（`Tensor | None`）：L1 上的 OCP `e8m0` 共享指数 tile（沿 K 每 32 个元素一份），
+  使 L1→L0A/L0B 变为 microscaling（MX）load，并下沉为 `tla.copy_mx`。因 MLIR 无
+  e8m0 类型，以 `i8`/`u8` 存储；目的为 L0A 时 tag `tla.arch.zZMxScale`，为 L0B 时
+  tag `tla.arch.nNMxScale`。默认 `None`。
 
 约束说明：
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
+- `scale` 仅对 L1→L0A/L0B 通路有效；由此加载的 tile 随后须由 `tla.mmad` /
+  `tla.mmad_mx` 消费。scale 由 load 消费，而非 matmul 参数——硬件 `mad_mx`
+  没有 scale 操作数，MX 关联在操作数进入 L0 时建立（对齐 AscendC 五参数
+  `LoadData` 重载）。
 - 须在 `tla.cube()` 或 `tla.vector()` 内调用（上述 cube 通路在 `cube()`，
   vector 通路在 `vector()`）。
 - 整 tile DMA 使用 `tla.copy`。寄存器级 UB 非对齐访问请改用
@@ -521,6 +638,67 @@ with tla.cube():
 #       x_reg = x_ub.load(tla.params.UnalignLoadParams())
 #       y_ub.store(y_reg, tla.params.UnalignStoreParams())
 ```
+
+无 scale 的 Cube 拷贝通路，`tla.copy(dst, src, scale=None)`
+
+|`src_addr`|`src_layout`|`dst_addr`|`dst_layout`|`dtypes`|
+|----------|------------|----------|------------|--------|
+|`gm`|`RowMajor`|`l1`|`zN`|`f32`,`f16`,`bf16`,`i8`,`f8e4m3fn`,`f8e5m2`,`f4e2m1`,`f4e1m2`|
+|`gm`|`ColumnMajor`|`l1`|`nZ`|`f32`,`f16`,`bf16`,`i8`,`f8e4m3fn`,`f8e5m2`,`f4e2m1`,`f4e1m2`|
+|`gm`|`RowMajorMxScaleA`|`l1`|`zZMxScale`|`f8e8m0`|
+|`gm`|`ColMajorMxScaleA`|`l1`|`zZMxScale`|`f8e8m0`|
+|`gm`|`RowMajorMxScaleB`|`l1`|`nNMxScale`|`f8e8m0`|
+|`gm`|`ColMajorMxScaleB`|`l1`|`nNMxScale`|`f8e8m0`|
+|`l1`|`zN`|`l0a`|`zN`|`f32`,`f16`,`bf16`,`i8`,`f8e4m3fn`,`f8e5m2`|
+|`l1`|`nZ`|`l0a`|`zN`|`f32`,`f16`,`bf16`,`i8`,`f8e4m3fn`,`f8e5m2`|
+|`l1`|`zN`|`l0b`|`nZ`|`f32`,`f16`,`bf16`,`i8`,`f8e4m3fn`,`f8e5m2`|
+|`l1`|`nZ`|`l0b`|`nZ`|`f32`,`f16`,`bf16`,`i8`,`f8e4m3fn`,`f8e5m2`|
+
+带 scale 的 Cube 拷贝通路（供 `tla.mmad_mx`），即
+`tla.copy(dst=l0a|l0b, src=l1, scale=scale)`；scale 仅支持 `f8e8m0`，
+且 scale 的 `l1->l0` 不支持转置。
+
+|`src_addr`|`src_layout`|`dst_addr`|`dst_layout`|`scale_addr`|`scale_layout`|`dtypes`|
+|----------|------------|----------|------------|------------|--------------|--------|
+|`l1`|`zN`|`l0a`|`zN`|`l1`|`zZMxScale`|`f8e4m3fn`,`f8e5m2`,`f4e2m1`,`f4e1m2`|
+|`l1`|`nZ`|`l0a`|`zN`|`l1`|`zZMxScale`|`f8e4m3fn`,`f8e5m2`,`f4e2m1`,`f4e1m2`|
+|`l1`|`zN`|`l0b`|`nZ`|`l1`|`nNMxScale`|`f8e4m3fn`,`f8e5m2`,`f4e2m1`,`f4e1m2`|
+|`l1`|`nZ`|`l0b`|`nZ`|`l1`|`nNMxScale`|`f8e4m3fn`,`f8e5m2`,`f4e2m1`,`f4e1m2`|
+
+Cube fixpipe 通路：从 L0C 拷到 GM/L1/UB。
+fixpipe 支持随路 quant 与 relu；quant 模式支持 `NO_QUANT`、`PER_TENSOR`、`PER_CHANNEL`。
+规则：
+- 链路为 (l0c acc) → quant（可选）→ relu（可选）→ 写出到 dst。
+- `NO_QUANT` 含纯数据类型转换，如 `f32`→`f16`、`f32`→`bf16`。
+- 目的为 UB 时额外有 `split_mode`：nosplit（`NO_SPLIT_VEC_0`、`NO_SPLIT_VEC_1`）与
+  split（`SPLIT_M`、`SPLIT_N`）。
+- 目的为 `(ub, ColumnMajor)` 时仅支持 `nosplit`。
+- UB 的 `split` 模式下禁用任何 quant_mode/relu，也不做纯 cast，仅允许
+  `f32`→`f32` 与 `i32`→`i32`。
+
+|`dst`|`dst_layout`|`split_mode`|`quant_mode`|`relu`|`src_dtype`:`dst_dtype`|
+|-----|------------|------------|------------|------|-----------------------|
+|`gm`|`RowMajor`|`-`|`NO_QUANT`|`False`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `i32`|
+|`gm`|`ColumnMajor`|`-`|`NO_QUANT`|`False`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `i32`|
+|`l1`|`zN`|`-`|`NO_QUANT`|`False`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `i32`|
+|`ub`|`RowMajor`|`nosplit`|`NO_QUANT`|`False`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `i32`|
+|`ub`|`RowMajor`|`split`|`NO_QUANT`|`False`|`f32`: `f32`<br>`i32`: `i32`|
+|`ub`|`ColumnMajor`|`nosplit`|`NO_QUANT`|`False`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `i32`|
+|`gm`|`RowMajor`|`-`|`NO_QUANT`|`True`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `i32`|
+|`gm`|`ColumnMajor`|`-`|`NO_QUANT`|`True`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `i32`|
+|`l1`|`zN`|`-`|`NO_QUANT`|`True`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `i32`|
+|`ub`|`RowMajor`|`nosplit`|`NO_QUANT`|`True`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `i32`|
+|`ub`|`ColumnMajor`|`nosplit`|`NO_QUANT`|`True`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `i32`|
+
+Vector 拷贝通路
+
+|`src_addr`|`src_layout`|`dst_addr`|`dst_layout`|`dtypes`|
+|----------|------------|----------|------------|--------|
+|`gm`|`RowMajor`|`ub`|`RowMajor`|`f32`,`f16`,`bf16`,`i32`,`i16`,`i8`,`f8e4m3fn`,`f8e5m2`|
+|`ub`|`RowMajor`|`gm`|`RowMajor`|`f32`,`f16`,`bf16`,`i32`,`i16`,`i8`,`f8e4m3fn`,`f8e5m2`|
+|`ub`|`RowMajor`|`l1`|`zN`|`f32`,`f16`,`bf16`,`i8`,`f8e4m3fn`,`f8e5m2`|
+|`ub`|`zN`|`l1`|`zN`|`f32`,`f16`,`bf16`,`i8`,`f8e4m3fn`,`f8e5m2`|
+|`ub`|`zNUnAlign`|`l1`|`zN`|`f32`,`f16`,`bf16`,`i8`,`f8e4m3fn`,`f8e5m2`|
 
 ---
 
@@ -624,11 +802,11 @@ with tla.vec.func(mode="simd"):
 
 ## 矩阵运算
 
-Cube 侧矩阵乘加（`tla.mmad`）。
+Cube 侧矩阵乘加（`tla.mmad` / `tla.mmad_mx`）。
 
 ### `mmad`
 
-**源码：** [`catlass.core_api.mmad`](../../../catlass/core_api.py#L5204)
+**源码：** [`catlass.core_api.mmad`](../../../catlass/core_api.py#L6338)
 
 功能说明：
 
@@ -669,6 +847,59 @@ with tla.cube():
 
 ---
 
+### `mmad_mx`
+
+**源码：** [`catlass.core_api.mmad_mx`](../../../catlass/core_api.py#L6449)
+
+功能说明：
+
+在 TLA tile 上执行 microscaling（MX）矩阵乘累加。
+
+与 `tla.mmad` 分开，因为 Cube 有专用 `mad_mx` 指令（AscendC 暴露为
+`asc_mmad_mx`）。
+
+与该指令一样，本接口**不接受 scale 参数**。`lhs`/`rhs` 必须先通过带
+`scale` 操作数的 `tla.copy` 加载，从而把 e8m0 block 附着到 L0 tile；硬件再
+从 L0 tile 旁路缓冲读取 scale。传入未按此方式加载的操作数会报错；把
+microscaling 操作数传给 `tla.mmad` 同样会报错——两个 op 不可互换，操作数
+本身也无法区分属于哪条路径。
+
+函数原型：
+
+```python
+tla.mmad_mx(acc: Tensor, lhs: Tensor, rhs: Tensor, init_c: bool | Bool | None = None, unit_flag: IndexLike | None = None, compute_order: ComputeOrder = ComputeOrder.M_FIRST, **extra_kwargs: object) -> None
+```
+
+参数说明：
+
+- `acc`（`Tensor`）：累加器 / 输出 tile，位于 L0C，始终为 fp32。必填。
+- `lhs`（`Tensor`）：左矩阵 tile，位于 L0A。必填。
+- `rhs`（`Tensor`）：右矩阵 tile，位于 L0B。必填。
+- `init_c`（`bool | Bool | None`）：是否先清零累加器；省略时默认为 `False`。可选，默认 `None`。
+- `unit_flag`（`IndexLike | None`）：unit flag 控制位；省略时默认为 `0`。可选，默认 `None`。
+- `compute_order`（`ComputeOrder`）：M/N 计算方向优先级；默认 `M_FIRST`。
+
+约束说明：
+
+- 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
+- 须在 `tla.cube()` 内调用；`acc`/`lhs`/`rhs` 须为匹配的 L0 tile。
+- 操作数须为 `f8e4m3fn`/`f8e5m2` 配对，或 `f4e2m1`/`f4e1m2` 配对；
+  同一对内两种格式可混用，累加器为 fp32。
+- 两个操作数都必须经 `tla.copy(..., scale=...)` 加载。
+
+调用示例：
+
+```python
+# 前：l1a/l1b 为 fp8 操作数，l1sa/l1sb 为其 e8m0 scale block。
+with tla.cube():
+    tla.copy(l0a, l1a, scale=l1sa)   # scale 随 load，不在 matmul 参数里
+    tla.copy(l0b, l1b, scale=l1sb)
+    tla.mmad_mx(l0c, l0a, l0b, init_c=True)
+    # 后：l0c 累加 microscaled 的 lhs@rhs。
+```
+
+---
+
 ## Vector 运算
 
 寄存器 Vector 路径上的计算与 mask 操作，通常须在 `tla.vec.func()` 内调用。
@@ -679,7 +910,7 @@ Mask 创建与尾块更新。
 
 #### `create_mask`
 
-**源码：** [`catlass.core_api.create_mask`](../../../catlass/core_api.py#L7553)
+**源码：** [`catlass.core_api.create_mask`](../../../catlass/core_api.py#L9193)
 
 功能说明：
 
@@ -734,7 +965,7 @@ with tla.vec.func(mode="simd"):
 
 #### `update_mask`
 
-**源码：** [`catlass.core_api.update_mask`](../../../catlass/core_api.py#L7617)
+**源码：** [`catlass.core_api.update_mask`](../../../catlass/core_api.py#L9257)
 
 功能说明：
 
@@ -769,7 +1000,7 @@ with tla.vec.func(mode="simd"):
 
 #### `exp`
 
-**源码：** [`catlass.core_api.exp`](../../../catlass/core_api.py#L5786)
+**源码：** [`catlass.core_api.exp`](../../../catlass/core_api.py#L7312)
 
 功能说明：
 
@@ -802,7 +1033,7 @@ with tla.vec.func(mode="simd"):
 
 #### `log`
 
-**源码：** [`catlass.core_api.log`](../../../catlass/core_api.py#L5808)
+**源码：** [`catlass.core_api.log`](../../../catlass/core_api.py#L7334)
 
 功能说明：
 
@@ -835,11 +1066,17 @@ with tla.vec.func(mode="simd"):
 
 #### `sqrt`
 
-**源码：** [`catlass.core_api.sqrt`](../../../catlass/core_api.py#L5830)
+**源码：** [`catlass.core_api.sqrt`](../../../catlass/core_api.py#L7356)
 
 功能说明：
 
-vector 逐元素平方根（需 f16/f32）。
+vector 或标量的平方根。
+
+对 `VectorSSA`：逐元素 AVE 运算（需 f16/f32）。
+对浮点 `Numeric`：走核内标量单元，可在 `tla.cube`、SIMD/SIMT 的
+`tla.vec.func` 或 kernel 函数体中使用。SIMT 区域内为逐线程
+`tla.simt_sqrt`；其余路径为 `math.sqrt`。浮点 `Numeric` 上的 `x.sqrt()`
+是同一操作。
 
 函数原型：
 
@@ -849,26 +1086,30 @@ tla.sqrt(operand: VectorSSA, *, mask: MaskSSA | None = None) -> VectorSSA
 
 参数说明：
 
-- `operand`（`VectorSSA`）：源 vector 寄存器。必填。
-- `mask`（`MaskSSA | None`）：可选执行掩码；`None` 表示全有效。可选，默认 `None`。
+- `operand`（`VectorSSA | Numeric`）：源 vector 寄存器，或浮点标量。必填。
+- `mask`（`MaskSSA | None`）：可选执行掩码；`None` 表示全有效。仅 vector 形态。可选，默认 `None`。
 
 约束说明：
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
-- 须在 `tla.vec.func()` 内调用；元素类型须为 f16/f32。
+- vector 形态须在 `tla.vec.func()` 内调用；元素类型须为 f16/f32。
+- 标量形态仅支持浮点，且不接受 `mask`。
 
 调用示例：
 
 ```python
 with tla.vec.func(mode="simd"):
     y = tla.sqrt(x_reg)
+
+with tla.cube():
+    s = tla.sqrt(scale)
 ```
 
 ---
 
 #### `abs`
 
-**源码：** [`catlass.core_api.abs`](../../../catlass/core_api.py#L5852)
+**源码：** [`catlass.core_api.abs`](../../../catlass/core_api.py#L7389)
 
 功能说明：
 
@@ -901,7 +1142,7 @@ with tla.vec.func(mode="simd"):
 
 #### `neg`
 
-**源码：** [`catlass.core_api.neg`](../../../catlass/core_api.py#L6016)
+**源码：** [`catlass.core_api.neg`](../../../catlass/core_api.py#L7411)
 
 功能说明：
 
@@ -934,7 +1175,7 @@ with tla.vec.func(mode="simd"):
 
 #### `add`
 
-**源码：** [`catlass.core_api.add`](../../../catlass/core_api.py#L6195)
+**源码：** [`catlass.core_api.add`](../../../catlass/core_api.py#L7717)
 
 功能说明：
 
@@ -975,7 +1216,7 @@ with tla.vec.func(mode="simd"):
 
 #### `sub`
 
-**源码：** [`catlass.core_api.sub`](../../../catlass/core_api.py#L6241)
+**源码：** [`catlass.core_api.sub`](../../../catlass/core_api.py#L7763)
 
 功能说明：
 
@@ -1013,7 +1254,7 @@ with tla.vec.func(mode="simd"):
 
 #### `mul`
 
-**源码：** [`catlass.core_api.mul`](../../../catlass/core_api.py#L6278)
+**源码：** [`catlass.core_api.mul`](../../../catlass/core_api.py#L7800)
 
 功能说明：
 
@@ -1052,7 +1293,7 @@ with tla.vec.func(mode="simd"):
 
 #### `max`
 
-**源码：** [`catlass.core_api.max`](../../../catlass/core_api.py#L6181)
+**源码：** [`catlass.core_api.max`](../../../catlass/core_api.py#L7924)
 
 功能说明：
 
@@ -1086,7 +1327,7 @@ with tla.vec.func(mode="simd"):
 
 #### `min`
 
-**源码：** [`catlass.core_api.min`](../../../catlass/core_api.py#L6221)
+**源码：** [`catlass.core_api.min`](../../../catlass/core_api.py#L7925)
 
 功能说明：
 
@@ -1120,7 +1361,7 @@ with tla.vec.func(mode="simd"):
 
 #### `div`
 
-**源码：** [`catlass.core_api.div`](../../../catlass/core_api.py#L6407)
+**源码：** [`catlass.core_api.div`](../../../catlass/core_api.py#L7929)
 
 功能说明：
 
@@ -1158,9 +1399,89 @@ with tla.vec.func(mode="simd"):
 
 ### 逻辑计算
 
+Mask / Vector 上的按位与逻辑运算。
+
+#### `shift_left`
+
+**源码：** [`catlass.core_api.shift_left`](../../../catlass/core_api.py#L7609)
+
+功能说明：
+
+按 lane 或标量移位量，对 vector 做逐元素左移。
+
+函数原型：
+
+```python
+tla.shift_left(source: VectorSSA, shift: Any, *, mask: MaskSSA | None = None) -> VectorSSA
+```
+
+参数说明：
+
+- `source`（`VectorSSA`）：待移位的源 vector。必填。
+- `shift`（`VectorSSA | Numeric | int`）：每 lane 移位量。可为与 `source`
+  同元素位宽的有符号 `VectorSSA`，或可转为 i16 的整型标量。必填。
+- `mask`（`MaskSSA | None`）：执行掩码。可选，默认 `None`（全 lane 有效）；
+  被 mask 掉的 lane 写零。
+
+约束说明：
+
+- 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
+- 须在 `tla.vec.func()` 内调用。
+- 源元素须为有符号 8/16/32 位整数（i8/i16/i32）；不支持 64 位与无符号移位。
+- 移位量须为非负。
+
+调用示例：
+
+```python
+with tla.vec.func(mode="simd"):
+    _tile = tla.shift_left(tile, bit_shift_reg, mask=mask)
+```
+
+---
+
+#### `shift_right`
+
+**源码：** [`catlass.core_api.shift_right`](../../../catlass/core_api.py#L7645)
+
+功能说明：
+
+按 lane 或标量移位量，对 vector 做逐元素右移。
+
+有符号源 vector 使用算术右移。
+
+函数原型：
+
+```python
+tla.shift_right(source: VectorSSA, shift: Any, *, mask: MaskSSA | None = None) -> VectorSSA
+```
+
+参数说明：
+
+- `source`（`VectorSSA`）：待移位的源 vector。必填。
+- `shift`（`VectorSSA | Numeric | int`）：每 lane 移位量。可为与 `source`
+  同元素位宽的有符号 `VectorSSA`，或可转为 i16 的整型标量。必填。
+- `mask`（`MaskSSA | None`）：执行掩码。可选，默认 `None`（全 lane 有效）；
+  被 mask 掉的 lane 写零。
+
+约束说明：
+
+- 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
+- 须在 `tla.vec.func()` 内调用。
+- 源元素须为有符号 8/16/32 位整数（i8/i16/i32）；不支持 64 位与无符号移位。
+- 移位量须为非负。
+
+调用示例：
+
+```python
+with tla.vec.func(mode="simd"):
+    _tile = tla.shift_right(tile, bit_shift_reg, mask=mask)
+```
+
+---
+
 #### `bitwise_not`
 
-**源码：** [`catlass.core_api.bitwise_not`](../../../catlass/core_api.py#L6161)
+**源码：** [`catlass.core_api.bitwise_not`](../../../catlass/core_api.py#L7683)
 
 功能说明：
 
@@ -1193,7 +1514,7 @@ with tla.vec.func(mode="simd"):
 
 #### `bitwise_and`
 
-**源码：** [`catlass.core_api.bitwise_and`](../../../catlass/core_api.py#L6837)
+**源码：** [`catlass.core_api.bitwise_and`](../../../catlass/core_api.py#L8359)
 
 功能说明：
 
@@ -1227,7 +1548,7 @@ with tla.vec.func(mode="simd"):
 
 #### `bitwise_or`
 
-**源码：** [`catlass.core_api.bitwise_or`](../../../catlass/core_api.py#L6875)
+**源码：** [`catlass.core_api.bitwise_or`](../../../catlass/core_api.py#L8397)
 
 功能说明：
 
@@ -1261,7 +1582,7 @@ with tla.vec.func(mode="simd"):
 
 #### `bitwise_xor`
 
-**源码：** [`catlass.core_api.bitwise_xor`](../../../catlass/core_api.py#L6913)
+**源码：** [`catlass.core_api.bitwise_xor`](../../../catlass/core_api.py#L8435)
 
 功能说明：
 
@@ -1293,83 +1614,11 @@ with tla.vec.func(mode="simd"):
 
 ---
 
-#### `shift_left`
-
-**源码：** [`catlass.core_api.shift_left`](../../../catlass/core_api.py#L7489)
-
-功能说明：
-
-逐元素左移，移位量可按通道或标量指定。
-
-函数原型：
-
-```python
-tla.shift_left(source: VectorSSA, shift: Any, *, mask: MaskSSA | None = None) -> VectorSSA
-```
-
-参数说明：
-
-- `source`（`VectorSSA`）：待移位的源向量。必填。
-- `shift`（`VectorSSA | Numeric | int`）：每通道移位量。与 `source` 元素宽度相同的有符号 `VectorSSA`，或可转换为 i16 的整数标量。必填。
-- `mask`（`MaskSSA | None`）：执行掩码。可选，默认 `None`（全通道使能）；被掩码的通道置零。
-
-约束说明：
-
-- 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
-- 须在 `tla.vec.func()` 内调用。
-- 源元素须为有符号 8/16/32 位整数（i8/i16/i32）；不支持 64 位和无符号移位。
-- 移位量须为非负数。
-
-调用示例：
-
-```python
-with tla.vec.func(mode="simd"):
-    _tile = tla.shift_left(tile, bit_shift_reg, mask=mask)
-```
-
----
-
-#### `shift_right`
-
-**源码：** [`catlass.core_api.shift_right`](../../../catlass/core_api.py#L7525)
-
-功能说明：
-
-逐元素右移，移位量可按通道或标量指定。带符号源向量使用算术右移。
-
-函数原型：
-
-```python
-tla.shift_right(source: VectorSSA, shift: Any, *, mask: MaskSSA | None = None) -> VectorSSA
-```
-
-参数说明：
-
-- `source`（`VectorSSA`）：待移位的源向量。必填。
-- `shift`（`VectorSSA | Numeric | int`）：每通道移位量。与 `source` 元素宽度相同的有符号 `VectorSSA`，或可转换为 i16 的整数标量。必填。
-- `mask`（`MaskSSA | None`）：执行掩码。可选，默认 `None`（全通道使能）；被掩码的通道置零。
-
-约束说明：
-
-- 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
-- 须在 `tla.vec.func()` 内调用。
-- 源元素须为有符号 8/16/32 位整数（i8/i16/i32）；不支持 64 位和无符号移位。
-- 移位量须为非负数。
-
-调用示例：
-
-```python
-with tla.vec.func(mode="simd"):
-    _tile = tla.shift_right(tile, bit_shift_reg, mask=mask)
-```
-
----
-
 ### 比较与选择
 
 #### `where`
 
-**源码：** [`catlass.core_api.where`](../../../catlass/core_api.py#L6579)
+**源码：** [`catlass.core_api.where`](../../../catlass/core_api.py#L8101)
 
 功能说明：
 
@@ -1403,7 +1652,7 @@ with tla.vec.func(mode="simd"):
 
 #### `cmp`
 
-**源码：** [`catlass.core_api.cmp`](../../../catlass/core_api.py#L6761)
+**源码：** [`catlass.core_api.cmp`](../../../catlass/core_api.py#L8283)
 
 功能说明：
 
@@ -1440,40 +1689,49 @@ with tla.vec.func(mode="simd"):
 
 #### `full`
 
-**源码：** [`catlass.core_api.full`](../../../catlass/core_api.py#L5319)
+**源码：** [`catlass.core_api.full`](../../../catlass/core_api.py#L6537)
 
 功能说明：
 
-用 Python 标量字面量填充一维 vector SSA。
+用 Python 标量字面量填充一维 vector SSA，或将单 lane 的 vector 片段
+（例如 `VectorSSA.reduce` 的结果）广播到全部 lane。
 
 函数原型：
 
 ```python
-tla.full(value: bool | int | float | Numeric, dtype: type[Numeric]) -> VectorSSA
+tla.full(value: bool | int | float | Numeric | VectorSSA, dtype: type[Numeric], *, mask: Any | None = None) -> VectorSSA
 ```
 
 参数说明：
 
-- `value`（`bool | int | float | Numeric`）：填充常量。必填。
+- `value`（`bool | int | float | Numeric | VectorSSA`）：填充常量，或待广播的
+  单 lane vector 片段。必填。
 - `dtype`（`type[Numeric]`）：vector 元素类型。必填。
+- `mask`（`MaskSSA | None`）：谓词哪些 lane 被写入。可选；默认写全部 lane。
 
 约束说明：
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
-- 须在 `tla.vec.func()` 内调用；`value` 须为 Python 标量字面量。
+- 须在 `tla.vec.func()` 内调用；`value` 须为 Python 标量字面量、Host
+  `Numeric`，或单 lane vector 片段。
+- 当 `value` 为 vector 时，必须恰好 1 个有效 lane，且元素类型与 `dtype` 一致。
+- 若提供 `mask`，须与结果元素类型匹配。
 
 调用示例：
 
 ```python
 with tla.vec.func(mode="simd"):
     zeros = tla.full(0.0, dtype=tla.Float32)
+    all_lanes, _ = tla.update_mask(64, tla.Float32)
+    total = src.reduce(tla.ReductionOp.ADD, mask=all_lanes)
+    spread = tla.full(total, dtype=tla.Float32)
 ```
 
 ---
 
 #### `arange`
 
-**源码：** [`catlass.core_api.arange`](../../../catlass/core_api.py#L5392)
+**源码：** [`catlass.core_api.arange`](../../../catlass/core_api.py#L6666)
 
 功能说明：
 
@@ -1507,9 +1765,11 @@ with tla.vec.func(mode="simd"):
 
 ### 离散与聚合
 
+按索引 gather，以及带 mask 的归约（`VectorSSA.reduce`）。
+
 #### `gather`
 
-**源码：** [`catlass.core_api.gather`](../../../catlass/core_api.py#L6951)
+**源码：** [`catlass.core_api.gather`](../../../catlass/core_api.py#L8509)
 
 功能说明：
 
@@ -1541,13 +1801,54 @@ with tla.vec.func(mode="simd"):
 
 ---
 
+#### `VectorSSA.reduce`
+
+**源码：** [`catlass.core_api.VectorSSA.reduce`](../../../catlass/core_api.py#L515)
+
+功能说明：
+
+在 mask 下对本寄存器驻留 vector 做归约，得到单 lane 片段
+（`tla.ReductionOp.ADD` / `MAX` / `MIN`）。可用
+`tla.full(fragment, dtype=...)` 再广播回全宽。
+
+函数原型：
+
+```python
+VectorSSA.reduce(kind: ReductionOp, *, mask: Any, init_value: Any | None = None, reduction_profile: Any | None = None) -> Any
+```
+
+参数说明：
+
+- `kind`（`ReductionOp`）：归约种类（`ADD`、`MAX` 或 `MIN`）。必填。
+- `mask`（`MaskSSA`）：谓词哪些 lane 参与。必填。
+- `init_value`：预留；当前仅支持 `None`。可选，默认 `None`。
+- `reduction_profile`：预留；当前仅支持 `None`。可选，默认 `None`。
+
+约束说明：
+
+- 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
+- 须在 `tla.vec.func()` 内调用。
+- 元素类型须为 f16/f32/i16/i32/u16/u32 之一。
+- `init_value` 与 `reduction_profile` 须省略或为 `None`。
+
+调用示例：
+
+```python
+with tla.vec.func(mode="simd"):
+    m = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
+    total = src_reg.reduce(tla.ReductionOp.ADD, mask=m)
+    broadcast = tla.full(total, dtype=tla.Float32)
+```
+
+---
+
 ### 数据重排
 
 提供 vector 寄存器或 predicate mask 的 lane 交插与解交插操作。
 
 #### `interleave`
 
-**源码：** [`catlass.core_api.interleave`](../../../catlass/core_api.py#L7384)
+**源码：** [`catlass.core_api.interleave`](../../../catlass/core_api.py#L7449)
 
 功能说明：
 
@@ -1581,7 +1882,7 @@ with tla.vec.func(mode="simd"):
 
 #### `deinterleave`
 
-**源码：** [`catlass.core_api.deinterleave`](../../../catlass/core_api.py#L7455)
+**源码：** [`catlass.core_api.deinterleave`](../../../catlass/core_api.py#L7527)
 
 功能说明：
 
@@ -1618,7 +1919,7 @@ with tla.vec.func(mode="simd"):
 
 #### `squeeze`
 
-**源码：** [`catlass.core_api.squeeze`](../../../catlass/core_api.py#L6608)
+**源码：** [`catlass.core_api.squeeze`](../../../catlass/core_api.py#L8130)
 
 功能说明：
 
@@ -1647,19 +1948,31 @@ with tla.vec.func(mode="simd"):
     packed = tla.squeeze(src, m)
 ```
 
+---
+
 ### 类型转换
+
+寄存器 vector 上的元素类型转换（`VectorSSA.to`）。
 
 #### `VectorSSA.to`
 
-**源码：** [`catlass.core_api.VectorSSA.to`](../../../catlass/core_api.py#L535)
+**源码：** [`catlass.core_api.VectorSSA.to`](../../../catlass/core_api.py#L561)
 
 功能说明：
 
 将寄存器内的 vector 转换为另一种元素类型。
 
-lowering 支持有符号整数 `tla.Int8` ~ `tla.Int64`、浮点 `tla.Float16` / `tla.BFloat16` / `tla.Float32`，以及两种 OCP fp8 格式 `tla.Float8E4M3FN` / `tla.Float8E5M2`。无符号整数、`tla.Bool`（i1）、`tla.Float64` 与 `tla.Float8E8M0` 会被拒绝。
+lowering 支持有符号整数 `tla.Int8` ~ `tla.Int64`、浮点 `tla.Float16` /
+`tla.BFloat16` / `tla.Float32`，以及两种 OCP fp8 格式 `tla.Float8E4M3FN` /
+`tla.Float8E5M2`。无符号整数、`tla.Bool`（i1）、`tla.Float64` 与 `tla.Float8E8M0`
+会被拒绝。
 
-fp8 操作数可与 `tla.Float32`、`tla.Float16`、`tla.BFloat16` 互相转换。其中只有 f32 这一对是单条指令：f16 与 bf16 两对由 lowering 展开为经过 f32 的两次 cast，扩宽一侧精确、收窄一侧只舍入一次；`f8e5m2 -> f16` 则展开为一次整数扩宽加一次移位，因为这两种格式共享同一指数字段。fp8 之间没有重编码路径——两者指数范围不同，属于重量化而非 cast——也没有 fp8 与整数之间的路径。
+fp8 操作数可与 `tla.Float32`、`tla.Float16`、`tla.BFloat16` 互相转换。其中只有
+f32 这一对是单条指令：f16 与 bf16 两对由 lowering 展开为经过 f32 的两次 cast，
+扩宽一侧精确、收窄一侧只舍入一次；`f8e5m2 -> f16` 则展开为一次整数扩宽加一次移位，
+因为这两种格式共享同一符号与指数字段——与经过 f32 的组合路径选出相同元素，但只需
+两条指令而非五条。fp8 之间没有重编码路径——两者指数范围不同，属于重量化而非
+cast——也没有 fp8 与整数之间的路径。
 
 函数原型：
 
@@ -1672,12 +1985,17 @@ VectorSSA.to(dst_type: Any, params: CastParams, mask: Any | None = None) -> Any
 - `dst_type`（`type[Numeric]`）：目标元素类型。必填。
 - `params`（`CastParams`）：舍入模式、饱和模式与寄存器 slot。必填。
 - `mask`（`MaskSSA | None`）：可选执行掩码；`None` 表示所有 lane 使能。选填，默认 `None`。
+  mask 按**源**元素域索引：lane `i` 谓词源元素 `i`，与位宽变化无关；被 mask 关掉的
+  元素对结果贡献为零。
 
 约束说明：
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
 - 须在 `tla.vec.func()` 内调用。
-- `reg_slot` 的 `TWO` 与 `THREE` 指向 pack 的四分之一，仅在位宽变化为 4 倍的整数 cast 上可达。
+- `reg_slot` 的 `TWO` 与 `THREE` 指向 pack 的四分之一，仅在位宽变化为 4 倍的整数
+  cast 以及直接的 fp8↔f32 指令上合法。
+- 线程级标量 cast 在 `mode="simt"` 下使用 `Numeric.to`；本方法是 vector（AVE）
+  形态，始终需要 `CastParams`。
 
 调用示例：
 
@@ -1699,7 +2017,7 @@ with tla.vec.func(mode="simd"):
 
 ### `flag`
 
-**源码：** [`catlass.core_api.flag`](../../../catlass/core_api.py#L4496)
+**源码：** [`catlass.core_api.flag`](../../../catlass/core_api.py#L5457)
 
 功能说明：
 
@@ -1737,7 +2055,7 @@ with tla.vector():
 
 ### `cross_flag`
 
-**源码：** [`catlass.core_api.cross_flag`](../../../catlass/core_api.py#L4549)
+**源码：** [`catlass.core_api.cross_flag`](../../../catlass/core_api.py#L5510)
 
 功能说明：
 
@@ -1769,7 +2087,7 @@ cf = tla.cross_flag("aic_aiv", mode=2)
 
 ### `cross_core_set_flag`
 
-**源码：** [`catlass.core_api.cross_core_set_flag`](../../../catlass/core_api.py#L4625)
+**源码：** [`catlass.core_api.cross_core_set_flag`](../../../catlass/core_api.py#L5586)
 
 功能说明：
 
@@ -1804,7 +2122,7 @@ with tla.cube():
 
 ### `cross_core_wait_flag`
 
-**源码：** [`catlass.core_api.cross_core_wait_flag`](../../../catlass/core_api.py#L4669)
+**源码：** [`catlass.core_api.cross_core_wait_flag`](../../../catlass/core_api.py#L5630)
 
 功能说明：
 
@@ -1838,7 +2156,7 @@ with tla.vector():
 
 ### `set_flag`
 
-**源码：** [`catlass.core_api.set_flag`](../../../catlass/core_api.py#L4712)
+**源码：** [`catlass.core_api.set_flag`](../../../catlass/core_api.py#L5673)
 
 功能说明：
 
@@ -1870,7 +2188,7 @@ with tla.vector():
 
 ### `wait_flag`
 
-**源码：** [`catlass.core_api.wait_flag`](../../../catlass/core_api.py#L4738)
+**源码：** [`catlass.core_api.wait_flag`](../../../catlass/core_api.py#L5699)
 
 功能说明：
 
@@ -1902,7 +2220,7 @@ with tla.vector():
 
 ### `pipe_barrier`
 
-**源码：** [`catlass.core_api.pipe_barrier`](../../../catlass/core_api.py#L4764)
+**源码：** [`catlass.core_api.pipe_barrier`](../../../catlass/core_api.py#L5725)
 
 功能说明：
 
@@ -1934,7 +2252,7 @@ with tla.vector():
 
 ### `mutex`
 
-**源码：** [`catlass.core_api.mutex`](../../../catlass/core_api.py#L4807)
+**源码：** [`catlass.core_api.mutex`](../../../catlass/core_api.py#L5768)
 
 功能说明：
 
@@ -1966,7 +2284,7 @@ mtx = tla.mutex("l1_buf", id=0)
 
 ### `mutex_guard`
 
-**源码：** [`catlass.core_api.mutex_guard`](../../../catlass/core_api.py#L4855)
+**源码：** [`catlass.core_api.mutex_guard`](../../../catlass/core_api.py#L5816)
 
 功能说明：
 
@@ -1998,7 +2316,7 @@ with tla.mutex_guard(mtx):
 
 ### `mutex_lock`
 
-**源码：** [`catlass.core_api.mutex_lock`](../../../catlass/core_api.py#L4896)
+**源码：** [`catlass.core_api.mutex_lock`](../../../catlass/core_api.py#L5857)
 
 功能说明：
 
@@ -2030,7 +2348,7 @@ tla.mutex_lock(mtx, pipe=tla.arch.MTE2)
 
 ### `mutex_unlock`
 
-**源码：** [`catlass.core_api.mutex_unlock`](../../../catlass/core_api.py#L4926)
+**源码：** [`catlass.core_api.mutex_unlock`](../../../catlass/core_api.py#L5887)
 
 功能说明：
 
@@ -2062,7 +2380,7 @@ tla.mutex_unlock(mtx, pipe=tla.arch.MTE2)
 
 ### `local_mem_bar`
 
-**源码：** [`catlass.core_api.local_mem_bar`](../../../catlass/core_api.py#L4956)
+**源码：** [`catlass.core_api.local_mem_bar`](../../../catlass/core_api.py#L5917)
 
 功能说明：
 
@@ -2099,7 +2417,7 @@ with tla.vec.func(mode="simd"):
 
 ### `arch`
 
-**源码：** [`catlass.core_api.arch`](../../../catlass/core_api.py#L7418)
+**源码：** [`catlass.core_api.arch`](../../../catlass/core_api.py#L9047)
 
 功能说明：
 
@@ -2176,7 +2494,7 @@ hi = tla.make_tensor_like(base + HALF, gm_b, tla.arch.RowMajor)
 
 ### `allocate`
 
-**源码：** [`catlass.core_api.allocate`](../../../catlass/core_api.py#L7181)
+**源码：** [`catlass.core_api.allocate`](../../../catlass/core_api.py#L8739)
 
 功能说明：
 
@@ -2219,7 +2537,7 @@ kernel 内标量 / tensor 调试打印。
 
 ### `print`
 
-**源码：** [`catlass.core_api.print`](../../../catlass/core_api.py#L3359)
+**源码：** [`catlass.core_api.print`](../../../catlass/core_api.py#L3699)
 
 功能说明：
 
@@ -2263,7 +2581,7 @@ Cube / Vector / `vec.func` 区域以及 kernel 侧循环范围。
 
 ### `range`
 
-**源码：** [`catlass.core_api.range`](../../../catlass/core_api.py#L5008)
+**源码：** [`catlass.core_api.range`](../../../catlass/core_api.py#L5969)
 
 功能说明：
 
@@ -2297,7 +2615,7 @@ for i in tla.range(0, n, 1):
 
 ### `range_constexpr`
 
-**源码：** [`catlass.core_api.range_constexpr`](../../../catlass/core_api.py#L5058)
+**源码：** [`catlass.core_api.range_constexpr`](../../../catlass/core_api.py#L6019)
 
 功能说明：
 
@@ -2333,7 +2651,7 @@ for k in tla.range_constexpr(0, 4):
 
 ### `cube`
 
-**源码：** [`catlass.core_api.cube`](../../../catlass/core_api.py#L5109)
+**源码：** [`catlass.core_api.cube`](../../../catlass/core_api.py#L6070)
 
 功能说明：
 
@@ -2365,7 +2683,7 @@ with tla.cube():
 
 ### `vector`
 
-**源码：** [`catlass.core_api.vector`](../../../catlass/core_api.py#L5131)
+**源码：** [`catlass.core_api.vector`](../../../catlass/core_api.py#L6092)
 
 功能说明：
 
@@ -2397,7 +2715,7 @@ with tla.vector():
 
 ### `vec.func`
 
-**源码：** [`catlass.core_api._vec_func`](../../../catlass/core_api.py#L5165)
+**源码：** [`catlass.core_api._vec_func`](../../../catlass/core_api.py#L6126)
 
 功能说明：
 
@@ -2426,6 +2744,70 @@ tla.vec.func(*, mode: str = 'simd', thread_block_dim: int | tuple[int, int, int]
 with tla.vector():
     with tla.vec.func(mode="simd"):
         z = tla.add(x_reg, y_reg)
+```
+
+---
+
+## Tile 数据填充
+
+对 L1 zN/nZ tensor 整 tile 填充（`Tensor.fill`）。
+
+### `Tensor.fill`
+
+**源码：** [`catlass.tla.tensor._Tensor.fill`](../../../catlass/tla/tensor.py#L720)
+
+功能说明：
+
+用给定值填充整个 L1 zN/nZ tile。填充区域即该 tile 自身：在逻辑二维
+（M, N）轴上覆盖 ``[self.coord, self.coord + self.origin_shape)``。
+沿 layout 的 C0 轴（32 字节）会先把起点坐标向上对齐到 C0 边界再填充，
+因此只写入 tile 内完整的 C0 单元；起点处不完整的部分保持不动（残差需
+另途覆盖——MX pad 流程中通常由 GM→L1 copy 带入）。
+
+以具体 fp8（一个 C0 单元 = 32 字节）zN 为例：取一个（例如经
+`tla.get_tile` 得到的）tile，坐标 ``(0, 40)``，
+``origin_shape = (16, 56)``：
+
+```text
+    N   0               32  40          64              96
+                                        ^   C0 边界：起点 40 向上对齐到 64
+    M
+    0   - - - - - - - - - - + + + + + + * * * * * * * *
+    1   - - - - - - - - - - + + + + + + * * * * * * * *
+    :   （第 2 .. 14 行相同）
+   15   - - - - - - - - - - + + + + + + * * * * * * * *
+```
+
+图例：`*` = 设备写入：完整 C0 单元 ``[64, 96)``（tile 末端
+40 + 56 = 96 已 C0 对齐）。`+` = 落在 tile 内但未写入：列 40..63 是不
+完整的 C0 单元。`-` = tile 外。此处 M 轴无 C0 对齐：对 zN 而言 C0 轴是 N。
+
+函数原型：
+
+```python
+tile.fill(value: int | float) -> None
+```
+
+参数说明：
+
+- `value`（`int | float`）：trace 期标量；当前仅支持 ``0``
+  （设备写入全零比特模式）。
+
+约束说明：
+
+- 须在 `@tla.kernel` 装饰的 kernel 函数体内调用，并嵌套在 `tla.cube()` 内。
+- 目的地须为带 ``zN`` 或 ``nZ`` 标签的 L1 tensor。
+- 支持的元素类型：打包的 fp4/fp8 操作数格式
+  （``f4e2m1``/``f4e1m2``/``f8e4m3fn``/``f8e5m2``），且仅支持填零。
+  更宽类型、8 位整数与 e8m0 scale tile 不支持。
+
+调用示例：
+
+```python
+# 将 L1 A tile 的 K-pad 尾部清零：先切 tile，再 fill。
+pad = tla.get_tile(t_l1a, tla.make_coord(0, k_valid),
+                   tla.make_shape(m, k_l0 - k_valid))
+pad.fill(0)
 ```
 
 ---
