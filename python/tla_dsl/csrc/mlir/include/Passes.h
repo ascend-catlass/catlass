@@ -14,6 +14,7 @@ std::unique_ptr<mlir::Pass> createTlaLowerFlagBarrierToHivmPass();
 std::unique_ptr<mlir::Pass> createTlaLowerFuncPass();
 std::unique_ptr<mlir::Pass> createTlaInsertAutoMutexPass();
 std::unique_ptr<mlir::Pass> createTlaLowerScalarAccessPass();
+std::unique_ptr<mlir::Pass> createTlaLowerScalarOpsPass();
 std::unique_ptr<mlir::Pass> createTlaSplitMixedFuncPass();
 std::unique_ptr<mlir::Pass> createTlaLowerTensorDescPass();
 std::unique_ptr<mlir::Pass> createTlaLowerBlockIdxPass();

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import math
 import operator
 import struct
 from abc import ABC, abstractmethod
@@ -255,6 +256,121 @@ def _binary_op(
         return res_type(result)
 
     return wrapper
+
+
+# ScalarRoundMode -> tla.scalar_round_cast mode attribute. TRUNC is absent
+# because there is nothing to map it to: probing ccec for dav-c310 shows the
+# scalar unit has conv_f322s32{r,a,f,c} and no toward-zero form, so TRUNC stays
+# on arith.fptosi.
+_SCALAR_ROUND_CAST_MODE = {}
+
+
+def _scalar_round_cast_mode_table() -> dict:
+    """Built lazily: params imports typing, so the enum cannot be imported here."""
+    global _SCALAR_ROUND_CAST_MODE
+    if not _SCALAR_ROUND_CAST_MODE:
+        from ..params import ScalarRoundMode
+
+        _SCALAR_ROUND_CAST_MODE = {
+            ScalarRoundMode.NEAREST_EVEN: "rn",
+            ScalarRoundMode.NEAREST_AWAY: "ra",
+            ScalarRoundMode.FLOOR: "rd",
+            ScalarRoundMode.CEIL: "ru",
+            ScalarRoundMode.ODD: "o",
+        }
+    return _SCALAR_ROUND_CAST_MODE
+
+
+def _round_f32_to_f16_odd(value: float) -> float:
+    """Constant-fold f32 -> f16 round-to-odd, matching ``conv_f322f16o``.
+
+    Round to odd keeps an exactly representable value unchanged; otherwise it
+    picks whichever of the two neighbouring f16 values has an odd mantissa,
+    which is always the one nearer zero unless that one is even. Implemented on
+    the bit pattern rather than with a rounding mode, since Python has none.
+    """
+    v32 = np.float32(value)
+    if not np.isfinite(v32):
+        # inf and NaN pass through any rounding unchanged.
+        return float(np.float16(v32))
+    nearest = np.float16(v32)
+    if np.float32(nearest) == v32:
+        return float(nearest)  # exactly representable: no rounding to do
+    # Step to the neighbour nearer zero, if round-to-nearest went outward.
+    toward_zero = nearest
+    if abs(np.float32(nearest)) > abs(v32):
+        toward_zero = np.nextafter(nearest, np.float16(0.0))
+    if int(toward_zero.view(np.uint16)) & 1:
+        return float(toward_zero)
+    away = np.float16(np.inf) if v32 > 0 else np.float16(-np.inf)
+    return float(np.nextafter(toward_zero, away))
+
+
+def _round_host_float(value: float, round_mode: Any) -> int:
+    """Constant-fold a float -> int conversion under an explicit rounding mode."""
+    from ..params import ScalarRoundMode
+
+    if round_mode is ScalarRoundMode.TRUNC:
+        return int(value)
+    if round_mode is ScalarRoundMode.FLOOR:
+        return math.floor(value)
+    if round_mode is ScalarRoundMode.CEIL:
+        return math.ceil(value)
+    if round_mode is ScalarRoundMode.NEAREST_EVEN:
+        # Python's round() is round-half-to-even, matching conv_f322s32r.
+        return round(value)
+    if round_mode is ScalarRoundMode.NEAREST_AWAY:
+        # Ties away from zero, matching conv_f322s32a; round() would go to even.
+        return math.floor(value + 0.5) if value >= 0 else math.ceil(value - 0.5)
+    raise TypeError(f"unsupported round_mode {round_mode}")
+
+
+def _validate_scalar_round_mode(value: "Numeric", dtype: Any, round_mode: Any) -> None:
+    """Reject round_mode anywhere it would be silently ignored."""
+    from ..params import RoundMode, ScalarRoundMode
+
+    if isinstance(round_mode, RoundMode):
+        raise TypeError(
+            f"round_mode {round_mode} is a RoundMode, which configures the AVE "
+            "vector cast (tla.cast). A scalar conversion takes a "
+            "tla.params.ScalarRoundMode"
+        )
+    if not isinstance(round_mode, ScalarRoundMode):
+        raise TypeError(
+            "round_mode must be a tla.params.ScalarRoundMode, got "
+            f"{type(round_mode).__name__}"
+        )
+    src_ty = type(value)
+    if not (isinstance(dtype, NumericMeta) and not dtype.is_abstract):
+        raise TypeError(
+            "round_mode applies only to a conversion between concrete Numeric "
+            f"types, not to {getattr(dtype, '__name__', dtype)}"
+        )
+    # ODD is the one f32 -> f16 instruction; every other mode targets i32.
+    if round_mode is ScalarRoundMode.ODD:
+        if src_ty.width != 32 or not src_ty.is_float or dtype is not Float16:
+            raise TypeError(
+                "round_mode ODD is the f32 -> f16 round-to-odd conversion and "
+                "applies only to Float32 -> Float16. Got "
+                f"{src_ty.__name__} -> {dtype.__name__}"
+            )
+        return
+    if not (src_ty.is_float and dtype.is_integer):
+        raise TypeError(
+            "round_mode applies only to a float -> integer conversion, "
+            f"not {src_ty.__name__} -> {dtype.__name__} (ODD is the one "
+            "float -> float mode)"
+        )
+    if round_mode is ScalarRoundMode.TRUNC:
+        return
+    if src_ty.width != 32 or dtype.width != 32 or not dtype.signed:
+        raise TypeError(
+            "round_mode is supported only for Float32 -> Int32; the scalar unit "
+            "has no rounding conversion for other widths. Got "
+            f"{src_ty.__name__} -> {dtype.__name__}"
+        )
+    if round_mode not in _scalar_round_cast_mode_table():
+        raise TypeError(f"unsupported round_mode {round_mode}")
 
 
 def _decorate_generated_method(
@@ -772,8 +888,20 @@ class Numeric(metaclass=NumericMeta, is_abstract=True):
         self,
         dtype: Any,
         *,
+        round_mode: Any = None,
         loc: mlir_ir.Location | None = None,
     ) -> Any:
+        """Convert to another type.
+
+        ``round_mode`` applies only to a float32 -> int32 conversion and names
+        one of the scalar unit's four rounding instructions
+        (``ScalarRoundMode.NEAREST_EVEN`` / ``NEAREST_AWAY`` / ``FLOOR`` /
+        ``CEIL``). Omitted -- or ``TRUNC`` -- keeps ``arith.fptosi``, which
+        truncates toward zero. This is not :class:`RoundMode`, which configures
+        the AVE vector cast.
+        """
+        if round_mode is not None:
+            _validate_scalar_round_mode(self, dtype, round_mode)
         if dtype is int:
             if isinstance(self.value, (int, float, bool)):
                 return int(self.value)
@@ -799,6 +927,15 @@ class Numeric(metaclass=NumericMeta, is_abstract=True):
             return self
         # Host: construct target (Python cast in __init__). SSA: emit arith ops.
         if isinstance(self.value, (bool, int, float)):
+            if round_mode is not None and type(self).is_float:
+                # Fold with the SAME rounding the instruction would apply, so a
+                # literal and a runtime value do not disagree.
+                from ..params import ScalarRoundMode
+
+                if round_mode is ScalarRoundMode.ODD:
+                    return dtype(_round_f32_to_f16_odd(float(self.value)))
+                if dtype.is_integer:
+                    return dtype(_round_host_float(float(self.value), round_mode))
             return dtype(self, loc=loc)
         src = self.ir_value(loc=loc)
         dst_ty = dtype.mlir_type()
@@ -816,6 +953,16 @@ class Numeric(metaclass=NumericMeta, is_abstract=True):
             result = _emit_scalar_cast(cast_name, src, dst_ty, loc)
             return dtype(result)
         if src_ty.is_float and dtype.is_float:
+            mode = _scalar_round_cast_mode_table().get(round_mode)
+            if mode is not None:
+                result = mlir_ir.Operation.create(
+                    "tla.scalar_round_cast",
+                    operands=[src],
+                    results=[dst_ty],
+                    attributes={"mode": mlir_ir.StringAttr.get(mode)},
+                    loc=loc,
+                ).results[0]
+                return dtype(result)
             cast_name = "arith.extf" if dtype.width > src_ty.width else "arith.truncf"
             result = _emit_scalar_cast(cast_name, src, dst_ty, loc)
             return dtype(result)
@@ -824,6 +971,16 @@ class Numeric(metaclass=NumericMeta, is_abstract=True):
             result = _emit_scalar_cast(cast_name, src, dst_ty, loc)
             return dtype(result)
         if src_ty.is_float and dtype.is_integer:
+            mode = _scalar_round_cast_mode_table().get(round_mode)
+            if mode is not None:
+                result = mlir_ir.Operation.create(
+                    "tla.scalar_round_cast",
+                    operands=[src],
+                    results=[dst_ty],
+                    attributes={"mode": mlir_ir.StringAttr.get(mode)},
+                    loc=loc,
+                ).results[0]
+                return dtype(result)
             cast_name = "arith.fptoui" if not dtype.signed else "arith.fptosi"
             result = _emit_scalar_cast(cast_name, src, dst_ty, loc)
             return dtype(result)
@@ -1027,6 +1184,39 @@ class Float(
     """Abstract floating-point numeric family."""
 
     _host_bits: ClassVar[Callable[[float], int]]
+
+    @dsl_user_op
+    def sqrt(self, *, loc: mlir_ir.Location | None = None) -> "Float":
+        """Square root of a scalar float.
+
+        The scalar counterpart of ``tla.sqrt``, dispatched the same way
+        ``__abs__`` is: inside a ``tla.vec.func(mode="simt")`` this is the
+        per-thread ``tla.simt_sqrt``, and everywhere else -- a cube region, a
+        SIMD vector region, the kernel body -- it is ``math.sqrt`` on the
+        core's own scalar unit.
+        """
+        if isinstance(self.value, (int, float, bool)):
+            return type(self)(math.sqrt(float(self.value)))
+        if _current_frontend_state() is None:
+            raise RuntimeError("Float.sqrt on SSA requires frontend context")
+        from ..runtime import _in_simt_vec_func
+
+        in_simt = _in_simt_vec_func()
+        # Outside a SIMT region this is math.sqrt, which the backend selects
+        # only for f32 -- f16 and bf16 come back as "Cannot select: fsqrt" from
+        # inside the compiler. Reject them here so the message names the kernel.
+        if not in_simt and type(self).width != 32:
+            raise TypeError(
+                f"sqrt on a scalar outside a SIMT region requires Float32; got "
+                f"{type(self).__name__}. Convert first with .to(tla.Float32), "
+                "or use a tla.vec.func(mode='simt') region"
+            )
+        v = self.ir_value(loc=loc)
+        name = "tla.simt_sqrt" if in_simt else "math.sqrt"
+        result = mlir_ir.Operation.create(
+            name, operands=[v], results=[v.type], loc=loc
+        ).results[0]
+        return type(self)(result)
 
     def __c_pointers__(self) -> list[int]:
         cls = type(self)

@@ -11,6 +11,7 @@ import pytest
 
 from catlass._mlir import ir as mlir_ir
 import catlass.tla as tla
+from catlass.params import ScalarRoundMode as _SRM
 import catlass.runtime as runtime_mod
 
 
@@ -361,3 +362,221 @@ def test_bool_ssa_to_float_uitofp() -> None:
             result = tla.Bool(one).to(tla.Float32)
             assert isinstance(result, tla.Float32)
             assert result.value.owner.name == "arith.uitofp"
+
+
+@tla.kernel
+def _kernel_numeric_sqrt(meta: tla.Tensor, out: tla.Tensor) -> None:
+    x = meta[0]
+    out[0] = tla.sqrt(x)
+
+
+@tla.kernel
+def _kernel_numeric_sqrt_method(meta: tla.Tensor, out: tla.Tensor) -> None:
+    x = meta[0]
+    out[0] = x.sqrt()
+
+
+@tla.kernel
+def _kernel_numeric_sqrt_in_cube(meta: tla.Tensor, out: tla.Tensor) -> None:
+    with tla.cube():
+        out[0] = tla.sqrt(meta[0])
+
+
+@tla.kernel
+def _kernel_numeric_sqrt_in_simt(meta: tla.Tensor, out: tla.Tensor) -> None:
+    with tla.vector():
+        with tla.vec.func(mode="simt", thread_block_dim=64):
+            out[0] = tla.sqrt(meta[0])
+
+
+@tla.kernel
+def _kernel_numeric_sqrt_int_rejected(meta: tla.Tensor, out: tla.Tensor) -> None:
+    out[0] = tla.sqrt(meta[0])
+
+
+def test_numeric_sqrt_outside_simt_emits_math_sqrt() -> None:
+    """Scalar sqrt outside a SIMT region is math.sqrt on the core scalar unit."""
+    meta = _gm_tensor_1d(8, dtype=tla.Float32)
+    out = _gm_tensor_1d(8, dtype=tla.Float32)
+    mlir = _kernel_numeric_sqrt.dump_mlir(type_args=(meta, out))
+    assert "math.sqrt" in mlir
+    assert "tla.simt_sqrt" not in mlir
+
+
+def test_numeric_sqrt_method_matches_free_function() -> None:
+    meta = _gm_tensor_1d(8, dtype=tla.Float32)
+    out = _gm_tensor_1d(8, dtype=tla.Float32)
+    mlir = _kernel_numeric_sqrt_method.dump_mlir(type_args=(meta, out))
+    assert "math.sqrt" in mlir
+
+
+def test_numeric_sqrt_in_cube_region_emits_math_sqrt() -> None:
+    meta = _gm_tensor_1d(8, dtype=tla.Float32)
+    out = _gm_tensor_1d(8, dtype=tla.Float32)
+    mlir = _kernel_numeric_sqrt_in_cube.dump_mlir(type_args=(meta, out))
+    assert "math.sqrt" in mlir
+
+
+def test_numeric_sqrt_in_simt_region_keeps_simt_op() -> None:
+    """The SIMT form is untouched: a per-thread scalar still gets tla.simt_sqrt."""
+    meta = _gm_tensor_1d(8, dtype=tla.Float32)
+    out = _gm_tensor_1d(8, dtype=tla.Float32)
+    mlir = _kernel_numeric_sqrt_in_simt.dump_mlir(type_args=(meta, out))
+    assert "tla.simt_sqrt" in mlir
+
+
+def test_numeric_sqrt_rejects_integer() -> None:
+    meta = _gm_tensor_1d(8, dtype=tla.Int32)
+    out = _gm_tensor_1d(8, dtype=tla.Int32)
+    with pytest.raises(Exception, match="float-only"):
+        _kernel_numeric_sqrt_int_rejected.dump_mlir(type_args=(meta, out))
+
+
+def test_numeric_sqrt_constant_folds() -> None:
+    assert abs(float(tla.Float32(6.25).sqrt().value) - 2.5) < 1e-6
+
+
+@tla.kernel
+def _kernel_round_cast_floor(meta: tla.Tensor, out: tla.Tensor) -> None:
+    out[0] = meta[0].to(tla.Int32, round_mode=_SRM.FLOOR)
+
+
+@tla.kernel
+def _kernel_round_cast_trunc(meta: tla.Tensor, out: tla.Tensor) -> None:
+    out[0] = meta[0].to(tla.Int32, round_mode=_SRM.TRUNC)
+
+
+def test_round_cast_emits_tla_scalar_round_cast() -> None:
+    meta = _gm_tensor_1d(8, dtype=tla.Float32)
+    out = _gm_tensor_1d(8, dtype=tla.Int32)
+    mlir = _kernel_round_cast_floor.dump_mlir(type_args=(meta, out))
+    assert "tla.scalar_round_cast" in mlir
+    assert '"rd"' in mlir or "rd " in mlir
+
+
+def test_round_cast_trunc_stays_on_fptosi() -> None:
+    """CAST_TRUNC needs no helper: arith.fptosi already truncates toward zero."""
+    meta = _gm_tensor_1d(8, dtype=tla.Float32)
+    out = _gm_tensor_1d(8, dtype=tla.Int32)
+    mlir = _kernel_round_cast_trunc.dump_mlir(type_args=(meta, out))
+    assert "arith.fptosi" in mlir
+    assert "tla.scalar_round_cast" not in mlir
+
+
+def test_round_cast_rejects_non_f32_to_i32() -> None:
+    with pytest.raises(TypeError, match="only for Float32 -> Int32"):
+        tla.Float32(1.5).to(tla.Int64, round_mode=_SRM.FLOOR)
+
+
+def test_round_cast_rejects_float_target() -> None:
+    with pytest.raises(TypeError, match="float -> integer"):
+        tla.Float32(1.5).to(tla.Float16, round_mode=_SRM.FLOOR)
+
+
+def test_round_cast_rejects_non_enum() -> None:
+    with pytest.raises(TypeError, match="must be a tla.params.ScalarRoundMode"):
+        tla.Float32(1.5).to(tla.Int32, round_mode="floor")
+
+
+def test_round_cast_rejects_vector_round_mode() -> None:
+    """Passing the AVE cast's RoundMode here must name the right enum."""
+    from catlass.params import RoundMode
+
+    with pytest.raises(TypeError, match="configures the AVE vector cast"):
+        tla.Float32(1.5).to(tla.Int32, round_mode=RoundMode.CAST_FLOOR)
+
+
+@pytest.mark.parametrize(
+    "mode,value,expected",
+    [
+        (_SRM.NEAREST_EVEN, 2.5, 2),  # ties to even
+        (_SRM.NEAREST_AWAY, 2.5, 3),  # ties away from zero
+        (_SRM.FLOOR, -2.3, -3),
+        (_SRM.CEIL, -2.3, -2),
+        (_SRM.TRUNC, -2.3, -2),
+    ],
+)
+def test_round_cast_constant_folds_per_mode(mode, value, expected) -> None:
+    """A literal must fold the way the instruction would round it."""
+    assert int(tla.Float32(value).to(tla.Int32, round_mode=mode).value) == expected
+
+
+@tla.kernel
+def _kernel_sqrt_f16_scalar_rejected(meta: tla.Tensor, out: tla.Tensor) -> None:
+    out[0] = tla.sqrt(meta[0])
+
+
+@tla.kernel
+def _kernel_sqrt_f16_scalar_method_rejected(meta: tla.Tensor, out: tla.Tensor) -> None:
+    out[0] = meta[0].sqrt()
+
+
+def test_scalar_sqrt_rejects_f16_outside_simt() -> None:
+    """math.sqrt selects only for f32; f16 would be 'Cannot select' in the backend."""
+    meta = _gm_tensor_1d(8, dtype=tla.Float16)
+    out = _gm_tensor_1d(8, dtype=tla.Float16)
+    with pytest.raises(Exception, match="requires Float32"):
+        _kernel_sqrt_f16_scalar_rejected.dump_mlir(type_args=(meta, out))
+
+
+def test_scalar_sqrt_method_rejects_f16_outside_simt() -> None:
+    meta = _gm_tensor_1d(8, dtype=tla.Float16)
+    out = _gm_tensor_1d(8, dtype=tla.Float16)
+    with pytest.raises(Exception, match="requires Float32"):
+        _kernel_sqrt_f16_scalar_method_rejected.dump_mlir(type_args=(meta, out))
+
+
+@tla.kernel
+def _kernel_narrow_odd(meta: tla.Tensor, out: tla.Tensor) -> None:
+    out[0] = meta[0].to(tla.Float16, round_mode=_SRM.ODD)
+
+
+@tla.kernel
+def _kernel_narrow_default(meta: tla.Tensor, out: tla.Tensor) -> None:
+    out[0] = meta[0].to(tla.Float16)
+
+
+def test_narrow_odd_emits_scalar_round_cast() -> None:
+    meta = _gm_tensor_1d(8, dtype=tla.Float32)
+    out = _gm_tensor_1d(8, dtype=tla.Float16)
+    mlir = _kernel_narrow_odd.dump_mlir(type_args=(meta, out))
+    assert "tla.scalar_round_cast" in mlir
+    assert "arith.truncf" not in mlir
+
+
+def test_narrow_default_stays_on_truncf() -> None:
+    """Plain .to(Float16) keeps round-to-nearest-even; ODD must be opt-in."""
+    meta = _gm_tensor_1d(8, dtype=tla.Float32)
+    out = _gm_tensor_1d(8, dtype=tla.Float16)
+    mlir = _kernel_narrow_default.dump_mlir(type_args=(meta, out))
+    assert "arith.truncf" in mlir
+    assert "tla.scalar_round_cast" not in mlir
+
+
+def test_odd_rejects_integer_target() -> None:
+    with pytest.raises(TypeError, match="only to Float32 -> Float16"):
+        tla.Float32(1.5).to(tla.Int32, round_mode=_SRM.ODD)
+
+
+def test_odd_rejects_f32_target() -> None:
+    with pytest.raises(TypeError, match="only to Float32 -> Float16"):
+        tla.Float32(1.5).to(tla.Float32, round_mode=_SRM.ODD)
+
+
+def test_int_modes_reject_float_target() -> None:
+    with pytest.raises(TypeError, match="ODD is the one"):
+        tla.Float32(1.5).to(tla.Float16, round_mode=_SRM.FLOOR)
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        (2.0, 2.0),  # exactly representable: unchanged, even mantissa is fine
+        (1.0 + 2.0**-11, 1.0009765625),  # tie: rne gives 1.0, odd goes up
+        (-0.1, -0.10003662109375),
+    ],
+)
+def test_odd_constant_folds(value, expected) -> None:
+    """A literal must fold the way conv_f322f16o rounds it."""
+    folded = float(tla.Float32(value).to(tla.Float16, round_mode=_SRM.ODD).value)
+    assert folded == expected

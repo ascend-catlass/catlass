@@ -40,6 +40,7 @@ void registerTlaPasses()
     registerTlaFinalizeMemrefPass();
     registerTlaPrologueEpiloguePass();
     registerTlaLowerAVEToRegbaseIntrinsPass();
+    registerTlaLowerScalarOpsPass();
 }
 
 void buildTlaPipeline(OpPassManager& pm)
@@ -65,6 +66,7 @@ void buildTlaPipeline(OpPassManager& pm)
     pm.addPass(createTlaCubeRegionPass());
     pm.addPass(createTlaFinalizeMemrefPass());
     pm.addPass(createTlaLowerDebugPrintPass());
+    pm.addPass(createTlaLowerScalarOpsPass());
     pm.addPass(createTlaLowerBlockIdxPass());
     pm.addPass(createTlaLowerFlagBarrierToHivmPass());
     pm.addPass(createTlaLowerMutexToStdPass());
@@ -87,16 +89,12 @@ void buildTlaPipeline(OpPassManager& pm)
     // recognition benefits from i16 when bounds fit. Default TableGen option is
     // false, so turn it on here when constructing the pass.
     {
-        std::unique_ptr<mlir::Pass> hivmaveToIntrin =
-            mlir::createConvertHIVMAVEToAVEIntrinPass();
-        if (failed(hivmaveToIntrin->initializeOptions(
-                "enable-i16-indvar=true", [](const llvm::Twine& msg) {
-                    llvm::errs() << "convert-hivmave-to-ave-intrin options: " << msg
-                                 << "\n";
-                    return mlir::failure();
-                }))) {
-            llvm::report_fatal_error(
-                "failed to set enable-i16-indvar=true on convert-hivmave-to-ave-intrin");
+        std::unique_ptr<mlir::Pass> hivmaveToIntrin = mlir::createConvertHIVMAVEToAVEIntrinPass();
+        if (failed(hivmaveToIntrin->initializeOptions("enable-i16-indvar=true", [](const llvm::Twine& msg) {
+                llvm::errs() << "convert-hivmave-to-ave-intrin options: " << msg << "\n";
+                return mlir::failure();
+            }))) {
+            llvm::report_fatal_error("failed to set enable-i16-indvar=true on convert-hivmave-to-ave-intrin");
         }
         pm.addPass(std::move(hivmaveToIntrin));
     }

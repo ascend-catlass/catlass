@@ -316,6 +316,34 @@ class RoundMode(enum.Enum):
         return self.value
 
 
+class ScalarRoundMode(enum.Enum):
+    """Rounding for a scalar float32 conversion (``Numeric.to``).
+
+    Distinct from :class:`RoundMode`, which configures the AVE vector cast:
+    these are the scalar unit's own conversion instructions, and the two sets
+    are not interchangeable -- the vector cast has no round-to-nearest-even,
+    and the scalar unit takes none of the AVE cast's saturation or register-slot
+    knobs.
+    """
+
+    NEAREST_EVEN = "nearest_even"  # ties to even      (conv_f322s32r)
+    NEAREST_AWAY = "nearest_away"  # ties away from 0  (conv_f322s32a)
+    FLOOR = "floor"  # toward -inf       (conv_f322s32f)
+    CEIL = "ceil"  # toward +inf       (conv_f322s32c)
+    # There is no conv_f322s32z: the scalar unit has no toward-zero
+    # conversion instruction, so this is arith.fptosi rather than a helper.
+    TRUNC = "trunc"  # toward zero       (arith.fptosi)
+    # f32 -> f16 only, and the only mode that conversion has. Round to odd picks
+    # the neighbour with an odd mantissa whenever the value is not exactly
+    # representable; it exists to avoid double rounding when the result is
+    # narrowed again. It is NOT the default narrowing -- plain .to(Float16)
+    # gives correct round-to-nearest-even and should stay the usual choice.
+    ODD = "odd"  # to odd            (conv_f322f16o)
+
+    def __str__(self) -> str:
+        return self.value
+
+
 _REG_SLOT_CODE = {RegSlot.ZERO: 0, RegSlot.ONE: 1, RegSlot.TWO: 2, RegSlot.THREE: 3}
 _SAT_MODE_CODE = {SatMode.UNKNOWN: 0, SatMode.SAT: 1, SatMode.NOSAT: 2}
 _ROUND_MODE_CODE = {

@@ -7148,12 +7148,30 @@ _SIMT_UNARY_OPS = {
 }
 
 
+# Scalar unaries that also have a form outside a SIMT region, on the core's own
+# scalar unit. These reach the backend as plain ``math`` ops, the same route
+# ``Numeric.__abs__`` takes. exp and log are absent on purpose: probing hivmc
+# shows math.exp/log on a non-SIMT scalar lower to a libm call and leave an
+# undefined expf/logf symbol, so neither is usable on this path.
+_SCALAR_UNARY_OPS = {
+    "sqrt": "math.sqrt",
+}
+
+# ...and f32 is the only element type the scalar path accepts. math.sqrt on a
+# scalar f16 or bf16 reaches the backend as "Cannot select: f16 = fsqrt", an
+# error from deep inside the compiler that says nothing about the kernel, so the
+# frontend rejects those here instead. The SIMT form is unaffected: tla.simt_sqrt
+# selects for f16, and tla-vector-region promotes bf16 through f32.
+_SCALAR_UNARY_ELEMENT_TYPE = Float32
+
+
 @dsl_user_op
 def _emit_simt_unary(
     mnemonic: str, operand: Any, *, loc: mlir_ir.Location | None = None
 ) -> Any:
     _require_frontend_state(mnemonic)
-    if not _runtime._in_simt_vec_func():
+    in_simt = _runtime._in_simt_vec_func()
+    if not in_simt and mnemonic not in _SCALAR_UNARY_OPS:
         _op_error(
             mnemonic,
             "on a scalar is only available inside a tla.vec.func with mode='simt'; "
@@ -7162,9 +7180,18 @@ def _emit_simt_unary(
     num = operand if isinstance(operand, Numeric) else as_numeric(operand)
     if not type(num).is_float:
         _op_error(mnemonic, f"is float-only; got {type(num).__name__}")
+    if not in_simt and type(num) is not _SCALAR_UNARY_ELEMENT_TYPE:
+        _op_error(
+            mnemonic,
+            f"on a scalar outside a SIMT region requires "
+            f"{_SCALAR_UNARY_ELEMENT_TYPE.__name__}; got {type(num).__name__}. "
+            "Convert first with .to(tla.Float32), or use a "
+            "tla.vec.func(mode='simt') region",
+        )
     value = num.ir_value(loc=loc)
+    name = _SIMT_UNARY_OPS[mnemonic] if in_simt else _SCALAR_UNARY_OPS[mnemonic]
     result = mlir_ir.Operation.create(
-        _SIMT_UNARY_OPS[mnemonic], operands=[value], results=[value.type], loc=loc
+        name, operands=[value], results=[value.type], loc=loc
     ).results[0]
     return type(num)(result)
 
@@ -7304,20 +7331,31 @@ sqrt = _make_scalar_aware_unary_op(
     doc="""Directory: Vector Compute / Basic Arithmetic
 
 Description:
-    Element-wise square root on a vector (requires f16/f32).
+    Square root of a vector or of a scalar.
+
+    Given a `VectorSSA` this is the element-wise AVE op (requires f16/f32).
+    Given a float `Numeric` it is a scalar square root on the core's own scalar
+    unit, available anywhere a scalar is: a `tla.cube` region, a SIMD or SIMT
+    `tla.vec.func`, or the kernel body. Inside a SIMT region it becomes the
+    per-thread `tla.simt_sqrt`; elsewhere it is `math.sqrt`. `x.sqrt()` on a
+    float `Numeric` is the same operation.
 
     Parameters:
-    - `operand` (`VectorSSA`): Source vector register. Required.
-    - `mask` (`MaskSSA | None`): Optional execution mask; `None` means all lanes enabled. Optional, default `None`.
+    - `operand` (`VectorSSA | Numeric`): Source vector register, or a float scalar. Required.
+    - `mask` (`MaskSSA | None`): Optional execution mask; `None` means all lanes enabled. Vector form only. Optional, default `None`.
 
     Constraints:
     - Must be called inside a `@tla.kernel`-decorated kernel function.
-    - Must be called inside `tla.vec.func()`; element type must be f16/f32.
+    - The vector form must be called inside `tla.vec.func()`; element type must be f16/f32.
+    - The scalar form is float-only and takes no `mask`.
 
     Example:
     ```python
     with tla.vec.func(mode="simd"):
         y = tla.sqrt(x_reg)
+
+    with tla.cube():
+        s = tla.sqrt(scale)
     ```
     """,
 )

@@ -18,6 +18,7 @@ install(
   DIRECTORY
     "${CMAKE_CURRENT_SOURCE_DIR}/Cube"
     "${CMAKE_CURRENT_SOURCE_DIR}/Vector"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Scalar"
   DESTINATION catlass/csrc/mlir/bc
   COMPONENT catlass_wheel
   FILES_MATCHING

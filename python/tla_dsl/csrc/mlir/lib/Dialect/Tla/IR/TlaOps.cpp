@@ -1165,6 +1165,25 @@ mlir::LogicalResult SimtCastOp::verify()
     return emitOpError() << "unsupported cast kind \"" << getKind() << "\"";
 }
 
+mlir::LogicalResult ScalarRoundCastOp::verify()
+{
+    // The mode and the result type are not independent: the scalar unit has
+    // four f32->i32 instructions and exactly one f32->f16 one.
+    bool resultIsF16 = mlir::isa<mlir::Float16Type>(getResult().getType());
+    if (resultIsF16) {
+        if (getMode() == "o")
+            return mlir::success();
+        return emitOpError() << "an f16 result takes only mode \"o\" (round to odd), got \"" << getMode() << "\"";
+    }
+    static constexpr ::llvm::StringLiteral kIntModes[] = {"rn", "ra", "rd", "ru"};
+    for (::llvm::StringLiteral mode : kIntModes)
+        if (getMode() == mode)
+            return mlir::success();
+    if (getMode() == "o")
+        return emitOpError() << "mode \"o\" (round to odd) produces an f16 result, not i32";
+    return emitOpError() << "an i32 result takes one of rn, ra, rd, ru, got \"" << getMode() << "\"";
+}
+
 mlir::LogicalResult SimtCmpOp::verify()
 {
     if (!isSupportedCmpMode(getMode()))

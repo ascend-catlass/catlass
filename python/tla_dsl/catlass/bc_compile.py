@@ -66,6 +66,12 @@ _SOURCE_SUBDIR: dict[str, str] = {
     "aiv": "Vector",
 }
 
+# Core-agnostic stub directories, compiled once per core type and linked into
+# both meta-op bitcodes. The scalar unit exists on AIC and AIV alike, so a
+# scalar helper belongs in exactly one place rather than in a shared header with
+# a one-line stub under each of Cube/ and Vector/.
+_SHARED_SUBDIRS: tuple[str, ...] = ("Scalar",)
+
 # Mix kernels are not compiled as a dedicated core type: they reuse the plain
 # ``aic`` + ``aiv`` meta_op bitcode, linked together by hivmc at runtime.
 _MODE_CORE_TYPES: dict[str, list[str]] = {
@@ -259,9 +265,23 @@ def build_meta_op(core_type: str, cache: Path, cfg: BCConfig) -> Path:
     src_dir = cfg.paths.bc_stubs / _SOURCE_SUBDIR[core_type]
     if not src_dir.is_dir():
         raise RuntimeError(f"Stub source directory not found: {src_dir}")
+    src_dirs = [src_dir]
+    for shared in _SHARED_SUBDIRS:
+        shared_dir = cfg.paths.bc_stubs / shared
+        if shared_dir.is_dir():
+            src_dirs.append(shared_dir)
 
     individual: list[Path] = []
-    for cpp in sorted(src_dir.glob("*.cpp")):
+    seen: dict[str, Path] = {}
+    for cpp in sorted(p for d in src_dirs for p in d.glob("*.cpp")):
+        # The per-file bitcode is named from the stem alone, so two stubs of the
+        # same name in different directories would silently overwrite each
+        # other's .bc. Fail loudly instead.
+        if cpp.stem in seen:
+            raise RuntimeError(
+                f"duplicate bc stub name '{cpp.stem}.cpp': {seen[cpp.stem]} and {cpp}"
+            )
+        seen[cpp.stem] = cpp
         bc_name = cpp.stem + f".{core_type}.{cfg.cce_arch}.bc"
         bc_path = cache / bc_name
         if not bc_path.exists():
