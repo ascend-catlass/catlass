@@ -46,6 +46,7 @@
 #include "template/w4a4_matmul_per_token_per_channel_dequant.h"
 #include "template/w4a8_matmul.h"
 #include "template/ascend950_basic_conv2d_tla.h"
+#include "template/ascend950_conv2d_bias_silu.h"
 #include "template/ascend950_mxfp8_flash_attention.h"
 #include "template/broadcast_matmul_perblock_quant.h"
 #include "template/gemm.h"
@@ -61,6 +62,7 @@
 #include "template/syrk.h"
 #include "template/trmm.h"
 #include "template/conv_bias.h"
+#include "template/conv2d_bias_silu.h"
 #include "template/symm.h"
 #include "template/planar_complex_matmul.h"
 #include "template/matrix_inverse.h"
@@ -292,6 +294,9 @@ REGISTER_TORCH_FUNC(trmm);
 static auto& basic_conv2d = BasicConv2dOp::Run;
 REGISTER_TORCH_FUNC(basic_conv2d);
 
+static auto& conv2d_bias_silu = Conv2dBiasSiluOp::Run;
+REGISTER_TORCH_FUNC(conv2d_bias_silu);
+
 static auto& mla = MlaOp::Run;
 REGISTER_TORCH_FUNC(mla);
 
@@ -462,6 +467,9 @@ REGISTER_TORCH_FUNC(ascend950_rain_fusion_attention);
 
 static auto& ascend950_basic_conv2d_tla = Ascend950BasicConv2dTLAOp::Run;
 REGISTER_TORCH_FUNC(ascend950_basic_conv2d_tla);
+
+static auto& ascend950_conv2d_bias_silu = Ascend950Conv2dBiasSiluOp::Run;
+REGISTER_TORCH_FUNC(ascend950_conv2d_bias_silu);
 
 static auto& conv_bias = ConvBiasOp::Run;
 REGISTER_TORCH_FUNC(conv_bias);

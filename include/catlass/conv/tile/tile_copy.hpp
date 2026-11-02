@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2025 Huawei Technologies Co., Ltd.
+ * Copyright (c) 2025-2026 Huawei Technologies Co., Ltd.
  * This file is a part of the CANN Open Software.
  * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
  * CANN Open Software License Agreement Version 2.0 (the "License").
@@ -36,12 +36,15 @@ template <
     /// ConvType type for Output operand
     class OutputType,
     /// ConvType type for Bias operand
-    class BiasType = void>
+    class BiasType = void,
+    /// 卷积累加类型：默认void表示按输入类型自动推导；可显式指定half启用fp16累加特化
+    class ElementAccumulator_ = void>
 struct TileCopy {
     using ElementFmap = typename FmapType::Element;
     using ElementFilter = typename FilterType::Element;
-    using ElementAccumulator =
-        typename Gemm::helper::ElementAccumulatorSelector<ElementFmap, ElementFilter>::ElementAccumulator;
+    using ElementAccumulator = std::conditional_t<
+        !std::is_void_v<ElementAccumulator_>, ElementAccumulator_,
+        typename Gemm::helper::ElementAccumulatorSelector<ElementFmap, ElementFilter>::ElementAccumulator>;
 
     using CopyGmToL1A = Conv::Tile::CopyGmToL1<ArchTag, FmapType>;
     using CopyGmToL1B = Conv::Tile::CopyGmToL1<ArchTag, FilterType>;
@@ -55,7 +58,9 @@ template <
     /// Tag indicating architecture
     class ArchTag, class ElementFmap_, class LayoutTagFmap_, class ElementFilter_, class LayoutTagFilter_,
     class ElementOutput_, class LayoutTagOutput_, class ElementBias = void, bool ReluEnable_ = false,
-    ScaleGranularity DEQUANT_GRANULARITY_ = ScaleGranularity::NO_QUANT>
+    ScaleGranularity DEQUANT_GRANULARITY_ = ScaleGranularity::NO_QUANT,
+    /// 卷积累加类型：默认void表示按输入类型自动推导；可显式指定half启用fp16累加特化
+    class ElementAccumulator_ = void>
 struct PackedTileCopyTla {
     using ElementFmap = ElementFmap_;
     using ElementFilter = ElementFilter_;
@@ -63,8 +68,9 @@ struct PackedTileCopyTla {
     using LayoutTagFmap = LayoutTagFmap_;
     using LayoutTagFilter = LayoutTagFilter_;
     using LayoutTagOutput = LayoutTagOutput_;
-    using ElementAccumulator =
-        typename Gemm::helper::ElementAccumulatorSelector<ElementFmap, ElementFilter>::ElementAccumulator;
+    using ElementAccumulator = std::conditional_t<
+        !std::is_void_v<ElementAccumulator_>, ElementAccumulator_,
+        typename Gemm::helper::ElementAccumulatorSelector<ElementFmap, ElementFilter>::ElementAccumulator>;
     static constexpr bool ReluEnable = ReluEnable_;
     static constexpr ScaleGranularity DEQUANT_GRANULARITY = DEQUANT_GRANULARITY_;
 

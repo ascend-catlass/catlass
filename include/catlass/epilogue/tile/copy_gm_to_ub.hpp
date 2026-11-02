@@ -21,6 +21,7 @@
 #include "catlass/layout/layout.hpp"
 #include "catlass/gemm/gemm_type.hpp"
 #include "catlass/numeric_size.hpp"
+#include "catlass/conv_coord.hpp"
 
 namespace Catlass::Epilogue::Tile {
 
@@ -261,6 +262,149 @@ struct CopyGm2UbAligned<Arch::Ascend950, Gemm::GemmType<Element, layout::RowMajo
     }
 };
 
+////////////////////////////////////////////////////////////
+// NC1HWC0 specialized copies for Conv2d epilogue
+////////////////////////////////////////////////////////////
+
+template <typename Element>
+struct CopyGm2Ub<Arch::AtlasA2, Gemm::GemmType<Element, layout::NC1HWC0>> {
+    using LayoutSrc = layout::NC1HWC0;
+    using LayoutDst = layout::RowMajor;
+
+    static constexpr uint32_t C0_SIZE = BYTE_PER_C0 / sizeof(Element);
+
+    CATLASS_DEVICE
+    CopyGm2Ub() = default;
+
+    CATLASS_DEVICE
+    void operator()(
+        AscendC::LocalTensor<Element> const& dstTensor, AscendC::GlobalTensor<Element> const& srcTensor,
+        layout::RowMajor const& layoutDst, layout::NC1HWC0 const& layoutSrc, int64_t tileBaseOffset = 0,
+        uint32_t localStart = 0)
+    {
+        uint32_t batch = layoutSrc.shape(0);
+        uint32_t c1 = layoutSrc.shape(1);
+        uint32_t h = layoutSrc.shape(2);
+        uint32_t w = layoutSrc.shape(3);
+        uint32_t c0 = layoutSrc.shape(4);
+
+        uint32_t totalElements = batch * c1 * h * w * c0;
+        uint32_t dstRows = layoutDst.shape(0);
+        uint32_t dstCols = layoutDst.shape(1);
+        uint32_t actualLen = dstRows * dstCols;
+
+        if (actualLen >= totalElements) {
+            actualLen = totalElements;
+        }
+
+        int64_t strideB = layoutSrc.stride(0);
+        int64_t strideC1 = layoutSrc.stride(1);
+        int64_t strideH = layoutSrc.stride(2);
+        int64_t strideW = layoutSrc.stride(3);
+        int64_t strideC0 = layoutSrc.stride(4);
+
+        int64_t localFlat = localStart;
+        uint32_t remainingElements = actualLen;
+        uint32_t dstIdx = 0;
+
+        while (remainingElements > 0) {
+            uint32_t chunkSize = (remainingElements > C0_SIZE) ? C0_SIZE : remainingElements;
+
+            uint32_t localC0 = localFlat % c0;
+            uint32_t remIdx = localFlat / c0;
+            uint32_t localW = remIdx % w;
+            remIdx /= w;
+            uint32_t localH = remIdx % h;
+            remIdx /= h;
+            uint32_t localC1 = remIdx % c1;
+            uint32_t localB = remIdx / c1;
+
+            int64_t gmOffset = tileBaseOffset + localB * strideB + localC1 * strideC1 + localH * strideH +
+                               localW * strideW + localC0 * strideC0;
+
+            AscendC::DataCopyExtParams copyParams(1, chunkSize * sizeof(Element), 0, 0, 0);
+            AscendC::DataCopyPadExtParams<Element> padParams(false, 0, 0, 0);
+            AscendC::DataCopyPad(dstTensor[dstIdx], srcTensor[gmOffset], copyParams, padParams);
+
+            localFlat += chunkSize;
+            dstIdx += chunkSize;
+            remainingElements -= chunkSize;
+        }
+    };
+};
+
+#if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510) || (defined(__NPU_ARCH__) && __NPU_ARCH__ == 3510)
+template <typename Element>
+struct CopyGm2Ub<Arch::Ascend950, Gemm::GemmType<Element, layout::NC1HWC0>> {
+    using LayoutSrc = layout::NC1HWC0;
+    using LayoutDst = layout::RowMajor;
+
+    static constexpr uint32_t C0_SIZE = BYTE_PER_C0 / sizeof(Element);
+
+    CATLASS_DEVICE
+    CopyGm2Ub() = default;
+
+    CATLASS_DEVICE
+    void operator()(
+        AscendC::LocalTensor<Element> const& dstTensor, AscendC::GlobalTensor<Element> const& srcTensor,
+        layout::RowMajor const& layoutDst, layout::NC1HWC0 const& layoutSrc, int64_t tileBaseOffset = 0,
+        uint32_t localStart = 0)
+    {
+        uint32_t batch = layoutSrc.shape(0);
+        uint32_t c1 = layoutSrc.shape(1);
+        uint32_t h = layoutSrc.shape(2);
+        uint32_t w = layoutSrc.shape(3);
+        uint32_t c0 = layoutSrc.shape(4);
+
+        uint32_t totalElements = batch * c1 * h * w * c0;
+        uint32_t dstRows = layoutDst.shape(0);
+        uint32_t dstCols = layoutDst.shape(1);
+        uint32_t actualLen = dstRows * dstCols;
+
+        if (actualLen >= totalElements) {
+            actualLen = totalElements;
+        }
+
+        // tileBaseOffset is the absolute GM offset for the tile's local index 0
+        // localStart is the starting local index within the tile
+        int64_t strideB = layoutSrc.stride(0);
+        int64_t strideC1 = layoutSrc.stride(1);
+        int64_t strideH = layoutSrc.stride(2);
+        int64_t strideW = layoutSrc.stride(3);
+        int64_t strideC0 = layoutSrc.stride(4);
+
+        int64_t localFlat = localStart;
+        uint32_t remainingElements = actualLen;
+        uint32_t dstIdx = 0;
+
+        while (remainingElements > 0) {
+            uint32_t chunkSize = (remainingElements > C0_SIZE) ? C0_SIZE : remainingElements;
+
+            // Convert localFlat to tile-local NC1HWC0 coordinate
+            uint32_t localC0 = localFlat % c0;
+            uint32_t remIdx = localFlat / c0;
+            uint32_t localW = remIdx % w;
+            remIdx /= w;
+            uint32_t localH = remIdx % h;
+            remIdx /= h;
+            uint32_t localC1 = remIdx % c1;
+            uint32_t localB = remIdx / c1;
+
+            // Compute absolute GM offset: tileBaseOffset + local coord * global strides
+            int64_t gmOffset = tileBaseOffset + localB * strideB + localC1 * strideC1 + localH * strideH +
+                               localW * strideW + localC0 * strideC0;
+
+            AscendC::DataCopyExtParams copyParams(1, chunkSize * sizeof(Element), 0, 0, 0);
+            AscendC::DataCopyPadExtParams<Element> padParams(false, 0, 0, 0);
+            AscendC::DataCopyPad(dstTensor[dstIdx], srcTensor[gmOffset], copyParams, padParams);
+
+            localFlat += chunkSize;
+            dstIdx += chunkSize;
+            remainingElements -= chunkSize;
+        }
+    };
+};
+#endif
 } // namespace Catlass::Epilogue::Tile
 
 #endif

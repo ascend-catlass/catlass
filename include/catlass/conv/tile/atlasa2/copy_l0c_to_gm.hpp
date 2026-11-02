@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2025 Huawei Technologies Co., Ltd.
+ * Copyright (c) 2025-2026 Huawei Technologies Co., Ltd.
  * This file is a part of the CANN Open Software.
  * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
  * CANN Open Software License Agreement Version 2.0 (the "License").
@@ -40,6 +40,12 @@ struct CopyL0CToGmQuantMode {
 template <>
 struct CopyL0CToGmQuantMode<Catlass::Arch::AtlasA2, float, half, ScaleGranularity::NO_QUANT> {
     static constexpr auto VALUE = QuantMode_t::F322F16;
+};
+
+// CopyL0CToGm half to half (fp16累加特化：L0C累加结果为half，直接搬出到GM无需类型转换)
+template <>
+struct CopyL0CToGmQuantMode<Catlass::Arch::AtlasA2, half, half, ScaleGranularity::NO_QUANT> {
+    static constexpr auto VALUE = QuantMode_t::NoQuant;
 };
 
 // CopyL0CToGm cast fp32 to bf16

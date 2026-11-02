@@ -10,3 +10,7 @@
 
 set_source_files_properties(basic_conv2d_tla.cpp PROPERTIES LANGUAGE ASC)
 catlass_example_add_executable(56_ascend950_basic_conv2d_tla cube basic_conv2d_tla.cpp)
+
+set_source_files_properties(conv2d_bias_silu.cpp PROPERTIES LANGUAGE ASC)
+catlass_example_add_executable(56_ascend950_conv2d_bias_silu mix conv2d_bias_silu.cpp)
+target_link_libraries(56_ascend950_conv2d_bias_silu PRIVATE m)

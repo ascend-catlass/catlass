@@ -937,6 +937,23 @@ def test_83_ascend950_hstu_infer_paged(build_env):
     run_case(build_env, "83_ascend950_hstu_infer", case_cpp)
 
 
+@only_on_3510
+def test_56_ascend950_conv2d_bias_silu(build_env):
+    # Default shape from example Options: stride=2, 3x3 kernel, pad=2
+    case_cpp = [str(i) for i in [2, 33, 43, 112, 80, 3, 3, 2, 2, 2, 2, 2, 2, 1, 1]]
+    case_cpp.append(DEVICE_ID)
+    run_case(build_env, "56_ascend950_conv2d_bias_silu", case_cpp)
+
+
+@only_on_2201
+def test_33_conv2d_bias_silu(build_env):
+    # Default shape from example Options: stride=1, 3x3 kernel, pad=2 (stride=2 with a
+    # 3x3 kernel exceeds the AtlasA2 512K L1 and is rejected by CanImplement).
+    case_cpp = [str(i) for i in [2, 33, 43, 112, 80, 3, 3, 2, 2, 2, 2, 1, 1, 1, 1]]
+    case_cpp.append(DEVICE_ID)
+    run_case(build_env, "33_conv2d_bias_silu", case_cpp)
+
+
 # ---------------------------------------------------------------------------
 # normal cases: generated via parametrize
 # ---------------------------------------------------------------------------
@@ -970,6 +987,7 @@ normal_cases_2201 = [
     "30_w8a16_matmul 256 512 1024 0",
     "31_small_matmul 256 1024 256 0",
     "33_basic_conv2d 2 33 43 112 80 3 3 2 2 2 2 1 1 1 1 0",
+    "33_conv2d_bias_silu 2 33 43 112 80 3 3 2 2 2 2 1 1 1 1 0",
     "37_streamk_matmul 256 512 1024 0",
     "34_single_core_splitk_matmul 256 512 1024 0",
     "42_quant_optimized_matmul_tla 256 512 1024 0",
@@ -991,6 +1009,7 @@ normal_cases_3510 = [
     "50_ascend950_basic_matmul_gemv 1 128 127 0",
     "51_ascend950_quant_matmul_per_group_per_block_tla 256 512 1024 0",
     "56_ascend950_basic_conv2d_tla 2 33 43 112 80 3 3 2 2 2 2 1 1 1 1 0",
+    "56_ascend950_conv2d_bias_silu 2 33 43 112 80 3 3 2 2 2 2 1 1 1 1 0",
     "60_ascend950_grouped_matmul_slice_m 128 512 1024 2048 0",
     "64_ascend950_matmul_evg_add 256 512 1024 0",
     "64_ascend950_matmul_evg_leaky_relu 256 512 1024 0",

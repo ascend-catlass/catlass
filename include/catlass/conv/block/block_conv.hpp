@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2025 Huawei Technologies Co., Ltd.
+ * Copyright (c) 2025-2026 Huawei Technologies Co., Ltd.
  * This file is a part of the CANN Open Software.
  * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
  * CANN Open Software License Agreement Version 2.0 (the "License").
@@ -33,7 +33,10 @@ struct BlockConv {
 template <
     class DispatchPolicy, class FmapL1TileShape, class FilterL1TileShape, class L0TileShape, class FmapType,
     class FilterType, class OutputType, class BiasType = void,
-    class TileCopy = Conv::Tile::TileCopy<typename DispatchPolicy::ArchTag, FmapType, FilterType, OutputType, BiasType>,
+    /// 卷积累加类型：默认void表示按输入类型自动推导；可显式指定half启用fp16累加特化
+    class ElementAccumulator = void,
+    class TileCopy = Conv::Tile::TileCopy<
+        typename DispatchPolicy::ArchTag, FmapType, FilterType, OutputType, BiasType, ElementAccumulator>,
     class TileMmad = Gemm::Tile::TileMmad<typename DispatchPolicy::ArchTag, FmapType, FilterType, BiasType>>
 struct BlockConv2d {
     static_assert(DEPENDENT_FALSE<DispatchPolicy>, "BlockConv2d is not implemented for this DispatchPolicy");
@@ -42,10 +45,12 @@ struct BlockConv2d {
 
 template <
     class DispatchPolicy, class FmapL1TileShape, class FilterL1TileShape, class L0TileShape, class ElementFmap,
-    class ElementFilter, class ElementOutput, class ElementBias = void,
+    class ElementFilter, class ElementOutput,
+    /// 卷积累加类型：默认void表示按输入类型自动推导（half输入推导为float）；可显式指定half启用fp16累加特化
+    class ElementAccumulator = void, class ElementBias = void,
     class TileCopy = Conv::Tile::PackedTileCopyTla<
         typename DispatchPolicy::ArchTag, ElementFmap, layout::NC1HWC0, ElementFilter, layout::CI1KHKWCOCI0,
-        ElementOutput, layout::NC1HWC0, ElementBias>,
+        ElementOutput, layout::NC1HWC0, ElementBias, false, Conv::Tile::ScaleGranularity::NO_QUANT, ElementAccumulator>,
     class TileMmad =
         Gemm::Tile::TileMmadTla<typename DispatchPolicy::ArchTag, ElementFmap, typename TileCopy::LayoutTagL1A>>
 struct BlockConv2dTla {

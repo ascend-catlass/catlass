@@ -30,3 +30,26 @@ foreach(_SRC ${_BASIC_CONV2D_TLA_SOURCES})
         endforeach()
     endforeach()
 endforeach()
+
+set(_CONV2D_BIAS_SILU_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/conv2d_bias_silu.cpp
+)
+set_source_files_properties(${_CONV2D_BIAS_SILU_SOURCES} PROPERTIES LANGUAGE ASC)
+
+add_kernel(NAME ascend950_conv2d_bias_silu
+    NPU_ARCH_LIST 3510
+    KERNEL_TYPE prebuilt
+    ${_CONV2D_BIAS_SILU_SOURCES}
+)
+
+foreach(_SRC ${_CONV2D_BIAS_SILU_SOURCES})
+    get_filename_component(_SRC_NAME ${_SRC} NAME)
+    foreach(_ARCH 3510)
+        foreach(_MS_SUFFIX "" "_ms")
+            set(_LIB_NAME "catlass_kernel_${_ARCH}_ascend950_conv2d_bias_silu${_MS_SUFFIX}")
+            if(TARGET ${_LIB_NAME})
+                target_compile_definitions(${_LIB_NAME} PRIVATE TILING_KEY_VAR)
+            endif()
+        endforeach()
+    endforeach()
+endforeach()

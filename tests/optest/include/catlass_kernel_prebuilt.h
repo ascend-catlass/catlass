@@ -163,6 +163,11 @@ __attribute__((weak)) void ConvBias(const uint32_t blockNum, aclrtStream stream,
 __attribute__((weak)) void BasicConv2d(const uint32_t blockNum, aclrtStream stream, const ConvParams& params);
 
 /**
+ * @brief Reserved prebuilt interface for example 33_basic_conv2d(conv2d_bias_silu).
+ */
+__attribute__((weak)) void Conv2dBiasSilu(const uint32_t blockNum, aclrtStream stream, const ConvParams& params);
+
+/**
  * @brief Reserved prebuilt interface for example 40_flash_attention_infer_tla.
  */
 __attribute__((weak)) void FlashAttentionInferTLA(
@@ -178,6 +183,12 @@ __attribute__((weak)) void Ascend950FlashAttentionInfer(
  * @brief Reserved prebuilt interface for example 56_ascend950_basic_conv2d_tla.
  */
 __attribute__((weak)) void Ascend950BasicConv2dTLA(
+    const uint32_t blockNum, aclrtStream stream, const ConvParams& params);
+
+/**
+ * @brief Reserved prebuilt interface for example 56_ascend950_basic_conv2d_tla(conv2d_bias_silu).
+ */
+__attribute__((weak)) void Ascend950Conv2dBiasSilu(
     const uint32_t blockNum, aclrtStream stream, const ConvParams& params);
 
 /**

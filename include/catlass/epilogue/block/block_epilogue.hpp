@@ -22,6 +22,7 @@ class BlockEpilogue {
 
 } // namespace Catlass::Epilogue::Block
 
+#include "catlass/epilogue/block/block_epilogue_conv2d_elemwise_no_source.hpp"
 #include "catlass/epilogue/block/block_epilogue_fa_unshared_softmax.hpp"
 #include "catlass/epilogue/block/block_epilogue_rescale_o_no_div_rowsum.hpp"
 #include "catlass/epilogue/block/block_epilogue_combine_scale.hpp"

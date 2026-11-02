@@ -26,12 +26,12 @@ template <
     class FmapL1TileShape_,   // (hoBlock, woBlock, cin1BlockSmall)
     class FilterL1TileShape_, // (coutBlock, cin1BlockBig)
     class L0TileShape_,       // (mL0, nL0, kL0)
-    class ElementFmap_, class ElementFilter_, class ElementOutput_, class ElementBias_, class TileCopy_,
-    class TileMmad_>
+    class ElementFmap_, class ElementFilter_, class ElementOutput_, class ElementAccumulator_, class ElementBias_,
+    class TileCopy_, class TileMmad_>
 struct BlockConv2dTla<
     ConvPingpong<ArchTag_, L1A_STAGES_, L1B_STAGES_, L0A_STAGES_, L0B_STAGES_, L0C_STAGES_, ENABLE_UNIT_FLAG_>,
-    FmapL1TileShape_, FilterL1TileShape_, L0TileShape_, ElementFmap_, ElementFilter_, ElementOutput_, ElementBias_,
-    TileCopy_, TileMmad_> {
+    FmapL1TileShape_, FilterL1TileShape_, L0TileShape_, ElementFmap_, ElementFilter_, ElementOutput_,
+    ElementAccumulator_, ElementBias_, TileCopy_, TileMmad_> {
 public:
     using DispatchPolicy =
         ConvPingpong<ArchTag_, L1A_STAGES_, L1B_STAGES_, L0A_STAGES_, L0B_STAGES_, L0C_STAGES_, ENABLE_UNIT_FLAG_>;
@@ -55,8 +55,9 @@ public:
     using CopyL1ToL0A = typename TileCopy::CopyL1ToL0A;
     using CopyL1ToL0B = typename TileCopy::CopyL1ToL0B;
 
-    using ElementAccumulator =
-        typename Gemm::helper::ElementAccumulatorSelector<ElementFmap, ElementFilter>::ElementAccumulator;
+    using ElementAccumulator = std::conditional_t<
+        !std::is_void_v<ElementAccumulator_>, ElementAccumulator_,
+        typename Gemm::helper::ElementAccumulatorSelector<ElementFmap, ElementFilter>::ElementAccumulator>;
 
     using LayoutTagFmap = typename TileCopy::LayoutTagFmap;
     using LayoutTagFilter = typename TileCopy::LayoutTagFilter;
@@ -193,15 +194,26 @@ public:
         int32_t wiActualOrg = wiActual + blockPadLeft + blockPadRight;
         int32_t hiActualOrg = hiActual + blockPadTop + blockPadBottom;
 
-        // 计算输出特征图大小
+        // 计算输出特征图大小。
+        // 大padding场景下padding外扩会产生超出本block输出tile的无效输出行/列，
+        // 需按L1 tile上限截断，防止howoActual过大导致L0A单stage缓冲越界
         uint32_t hoActual =
-            (hiActualOrg - 1 - (filterParams.kh() - 1) * filterParams.dilationH()) / filterParams.strideH() + 1;
+            min((hiActualOrg - 1 - (filterParams.kh() - 1) * filterParams.dilationH()) / filterParams.strideH() + 1,
+                FmapL1TileShape::Ho);
         uint32_t woActual =
-            (wiActualOrg - 1 - (filterParams.kw() - 1) * filterParams.dilationW()) / filterParams.strideW() + 1;
+            min((wiActualOrg - 1 - (filterParams.kw() - 1) * filterParams.dilationW()) / filterParams.strideW() + 1,
+                FmapL1TileShape::Wo);
         uint32_t howoActual = hoActual * woActual;
 
         uint32_t nPartLoop = CeilDiv(coutActual, L0_TILE_N);
-        uint32_t cin1L0Tile = Max(L0_TILE_K / (filterParams.kh() * filterParams.kw() * ELE_NUM_A_PER_C0), 1U);
+        uint32_t filterKwKhC0 = filterParams.kh() * filterParams.kw() * ELE_NUM_A_PER_C0;
+        uint32_t maxKPartForL0B = L0B_PINGPONG_BUF_SIZE / (L0_TILE_N * sizeof(ElementFilter));
+        uint32_t cin1L0Tile = Max(L0_TILE_K / filterKwKhC0, 1U);
+        uint32_t kPartMaxSize = cin1L0Tile * filterKwKhC0;
+        if (kPartMaxSize > maxKPartForL0B) {
+            kPartMaxSize = maxKPartForL0B;
+            cin1L0Tile = Max(kPartMaxSize / filterKwKhC0, 1U);
+        }
 
         // 特征图layout L1
         auto layoutFmapInL1 = tla::MakeLayoutFmap<ElementFmap>((uint32_t)1, FmapL1TileShape::Cin1, hiActual, wiActual);
@@ -377,7 +389,10 @@ public:
                     bool initC = (cin1LoopIdx == 0) && (kPartIdx == 0);
 
                     // Perfrom calculation operations
-                    tileMmad(tensorTileL0C, tensorL0A, tensorL0B, howoActual, nPartActual, kPartActual, initC);
+                    auto tensorTileL0CMmad = tla::MakeTensor(
+                        tensorTileL0C.data()[tensorTileL0C.layout()(tensorTileL0C.coord())], tensorTileL0C.layout(),
+                        tla::MakeCoord(0, 0), Arch::PositionL0C{});
+                    tileMmad(tensorTileL0CMmad, tensorL0A, tensorL0B, howoActual, nPartActual, kPartActual, initC);
 
                     // Notify to move the next L0A, L0B tile
                     AscendC::SetFlag<AscendC::HardEvent::M_MTE1>(l0BEventList[l0BListId]);
@@ -411,6 +426,12 @@ public:
         uint32_t coutRound = RoundUp(FilterL1TileShape::Cout, C0_NUM_PER_FRACTAL);
         uint32_t l1B_size = FilterL1TileShape::Cin1 * filterParams.kh() * filterParams.kw() * coutRound * BYTE_PER_C0;
         if (l1A_size * L1A_STAGES + l1B_size * L1B_STAGES > ArchTag::L1_SIZE) {
+            return false;
+        }
+        uint32_t filterKwKhC0 = filterParams.kh() * filterParams.kw() * ELE_NUM_A_PER_C0;
+        // L0B LoadData3D硬件约束：单次kPart（=kh*kw*C0）上限为512，超出会触发AIC核错误(507015)
+        constexpr uint32_t MAX_KPART_HW = 512;
+        if (filterKwKhC0 > MAX_KPART_HW) {
             return false;
         }
         return true;

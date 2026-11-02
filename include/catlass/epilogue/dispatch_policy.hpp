@@ -330,6 +330,18 @@ struct EpilogueAtlasA2RescaleO_FD {
     static constexpr LseMode LSE_MODE = LSE_MODE_;
 };
 
+// For AtlasA2 Conv2d epilogue with NC1HWC0 layout
+struct EpilogueAtlasA2Conv2dElemWise {
+    using ArchTag = Arch::AtlasA2;
+    static constexpr uint32_t OPERANDS_NUM = 2;
+};
+
+// For Ascend950 Conv2d epilogue with NC1HWC0 layout
+struct EpilogueAscend950Conv2dElemWise {
+    using ArchTag = Arch::Ascend950;
+    static constexpr uint32_t OPERANDS_NUM = 2;
+};
+
 struct EpilogueSilu {
     using ArchTag = Arch::Ascend950;
     static constexpr uint32_t UB_STAGES = 2;

@@ -11,6 +11,7 @@
 
 from .a2_fp8_e4m3_matmul import a2_fp8_e4m3_matmul  # example 29
 from .ascend950_basic_conv2d_tla import ascend950_basic_conv2d_tla  # example 56
+from .ascend950_conv2d_bias_silu import ascend950_conv2d_bias_silu  # example 56 (conv2d_bias_silu)
 from .ascend950_basic_matmul import ascend950_basic_matmul  # example 43
 from .ascend950_basic_matmul_gemv import ascend950_basic_matmul_gemv  # example 50
 from .ascend950_batched_matmul import ascend950_batched_matmul  # example 67
@@ -71,6 +72,7 @@ from .ascend950_fp8_mx_grouped_matmul_slice_m_swiglu_mx_quant import (
 )
 from .ascend950_streamk_matmul import ascend950_streamk_matmul  # example 66
 from .basic_conv2d import basic_conv2d  # example 33
+from .conv2d_bias_silu import conv2d_bias_silu  # example 33 (conv2d_bias_silu, AtlasA2)
 from .basic_matmul import basic_matmul  # example 00
 from .basic_matmul_preload_zN import basic_matmul_preload_zN  # example 21
 from .basic_matmul_tla import basic_matmul_tla  # example 13
@@ -174,6 +176,7 @@ __all__ = [
     "small_matmul",  # example 31
     "w4a8_matmul",  # example 32
     "basic_conv2d",  # example 33
+    "conv2d_bias_silu",  # example 33 (conv2d_bias_silu, AtlasA2)
     "single_core_splitk_matmul",  # example 34
     "streamk_matmul",  # example 37
     "w4a4_matmul_per_token_per_channel_dequant",  # example 38
@@ -220,6 +223,7 @@ __all__ = [
     "ascend950_fp8_e4m3_quant_matmul",  # experimental/matmul
     "ascend950_fp8_mx_grouped_matmul_finalize_routing_no_deter",  # example 71 no_deter
     "ascend950_basic_conv2d_tla",  # example 56
+    "ascend950_conv2d_bias_silu",  # example 56 (conv2d_bias_silu)
     "ascend950_matmul_full_loadA",  # example 73
     "ascend950_dual_matmul_silu_mul",  # example 78
     "ascend950_matmul_permute",  # example 88

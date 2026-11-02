@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2025 Huawei Technologies Co., Ltd.
+ * Copyright (c) 2025-2026 Huawei Technologies Co., Ltd.
  * This file is a part of the CANN Open Software.
  * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
  * CANN Open Software License Agreement Version 2.0 (the "License").
@@ -12,6 +12,8 @@
 #ifndef CATLASS_CONV_BLOCK_BLOCK_CONV2D_PINGPONG_HPP
 #define CATLASS_CONV_BLOCK_BLOCK_CONV2D_PINGPONG_HPP
 
+#include <type_traits>
+
 #include "catlass/arch/resource.hpp"
 #include "catlass/catlass.hpp"
 #include "catlass/conv/dispatch_policy.hpp"
@@ -23,11 +25,11 @@ namespace Catlass::Conv::Block {
 template <
     uint32_t L1A_STAGES_, uint32_t L1B_STAGES_, uint32_t L0A_STAGES_, uint32_t L0B_STAGES_, uint32_t L0C_STAGES_,
     bool ENABLE_UNIT_FLAG_, class FmapL1TileShape_, class FilterL1TileShape_, class L0TileShape_, class FmapType_,
-    class FilterType_, class OutputType_, class BiasType_, class TileCopy_, class TileMmad_>
+    class FilterType_, class OutputType_, class BiasType_, class ElementAccumulator_, class TileCopy_, class TileMmad_>
 struct BlockConv2d<
     ConvAtlasA2Pingpong<L1A_STAGES_, L1B_STAGES_, L0A_STAGES_, L0B_STAGES_, L0C_STAGES_, ENABLE_UNIT_FLAG_>,
-    FmapL1TileShape_, FilterL1TileShape_, L0TileShape_, FmapType_, FilterType_, OutputType_, BiasType_, TileCopy_,
-    TileMmad_> {
+    FmapL1TileShape_, FilterL1TileShape_, L0TileShape_, FmapType_, FilterType_, OutputType_, BiasType_,
+    ElementAccumulator_, TileCopy_, TileMmad_> {
 public:
     // Type Aliases
     using DispatchPolicy =
@@ -48,8 +50,9 @@ public:
     using CopyL1ToL0A = typename TileCopy_::CopyL1ToL0A;
     using CopyL1ToL0B = typename TileCopy_::CopyL1ToL0B;
     using CopyL0CToGm = typename TileCopy_::CopyL0CToGm;
-    using ElementAccumulator =
-        typename Gemm::helper::ElementAccumulatorSelector<ElementFmap, ElementFilter>::ElementAccumulator;
+    using ElementAccumulator = std::conditional_t<
+        !std::is_void_v<ElementAccumulator_>, ElementAccumulator_,
+        typename Gemm::helper::ElementAccumulatorSelector<ElementFmap, ElementFilter>::ElementAccumulator>;
     using LayoutFmapInL1 = typename CopyL1ToL0A::LayoutSrc;
     using LayoutFilterInL1 = typename CopyL1ToL0B::LayoutSrc;
     using LayoutFmapInL0 = typename CopyL1ToL0A::LayoutDst;
@@ -210,9 +213,11 @@ public:
         int32_t hiActualOrg = hiActual + blockPadTop + blockPadBottom;
 
         uint32_t hoActual =
-            (hiActualOrg - 1 - (filterParams.kh() - 1) * filterParams.dilationH()) / filterParams.strideH() + 1;
+            min((hiActualOrg - 1 - (filterParams.kh() - 1) * filterParams.dilationH()) / filterParams.strideH() + 1,
+                FmapL1TileShape::Ho);
         uint32_t woActual =
-            (wiActualOrg - 1 - (filterParams.kw() - 1) * filterParams.dilationW()) / filterParams.strideW() + 1;
+            min((wiActualOrg - 1 - (filterParams.kw() - 1) * filterParams.dilationW()) / filterParams.strideW() + 1,
+                FmapL1TileShape::Wo);
         uint32_t howoActual = hoActual * woActual;
 
         uint32_t howoRound = RoundUp<L1FmapAlignHelper::HOWO_ALIGNED>(howoActual);
