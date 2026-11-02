@@ -235,10 +235,12 @@ using Ascend950BatchedMatmulOp = BatchedMatmulLike<CatlassKernel::Ascend950Batch
 static auto& ascend950_batched_matmul = Ascend950BatchedMatmulOp::Run;
 REGISTER_TORCH_FUNC(ascend950_batched_matmul);
 
+#if ENABLE_ASCEND950
 using Ascend950BatchedMatmulSoftmaxOp =
     BatchedMatmulSoftmaxLike<CatlassKernel::Ascend950BatchedMatmulSoftmax>;
 static auto& ascend950_batched_matmul_softmax = Ascend950BatchedMatmulSoftmaxOp::Run;
 REGISTER_TORCH_FUNC(ascend950_batched_matmul_softmax);
+#endif
 
 using Ascend950StreamkMatmulOp = MatmulLike<CatlassKernel::Ascend950StreamkMatmul>;
 static auto& ascend950_streamk_matmul = Ascend950StreamkMatmulOp::Run;
@@ -275,9 +277,11 @@ REGISTER_TORCH_FUNC(ascend950_dual_matmul_silu_mul);
 using Ascend950MatmulGatherScatterOp = MatmulGatherScatterLike<CatlassKernel::Ascend950MatmulGatherScatter>;
 static auto& ascend950_matmul_gather_scatter = Ascend950MatmulGatherScatterOp::Run;
 REGISTER_TORCH_FUNC(ascend950_matmul_gather_scatter);
+#if ENABLE_ASCEND950
 using Ascend950MatmulPermuteOp = MatmulLike<CatlassKernel::Ascend950MatmulPermute>;
 static auto& ascend950_matmul_permute = Ascend950MatmulPermuteOp::Run;
 REGISTER_TORCH_FUNC(ascend950_matmul_permute);
+#endif
 using A2Fp8E4M3MatmulOp = MatmulLike<CatlassKernel::A2Fp8E4M3Matmul>;
 static auto& a2_fp8_e4m3_matmul = A2Fp8E4M3MatmulOp::Run;
 REGISTER_TORCH_FUNC(a2_fp8_e4m3_matmul);

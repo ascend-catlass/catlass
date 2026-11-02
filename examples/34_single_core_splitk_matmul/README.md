@@ -2,67 +2,73 @@
 
 ## 功能说明
 
-- 算子功能：优化的矩阵乘计算（优化策略详见[单核切K策略说明](./34_single_splitk_matmul.md)）
+- 算子功能：完成单核切 K（SingleCoreSplitk）优化的矩阵乘计算；当 L0C 不足以容纳放大后的 L1 tile 时，单核内沿 K 分轮累加。优化策略详见[单核切K策略说明](./34_single_splitk_matmul.md)。
+- 计算公式：
 
-## 参数说明
+  $$
+    \begin{aligned}
+    C &= A \times B \\
+    C_{i,j} &= \Sigma_{k} A_{i,k}B_{k,j}
+    \end{aligned}
+  $$
 
-本样例直调参数包括m, n, k, deviceId，与[00_basic_matmul参数](../00_basic_matmul/README.md#样例参数说明)条件一致。
-相应地，算子原型有如下设计：
+  其中$A$和$B$分别是形如`(m,k)`，`(k,n)`的输入矩阵，$C$是形如`(m,n)`的输出矩阵。
 
-| 名称/Name | 类型/Class | 数据类型/Dtype   | 维度/Dims | 格式/Format | 描述/Description |
-| --------- | ---------- | ---------------- | --------- | ----------- | ---------------- |
-| matA      | inTensor   | fp16\|bf16\|fp32 | [m, k]    | ND\|NZ      | 左矩阵，支持转置 |
-| matB      | inTensor   | fp16\|bf16\|fp32 | [k, n]    | ND\|NZ      | 右矩阵，支持转置 |
-| matC      | outTensor  | fp16\|bf16\|fp32 | [m, n]    | ND          | 输出矩阵         |
+- 支持产品型号：Atlas A2/A3系列产品
 
-## 约束说明
+## 样例参数说明
 
-无
+| 参数       | 属性 |shape|dtype| 说明                                                             |
+| ---------- | ------ | --------|---------|----------------------------------------------- |
+| `A`        | Input  | `(m,k)` | `float16/bfloat16/float32` | 左矩阵，支持转置；layout 可配置为 `RowMajor` 或 `ColumnMajor`，也可配合 Padding 使用 `zN`/`nZ` 等格式 |
+| `B`        | Input  | `(k,n)` | `float16/bfloat16/float32` | 右矩阵，支持转置；layout 可配置为 `RowMajor` 或 `ColumnMajor`，数据类型与左矩阵一致 |
+| `C`        | Output | `(m,n)` | `float16/bfloat16/float32` | 矩阵乘结果，layout为`RowMajor`，数据类型与左矩阵一致 |
 
-## 代码组织
+本样例固定使用 A 为 `RowMajor`、B 为 `ColumnMajor` 的配置，命令行不提供转置开关。上述固定配置不限制算子接口的转置能力。
 
-本样例组织结构如下：
+PyTorch 接口 `single_core_splitk_matmul` 通过 `transA` 和 `transB` 指定转置：`transA=false` 时 A 的输入形状为 `(m,k)`，`transA=true` 时为 `(k,m)`；`transB=false` 时 B 的输入形状为 `(k,n)`，`transB=true` 时为 `(n,k)`。输出形状均为 `(m,n)`。
 
-```text
-├── 34_single_splitk_matmul
-│   ├── CMakeLists.txt           # CMake编译文件
-│   ├── single_core_splitk.cpp   # 主文件
-│   └── README.md
-```
+## 使用范围说明
+
+推荐范围：
+
+- `M >= 2048, N >= 2048, K >= 4000` 的大尺寸场景（M、N 过小或 K 偏低会出现分核负载不均衡）。
+- 实测大尺寸场景较 `00_basic_matmul` 约有 1.3~1.75 倍收益，且 K 越大收益越高。
 
 ## 使用示例
 
-1、 编译样例代码，生成相应的算子可执行文件。
+### 命令行参数
 
 ```bash
-# 编译指定用例
-bash scripts/build.sh 34_single_core_splitk_matmul
+34_single_core_splitk_matmul [m] [n] [k] [deviceId]
 ```
 
-2、 切换到可执行文件的编译目录`output/bin`下，并执行算子样例程序。类似于基础样例[00_basic_matmul](../00_basic_matmul/README.md)，测试数据根据命令行输入尺寸随机生成。
+上述命令行参数具体说明如下：
 
-```bash
-cd output/bin
-# 可执行文件名 |矩阵m轴|n轴|k轴|Device ID
-# Device ID可选，默认为0
-./34_single_core_splitk_matmul 256 512 1024 0
-```
+| 参数 | 默认值 | 参数说明 |
+| --- | --- | --- |
+| `m` | 无 | A 矩阵的 m 轴大小 |
+| `n` | 无 | B 矩阵的 n 轴大小 |
+| `k` | 无 | A/B 矩阵的 k 轴大小 |
+| `deviceId` | `0` | 指定运行设备ID |
 
-• 256：矩阵m轴
+### 执行示例
 
-• 512：n轴
+1. 进入项目根目录，编译样例代码生成相应的算子可执行文件。
 
-• 1024：k轴
+    ```bash
+    bash scripts/build.sh 34_single_core_splitk_matmul
+    ```
 
-• 0：Device ID，可选，默认为0
+2. 切换到可执行文件的编译目录 `output/bin`，执行算子样例程序。
 
-执行结果如下，说明精度比对成功。
+    ```bash
+    cd output/bin
+    ./34_single_core_splitk_matmul 256 512 1024 0
+    ```
 
-```text
-Compare success.
-```
+3. 执行结果如下，说明样例执行成功，精度通过：
 
-## 模板推荐场景
-
-本样例为单核切 K 模板（SingleCoreSplitk），L0C 容量不足以容纳放大后的 L1 tile 时，单核内沿 K 分轮累加；实测大尺寸场景较 `00_basic_matmul` 有 1.3~1.75 倍收益且 K 越大收益越高（详见[单核切K策略说明](./34_single_splitk_matmul.md)）。
-推荐 MNK 范围：`M、N ≥ 2048 且 K ≥ 4000` 的大尺寸场景（M、N 过小或 K 偏低会出现分核负载不均衡）。
+    ```text
+    Compare success.
+    ```

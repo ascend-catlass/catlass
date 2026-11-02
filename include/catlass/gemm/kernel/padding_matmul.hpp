@@ -350,7 +350,10 @@ struct PaddingMatrixNZ {
         bool cond4 = computeLayoutSrc.shape(0) > 1024; // Empirical parameters
         // VnchwND2NZ requires that the shape must be equal the stride
         bool cond5 = computeLayoutSrc.shape(1) == computeLayoutSrc.stride(0);
-        if (cond0 && cond4 && (cond1 || cond2 || cond3) && cond5) {
+        // VnchwND2NZ only initializes address tables for half and float.
+        if constexpr (!std::is_same_v<Element, half> && !std::is_same_v<Element, float>) {
+            CommonND2NZ(dst, src, computeLayoutDst, computeLayoutSrc);
+        } else if (cond0 && cond4 && (cond1 || cond2 || cond3) && cond5) {
             VnchwND2NZ(dst, src, computeLayoutDst, computeLayoutSrc);
         } else {
             CommonND2NZ(dst, src, computeLayoutDst, computeLayoutSrc);
