@@ -73,4 +73,4 @@ Export the current build tree as:
 export CATLASS_DSL_PREBUILT_ASCENDNPU_IR="$PWD"
 ```
 
-Then return to the DSL subproject and continue with [Building CATLASS Python](build.md) and [Running Test Cases](testing.md).
+Then return to the CATLASS Python subproject and continue with [Building CATLASS Python](build.md) and [Running Test Cases](testing.md).

@@ -4,11 +4,11 @@ nav_order: 50
 
 # CMake Target Debugging
 
-TLA DSL uses [`build.sh`](../build_guide/build.md) to prepare the AscendNPU-IR paths and configure CMake uniformly. This document is for developers who need to compile CMake targets individually or run compiler regression tests.
+CATLASS Python uses [`build.sh`](../build_guide/build.md) to prepare the AscendNPU-IR paths and configure CMake uniformly. This document is for developers who need to compile CMake targets individually or run compiler regression tests.
 
 ## Configuration and Compilation
 
-First load CANN, then run a Development build in the DSL subproject root:
+First load CANN, then run a Development build in the CATLASS Python subproject root:
 
 ```bash
 source /path/to/cann/set_env.sh

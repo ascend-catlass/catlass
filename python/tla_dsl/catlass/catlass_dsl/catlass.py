@@ -87,16 +87,16 @@ class CatlassBaseDSL(BaseDSL):
             Example:
             ```python
             @tla.kernel
-            def vadd(src: tla.Tensor, dst: tla.Tensor) -> None:
+            def copy_kernel(src: tla.Tensor, dst: tla.Tensor) -> None:
                 with tla.vector():
-                    tla.copy(src, dst)
+                    tla.copy(dst, src)
 
             @tla.kernel(auto_sync="v0")
-            def vadd_auto(src: tla.Tensor, dst: tla.Tensor) -> None:
+            def copy_kernel_auto(src: tla.Tensor, dst: tla.Tensor) -> None:
                 with tla.vector():
-                    tla.copy(src, dst)
+                    tla.copy(dst, src)
 
-            compiled = tla.compile(vadd, tx, ty, options="--npu-arch 3510")
+            compiled = tla.compile(copy_kernel, tx, ty, options="--npu-arch 3510")
             compiled(tx, ty, block_num=1)
             ```
 
@@ -159,7 +159,7 @@ class CatlassBaseDSL(BaseDSL):
 
 
 class TlaDSL(CatlassBaseDSL):
-    """Concrete TLA DSL class used by ``catlass.tla``."""
+    """Concrete TLA Python class used by ``catlass.tla``."""
 
 
 __all__ = ["CatlassBaseDSL", "TlaDSL"]

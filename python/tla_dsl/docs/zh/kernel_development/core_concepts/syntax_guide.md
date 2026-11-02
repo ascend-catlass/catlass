@@ -2,9 +2,9 @@
 nav_order: 10
 ---
 
-# DSL 语法约束
+# 语法约束
 
-CATLASS Python 采用Python作为kernel描述语言，但由于NPU架构、性能考虑等因素，DSL并不支持完整的Python语言特性。只有部分的Python描述能够被映射为有意义的NPU指令。本文将对这些限制进行介绍。
+CATLASS Python 采用 Python 作为 kernel 描述语言，但受 NPU 架构、性能等因素限制，CATLASS Python 并不支持完整的 Python 语言特性。只有部分 Python 写法能够被映射为有意义的 NPU 指令。本文介绍这些限制。
 
 ## 基本概念
 
@@ -22,7 +22,7 @@ CATLASS Python 采用Python作为kernel描述语言，但由于NPU架构、性�
 
 ### 值、分支与循环的动态与静态
 
-编译、运行两个步骤将DSL中的值、分支与循环区分为动态与静态。判断一个值、分支或循环是动态还是静态，看它的值或条件是否依赖运行时才确定的数值。
+编译、运行两个步骤将Python中的值、分支与循环区分为动态与静态。判断一个值、分支或循环是动态还是静态，看它的值或条件是否依赖运行时才确定的数值。
 
 | 类别 | 判定 | 例子 |
 | --- | --- | --- |
@@ -141,7 +141,7 @@ def static_stages(count: tla.Constexpr[int]) -> None:
 
 ### with 区域
 
-NPU 中存在cube核与vector核，在DSL中被抽象为两个可使用`with`进入的区域。
+NPU 中存在cube核与vector核，在Python中被抽象为两个可使用`with`进入的区域。
 
 - **Cube 区域**：用 `with tla.cube(...)` 进入，承载cube核上的运算。
 - **Vector 区域**：用 `with tla.vector(...)` 进入，承载vector核上的运算。

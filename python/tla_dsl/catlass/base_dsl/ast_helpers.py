@@ -9,7 +9,7 @@ from typing import Any, Callable
 
 
 class DSLOptimizationWarning(Warning):
-    """Warning for Tla DSL patterns that may be expensive to compile."""
+    """Warning for TLA Python patterns that may be expensive to compile."""
 
     def __init__(self, message: str) -> None:
         self.message = message

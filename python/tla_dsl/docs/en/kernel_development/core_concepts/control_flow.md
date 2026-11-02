@@ -2,7 +2,7 @@
 nav_order: 20
 ---
 
-# DSL Control Flow
+# Control Flow
 
 TLA kernel bodies are executed by Python while the frontend builds device IR. This makes ordinary, inspectable Python staging code useful for deriving static configuration before an operation is lowered.
 
@@ -31,7 +31,7 @@ def kernel(limit: int) -> None:
 
 ## Runtime control flow and promotion
 
-Conditions and loop bounds backed by DSL values create runtime control flow. Values written in such a region become runtime state. Promote a Python scalar explicitly with `tla.as_numeric(...)` before assigning to it in a runtime `if`, `tla.range` loop, `while`, or outlined DSL `with` region:
+Conditions and loop bounds backed by Python values create runtime control flow. Values written in such a region become runtime state. Promote a Python scalar explicitly with `tla.as_numeric(...)` before assigning to it in a runtime `if`, `tla.range` loop, `while`, or outlined Python `with` region:
 
 ```python
 @tla.kernel
@@ -58,4 +58,4 @@ Dataclass values may be constructed, carried, and rebound in runtime control flo
 
 ## `@tla.jit`
 
-`@tla.jit` is a DSL helper used while a kernel is being lowered. It may be called from `@tla.kernel`, but calling or launching an `@tla.kernel` from it is currently unsupported. Direct `@tla.kernel` invocation is also currently unsupported. Compile explicitly with `tla.compile(kernel, *sample_args)`, then invoke the returned compiled function.
+`@tla.jit` is a Python helper used while a kernel is being lowered. It may be called from `@tla.kernel`, but calling or launching an `@tla.kernel` from it is currently unsupported. Direct `@tla.kernel` invocation is also currently unsupported. Compile explicitly with `tla.compile(kernel, *sample_args)`, then invoke the returned compiled function.

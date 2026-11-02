@@ -21,7 +21,7 @@ cd /path/to/catlass/python/tla_dsl
 2. Build the compiler and Python extension in `csrc/mlir/build`.
 3. Install `ascend-catlass-dsl` in editable mode without reinstalling dependencies.
 
-- `--clean` deletes `build/`, `csrc/mlir/build/`, `dist/`, egg-info, pytest caches, and the binary library (`_tla_type_bridge_native*.so`) in the DSL subproject, then performs a Development mode build.
+- `--clean` deletes `build/`, `csrc/mlir/build/`, `dist/`, egg-info, pytest caches, and the binary library (`_tla_type_bridge_native*.so`) in the CATLASS Python subproject, then performs a Development mode build.
 
 After a successful build, check the key artifacts:
 

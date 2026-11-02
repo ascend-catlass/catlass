@@ -64,7 +64,7 @@ cd /path/to/catlass
 bash tests/run_dsl_test.sh --device 0
 ```
 
-该脚本会加载 CANN、检查 AscendNPU-IR、构建 DSL，并运行 `tests/dsl_battery` 上板回归测试。
+该脚本会加载 CANN、检查 AscendNPU-IR、构建 Python，并运行 `tests/dsl_battery` 上板回归测试。
 
 常用变量如下：
 
@@ -72,7 +72,7 @@ bash tests/run_dsl_test.sh --device 0
 | ----------------------------------- | -------------------------------------------------------- |
 | `ASCEND_HOME_PATH`                  | CANN Toolkit 根目录；脚本也会尝试定位并加载 `set_env.sh` |
 | `CATLASS_DSL_PREBUILT_ASCENDNPU_IR` | 共享的 AscendNPU-IR 源码与构建树根目录，作为仓库内子模块之后的回退路径 |
-| `CATLASS_DSL_DIR`                   | DSL 子项目路径；默认从脚本位置推导                       |
+| `CATLASS_DSL_DIR`                   | Python 子项目路径；默认从脚本位置推导                       |
 | `DEVICE_ID`                         | NPU device id；默认 `1`，可由 `--device` 覆盖            |
 | `CATLASS_DSL_FORCE_RECOMPILE`       | 是否强制重新编译运行时产物；脚本默认设为 `1`             |
 

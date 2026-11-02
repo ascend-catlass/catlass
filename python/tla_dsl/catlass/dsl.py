@@ -1,4 +1,4 @@
-"""Tla DSL decorators and lowering entry points."""
+"""TLA Python decorators and lowering entry points."""
 
 from __future__ import annotations
 

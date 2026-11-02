@@ -5,7 +5,7 @@ nav_order: 46
 # 结构化 Kernel 参数
 
 Kernel 参数可以是 Tensor、标量，也可以是包含它们的 tuple/list、NamedTuple、
-dataclass。用户直接传递 Python 结构，DSL 负责展开参数并在编译函数体时
+dataclass。用户直接传递 Python 结构，Python 负责展开参数并在编译函数体时
 恢复对应结构，无需手写设备 ABI。
 
 本文说明使用方式。Tensor 创建见 [Tensor 接入](tensor_binding.md)，编译对象与 stream
@@ -142,7 +142,7 @@ compiled(tx, aux, tout, block_num=1)
 ```
 
 动态维度和布局约束见 [静态与动态 Layout](layout.md)。
-普通 Tensor 与 Dynamic-GM 可以组合传入；描述符的物理字段由 DSL 处理。
+普通 Tensor 与 Dynamic-GM 可以组合传入；描述符的物理字段由 Python 处理。
 混合参数示例见 [mixed_memref_arguments.py](../../../../../../examples/python/tla_dsl/dsl_tutorials/structured_arguments/mixed_memref_arguments.py)。
 
 ## 已编译对象的复用

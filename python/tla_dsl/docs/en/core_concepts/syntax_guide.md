@@ -2,7 +2,7 @@
 nav_order: 10
 ---
 
-# DSL Syntax Constraints
+# Syntax Constraints
 
 ## Basic Concepts
 
@@ -11,11 +11,11 @@ nav_order: 10
 `@tla.kernel` is the device-kernel entry point. Direct invocation is currently
 unsupported. Compile it explicitly with
 `compiled = tla.compile(kernel, *sample_args)`, then launch with
-`compiled(*runtime_args, block_num=...)`. `@tla.jit` is a DSL helper callable
+`compiled(*runtime_args, block_num=...)`. `@tla.jit` is a Python helper callable
 from a kernel and is preprocessed before lowering; calling or launching an
 `@tla.kernel` from it is currently unsupported.
 
-Bare Python helpers may also be called while a kernel is emitting device-time code. They execute in the caller's active emission context and may directly emit supported TLA operations. Use `@tla.jit` when the helper itself needs DSL control-flow preprocessing. A bare helper called from device-time control flow must not declare `global` or `nonlocal`; calling a kernel as a helper and recursive `@tla.jit` calls are unsupported.
+Bare Python helpers may also be called while a kernel is emitting device-time code. They execute in the caller's active emission context and may directly emit supported TLA operations. Use `@tla.jit` when the helper itself needs Python control-flow preprocessing. A bare helper called from device-time control flow must not declare `global` or `nonlocal`; calling a kernel as a helper and recursive `@tla.jit` calls are unsupported.
 
 At compile time, kernels and helpers may also use ordinary Python functions, lambdas, nested functions, closures, class constructors, properties, and bound methods to derive compile-time configuration.
 

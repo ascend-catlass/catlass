@@ -2,7 +2,7 @@
 nav_order: 30
 ---
 
-# Calling bc to Integrate the Entire DSL Backend — Taking tla.copy as an Example
+# Calling bc to Integrate the Entire Python Backend — Taking tla.copy as an Example
 
 ---
 
@@ -62,11 +62,11 @@ This one file alone has **8+ partial specializations**, handling RowMajor->zN, z
 - [copy_l1_to_l0a.hpp](../../../../../../include/catlass/gemm/tile/ascend950/copy_l1_to_l0a.hpp) / [copy_l1_to_l0b.hpp](../../../../../../include/catlass/gemm/tile/ascend950/copy_l1_to_l0b.hpp) (L1 -> L0A/L0B)
 - vector-side [copy_gm_to_ub_tla.hpp](../../../../../../include/catlass/epilogue/tile/copy_gm_to_ub_tla.hpp) / [copy_ub_to_gm_tla.hpp](../../../../../../include/catlass/epilogue/tile/copy_ub_to_gm_tla.hpp) / [copy_ub_to_l1_tla.hpp](../../../../../../include/catlass/epilogue/tile/copy_ub_to_l1_tla.hpp)
 
-These templates are the fruit of C++ library tuning and encode a large amount of hardware detail (C0 stride, the choice between Nd2Nz and DataCopy, Fixpipe's quantization/ReLU/unit_flag). **If the DSL reimplemented them in MLIR passes, it would be enormous duplicated effort and prone to diverging from the C++ library implementation — the same move operator would have two sets of logic, with extremely high long-term maintenance cost.**
+These templates are the fruit of C++ library tuning and encode a large amount of hardware detail (C0 stride, the choice between Nd2Nz and DataCopy, Fixpipe's quantization/ReLU/unit_flag). **If CATLASS Python reimplemented them in MLIR passes, it would be enormous duplicated effort and prone to diverging from the C++ library implementation — the same move operator would have two sets of logic, with extremely high long-term maintenance cost.**
 
 ### The reuse idea: the contract lives in MLIR, the implementation in C++ templates, and bc is the bridge
 
-The choice of TLA DSL is to **reuse rather than reimplement**. The reuse mechanism decouples "what to call" from "how it is implemented":
+The choice of CATLASS Python is to **reuse rather than reimplement**. The reuse mechanism decouples "what to call" from "how it is implemented":
 
 | Layer | Responsibility | Location |
 |----|------|---------|
@@ -117,7 +117,7 @@ kernel.o   (the stub is inlined as a DMA intrinsic by always_inline)
 | `meta_op.aic.c310.bc` | the bodies of all runtime stubs for the cube core (AIC) | compiled from this project's `csrc/mlir/bc/Cube/*.cpp` + merged with `llvm-link` |
 | `meta_op.aiv.c310.bc` | the bodies of all runtime stubs for the vector core (AIV) | compiled from this project's `csrc/mlir/bc/Vector/*.cpp` + merged with `llvm-link` |
 
-These functions include: DMA movement (`dma.cpp`), matrix multiplication (`mmad.cpp`), debug printing (`print_tensor.cpp`), mutexes (`mutex.cpp`), RegStore (`store.cpp`), and so on. They are the "implementation layer" between the DSL and the AscendC hardware API: the DSL pipeline only generates the IR that calls them, and how the data is actually moved is decided by the C++ templates such as `AscendC::DataCopy` / `AscendC::Fixpipe` inside the stubs (see Section 1); when `bisheng` compiles a stub, it inlines these AscendC calls out into DMA intrinsics.
+These functions include: DMA movement (`dma.cpp`), matrix multiplication (`mmad.cpp`), debug printing (`print_tensor.cpp`), mutexes (`mutex.cpp`), RegStore (`store.cpp`), and so on. They are the "implementation layer" between CATLASS Python and the AscendC hardware API: the CATLASS Python pipeline only generates the IR that calls them, and how the data is actually moved is decided by the C++ templates such as `AscendC::DataCopy` / `AscendC::Fixpipe` inside the stubs (see Section 1); when `bisheng` compiles a stub, it inlines these AscendC calls out into DMA intrinsics.
 
 ---
 
@@ -329,4 +329,4 @@ LLVM IR (call @_mlir_ciface_copy_gm_RowMajor_to_l1_zN_float)
 kernel.o   (DMA intrinsics already inlined, no stub call leftovers)
 ```
 
-**One-sentence summary**: the DSL pipeline generates the "call contract" (`func.call` + payload layout), bc provides the "call implementation" (C++ stub -> `TileCopyTla` template -> AscendC -> intrinsic), and `hivmc --link-aicore-bitcode` is the step that welds the two together. `tla.copy` merely uses the most intuitive "move data" operation to show this contract-implementation-welding chain — `tla.mmad`, `tla.store`, and all other ops that go through stubs follow the same bc integration mechanism.
+**One-sentence summary**: the CATLASS Python pipeline generates the "call contract" (`func.call` + payload layout), bc provides the "call implementation" (C++ stub -> `TileCopyTla` template -> AscendC -> intrinsic), and `hivmc --link-aicore-bitcode` is the step that welds the two together. `tla.copy` merely uses the most intuitive "move data" operation to show this contract-implementation-welding chain — `tla.mmad`, `tla.store`, and all other ops that go through stubs follow the same bc integration mechanism.

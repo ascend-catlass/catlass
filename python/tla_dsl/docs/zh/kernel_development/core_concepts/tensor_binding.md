@@ -2,9 +2,9 @@
 nav_order: 40
 ---
 
-# DSL Tensor 接入
+# Tensor 接入
 
-本文说明如何在 Host 侧得到可供 `tla.compile` / 启动使用的 `tla.Tensor`：用 [DLPack](https://github.com/dmlc/dlpack) 的 `from_dlpack`（`torch` / `torch_npu`）绑定真实缓冲，或用 `make_fake_tensor` 造不带设备指针的类型样本。编译、缓存和重复启动见 [编译与启动](compile_and_launch.md)。静态 / 动态 layout 见 [DSL Layout](layout.md)。接口完整说明见 [Host API 参考](../../api/host_api_reference.md)。
+本文说明如何在 Host 侧得到可供 `tla.compile` / 启动使用的 `tla.Tensor`：用 [DLPack](https://github.com/dmlc/dlpack) 的 `from_dlpack`（`torch` / `torch_npu`）绑定真实缓冲，或用 `make_fake_tensor` 造不带设备指针的类型样本。编译、缓存和重复启动见 [编译与启动](compile_and_launch.md)。静态 / 动态 layout 见 [Layout](layout.md)。接口完整说明见 [程序生命周期参考](../../api/runtime/index.md)。
 
 ---
 
@@ -44,7 +44,7 @@ torch.npu.synchronize()
 
 其中 `x` 须实现 `__dlpack__`（通常为 NPU 上的 `torch` tensor，如经 `torch_npu`）。转换**零拷贝**：返回的 `tla.Tensor` 与源 tensor 共享同一块设备内存；源 tensor 生命周期须覆盖后续 `tla.compile` / launch，否则指针失效。
 
-默认得到**静态 layout**（具体 shape / stride / origin 写进编译类型）。要得到动态或混合静态/动态 layout，须在转换后调用 `mark_layout_dynamic` / `mark_compact_shape_dynamic`（见 [DSL Layout](layout.md)）。
+默认得到**静态 layout**（具体 shape / stride / origin 写进编译类型）。要得到动态或混合静态/动态 layout，须在转换后调用 `mark_layout_dynamic` / `mark_compact_shape_dynamic`（见 [Layout](layout.md)）。
 
 完整签名如下：
 

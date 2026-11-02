@@ -13,7 +13,7 @@ This directory explains how to prepare the development environment, build CATLAS
 | [Environment Preparation](environment.md) | Overall environment requirements, dependency software, and environment checks. |
 | [Conda Installation](conda.md) | Create a development environment with the repository `environment.yml` (does not include CANN or AscendNPU-IR). |
 | [Docker Installation](docker.md) | Build a development image with the repository `Dockerfile`, including all development dependencies. |
-| [Building AscendNPU-IR](ascend_npu_ir.md) | Manually build the AscendNPU-IR that the DSL depends on. |
+| [Building AscendNPU-IR](ascend_npu_ir.md) | Manually build the AscendNPU-IR that CATLASS Python depends on. |
 
 ## Build and Test
 

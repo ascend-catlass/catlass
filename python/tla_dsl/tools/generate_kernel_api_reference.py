@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate TLA DSL Kernel API reference docs from ``core_api.py``.
+"""Generate CATLASS Python Kernel API reference docs from ``core_api.py``.
 
 Signatures, parameters and the `Directory:` path come from the source AST. The
 docstrings come from the imported module instead, because an op can append to
@@ -7,7 +7,7 @@ its own docstring at import time (`mmad` / `mmad_mx` add the table of dtypes the
 accept), which the source text does not show. Importing needs the MLIR python
 bindings on the path.
 Section order and blurbs live in ``DIRECTORY_SECTIONS`` below.
-Writes English Markdown to ``docs/en/api/kernel_api_reference.md``.
+Writes split English Markdown under ``docs/en/api/language/``.
 """
 
 from __future__ import annotations
@@ -20,13 +20,16 @@ from types import ModuleType
 from common import (
     APIEntry,
     PACKAGE_ROOT,
+    ParamInfo,
     const_str,
     directory_path,
     function_entry,
     has_dsl_user_op,
     parse_all_names,
+    published_wording,
     render_reference,
-    run_cli,
+    run_cli_pages,
+    split_reference_document,
 )
 
 
@@ -37,8 +40,48 @@ TYPING_API_PATH = PACKAGE_ROOT / "catlass" / "base_dsl" / "typing.py"
 EXPERIMENTAL_API_PATH = (
     PACKAGE_ROOT / "catlass" / "tla" / "experimental" / "__init__.py"
 )
-OUTPUT_PATH = PACKAGE_ROOT / "docs" / "en" / "api" / "kernel_api_reference.md"
+OUTPUT_PATH = PACKAGE_ROOT / "docs" / "en" / "api" / "language" / "index.md"
 GENERATED_BY = "python/tla_dsl/tools/generate_kernel_api_reference.py"
+
+KERNEL_PAGE_FILES: dict[str, str] = {
+    "1": "language/layout_tensor.md",
+    "2": "language/values_types.md",
+    "3": "language/data_movement.md",
+    "4": "language/matrix.md",
+    "5": "language/simd/index.md",
+    "5.1": "language/simd/mask.md",
+    "5.2": "language/simd/arithmetic.md",
+    "5.3": "language/simd/logical.md",
+    "5.4": "language/simd/compare_select.md",
+    "5.5": "language/simd/fill.md",
+    "5.6": "language/simd/discrete_aggregate.md",
+    "5.7": "language/simd/rearrange.md",
+    "5.8": "language/simd/compress.md",
+    "5.9": "language/simd/type_conversion.md",
+    "5.10": "language/simd/histogram.md",
+    "6": "language/simt.md",
+    "7": "language/sync.md",
+    "8": "language/system.md",
+    "9": "language/resources.md",
+    "10": "language/debug.md",
+    "11": "language/scopes.md",
+    "12": "language/experimental.md",
+}
+
+KERNEL_PAGE_TITLES: dict[str, str] = {
+    "1": "Layout and Tensor",
+    "2": "Values and Data Types",
+    "3": "Data Movement",
+    "4": "Matrix Compute",
+    "5": "SIMD Vector Compute",
+    "6": "SIMT Vector Compute",
+    "7": "Synchronization",
+    "8": "System Variable Access",
+    "9": "Resource Management",
+    "10": "Debug and Printing",
+    "11": "Scopes and Control Flow",
+    "12": "Experimental APIs",
+}
 
 DIRECTORY_SECTIONS: list[tuple[str, str]] = [
     (
@@ -48,7 +91,7 @@ DIRECTORY_SECTIONS: list[tuple[str, str]] = [
     ),
     (
         "Scalar Compute",
-        "`Numeric` is the base of TLA DSL **scalar** types and values used "
+        "`Numeric` is the base of CATLASS Python **scalar** types and values used "
         "inside `@tla.kernel`. Concrete types include integers "
         "(`tla.Int8` / `Int16` / `Int32` / `Int64` and unsigned variants), "
         "floats (`tla.Float16` / `BFloat16` / `Float32`, plus narrower "
@@ -393,10 +436,10 @@ DIRECTORY_INTROS = dict(DIRECTORY_SECTIONS)
 # Display name for the reference heading / prototype (source link keeps
 # ``qualified_name``). Prefer frontend spelling over dunder method names.
 KERNEL_DISPLAY_NAMES: dict[str, str] = {
-    "Integer.__invert__": "~Integer",
+    "Integer.__invert__": "tla.Integer.__invert__",
     # Frontend indexing spellings; source links keep Tensor.__getitem__/__setitem__.
-    "Tensor.__getitem__": "tensor[i]",
-    "Tensor.__setitem__": "tensor[i] = value",
+    "Tensor.__getitem__": "tla.Tensor.__getitem__",
+    "Tensor.__setitem__": "tla.Tensor.__setitem__",
 }
 
 
@@ -508,12 +551,23 @@ def _collect_unary_aliases(
         ):
             continue
         name = target.id
+        scalar_aware = value.func.id == "_make_scalar_aware_unary_op"
+        params = list(template.params)
+        returns = template.returns
+        if scalar_aware:
+            # The public wrapper accepts a VectorSSA or a Numeric. The vector
+            # helper's narrower signature does not describe the SIMT form.
+            params = [
+                ParamInfo("operand", "VectorSSA | Numeric", "positional", None),
+                ParamInfo("mask", "MaskSSA | None", "keyword_only", "None"),
+            ]
+            returns = "VectorSSA | Numeric"
         entries[name] = APIEntry(
             name=name,
             qualified_name=f"catlass.core_api.{name}",
             source_line=node.lineno,
-            params=list(template.params),
-            returns=template.returns,
+            params=params,
+            returns=returns,
             docstring=_doc_from_make_unary_call(value),
         )
     return entries
@@ -552,6 +606,7 @@ def _collect_scalar_aware_binary_aliases(
             vector_def,
             qualified_name=f"catlass.core_api.{name}",
         )
+        entry.returns = "VectorSSA | Numeric"
         entry.source_line = node.lineno
         entries[name] = entry
     return entries
@@ -739,6 +794,8 @@ def parse_core_api(path: Path) -> dict[str, APIEntry]:
     remapped: dict[str, APIEntry] = {}
     for name, entry in entries.items():
         display = KERNEL_DISPLAY_NAMES.get(name, name)
+        if not display.startswith("tla."):
+            display = f"tla.{display}"
         entry.name = display
         remapped[display] = entry
     return remapped
@@ -748,21 +805,25 @@ def generate(*, docs_dir: Path | None = None) -> str:
     if not CORE_API_PATH.is_file():
         raise FileNotFoundError(f"core_api not found: {CORE_API_PATH}")
 
-    docs_dir = docs_dir or OUTPUT_PATH.parent
-    return render_reference(
+    docs_dir = docs_dir or OUTPUT_PATH.parent.parent
+    markdown = render_reference(
         parse_core_api(CORE_API_PATH),
         docs_dir=docs_dir,
-        title="TLA DSL Kernel API Reference",
+        title="CATLASS Python Language Reference",
         intro=[
-            "This document describes the **TLA DSL kernel-side Core APIs** "
+            "Start with the [API Quick Reference](quick_reference.md) to choose an API by task "
+            "and execution context. This document is the **CATLASS Python language reference** "
             "(typically imported as `import catlass.tla as tla`). "
-            "It covers data structures, compute / sync helpers, on-chip resources, "
-            "and debug printing. Host-side compile / launch / tensor binding are in "
-            "`docs/en/api/host_api_reference.md`; environment variables are in "
-            "`docs/zh/kernel_development/core_concepts/env_vars.md`.",
+            "It covers values and types, layout and tensor, data movement, compute, "
+            "synchronization, resources, and debug printing. Compilation, launch, and "
+            "Host tensor binding are in the [Program Lifecycle Reference](runtime/index.md); "
+            "environment variables are in "
+            "[Environment Variables](../kernel_development/core_concepts/env_vars.md).",
             "Interface descriptions and examples come from each op's source docstring "
             "(`Directory:` plus `Description:` / `Parameters:` / `Constraints:` / `Example:`).",
-            "All APIs must be called inside a `@tla.kernel`-decorated kernel function body.",
+            "Unless an entry explicitly allows Host use, these APIs must be called inside "
+            "a `@tla.kernel`-decorated kernel function body. For example, "
+            "`tla.arch.get_capacity_in_bytes` is also available on the Host.",
             "The vector unit has two execution modes, and they are separate "
             "chapters below. **SIMD Vector Compute** is the default: whole "
             "vector registers over data staged in UB, for regular dense work. "
@@ -788,13 +849,28 @@ def generate(*, docs_dir: Path | None = None) -> str:
         default_source_path=CORE_API_PATH,
         generated_by=GENERATED_BY,
     )
+    return published_wording(markdown)
+
+
+def generate_pages(*, docs_dir: Path | None = None) -> dict[Path, str]:
+    """Return the split English kernel reference keyed by relative path."""
+    docs_dir = docs_dir or OUTPUT_PATH.parent.parent
+    markdown = generate(docs_dir=docs_dir)
+    return split_reference_document(
+        markdown,
+        index_path="language/index.md",
+        page_files=KERNEL_PAGE_FILES,
+        page_titles=KERNEL_PAGE_TITLES,
+        reference_label="Language Reference",
+        quick_label="API Quick Reference",
+    )
 
 
 def main() -> int:
-    return run_cli(
+    return run_cli_pages(
         description=__doc__,
         default_output=OUTPUT_PATH,
-        generate_fn=generate,
+        generate_pages_fn=generate_pages,
     )
 
 

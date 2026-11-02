@@ -2,9 +2,9 @@
 nav_order: 30
 ---
 
-# DSL Layout
+# Layout
 
-This document introduces the meaning of static and dynamic layout, how to make a Host tensor dynamic-layout, and how to program in the Kernel. For integration methods such as `from_dlpack`, see [DSL Tensor Integration](tensor_binding.md); for interfaces such as `mark_*_dynamic`, see the [Host API Reference](../../api/host_api_reference.md).
+This document introduces the meaning of static and dynamic layout, how to make a Host tensor dynamic-layout, and how to program in the Kernel. For integration methods such as `from_dlpack`, see [Python Tensor Integration](tensor_binding.md); for interfaces such as `mark_*_dynamic`, see the [Program Lifecycle Reference](../../api/runtime/index.md).
 
 ---
 

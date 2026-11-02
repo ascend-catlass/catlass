@@ -1,4 +1,4 @@
-"""BC (LLVM bitcode) compiler for TLA DSL.
+"""BC (LLVM bitcode) compiler for TLA Python.
 
 Compiles BC stub sources using the user's own ``ccec`` / ``llvm-link``
 and caches the result.  Cache key = catlass version ID + ccec identity

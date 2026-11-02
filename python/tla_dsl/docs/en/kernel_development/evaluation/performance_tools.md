@@ -4,7 +4,7 @@ nav_order: 20
 
 # Tuning the Performance of CATLASS Python Operators
 
-The following document describes the complete workflow of end-to-end compilation, functional testing, and performance measurement using the CATLASS Python (hereafter abbreviated as DSL) toolchain.
+The following document describes the complete workflow of end-to-end compilation, functional testing, and performance measurement using the CATLASS Python toolchain.
 
 ## Performance Tuning Tool Overview
 
@@ -26,8 +26,8 @@ Among these, the general msprof collection commands are the basis of performance
 
 ### Enabling Basic Dependencies
 
-Before developing and testing the DSL, first confirm that the basic environment is ready. For detailed steps, see [Quick Start](../../../../../../docs/en/1_Practice/01_quick_start.md) to complete the CANN download, installation, and environment variable setup.
-The low-level compilation of the DSL depends on AscendNPU-IR. Before performing the subsequent compilation operations, see [Environment Preparation](../../dsl_development/build_guide/environment.md) and follow that document through [Running Test Cases](../../dsl_development/build_guide/testing.md).
+Before developing and testing CATLASS Python, first confirm that the basic environment is ready. For detailed steps, see [Quick Start](../../../../../../docs/en/1_Practice/01_quick_start.md) to complete the CANN download, installation, and environment variable setup.
+The low-level compilation of CATLASS Python depends on AscendNPU-IR. Before performing the subsequent compilation operations, see [Environment Preparation](../../dsl_development/build_guide/environment.md) and follow that document through [Running Test Cases](../../dsl_development/build_guide/testing.md).
 
 ## Single-Operator Performance Analysis with msProf
 
@@ -56,7 +56,7 @@ Some common parameters are listed below; for complete parameter information, see
 * ⚠ Notes
   * By default, the tool reads the performance data of the first operator in the execution sequence. When using an official example for standalone measurement, the target result is usually obtained directly; but when integrating into another complex project, even if only one operator's case is run, the underlying layer may also be accompanied by other initialization or preceding operators from the framework (such as PyTorch).
 
-    To avoid failing to read the target operator's result, it is strongly recommended to specify the operator name precisely with --kernel-name during performance analysis. For operators developed with the DSL (such as Catlass / TLA), the corresponding operator name is the function name decorated with the @tla.kernel decorator in the Python code (for example, in the basic_mixed.py script, the corresponding parameter should be configured as --kernel-name=basic_mixed).
+    To avoid failing to read the target operator's result, it is strongly recommended to specify the operator name precisely with --kernel-name during performance analysis. For operators developed with CATLASS Python (such as Catlass / TLA), the corresponding operator name is the function name decorated with the @tla.kernel decorator in the Python code (for example, in the basic_mixed.py script, the corresponding parameter should be configured as --kernel-name=basic_mixed).
   * You can set the environment variable `ASCEND_RT_VISIBLE_DEVICES` to specify the Device Id for onboard measurement.
 
 ### Performance Data Description

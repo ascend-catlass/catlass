@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Generate TLA DSL Host API reference docs from Host sources (AST only).
+"""Generate CATLASS Python Host API reference docs from Host sources (AST only).
 
 API docstrings carry ``Directory:`` plus Description / Parameters / Constraints /
 Example. Environment variables are documented separately in
 ``docs/zh/kernel_development/core_concepts/env_vars.md`` (not scanned here).
-Writes English Markdown to ``docs/en/api/host_api_reference.md``.
+Writes split English Markdown under ``docs/en/api/runtime/``.
 """
 
 from __future__ import annotations
@@ -18,13 +18,27 @@ from common import (
     ParamInfo,
     directory_path,
     function_entry,
+    published_wording,
     render_reference,
-    run_cli,
+    run_cli_pages,
+    split_reference_document,
 )
 
 
-OUTPUT_PATH = PACKAGE_ROOT / "docs" / "en" / "api" / "host_api_reference.md"
+OUTPUT_PATH = PACKAGE_ROOT / "docs" / "en" / "api" / "runtime" / "index.md"
 GENERATED_BY = "python/tla_dsl/tools/generate_host_api_reference.py"
+
+HOST_PAGE_FILES: dict[str, str] = {
+    "1": "runtime/kernel_entry.md",
+    "2": "runtime/compile_launch.md",
+    "3": "runtime/host_tensor.md",
+}
+
+HOST_PAGE_TITLES: dict[str, str] = {
+    "1": "Kernel Entry and Language Boundary",
+    "2": "Compile and Launch",
+    "3": "Host Tensor Binding",
+}
 DEFAULT_SOURCE_PATH = PACKAGE_ROOT / "catlass" / "dsl.py"
 
 # Host decorator docs cover ``@tla.kernel``, ``@tla.jit``, and ``@tla.extern``.
@@ -32,8 +46,10 @@ HOST_DIRECTORY_SECTIONS: list[tuple[str, str]] = [
     (
         "Decorators",
         "Host-side `@tla.kernel` entry, `@tla.jit` device helpers, "
-        "`@tla.extern` declarations, and Host `@dataclass` packing. Decorated "
-        "kernel, helper, and extern declaration bodies are not executed on the Host.",
+        "`@tla.extern` declarations, and Host `@dataclass` packing. Kernel and "
+        "extern declaration bodies are not executed as ordinary Host Python. "
+        "A `@tla.jit` helper is inlined during kernel lowering; a top-level Host "
+        "call runs the helper as ordinary Python.",
     ),
     (
         "Compile and Launch",
@@ -41,7 +57,7 @@ HOST_DIRECTORY_SECTIONS: list[tuple[str, str]] = [
         "`tla.compile` to obtain a callable `JitCompiledFunction`; call it "
         "directly to lazily create and then reuse its executor. Cache / arch / IR-dump "
         "knobs that are not function arguments are in "
-        "`docs/zh/kernel_development/core_concepts/env_vars.md`.",
+        "[Environment Variables](../kernel_development/core_concepts/env_vars.md).",
     ),
     (
         "Compile and Launch / Compile",
@@ -86,7 +102,7 @@ HOST_DIRECTORY_SECTIONS: list[tuple[str, str]] = [
         "Host Tensor",
         "Build Host `tla.Tensor` objects and mark layout extents dynamic so one "
         "artifact can run at different shapes. See also "
-        "`docs/zh/kernel_development/core_concepts/layout.md`.",
+        "[Static and Dynamic Layout](../kernel_development/core_concepts/layout.md).",
     ),
     (
         "Host Tensor / Binding",
@@ -96,7 +112,7 @@ HOST_DIRECTORY_SECTIONS: list[tuple[str, str]] = [
     (
         "Host Tensor / Dynamic Layout",
         "Mark static layout extents dynamic. See also "
-        "`docs/zh/kernel_development/core_concepts/layout.md`.",
+        "[Static and Dynamic Layout](../kernel_development/core_concepts/layout.md).",
     ),
 ]
 DIRECTORY_ORDER = [path for path, _ in HOST_DIRECTORY_SECTIONS]
@@ -115,15 +131,15 @@ HOST_SOURCE_PATHS = (
 
 # Display names in the generated reference (source qualified names stay unchanged).
 HOST_DISPLAY_NAMES = {
-    "CompileCallable.__call__": "compile",
-    "JitCompiledFunction.__call__": "JitCompiledFunction.__call__",
-    "_Tensor.mark_layout_dynamic": "Tensor.mark_layout_dynamic",
-    "_Tensor.mark_compact_shape_dynamic": "Tensor.mark_compact_shape_dynamic",
+    "CompileCallable.__call__": "tla.compile",
+    "JitCompiledFunction.__call__": "tla.JitCompiledFunction.__call__",
+    "_Tensor.mark_layout_dynamic": "tla.Tensor.mark_layout_dynamic",
+    "_Tensor.mark_compact_shape_dynamic": "tla.Tensor.mark_compact_shape_dynamic",
     # Stdlib ``@dataclass`` packing rules live on the struct-arg validator.
-    "_validate_dataclass_kernel_arg": "dataclass",
+    "_validate_dataclass_kernel_arg": "dataclasses.dataclass",
     # Public ``tla.kernel`` / ``tla.jit`` are aliases of these classmethods.
-    "CatlassBaseDSL.kernel": "kernel",
-    "CatlassBaseDSL.jit": "jit",
+    "CatlassBaseDSL.kernel": "tla.kernel",
+    "CatlassBaseDSL.jit": "tla.jit",
 }
 
 # Signature / qualified-name overrides when the documented public face differs
@@ -172,7 +188,7 @@ HOST_ENTRY_OVERRIDES: dict[str, dict[str, object]] = {
 CONSTEXPR_CALLABLE_DOC = """\
 Directory: Decorators
 Description:
-    Covers the "Compile-time function" row in the [`kernel`](#kernel) parameter table
+    Covers the "Compile-time function" row in the [`tla.kernel`](#tlakernel) parameter table
     (`tla.Constexpr[Callable[...]]`, or `tla.Constexpr` when the value is callable).
     It does not cover compile-time constants.
 
@@ -190,18 +206,18 @@ Constraints:
     - Runs only during `tla.compile` / `dump_mlir`; DSL ops enter the current kernel's device
       IR. The body is not run again when launching `compiled(...)`.
     - When called from a kernel, the body may use only interfaces from the
-      [Kernel API](kernel_api_reference.md); see each entry's Constraints.
+      [Language API](language/index.md); see each entry's Constraints.
     - Arbitrary Host-side Python is not device computation, including but not limited to
       third-party libraries, file/network I/O, reliance on local Host state, and treating DSL
       values as Host tensors or containers.
     - TLA control flow is not supported: `tla.range`, dynamic `if` / `while`, and similar.
 
-    Body rules when the argument is `@tla.jit` are under [`jit`](#jit).
+    Body rules when the argument is `@tla.jit` are under [`tla.jit`](#tlajit).
 
     **Calls inside a kernel**
 
     - Outer plain `def`: same body semantics as above.
-    - `@tla.jit` helper: see [`jit`](#jit); inlined into the current kernel IR during lowering.
+    - `@tla.jit` helper: see [`tla.jit`](#tlajit); inlined into the current kernel IR during lowering.
     - Constexpr Callable argument: same as this section.
 
 Example:
@@ -335,23 +351,28 @@ def parse_host_apis() -> dict[str, APIEntry]:
         source_path=None,
         is_concept=True,
     )
+    for entry in entries.values():
+        if entry.is_concept:
+            continue
+        if not entry.name.startswith(("tla.", "dataclasses.")):
+            entry.name = f"tla.{entry.name}"
     return entries
 
 
 def generate(*, docs_dir: Path | None = None) -> str:
-    docs_dir = docs_dir or OUTPUT_PATH.parent
-    return render_reference(
+    docs_dir = docs_dir or OUTPUT_PATH.parent.parent
+    markdown = render_reference(
         parse_host_apis(),
         docs_dir=docs_dir,
-        title="TLA DSL Host API Reference",
+        title="CATLASS Python Program Lifecycle Reference",
         intro=[
-            "This document describes the **TLA DSL Host-side APIs** "
-            "(typically imported as `import catlass.tla as tla`). It covers the "
-            "`@tla.kernel` and `@tla.extern` decorators, Host `@dataclass` packing, "
-            "`tla.compile` / `JitCompiledFunction` launch, and Host tensors. "
+            "Start with the [API Quick Reference](quick_reference.md) to choose an API by task "
+            "and execution context. This document covers the **CATLASS Python program lifecycle**: "
+            "kernel entry and language-boundary declarations, `tla.compile` / "
+            "`JitCompiledFunction` launch, and Host tensor binding. "
             "Environment variables are in "
-            "`docs/zh/kernel_development/core_concepts/env_vars.md`. "
-            "Kernel-side ops live in `docs/en/api/kernel_api_reference.md`.",
+            "[Environment Variables](../kernel_development/core_concepts/env_vars.md). "
+            "Language APIs live in the [Language Reference](language/index.md).",
             "Interface descriptions and examples come from each API's source docstring "
             "(`Directory:` plus `Description:` / `Parameters:` / `Constraints:` / `Example:`).",
             "These APIs are called from Python Host scripts, **outside** a `@tla.kernel` "
@@ -374,13 +395,28 @@ def generate(*, docs_dir: Path | None = None) -> str:
         default_source_path=DEFAULT_SOURCE_PATH,
         generated_by=GENERATED_BY,
     )
+    return published_wording(markdown)
+
+
+def generate_pages(*, docs_dir: Path | None = None) -> dict[Path, str]:
+    """Return the split English Host reference keyed by relative path."""
+    docs_dir = docs_dir or OUTPUT_PATH.parent.parent
+    markdown = generate(docs_dir=docs_dir)
+    return split_reference_document(
+        markdown,
+        index_path="runtime/index.md",
+        page_files=HOST_PAGE_FILES,
+        page_titles=HOST_PAGE_TITLES,
+        reference_label="Program Lifecycle",
+        quick_label="API Quick Reference",
+    )
 
 
 def main() -> int:
-    return run_cli(
+    return run_cli_pages(
         description=__doc__,
         default_output=OUTPUT_PATH,
-        generate_fn=generate,
+        generate_pages_fn=generate_pages,
     )
 
 

@@ -23,7 +23,7 @@ The following paths are relative to `python/tla_dsl/catlass/`:
 | `base_dsl/runtime/argument_binding.py` | physical binding description from leaves to MLIR/ABI |
 | `execution_lowering.py` | allocate leaf slots once, construct proxies and call unflatten, then generate the function body |
 | `execution.py`, `base_dsl/jit_executor.py` | artifact caching, runtime argument validation, payload packing, and launch |
-| `csrc/mlir/lib/Tools/TypeBridge.cpp` (relative to the DSL root) | generate ABI fields from lowered argument types and the backend calling convention |
+| `csrc/mlir/lib/Tools/TypeBridge.cpp` (relative to the CATLASS Python root) | generate ABI fields from lowered argument types and the backend calling convention |
 
 ## Argument Tree and Leaf Binding
 
@@ -62,7 +62,7 @@ The number of children is taken directly from the length of the child keys, and 
 Following the user guide's `add_bias(x, aux, out)`, the complete logical leaf order is
 `[x, bias, 0.5, out]`.
 
-### Bind the Python call and build the tree
+### Bind the CATLASS Python call and build the tree
 
 `tla.compile` binds positional arguments, keyword arguments, and defaults by function signature through `_bind_kernel_call_args()`, separates compilation options, and passes the actual arguments as-is to lowering. A call without arguments uses `type_args=None`;
 a call containing None or an empty container still keeps the corresponding actual argument. Whether the types and structures are legal is decided by lowering and the argument tree.
@@ -141,7 +141,7 @@ Dynamic-GM is still one logical Tensor; it needs to pass the dynamic shape, stri
 `_materialize_tree_dynamic_gm_descriptors()` constructs descriptors using the dynamic formal parameters,
 and `_rebuild_tree_argument_proxies()` puts the Tensor proxies back into the original structure.
 
-Under the hivmc mixed-entry calling convention used by this DSL, an ordinary static GM memref also expands into a
+Under the hivmc mixed-entry calling convention used by this Python, an ordinary static GM memref also expands into a
 rank-R descriptor. TypeBridge and the host packer must jointly follow:
 
 - Dynamic-GM: the 11 fields of a unified rank-4 memref, plus two origins, for 13 values in total.
@@ -170,7 +170,7 @@ current compile arguments → current argument tree and TLA IR
             combine with this call's signature and argument tree → compiled object
 ```
 
-Both in-memory and disk hits use the argument bindings of the current request and do not reuse the Python type template of an old request.
+Both in-memory and disk hits use the argument bindings of the current request and do not reuse the CATLASS Python type template of an old request.
 tuple/list or different dataclasses generating the same IR can share the device artifact, but each validates its own structure.
 
 Tensor address, version, and contents do not enter the artifact key. Static field values are kept by reference in the argument tree and

@@ -21,7 +21,7 @@ pip install ascend-catlass-dsl
 python -c "import catlass"
 ```
 
-> When you run `import catlass` in the `/path/to/catlass/python/tla_dsl` directory, Python imports from the current directory first by default, so it imports the `catlass` module in the source tree rather than the wheel installed in the previous step. The `catlass` in the source tree contains only the Python source code and lacks the corresponding DSL binary extension, so switch to another working directory to run the examples.
+> When you run `import catlass` in the `/path/to/catlass/python/tla_dsl` directory, Python imports from the current directory first by default, so it imports the `catlass` module in the source tree rather than the wheel installed in the previous step. The `catlass` in the source tree contains only the Python source code and lacks the corresponding Python binary extension, so switch to another working directory to run the examples.
 
 To try the latest features, you can also follow the [Developer Guide](dsl_development/index.md) to set up the environment and build the source code to compile the wheel yourself.
 

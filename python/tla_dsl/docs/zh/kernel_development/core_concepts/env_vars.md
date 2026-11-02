@@ -2,7 +2,7 @@
 nav_order: 50
 ---
 
-# DSL 环境变量
+# 环境变量
 
 本文说明运行与编译 CATLASS Python 时可设置的环境变量。除特别注明外，变量名均以 `CATLASS_DSL_` 为前缀。
 
@@ -121,7 +121,7 @@ nav_order: 50
 
 ### `CATLASS_DSL_PREBUILT_ASCENDNPU_IR`
 
-本机已构建的 AscendNPU-IR 目录，供构建 DSL 与运行测试使用。
+本机已构建的 AscendNPU-IR 目录，供构建 Python 与运行测试使用。
 
 | 取值 | 含义 |
 | --- | --- |

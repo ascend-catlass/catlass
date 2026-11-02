@@ -1,4 +1,4 @@
-"""Public TLA DSL namespace.
+"""Public TLA Python namespace.
 
 Preferred import::
 

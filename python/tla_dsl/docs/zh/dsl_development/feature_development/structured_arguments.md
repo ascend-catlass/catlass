@@ -26,7 +26,7 @@ nav_order: 50
 | `base_dsl/runtime/argument_binding.py` | 叶子到 MLIR/ABI 的物理绑定描述 |
 | `execution_lowering.py` | 一次分配叶子槽位，构造 proxy 并调用 unflatten，再生成函数体 |
 | `execution.py`、`base_dsl/jit_executor.py` | 产物缓存、运行时参数校验、payload 打包和启动 |
-| `csrc/mlir/lib/Tools/TypeBridge.cpp`（相对 DSL 根目录） | 根据 lowered 参数类型与后端调用约定生成 ABI 字段 |
+| `csrc/mlir/lib/Tools/TypeBridge.cpp`（相对 Python 根目录） | 根据 lowered 参数类型与后端调用约定生成 ABI 字段 |
 
 ## 参数树与叶子绑定
 
@@ -149,7 +149,7 @@ Dynamic-GM 仍是一个逻辑 Tensor；它需要传递动态 shape、stride 和 
 `_materialize_tree_dynamic_gm_descriptors()` 使用动态形式参数构造 descriptor，
 `_rebuild_tree_argument_proxies()` 将 Tensor proxy 放回原结构。
 
-在本 DSL 使用的 hivmc 混合入口调用约定下，普通静态 GM memref 也展开为
+在本 Python 使用的 hivmc 混合入口调用约定下，普通静态 GM memref 也展开为
 rank-R descriptor。TypeBridge 与 host packer 必须共同遵循：
 
 - Dynamic-GM：统一 rank-4 memref 的 11 个字段，加两个 origin，共 13 个值。

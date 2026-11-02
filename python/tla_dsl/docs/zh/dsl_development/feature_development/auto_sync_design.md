@@ -8,7 +8,7 @@ nav_order: 40
 
 Ascend AI Core 上的 MTE、Cube、Vector、Fixpipe 等流水可以异步执行。同一块片上存储被不同流水连续读写时，如果没有正确的同步，会产生 RAW、WAR 或 WAW 数据竞争。手工同步要求开发者同时维护 tensor 的存储关系、指令所属 pipe、双缓冲切换和 `unit_flag` 协议，代码量大，也容易因算法调整而遗漏。
 
-TLA DSL 通过 `@tla.kernel(auto_sync="v0")` 提供实验性自动同步能力。
+CATLASS Python 通过 `@tla.kernel(auto_sync="v0")` 提供实验性自动同步能力。
 
 `v0` 只处理单个 AIC 或 AIV 内部各流水之间的核内同步，不生成 Cube/Vector 核间同步，也不生成Vector核编程中VF内的同步。
 
@@ -242,7 +242,7 @@ mutex 与 pointer 沿完全相同的控制流传播，既保留精确性，也�
 
 ### 多个动态 buffer 的组合约束
 
-一条指令同时访问多个由运行时条件选择的 buffer 时，各分支必须保持一致的 allocation 顺序。例如，一个分支选择 `buffer0` 作为 src、`buffer1` 作为 dst，另一个分支反过来选择 `buffer1` 作为 src、`buffer0` 作为 dst，当前 `v0` 不支持这种写法。原因是 AutoSync 无法为所有运行时分支生成唯一且一致的 mutex 加锁顺序。这是 AutoSync 的当前能力限制，不是 TLA DSL 对条件 buffer 的通用限制。
+一条指令同时访问多个由运行时条件选择的 buffer 时，各分支必须保持一致的 allocation 顺序。例如，一个分支选择 `buffer0` 作为 src、`buffer1` 作为 dst，另一个分支反过来选择 `buffer1` 作为 src、`buffer0` 作为 dst，当前 `v0` 不支持这种写法。原因是 AutoSync 无法为所有运行时分支生成唯一且一致的 mutex 加锁顺序。这是 AutoSync 的当前能力限制，不是 CATLASS Python 对条件 buffer 的通用限制。
 
 ## `unit_flag` 协同
 

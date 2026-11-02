@@ -52,7 +52,7 @@ from .tla.typing import Tensor
 
 
 class TlaLoweringError(FrontendDiagnosticError):
-    """Raised when Tla DSL lowering fails."""
+    """Raised when TLA Python lowering fails."""
 
 
 class UnsupportedExecutionLowering(FrontendDiagnosticError):

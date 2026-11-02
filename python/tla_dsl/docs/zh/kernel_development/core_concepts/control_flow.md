@@ -2,7 +2,7 @@
 nav_order: 20
 ---
 
-# DSL 控制流
+# 控制流
 
 TLA kernel 函数体由 Python 在前端构建设备 IR 时执行。这使得普通、可检查的 Python staging 代码可用于在操作降级之前推导静态配置。
 
@@ -31,7 +31,7 @@ def kernel(limit: int) -> None:
 
 ## 运行时控制流与提升
 
-由 DSL 值支撑的条件与循环边界会形成运行时控制流。在此类区域内写入的值会成为运行时状态。在运行时 `if`、`tla.range` 循环、`while` 或展开的 DSL `with` 区域中赋值之前，请使用 `tla.as_numeric(...)` 显式提升 Python 标量：
+由 Python 值支撑的条件与循环边界会形成运行时控制流。在此类区域内写入的值会成为运行时状态。在运行时 `if`、`tla.range` 循环、`while` 或展开的 Python `with` 区域中赋值之前，请使用 `tla.as_numeric(...)` 显式提升 Python 标量：
 
 ```python
 @tla.kernel
@@ -58,7 +58,7 @@ state = [tla.as_numeric(value) for value in (0, 1)]
 
 ## `@tla.jit`
 
-`@tla.jit` 是 kernel lowering 期间使用的 DSL 辅助函数，可以从
+`@tla.jit` 是 kernel lowering 期间使用的 Python 辅助函数，可以从
 `@tla.kernel` 中调用，但当前不支持调用或启动 `@tla.kernel`。当前不支持直接调用
 `@tla.kernel`；须先通过 `tla.compile(kernel, *sample_args)` 显式编译，
 再调用返回的编译函数。

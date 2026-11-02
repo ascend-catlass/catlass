@@ -2,7 +2,7 @@
 nav_order: 50
 ---
 
-# DSL Environment Variables
+# Environment Variables
 
 This document describes the environment variables that can be set when running and compiling CATLASS Python. Unless otherwise noted, all variable names use the `CATLASS_DSL_` prefix.
 
@@ -121,7 +121,7 @@ If a usable `torch` / `torch_npu` is loaded in the environment, the current torc
 
 ### `CATLASS_DSL_PREBUILT_ASCENDNPU_IR`
 
-The locally built AscendNPU-IR directory, used for building the DSL and running tests.
+The locally built AscendNPU-IR directory, used for building CATLASS Python and running tests.
 
 | Value | Meaning |
 | --- | --- |

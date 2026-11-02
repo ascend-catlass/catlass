@@ -21,7 +21,7 @@ cd /path/to/catlass/python/tla_dsl
 2. 在 `csrc/mlir/build` 中构建编译器和 Python 扩展。
 3. 以 editable 模式安装 `ascend-catlass-dsl`，且不重复安装依赖。
 
-- `--clean` 会删除 DSL 子项目中的 `build/`、`csrc/mlir/build/`、`dist/`、egg-info、pytest 缓存和二进制库（`_tla_type_bridge_native*.so`）后，再执行 Development 模式构建。
+- `--clean` 会删除 Python 子项目中的 `build/`、`csrc/mlir/build/`、`dist/`、egg-info、pytest 缓存和二进制库（`_tla_type_bridge_native*.so`）后，再执行 Development 模式构建。
 
 构建成功后可检查关键产物：
 

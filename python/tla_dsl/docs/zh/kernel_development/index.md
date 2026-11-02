@@ -2,7 +2,7 @@
 nav_order: 20
 ---
 
-# DSL Kernel 开发指南
+# Kernel 开发指南
 
 Kernel 侧开发与调试实践，包括功能 / 性能调测工具的使用。
 

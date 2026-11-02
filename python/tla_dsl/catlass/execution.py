@@ -1,4 +1,4 @@
-"""Compilation and execution support for Tla DSL kernels."""
+"""Compilation and execution support for TLA Python kernels."""
 
 from __future__ import annotations
 

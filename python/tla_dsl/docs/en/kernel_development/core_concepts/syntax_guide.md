@@ -2,9 +2,9 @@
 nav_order: 10
 ---
 
-# DSL Syntax Constraints
+# Syntax Constraints
 
-CATLASS Python uses Python as the kernel description language, but due to NPU architecture, performance considerations, and other factors, the DSL does not support the full set of Python language features. Only part of the Python description can be mapped to meaningful NPU instructions. This document introduces these restrictions.
+CATLASS Python uses Python as the kernel description language, but due to NPU architecture, performance considerations, and other factors, CATLASS Python does not support the full set of Python language features. Only part of the Python code can be mapped to meaningful NPU instructions. This document introduces these restrictions.
 
 ## Basic Concepts
 
@@ -19,7 +19,7 @@ Python functions decorated with either follow a unified lowering/compilation pat
 
 ### Dynamic and static values, branches, and loops
 
-The compile and run steps divide values, branches, and loops in the DSL into dynamic and static. Whether a value, branch, or loop is dynamic or static depends on whether its value or condition depends on a number determined only at runtime.
+The compile and run steps divide values, branches, and loops in CATLASS Python into dynamic and static. Whether a value, branch, or loop is dynamic or static depends on whether its value or condition depends on a number determined only at runtime.
 
 | Category | Determination | Examples |
 | --- | --- | --- |
@@ -138,7 +138,7 @@ When the condition is the literal `True`/`False` or `tla.const_expr(...)`, `if` 
 
 ### with regions
 
-The NPU has a cube core and a vector core, abstracted in the DSL as two regions that can be entered with `with`.
+The NPU has a cube core and a vector core, abstracted as two regions that can be entered with `with`.
 
 - **Cube region**: entered with `with tla.cube(...)`, hosting operations on the cube core.
 - **Vector region**: entered with `with tla.vector(...)`, hosting operations on the vector core.

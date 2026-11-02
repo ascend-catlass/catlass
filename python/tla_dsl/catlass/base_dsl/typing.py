@@ -760,8 +760,8 @@ def _mlir_f8e8m0() -> mlir_ir.Type:
 class Numeric(metaclass=NumericMeta, is_abstract=True):
     """Numeric type and value (``DslType`` / ``NumericMeta`` first-class).
 
-    Kernel API overview for external developers lives in the Scalar Compute
-    section intro of ``docs/*/api/kernel_api_reference.md`` (generated from
+    Kernel API overview for external developers lives in the values and types
+    page ``docs/*/api/language/values_types.md`` (generated from
     ``DIRECTORY_SECTIONS``), not as a standalone ``### Numeric`` entry.
 
     - Type tag: ``dtype=tla.Float16``; class attr ``dtype`` is the TLA token string.

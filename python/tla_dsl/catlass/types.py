@@ -1,4 +1,4 @@
-"""Lightweight Tla DSL type helpers, MLIR ``!tla.ptr`` (:class:`PtrType`), and addrspace helpers."""
+"""Lightweight TLA Python type helpers, MLIR ``!tla.ptr`` (:class:`PtrType`), and addrspace helpers."""
 
 from __future__ import annotations
 

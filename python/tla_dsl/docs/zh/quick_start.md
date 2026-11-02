@@ -21,7 +21,7 @@ pip install ascend-catlass-dsl
 python -c "import catlass"
 ```
 
-> 在 `/path/to/catlass/python/tla_dsl` 目录下执行 `import catlass` 时，Python 默认优先从当前目录导入，命中的是源码树中的 `catlass`，而非上一步安装的 wheel。源码树中的 `catlass` 仅包含 Python 部分源码，缺少对应的 DSL 二进制扩展，因此运行示例需切换到其他工作目录。
+> 在 `/path/to/catlass/python/tla_dsl` 目录下执行 `import catlass` 时，Python 默认优先从当前目录导入，命中的是源码树中的 `catlass`，而非上一步安装的 wheel。源码树中的 `catlass` 仅包含 Python 部分源码，缺少对应的 Python 二进制扩展，因此运行示例需切换到其他工作目录。
 
 如需体验最新特性，也可参考[开发者指南](dsl_development/index.md)完成环境配置与源码构建，自行编译 wheel 包。
 

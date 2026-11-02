@@ -6,8 +6,8 @@ nav_order: 45
 
 This document describes the behavior observable on the Host side when using `tla.compile` and launching a kernel, including compile samples,
 the compilation cache, repeated launches, and stream selection. For how to create a Host tensor, see
-[DSL Tensor Integration](tensor_binding.md); for the complete interface signatures, see the
-[Host API Reference](../../api/host_api_reference.md).
+[Python Tensor Integration](tensor_binding.md); for the complete interface signatures, see the
+[Program Lifecycle Reference](../../api/runtime/index.md).
 
 For how to pass composite arguments such as tuple/list and dataclass, see [Structured Kernel Arguments](structured_arguments.md).
 

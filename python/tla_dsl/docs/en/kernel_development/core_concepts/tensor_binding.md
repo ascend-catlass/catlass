@@ -2,9 +2,9 @@
 nav_order: 40
 ---
 
-# DSL Tensor Integration
+# Tensor Integration
 
-This document explains how to obtain a `tla.Tensor` on the Host side that can be used by `tla.compile` / launch: bind a real buffer with [DLPack](https://github.com/dmlc/dlpack)'s `from_dlpack` (`torch` / `torch_npu`), or build a type sample without a device pointer with `make_fake_tensor`. For compilation, caching, and repeated launches, see [Compile and Launch](compile_and_launch.md). For static / dynamic layout, see [DSL Layout](layout.md). For the complete interface description, see the [Host API Reference](../../api/host_api_reference.md).
+This document explains how to obtain a `tla.Tensor` on the Host side that can be used by `tla.compile` / launch: bind a real buffer with [DLPack](https://github.com/dmlc/dlpack)'s `from_dlpack` (`torch` / `torch_npu`), or build a type sample without a device pointer with `make_fake_tensor`. For compilation, caching, and repeated launches, see [Compile and Launch](compile_and_launch.md). For static / dynamic layout, see [Layout](layout.md). For the complete interface description, see the [Program Lifecycle Reference](../../api/runtime/index.md).
 
 ---
 
@@ -43,7 +43,7 @@ How the compiled artifact is cached, how the first launch differs from repeated 
 
 Here `x` must implement `__dlpack__` (usually a `torch` tensor on the NPU, for example via `torch_npu`). The conversion is **zero-copy**: the returned `tla.Tensor` shares the same device memory as the source tensor; the source tensor's lifetime must cover the subsequent `tla.compile` / launch, otherwise the pointer becomes invalid.
 
-By default you get a **static layout** (the concrete shape / stride / origin are written into the compiled type). To get a dynamic or mixed static/dynamic layout, call `mark_layout_dynamic` / `mark_compact_shape_dynamic` after the conversion (see [DSL Layout](layout.md)).
+By default you get a **static layout** (the concrete shape / stride / origin are written into the compiled type). To get a dynamic or mixed static/dynamic layout, call `mark_layout_dynamic` / `mark_compact_shape_dynamic` after the conversion (see [Layout](layout.md)).
 
 The full signature is as follows:
 

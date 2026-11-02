@@ -1,4 +1,4 @@
-# AGENTS.md — DSL (python/tla_dsl)
+# AGENTS.md — Python Frontend (python/tla_dsl)
 
 ## Test Guidelines
 

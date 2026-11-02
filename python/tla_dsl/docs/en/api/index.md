@@ -2,12 +2,15 @@
 nav_order: 40
 ---
 
-# API Documentation
+# CATLASS Python API
 
 API references and documentation generation/maintenance instructions for CATLASS Python.
 
 | Document | Scope |
-|------|------|
-| [Kernel API Reference](kernel_api_reference.md) | Kernel-side Core API (`tla.copy`, `tla.mmad`, Vector operations, synchronization, etc.). |
-| [Host API Reference](host_api_reference.md) | Host-side `@tla.kernel`, `tla.compile` / launch, Host tensor. |
-| [API Documentation Generation](generate_api_docs.md) | Regenerate the Kernel / Host API reference from English docstrings. |
+| ------ | ------ |
+| [API Quick Reference](quick_reference.md) | Choose common APIs by task and execution context: Host, kernel, Cube, Vector, SIMD, and SIMT. |
+| [Language Reference](language/index.md) | Values and types, layout and tensor, data movement, compute, synchronization, resources, and debug, organized by language concept. |
+| [Program Lifecycle Reference](runtime/index.md) | Kernel entry, language-boundary declarations, compile and launch, and Host tensor binding. |
+| [API Documentation Generation](generate_api_docs.md) | Regenerate the Language / Program Lifecycle reference from English docstrings. |
+
+Execution context (`Host`, `Kernel`, `Cube`, `Vector`, `SIMD`, `SIMT`) is a property recorded in each API entry, not a top-level document category.

@@ -6,8 +6,8 @@ nav_order: 45
 
 本文说明 Host 侧使用 `tla.compile` 和启动 kernel 时可观察到的行为，包括编译样本、
 编译缓存、重复启动和 stream 选择。Host tensor 的创建方式见
-[DSL Tensor 接入](tensor_binding.md)，接口完整签名见
-[Host API 参考](../../api/host_api_reference.md)。
+[Tensor 接入](tensor_binding.md)，接口完整签名见
+[程序生命周期参考](../../api/runtime/index.md)。
 
 tuple/list、dataclass 等复合参数的传递方式见 [结构化 Kernel 参数](structured_arguments.md)。
 

@@ -1,4 +1,4 @@
-"""Tla DSL runtime entry points and dynamic op helper registry."""
+"""TLA Python runtime entry points and dynamic op helper registry."""
 
 from __future__ import annotations
 
@@ -466,7 +466,7 @@ def const_expr(value: Any) -> bool:
 
 
 def jit(fn: Callable[..., Any]) -> Any:
-    """Compat wrapper for the Tla DSL jit decorator."""
+    """Compat wrapper for the TLA Python jit decorator."""
 
     from .dsl import jit as _jit
 
@@ -474,7 +474,7 @@ def jit(fn: Callable[..., Any]) -> Any:
 
 
 def kernel(fn: Callable[..., Any]) -> Any:
-    """Compat wrapper for the Tla DSL kernel decorator."""
+    """Compat wrapper for the TLA Python kernel decorator."""
 
     from .dsl import kernel as _kernel
 

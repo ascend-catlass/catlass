@@ -8,7 +8,7 @@ nav_order: 40
 
 The MTE, Cube, Vector, Fixpipe, and other pipelines on an Ascend AI Core can execute asynchronously. When the same on-chip storage is read and written in succession by different pipelines, missing or incorrect synchronization produces RAW, WAR, or WAW data races. Manual synchronization requires developers to maintain the storage relationships of tensors, the pipe that each instruction belongs to, double-buffer switching, and the `unit_flag` protocol at the same time; it is verbose and easy to overlook when the algorithm changes.
 
-TLA DSL provides experimental automatic synchronization through `@tla.kernel(auto_sync="v0")`.
+CATLASS Python provides experimental automatic synchronization through `@tla.kernel(auto_sync="v0")`.
 
 `v0` only handles intra-core synchronization among the pipelines within a single AIC or AIV. It does not generate Cube/Vector inter-core synchronization, nor the synchronization inside a VF in Vector core programming.
 
@@ -76,7 +76,7 @@ The inter-core `cross_flag`, `cross_core_set_flag`, and `cross_core_wait_flag` a
 
 ## Compilation Pipeline
 
-AutoSync's control information travels from the Python decorator all the way to the MLIR pass:
+AutoSync's control information travels from the CATLASS Python decorator all the way to the MLIR pass:
 
 ```text
 @tla.kernel(auto_sync="v0")
@@ -242,7 +242,7 @@ For an `scf.for` iter argument/result, the root is considered stable only when t
 
 ### Combination constraints for multiple dynamic buffers
 
-When one instruction accesses multiple buffers selected by runtime conditions at the same time, each branch must keep a consistent allocation order. For example, if one branch selects `buffer0` as src and `buffer1` as dst while the other branch conversely selects `buffer1` as src and `buffer0` as dst, `v0` does not currently support this form. The reason is that AutoSync cannot generate a unique and consistent mutex lock order for all runtime branches. This is a current capability limitation of AutoSync, not a general limitation of TLA DSL on conditional buffers.
+When one instruction accesses multiple buffers selected by runtime conditions at the same time, each branch must keep a consistent allocation order. For example, if one branch selects `buffer0` as src and `buffer1` as dst while the other branch conversely selects `buffer1` as src and `buffer0` as dst, `v0` does not currently support this form. The reason is that AutoSync cannot generate a unique and consistent mutex lock order for all runtime branches. This is a current capability limitation of AutoSync, not a general limitation of CATLASS Python on conditional buffers.
 
 ## `unit_flag` Coordination
 

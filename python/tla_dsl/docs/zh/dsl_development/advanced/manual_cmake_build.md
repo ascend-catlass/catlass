@@ -4,11 +4,11 @@ nav_order: 50
 
 # CMake 目标调试
 
-TLA DSL 通过 [`build.sh`](../build_guide/build.md) 统一准备 AscendNPU-IR 路径并配置 CMake。本文面向需要单独编译 CMake 目标或运行编译器回归测试的开发者。
+CATLASS Python 通过 [`build.sh`](../build_guide/build.md) 统一准备 AscendNPU-IR 路径并配置 CMake。本文面向需要单独编译 CMake 目标或运行编译器回归测试的开发者。
 
 ## 配置和编译
 
-先加载 CANN，然后在 DSL 子项目根目录执行 Development 构建：
+先加载 CANN，然后在 Python 子项目根目录执行 Development 构建：
 
 ```bash
 source /path/to/cann/set_env.sh

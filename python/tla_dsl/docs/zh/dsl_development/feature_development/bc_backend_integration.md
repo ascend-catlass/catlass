@@ -2,7 +2,7 @@
 nav_order: 30
 ---
 
-# 调用 bc 接入整个 DSL 后端 —— 以 tla.copy 为例
+# 调用 bc 接入整个 Python 后端 —— 以 tla.copy 为例
 
 ---
 
@@ -62,11 +62,11 @@ struct TileCopyTla<
 - [copy_l1_to_l0a.hpp](../../../../../../include/catlass/gemm/tile/ascend950/copy_l1_to_l0a.hpp) / [copy_l1_to_l0b.hpp](../../../../../../include/catlass/gemm/tile/ascend950/copy_l1_to_l0b.hpp)（L1 -> L0A/L0B）
 - vector 侧 [copy_gm_to_ub_tla.hpp](../../../../../../include/catlass/epilogue/tile/copy_gm_to_ub_tla.hpp) / [copy_ub_to_gm_tla.hpp](../../../../../../include/catlass/epilogue/tile/copy_ub_to_gm_tla.hpp) / [copy_ub_to_l1_tla.hpp](../../../../../../include/catlass/epilogue/tile/copy_ub_to_l1_tla.hpp)
 
-这些模板是 C++ 库调优的成果，编码了大量硬件细节（C0 stride、Nd2Nz vs DataCopy 的选择、Fixpipe 的量化/ReLU/unit_flag）。**若 DSL 在 MLIR pass 里重新实现一遍，既是巨大的重复劳动，又容易和 C++ 库的实现产生分歧--同一个搬运算子存在两套逻辑，长期维护成本极高。**
+这些模板是 C++ 库调优的成果，编码了大量硬件细节（C0 stride、Nd2Nz vs DataCopy 的选择、Fixpipe 的量化/ReLU/unit_flag）。**若 Python 在 MLIR pass 里重新实现一遍，既是巨大的重复劳动，又容易和 C++ 库的实现产生分歧--同一个搬运算子存在两套逻辑，长期维护成本极高。**
 
 ### 复用思路：契约在 MLIR，实现在 C++ 模板，bc 是桥梁
 
-TLA DSL 的选择是 **不重新实现，而是复用**。复用的机制就是把"调用什么"和"怎么实现"解耦：
+CATLASS Python 的选择是 **不重新实现，而是复用**。复用的机制就是把"调用什么"和"怎么实现"解耦：
 
 | 层 | 职责 | 所在位置 |
 |----|------|---------|
@@ -117,7 +117,7 @@ kernel.o   (stub 被 always_inline 内联展开为 DMA intrinsic)
 | `meta_op.aic.c310.bc` | cube 核（AIC）所有 runtime stub 的函数体 | 本项目 `csrc/mlir/bc/Cube/*.cpp` 编译 + `llvm-link` 合并 |
 | `meta_op.aiv.c310.bc` | vector 核（AIV）所有 runtime stub 的函数体 | 本项目 `csrc/mlir/bc/Vector/*.cpp` 编译 + `llvm-link` 合并 |
 
-这些函数包括：DMA 搬运（`dma.cpp`）、矩阵乘（`mmad.cpp`）、调试打印（`print_tensor.cpp`）、互斥锁（`mutex.cpp`）、RegStore（`store.cpp`）等。它们是 DSL 与 AscendC 硬件 API 之间的"实现层"：DSL 流水线只负责生成调用它们的 IR，具体怎么搬数据由 stub 内部的 `AscendC::DataCopy` / `AscendC::Fixpipe` 等 C++ 模板决定（见第 1 节）；而 `bisheng` 在编译 stub 时，会把这些 AscendC 调用内联展开成 DMA intrinsic。
+这些函数包括：DMA 搬运（`dma.cpp`）、矩阵乘（`mmad.cpp`）、调试打印（`print_tensor.cpp`）、互斥锁（`mutex.cpp`）、RegStore（`store.cpp`）等。它们是 Python 与 AscendC 硬件 API 之间的"实现层"：Python 流水线只负责生成调用它们的 IR，具体怎么搬数据由 stub 内部的 `AscendC::DataCopy` / `AscendC::Fixpipe` 等 C++ 模板决定（见第 1 节）；而 `bisheng` 在编译 stub 时，会把这些 AscendC 调用内联展开成 DMA intrinsic。
 
 ---
 
@@ -329,4 +329,4 @@ LLVM IR (call @_mlir_ciface_copy_gm_RowMajor_to_l1_zN_float)
 kernel.o   (DMA intrinsic 已内联，无 stub 调用残留)
 ```
 
-**一句话总结**：DSL 流水线生成"调用契约"（`func.call` + payload 布局），bc 提供"调用实现"（C++ stub -> `TileCopyTla` 模板 -> AscendC -> intrinsic），`hivmc --link-aicore-bitcode` 是把两者焊在一起的那道工序。`tla.copy` 只是用最直观的"搬数据"把这条契约-实现-焊接的链路展示出来--`tla.mmad`、`tla.store` 等所有走 stub 的 op 都遵循同一套 bc 接入机制。
+**一句话总结**：Python 流水线生成"调用契约"（`func.call` + payload 布局），bc 提供"调用实现"（C++ stub -> `TileCopyTla` 模板 -> AscendC -> intrinsic），`hivmc --link-aicore-bitcode` 是把两者焊在一起的那道工序。`tla.copy` 只是用最直观的"搬数据"把这条契约-实现-焊接的链路展示出来--`tla.mmad`、`tla.store` 等所有走 stub 的 op 都遵循同一套 bc 接入机制。

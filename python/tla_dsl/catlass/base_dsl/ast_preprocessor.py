@@ -144,7 +144,7 @@ def reject_user_class_value(value: Any, *, context: str) -> None:
             return
         raise TypeError(
             f"user-defined class {item_type.__name__!r} is not supported in "
-            f"Tla DSL functions ({context})"
+            f"TLA Python functions ({context})"
         )
 
     check(value)
@@ -1913,7 +1913,7 @@ class _FrontendControlFlowTransformer(ast.NodeTransformer):
         except (KeyError, RuntimeError):
             self._raise_source_syntax(
                 node.func,
-                "reserved module-qualified call must use the genuine Tla DSL member",
+                "reserved module-qualified call must use the genuine TLA Python member",
             )
 
     def _module_qualified_dsl_path(self, func: ast.expr) -> str | None:
@@ -3458,9 +3458,9 @@ def validate_language_boundaries(
 
     prepared = _prepared_source or _prepare_function_source(fn)
     if prepared is None:
-        raise SyntaxError("Tla DSL function source must be available for validation")
+        raise SyntaxError("TLA Python function source must be available for validation")
     if prepared.target is None:
-        raise SyntaxError("Tla DSL function source could not be analyzed")
+        raise SyntaxError("TLA Python function source could not be analyzed")
     _validate_language_boundaries(
         fn,
         target=prepared.target,
@@ -3629,7 +3629,7 @@ def _validate_language_boundaries(
             name = getattr(value.fn, "__name__", "<kernel>")
             fail(
                 node.func,
-                f"calling @tla.kernel {name!r} from a Tla DSL function is not "
+                f"calling @tla.kernel {name!r} from a TLA Python function is not "
                 "supported; use @tla.jit",
             )
         if inspect.isclass(value):
@@ -3650,8 +3650,8 @@ def _validate_language_boundaries(
                 if not is_supported_isinstance_type(node.args[1]):
                     fail(
                         node.args[1],
-                        "isinstance only supports built-in or Tla DSL types in "
-                        "Tla DSL functions",
+                        "isinstance only supports built-in or TLA Python types in "
+                        "TLA Python functions",
                     )
                 return
             supported_builtins = {
@@ -3677,7 +3677,9 @@ def _validate_language_boundaries(
             if value in supported_builtins:
                 return
             name = getattr(value, "__name__", type(value).__name__)
-            fail(node.func, f"builtin {name!r} is not supported in Tla DSL functions")
+            fail(
+                node.func, f"builtin {name!r} is not supported in TLA Python functions"
+            )
         if inspect.isfunction(value):
             # Bare Python functions execute directly during staging. They share
             # the caller's active frontend emission context, so TLA operations
@@ -3692,7 +3694,7 @@ def _validate_language_boundaries(
                 fail(
                     node.func,
                     f"call to Python callable {name!r} requires @tla.jit with "
-                    "inspectable source when it is lowered by Tla DSL",
+                    "inspectable source when it is lowered by TLA Python",
                 )
             callable_source = textwrap.dedent("".join(callable_lines))
             callable_filename = inspect.getsourcefile(value) or filename
@@ -4289,7 +4291,7 @@ def _cf_symbol_check(symbol: Any) -> None:
     ):
         return
     name = getattr(symbol, "__name__", type(symbol).__name__)
-    raise RuntimeError(f"Incorrect `{name}` is used. Please use the Tla DSL symbol.")
+    raise RuntimeError(f"Incorrect `{name}` is used. Please use the TLA Python symbol.")
 
 
 def _checked_dsl_member(module: Any, path: str) -> Any:
@@ -4308,7 +4310,7 @@ def _checked_dsl_member(module: Any, path: str) -> Any:
     expected = expected_paths.get(path)
     if module is not identities.module or expected is None:
         _cf_symbol_check(module)
-        raise RuntimeError("Unknown reserved Tla DSL member path")
+        raise RuntimeError("Unknown reserved TLA Python member path")
     current = module
     for member, trusted in zip(path.split("."), expected):
         try:
@@ -4341,7 +4343,7 @@ def _checked_dsl_identity(symbol: Any, path: str) -> Any:
 
 def _raise_incorrect_dsl_symbol(symbol: Any) -> NoReturn:
     name = getattr(symbol, "__name__", type(symbol).__name__)
-    raise RuntimeError(f"Incorrect `{name}` is used. Please use the Tla DSL symbol.")
+    raise RuntimeError(f"Incorrect `{name}` is used. Please use the TLA Python symbol.")
 
 
 def _is_tla_range_iter(

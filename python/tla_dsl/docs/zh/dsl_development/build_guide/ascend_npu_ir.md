@@ -82,4 +82,4 @@ done
 export CATLASS_DSL_PREBUILT_ASCENDNPU_IR="$PWD"
 ```
 
-然后返回 DSL 子项目并按照[构建 CATLASS Python](build.md)和[运行测试用例](testing.md)继续。
+然后返回 Python 子项目并按照[构建 CATLASS Python](build.md)和[运行测试用例](testing.md)继续。

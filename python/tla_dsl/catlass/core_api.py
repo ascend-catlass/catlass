@@ -1,4 +1,4 @@
-"""Explicit user-facing Tla DSL op helpers with inline preconditions."""
+"""Explicit user-facing TLA Python op helpers with inline preconditions."""
 
 from __future__ import annotations
 

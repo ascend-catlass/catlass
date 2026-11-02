@@ -4,7 +4,7 @@ nav_order: 20
 
 # 对 CATLASS Python 算子进行性能调优
 
-下述文档介绍使用 CATLASS Python （以下简称为DSL）工具链的端到端编译、功能测试及性能维测的完整流程。
+下述文档介绍使用 CATLASS Python工具链的端到端编译、功能测试及性能维测的完整流程。
 
 ## 性能调优工具简介
 
@@ -26,8 +26,8 @@ nav_order: 20
 
 ### 基础依赖启用
 
-在进行 DSL 开发与测试前，请先行确认基础环境已准备完毕。详细步骤请参考 [快速上手](../../../../../../docs/zh/1_Practice/01_quick_start.md)，完成 CANN 的下载安装与环境变量启用。
-DSL 的底层编译依赖于 AscendNPU-IR。在执行后续编译操作前，请参阅 [环境准备](../../dsl_development/build_guide/environment.md) 并按该文档指引完成至 [运行测试用例](../../dsl_development/build_guide/testing.md) 相关内容。
+在进行 Python 开发与测试前，请先行确认基础环境已准备完毕。详细步骤请参考 [快速上手](../../../../../../docs/zh/1_Practice/01_quick_start.md)，完成 CANN 的下载安装与环境变量启用。
+Python 的底层编译依赖于 AscendNPU-IR。在执行后续编译操作前，请参阅 [环境准备](../../dsl_development/build_guide/environment.md) 并按该文档指引完成至 [运行测试用例](../../dsl_development/build_guide/testing.md) 相关内容。
 
 ## 用msProf进行单算子性能分析
 
@@ -56,7 +56,7 @@ msprof op --application="python examples/python/tla_dsl/tla/kernel/matmul/basic_
 * ⚠ 注意事项
   * 工具默认会读取执行序列中第一个算子的性能数据。在使用官方 example 进行独立调测时，通常可直接获取到目标结果；但若接入其他复杂工程，即使只跑某一个算子的用例，底层也可能伴随着框架（如 PyTorch）其他的初始化或前置算子执行。
 
-    为了避免读取不到目标算子的结果，强烈建议性能分析时通过 --kernel-name 精准指定算子名称。对于使用 DSL（如 Catlass / TLA）开发的算子，对应的算子名称即为 Python 代码中被 @tla.kernel 装饰器修饰的函数名（例如，在 basic_mixed.py 脚本中，对应的参数应配置为 --kernel-name=basic_mixed）。
+    为了避免读取不到目标算子的结果，强烈建议性能分析时通过 --kernel-name 精准指定算子名称。对于使用 Python（如 Catlass / TLA）开发的算子，对应的算子名称即为 Python 代码中被 @tla.kernel 装饰器修饰的函数名（例如，在 basic_mixed.py 脚本中，对应的参数应配置为 --kernel-name=basic_mixed）。
   * 可设置环境变量`ASCEND_RT_VISIBLE_DEVICES`指定上板调测的Device Id号
 
 ### 性能数据说明

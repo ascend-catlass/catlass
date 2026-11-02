@@ -1,4 +1,4 @@
-"""Shared AST parsing and Markdown rendering for TLA DSL API references."""
+"""Shared AST parsing and Markdown rendering for CATLASS Python API references."""
 
 from __future__ import annotations
 
@@ -348,6 +348,8 @@ def format_signature(entry: APIEntry, *, default_source_path: Path) -> str:
 
     if entry.qualified_name.startswith("dataclasses."):
         callee = entry.qualified_name
+    elif entry.name.startswith("tla."):
+        callee = entry.name
     elif entry.name.startswith("Tensor."):
         method = entry.name.split(".", 1)[1]
         src = entry.source_path or default_source_path
@@ -412,7 +414,8 @@ def render_entry(
                 f"`{entry.name}` missing {label}:; please update {entry.qualified_name}"
             )
     h = "#" * heading_level
-    parts = [f"{h} `{entry.name}`", ""]
+    heading = f"{h} {entry.name}" if entry.is_concept else f"{h} `{entry.name}`"
+    parts = [heading, ""]
     source = source_markdown(entry, docs_dir, default_source_path=default_source_path)
     if source:
         parts.extend([source, ""])
@@ -562,7 +565,8 @@ def render_reference(
         "",
         f"# {title}",
         "",
-        *[paragraph + "\n" for paragraph in intro],
+        *[paragraph.rstrip("\n") + "\n" for paragraph in intro],
+        "",
         "---",
         "",
         render_toc(tree),
@@ -592,6 +596,282 @@ def render_reference(
     return "\n".join(header + body).rstrip() + "\n"
 
 
+_NUMBERED_HEADING = re.compile(r"^(#{2,6})\s+(\d+(?:\.\d+)*)\.?\s+(.+?)\s*$")
+_MARKDOWN_LINK = re.compile(r"(\]\(\s*)([^)\s#]+)(#[^)\s]*)?(\s*\))")
+
+
+def _trim_section(lines: list[str]) -> list[str]:
+    """Drop separator rules and surrounding blank lines from one section."""
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    while lines and not lines[-1].strip():
+        lines.pop()
+    while lines and lines[-1].strip() == "---":
+        lines.pop()
+        while lines and not lines[-1].strip():
+            lines.pop()
+    return lines
+
+
+def _shift_headings(lines: list[str], amount: int) -> list[str]:
+    shifted: list[str] = []
+    for line in lines:
+        match = re.match(r"^(#{2,6})(\s+.*)$", line)
+        if match:
+            level = max(1, len(match.group(1)) - amount)
+            line = "#" * level + match.group(2)
+        shifted.append(line)
+    return shifted
+
+
+def _prefix_relative_links(lines: list[str], prefix: str) -> list[str]:
+    """Rebase links from the old single-page location to a split page."""
+
+    def replace(match: re.Match[str]) -> str:
+        target = match.group(2)
+        if target.startswith(("http://", "https://", "/", "mailto:")):
+            return match.group(0)
+        return f"{match.group(1)}{prefix}{target}{match.group(3) or ''}{match.group(4)}"
+
+    return [_MARKDOWN_LINK.sub(replace, line) for line in lines]
+
+
+def split_reference_document(
+    markdown: str,
+    *,
+    index_path: str,
+    page_files: dict[str, str],
+    page_titles: dict[str, str] | None = None,
+    reference_label: str = "API Reference",
+    quick_label: str = "Quick Reference",
+) -> dict[Path, str]:
+    """Split one generated reference into section pages plus a landing page.
+
+    ``page_files`` maps numeric section ids to output paths relative to the
+    reference directory. A mapping for ``"5"`` whose path ends in ``index.md``
+    turns section 5 into a group page and emits its numbered H3 subsections as
+    separate pages.
+    """
+    lines = markdown.splitlines()
+    h1_index = next(i for i, line in enumerate(lines) if line.startswith("# "))
+    header_end = next(
+        i for i in range(h1_index + 1, len(lines)) if lines[i].strip() == "---"
+    )
+    comment = lines[:h1_index]
+    title_line = lines[h1_index]
+    intro = _trim_section(lines[h1_index + 1 : header_end])
+
+    top_sections: list[tuple[str, str, int, int]] = []
+    for i, line in enumerate(lines):
+        match = _NUMBERED_HEADING.match(line)
+        if match and len(match.group(1)) == 2:
+            top_sections.append((match.group(2), match.group(3), i, len(lines)))
+    for idx in range(len(top_sections) - 1):
+        number, title, start, _end = top_sections[idx]
+        top_sections[idx] = (number, title, start, top_sections[idx + 1][2])
+    if top_sections:
+        last_number, last_title, last_start, _end = top_sections[-1]
+        top_sections[-1] = (last_number, last_title, last_start, len(lines))
+
+    pages: list[tuple[str, str, str, list[str]]] = []
+    for number, title, start, end in top_sections:
+        if number not in page_files:
+            continue
+        block = _trim_section(lines[start:end].copy())
+        path = page_files[number]
+        display_title = (page_titles or {}).get(number, title)
+        group = path.endswith("/index.md")
+        if group:
+            first_child = next(
+                (
+                    i
+                    for i, line in enumerate(block[1:], start=1)
+                    if (m := _NUMBERED_HEADING.match(line))
+                    and m.group(1) == "###"
+                    and m.group(2).startswith(f"{number}.")
+                ),
+                None,
+            )
+            intro_block = _trim_section(block[:first_child]) if first_child else block
+            pages.append((number, display_title, path, intro_block))
+            if first_child is not None:
+                child_starts: list[int] = []
+                for i, line in enumerate(block[first_child:], start=first_child):
+                    match = _NUMBERED_HEADING.match(line)
+                    if match and match.group(1) == "###":
+                        child_starts.append(i)
+                for cidx, child_start in enumerate(child_starts):
+                    child_end = (
+                        child_starts[cidx + 1]
+                        if cidx + 1 < len(child_starts)
+                        else len(block)
+                    )
+                    child_match = _NUMBERED_HEADING.match(block[child_start])
+                    assert child_match is not None
+                    child_number = child_match.group(2)
+                    child_path = page_files.get(child_number)
+                    if child_path is None:
+                        continue
+                    pages.append(
+                        (
+                            child_number,
+                            (page_titles or {}).get(child_number, child_match.group(3)),
+                            child_path,
+                            _trim_section(block[child_start:child_end].copy()),
+                        )
+                    )
+        else:
+            pages.append((number, display_title, path, block))
+
+    result: dict[Path, str] = {}
+    index_page = Path(index_path)
+    table = ["## Reference Pages", "", "| Section | Page |", "| --- | --- |"]
+    for number, title, path, _block in pages:
+        target = Path(os.path.relpath(Path(path), index_page.parent)).as_posix()
+        table.append(f"| {number} | [{title}]({target}) |")
+    table.extend(["", "---", ""])
+    index_prefix = "../" * len(index_page.parent.parts)
+    index_body = (
+        comment
+        + [title_line, ""]
+        + _prefix_relative_links(intro, index_prefix)
+        + [""]
+        + table
+    )
+    result[index_page] = "\n".join(index_body).rstrip() + "\n"
+
+    for number, title, path, block in pages:
+        page = Path(path)
+        nav_order = int(number.replace(".", ""))
+        shift = 1 if "." not in number else 2
+        depth = len(page.parent.parts)
+        prefix = "../" * depth
+        shifted = _shift_headings(
+            _prefix_relative_links(_trim_section(block.copy()), prefix), shift
+        )
+        if not shifted:
+            continue
+        back = Path(os.path.relpath(index_page, page.parent)).as_posix()
+        quick = Path(os.path.relpath("quick_reference.md", page.parent)).as_posix()
+        breadcrumb = f"[{reference_label}]({back}) | [{quick_label}]({quick})"
+        page_body = (
+            ["---", f"nav_order: {nav_order}", "---", ""]
+            + comment
+            + [f"# {title}", "", breadcrumb, ""]
+            + _trim_section(shifted[1:].copy())
+        )
+        if path.endswith("/index.md"):
+            children = [
+                item
+                for item in pages
+                if item[2].startswith(f"{page.parent.as_posix()}/") and item[2] != path
+            ]
+            if children:
+                page_body.extend(
+                    ["", "## Subtopics", "", "| Section | Page |", "| --- | --- |"]
+                )
+                for child_number, child_title, child_path, _child_block in children:
+                    child_target = Path(
+                        os.path.relpath(child_path, page.parent)
+                    ).as_posix()
+                    page_body.append(
+                        f"| {child_number} | [{child_title}]({child_target}) |"
+                    )
+        result[page] = "\n".join(page_body).rstrip() + "\n"
+    return result
+
+
+_PUBLISHED_WORDING_PROTECTIONS = (
+    "CATLASS_DSL_",
+    "DSLOptimizationWarning",
+    "CatlassBaseDSL",
+    "BaseDSL",
+    "TlaDSL",
+    "DSLLocation",
+    "_TRUSTED_DSL_",
+    "_INTERNAL_CHECKED_DSL_",
+    "CuTe DSL",
+    "python/tla_dsl",
+    "dsl_development",
+    "dsl_tutorials",
+)
+
+
+def published_wording(markdown: str) -> str:
+    """Normalize terminology in generated API prose only.
+
+    Source docstrings keep the project's internal DSL terminology. The
+    generated API reference uses Python wording, except for identifiers,
+    environment variables, paths, and external product names.
+    """
+    placeholders: dict[str, str] = {}
+    for index, token in enumerate(_PUBLISHED_WORDING_PROTECTIONS):
+        placeholders[token] = f"@@W{index}@@"
+    for token, placeholder in placeholders.items():
+        markdown = markdown.replace(token, placeholder)
+
+    markdown = markdown.replace(
+        "CATLASS Python (hereafter abbreviated as DSL)", "CATLASS Python"
+    )
+    markdown = markdown.replace("CATLASS Python （以下简称为DSL）", "CATLASS Python")
+    markdown = markdown.replace("TLA DSL", "CATLASS Python")
+    markdown = markdown.replace("Tla DSL", "CATLASS Python")
+    markdown = markdown.replace("Tla base DSL", "CATLASS Python")
+    markdown = markdown.replace("the DSL", "CATLASS Python")
+    markdown = markdown.replace("in the DSL", "in CATLASS Python")
+    for old, new in (
+        ("DSL API", "Python API"),
+        ("DSL call", "Python call"),
+        ("DSL region", "Python region"),
+        ("DSL lowering", "Python lowering"),
+        ("DSL operation", "Python operation"),
+        ("DSL op", "Python op"),
+        ("DSL type", "Python type"),
+        ("DSL value", "Python value"),
+        ("DSL frontend", "Python frontend"),
+        ("DSL", "Python"),
+        ("Python Python", "Python"),
+    ):
+        markdown = markdown.replace(old, new)
+
+    for old, new in (
+        ("the Python does not support", "CATLASS Python does not support"),
+        ("in the Python into", "in CATLASS Python into"),
+        ("abstracted in the Python as", "abstracted as"),
+        ("the Python depends on", "CATLASS Python depends on"),
+        ("building the Python and", "building CATLASS Python and"),
+        ("developing and testing the Python", "developing and testing CATLASS Python"),
+        ("compilation of the Python depends", "compilation of CATLASS Python depends"),
+        ("developed with the Python", "developed with CATLASS Python"),
+        ("the Python expands the arguments", "CATLASS Python expands the arguments"),
+        ("handled by the Python.", "handled by CATLASS Python."),
+        ("the Python pipeline", "the CATLASS Python pipeline"),
+        ("the Python decorator", "the CATLASS Python decorator"),
+        ("to the Python.", "to CATLASS Python."),
+        ("the Python constructor", "the CATLASS Python constructor"),
+        ("in the Python subproject", "in the CATLASS Python subproject"),
+        ("builds the Python, and runs", "builds CATLASS Python and runs"),
+        ("from the Python --", "from CATLASS Python --"),
+        ("the Python type template", "the CATLASS Python type template"),
+        ("the Python call", "the CATLASS Python call"),
+        ("the Python compilation pipeline", "the CATLASS Python compilation pipeline"),
+        ("customize the Python", "customize CATLASS Python"),
+        ("reachable from the Python --", "reachable from CATLASS Python --"),
+        ("relative to the Python root", "relative to the CATLASS Python root"),
+        ("return to the Python subproject", "return to the CATLASS Python subproject"),
+        ("If the Python reimplemented", "If CATLASS Python reimplemented"),
+        (
+            "between the Python and the AscendC",
+            "between CATLASS Python and the AscendC",
+        ),
+    ):
+        markdown = markdown.replace(old, new)
+
+    for token, placeholder in placeholders.items():
+        markdown = markdown.replace(placeholder, token)
+    return markdown
+
+
 def write_output(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
@@ -615,6 +895,43 @@ def check_output(path: Path, content: str) -> bool:
     print(diff)
     print(f"out of date {path.relative_to(PACKAGE_ROOT)}")
     return False
+
+
+def run_cli_pages(
+    *,
+    description: str,
+    default_output: Path,
+    generate_pages_fn: Callable[..., dict[Path, str]],
+) -> int:
+    """Write or check a reference split across multiple Markdown pages."""
+    parser = argparse.ArgumentParser(description=description)
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=default_output,
+        help=f"Output landing page (default: {default_output.relative_to(PACKAGE_ROOT)})",
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Do not write files; fail if any generated Markdown is stale.",
+    )
+    args = parser.parse_args()
+    output = args.output if args.output.is_absolute() else PACKAGE_ROOT / args.output
+    reference_root = output.parent.parent
+    try:
+        pages = generate_pages_fn(docs_dir=reference_root)
+    except MissingAPIDocError as exc:
+        print(exc)
+        return 1
+    ok = True
+    for relative_path, content in pages.items():
+        path = reference_root / relative_path
+        if args.check:
+            ok = check_output(path, content) and ok
+        else:
+            write_output(path, content)
+    return 0 if ok else 1
 
 
 def run_cli(

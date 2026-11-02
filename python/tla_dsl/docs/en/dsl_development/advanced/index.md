@@ -4,7 +4,7 @@ nav_order: 30
 
 # Advanced
 
-Advanced development practices for developers who need to customize the DSL compilation pipeline in depth.
+Advanced development practices for developers who need to customize the CATLASS Python compilation pipeline in depth.
 
 | Document | Scope |
 |------|------|

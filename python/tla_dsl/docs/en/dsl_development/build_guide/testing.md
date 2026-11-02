@@ -64,7 +64,7 @@ cd /path/to/catlass
 bash tests/run_dsl_test.sh --device 0
 ```
 
-The script loads CANN, checks AscendNPU-IR, builds the DSL, and runs the on-device regression tests in `tests/dsl_battery`.
+The script loads CANN, checks AscendNPU-IR, builds CATLASS Python and runs the on-device regression tests in `tests/dsl_battery`.
 
 Common variables are as follows:
 
@@ -72,7 +72,7 @@ Common variables are as follows:
 | ----------------------------------- | -------------------------------------------------------- |
 | `ASCEND_HOME_PATH`                  | CANN Toolkit root directory; the script also tries to locate and load `set_env.sh` |
 | `CATLASS_DSL_PREBUILT_ASCENDNPU_IR` | Root of the shared AscendNPU-IR source and build tree, used as a fallback path after the in-repository submodule |
-| `CATLASS_DSL_DIR`                   | DSL subproject path; derived from the script location by default |
+| `CATLASS_DSL_DIR`                   | Python subproject path; derived from the script location by default |
 | `DEVICE_ID`                         | NPU device id; defaults to `1` and can be overridden by `--device` |
 | `CATLASS_DSL_FORCE_RECOMPILE`       | Whether to force recompilation of runtime artifacts; the script sets it to `1` by default |
 

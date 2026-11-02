@@ -5,7 +5,7 @@ nav_order: 46
 # Structured Kernel Arguments
 
 Kernel arguments can be Tensors or scalars, or tuple/list, NamedTuple, or
-dataclass values that contain them. The user passes the Python structures directly, and the DSL expands the arguments and
+dataclass values that contain them. The user passes the Python structures directly, and CATLASS Python expands the arguments and
 restores the corresponding structures while compiling the function body, with no hand-written device ABI needed.
 
 This document explains the usage. For Tensor creation see [Tensor Integration](tensor_binding.md); for compiled objects and streams
@@ -142,7 +142,7 @@ compiled(tx, aux, tout, block_num=1)
 ```
 
 For dynamic dimensions and layout constraints, see [Static and Dynamic Layout](layout.md).
-Ordinary Tensors and Dynamic-GM can be passed in combination; the physical fields of the descriptor are handled by the DSL.
+Ordinary Tensors and Dynamic-GM can be passed in combination; the physical fields of the descriptor are handled by CATLASS Python.
 For a mixed-argument example, see [mixed_memref_arguments.py](../../../../../../examples/python/tla_dsl/dsl_tutorials/structured_arguments/mixed_memref_arguments.py).
 
 ## Reusing a Compiled Object

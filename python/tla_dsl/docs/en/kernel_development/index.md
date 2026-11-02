@@ -2,7 +2,7 @@
 nav_order: 20
 ---
 
-# DSL Kernel Development Guide
+# Kernel Development Guide
 
 Kernel-side development and debugging practices, including the use of functional / performance debugging tools.
 
