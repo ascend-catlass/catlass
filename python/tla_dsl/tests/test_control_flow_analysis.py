@@ -1640,7 +1640,7 @@ def test_control_flow_symbol_check_uses_exact_trusted_identities() -> None:
     forged_range.__module__ = "catlass.core_api"
     forged_range.__name__ = "range"
     for forged in (forged_module, forged_range):
-        with pytest.raises(RuntimeError, match="Please use the Tla DSL symbol"):
+        with pytest.raises(RuntimeError, match="Please use the TLA Python symbol"):
             _cf_symbol_check(forged)
 
 
@@ -1710,7 +1710,7 @@ def test_mutated_module_qualified_member_is_rejected_during_transform(
     else:
         monkeypatch.setattr(catlass_module, member, forged)
 
-    with pytest.raises(SyntaxError, match="genuine Tla DSL member") as exc_info:
+    with pytest.raises(SyntaxError, match="genuine TLA Python member") as exc_info:
         _ = _transform_source(source, {"tla": catlass_module})
     assert exc_info.value.lineno == 2
 
@@ -1822,7 +1822,7 @@ def test_checked_module_member_preserves_callable_before_arguments(monkeypatch) 
         raise AssertionError("argument must not run before callable validation")
 
     monkeypatch.setattr(catlass_module, "range", lambda *_: ())
-    with pytest.raises(RuntimeError, match="Please use the Tla DSL symbol"):
+    with pytest.raises(RuntimeError, match="Please use the TLA Python symbol"):
         transformed(argument)
     assert argument_calls == 0
 
@@ -1843,7 +1843,7 @@ def test_explicit_step_checks_callable_before_lifted_arguments(
         return evaluate
 
     monkeypatch.setattr(catlass_module, "range", core_api.range_constexpr)
-    with pytest.raises(RuntimeError, match="Please use the Tla DSL symbol"):
+    with pytest.raises(RuntimeError, match="Please use the TLA Python symbol"):
         transformed(argument(0), argument(2), argument(step_value))
     assert argument_calls == 0
 
@@ -1889,7 +1889,7 @@ def test_module_member_cross_role_swap_is_rejected_before_transform(
     monkeypatch, member: str, replacement, source: str
 ) -> None:
     monkeypatch.setattr(catlass_module, member, replacement)
-    with pytest.raises(SyntaxError, match="genuine Tla DSL member"):
+    with pytest.raises(SyntaxError, match="genuine TLA Python member"):
         _ = _transform_source(source, {"tla": catlass_module})
 
 
@@ -1977,7 +1977,7 @@ def test_transformed_function_rejects_later_module_member_mutation(
     else:
         monkeypatch.setattr(catlass_module, member, forged)
 
-    with pytest.raises(RuntimeError, match="Please use the Tla DSL symbol"):
+    with pytest.raises(RuntimeError, match="Please use the TLA Python symbol"):
         transformed(*args)
     assert calls == 0
 
@@ -1997,7 +1997,7 @@ def test_transformed_function_rejects_module_member_cross_role_swap(
 ) -> None:
     transformed = _maybe_transform(function)
     monkeypatch.setattr(catlass_module, member, replacement)
-    with pytest.raises(RuntimeError, match="Please use the Tla DSL symbol"):
+    with pytest.raises(RuntimeError, match="Please use the TLA Python symbol"):
         transformed(*args)
 
 
@@ -2014,7 +2014,7 @@ def test_transformed_direct_alias_rejects_cross_role_rebinding(
 ) -> None:
     transformed = _maybe_transform(function)
     transformed.__globals__[name] = replacement
-    with pytest.raises(RuntimeError, match="Please use the Tla DSL symbol"):
+    with pytest.raises(RuntimeError, match="Please use the TLA Python symbol"):
         transformed(*args)
 
 
@@ -2024,7 +2024,7 @@ def test_transformed_function_rejects_later_module_alias_rebinding(monkeypatch) 
     forged_module.range = core_api.range
     monkeypatch.setitem(transformed.__globals__, "catlass_module", forged_module)
 
-    with pytest.raises(RuntimeError, match="Please use the Tla DSL symbol"):
+    with pytest.raises(RuntimeError, match="Please use the TLA Python symbol"):
         transformed(1)
 
 
@@ -2038,7 +2038,7 @@ def test_region_member_validation_precedes_mode_evaluation(monkeypatch) -> None:
         raise AssertionError("mode must not run before callable validation")
 
     monkeypatch.setitem(core_api.vec._members, "func", lambda **_: None)
-    with pytest.raises(RuntimeError, match="Please use the Tla DSL symbol"):
+    with pytest.raises(RuntimeError, match="Please use the TLA Python symbol"):
         transformed(argument)
     assert argument_calls == 0
 
