@@ -224,21 +224,21 @@ msTuner_CATLASS支持在 `tools/library/scripts/search_space.py`文件中对算�
 - L1/L0 Tile Shapes配置与自定义剪枝函数`tile_shape_constraint_for_pingpong`
 
   ```python
-          tile_shapes = list(generate_tile_shapes(
-          tile_shape_constraint_for_pingpong, # set constraint function based on dispatch policy
-          # below are arguments for constraint function
-          element_sizes=(2, 2, 4), # size of ElementA, ElementB, ElementAccumulator
-          stages=[2], # stages of dispatch policy for estimating boundary conditions, e.g. 2 for UB stages
-          step=16, # step size for iterating the next tile shape on each dimension of L1/L0 tile shape
-          tile_shape_range=TileShapeRange(
-            l1_tile_m_range=(32, 128),  # range of L1TileShape::M/N/K
-            l1_tile_n_range=(128, 256),
-            l1_tile_k_range=(128, 256),
-            l0_tile_m_range=(32, 128),  # range of L0TileShape::M/N/K
-            l0_tile_n_range=(128, 256),
-            l0_tile_k_range=(32, 64)
-          )
-      ))
+  tile_shapes = list(generate_tile_shapes(
+      tile_shape_constraint_for_pingpong, # set constraint function based on dispatch policy
+      # below are arguments for constraint function
+      element_sizes=(2, 2, 4), # size of ElementA, ElementB, ElementAccumulator
+      stages=2, # stages of dispatch policy for estimating boundary conditions, e.g. 2 for UB stages
+      step=16, # step size for iterating the next tile shape on each dimension of L1/L0 tile shape
+      tile_shape_range=TileShapeRange(
+          l1_tile_m_range=(32, 128),  # range of L1TileShape::M/N/K
+          l1_tile_n_range=(128, 256),
+          l1_tile_k_range=(128, 256),
+          l0_tile_m_range=(32, 128),  # range of L0TileShape::M/N/K
+          l0_tile_n_range=(128, 256),
+          l0_tile_k_range=(32, 64)
+      )
+  ))
   ```
 
 - Swizzle策略配置
