@@ -12,7 +12,8 @@ metadata:
    - Bug-Hunting 用例设计（找 bug 而非追求 100% 通过率）、INT32 溢出看护；
    - Phase A（生成交付物）与 Phase B（NPU 精度比对）的执行方式与精度报告判读。
    本技能只补充 CATLASS 专属的 matmul 用例定义 / 运行时写法，凡涉及精度标准、数值约束、
-   精度比对标准一律以 `atk-quality-guard` 的 SKILL.md 及其中 `references/experimental_standard.md` 为准，
+   精度比对标准一律以 [atk-quality-guard](https://gitcode.com/Ascend/ATK/blob/master/skill/atk-quality-guard/SKILL.md)（外部仓 `Ascend/ATK`，本仓 `.agents/skills/` 下没有它）
+   及其中 [references/experimental_standard.md](https://gitcode.com/Ascend/ATK/blob/master/skill/atk-quality-guard/references/experimental_standard.md) 为准，
    **禁止依赖记忆或本文件内硬编码的 rtol/atol 数值**。
    **`standard` 选择规则**：优先 `acc: mixed_tolerance_bm`（预期高版本 ATK）；
    若已装 ATK 的 accuracy 插件不存在该标准（报 `KeyError: '<std>'`），**回退到 `acc: single_bm`**——
