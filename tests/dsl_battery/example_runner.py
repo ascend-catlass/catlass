@@ -31,8 +31,31 @@ from typing import Any
 EXAMPLES_DIR = (
     Path(__file__).resolve().parents[2] / "examples" / "python" / "tla_dsl"
 )
+#: On-device scripts that are not published under examples/ (battery-only).
+END_TO_END_DIR = (
+    Path(__file__).resolve().parents[2]
+    / "python"
+    / "tla_dsl"
+    / "tests"
+    / "end_to_end"
+)
+#: Path prefix for scripts under ``python/tla_dsl/tests/end_to_end/``.
+END_TO_END_SCRIPT_PREFIX = "end_to_end/"
 
 _MODULE_CACHE: dict[Path, Any] = {}
+
+
+def resolve_script(rel: str) -> Path:
+    """Map a battery argv path to an on-disk script.
+
+    Paths starting with ``end_to_end/`` resolve under
+    ``python/tla_dsl/tests/end_to_end/``; everything else stays under
+    ``examples/python/tla_dsl/``.
+    """
+
+    if rel.startswith(END_TO_END_SCRIPT_PREFIX):
+        return END_TO_END_DIR / rel[len(END_TO_END_SCRIPT_PREFIX) :]
+    return EXAMPLES_DIR / rel
 
 
 class _SiblingFinder(importlib.abc.MetaPathFinder):

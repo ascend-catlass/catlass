@@ -109,7 +109,7 @@ compiled(gm_a, gm_b, gm_c, block_num=1)
 
 ### `tla.TlaJitFunction.compile`
 
-**Source:** [`catlass.dsl.TlaJitFunction.compile`](../../../../catlass/dsl.py#L208)
+**Source:** [`catlass.dsl.TlaJitFunction.compile`](../../../../catlass/dsl.py#L266)
 
 Description:
 
@@ -218,7 +218,7 @@ Dump frontend TLA IR without building a device binary or launching. See `TlaJitF
 
 ### `tla.TlaJitFunction.dump_mlir`
 
-**Source:** [`catlass.dsl.TlaJitFunction.dump_mlir`](../../../../catlass/dsl.py#L269)
+**Source:** [`catlass.dsl.TlaJitFunction.dump_mlir`](../../../../catlass/dsl.py#L327)
 
 Description:
 

@@ -204,7 +204,7 @@ Bitwise NOT of an integer `Numeric`: write `~Integer`.
 Prototype:
 
 ```python
-~Integer -> 'Integer'
+tla.Integer.__invert__() -> 'Integer'
 ```
 
 Parameters:

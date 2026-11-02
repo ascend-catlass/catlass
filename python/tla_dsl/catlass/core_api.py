@@ -6029,11 +6029,21 @@ def _cross_flag_aiv_id_attr(
 ) -> mlir_ir.IntegerAttr | None:
     mode = _tla_type_bridge.cross_flag_mode(_as_value(cross_flag_value).type)
     if mode == 4:
+        allowed = (0, 1)
+        state = _runtime._current_frontend_state()
+        if state is not None and state.core_ratio == (1, 1):
+            allowed = (0,)
         if (
             not isinstance(aiv_id, int)
             or isinstance(aiv_id, bool)
-            or aiv_id not in (0, 1)
+            or aiv_id not in allowed
         ):
+            if allowed == (0,):
+                _op_error(
+                    op_name,
+                    "invalid argument 'aiv_id': core_ratio=tla.arch.C1V1 requires "
+                    f"compile-time 0, got {aiv_id!r}",
+                )
             _op_error(
                 op_name,
                 "invalid argument 'aiv_id': mode 4 requires compile-time 0 or 1, "
@@ -6112,16 +6122,25 @@ def cross_core_wait_flag(
         Parameters:
         - `cross_flag_value` (`CrossFlagLike`): Cross-core flag from `tla.cross_flag`. Required.
         - `pipe` (`PipeLike`): Pipe that performs the wait. Required.
+          Use `tla.arch.SCALAR` for `PIPE_S`, `tla.arch.VECTOR` for `PIPE_V`, etc.
         - `aiv_id` (`int | None`): Target AIV id; omit for broadcast/default routing. Optional, default `None`.
 
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function.
         - Must be called inside `tla.cube()` or `tla.vector()`; when `mode=4`, `aiv_id` must be 0 or 1.
+        - Under `@tla.kernel(core_ratio=tla.arch.C1V1)`, Ascend950 CV 1:1
+          handshakes expect `pipe=tla.arch.SCALAR` (`PIPE_S`), matching AscendC
+          SyncAll. The compiler does not rewrite a wrong wait pipe; the caller
+          must pass `SCALAR` explicitly (see
+          `python/tla_dsl/tests/end_to_end/basic_mixed_core_ratio_11.py`).
 
         Example:
         ```python
         with tla.vector():
+            # Default MIX 1:2 often waits on VECTOR:
             tla.cross_core_wait_flag(cf, tla.arch.VECTOR)
+            # CV 1:1 (core_ratio=C1V1): wait on SCALAR / PIPE_S, aiv_id=0 only:
+            # tla.cross_core_wait_flag(cf, tla.arch.SCALAR, aiv_id=0)
         ```
     """
     _require_category("cross_core_wait_flag", "flag", cross_flag_value, "cross_flag", 0)
@@ -10160,6 +10179,11 @@ arch._set("ColumnMajor", _LayoutTag("ColumnMajor"))
 arch._set("L0Clayout", _LayoutTag("L0Clayout"))
 arch._set("zNUnAlign", _LayoutTag("zNUnAlign"))
 arch._set("VectorLayout", _LayoutTag("VectorLayout"))
+from .dsl import C1V1 as _C1V1
+from .dsl import C1V2 as _C1V2
+
+arch._set("C1V1", _C1V1)
+arch._set("C1V2", _C1V2)
 
 vec = _Namespace()
 vec._set("func", _vec_func)

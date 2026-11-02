@@ -175,6 +175,18 @@ def lower_jit_to_tlair_module_by_execution(
         )
     if kind != "kernel" and auto_sync is not None:
         raise TlaLoweringError("auto_sync is supported only for tla.kernel")
+    raw_core_ratio = (options or {}).get("core_ratio")
+    core_ratio = None
+    if raw_core_ratio is not None:
+        if kind != "kernel":
+            raise TlaLoweringError("core_ratio is supported only for tla.kernel")
+        from .dsl import parse_core_ratio
+
+        try:
+            # Options already store the decorate-time normalized tuple.
+            core_ratio = parse_core_ratio(raw_core_ratio, allow_normalized_tuple=True)
+        except ValueError as exc:
+            raise TlaLoweringError(str(exc)) from exc
     fn = _preprocess_for_lowering(
         fn,
         internal_for=ast_decorators._internal_frontend_for,
@@ -267,6 +279,7 @@ def lower_jit_to_tlair_module_by_execution(
                     fn_loc=fn_loc,
                     auto_sync=auto_sync,
                     runtime_argument_trees=runtime_argument_trees,
+                    core_ratio=core_ratio,
                 )
     lowered = LoweredTlaIR(
         context=ctx,
@@ -558,6 +571,7 @@ def _build_tla_func(
     fn_loc: mlir_ir.Location,
     auto_sync: str | None,
     runtime_argument_trees: Mapping[str, RuntimeArgumentTree],
+    core_ratio: tuple[int, int] | None = None,
 ) -> tuple[
     tuple[ExternCompileSpec, ...],
     tuple[RuntimeArgumentTree | None, ...],
@@ -601,6 +615,8 @@ def _build_tla_func(
         )
     if auto_sync == "v0":
         func_attrs["tla.auto_sync"] = mlir_ir.StringAttr.get("v0")
+    if core_ratio is not None:
+        func_attrs["tla.core_ratio"] = mlir_ir.DenseI64ArrayAttr.get(list(core_ratio))
     func_op = mlir_ir.Operation.create(
         "tla.func",
         attributes=func_attrs,
@@ -650,6 +666,7 @@ def _build_tla_func(
             category_bindings=category_bindings,
             tensor_host_by_value=tensor_host_by_value,
             module=module,
+            core_ratio=core_ratio,
         ) as frontend_state:
             from .core_api import (
                 _register_tla_tensor_metadata,
@@ -810,6 +827,28 @@ def _build_tla_func(
                     core_types,
                 ) in source_compile_configs.items()
             )
+            if core_ratio is not None:
+                has_cube = False
+                has_vector = False
+
+                def _walk_regions(op: mlir_ir.Operation) -> None:
+                    nonlocal has_cube, has_vector
+                    name = op.name
+                    if name == "tla.cube":
+                        has_cube = True
+                    elif name == "tla.vector":
+                        has_vector = True
+                    for region in op.regions:
+                        for block in region.blocks:
+                            for child in block.operations:
+                                _walk_regions(child)
+
+                _walk_regions(func_op)
+                if not (has_cube and has_vector):
+                    raise TlaLoweringError(
+                        "core_ratio is only valid on MIX kernels that contain "
+                        "both tla.cube and tla.vector regions"
+                    )
         mlir_ir.Operation.create("tla.return", loc=fn_loc)
     # Return external compile requirements and the same tree plans used by
     # device reconstruction and host launch.

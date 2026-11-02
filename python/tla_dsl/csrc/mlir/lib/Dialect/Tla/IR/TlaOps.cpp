@@ -12,6 +12,7 @@
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/IR/Builders.h"
+#include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Matchers.h"
 #include "mlir/IR/OpImplementation.h"
@@ -1486,6 +1487,21 @@ TLA_VERIFY_IN_CUBE_OR_VECTOR(PipeBarrierOp)
 
 #undef TLA_VERIFY_IN_CUBE_OR_VECTOR
 
+// Look up ``tla.core_ratio`` on the enclosing entry func (tla.func / func.func).
+// Returns the AIV half of the ratio when present; otherwise nullopt (legacy
+// default allows aiv_id in {0,1}).
+static std::optional<int64_t> getEnclosingMixAivRatio(mlir::Operation* op)
+{
+    for (mlir::Operation* parent = op->getParentOp(); parent; parent = parent->getParentOp()) {
+        auto attr = parent->getAttrOfType<mlir::DenseI64ArrayAttr>("tla.core_ratio");
+        if (attr && attr.size() == 2)
+            return attr[1];
+        if (mlir::isa<mlir::func::FuncOp, FuncOp>(parent))
+            break;
+    }
+    return std::nullopt;
+}
+
 template <typename OpTy>
 static mlir::LogicalResult verifyCrossCoreFlagOp(OpTy op)
 {
@@ -1494,8 +1510,13 @@ static mlir::LogicalResult verifyCrossCoreFlagOp(OpTy op)
     auto flagType = mlir::cast<CrossFlagType>(op.getFlag().getType());
     auto aivIdAttr = op->template getAttrOfType<mlir::IntegerAttr>("aiv_id");
     if (flagType.getMode() == 4) {
-        if (!aivIdAttr || (aivIdAttr.getInt() != 0 && aivIdAttr.getInt() != 1))
+        std::optional<int64_t> aivRatio = getEnclosingMixAivRatio(op.getOperation());
+        if (aivRatio && *aivRatio == 1) {
+            if (!aivIdAttr || aivIdAttr.getInt() != 0)
+                return op.emitOpError("core_ratio [1, 1] requires aiv_id to be the compile-time integer 0");
+        } else if (!aivIdAttr || (aivIdAttr.getInt() != 0 && aivIdAttr.getInt() != 1)) {
             return op.emitOpError("mode 4 requires aiv_id to be the compile-time integer 0 or 1");
+        }
     } else if (aivIdAttr) {
         return op.emitOpError("aiv_id is only valid for mode 4 cross flags");
     }

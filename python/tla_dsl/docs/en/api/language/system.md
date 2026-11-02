@@ -18,10 +18,10 @@ Architecture attributes on `tla.arch` / `tla.AddressSpace` (layout tags, pipes, 
 
 Layout tags under `tla.arch` (`_LayoutTag`), used by `make_layout` / `make_tensor` / `make_tensor_like` / `copy`. Pass as `layoutTag=` / `layout_tag=`.
 
-**Source:** [`catlass.core_api.arch`](../../../../catlass/core_api.py#L10100)
+**Source:** [`catlass.core_api.arch`](../../../../catlass/core_api.py#L10107)
 
 | Tag | Role |
-| --- | --- |
+|---|---|
 | `tla.arch.RowMajor` | ND row-major |
 | `tla.arch.ColumnMajor` | ND column-major |
 | `tla.arch.VectorLayout` | Rank-1 contiguous run |
@@ -54,7 +54,7 @@ Pipe identifiers under `tla.arch`, used by `flag` / `pipe_barrier` / `mutex_*` /
 **Source:** [`catlass.core_api.arch`](../../../../catlass/core_api.py#L10100)
 
 | Pipe | Role |
-| --- | --- |
+|---|---|
 | `tla.arch.SCALAR` | Scalar pipe |
 | `tla.arch.VECTOR` | Vector pipe |
 | `tla.arch.CUBE` | Cube pipe |
@@ -81,7 +81,7 @@ On-chip members of `tla.AddressSpace`, used by `allocate` / `get_capacity_in_byt
 **Source:** [`catlass.address_space.AddressSpace`](../../../../catlass/address_space.py#L16)
 
 | Address space | Role |
-| --- | --- |
+|---|---|
 | `tla.AddressSpace.l1` | L1 |
 | `tla.AddressSpace.l0a` | L0A |
 | `tla.AddressSpace.l0b` | L0B |
@@ -107,7 +107,7 @@ Callable helpers on `tla.arch`: block / thread indexing, SIMT `sync_threads`, on
 
 ### `tla.arch.block_idx`
 
-**Source:** [`catlass.core_api.arch_block_idx`](../../../../catlass/core_api.py#L9581)
+**Source:** [`catlass.core_api.arch_block_idx`](../../../../catlass/core_api.py#L9600)
 
 Description:
 
@@ -137,7 +137,7 @@ bid = tla.arch.block_idx()
 
 ### `tla.arch.sub_block_idx`
 
-**Source:** [`catlass.core_api.arch_sub_block_idx`](../../../../catlass/core_api.py#L9604)
+**Source:** [`catlass.core_api.arch_sub_block_idx`](../../../../catlass/core_api.py#L9623)
 
 Description:
 
@@ -167,7 +167,7 @@ sid = tla.arch.sub_block_idx()
 
 ### `tla.arch.thread_idx`
 
-**Source:** [`catlass.core_api.arch_thread_idx`](../../../../catlass/core_api.py#L9627)
+**Source:** [`catlass.core_api.arch_thread_idx`](../../../../catlass/core_api.py#L9646)
 
 Description:
 
@@ -191,7 +191,6 @@ Parameters:
 - None.
 
 Returns:
-
 - `tuple[Int32, Int32, Int32]`: the thread's `(x, y, z)` index.
 
 Constraints:
@@ -212,7 +211,7 @@ with tla.vec.func(mode="simt", thread_block_dim=256):
 
 ### `tla.arch.sync_threads`
 
-**Source:** [`catlass.core_api.arch_sync_threads`](../../../../catlass/core_api.py#L9671)
+**Source:** [`catlass.core_api.arch_sync_threads`](../../../../catlass/core_api.py#L9690)
 
 Description:
 
@@ -260,7 +259,7 @@ with tla.vec.func(mode="simt", thread_block_dim=THREADS):
 
 ### `tla.arch.block_num`
 
-**Source:** [`catlass.core_api.arch_block_num`](../../../../catlass/core_api.py#L9715)
+**Source:** [`catlass.core_api.arch_block_num`](../../../../catlass/core_api.py#L9734)
 
 Description:
 
@@ -293,7 +292,7 @@ nblocks = tla.arch.block_num()
 
 ### `tla.arch.thread_block_dim`
 
-**Source:** [`catlass.core_api.arch_thread_block_dim`](../../../../catlass/core_api.py#L9741)
+**Source:** [`catlass.core_api.arch_thread_block_dim`](../../../../catlass/core_api.py#L9760)
 
 Description:
 
@@ -318,7 +317,6 @@ Parameters:
 - None.
 
 Returns:
-
 - `tuple[Int32, Int32, Int32]`: the block's `(x, y, z)` thread extents.
 
 Constraints:
@@ -340,7 +338,7 @@ with tla.vec.func(mode="simt", thread_block_dim=256):
 
 ### `tla.arch.get_capacity_in_bytes`
 
-**Source:** [`catlass.core_api.arch_get_capacity_in_bytes`](../../../../catlass/core_api.py#L9788)
+**Source:** [`catlass.core_api.arch_get_capacity_in_bytes`](../../../../catlass/core_api.py#L9807)
 
 Description:
 
@@ -375,7 +373,7 @@ ub_bytes = tla.arch.get_capacity_in_bytes(tla.AddressSpace.ub)
 
 ### `tla.arch.get_dyn_ub`
 
-**Source:** [`catlass.core_api.arch_get_dyn_ub`](../../../../catlass/core_api.py#L9898)
+**Source:** [`catlass.core_api.arch_get_dyn_ub`](../../../../catlass/core_api.py#L9917)
 
 Description:
 

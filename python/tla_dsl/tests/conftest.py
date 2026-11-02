@@ -16,6 +16,9 @@ _EXAMPLES_ROOT = Path(__file__).resolve().parents[3] / "examples" / "python" / "
 if str(_EXAMPLES_ROOT) not in sys.path:
     sys.path.append(str(_EXAMPLES_ROOT))
 
+# On-device scripts; covered by dsl_battery, not unit pytest collection.
+collect_ignore_glob = ["end_to_end/*"]
+
 
 def _load_pretest_bootstrap(repo_root: Path):  # type: ignore[no-untyped-def]
     module_path = repo_root / "tests" / "_bootstrap.py"

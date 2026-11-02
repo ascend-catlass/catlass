@@ -16,6 +16,64 @@ from .base_dsl.jit_executor import ExecutionArgs, JitCompiledFunction
 from .catlass_dsl.catlass import TlaDSL
 
 
+class _CoreRatioToken:
+    """Singleton token for ``@tla.kernel(core_ratio=tla.arch.C1V*)``."""
+
+    __slots__ = ("_name", "_ratio")
+
+    def __init__(self, name: str, ratio: tuple[int, int]) -> None:
+        self._name = name
+        self._ratio = ratio
+
+    def __repr__(self) -> str:
+        return f"tla.arch.{self._name}"
+
+    @property
+    def ratio(self) -> tuple[int, int]:
+        return self._ratio
+
+
+#: Cube:Vector = 1:1. Only legal via identity (``tla.arch.C1V1``), not ``(1, 1)``.
+C1V1 = _CoreRatioToken("C1V1", (1, 1))
+#: Cube:Vector = 1:2. Only legal via identity (``tla.arch.C1V2``), not ``(1, 2)``.
+C1V2 = _CoreRatioToken("C1V2", (1, 2))
+
+_CORE_RATIO_BY_ID: dict[int, _CoreRatioToken] = {
+    id(C1V1): C1V1,
+    id(C1V2): C1V2,
+}
+
+
+_NORMALIZED_CORE_RATIOS: frozenset[tuple[int, int]] = frozenset({(1, 1), (1, 2)})
+
+
+def parse_core_ratio(
+    value: Any, *, allow_normalized_tuple: bool = False
+) -> tuple[int, int]:
+    """Normalize a user ``core_ratio`` to ``(aic, aiv)``.
+
+    Public surface accepts only ``tla.arch.C1V1`` / ``tla.arch.C1V2``
+    (identity). Tuples, strings, and any other value are rejected.
+
+    When ``allow_normalized_tuple`` is true (internal options re-entry after
+    decorate-time normalization), ``(1, 1)`` / ``(1, 2)`` are also accepted.
+    """
+    token = _CORE_RATIO_BY_ID.get(id(value))
+    if token is not None and value is token:
+        return token.ratio
+    if (
+        allow_normalized_tuple
+        and isinstance(value, tuple)
+        and len(value) == 2
+        and value in _NORMALIZED_CORE_RATIOS
+        and all(isinstance(x, int) and not isinstance(x, bool) for x in value)
+    ):
+        return (value[0], value[1])
+    raise ValueError(
+        f"tla.kernel core_ratio must be tla.arch.C1V1 or tla.arch.C1V2, got {value!r}"
+    )
+
+
 def _kernel_signature(fn: Callable[..., Any] | None) -> inspect.Signature | None:
     if fn is None:
         return None
@@ -349,6 +407,9 @@ def _reject_async_dsl_function(fn: Callable[..., Any], *, kind: str) -> None:
 
 
 __all__ = [
+    "C1V1",
+    "C1V2",
+    "parse_core_ratio",
     "DSLLocation",
     "BaseDSL",
     "TlaDSL",

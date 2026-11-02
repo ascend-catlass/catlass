@@ -16,7 +16,7 @@ Interleave / deinterleave and related lane reshuffles.
 
 ## `tla.pack`
 
-**Source:** [`catlass.core_api.pack`](../../../../../catlass/core_api.py#L8039)
+**Source:** [`catlass.core_api.pack`](../../../../../catlass/core_api.py#L8058)
 
 Description:
 
@@ -51,7 +51,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.interleave`
 
-**Source:** [`catlass.core_api.interleave`](../../../../../catlass/core_api.py#L8098)
+**Source:** [`catlass.core_api.interleave`](../../../../../catlass/core_api.py#L8117)
 
 Description:
 
@@ -85,7 +85,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.deinterleave`
 
-**Source:** [`catlass.core_api.deinterleave`](../../../../../catlass/core_api.py#L8176)
+**Source:** [`catlass.core_api.deinterleave`](../../../../../catlass/core_api.py#L8195)
 
 Description:
 

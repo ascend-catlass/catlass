@@ -91,7 +91,7 @@ cf = tla.cross_flag("aic_aiv", mode=2)
 
 ## `tla.cross_core_set_flag`
 
-**Source:** [`catlass.core_api.cross_core_set_flag`](../../../../catlass/core_api.py#L6056)
+**Source:** [`catlass.core_api.cross_core_set_flag`](../../../../catlass/core_api.py#L6066)
 
 Description:
 
@@ -126,7 +126,7 @@ with tla.cube():
 
 ## `tla.cross_core_wait_flag`
 
-**Source:** [`catlass.core_api.cross_core_wait_flag`](../../../../catlass/core_api.py#L6100)
+**Source:** [`catlass.core_api.cross_core_wait_flag`](../../../../catlass/core_api.py#L6110)
 
 Description:
 
@@ -142,25 +142,34 @@ Parameters:
 
 - `cross_flag_value` (`CrossFlagLike`): Cross-core flag from `tla.cross_flag`. Required.
 - `pipe` (`PipeLike`): Pipe that performs the wait. Required.
+  Use `tla.arch.SCALAR` for `PIPE_S`, `tla.arch.VECTOR` for `PIPE_V`, etc.
 - `aiv_id` (`int | None`): Target AIV id; omit for broadcast/default routing. Optional, default `None`.
 
 Constraints:
 
 - Must be called inside a `@tla.kernel`-decorated kernel function.
 - Must be called inside `tla.cube()` or `tla.vector()`; when `mode=4`, `aiv_id` must be 0 or 1.
+- Under `@tla.kernel(core_ratio=tla.arch.C1V1)`, Ascend950 CV 1:1
+  handshakes expect `pipe=tla.arch.SCALAR` (`PIPE_S`), matching AscendC
+  SyncAll. The compiler does not rewrite a wrong wait pipe; the caller
+  must pass `SCALAR` explicitly (see
+  `python/tla_dsl/tests/end_to_end/basic_mixed_core_ratio_11.py`).
 
 Example:
 
 ```python
 with tla.vector():
+    # Default MIX 1:2 often waits on VECTOR:
     tla.cross_core_wait_flag(cf, tla.arch.VECTOR)
+    # CV 1:1 (core_ratio=C1V1): wait on SCALAR / PIPE_S, aiv_id=0 only:
+    # tla.cross_core_wait_flag(cf, tla.arch.SCALAR, aiv_id=0)
 ```
 
 ---
 
 ## `tla.set_flag`
 
-**Source:** [`catlass.core_api.set_flag`](../../../../catlass/core_api.py#L6143)
+**Source:** [`catlass.core_api.set_flag`](../../../../catlass/core_api.py#L6162)
 
 Description:
 
@@ -192,7 +201,7 @@ with tla.vector():
 
 ## `tla.wait_flag`
 
-**Source:** [`catlass.core_api.wait_flag`](../../../../catlass/core_api.py#L6169)
+**Source:** [`catlass.core_api.wait_flag`](../../../../catlass/core_api.py#L6188)
 
 Description:
 
@@ -224,7 +233,7 @@ with tla.vector():
 
 ## `tla.pipe_barrier`
 
-**Source:** [`catlass.core_api.pipe_barrier`](../../../../catlass/core_api.py#L6195)
+**Source:** [`catlass.core_api.pipe_barrier`](../../../../catlass/core_api.py#L6214)
 
 Description:
 
@@ -256,7 +265,7 @@ with tla.vector():
 
 ## `tla.mutex`
 
-**Source:** [`catlass.core_api.mutex`](../../../../catlass/core_api.py#L6238)
+**Source:** [`catlass.core_api.mutex`](../../../../catlass/core_api.py#L6257)
 
 Description:
 
@@ -288,7 +297,7 @@ mtx = tla.mutex("l1_buf", id=0)
 
 ## `tla.mutex_guard`
 
-**Source:** [`catlass.core_api.mutex_guard`](../../../../catlass/core_api.py#L6286)
+**Source:** [`catlass.core_api.mutex_guard`](../../../../catlass/core_api.py#L6305)
 
 Description:
 
@@ -320,7 +329,7 @@ with tla.mutex_guard(mtx):
 
 ## `tla.mutex_lock`
 
-**Source:** [`catlass.core_api.mutex_lock`](../../../../catlass/core_api.py#L6327)
+**Source:** [`catlass.core_api.mutex_lock`](../../../../catlass/core_api.py#L6346)
 
 Description:
 
@@ -360,7 +369,7 @@ mtx.lock(pipe=tla.arch.SCALAR)
 
 ## `tla.mutex_unlock`
 
-**Source:** [`catlass.core_api.mutex_unlock`](../../../../catlass/core_api.py#L6365)
+**Source:** [`catlass.core_api.mutex_unlock`](../../../../catlass/core_api.py#L6384)
 
 Description:
 
@@ -400,7 +409,7 @@ mtx.unlock(pipe=tla.arch.SCALAR)
 
 ## `tla.local_mem_bar`
 
-**Source:** [`catlass.core_api.local_mem_bar`](../../../../catlass/core_api.py#L6403)
+**Source:** [`catlass.core_api.local_mem_bar`](../../../../catlass/core_api.py#L6422)
 
 Description:
 

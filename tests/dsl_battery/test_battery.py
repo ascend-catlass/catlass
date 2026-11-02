@@ -415,6 +415,13 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
             [["tla/kernel/matmul/basic_mixed/basic_mixed_store_zNUnAlign.py", *dev, "--m", m]],
         )
     yield ("mixed-fixpipe-nz2dn", [["tla/kernel/matmul/basic_mixed/basic_mixed_fixpipe_nz2dn.py", *dev]])
+    # CV 1:1 (core_ratio=C1V1): single-AIV epilogue, L0C→GM, mode-4 aiv_id=0.
+    # Script under python/tla_dsl/tests/end_to_end/; battery must keep this case
+    # as the C1V1 device guard (do not drop when it fails — fix the launch path).
+    yield (
+        "mixed-core-ratio-11",
+        [["end_to_end/basic_mixed_core_ratio_11.py", *dev, "--block-num", "1"]],
+    )
 
     # --- mixed-core handshake and standalone control-flow probes ---
     # flash_attention_infer routes --mask to two independently compiled
@@ -905,9 +912,20 @@ def test_case(case_id: str, device: int) -> None:
 
     argvs = dict(battery_cases(device))[case_id]
     for argv in argvs:
-        script = example_runner.EXAMPLES_DIR / argv[0]
+        script = example_runner.resolve_script(argv[0])
         assert script.is_file(), f"no such example: {argv[0]}"
-        rc = example_runner.run_case([str(script), *argv[1:]])
+        try:
+            rc = example_runner.run_case([str(script), *argv[1:]])
+        except Exception as exc:
+            # Driver may advertise RES_DBG_ADDR but fail at open (error 62).
+            if case_id == LOCAL_PRINT_CASE_ID:
+                from catlass.base_dsl.runtime.ascend_debug_fifo import (
+                    AscDebugFifoError,
+                )
+
+                if isinstance(exc, AscDebugFifoError):
+                    pytest.skip(str(exc))
+            raise
         assert rc == 0, f"{argv[0]} {' '.join(argv[1:])} exited {rc}"
 
 

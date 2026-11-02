@@ -16,7 +16,7 @@ Constant fill and lane-index sequence construction.
 
 ## `tla.full`
 
-**Source:** [`catlass.core_api.full`](../../../../../catlass/core_api.py#L7110)
+**Source:** [`catlass.core_api.full`](../../../../../catlass/core_api.py#L7129)
 
 Description:
 
@@ -59,7 +59,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.arange`
 
-**Source:** [`catlass.core_api.arange`](../../../../../catlass/core_api.py#L7238)
+**Source:** [`catlass.core_api.arange`](../../../../../catlass/core_api.py#L7257)
 
 Description:
 

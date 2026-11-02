@@ -83,6 +83,7 @@ Supported cube copy routes without scale, `tla.copy(dst, src, scale=None)`
 |`l1`|`zN`|`l0b`|`nZ`|`f32`,`f16`,`bf16`,`i8`,`u32`,`f8e4m3fn`,`f8e5m2`|
 |`l1`|`nZ`|`l0b`|`nZ`|`f32`,`f16`,`bf16`,`i8`,`u32`,`f8e4m3fn`,`f8e5m2`|
 
+
 Supported cube copy routes carrying a scale (tla.mmad_mx),
 i.e. `tla.copy(dst=l0a|l0b, src=l1, scale=scale)`, the scale only support `f8e8m0`.
 and the scale `l1->l0` don't support transpose.
@@ -94,10 +95,10 @@ and the scale `l1->l0` don't support transpose.
 |`l1`|`zN`|`l0b`|`nZ`|`l1`|`nNMxScale`|`f8e4m3fn`,`f8e5m2`,`f4e2m1`,`f4e1m2`|
 |`l1`|`nZ`|`l0b`|`nZ`|`l1`|`nNMxScale`|`f8e4m3fn`,`f8e5m2`,`f4e2m1`,`f4e1m2`|
 
+
 Supported cube fixpipe routes, copy from l0c->gm/l1/ub.
 The fixpipe support on-the-fly quant and relu, quant mode support `NO_QUANT`, `PER_TENSOR`, `PER_CHANNEL`.
 The fixpipe has these rules:
-
 - the fixpipe chain is (l0c acc) -> quant(optional) -> relu(optional) -> copy out to dst.
 - `NO_QUANT` mode includes pure data cast, `f32`->`f16`, `f32`->`bf16`
 - If the dst is ub, there's an extra `split_mode`, support nosplit(`NO_SPLIT_VEC_0`, `NO_SPLIT_VEC_1`), and split(`SPLIT_M`, `SPLIT_N`)
@@ -125,6 +126,7 @@ The fixpipe has these rules:
 |`gm`|`RowMajor`|`-`|`PER_CHANNEL`|`True`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
 |`gm`|`ColumnMajor`|`-`|`PER_CHANNEL`|`False`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
 |`gm`|`ColumnMajor`|`-`|`PER_CHANNEL`|`True`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
+
 
 Supported vector copy routes
 
@@ -203,7 +205,7 @@ Parameters:
       `DIST_NORM`.
 
       | Value | Meaning |
-      | --- | --- |
+      |---|---|
       | `DIST_NORM` | Default contiguous load |
       | `DIST_BRC_B32` | Broadcast one b32 element to all lanes |
       | `DIST_DINTLV_B32` | f32 deinterleave; dual results |
@@ -236,7 +238,7 @@ Parameters:
       Default `DIST_NORM`.
 
       | Value | Meaning |
-      | --- | --- |
+      |---|---|
       | `DIST_NORM` | Bit-packed mask load |
       | `DIST_US` | Bit upsample |
       | `DIST_DS` | Bit downsample |
@@ -320,7 +322,7 @@ Parameters:
       `DIST_NORM`.
 
       | Value | Meaning |
-      | --- | --- |
+      |---|---|
       | `DIST_NORM` | Default contiguous store |
       | `DIST_FIRST_ELEMENT_B8` | Write only lane 0 (1-byte) |
       | `DIST_FIRST_ELEMENT_B16` | Write only lane 0 (2-byte) |
@@ -440,7 +442,6 @@ Parameters:
   logical dimension of the tensor. Required.
 
 Returns:
-
 - `Numeric`: the element, typed by the tensor's element type
   (`Bool` for an i1 tensor).
 

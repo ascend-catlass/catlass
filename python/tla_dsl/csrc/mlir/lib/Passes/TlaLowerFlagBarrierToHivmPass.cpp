@@ -212,6 +212,17 @@ private:
         const llvm::StringMap<CrossFlagInfo>& flags;
     };
 
+    /// True when the enclosing MIX func is stamped ``tla.core_ratio = [1, 1]``.
+    /// CV 1:1 must handshake via FFTS (``SET.CROSS.CORE`` / ``WAIT.FLAG.DEV``);
+    /// CV 1:2 keeps INTRA Imm for mode 2/4.
+    static bool isMixCoreRatio11(func::FuncOp func)
+    {
+        if (!func)
+            return false;
+        auto attr = func->getAttrOfType<DenseI64ArrayAttr>(kCoreRatioAttrName);
+        return attr && attr.size() == 2 && attr[0] == 1 && attr[1] == 1;
+    }
+
     class CrossUseOpConversion : public ConversionPattern {
     public:
         CrossUseOpConversion(StringRef opName, TypeConverter& converter, MLIRContext* ctx, bool isSet)
@@ -227,17 +238,68 @@ private:
             if (!flagType)
                 return rewriter.notifyMatchFailure(op, "expected a mode-parameterized cross flag type");
             int64_t mode = flagType.getMode();
-            std::optional<hivm::TFuncCoreType> coreType = getFunctionCoreType(op->getParentOfType<func::FuncOp>());
+            func::FuncOp parentFunc = op->getParentOfType<func::FuncOp>();
+            std::optional<hivm::TFuncCoreType> coreType = getFunctionCoreType(parentFunc);
             auto pipeAttr = op->getAttrOfType<PipeAttr>("pipe");
             FailureOr<hivm::PIPE> pipe = pipeAttr ? getHivmPipe(pipeAttr.getPipe()) : FailureOr<hivm::PIPE>(failure());
             if (!coreType || failed(pipe))
                 return rewriter.notifyMatchFailure(op, "unsupported coreType or pipe");
-            uint64_t pipeValue = static_cast<uint64_t>(*pipe);
             Value flagId = operands.front();
             IntegerAttr staticIdAttr;
             if (auto constant = flagId.getDefiningOp<arith::ConstantIntOp>())
                 staticIdAttr = rewriter.getI64IntegerAttr(constant.value());
+            uint64_t pipeValue = static_cast<uint64_t>(*pipe);
 
+            // Emit FFTS Imm (SET.CROSS.CORE / WAIT.FLAG.DEV.*) with the given
+            // FFTS mode nibble. Matches AscendC GetffstMsg(mode, id) packing:
+            //   config = 0x1 | ((mode & 0xf) << 4) | ((id & 0xf) << 8)
+            auto emitFftsImm = [&](int64_t fftsMode) {
+                if (isSet) {
+                    Value config;
+                    if (staticIdAttr) {
+                        int64_t encoded = 1 | (fftsMode << 4) | (staticIdAttr.getInt() << 8);
+                        config = rewriter.create<arith::ConstantIntOp>(op->getLoc(), encoded, 64);
+                    } else {
+                        Value shift = rewriter.create<arith::ConstantIntOp>(op->getLoc(), 8, 64);
+                        Value shifted = rewriter.create<arith::ShLIOp>(op->getLoc(), flagId, shift);
+                        Value base = rewriter.create<arith::ConstantIntOp>(op->getLoc(), 1 | (fftsMode << 4), 64);
+                        config = rewriter.create<arith::OrIOp>(op->getLoc(), shifted, base);
+                    }
+                    rewriter.create<hivm::SetCrossCoreInstrOp>(op->getLoc(), pipeValue, config);
+                } else if (staticIdAttr) {
+                    rewriter.create<hivm::WaitFlagDevPipeImmInstrOp>(op->getLoc(), pipeValue, staticIdAttr.getInt());
+                } else {
+                    rewriter.create<hivm::WaitFlagDevPipeRegInstrOp>(op->getLoc(), pipeValue, flagId);
+                }
+                rewriter.eraseOp(op);
+            };
+
+            // Modes 0/1 (inter-block / inter-subblock): historical FFTS Imm path.
+            if (mode == 0 || mode == 1) {
+                emitFftsImm(mode);
+                return success();
+            }
+
+            if (mode != 2 && mode != 4)
+                return op->emitError() << "unsupported cross_flag mode " << mode;
+
+            // CV 1:1: AscendC SyncAll / tip Legalize use GetffstMsg(0x2, id).
+            // Do not emit INTRA — MIX_AIC_1_1 + INTRA → 507015 on device.
+            // Mode-4 aiv_id offsets / GetSubBlockIdx guards are 1:2-only; a
+            // single AIV observes the FFTS flag without id+16 dual-cast.
+            if (isMixCoreRatio11(parentFunc)) {
+                if (mode == 4) {
+                    auto aivIdAttr = op->getAttrOfType<IntegerAttr>("aiv_id");
+                    if (!aivIdAttr || aivIdAttr.getInt() != 0)
+                        return op->emitError("core_ratio [1, 1] requires aiv_id to be 0");
+                }
+                constexpr int64_t kCvFftsMode = 2;
+                emitFftsImm(kCvFftsMode);
+                return success();
+            }
+
+            // CV 1:2 (default): INTRA ImmInstr. Emitting SyncBlockWait for INTRA
+            // on CUBE (e.g. PIPE_FIX) can fail dav-c310 ISel, so keep Imm here.
             auto emitIntraBlock = [&](OpBuilder& builder, Location loc, Value id, IntegerAttr immediateId) {
                 if (immediateId) {
                     if (isSet)
@@ -251,31 +313,6 @@ private:
                 }
             };
 
-            if (mode == 0 || mode == 1) {
-                if (isSet) {
-                    Value config;
-                    if (staticIdAttr) {
-                        int64_t encoded = 1 | (mode << 4) | (staticIdAttr.getInt() << 8);
-                        config = rewriter.create<arith::ConstantIntOp>(op->getLoc(), encoded, 64);
-                    } else {
-                        Value shift = rewriter.create<arith::ConstantIntOp>(op->getLoc(), 8, 64);
-                        Value shifted = rewriter.create<arith::ShLIOp>(op->getLoc(), flagId, shift);
-                        Value base = rewriter.create<arith::ConstantIntOp>(op->getLoc(), 1 | (mode << 4), 64);
-                        config = rewriter.create<arith::OrIOp>(op->getLoc(), shifted, base);
-                    }
-                    rewriter.create<hivm::SetCrossCoreInstrOp>(op->getLoc(), pipeValue, config);
-                } else if (staticIdAttr) {
-                    rewriter.create<hivm::WaitFlagDevPipeImmInstrOp>(op->getLoc(), pipeValue, staticIdAttr.getInt());
-                } else {
-                    rewriter.create<hivm::WaitFlagDevPipeRegInstrOp>(op->getLoc(), pipeValue, flagId);
-                }
-                rewriter.eraseOp(op);
-                return success();
-            }
-
-            if (mode != 2 && mode != 4)
-                return op->emitError() << "unsupported cross_flag mode " << mode;
-
             auto offsetId = [&](int64_t offset) -> std::pair<Value, IntegerAttr> {
                 if (staticIdAttr)
                     return {Value(), rewriter.getI64IntegerAttr(staticIdAttr.getInt() + offset)};
@@ -286,6 +323,8 @@ private:
             };
 
             if (mode == 2) {
+                // ImmInstr has no Legalize pairing: AIC must emit id and id+16 so
+                // both VEC0/VEC1 observe the set (CUBECORE maps 0-15→VEC0, 16-31→VEC1).
                 auto base = offsetId(0);
                 emitIntraBlock(rewriter, op->getLoc(), base.first, base.second);
                 if (*coreType == hivm::TFuncCoreType::AIC) {

@@ -93,7 +93,14 @@ class BaseDSL:
             if executor_name == "_kernel_helper":
                 _reject_async_dsl_function(fn, kind="kernel")
                 auto_sync = dkwargs.get("auto_sync")
-                options = {} if auto_sync is None else {"auto_sync": auto_sync}
+                core_ratio = dkwargs.get("core_ratio")
+                options: dict[str, Any] = {}
+                if auto_sync is not None:
+                    options["auto_sync"] = auto_sync
+                if core_ratio is not None:
+                    from ..dsl import parse_core_ratio
+
+                    options["core_ratio"] = parse_core_ratio(core_ratio)
                 return _make_kernel_wrapper(fn, location=call_site, options=options)
 
             if executor_name != "_jit_helper":

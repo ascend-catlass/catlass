@@ -16,7 +16,7 @@ Mask creation and tail-mask updates.
 
 ## `tla.create_mask`
 
-**Source:** [`catlass.core_api.create_mask`](../../../../../catlass/core_api.py#L10224)
+**Source:** [`catlass.core_api.create_mask`](../../../../../catlass/core_api.py#L10248)
 
 Description:
 
@@ -35,7 +35,7 @@ Parameters:
   `tla.mask`:
 
   | Pattern | Meaning |
-  | --- | --- |
+  |---|---|
   | `ALL` | All elements are valid |
   | `ALLF` | All elements are invalid |
   | `VL1` / `VL2` / `VL3` / `VL4` | Lowest 1 / 2 / 3 / 4 elements are valid |
@@ -72,7 +72,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.update_mask`
 
-**Source:** [`catlass.core_api.update_mask`](../../../../../catlass/core_api.py#L10288)
+**Source:** [`catlass.core_api.update_mask`](../../../../../catlass/core_api.py#L10312)
 
 Description:
 

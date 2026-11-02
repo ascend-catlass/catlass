@@ -175,6 +175,12 @@ static func::FuncOp createSplitFunction(func::FuncOp source, StringRef newName, 
     newFunc->setAttr(kParallelModeAttrName, StringAttr::get(ctx, "simd"));
     newFunc->setAttr(hivm::TPartOfMixAttr::name, UnitAttr::get(ctx));
     newFunc->setAttr(hivm::VFModeAttr::name, hivm::VFModeAttr::get(ctx, hivm::VFMode::SIMD));
+    // Clone already copied ``tla.core_ratio`` / ``hivm.core_ratio``; re-set
+    // explicitly so split halves stay aligned if stamp order changes.
+    if (auto mixRatio = source->getAttr(kCoreRatioAttrName))
+        newFunc->setAttr(kCoreRatioAttrName, mixRatio);
+    if (auto coreRatio = source->getAttr(hivm::TCoreRatioAttr::name))
+        newFunc->setAttr(hivm::TCoreRatioAttr::name, coreRatio);
 
     eraseOppositeScopes(newFunc, side);
     eraseUnusedSplitFlags(newFunc);

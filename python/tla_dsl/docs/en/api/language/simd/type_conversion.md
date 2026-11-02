@@ -25,7 +25,7 @@ Convert a register-resident vector to another element type.
 Prototype:
 
 ```python
-VectorSSA.to(dst_type: Any, params: CastParams, mask: Any | None = None) -> Any
+tla.VectorSSA.to(dst_type: Any, params: CastParams, mask: Any | None = None) -> Any
 ```
 
 Parameters:

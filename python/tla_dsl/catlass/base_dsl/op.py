@@ -58,6 +58,8 @@ class _FrontendEmitState:
     vec_func_modes: list[str] = field(default_factory=list)
     #: Original symbol -> declaration and all call sites in this kernel.
     extern_usages: dict[str, _ExternUsage] = field(default_factory=dict)
+    #: Explicit ``@tla.kernel(core_ratio=...)`` when provided; else ``None``.
+    core_ratio: tuple[int, int] | None = None
 
 
 _FRONTEND_EMIT_STATE: contextvars.ContextVar[_FrontendEmitState | None] = (
@@ -72,6 +74,7 @@ def _frontend_emission(
     category_bindings: dict[int, _IdentityBinding] | None = None,
     tensor_host_by_value: dict[Any, Any] | None = None,
     module: Any | None = None,
+    core_ratio: tuple[int, int] | None = None,
 ) -> Iterator[_FrontendEmitState]:
     """Activate frontend direct-op emission context."""
     state = _FrontendEmitState(
@@ -79,6 +82,7 @@ def _frontend_emission(
         category_bindings=dict(category_bindings or {}),
         tensor_host_by_value=dict(tensor_host_by_value or {}),
         module=module,
+        core_ratio=core_ratio,
     )
     token = _FRONTEND_EMIT_STATE.set(state)
     try:

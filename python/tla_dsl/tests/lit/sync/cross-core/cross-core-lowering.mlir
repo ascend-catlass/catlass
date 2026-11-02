@@ -56,3 +56,6 @@ module {
 // CHECK: "hivm.intr.hivm.SET.CROSS.CORE"
 // CHECK-SAME: pipe = 5 : i64
 // CHECK: "hivm.intr.hivm.WAIT.FLAG.DEV.PIPE.IMM"() <{flag_id = 2 : i64, pipe = 0 : i64}>
+// CHECK-NOT: hivm.hir.sync_block
+// CHECK-NOT: !tla.cross_flag
+// CHECK-NOT: tla.cross_core

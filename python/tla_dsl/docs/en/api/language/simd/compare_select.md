@@ -16,7 +16,7 @@ Vector compares that produce masks, and masked select.
 
 ## `tla.where`
 
-**Source:** [`catlass.core_api.where`](../../../../../catlass/core_api.py#L8796)
+**Source:** [`catlass.core_api.where`](../../../../../catlass/core_api.py#L8815)
 
 Description:
 
@@ -55,7 +55,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.cmp`
 
-**Source:** [`catlass.core_api.cmp`](../../../../../catlass/core_api.py#L9125)
+**Source:** [`catlass.core_api.cmp`](../../../../../catlass/core_api.py#L9144)
 
 Description:
 
@@ -74,14 +74,13 @@ Parameters:
 - `mode` (`str`): Compare mode. Required.
 
   | Value | Meaning |
-  | --- | --- |
+  |---|---|
   | `lt` | Less than |
   | `le` | Less than or equal |
   | `gt` | Greater than |
   | `ge` | Greater than or equal |
   | `eq` | Equal |
   | `ne` | Not equal |
-
 - `mask` (`MaskSSA | None`): Optional execution mask; `None` means all lanes enabled. Optional, default `None`.
 
 Constraints:

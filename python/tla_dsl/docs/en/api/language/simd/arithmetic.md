@@ -16,7 +16,7 @@ Element-wise arithmetic and unary math ops. `VectorSSA` overloads `+` / `-` / `*
 
 ## `tla.exp`
 
-**Source:** [`catlass.core_api.exp`](../../../../../catlass/core_api.py#L7884)
+**Source:** [`catlass.core_api.exp`](../../../../../catlass/core_api.py#L7903)
 
 Description:
 
@@ -54,7 +54,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.log`
 
-**Source:** [`catlass.core_api.log`](../../../../../catlass/core_api.py#L7911)
+**Source:** [`catlass.core_api.log`](../../../../../catlass/core_api.py#L7930)
 
 Description:
 
@@ -92,7 +92,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.sqrt`
 
-**Source:** [`catlass.core_api.sqrt`](../../../../../catlass/core_api.py#L7938)
+**Source:** [`catlass.core_api.sqrt`](../../../../../catlass/core_api.py#L7957)
 
 Description:
 
@@ -139,7 +139,7 @@ with tla.cube():
 
 ## `tla.abs`
 
-**Source:** [`catlass.core_api.abs`](../../../../../catlass/core_api.py#L7974)
+**Source:** [`catlass.core_api.abs`](../../../../../catlass/core_api.py#L7993)
 
 Description:
 
@@ -177,7 +177,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.neg`
 
-**Source:** [`catlass.core_api.neg`](../../../../../catlass/core_api.py#L8001)
+**Source:** [`catlass.core_api.neg`](../../../../../catlass/core_api.py#L8020)
 
 Description:
 
@@ -210,7 +210,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.add`
 
-**Source:** [`catlass.core_api.add`](../../../../../catlass/core_api.py#L8366)
+**Source:** [`catlass.core_api.add`](../../../../../catlass/core_api.py#L8385)
 
 Description:
 
@@ -251,7 +251,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.sub`
 
-**Source:** [`catlass.core_api.sub`](../../../../../catlass/core_api.py#L8412)
+**Source:** [`catlass.core_api.sub`](../../../../../catlass/core_api.py#L8431)
 
 Description:
 
@@ -289,7 +289,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.mul`
 
-**Source:** [`catlass.core_api.mul`](../../../../../catlass/core_api.py#L8449)
+**Source:** [`catlass.core_api.mul`](../../../../../catlass/core_api.py#L8468)
 
 Description:
 
@@ -328,7 +328,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.max`
 
-**Source:** [`catlass.core_api.max`](../../../../../catlass/core_api.py#L8583)
+**Source:** [`catlass.core_api.max`](../../../../../catlass/core_api.py#L8602)
 
 Description:
 
@@ -367,7 +367,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.min`
 
-**Source:** [`catlass.core_api.min`](../../../../../catlass/core_api.py#L8584)
+**Source:** [`catlass.core_api.min`](../../../../../catlass/core_api.py#L8603)
 
 Description:
 
@@ -406,7 +406,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.div`
 
-**Source:** [`catlass.core_api.div`](../../../../../catlass/core_api.py#L8588)
+**Source:** [`catlass.core_api.div`](../../../../../catlass/core_api.py#L8607)
 
 Description:
 

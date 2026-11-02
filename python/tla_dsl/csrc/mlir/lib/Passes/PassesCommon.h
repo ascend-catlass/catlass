@@ -49,6 +49,7 @@ inline constexpr StringLiteral kDltiTargetSystemSpecAttrName = "dlti.target_syst
 inline constexpr StringLiteral kMixModeAttrName = "mix_mode";
 inline constexpr StringLiteral kParallelModeAttrName = "parallel_mode";
 inline constexpr StringLiteral kHivmVectorFunctionAttrName = "hivm.vector_function";
+inline constexpr StringLiteral kCoreRatioAttrName = "tla.core_ratio";
 
 inline hivm::TModuleCoreType toModuleCoreType(hivm::TFuncCoreType coreType)
 {

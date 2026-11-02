@@ -29,6 +29,7 @@ class CatlassBaseDSL(BaseDSL):
         fn: Callable[..., Any] | None = None,
         *,
         auto_sync: str | None = None,
+        core_ratio: Any | None = None,
     ) -> Any:
         """Directory: Decorators
         Description:
@@ -45,11 +46,21 @@ class CatlassBaseDSL(BaseDSL):
               automatic in-core synchronization for supported `tla.copy`, `tla.mmad`,
               and `tla.vec.func` accesses. Default `None` (synchronization stays
               explicit).
+            - *`core_ratio`*: Optional AIC:AIV ratio for MIX kernels. Accepts only
+              `tla.arch.C1V1` (1:1) or `tla.arch.C1V2` (1:2). MIX kernels default
+              to 1:2 when omitted. Non-MIX kernels must not set this.
 
             Constraints:
             - The decorated function must not be defined with Python `async def`.
-            - Keyword options are whitelisted: currently only `auto_sync`.
+            - Keyword options are whitelisted: `auto_sync` and `core_ratio`.
             - `auto_sync` must be `"v0"` or `None`.
+            - `core_ratio` must be `tla.arch.C1V1` or `tla.arch.C1V2` when set.
+            - With `core_ratio=tla.arch.C1V1` the programmer owns the Ascend950
+              CV 1:1 contract (compiler does not rewrite pipes or data paths):
+              stage cube results L0C→GM→UB (tightly coupled L0C→UB is illegal);
+              `cross_core_wait_flag` must use `tla.arch.SCALAR` (`PIPE_S`);
+              mode-4 flags must use `aiv_id=0` only. Writing `VECTOR`/`FIX` on
+              the wait is not corrected silently and may fail to handshake.
             - With `auto_sync="v0"`:
               - Only pipeline synchronization within one AIC or AIV is generated.
                 Cross-core synchronization and thread synchronization inside
@@ -96,6 +107,13 @@ class CatlassBaseDSL(BaseDSL):
                 with tla.vector():
                     tla.copy(dst, src)
 
+            @tla.kernel(core_ratio=tla.arch.C1V1)
+            def fused_mix(...):
+                with tla.cube():
+                    ...
+                with tla.vector():
+                    ...
+
             compiled = tla.compile(copy_kernel, tx, ty, options="--npu-arch 3510")
             compiled(tx, ty, block_num=1)
             ```
@@ -105,10 +123,21 @@ class CatlassBaseDSL(BaseDSL):
             raise ValueError(
                 f"tla.kernel auto_sync must be 'v0' or None, got {auto_sync!r}"
             )
+        if core_ratio is not None:
+            from ..dsl import parse_core_ratio
+
+            try:
+                parse_core_ratio(core_ratio)
+            except ValueError as exc:
+                raise ValueError(str(exc)) from exc
         site = cls._capture_call_site()
         if fn is None:
-            return BaseDSL.jit_runner(cls, "_kernel_helper", site, auto_sync=auto_sync)
-        return BaseDSL.jit_runner(cls, "_kernel_helper", site, fn, auto_sync=auto_sync)
+            return BaseDSL.jit_runner(
+                cls, "_kernel_helper", site, auto_sync=auto_sync, core_ratio=core_ratio
+            )
+        return BaseDSL.jit_runner(
+            cls, "_kernel_helper", site, fn, auto_sync=auto_sync, core_ratio=core_ratio
+        )
 
     @classmethod
     def jit(cls, fn: Callable[..., Any] | None = None) -> Any:

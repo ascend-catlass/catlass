@@ -110,7 +110,7 @@ Parameters:
   Common patterns:
 
   | Layout | Typical `make_stride(...)` | Meaning |
-  | --- | --- | --- |
+  |---|---|---|
   | RowMajor 2D `(M, N)` | `(N, 1)` | Row step is `N` elements; column step is 1 |
   | ColumnMajor 2D `(M, N)` | `(1, M)` | Row step is 1; column step is `M` |
   | `zN` / `nZ` / … | nested `((s00, s01), (s10, s11))` | Same nesting as physical `shape`; values must match the layout tag |
@@ -425,7 +425,7 @@ dst = tla.make_tensor_like(ptr, like=src_tile, layoutTag=tla.arch.RowMajor)
 
 ## `tla.make_ptr`
 
-**Source:** [`catlass.core_api.make_ptr`](../../../../catlass/core_api.py#L9951)
+**Source:** [`catlass.core_api.make_ptr`](../../../../catlass/core_api.py#L9970)
 
 Description:
 
@@ -460,7 +460,7 @@ ptr = tla.make_ptr(tla.Float16, addr, mem_space=tla.AddressSpace.gm)
 
 ## `tla.recast_ptr`
 
-**Source:** [`catlass.core_api.recast_ptr`](../../../../catlass/core_api.py#L10005)
+**Source:** [`catlass.core_api.recast_ptr`](../../../../catlass/core_api.py#L10024)
 
 Description:
 

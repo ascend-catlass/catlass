@@ -273,10 +273,45 @@ hivm::TFuncCoreType promoteCoreType(std::optional<hivm::TFuncCoreType> current, 
     return hivm::TFuncCoreType::MIX;
 }
 
+// Read and validate ``tla.core_ratio`` (DenseI64ArrayAttr of length 2).
+// Returns failure when the attribute is absent.
+static FailureOr<std::pair<int64_t, int64_t>> getCoreRatioAttr(Operation* op)
+{
+    auto attr = op->getAttrOfType<DenseI64ArrayAttr>(kCoreRatioAttrName);
+    if (!attr)
+        return failure();
+    if (attr.size() != 2)
+        return op->emitError("tla.core_ratio must be a length-2 i64 array");
+    int64_t aic = attr[0];
+    int64_t aiv = attr[1];
+    if (!((aic == 1 && aiv == 1) || (aic == 1 && aiv == 2)))
+        return op->emitError("tla.core_ratio must be [1, 1] or [1, 2]");
+    return std::make_pair(aic, aiv);
+}
+
+// Ensure MIX kernels carry an explicit ``tla.core_ratio`` (default 1:2) and that
+// non-MIX kernels do not.
+static LogicalResult ensureCoreRatioAttr(Operation* op, hivm::TFuncCoreType coreType)
+{
+    FailureOr<std::pair<int64_t, int64_t>> ratio = getCoreRatioAttr(op);
+    if (failed(ratio)) {
+        // getCoreRatioAttr emits on malformed attrs; distinguish absent vs bad.
+        if (op->hasAttr(kCoreRatioAttrName))
+            return failure();
+        if (coreType == hivm::TFuncCoreType::MIX) {
+            op->setAttr(kCoreRatioAttrName, DenseI64ArrayAttr::get(op->getContext(), {1, 2}));
+        }
+        return success();
+    }
+    if (coreType != hivm::TFuncCoreType::MIX)
+        return op->emitError("tla.core_ratio is only valid on MIX kernels");
+    return success();
+}
+
 // Materialize the final HACC/HIVM entry attributes for a device function from
 // its core type (hacc.entry, function_kind, hivm.func_core_type, mix_mode,
-// parallel_mode, and the C310 regbase target). This is the single place that
-// stamps the per-device-function HACC/HIVM entry metadata.
+// parallel_mode, hivm.core_ratio for MIX, and the C310 regbase target). This is
+// the single place that stamps the per-device-function HACC/HIVM entry metadata.
 void stampFunctionHaccHivmAttrs(Operation* op, hivm::TFuncCoreType coreType)
 {
     if (isPrivateSymbol(op))
@@ -288,6 +323,18 @@ void stampFunctionHaccHivmAttrs(Operation* op, hivm::TFuncCoreType coreType)
     StringRef mixMode = coreType == hivm::TFuncCoreType::AIV && !op->hasAttr("hivm.part_of_mix") ? "aiv" : "mix";
     op->setAttr(kMixModeAttrName, StringAttr::get(ctx, mixMode));
     op->setAttr(kParallelModeAttrName, StringAttr::get(ctx, "simd"));
+    // Bridge ``tla.core_ratio`` into ``#hivm.core_ratio`` so HIVM→LLVM→hivmc can
+    // emit MIX_TASK_RATION (ELF .ascend.meta type=3). Caller must have run
+    // ensureCoreRatioAttr first so MIX entries carry an explicit ratio.
+    if (coreType == hivm::TFuncCoreType::MIX) {
+        FailureOr<std::pair<int64_t, int64_t>> ratio = getCoreRatioAttr(op);
+        if (succeeded(ratio)) {
+            op->setAttr(
+                hivm::TCoreRatioAttr::name,
+                hivm::TCoreRatioAttr::get(
+                    ctx, static_cast<int32_t>(ratio->first), static_cast<int32_t>(ratio->second)));
+        }
+    }
 }
 
 // Lower the tla.func / tla.return containers to func.func / func.return, copying
@@ -395,17 +442,28 @@ public:
         //    Done on the tla.func containers so the attrs are carried onto func.func
         //    by the CopyNonSignatureAttrs lowering below.
         std::optional<hivm::TFuncCoreType> moduleCoreType;
-        auto classify = [&](Operation* funcOp, Region& body) {
+        auto classify = [&](Operation* funcOp, Region& body) -> LogicalResult {
             if (!isInferableFunc(funcOp, body))
-                return;
+                return success();
             hivm::TFuncCoreType funcCoreType = inferFuncCoreType(funcOp);
+            if (failed(ensureCoreRatioAttr(funcOp, funcCoreType)))
+                return failure();
             stampFunctionHaccHivmAttrs(funcOp, funcCoreType);
             moduleCoreType = promoteCoreType(moduleCoreType, funcCoreType);
+            return success();
         };
-        for (::tla::FuncOp funcOp : module.getOps<::tla::FuncOp>())
-            classify(funcOp, funcOp.getBody());
-        for (func::FuncOp funcOp : module.getOps<func::FuncOp>())
-            classify(funcOp, funcOp.getBody());
+        for (::tla::FuncOp funcOp : module.getOps<::tla::FuncOp>()) {
+            if (failed(classify(funcOp, funcOp.getBody()))) {
+                signalPassFailure();
+                return;
+            }
+        }
+        for (func::FuncOp funcOp : module.getOps<func::FuncOp>()) {
+            if (failed(classify(funcOp, funcOp.getBody()))) {
+                signalPassFailure();
+                return;
+            }
+        }
 
         // Always tag the module core type, defaulting an empty / region-less module
         // to AIV -- the same fallback inferFuncCoreType applies per function.
