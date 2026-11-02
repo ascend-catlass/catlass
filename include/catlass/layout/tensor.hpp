@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2025 Huawei Technologies Co., Ltd.
+ * Copyright (c) 2025-2026 Huawei Technologies Co., Ltd.
  * This file is a part of the CANN Open Software.
  * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
  * CANN Open Software License Agreement Version 2.0 (the "License").
@@ -40,9 +40,9 @@ public:
     NC1HWC0(Index batch = 0, Index c1 = 0, Index h = 0, Index w = 0, Index c0 = 0)
         : shape_(MakeCoord(batch, c1, h, w, c0))
     {
-        LongIndex strideBatch = c1 * h * w * c0;
-        LongIndex strideC1 = h * w * c0;
-        LongIndex strideH = w * c0;
+        LongIndex strideBatch = static_cast<LongIndex>(c1) * h * w * c0;
+        LongIndex strideC1 = static_cast<LongIndex>(h) * w * c0;
+        LongIndex strideH = static_cast<LongIndex>(w) * c0;
         LongIndex strideW = c0;
         LongIndex strideC0 = 1;
         stride_ = MakeCoord(strideBatch, strideC1, strideH, strideW, strideC0);
@@ -176,9 +176,9 @@ public:
     CI1KHKWCOCI0(Index cin1 = 0, Index kh = 0, Index kw = 0, Index cout = 0, Index c0 = 0)
         : shape_(MakeCoord(cin1, kh, kw, cout, c0))
     {
-        LongIndex strideCin1 = kh * kw * cout * c0;
-        LongIndex strideKh = kw * cout * c0;
-        LongIndex strideKw = cout * c0;
+        LongIndex strideCin1 = static_cast<LongIndex>(kh) * kw * cout * c0;
+        LongIndex strideKh = static_cast<LongIndex>(kw) * cout * c0;
+        LongIndex strideKw = static_cast<LongIndex>(cout) * c0;
         LongIndex strideCout = c0;
         LongIndex strideC0 = 1;
         stride_ = MakeCoord(strideCin1, strideKh, strideKw, strideCout, strideC0);
