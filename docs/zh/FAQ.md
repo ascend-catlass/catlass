@@ -57,6 +57,8 @@ echo | gcc -x c++ -E -v - 2>&1 | sed -n '/#include <...> search starts here:/,/E
 
 确认后重新执行`bash scripts/build.sh 00_basic_matmul`，输出`[INFO] Target '00_basic_matmul' built successfully`即表示环境已就绪。
 
+针对这类环境问题，`cmake/funcs.cmake` 中已集成自动检测：当编译或链接找不到 C++ 标准库时，会尝试按本机 gcc 的隐式搜索路径注入 C++ 头文件与库搜索路径。该逻辑依赖本机 gcc 的搜索路径推导，在特殊发行版或非标准安装前缀下可能失效；若仍出现该问题，请按上文步骤手动导出环境变量，并参考[环境问题反馈](#遇到其他编译链接类环境问题如何反馈)提供信息。
+
 ## 遇到其他编译/链接类环境问题，如何反馈？
 
 环境类问题与发行版、gcc版本、CANN版本强相关，反馈issue时请附带以下信息，以便在其他环境中复现：

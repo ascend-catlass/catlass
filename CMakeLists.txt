@@ -22,14 +22,15 @@ else()
 endif()
 
 include(cmake/funcs.cmake)
+ensure_bisheng_stdlib_source()
 
-if((NOT DEFINED NPU_MODEL OR NPU_MODEL STREQUAL "")
+if((NOT DEFINED SOC_VERSION OR SOC_VERSION STREQUAL "")
         OR (NOT DEFINED CANN_VERSION OR CANN_VERSION STREQUAL ""))
     get_cann_version_and_soc_name()
 endif()
 
-if(NOT DEFINED NPU_MODEL OR NPU_MODEL STREQUAL "")
-    message(WARNING "Failed to detect NPU_MODEL. Simulator or aclnn examples may not run correctly.\nYou can set NPU_MODEL manually by -DNPU_MODEL=Ascendxxxyy.")
+if(NOT DEFINED SOC_VERSION OR SOC_VERSION STREQUAL "")
+    message(WARNING "Failed to detect SOC_VERSION. Simulator or aclnn examples may not run correctly.\nYou can set SOC_VERSION manually by -DSOC_VERSION=Ascendxxxyy.")
 endif()
 
 if(NOT DEFINED CANN_VERSION OR CANN_VERSION STREQUAL "")

@@ -41,7 +41,7 @@ if(NOT EXISTS ${MSOPGEN_PROJECT_SOURCE_DIR})
     find_program(MSOPGEN NAMES msopgen HINTS ${ASCEND_HOME_PATH})
     add_custom_target(generated_msopgen_project
         COMMAND ${CMAKE_COMMAND} -E make_directory ${MSOPGEN_PROJECT_SOURCE_DIR}
-        COMMAND ${MSOPGEN} gen -i ${CMAKE_CURRENT_BINARY_DIR}/tmp/catlass_basic_matmul.json -c ai_core-${NPU_MODEL} -lan cpp -out ${MSOPGEN_PROJECT_SOURCE_DIR}
+        COMMAND ${MSOPGEN} gen -i ${CMAKE_CURRENT_BINARY_DIR}/tmp/catlass_basic_matmul.json -c ai_core-${SOC_VERSION} -lan cpp -out ${MSOPGEN_PROJECT_SOURCE_DIR}
         COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/op_host/catlass_basic_matmul.cpp ${MSOPGEN_PROJECT_SOURCE_DIR}/op_host
         COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/op_host/catlass_basic_matmul_tiling.h ${MSOPGEN_PROJECT_SOURCE_DIR}/op_host
         COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/op_kernel/catlass_basic_matmul.cpp ${MSOPGEN_PROJECT_SOURCE_DIR}/op_kernel

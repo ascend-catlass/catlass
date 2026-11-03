@@ -33,7 +33,7 @@ fi
 
 # msopgen package build
 if [[ "$CATLASS_ARCH" == 2201 ]]; then
-    bash "$BUILD_SCRIPT_PATH" "${DEFAULT_BUILD_OPTIONS[@]}" -DNPU_MODEL=Ascend910B1 basic_matmul_aclnn || exit 1
+    bash "$BUILD_SCRIPT_PATH" "${DEFAULT_BUILD_OPTIONS[@]}" -DSOC_VERSION=Ascend910B1 basic_matmul_aclnn || exit 1
 fi
 
 # example test. Do not replace or the test will fail.

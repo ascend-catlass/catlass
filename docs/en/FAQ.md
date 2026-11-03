@@ -57,6 +57,8 @@ echo | gcc -x c++ -E -v - 2>&1 | sed -n '/#include <...> search starts here:/,/E
 
 Then run `bash scripts/build.sh 00_basic_matmul` again. The output `[INFO] Target '00_basic_matmul' built successfully` indicates that the environment is ready.
 
+For such environment issues, `cmake/funcs.cmake` includes automatic detection: when the C++ standard library cannot be found during compilation or linking, it attempts to inject the C++ header and library search paths derived from the local gcc implicit search paths. This logic depends on the local gcc search paths and may fail on unusual distributions or non-standard install prefixes. If the issue persists, export the environment variables manually as described above, and include the details requested in [how to report environment issues](#how-should-i-report-other-build-or-link-environment-issues).
+
 ## How should I report other build or link environment issues?
 
 Environment issues depend heavily on the distribution, gcc version, and CANN version. When filing an issue, include the following so that it can be reproduced elsewhere:

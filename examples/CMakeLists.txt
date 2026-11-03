@@ -36,14 +36,14 @@ add_link_options($<$<COMPILE_LANGUAGE:ASC>:-Wno-unused-command-line-argument>)
 
 # compile options for debug features
 if(DEFINED ENABLE_SIMULATOR AND ENABLE_SIMULATOR)
-    if(NOT DEFINED NPU_MODEL OR NPU_MODEL STREQUAL "")
-        message(FATAL_ERROR "NPU_MODEL is not defined.")
+    if(NOT DEFINED SOC_VERSION OR SOC_VERSION STREQUAL "")
+        message(FATAL_ERROR "SOC_VERSION is not defined.")
         return()
     endif()
 
     message("To run examples in simulator mode, execute the following commands in your terminal:")
-    message("export LD_LIBRARY_PATH=${ASCEND_HOME_PATH}/tools/simulator/${NPU_MODEL}/lib:\$LD_LIBRARY_PATH")
-    message("export LD_PRELOAD=${ASCEND_HOME_PATH}/tools/simulator/${NPU_MODEL}/lib/libruntime_camodel.so:${ASCEND_HOME_PATH}/tools/simulator/${NPU_MODEL}/lib/libnpu_drv_camodel.so")
+    message("export LD_LIBRARY_PATH=${ASCEND_HOME_PATH}/tools/simulator/${SOC_VERSION}/lib:\$LD_LIBRARY_PATH")
+    message("export LD_PRELOAD=${ASCEND_HOME_PATH}/tools/simulator/${SOC_VERSION}/lib/libruntime_camodel.so:${ASCEND_HOME_PATH}/tools/simulator/${SOC_VERSION}/lib/libnpu_drv_camodel.so")
 endif()
 
 # compile options for msSanitizer
@@ -193,8 +193,8 @@ endforeach()
 # advanded examples
 add_subdirectory(shared_lib)
 add_subdirectory(python_extension)
-if(DEFINED NPU_MODEL)
+if(DEFINED SOC_VERSION AND NOT SOC_VERSION STREQUAL "")
     add_subdirectory(advanced/basic_matmul_aclnn)
 else()
-    message(WARNING "NPU_MODEL is not defined. basic_matmul_aclnn will not be compiled.")
+    message(WARNING "SOC_VERSION is not defined. basic_matmul_aclnn will not be compiled.")
 endif()

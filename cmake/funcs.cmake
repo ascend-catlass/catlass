@@ -52,14 +52,86 @@ function(get_cann_version_and_soc_name)
     string(FIND "${RUN_OUTPUT}" " " SPACE_POS)
     if(SPACE_POS GREATER_EQUAL 0)
         math(EXPR SOC_NAME_START "${SPACE_POS} + 1")
-        string(SUBSTRING "${RUN_OUTPUT}" ${SOC_NAME_START} -1 NPU_MODEL_TMP)
+        string(SUBSTRING "${RUN_OUTPUT}" ${SOC_NAME_START} -1 SOC_VERSION_TMP)
 
-        # 只在调用方未预先设定 NPU_MODEL 时才覆盖
-        if(NOT DEFINED NPU_MODEL OR NPU_MODEL STREQUAL "")
-            set(NPU_MODEL ${NPU_MODEL_TMP} PARENT_SCOPE)
-            message("Detected NPU_MODEL: ${NPU_MODEL_TMP}")
+        # 只在调用方未预先设定 SOC_VERSION 时才覆盖
+        if(NOT DEFINED SOC_VERSION OR SOC_VERSION STREQUAL "")
+            set(SOC_VERSION ${SOC_VERSION_TMP} PARENT_SCOPE)
+            message("Detected SOC_VERSION: ${SOC_VERSION_TMP}")
         else()
-            message("Using preset NPU_MODEL: ${NPU_MODEL}")
+            message("Using preset SOC_VERSION: ${SOC_VERSION}")
         endif()
     endif()
+endfunction()
+
+function(ensure_bisheng_stdlib_source)
+    # Probe 1: can bisheng parse C++ standard library headers?
+    execute_process(
+        COMMAND printf "%s" "#include <cstdlib>\n"
+        COMMAND "${CMAKE_ASC_COMPILER}" -x c++ - -fsyntax-only
+        RESULT_VARIABLE STDLIB_HEADER_RESULT
+        OUTPUT_QUIET
+        ERROR_VARIABLE STDLIB_HEADER_ERROR
+    )
+
+    # Probe 2: can bisheng link against the C++ standard library?
+    # -fsyntax-only does not link, so a link failure such as
+    # "unable to find library -lstdc++" is invisible to the header probe.
+    execute_process(
+        COMMAND printf "%s" "int main() { return 0; }\n"
+        COMMAND "${CMAKE_ASC_COMPILER}" -x c++ - -o "${CMAKE_CURRENT_BINARY_DIR}/stdlib_probe" -lstdc++
+        RESULT_VARIABLE STDLIB_LINK_RESULT
+        OUTPUT_QUIET
+        ERROR_VARIABLE STDLIB_LINK_ERROR
+    )
+    file(REMOVE "${CMAKE_CURRENT_BINARY_DIR}/stdlib_probe")
+
+    if(STDLIB_HEADER_RESULT STREQUAL "0" AND STDLIB_LINK_RESULT STREQUAL "0")
+        return()
+    endif()
+
+    # C++ standard library headers only; exclude GCC builtin headers.
+    set(STDLIB_DIRS "")
+    foreach(DIR IN LISTS CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES)
+        if(EXISTS "${DIR}/cstdint"
+           OR EXISTS "${DIR}/bits/c++config.h"
+           OR EXISTS "${DIR}/backward_warning.h")
+            list(APPEND STDLIB_DIRS "${DIR}")
+        endif()
+    endforeach()
+
+    if(NOT STDLIB_DIRS OR NOT CMAKE_CXX_IMPLICIT_LINK_DIRECTORIES)
+        message(FATAL_ERROR
+            "Cannot locate host C++ standard library paths.\n"
+            "Header probe: ${STDLIB_HEADER_RESULT}\n${STDLIB_HEADER_ERROR}\n"
+            "Link probe: ${STDLIB_LINK_RESULT}\n${STDLIB_LINK_ERROR}")
+    endif()
+
+    list(JOIN STDLIB_DIRS ":" INCLUDE_PATH)
+    list(JOIN CMAKE_CXX_IMPLICIT_LINK_DIRECTORIES ":" LIBRARY_PATH)
+
+    if(NOT "$ENV{CPLUS_INCLUDE_PATH}" STREQUAL "")
+        string(APPEND INCLUDE_PATH ":$ENV{CPLUS_INCLUDE_PATH}")
+    endif()
+    if(NOT "$ENV{LIBRARY_PATH}" STREQUAL "")
+        string(APPEND LIBRARY_PATH ":$ENV{LIBRARY_PATH}")
+    endif()
+
+    string(CONCAT PREFIX
+        "\"${CMAKE_COMMAND}\" -E env "
+        "\"CPLUS_INCLUDE_PATH=${INCLUDE_PATH}\" "
+        "\"LIBRARY_PATH=${LIBRARY_PATH}\" "
+    )
+
+    # ASC rule variables: executables use LINK_EXECUTABLE, shared libraries use
+    # CREATE_SHARED_LIBRARY, device modules use CREATE_SHARED_MODULE.
+    foreach(VAR CMAKE_ASC_COMPILE_OBJECT
+                CMAKE_ASC_LINK_EXECUTABLE
+                CMAKE_ASC_CREATE_SHARED_LIBRARY
+                CMAKE_ASC_CREATE_SHARED_MODULE)
+        if(DEFINED ${VAR} AND NOT "${${VAR}}" STREQUAL "")
+            list(TRANSFORM ${VAR} PREPEND "${PREFIX}")
+            set(${VAR} "${${VAR}}" PARENT_SCOPE)
+        endif()
+    endforeach()
 endfunction()
