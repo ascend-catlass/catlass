@@ -1367,6 +1367,7 @@ def main() -> int:
     if args.block_num != -1 and args.block_num <= 0:
         parser.error("--block-num must be -1 or positive")
     import torch
+    import torch_npu  # noqa: F401
 
     dtype = torch.float16 if args.dtype == "f16" else torch.bfloat16
     torch.manual_seed(0)
