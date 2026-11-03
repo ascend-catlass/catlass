@@ -643,7 +643,8 @@ static bool isVectorComputeOp(Operation* op)
            isa_and_nonnull<::tla::HistogramsOp>(op) || isa_and_nonnull<::tla::ReduceOp>(op) ||
            isa_and_nonnull<::tla::GatherOp>(op) || isa_and_nonnull<::tla::CastOp>(op) ||
            isa_and_nonnull<::tla::BitCastOp>(op) || isa_and_nonnull<::tla::PackOp>(op) ||
-           isa_and_nonnull<::tla::InterleaveOp>(op) || isa_and_nonnull<::tla::DeInterleaveOp>(op);
+           isa_and_nonnull<::tla::UnpackOp>(op) || isa_and_nonnull<::tla::InterleaveOp>(op) ||
+           isa_and_nonnull<::tla::DeInterleaveOp>(op);
 }
 
 static void annotateAivLibraryCall(func::FuncOp callee)
@@ -710,6 +711,35 @@ static std::string getSqueezeLibraryCallName(Type elementType)
         if (intType.getWidth() == 32)
             return "vsqueeze_int32_t";
     return {};
+}
+
+static std::string getVectorPackLibraryCallName(Type srcElement, Type dstElement, ::RegPart part)
+{
+    auto src = cast<IntegerType>(srcElement);
+    auto dst = cast<IntegerType>(dstElement);
+    return std::string("pack_reg_uint") + std::to_string(dst.getWidth()) + "_t_" + (src.isUnsigned() ? "uint" : "int") +
+           std::to_string(src.getWidth()) + "_t_" + (part == ::RegPart::high ? "high" : "low");
+}
+
+static std::string getVectorUnpackLibraryCallName(Type srcElement, Type dstElement, ::RegPart part)
+{
+    auto src = cast<IntegerType>(srcElement);
+    auto dst = cast<IntegerType>(dstElement);
+    return std::string("unpack_reg_") + (dst.isUnsigned() ? "uint" : "int") + std::to_string(dst.getWidth()) + "_t_" +
+           (src.isUnsigned() ? "uint" : "int") + std::to_string(src.getWidth()) + "_t_" +
+           (part == ::RegPart::high ? "high" : "low");
+}
+
+static func::FuncOp getOrCreateVectorPackUnpackLibraryCall(
+    ModuleOp module, Location loc, VectorType srcType, VectorType dstType, StringRef name)
+{
+    if (auto existing = module.lookupSymbol<func::FuncOp>(name))
+        return existing;
+    OpBuilder moduleBuilder(module.getBodyRegion());
+    auto type = FunctionType::get(module.getContext(), {srcType}, {dstType});
+    auto callee = moduleBuilder.create<func::FuncOp>(loc, name, type);
+    annotateAivLibraryCall(callee);
+    return callee;
 }
 
 static std::string getGatherRegLibraryCallName(Type elementType)
@@ -2773,20 +2803,54 @@ static LogicalResult lowerReduce(
     return success();
 }
 
-static LogicalResult lowerPack(::tla::PackOp packOp, OpBuilder& b, DenseMap<Value, Value>& valueMap)
+static LogicalResult lowerPack(::tla::PackOp packOp, OpBuilder& b, ModuleOp module, DenseMap<Value, Value>& valueMap)
 {
     Location loc = packOp.getLoc();
     Value src = valueMap.lookup(packOp.getSrc());
     if (!src)
         return failure();
 
-    int64_t partValue = packOp.getPart() == ::RegPart::high ? 1 : 0;
-    Value part = b.create<arith::ConstantIntOp>(loc, partValue, 32);
+    if (isa<::tla::VectorSSAType>(packOp.getSrc().getType())) {
+        auto srcType = cast<::tla::VectorSSAType>(packOp.getSrc().getType());
+        auto dstType = cast<::tla::VectorSSAType>(packOp.getResult().getType());
+        auto srcCtx = deriveVecCtxForElement(srcType.getElementType());
+        auto dstCtx = deriveVecCtxForElement(dstType.getElementType());
+        if (failed(srcCtx) || failed(dstCtx))
+            return failure();
+        auto name = getVectorPackLibraryCallName(srcType.getElementType(), dstType.getElementType(), packOp.getPart());
+        auto callee = getOrCreateVectorPackUnpackLibraryCall(module, loc, srcCtx->vecType, dstCtx->vecType, name);
+        valueMap[packOp.getResult()] = b.create<func::CallOp>(loc, callee, ValueRange{src}).getResult(0);
+        return success();
+    }
+    if (isa<::tla::MaskSSAType>(packOp.getSrc().getType())) {
+        int64_t partValue = packOp.getPart() == ::RegPart::high ? 1 : 0;
+        Value part = b.create<arith::ConstantIntOp>(loc, partValue, 32);
+        VectorType pregType = fullPregVecType(b.getContext());
+        Value pregSrc = castMaskToPregType(b, loc, src, pregType);
+        auto packed = b.create<hivm_regbaseintrins::PpackInstrOp>(loc, pregType, pregSrc, part);
+        valueMap[packOp.getResult()] = packed->getResult(0);
+        return success();
+    }
+    return failure();
+}
 
-    VectorType pregType = fullPregVecType(b.getContext());
-    Value pregSrc = castMaskToPregType(b, loc, src, pregType);
-    auto packed = b.create<hivm_regbaseintrins::PpackInstrOp>(loc, pregType, pregSrc, part);
-    valueMap[packOp.getResult()] = packed->getResult(0);
+static LogicalResult lowerUnpack(
+    ::tla::UnpackOp unpackOp, OpBuilder& b, ModuleOp module, DenseMap<Value, Value>& valueMap)
+{
+    Value src = valueMap.lookup(unpackOp.getSrc());
+    if (!src)
+        return failure();
+    // Preserve TLA signedness in the symbol; CANN selects sign/zero extension.
+    auto srcType = cast<::tla::VectorSSAType>(unpackOp.getSrc().getType());
+    auto dstType = cast<::tla::VectorSSAType>(unpackOp.getResult().getType());
+    auto srcCtx = deriveVecCtxForElement(srcType.getElementType());
+    auto dstCtx = deriveVecCtxForElement(dstType.getElementType());
+    if (failed(srcCtx) || failed(dstCtx))
+        return failure();
+    auto name = getVectorUnpackLibraryCallName(srcType.getElementType(), dstType.getElementType(), unpackOp.getPart());
+    auto callee =
+        getOrCreateVectorPackUnpackLibraryCall(module, unpackOp.getLoc(), srcCtx->vecType, dstCtx->vecType, name);
+    valueMap[unpackOp.getResult()] = b.create<func::CallOp>(unpackOp.getLoc(), callee, ValueRange{src}).getResult(0);
     return success();
 }
 
@@ -3666,7 +3730,9 @@ static LogicalResult lowerNestedVectorOp(
         return lowerReduce(reduceOp, b, module, valueMap, fullMasks);
 
     if (auto packOp = dyn_cast<::tla::PackOp>(op))
-        return lowerPack(packOp, b, valueMap);
+        return lowerPack(packOp, b, module, valueMap);
+    if (auto unpackOp = dyn_cast<::tla::UnpackOp>(op))
+        return lowerUnpack(unpackOp, b, module, valueMap);
 
     if (auto interleaveOp = dyn_cast<::tla::InterleaveOp>(op))
         return lowerInterleave(interleaveOp, b, module, valueMap, fullMasks);
@@ -4522,6 +4588,10 @@ public:
                 if (!producedValues.contains(packOp.getSrc()))
                     return rewriter.notifyMatchFailure(
                         vecFuncOp, "expected tla.pack src from a legal register producer");
+            } else if (auto unpackOp = dyn_cast<::tla::UnpackOp>(computeOp)) {
+                if (!producedValues.contains(unpackOp.getSrc()))
+                    return rewriter.notifyMatchFailure(
+                        vecFuncOp, "expected tla.unpack src from a legal register producer");
             } else if (auto interleaveOp = dyn_cast<::tla::InterleaveOp>(computeOp)) {
                 if (!producedValues.contains(interleaveOp.getSrc0()) ||
                     !producedValues.contains(interleaveOp.getSrc1()))

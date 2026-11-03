@@ -609,6 +609,25 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
             for part in ("low", "high")
         ],
     )
+    # Vector Pack/UnPack: 16/32-bit truncation and sign/zero-extension, both
+    # register halves, both the signed-unpack and bitcast-through-unsigned
+    # routes.
+    yield (
+        "vector-pack-op",
+        [
+            [
+                "dsl_tutorials/vector_simd_ops/pack_op.py",
+                "--kind", "vector",
+                "--wide-bits", wide_bits,
+                "--part", part,
+                *(["--signed-unpack"] if signed_unpack else []),
+                *dev,
+            ]
+            for wide_bits in ("16", "32")
+            for part in ("low", "high")
+            for signed_unpack in (False, True)
+        ],
+    )
     yield (
         "vector-mask-select-op",
         [[

@@ -16,22 +16,25 @@ Interleave / deinterleave and related lane reshuffles.
 
 ## `tla.pack`
 
-**Source:** [`catlass.core_api.pack`](../../../../../catlass/core_api.py#L8058)
+**Source:** [`catlass.core_api.pack`](../../../../../catlass/core_api.py#L8067)
 
 Description:
 
-Pack a predicate value into the low or high half of its destination
-predicate register.
+Pack a predicate value, or truncate integer vector elements to their
+low 8 or 16 bits and place them in the selected destination half.
+The other destination half of a vector is unspecified. The
+destination element type is derived from the source: the result is
+always unsigned, with half the source bit width.
 
 Prototype:
 
 ```python
-tla.pack(src: MaskSSA, *, part: RegPart) -> MaskSSA
+tla.pack(src: VectorSSA | MaskSSA, *, part: RegPart) -> VectorSSA | MaskSSA
 ```
 
 Parameters:
 
-- `src` (`MaskSSA`): Predicate register value to pack. Required.
+- `src` (`VectorSSA | MaskSSA`): Source register value. Required.
 - `part` (`tla.RegPart`): Destination register half: `LOW` (low) or `HIGH` (high). Required.
 
 Constraints:
@@ -39,19 +42,62 @@ Constraints:
 - Must be called inside a `@tla.kernel`-decorated kernel function.
 - Must be called inside `tla.vec.func(mode="simd")`.
 - Mask inputs support `mask<64> -> mask<128>` and `mask<128> -> mask<256>`.
+- Vector pairs (destination <- source): `UInt8 <- Int16/UInt16`, `UInt16 <- Int32/UInt32`. 64-bit sources (`Int64`/`UInt64`) are not supported.
+- Vector inputs must fill one 256Byte register (RegTraitNumOne); the result has twice as many lanes. RegTraitNumTwo is not representable by `VectorSSA`; CANN permits only LOW for that trait.
+- Vector form supports Ascend 950 (`--npu-arch 3510`) only. `LOW/HIGH` map to CANN `HighLowPart::LOWEST/HIGHEST`.
 
 Example:
 
 ```python
 with tla.vec.func(mode="simd"):
     packed = tla.pack(src, part=tla.RegPart.LOW)
+    narrow = tla.pack(src_reg, part=tla.RegPart.HIGH)
+```
+
+---
+
+## `tla.unpack`
+
+**Source:** [`catlass.core_api.unpack`](../../../../../catlass/core_api.py#L8154)
+
+Description:
+
+Extend integer elements from the selected source register half.
+Signed types sign-extend; unsigned types zero-extend. The
+destination element type is derived from the source: the result
+keeps the source signedness, with twice the source bit width.
+
+Prototype:
+
+```python
+tla.unpack(src: VectorSSA, *, part: RegPart) -> VectorSSA
+```
+
+Parameters:
+
+- `src` (`VectorSSA`): Narrow integer source register. Required.
+- `part` (`tla.RegPart`): Source half to read: `LOW` or `HIGH`. Required.
+
+Constraints:
+
+- Must be called inside a `@tla.kernel`-decorated kernel function and `tla.vec.func(mode="simd")`.
+- Pairs (destination <- source): `Int16 <- Int8`, `UInt16 <- UInt8`, `Int32 <- Int16`, `UInt32 <- UInt16`. 64-bit destinations (`Int64`/`UInt64`) are not supported.
+- Source and destination signedness must match. The result has half as many lanes.
+- Inputs must fill one 256Byte register (RegTraitNumOne). RegTraitNumTwo is not representable by `VectorSSA`; CANN permits only LOW for that trait.
+- Supports Ascend 950 (`--npu-arch 3510`) only. `LOW/HIGH` map to CANN `HighLowPart::LOWEST/HIGHEST`.
+
+Example:
+
+```python
+with tla.vec.func(mode="simd"):
+    wide = tla.unpack(src_reg, part=tla.RegPart.HIGH)
 ```
 
 ---
 
 ## `tla.interleave`
 
-**Source:** [`catlass.core_api.interleave`](../../../../../catlass/core_api.py#L8117)
+**Source:** [`catlass.core_api.interleave`](../../../../../catlass/core_api.py#L8217)
 
 Description:
 
@@ -85,7 +131,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.deinterleave`
 
-**Source:** [`catlass.core_api.deinterleave`](../../../../../catlass/core_api.py#L8195)
+**Source:** [`catlass.core_api.deinterleave`](../../../../../catlass/core_api.py#L8295)
 
 Description:
 

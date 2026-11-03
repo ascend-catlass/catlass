@@ -652,18 +652,71 @@ mlir::LogicalResult PackOp::verify()
     if (!hasEnclosingRegion<VecFuncOp>(getOperation()))
         return emitOpError("must be nested inside a tla.vec.func region");
 
-    auto srcMask = mlir::dyn_cast<MaskSSAType>(getSrc().getType());
-    auto resultMask = mlir::dyn_cast<MaskSSAType>(getResult().getType());
-    if (!srcMask || !resultMask)
-        return emitOpError("requires source and result to both be !tla.mask values");
+    if (auto src = mlir::dyn_cast<VectorSSAType>(getSrc().getType())) {
+        auto dst = mlir::dyn_cast<VectorSSAType>(getResult().getType());
+        if (!dst)
+            return emitOpError("requires source and result to both be VectorSSA or both be MaskSSA");
+        if (auto region = getOperation()->getParentOfType<VecFuncOp>())
+            if (auto mode = region->getAttrOfType<mlir::StringAttr>("mode"))
+                if (!mode.getValue().equals_insensitive("simd"))
+                    return emitOpError("is only supported in tla.vec.func(mode='simd')");
 
-    int64_t srcLanes = srcMask.getPhysicalLanes();
-    int64_t resultLanes = resultMask.getPhysicalLanes();
-    if (srcLanes != 64 && srcLanes != 128)
-        return emitOpError() << "unsupported mask source width " << srcLanes << "; expected 64 or 128 lanes";
-    if (resultLanes != 2 * srcLanes)
-        return emitOpError() << "mask result must have twice the source lane count, got source " << srcLanes
-                             << " and result " << resultLanes;
+        // 64-bit sources are not supported: Ascend 950 has no native
+        // vpack for that width.
+        auto srcInt = mlir::dyn_cast<mlir::IntegerType>(src.getElementType());
+        auto dstInt = mlir::dyn_cast<mlir::IntegerType>(dst.getElementType());
+        if (!srcInt || !dstInt || !dstInt.isUnsigned() || (dstInt.getWidth() != 8 && dstInt.getWidth() != 16) ||
+            srcInt.getWidth() != 2 * dstInt.getWidth())
+            return emitOpError() << "unsupported vector element type pair " << src.getElementType() << " -> "
+                                 << dst.getElementType()
+                                 << "; expected 16->8 or 32->16 integers with an unsigned result";
+
+        // VectorSSAType caps values at one 256-byte register (RegTraitNumOne).
+        // CANN RegTraitNumTwo supports LOW only, but is not represented here.
+        if (src.getValidLanes() != 2048 / srcInt.getWidth() || dst.getValidLanes() != 2048 / dstInt.getWidth())
+            return emitOpError("requires full 256-byte vector registers (RegTraitNumOne)");
+        return mlir::success();
+    }
+    if (auto src = mlir::dyn_cast<MaskSSAType>(getSrc().getType())) {
+        auto dst = mlir::dyn_cast<MaskSSAType>(getResult().getType());
+        if (!dst)
+            return emitOpError("requires source and result to both be VectorSSA or both be MaskSSA");
+        int64_t srcLanes = src.getPhysicalLanes();
+        int64_t resultLanes = dst.getPhysicalLanes();
+        if (srcLanes != 64 && srcLanes != 128)
+            return emitOpError() << "unsupported mask source width " << srcLanes << "; expected 64 or 128 lanes";
+        if (resultLanes != 2 * srcLanes)
+            return emitOpError() << "mask result must have twice the source lane count, got source " << srcLanes
+                                 << " and result " << resultLanes;
+        return mlir::success();
+    }
+    return emitOpError("expects VectorSSA or MaskSSA operands");
+}
+
+mlir::LogicalResult UnpackOp::verify()
+{
+    if (!hasEnclosingRegion<VecFuncOp>(getOperation()))
+        return emitOpError("must be nested inside a tla.vec.func region");
+    if (auto region = getOperation()->getParentOfType<VecFuncOp>())
+        if (auto mode = region->getAttrOfType<mlir::StringAttr>("mode"))
+            if (!mode.getValue().equals_insensitive("simd"))
+                return emitOpError("is only supported in tla.vec.func(mode='simd')");
+
+    auto src = mlir::cast<VectorSSAType>(getSrc().getType());
+    auto dst = mlir::cast<VectorSSAType>(getResult().getType());
+    // 64-bit destinations are not supported: Ascend 950 has no native
+    // vunpack for that width.
+    auto srcInt = mlir::dyn_cast<mlir::IntegerType>(src.getElementType());
+    auto dstInt = mlir::dyn_cast<mlir::IntegerType>(dst.getElementType());
+    if (!srcInt || !dstInt || srcInt.isUnsigned() != dstInt.isUnsigned() ||
+        (srcInt.getWidth() != 8 && srcInt.getWidth() != 16) || dstInt.getWidth() != 2 * srcInt.getWidth())
+        return emitOpError() << "unsupported vector element type pair " << src.getElementType() << " -> "
+                             << dst.getElementType() << "; expected 8->16 or 16->32 integers with matching signedness";
+
+    // VectorSSAType caps values at one 256-byte register (RegTraitNumOne).
+    // CANN RegTraitNumTwo supports LOW only, but is not represented here.
+    if (src.getValidLanes() != 2048 / srcInt.getWidth() || dst.getValidLanes() != 2048 / dstInt.getWidth())
+        return emitOpError("requires full 256-byte vector registers (RegTraitNumOne)");
     return mlir::success();
 }
 

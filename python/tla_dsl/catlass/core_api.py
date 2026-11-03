@@ -8054,35 +8054,51 @@ _INTERLEAVE_ELEMENT_TYPES = frozenset(
 )
 
 
+# 64-bit elements are deliberately unsupported: Ascend 950 has no native
+# vpack/vunpack for them, and the hardware-equivalent composition (deinterleave
+# the 32-bit halves against a zero/sign-filled register) is not implemented.
+# Pack produces unsigned elements with half the source bit width.
+# Signed and unsigned source types share the same destination type.
+_VECTOR_PACK_DST_FOR_SRC = {"i16": "u8", "u16": "u8", "i32": "u16", "u32": "u16"}
+_VECTOR_UNPACK_DST_FOR_SRC = {"i8": "i16", "u8": "u16", "i16": "i32", "u16": "u32"}
+
+
 @dsl_user_op
 def pack(
-    src: MaskSSA,
+    src: VectorSSA | MaskSSA,
     *,
     part: RegPart,
     loc: mlir_ir.Location | None = None,
-) -> MaskSSA:
+) -> VectorSSA | MaskSSA:
     """Directory: SIMD Vector Compute / Data Rearrange
 
     Description:
-        Pack a predicate value into the low or high half of its destination
-        predicate register.
+        Pack a predicate value, or truncate integer vector elements to their
+        low 8 or 16 bits and place them in the selected destination half.
+        The other destination half of a vector is unspecified. The
+        destination element type is derived from the source: the result is
+        always unsigned, with half the source bit width.
 
         Parameters:
-        - `src` (`MaskSSA`): Predicate register value to pack. Required.
+        - `src` (`VectorSSA | MaskSSA`): Source register value. Required.
         - `part` (`tla.RegPart`): Destination register half: `LOW` (low) or `HIGH` (high). Required.
 
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function.
         - Must be called inside `tla.vec.func(mode="simd")`.
         - Mask inputs support `mask<64> -> mask<128>` and `mask<128> -> mask<256>`.
+        - Vector pairs (destination <- source): `UInt8 <- Int16/UInt16`, `UInt16 <- Int32/UInt32`. 64-bit sources (`Int64`/`UInt64`) are not supported.
+        - Vector inputs must fill one 256Byte register (RegTraitNumOne); the result has twice as many lanes. RegTraitNumTwo is not representable by `VectorSSA`; CANN permits only LOW for that trait.
+        - Vector form supports Ascend 950 (`--npu-arch 3510`) only. `LOW/HIGH` map to CANN `HighLowPart::LOWEST/HIGHEST`.
 
         Example:
         ```python
         with tla.vec.func(mode="simd"):
             packed = tla.pack(src, part=tla.RegPart.LOW)
+            narrow = tla.pack(src_reg, part=tla.RegPart.HIGH)
         ```
     """
-    _require_categories("pack", "src", src, ("mask_ssa",), 0)
+    _require_categories("pack", "src", src, ("vector_ssa", "mask_ssa"), 0)
     if not isinstance(part, RegPart):
         _op_error(
             "pack",
@@ -8097,6 +8113,29 @@ def pack(
 
     src_value = _as_value(src)
     context = src_value.type.context
+    part_attr = mlir_ir.Attribute.parse(f"#tla.reg_part<{part.value}>", context=context)
+    if _category(src) == "vector_ssa":
+        src_desc = _vector_ssa_type_for_mlir_value(src_value)
+        dst_token = _VECTOR_PACK_DST_FOR_SRC.get(src_desc.element_type)
+        if dst_token is None:
+            _op_error(
+                "pack",
+                f"unsupported vector element type {src_desc.element_type}; "
+                "expected a 16/32-bit integer source",
+            )
+        if (
+            src_desc.valid_lanes
+            != _full_vector_ssa_descriptor(src_desc.element_type).valid_lanes
+        ):
+            _op_error(
+                "pack", "requires full 256-byte vector registers (RegTraitNumOne)"
+            )
+        result_desc = _full_vector_ssa_descriptor(dst_token)
+        result = _tla_ops_gen.pack(
+            result_desc.to_mlir_type(context), src_value, part_attr, loc=loc
+        )
+        return VectorSSA(result)
+
     src_desc = _mask_ssa_type_for_mlir_value(src_value)
     if src_desc.physical_lanes not in (64, 128):
         _op_error(
@@ -8105,12 +8144,73 @@ def pack(
             "supported source widths are 64 and 128",
         )
     result_desc = TlaMaskSSATypeDescriptor(src_desc.physical_lanes * 2)
-
-    part_attr = mlir_ir.Attribute.parse(f"#tla.reg_part<{part.value}>", context=context)
     result = _tla_ops_gen.pack(
         result_desc.to_mlir_type(context), src_value, part_attr, loc=loc
     )
     return MaskSSA(result)
+
+
+@dsl_user_op
+def unpack(
+    src: VectorSSA,
+    *,
+    part: RegPart,
+    loc: mlir_ir.Location | None = None,
+) -> VectorSSA:
+    """Directory: SIMD Vector Compute / Data Rearrange
+
+    Description:
+        Extend integer elements from the selected source register half.
+        Signed types sign-extend; unsigned types zero-extend. The
+        destination element type is derived from the source: the result
+        keeps the source signedness, with twice the source bit width.
+
+        Parameters:
+        - `src` (`VectorSSA`): Narrow integer source register. Required.
+        - `part` (`tla.RegPart`): Source half to read: `LOW` or `HIGH`. Required.
+
+        Constraints:
+        - Must be called inside a `@tla.kernel`-decorated kernel function and `tla.vec.func(mode="simd")`.
+        - Pairs (destination <- source): `Int16 <- Int8`, `UInt16 <- UInt8`, `Int32 <- Int16`, `UInt32 <- UInt16`. 64-bit destinations (`Int64`/`UInt64`) are not supported.
+        - Source and destination signedness must match. The result has half as many lanes.
+        - Inputs must fill one 256Byte register (RegTraitNumOne). RegTraitNumTwo is not representable by `VectorSSA`; CANN permits only LOW for that trait.
+        - Supports Ascend 950 (`--npu-arch 3510`) only. `LOW/HIGH` map to CANN `HighLowPart::LOWEST/HIGHEST`.
+
+        Example:
+        ```python
+        with tla.vec.func(mode="simd"):
+            wide = tla.unpack(src_reg, part=tla.RegPart.HIGH)
+        ```
+    """
+    _require_category("unpack", "src", src, "vector_ssa", 0)
+    if not isinstance(part, RegPart):
+        _op_error("unpack", "expected tla.RegPart.LOW or tla.RegPart.HIGH")
+    _require_frontend_state("unpack")
+    _runtime._require_enclosing_region("unpack", "vec.func")
+    if _runtime._in_simt_vec_func():
+        _op_error("unpack", "is only supported in tla.vec.func(mode='simd')")
+
+    src_value = _as_value(src)
+    src_desc = _vector_ssa_type_for_mlir_value(src_value)
+    dst_token = _VECTOR_UNPACK_DST_FOR_SRC.get(src_desc.element_type)
+    if dst_token is None:
+        _op_error(
+            "unpack",
+            f"unsupported vector element type {src_desc.element_type}; "
+            "expected an 8/16-bit integer source",
+        )
+    if (
+        src_desc.valid_lanes
+        != _full_vector_ssa_descriptor(src_desc.element_type).valid_lanes
+    ):
+        _op_error("unpack", "requires full 256-byte vector registers (RegTraitNumOne)")
+    result_desc = _full_vector_ssa_descriptor(dst_token)
+    context = src_value.type.context
+    part_attr = mlir_ir.Attribute.parse(f"#tla.reg_part<{part.value}>", context=context)
+    result = _tla_ops_gen.unpack(
+        result_desc.to_mlir_type(context), src_value, part_attr, loc=loc
+    )
+    return VectorSSA(result)
 
 
 @dsl_user_op
@@ -10128,6 +10228,7 @@ _require_generated("bitcast")
 _require_generated("interleave")
 _require_generated("deinterleave")
 _require_generated("pack")
+_require_generated("unpack")
 for _unary_op_name in ("exp", "log", "sqrt", "abs", "neg"):
     _require_generated(_unary_op_name)
 _require_generated("cmp")
@@ -10552,6 +10653,7 @@ __all__ = [
     "interleave",
     "deinterleave",
     "pack",
+    "unpack",
     "RegPart",
     "gather",
     "ReductionOp",

@@ -1,0 +1,143 @@
+// RUN: sed -n '/^\/\/ BEGIN_PACK_SIGN$/,/^\/\/ END_PACK_SIGN$/p' %s | sed '1d;$d;s|^// ||' > %t.PACK_SIGN.mlir && not %tla_compile %t.PACK_SIGN.mlir -o %t 2>&1 | %filecheck %s --check-prefix=PACK-SIGN
+// RUN: sed -n '/^\/\/ BEGIN_PACK_WIDTH$/,/^\/\/ END_PACK_WIDTH$/p' %s | sed '1d;$d;s|^// ||' > %t.PACK_WIDTH.mlir && not %tla_compile %t.PACK_WIDTH.mlir -o %t 2>&1 | %filecheck %s --check-prefix=PACK-WIDTH
+// RUN: sed -n '/^\/\/ BEGIN_UNPACK_SIGN$/,/^\/\/ END_UNPACK_SIGN$/p' %s | sed '1d;$d;s|^// ||' > %t.UNPACK_SIGN.mlir && not %tla_compile %t.UNPACK_SIGN.mlir -o %t 2>&1 | %filecheck %s --check-prefix=UNPACK-SIGN
+// RUN: sed -n '/^\/\/ BEGIN_UNPACK_WIDTH$/,/^\/\/ END_UNPACK_WIDTH$/p' %s | sed '1d;$d;s|^// ||' > %t.UNPACK_WIDTH.mlir && not %tla_compile %t.UNPACK_WIDTH.mlir -o %t 2>&1 | %filecheck %s --check-prefix=UNPACK-WIDTH
+// RUN: sed -n '/^\/\/ BEGIN_FLOAT$/,/^\/\/ END_FLOAT$/p' %s | sed '1d;$d;s|^// ||' > %t.FLOAT.mlir && not %tla_compile %t.FLOAT.mlir -o %t 2>&1 | %filecheck %s --check-prefix=FLOAT
+// RUN: sed -n '/^\/\/ BEGIN_SIMT$/,/^\/\/ END_SIMT$/p' %s | sed '1d;$d;s|^// ||' > %t.SIMT.mlir && not %tla_compile %t.SIMT.mlir -o %t 2>&1 | %filecheck %s --check-prefix=SIMT
+// RUN: sed -n '/^\/\/ BEGIN_FRAGMENT$/,/^\/\/ END_FRAGMENT$/p' %s | sed '1d;$d;s|^// ||' > %t.FRAGMENT.mlir && not %tla_compile %t.FRAGMENT.mlir -o %t 2>&1 | %filecheck %s --check-prefix=FRAGMENT
+// RUN: sed -n '/^\/\/ BEGIN_OUTSIDE$/,/^\/\/ END_OUTSIDE$/p' %s | sed '1d;$d;s|^// ||' > %t.outside.mlir && not %tla_compile %t.outside.mlir -o %t 2>&1 | %filecheck %s --check-prefix=OUTSIDE
+// RUN: sed -n '/^\/\/ BEGIN_NUM_TWO$/,/^\/\/ END_NUM_TWO$/p' %s | sed '1d;$d;s|^// ||' > %t.num-two.mlir && not %tla_compile %t.num-two.mlir -o %t 2>&1 | %filecheck %s --check-prefix=NUM-TWO
+// RUN: sed -n '/^\/\/ BEGIN_VECTOR_MASK$/,/^\/\/ END_VECTOR_MASK$/p' %s | sed '1d;$d;s|^// ||' > %t.vector-mask.mlir && not %tla_compile %t.vector-mask.mlir -o %t 2>&1 | %filecheck %s --check-prefix=VECTOR-MASK
+// RUN: sed -n '/^\/\/ BEGIN_MASK_VECTOR$/,/^\/\/ END_MASK_VECTOR$/p' %s | sed '1d;$d;s|^// ||' > %t.mask-vector.mlir && not %tla_compile %t.mask-vector.mlir -o %t 2>&1 | %filecheck %s --check-prefix=MASK-VECTOR
+
+// PACK-SIGN: 'tla.pack' op {{.*}}unsupported vector element type pair
+// BEGIN_PACK_SIGN
+// module {
+//   func.func @invalid(%src: !tla.vector<64xi32>) {
+//     "tla.vec.func"() ({
+//       %result = tla.pack %src, <low> : !tla.vector<64xi32> -> !tla.vector<128xi16>
+//     }) {mode = "simd"} : () -> ()
+//     return
+//   }
+// }
+// END_PACK_SIGN
+
+// PACK-WIDTH: 'tla.pack' op {{.*}}unsupported vector element type pair
+// BEGIN_PACK_WIDTH
+// module {
+//   func.func @invalid(%src: !tla.vector<64xi32>) {
+//     "tla.vec.func"() ({
+//       %result = tla.pack %src, <low> : !tla.vector<64xi32> -> !tla.vector<256xui8>
+//     }) {mode = "simd"} : () -> ()
+//     return
+//   }
+// }
+// END_PACK_WIDTH
+
+// UNPACK-SIGN: 'tla.unpack' op {{.*}}matching signedness
+// BEGIN_UNPACK_SIGN
+// module {
+//   func.func @invalid(%src: !tla.vector<256xui8>) {
+//     "tla.vec.func"() ({
+//       %result = tla.unpack %src, <low> : !tla.vector<256xui8> -> !tla.vector<128xi16>
+//     }) {mode = "simd"} : () -> ()
+//     return
+//   }
+// }
+// END_UNPACK_SIGN
+
+// UNPACK-WIDTH: 'tla.unpack' op {{.*}}unsupported vector element type pair
+// BEGIN_UNPACK_WIDTH
+// module {
+//   func.func @invalid(%src: !tla.vector<256xi8>) {
+//     "tla.vec.func"() ({
+//       %result = tla.unpack %src, <low> : !tla.vector<256xi8> -> !tla.vector<64xi32>
+//     }) {mode = "simd"} : () -> ()
+//     return
+//   }
+// }
+// END_UNPACK_WIDTH
+
+// FLOAT: 'tla.pack' op {{.*}}unsupported vector element type pair
+// BEGIN_FLOAT
+// module {
+//   func.func @invalid(%src: !tla.vector<64xf32>) {
+//     "tla.vec.func"() ({
+//       %result = tla.pack %src, <low> : !tla.vector<64xf32> -> !tla.vector<128xui16>
+//     }) {mode = "simd"} : () -> ()
+//     return
+//   }
+// }
+// END_FLOAT
+
+// SIMT: 'tla.pack' op {{.*}}only supported in tla.vec.func
+// BEGIN_SIMT
+// module {
+//   func.func @invalid(%src: !tla.vector<64xi32>) {
+//     "tla.vec.func"() ({
+//       %result = tla.pack %src, <low> : !tla.vector<64xi32> -> !tla.vector<128xui16>
+//     }) {mode = "simt", thread_block_dim = array<i64: 1, 1, 1>} : () -> ()
+//     return
+//   }
+// }
+// END_SIMT
+
+// FRAGMENT: 'tla.unpack' op {{.*}}requires full 256-byte vector registers
+// BEGIN_FRAGMENT
+// module {
+//   func.func @invalid(%src: !tla.vector<1xi8>) {
+//     "tla.vec.func"() ({
+//       %result = tla.unpack %src, <high> : !tla.vector<1xi8> -> !tla.vector<128xi16>
+//     }) {mode = "simd"} : () -> ()
+//     return
+//   }
+// }
+// END_FRAGMENT
+
+// OUTSIDE: 'tla.pack' op must be nested inside a tla.vec.func region
+// BEGIN_OUTSIDE
+// module {
+//   tla.func @invalid(%src: !tla.vector<64xi32>) {
+//     %result = tla.pack %src, <low> : !tla.vector<64xi32> -> !tla.vector<128xui16>
+//     tla.return
+//   }
+// }
+// END_OUTSIDE
+
+// VectorSSA represents RegTraitNumOne only. In particular, a RegTraitNumTwo
+// value must not be accepted with HIGH (CANN supports LOW only for that trait).
+// NUM-TWO: tla.vector valid lane count must be in [1, 32]
+// BEGIN_NUM_TWO
+// module {
+//   func.func @invalid(%src: !tla.vector<64xi64>) {
+//     "tla.vec.func"() ({
+//       %result = tla.pack %src, <high> : !tla.vector<64xi64> -> !tla.vector<64xui32>
+//     }) {mode = "simd"} : () -> ()
+//     return
+//   }
+// }
+// END_NUM_TWO
+
+// VECTOR-MASK: 'tla.pack' op requires source and result to both be VectorSSA or both be MaskSSA
+// BEGIN_VECTOR_MASK
+// module {
+//   func.func @invalid(%src: !tla.vector<64xi32>) {
+//     "tla.vec.func"() ({
+//       %result = tla.pack %src, <low> : !tla.vector<64xi32> -> !tla.mask<128>
+//     }) {mode = "simd"} : () -> ()
+//     return
+//   }
+// }
+// END_VECTOR_MASK
+
+// MASK-VECTOR: 'tla.pack' op requires source and result to both be VectorSSA or both be MaskSSA
+// BEGIN_MASK_VECTOR
+// module {
+//   func.func @invalid(%src: !tla.mask<64>) {
+//     "tla.vec.func"() ({
+//       %result = tla.pack %src, <low> : !tla.mask<64> -> !tla.vector<128xui16>
+//     }) {mode = "simd"} : () -> ()
+//     return
+//   }
+// }
+// END_MASK_VECTOR

@@ -16,7 +16,7 @@ Compress valid lanes under a mask.
 
 ## `tla.squeeze`
 
-**Source:** [`catlass.core_api.squeeze`](../../../../../catlass/core_api.py#L8847)
+**Source:** [`catlass.core_api.squeeze`](../../../../../catlass/core_api.py#L8947)
 
 Description:
 

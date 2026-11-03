@@ -623,16 +623,34 @@ def Tla_StoreOp : Tla_Op<"store", [AttrSizedOperandSegments]> {
 }
 
 def Tla_PackOp : Tla_Op<"pack", [Pure]> {
-  let summary = "Pack into one half of a predicate register";
+  let summary = "Pack vector elements or predicates into a destination half";
   let description = [{
-    Compacts a predicate source and places it in either the low or high half
-    of a wider predicate domain.
+    For vectors, truncates integer elements to their low half of bits and
+    places them in the selected destination half. For masks, compacts the
+    source into the selected half of a wider predicate domain.
+    The destination element type is determined by the result type.
   }];
   let arguments = (ins
-      Tla_MaskSSAType:$src,
+      AnyTypeOf<[Tla_VectorSSAType, Tla_MaskSSAType]>:$src,
       Tla_RegPartAttr:$part);
   let results = (outs
-      Tla_MaskSSAType:$result);
+      AnyTypeOf<[Tla_VectorSSAType, Tla_MaskSSAType]>:$result);
+  let assemblyFormat = [{
+    $src `,` $part attr-dict `:`
+    qualified(type($src)) `->` qualified(type($result))
+  }];
+  let hasVerifier = 1;
+}
+
+def Tla_UnpackOp : Tla_Op<"unpack", [Pure]> {
+  let summary = "Extend integer elements from the selected source half";
+  let description = [{
+    Reads the selected source half and widens integer elements. Signed
+    integers sign-extend; unsigned integers zero-extend. Source and result
+    must have matching signedness and the result element width is doubled.
+  }];
+  let arguments = (ins Tla_VectorSSAType:$src, Tla_RegPartAttr:$part);
+  let results = (outs Tla_VectorSSAType:$result);
   let assemblyFormat = [{
     $src `,` $part attr-dict `:`
     qualified(type($src)) `->` qualified(type($result))
