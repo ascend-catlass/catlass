@@ -277,7 +277,7 @@ std::vector<uint64_t> CompareData(
             ElementCompare expectValue = expect[currentIndex];
             ElementCompare diff = std::fabs(actualValue - expectValue);
             if (diff > rtol * std::max(1.0f, std::fabs(expectValue))) {
-                errorIndices.push_back(i);
+                errorIndices.push_back(currentIndex);
             }
             currentIndex++;
         }
