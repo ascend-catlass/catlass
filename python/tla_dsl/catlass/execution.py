@@ -2543,7 +2543,7 @@ def _build_hivmc_a5_command(
     if compile_option.cce_disable_asc_reserved_ubuf:
         reserve_flags.append("--cce-disable-asc-reserved-ubuf")
     if compile_option.cce_disable_vf_stack_reserved_ubuf:
-        reserve_flags.append("--cce-disable-vf-stack-reserved-ubuf")
+        reserve_flags.extend(["-mllvm", "-cce-vf-stack-size=0"])
     # VF auto-sync (whole-kernel; later ``-mllvm`` overrides HIVMC's injected
     # ``global``). Always force ``fused``; no developer override knob.
     reserve_flags.extend(["-mllvm", "--cce-vf-auto-sync=fused"])
