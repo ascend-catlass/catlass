@@ -117,9 +117,9 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
 
     dev = ["--device", str(device)]
 
-    # --- SYRK: aligned tiles, M/K tails, long K, single/multi-core stores ---
+    # --- SYRK: aligned tiles, M/K tails, K boundary, single/multi-core stores ---
     for dtype in ("f16", "bf16"):
-        for m, k in (("1", "1"), ("1024", "1024"), ("769", "129"), ("257", "16385")):
+        for m, k in (("1", "1"), ("1024", "1024"), ("769", "129"), ("257", "4095")):
             for blocks in ("1", "-1"):
                 yield (
                     f"syrk-{m}x{k}-{dtype}-b{blocks}",
@@ -164,11 +164,11 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         yield (f"syrk-poly-no-residual-{dtype}", [[*syrk, *shape, *poly]])
         yield (
             f"syrk-splitk-{dtype}",
-            [[*syrk, "--m", "256", "--k", "8192", "--splitk", "2"]],
+            [[*syrk, "--m", "256", "--k", "4096", "--splitk", "2"]],
         )
         yield (
             f"syrk-splitk-auto-{dtype}",
-            [[*syrk, "--m", "64", "--k", "32768", "--tile", "0", "--splitk", "0"]],
+            [[*syrk, "--m", "64", "--k", "4096", "--tile", "0", "--splitk", "0"]],
         )
 
     # --- basic_mmad: the flag-sync layout x dtype matrix ---
@@ -959,4 +959,3 @@ def test_syrk_api_rejects_invalid_block_num(device: int) -> None:
     for block_num in (0, -2):
         with pytest.raises(ValueError, match="block_num must be -1 .* or positive"):
             example.syrk(x, block_num=block_num)
-

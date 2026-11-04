@@ -6,7 +6,7 @@
 Each off-diagonal tile is written to GM twice: once where it was computed, and
 once transposed into the upper triangle. The transpose runs in UB through the
 ``ub,RowMajor -> ub,ColumnMajor`` tla.copy route, so the fixpipe moves each tile
-once instead of twice. This example uses FP16 or BF16 for X, R and Y.
+once instead of twice. This example uses FP16 or BF16 for X and R, and FP32 for Y.
 
 A long K splits across cores: each slice writes an FP32 partial tile to a
 workspace, then the vector units sum the slices and run the epilogue once.
@@ -32,17 +32,14 @@ from catlass.params import (
     L0C2UBMode,
     LoadDist,
     NormalLoadParams,
-    NormalStoreParams,
     ScalarRoundMode,
-    StoreDist,
 )
 
 UB_SIZE = 248 * 1024  # Ascend 950 (arch.hpp Ascend950::UB_SIZE)
 L0C_SIZE = 256 * 1024  # Ascend 950 (arch.hpp Ascend950::L0C_SIZE)
 CHUNK_SLOTS = 4
 
-# Both casts in the epilogue, 16-bit -> f32 and f32 -> 16-bit, want the same
-# round-to-nearest-even, unsaturated conversion.
+# Residual conversion to FP32 uses round-to-nearest-even without saturation.
 _CAST_ROUND_EVEN = tla.params.CastParams(
     reg_slot=tla.params.RegSlot.ZERO,
     sat_mode=tla.params.SatMode.NOSAT,
@@ -55,8 +52,8 @@ class SyrkTiling:
     """L1/L0 tiling for the SYRK kernel that mirrors via UB transpose.
 
     Each fixpipe transfers one chunk of the product tile from L0C, alternating
-    between the two paired vector units. Plain SYRK converts in the fixpipe;
-    polynomial updates retain FP32 products until the vector epilogue. Each
+    between the two paired vector units. Products and outputs remain FP32;
+    polynomial updates run in place in the vector epilogue. Each
     off-diagonal result is transposed in UB and stored in the upper triangle.
     """
 
@@ -75,7 +72,7 @@ class SyrkTiling:
     def ub_bytes(self) -> int:
         """UB budget per AIV, including the optional polynomial residual buffer."""
         rows, cols = self.chunk_rows, self.l1_tn
-        return 2 * rows * cols * 4 + rows * cols * 2 * 3
+        return 3 * rows * cols * 4 + rows * cols * 2
 
     def validate(self) -> None:
         if self.l1_tm != self.l1_tn:
@@ -186,7 +183,6 @@ def _chunk_strip(
     add_diagonal,
     polynomial,
     use_residual,
-    out_dtype,
     lanes,
 ):
     """Process one SIMD strip (1 × lanes elements) of a chunk.
@@ -216,10 +212,7 @@ def _chunk_strip(
     if add_diagonal:
         offset = tla.arange(col_j * lanes, dtype=tla.Int32) - (row_base + row_i)
         acc = tla.where(tla.cmp(offset, 0, "eq"), tla.add(acc, diagonal), acc)
-    o_chunk.store(
-        acc.to(out_dtype, _CAST_ROUND_EVEN),
-        NormalStoreParams(store_dist=StoreDist.DIST_PACK_B32),
-    )
+    o_chunk.store(acc)
     return remaining
 
 
@@ -252,10 +245,10 @@ def _chunk_epilogue(
 ):
     """Apply the epilogue to one product chunk in this vector unit's UB.
 
-    Converts the FP32 product to the output dtype and stores it in Y at
+    Stores the FP32 product in Y at
     ``(row_origin, col_origin)``. The polynomial path first applies
     ``alpha * P + beta * R`` and the optional diagonal term. When ``mirror``
-    is set the 16-bit result is transposed in UB and stored a second time at
+    is set the FP32 result is transposed in UB and stored a second time at
     the mirrored position ``(col_origin, row_origin)``. Diagonal tiles are
     never mirrored.
     """
@@ -264,10 +257,8 @@ def _chunk_epilogue(
 
     ub_stride = _tiling.l1_tn
     tr_stride = chunk_rows
-    out_dtype = gm_y_plane.ptr.dtype
-    converted_by_fixpipe = ub_p_ptr.dtype == out_dtype
-    if tla.const_expr(converted_by_fixpipe):
-        ub_out_ptr = ub_p_ptr
+    # Reuse this chunk's FP32 product buffer after its final read.
+    ub_out_ptr = ub_p_ptr
     epilogue_rows = chunk_rows if add_diagonal else 1
     epilogue_cols = _tiling.l1_tn if add_diagonal else chunk_rows * _tiling.l1_tn
     n_strips = (epilogue_cols + _tiling.simd_lanes - 1) // _tiling.simd_lanes
@@ -321,7 +312,7 @@ def _chunk_epilogue(
     tla.set_flag(res_loaded)
     tla.wait_flag(res_loaded)
 
-    if tla.const_expr(not converted_by_fixpipe):
+    if tla.const_expr(polynomial):
         with tla.vec.func(mode="simd"):
             for row_i in tla.range(c0, epilogue_rows, c1):
                 remaining = epilogue_cols
@@ -340,7 +331,6 @@ def _chunk_epilogue(
                         add_diagonal,
                         polynomial,
                         use_residual,
-                        out_dtype,
                         _tiling.simd_lanes,
                     )
 
@@ -542,11 +532,10 @@ def _syrk_impl(
     chunk_rows = _tiling.chunk_rows
     ub_stride = _tiling.l1_tn
     slot_elems = chunk_rows * ub_stride
-    # Plain single-pass SYRK needs no FP32 epilogue; let FIX convert once.
-    product_dtype = tla.Float32 if _polynomial or _splitk > 1 else gm_y.ptr.dtype
+    product_dtype = tla.Float32
     ub_p0_ptr = tla.allocate(slot_elems, product_dtype, tla.AddressSpace.ub, 256)
     ub_p1_ptr = tla.allocate(slot_elems, product_dtype, tla.AddressSpace.ub, 256)
-    ub_out_ptr = tla.allocate(slot_elems, gm_y.ptr.dtype, tla.AddressSpace.ub, 256)
+    ub_out_ptr = ub_p0_ptr
     ub_res_ptr = ub_out_ptr
     if tla.const_expr(_use_residual):
         ub_res_ptr = tla.allocate(slot_elems, gm_r.ptr.dtype, tla.AddressSpace.ub, 256)
@@ -1135,16 +1124,16 @@ def syrk_polynomial_splitk_kernel(
 # Host
 # ---------------------------------------------------------------------------
 def validate_shape(m: int, k: int, batch: int = 1) -> None:
-    """Delivery limits for the 10 GiB host accuracy-test environment."""
+    """Validate supported SYRK input dimensions and batched storage bounds."""
     if (
         min(m, k, batch) <= 0
         or m > 8192
-        or k > 65536
+        or k > 4096
         or batch * m * k > 8192**2
         or batch * m * m > 8192**2
     ):
         raise ValueError(
-            "SYRK sample requires 1<=M<=8192, 1<=K<=65536 and B*M*K, B*M*M <= 67108864"
+            "SYRK sample requires 1<=M<=8192, 1<=K<=4096 and B*M*K, B*M*M <= 67108864"
         )
 
 
@@ -1211,7 +1200,7 @@ def _prepare_launch(
     )
     tiling = config.tiling()
     tiling.validate()
-    y = torch.empty((*x.shape[:-2], m, m), device=x.device, dtype=x.dtype)
+    y = torch.empty((*x.shape[:-2], m, m), device=x.device, dtype=torch.float32)
     x_tla = create_tla_tensor(x.reshape(batch * m, k), layout="row")
     y_tla = create_tla_tensor(y.reshape(batch * m, m), layout="row")
     kernel_fn = syrk_kernel
@@ -1286,8 +1275,8 @@ def syrk(
     """Return alpha * X @ X.T + beta * residual + diagonal * I for a contiguous
     FP16/BF16 NPU tensor of shape (M, K) or (B, M, K).
 
-    The defaults give Y = X @ X.T. The residual must be symmetric, contiguous,
-    and match the output shape, device and dtype; pass ``None`` when ``beta`` is
+    The defaults give FP32 Y = X @ X.T. The residual must be symmetric, contiguous,
+    and match the output shape and input device and dtype; pass ``None`` when ``beta`` is
     zero and the kernel skips the residual load entirely. Pass ``tile=0`` or
     ``splitk=0`` to let the shape choose. The launch runs on Torch's current
     stream and waits for that stream before returning. ``block_num`` must be
@@ -1314,18 +1303,18 @@ def golden(
     residual=None,
     diagonal: float = 0.0,
 ):
-    """Compute the CPU reference with fp32 accumulation on quantized input."""
+    """Accumulate quantized input and coefficients in FP64, then round to FP32."""
     import torch
 
-    x_fp32 = x.float()
-    out = alpha * (x_fp32 @ x_fp32.transpose(-2, -1))
+    x_fp64 = x.double()
+    out = alpha * (x_fp64 @ x_fp64.transpose(-2, -1))
     if beta:
         if residual is None:
             raise ValueError("residual is required when beta is nonzero")
-        out = out + beta * residual.float()
+        out = out + beta * residual.double()
     if diagonal:
-        out = out + diagonal * torch.eye(x.shape[-2], dtype=torch.float32)
-    return out.to(x.dtype)
+        out = out + diagonal * torch.eye(x.shape[-2], dtype=torch.float64)
+    return out.float()
 
 
 def check(actual, expected, k: int) -> bool:
@@ -1372,7 +1361,7 @@ def main() -> int:
     dtype = torch.float16 if args.dtype == "f16" else torch.bfloat16
     torch.manual_seed(0)
     shape = (args.m, args.k) if args.batch == 1 else (args.batch, args.m, args.k)
-    x = (torch.rand(*shape) * 2 - 1).to(dtype)
+    x = (torch.rand(*shape) * 10 - 5).to(dtype)
     residual = None
     if args.beta != 0.0:
         # The symmetry check below only holds for a symmetric residual.

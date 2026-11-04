@@ -176,8 +176,9 @@ Run end-to-end validation for:
     fp16 x fp16 -> fp16 and i8 x i8 -> i32 routes)
   - basic_mmad_ptr (basic_mmad_ptr.py)
   - basic_mmad_l0c2l1 (basic_matmul_l0c2l1.py: cube-only E=(A@B)@D with L0C->L1 staging)
-  - basic_syrk (fp16/bf16, aligned/tail/long-K shapes, single/automatic core count; batched UB-transpose
-    mirror, polynomial epilogue with and without a residual, explicit and automatic split-K)
+  - basic_syrk (fp16/bf16 input, fp32 output, aligned/tail shapes, K<=4096,
+    single/automatic core count; batched UB-transpose mirror, polynomial epilogue
+    with and without a residual, explicit and automatic split-K)
   - mx_mmad_bias (mx_matmul_bias.py: microscaling matmul with a 1 x N fp32 bias carried
     GM -> L1 -> biasbuf and consumed by the first mmad_mx of each block; fp8 across all
     four operand/scale layouts and both fp4 encodings, regular and unaligned shapes)
