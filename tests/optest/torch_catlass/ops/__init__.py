@@ -136,7 +136,10 @@ from .ascend950_quant_matmul import (  # example 79, 81
     ascend950_fp4_mx_quant_matmul,
     ascend950_fp8_e4m3_quant_matmul,
 )
+from .ascend950_bmm_broadcast import ascend950_bmm_broadcast
+
 __all__ = [
+    "ascend950_bmm_broadcast",
     "basic_matmul",  # example 00
     "batched_matmul",  # example 01
     "grouped_matmul_slice_m",  # example 02

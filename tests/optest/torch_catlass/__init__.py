@@ -74,6 +74,7 @@ __all__ = [
     "ascend950_matmul_gather_scatter",
     "ascend950_matmul_permute",
     "ascend950_batched_matmul",
+    "ascend950_bmm_broadcast",
     "ascend950_batched_matmul_softmax",
     "ascend950_streamk_matmul",
     "flash_attention_infer",

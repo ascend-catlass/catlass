@@ -21,6 +21,7 @@
 #include "common/workspace.h"
 #include "template/basic_conv2d.h"
 #include "template/batched_matmul.h"
+#include "template/bmm_broadcast.h"
 #include "template/batched_matmul_softmax.h"
 #include "template/dual_matmul.h"
 #include "template/flash_attention.h"
@@ -236,6 +237,8 @@ REGISTER_TORCH_FUNC(ascend950_basic_matmul);
 using Ascend950BatchedMatmulOp = BatchedMatmulLike<CatlassKernel::Ascend950BatchedMatmul>;
 static auto& ascend950_batched_matmul = Ascend950BatchedMatmulOp::Run;
 REGISTER_TORCH_FUNC(ascend950_batched_matmul);
+static auto& ascend950_bmm_broadcast = BatchedMatmulBroadcast::Run;
+REGISTER_TORCH_FUNC(ascend950_bmm_broadcast);
 
 #if ENABLE_ASCEND950
 using Ascend950BatchedMatmulSoftmaxOp =

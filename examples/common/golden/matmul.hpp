@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2025 Huawei Technologies Co., Ltd.
+ * Copyright (c) 2025-2026 Huawei Technologies Co., Ltd.
  * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
  * CANN Open Software License Agreement Version 2.0 (the "License").
  * Please refer to the License for details. You may not use this file except in compliance with the License.
@@ -11,7 +11,9 @@
 #ifndef EXAMPLES_COMMON_GOLDEN_MATMUL_HPP
 #define EXAMPLES_COMMON_GOLDEN_MATMUL_HPP
 
+#include <cmath>
 #include <iostream>
+#include <type_traits>
 #include <vector>
 
 #include "catlass/layout/layout.hpp"
@@ -558,6 +560,79 @@ void QuantMatmulPergroupPerBlockDequant(
         }
     }
 }
+
+// Decode each output coordinate once. Broadcast matrices have a zero batch stride.
+template <class Element, class LayoutA, class LayoutB>
+void ComputeBatchedMatmulBroadcast(
+    const GemmCoord& problemShape, uint32_t batchA, uint32_t batchB, uint32_t biasMode,
+    const std::vector<Element>& hostA, const std::vector<Element>& hostB, const std::vector<Element>& hostBias,
+    std::vector<float>& hostGolden)
+{
+    size_t m = problemShape.m();
+    size_t n = problemShape.n();
+    size_t k = problemShape.k();
+    size_t batchStrideA = 0;
+    size_t batchStrideB = 0;
+    size_t batchStrideBias = 0;
+    if (batchA != 1) {
+        batchStrideA = m * k;
+    }
+    if (batchB != 1) {
+        batchStrideB = k * n;
+    }
+    if (biasMode == 2) {
+        batchStrideBias = n;
+    }
+    LayoutA layoutA(problemShape.m(), problemShape.k());
+    LayoutB layoutB(problemShape.k(), problemShape.n());
+    for (size_t outputOffset = 0; outputOffset < hostGolden.size(); ++outputOffset) {
+        size_t batchIndex = outputOffset / (m * n);
+        uint32_t row = (outputOffset / n) % m;
+        uint32_t column = outputOffset % n;
+        float accumulator = 0.0f;
+        if (biasMode != 0) {
+            accumulator = static_cast<float>(hostBias[batchIndex * batchStrideBias + column]);
+        }
+        for (uint32_t inner = 0; inner < k; ++inner) {
+            size_t offsetA = batchIndex * batchStrideA + layoutA.GetOffset(MakeCoord(row, inner));
+            size_t offsetB = batchIndex * batchStrideB + layoutB.GetOffset(MakeCoord(inner, column));
+            accumulator += static_cast<float>(hostA[offsetA]) * static_cast<float>(hostB[offsetB]);
+        }
+        hostGolden[outputOffset] = static_cast<float>(static_cast<Element>(accumulator));
+    }
+}
+
+// Preserve the example's dtype-specific tolerances and output guard checks.
+template <class Element, bool IsBfloat16, bool HF32>
+size_t CompareBatchedMatmulBroadcast(
+    const std::vector<Element>& hostC, const std::vector<float>& hostGolden, size_t guardElements, Element guardValue)
+{
+    double tolerance = 0.0001;
+    if constexpr (IsBfloat16) {
+        tolerance = 0.016;
+    } else if constexpr (HF32) {
+        tolerance = 0.005;
+    } else if constexpr (sizeof(Element) == 2) {
+        tolerance = 0.002;
+    }
+    size_t errors = 0;
+    for (size_t index = 0; index < hostGolden.size(); ++index) {
+        float actual = static_cast<float>(hostC[guardElements + index]);
+        float expected = hostGolden[index];
+        double difference = std::abs(static_cast<double>(actual) - expected);
+        if (!std::isfinite(actual) || difference > tolerance + tolerance * std::abs(expected)) {
+            ++errors;
+        }
+    }
+    for (size_t index = 0; index < guardElements; ++index) {
+        if (static_cast<float>(hostC[index]) != static_cast<float>(guardValue) ||
+            static_cast<float>(hostC[guardElements + hostGolden.size() + index]) != static_cast<float>(guardValue)) {
+            ++errors;
+        }
+    }
+    return errors;
+}
+
 } // namespace Catlass::golden
 
 #endif // EXAMPLES_COMMON_GOLDEN_MATMUL_HPP

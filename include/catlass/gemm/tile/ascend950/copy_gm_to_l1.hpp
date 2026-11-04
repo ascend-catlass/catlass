@@ -260,6 +260,29 @@ struct TileCopyTla<
 
         AscendC::DataCopy(dstTensor.data()[dstOffset], srcTensor.data()[srcOffset], intriParams);
     }
+
+    // Explicit opt-in for vectors without GM tail padding.
+    template <class TensorDst, class TensorSrc>
+    CATLASS_DEVICE void operator()(TensorDst const& dstTensor, TensorSrc const& srcTensor, ElementSrc padValue)
+    {
+        static_assert(
+            tla::detail::isVector<typename TensorSrc::Layout>::value &&
+                tla::detail::isVector<typename TensorDst::Layout>::value &&
+                TensorSrc::position == AscendC::TPosition::GM && TensorDst::position == AscendC::TPosition::A1,
+            "The input parameters do not match. TensorSrc must be GM and Vector, "
+            "while TensorDst must be L1 and Vector");
+        static_assert(
+            SizeOfBits<ElementSrc>::value == BytesToBits(sizeof(ElementSrc)),
+            "Padding copy requires byte-addressable elements");
+
+        auto dstOffset = dstTensor.layout()(dstTensor.coord());
+        auto srcOffset = srcTensor.layout()(srcTensor.coord());
+        AscendC::DataCopyExtParams intriParams{};
+        intriParams.blockCount = 1;
+        intriParams.blockLen = tla::get<0>(srcTensor.originShape()) * sizeof(ElementSrc);
+        AscendC::DataCopyPadExtParams<ElementSrc> padParams{true, 0, 0, padValue};
+        AscendC::DataCopyPad(dstTensor.data()[dstOffset], srcTensor.data()[srcOffset], intriParams, padParams);
+    }
 };
 
 /// Partial specialization for CopyGmToL1 TLA, Ascend950, MX fp8 e8m0, MxScaleA RowMajor in and zZ out.

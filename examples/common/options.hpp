@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 
 #include "catlass/gemm_coord.hpp"
@@ -253,6 +254,65 @@ struct SyrkOptions {
         }
         if (posArgs == 3 || posArgs == 6) {
             deviceId = std::atoi(argv[argc - 1]);
+        }
+        return 0;
+    }
+};
+
+/** Options for continuous batched matmul with batch broadcasting. */
+struct BatchedMatmulBroadcastTlaOptions {
+    const std::string HELPER = "batch batchA batchB m n k [deviceId]";
+    Catlass::GemmCoord problemShape{128, 128, 128};
+    uint32_t batchCount{1};
+    uint32_t batchA{1};
+    uint32_t batchB{1};
+    uint32_t deviceId{0};
+
+    static uint32_t ParseUnsigned(const char* argument)
+    {
+        std::string value(argument);
+        if (value.empty() || value.find_first_not_of("0123456789") != std::string::npos) {
+            throw std::invalid_argument("Expected unsigned integer");
+        }
+        auto number = std::stoull(value);
+        if (number > UINT32_MAX) {
+            throw std::invalid_argument("Integer exceeds UINT32_MAX");
+        }
+        return static_cast<uint32_t>(number);
+    }
+
+    int Parse(int argc, const char** argv)
+    {
+        enum class ArgsIndex : int
+        {
+            BATCH_INDEX = 1,
+            BATCH_A_INDEX,
+            BATCH_B_INDEX,
+            M_INDEX,
+            N_INDEX,
+            K_INDEX,
+            DEVICE_ID_INDEX,
+            ARGS_MAX
+        };
+        constexpr int minArgs = static_cast<int>(ArgsIndex::DEVICE_ID_INDEX);
+        constexpr int maxArgs = static_cast<int>(ArgsIndex::ARGS_MAX);
+        if (argc != minArgs && argc != maxArgs) {
+            std::cerr << TOSTRING(CATLASS_EXAMPLE_NAME) << " " << HELPER << std::endl;
+            return -1;
+        }
+        try {
+            batchCount = ParseUnsigned(argv[static_cast<int>(ArgsIndex::BATCH_INDEX)]);
+            batchA = ParseUnsigned(argv[static_cast<int>(ArgsIndex::BATCH_A_INDEX)]);
+            batchB = ParseUnsigned(argv[static_cast<int>(ArgsIndex::BATCH_B_INDEX)]);
+            problemShape.m() = ParseUnsigned(argv[static_cast<int>(ArgsIndex::M_INDEX)]);
+            problemShape.n() = ParseUnsigned(argv[static_cast<int>(ArgsIndex::N_INDEX)]);
+            problemShape.k() = ParseUnsigned(argv[static_cast<int>(ArgsIndex::K_INDEX)]);
+            if (argc == maxArgs) {
+                deviceId = ParseUnsigned(argv[static_cast<int>(ArgsIndex::DEVICE_ID_INDEX)]);
+            }
+        } catch (const std::exception& error) {
+            std::cerr << error.what() << std::endl;
+            return -1;
         }
         return 0;
     }

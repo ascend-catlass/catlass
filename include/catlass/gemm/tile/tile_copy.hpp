@@ -453,6 +453,25 @@ struct PaddingPackedTileCopyTla {
 };
 
 #if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+struct PaddedVectorCopy {
+    // Preserve the caller's destination tensor type, including compile-time layouts.
+    template <class TensorDst, class TensorSrc>
+    CATLASS_DEVICE void operator()(TensorDst const& dstTensor, TensorSrc const& srcTensor)
+    {
+        // Copy the logical vector length and zero-pad the L1 alignment tail.
+        TileCopyTla<Arch::Ascend950, TensorSrc, TensorDst> copy;
+        copy(dstTensor, srcTensor, typename TensorSrc::Element{0});
+    }
+};
+
+// Opt in to padded Bias copies while inheriting the other copy operations.
+template <class BaseTileCopy>
+struct PaddedTileCopy : public BaseTileCopy {
+    template <class TensorBias>
+    using CopyGmToL1Bias = std::conditional_t<
+        BaseTileCopy::HAS_BIAS, PaddedVectorCopy, typename BaseTileCopy::template CopyGmToL1Bias<TensorBias>>;
+};
+
 template <
     /// Tag indicating architecture
     class ArchTag, class ElementA_, class LayoutTagA, class ElementB_, class LayoutTagB, class ElementC_,

@@ -178,6 +178,7 @@ set(EXAMPLE_ASCEND950
     82_ascend950_basic_syrk
     83_ascend950_hstu_infer
     84_ascend950_syrk
+    88_ascend950_bmm_broadcast
 )
 
 if(CATLASS_ARCH STREQUAL "2201")

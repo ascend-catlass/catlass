@@ -77,8 +77,15 @@ struct MatmulParams {
 };
 
 /**
- * @brief Runtime parameters for experimental/matmul/ascend950_matmul_gather_scatter.
+ * @brief Runtime parameters for example 88_ascend950_bmm_broadcast.
  */
+struct BmmBroadcastParams : public MatmulParams {
+    uint32_t batchA = 1;
+    uint32_t batchB = 1;
+    uint32_t biasMode = 0; ///< 0=None, 1=SharedN, 2=PerBatchN. inputAddr[2] is optional Bias.
+};
+
+/** @brief Runtime parameters for experimental/matmul/ascend950_matmul_gather_scatter. */
 struct MatmulGatherScatterParams : public MatmulParams {
     uint32_t j = 1; ///< Number of selected rows and logical matmul M dimension.
 };
@@ -164,6 +171,10 @@ struct SvdQuantMatmulParams : public MatmulParams {
 // Architecture-specific entries may be absent from a single-architecture wheel.
 // RUN_NPU_FUNC checks unresolved weak entries before dispatch.
 extern "C" {
+
+/** @brief JIT interface for example 88_ascend950_bmm_broadcast. */
+__attribute__((weak)) void Ascend950BmmBroadcast(
+    uint32_t blockNum, aclrtStream stream, const TParams& tParams, const BmmBroadcastParams& params);
 
 /**
  * @brief JIT interface for example 00_basic_matmul.
