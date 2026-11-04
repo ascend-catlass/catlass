@@ -13,6 +13,10 @@
 
 The overall design of this test case is the same as that of [00_basic_matmul](../00_basic_matmul/README.md). The difference is that TLA-related abstractions are used. Therefore, related examples are provided.
 
+## Constraints
+
+Constraint: `m`, `n`, and `k` must all be greater than 0; otherwise the example exits during argument parsing.
+
 ## Example
 
 - After obtaining the code, compile the operator executable file. For details, see [Template Library Quick Start](../../docs/en/1_Practice/01_quick_start.md#build-and-execution).

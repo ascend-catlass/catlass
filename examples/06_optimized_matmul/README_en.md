@@ -13,6 +13,10 @@
 
 This example demonstrates optimized matrix multiplication. Compared to the `00_basic_matmul` example , this implementation replaces the dispatch policy with `MmadAtlasA2Preload` and introduces padding preprocessing for the input matrices to improve data transfer performance.
 
+## Constraints
+
+Constraint: `m`, `n`, and `k` must all be greater than 0; otherwise the example exits during argument parsing.
+
 ## Example
 
 - After obtaining the code, compile the operator executable file. For details, see [Template Library Quick Start](../../docs/en/1_Practice/01_quick_start.md#build-and-execution).

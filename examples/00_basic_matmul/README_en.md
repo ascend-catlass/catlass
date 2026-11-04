@@ -28,6 +28,8 @@
 
 This example does not include optimizations such as Padding, Preload, or split-K, and serves as the common baseline for the optimized examples.
 
+Constraint: `m`, `n`, and `k` must all be greater than 0; otherwise the example exits during argument parsing.
+
 Recommended range:
 
 - `m ≥ 256, n ≥ 256, 256 < k ≤ 3072`

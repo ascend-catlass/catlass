@@ -60,6 +60,10 @@ struct GemmOptions {
         problemShape.m() = std::atoi(argv[static_cast<uint32_t>(ArgsIndex::M_INDEX)]);
         problemShape.n() = std::atoi(argv[static_cast<uint32_t>(ArgsIndex::N_INDEX)]);
         problemShape.k() = std::atoi(argv[static_cast<uint32_t>(ArgsIndex::K_INDEX)]);
+        if (problemShape.m() == 0 || problemShape.n() == 0 || problemShape.k() == 0) {
+            std::cerr << TOSTRING(CATLASS_EXAMPLE_NAME) << ": m, n and k must be greater than 0" << std::endl;
+            return -1;
+        }
         if (argc == static_cast<uint32_t>(ArgsIndex::ARGS_MAX)) {
             deviceId = std::atoi(argv[static_cast<uint32_t>(ArgsIndex::DEVICE_ID_INDEX)]);
         }

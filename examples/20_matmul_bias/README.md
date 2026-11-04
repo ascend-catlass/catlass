@@ -27,6 +27,8 @@
 
 ## 使用范围说明
 
+约束：`m`、`n`、`k` 均须大于 0；否则样例在参数解析阶段直接退出。
+
 本样例在基础矩阵乘的基础上融合一维偏置，输入及偏置所支持的类型组合如下（Dtype_Acc 为 AIC 累加类型）：
 
 | Dtype_A | Dtype_B | Dtype_Acc | Dtype_D | Dtype_Bias |
