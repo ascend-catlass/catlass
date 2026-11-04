@@ -16,9 +16,12 @@ Do not regenerate this file from a glossary.
 
 核内 / 跨核 flag、pipe barrier、mutex 与本地内存屏障。
 
+> 何时需要同步、如何选择接口、常见卡死 / 结果错误如何排查，见
+> [同步使用指南](../../kernel_development/core_concepts/sync.md)。
+
 ## `tla.flag`
 
-**源码：** [`catlass.core_api.flag`](../../../../catlass/core_api.py#L5833)
+**源码：** [`catlass.core_api.flag`](../../../../catlass/core_api.py#L5913)
 
 功能说明：
 
@@ -59,7 +62,7 @@ with tla.vector():
 
 ## `tla.cross_flag`
 
-**源码：** [`catlass.core_api.cross_flag`](../../../../catlass/core_api.py#L5898)
+**源码：** [`catlass.core_api.cross_flag`](../../../../catlass/core_api.py#L5980)
 
 功能说明：
 
@@ -91,7 +94,7 @@ cf = tla.cross_flag("aic_aiv", mode=2)
 
 ## `tla.cross_core_set_flag`
 
-**源码：** [`catlass.core_api.cross_core_set_flag`](../../../../catlass/core_api.py#L5974)
+**源码：** [`catlass.core_api.cross_core_set_flag`](../../../../catlass/core_api.py#L6066)
 
 功能说明：
 
@@ -126,7 +129,7 @@ with tla.cube():
 
 ## `tla.cross_core_wait_flag`
 
-**源码：** [`catlass.core_api.cross_core_wait_flag`](../../../../catlass/core_api.py#L6018)
+**源码：** [`catlass.core_api.cross_core_wait_flag`](../../../../catlass/core_api.py#L6110)
 
 功能说明：
 
@@ -160,7 +163,7 @@ with tla.vector():
 
 ## `tla.set_flag`
 
-**源码：** [`catlass.core_api.set_flag`](../../../../catlass/core_api.py#L6061)
+**源码：** [`catlass.core_api.set_flag`](../../../../catlass/core_api.py#L6162)
 
 功能说明：
 
@@ -192,7 +195,7 @@ with tla.vector():
 
 ## `tla.wait_flag`
 
-**源码：** [`catlass.core_api.wait_flag`](../../../../catlass/core_api.py#L6087)
+**源码：** [`catlass.core_api.wait_flag`](../../../../catlass/core_api.py#L6188)
 
 功能说明：
 
@@ -224,7 +227,7 @@ with tla.vector():
 
 ## `tla.pipe_barrier`
 
-**源码：** [`catlass.core_api.pipe_barrier`](../../../../catlass/core_api.py#L6113)
+**源码：** [`catlass.core_api.pipe_barrier`](../../../../catlass/core_api.py#L6214)
 
 功能说明：
 
@@ -244,6 +247,9 @@ tla.pipe_barrier(pipe: PipeLike) -> None
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
 - 须在 `tla.cube()` 或 `tla.vector()` 内调用。
+- 允许的 pipe 随所在区域变化：`tla.cube()` 内为 `CUBE`、`MTE1`、`MTE2`、`FIX`、`ALL`；
+  `tla.vector()` 内为 `MTE2`、`MTE3`、`ALL`（3510 不支持 `pipe_barrier<PIPE_V>`）。
+- kernel 末尾需要排空所有流水时使用 `tla.pipes.ALL`。
 
 调用示例：
 
@@ -256,7 +262,7 @@ with tla.vector():
 
 ## `tla.mutex`
 
-**源码：** [`catlass.core_api.mutex`](../../../../catlass/core_api.py#L6156)
+**源码：** [`catlass.core_api.mutex`](../../../../catlass/core_api.py#L6261)
 
 功能说明：
 
@@ -271,12 +277,15 @@ tla.mutex(resource: str, id: int = -1) -> TlaMutex
 参数说明：
 
 - `resource`（`str`）：互斥资源名。必填。
-- `id`（`int`）：互斥实例编号；`-1` 表示默认。可选，默认 `-1`。
+- `id`（`int`）：互斥实例编号。可选，默认 `-1`，但当前 bitcode 调用 lowering 不支持自动分配，
+  请显式传入 `0..31`，该范围内没有任何 id 被保留。
 
 约束说明：
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
-- `resource` 非空；`id` 为 -1 或 0..31。
+- `resource` 非空；`id` 须在 `0..31`。`id=-1` 前端接受，但编译到 bitcode 调用时会报
+  `mutex id auto allocation is not implemented for bitcode call lowering`。
+- mutex 只在单个 AIC 或 AIV 内有效；跨核请使用 `tla.cross_flag`。
 
 调用示例：
 
@@ -288,7 +297,7 @@ mtx = tla.mutex("l1_buf", id=0)
 
 ## `tla.mutex_guard`
 
-**源码：** [`catlass.core_api.mutex_guard`](../../../../catlass/core_api.py#L6204)
+**源码：** [`catlass.core_api.mutex_guard`](../../../../catlass/core_api.py#L6314)
 
 功能说明：
 
@@ -320,7 +329,7 @@ with tla.mutex_guard(mtx):
 
 ## `tla.mutex_lock`
 
-**源码：** [`catlass.core_api.mutex_lock`](../../../../catlass/core_api.py#L6245)
+**源码：** [`catlass.core_api.mutex_lock`](../../../../catlass/core_api.py#L6355)
 
 功能说明：
 
@@ -356,7 +365,7 @@ mtx.lock(pipe=tla.arch.SCALAR)
 
 ## `tla.mutex_unlock`
 
-**源码：** [`catlass.core_api.mutex_unlock`](../../../../catlass/core_api.py#L6275)
+**源码：** [`catlass.core_api.mutex_unlock`](../../../../catlass/core_api.py#L6393)
 
 功能说明：
 
@@ -392,7 +401,7 @@ mtx.unlock(pipe=tla.arch.SCALAR)
 
 ## `tla.local_mem_bar`
 
-**源码：** [`catlass.core_api.local_mem_bar`](../../../../catlass/core_api.py#L6305)
+**源码：** [`catlass.core_api.local_mem_bar`](../../../../catlass/core_api.py#L6431)
 
 功能说明：
 

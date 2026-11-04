@@ -89,6 +89,9 @@ nav_order: 5
 
 ### 同步
 
+不确定什么时候需要同步、该选 flag 还是 mutex 时，先看
+[同步使用指南](../kernel_development/core_concepts/sync.md)。
+
 | API | 用途 | 上下文或关键约束 |
 | --- | --- | --- |
 | [`tla.flag`](language/sync.md#tlaflag)、[`tla.set_flag`](language/sync.md#tlaset_flag)、[`tla.wait_flag`](language/sync.md#tlawait_flag) | 在核内生产者与消费者流水间同步。 | Kernel / Cube 或 Vector；set 与 wait 须成对作用于同一 flag。 |

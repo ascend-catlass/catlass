@@ -132,6 +132,11 @@ python catlass_python_matmul.py
 Passed.
 ```
 
+The `tla.flag` / `set_flag` / `wait_flag` calls in the example are not optional decoration:
+`tla.copy` and `tla.mmad` run on different hardware pipes, and missing synchronization
+reads stale data or hangs. For why they are paired this way and when synchronization is
+required, see the [Synchronization Guide](kernel_development/core_concepts/sync.md).
+
 ## Running Repository Examples
 
 After installation, you can also directly run the end-to-end examples in the repository:

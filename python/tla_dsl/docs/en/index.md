@@ -21,6 +21,7 @@ nav_order: 0
 | [Structured Arguments Design](dsl_development/feature_development/structured_arguments.md) | Argument tree, leaf binding, device-side reconstruction, and host ABI. |
 | [Static and Dynamic Layout](kernel_development/core_concepts/layout.md) | Static / dynamic layout; marking dynamic on Host tensor; programming in the kernel. |
 | [Syntax Constraints](kernel_development/core_concepts/syntax_guide.md) | Python constructs allowed inside `@tla.kernel`. |
+| [Synchronization Guide](kernel_development/core_concepts/sync.md) | When synchronization is required, choosing between flag / cross_flag / mutex / barrier, and troubleshooting. |
 | [Environment Variables](kernel_development/core_concepts/env_vars.md) | `CATLASS_DSL_*` and related environment variables. |
 | [Building API Documentation](api/generate_api_docs.md) | How to regenerate the Language / Program Lifecycle reference from English docstrings. |
 

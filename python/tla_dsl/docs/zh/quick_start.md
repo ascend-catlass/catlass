@@ -132,6 +132,10 @@ python catlass_python_matmul.py
 Passed.
 ```
 
+示例中的 `tla.flag` / `set_flag` / `wait_flag` 不是可选装饰：`tla.copy` 与 `tla.mmad`
+落在不同硬件流水上，缺少同步会读到旧数据或卡死。为什么这样配、什么时候需要同步，
+见[同步使用指南](kernel_development/core_concepts/sync.md)。
+
 ## 运行仓库示例
 
 安装完成后，也可以直接运行仓库内的端到端示例：

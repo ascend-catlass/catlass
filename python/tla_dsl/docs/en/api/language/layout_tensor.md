@@ -425,7 +425,7 @@ dst = tla.make_tensor_like(ptr, like=src_tile, layoutTag=tla.arch.RowMajor)
 
 ## `tla.make_ptr`
 
-**Source:** [`catlass.core_api.make_ptr`](../../../../catlass/core_api.py#L10088)
+**Source:** [`catlass.core_api.make_ptr`](../../../../catlass/core_api.py#L10097)
 
 Description:
 
@@ -460,7 +460,7 @@ ptr = tla.make_ptr(tla.Float16, addr, mem_space=tla.AddressSpace.gm)
 
 ## `tla.recast_ptr`
 
-**Source:** [`catlass.core_api.recast_ptr`](../../../../catlass/core_api.py#L10142)
+**Source:** [`catlass.core_api.recast_ptr`](../../../../catlass/core_api.py#L10151)
 
 Description:
 

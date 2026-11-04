@@ -11,6 +11,7 @@ and Host-side compile and launch.
 |------|------|
 | [Syntax Constraints](syntax_guide.md) | Python constructs and restrictions allowed inside `@tla.kernel`. |
 | [Control Flow](control_flow.md) | The boundary between Python staging and runtime control flow. |
+| [Synchronization Guide](sync.md) | When synchronization is required, choosing between flag / cross_flag / mutex / barrier, and common errors. |
 | [Layout](layout.md) | The meaning of static / dynamic layout and kernel-side programming. |
 | [Python Tensor Integration](tensor_binding.md) | Host-side `from_dlpack` / `make_fake_tensor`. |
 | [Compile and Launch](compile_and_launch.md) | Compile samples, caching, repeated launch, and stream. |

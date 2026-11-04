@@ -83,6 +83,9 @@ Both modes run in `tla.vec.func` nested inside `tla.vector()`:
 
 ### Synchronization
 
+If you are unsure when synchronization is required, or whether to use a flag or a mutex,
+start from the [Synchronization Guide](../kernel_development/core_concepts/sync.md).
+
 | API | Purpose | Context or key constraint |
 | --- | --- | --- |
 | [`tla.flag`](language/sync.md#tlaflag), [`tla.set_flag`](language/sync.md#tlaset_flag), [`tla.wait_flag`](language/sync.md#tlawait_flag) | Synchronize producer and consumer pipes within a core. | Kernel / Cube or Vector; pair set and wait operations on the flag. |

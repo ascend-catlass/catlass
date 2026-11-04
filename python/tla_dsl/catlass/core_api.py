@@ -6241,6 +6241,10 @@ def pipe_barrier(pipe: PipeLike, *, loc: mlir_ir.Location | None = None) -> None
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function.
         - Must be called inside `tla.cube()` or `tla.vector()`.
+        - Allowed pipes depend on the region. In `tla.cube()`: `CUBE`, `MTE1`,
+          `MTE2`, `FIX`, `ALL`. In `tla.vector()`: `MTE2`, `MTE3`, `ALL`
+          (Ascend 950 does not support `pipe_barrier<PIPE_V>`).
+        - Use `tla.pipes.ALL` to drain every pipe at kernel end.
 
         Example:
         ```python
@@ -6285,11 +6289,16 @@ def mutex(
 
         Parameters:
         - `resource` (`str`): Mutex resource name. Required.
-        - `id` (`int`): Mutex instance id; `-1` means default. Optional, default `-1`.
+        - `id` (`int`): Mutex instance id. Optional, default `-1`, but the current
+          bitcode call lowering does not support auto allocation: always pass an
+          explicit id in `0..31`. No id in this range is reserved.
 
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function.
-        - `resource` must be non-empty; `id` must be -1 or 0..31.
+        - `resource` must be non-empty; `id` must be in `0..31`. `id=-1` is accepted
+          by the frontend but fails later with `mutex id auto allocation is not
+          implemented for bitcode call lowering`.
+        - A mutex works only within one AIC or AIV; use `tla.cross_flag` across cores.
 
         Example:
         ```python

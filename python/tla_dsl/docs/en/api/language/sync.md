@@ -253,6 +253,10 @@ Constraints:
 
 - Must be called inside a `@tla.kernel`-decorated kernel function.
 - Must be called inside `tla.cube()` or `tla.vector()`.
+- Allowed pipes depend on the region. In `tla.cube()`: `CUBE`, `MTE1`,
+  `MTE2`, `FIX`, `ALL`. In `tla.vector()`: `MTE2`, `MTE3`, `ALL`
+  (Ascend 950 does not support `pipe_barrier<PIPE_V>`).
+- Use `tla.pipes.ALL` to drain every pipe at kernel end.
 
 Example:
 
@@ -265,7 +269,7 @@ with tla.vector():
 
 ## `tla.mutex`
 
-**Source:** [`catlass.core_api.mutex`](../../../../catlass/core_api.py#L6275)
+**Source:** [`catlass.core_api.mutex`](../../../../catlass/core_api.py#L6279)
 
 Description:
 
@@ -280,12 +284,17 @@ tla.mutex(resource: str, id: int = -1) -> TlaMutex
 Parameters:
 
 - `resource` (`str`): Mutex resource name. Required.
-- `id` (`int`): Mutex instance id; `-1` means default. Optional, default `-1`.
+- `id` (`int`): Mutex instance id. Optional, default `-1`, but the current
+  bitcode call lowering does not support auto allocation: always pass an
+  explicit id in `0..31`. No id in this range is reserved.
 
 Constraints:
 
 - Must be called inside a `@tla.kernel`-decorated kernel function.
-- `resource` must be non-empty; `id` must be -1 or 0..31.
+- `resource` must be non-empty; `id` must be in `0..31`. `id=-1` is accepted
+  by the frontend but fails later with `mutex id auto allocation is not
+  implemented for bitcode call lowering`.
+- A mutex works only within one AIC or AIV; use `tla.cross_flag` across cores.
 
 Example:
 
@@ -297,7 +306,7 @@ mtx = tla.mutex("l1_buf", id=0)
 
 ## `tla.mutex_guard`
 
-**Source:** [`catlass.core_api.mutex_guard`](../../../../catlass/core_api.py#L6323)
+**Source:** [`catlass.core_api.mutex_guard`](../../../../catlass/core_api.py#L6332)
 
 Description:
 
@@ -329,7 +338,7 @@ with tla.mutex_guard(mtx):
 
 ## `tla.mutex_lock`
 
-**Source:** [`catlass.core_api.mutex_lock`](../../../../catlass/core_api.py#L6364)
+**Source:** [`catlass.core_api.mutex_lock`](../../../../catlass/core_api.py#L6373)
 
 Description:
 
@@ -369,7 +378,7 @@ mtx.lock(pipe=tla.arch.SCALAR)
 
 ## `tla.mutex_unlock`
 
-**Source:** [`catlass.core_api.mutex_unlock`](../../../../catlass/core_api.py#L6402)
+**Source:** [`catlass.core_api.mutex_unlock`](../../../../catlass/core_api.py#L6411)
 
 Description:
 
@@ -409,7 +418,7 @@ mtx.unlock(pipe=tla.arch.SCALAR)
 
 ## `tla.local_mem_bar`
 
-**Source:** [`catlass.core_api.local_mem_bar`](../../../../catlass/core_api.py#L6440)
+**Source:** [`catlass.core_api.local_mem_bar`](../../../../catlass/core_api.py#L6449)
 
 Description:
 
