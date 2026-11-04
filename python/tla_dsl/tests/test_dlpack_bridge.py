@@ -279,3 +279,101 @@ def test_from_dlpack_still_rejects_a_foreign_device() -> None:
 
     gc.collect()
     assert exporter.deleter_calls == 1
+
+
+def test_from_dlpack_rejects_a_strided_vector_layout_buffer() -> None:
+    """A flat 1-D layout is unit-stride; a strided view must not be bound.
+
+    ``torch.arange(64)[::2]`` exports shape=(32,), strides=(2,). VectorLayout
+    (like RowMajor) is built as ``(N):(1)`` downstream, so accepting this buffer
+    would make the kernel read every other element while claiming a dense tile --
+    silently the wrong data.
+    """
+    exporter = _ManagedExport(shape=(32,), strides=(2,))
+
+    with pytest.raises(RuntimeTensorError, match="contiguous run"):
+        from_dlpack(exporter, layout_tag=tla.arch.VectorLayout)
+
+    # The rejected capsule was never consumed, so the producer still owns it and
+    # its destructor releases the buffer exactly once.
+    gc.collect()
+    assert exporter.deleter_calls == 1
+
+
+def test_from_dlpack_rejects_a_strided_row_major_buffer() -> None:
+    exporter = _ManagedExport(shape=(32,), strides=(2,))
+
+    with pytest.raises(RuntimeTensorError, match="contiguous run"):
+        from_dlpack(exporter, layout_tag=tla.arch.RowMajor)
+
+    gc.collect()
+    assert exporter.deleter_calls == 1
+
+
+def test_from_dlpack_rejects_a_strided_slice_behind_a_rank_one_origin() -> None:
+    """The guard follows the projected rank, not the physical DLPack rank.
+
+    ``arange(64).reshape(1, 64)[:, ::2]`` exports shape=(1, 32), strides=(64, 2)
+    -- a rank-2 buffer, but the rank-1 ``origin_shape`` flattens it to
+    ``(32):(1)`` exactly like the 1-D case, so judging by the physical rank would
+    let the same silent stride loss through.
+    """
+    exporter = _ManagedExport(shape=(1, 32), strides=(64, 2))
+
+    with pytest.raises(RuntimeTensorError, match="contiguous run"):
+        from_dlpack(exporter, layout_tag=tla.arch.RowMajor, origin_shape=(32,))
+
+    gc.collect()
+    assert exporter.deleter_calls == 1
+
+
+def test_from_dlpack_accepts_a_dense_single_row_behind_a_rank_one_origin() -> None:
+    """A ``(1, N)`` buffer that is one contiguous row is a legitimate flat tile."""
+    tensor = from_dlpack(
+        _ManagedExport(shape=(1, 32), strides=(32, 1)),
+        layout_tag=tla.arch.RowMajor,
+        origin_shape=(32,),
+    )
+
+    assert (tensor.shape, tensor.stride, tensor.origin_shape) == (
+        (32,),
+        (1,),
+        (32,),
+    )
+
+
+def test_from_dlpack_accepts_a_contiguous_one_dimensional_buffer() -> None:
+    tensor = from_dlpack(
+        _ManagedExport(shape=(32,), strides=(1,)),
+        layout_tag=tla.arch.VectorLayout,
+    )
+
+    assert (tensor.shape, tensor.stride, tensor.origin_shape) == (
+        (32,),
+        (1,),
+        (32,),
+    )
+
+
+def test_from_dlpack_accepts_a_size_one_view_with_any_stride() -> None:
+    """A size-1 extent's stride is unobservable, so it must not be rejected.
+
+    torch keeps the parent's stride on a one-element slice; the extent addresses
+    nothing extra, so the flat projection is still exact.
+    """
+    tensor = from_dlpack(
+        _ManagedExport(shape=(1,), strides=(7,)),
+        layout_tag=tla.arch.VectorLayout,
+    )
+
+    assert (tensor.shape, tensor.stride) == ((1,), (1,))
+
+
+def test_from_dlpack_accepts_an_empty_view_with_any_stride() -> None:
+    """A zero-element view addresses nothing, so its stride cannot mislead."""
+    tensor = from_dlpack(
+        _ManagedExport(shape=(0,), strides=(2,)),
+        layout_tag=tla.arch.VectorLayout,
+    )
+
+    assert (tensor.shape, tensor.stride) == ((0,), (1,))

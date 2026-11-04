@@ -23,7 +23,7 @@ Bind a real NPU buffer with `from_dlpack`, or a metadata-only sample with `make_
 
 ### `tla.from_dlpack`
 
-**Source:** [`catlass.tla.runtime.from_dlpack`](../../../../catlass/tla/runtime.py#L653)
+**Source:** [`catlass.tla.runtime.from_dlpack`](../../../../catlass/tla/runtime.py#L709)
 
 Description:
 
@@ -70,6 +70,10 @@ Constraints:
 - 2-D `RowMajor` requires `tensor.contiguous()`. 2-D `ColumnMajor`
   requires `tensor.permute(1, 0).contiguous()`. A mismatch raises
   `RuntimeTensorError`. Providing `origin_shape` skips that check.
+- A rank-1 `origin_shape` under `RowMajor`/`VectorLayout` is bound as a
+  flat, unit-stride run. The buffer must then read consecutive elements
+  (`torch.arange(64)[::2]` is refused); this holds whatever rank the
+  physical slice is spelled in, and `origin_shape` does not skip it.
 - Default layout is static. Call `mark_layout_dynamic` /
   `mark_compact_shape_dynamic` for dynamic extents.
 - When `element_type` is set, its per-element bit width must match the
@@ -89,7 +93,7 @@ ty = from_dlpack(
 
 ### `tla.make_fake_tensor`
 
-**Source:** [`catlass.tla.runtime.make_fake_tensor`](../../../../catlass/tla/runtime.py#L928)
+**Source:** [`catlass.tla.runtime.make_fake_tensor`](../../../../catlass/tla/runtime.py#L1005)
 
 Description:
 
@@ -146,7 +150,7 @@ Mark static layout extents dynamic. See also [Static and Dynamic Layout](../../k
 
 ### `tla.Tensor.mark_layout_dynamic`
 
-**Source:** [`catlass.tla.runtime._Tensor.mark_layout_dynamic`](../../../../catlass/tla/runtime.py#L296)
+**Source:** [`catlass.tla.runtime._Tensor.mark_layout_dynamic`](../../../../catlass/tla/runtime.py#L352)
 
 Description:
 
@@ -188,7 +192,7 @@ artifact = tla.compile(my_kernel, ta, options="--npu-arch 3510")
 
 ### `tla.Tensor.mark_compact_shape_dynamic`
 
-**Source:** [`catlass.tla.runtime._Tensor.mark_compact_shape_dynamic`](../../../../catlass/tla/runtime.py#L394)
+**Source:** [`catlass.tla.runtime._Tensor.mark_compact_shape_dynamic`](../../../../catlass/tla/runtime.py#L450)
 
 Description:
 

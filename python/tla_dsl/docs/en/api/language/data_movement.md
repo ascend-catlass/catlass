@@ -16,7 +16,7 @@ Tensor copies between on-chip and global memory, and UB register load/store.
 
 ## `tla.copy`
 
-**Source:** [`catlass.core_api.copy`](../../../../catlass/core_api.py#L5592)
+**Source:** [`catlass.core_api.copy`](../../../../catlass/core_api.py#L5599)
 
 Description:
 

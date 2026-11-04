@@ -16,7 +16,7 @@ Cube-side matrix multiply-accumulate (`tla.mmad`).
 
 ## `tla.mmad`
 
-**Source:** [`catlass.core_api.mmad`](../../../../catlass/core_api.py#L6905)
+**Source:** [`catlass.core_api.mmad`](../../../../catlass/core_api.py#L6912)
 
 Description:
 
@@ -91,7 +91,7 @@ with tla.cube():
 
 ## `tla.mmad_mx`
 
-**Source:** [`catlass.core_api.mmad_mx`](../../../../catlass/core_api.py#L7040)
+**Source:** [`catlass.core_api.mmad_mx`](../../../../catlass/core_api.py#L7047)
 
 Description:
 

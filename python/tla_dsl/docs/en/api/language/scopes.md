@@ -16,7 +16,7 @@ Cube / Vector / `vec.func` regions and kernel-side loop ranges.
 
 ## `tla.range`
 
-**Source:** [`catlass.core_api.range`](../../../../catlass/core_api.py#L6485)
+**Source:** [`catlass.core_api.range`](../../../../catlass/core_api.py#L6492)
 
 Description:
 
@@ -50,7 +50,7 @@ for i in tla.range(0, n, 1):
 
 ## `tla.range_constexpr`
 
-**Source:** [`catlass.core_api.range_constexpr`](../../../../catlass/core_api.py#L6535)
+**Source:** [`catlass.core_api.range_constexpr`](../../../../catlass/core_api.py#L6542)
 
 Description:
 
@@ -89,7 +89,7 @@ for k in tla.range_constexpr(0, 4):
 
 ## `tla.cube`
 
-**Source:** [`catlass.core_api.cube`](../../../../catlass/core_api.py#L6586)
+**Source:** [`catlass.core_api.cube`](../../../../catlass/core_api.py#L6593)
 
 Description:
 
@@ -121,7 +121,7 @@ with tla.cube():
 
 ## `tla.vector`
 
-**Source:** [`catlass.core_api.vector`](../../../../catlass/core_api.py#L6608)
+**Source:** [`catlass.core_api.vector`](../../../../catlass/core_api.py#L6615)
 
 Description:
 
@@ -153,7 +153,7 @@ with tla.vector():
 
 ## `tla.vec.func`
 
-**Source:** [`catlass.core_api._vec_func`](../../../../catlass/core_api.py#L6642)
+**Source:** [`catlass.core_api._vec_func`](../../../../catlass/core_api.py#L6649)
 
 Description:
 

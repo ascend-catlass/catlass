@@ -43,6 +43,62 @@ def _as_host_index_tree(value: Any, *, what: str) -> Any:
     )
 
 
+def _is_contiguous_run(shape: tuple[int, ...], strides: tuple[int, ...]) -> bool:
+    """True when a view reads consecutive elements, ignoring size-1 extents.
+
+    A size-1 extent addresses nothing extra, so torch is free to leave its stride
+    at whatever the parent had; only extents above 1 constrain the layout. This is
+    torch's ``is_contiguous()`` test, spelled out so the reason is visible.
+    """
+    expected = 1
+    for extent, stride in zip(reversed(shape), reversed(strides)):
+        if extent <= 1:
+            continue
+        if stride != expected:
+            return False
+        expected *= extent
+    return True
+
+
+def _require_flat_1d_binding(
+    layout_token: str,
+    shape: tuple[int, ...],
+    strides: tuple[int, ...],
+    *,
+    projects_to_rank_one: bool,
+) -> None:
+    """Reject a buffer that a flat one-dimensional layout cannot describe.
+
+    ``RowMajor`` and ``VectorLayout`` flatten a rank-1 tile to ``(N):(1)`` -- the
+    bc layer builds exactly that, with a literal unit stride -- so the kernel
+    reads ``base + k`` for ``k`` in ``[0, N)``. A strided view
+    (``arange(64)[::2]``, strides ``(2,)``) would therefore be addressed dense and
+    silently read the wrong elements.
+
+    Whether the tile is flattened depends on the *projected* rank, i.e. on
+    ``origin_shape``, not on the physical DLPack rank: a ``(1, 32)`` slice of a
+    ``(1, 64)`` buffer with a rank-1 ``origin_shape`` lands in the same flat form
+    while its real stride is still 2. So this asks whether the buffer is one
+    contiguous run, whatever rank it is spelled in.
+
+    ``tla.make_tensor`` checks the tile metadata the kernel builds, but a DLPack
+    buffer's real strides never reach it -- this is the binding's own guard.
+    """
+    from ..core_api import _FLAT_1D_LAYOUT_TOKENS
+
+    if layout_token not in _FLAT_1D_LAYOUT_TOKENS or not projects_to_rank_one:
+        return
+    if _is_contiguous_run(shape, strides):
+        return
+    raise RuntimeTensorError(
+        f"from_dlpack layout_tag={layout_token!r} flattens its tile to a "
+        f"contiguous run, but got shape={shape} strides={strides}: this view "
+        f"does not read consecutive elements, so the kernel would address it "
+        f"dense and read the wrong data. Take a contiguous copy first (e.g. "
+        f"tensor.contiguous())."
+    )
+
+
 class DlpackBridgeError(RuntimeError):
     """Raised when DLPack export or parsing fails."""
 
@@ -696,6 +752,10 @@ def from_dlpack(
         - 2-D `RowMajor` requires `tensor.contiguous()`. 2-D `ColumnMajor`
           requires `tensor.permute(1, 0).contiguous()`. A mismatch raises
           `RuntimeTensorError`. Providing `origin_shape` skips that check.
+        - A rank-1 `origin_shape` under `RowMajor`/`VectorLayout` is bound as a
+          flat, unit-stride run. The buffer must then read consecutive elements
+          (`torch.arange(64)[::2]` is refused); this holds whatever rank the
+          physical slice is spelled in, and `origin_shape` does not skip it.
         - Default layout is static. Call `mark_layout_dynamic` /
           `mark_compact_shape_dynamic` for dynamic extents.
         - When `element_type` is set, its per-element bit width must match the
@@ -836,6 +896,12 @@ def from_dlpack(
             f"from_dlpack layout_tag={layout_token!r} requires element_type "
             f"tla.Float8E8M0, got {dtype_token!r}"
         )
+    # A flat one-dimensional layout is unit-stride by definition, but the DLPack
+    # strides are the only place a strided view shows up: ``make_tensor`` never
+    # sees them, and the remap below would otherwise replace the real stride
+    # with 1. Reject before any metadata is derived, and judge by the rank the
+    # tile is projected to -- a (1, N) physical slice with a rank-1 origin is
+    # flattened just the same.
     if origin_shape is None:
         # A physically contiguous buffer is passed here (stride = (shape[1], 1)).
         # A size-1 extent is exempt: torch is free to leave its stride at 1,
@@ -875,6 +941,17 @@ def from_dlpack(
                 "from_dlpack origin_shape=... must be an int tree / tuple "
                 "(Kernel tla.make_shape is not a Host API)"
             )
+    # Now that the logical origin fixes the projected rank, check the buffer.
+    _require_flat_1d_binding(
+        layout_token,
+        phys_shape,
+        phys_strides,
+        projects_to_rank_one=(
+            isinstance(logical_origin, tuple)
+            and len(logical_origin) == 1
+            and not isinstance(logical_origin[0], (tuple, list))
+        ),
+    )
     # A stride counts elements between physically adjacent rows, and rows sit
     # at byte addresses: for a sub-byte element the leading linear stride must
     # land on a whole byte, i.e. round up to whole element slots. A packed fp4

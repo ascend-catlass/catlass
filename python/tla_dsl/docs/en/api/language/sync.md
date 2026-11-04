@@ -16,7 +16,7 @@ In-core / cross-core flags, pipe barriers, mutexes, and local-memory barriers.
 
 ## `tla.flag`
 
-**Source:** [`catlass.core_api.flag`](../../../../catlass/core_api.py#L5924)
+**Source:** [`catlass.core_api.flag`](../../../../catlass/core_api.py#L5931)
 
 Description:
 
@@ -59,7 +59,7 @@ with tla.vector():
 
 ## `tla.cross_flag`
 
-**Source:** [`catlass.core_api.cross_flag`](../../../../catlass/core_api.py#L5991)
+**Source:** [`catlass.core_api.cross_flag`](../../../../catlass/core_api.py#L5998)
 
 Description:
 
@@ -91,7 +91,7 @@ cf = tla.cross_flag("aic_aiv", mode=2)
 
 ## `tla.cross_core_set_flag`
 
-**Source:** [`catlass.core_api.cross_core_set_flag`](../../../../catlass/core_api.py#L6077)
+**Source:** [`catlass.core_api.cross_core_set_flag`](../../../../catlass/core_api.py#L6084)
 
 Description:
 
@@ -126,7 +126,7 @@ with tla.cube():
 
 ## `tla.cross_core_wait_flag`
 
-**Source:** [`catlass.core_api.cross_core_wait_flag`](../../../../catlass/core_api.py#L6121)
+**Source:** [`catlass.core_api.cross_core_wait_flag`](../../../../catlass/core_api.py#L6128)
 
 Description:
 
@@ -169,7 +169,7 @@ with tla.vector():
 
 ## `tla.set_flag`
 
-**Source:** [`catlass.core_api.set_flag`](../../../../catlass/core_api.py#L6173)
+**Source:** [`catlass.core_api.set_flag`](../../../../catlass/core_api.py#L6180)
 
 Description:
 
@@ -201,7 +201,7 @@ with tla.vector():
 
 ## `tla.wait_flag`
 
-**Source:** [`catlass.core_api.wait_flag`](../../../../catlass/core_api.py#L6199)
+**Source:** [`catlass.core_api.wait_flag`](../../../../catlass/core_api.py#L6206)
 
 Description:
 
@@ -233,7 +233,7 @@ with tla.vector():
 
 ## `tla.pipe_barrier`
 
-**Source:** [`catlass.core_api.pipe_barrier`](../../../../catlass/core_api.py#L6225)
+**Source:** [`catlass.core_api.pipe_barrier`](../../../../catlass/core_api.py#L6232)
 
 Description:
 
@@ -265,7 +265,7 @@ with tla.vector():
 
 ## `tla.mutex`
 
-**Source:** [`catlass.core_api.mutex`](../../../../catlass/core_api.py#L6268)
+**Source:** [`catlass.core_api.mutex`](../../../../catlass/core_api.py#L6275)
 
 Description:
 
@@ -297,7 +297,7 @@ mtx = tla.mutex("l1_buf", id=0)
 
 ## `tla.mutex_guard`
 
-**Source:** [`catlass.core_api.mutex_guard`](../../../../catlass/core_api.py#L6316)
+**Source:** [`catlass.core_api.mutex_guard`](../../../../catlass/core_api.py#L6323)
 
 Description:
 
@@ -329,7 +329,7 @@ with tla.mutex_guard(mtx):
 
 ## `tla.mutex_lock`
 
-**Source:** [`catlass.core_api.mutex_lock`](../../../../catlass/core_api.py#L6357)
+**Source:** [`catlass.core_api.mutex_lock`](../../../../catlass/core_api.py#L6364)
 
 Description:
 
@@ -369,7 +369,7 @@ mtx.lock(pipe=tla.arch.SCALAR)
 
 ## `tla.mutex_unlock`
 
-**Source:** [`catlass.core_api.mutex_unlock`](../../../../catlass/core_api.py#L6395)
+**Source:** [`catlass.core_api.mutex_unlock`](../../../../catlass/core_api.py#L6402)
 
 Description:
 
@@ -409,7 +409,7 @@ mtx.unlock(pipe=tla.arch.SCALAR)
 
 ## `tla.local_mem_bar`
 
-**Source:** [`catlass.core_api.local_mem_bar`](../../../../catlass/core_api.py#L6433)
+**Source:** [`catlass.core_api.local_mem_bar`](../../../../catlass/core_api.py#L6440)
 
 Description:
 

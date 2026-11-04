@@ -1925,6 +1925,12 @@ _LINEAR_LAYOUT_TOKENS = frozenset({"RowMajor", "ColumnMajor", "VectorLayout"})
 # linear tag.
 _ROW_MAJOR_LAYOUT_TOKENS = frozenset({"RowMajor"})
 _COLUMN_MAJOR_LAYOUT_TOKENS = frozenset({"ColumnMajor"})
+# The linear tags whose rank-1 form is the flat contiguous run ``(N):(1)``. The
+# bc layer builds both through ``makeVectorTlaLayout``, whose stride is a literal 1,
+# so neither can carry a real stride: anything that holds a buffer with its own
+# strides must reject a strided one-dimensional view rather than describe it
+# dense. Rank-1 ColumnMajor is deliberately absent -- it has no flat form at all.
+_FLAT_1D_LAYOUT_TOKENS = frozenset({"RowMajor", "VectorLayout"})
 # Which flat stride leaf of each GM MxScale tag is the runtime pitch (everything
 # else is a structural constant: the 0 broadcast, unit strides, and the e8m0
 # scale C0 = 2). mark_layout_dynamic keeps the constants static and marks only
@@ -2456,11 +2462,12 @@ def _remap_tensor_like_prefix_fields_for_layout_trees(
         if isinstance(length, tuple):
             return None
         layout_tag = layout.strip()
-        # VectorLayout is the explicit one-dimensional tag. Rank-1 RowMajor keeps
-        # its existing meaning too: a 1-D RowMajor view may be strided
-        # (stride != 1), which VectorLayout -- unit-stride by definition --
-        # cannot express.
-        if layout_tag in ("RowMajor", "VectorLayout"):
+        # A rank-1 linear tile is the flat contiguous run ``(N):(1)``: the bc
+        # layer's ``makeVectorTlaLayout`` carries a literal stride of 1, so this
+        # derivation cannot express a real one and must not be asked to. Callers
+        # that hold a buffer with its own strides (``from_dlpack``) reject a
+        # strided one-dimensional view themselves; this is why they have to.
+        if layout_tag in _FLAT_1D_LAYOUT_TOKENS:
             shape = (length,)
             stride = (1,)
             origin = (length,)
