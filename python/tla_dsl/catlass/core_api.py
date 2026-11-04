@@ -670,6 +670,11 @@ class VectorSSA(_RegisterSSA):
               saturates), and `reg_slot` must be `ZERO` or `ONE`.
             - `reg_slot` `TWO` and `THREE` name a pack quarter. They are valid
               on a 4x integer cast and the direct fp8<->f32 path.
+            - `params.round_mode` accepts `CAST_ROUND` / `CAST_FLOOR` /
+              `CAST_CEIL` / `CAST_TRUNC` / `CAST_RINT` / `CAST_ODD` /
+              `CAST_NONE` (not AscendC `CAST_HYBRID`). `CAST_NONE` must be
+              passed explicitly: lossless casts drop the round operand;
+              lossy casts lower as `CAST_RINT` (ties to even).
 
             Example:
             ```python
@@ -685,6 +690,12 @@ class VectorSSA(_RegisterSSA):
                     reg_slot=tla.params.RegSlot.ZERO,
                     sat_mode=tla.params.SatMode.UNKNOWN,
                     round_mode=tla.params.RoundMode.CAST_TRUNC,
+                ))
+                # CAST_NONE must be explicit; lossy paths behave as CAST_RINT.
+                as_i32 = as_f32.to(tla.Int32, tla.params.CastParams(
+                    reg_slot=tla.params.RegSlot.ZERO,
+                    sat_mode=tla.params.SatMode.NOSAT,
+                    round_mode=tla.params.RoundMode.CAST_NONE,
                 ))
             ```
         """

@@ -693,6 +693,20 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         "vector-cast-multi",
         [["dsl_tutorials/vector_simd_ops/cast_multi.py", "cast_multi", "--shape", "256", *dev]],
     )
+    # CAST_NONE / CAST_RINT / CAST_ODD: lossy NONE equals RINT, lossless NONE
+    # widen drops rnd, f32->f16 ODD. Script under python/tla_dsl/tests/end_to_end/.
+    yield (
+        "vector-cast-round-modes",
+        [
+            [
+                "end_to_end/cast_round_modes_op.py",
+                "cast_round_modes",
+                "--shape",
+                "256",
+                *dev,
+            ]
+        ],
+    )
     # Same-width bit reinterpretation: the f32 round trips through i32 and u32
     # are subtracted to zero, so a rewritten register shows as a mismatch
     # rather than hiding behind the exponent term.

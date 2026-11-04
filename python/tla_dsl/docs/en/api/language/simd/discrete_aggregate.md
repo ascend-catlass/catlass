@@ -57,7 +57,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.gather`
 
-**Source:** [`catlass.core_api.gather`](../../../../../catlass/core_api.py#L9521)
+**Source:** [`catlass.core_api.gather`](../../../../../catlass/core_api.py#L9532)
 
 Description:
 

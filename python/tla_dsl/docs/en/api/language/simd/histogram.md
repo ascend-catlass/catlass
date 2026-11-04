@@ -16,7 +16,7 @@ Histogram accumulation on register-vector data.
 
 ## `tla.histograms`
 
-**Source:** [`catlass.core_api.histograms`](../../../../../catlass/core_api.py#L9025)
+**Source:** [`catlass.core_api.histograms`](../../../../../catlass/core_api.py#L9036)
 
 Description:
 

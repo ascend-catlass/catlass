@@ -1209,6 +1209,9 @@ static Value allTrueMaskFor(AutoFullPredicateCache& cache, Location loc, VectorT
 }
 
 // Map the tla.cast round mode onto the HIVM round_mode attribute.
+// CAST_NONE matches AscendC: when a path actually consumes rnd (lossy cast /
+// same-type vtrc / etc.) it becomes RINT; lossless widen paths such as
+// vextf ignore the attribute entirely and never call this for effect.
 static hivm::RoundModeAttr mapCastRoundMode(OpBuilder& b, ::RoundMode mode)
 {
     hivm::RoundMode hv = hivm::RoundMode::ROUND;
@@ -1224,6 +1227,13 @@ static hivm::RoundModeAttr mapCastRoundMode(OpBuilder& b, ::RoundMode mode)
             break;
         case ::RoundMode::cast_trunc:
             hv = hivm::RoundMode::TRUNC;
+            break;
+        case ::RoundMode::cast_none:
+        case ::RoundMode::cast_rint:
+            hv = hivm::RoundMode::RINT;
+            break;
+        case ::RoundMode::cast_odd:
+            hv = hivm::RoundMode::ODD;
             break;
     }
     return hivm::RoundModeAttr::get(b.getContext(), hv);

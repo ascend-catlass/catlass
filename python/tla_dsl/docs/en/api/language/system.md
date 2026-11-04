@@ -107,7 +107,7 @@ Callable helpers on `tla.arch`: block / thread indexing, SIMT `sync_threads`, on
 
 ### `tla.arch.block_idx`
 
-**Source:** [`catlass.core_api.arch_block_idx`](../../../../catlass/core_api.py#L9700)
+**Source:** [`catlass.core_api.arch_block_idx`](../../../../catlass/core_api.py#L9711)
 
 Description:
 
@@ -137,7 +137,7 @@ bid = tla.arch.block_idx()
 
 ### `tla.arch.sub_block_idx`
 
-**Source:** [`catlass.core_api.arch_sub_block_idx`](../../../../catlass/core_api.py#L9723)
+**Source:** [`catlass.core_api.arch_sub_block_idx`](../../../../catlass/core_api.py#L9734)
 
 Description:
 
@@ -167,7 +167,7 @@ sid = tla.arch.sub_block_idx()
 
 ### `tla.arch.thread_idx`
 
-**Source:** [`catlass.core_api.arch_thread_idx`](../../../../catlass/core_api.py#L9746)
+**Source:** [`catlass.core_api.arch_thread_idx`](../../../../catlass/core_api.py#L9757)
 
 Description:
 
@@ -211,7 +211,7 @@ with tla.vec.func(mode="simt", thread_block_dim=256):
 
 ### `tla.arch.sync_threads`
 
-**Source:** [`catlass.core_api.arch_sync_threads`](../../../../catlass/core_api.py#L9790)
+**Source:** [`catlass.core_api.arch_sync_threads`](../../../../catlass/core_api.py#L9801)
 
 Description:
 
@@ -259,7 +259,7 @@ with tla.vec.func(mode="simt", thread_block_dim=THREADS):
 
 ### `tla.arch.block_num`
 
-**Source:** [`catlass.core_api.arch_block_num`](../../../../catlass/core_api.py#L9834)
+**Source:** [`catlass.core_api.arch_block_num`](../../../../catlass/core_api.py#L9845)
 
 Description:
 
@@ -292,7 +292,7 @@ nblocks = tla.arch.block_num()
 
 ### `tla.arch.thread_block_dim`
 
-**Source:** [`catlass.core_api.arch_thread_block_dim`](../../../../catlass/core_api.py#L9860)
+**Source:** [`catlass.core_api.arch_thread_block_dim`](../../../../catlass/core_api.py#L9871)
 
 Description:
 
@@ -338,7 +338,7 @@ with tla.vec.func(mode="simt", thread_block_dim=256):
 
 ### `tla.arch.get_capacity_in_bytes`
 
-**Source:** [`catlass.core_api.arch_get_capacity_in_bytes`](../../../../catlass/core_api.py#L9907)
+**Source:** [`catlass.core_api.arch_get_capacity_in_bytes`](../../../../catlass/core_api.py#L9918)
 
 Description:
 
@@ -373,7 +373,7 @@ ub_bytes = tla.arch.get_capacity_in_bytes(tla.AddressSpace.ub)
 
 ### `tla.arch.get_dyn_ub`
 
-**Source:** [`catlass.core_api.arch_get_dyn_ub`](../../../../catlass/core_api.py#L10017)
+**Source:** [`catlass.core_api.arch_get_dyn_ub`](../../../../catlass/core_api.py#L10028)
 
 Description:
 

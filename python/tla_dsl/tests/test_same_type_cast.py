@@ -36,6 +36,9 @@ _ROUND_MODES = (
     tla.params.RoundMode.CAST_FLOOR,
     tla.params.RoundMode.CAST_CEIL,
     tla.params.RoundMode.CAST_TRUNC,
+    tla.params.RoundMode.CAST_NONE,
+    tla.params.RoundMode.CAST_RINT,
+    tla.params.RoundMode.CAST_ODD,
 )
 
 
@@ -77,7 +80,7 @@ def test_every_same_type_float_cast_compiles(dtype) -> None:
 @pytest.mark.parametrize("dtype", _SAME_TYPE_FLOATS)
 @pytest.mark.parametrize("rnd", _ROUND_MODES)
 def test_every_same_type_float_cast_accepts_every_round_mode(dtype, rnd) -> None:
-    """The round mode is the only knob vtrc carries; all four must be admitted."""
+    """The round mode is the only knob vtrc carries; every mode must be admitted."""
     _compile(dtype, tla.params.CastParams(round_mode=rnd))
 
 

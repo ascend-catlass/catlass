@@ -45,6 +45,11 @@ cast——也没有 fp8 与整数之间的路径。
 指令：只有 `round_mode` 到达指令，`sat_mode` 与 `reg_slot` 不产生任何效果。整数与
 fp8 格式没有同类型 cast。
 
+`CastParams.round_mode` 支持 `CAST_ROUND` / `CAST_FLOOR` / `CAST_CEIL` /
+`CAST_TRUNC` / `CAST_RINT` / `CAST_ODD` / `CAST_NONE`（不含 AscendC 的
+`CAST_HYBRID`）。`CAST_NONE` 须显式传入：无损转换（如 `f16→f32`）仍走无
+`rnd` 的指令；有损转换按 `CAST_RINT`（ties to even）处理。
+
 函数原型：
 
 ```python
@@ -86,6 +91,12 @@ with tla.vec.func(mode="simd"):
         reg_slot=tla.params.RegSlot.ZERO,
         sat_mode=tla.params.SatMode.UNKNOWN,
         round_mode=tla.params.RoundMode.CAST_TRUNC,
+    ))
+    # CAST_NONE 须显式传入；有损路径行为等同 CAST_RINT。
+    as_i32 = as_f32.to(tla.Int32, tla.params.CastParams(
+        reg_slot=tla.params.RegSlot.ZERO,
+        sat_mode=tla.params.SatMode.NOSAT,
+        round_mode=tla.params.RoundMode.CAST_NONE,
     ))
 ```
 

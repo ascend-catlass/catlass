@@ -16,7 +16,7 @@ Bitwise and logical ops on Mask / Vector.
 
 ## `tla.shift_left`
 
-**Source:** [`catlass.core_api.shift_left`](../../../../../catlass/core_api.py#L8377)
+**Source:** [`catlass.core_api.shift_left`](../../../../../catlass/core_api.py#L8388)
 
 Description:
 
@@ -56,7 +56,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.shift_right`
 
-**Source:** [`catlass.core_api.shift_right`](../../../../../catlass/core_api.py#L8413)
+**Source:** [`catlass.core_api.shift_right`](../../../../../catlass/core_api.py#L8424)
 
 Description:
 
@@ -98,7 +98,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.bitwise_not`
 
-**Source:** [`catlass.core_api.bitwise_not`](../../../../../catlass/core_api.py#L8451)
+**Source:** [`catlass.core_api.bitwise_not`](../../../../../catlass/core_api.py#L8462)
 
 Description:
 
@@ -131,7 +131,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.bitwise_and`
 
-**Source:** [`catlass.core_api.bitwise_and`](../../../../../catlass/core_api.py#L9330)
+**Source:** [`catlass.core_api.bitwise_and`](../../../../../catlass/core_api.py#L9341)
 
 Description:
 
@@ -165,7 +165,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.bitwise_or`
 
-**Source:** [`catlass.core_api.bitwise_or`](../../../../../catlass/core_api.py#L9368)
+**Source:** [`catlass.core_api.bitwise_or`](../../../../../catlass/core_api.py#L9379)
 
 Description:
 
@@ -199,7 +199,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.bitwise_xor`
 
-**Source:** [`catlass.core_api.bitwise_xor`](../../../../../catlass/core_api.py#L9406)
+**Source:** [`catlass.core_api.bitwise_xor`](../../../../../catlass/core_api.py#L9417)
 
 Description:
 

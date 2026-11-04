@@ -16,7 +16,7 @@ Vector compares that produce masks, and masked select.
 
 ## `tla.where`
 
-**Source:** [`catlass.core_api.where`](../../../../../catlass/core_api.py#L8915)
+**Source:** [`catlass.core_api.where`](../../../../../catlass/core_api.py#L8926)
 
 Description:
 
@@ -55,7 +55,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.cmp`
 
-**Source:** [`catlass.core_api.cmp`](../../../../../catlass/core_api.py#L9244)
+**Source:** [`catlass.core_api.cmp`](../../../../../catlass/core_api.py#L9255)
 
 Description:
 

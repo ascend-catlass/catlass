@@ -463,6 +463,7 @@ first mismatch=None
 
 - 文件位置：
   - `cast_multi.py`：`tla.cast` 多级类型转换。
+  - `python/tla_dsl/tests/end_to_end/cast_round_modes_op.py`：`CAST_NONE` / `CAST_RINT` / `CAST_ODD` 舍入模式（上板用例，非本目录 tutorial）。
 
 - 功能说明：**`cast_multi.py`**（f32）——op `cast_multi`，单个内核在 4 个 64-lane chunk 上跑多条 cast 路径并汇总为 f32 输出，覆盖 f16/bf16/i32/i16/i8 与 f32 之间的 2x/4x 宽度转换；另含 `(a+200)` 的 `f16↔u8` unsigned 往返（咬住 signed twin）。
 

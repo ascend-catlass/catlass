@@ -379,12 +379,20 @@ class SatMode(enum.Enum):
 
 
 class RoundMode(enum.Enum):
-    """Rounding applied on precision loss."""
+    """Rounding applied on precision loss (AVE ``tla.cast`` / ``VectorSSA.to``).
+
+    ``CAST_NONE`` matches AscendC: it must be passed explicitly. Lossless casts
+    drop the round operand; lossy casts lower as ``CAST_RINT``. ``CAST_HYBRID``
+    is not exposed.
+    """
 
     CAST_ROUND = "cast_round"  # round to nearest, tie away from zero
     CAST_FLOOR = "cast_floor"  # round toward -inf
     CAST_CEIL = "cast_ceil"  # round toward +inf
     CAST_TRUNC = "cast_trunc"  # round toward zero
+    CAST_NONE = "cast_none"  # AscendC CAST_NONE: lossless no-rnd / lossy RINT
+    CAST_RINT = "cast_rint"  # round to nearest, tie to even (banker's)
+    CAST_ODD = "cast_odd"  # Von Neumann rounding (round to odd)
 
     def __str__(self) -> str:
         return self.value
@@ -395,9 +403,9 @@ class ScalarRoundMode(enum.Enum):
 
     Distinct from :class:`RoundMode`, which configures the AVE vector cast:
     these are the scalar unit's own conversion instructions, and the two sets
-    are not interchangeable -- the vector cast has no round-to-nearest-even,
-    and the scalar unit takes none of the AVE cast's saturation or register-slot
-    knobs.
+    are not interchangeable -- the scalar unit takes none of the AVE cast's
+    saturation or register-slot knobs. Vector ``CAST_RINT`` is the AVE peer of
+    scalar ``NEAREST_EVEN``.
     """
 
     NEAREST_EVEN = "nearest_even"  # ties to even      (conv_f322s32r)
@@ -425,6 +433,9 @@ _ROUND_MODE_CODE = {
     RoundMode.CAST_FLOOR: 1,
     RoundMode.CAST_CEIL: 2,
     RoundMode.CAST_TRUNC: 3,
+    RoundMode.CAST_NONE: 4,
+    RoundMode.CAST_RINT: 5,
+    RoundMode.CAST_ODD: 6,
 }
 
 
