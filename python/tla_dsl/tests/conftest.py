@@ -35,6 +35,12 @@ def _load_pretest_bootstrap(repo_root: Path):  # type: ignore[no-untyped-def]
 def pytest_sessionstart(session: pytest.Session) -> None:
     del session
     repo_root = Path(__file__).resolve().parents[1]
+    # Point the BC cache at the repo-local directory before collection imports
+    # `catlass`: that import builds a missing cache, and without this it would
+    # build into the user-wide default instead of the isolated test cache.
+    os.environ["CATLASS_DSL_CACHE_DIR"] = str(
+        Path(__file__).resolve().parent / ".cache"
+    )
     bootstrap = _load_pretest_bootstrap(repo_root)
     try:
         bootstrap.ensure_pretest_mlir_build(repo_root)

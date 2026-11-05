@@ -25,19 +25,17 @@ python -c "import catlass"
 
 如需体验最新特性，也可参考[开发者指南](dsl_development/index.md)完成环境配置与源码构建，自行编译 wheel 包。
 
-安装完成后需预编译数据搬运等 BC 模板（首次约 20 秒，结果自动缓存）；缓存目录可通过 `CATLASS_DSL_CACHE_DIR` 环境变量指定，默认值为 `$HOME/.cache/catlass/bc/`。
+在全新的 CANN 版本与 CATLASS Python 版本环境下，首次 `import catlass` 会自动编译数据搬运等 BC 模板并缓存结果；已编译过的版本组合直接复用编译结果，无需手动编译。多卡拉起算子时各进程共用同一份编译结果，不会重复编译。
+
+如需提前完成编译（例如镜像构建或 CI），也可手动执行：
 
 ```bash
-python -m catlass.bc_compile
+python -m catlass.bc_compile          # 编译
+python -m catlass.bc_compile --clean  # 清理缓存，下次导入重新编译
+python -m catlass.bc_compile --force  # 忽略缓存，重新编译
 ```
 
-更换 wheel 包版本或 CANN 环境后需重新编译，可按需清理缓存或忽略缓存重新编译：
-
-```bash
-python -m catlass.bc_compile --clean
-# 强制：忽略缓存，重新编译
-python -m catlass.bc_compile --force
-```
+缓存目录可通过 `CATLASS_DSL_CACHE_DIR` 环境变量指定，默认值为 `$HOME/.cache/catlass/bc/`。
 
 多数情况下，CATLASS Python 算子会结合 PyTorch 和 TorchNPU 使用，因此建议同时安装。可参考[PyTorch Ascend 安装部署](https://www.hiascend.com/developer/software/ai-frameworks/pytorch/download)，选择并安装所需的、与当前 CANN 版本兼容的 TorchNPU 版本。
 

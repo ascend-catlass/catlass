@@ -25,19 +25,17 @@ python -c "import catlass"
 
 To try the latest features, you can also follow the [Developer Guide](dsl_development/index.md) to set up the environment and build the source code to compile the wheel yourself.
 
-After installation, precompile the data-movement and other BC templates (about 20 seconds the first time; the result is cached automatically). Use the `CATLASS_DSL_CACHE_DIR` environment variable to set the cache directory; the default is `$HOME/.cache/catlass/bc/`.
+On a fresh CANN or CATLASS Python version, the first `import catlass` compiles the data-movement and other BC templates and caches the result; an already-compiled version pair reuses that cache, so no manual compile is needed. A multi-card launch shares one compilation instead of repeating it per process.
+
+To compile ahead of time (for example during image builds or in CI), run:
 
 ```bash
-python -m catlass.bc_compile
+python -m catlass.bc_compile          # compile
+python -m catlass.bc_compile --clean  # drop the cache; the next import recompiles
+python -m catlass.bc_compile --force  # ignore the cache and recompile
 ```
 
-Recompile after changing the wheel package version or the CANN environment; clear the cache or ignore the cache to recompile as needed:
-
-```bash
-python -m catlass.bc_compile --clean
-# Force: ignore the cache and recompile
-python -m catlass.bc_compile --force
-```
+Use the `CATLASS_DSL_CACHE_DIR` environment variable to set the cache directory; the default is `$HOME/.cache/catlass/bc/`.
 
 In most cases, CATLASS Python operators are used together with PyTorch and TorchNPU, so installing them as well is recommended. See [PyTorch Ascend Installation and Deployment](https://www.hiascend.com/developer/software/ai-frameworks/pytorch/download), and select and install the TorchNPU version that matches your CANN version.
 

@@ -3,20 +3,29 @@
 Compiles BC stub sources using the user's own ``ccec`` / ``llvm-link``
 and caches the result.  Cache key = catlass version ID + ccec identity
 (ELF build-id).
+
+The cache is also built on first import (see :func:`autobuild_on_import`), so
+running an operator needs no separate precompile step.  That import happens in
+every process of a multi-card run, so the build is serialized by an ``flock``.
 """
 
 from __future__ import annotations
 
+import contextlib
+import errno
+import fcntl
 import hashlib
 import json
 import os
+import shutil
 import struct
 import subprocess
+import sys
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Iterator, Optional
 
 
 # ---------------------------------------------------------------------------
@@ -150,6 +159,23 @@ def _resolve_toolchain(ascend_home: Optional[Path] = None) -> BCToolchain:
     return BCToolchain(ccec=ccec, llvm_link=llvm_link, ascend_home=ascend_home)
 
 
+def _resolve_config(
+    *,
+    ascend_home: Optional[Path] = None,
+    cache_dir: Optional[Path] = None,
+    cce_arch: str = "c310",
+    catlass_arch: int = 3510,
+) -> BCConfig:
+    """Resolve a full build configuration, with explicit values overriding env."""
+    return BCConfig(
+        paths=_resolve_paths(),
+        toolchain=_resolve_toolchain(ascend_home),
+        cce_arch=cce_arch,
+        catlass_arch=catlass_arch,
+        cache_dir=(cache_dir or _resolve_cache_dir()).resolve(),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Cache key
 # ---------------------------------------------------------------------------
@@ -247,7 +273,15 @@ def compile_stub(cpp: Path, out_bc: Path, core_type: str, cfg: BCConfig) -> None
             args.extend(["-DASCENDC_DUMP", "-DONE_CORE_DUMP_SIZE=1048576"])
 
     args.extend([str(cpp), "-emit-llvm", "-c", "-o", str(out_bc)])
-    subprocess.run(args, check=True, capture_output=True, text=True)
+    try:
+        subprocess.run(args, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as exc:
+        # capture_output keeps ccec's diagnostic off the terminal: print it, or a
+        # failed stub is reported with no reason at all.
+        detail = (exc.stderr or "") + (exc.stdout or "")
+        if detail:
+            print(detail, file=sys.stderr, end="")
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -395,43 +429,50 @@ def init(
 ) -> Path:
     """Pre-compile the full BC artifact set and return the cache dir.
 
-    Compiles into *cache_dir* (or the default cache root) without validating
-    a previous cache. Used by install scripts and by the pytest session,
-    which compiles into its own temporary directory.
+    Compiles into *cache_dir* (or the default cache root).  Used by install
+    scripts and by the pytest session, which compiles into its own directory.
+
+    Holds the same lock as the first-import build, and reuses a cache that
+    already matches this version, ``ccec`` and arch pair.
     """
     global _cfg, _cache
 
-    cfg = BCConfig(
-        paths=_resolve_paths(),
-        toolchain=_resolve_toolchain(ascend_home),
+    cfg = _resolve_config(
+        ascend_home=ascend_home,
+        cache_dir=cache_dir,
         cce_arch=cce_arch,
         catlass_arch=catlass_arch,
-        cache_dir=cache_dir or _resolve_cache_dir(),
     )
 
     _cfg = cfg
     _cache = cfg.cache_dir / compute_cache_key(cfg.toolchain.ccec)
-    _compile_all(cfg, _cache)
+    _build_locked(cfg, _cache)
     return _cache
+
+
+def _manifest_matches(cfg: BCConfig, cache: Path) -> bool:
+    """Whether *cache*'s manifest was written for this version, ``ccec`` and arch.
+
+    Artifacts are named after ``cce_arch``, so a cache built for another arch is
+    not a cache for *cfg*.
+    """
+    try:
+        manifest = json.loads((cache / "manifest.json").read_text())
+    except (json.JSONDecodeError, OSError):
+        return False
+    return (
+        manifest.get("catlass_version") == _catlass_version_id()
+        and manifest.get("ccec_id") == _ccec_id(cfg.toolchain.ccec)
+        and manifest.get("cce_arch") == cfg.cce_arch
+        and manifest.get("catlass_arch") == cfg.catlass_arch
+    )
 
 
 def _ensure_cache(cfg: BCConfig) -> Path:
     """Check manifest and return cache dir. Raises if BC needs recompilation."""
-    key = compute_cache_key(cfg.toolchain.ccec)
-    cache = cfg.cache_dir / key
-    manifest_path = cache / "manifest.json"
-
-    if manifest_path.exists():
-        try:
-            manifest = json.loads(manifest_path.read_text())
-            if manifest.get(
-                "catlass_version"
-            ) == _catlass_version_id() and manifest.get("ccec_id") == _ccec_id(
-                cfg.toolchain.ccec
-            ):
-                return cache
-        except (json.JSONDecodeError, OSError):
-            pass
+    cache = cfg.cache_dir / compute_cache_key(cfg.toolchain.ccec)
+    if _manifest_matches(cfg, cache):
+        return cache
 
     raise RuntimeError(
         "BC not compiled or version mismatch. Run: python -m catlass.bc_compile"
@@ -443,6 +484,7 @@ def get_bc_paths(
     *,
     bc_dir: Optional[Path] = None,
     variant: str = "print",
+    cce_arch: Optional[str] = None,
 ) -> str:
     """Get comma-joined BC paths from cache. Raises if not compiled.
 
@@ -450,14 +492,11 @@ def get_bc_paths(
     cache dir resolved from the environment.
     ``variant``: for meta_op aggregates, ``"print"`` includes every helper;
     ``"normal"`` excludes print/debug helpers.
+    ``cce_arch``: aggregate suffix to look for; defaults to the environment's.
+    A caller holding a resolved configuration must pass its ``cce_arch``, since
+    resolving the default here would look for the wrong artifacts.
     """
-    cfg = BCConfig(
-        paths=_resolve_paths(),
-        toolchain=_resolve_toolchain(),
-        cce_arch="c310",
-        catlass_arch=3510,
-        cache_dir=_resolve_cache_dir(),
-    )
+    cfg = _resolve_config(cce_arch=cce_arch) if cce_arch else _resolve_config()
     cache = bc_dir or _ensure_cache(cfg)
 
     core_types = _MODE_CORE_TYPES[kernel_mode]
@@ -472,7 +511,7 @@ def get_bc_paths(
     return ",".join(paths)
 
 
-def check_bc(bc_dir: Optional[Path] = None) -> None:
+def check_bc(bc_dir: Optional[Path] = None, *, cce_arch: Optional[str] = None) -> None:
     """Check every meta_op aggregate for both variants.
 
     ``get_bc_paths`` is called for its validation side effect only: it raises
@@ -481,13 +520,166 @@ def check_bc(bc_dir: Optional[Path] = None) -> None:
     propagated rather than caught -- ``main`` treats it as a cache miss and
     recompiles, and the pytest session relies on it to fail loudly.
 
+    ``cce_arch``: aggregate suffix to look for; a caller that resolved a
+    configuration must pass its own, or this checks the wrong artifacts.
+
     Raises:
-        RuntimeError: an aggregate is missing, or the cached manifest does not
-            match the current catlass version / ``ccec`` identity.
+        RuntimeError: an aggregate is missing for the requested arch.
     """
     for variant in _BC_AGGREGATE_VARIANTS:
         for kernel_mode in _MODE_CORE_TYPES:
-            _ = get_bc_paths(kernel_mode, bc_dir=bc_dir, variant=variant)
+            _ = get_bc_paths(
+                kernel_mode, bc_dir=bc_dir, variant=variant, cce_arch=cce_arch
+            )
+
+
+# ---------------------------------------------------------------------------
+# Locked build: one process compiles, the rest wait
+# ---------------------------------------------------------------------------
+
+#: Seconds a waiter blocks for a peer's build before giving up (first build ~20 s).
+DEFAULT_LOCK_TIMEOUT_S = 900.0
+
+#: How often a waiter re-tries the lock while a peer is compiling.
+_LOCK_POLL_S = 0.2
+
+
+def _lock_path(cache_root: Path) -> Path:
+    """Lock file guarding *cache_root*, beside it so ``--clean`` cannot unlink it.
+
+    The path is resolved to its real form first: a real path and a symlink to the
+    same directory must share one lock file, or two processes using the two
+    spellings would both take the lock and build into the same tree at once.
+    """
+    resolved = cache_root.resolve()
+    return resolved.parent / (resolved.name + ".lock")
+
+
+@contextlib.contextmanager
+def _cache_lock(cache_root: Path) -> Iterator[None]:
+    """Serialize builds of *cache_root* against every other process.
+
+    An ``flock``, dropped by the kernel when the holder exits or is killed, and
+    never unlinked: removing a file a peer already opened would let two
+    processes lock two different inodes.
+    """
+    lock_path = _lock_path(cache_root)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    # O_CLOEXEC: an inherited descriptor would hold the lock past its taker.
+    fd = os.open(lock_path, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o644)
+    try:
+        deadline = time.monotonic() + DEFAULT_LOCK_TIMEOUT_S
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError as exc:
+                # Only a held lock is worth waiting for; retrying a permanent
+                # failure would stall for the budget and blame a peer instead.
+                if exc.errno not in (errno.EACCES, errno.EAGAIN):
+                    raise
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(
+                        f"timed out after {DEFAULT_LOCK_TIMEOUT_S:.0f}s waiting "
+                        f"for another process to build the BC cache in "
+                        f"{cache_root}"
+                    ) from None
+                time.sleep(_LOCK_POLL_S)
+        yield
+    finally:
+        os.close(fd)  # releases the lock; the file is kept
+
+
+def _cache_is_current(cfg: BCConfig, cache: Path) -> bool:
+    """Whether *cache* holds a complete set for *cfg*.
+
+    The arch pair is part of the match: judging by the defaults would call a
+    cache built for another arch current and skip the build that was asked for.
+    """
+    if not _manifest_matches(cfg, cache):
+        return False
+    try:
+        check_bc(bc_dir=cache, cce_arch=cfg.cce_arch)
+    except RuntimeError:
+        return False
+    return True
+
+
+def _build_locked(
+    cfg: BCConfig, cache: Path, *, force: bool = False, announce: bool = False
+) -> None:
+    """Build *cache* under the lock, re-checking the cache inside it.
+
+    A peer may have finished this very build while we waited, which is the
+    ordinary multi-card case: N processes arrive together, one compiles, and the
+    other N-1 find the artifacts ready.  *announce* prints a line first, for the
+    import-time build that would otherwise stall with no output.
+    """
+    with _cache_lock(cfg.cache_dir):
+        if not force and _cache_is_current(cfg, cache):
+            return
+        if announce:
+            print(
+                f"catlass: building the BC template cache in {cache} (first run)",
+                file=sys.stderr,
+            )
+        # A forced rebuild drops stale bitcode (e.g. from a removed stub) first.
+        if force:
+            for stale in [*cache.glob("*.bc"), cache / "manifest.json"]:
+                stale.unlink(missing_ok=True)
+        _compile_all(cfg, cache)
+
+
+def _clean_root(cache_root: Path) -> None:
+    """Remove the whole cache root, serialized against builds into it."""
+    cache_root = cache_root.resolve()
+    with _cache_lock(cache_root):
+        if cache_root.exists():
+            shutil.rmtree(cache_root)
+            print(f"cleaned: {cache_root}")
+        else:
+            print(f"cache not found: {cache_root}")
+
+
+def autobuild_on_import() -> Optional[Path]:
+    """Build the BC cache during ``import catlass`` when it is missing.
+
+    Returns the cache directory, or ``None`` when the build was skipped: this
+    process is the ``bc_compile`` CLI (which must not be preempted), or no
+    toolchain is available -- importing the package has to keep working
+    off-device, and the missing-toolchain error belongs to the compile step.
+
+    Fail-soft: a failure is reported and the import continues, so a broken
+    toolchain cannot make ``import catlass`` itself fail.  The artifacts stay
+    absent, and the compile step still raises its actionable error.
+    """
+    if _running_bc_compile_cli():
+        return None
+    try:
+        cfg = _resolve_config()
+    except (RuntimeError, OSError):
+        return None
+
+    cache = cfg.cache_dir / compute_cache_key(cfg.toolchain.ccec)
+    if _cache_is_current(cfg, cache):
+        return cache
+
+    try:
+        _build_locked(cfg, cache, announce=True)
+    except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+        # OSError already covers TimeoutError, raised when the lock times out.
+        print(f"catlass: BC prebuild skipped: {exc}", file=sys.stderr)
+        return None
+    return cache
+
+
+def _running_bc_compile_cli() -> bool:
+    """Whether this process is ``python -m catlass.bc_compile``."""
+    argv = getattr(sys, "orig_argv", None) or []
+    for index, arg in enumerate(argv[:-1]):
+        if arg == "-m" and argv[index + 1] == "catlass.bc_compile":
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -498,7 +690,6 @@ def check_bc(bc_dir: Optional[Path] = None) -> None:
 def main() -> None:
     """Pre-compile all BC stubs. Useful for CI or offline environments."""
     import argparse
-    import shutil
 
     parser = argparse.ArgumentParser(
         description="Pre-compile CATLASS BC stubs (normal and print meta_op)."
@@ -522,33 +713,20 @@ def main() -> None:
     )
 
     if args.clean:
-        if cache_root.exists():
-            shutil.rmtree(cache_root)
-            print(f"cleaned: {cache_root}")
-        else:
-            print(f"cache not found: {cache_root}")
+        _clean_root(cache_root)
         return
 
-    cfg = BCConfig(
-        paths=_resolve_paths(),
-        toolchain=_resolve_toolchain(),
+    cfg = _resolve_config(
+        cache_dir=cache_root,
         cce_arch=args.cce_arch,
         catlass_arch=args.catlass_arch,
-        cache_dir=cache_root,
     )
     key = compute_cache_key(cfg.toolchain.ccec)
     cache = cfg.cache_dir / key
 
     # A cache hit needs a matching manifest (catlass version + ccec identity)
-    # and every artifact still on disk -- check_bc enforces both.
-    cache_hit = False
-    try:
-        _ensure_cache(cfg)
-        check_bc(bc_dir=cache)
-        cache_hit = True
-    except RuntimeError:
-        pass
-    cache_hit = cache_hit and not args.force
+    # and every artifact still on disk -- _cache_is_current enforces both.
+    cache_hit = not args.force and _cache_is_current(cfg, cache)
 
     # System info
     print(f"catlass  : {_catlass_version_id()}")
@@ -563,20 +741,12 @@ def main() -> None:
             print(f"  {f.name}: {f.stat().st_size // 1024} KB")
         return
 
-    # Compile
-    cache.mkdir(parents=True, exist_ok=True)
-    # A forced rebuild must not leave stale bitcode behind (e.g. a stub that
-    # was removed from the source tree), so drop existing artifacts first.
-    if args.force:
-        for stale in [*cache.glob("*.bc"), cache / "manifest.json"]:
-            if stale.exists():
-                stale.unlink()
     total_t0 = time.perf_counter()
 
     global _cfg, _cache
     _cfg = cfg
     _cache = cache
-    _compile_all(cfg, cache)
+    _build_locked(cfg, cache, force=args.force)
 
     total_dt = time.perf_counter() - total_t0
 
