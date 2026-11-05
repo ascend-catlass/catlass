@@ -29,8 +29,6 @@ from vector_op_harness import (
 #   tla.params.RegSlot        : ZERO, ONE (2x part_even/odd); ZERO..THREE (4x pp0..pp3)
 #   tla.params.SatMode        : NOSAT, SAT, UNKNOWN
 #   tla.params.RoundMode      : CAST_ROUND, CAST_FLOOR, CAST_CEIL, CAST_TRUNC
-#                               (CAST_NONE / CAST_RINT / CAST_ODD:
-#                                see python/tla_dsl/tests/end_to_end/cast_round_modes_op.py)
 #
 # Coverage notes:
 #   - On a float->float narrowing (f32->f16/bf16) the round_mode rounds to the

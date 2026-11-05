@@ -422,6 +422,11 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         "mixed-core-ratio-11",
         [["end_to_end/basic_mixed_core_ratio_11.py", *dev, "--block-num", "1"]],
     )
+    # Host make_ptr/make_layout/make_tensor Torch bind (no DLPack), vector add.
+    yield (
+        "host-make-tensor-torch-vadd",
+        [["end_to_end/host_make_tensor_torch_vadd.py", *dev, "--block-num", "1"]],
+    )
 
     # --- mixed-core handshake and standalone control-flow probes ---
     # flash_attention_infer routes --mask to two independently compiled

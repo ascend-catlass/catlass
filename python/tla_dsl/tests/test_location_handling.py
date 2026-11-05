@@ -8,7 +8,6 @@ from catlass._mlir import ir as mlir_ir
 
 import catlass.tla as tla
 import catlass.runtime as runtime_mod
-from catlass.core_api import _Shape
 
 # ---------------------------------------------------------------------------
 # _CapturedLocation / _to_mlir_location removal
@@ -55,12 +54,6 @@ def test_dsl_op_rejects_int_as_loc() -> None:
 # ---------------------------------------------------------------------------
 
 
-
-
-def test_loc_none_without_frontend_state_rejects_make_shape() -> None:
-    """Host public ``make_shape`` requires frontend."""
-    with pytest.raises(tla.TlaIRNotExecutableError, match="tla.make_shape"):
-        tla.make_shape(1, 2, loc=None)
 
 
 # ---------------------------------------------------------------------------

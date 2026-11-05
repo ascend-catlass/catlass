@@ -20,7 +20,11 @@ Construction and views for front-end structured values such as Shape / Coord / S
 
 Description:
 
-Build a packed `!tla.shape`; components may be nested tuples.
+Build a shape; components may be nested tuples.
+
+Inside ``@tla.kernel``: builds packed `!tla.shape`. Outside a kernel:
+same ``_Shape`` type with Host int-tree components for
+``tla.make_layout`` / Host ``tla.make_tensor``.
 
 Prototype:
 
@@ -32,11 +36,12 @@ Parameters:
 
 - *`components`* (`IndexTree`): Shape components per dimension. Nested
   tuples are used for `zN` / `nZ` / `L0Clayout` / `zNUnAlign`
-  physical layouts. Required.
+  physical layouts. Required. Host path: Python ints only.
 
 Constraints:
 
-- Must be called inside a `@tla.kernel`-decorated kernel function.
+- Kernel path: must be inside `@tla.kernel`.
+- Host path: no frontend; int trees only.
 - Provide at least one shape component.
 - RowMajor / ColumnMajor: use a 2D shape `(M, N)`.
 - `zN` / `nZ` / `L0Clayout` / `zNUnAlign`: for `make_layout` /
@@ -64,7 +69,10 @@ zn_shape = tla.make_shape((16, 8), (16, 4))
 
 Description:
 
-Build a packed `!tla.coord`.
+Build a coordinate tree.
+
+Inside ``@tla.kernel``: builds packed `!tla.coord`. Outside a kernel:
+same ``_Coord`` type with Host int-tree components.
 
 Prototype:
 
@@ -75,10 +83,12 @@ tla.make_coord(*components: IndexTree) -> TlaCoord
 Parameters:
 
 - *`components`* (`IndexTree`): Coordinate components per dimension. Required.
+  Host path: Python ints only.
 
 Constraints:
 
-- Must be called inside a `@tla.kernel`-decorated kernel function.
+- Kernel path: must be inside `@tla.kernel`.
+- Host path: no frontend; int trees only.
 - Provide at least one coordinate component.
 
 Example:
@@ -95,7 +105,10 @@ coord = tla.make_coord(block_row, 0)
 
 Description:
 
-Build a packed `!tla.stride` (same nesting rules as `make_shape`).
+Build a stride (same nesting rules as `make_shape`).
+
+Inside ``@tla.kernel``: builds packed `!tla.stride`. Outside a kernel:
+same ``_Stride`` type with Host int-tree components.
 
 Prototype:
 
@@ -106,6 +119,7 @@ tla.make_stride(*components: IndexTree) -> TlaStride
 Parameters:
 
 - *`components`* (`IndexTree`): Stride components per dimension. Required.
+  Host path: Python ints only.
 
   Common patterns:
 
@@ -122,7 +136,8 @@ Parameters:
 
 Constraints:
 
-- Must be called inside a `@tla.kernel`-decorated kernel function.
+- Kernel path: must be inside `@tla.kernel`.
+- Host path: no frontend; int trees only.
 - Provide at least one stride component.
 - For `zN` / `nZ` / `L0Clayout` / `zNUnAlign`, stride values must
   match the layout tag (see examples); `make_tensor` checks them against
@@ -157,36 +172,43 @@ nz_stride = tla.make_stride((1, 1024), (16, 256))
 
 Description:
 
-Compose a `!tla.layout` from shape / stride (maps to `tla.make_layout`).
+Compose a layout from shape / stride.
+
+Inside ``@tla.kernel``: builds `!tla.layout` (maps to `tla.make_layout`);
+``shape`` / ``stride`` must come from ``make_shape`` / ``make_stride``.
+
+Outside a kernel: same ``_Layout`` type; ``shape`` / ``stride`` from Host
+``make_shape`` / ``make_stride`` (or equivalent int trees) for
+Host ``tla.make_tensor``.
 
 Prototype:
 
 ```python
-tla.make_layout(shape: _Shape, stride: _Stride, *, origin_shape: _Shape | None = None, layoutTag: _LayoutTag | None = None) -> TlaLayout
+tla.make_layout(shape: Any, stride: Any, *, origin_shape: Any | None = None, layoutTag: _LayoutTag | None = None) -> TlaLayout
 ```
 
 Parameters:
 
-- `shape` (`_Shape`): Layout shape from `tla.make_shape`. Required.
-  RowMajor / ColumnMajor: 2D `(M, N)`.
-  `zN` / `nZ` / `L0Clayout` / `zNUnAlign`: nested
-  `((m0, m1), (n0, n1))`.
-- `stride` (`_Stride`): Layout stride from `tla.make_stride`. Required.
-  Use the same nesting as `shape`.
-- `origin_shape` (`_Shape | None`): Logical working shape (true data size
-  before alignment fill). Optional, default `None`. Copy / tiling use this
-  logical size; physical packing lives in `shape` / `stride`.
+- `shape` (`_Shape` | int tree): From `tla.make_shape`. Host also accepts a
+  Python int tree. RowMajor / ColumnMajor: 2D `(M, N)`. `zN` / `nZ` /
+  `L0Clayout` / `zNUnAlign`: nested `((m0, m1), (n0, n1))`.
+- `stride` (`_Stride` | int tree): From `tla.make_stride`. Host also accepts
+  a Python int tree with the same nesting as `shape`.
+- `origin_shape` (`_Shape` | int tree | None): Logical working shape.
+  Optional, default `None` (inferred / equals `shape` on Host).
 - `layoutTag` (`_LayoutTag | None`): Layout tag; see
   **System Variable Access / Layout Tags**. Optional, default `None`
   (`RowMajor`).
 
 Constraints:
 
-- Must be called inside a `@tla.kernel`-decorated kernel function.
-- `shape` / `stride` must be values returned by `make_shape` / `make_stride`.
+- Kernel path: must be inside `@tla.kernel`; `shape` / `stride` from
+  `make_shape` / `make_stride` (SSA).
+- Host path: no frontend; Host `make_shape` / `make_stride` or int trees;
+  result is for Host `tla.make_tensor`, not Kernel IR.
 - For RowMajor / ColumnMajor, an omitted `origin_shape` is inferred as
-  `shape`. For `zN` / `nZ` / `L0Clayout` / `zNUnAlign`, it is
-  inferred as `(m0*m1, n0*n1)` from `shape=((m0,m1),(n0,n1))`.
+  `shape`. For `zN` / `nZ` / `L0Clayout` / `zNUnAlign`, Kernel infers
+  `(m0*m1, n0*n1)`; Host defaults omitted origin to `shape`.
 - Do **not** pass a plain 2D `shape` with a `zN` / `nZ` /
   `L0Clayout` / `zNUnAlign` tag; that fails checks. Either build the nested
   physical shape, or use `make_tensor_like(ptr, like, layoutTag=...)` so
@@ -195,22 +217,11 @@ Constraints:
 Example:
 
 ```python
-# RowMajor 2D:
 layout = tla.make_layout(
     tla.make_shape(256, 128),
     tla.make_stride(128, 1),
     layoutTag=tla.arch.RowMajor,
 )
-
-# Explicit f16 zN (logical 128x64 → nested physical + 2D origin):
-# Before: logical ND tile is (128, 64).
-zn = tla.make_layout(
-    tla.make_shape((16, 8), (16, 4)),
-    tla.make_stride((16, 256), (1, 2048)),
-    origin_shape=tla.make_shape(128, 64),  # logical size for copy/tiling
-    layoutTag=tla.arch.zN,
-)
-# After: layout.shape is zN-packed; layout.origin_shape stays (128, 64).
 ```
 
 ---
@@ -350,7 +361,11 @@ pad.fill(0)
 
 Description:
 
-Build a `!tla.tensor` from an explicit pointer, layout, and optional coord.
+Build a tensor from an explicit pointer, layout, and optional coord.
+
+Inside ``@tla.kernel``: builds packed `!tla.tensor` IR.
+Outside a kernel: same entry binds a Host tensor from Host
+``tla.make_ptr`` / ``tla.make_layout`` (no DLPack).
 
 Prototype:
 
@@ -360,31 +375,46 @@ tla.make_tensor(ptr: Pointer, layout: TlaLayout, coord: CoordLike | None = None)
 
 Parameters:
 
-- `ptr` (`Pointer`): Underlying data pointer (`!tla.ptr`). Required.
+- `ptr` (`Pointer`): Underlying data pointer (`!tla.ptr` in Kernel, or
+  Host ``make_ptr``). Required.
 - `layout` (`TlaLayout`): Tensor layout from `tla.make_layout`. Required.
 - `coord` (`CoordLike | None`): Optional start coordinate; treated as zeros when omitted. Optional, default `None`.
 
 Constraints:
 
-- Must be called inside a `@tla.kernel`-decorated kernel function.
-- Pointer, layout, and coord must match the target address space and dtype.
+- Kernel path: must be inside `@tla.kernel`; pointer, layout, and coord
+  must match the target address space and dtype.
+- Host path: no frontend; Host ``make_ptr`` / ``make_layout`` only;
+  trusts layout metadata (prefer ``from_dlpack`` when you need those
+  checks). ``loc`` is ignored.
 - `coord` defaults to a zero coord matching the layout's rank (rank-2 ->
   `make_coord(0, 0)`, rank-1 -> `make_coord(0)`). Element type and address
-  space come from `ptr`'s `!tla.ptr`; layout tag, shape, stride, and origin
-  come from the `!tla.layout` operand (origin defaults to `shape`).
+  space come from `ptr`; layout tag, shape, stride, and origin
+  come from the layout (origin defaults to `shape`).
 - Lowering supports RowMajor, ColumnMajor, zN, nZ, L0Clayout, and
   zNUnAlign. For `zN` / `nZ` / `L0Clayout` / `zNUnAlign`, physical
   `shape` / `stride` are nested 2x2, while logical coord / `origin_shape`
   stay 2D `(M, N)`. If `make_layout` omitted `origin_shape`, the logical
   size is inferred from the physical shape (for example `(m0*m1, n0*n1)`).
-- A full compile requires `ptr` to carry backing storage; an on-chip pointer
-  from `allocate` (optionally via `recast_ptr`) is the supported form for
-  runnable kernels.
+- A full Kernel compile requires `ptr` to carry backing storage; an on-chip
+  pointer from `allocate` (optionally via `recast_ptr`) is the supported
+  form for runnable kernels.
 
 Example:
 
 ```python
+# Kernel IR:
 tensor = tla.make_tensor(ptr, layout, coord=tla.make_coord(0, 0))
+
+# Host bind (no DLPack):
+host = tla.make_tensor(
+    tla.make_ptr(tla.Float16, int(buf.data_ptr()), tla.AddressSpace.gm),
+    tla.make_layout(
+        tla.make_shape(128, 64),
+        tla.make_stride(64, 1),
+        layoutTag=tla.arch.RowMajor,
+    ),
+)
 ```
 
 ---
@@ -429,7 +459,11 @@ dst = tla.make_tensor_like(ptr, like=src_tile, layoutTag=tla.arch.RowMajor)
 
 Description:
 
-Build a `!tla.ptr` from an address value.
+Build a pointer from an address value.
+
+Inside ``@tla.kernel``: builds `!tla.ptr`. Outside a kernel: same
+``Pointer`` type holding a Host address for Host ``tla.make_tensor``
+(no MLIR); ``value`` must be a Python ``int`` address.
 
 Prototype:
 
@@ -442,13 +476,15 @@ Parameters:
 - `dtype` (`type[Numeric] | None`): Pointee element type; `None` means
   `Int8`. Optional, default `None`.
 - `value` (`int | Numeric | address SSA`): Address value. Required.
+  Host path requires ``int``.
 - `mem_space` (`AddressSpace`): Address space of the pointer. Optional, default `AddressSpace.gm`.
 - `assumed_align` (`int | None`): Assumed alignment in bytes. Optional, default `None`.
 
 Constraints:
 
-- Must be called inside a `@tla.kernel`-decorated kernel function.
-- Integer address bit-width must match the target `mem_space`.
+- Kernel path: must be inside `@tla.kernel`; integer address bit-width
+  must match the target `mem_space`.
+- Host path: no frontend; result is for Host `tla.make_tensor` only.
 
 Example:
 

@@ -247,11 +247,6 @@ def test_make_fake_tensor_is_unbound() -> None:
     assert isinstance(fake, tla.Tensor)
 
 
-def test_host_make_shape_requires_frontend() -> None:
-    with pytest.raises(tla.TlaIRNotExecutableError):
-        tla.make_shape(1, 2)
-
-
 def test_from_dlpack_requires_layout_tag() -> None:
     class _Buf:
         def __dlpack__(self, stream: int | None = None):

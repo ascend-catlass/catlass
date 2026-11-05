@@ -19,7 +19,71 @@ Build Host `tla.Tensor` objects and mark layout extents dynamic so one artifact 
 
 ## Binding
 
-Bind a real NPU buffer with `from_dlpack`, or a metadata-only sample with `make_fake_tensor`.
+Bind a real NPU buffer with `from_dlpack` or Host dual-mode `tla.make_ptr` / `tla.make_layout` / `tla.make_tensor`, or build a metadata-only sample with `make_fake_tensor`.
+
+### `tla.make_tensor`
+
+**Source:** `catlass.core_api.make_tensor`
+
+Description:
+
+Bind a pointer and layout as a TLA Host tensor without DLPack (dual-mode
+``tla.make_tensor`` outside ``@tla.kernel``). Prefer this on the launch hot
+path when address and layout metadata are already known: it skips capsule
+export/parse/ownership and does not open ``_eager_capture``.
+
+Build ``ptr`` / ``layout`` with the same ``tla.make_ptr`` /
+``tla.make_layout`` APIs used in Kernel code. Inside a kernel the same
+``tla.make_tensor`` entry emits ``!tla.tensor`` IR (see Language API).
+
+Prototype:
+
+```python
+tla.make_tensor(ptr: Pointer, layout: TlaLayout, coord: CoordLike | None = None, *, loc: mlir_ir.Location | None = None) -> TlaTensor
+```
+
+Parameters:
+
+- *`ptr`*: From ``tla.make_ptr`` outside a kernel (dtype, address,
+  addrspace).
+- *`layout`*: From ``tla.make_layout`` outside a kernel (``make_shape`` /
+  ``make_stride``, ``layoutTag``, optional origin).
+- *`coord`*: Optional Host ``tla.make_coord`` / int tree. When omitted,
+  derived from the layout (typically zeros).
+- *`loc`*: Used on the Kernel path; ignored on the Host path.
+
+Constraints:
+
+- Host path rejects Kernel SSA ``Pointer`` / ``Layout``; call
+  ``tla.make_ptr`` / ``tla.make_layout`` on the Host (no ``@tla.kernel``
+  context).
+- Hot-path bind trusts ``make_ptr`` / ``make_layout`` metadata (no
+  Kernel trait checks / RM-CM compact gate). Keep buffer metadata
+  consistent; prefer ``from_dlpack`` when you need those checks.
+- Does **not** own DLPack lifetime. Keep the live buffer alive across
+  launch.
+- ``ptr.data_ptr == 0`` builds an unbound sample (`_external_binding` is
+  false); non-zero marks an external binding.
+
+Example:
+
+```python
+import catlass.tla as tla
+
+ptr = tla.make_ptr(
+    tla.Float16,
+    int(buf.data_ptr()),
+    tla.AddressSpace.gm,
+)
+layout = tla.make_layout(
+    tla.make_shape(128, 64),
+    tla.make_stride(64, 1),
+    layoutTag=tla.arch.RowMajor,
+)
+host = tla.make_tensor(ptr, layout)
+```
+
+---
 
 ### `tla.from_dlpack`
 
@@ -99,7 +163,7 @@ Description:
 
 Build a metadata-only Host tensor with no device buffer (`data_ptr == 0`).
 Use this as a `tla.compile` type sample when no NPU is needed. Bind real
-buffers with `from_dlpack`.
+buffers with `tla.make_tensor` (direct pointer) or `from_dlpack`.
 
 Prototype:
 
@@ -112,8 +176,9 @@ Parameters:
 - *`dtype`*: Element type such as `tla.Float16` / `tla.Float32`. Required.
 - *`shape`* (`int | tuple`): Logical shape tree (nested tuples for zN
   physical layouts). Required.
-- *`stride`* (`int | tuple`): Stride tree; structure must match `shape`.
-  Required.
+- *`stride`* (`int | tuple | None`): Stride tree; structure must match
+  `shape`. When ``None``, derived from layout remap (same as historical
+  ``_Tensor`` construction).
 - *`layout_tag`*: `tla.arch` tag. Optional; default `tla.arch.RowMajor`.
 - *`addrspace`*: Address space. Optional; default `AddressSpace.gm`.
 - *`origin_shape`* (`int | tuple | None`): Logical origin. Optional;
@@ -126,8 +191,12 @@ Constraints:
 
 - `shape` / `stride` / `origin_shape` / `coord` are Python int trees,
   not Kernel `tla.make_shape` / `tla.make_stride` / `tla.make_coord`.
-- Always unbound; cannot be launched until replaced by `from_dlpack`.
+- Always unbound; cannot be launched until replaced by a bound Host
+  tensor (`tla.make_tensor` / `from_dlpack`).
 - Explicit `shape` / `stride` are kept as given (no layout remap).
+- Signature unchanged; implemented via ``tla.make_ptr`` +
+  ``tla.make_layout`` + Host ``tla.make_tensor``. ``stride=None`` /
+  ``coord=None`` keep the pre-existing remap defaults.
 
 Example:
 

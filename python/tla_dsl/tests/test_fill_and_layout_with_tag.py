@@ -262,12 +262,6 @@ def test_get_tile_rejects_plain_tuple_args() -> None:
         _kernel.dump_mlir()
 
 
-def test_get_tile_rejects_outside_kernel() -> None:
-    # Outside a @tla.kernel the coord construction fails before get_tile runs.
-    with pytest.raises(tla.TlaIRNotExecutableError, match="make_coord"):
-        tla.get_tile(None, tla.make_coord(0, 0), tla.make_shape(32, 32))
-
-
 # --- Tensor.fill ----------------------------------------------------------------
 
 

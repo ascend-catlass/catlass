@@ -4,6 +4,11 @@ Preferred import::
 
     import catlass.tla as tla
     from catlass.tla.runtime import from_dlpack
+
+Host bind uses the same ``tla.make_ptr`` / ``tla.make_layout`` / ``tla.make_tensor``
+as Kernel (outside ``@tla.kernel`` they are dual-mode Host entries).
+``catlass.tla.runtime`` keeps Host-only helpers such as ``from_dlpack`` /
+``make_fake_tensor`` (not dual-mode builders like ``make_ptr`` / ``make_tensor``).
 """
 
 from __future__ import annotations
@@ -109,12 +114,12 @@ __all__ = list(_EXPLICIT_EXPORTS) + list(_PARENT_EXPORTS)
 
 
 def __getattr__(name: str) -> Any:
+    value: Any
     if name == "experimental":
         from importlib import import_module
 
-        return import_module(".experimental", __name__)
-
-    if name in (
+        value = import_module(".experimental", __name__)
+    elif name in (
         "kernel",
         "jit",
         "compile",
@@ -125,19 +130,16 @@ def __getattr__(name: str) -> Any:
     ):
         from .. import dsl as _dsl
 
-        return getattr(_dsl, name)
-
-    if name in ("JitCompiledFunction", "JitModule"):
+        value = getattr(_dsl, name)
+    elif name in ("JitCompiledFunction", "JitModule"):
         from ..base_dsl import jit_executor as _jit_executor
 
-        return getattr(_jit_executor, name)
-
-    if name in ("DSLLocation", "BaseDSL"):
+        value = getattr(_jit_executor, name)
+    elif name in ("DSLLocation", "BaseDSL"):
         from .. import base_dsl as _base_dsl
 
-        return getattr(_base_dsl, name)
-
-    if name == "Constexpr" or name in (
+        value = getattr(_base_dsl, name)
+    elif name == "Constexpr" or name in (
         "Pointer",
         "TypedPointer",
         "JitArgument",
@@ -150,19 +152,16 @@ def __getattr__(name: str) -> Any:
     ):
         from ..base_dsl import typing as _typing
 
-        return getattr(_typing, name)
-
-    if name == "AddressSpace":
+        value = getattr(_typing, name)
+    elif name == "AddressSpace":
         from ..address_space import AddressSpace
 
-        return AddressSpace
-
-    if name == "extern":
+        value = AddressSpace
+    elif name == "extern":
         from .ffi import extern
 
-        return extern
-
-    if name in (
+        value = extern
+    elif name in (
         "Numeric",
         "Integer",
         "Float",
@@ -186,45 +185,46 @@ def __getattr__(name: str) -> Any:
     ):
         from .. import types as _types
 
-        return getattr(_types, name)
-
-    if name == "types":
+        value = getattr(_types, name)
+    elif name == "types":
         from .. import types as _types
 
-        return _types
-
-    if name == "params":
+        value = _types
+    elif name == "params":
         from .. import params as _params
 
-        return _params
-
-    if name == "core":
+        value = _params
+    elif name == "core":
         from .. import core_api as _core
 
-        return _core
-
-    if name == "ReductionOp":
+        value = _core
+    elif name == "ReductionOp":
         from ..core_api import ReductionOp
 
-        return ReductionOp
-
-    if name == "PASSES":
-        return ()
-
-    if name == "__version__":
+        value = ReductionOp
+    elif name == "PASSES":
+        value = ()
+    elif name == "__version__":
         try:
             from .._version import __version__ as _version
         except ImportError:  # pragma: no cover
             _version = "0.0.0"
-        return _version
+        value = _version
+    else:
+        # Errors, const_expr, arch/utils/pipes, and core_api helpers live on
+        # catlass.runtime (includes Host hot path make_ptr/shape/stride/layout).
+        from .. import runtime as _runtime
 
-    # Errors, const_expr, arch/utils/pipes, and core_api helpers live on catlass.runtime.
-    from .. import runtime as _runtime
+        try:
+            value = getattr(_runtime, name)
+        except AttributeError as exc:
+            raise AttributeError(
+                f"module 'catlass.tla' has no attribute {name!r}"
+            ) from exc
 
-    try:
-        return getattr(_runtime, name)
-    except AttributeError as exc:
-        raise AttributeError(f"module 'catlass.tla' has no attribute {name!r}") from exc
+    # Cache so subsequent ``tla.make_*`` / dtype / arch lookups are dict hits.
+    globals()[name] = value
+    return value
 
 
 def __dir__() -> list[str]:

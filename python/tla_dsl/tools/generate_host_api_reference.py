@@ -106,8 +106,9 @@ HOST_DIRECTORY_SECTIONS: list[tuple[str, str]] = [
     ),
     (
         "Host Tensor / Binding",
-        "Bind a real NPU buffer with `from_dlpack`, or a metadata-only sample "
-        "with `make_fake_tensor`.",
+        "Bind a real NPU buffer with `from_dlpack` or Host dual-mode "
+        "`tla.make_ptr` / `tla.make_layout` / `tla.make_tensor`, or build a "
+        "metadata-only sample with `make_fake_tensor`.",
     ),
     (
         "Host Tensor / Dynamic Layout",
@@ -183,6 +184,59 @@ HOST_ENTRY_OVERRIDES: dict[str, dict[str, object]] = {
         "returns": "Callable[..., Any]",
     },
 }
+
+# Dual-mode Host path of ``tla.make_tensor`` (implementation is private in
+# ``tla.runtime``; public entry is ``core_api.make_tensor``, same as ``make_ptr``).
+HOST_MAKE_TENSOR_DOC = """\
+Directory: Host Tensor / Binding
+Description:
+    Bind a pointer and layout as a TLA Host tensor without DLPack (dual-mode
+    ``tla.make_tensor`` outside ``@tla.kernel``). Prefer this on the launch hot
+    path when address and layout metadata are already known: it skips capsule
+    export/parse/ownership and does not open ``_eager_capture``.
+
+    Build ``ptr`` / ``layout`` with the same ``tla.make_ptr`` /
+    ``tla.make_layout`` APIs used in Kernel code. Inside a kernel the same
+    ``tla.make_tensor`` entry emits ``!tla.tensor`` IR (see Language API).
+
+Parameters:
+    - *`ptr`*: From ``tla.make_ptr`` outside a kernel (dtype, address,
+      addrspace).
+    - *`layout`*: From ``tla.make_layout`` outside a kernel (``make_shape`` /
+      ``make_stride``, ``layoutTag``, optional origin).
+    - *`coord`*: Optional Host ``tla.make_coord`` / int tree. When omitted,
+      derived from the layout (typically zeros).
+    - *`loc`*: Used on the Kernel path; ignored on the Host path.
+
+Constraints:
+    - Host path rejects Kernel SSA ``Pointer`` / ``Layout``; call
+      ``tla.make_ptr`` / ``tla.make_layout`` on the Host (no ``@tla.kernel``
+      context).
+    - Hot-path bind trusts ``make_ptr`` / ``make_layout`` metadata (no
+      Kernel trait checks / RM-CM compact gate). Keep buffer metadata
+      consistent; prefer ``from_dlpack`` when you need those checks.
+    - Does **not** own DLPack lifetime. Keep the live buffer alive across
+      launch.
+    - ``ptr.data_ptr == 0`` builds an unbound sample (`_external_binding` is
+      false); non-zero marks an external binding.
+
+Example:
+    ```python
+    import catlass.tla as tla
+
+    ptr = tla.make_ptr(
+        tla.Float16,
+        int(buf.data_ptr()),
+        tla.AddressSpace.gm,
+    )
+    layout = tla.make_layout(
+        tla.make_shape(128, 64),
+        tla.make_stride(64, 1),
+        layoutTag=tla.arch.RowMajor,
+    )
+    host = tla.make_tensor(ptr, layout)
+    ```
+"""
 
 # Injected language-boundary topic (not scraped from a runtime symbol).
 CONSTEXPR_CALLABLE_DOC = """\
@@ -342,6 +396,24 @@ def parse_host_apis() -> dict[str, APIEntry]:
         if not path.is_file():
             raise FileNotFoundError(f"host API source not found: {path}")
         entries.update(_collect_host_file(path))
+    # Dual-mode Host bind: public API is ``tla.make_tensor`` (core_api); Host
+    # body is private in ``tla.runtime`` (aligned with ``make_ptr`` — not
+    # re-exported from ``catlass.tla.runtime``).
+    entries["make_tensor"] = APIEntry(
+        name="tla.make_tensor",
+        qualified_name="catlass.core_api.make_tensor",
+        source_line=None,
+        docstring=HOST_MAKE_TENSOR_DOC,
+        source_path=PACKAGE_ROOT / "catlass" / "core_api.py",
+        is_concept=False,
+        params=[
+            ParamInfo("ptr", "Pointer", "positional", None),
+            ParamInfo("layout", "TlaLayout", "positional", None),
+            ParamInfo("coord", "CoordLike | None", "positional", "None"),
+            ParamInfo("loc", "mlir_ir.Location | None", "keyword_only", "None"),
+        ],
+        returns="TlaTensor",
+    )
     # Language-boundary topic: kept in the generator, not as a runtime stub.
     entries["Constexpr Callable arguments"] = APIEntry(
         name="Constexpr Callable arguments",

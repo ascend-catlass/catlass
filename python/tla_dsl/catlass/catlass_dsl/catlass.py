@@ -55,7 +55,7 @@ class CatlassBaseDSL(BaseDSL):
             - Keyword options are whitelisted: `auto_sync` and `core_ratio`.
             - `auto_sync` must be `"v0"` or `None`.
             - `core_ratio` must be `tla.arch.C1V1` or `tla.arch.C1V2` when set.
-            - With `core_ratio=tla.arch.C1V1` the programmer owns the Ascend950
+            - With `core_ratio=tla.arch.C1V1` the programmer owns the Ascend 950
               CV 1:1 contract (compiler does not rewrite pipes or data paths):
               stage cube results L0C→GM→UB (tightly coupled L0C→UB is illegal);
               `cross_core_wait_flag` must use `tla.arch.SCALAR` (`PIPE_S`);

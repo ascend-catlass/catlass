@@ -22,7 +22,11 @@ Shape / Coord / Stride / Layout / Tensor 等前端结构化值的构造与视图
 
 功能说明：
 
-构造打包的 `!tla.shape`，分量可为嵌套 tuple。
+构造 shape；分量可为嵌套 tuple。
+
+在 ``@tla.kernel`` 内：构造打包的 `!tla.shape`。在 kernel 外：同一
+``_Shape`` 类型，承载 Host int 树，供 ``tla.make_layout`` /
+Host ``tla.make_tensor`` 使用。
 
 函数原型：
 
@@ -33,11 +37,12 @@ tla.make_shape(*components: IndexTree) -> TlaShape
 参数说明：
 
 - *`components`*（`IndexTree`）：shape 各维分量。`zN` / `nZ` /
-  `L0Clayout` / `zNUnAlign` 的物理布局用嵌套 tuple。必填。
+  `L0Clayout` / `zNUnAlign` 的物理布局用嵌套 tuple。必填。Host 路径：仅 Python int。
 
 约束说明：
 
-- 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
+- Kernel 路径：须在 `@tla.kernel` 内。
+- Host 路径：无 frontend；仅 int 树。
 - 至少提供 1 个 shape 分量。
 - RowMajor / ColumnMajor：用二维 shape `(M, N)`。
 - `zN` / `nZ` / `L0Clayout` / `zNUnAlign`：在 `make_layout` /
@@ -64,7 +69,10 @@ zn_shape = tla.make_shape((16, 8), (16, 4))
 
 功能说明：
 
-构造打包的 `!tla.coord`。
+构造坐标树。
+
+在 ``@tla.kernel`` 内：构造打包的 `!tla.coord`。在 kernel 外：同一
+``_Coord`` 类型，承载 Host int 树。
 
 函数原型：
 
@@ -74,11 +82,12 @@ tla.make_coord(*components: IndexTree) -> TlaCoord
 
 参数说明：
 
-- *`components`*（`IndexTree`）：coord 各维分量。必填。
+- *`components`*（`IndexTree`）：coord 各维分量。必填。Host 路径：仅 Python int。
 
 约束说明：
 
-- 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
+- Kernel 路径：须在 `@tla.kernel` 内。
+- Host 路径：无 frontend；仅 int 树。
 - 至少提供 1 个 coord 分量。
 
 调用示例：
@@ -95,7 +104,10 @@ coord = tla.make_coord(block_row, 0)
 
 功能说明：
 
-构造打包的 `!tla.stride`（嵌套规则与 `make_shape` 相同）。
+构造 stride（嵌套规则与 `make_shape` 相同）。
+
+在 ``@tla.kernel`` 内：构造打包的 `!tla.stride`。在 kernel 外：同一
+``_Stride`` 类型，承载 Host int 树。
 
 函数原型：
 
@@ -105,7 +117,7 @@ tla.make_stride(*components: IndexTree) -> TlaStride
 
 参数说明：
 
-- *`components`*（`IndexTree`）：stride 各维分量。必填。
+- *`components`*（`IndexTree`）：stride 各维分量。必填。Host 路径：仅 Python int。
 
   常见写法：
 
@@ -122,7 +134,8 @@ tla.make_stride(*components: IndexTree) -> TlaStride
 
 约束说明：
 
-- 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
+- Kernel 路径：须在 `@tla.kernel` 内。
+- Host 路径：无 frontend；仅 int 树。
 - 至少提供 1 个 stride 分量。
 - 对 `zN` / `nZ` / `L0Clayout` / `zNUnAlign`，stride 数值须匹配
   layout（见示例）；`make_tensor` 会按 `shape` + `layoutTag` 检查。
@@ -156,33 +169,40 @@ nz_stride = tla.make_stride((1, 1024), (16, 256))
 
 功能说明：
 
-由 shape / stride 合成 `!tla.layout`（对应 `tla.make_layout`）。
+由 shape / stride 合成 layout。
+
+在 ``@tla.kernel`` 内：构造 `!tla.layout`（对应 `tla.make_layout`）；
+``shape`` / ``stride`` 须来自 ``make_shape`` / ``make_stride``。
+
+在 kernel 外：同一 ``_Layout`` 类型；``shape`` / ``stride`` 来自 Host
+``make_shape`` / ``make_stride``（或等价 int 树），供
+Host ``tla.make_tensor`` 使用。
 
 函数原型：
 
 ```python
-tla.make_layout(shape: _Shape, stride: _Stride, *, origin_shape: _Shape | None = None, layoutTag: _LayoutTag | None = None) -> TlaLayout
+tla.make_layout(shape: Any, stride: Any, *, origin_shape: Any | None = None, layoutTag: _LayoutTag | None = None) -> TlaLayout
 ```
 
 参数说明：
 
-- `shape`（`_Shape`）：布局 shape，由 `tla.make_shape` 构造。必填。
+- `shape`（`_Shape` | int 树）：由 `tla.make_shape` 构造；Host 也可传 Python int 树。
   RowMajor / ColumnMajor：二维 `(M, N)`。
   `zN` / `nZ` / `L0Clayout` / `zNUnAlign`：嵌套 `((m0, m1), (n0, n1))`。
-- `stride`（`_Stride`）：布局 stride，由 `tla.make_stride` 构造。必填。
-  嵌套形态须与 `shape` 一致。
-- `origin_shape`（`_Shape | None`）：逻辑工作尺寸（对齐前的真实数据大小）。
-  可选，默认 `None`。拷贝 / 切块按该逻辑尺寸；物理存放方式在 `shape` / `stride`。
+- `stride`（`_Stride` | int 树）：由 `tla.make_stride` 构造；Host 也可传与 `shape` 同嵌套的 int 树。
+- `origin_shape`（`_Shape` | int 树 | None）：逻辑工作尺寸。可选，默认 `None`
+  （推断；Host 上省略时等于 `shape`）。
 - `layoutTag`（`_LayoutTag | None`）：布局标签，见 [布局标签](system.md#布局标签)。
   可选，默认 `None`（`RowMajor`）。
 
 约束说明：
 
-- 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
-- `shape` / `stride` 须为 `make_shape` / `make_stride` 的返回值。
+- Kernel 路径：须在 `@tla.kernel` 内；`shape` / `stride` 为 `make_shape` / `make_stride`（SSA）。
+- Host 路径：无 frontend；Host `make_shape` / `make_stride` 或 int 树；结果供
+  Host `tla.make_tensor`，不是 Kernel IR。
 - RowMajor / ColumnMajor 省略 `origin_shape` 时推断为 `shape`；
-  `zN` / `nZ` / `L0Clayout` / `zNUnAlign` 则从
-  `shape=((m0,m1),(n0,n1))` 推断为 `(m0*m1, n0*n1)`。
+  `zN` / `nZ` / `L0Clayout` / `zNUnAlign` 在 Kernel 上从
+  `shape=((m0,m1),(n0,n1))` 推断为 `(m0*m1, n0*n1)`；Host 省略 origin 时默认等于 `shape`。
 - **不要**给 `zN` / `nZ` / `L0Clayout` / `zNUnAlign` 配普通二维
   `shape`，检查会失败。请写嵌套物理 shape，或用
   `make_tensor_like(ptr, like, layoutTag=...)` 由 `like.origin_shape` 自动换算。
@@ -338,7 +358,11 @@ pad.fill(0)
 
 功能说明：
 
-由显式指针、layout 与可选 coord 构造 `!tla.tensor`。
+由显式指针、layout 与可选 coord 构造 tensor。
+
+在 ``@tla.kernel`` 内：构造打包的 `!tla.tensor` IR。
+在 kernel 外：同一入口用 Host ``tla.make_ptr`` / ``tla.make_layout``
+直绑 Host tensor（无 DLPack）。
 
 函数原型：
 
@@ -348,25 +372,37 @@ tla.make_tensor(ptr: Pointer, layout: TlaLayout, coord: CoordLike | None = None)
 
 参数说明：
 
-- `ptr`（`Pointer`）：底层数据指针（`!tla.ptr`）。必填。
+- `ptr`（`Pointer`）：底层数据指针（Kernel 为 `!tla.ptr`，或 Host ``make_ptr``）。必填。
 - `layout`（`TlaLayout`）：tensor 布局，由 `tla.make_layout` 构造。必填。
 - `coord`（`CoordLike | None`）：可选起始坐标；缺省视为零坐标。可选，默认 `None`。
 
 约束说明：
 
-- 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
-- 指针、layout、coord 须匹配目标地址空间与 dtype。
-- `coord` 缺省为零坐标，秩与 layout 一致（秩 2 → `make_coord(0, 0)`，秩 1 → `make_coord(0)`）。元素类型与地址空间来自 `ptr` 的 `!tla.ptr`；layout tag、shape、stride、origin 来自 `!tla.layout` 操作数（未给 `origin_shape` 时 origin 默认为 `shape`）。
+- Kernel 路径：须在 `@tla.kernel` 内；指针、layout、coord 须匹配目标地址空间与 dtype。
+- Host 路径：无 frontend；仅 Host ``make_ptr`` / ``make_layout``；
+  信任 layout 元数据（需要校验时请用 ``from_dlpack``）。``loc`` 忽略。
+- `coord` 缺省为零坐标，秩与 layout 一致（秩 2 → `make_coord(0, 0)`，秩 1 → `make_coord(0)`）。元素类型与地址空间来自 `ptr`；layout tag、shape、stride、origin 来自 layout（未给 `origin_shape` 时 origin 默认为 `shape`）。
 - Lowering 支持 RowMajor、ColumnMajor、zN、nZ、L0Clayout、zNUnAlign。
   对 `zN` / `nZ` / `L0Clayout` / `zNUnAlign`，物理 `shape` / `stride`
   为嵌套 2×2，逻辑 coord / `origin_shape` 仍是二维 `(M, N)`。若 `make_layout`
   省略 `origin_shape`，则从物理 shape 推断逻辑尺寸（例如 `(m0*m1, n0*n1)`）。
-- 完整编译要求 `ptr` 具备底层存储；可运行 kernel 中片上指针的推荐形式是 `allocate`（可选再经 `recast_ptr`）。
+- 完整 Kernel 编译要求 `ptr` 具备底层存储；可运行 kernel 中片上指针的推荐形式是 `allocate`（可选再经 `recast_ptr`）。
 
 调用示例：
 
 ```python
+# Kernel IR：
 tensor = tla.make_tensor(ptr, layout, coord=tla.make_coord(0, 0))
+
+# Host 直绑（无 DLPack）：
+host = tla.make_tensor(
+    tla.make_ptr(tla.Float16, int(buf.data_ptr()), tla.AddressSpace.gm),
+    tla.make_layout(
+        tla.make_shape(128, 64),
+        tla.make_stride(64, 1),
+        layoutTag=tla.arch.RowMajor,
+    ),
+)
 ```
 
 ---
@@ -411,7 +447,11 @@ dst = tla.make_tensor_like(ptr, like=src_tile, layoutTag=tla.arch.RowMajor)
 
 功能说明：
 
-由整型位型经 `tla.inttoptr` 构造指针。
+由地址值构造指针。
+
+在 ``@tla.kernel`` 内：构造 `!tla.ptr`。在 kernel 外：同一 ``Pointer`` 类型，
+持有 Host 地址，供 Host ``tla.make_tensor`` 使用（无 MLIR）；
+``value`` 须为 Python ``int`` 地址。
 
 函数原型：
 
@@ -422,14 +462,14 @@ tla.make_ptr(dtype: type[Numeric] | None, value: int | mlir_ir.Value | Numeric, 
 参数说明：
 
 - `dtype`（`type[Numeric] | None`）：指针指向的元素类型；`None` 表示 `Int8`。可选，默认 `None`。
-- `value`（`int | mlir_ir.Value | Numeric`）：地址值（整数、`mlir` Value 或 Numeric）。必填。
+- `value`（`int | mlir_ir.Value | Numeric`）：地址值。必填。Host 路径要求 ``int``。
 - `mem_space`（`AddressSpace`）：指针所在地址空间。可选，默认 `AddressSpace.gm`。
 - `assumed_align`（`int | None`）：假定对齐字节数。可选，默认 `None`。
 
 约束说明：
 
-- 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
-- 整型地址位宽须与目标 `mem_space` 匹配。
+- Kernel 路径：须在 `@tla.kernel` 内；整型地址位宽须与目标 `mem_space` 匹配。
+- Host 路径：无 frontend；结果仅供 Host `tla.make_tensor`。
 
 调用示例：
 

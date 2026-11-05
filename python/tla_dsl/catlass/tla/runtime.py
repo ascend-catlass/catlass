@@ -43,6 +43,13 @@ def _as_host_index_tree(value: Any, *, what: str) -> Any:
     )
 
 
+def _zeros_index_tree(tree: Any) -> Any:
+    """Coord default: same nesting as ``tree``, every leaf 0."""
+    if isinstance(tree, tuple):
+        return tuple(_zeros_index_tree(x) for x in tree)
+    return 0
+
+
 def _is_contiguous_run(shape: tuple[int, ...], strides: tuple[int, ...]) -> bool:
     """True when a view reads consecutive elements, ignoring size-1 extents.
 
@@ -324,6 +331,44 @@ class _Tensor(TensorABC):
         self._flat_stride = resolved_flat_stride
         if len(resolved_flat_stride) != len(resolved_flat_shape):
             raise RuntimeTensorError("Tensor shape/stride flat metadata rank mismatch")
+
+    @classmethod
+    def _from_host_binding(
+        cls,
+        *,
+        shape_tree: Any,
+        stride_tree: Any,
+        origin_tree: Any,
+        coord_tree: Any,
+        dtype: Any,
+        addrspace: Any,
+        data_ptr: int,
+        layout_tag: Any,
+        assumed_align: int | None = None,
+    ) -> "_Tensor":
+        """Fast Host bind: trust already-normalized make_ptr/make_layout trees.
+
+        Skips ``__init__`` remap / re-validation used by the general constructor.
+        """
+        self = object.__new__(cls)
+        self._external_binding = data_ptr != 0
+        self._assumed_align = None if assumed_align is None else int(assumed_align)
+        self._dlpack_source = None
+        self._dlpack_release = None
+        self._dynamic_shape_tree = None
+        self._dynamic_origin_shape_tree = None
+        self._dynamic_stride_tree = None
+        self.data_ptr = int(data_ptr)
+        self._dtype = _coerce_host_tensor_dtype(dtype)
+        self.addrspace = _coerce_host_tensor_addrspace(addrspace)
+        self.layout_tag = layout_tag
+        self._shape = shape_tree
+        self._stride = stride_tree
+        self.origin_shape = origin_tree
+        self.coord = coord_tree
+        self._flat_shape = tuple(_flatten_int_leaves_tree(shape_tree))
+        self._flat_stride = tuple(_flatten_int_leaves_tree(stride_tree))
+        return self
 
     @property
     def dtype(self) -> Any:
@@ -1002,6 +1047,74 @@ def from_dlpack(
     return tensor
 
 
+def _host_make_tensor(ptr: Any, layout: Any, *, coord: Any | None = None) -> _Tensor:
+    """Host bind implementation behind dual-mode ``tla.make_tensor`` (not public)."""
+    from ..core_api import (
+        _Coord,
+        _Layout,
+        _NZ_FAMILY_LAYOUT_TOKENS,
+        _Pointer,
+        _Shape,
+        _Stride,
+        _infer_padded_origin_tree_from_nz_family_shape,
+        _resolve_arch_layout_tag,
+    )
+
+    if not isinstance(ptr, _Pointer) or ptr.value is not None:
+        raise TypeError(
+            "make_tensor ptr must come from tla.make_ptr outside a kernel; "
+            f"got {type(ptr).__name__}"
+        )
+    if not isinstance(layout, _Layout) or layout._layout_value is not None:
+        raise TypeError(
+            "make_tensor layout must come from tla.make_layout outside a kernel; "
+            f"got {type(layout).__name__}"
+        )
+    shape_obj = layout.shape
+    stride_obj = layout.stride
+    if not isinstance(shape_obj, _Shape) or not isinstance(stride_obj, _Stride):
+        raise TypeError("make_tensor layout is missing Host shape/stride")
+    origin_obj = layout.origin_shape
+    if origin_obj is not None and not isinstance(origin_obj, _Shape):
+        raise TypeError("make_tensor layout origin_shape must be a Host shape")
+
+    shape_tree = shape_obj._components
+    stride_tree = stride_obj._components
+    layout_token = _resolve_arch_layout_tag(layout.layout_tag, for_op="make_tensor")
+    if origin_obj is None:
+        if layout_token in _NZ_FAMILY_LAYOUT_TOKENS:
+            origin_tree = _infer_padded_origin_tree_from_nz_family_shape(
+                shape_tree, for_op="make_tensor"
+            )
+        else:
+            origin_tree = shape_tree
+    else:
+        origin_tree = origin_obj._components
+
+    if coord is None:
+        coord_tree = _zeros_index_tree(origin_tree)
+    else:
+        if isinstance(coord, _Coord):
+            if coord._coord_value is not None:
+                raise TypeError(
+                    "make_tensor coord must come from tla.make_coord outside a kernel"
+                )
+            coord = coord._components
+        coord_tree = _as_host_index_tree(coord, what="coord")
+
+    return _Tensor._from_host_binding(
+        shape_tree=shape_tree,
+        stride_tree=stride_tree,
+        origin_tree=origin_tree,
+        coord_tree=coord_tree,
+        dtype=ptr.dtype,
+        addrspace=ptr.addrspace,
+        data_ptr=ptr.data_ptr,
+        layout_tag=layout_token,
+        assumed_align=ptr.assumed_align,
+    )
+
+
 def make_fake_tensor(
     dtype: Any,
     shape: Any,
@@ -1017,14 +1130,15 @@ def make_fake_tensor(
     Description:
         Build a metadata-only Host tensor with no device buffer (`data_ptr == 0`).
         Use this as a `tla.compile` type sample when no NPU is needed. Bind real
-        buffers with `from_dlpack`.
+        buffers with `tla.make_tensor` (direct pointer) or `from_dlpack`.
 
         Parameters:
         - *`dtype`*: Element type such as `tla.Float16` / `tla.Float32`. Required.
         - *`shape`* (`int | tuple`): Logical shape tree (nested tuples for zN
           physical layouts). Required.
-        - *`stride`* (`int | tuple`): Stride tree; structure must match `shape`.
-          Required.
+        - *`stride`* (`int | tuple | None`): Stride tree; structure must match
+          `shape`. When ``None``, derived from layout remap (same as historical
+          ``_Tensor`` construction).
         - *`layout_tag`*: `tla.arch` tag. Optional; default `tla.arch.RowMajor`.
         - *`addrspace`*: Address space. Optional; default `AddressSpace.gm`.
         - *`origin_shape`* (`int | tuple | None`): Logical origin. Optional;
@@ -1036,8 +1150,12 @@ def make_fake_tensor(
         Constraints:
         - `shape` / `stride` / `origin_shape` / `coord` are Python int trees,
           not Kernel `tla.make_shape` / `tla.make_stride` / `tla.make_coord`.
-        - Always unbound; cannot be launched until replaced by `from_dlpack`.
+        - Always unbound; cannot be launched until replaced by a bound Host
+          tensor (`tla.make_tensor` / `from_dlpack`).
         - Explicit `shape` / `stride` are kept as given (no layout remap).
+        - Signature unchanged; implemented via ``tla.make_ptr`` +
+          ``tla.make_layout`` + Host ``tla.make_tensor``. ``stride=None`` /
+          ``coord=None`` keep the pre-existing remap defaults.
 
         Example:
         ```python
@@ -1051,27 +1169,67 @@ def make_fake_tensor(
         )
         ```
     """
-    from ..runtime import _eager_capture
+    from ..core_api import arch as _arch
+    from ..core_api import make_layout as _make_layout
+    from ..core_api import make_ptr as _make_ptr
+    from ..core_api import make_shape as _make_shape
+    from ..core_api import make_stride as _make_stride
+    from ..core_api import _resolve_arch_layout_tag
 
-    if origin_shape is None:
-        origin_shape = shape
+    if layout_tag is None:
+        layout_tag = _arch.RowMajor
 
-    with _eager_capture():
-        tensor = _Tensor(
-            shape,
-            dtype,
-            addrspace=addrspace,
-            data_ptr=0,
-            origin_shape=origin_shape,
-            coord=coord,
-            stride=stride,
-            layout_tag=layout_tag,
+    def _as_components(tree: Any) -> tuple[Any, ...]:
+        if isinstance(tree, tuple):
+            return tree
+        return (tree,)
+
+    shape_tree = _as_host_index_tree(shape, what="shape")
+    origin_tree = _as_host_index_tree(
+        shape if origin_shape is None else origin_shape, what="origin_shape"
+    )
+    resolved_stride = stride
+    resolved_coord = coord
+    # Match historical ``_Tensor(..., stride=None, coord=None)``: derive from
+    # the same layout remap helper, then feed concrete trees into Host make_*.
+    if resolved_stride is None or resolved_coord is None:
+        layout_token = _resolve_arch_layout_tag(layout_tag, for_op="Tensor")
+        dtype_token = _coerce_host_tensor_dtype(dtype)
+        rs_stride, rs_coord = _try_remap_stride_coord_trees(
+            shape_tree, origin_tree, dtype_token, layout_token
         )
-    if assumed_align is not None:
-        tensor._assumed_align = int(assumed_align)
-    tensor.data_ptr = 0
-    tensor._external_binding = False
-    return tensor
+        if resolved_stride is None:
+            if rs_stride is None:
+                raise ValueError(
+                    "make_fake_tensor(stride=None): cannot derive stride from layout "
+                    "remap (remap stride tree must match shape tree); pass an explicit "
+                    "stride tree"
+                )
+            resolved_stride = rs_stride
+        if resolved_coord is None:
+            if rs_coord is None:
+                raise ValueError(
+                    "make_fake_tensor(coord=None): cannot derive coord from layout "
+                    "remap; use a flat logical origin_shape (M,N) without nested "
+                    "parentheses, or pass an explicit coord tree"
+                )
+            resolved_coord = rs_coord
+
+    host_shape = _make_shape(*_as_components(shape_tree))
+    host_stride = _make_stride(*_as_components(resolved_stride))
+    host_origin = (
+        None if origin_shape is None else _make_shape(*_as_components(origin_tree))
+    )
+    return _host_make_tensor(
+        _make_ptr(dtype, 0, addrspace, assumed_align=assumed_align),
+        _make_layout(
+            host_shape,
+            host_stride,
+            origin_shape=host_origin,
+            layoutTag=layout_tag,
+        ),
+        coord=resolved_coord,
+    )
 
 
 __all__ = [

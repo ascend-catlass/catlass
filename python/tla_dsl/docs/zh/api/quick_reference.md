@@ -30,22 +30,23 @@ nav_order: 5
 | [`tla.compile`](runtime/compile_launch.md#tlacompile) | 从类型样本编译 kernel，返回 `JitCompiledFunction`。 | Host；类型样本不必绑定 NPU 缓冲。`block_num` / `stream` 等启动参数写在编译结果上。 |
 | [`tla.JitCompiledFunction.__call__`](runtime/compile_launch.md#tlajitcompiledfunction__call__) | 启动已编译 kernel，并复用 executor 与二进制。 | Host；tensor 实参须为已绑定的 NPU 缓冲，`make_fake_tensor` 结果不能启动。 |
 | [`tla.from_dlpack`](runtime/host_tensor.md#tlafrom_dlpack) | 零拷贝绑定 DLPack tensor 为 TLA Host tensor。 | Host；`layout_tag` 必填。NPU 缓冲可启动，CPU 缓冲只提供编译元数据。 |
+| [`tla.make_tensor`](runtime/host_tensor.md#tlamake_tensor) | Host 双模式：由 `tla.make_ptr` + `tla.make_layout` 绑定缓冲。 | Host 路径跳过 DLPack；Kernel 内仍发 IR。 |
 | [`tla.make_fake_tensor`](runtime/host_tensor.md#tlamake_fake_tensor) | 创建仅含元数据的编译样本。 | Host；无设备缓冲，不能启动。shape 输入是 Python 整数树，不是 Kernel layout 值。 |
 
 ## 3. Tensor、Layout 与 Pointer
 
 | API | 用途 | 上下文或关键约束 |
 | --- | --- | --- |
-| [`tla.make_shape`](language/layout_tensor.md#tlamake_shape) | 构造逻辑或嵌套物理 shape。 | Kernel；`zN`、`nZ`、`L0Clayout`、`zNUnAlign` 使用显式嵌套物理 shape。 |
-| [`tla.make_coord`](language/layout_tensor.md#tlamake_coord) | 构造 coord 树。 | Kernel；坐标表示 tile 还是元素由消费接口决定。 |
-| [`tla.make_stride`](language/layout_tensor.md#tlamake_stride) | 构造 stride 树。 | Kernel；嵌套结构与数值须匹配 shape 与 layout tag。 |
-| [`tla.make_layout`](language/layout_tensor.md#tlamake_layout) | 组合 shape、stride、逻辑 origin 与 layout tag。 | Kernel；物理 layout 须使用嵌套 shape / stride。 |
+| [`tla.make_shape`](language/layout_tensor.md#tlamake_shape) | 构造逻辑或嵌套物理 shape。 | Kernel / Host 同类型；`zN` 等使用显式嵌套物理 shape。 |
+| [`tla.make_coord`](language/layout_tensor.md#tlamake_coord) | 构造 coord 树。 | Kernel / Host 同类型；坐标语义由消费接口决定。 |
+| [`tla.make_stride`](language/layout_tensor.md#tlamake_stride) | 构造 stride 树。 | Kernel / Host 同类型；嵌套与数值须匹配 shape 与 layout tag。 |
+| [`tla.make_layout`](language/layout_tensor.md#tlamake_layout) | 组合 shape、stride、逻辑 origin 与 layout tag。 | Kernel / Host 同类型；Host 用 `make_shape` / `make_stride`。 |
 | [`tla.make_layout_with_tag`](language/layout_tensor.md#tlamake_layout_with_tag) | 按元素类型与 layout tag 重映射二维逻辑尺寸。 | Kernel；仅限片上 layout，供 `make_tensor` 使用。 |
 | [`tla.tile_view`](language/layout_tensor.md#tlatile_view) | 不拷贝源缓冲创建 tile 视图。 | Kernel；坐标使用 tile 粒度。 |
 | [`tla.get_tile`](language/layout_tensor.md#tlaget_tile) | 从源缓冲切出扁平二维子 tile。 | Kernel；坐标为元素偏移。裁剪只收窄尺寸，不限制越界起点。 |
 | [`tla.make_tensor`](language/layout_tensor.md#tlamake_tensor) | 组合 pointer、layout 与可选 coord。 | Kernel；pointer dtype 与地址空间须匹配，可运行 kernel 须有底层存储。 |
 | [`tla.make_tensor_like`](language/layout_tensor.md#tlamake_tensor_like) | 在另一 pointer 上复用参考 tile 元数据，可改 layout tag。 | Kernel；目标 pointer 指向片上。 |
-| [`tla.make_ptr`](language/layout_tensor.md#tlamake_ptr) | 从地址构造带类型的 pointer。 | Kernel；整数地址宽度须匹配目标地址空间。 |
+| [`tla.make_ptr`](language/layout_tensor.md#tlamake_ptr) | 从地址构造带类型的 pointer。 | Kernel / Host 同类型；Host 接受 Python int 地址。 |
 | [`tla.recast_ptr`](language/layout_tensor.md#tlarecast_ptr) | 重解释 pointer 的元素类型。 | Kernel；地址与 swizzle 保持不变。 |
 
 ## 4. 数据搬运与矩阵计算

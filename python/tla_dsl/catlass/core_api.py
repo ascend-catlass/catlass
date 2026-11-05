@@ -269,7 +269,7 @@ def _check_reduction_element_type_supported(op_name: str, element_type: str) -> 
 
 
 class _Shape:
-    """SSA wrapper for the **result** of ``make_shape`` (``!tla.shape<...>``).
+    """Result of ``make_shape``: Kernel ``!tla.shape`` SSA, or Host int-tree components.
 
     Nested structure is expressed only via **tuple trees** in ``make_shape(*components)``;
     do not pass ``_Shape`` / ``_Coord`` / ``_Stride`` as inner components.
@@ -278,26 +278,34 @@ class _Shape:
     __slots__ = ("_shape_value", "_components")
 
     def __init__(
-        self, *, shape_value: mlir_ir.Value, components: tuple[Any, ...]
+        self, *, shape_value: mlir_ir.Value | None, components: tuple[Any, ...]
     ) -> None:
         self._shape_value = shape_value
         self._components = components
 
+    @classmethod
+    def _from_host(cls, components: tuple[Any, ...]) -> "_Shape":
+        return cls(shape_value=None, components=components)
+
 
 class _Coord:
-    """SSA wrapper for the **result** of ``make_coord`` (``!tla.coord<...>``). See ``_Shape`` re: tuple-only nesting."""
+    """Result of ``make_coord``: Kernel ``!tla.coord`` SSA, or Host int-tree components."""
 
     __slots__ = ("_coord_value", "_components")
 
     def __init__(
-        self, *, coord_value: mlir_ir.Value, components: tuple[Any, ...]
+        self, *, coord_value: mlir_ir.Value | None, components: tuple[Any, ...]
     ) -> None:
         self._coord_value = coord_value
         self._components = components
 
+    @classmethod
+    def _from_host(cls, components: tuple[Any, ...]) -> "_Coord":
+        return cls(coord_value=None, components=components)
+
 
 class _Stride:
-    """SSA wrapper for ``make_stride`` (``!tla.stride<...>``).
+    """Result of ``make_stride``: Kernel ``!tla.stride`` SSA, or Host int-tree components.
 
     Like :class:`_Shape` / :class:`_Coord`, stores ``_components`` (the tuple tree passed to
     ``make_stride``) so Python code can recover the same tree as ``make_shape`` without
@@ -308,38 +316,125 @@ class _Stride:
     __slots__ = ("_stride_value", "_components")
 
     def __init__(
-        self, *, stride_value: mlir_ir.Value, components: tuple[Any, ...]
+        self, *, stride_value: mlir_ir.Value | None, components: tuple[Any, ...]
     ) -> None:
         self._stride_value = stride_value
         self._components = components
 
+    @classmethod
+    def _from_host(cls, components: tuple[Any, ...]) -> "_Stride":
+        return cls(stride_value=None, components=components)
+
 
 class _Layout:
-    """SSA wrapper for ``make_layout`` (``!tla.layout<...>``).
+    """Layout from ``make_layout``: Kernel ``!tla.layout`` SSA, or Host metadata.
 
-    The fused layout SSA is the primary payload. The source ``_Shape`` / ``_Stride`` /
-    origin ``_Shape`` wrappers and the resolved layout-tag token are also retained so
-    ``make_tensor`` can rebuild the Python layout/tensor descriptor trees without
-    re-parsing the MLIR type string (same component trees as MLIR: layout type is derived
-    from shape+stride types).
+    Kernel: fused layout SSA is the primary payload; source ``_Shape`` / ``_Stride`` /
+    origin wrappers and the layout-tag token are retained for ``make_tensor`` IR rebuild.
+
+    Host (outside ``@tla.kernel``): ``_layout_value`` is ``None``; ``_shape`` /
+    ``_stride`` / ``_origin_shape`` are Host ``_Shape`` / ``_Stride`` (no MLIR SSA).
     """
 
-    __slots__ = ("_layout_value", "_shape", "_stride", "_origin_shape", "_layout_tag")
+    __slots__ = (
+        "_layout_value",
+        "_shape",
+        "_stride",
+        "_origin_shape",
+        "_layout_tag",
+    )
 
     def __init__(
         self,
         *,
-        layout_value: mlir_ir.Value,
+        layout_value: mlir_ir.Value | None,
         shape: _Shape | None = None,
         stride: _Stride | None = None,
         origin_shape: _Shape | None = None,
-        layout_tag: str | None = None,
+        layout_tag: Any = None,
     ) -> None:
         self._layout_value = layout_value
         self._shape = shape
         self._stride = stride
         self._origin_shape = origin_shape
         self._layout_tag = layout_tag
+
+    @classmethod
+    def _from_host(
+        cls,
+        shape: _Shape,
+        stride: _Stride,
+        *,
+        layout_tag: Any,
+        origin_shape: _Shape | None,
+    ) -> "_Layout":
+        return cls(
+            layout_value=None,
+            shape=shape,
+            stride=stride,
+            origin_shape=origin_shape,
+            layout_tag=layout_tag,
+        )
+
+    @property
+    def shape(self) -> _Shape | None:
+        return self._shape
+
+    @property
+    def stride(self) -> _Stride | None:
+        return self._stride
+
+    @property
+    def layout_tag(self) -> Any:
+        return self._layout_tag
+
+    @property
+    def origin_shape(self) -> _Shape | None:
+        return self._origin_shape
+
+
+def _require_host_index_components(value: Any, *, arg: str) -> Any:
+    """Validate a Host-only int / nested-int-tuple tree (no SSA / Numeric)."""
+    if isinstance(value, int):
+        return value
+    if isinstance(value, tuple):
+        if len(value) == 0:
+            raise TypeError(f"{arg} must be a non-empty int tree")
+        return tuple(_require_host_index_components(x, arg=arg) for x in value)
+    raise TypeError(
+        f"{arg} must be an int or nested int tuple, got {type(value).__name__}"
+    )
+
+
+# Host make_layout accepts the typed object or a bare int tree; map each kind
+# to its SSA field (must be None on Host) and the public factory name.
+_HOST_TREE_SPEC: dict[type, tuple[str, str]] = {
+    _Shape: ("_shape_value", "make_shape"),
+    _Stride: ("_stride_value", "make_stride"),
+}
+
+
+def _coerce_host_tree(value: Any, *, cls: type, arg: str) -> Any:
+    """Normalize Host shape/stride input to ``cls`` (``_Shape`` / ``_Stride``)."""
+    ssa_attr, factory = _HOST_TREE_SPEC[cls]
+    if isinstance(value, cls):
+        if getattr(value, ssa_attr) is not None:
+            _op_error(
+                "make_layout",
+                f"outside a kernel, {arg} must be from Host tla.{factory} "
+                "(not Kernel SSA)",
+            )
+        # Already built by Host make_shape/make_stride; trust components.
+        return value
+    if isinstance(value, int):
+        return cls._from_host((value,))
+    if isinstance(value, tuple):
+        return cls._from_host(_require_host_index_components(value, arg=arg))
+    _op_error(
+        "make_layout",
+        f"outside a kernel, {arg} must be tla.{factory}(...) or an int tree; "
+        f"got {type(value).__name__}",
+    )
 
 
 IndexLike: TypeAlias = int | mlir_ir.Value | Numeric
@@ -363,9 +458,21 @@ class _LayoutTag(_Sentinel):
 
 @_register_value_caster(PtrType.get_static_typeid(), replace=True)
 class _Pointer(Pointer):
-    """Concrete JIT pointer for ``!tla.ptr<...>``."""
+    """Pointer from ``make_ptr``: Kernel ``!tla.ptr`` SSA, or Host address metadata.
 
-    __slots__ = ("value", "_ptr_ty", "_alloc_size_bytes")
+    Host (outside ``@tla.kernel``): ``value`` is ``None``; dtype / data_ptr /
+    addrspace are held for Host ``tla.make_tensor``.
+    """
+
+    __slots__ = (
+        "value",
+        "_ptr_ty",
+        "_alloc_size_bytes",
+        "_host_dtype",
+        "_host_data_ptr",
+        "_host_addrspace",
+        "_host_assumed_align",
+    )
     __tla_category__ = "pointer"
 
     def __new__(cls, value: Any, alloc_size_bytes: int | None = None) -> Any:
@@ -380,6 +487,10 @@ class _Pointer(Pointer):
 
     def __init__(self, value: Any, alloc_size_bytes: int | None = None) -> None:
         if isinstance(value, _Pointer):
+            if value.value is None:
+                raise TypeError(
+                    "cannot wrap a Host make_ptr result as a Kernel pointer"
+                )
             if alloc_size_bytes is None:
                 alloc_size_bytes = value._alloc_size_bytes
             value = value.value
@@ -397,21 +508,65 @@ class _Pointer(Pointer):
             pt = PtrType(pt)
         object.__setattr__(self, "_ptr_ty", pt)
         object.__setattr__(self, "_alloc_size_bytes", alloc_size_bytes)
+        object.__setattr__(self, "_host_dtype", None)
+        object.__setattr__(self, "_host_data_ptr", None)
+        object.__setattr__(self, "_host_addrspace", None)
+        object.__setattr__(self, "_host_assumed_align", None)
+
+    @classmethod
+    def _from_host(
+        cls,
+        dtype: type[Numeric],
+        data_ptr: int,
+        addrspace: AddressSpace,
+        *,
+        assumed_align: int | None = None,
+    ) -> "_Pointer":
+        self = object.__new__(cls)
+        object.__setattr__(self, "value", None)
+        object.__setattr__(self, "_ptr_ty", None)
+        object.__setattr__(self, "_alloc_size_bytes", None)
+        object.__setattr__(self, "_host_dtype", dtype)
+        object.__setattr__(self, "_host_data_ptr", int(data_ptr))
+        object.__setattr__(self, "_host_addrspace", addrspace)
+        object.__setattr__(
+            self,
+            "_host_assumed_align",
+            None if assumed_align is None else int(assumed_align),
+        )
+        return self
 
     def __tla_type__(self) -> str:
+        if self.value is None:
+            return f"!tla.ptr<{self._host_dtype.dtype}, {self._host_addrspace}, host>"
         return str(self.value.type)
 
     def __str__(self) -> str:
+        if self.value is None:
+            return self.__tla_type__()
         return str(self.value.type)
 
     def __repr__(self) -> str:
+        if self.value is None:
+            return (
+                f"Pointer(host, dtype={self._host_dtype!r}, "
+                f"data_ptr={self._host_data_ptr!r}, addrspace={self._host_addrspace!r})"
+            )
         return f"Pointer({self.value})"
 
     def __get_mlir_types__(self, context: mlir_ir.Context | None = None) -> list[Any]:
         del context
+        if self.value is None:
+            raise TypeError(
+                "Host make_ptr result has no MLIR type; use inside @tla.kernel"
+            )
         return [self.value.type]
 
     def __extract_mlir_values__(self) -> list[Any]:
+        if self.value is None:
+            raise TypeError(
+                "Host make_ptr result has no MLIR value; use inside @tla.kernel"
+            )
         return [self.value]
 
     def __new_from_mlir_values__(self, values: list[Any]) -> "_Pointer":
@@ -424,6 +579,8 @@ class _Pointer(Pointer):
             raise ValueError(f"Pointer expects 1 MLIR value, got {len(values)}")
         v0 = values[0]
         if isinstance(v0, _Pointer):
+            if v0.value is None:
+                raise TypeError("cannot rebuild Host make_ptr result from MLIR values")
             inner = v0.value
         elif isinstance(v0, mlir_ir.Value):
             inner = v0
@@ -437,10 +594,30 @@ class _Pointer(Pointer):
 
     @property
     def dtype(self) -> type[Numeric]:
+        if self.value is None:
+            return self._host_dtype
         return Numeric.from_mlir_type(self.pointee)
 
     @property
+    def data_ptr(self) -> int:
+        if self.value is None:
+            return int(self._host_data_ptr)
+        raise TypeError(
+            "Kernel pointer has no Host data_ptr; use make_ptr outside a kernel"
+        )
+
+    @property
+    def assumed_align(self) -> int | None:
+        if self.value is None:
+            return self._host_assumed_align
+        return None
+
+    @property
     def alignment(self) -> int:
+        if self.value is None:
+            if self._host_assumed_align is not None:
+                return int(self._host_assumed_align)
+            return _builtins.max(1, int(self._host_dtype.width) // 8)
         return self._ptr_ty.alignment
 
     @property
@@ -449,19 +626,27 @@ class _Pointer(Pointer):
 
     @property
     def memspace(self) -> AddressSpace:
+        if self.value is None:
+            return self._host_addrspace
         return AddressSpace.from_mlir_token(self._ptr_ty.addrspace)
 
     @property
     def type(self) -> Any:
+        if self.value is None:
+            raise TypeError("Host make_ptr result has no MLIR type")
         return self.value.type
 
     @property
     def pointee(self) -> mlir_ir.Type:
+        if self.value is None:
+            raise TypeError("Host make_ptr result has no MLIR pointee type")
         return self._ptr_ty.pointee
 
     @property
     def addrspace(self) -> AddressSpace:
         """Address space of ``!tla.ptr`` (same as :attr:`memspace`)."""
+        if self.value is None:
+            return self._host_addrspace
         return AddressSpace.from_mlir_token(self._ptr_ty.addrspace)
 
     def __add__(self, other: Any) -> "_Pointer":
@@ -2097,6 +2282,7 @@ def _validate_static_make_tensor_layout(
     *,
     dtype: str,
     layout_tag: str,
+    for_op: str = "make_tensor",
 ) -> None:
     """Validate static shape/stride leaves using ``tla/layout.hpp`` traits."""
 
@@ -2112,7 +2298,7 @@ def _validate_static_make_tensor_layout(
             # is RowMajor, whose descriptor keeps the real value.
             if layout_tag == "VectorLayout" and stride_const_tree[0] is None:
                 raise TlaLoweringError(
-                    "tla.make_tensor layout 'VectorLayout' requires a static stride "
+                    f"tla.{for_op} layout 'VectorLayout' requires a static stride "
                     "of 1; a dynamic stride has no representation in this layout "
                     "(use RowMajor for a strided rank-1 view)"
                 )
@@ -2205,7 +2391,7 @@ def _validate_static_make_tensor_layout(
 
     if any(actual is not None and actual != expected for actual, expected in checks):
         raise TlaLoweringError(
-            f"tla.make_tensor shape {shape_const_tree!r} and stride "
+            f"tla.{for_op} shape {shape_const_tree!r} and stride "
             f"{stride_const_tree!r} do not match layout {layout_tag!r}"
         )
 
@@ -4090,15 +4276,20 @@ def make_shape(
 ) -> TlaShape:
     """Directory: Basic Data Types and Operations
     Description:
-        Build a packed `!tla.shape`; components may be nested tuples.
+        Build a shape; components may be nested tuples.
+
+        Inside ``@tla.kernel``: builds packed `!tla.shape`. Outside a kernel:
+        same ``_Shape`` type with Host int-tree components for
+        ``tla.make_layout`` / Host ``tla.make_tensor``.
 
         Parameters:
         - *`components`* (`IndexTree`): Shape components per dimension. Nested
           tuples are used for `zN` / `nZ` / `L0Clayout` / `zNUnAlign`
-          physical layouts. Required.
+          physical layouts. Required. Host path: Python ints only.
 
         Constraints:
-        - Must be called inside a `@tla.kernel`-decorated kernel function.
+        - Kernel path: must be inside `@tla.kernel`.
+        - Host path: no frontend; int trees only.
         - Provide at least one shape component.
         - RowMajor / ColumnMajor: use a 2D shape `(M, N)`.
         - `zN` / `nZ` / `L0Clayout` / `zNUnAlign`: for `make_layout` /
@@ -4119,6 +4310,11 @@ def make_shape(
     """
     if len(components) == 0:
         _op_error("make_shape", "expected at least 1 component")
+    if _runtime._current_frontend_state() is None:
+        host_components = tuple(
+            _require_host_index_components(c, arg="make_shape") for c in components
+        )
+        return _Shape._from_host(host_components)
     _require_frontend_state("make_shape")
     v = _pack_shape(components, loc=loc)
     return _Shape(shape_value=v, components=components)
@@ -4132,13 +4328,18 @@ def make_coord(
     """Directory: Basic Data Types and Operations
 
     Description:
-        Build a packed `!tla.coord`.
+        Build a coordinate tree.
+
+        Inside ``@tla.kernel``: builds packed `!tla.coord`. Outside a kernel:
+        same ``_Coord`` type with Host int-tree components.
 
         Parameters:
         - *`components`* (`IndexTree`): Coordinate components per dimension. Required.
+          Host path: Python ints only.
 
         Constraints:
-        - Must be called inside a `@tla.kernel`-decorated kernel function.
+        - Kernel path: must be inside `@tla.kernel`.
+        - Host path: no frontend; int trees only.
         - Provide at least one coordinate component.
 
         Example:
@@ -4148,6 +4349,11 @@ def make_coord(
     """
     if len(components) == 0:
         _op_error("make_coord", "expected at least 1 component")
+    if _runtime._current_frontend_state() is None:
+        host_components = tuple(
+            _require_host_index_components(c, arg="make_coord") for c in components
+        )
+        return _Coord._from_host(host_components)
     _require_frontend_state("make_coord")
     v = _pack_coord(components, loc=loc)
     return _Coord(coord_value=v, components=components)
@@ -4161,10 +4367,14 @@ def make_stride(
     """Directory: Basic Data Types and Operations
 
     Description:
-        Build a packed `!tla.stride` (same nesting rules as `make_shape`).
+        Build a stride (same nesting rules as `make_shape`).
+
+        Inside ``@tla.kernel``: builds packed `!tla.stride`. Outside a kernel:
+        same ``_Stride`` type with Host int-tree components.
 
         Parameters:
         - *`components`* (`IndexTree`): Stride components per dimension. Required.
+          Host path: Python ints only.
 
           Common patterns:
 
@@ -4180,7 +4390,8 @@ def make_stride(
           `elems_per_block = elems_per_c0 * 16`.
 
         Constraints:
-        - Must be called inside a `@tla.kernel`-decorated kernel function.
+        - Kernel path: must be inside `@tla.kernel`.
+        - Host path: no frontend; int trees only.
         - Provide at least one stride component.
         - For `zN` / `nZ` / `L0Clayout` / `zNUnAlign`, stride values must
           match the layout tag (see examples); `make_tensor` checks them against
@@ -4208,6 +4419,11 @@ def make_stride(
     """
     if len(components) == 0:
         _op_error("make_stride", "expected at least 1 component")
+    if _runtime._current_frontend_state() is None:
+        host_components = tuple(
+            _require_host_index_components(c, arg="make_stride") for c in components
+        )
+        return _Stride._from_host(host_components)
     _require_frontend_state("make_stride")
     v = _pack_stride(components, loc=loc)
     return _Stride(stride_value=v, components=tuple(components))
@@ -4215,38 +4431,45 @@ def make_stride(
 
 @dsl_user_op
 def make_layout(
-    shape: _Shape,
-    stride: _Stride,
+    shape: Any,
+    stride: Any,
     *,
-    origin_shape: _Shape | None = None,
+    origin_shape: Any | None = None,
     layoutTag: _LayoutTag | None = None,
     loc: mlir_ir.Location | None = None,
 ) -> TlaLayout:
     """Directory: Basic Data Types and Operations
 
     Description:
-        Compose a `!tla.layout` from shape / stride (maps to `tla.make_layout`).
+        Compose a layout from shape / stride.
+
+        Inside ``@tla.kernel``: builds `!tla.layout` (maps to `tla.make_layout`);
+        ``shape`` / ``stride`` must come from ``make_shape`` / ``make_stride``.
+
+        Outside a kernel: same ``_Layout`` type; ``shape`` / ``stride`` from Host
+        ``make_shape`` / ``make_stride`` (or equivalent int trees) for
+        Host ``tla.make_tensor``.
 
         Parameters:
-        - `shape` (`_Shape`): Layout shape from `tla.make_shape`. Required.
-          RowMajor / ColumnMajor: 2D `(M, N)`.
-          `zN` / `nZ` / `L0Clayout` / `zNUnAlign`: nested
-          `((m0, m1), (n0, n1))`.
-        - `stride` (`_Stride`): Layout stride from `tla.make_stride`. Required.
-          Use the same nesting as `shape`.
-        - `origin_shape` (`_Shape | None`): Logical working shape (true data size
-          before alignment fill). Optional, default `None`. Copy / tiling use this
-          logical size; physical packing lives in `shape` / `stride`.
+        - `shape` (`_Shape` | int tree): From `tla.make_shape`. Host also accepts a
+          Python int tree. RowMajor / ColumnMajor: 2D `(M, N)`. `zN` / `nZ` /
+          `L0Clayout` / `zNUnAlign`: nested `((m0, m1), (n0, n1))`.
+        - `stride` (`_Stride` | int tree): From `tla.make_stride`. Host also accepts
+          a Python int tree with the same nesting as `shape`.
+        - `origin_shape` (`_Shape` | int tree | None): Logical working shape.
+          Optional, default `None` (inferred / equals `shape` on Host).
         - `layoutTag` (`_LayoutTag | None`): Layout tag; see
           **System Variable Access / Layout Tags**. Optional, default `None`
           (`RowMajor`).
 
         Constraints:
-        - Must be called inside a `@tla.kernel`-decorated kernel function.
-        - `shape` / `stride` must be values returned by `make_shape` / `make_stride`.
+        - Kernel path: must be inside `@tla.kernel`; `shape` / `stride` from
+          `make_shape` / `make_stride` (SSA).
+        - Host path: no frontend; Host `make_shape` / `make_stride` or int trees;
+          result is for Host `tla.make_tensor`, not Kernel IR.
         - For RowMajor / ColumnMajor, an omitted `origin_shape` is inferred as
-          `shape`. For `zN` / `nZ` / `L0Clayout` / `zNUnAlign`, it is
-          inferred as `(m0*m1, n0*n1)` from `shape=((m0,m1),(n0,n1))`.
+          `shape`. For `zN` / `nZ` / `L0Clayout` / `zNUnAlign`, Kernel infers
+          `(m0*m1, n0*n1)`; Host defaults omitted origin to `shape`.
         - Do **not** pass a plain 2D `shape` with a `zN` / `nZ` /
           `L0Clayout` / `zNUnAlign` tag; that fails checks. Either build the nested
           physical shape, or use `make_tensor_like(ptr, like, layoutTag=...)` so
@@ -4254,24 +4477,33 @@ def make_layout(
 
         Example:
         ```python
-        # RowMajor 2D:
         layout = tla.make_layout(
             tla.make_shape(256, 128),
             tla.make_stride(128, 1),
             layoutTag=tla.arch.RowMajor,
         )
-
-        # Explicit f16 zN (logical 128x64 → nested physical + 2D origin):
-        # Before: logical ND tile is (128, 64).
-        zn = tla.make_layout(
-            tla.make_shape((16, 8), (16, 4)),
-            tla.make_stride((16, 256), (1, 2048)),
-            origin_shape=tla.make_shape(128, 64),  # logical size for copy/tiling
-            layoutTag=tla.arch.zN,
-        )
-        # After: layout.shape is zN-packed; layout.origin_shape stays (128, 64).
         ```
     """
+    in_kernel = _runtime._current_frontend_state() is not None
+    if not in_kernel:
+        # Validate tag early; keep the arch sentinel for ``_Tensor`` (not the
+        # resolved MLIR token string).
+        _resolve_arch_layout_tag(layoutTag, for_op="make_layout")
+        host_shape = _coerce_host_tree(shape, cls=_Shape, arg="shape")
+        host_stride = _coerce_host_tree(stride, cls=_Stride, arg="stride")
+        # Omit origin → None (same as Kernel); Host make_tensor defaults it.
+        host_origin = (
+            None
+            if origin_shape is None
+            else _coerce_host_tree(origin_shape, cls=_Shape, arg="origin_shape")
+        )
+        return _Layout._from_host(
+            host_shape,
+            host_stride,
+            layout_tag=arch.RowMajor if layoutTag is None else layoutTag,
+            origin_shape=host_origin,
+        )
+
     if not isinstance(shape, _Shape) or not isinstance(stride, _Stride):
         _op_error(
             "make_layout",
@@ -4703,34 +4935,59 @@ def make_tensor(
     """Directory: Basic Data Types and Operations
 
     Description:
-        Build a `!tla.tensor` from an explicit pointer, layout, and optional coord.
+        Build a tensor from an explicit pointer, layout, and optional coord.
+
+        Inside ``@tla.kernel``: builds packed `!tla.tensor` IR.
+        Outside a kernel: same entry binds a Host tensor from Host
+        ``tla.make_ptr`` / ``tla.make_layout`` (no DLPack).
 
         Parameters:
-        - `ptr` (`Pointer`): Underlying data pointer (`!tla.ptr`). Required.
+        - `ptr` (`Pointer`): Underlying data pointer (`!tla.ptr` in Kernel, or
+          Host ``make_ptr``). Required.
         - `layout` (`TlaLayout`): Tensor layout from `tla.make_layout`. Required.
         - `coord` (`CoordLike | None`): Optional start coordinate; treated as zeros when omitted. Optional, default `None`.
 
         Constraints:
-        - Must be called inside a `@tla.kernel`-decorated kernel function.
-        - Pointer, layout, and coord must match the target address space and dtype.
+        - Kernel path: must be inside `@tla.kernel`; pointer, layout, and coord
+          must match the target address space and dtype.
+        - Host path: no frontend; Host ``make_ptr`` / ``make_layout`` only;
+          trusts layout metadata (prefer ``from_dlpack`` when you need those
+          checks). ``loc`` is ignored.
         - `coord` defaults to a zero coord matching the layout's rank (rank-2 ->
           `make_coord(0, 0)`, rank-1 -> `make_coord(0)`). Element type and address
-          space come from `ptr`'s `!tla.ptr`; layout tag, shape, stride, and origin
-          come from the `!tla.layout` operand (origin defaults to `shape`).
+          space come from `ptr`; layout tag, shape, stride, and origin
+          come from the layout (origin defaults to `shape`).
         - Lowering supports RowMajor, ColumnMajor, zN, nZ, L0Clayout, and
           zNUnAlign. For `zN` / `nZ` / `L0Clayout` / `zNUnAlign`, physical
           `shape` / `stride` are nested 2x2, while logical coord / `origin_shape`
           stay 2D `(M, N)`. If `make_layout` omitted `origin_shape`, the logical
           size is inferred from the physical shape (for example `(m0*m1, n0*n1)`).
-        - A full compile requires `ptr` to carry backing storage; an on-chip pointer
-          from `allocate` (optionally via `recast_ptr`) is the supported form for
-          runnable kernels.
+        - A full Kernel compile requires `ptr` to carry backing storage; an on-chip
+          pointer from `allocate` (optionally via `recast_ptr`) is the supported
+          form for runnable kernels.
 
         Example:
         ```python
+        # Kernel IR:
         tensor = tla.make_tensor(ptr, layout, coord=tla.make_coord(0, 0))
+
+        # Host bind (no DLPack):
+        host = tla.make_tensor(
+            tla.make_ptr(tla.Float16, int(buf.data_ptr()), tla.AddressSpace.gm),
+            tla.make_layout(
+                tla.make_shape(128, 64),
+                tla.make_stride(64, 1),
+                layoutTag=tla.arch.RowMajor,
+            ),
+        )
         ```
     """
+    if _runtime._current_frontend_state() is None:
+        del loc
+        from .tla.runtime import _host_make_tensor
+
+        return _host_make_tensor(ptr, layout, coord=coord)
+
     _require_category("make_tensor", "ptr", ptr, "pointer", 0)
     if not isinstance(layout, _Layout):
         _op_error(
@@ -4816,6 +5073,7 @@ def make_tensor(
         stride_tree,
         dtype=dtype,
         layout_tag=layout._layout_tag,
+        for_op="make_tensor",
     )
 
     if coord is None:
@@ -6146,7 +6404,7 @@ def cross_core_wait_flag(
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function.
         - Must be called inside `tla.cube()` or `tla.vector()`; when `mode=4`, `aiv_id` must be 0 or 1.
-        - Under `@tla.kernel(core_ratio=tla.arch.C1V1)`, Ascend950 CV 1:1
+        - Under `@tla.kernel(core_ratio=tla.arch.C1V1)`, Ascend 950 CV 1:1
           handshakes expect `pipe=tla.arch.SCALAR` (`PIPE_S`), matching AscendC
           SyncAll. The compiler does not rewrite a wrong wait pipe; the caller
           must pass `SCALAR` explicitly (see
@@ -10105,31 +10363,53 @@ def make_ptr(
     """Directory: Basic Data Types and Operations
 
     Description:
-        Build a `!tla.ptr` from an address value.
+        Build a pointer from an address value.
+
+        Inside ``@tla.kernel``: builds `!tla.ptr`. Outside a kernel: same
+        ``Pointer`` type holding a Host address for Host ``tla.make_tensor``
+        (no MLIR); ``value`` must be a Python ``int`` address.
 
         Parameters:
         - `dtype` (`type[Numeric] | None`): Pointee element type; `None` means
           `Int8`. Optional, default `None`.
         - `value` (`int | Numeric | address SSA`): Address value. Required.
+          Host path requires ``int``.
         - `mem_space` (`AddressSpace`): Address space of the pointer. Optional, default `AddressSpace.gm`.
         - `assumed_align` (`int | None`): Assumed alignment in bytes. Optional, default `None`.
 
         Constraints:
-        - Must be called inside a `@tla.kernel`-decorated kernel function.
-        - Integer address bit-width must match the target `mem_space`.
+        - Kernel path: must be inside `@tla.kernel`; integer address bit-width
+          must match the target `mem_space`.
+        - Host path: no frontend; result is for Host `tla.make_tensor` only.
 
         Example:
         ```python
         ptr = tla.make_ptr(tla.Float16, addr, mem_space=tla.AddressSpace.gm)
         ```
     """
-    _require_frontend_state("make_ptr")
-
     if dtype is not None and (
         not isinstance(dtype, type) or not issubclass(dtype, Numeric) or not dtype.dtype
     ):
         _op_error("make_ptr", f"expects dtype to be a type of Numeric, but got {dtype}")
     dt = Int8 if dtype is None else dtype
+
+    if _runtime._current_frontend_state() is None:
+        if not isinstance(value, int):
+            _op_error(
+                "make_ptr",
+                "outside a kernel, value must be a Python int device address; "
+                f"got {type(value).__name__}",
+            )
+        if not isinstance(mem_space, AddressSpace):
+            _op_error(
+                "make_ptr",
+                f"expects mem_space to be AddressSpace, got {type(mem_space).__name__}",
+            )
+        return _Pointer._from_host(
+            dt, int(value), mem_space, assumed_align=assumed_align
+        )
+
+    _require_frontend_state("make_ptr")
     ctx = loc.context if loc is not None else mlir_ir.Context()
     pointee = dt.mlir_type(ctx)
     addr_token = _require_pointer_addrspace("make_ptr", mem_space, 2)

@@ -18,7 +18,7 @@ nav_order: 3
 
 ## 创建与绑定
 
-用 `from_dlpack` 绑定真实 NPU 缓冲，或用 `make_fake_tensor` 造仅含元数据的类型样本。
+用 `from_dlpack`，或 Host 双模式 `tla.make_ptr` / `tla.make_layout` / `tla.make_tensor` 绑定真实 NPU 缓冲；用 `make_fake_tensor` 造仅含元数据的类型样本。
 
 ### `tla.from_dlpack`
 
@@ -79,6 +79,55 @@ ty = from_dlpack(
 
 ---
 
+### `tla.make_tensor`
+
+**源码：** [`catlass.core_api.make_tensor`](../../../../catlass/core_api.py)
+
+功能说明：
+
+双模式入口（与 ``tla.make_ptr`` / ``tla.make_layout`` 对齐）。Kernel 内构建 `!tla.tensor` IR；Host 上将 ``tla.make_ptr`` / ``tla.make_layout`` 组成 Host tensor，不经 DLPack。热路径上优先使用：跳过 capsule 导出/解析/所有权，也不打开 ``_eager_capture``。
+
+``catlass.tla.runtime`` **不**再导出 ``make_tensor``（与 ``make_ptr`` 一致）。
+
+函数原型：
+
+```python
+tla.make_tensor(ptr, layout, coord=None, *, loc=None) -> Tensor
+```
+
+参数说明：
+
+- *`ptr`*：Host 上 ``tla.make_ptr(dtype, address, mem_space)`` 的返回值（同 ``Pointer`` 类型）。
+- *`layout`*：Host 上 ``tla.make_layout(make_shape(...), make_stride(...), layoutTag=...)`` 的返回值（同 ``Layout`` 类型）。
+- *`coord`*：可选；Host ``tla.make_coord`` 或 int 树；省略时由 layout 推导。
+- *`loc`*：Kernel 路径用；Host 路径忽略。
+
+约束说明：
+
+- Host 路径拒绝带 MLIR SSA 的 Kernel ``Pointer`` / ``Layout``；须在 Host 调用 ``tla.make_ptr`` / ``tla.make_layout``。
+- 热路径信任 ``make_ptr`` / ``make_layout`` 元数据（不做 Kernel trait / RM-CM compact 检查）；需要这些检查时用 ``from_dlpack``。
+- 不接管 DLPack 生命周期；``data_ptr == 0`` 为未绑定样本。
+
+调用示例：
+
+```python
+import catlass.tla as tla
+
+ptr = tla.make_ptr(
+    tla.Float16,
+    int(buf.data_ptr()),
+    tla.AddressSpace.gm,
+)
+layout = tla.make_layout(
+    tla.make_shape(128, 64),
+    tla.make_stride(64, 1),
+    layoutTag=tla.arch.RowMajor,
+)
+host = tla.make_tensor(ptr, layout)
+```
+
+---
+
 ### `tla.make_fake_tensor`
 
 **源码：** [`catlass.tla.runtime.make_fake_tensor`](../../../../catlass/tla/runtime.py)
@@ -86,7 +135,7 @@ ty = from_dlpack(
 功能说明：
 
 构造仅含元数据、不绑定设备缓冲的 Host tensor（`data_ptr == 0`）。
-用于无需 NPU 时给 `tla.compile` 提供类型样本。真实缓冲请用 `from_dlpack`。
+用于无需 NPU 时给 `tla.compile` 提供类型样本。真实缓冲请用 `make_tensor`（直绑）或 `from_dlpack`。
 
 函数原型：
 
@@ -98,7 +147,8 @@ tla.make_fake_tensor(dtype: Any, shape: Any, stride: Any, *, layout_tag: Any | N
 
 - *`dtype`*：元素类型，如 `tla.Float16` / `tla.Float32`。必填。
 - *`shape`*（`int | tuple`）：逻辑 shape 树（zN 等物理布局用嵌套 tuple）。必填。
-- *`stride`*（`int | tuple`）：stride 树，结构须与 `shape` 一致。必填。
+- *`stride`*（`int | tuple | None`）：stride 树，结构须与 `shape` 一致。
+  为 ``None`` 时由 layout remap 推导（与历史 ``_Tensor`` 构造一致）。
 - *`layout_tag`*：`tla.arch` 标签。可选，默认 `tla.arch.RowMajor`。
 - *`addrspace`*：地址空间。可选，默认 `AddressSpace.gm`。
 - *`origin_shape`*（`int | tuple | None`）：逻辑 origin。可选，默认等于 `shape`。
@@ -109,8 +159,10 @@ tla.make_fake_tensor(dtype: Any, shape: Any, stride: Any, *, layout_tag: Any | N
 
 - `shape` / `stride` / `origin_shape` / `coord` 须为 Python int 树，
   不能是 Kernel 侧 `tla.make_shape` / `tla.make_stride` / `tla.make_coord`。
-- 始终未绑定，不能直接 launch；真实缓冲须改用 `from_dlpack`。
+- 始终未绑定，不能直接 launch；真实缓冲须改用 `make_tensor` / `from_dlpack`。
 - 显式传入的 `shape` / `stride` 按原样使用（不做 layout remap）。
+- 对外签名不变；内部经 `tla.make_ptr` + `tla.make_layout` + Host `tla.make_tensor` 实现。
+  ``stride=None`` / ``coord=None`` 仍保留既有 remap 默认行为。
 
 调用示例：
 

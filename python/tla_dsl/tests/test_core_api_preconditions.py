@@ -48,11 +48,6 @@ module {
             assert {registered: "metadata"}[lookup] == "metadata"
 
 
-def test_copy_preconditions_require_tiles() -> None:
-    with pytest.raises(tla.TlaIRNotExecutableError, match="tla.make_shape"):
-        tla.copy(tla.make_shape(1, 2), tla.make_shape(1, 2))
-
-
 def test_allocate_returns_typed_pointer_metadata() -> None:
     with runtime_mod._eager_capture():
         ptr = tla.allocate((2, 4), tla.Float16, tla.AddressSpace.l1, 512)
