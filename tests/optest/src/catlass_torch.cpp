@@ -507,4 +507,8 @@ using Ascend950SyrkOp = SyrkLike<CatlassKernel::Ascend950Syrk>;
 static auto& ascend950_syrk = Ascend950SyrkOp::Run;
 REGISTER_TORCH_FUNC(ascend950_syrk);
 
+using Ascend950SyrkPolynomialOp = SyrkPolynomialLike<CatlassKernel::Ascend950SyrkPolynomial>;
+static auto& ascend950_syrk_polynomial = Ascend950SyrkPolynomialOp::Run;
+REGISTER_TORCH_FUNC(ascend950_syrk_polynomial);
+
 } // namespace CatlassKernelWrapper

@@ -49,6 +49,41 @@ def test_ascend950_basic_syrk_batched_triangular_schedule(dtype):
 
 
 @only_on_3510
+@pytest.mark.parametrize("dtype,rtol", [(torch.float16, 1e-2), (torch.bfloat16, 2e-2)])
+def test_ascend950_syrk_polynomial(dtype, rtol):
+    batch, m, k = 2, 512, 384
+    x = _random_npu((batch, m, k), dtype, seed=3097) * (k**-0.5)
+    scales = torch.linspace(0.5, 1.5, k).to(dtype).to("npu")
+    xt = x * scales
+    residual_source = _random_npu((batch, m, k), dtype, seed=7351) * (k**-0.5)
+    residual = torch.matmul(residual_source, residual_source.transpose(-2, -1))
+    alpha, beta, diagonal = 2.0315, -4.7750, 3.4445
+
+    result = torch_catlass.ascend950_syrk_polynomial(
+        x, xt, residual, alpha, beta, diagonal
+    )
+    expected = alpha * torch.matmul(x.float(), xt.float().transpose(-2, -1))
+    expected.add_(residual.float(), alpha=beta)
+    expected.diagonal(dim1=-2, dim2=-1).add_(diagonal)
+
+    torch.testing.assert_close(result.float(), expected, rtol=rtol, atol=rtol)
+    assert torch.equal(result, result.transpose(-2, -1))
+
+
+@only_on_3510
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+def test_ascend950_syrk_polynomial_without_residual(dtype):
+    x = _random_npu((64, 96), dtype, seed=3097) * (96**-0.5)
+    diagonal = 1.25
+
+    result = torch_catlass.ascend950_syrk_polynomial(x, x, None, 0.75, 0.0, diagonal)
+    expected = 0.75 * torch.matmul(x.float(), x.float().T)
+    expected.diagonal().add_(diagonal)
+
+    torch.testing.assert_close(result.float(), expected, rtol=1e-2, atol=1e-2)
+
+
+@only_on_3510
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16], ids=["fp16", "bf16"])
 @pytest.mark.parametrize(
     "batch,m,k,tile,splitk,transposed",
@@ -135,6 +170,34 @@ def test_ascend950_basic_syrk_rejects_splitk():
     x = torch.zeros((64, 513), dtype=torch.bfloat16, device="npu")
     with pytest.raises(RuntimeError, match="splitk must be 0.*or 1"):
         torch_catlass.ascend950_basic_syrk(x, splitk=2)
+
+
+@only_on_3510
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+@pytest.mark.parametrize("splitk", [1])
+def test_ascend950_syrk_polynomial_distinct_operands(dtype, splitk):
+    batch, m, k = 2, 384, 513
+    x = _random_npu((batch, m, k), dtype, seed=3097) * k**-0.5
+    xt = _random_npu((batch, m, k), dtype, seed=7351) * k**-0.5
+    residual_source = _random_npu((batch, m, 96), dtype, seed=31) * 96**-0.5
+    residual = residual_source @ residual_source.transpose(-2, -1)
+    result = torch_catlass.ascend950_syrk_polynomial(
+        x, xt, residual, 0.75, -0.25, 1.25, dtype, 128, splitk
+    ).cpu()
+    full = 0.75 * (x.cpu().double() @ xt.cpu().double().transpose(-2, -1))
+    full -= 0.25 * residual.cpu().double()
+    full.diagonal(dim1=-2, dim2=-1).add_(1.25)
+    expected = full.tril() + full.tril(-1).transpose(-2, -1)
+    assert torch.isfinite(result).all()
+    assert torch.equal(result, result.transpose(-2, -1))
+    torch.testing.assert_close(result.float(), expected.float(), rtol=1e-2, atol=2e-3)
+
+
+@only_on_3510
+def test_ascend950_syrk_polynomial_rejects_splitk():
+    x = torch.zeros((64, 513), dtype=torch.bfloat16, device="npu")
+    with pytest.raises(RuntimeError, match="splitk must be 0.*or 1"):
+        torch_catlass.ascend950_syrk_polynomial(x, x, None, 1.0, 0.0, splitk=2)
 
 
 if __name__ == "__main__":

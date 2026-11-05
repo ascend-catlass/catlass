@@ -35,21 +35,42 @@ def _measure(run, warmup, iterations):
 
 def _run_case(name, implementation, x, residual, alpha, beta, diagonal, tile, splitk, warmup, iterations):
     if implementation == "torch":
-        run = lambda: torch.matmul(x, x.transpose(-2, -1))
-    else:
+        if name == "basic":
+            run = lambda: torch.matmul(x, x.transpose(-2, -1))
+        else:
+            def run():
+                output = torch.matmul(x, x.transpose(-2, -1))
+                output.mul_(alpha)
+                output.add_(residual, alpha=beta)
+                output.diagonal(dim1=-2, dim2=-1).add_(diagonal)
+                return output
+    elif name == "basic":
         run = lambda: torch_catlass.ascend950_basic_syrk(x, outDType=x.dtype, tile=tile, splitk=splitk)
+    else:
+        run = lambda: torch_catlass.ascend950_syrk_polynomial(
+            x, x, residual, alpha, beta, diagonal, outDType=x.dtype, tile=tile, splitk=splitk
+        )
     return _measure(run, warmup, iterations)
 
 
 def _verify(x, residual, alpha, beta, diagonal, tile, splitk, names):
     product = torch.matmul(x.float(), x.float().transpose(-2, -1))
-    basic = torch_catlass.ascend950_basic_syrk(x, outDType=x.dtype, tile=tile, splitk=splitk)
-    torch.testing.assert_close(basic.float(), product, rtol=2e-2, atol=2e-2)
+    if "basic" in names:
+        basic = torch_catlass.ascend950_basic_syrk(x, outDType=x.dtype, tile=tile, splitk=splitk)
+        torch.testing.assert_close(basic.float(), product, rtol=2e-2, atol=2e-2)
+
+    if "polynomial" in names:
+        polynomial = torch_catlass.ascend950_syrk_polynomial(
+            x, x, residual, alpha, beta, diagonal, outDType=x.dtype, tile=tile, splitk=splitk
+        )
+        expected = alpha * product + beta * residual.float()
+        expected.diagonal(dim1=-2, dim2=-1).add_(diagonal)
+        torch.testing.assert_close(polynomial.float(), expected, rtol=2e-2, atol=2e-2)
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--op", choices=("basic",), default="basic")
+    parser.add_argument("--op", choices=("basic", "polynomial", "all"), default="all")
     parser.add_argument("--implementation", choices=("catlass", "torch"), default="catlass")
     parser.add_argument("--batch", type=int, default=1)
     parser.add_argument("--m", type=int, default=1024)

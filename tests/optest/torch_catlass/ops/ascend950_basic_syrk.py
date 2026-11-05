@@ -57,3 +57,51 @@ def ascend950_basic_syrk(
         matXt = matX
     outDType = _resolve_dtype(outDType, _DTYPE_ALIASES)
     return torch.ops.catlass.ascend950_basic_syrk(matX, matXt, outDType, int(tile), int(splitk))
+
+
+def ascend950_syrk_polynomial(
+    matX: Tensor,
+    matXt: Tensor,
+    residual: Tensor | None,
+    alpha: float,
+    beta: float,
+    diagonal: float = 0.0,
+    outDType: str | torch.dtype | None = None,
+    tile: int = 0,
+    splitk: int = 0,
+) -> Tensor:
+    """Compute ``alpha * X @ X.T + beta * residual + diagonal * I``.
+
+    Source: example 82_ascend950_basic_syrk.
+
+    Only the lower triangle is computed and then mirrored, including inside
+    diagonal tiles when the operands use distinct buffers. ``residual`` must be
+    symmetric. ``M`` must be a multiple of 32.
+
+    Args:
+        matX: Input ``X`` with shape ``(M, K)`` or ``(B, M, K)`` on NPU. May be
+            a row-major tensor or a transposed view of a row-major ``(K, M)`` /
+            ``(B, K, M)`` tensor.
+        matXt: Second, transposed operand view; same layout, shape and dtype as
+            ``matX`` and usually ``matX`` itself.
+        residual: Square residual with shape ``(M, M)`` or ``(B, M, M)``,
+            contiguous and of dtype ``outDType``. May be ``None`` when ``beta``
+            is zero.
+        alpha: Scale for ``X @ X.T``.
+        beta: Scale for ``residual``.
+        diagonal: Value added to the diagonal of the result.
+        outDType: Output dtype, FP16 or BF16 only. Defaults to
+            ``residual.dtype``, or ``matX.dtype`` when there is no residual.
+        tile: Square output tile edge: 0 (auto), 64, 128 or 256.
+        splitk: 0 (auto) or 1; both select the single-pass kernel.
+
+    Returns:
+        Output with shape ``(M, M)`` or ``(B, M, M)`` on the active NPU device.
+    """
+    if outDType is None:
+        outDType = matX.dtype if residual is None else residual.dtype
+    outDType = _resolve_dtype(outDType, _DTYPE_ALIASES_16)
+    return torch.ops.catlass.ascend950_syrk_polynomial(
+        matX, matXt, residual, outDType, float(alpha), float(beta), float(diagonal), int(tile),
+        int(splitk),
+    )

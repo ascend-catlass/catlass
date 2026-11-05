@@ -99,6 +99,7 @@ __all__ = [
     "symm",
     "ascend950_basic_syrk",
     "ascend950_syrk",
+    "ascend950_syrk_polynomial",
     "__version__",
     "__catlass_version__",
 ]

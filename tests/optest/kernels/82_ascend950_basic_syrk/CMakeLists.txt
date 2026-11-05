@@ -13,3 +13,9 @@ add_kernel(NAME ascend950_basic_syrk
     KERNEL_TYPE jit
     ${CMAKE_CURRENT_SOURCE_DIR}/ascend950_basic_syrk.cpp
     TEMPLATE ${CMAKE_CURRENT_SOURCE_DIR}/ascend950_basic_syrk_impl.cpp)
+
+add_kernel(NAME ascend950_syrk_polynomial
+    NPU_ARCH_LIST 3510
+    KERNEL_TYPE jit
+    ${CMAKE_CURRENT_SOURCE_DIR}/ascend950_syrk_polynomial.cpp
+    TEMPLATE ${CMAKE_CURRENT_SOURCE_DIR}/ascend950_syrk_polynomial_impl.cpp)

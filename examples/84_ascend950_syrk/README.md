@@ -77,3 +77,12 @@
 bash scripts/build.sh -DCATLASS_ARCH=3510 84_ascend950_batched_basic_syrk
 ./output/bin/84_ascend950_batched_basic_syrk 300 513 2 0
 ```
+
+## Polynomial SYRK
+
+`syrk_polynomial.cpp` computes `D = alpha * X @ Xt.T + beta * R + diagonal * I` with BF16 tensors and a symmetric residual.
+
+```bash
+bash scripts/build.sh -DCATLASS_ARCH=3510 84_ascend950_syrk_polynomial
+./output/bin/84_ascend950_syrk_polynomial 160 513 2 0.75 -0.25 1.25 0
+```

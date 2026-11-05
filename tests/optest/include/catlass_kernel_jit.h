@@ -142,6 +142,18 @@ struct SyrkParams : public MatmulParams {
 };
 
 /**
+ * @brief Runtime parameters for the Ascend950 SYRK polynomial:
+ *        D = alpha * X @ X^T + beta * C + diagonal * I.
+ *
+ * ``inputAddr[0]`` = X, ``inputAddr[1]`` = Xt (normally the same buffer), ``inputAddr[2]`` = C,
+ * ``outputAddr[0]`` = D; ``m`` must equal ``n``. For batched inputs use ``batch > 1`` with
+ * contiguous ``(B, M, K)`` / ``(B, M, M)`` tensors.
+ */
+struct SyrkPolynomialParams : public GemmParams {
+    float diagonal = 0.0f; ///< Diagonal shift in D = alpha * X @ X^T + beta * C + diagonal * I.
+};
+
+/**
  * @brief Runtime parameters for example 76_trmm.
  */
 struct TrmmParams : public MatmulParams {
@@ -578,6 +590,15 @@ __attribute__((weak)) void Ascend950BasicSyrk(
  */
 __attribute__((weak)) void Ascend950Syrk(
     const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const SyrkParams& params);
+
+/**
+ * @brief JIT interface for the SYRK polynomial kernels (MIX, 82_ascend950_basic_syrk).
+ *
+ * D = alpha * X @ X^T + beta * C + diagonal * I. The single-pass kernel
+ * hands each L0C tile to the paired AIVs.
+ */
+__attribute__((weak)) void Ascend950SyrkPolynomial(
+    const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const SyrkPolynomialParams& params);
 
 /**
  * @brief Reserved JIT interface for example 74_ascend950_weight_quant_a8w4_grouped_mx_matmul.
