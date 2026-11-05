@@ -16,7 +16,7 @@ In-kernel scalar / tensor debug printing.
 
 ## `tla.print`
 
-**Source:** [`catlass.core_api.print`](../../../../catlass/core_api.py#L3916)
+**Source:** [`catlass.core_api.print`](../../../../catlass/core_api.py)
 
 Description:
 

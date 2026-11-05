@@ -26,7 +26,7 @@ with tla.vector():
 
 The subsections below follow the same order as **SIMD Vector Compute**: what the region is and what may appear in it, then how a thread moves data and computes. Thread index / block geometry / `sync_threads` live under **System Variable Access**.
 
-## 6.1 Region Scope
+## Region Scope
 
 The region is declared by `tla.vec.func` (see **Scopes and Control Flow**), which owns the geometry rules, the 2048 threads-per-block limit and the scalar-only capture rule. On-chip scratch is allocated outside the region with `tla.allocate` (see **Resource Management**), and a pipe barrier goes after it, inside `tla.vector()`, as the example above does.
 
@@ -47,7 +47,7 @@ These are not, and are rejected when the kernel is compiled:
 - `while` loops, in any `tla.vec.func`; carry the iteration through `tla.range` instead.
 - A nested `tla.vec.func`.
 
-## 6.2 Element Access
+## Element Access
 
 A thread moves data by element access on a `gm` or `ub` tensor: `value = tensor[i]` and `tensor[i] = value`, which emit the per-thread `tla.simt_load` / `tla.simt_store`. The layout must be `RowMajor` or `ColumnMajor`, the logical rank 1 or 2, and sub-byte element types other than `Bool` are not supported. Both are documented as `tensor[i]` / `tensor[i] = value` under **Data Movement**.
 
@@ -57,7 +57,7 @@ with tla.vec.func(mode="simt", thread_block_dim=256):
     gm_out[tid] = gm_in[tid]
 ```
 
-## 6.3 Basic Arithmetic
+## Basic Arithmetic
 
 Arithmetic and unary math on `Numeric` values keep their SIMD spelling inside a SIMT region but emit the per-thread op: `+` / `-` / `*` / `/` become `tla.simt_add` / `simt_sub` / `simt_mul` / `simt_div`, and `tla.exp` / `log` / `abs` / `sqrt` / `max` / `min` become their `simt_` forms. The entries are shared with **SIMD Vector Compute / Basic Arithmetic**, where each one states its SIMT form under `Constraints:`.
 
@@ -70,7 +70,7 @@ with tla.vec.func(mode="simt", thread_block_dim=256):
     gm_out[tid] = tla.sqrt(tla.exp(x) + tla.abs(x))
 ```
 
-## 6.4 Compare and Select
+## Compare and Select
 
 The comparisons emit `tla.simt_cmp` and produce a `Bool`, not a `MaskSSA`; `tla.where` on a `Bool` condition emits the per-thread `tla.simt_where`. The entries are shared with **SIMD Vector Compute / Compare and Select**.
 
@@ -81,7 +81,7 @@ with tla.vec.func(mode="simt", thread_block_dim=256):
     gm_out[tid] = tla.where(a > 0.0, a, -a)
 ```
 
-## 6.5 Type Conversion
+## Type Conversion
 
 `Numeric.to` emits the per-thread `tla.simt_cast` inside a SIMT region and the core's own scalar conversion outside one; the entry is under **Scalar Compute**. There is no per-thread equivalent of the register-vector `tla.cast`.
 

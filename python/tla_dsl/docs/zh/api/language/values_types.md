@@ -38,7 +38,7 @@ Do not regenerate this file from a glossary.
 
 ## `tla.cast`
 
-**源码：** [`catlass.base_dsl.typing.cast`](../../../../catlass/base_dsl/typing.py#L661)
+**源码：** [`catlass.base_dsl.typing.cast`](../../../../catlass/base_dsl/typing.py)
 
 功能说明：
 
@@ -76,7 +76,7 @@ def kernel() -> None:
 
 ## `tla.Numeric.to`
 
-**源码：** [`catlass.base_dsl.typing.Numeric.to`](../../../../catlass/base_dsl/typing.py#L891)
+**源码：** [`catlass.base_dsl.typing.Numeric.to`](../../../../catlass/base_dsl/typing.py)
 
 功能说明：
 
@@ -122,7 +122,7 @@ def kernel(n: int) -> None:
 
 ## `tla.Numeric.bitcast`
 
-**源码：** [`catlass.base_dsl.typing.Numeric.bitcast`](../../../../catlass/base_dsl/typing.py#L1030)
+**源码：** [`catlass.base_dsl.typing.Numeric.bitcast`](../../../../catlass/base_dsl/typing.py)
 
 功能说明：
 
@@ -155,7 +155,7 @@ bits = tla.Float32(1.0).bitcast(tla.Int32)
 
 ## `tla.as_numeric`
 
-**源码：** [`catlass.base_dsl.typing.as_numeric`](../../../../catlass/base_dsl/typing.py#L1204)
+**源码：** [`catlass.base_dsl.typing.as_numeric`](../../../../catlass/base_dsl/typing.py)
 
 功能说明：
 
@@ -193,7 +193,7 @@ def kernel(limit: int) -> None:
 
 ## `tla.Integer.__invert__`
 
-**源码：** [`catlass.base_dsl.typing.Integer.__invert__`](../../../../catlass/base_dsl/typing.py#L1253)
+**源码：** [`catlass.base_dsl.typing.Integer.__invert__`](../../../../catlass/base_dsl/typing.py)
 
 功能说明：
 
@@ -227,7 +227,7 @@ def kernel() -> None:
 
 ## `tla.Float.sqrt`
 
-**源码：** [`catlass.base_dsl.typing.Float.sqrt`](../../../../catlass/base_dsl/typing.py#L1306)
+**源码：** [`catlass.base_dsl.typing.Float.sqrt`](../../../../catlass/base_dsl/typing.py)
 
 功能说明：
 

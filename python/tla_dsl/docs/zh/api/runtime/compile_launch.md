@@ -26,7 +26,7 @@ executor。缓存 / 架构 / IR dump 等非函数参数见
 
 ### `tla.compile`
 
-**源码：** [`catlass.base_dsl.compiler.CompileCallable.__call__`](../../../../catlass/base_dsl/compiler.py#L118)
+**源码：** [`catlass.base_dsl.compiler.CompileCallable.__call__`](../../../../catlass/base_dsl/compiler.py)
 
 功能说明：
 
@@ -82,7 +82,7 @@ compiled(gm_a, gm_b, gm_c, block_num=1)
 
 ### `tla.TlaJitFunction.compile`
 
-**源码：** [`catlass.dsl.TlaJitFunction.compile`](../../../../catlass/dsl.py#L198)
+**源码：** [`catlass.dsl.TlaJitFunction.compile`](../../../../catlass/dsl.py)
 
 功能说明：
 
@@ -169,7 +169,7 @@ compiled = tla.compile(
 
 ### `tla.JitCompiledFunction.__call__`
 
-**源码：** [`catlass.base_dsl.jit_executor.JitCompiledFunction.__call__`](../../../../catlass/base_dsl/jit_executor.py#L614)
+**源码：** [`catlass.base_dsl.jit_executor.JitCompiledFunction.__call__`](../../../../catlass/base_dsl/jit_executor.py)
 
 功能说明：
 
@@ -221,7 +221,7 @@ compiled(args=(tx, ty), block_num=1)
 
 ### `tla.TlaJitFunction.dump_mlir`
 
-**源码：** [`catlass.dsl.TlaJitFunction.dump_mlir`](../../../../catlass/dsl.py#L259)
+**源码：** [`catlass.dsl.TlaJitFunction.dump_mlir`](../../../../catlass/dsl.py)
 
 功能说明：
 

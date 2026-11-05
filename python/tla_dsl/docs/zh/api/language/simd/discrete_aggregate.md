@@ -18,7 +18,7 @@ Do not regenerate this file from a glossary.
 
 ## `tla.VectorSSA.reduce`
 
-**源码：** [`catlass.core_api.VectorSSA.reduce`](../../../../../catlass/core_api.py#L576)
+**源码：** [`catlass.core_api.VectorSSA.reduce`](../../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -59,7 +59,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.gather`
 
-**源码：** [`catlass.core_api.gather`](../../../../../catlass/core_api.py#L9201)
+**源码：** [`catlass.core_api.gather`](../../../../../catlass/core_api.py)
 
 功能说明：
 

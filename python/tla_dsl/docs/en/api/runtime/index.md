@@ -17,10 +17,8 @@ These APIs are called from Python Host scripts, **outside** a `@tla.kernel` func
 
 ## Reference Pages
 
-| Section | Page |
-| --- | --- |
-| 1 | [Kernel Entry and Language Boundary](kernel_entry.md) |
-| 2 | [Compile and Launch](compile_launch.md) |
-| 3 | [Host Tensor Binding](host_tensor.md) |
+- [Kernel Entry and Language Boundary](kernel_entry.md)
+- [Compile and Launch](compile_launch.md)
+- [Host Tensor Binding](host_tensor.md)
 
 ---

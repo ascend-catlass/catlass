@@ -30,7 +30,7 @@ Constraints:
 
 ## `tla.cast`
 
-**Source:** [`catlass.base_dsl.typing.cast`](../../../../catlass/base_dsl/typing.py#L661)
+**Source:** [`catlass.base_dsl.typing.cast`](../../../../catlass/base_dsl/typing.py)
 
 Description:
 
@@ -69,7 +69,7 @@ def kernel() -> None:
 
 ## `tla.Numeric.to`
 
-**Source:** [`catlass.base_dsl.typing.Numeric.to`](../../../../catlass/base_dsl/typing.py#L910)
+**Source:** [`catlass.base_dsl.typing.Numeric.to`](../../../../catlass/base_dsl/typing.py)
 
 Description:
 
@@ -119,7 +119,7 @@ def kernel(n: int) -> None:
 
 ## `tla.Numeric.bitcast`
 
-**Source:** [`catlass.base_dsl.typing.Numeric.bitcast`](../../../../catlass/base_dsl/typing.py#L1042)
+**Source:** [`catlass.base_dsl.typing.Numeric.bitcast`](../../../../catlass/base_dsl/typing.py)
 
 Description:
 
@@ -154,7 +154,7 @@ bits = tla.Float32(1.0).bitcast(tla.Int32)
 
 ## `tla.as_numeric`
 
-**Source:** [`catlass.base_dsl.typing.as_numeric`](../../../../catlass/base_dsl/typing.py#L1216)
+**Source:** [`catlass.base_dsl.typing.as_numeric`](../../../../catlass/base_dsl/typing.py)
 
 Description:
 
@@ -195,7 +195,7 @@ def kernel(limit: int) -> None:
 
 ## `tla.Integer.__invert__`
 
-**Source:** [`catlass.base_dsl.typing.Integer.__invert__`](../../../../catlass/base_dsl/typing.py#L1253)
+**Source:** [`catlass.base_dsl.typing.Integer.__invert__`](../../../../catlass/base_dsl/typing.py)
 
 Description:
 
@@ -229,7 +229,7 @@ def kernel() -> None:
 
 ## `tla.Float.sqrt`
 
-**Source:** [`catlass.base_dsl.typing.Float.sqrt`](../../../../catlass/base_dsl/typing.py#L1306)
+**Source:** [`catlass.base_dsl.typing.Float.sqrt`](../../../../catlass/base_dsl/typing.py)
 
 Description:
 

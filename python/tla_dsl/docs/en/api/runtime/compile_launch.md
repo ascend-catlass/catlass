@@ -17,7 +17,7 @@ language-boundary text lives in this generator (`CONSTEXPR_CALLABLE_DOC`).
 
 Compile a decorated kernel and launch it on the NPU. Use `tla.compile` to obtain a callable `JitCompiledFunction`; call it directly to lazily create and then reuse its executor. Cache / arch / IR-dump knobs that are not function arguments are in [Environment Variables](../../kernel_development/core_concepts/env_vars.md).
 
-## 2.1 Compile
+## Compile
 
 Build a device binary. Primary entry: `tla.compile`. `TlaJitFunction.compile` is a lower-level helper on the decorated function.
 
@@ -37,7 +37,7 @@ The Unified Buffer is 256 KB, of which the compiler reserves 8 KB (2 KB Ascend C
 
 ### `tla.compile`
 
-**Source:** [`catlass.base_dsl.compiler.CompileCallable.__call__`](../../../../catlass/base_dsl/compiler.py#L118)
+**Source:** [`catlass.base_dsl.compiler.CompileCallable.__call__`](../../../../catlass/base_dsl/compiler.py)
 
 Description:
 
@@ -109,7 +109,7 @@ compiled(gm_a, gm_b, gm_c, block_num=1)
 
 ### `tla.TlaJitFunction.compile`
 
-**Source:** [`catlass.dsl.TlaJitFunction.compile`](../../../../catlass/dsl.py#L266)
+**Source:** [`catlass.dsl.TlaJitFunction.compile`](../../../../catlass/dsl.py)
 
 Description:
 
@@ -154,13 +154,13 @@ compiled = my_kernel.compile(
 
 ---
 
-## 2.2 Launch
+## Launch
 
 Run a compiled kernel on the NPU by calling the `JitCompiledFunction` returned by `tla.compile`.
 
 ### `tla.JitCompiledFunction.__call__`
 
-**Source:** [`catlass.base_dsl.jit_executor.JitCompiledFunction.__call__`](../../../../catlass/base_dsl/jit_executor.py#L611)
+**Source:** [`catlass.base_dsl.jit_executor.JitCompiledFunction.__call__`](../../../../catlass/base_dsl/jit_executor.py)
 
 Description:
 
@@ -212,13 +212,13 @@ compiled(args=(tx, ty), block_num=1)
 
 ---
 
-## 2.3 Inspect
+## Inspect
 
 Dump frontend TLA IR without building a device binary or launching. See `TlaJitFunction.dump_mlir`.
 
 ### `tla.TlaJitFunction.dump_mlir`
 
-**Source:** [`catlass.dsl.TlaJitFunction.dump_mlir`](../../../../catlass/dsl.py#L327)
+**Source:** [`catlass.dsl.TlaJitFunction.dump_mlir`](../../../../catlass/dsl.py)
 
 Description:
 

@@ -23,15 +23,13 @@ Do not regenerate this file from a glossary.
 
 ## 子页面
 
-| 章节 | 页面 |
-| --- | --- |
-| 5.1 | [Mask 计算](mask.md) |
-| 5.2 | [基础算术](arithmetic.md) |
-| 5.3 | [逻辑计算](logical.md) |
-| 5.4 | [比较与选择](compare_select.md) |
-| 5.5 | [数据填充](fill.md) |
-| 5.6 | [离散与聚合](discrete_aggregate.md) |
-| 5.7 | [数据重排](rearrange.md) |
-| 5.8 | [数据压缩](compress.md) |
-| 5.9 | [类型转换](type_conversion.md) |
-| 5.10 | [直方图计算](histogram.md) |
+- [Mask 计算](mask.md)
+- [基础算术](arithmetic.md)
+- [逻辑计算](logical.md)
+- [比较与选择](compare_select.md)
+- [数据填充](fill.md)
+- [离散与聚合](discrete_aggregate.md)
+- [数据重排](rearrange.md)
+- [数据压缩](compress.md)
+- [类型转换](type_conversion.md)
+- [直方图计算](histogram.md) |

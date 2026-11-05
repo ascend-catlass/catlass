@@ -18,7 +18,7 @@ Do not regenerate this file from a glossary.
 
 ## `tla.VectorSSA.to`
 
-**源码：** [`catlass.core_api.VectorSSA.to`](../../../../../catlass/core_api.py#L639)
+**源码：** [`catlass.core_api.VectorSSA.to`](../../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -104,7 +104,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.VectorSSA.bitcast`
 
-**源码：** [`catlass.core_api.VectorSSA.bitcast`](../../../../../catlass/core_api.py#L767)
+**源码：** [`catlass.core_api.VectorSSA.bitcast`](../../../../../catlass/core_api.py)
 
 功能说明：
 

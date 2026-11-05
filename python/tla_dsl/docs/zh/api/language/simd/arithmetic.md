@@ -16,7 +16,7 @@ Do not regenerate this file from a glossary.
 
 ## `tla.exp`
 
-**源码：** [`catlass.core_api.exp`](../../../../../catlass/core_api.py#L7734)
+**源码：** [`catlass.core_api.exp`](../../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -52,7 +52,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.log`
 
-**源码：** [`catlass.core_api.log`](../../../../../catlass/core_api.py#L7761)
+**源码：** [`catlass.core_api.log`](../../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -88,7 +88,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.sqrt`
 
-**源码：** [`catlass.core_api.sqrt`](../../../../../catlass/core_api.py#L7788)
+**源码：** [`catlass.core_api.sqrt`](../../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -131,7 +131,7 @@ with tla.cube():
 
 ## `tla.abs`
 
-**源码：** [`catlass.core_api.abs`](../../../../../catlass/core_api.py#L7824)
+**源码：** [`catlass.core_api.abs`](../../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -168,7 +168,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.neg`
 
-**源码：** [`catlass.core_api.neg`](../../../../../catlass/core_api.py#L7851)
+**源码：** [`catlass.core_api.neg`](../../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -201,7 +201,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.add`
 
-**源码：** [`catlass.core_api.add`](../../../../../catlass/core_api.py#L8157)
+**源码：** [`catlass.core_api.add`](../../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -242,7 +242,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.sub`
 
-**源码：** [`catlass.core_api.sub`](../../../../../catlass/core_api.py#L8203)
+**源码：** [`catlass.core_api.sub`](../../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -280,7 +280,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.mul`
 
-**源码：** [`catlass.core_api.mul`](../../../../../catlass/core_api.py#L8240)
+**源码：** [`catlass.core_api.mul`](../../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -319,7 +319,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.max`
 
-**源码：** [`catlass.core_api.max`](../../../../../catlass/core_api.py#L8374)
+**源码：** [`catlass.core_api.max`](../../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -353,7 +353,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.min`
 
-**源码：** [`catlass.core_api.min`](../../../../../catlass/core_api.py#L8375)
+**源码：** [`catlass.core_api.min`](../../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -387,7 +387,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.div`
 
-**源码：** [`catlass.core_api.div`](../../../../../catlass/core_api.py#L8379)
+**源码：** [`catlass.core_api.div`](../../../../../catlass/core_api.py)
 
 功能说明：
 

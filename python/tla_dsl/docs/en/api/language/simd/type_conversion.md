@@ -16,7 +16,7 @@ Element-type conversion on the register-vector path.
 
 ## `tla.VectorSSA.to`
 
-**Source:** [`catlass.core_api.VectorSSA.to`](../../../../../catlass/core_api.py#L639)
+**Source:** [`catlass.core_api.VectorSSA.to`](../../../../../catlass/core_api.py)
 
 Description:
 
@@ -85,7 +85,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.VectorSSA.bitcast`
 
-**Source:** [`catlass.core_api.VectorSSA.bitcast`](../../../../../catlass/core_api.py#L776)
+**Source:** [`catlass.core_api.VectorSSA.bitcast`](../../../../../catlass/core_api.py)
 
 Description:
 

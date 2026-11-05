@@ -16,7 +16,7 @@ Do not regenerate this file from a glossary.
 
 ## `tla.squeeze`
 
-**源码：** [`catlass.core_api.squeeze`](../../../../../catlass/core_api.py#L8619)
+**源码：** [`catlass.core_api.squeeze`](../../../../../catlass/core_api.py)
 
 功能说明：
 

@@ -16,7 +16,7 @@ Construction and views for front-end structured values such as Shape / Coord / S
 
 ## `tla.make_shape`
 
-**Source:** [`catlass.core_api.make_shape`](../../../../catlass/core_api.py#L4087)
+**Source:** [`catlass.core_api.make_shape`](../../../../catlass/core_api.py)
 
 Description:
 
@@ -60,7 +60,7 @@ zn_shape = tla.make_shape((16, 8), (16, 4))
 
 ## `tla.make_coord`
 
-**Source:** [`catlass.core_api.make_coord`](../../../../catlass/core_api.py#L4128)
+**Source:** [`catlass.core_api.make_coord`](../../../../catlass/core_api.py)
 
 Description:
 
@@ -91,7 +91,7 @@ coord = tla.make_coord(block_row, 0)
 
 ## `tla.make_stride`
 
-**Source:** [`catlass.core_api.make_stride`](../../../../catlass/core_api.py#L4157)
+**Source:** [`catlass.core_api.make_stride`](../../../../catlass/core_api.py)
 
 Description:
 
@@ -153,7 +153,7 @@ nz_stride = tla.make_stride((1, 1024), (16, 256))
 
 ## `tla.make_layout`
 
-**Source:** [`catlass.core_api.make_layout`](../../../../catlass/core_api.py#L4217)
+**Source:** [`catlass.core_api.make_layout`](../../../../catlass/core_api.py)
 
 Description:
 
@@ -217,7 +217,7 @@ zn = tla.make_layout(
 
 ## `tla.make_layout_with_tag`
 
-**Source:** [`catlass.core_api.make_layout_with_tag`](../../../../catlass/core_api.py#L4353)
+**Source:** [`catlass.core_api.make_layout_with_tag`](../../../../catlass/core_api.py)
 
 Description:
 
@@ -267,7 +267,7 @@ t_l1a = tla.make_tensor(l1a, lay)
 
 ## `tla.tile_view`
 
-**Source:** [`catlass.core_api.tile_view`](../../../../catlass/core_api.py#L4505)
+**Source:** [`catlass.core_api.tile_view`](../../../../catlass/core_api.py)
 
 Description:
 
@@ -302,7 +302,7 @@ tile = tla.tile_view(
 
 ## `tla.get_tile`
 
-**Source:** [`catlass.core_api.get_tile`](../../../../catlass/core_api.py#L4552)
+**Source:** [`catlass.core_api.get_tile`](../../../../catlass/core_api.py)
 
 Description:
 
@@ -346,7 +346,7 @@ pad.fill(0)
 
 ## `tla.make_tensor`
 
-**Source:** [`catlass.core_api.make_tensor`](../../../../catlass/core_api.py#L4696)
+**Source:** [`catlass.core_api.make_tensor`](../../../../catlass/core_api.py)
 
 Description:
 
@@ -391,7 +391,7 @@ tensor = tla.make_tensor(ptr, layout, coord=tla.make_coord(0, 0))
 
 ## `tla.make_tensor_like`
 
-**Source:** [`catlass.core_api.make_tensor_like`](../../../../catlass/core_api.py#L4901)
+**Source:** [`catlass.core_api.make_tensor_like`](../../../../catlass/core_api.py)
 
 Description:
 
@@ -425,7 +425,7 @@ dst = tla.make_tensor_like(ptr, like=src_tile, layoutTag=tla.arch.RowMajor)
 
 ## `tla.make_ptr`
 
-**Source:** [`catlass.core_api.make_ptr`](../../../../catlass/core_api.py#L10097)
+**Source:** [`catlass.core_api.make_ptr`](../../../../catlass/core_api.py)
 
 Description:
 
@@ -460,7 +460,7 @@ ptr = tla.make_ptr(tla.Float16, addr, mem_space=tla.AddressSpace.gm)
 
 ## `tla.recast_ptr`
 
-**Source:** [`catlass.core_api.recast_ptr`](../../../../catlass/core_api.py#L10151)
+**Source:** [`catlass.core_api.recast_ptr`](../../../../catlass/core_api.py)
 
 Description:
 

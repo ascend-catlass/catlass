@@ -18,7 +18,7 @@ Do not regenerate this file from a glossary.
 
 ## `tla.copy`
 
-**源码：** [`catlass.core_api.copy`](../../../../catlass/core_api.py#L5585)
+**源码：** [`catlass.core_api.copy`](../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -166,7 +166,7 @@ with tla.cube():
 
 ## `tla.Tensor.load`
 
-**源码：** [`catlass.tla.tensor._Tensor.load`](../../../../catlass/tla/tensor.py#L533)
+**源码：** [`catlass.tla.tensor._Tensor.load`](../../../../catlass/tla/tensor.py)
 
 功能说明：
 
@@ -266,7 +266,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.Tensor.store`
 
-**源码：** [`catlass.tla.tensor._Tensor.store`](../../../../catlass/tla/tensor.py#L997)
+**源码：** [`catlass.tla.tensor._Tensor.store`](../../../../catlass/tla/tensor.py)
 
 功能说明：
 
@@ -339,7 +339,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.Tensor.fill`
 
-**源码：** [`catlass.tla.tensor._Tensor.fill`](../../../../catlass/tla/tensor.py#L1254)
+**源码：** [`catlass.tla.tensor._Tensor.fill`](../../../../catlass/tla/tensor.py)
 功能说明：
 
 用常量填充本 L1 zN/nZ tile（当前仅支持写零）。
@@ -378,7 +378,7 @@ pad.fill(0)
 
 ## `tla.Tensor.__getitem__`
 
-**源码：** [`catlass.tla.tensor._Tensor.__getitem__`](../../../../catlass/tla/tensor.py#L1403)
+**源码：** [`catlass.tla.tensor._Tensor.__getitem__`](../../../../catlass/tla/tensor.py)
 
 功能说明：
 
@@ -415,7 +415,7 @@ with tla.vec.func(mode="simt", thread_block_dim=256):
 
 ## `tla.Tensor.__setitem__`
 
-**源码：** [`catlass.tla.tensor._Tensor.__setitem__`](../../../../catlass/tla/tensor.py#L1514)
+**源码：** [`catlass.tla.tensor._Tensor.__setitem__`](../../../../catlass/tla/tensor.py)
 
 功能说明：
 

@@ -374,7 +374,7 @@ def format_signature(entry: APIEntry, *, default_source_path: Path) -> str:
 def source_markdown(
     entry: APIEntry, docs_dir: Path, *, default_source_path: Path
 ) -> str:
-    # Concept / catalog entries: link to the declaration when we have a line;
+    # Concept / catalog entries: link to the declaration when we have one;
     # otherwise omit Source (no "not a callable API" placeholder).
     if entry.is_concept and entry.source_line is None:
         return ""
@@ -382,9 +382,13 @@ def source_markdown(
         if entry.is_env:
             return f"**Source:** environment variable `{entry.name}`"
         return f"**Source:** `{entry.qualified_name}`"
+    # The link stops at the file. A ``#L`` fragment goes stale on every
+    # unrelated edit above the definition, so the reference renders no line
+    # number; ``source_line`` is still collected for entry ordering and for
+    # the diagnostics of ``require_docs``.
     src = entry.source_path or default_source_path
     rel = Path(os.path.relpath(src, docs_dir))
-    link = f"[`{entry.qualified_name}`]({rel.as_posix()}#L{entry.source_line})"
+    link = f"[`{entry.qualified_name}`]({rel.as_posix()})"
     if entry.is_env:
         return f"**Source:** environment variable {link}"
     return f"**Source:** {link}"
@@ -392,12 +396,6 @@ def source_markdown(
 
 def _anchor(title: str) -> str:
     return re.sub(r"[^\w\u4e00-\u9fff\- ]", "", title).strip().replace(" ", "-").lower()
-
-
-def numbered_title(number: str | None, title: str) -> str:
-    if not number:
-        return title
-    return f"{number} {title}" if "." in number else f"{number}. {title}"
 
 
 def render_entry(
@@ -478,15 +476,14 @@ def iter_apis(node: DocNode) -> list[str]:
 def render_toc(tree: DocNode) -> str:
     lines = ["## Table of Contents", ""]
 
-    def walk(node: DocNode, number: str) -> None:
-        heading = numbered_title(number, node.title)
-        indent = "  " * number.count(".")
-        lines.append(f"{indent}- [{heading}](#{_anchor(heading)})")
-        for idx, child in enumerate(node.children, start=1):
-            walk(child, f"{number}.{idx}")
+    def walk(node: DocNode, depth: int) -> None:
+        indent = "  " * depth
+        lines.append(f"{indent}- [{node.title}](#{_anchor(node.title)})")
+        for child in node.children:
+            walk(child, depth + 1)
 
-    for idx, child in enumerate(tree.children, start=1):
-        walk(child, str(idx))
+    for child in tree.children:
+        walk(child, 0)
     lines.append("")
     return "\n".join(lines)
 
@@ -496,24 +493,22 @@ def render_doc_node(
     entries: dict[str, APIEntry],
     heading_level: int,
     docs_dir: Path,
-    section_number: str,
     *,
     default_source_path: Path,
 ) -> str:
-    parts = [f"{'#' * heading_level} {numbered_title(section_number, node.title)}", ""]
+    parts = [f"{'#' * heading_level} {node.title}", ""]
     if node.intro:
         parts.extend([node.intro, ""])
     # Nested catalog subsections first, then APIs whose Directory is exactly
     # this path (e.g. System Variable Access: Layout Tags / Pipes / …, then
     # `arch.block_idx` / `arch.get_dyn_ub`).
-    for idx, child in enumerate(node.children, start=1):
+    for child in node.children:
         parts.append(
             render_doc_node(
                 child,
                 entries,
                 heading_level + 1,
                 docs_dir,
-                f"{section_number}.{idx}",
                 default_source_path=default_source_path,
             )
         )
@@ -580,10 +575,9 @@ def render_reference(
             entries,
             2,
             docs_dir,
-            str(idx),
             default_source_path=default_source_path,
         )
-        for idx, child in enumerate(tree.children, start=1)
+        for child in tree.children
     ]
     if leftovers:
         body.append(f"## {leftovers_title}\n")
@@ -596,7 +590,7 @@ def render_reference(
     return "\n".join(header + body).rstrip() + "\n"
 
 
-_NUMBERED_HEADING = re.compile(r"^(#{2,6})\s+(\d+(?:\.\d+)*)\.?\s+(.+?)\s*$")
+_HEADING = re.compile(r"^(#{2,6})\s+(.+?)\s*$")
 _MARKDOWN_LINK = re.compile(r"(\]\(\s*)([^)\s#]+)(#[^)\s]*)?(\s*\))")
 
 
@@ -636,6 +630,28 @@ def _prefix_relative_links(lines: list[str], prefix: str) -> list[str]:
     return [_MARKDOWN_LINK.sub(replace, line) for line in lines]
 
 
+def _headings(lines: list[str], start: int = 0):
+    """Yield ``(index, level, title)`` for headings outside fenced code blocks."""
+    in_fence = False
+    for index in range(start, len(lines)):
+        line = lines[index]
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        match = _HEADING.match(line)
+        if match:
+            yield index, len(match.group(1)), match.group(2)
+
+
+def _child_section_ids(page_files: dict[str, str], number: str) -> list[str]:
+    """Return the ids of the subsections nested under one section."""
+    prefix = f"{number}."
+    children = [key for key in page_files if key.startswith(prefix)]
+    return sorted(children, key=lambda key: int(key[len(prefix) :]))
+
+
 def split_reference_document(
     markdown: str,
     *,
@@ -647,10 +663,10 @@ def split_reference_document(
 ) -> dict[Path, str]:
     """Split one generated reference into section pages plus a landing page.
 
-    ``page_files`` maps numeric section ids to output paths relative to the
-    reference directory. A mapping for ``"5"`` whose path ends in ``index.md``
-    turns section 5 into a group page and emits its numbered H3 subsections as
-    separate pages.
+    ``page_files`` maps section ids to output paths relative to the reference
+    directory. The ids order the pages and route sections to files; they are
+    not rendered. A mapping for ``"5"`` whose path ends in ``index.md`` turns
+    section 5 into a group page and emits its H3 subsections as separate pages.
     """
     lines = markdown.splitlines()
     h1_index = next(i for i, line in enumerate(lines) if line.startswith("# "))
@@ -662,10 +678,11 @@ def split_reference_document(
     intro = _trim_section(lines[h1_index + 1 : header_end])
 
     top_sections: list[tuple[str, str, int, int]] = []
-    for i, line in enumerate(lines):
-        match = _NUMBERED_HEADING.match(line)
-        if match and len(match.group(1)) == 2:
-            top_sections.append((match.group(2), match.group(3), i, len(lines)))
+    for index, level, title in _headings(lines, header_end + 1):
+        if title == "Table of Contents":
+            continue
+        if level == 2:
+            top_sections.append((str(len(top_sections) + 1), title, index, len(lines)))
     for idx in range(len(top_sections) - 1):
         number, title, start, _end = top_sections[idx]
         top_sections[idx] = (number, title, start, top_sections[idx + 1][2])
@@ -680,55 +697,44 @@ def split_reference_document(
         block = _trim_section(lines[start:end].copy())
         path = page_files[number]
         display_title = (page_titles or {}).get(number, title)
-        group = path.endswith("/index.md")
-        if group:
-            first_child = next(
-                (
-                    i
-                    for i, line in enumerate(block[1:], start=1)
-                    if (m := _NUMBERED_HEADING.match(line))
-                    and m.group(1) == "###"
-                    and m.group(2).startswith(f"{number}.")
-                ),
-                None,
-            )
-            intro_block = _trim_section(block[:first_child]) if first_child else block
-            pages.append((number, display_title, path, intro_block))
-            if first_child is not None:
-                child_starts: list[int] = []
-                for i, line in enumerate(block[first_child:], start=first_child):
-                    match = _NUMBERED_HEADING.match(line)
-                    if match and match.group(1) == "###":
-                        child_starts.append(i)
-                for cidx, child_start in enumerate(child_starts):
-                    child_end = (
-                        child_starts[cidx + 1]
-                        if cidx + 1 < len(child_starts)
-                        else len(block)
-                    )
-                    child_match = _NUMBERED_HEADING.match(block[child_start])
-                    assert child_match is not None
-                    child_number = child_match.group(2)
-                    child_path = page_files.get(child_number)
-                    if child_path is None:
-                        continue
-                    pages.append(
-                        (
-                            child_number,
-                            (page_titles or {}).get(child_number, child_match.group(3)),
-                            child_path,
-                            _trim_section(block[child_start:child_end].copy()),
-                        )
-                    )
-        else:
+        if not path.endswith("/index.md"):
             pages.append((number, display_title, path, block))
+            continue
+        child_ids = _child_section_ids(page_files, number)
+        child_starts: list[int] = []
+        for index, level, child_title in _headings(block, 1):
+            if len(child_starts) >= len(child_ids):
+                break
+            # An H3 API entry is wrapped in code spans; plain H3s are sections.
+            if level == 3 and not child_title.startswith("`"):
+                child_starts.append(index)
+        first_child = child_starts[0] if child_starts else None
+        intro_block = (
+            _trim_section(block[:first_child]) if first_child is not None else block
+        )
+        pages.append((number, display_title, path, intro_block))
+        for cidx, child_start in enumerate(child_starts):
+            child_end = (
+                child_starts[cidx + 1] if cidx + 1 < len(child_starts) else len(block)
+            )
+            child_number = child_ids[cidx]
+            child_title = _HEADING.match(block[child_start]).group(2)
+            pages.append(
+                (
+                    child_number,
+                    (page_titles or {}).get(child_number, child_title),
+                    page_files[child_number],
+                    _trim_section(block[child_start:child_end].copy()),
+                )
+            )
 
     result: dict[Path, str] = {}
     index_page = Path(index_path)
-    table = ["## Reference Pages", "", "| Section | Page |", "| --- | --- |"]
+    table = ["## Reference Pages", ""]
     for number, title, path, _block in pages:
         target = Path(os.path.relpath(Path(path), index_page.parent)).as_posix()
-        table.append(f"| {number} | [{title}]({target}) |")
+        indent = "  " if "." in number else ""
+        table.append(f"{indent}- [{title}]({target})")
     table.extend(["", "---", ""])
     index_prefix = "../" * len(index_page.parent.parts)
     index_body = (
@@ -767,16 +773,12 @@ def split_reference_document(
                 if item[2].startswith(f"{page.parent.as_posix()}/") and item[2] != path
             ]
             if children:
-                page_body.extend(
-                    ["", "## Subtopics", "", "| Section | Page |", "| --- | --- |"]
-                )
-                for child_number, child_title, child_path, _child_block in children:
+                page_body.extend(["", "## Subtopics", ""])
+                for _child_number, child_title, child_path, _child_block in children:
                     child_target = Path(
                         os.path.relpath(child_path, page.parent)
                     ).as_posix()
-                    page_body.append(
-                        f"| {child_number} | [{child_title}]({child_target}) |"
-                    )
+                    page_body.append(f"- [{child_title}]({child_target})")
         result[page] = "\n".join(page_body).rstrip() + "\n"
     return result
 

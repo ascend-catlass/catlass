@@ -18,7 +18,7 @@ Mask / Vector 上的按位与逻辑运算。
 
 ## `tla.shift_left`
 
-**源码：** [`catlass.core_api.shift_left`](../../../../../catlass/core_api.py#L8049)
+**源码：** [`catlass.core_api.shift_left`](../../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -56,7 +56,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.shift_right`
 
-**源码：** [`catlass.core_api.shift_right`](../../../../../catlass/core_api.py#L8085)
+**源码：** [`catlass.core_api.shift_right`](../../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -96,7 +96,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.bitwise_not`
 
-**源码：** [`catlass.core_api.bitwise_not`](../../../../../catlass/core_api.py#L8123)
+**源码：** [`catlass.core_api.bitwise_not`](../../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -129,7 +129,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.bitwise_and`
 
-**源码：** [`catlass.core_api.bitwise_and`](../../../../../catlass/core_api.py#L9012)
+**源码：** [`catlass.core_api.bitwise_and`](../../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -163,7 +163,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.bitwise_or`
 
-**源码：** [`catlass.core_api.bitwise_or`](../../../../../catlass/core_api.py#L9050)
+**源码：** [`catlass.core_api.bitwise_or`](../../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -197,7 +197,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.bitwise_xor`
 
-**源码：** [`catlass.core_api.bitwise_xor`](../../../../../catlass/core_api.py#L9088)
+**源码：** [`catlass.core_api.bitwise_xor`](../../../../../catlass/core_api.py)
 
 功能说明：
 

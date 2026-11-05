@@ -17,13 +17,13 @@ language-boundary text lives in this generator (`CONSTEXPR_CALLABLE_DOC`).
 
 Build Host `tla.Tensor` objects and mark layout extents dynamic so one artifact can run at different shapes. See also [Static and Dynamic Layout](../../kernel_development/core_concepts/layout.md).
 
-## 3.1 Binding
+## Binding
 
 Bind a real NPU buffer with `from_dlpack`, or a metadata-only sample with `make_fake_tensor`.
 
 ### `tla.from_dlpack`
 
-**Source:** [`catlass.tla.runtime.from_dlpack`](../../../../catlass/tla/runtime.py#L709)
+**Source:** [`catlass.tla.runtime.from_dlpack`](../../../../catlass/tla/runtime.py)
 
 Description:
 
@@ -93,7 +93,7 @@ ty = from_dlpack(
 
 ### `tla.make_fake_tensor`
 
-**Source:** [`catlass.tla.runtime.make_fake_tensor`](../../../../catlass/tla/runtime.py#L1005)
+**Source:** [`catlass.tla.runtime.make_fake_tensor`](../../../../catlass/tla/runtime.py)
 
 Description:
 
@@ -144,13 +144,13 @@ fzn = make_fake_tensor(
 
 ---
 
-## 3.2 Dynamic Layout
+## Dynamic Layout
 
 Mark static layout extents dynamic. See also [Static and Dynamic Layout](../../kernel_development/core_concepts/layout.md).
 
 ### `tla.Tensor.mark_layout_dynamic`
 
-**Source:** [`catlass.tla.runtime._Tensor.mark_layout_dynamic`](../../../../catlass/tla/runtime.py#L352)
+**Source:** [`catlass.tla.runtime._Tensor.mark_layout_dynamic`](../../../../catlass/tla/runtime.py)
 
 Description:
 
@@ -192,7 +192,7 @@ artifact = tla.compile(my_kernel, ta, options="--npu-arch 3510")
 
 ### `tla.Tensor.mark_compact_shape_dynamic`
 
-**Source:** [`catlass.tla.runtime._Tensor.mark_compact_shape_dynamic`](../../../../catlass/tla/runtime.py#L450)
+**Source:** [`catlass.tla.runtime._Tensor.mark_compact_shape_dynamic`](../../../../catlass/tla/runtime.py)
 
 Description:
 

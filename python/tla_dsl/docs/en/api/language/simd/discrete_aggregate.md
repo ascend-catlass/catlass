@@ -16,7 +16,7 @@ Gather elements from a UB tensor by index, and masked reductions (`VectorSSA.red
 
 ## `tla.VectorSSA.reduce`
 
-**Source:** [`catlass.core_api.VectorSSA.reduce`](../../../../../catlass/core_api.py#L593)
+**Source:** [`catlass.core_api.VectorSSA.reduce`](../../../../../catlass/core_api.py)
 
 Description:
 
@@ -57,7 +57,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.gather`
 
-**Source:** [`catlass.core_api.gather`](../../../../../catlass/core_api.py#L9548)
+**Source:** [`catlass.core_api.gather`](../../../../../catlass/core_api.py)
 
 Description:
 

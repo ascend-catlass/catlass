@@ -20,7 +20,7 @@ kernel lowering 期间内联；在 Host 顶层调用时按普通 Python 执行�
 
 ## `dataclasses.dataclass`
 
-**源码：** [`dataclasses.dataclass`](../../../../catlass/base_dsl/runtime/jit_arg_adapters.py#L135)
+**源码：** [`dataclasses.dataclass`](../../../../catlass/base_dsl/runtime/jit_arg_adapters.py)
 
 功能说明：
 
@@ -81,7 +81,7 @@ artifact(tiling, block_num=1)
 
 ## `tla.kernel`
 
-**源码：** [`catlass.dsl.kernel`](../../../../catlass/catlass_dsl/catlass.py#L27)
+**源码：** [`catlass.dsl.kernel`](../../../../catlass/catlass_dsl/catlass.py)
 
 功能说明：
 
@@ -160,7 +160,7 @@ compiled(tx, ty, block_num=1)
 
 ## `tla.jit`
 
-**源码：** [`catlass.dsl.jit`](../../../../catlass/catlass_dsl/catlass.py#L114)
+**源码：** [`catlass.dsl.jit`](../../../../catlass/catlass_dsl/catlass.py)
 
 功能说明：
 
@@ -252,7 +252,7 @@ compiled_ep(tx, ty, block_num=1)  # 不再传 abs_epilogue
 
 ## `tla.extern`
 
-**源码：** [`catlass.tla.ffi.extern`](../../../../catlass/tla/ffi.py#L70)
+**源码：** [`catlass.tla.ffi.extern`](../../../../catlass/tla/ffi.py)
 
 功能说明：
 

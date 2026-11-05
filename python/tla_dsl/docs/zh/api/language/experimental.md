@@ -19,7 +19,7 @@ Do not regenerate this file from a glossary.
 
 ## `tla.experimental.img2col`
 
-**源码：** [`catlass.tla.experimental.img2col`](../../../../catlass/tla/experimental/__init__.py#L51)
+**源码：** [`catlass.tla.experimental.img2col`](../../../../catlass/tla/experimental/__init__.py)
 
 功能说明：
 

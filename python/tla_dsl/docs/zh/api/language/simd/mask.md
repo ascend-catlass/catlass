@@ -18,7 +18,7 @@ Mask 创建与尾块更新。
 
 ## `tla.create_mask`
 
-**源码：** [`catlass.core_api.create_mask`](../../../../../catlass/core_api.py#L10064)
+**源码：** [`catlass.core_api.create_mask`](../../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -72,7 +72,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.update_mask`
 
-**源码：** [`catlass.core_api.update_mask`](../../../../../catlass/core_api.py#L10128)
+**源码：** [`catlass.core_api.update_mask`](../../../../../catlass/core_api.py)
 
 功能说明：
 

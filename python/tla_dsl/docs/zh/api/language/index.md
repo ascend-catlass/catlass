@@ -25,29 +25,27 @@ DLPack 接入教程见 [Host Tensor 接入](../../kernel_development/core_concep
 
 ## 分类页面
 
-| 章节 | 页面 |
-| --- | --- |
-| 1 | [Layout 与 Tensor](layout_tensor.md) |
-| 2 | [值与数据类型](values_types.md) |
-| 3 | [数据搬运](data_movement.md) |
-| 4 | [矩阵运算](matrix.md) |
-| 5 | [SIMD 向量计算](simd/index.md) |
-| 5.1 | [Mask 计算](simd/mask.md) |
-| 5.2 | [基础算术](simd/arithmetic.md) |
-| 5.3 | [逻辑计算](simd/logical.md) |
-| 5.4 | [比较与选择](simd/compare_select.md) |
-| 5.5 | [数据填充](simd/fill.md) |
-| 5.6 | [离散与聚合](simd/discrete_aggregate.md) |
-| 5.7 | [数据重排](simd/rearrange.md) |
-| 5.8 | [数据压缩](simd/compress.md) |
-| 5.9 | [类型转换](simd/type_conversion.md) |
-| 5.10 | [直方图计算](simd/histogram.md) |
-| 6 | [SIMT 向量计算](simt.md) |
-| 7 | [同步控制](sync.md) |
-| 8 | [系统变量访问](system.md) |
-| 9 | [资源管理](resources.md) |
-| 10 | [调试与打印](debug.md) |
-| 11 | [作用域与控制流](scopes.md) |
-| 12 | [实验性接口](experimental.md) |
+- [Layout 与 Tensor](layout_tensor.md)
+- [值与数据类型](values_types.md)
+- [数据搬运](data_movement.md)
+- [矩阵运算](matrix.md)
+- [SIMD 向量计算](simd/index.md)
+  - [Mask 计算](simd/mask.md)
+  - [基础算术](simd/arithmetic.md)
+  - [逻辑计算](simd/logical.md)
+  - [比较与选择](simd/compare_select.md)
+  - [数据填充](simd/fill.md)
+  - [离散与聚合](simd/discrete_aggregate.md)
+  - [数据重排](simd/rearrange.md)
+  - [数据压缩](simd/compress.md)
+  - [类型转换](simd/type_conversion.md)
+  - [直方图计算](simd/histogram.md)
+- [SIMT 向量计算](simt.md)
+- [同步控制](sync.md)
+- [系统变量访问](system.md)
+- [资源管理](resources.md)
+- [调试与打印](debug.md)
+- [作用域与控制流](scopes.md)
+- [实验性接口](experimental.md)
 
 ---

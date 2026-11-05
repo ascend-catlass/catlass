@@ -16,7 +16,7 @@ Do not regenerate this file from a glossary.
 
 ## `tla.where`
 
-**源码：** [`catlass.core_api.where`](../../../../../catlass/core_api.py#L8587)
+**源码：** [`catlass.core_api.where`](../../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -50,7 +50,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.cmp`
 
-**源码：** [`catlass.core_api.cmp`](../../../../../catlass/core_api.py#L8935)
+**源码：** [`catlass.core_api.cmp`](../../../../../catlass/core_api.py)
 
 功能说明：
 

@@ -16,7 +16,7 @@ Do not regenerate this file from a glossary.
 
 ## `tla.full`
 
-**源码：** [`catlass.core_api.full`](../../../../../catlass/core_api.py#L6959)
+**源码：** [`catlass.core_api.full`](../../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -57,7 +57,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.arange`
 
-**源码：** [`catlass.core_api.arange`](../../../../../catlass/core_api.py#L7088)
+**源码：** [`catlass.core_api.arange`](../../../../../catlass/core_api.py)
 
 功能说明：
 

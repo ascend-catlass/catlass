@@ -20,7 +20,7 @@ Cube / Vector / `vec.func` 区域以及 kernel 侧循环范围。
 
 ## `tla.range`
 
-**源码：** [`catlass.core_api.range`](../../../../catlass/core_api.py#L6357)
+**源码：** [`catlass.core_api.range`](../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -54,7 +54,7 @@ for i in tla.range(0, n, 1):
 
 ## `tla.range_constexpr`
 
-**源码：** [`catlass.core_api.range_constexpr`](../../../../catlass/core_api.py#L6407)
+**源码：** [`catlass.core_api.range_constexpr`](../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -90,7 +90,7 @@ for k in tla.range_constexpr(0, 4):
 
 ## `tla.cube`
 
-**源码：** [`catlass.core_api.cube`](../../../../catlass/core_api.py#L6458)
+**源码：** [`catlass.core_api.cube`](../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -122,7 +122,7 @@ with tla.cube():
 
 ## `tla.vector`
 
-**源码：** [`catlass.core_api.vector`](../../../../catlass/core_api.py#L6480)
+**源码：** [`catlass.core_api.vector`](../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -154,7 +154,7 @@ with tla.vector():
 
 ## `tla.vec.func`
 
-**源码：** [`catlass.core_api._vec_func`](../../../../catlass/core_api.py#L6514)
+**源码：** [`catlass.core_api._vec_func`](../../../../catlass/core_api.py)
 
 功能说明：
 

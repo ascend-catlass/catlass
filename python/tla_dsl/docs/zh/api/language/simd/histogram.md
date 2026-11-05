@@ -18,7 +18,7 @@ Do not regenerate this file from a glossary.
 
 ## `tla.histograms`
 
-**源码：** [`catlass.core_api.histograms`](../../../../../catlass/core_api.py#L8865)
+**源码：** [`catlass.core_api.histograms`](../../../../../catlass/core_api.py)
 
 功能说明：
 

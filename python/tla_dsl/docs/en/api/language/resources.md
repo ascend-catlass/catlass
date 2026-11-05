@@ -16,7 +16,7 @@ On-chip scratch allocation via `allocate`.
 
 ## `tla.allocate`
 
-**Source:** [`catlass.core_api.allocate`](../../../../catlass/core_api.py#L9978)
+**Source:** [`catlass.core_api.allocate`](../../../../catlass/core_api.py)
 
 Description:
 

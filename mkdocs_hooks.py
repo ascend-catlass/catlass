@@ -29,14 +29,14 @@ _TOP_LEVEL_ORDER = {
     "1_Practice": 10,
     "2_Design": 20,
     "3_API": 30,
-    "4_CATLASS_DSL": 40,
+    "4_CATLASS_Python": 40,
     "0x_new_versions": 50,
     "FAQ.md": 100,
 }
 
 _ASSETS_PATH = Path("assets")
 _DSL_DOCS_PATH = Path("python/tla_dsl/docs")
-_DSL_SITE_SECTION = Path("4_CATLASS_DSL")
+_DSL_SITE_SECTION = Path("4_CATLASS_Python")
 _DSL_GENERATED_BY = "mkdocs_hooks.dsl_docs"
 
 _DSL_DEFAULT_ORDER = 90

@@ -22,7 +22,7 @@ nav_order: 3
 
 ### `tla.from_dlpack`
 
-**源码：** [`catlass.tla.runtime.from_dlpack`](../../../../catlass/tla/runtime.py#L653)
+**源码：** [`catlass.tla.runtime.from_dlpack`](../../../../catlass/tla/runtime.py)
 
 功能说明：
 
@@ -81,7 +81,7 @@ ty = from_dlpack(
 
 ### `tla.make_fake_tensor`
 
-**源码：** [`catlass.tla.runtime.make_fake_tensor`](../../../../catlass/tla/runtime.py#L928)
+**源码：** [`catlass.tla.runtime.make_fake_tensor`](../../../../catlass/tla/runtime.py)
 
 功能说明：
 
@@ -133,7 +133,7 @@ fzn = make_fake_tensor(
 
 ### `tla.Tensor.mark_layout_dynamic`
 
-**源码：** [`catlass.tla.runtime._Tensor.mark_layout_dynamic`](../../../../catlass/tla/runtime.py#L296)
+**源码：** [`catlass.tla.runtime._Tensor.mark_layout_dynamic`](../../../../catlass/tla/runtime.py)
 
 功能说明：
 
@@ -171,7 +171,7 @@ artifact = tla.compile(my_kernel, ta, options="--npu-arch 3510")
 
 ### `tla.Tensor.mark_compact_shape_dynamic`
 
-**源码：** [`catlass.tla.runtime._Tensor.mark_compact_shape_dynamic`](../../../../catlass/tla/runtime.py#L394)
+**源码：** [`catlass.tla.runtime._Tensor.mark_compact_shape_dynamic`](../../../../catlass/tla/runtime.py)
 
 功能说明：
 

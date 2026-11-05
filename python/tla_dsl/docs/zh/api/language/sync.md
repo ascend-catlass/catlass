@@ -21,7 +21,7 @@ Do not regenerate this file from a glossary.
 
 ## `tla.flag`
 
-**源码：** [`catlass.core_api.flag`](../../../../catlass/core_api.py#L5913)
+**源码：** [`catlass.core_api.flag`](../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -62,7 +62,7 @@ with tla.vector():
 
 ## `tla.cross_flag`
 
-**源码：** [`catlass.core_api.cross_flag`](../../../../catlass/core_api.py#L5980)
+**源码：** [`catlass.core_api.cross_flag`](../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -94,7 +94,7 @@ cf = tla.cross_flag("aic_aiv", mode=2)
 
 ## `tla.cross_core_set_flag`
 
-**源码：** [`catlass.core_api.cross_core_set_flag`](../../../../catlass/core_api.py#L6066)
+**源码：** [`catlass.core_api.cross_core_set_flag`](../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -129,7 +129,7 @@ with tla.cube():
 
 ## `tla.cross_core_wait_flag`
 
-**源码：** [`catlass.core_api.cross_core_wait_flag`](../../../../catlass/core_api.py#L6110)
+**源码：** [`catlass.core_api.cross_core_wait_flag`](../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -163,7 +163,7 @@ with tla.vector():
 
 ## `tla.set_flag`
 
-**源码：** [`catlass.core_api.set_flag`](../../../../catlass/core_api.py#L6162)
+**源码：** [`catlass.core_api.set_flag`](../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -195,7 +195,7 @@ with tla.vector():
 
 ## `tla.wait_flag`
 
-**源码：** [`catlass.core_api.wait_flag`](../../../../catlass/core_api.py#L6188)
+**源码：** [`catlass.core_api.wait_flag`](../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -227,7 +227,7 @@ with tla.vector():
 
 ## `tla.pipe_barrier`
 
-**源码：** [`catlass.core_api.pipe_barrier`](../../../../catlass/core_api.py#L6214)
+**源码：** [`catlass.core_api.pipe_barrier`](../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -262,7 +262,7 @@ with tla.vector():
 
 ## `tla.mutex`
 
-**源码：** [`catlass.core_api.mutex`](../../../../catlass/core_api.py#L6261)
+**源码：** [`catlass.core_api.mutex`](../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -297,7 +297,7 @@ mtx = tla.mutex("l1_buf", id=0)
 
 ## `tla.mutex_guard`
 
-**源码：** [`catlass.core_api.mutex_guard`](../../../../catlass/core_api.py#L6314)
+**源码：** [`catlass.core_api.mutex_guard`](../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -329,7 +329,7 @@ with tla.mutex_guard(mtx):
 
 ## `tla.mutex_lock`
 
-**源码：** [`catlass.core_api.mutex_lock`](../../../../catlass/core_api.py#L6355)
+**源码：** [`catlass.core_api.mutex_lock`](../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -365,7 +365,7 @@ mtx.lock(pipe=tla.arch.SCALAR)
 
 ## `tla.mutex_unlock`
 
-**源码：** [`catlass.core_api.mutex_unlock`](../../../../catlass/core_api.py#L6393)
+**源码：** [`catlass.core_api.mutex_unlock`](../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -401,7 +401,7 @@ mtx.unlock(pipe=tla.arch.SCALAR)
 
 ## `tla.local_mem_bar`
 
-**源码：** [`catlass.core_api.local_mem_bar`](../../../../catlass/core_api.py#L6431)
+**源码：** [`catlass.core_api.local_mem_bar`](../../../../catlass/core_api.py)
 
 功能说明：
 

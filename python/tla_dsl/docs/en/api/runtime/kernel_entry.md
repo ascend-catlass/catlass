@@ -19,7 +19,7 @@ Host-side `@tla.kernel` entry, `@tla.jit` device helpers, `@tla.extern` declarat
 
 ## `dataclasses.dataclass`
 
-**Source:** [`dataclasses.dataclass`](../../../../catlass/base_dsl/runtime/jit_arg_adapters.py#L135)
+**Source:** [`dataclasses.dataclass`](../../../../catlass/base_dsl/runtime/jit_arg_adapters.py)
 
 Description:
 
@@ -68,7 +68,7 @@ compiled(Aux(128, bias, 0.5), ...)
 
 ## `tla.kernel`
 
-**Source:** [`catlass.dsl.kernel`](../../../../catlass/catlass_dsl/catlass.py#L27)
+**Source:** [`catlass.dsl.kernel`](../../../../catlass/catlass_dsl/catlass.py)
 
 Description:
 
@@ -170,7 +170,7 @@ compiled(tx, ty, block_num=1)
 
 ## `tla.jit`
 
-**Source:** [`catlass.dsl.jit`](../../../../catlass/catlass_dsl/catlass.py#L143)
+**Source:** [`catlass.dsl.jit`](../../../../catlass/catlass_dsl/catlass.py)
 
 Description:
 
@@ -277,7 +277,7 @@ compiled_ep(tx, ty, block_num=1)  # abs_epilogue omitted at launch
 
 ## `tla.extern`
 
-**Source:** [`catlass.tla.ffi.extern`](../../../../catlass/tla/ffi.py#L70)
+**Source:** [`catlass.tla.ffi.extern`](../../../../catlass/tla/ffi.py)
 
 Description:
 

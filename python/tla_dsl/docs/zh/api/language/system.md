@@ -22,7 +22,7 @@ block 辅助等）。
 `tla.arch` 上的布局标签（`_LayoutTag`），供 `make_layout` / `make_tensor` /
 `make_tensor_like` / `copy` 使用，作为 `layoutTag=` / `layout_tag=` 传入。
 
-**源码：** [`catlass.core_api.arch`](../../../../catlass/core_api.py#L10100)
+**源码：** [`catlass.core_api.arch`](../../../../catlass/core_api.py)
 
 | Tag | 用途 |
 | --- | --- |
@@ -55,7 +55,7 @@ tag = tla.arch.RowMajor
 
 `tla.arch` 上的 pipe 标识，供 `flag` / `pipe_barrier` / `mutex_*` / 跨核同步使用。
 
-**源码：** [`catlass.core_api.arch`](../../../../catlass/core_api.py#L10100)
+**源码：** [`catlass.core_api.arch`](../../../../catlass/core_api.py)
 
 | Pipe | 用途 |
 | --- | --- |
@@ -82,7 +82,7 @@ pipe = tla.arch.MTE2
 
 `tla.AddressSpace` 的片上成员，供 `allocate` / `get_capacity_in_bytes` 使用。
 
-**源码：** [`catlass.address_space.AddressSpace`](../../../../catlass/address_space.py#L16)
+**源码：** [`catlass.address_space.AddressSpace`](../../../../catlass/address_space.py)
 
 | Address space | 用途 |
 | --- | --- |
@@ -112,7 +112,7 @@ scope = tla.AddressSpace.ub
 
 ### `tla.arch.block_idx`
 
-**源码：** [`catlass.core_api.arch_block_idx`](../../../../catlass/core_api.py#L9538)
+**源码：** [`catlass.core_api.arch_block_idx`](../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -142,7 +142,7 @@ bid = tla.arch.block_idx()
 
 ### `tla.arch.sub_block_idx`
 
-**源码：** [`catlass.core_api.arch_sub_block_idx`](../../../../catlass/core_api.py#L9561)
+**源码：** [`catlass.core_api.arch_sub_block_idx`](../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -172,7 +172,7 @@ sid = tla.arch.sub_block_idx()
 
 ### `tla.arch.thread_idx`
 
-**源码：** [`catlass.core_api.arch_thread_idx`](../../../../catlass/core_api.py#L9584)
+**源码：** [`catlass.core_api.arch_thread_idx`](../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -210,7 +210,7 @@ with tla.vec.func(mode="simt", thread_block_dim=256):
 
 ### `tla.arch.sync_threads`
 
-**源码：** [`catlass.core_api.arch_sync_threads`](../../../../catlass/core_api.py#L9628)
+**源码：** [`catlass.core_api.arch_sync_threads`](../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -253,7 +253,7 @@ with tla.vec.func(mode="simt", thread_block_dim=THREADS):
 
 ### `tla.arch.block_num`
 
-**源码：** [`catlass.core_api.arch_block_num`](../../../../catlass/core_api.py#L9672)
+**源码：** [`catlass.core_api.arch_block_num`](../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -285,7 +285,7 @@ nblocks = tla.arch.block_num()
 
 ### `tla.arch.thread_block_dim`
 
-**源码：** [`catlass.core_api.arch_thread_block_dim`](../../../../catlass/core_api.py#L9698)
+**源码：** [`catlass.core_api.arch_thread_block_dim`](../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -324,7 +324,7 @@ with tla.vec.func(mode="simt", thread_block_dim=256):
 
 ### `tla.arch.get_capacity_in_bytes`
 
-**源码：** [`catlass.core_api.arch_get_capacity_in_bytes`](../../../../catlass/core_api.py#L9745)
+**源码：** [`catlass.core_api.arch_get_capacity_in_bytes`](../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -358,7 +358,7 @@ ub_bytes = tla.arch.get_capacity_in_bytes(tla.AddressSpace.ub)
 
 ### `tla.arch.get_dyn_ub`
 
-**源码：** [`catlass.core_api.arch_get_dyn_ub`](../../../../catlass/core_api.py#L9856)
+**源码：** [`catlass.core_api.arch_get_dyn_ub`](../../../../catlass/core_api.py)
 
 功能说明：
 

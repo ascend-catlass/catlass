@@ -18,7 +18,7 @@ Do not regenerate this file from a glossary.
 
 ## `tla.pack`
 
-**源码：** [`catlass.core_api.pack`](../../../../../catlass/core_api.py#L7890)
+**源码：** [`catlass.core_api.pack`](../../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -56,7 +56,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.unpack`
 
-**源码：** [`catlass.core_api.unpack`](../../../../../catlass/core_api.py#L8200)
+**源码：** [`catlass.core_api.unpack`](../../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -92,7 +92,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.interleave`
 
-**源码：** [`catlass.core_api.interleave`](../../../../../catlass/core_api.py#L7889)
+**源码：** [`catlass.core_api.interleave`](../../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -126,7 +126,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.deinterleave`
 
-**源码：** [`catlass.core_api.deinterleave`](../../../../../catlass/core_api.py#L7967)
+**源码：** [`catlass.core_api.deinterleave`](../../../../../catlass/core_api.py)
 
 功能说明：
 

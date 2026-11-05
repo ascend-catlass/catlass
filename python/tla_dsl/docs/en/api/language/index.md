@@ -16,29 +16,27 @@ The vector unit has two execution modes, and they are separate chapters below. *
 
 ## Reference Pages
 
-| Section | Page |
-| --- | --- |
-| 1 | [Layout and Tensor](layout_tensor.md) |
-| 2 | [Values and Data Types](values_types.md) |
-| 3 | [Data Movement](data_movement.md) |
-| 4 | [Matrix Compute](matrix.md) |
-| 5 | [SIMD Vector Compute](simd/index.md) |
-| 5.1 | [Mask Compute](simd/mask.md) |
-| 5.2 | [Basic Arithmetic](simd/arithmetic.md) |
-| 5.3 | [Logical Compute](simd/logical.md) |
-| 5.4 | [Compare and Select](simd/compare_select.md) |
-| 5.5 | [Data Fill](simd/fill.md) |
-| 5.6 | [Discrete and Aggregate](simd/discrete_aggregate.md) |
-| 5.7 | [Data Rearrange](simd/rearrange.md) |
-| 5.8 | [Data Compress](simd/compress.md) |
-| 5.9 | [Type Conversion](simd/type_conversion.md) |
-| 5.10 | [Histogram Compute](simd/histogram.md) |
-| 6 | [SIMT Vector Compute](simt.md) |
-| 7 | [Synchronization](sync.md) |
-| 8 | [System Variable Access](system.md) |
-| 9 | [Resource Management](resources.md) |
-| 10 | [Debug and Printing](debug.md) |
-| 11 | [Scopes and Control Flow](scopes.md) |
-| 12 | [Experimental APIs](experimental.md) |
+- [Layout and Tensor](layout_tensor.md)
+- [Values and Data Types](values_types.md)
+- [Data Movement](data_movement.md)
+- [Matrix Compute](matrix.md)
+- [SIMD Vector Compute](simd/index.md)
+  - [Mask Compute](simd/mask.md)
+  - [Basic Arithmetic](simd/arithmetic.md)
+  - [Logical Compute](simd/logical.md)
+  - [Compare and Select](simd/compare_select.md)
+  - [Data Fill](simd/fill.md)
+  - [Discrete and Aggregate](simd/discrete_aggregate.md)
+  - [Data Rearrange](simd/rearrange.md)
+  - [Data Compress](simd/compress.md)
+  - [Type Conversion](simd/type_conversion.md)
+  - [Histogram Compute](simd/histogram.md)
+- [SIMT Vector Compute](simt.md)
+- [Synchronization](sync.md)
+- [System Variable Access](system.md)
+- [Resource Management](resources.md)
+- [Debug and Printing](debug.md)
+- [Scopes and Control Flow](scopes.md)
+- [Experimental APIs](experimental.md)
 
 ---

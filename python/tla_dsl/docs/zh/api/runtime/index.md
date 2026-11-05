@@ -23,10 +23,8 @@ DLPack 接入教程见 [Host Tensor 接入](../../kernel_development/core_concep
 
 ## 分类页面
 
-| 章节 | 页面 |
-| --- | --- |
-| 1 | [Kernel 入口与语言边界](kernel_entry.md) |
-| 2 | [编译与启动](compile_launch.md) |
-| 3 | [Host Tensor 接入](host_tensor.md) |
+- [Kernel 入口与语言边界](kernel_entry.md)
+- [编译与启动](compile_launch.md)
+- [Host Tensor 接入](host_tensor.md)
 
 ---

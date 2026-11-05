@@ -16,7 +16,7 @@ Tensor copies between on-chip and global memory, and UB register load/store.
 
 ## `tla.copy`
 
-**Source:** [`catlass.core_api.copy`](../../../../catlass/core_api.py#L5599)
+**Source:** [`catlass.core_api.copy`](../../../../catlass/core_api.py)
 
 Description:
 
@@ -181,7 +181,7 @@ with tla.cube():
 
 ## `tla.Tensor.load`
 
-**Source:** [`catlass.tla.tensor._Tensor.load`](../../../../catlass/tla/tensor.py#L533)
+**Source:** [`catlass.tla.tensor._Tensor.load`](../../../../catlass/tla/tensor.py)
 
 Description:
 
@@ -296,7 +296,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.Tensor.store`
 
-**Source:** [`catlass.tla.tensor._Tensor.store`](../../../../catlass/tla/tensor.py#L1019)
+**Source:** [`catlass.tla.tensor._Tensor.store`](../../../../catlass/tla/tensor.py)
 
 Description:
 
@@ -381,7 +381,7 @@ with tla.vec.func(mode="simd"):
 
 ## `tla.Tensor.fill`
 
-**Source:** [`catlass.tla.tensor._Tensor.fill`](../../../../catlass/tla/tensor.py#L1314)
+**Source:** [`catlass.tla.tensor._Tensor.fill`](../../../../catlass/tla/tensor.py)
 
 Description:
 
@@ -424,7 +424,7 @@ pad.fill(0)
 
 ## `tla.Tensor.__getitem__`
 
-**Source:** [`catlass.tla.tensor._Tensor.__getitem__`](../../../../catlass/tla/tensor.py#L1403)
+**Source:** [`catlass.tla.tensor._Tensor.__getitem__`](../../../../catlass/tla/tensor.py)
 
 Description:
 
@@ -469,7 +469,7 @@ with tla.vec.func(mode="simt", thread_block_dim=256):
 
 ## `tla.Tensor.__setitem__`
 
-**Source:** [`catlass.tla.tensor._Tensor.__setitem__`](../../../../catlass/tla/tensor.py#L1514)
+**Source:** [`catlass.tla.tensor._Tensor.__setitem__`](../../../../catlass/tla/tensor.py)
 
 Description:
 

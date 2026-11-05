@@ -67,27 +67,27 @@ Intro.
 
 ## Table of Contents
 
-- [1. One](#1-one)
+- [One](#one)
 
 ---
 
-## 1. One
+## One
 
 First topic.
 
 ---
 
-## 2. Group
+## Group
 
 Group intro.
 
-### 2.1 Child
+### Child
 
 Child topic.
 
 ---
 
-## 3. Three
+## Three
 
 Third topic.
 

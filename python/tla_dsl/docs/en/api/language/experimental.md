@@ -16,7 +16,7 @@ APIs under `tla.experimental` may change or be removed without backward-compatib
 
 ## `tla.experimental.img2col`
 
-**Source:** [`catlass.tla.experimental.img2col`](../../../../catlass/tla/experimental/__init__.py#L51)
+**Source:** [`catlass.tla.experimental.img2col`](../../../../catlass/tla/experimental/__init__.py)
 
 Description:
 

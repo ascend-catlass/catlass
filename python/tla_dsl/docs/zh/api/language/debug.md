@@ -18,7 +18,7 @@ kernel 内标量 / tensor 调试打印。
 
 ## `tla.print`
 
-**源码：** [`catlass.core_api.print`](../../../../catlass/core_api.py#L3860)
+**源码：** [`catlass.core_api.print`](../../../../catlass/core_api.py)
 
 功能说明：
 

@@ -18,15 +18,13 @@ Several entries here also have a per-thread form, used when the enclosing region
 
 ## Subtopics
 
-| Section | Page |
-| --- | --- |
-| 5.1 | [Mask Compute](mask.md) |
-| 5.2 | [Basic Arithmetic](arithmetic.md) |
-| 5.3 | [Logical Compute](logical.md) |
-| 5.4 | [Compare and Select](compare_select.md) |
-| 5.5 | [Data Fill](fill.md) |
-| 5.6 | [Discrete and Aggregate](discrete_aggregate.md) |
-| 5.7 | [Data Rearrange](rearrange.md) |
-| 5.8 | [Data Compress](compress.md) |
-| 5.9 | [Type Conversion](type_conversion.md) |
-| 5.10 | [Histogram Compute](histogram.md) |
+- [Mask Compute](mask.md)
+- [Basic Arithmetic](arithmetic.md)
+- [Logical Compute](logical.md)
+- [Compare and Select](compare_select.md)
+- [Data Fill](fill.md)
+- [Discrete and Aggregate](discrete_aggregate.md)
+- [Data Rearrange](rearrange.md)
+- [Data Compress](compress.md)
+- [Type Conversion](type_conversion.md)
+- [Histogram Compute](histogram.md)

@@ -18,7 +18,7 @@ Do not regenerate this file from a glossary.
 
 ## `tla.allocate`
 
-**源码：** [`catlass.core_api.allocate`](../../../../catlass/core_api.py#L9602)
+**源码：** [`catlass.core_api.allocate`](../../../../catlass/core_api.py)
 
 功能说明：
 

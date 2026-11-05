@@ -18,7 +18,7 @@ Cube 侧矩阵乘加（`tla.mmad` / `tla.mmad_mx`）。
 
 ## `tla.mmad`
 
-**源码：** [`catlass.core_api.mmad`](../../../../catlass/core_api.py#L6843)
+**源码：** [`catlass.core_api.mmad`](../../../../catlass/core_api.py)
 
 功能说明：
 
@@ -70,7 +70,7 @@ with tla.cube():
 
 ## `tla.mmad_mx`
 
-**源码：** [`catlass.core_api.mmad_mx`](../../../../catlass/core_api.py#L6973)
+**源码：** [`catlass.core_api.mmad_mx`](../../../../catlass/core_api.py)
 
 功能说明：
 
