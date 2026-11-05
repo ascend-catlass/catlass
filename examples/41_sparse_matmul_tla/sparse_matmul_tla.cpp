@@ -172,6 +172,9 @@ static void Run(const Options& options)
     matmulOp(stream, blockNum);
 
     ACL_CHECK(aclrtSynchronizeStream(stream));
+    if (deviceWorkspace != nullptr) {
+        ACL_CHECK(aclrtFree(deviceWorkspace));
+    }
 
     std::vector<int32_t> hostC(lenC);
     ACL_CHECK(aclrtMemcpy(hostC.data(), sizeC, deviceC, sizeC, ACL_MEMCPY_DEVICE_TO_HOST));
@@ -191,6 +194,9 @@ static void Run(const Options& options)
     ACL_CHECK(aclrtFree(deviceB));
     ACL_CHECK(aclrtFree(deviceIdx));
     ACL_CHECK(aclrtFree(deviceC));
+    ACL_CHECK(aclrtFreeHost(hostA));
+    ACL_CHECK(aclrtFreeHost(hostB));
+    ACL_CHECK(aclrtFreeHost(hostIdx));
 
     ACL_CHECK(aclrtDestroyStream(stream));
     ACL_CHECK(aclrtResetDevice(options.deviceId));

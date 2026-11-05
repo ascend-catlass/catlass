@@ -44,6 +44,12 @@ static void Run(Options const& options)
     ACL_CHECK(aclrtSetDevice(options.deviceId));
     ACL_CHECK(aclrtCreateStream(&stream));
 
+    const auto releaseAclEarly = [&]() {
+        ACL_CHECK(aclrtDestroyStream(stream));
+        ACL_CHECK(aclrtResetDevice(options.deviceId));
+        ACL_CHECK(aclFinalize());
+    };
+
     auto aicoreNum = platform_ascendc::PlatformAscendCManager::GetInstance()->GetCoreNumAic();
 
     uint32_t m = options.problemShape.m();
@@ -186,6 +192,7 @@ static void Run(Options const& options)
 
     if (matmulOp.CanImplement(arguments) == Status::kInvalid) {
         std::cerr << "Matmul op cannot be implemented." << std::endl;
+        releaseAclEarly();
         return;
     }
 

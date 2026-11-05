@@ -82,7 +82,7 @@ static void Run(const Options& options, QuantMode x1QuantMode, QuantMode x2Quant
     size_t sizeC = lenC * sizeof(fp16_t);
     size_t sizeBias = lenBias * sizeof(ElementBias);
     size_t goldenSize = lenC * sizeof(float);
-    size_t sizeWorkspace;
+    size_t sizeWorkspace = 0;
 
     uint8_t* deviceA{nullptr};
     uint8_t* deviceB{nullptr};
@@ -91,6 +91,11 @@ static void Run(const Options& options, QuantMode x1QuantMode, QuantMode x2Quant
     uint8_t* x1ScaleDevice{nullptr};
     uint8_t* x2ScaleDevice{nullptr};
     uint8_t* quantBiasDevice{nullptr};
+    uint8_t* hostA{nullptr};
+    uint8_t* hostB{nullptr};
+    uint8_t* x1ScaleHost{nullptr};
+    uint8_t* x2ScaleHost{nullptr};
+    uint8_t* quantBiasHost{nullptr};
 
     const auto cleanupAndFinalize = [&]() {
         if (deviceA)
@@ -107,12 +112,21 @@ static void Run(const Options& options, QuantMode x1QuantMode, QuantMode x2Quant
             ACL_CHECK(aclrtFree(deviceC));
         if (sizeWorkspace > 0 && deviceWorkspace)
             ACL_CHECK(aclrtFree(deviceWorkspace));
+        if (hostA)
+            ACL_CHECK(aclrtFreeHost(hostA));
+        if (hostB)
+            ACL_CHECK(aclrtFreeHost(hostB));
+        if (x1ScaleHost)
+            ACL_CHECK(aclrtFreeHost(x1ScaleHost));
+        if (x2ScaleHost)
+            ACL_CHECK(aclrtFreeHost(x2ScaleHost));
+        if (quantBiasHost)
+            ACL_CHECK(aclrtFreeHost(quantBiasHost));
         ACL_CHECK(aclrtDestroyStream(stream));
         ACL_CHECK(aclrtResetDevice(options.deviceId));
         ACL_CHECK(aclFinalize());
     };
 
-    uint8_t* hostA;
     ACL_CHECK(aclrtMallocHost((void**)(&hostA), sizeA));
     if (!ReadFile("./input/x1.bin", hostA, sizeA)) {
         cleanupAndFinalize();
@@ -121,7 +135,6 @@ static void Run(const Options& options, QuantMode x1QuantMode, QuantMode x2Quant
     ACL_CHECK(aclrtMalloc(reinterpret_cast<void**>(&deviceA), sizeA, ACL_MEM_MALLOC_HUGE_FIRST));
     ACL_CHECK(aclrtMemcpy(deviceA, sizeA, hostA, sizeA, ACL_MEMCPY_HOST_TO_DEVICE));
 
-    uint8_t* hostB;
     ACL_CHECK(aclrtMallocHost((void**)(&hostB), sizeB));
     if (!ReadFile("./input/x2.bin", hostB, sizeB)) {
         cleanupAndFinalize();
@@ -132,7 +145,6 @@ static void Run(const Options& options, QuantMode x1QuantMode, QuantMode x2Quant
 
     ACL_CHECK(aclrtMalloc(reinterpret_cast<void**>(&deviceC), sizeC, ACL_MEM_MALLOC_HUGE_FIRST));
 
-    uint8_t* x1ScaleHost = nullptr;
     size_t x1ScaleFileSize = 0;
     if (x1QuantMode == QuantMode::PERTENSOR_MODE) {
         x1ScaleFileSize = sizeof(float);
@@ -149,7 +161,6 @@ static void Run(const Options& options, QuantMode x1QuantMode, QuantMode x2Quant
         ACL_CHECK(aclrtMemcpy(x1ScaleDevice, x1ScaleFileSize, x1ScaleHost, x1ScaleFileSize, ACL_MEMCPY_HOST_TO_DEVICE));
     }
 
-    uint8_t* x2ScaleHost = nullptr;
     size_t x2ScaleFileSize = 0;
     if (x2QuantMode == QuantMode::PERTENSOR_MODE) {
         x2ScaleFileSize = sizeof(float);
@@ -166,7 +177,6 @@ static void Run(const Options& options, QuantMode x1QuantMode, QuantMode x2Quant
         ACL_CHECK(aclrtMemcpy(x2ScaleDevice, x2ScaleFileSize, x2ScaleHost, x2ScaleFileSize, ACL_MEMCPY_HOST_TO_DEVICE));
     }
 
-    uint8_t* quantBiasHost = nullptr;
     if (hasQuantBias) {
         size_t quantBiasFileSize = n * sizeof(float);
         ACL_CHECK(aclrtMallocHost((void**)(&quantBiasHost), quantBiasFileSize));

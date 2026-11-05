@@ -139,6 +139,7 @@ static void Run(const Options& options)
 
     ACL_CHECK(aclrtFree(deviceA));
     ACL_CHECK(aclrtFree(deviceB));
+    ACL_CHECK(aclrtFree(deviceBias));
     ACL_CHECK(aclrtFree(deviceC));
 
     ACL_CHECK(aclrtDestroyStream(stream));

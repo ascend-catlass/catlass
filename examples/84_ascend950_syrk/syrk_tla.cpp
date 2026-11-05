@@ -45,6 +45,12 @@ static void Run(const Options& options)
     ACL_CHECK(aclrtSetDevice(options.deviceId));
     ACL_CHECK(aclrtCreateStream(&stream));
 
+    const auto releaseAclEarly = [&]() {
+        ACL_CHECK(aclrtDestroyStream(stream));
+        ACL_CHECK(aclrtResetDevice(options.deviceId));
+        ACL_CHECK(aclFinalize());
+    };
+
     // D = alpha * X * X^T + beta * Y, X: [batch, M, K], Y/D: [batch, M, M]
     uint32_t batch = options.batchCount;
     uint32_t m = options.problemShape.m();
@@ -108,6 +114,7 @@ static void Run(const Options& options)
                                                deviceD, options.alpha,      options.beta, aicCoreUsed};
     if (!MatmulKernel::CanImplement(arguments)) {
         std::cerr << "MatmulKernel can not implement the arguments: m must equal n." << std::endl;
+        releaseAclEarly();
         return;
     }
 

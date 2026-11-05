@@ -142,6 +142,12 @@ static bool Run(const Options& options)
     ACL_CHECK(aclrtSetDevice(options.deviceId));
     ACL_CHECK(aclrtCreateStream(&stream));
 
+    const auto releaseAclEarly = [&]() {
+        ACL_CHECK(aclrtDestroyStream(stream));
+        ACL_CHECK(aclrtResetDevice(options.deviceId));
+        ACL_CHECK(aclFinalize());
+    };
+
     // Get the number of cube cores of the current hardware
     auto aicCoreNum = platform_ascendc::PlatformAscendCManager::GetInstance()->GetCoreNumAic();
 
@@ -161,9 +167,7 @@ static bool Run(const Options& options)
 
     if (!CanImplement(
             batch, qSeqlen, kvSeqlen, numHeads, kvHeads, embeddingSize, options.isVariedLen, maskType, dataType)) {
-        ACL_CHECK(aclrtDestroyStream(stream));
-        ACL_CHECK(aclrtResetDevice(options.deviceId));
-        ACL_CHECK(aclFinalize());
+        releaseAclEarly();
         return false;
     }
 
@@ -278,9 +282,7 @@ static bool Run(const Options& options)
 
     FAInferTiling::GetFATilingParam(faInfo, blockDim, faTilingData);
 
-    tilingHost = reinterpret_cast<void*>(&faTilingData);
-
-    ACL_CHECK(aclrtMemcpy(tilingDevice, tilingSize, tilingHost, tilingSize, ACL_MEMCPY_HOST_TO_DEVICE));
+    ACL_CHECK(aclrtMemcpy(tilingDevice, tilingSize, &faTilingData, tilingSize, ACL_MEMCPY_HOST_TO_DEVICE));
 
     // Prepare hardware sync address
     uint64_t hardwareSyncAddr{0};

@@ -189,6 +189,9 @@ bool Run(const Options& options)
     uint8_t* maskDevice{nullptr};
     uint8_t* blockTableHost{nullptr};
     uint8_t* blockTableDevice{nullptr};
+    uint8_t* oDevice{nullptr};
+    uint8_t* tilingDevice{nullptr};
+    void* tilingHost{nullptr};
 
     const auto cleanupAndFinalize = [&]() {
         if (qNtokens)
@@ -207,6 +210,12 @@ bool Run(const Options& options)
             FreeMem(maskHost, maskDevice);
         if (blockTableDevice)
             FreeMem(blockTableHost, blockTableDevice);
+        if (oDevice)
+            aclrtFree(oDevice);
+        if (tilingDevice)
+            aclrtFree(tilingDevice);
+        if (tilingHost)
+            aclrtFreeHost(tilingHost);
 
         ACL_CHECK(aclrtDestroyStream(stream));
         ACL_CHECK(aclrtResetDevice(options.deviceId));
@@ -290,14 +299,11 @@ bool Run(const Options& options)
 
     // Allocate matrices in device memory for workspace.
     // One base workspace block contains 65536 elements.
-    uint8_t* oDevice{nullptr};
     ACL_CHECK(aclrtMalloc((void**)(&oDevice), qoSize * 2, ACL_MEM_MALLOC_HUGE_FIRST));
 
-    uint8_t* tilingDevice;
     ACL_CHECK(aclrtMalloc((void**)(&tilingDevice), tilingSize, ACL_MEM_MALLOC_HUGE_FIRST));
 
     // get tiling
-    void* tilingHost = nullptr;
     ACL_CHECK(aclrtMallocHost(&tilingHost, tilingSize));
     uint32_t blockDim = aicCoreNum;
 
@@ -314,9 +320,8 @@ bool Run(const Options& options)
 
     FATilingData faTilingData;
     FAInferTiling::GetFATilingParam(faInfo, blockDim, faTilingData);
-    tilingHost = reinterpret_cast<void*>(&faTilingData);
 
-    ACL_CHECK(aclrtMemcpy(tilingDevice, tilingSize, tilingHost, tilingSize, ACL_MEMCPY_HOST_TO_DEVICE));
+    ACL_CHECK(aclrtMemcpy(tilingDevice, tilingSize, &faTilingData, tilingSize, ACL_MEMCPY_HOST_TO_DEVICE));
     bool passed = false;
     for (int i = 0; i < 1; i++) {
         if (dataType == "half") {
@@ -385,24 +390,7 @@ bool Run(const Options& options)
         passed = errorIndices.empty();
     }
 
-    // Free host memory allocations.
-    FreeMem(qSeqHost, qSeqDevice);
-    FreeMem(kvSeqHost, kvSeqDevice);
-    FreeMem(qHost, qDevice);
-    FreeMem(kHost, kDevice);
-    FreeMem(vHost, vDevice);
-    if (maskType > 0) {
-        FreeMem(maskHost, maskDevice);
-    }
-    FreeMem(blockTableHost, blockTableDevice);
-    aclrtFree(oDevice);
-    aclrtFree(tilingDevice);
-    aclrtFreeHost(qNtokens);
-
-    // Destroy specified Stream and reset device.
-    ACL_CHECK(aclrtDestroyStream(stream));
-    ACL_CHECK(aclrtResetDevice(options.deviceId));
-    ACL_CHECK(aclFinalize());
+    cleanupAndFinalize();
     return passed;
 }
 

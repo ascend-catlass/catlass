@@ -102,7 +102,18 @@ static void Run(const Options& options)
     using MatmulAdapter = Gemm::Device::DeviceGemm<MatmulKernel>;
     MatmulKernel::Arguments arguments{options.problemShape, deviceA, deviceB, deviceC};
     MatmulAdapter matmulOp;
-    matmulOp.CanImplement(arguments);
+    if (matmulOp.CanImplement(arguments) != Status::kSuccess) {
+        std::cerr << "BasicMatmulPreloadZN cannot be implemented! " << std::endl;
+
+        ACL_CHECK(aclrtFree(deviceA));
+        ACL_CHECK(aclrtFree(deviceB));
+        ACL_CHECK(aclrtFree(deviceC));
+        ACL_CHECK(aclrtDestroyStream(stream));
+        ACL_CHECK(aclrtResetDevice(options.deviceId));
+        ACL_CHECK(aclFinalize());
+        return;
+    }
+
     size_t sizeWorkspace = matmulOp.GetWorkspaceSize(arguments);
     uint8_t* deviceWorkspace = nullptr;
     if (sizeWorkspace > 0) {

@@ -167,6 +167,12 @@ static void Run(const Options& options)
     ACL_CHECK(aclrtSetDevice(options.deviceId));
     ACL_CHECK(aclrtCreateStream(&stream));
 
+    const auto releaseAclEarly = [&]() {
+        ACL_CHECK(aclrtDestroyStream(stream));
+        ACL_CHECK(aclrtResetDevice(options.deviceId));
+        ACL_CHECK(aclFinalize());
+    };
+
     // Get the number of cube cores of the current hardware
     auto aicCoreNum = platform_ascendc::PlatformAscendCManager::GetInstance()->GetCoreNumAic();
 
@@ -196,9 +202,7 @@ static void Run(const Options& options)
     if (!CanImplement(
             batch, qSeqlen, kvSeqlen, numHeads, kvHeads, qkHeadSize, vHeadSize, blockSize, numBlocks, dataType,
             cacheLayout)) {
-        ACL_CHECK(aclrtDestroyStream(stream));
-        ACL_CHECK(aclrtResetDevice(options.deviceId));
-        ACL_CHECK(aclFinalize());
+        releaseAclEarly();
         return;
     }
 
@@ -372,8 +376,7 @@ static void Run(const Options& options)
     }
 
     // tiling output
-    tilingHost = reinterpret_cast<void*>(&faiTilingData);
-    ACL_CHECK(aclrtMemcpy(tilingDevice, tilingSize, tilingHost, tilingSize, ACL_MEMCPY_HOST_TO_DEVICE));
+    ACL_CHECK(aclrtMemcpy(tilingDevice, tilingSize, &faiTilingData, tilingSize, ACL_MEMCPY_HOST_TO_DEVICE));
 
     for (int i = 0; i < 1; i++) {
         if (cacheLayout == "nd") {

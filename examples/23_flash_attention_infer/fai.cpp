@@ -89,8 +89,12 @@ static void AllocMem(uint8_t** host, uint8_t** device, size_t size)
 
 static void FreeMem(uint8_t* host, uint8_t* device)
 {
-    ACL_CHECK(aclrtFreeHost(host));
-    ACL_CHECK(aclrtFree(device));
+    if (host != nullptr) {
+        ACL_CHECK(aclrtFreeHost(host));
+    }
+    if (device != nullptr) {
+        ACL_CHECK(aclrtFree(device));
+    }
 }
 
 static bool CanImplement(
@@ -142,6 +146,71 @@ static bool Run(const Options& options)
     ACL_CHECK(aclrtSetDevice(options.deviceId));
     ACL_CHECK(aclrtCreateStream(&stream));
 
+    // H2D
+    uint8_t* qSeqHost{nullptr};
+    uint8_t* qSeqDevice{nullptr};
+    uint8_t* kvSeqHost{nullptr};
+    uint8_t* kvSeqDevice{nullptr};
+    uint8_t* qHost{nullptr};
+    uint8_t* qDevice{nullptr};
+    uint8_t* kHost{nullptr};
+    uint8_t* kDevice{nullptr};
+    uint8_t* vHost{nullptr};
+    uint8_t* vDevice{nullptr};
+    uint8_t* maskHost{nullptr};
+    uint8_t* maskDevice{nullptr};
+    uint8_t* blockTableHost{nullptr};
+    uint8_t* blockTableDevice{nullptr};
+    // Device only
+    uint8_t* sDevice{nullptr};
+    uint8_t* pDevice{nullptr};
+    uint8_t* oTempDevice{nullptr};
+    uint8_t* oUpdateDevice{nullptr};
+    uint8_t* oDevice{nullptr};
+    uint8_t* tilingDevice{nullptr};
+    void* qNtokens{nullptr};
+    void* tilingHost{nullptr};
+
+    const auto aclReleaseEarly = [&]() {
+        FreeMem(qSeqHost, qSeqDevice);
+        FreeMem(kvSeqHost, kvSeqDevice);
+        FreeMem(qHost, qDevice);
+        FreeMem(kHost, kDevice);
+        FreeMem(vHost, vDevice);
+        FreeMem(maskHost, maskDevice);
+        FreeMem(blockTableHost, blockTableDevice);
+        if (tilingHost != nullptr) {
+            ACL_CHECK(aclrtFreeHost(tilingHost));
+        }
+        if (qNtokens != nullptr) {
+            ACL_CHECK(aclrtFreeHost(qNtokens));
+        }
+        ACL_CHECK(aclrtDestroyStream(stream));
+        ACL_CHECK(aclrtResetDevice(options.deviceId));
+        ACL_CHECK(aclFinalize());
+    };
+
+    const auto aclDeviceReleaseEarly = [&]() {
+        if (sDevice != nullptr) {
+            ACL_CHECK(aclrtFree(sDevice));
+        }
+        if (pDevice != nullptr) {
+            ACL_CHECK(aclrtFree(pDevice));
+        }
+        if (oTempDevice != nullptr) {
+            ACL_CHECK(aclrtFree(oTempDevice));
+        }
+        if (oUpdateDevice != nullptr) {
+            ACL_CHECK(aclrtFree(oUpdateDevice));
+        }
+        if (oDevice != nullptr) {
+            ACL_CHECK(aclrtFree(oDevice));
+        }
+        if (tilingDevice != nullptr) {
+            ACL_CHECK(aclrtFree(tilingDevice));
+        }
+    };
+
     // Get the number of cube cores of the current hardware
     auto aicCoreNum = platform_ascendc::PlatformAscendCManager::GetInstance()->GetCoreNumAic();
 
@@ -161,16 +230,16 @@ static bool Run(const Options& options)
 
     if (!CanImplement(
             batch, qSeqlen, kvSeqlen, numHeads, kvHeads, embeddingSize, options.isVariedLen, maskType, dataType)) {
-        ACL_CHECK(aclrtDestroyStream(stream));
-        ACL_CHECK(aclrtResetDevice(options.deviceId));
-        ACL_CHECK(aclFinalize());
+        aclReleaseEarly();
         return false;
     }
 
     // read qNtokens num
-    void* qNtokens = nullptr;
     ACL_CHECK(aclrtMallocHost(&qNtokens, 1 * sizeof(int32_t)));
-    ReadFile(dataPath + "/q_ntokens.bin", qNtokens, 1 * sizeof(int32_t));
+    if (!ReadFile(dataPath + "/q_ntokens.bin", qNtokens, 1 * sizeof(int32_t))) {
+        aclReleaseEarly();
+        return false;
+    }
     int32_t numTokens = static_cast<int32_t*>(qNtokens)[0];
 
     uint64_t seqArraySize = batch * sizeof(int64_t);
@@ -184,54 +253,61 @@ static bool Run(const Options& options)
     uint32_t tilingSize = sizeof(FATilingData);
 
     // Allocate matrices in host and device memory.
-    uint8_t* qSeqHost;
-    uint8_t* qSeqDevice;
     AllocMem(&qSeqHost, &qSeqDevice, seqArraySize);
-    ReadFile(dataPath + "/q_seqlen.bin", qSeqHost, seqArraySize);
+    if (!ReadFile(dataPath + "/q_seqlen.bin", qSeqHost, seqArraySize)) {
+        aclReleaseEarly();
+        return false;
+    }
     ACL_CHECK(aclrtMemcpy(qSeqDevice, seqArraySize, qSeqHost, seqArraySize, ACL_MEMCPY_HOST_TO_DEVICE));
 
     // Allocate matrices in host and device memory.
-    uint8_t* kvSeqHost;
-    uint8_t* kvSeqDevice;
     AllocMem(&kvSeqHost, &kvSeqDevice, seqArraySize);
-    ReadFile(dataPath + "/kv_seqlen.bin", kvSeqHost, seqArraySize);
+    if (!ReadFile(dataPath + "/kv_seqlen.bin", kvSeqHost, seqArraySize)) {
+        aclReleaseEarly();
+        return false;
+    }
     ACL_CHECK(aclrtMemcpy(kvSeqDevice, seqArraySize, kvSeqHost, seqArraySize, ACL_MEMCPY_HOST_TO_DEVICE));
 
     // Allocate matrices in host and device memory and load Matrix q.
-    uint8_t* qHost;
-    uint8_t* qDevice;
     AllocMem(&qHost, &qDevice, qoSize);
-    ReadFile(dataPath + "/q.bin", qHost, qoSize);
+    if (!ReadFile(dataPath + "/q.bin", qHost, qoSize)) {
+        aclReleaseEarly();
+        return false;
+    }
     ACL_CHECK(aclrtMemcpy(qDevice, qoSize, qHost, qoSize, ACL_MEMCPY_HOST_TO_DEVICE));
 
     // Allocate matrices in host and device memory and load Matrix k.
-    uint8_t* kHost;
-    uint8_t* kDevice;
     AllocMem(&kHost, &kDevice, kvSize);
-    ReadFile(dataPath + "/k.bin", kHost, kvSize);
+    if (!ReadFile(dataPath + "/k.bin", kHost, kvSize)) {
+        aclReleaseEarly();
+        return false;
+    }
     ACL_CHECK(aclrtMemcpy(kDevice, kvSize, kHost, kvSize, ACL_MEMCPY_HOST_TO_DEVICE));
 
     // Allocate matrices in host and device memory and load Matrix v.
-    uint8_t* vHost;
-    uint8_t* vDevice;
     AllocMem(&vHost, &vDevice, kvSize);
-    ReadFile(dataPath + "/v.bin", vHost, kvSize);
+    if (!ReadFile(dataPath + "/v.bin", vHost, kvSize)) {
+        aclReleaseEarly();
+        return false;
+    }
     ACL_CHECK(aclrtMemcpy(vDevice, kvSize, vHost, kvSize, ACL_MEMCPY_HOST_TO_DEVICE));
 
     // Allocate matrices in host and device memory and load Matrix v.
-    uint8_t* maskHost;
-    uint8_t* maskDevice;
     if (maskType == 1) {
         AllocMem(&maskHost, &maskDevice, maskSize);
-        ReadFile(dataPath + "/mask.bin", maskHost, maskSize);
+        if (!ReadFile(dataPath + "/mask.bin", maskHost, maskSize)) {
+            aclReleaseEarly();
+            return false;
+        }
         ACL_CHECK(aclrtMemcpy(maskDevice, maskSize, maskHost, maskSize, ACL_MEMCPY_HOST_TO_DEVICE));
     }
 
     // Allocate matrices in host and device memory and load Matrix block_table.
-    uint8_t* blockTableHost;
-    uint8_t* blockTableDevice;
     AllocMem(&blockTableHost, &blockTableDevice, blockTableSize);
-    ReadFile(dataPath + "/block_table.bin", blockTableHost, blockTableSize);
+    if (!ReadFile(dataPath + "/block_table.bin", blockTableHost, blockTableSize)) {
+        aclReleaseEarly();
+        return false;
+    }
     ACL_CHECK(aclrtMemcpy(blockTableDevice, blockTableSize, blockTableHost, blockTableSize, ACL_MEMCPY_HOST_TO_DEVICE));
 
     // Allocate matrices in device memory for workspace.
@@ -243,23 +319,16 @@ static bool Run(const Options& options)
     uint64_t UpdateSize = aicCoreNum * FAInferTiling::WORKSPACE_BLOCK_SIZE_DB * sizeof(float) * FAInferTiling::NUM3;
     uint64_t workSpaceSize = mm1OutSize + smOnlineOutSize + mm2OutSize + UpdateSize;
 
-    uint8_t* sDevice;
     ACL_CHECK(aclrtMalloc((void**)(&sDevice), mm1OutSize, ACL_MEM_MALLOC_HUGE_FIRST));
-    uint8_t* pDevice;
     ACL_CHECK(aclrtMalloc((void**)(&pDevice), smOnlineOutSize, ACL_MEM_MALLOC_HUGE_FIRST));
-    uint8_t* oTempDevice;
     ACL_CHECK(aclrtMalloc((void**)(&oTempDevice), mm2OutSize, ACL_MEM_MALLOC_HUGE_FIRST));
-    uint8_t* oUpdateDevice;
     ACL_CHECK(aclrtMalloc((void**)(&oUpdateDevice), UpdateSize, ACL_MEM_MALLOC_HUGE_FIRST));
 
-    uint8_t* oDevice{nullptr};
     ACL_CHECK(aclrtMalloc((void**)(&oDevice), qoSize * 2, ACL_MEM_MALLOC_HUGE_FIRST));
 
-    uint8_t* tilingDevice;
     ACL_CHECK(aclrtMalloc((void**)(&tilingDevice), tilingSize, ACL_MEM_MALLOC_HUGE_FIRST));
 
     // get tiling
-    void* tilingHost = nullptr;
     ACL_CHECK(aclrtMallocHost(&tilingHost, tilingSize));
     uint32_t blockDim = aicCoreNum;
 
@@ -279,11 +348,9 @@ static bool Run(const Options& options)
 
     FAInferTiling::GetFATilingParam(faInfo, blockDim, faTilingData);
 
-    tilingHost = reinterpret_cast<void*>(&faTilingData);
-
     uint32_t tilingKey = 0;
 
-    ACL_CHECK(aclrtMemcpy(tilingDevice, tilingSize, tilingHost, tilingSize, ACL_MEMCPY_HOST_TO_DEVICE));
+    ACL_CHECK(aclrtMemcpy(tilingDevice, tilingSize, &faTilingData, tilingSize, ACL_MEMCPY_HOST_TO_DEVICE));
 
     // Prepare hardware sync address
     uint64_t hardwareSyncAddr{0};
@@ -313,7 +380,11 @@ static bool Run(const Options& options)
         // Compute the golden result
         vector<float> goldenHost(qoSize / sizeof(fp16_t));
         const size_t goldenSize = qoSize * 2;
-        ReadFile(dataPath + "/golden.bin", goldenHost.data(), goldenSize);
+        if (!ReadFile(dataPath + "/golden.bin", goldenHost.data(), goldenSize)) {
+            aclDeviceReleaseEarly();
+            aclReleaseEarly();
+            return false;
+        }
 
         // Compare the result
         vector<uint64_t> errorIndices = (dataType == "half") ? golden::CompareData(oHostHalf, goldenHost, kvSeqlen) :
@@ -326,29 +397,8 @@ static bool Run(const Options& options)
         passed = errorIndices.empty();
     }
 
-    // Free host memory allocations.
-    FreeMem(qSeqHost, qSeqDevice);
-    FreeMem(kvSeqHost, kvSeqDevice);
-    FreeMem(qHost, qDevice);
-    FreeMem(kHost, kDevice);
-    FreeMem(vHost, vDevice);
-    if (maskType == 1) {
-        FreeMem(maskHost, maskDevice);
-    }
-    FreeMem(blockTableHost, blockTableDevice);
-    aclrtFree(oDevice);
-    aclrtFree(tilingDevice);
-    aclrtFree(sDevice);
-    aclrtFree(pDevice);
-    aclrtFree(oTempDevice);
-    aclrtFree(oUpdateDevice);
-    aclrtFreeHost(tilingHost);
-    aclrtFreeHost(qNtokens);
-
-    // Destroy specified Stream and reset device.
-    ACL_CHECK(aclrtDestroyStream(stream));
-    ACL_CHECK(aclrtResetDevice(options.deviceId));
-    ACL_CHECK(aclFinalize());
+    aclDeviceReleaseEarly();
+    aclReleaseEarly();
     return passed;
 }
 

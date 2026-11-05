@@ -167,6 +167,9 @@ static void Run(const Options& options)
     matmulOp(stream, aicCoreNum);
 
     ACL_CHECK(aclrtSynchronizeStream(stream));
+    if (deviceWorkspace != nullptr) {
+        ACL_CHECK(aclrtFree(deviceWorkspace));
+    }
 
     std::vector<fp16_t> hostC(lenC);
     ACL_CHECK(aclrtMemcpy(hostC.data(), sizeC, deviceC, sizeC, ACL_MEMCPY_DEVICE_TO_HOST));

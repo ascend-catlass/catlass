@@ -76,7 +76,17 @@ public:
 
     static bool CanImplement(const Arguments& args)
     {
-        return true;
+        constexpr uint32_t ELE_NUM_PER_C0 = BytesToBits(BYTE_PER_C0) / SizeOfBits<ElementB>::value;
+
+        uint32_t n = args.problemShape.n();
+        uint32_t k = args.problemShape.k();
+        bool isValid = true;
+        if constexpr (std::is_same_v<LayoutB, layout::zN>) {
+            isValid = k % C0_NUM_PER_FRACTAL == 0 && n % ELE_NUM_PER_C0 == 0;
+        } else if constexpr (std::is_same_v<LayoutB, layout::nZ>) {
+            isValid = n % C0_NUM_PER_FRACTAL == 0 && k % ELE_NUM_PER_C0 == 0;
+        }
+        return isValid;
     }
 
     static size_t GetWorkspaceSize(const Arguments& args)

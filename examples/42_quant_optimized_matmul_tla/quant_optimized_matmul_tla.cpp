@@ -419,6 +419,8 @@ static void Run(const Options& options)
 
     ACL_CHECK(aclrtFree(deviceA));
     ACL_CHECK(aclrtFree(deviceB));
+    ACL_CHECK(aclrtFree(deviceScale));
+    ACL_CHECK(aclrtFree(devicePerTokenScale));
     ACL_CHECK(aclrtFree(deviceD));
     if (isNeedPaddingA) {
         ACL_CHECK(aclrtFree(deviceWA));

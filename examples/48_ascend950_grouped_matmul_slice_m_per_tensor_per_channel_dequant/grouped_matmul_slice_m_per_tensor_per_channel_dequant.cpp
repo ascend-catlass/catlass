@@ -237,6 +237,7 @@ void RunTest(Options const& options)
     ACL_CHECK(aclrtFree(deviceB));
     ACL_CHECK(aclrtFree(deviceC));
     ACL_CHECK(aclrtFree(deviceGroupList));
+    ACL_CHECK(aclrtFree(devicePerChannelScale));
     if (sizeWorkspace > 0) {
         ACL_CHECK(aclrtFree(deviceWorkspace));
     }
