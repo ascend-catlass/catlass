@@ -245,6 +245,8 @@ static hivmave::LoadDist mapTlaLoadDistToAve(::LoadDist dist)
             return hivmave::LoadDist::US_B16;
         case ::LoadDist::unpack_b16:
             return hivmave::LoadDist::UNPK_B16;
+        case ::LoadDist::unpack4_b8:
+            return hivmave::LoadDist::UNPK4_B8;
         case ::LoadDist::e2b_b16:
             return hivmave::LoadDist::E2B_B16;
         case ::LoadDist::e2b_b32:
@@ -268,6 +270,8 @@ static hivmave::StoreDist mapTlaStoreDistToAve(::StoreDist dist)
             return hivmave::StoreDist::PK_B32;
         case ::StoreDist::pack_b16:
             return hivmave::StoreDist::PK_B16;
+        case ::StoreDist::pack4_b32:
+            return hivmave::StoreDist::PK4_B32;
         case ::StoreDist::first_element_b8:
             return hivmave::StoreDist::ONEPT_B8;
         case ::StoreDist::first_element_b16:

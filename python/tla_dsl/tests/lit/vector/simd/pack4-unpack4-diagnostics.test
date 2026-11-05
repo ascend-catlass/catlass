@@ -1,0 +1,54 @@
+// RUN: split-file %s %t
+// RUN: not %tla_compile %t/unpack-width.mlir -o - 2>&1 | %filecheck %s --check-prefix=WIDTH
+// RUN: not %tla_compile %t/unpack-unaligned.mlir -o - 2>&1 | %filecheck %s --check-prefix=ALIGN
+// RUN: not %tla_compile %t/unpack-lanes.mlir -o - 2>&1 | %filecheck %s --check-prefix=LANES
+// RUN: not %tla_compile %t/pack-width-masked.mlir -o - 2>&1 | %filecheck %s --check-prefix=PACK
+
+// WIDTH: unpack4_b8 requires 1-byte source and result element types
+// ALIGN: unpack4_b8 requires aligned UB access
+// LANES: unpack4_b8 produces a full 256-byte register
+// PACK: unsupported pack4_b32 source/destination element widths: source 32 bits, destination 16 bits
+
+//--- unpack-width.mlir
+!s = !tla.tensor<!tla.layout<!tla.shape<64>, !tla.stride<1>, !tla.shape<64>, RowMajor>, !tla.coord<0>, !tla.ptr<i16, ub, 32>>
+module {
+  func.func @bad(%s: !s) {
+    "tla.vec.func"() ({
+      %v = tla.load %s {load_dist = #tla.load_dist<unpack4_b8>} : !s -> !tla.vector<128xi16>
+    }) : () -> ()
+    return
+  }
+}
+
+//--- unpack-unaligned.mlir
+!s = !tla.tensor<!tla.layout<!tla.shape<64>, !tla.stride<1>, !tla.shape<64>, RowMajor>, !tla.coord<0>, !tla.ptr<i8, ub, 32>>
+module {
+  func.func @bad(%s: !s) {
+    "tla.vec.func"() ({
+      %v = tla.load %s {load_dist = #tla.load_dist<unpack4_b8>, unaligned_ub_access} : !s -> !tla.vector<256xi8>
+    }) : () -> ()
+    return
+  }
+}
+
+//--- unpack-lanes.mlir
+!s = !tla.tensor<!tla.layout<!tla.shape<64>, !tla.stride<1>, !tla.shape<64>, RowMajor>, !tla.coord<0>, !tla.ptr<i8, ub, 32>>
+module {
+  func.func @bad(%s: !s) {
+    "tla.vec.func"() ({
+      %v = tla.load %s {load_dist = #tla.load_dist<unpack4_b8>} : !s -> !tla.vector<64xi8>
+    }) : () -> ()
+    return
+  }
+}
+
+//--- pack-width-masked.mlir
+!d = !tla.tensor<!tla.layout<!tla.shape<64>, !tla.stride<1>, !tla.shape<64>, RowMajor>, !tla.coord<0>, !tla.ptr<i16, ub, 32>>
+module {
+  func.func @bad(%d: !d, %v: !tla.vector<64xi32>, %p: !tla.mask<64>) {
+    "tla.vec.func"() ({
+      "tla.store"(%d, %v, %p) {store_dist = #tla.store_dist<pack4_b32>, operandSegmentSizes = array<i32: 1, 1, 1, 0>} : (!d, !tla.vector<64xi32>, !tla.mask<64>) -> ()
+    }) : () -> ()
+    return
+  }
+}

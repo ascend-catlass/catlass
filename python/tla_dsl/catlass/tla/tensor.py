@@ -558,6 +558,7 @@ class _Tensor(TensorABC):
                   | `DIST_US_B8` / `DIST_US_B16` | 2x up-sample |
                   | `DIST_BRC_B16` | Broadcast one b16 element |
                   | `DIST_UNPACK_B16` | Zero-extend b16 to double width |
+                  | `DIST_UNPACK4_B8` | Load exactly 64 bytes into register byte slots 0,4,...,252; zero the other register bytes |
                   | `DIST_E2B_B16` / `DIST_E2B_B32` | Element-to-DataBlock broadcast |
                   | `DIST_BLK` | One 32-byte DataBlock broadcast to all 8 |
 
@@ -591,13 +592,16 @@ class _Tensor(TensorABC):
 
             Constraints:
             - Must be called inside a `@tla.kernel`-decorated kernel function.
-            - Must be called inside `tla.vec.func()`; source tile must be UB.
+            - Must be called inside `tla.vec.func(mode="simd")`; source tile must be UB.
+            - The actual read range must stay within the usable UB address space.
             - Mask load ``DIST_NORM`` requires a 1/2/4-byte scalar UB element type.
             - Distribution modes fix the element width: `DIST_US_B8` needs
               i8/u8; `DIST_BRC_B16` / `DIST_US_B16` / `DIST_UNPACK_B16` /
               `DIST_E2B_B16` need 2-byte (f16/bf16/i16/u16); `DIST_E2B_B32`
               needs 4-byte (f32/i32/u32); `DIST_DINTLV_B32` needs f32;
               `DIST_BLK` works for any element size.
+            - `DIST_UNPACK4_B8` requires a 1-byte element type and a
+              32-byte-aligned source address.
             - `BlockLoadParams` requires a 2/4-byte element type
               (f32/f16/bf16/i32/u32/i16/u16); `block_stride` and
               `repeat_stride` must fit in [0, 65535].
@@ -634,6 +638,10 @@ class _Tensor(TensorABC):
                     tla.params.MaskLoadParams(load_dist=tla.params.MaskLoadDist.DIST_DS)
                 )
                 y = tla.where(preg, x_reg, min_reg)
+                # fp8_ub: 64 Float8E4M3FN elements at a 32-byte-aligned address.
+                fp8_reg = fp8_ub.load(tla.params.NormalLoadParams(
+                    load_dist=tla.params.LoadDist.DIST_UNPACK4_B8))
+                fp32_reg = fp8_reg.to(tla.Float32)
             ```
         """
         from ..core_api import (
@@ -842,6 +850,10 @@ class _Tensor(TensorABC):
             isinstance(params, NormalLoadParams)
             and params.load_dist == LoadDist.DIST_UNPACK_B16
         )
+        is_unpack4_b8 = (
+            isinstance(params, NormalLoadParams)
+            and params.load_dist == LoadDist.DIST_UNPACK4_B8
+        )
         is_e2b_b16 = (
             isinstance(params, NormalLoadParams)
             and params.load_dist == LoadDist.DIST_E2B_B16
@@ -958,6 +970,13 @@ class _Tensor(TensorABC):
                     f"element type (got {source_desc.element_type})"
                 )
             result_desc = _full_vector_ssa_descriptor(source_desc.element_type)
+        elif is_unpack4_b8:
+            if dtype_size_bytes(source_desc.element_type) != 1:
+                raise TlaLoweringError(
+                    "DIST_UNPACK4_B8 requires a 1-byte element type "
+                    f"(got {source_desc.element_type})"
+                )
+            result_desc = _full_vector_ssa_descriptor(source_desc.element_type)
         elif is_e2b_b16 or is_e2b_b32:
             # AscendC LoadDist::DIST_E2B_B16 / DIST_E2B_B32 (HIVMAVE E2B_B16 /
             # E2B_B32): element-to-DataBlock broadcast. The transfer reads
@@ -1043,6 +1062,7 @@ class _Tensor(TensorABC):
                   | Value | Meaning |
                   |---|---|
                   | `DIST_NORM` | Default contiguous store |
+                  | `DIST_PACK4_B32` | Store register byte slots 0,4,...,252 to UB byte slots 0,1,...,63, subject to the mask |
                   | `DIST_FIRST_ELEMENT_B8` | Write only lane 0 (1-byte) |
                   | `DIST_FIRST_ELEMENT_B16` | Write only lane 0 (2-byte) |
                   | `DIST_FIRST_ELEMENT_B32` | Write only lane 0 (4-byte) |
@@ -1068,11 +1088,20 @@ class _Tensor(TensorABC):
                   Default `DIST_NORM`.
             - `mask` (`MaskSSA | None`): Optional predicate for vector stores;
               rejected by `MaskStoreParams` and first-element modes. Default
-              `None`.
+              `None`. For `DIST_PACK4_B32`, masks use source lanes:
+              4/2/1 lanes per destination byte for 1/2/4-byte sources.
+              An omitted mask follows the destination's valid length;
+              an explicit mask is not clipped to that length. Masked-out
+              destination bytes remain unchanged.
 
             Constraints:
             - Must be called inside a `@tla.kernel`-decorated kernel function.
-            - Must be called inside `tla.vec.func()`; destination tile must be UB.
+            - Must be called inside `tla.vec.func(mode="simd")`; destination tile must be UB.
+            - `DIST_PACK4_B32` requires 1/2/4-byte source elements,
+              1-byte destination elements and a 32-byte-aligned destination address.
+              It stores at most 64 bytes, subject to the mask, without numeric
+              conversion or FP4 nibble packing. For FP32→FP8 results, use
+              `RegSlot.ZERO` to place the values in byte slots 0,4,...,252.
             - First-element modes require the stored value and the dest tile to
               use the suffix-matching element width (b8 → 1-byte, b16 → 2-byte,
               b32 → 4-byte); passing a predicate mask raises an error.
@@ -1092,6 +1121,14 @@ class _Tensor(TensorABC):
                 y_ub.store(y_reg, tla.params.UnalignStoreParams())
                 y_ub.store(y_reg, tla.params.NormalStoreParams(
                     store_dist=tla.params.StoreDist.DIST_FIRST_ELEMENT_B16))
+                # fp32_reg: 64 FP32 lanes; fp8_ub: 64 Float8E4M3FN elements.
+                # fp8_ub starts at a 32-byte-aligned address.
+                fp8_reg = fp32_reg.to(tla.Float8E4M3FN, tla.params.CastParams(
+                    round_mode=tla.params.RoundMode.CAST_RINT,
+                    sat_mode=tla.params.SatMode.SAT,
+                    reg_slot=tla.params.RegSlot.ZERO))
+                fp8_ub.store(fp8_reg, tla.params.NormalStoreParams(
+                    store_dist=tla.params.StoreDist.DIST_PACK4_B32))
             ```
         """
         from ..core_api import (
@@ -1250,6 +1287,19 @@ class _Tensor(TensorABC):
         mask_val = _as_value(mask) if mask is not None else None
         if mask_val is not None:
             _require_mask_matches_vector("store", mask_val, value_val)
+        if (
+            isinstance(params, NormalStoreParams)
+            and params.store_dist == StoreDist.DIST_PACK4_B32
+        ):
+            src_elem = _vector_ssa_type_for_mlir_value(value_val).element_type
+            if (
+                dtype_size_bytes(src_elem) not in (1, 2, 4)
+                or dtype_size_bytes(dest_desc.element_type) != 1
+            ):
+                raise TlaLoweringError(
+                    "DIST_PACK4_B32 requires a 1/2/4-byte source and a "
+                    "1-byte destination element type"
+                )
         if isinstance(params, NormalStoreParams) and params.store_dist in (
             StoreDist.DIST_FIRST_ELEMENT_B8,
             StoreDist.DIST_FIRST_ELEMENT_B16,

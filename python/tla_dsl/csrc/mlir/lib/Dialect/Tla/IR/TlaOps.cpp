@@ -977,14 +977,20 @@ mlir::LogicalResult StoreOp::verify()
             return emitOpError("predicate mask is not supported with first_element store_dist");
 
         auto destElementType = destType.getPtr().getPointee();
-        if ((!getMask() || isFirstElement) &&
+        // Explicit masks retain their historical behavior: their predicate
+        // geometry is defined by the user and verified below against the
+        // source vector. Omitted masks and mask-ignoring first-element stores
+        // need compiler-derived geometry and therefore require a supported
+        // source/destination width pairing.
+        if ((!getMask() || isFirstElement || dist == ::StoreDist::pack4_b32) &&
             !getPackedStorePredicateGeometry(dist, vectorSource.getElementType(), destElementType)) {
             return emitOpError() << "unsupported " << stringifyStoreDist(dist)
                                  << " source/destination element widths: source "
                                  << getBitSizeOfFixedWidthScalarType(vectorSource.getElementType())
                                  << " bits, destination " << getBitSizeOfFixedWidthScalarType(destElementType)
                                  << " bits; supported layouts are pack_b32 32->16, pack_b32 16->16, pack_b16 16->8, "
-                                    "first_element_b8 8->8, first_element_b16 16->16, and first_element_b32 32->32";
+                                    "pack4_b32 {8,16,32}->8, first_element_b8 8->8, first_element_b16 16->16, "
+                                    "and first_element_b32 32->32";
         }
     }
     return verifyMaskMatchesVector(getOperation(), getMask(), vectorSource);
@@ -1245,6 +1251,17 @@ mlir::LogicalResult LoadOp::verify()
 
     if (!mlir::isa<VectorSSAType>(getResult().getType()))
         return emitOpError("result must be !tla.vector or !tla.mask");
+
+    if (getLoadDist() && getLoadDist()->getLoadDist() == ::LoadDist::unpack4_b8) {
+        auto resultType = mlir::cast<VectorSSAType>(getResult().getType());
+        if (getByteSizeOfFixedWidthScalarType(sourceType.getPtr().getPointee()) != 1 ||
+            getByteSizeOfFixedWidthScalarType(resultType.getElementType()) != 1)
+            return emitOpError("unpack4_b8 requires 1-byte source and result element types");
+        if (getUnalignedUbAccess().value_or(false))
+            return emitOpError("unpack4_b8 requires aligned UB access");
+        if (resultType.getValidLanes() != 256)
+            return emitOpError("unpack4_b8 produces a full 256-byte register");
+    }
 
     if (auto blockStrideAttr = getBlockStrideAttr()) {
         if (getLoadDist())

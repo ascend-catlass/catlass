@@ -195,6 +195,7 @@ tla.Tensor.load(params: LoadParams | None = None) -> MaskSSA | VectorSSA | tuple
       | `DIST_US_B8` / `DIST_US_B16` | 2 倍上采样 |
       | `DIST_BRC_B16` | 单个 b16 元素广播 |
       | `DIST_UNPACK_B16` | b16 零扩展到双倍宽度 |
+      | `DIST_UNPACK4_B8` | 固定读取 64 字节到寄存器字节位置 0、4、…、252，其余寄存器字节置零 |
       | `DIST_E2B_B16` / `DIST_E2B_B32` | 元素到 DataBlock 广播 |
       | `DIST_BLK` | 一个 32 字节 DataBlock 广播到全部 8 个 |
 
@@ -224,12 +225,14 @@ tla.Tensor.load(params: LoadParams | None = None) -> MaskSSA | VectorSSA | tuple
 约束说明：
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
-- 须在 `tla.vec.func()` 内调用；源 tile 须位于 UB。
+- 须在 `tla.vec.func(mode="simd")` 内调用；源 tile 须位于 UB。
+- 实际读取范围须位于可用 UB 地址空间内。
 - Mask 载入 `DIST_NORM` 要求 UB 元素类型为 1/2/4 字节标量。
 - 分发模式限定元素宽度：`DIST_US_B8` 要求 i8/u8；`DIST_BRC_B16` /
   `DIST_US_B16` / `DIST_UNPACK_B16` / `DIST_E2B_B16` 要求 2 字节
   （f16/bf16/i16/u16）；`DIST_E2B_B32` 要求 4 字节（f32/i32/u32）；
   `DIST_DINTLV_B32` 要求 f32；`DIST_BLK` 适用于任意元素宽度。
+- `DIST_UNPACK4_B8` 要求 1 字节元素，实际读取地址须按 32 字节对齐。
 - `BlockLoadParams` 要求 2/4 字节元素类型（f32/f16/bf16/i32/u32/i16/u16）；
   `block_stride` 与 `repeat_stride` 须在 [0, 65535] 范围内。
 - `DIST_US` / `DIST_DS`：UB 元素类型可为任意 b8/b16/b32/b64 标量。
@@ -260,6 +263,10 @@ with tla.vec.func(mode="simd"):
         tla.params.MaskLoadParams(load_dist=tla.params.MaskLoadDist.DIST_DS)
     )
     y = tla.where(preg, x_reg, min_reg)
+    # fp8_ub：64 个 Float8E4M3FN 元素，实际起始地址按 32 字节对齐。
+    fp8_reg = fp8_ub.load(tla.params.NormalLoadParams(
+        load_dist=tla.params.LoadDist.DIST_UNPACK4_B8))
+    fp32_reg = fp8_reg.to(tla.Float32)
 ```
 
 ---
@@ -291,6 +298,7 @@ tla.Tensor.store(value: VectorSSA | MaskSSA, params: StoreParams | None = None, 
       | 取值 | 含义 |
       | --- | --- |
       | `DIST_NORM` | 默认连续写回 |
+      | `DIST_PACK4_B32` | 按 mask，将寄存器字节位置 0、4、…、252 写到 UB 字节位置 0、1、…、63 |
       | `DIST_FIRST_ELEMENT_B8` | 仅写 lane 0（1 字节） |
       | `DIST_FIRST_ELEMENT_B16` | 仅写 lane 0（2 字节） |
       | `DIST_FIRST_ELEMENT_B32` | 仅写 lane 0（4 字节） |
@@ -310,12 +318,19 @@ tla.Tensor.store(value: VectorSSA | MaskSSA, params: StoreParams | None = None, 
     - `store_dist`（`str`）：`tla.params.MaskStoreDist` token。默认
       `DIST_NORM`。
 - `mask`（`MaskSSA | None`）：vector 写回的可选谓词；与 `MaskStoreParams` 及
-  first-element 模式均不可同时使用。默认 `None`。
+  first-element 模式均不可同时使用。默认 `None`。`DIST_PACK4_B32` 的 mask
+  按源 lane 计数，1/2/4 字节源元素每个目标字节分别对应 4/2/1 个源 lane。
+  省略 mask 时按目标有效长度推导；显式 mask 不再受该长度限制。
+  被 mask 屏蔽的目标字节保持原值。
 
 约束说明：
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
-- 须在 `tla.vec.func()` 内调用；目标 tile 须位于 UB。
+- 须在 `tla.vec.func(mode="simd")` 内调用；目标 tile 须位于 UB。
+- `DIST_PACK4_B32` 要求 1/2/4 字节源元素、1 字节目标元素，以及
+  按 32 字节对齐的实际目标地址。按 mask 最多写入 64 字节，不做数值转换或
+  FP4 半字节合并。写回 FP32→FP8 结果时，使用 `RegSlot.ZERO`，使值位于
+  寄存器字节位置 0、4、…、252。
 - first-element 模式要求被写值与目标 tile 的元素宽度匹配后缀
   （b8 → 1 字节，b16 → 2 字节，b32 → 4 字节）；传入谓词 `mask` 会报错。
 - `POST_MODE_UPDATE` 要求 rank-1 连续 tile、`DIST_NORM`，且元素类型为
@@ -333,6 +348,14 @@ with tla.vec.func(mode="simd"):
     y_ub.store(y_reg, tla.params.UnalignStoreParams())
     y_ub.store(y_reg, tla.params.NormalStoreParams(
         store_dist=tla.params.StoreDist.DIST_FIRST_ELEMENT_B16))
+    # fp32_reg：64 个 FP32 lane；fp8_ub：64 个 Float8E4M3FN 元素。
+    # fp8_ub 的实际起始地址按 32 字节对齐。
+    fp8_reg = fp32_reg.to(tla.Float8E4M3FN, tla.params.CastParams(
+        round_mode=tla.params.RoundMode.CAST_RINT,
+        sat_mode=tla.params.SatMode.SAT,
+        reg_slot=tla.params.RegSlot.ZERO))
+    fp8_ub.store(fp8_reg, tla.params.NormalStoreParams(
+        store_dist=tla.params.StoreDist.DIST_PACK4_B32))
 ```
 
 ---

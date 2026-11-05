@@ -712,6 +712,13 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
             ]
         ],
     )
+    # PACK4/UNPACK4 are UB distributions; keep their device guards outside tutorials.
+    for fp8_case in ("layout", "e4m3", "e5m2"):
+        yield (
+            f"vector-fp8-pack4-{fp8_case}",
+            [["end_to_end/fp8_pack4_op.py", "--case", fp8_case, *dev]],
+        )
+
     # Same-width bit reinterpretation: the f32 round trips through i32 and u32
     # are subtracted to zero, so a rewritten register shows as a mismatch
     # rather than hiding behind the exponent term.

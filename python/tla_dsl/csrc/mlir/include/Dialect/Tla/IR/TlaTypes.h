@@ -128,6 +128,12 @@ inline std::optional<PackedStorePredicateGeometry> getPackedStorePredicateGeomet
     }
     if (storeDist == ::StoreDist::pack_b16 && sourceBits == 16 && destBits == 8)
         return PackedStorePredicateGeometry{1};
+    // One destination byte per 32-bit slot, independent of the source's
+    // numeric interpretation. An 8-bit source needs four predicate lanes
+    // per output byte; a 16-bit source needs two, and a 32-bit source one.
+    if (storeDist == ::StoreDist::pack4_b32 && destBits == 8 &&
+        (sourceBits == 8 || sourceBits == 16 || sourceBits == 32))
+        return PackedStorePredicateGeometry{32 / sourceBits};
     if ((storeDist == ::StoreDist::first_element_b8 && sourceBits == 8 && destBits == 8) ||
         (storeDist == ::StoreDist::first_element_b16 && sourceBits == 16 && destBits == 16) ||
         (storeDist == ::StoreDist::first_element_b32 && sourceBits == 32 && destBits == 32))

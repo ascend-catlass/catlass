@@ -149,6 +149,7 @@ def Tla_LoadDist_E2bB16 : I32EnumAttrCase<"e2b_b16", 8>;
 def Tla_LoadDist_E2bB32 : I32EnumAttrCase<"e2b_b32", 9>;
 def Tla_LoadDist_Blk : I32EnumAttrCase<"blk", 10>;
 def Tla_LoadDist_Ds : I32EnumAttrCase<"ds", 11>;
+def Tla_LoadDist_Unpack4B8 : I32EnumAttrCase<"unpack4_b8", 12>;
 def Tla_LoadDistEnum : Tla_I32Enum<"LoadDist", "Load distribution for tla.load.", [
   Tla_LoadDist_Norm,
   Tla_LoadDist_BrcB32,
@@ -161,7 +162,8 @@ def Tla_LoadDistEnum : Tla_I32Enum<"LoadDist", "Load distribution for tla.load."
   Tla_LoadDist_E2bB16,
   Tla_LoadDist_E2bB32,
   Tla_LoadDist_Blk,
-  Tla_LoadDist_Ds
+  Tla_LoadDist_Ds,
+  Tla_LoadDist_Unpack4B8
 ]>;
 def Tla_LoadDistAttr : Tla_EnumAttr<"LoadDist", "load_dist"> {
   let parameters = (ins EnumParameter<Tla_LoadDistEnum>:$load_dist);
@@ -185,6 +187,10 @@ def Tla_LoadDistAttr : Tla_EnumAttr<"LoadDist", "load_dist"> {
     ``LoadDist::DIST_UNPACK_B16``, HIVMAVE ``UNPK_B16``): loads ``VL/2``
     b16 elements and inserts one zero b16 element after each to fill a
     VL-wide ``b16`` register; b16 element type only.
+    ``unpack4_b8`` loads 64 consecutive bytes into byte slots 0,4,...,252
+    of the 256-byte register, inserting three zero bytes after each byte.
+    It requires a b8 element type and a 32-byte-aligned address. This is
+    byte distribution, not numeric conversion or FP4 nibble unpacking.
     ``e2b_b16`` / ``e2b_b32`` are element-to-DataBlock broadcast loads (AscendC
     ``LoadDist::DIST_E2B_B16`` / ``DIST_E2B_B32``, HIVMAVE ``E2B_B16`` /
     ``E2B_B32``): reads ``VL/DB`` (= 8, with ``DB`` a 32-byte DataBlock)
@@ -208,13 +214,15 @@ def Tla_StoreDist_PackB16: I32EnumAttrCase<"pack_b16", 2>;
 def Tla_StoreDist_FirstElementB8 : I32EnumAttrCase<"first_element_b8", 3>;
 def Tla_StoreDist_FirstElementB16 : I32EnumAttrCase<"first_element_b16", 4>;
 def Tla_StoreDist_FirstElementB32 : I32EnumAttrCase<"first_element_b32", 5>;
+def Tla_StoreDist_Pack4B32 : I32EnumAttrCase<"pack4_b32", 6>;
 def Tla_StoreDistEnum : Tla_I32Enum<"StoreDist", "Store distribution for tla.store.", [
   Tla_StoreDist_Norm,
   Tla_StoreDist_PackB32,
   Tla_StoreDist_PackB16,
   Tla_StoreDist_FirstElementB8,
   Tla_StoreDist_FirstElementB16,
-  Tla_StoreDist_FirstElementB32
+  Tla_StoreDist_FirstElementB32,
+  Tla_StoreDist_Pack4B32
 ]>;
 def Tla_StoreDistAttr : Tla_EnumAttr<"StoreDist", "store_dist"> {
   let parameters = (ins EnumParameter<Tla_StoreDistEnum>:$store_dist);
@@ -224,6 +232,11 @@ def Tla_StoreDistAttr : Tla_EnumAttr<"StoreDist", "store_dist"> {
      - DIST_NORM: Normal mode, support b8/b16/b32, with a fixed datacopy VL, should be aligned with 32B.
      - DIST_PACK_B16: Compact mode, store the low half data (b16) to dst, should be aligned with 32B, or VL/2.
      - DIST_PACK_B32: Compact mode, store the low half data (b32) to dst.
+     - DIST_PACK4_B32: Store the low byte of each 32-bit register slot to
+       consecutive b8 destination elements at a 32-byte-aligned address.
+       Supports b8/b16/b32 sources; the predicate is in the source lane
+       domain. Byte positions 0,4,...,252 contain the payload. This does
+       not combine separate FP4 nibbles into a byte.
      - DIST_FIRST_ELEMENT_B8/B16/B32 (AscendC ``DIST_FIRST_ELEMENT_*`` / HIVMAVE
        ``ONEPT_B*``): element store that ignores the mask and writes only the
        first element (lane 0) of the source register to the dst base address
