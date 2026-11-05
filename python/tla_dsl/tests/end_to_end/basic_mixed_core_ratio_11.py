@@ -116,7 +116,7 @@ def basic_mixed_core_ratio_11(
         tla.set_flag(mmad_done)
         tla.wait_flag(mmad_done)
 
-        # Ascend950 CV 1:1 禁止紧耦合 L0C→UB；结果经 GM 交给单 AIV（对齐
+        # Ascend 950 CV 1:1 禁止紧耦合 L0C→UB；结果经 GM 交给单 AIV（对齐
         # AscendNPU-IR InsertLoadStoreForMixCV / AscendC SyncAll 数据通路）。
         tla.copy(gm_c, l0_c)
 
