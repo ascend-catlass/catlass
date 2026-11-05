@@ -14,7 +14,7 @@
 
   where $A$ and $B$ are input matrices in the shape of `(m, k)` and `(k, n)`, respectively. $C$ is the output matrix in the shape of `(m, n)`.
 
-- Supported products: Atlas A2/A3 series products
+- Supported products: Atlas A2 series products and Atlas A3 series products
 
 ## Parameters
 

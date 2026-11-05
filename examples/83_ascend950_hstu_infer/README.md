@@ -2,7 +2,7 @@
 
 ## 功能说明
 
-本样例实现了 HSTU（Hierarchical Sequential Transducer Units）推理场景下的注意力计算算子（不携带rab编码），运行于 Ascend950（CATLASS_ARCH=3510），基于 CATLASS 模板库的 Cube-Vector（CV）融合框架开发。
+本样例实现了 HSTU（Hierarchical Sequential Transduction Units，用于生成式推荐的分层序列转导架构）推理场景下的注意力计算算子（不携带rab编码），运行于 Ascend 950（CATLASS_ARCH=3510），基于 CATLASS 模板库的 Cube-Vector（CV）融合框架开发。
 
 与标准 Attention 不同，HSTU 不做 softmax 归一化，而是对 QK^T 结果做带缩放的 SiLU 激活，计算公式如下：
 
@@ -228,7 +228,7 @@ run_kernel
 
 | 特性 | 说明 |
 | --- | --- |
-| 硬件 | Ascend950（Atlas A5，`CATLASS_ARCH=3510`） |
+| 硬件 | Ascend 950（Atlas A5，`CATLASS_ARCH=3510`） |
 | 核函数形态 | mix 核（`__mix__(1, 2)`）：1 个 AIC（Cube）+ 2 个 AIV 子块（Vector） |
 | 数据类型 | half（fp16），S/P 中间结果分别为 fp32 / half |
 | Q/O 布局 | `NTD`（numHeads, seqLen, headDim）或 `TND`（seqLen, numHeads, headDim） |

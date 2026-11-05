@@ -8,7 +8,7 @@
 
 `CopyGmToL1BTla` implements filter (convolution kernel) data movement from global memory to L1 in TLA style in convolution scenarios. It corresponds to matrix B, with layout transformation `CI1KHKWCOCI0` → `CI1KHKWCOCI0`.
 
-- Applicability: Atlas A2/A3 series products and Ascend 950PR&950DT series products
+- Applicability: Atlas A2 series products and Atlas A3 series products and Ascend 950PR&950DT series products
 - Style: TLA
 
 ## Template Prototype

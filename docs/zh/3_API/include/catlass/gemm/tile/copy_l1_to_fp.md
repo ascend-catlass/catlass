@@ -8,11 +8,11 @@
 
 `CopyL1ToFP` 模板负责将数据（通常为量化 Scale 等辅助信息）从 L1（Local Memory，A1 Buffer）搬运到 FP（FixPipe Buffer，C2PIPE2GM），通过 FixPipe 通道将数据直接写入 GM。
 
-FixPipe 是 AtlasA2 架构上的一种特殊数据通路，允许将 Core 内部的计算结果或辅助数据直接发送到外部存储（GM），绕过常规的 L0C→GM 搬运路径，常用于 per-token/per-channel 反量化场景中的 Scale 数据回写。
+FixPipe 是 Atlas A2 架构上的一种特殊数据通路，允许将 Core 内部的计算结果或辅助数据直接发送到外部存储（GM），绕过常规的 L0C→GM 搬运路径，常用于 per-token/per-channel 反量化场景中的 Scale 数据回写。
 
 该模板通常不直接使用，而是作为 [TileCopy](./tile_copy/README.md) 的成员类型（`CopyL1ToFP`），由 `blockMmad` 自动管理。仅在需要自定义 kernel 模板组装时显式声明。
 
-> **限制**：该模板仅支持 AtlasA2 架构（`CATLASS_ARCH == 2201`），Ascend950 不支持。
+> **限制**：该模板仅支持 Atlas A2 架构（`CATLASS_ARCH == 2201`），Ascend 950 不支持。
 
 ## 模板原型
 
@@ -35,7 +35,7 @@ struct CopyL1ToFP {
 
 | 架构    | 源 Layout    | 目标 Layout  | 位置           | 说明                                                                 |
 | :------ | :----------- | :----------- | :------------- | :------------------------------------------------------------------- |
-| AtlasA2 | VectorLayout | VectorLayout | A1 → C2PIPE2GM | 一维向量拷贝，使用 `AscendC::DataCopy`，块大小基于 `BYTE_PER_BLK_FP` |
+| Atlas A2 | VectorLayout | VectorLayout | A1 → C2PIPE2GM | 一维向量拷贝，使用 `AscendC::DataCopy`，块大小基于 `BYTE_PER_BLK_FP` |
 
 ## 调用接口
 
@@ -54,7 +54,7 @@ void operator()(
 
 ## 调用示例
 
-### 基础 FixPipe 搬运（AtlasA2）
+### 基础 FixPipe 搬运（Atlas A2）
 
 ```cpp
 #include "catlass/gemm/tile/copy_l1_to_fp.hpp"

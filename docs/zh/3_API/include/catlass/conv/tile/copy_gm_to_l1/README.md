@@ -12,9 +12,9 @@
 
 | API                                        | 风格   | 适用硬件           | 搬运对象        | 说明                      |
 | :----------------------------------------- | :----- | :----------------- | :-------------- | :------------------------ |
-| [CopyGmToL1](./copy_gm_to_l1.md)           | 非 TLA | AtlasA2            | Fmap / Filter   | 基础搬运，含偏特化分发    |
-| [CopyGmToL1ATla](./copy_gm_to_l1_a_tla.md) | TLA    | AtlasA2, Ascend950 | Fmap (A 矩阵)   | NC1HWC0→NC1HWC0           |
-| [CopyGmToL1BTla](./copy_gm_to_l1_b_tla.md) | TLA    | AtlasA2, Ascend950 | Filter (B 矩阵) | CI1KHKWCOCI0→CI1KHKWCOCI0 |
+| [CopyGmToL1](./copy_gm_to_l1.md)           | 非 TLA | Atlas A2            | Fmap / Filter   | 基础搬运，含偏特化分发    |
+| [CopyGmToL1ATla](./copy_gm_to_l1_a_tla.md) | TLA    | Atlas A2, Ascend 950 | Fmap (A 矩阵)   | NC1HWC0→NC1HWC0           |
+| [CopyGmToL1BTla](./copy_gm_to_l1_b_tla.md) | TLA    | Atlas A2, Ascend 950 | Filter (B 矩阵) | CI1KHKWCOCI0→CI1KHKWCOCI0 |
 
 ## 调用示例
 

@@ -11,7 +11,7 @@
 
 ## 使用示例
 
-1. 编译样例（Ascend950 需指定 `CATLASS_ARCH=3510`），可参考[快速入门](../../docs/zh/1_Practice/01_quick_start.md#编译执行)：
+1. 编译样例（Ascend 950 需指定 `CATLASS_ARCH=3510`），可参考[快速入门](../../docs/zh/1_Practice/01_quick_start.md#编译执行)：
 
     ```bash
     bash scripts/build.sh -DCATLASS_ARCH=3510 84_ascend950_syrk

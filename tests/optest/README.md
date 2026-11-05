@@ -66,39 +66,39 @@ Python API (`torch_catlass.ops.*`)
 - [x] 43_ascend950_basic_matmul
 - [x] 44_quant_matmul_full_loadA_tla
 - [x] 45_strided_batched_matmul_tla
-- [x] 46_ascend950_matmul_fixpipe_opti (Ascend950)
-- [x] 47_ascend950_grouped_slice_m_dequant (Ascend950)
-- [x] 48_ascend950_grouped_slice_m_pt_pc_dequant (Ascend950)
-- [x] 50_ascend950_basic_matmul_gemv (Ascend950)
-- [x] 49_ascend950_flash_attention_infer (Ascend950)
-- [x] 51_ascend950_quant_per_group_per_block (Ascend950)
+- [x] 46_ascend950_matmul_fixpipe_opti (Ascend 950)
+- [x] 47_ascend950_grouped_slice_m_dequant (Ascend 950)
+- [x] 48_ascend950_grouped_slice_m_pt_pc_dequant (Ascend 950)
+- [x] 50_ascend950_basic_matmul_gemv (Ascend 950)
+- [x] 49_ascend950_flash_attention_infer (Ascend 950)
+- [x] 51_ascend950_quant_per_group_per_block (Ascend 950)
 - [x] 52_quant_multi_core_splitk_matmul_tla
-- [x] 53_ascend950_fp8_mx_matmul (Ascend950)
-- [x] 54_ascend950_fp4_mx_matmul (Ascend950)
-- [x] 55_ascend950_mx_grouped_slice_m (Ascend950)
-- [x] 57_ascend950_matmul_full_dequant (Ascend950)
-- [x] 58_ascend950_fp8_mx_batch_matmul (Ascend950)
-- [x] 59_ascend950_a8w4_mx_matmul (Ascend950)
-- [x] 60_ascend950_grouped_matmul_slice_m (Ascend950)
-- [x] 67_ascend950_batched_matmul (Ascend950)
-- [x] 73_ascend950_matmul_full_loadA (Ascend950)
-- [x] 78_ascend950_dual_matmul_silu_mul (Ascend950)
-- [x] 74_ascend950_weight_quant_a8w4_grouped_mx_matmul (Ascend950)
+- [x] 53_ascend950_fp8_mx_matmul (Ascend 950)
+- [x] 54_ascend950_fp4_mx_matmul (Ascend 950)
+- [x] 55_ascend950_mx_grouped_slice_m (Ascend 950)
+- [x] 57_ascend950_matmul_full_dequant (Ascend 950)
+- [x] 58_ascend950_fp8_mx_batch_matmul (Ascend 950)
+- [x] 59_ascend950_a8w4_mx_matmul (Ascend 950)
+- [x] 60_ascend950_grouped_matmul_slice_m (Ascend 950)
+- [x] 67_ascend950_batched_matmul (Ascend 950)
+- [x] 73_ascend950_matmul_full_loadA (Ascend 950)
+- [x] 78_ascend950_dual_matmul_silu_mul (Ascend 950)
+- [x] 74_ascend950_weight_quant_a8w4_grouped_mx_matmul (Ascend 950)
 - [x] 78_x_attention
-- [x] 79_ascend950_matmul_gather_scatter (Ascend950)
-- [x] 82_ascend950_basic_syrk (Ascend950)
-- [x] 84_ascend950_syrk (Ascend950)
-- [x] 87_ascend950_batched_matmul_softmax (Ascend950)
+- [x] 79_ascend950_matmul_gather_scatter (Ascend 950)
+- [x] 82_ascend950_basic_syrk (Ascend 950)
+- [x] 84_ascend950_syrk (Ascend 950)
+- [x] 87_ascend950_batched_matmul_softmax (Ascend 950)
 - [x] 87_fag_tla
-- [x] 88_ascend950_bmm_broadcast (Ascend950)
+- [x] 88_ascend950_bmm_broadcast (Ascend 950)
 
 ### 暂未接入
 
 - [ ] 24_conv_bias
 - [ ] 33_basic_conv2d
 - [ ] 56_ascend950_basic_conv2d_tla
-- [ ] 70_ascend950_flash_attention_chunk_prefill (Ascend950)
-- [ ] 81_ascend950_rain_fusion_attention (Ascend950)
+- [ ] 70_ascend950_flash_attention_chunk_prefill (Ascend 950)
+- [ ] 81_ascend950_rain_fusion_attention (Ascend 950)
 - [ ] 102_dynamic_optimized_matmul
 - [ ] 103_dynamic_optimized_quant_matmul_per_token_basic
 

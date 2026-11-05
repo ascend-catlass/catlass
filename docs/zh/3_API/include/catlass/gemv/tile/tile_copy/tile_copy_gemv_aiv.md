@@ -8,7 +8,7 @@
 
 `TileCopyGemvAiv` 为 AIV（AI Vector）芯片提供 GEMV 搬运子组件的聚合模板。数据通路为 GM↔UB↔GM，引用 GEMV 专有的搬运组件。
 
-- 适用范围：AtlasA2
+- 适用范围：Atlas A2
 - 不直接执行算子，以类型成员方式暴露子组件引用
 
 ## 模板原型

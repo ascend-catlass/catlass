@@ -8,7 +8,7 @@
 
 `CopyGmToL1` 实现 Conv 场景下从 GM 到 L1 的权重/特征图数据搬运（非 TLA 风格），支持 Fmap（特征图）和 Filter（卷积核）两类搬运。
 
-- 适用范围：AtlasA2
+- 适用范围：Atlas A2
 - 风格：非 TLA
 
 ## 模板原型

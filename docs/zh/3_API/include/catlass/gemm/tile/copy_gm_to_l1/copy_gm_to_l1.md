@@ -34,7 +34,7 @@ struct CopyGmToL1
 
 ## 偏特化实现
 
-### AtlasA2 偏特化
+### Atlas A2 偏特化
 
 以下偏特化适用于 `Arch::AtlasA2`。
 
@@ -78,7 +78,7 @@ struct CopyGmToL1
 | NDC1HWC0（GM）       | NDC1HWC0    | 保持格式不变     |
 | KDC1KHKWN1N0C0（GM） | nZ          | 搬运并转 nZ 格式 |
 
-### Ascend950 偏特化
+### Ascend 950 偏特化
 
 以下偏特化适用于 `Arch::Ascend950`。
 

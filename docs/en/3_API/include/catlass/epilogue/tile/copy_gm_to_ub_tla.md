@@ -8,7 +8,7 @@
 
 `CopyGm2UbTla` implements TLA-style data movement from global memory to Unified Buffer in the epilogue stage. Operands are encapsulated using `tla::Tensor`, and SFINAE is used to automatically select the movement policy based on the source/destination layout.
 
-- Applicability: Atlas A2/A3 series products (RowMajor) and Ascend 950PR&950DT series products (VectorLayout/RowMajor)
+- Applicability: Atlas A2 series products and Atlas A3 series products (RowMajor) and Ascend 950PR&950DT series products (VectorLayout/RowMajor)
 - Style: TLA (`tla::Tensor`)
 - Difference from [CopyGm2Ub](./copy_gm_to_ub/README.md): TLA style, with template parameters inferred using `decltype`
 

@@ -1,4 +1,4 @@
-# CopyL0CToGm (L0C→GM, Ascend950) UT 参考
+# CopyL0CToGm (L0C→GM, Ascend 950) UT 参考
 
 被测源码：`include/catlass/gemm/tile/ascend950/copy_l0c_to_gm.hpp` (549行)
 

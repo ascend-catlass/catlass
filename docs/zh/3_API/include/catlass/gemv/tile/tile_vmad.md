@@ -8,7 +8,7 @@
 
 `TileVmad` 实现 GEMV 场景下的向量-矩阵乘加运算（`Y += A * X`）。将矩阵 A（m*n）的每行与向量 X（n 维）做内积，结果累加到向量 Y（m 维）。
 
-- 适用范围：AtlasA2
+- 适用范围：Atlas A2
 - 两种实现：RowMajor 矩阵（MulAddDst + WholeReduceSum）+ ColumnMajor 矩阵（Axpy 逐列）
 
 ## 模板原型
@@ -30,8 +30,8 @@ struct TileVmad;
 
 | 架构    | AType         | 实现策略                                              | 特殊版本                      |
 | :------ | :------------ | :---------------------------------------------------- | :---------------------------- |
-| AtlasA2 | `RowMajor`    | `Duplicate`→`MulAddDst`→`WholeReduceSum`→`Cast`→`Add` | float 版本：`Mul`+`MulAddDst` |
-| AtlasA2 | `ColumnMajor` | `Duplicate`→scalar 抖动→`Axpy`逐列→`Cast`→`Add`       | float 版本同步                |
+| Atlas A2 | `RowMajor`    | `Duplicate`→`MulAddDst`→`WholeReduceSum`→`Cast`→`Add` | float 版本：`Mul`+`MulAddDst` |
+| Atlas A2 | `ColumnMajor` | `Duplicate`→scalar 抖动→`Axpy`逐列→`Cast`→`Add`       | float 版本同步                |
 
 **RowMajor 实现流程**：
 

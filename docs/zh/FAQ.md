@@ -5,7 +5,7 @@
 我们于2026年3月第一次社区会议正式确定CATLASS社区主线将开始新增对下一代昇腾硬件Ascend 950PR&950DT系列产品的支持，对应的正式版本从1.5.0开始。为在不同平台区分底层接口的实现，该新增支持将引入新的编译宏，用户需要注意在对应编译命令中进行相应适配。
 
 - 新增宏：`CATLASS_ARCH`，用于指定目标架构。其取值可在[SIMD BuiltIn关键字](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/latest/programug/Ascendcopdevg/docs/zh/guide/programming_guide/language_extension/simd_builtin_keywords.md)中查询（`__NPU_ARCH__`列）。
-  - `Atlas A2/A3系列产品`：`2201`
+  - `Atlas A2系列产品、Atlas A3系列产品`：`2201`
   - `Ascend 950PR&950DT系列产品`：`3510`
 
 - 相关场景说明：

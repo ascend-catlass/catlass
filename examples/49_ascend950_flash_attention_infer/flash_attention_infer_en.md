@@ -2,7 +2,7 @@
 
 ## Overview
 
-CATLASS FlashAttention Infer is a FlashAttention inference operator optimized for Ascend950 hardware, implemented based on the CATLASS Gemm API. The operator structure consists of the following parts:
+CATLASS FlashAttention Infer is a FlashAttention inference operator optimized for Ascend 950 hardware, implemented based on the CATLASS Gemm API. The operator structure consists of the following parts:
 
 - Tiling calculation;
 - Kernel implementation;
@@ -112,7 +112,7 @@ The operator uses two types of Block Epilogue components:
 
 #### Tile Mmad & Tile Copy
 
-In the Block components used by the Kernel, the TileMmadTla component in tile_mmad.hpp and the PackedTileCopyTlaToUB component in tile_copy.hpp are used, and new TileCopySoftmax and TileCopyRescaleO components for FA Epilogue processing are added, as well as the ub->l1 path CopyUb2L1Tla component newly added for Ascend950, for example:
+In the Block components used by the Kernel, the TileMmadTla component in tile_mmad.hpp and the PackedTileCopyTlaToUB component in tile_copy.hpp are used, and new TileCopySoftmax and TileCopyRescaleO components for FA Epilogue processing are added, as well as the ub->l1 path CopyUb2L1Tla component newly added for Ascend 950, for example:
 
 ```c++
 using TileCopyQK = Gemm::Tile::PackedTileCopyTlaToUB<

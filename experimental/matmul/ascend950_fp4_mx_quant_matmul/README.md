@@ -1,10 +1,10 @@
-# Ascend950 FP4 MX Quant Matmul Example Readme
+# Ascend 950 FP4 MX Quant Matmul Example Readme
 
 > **注意**：本样例位于 `experimental/` 目录下，如需编译运行，请先将样例目录拷贝至 `examples/` 下，并在 `examples/CMakeLists.txt` 中添加样例名称 `ascend950_fp4_mx_quant_matmul`。
 
 ## 功能介绍
 
-- 演示 Ascend950 上的 **MX FP4 矩阵乘 + per-token/per-channel 量化 epilogue**。
+- 演示 Ascend 950 上的 **MX FP4 矩阵乘 + per-token/per-channel 量化 epilogue**。
 - 计算：`D = perTokenScale * (MxScaleA * A @ MxScaleB * B) * perChannelScale`，本样例中 MxScale 固定为 1.0。
 - A、B 元素类型为 `float4_e2m1x2_t`，per-token/per-channel scale 为 `float8_e4m3_t`，输出为 FP32。
 - 默认布局为 A `RowMajor`、B `RowMajor`，与 `gen_data.py` 生成的数据一致。
@@ -25,7 +25,7 @@ experimental
 
 ## 使用示例
 
-- 获取代码之后编译相应的算子可执行文件，可参考 [quickstart](../../../docs/zh/1_Practice/01_quick_start.md#编译执行)。本用例为 Ascend950（3510）算子，编译时需加 `-DCATLASS_ARCH=3510`。
+- 获取代码之后编译相应的算子可执行文件，可参考 [quickstart](../../../docs/zh/1_Practice/01_quick_start.md#编译执行)。本用例为 Ascend 950（3510）算子，编译时需加 `-DCATLASS_ARCH=3510`。
 - 执行算子
 
 ```test

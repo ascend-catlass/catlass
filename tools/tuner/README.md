@@ -84,7 +84,7 @@ bash scripts/build.sh -DCATLASS_LIBRARY_KERNELS=catlass_gemm_00_basic_matmul_fp1
 
 当前已支持如下算子类型。
 
-Atlas A2/A3架构：
+Atlas A2系列产品、Atlas A3系列产品架构：
 
 - 00_basic_matmul
 - 02_grouped_matmul_slice_m

@@ -19,8 +19,8 @@
 
 | 架构             | `kDirectionAlign`         | `disableGemv`               | 自动 GEMV 规避       |
 | :--------------- | :------------------------ | :-------------------------- | :------------------- |
-| AtlasA2 (2201)   | `float` + L1A `nZ` 时开启 | —                           | 模式 4 中 M=1 → M=16 |
-| Ascend950 (3510) | —                         | L1A `VectorLayout` 时 false | —                    |
+| Atlas A2 (2201)   | `float` + L1A `nZ` 时开启 | —                           | 模式 4 中 M=1 → M=16 |
+| Ascend 950 (3510) | —                         | L1A `VectorLayout` 时 false | —                    |
 
 ## 模板原型
 
@@ -64,7 +64,7 @@ void operator()(
 );
 ```
 
-与模式 1 的区别：`cmatrixInitVal = false`（Bias 已预设到 L0C），`disableGemv = true`（Ascend950）。
+与模式 1 的区别：`cmatrixInitVal = false`（Bias 已预设到 L0C），`disableGemv = true`（Ascend 950）。
 
 ### 模式 3：L0 Batch（批量 Mmad）
 
@@ -100,7 +100,7 @@ void operator()(
 - `n = tla::get<1>(l0CTensor.layout().originShape())`
 - `k = tla::get<1>(l0ATensor.layout().originShape())`
 
-AtlasA2 下 `m=1` 时自动提升为 16，避免进入低效 GEMV 模式。
+Atlas A2 下 `m=1` 时自动提升为 16，避免进入低效 GEMV 模式。
 
 ## 调用示例
 

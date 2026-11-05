@@ -1,6 +1,6 @@
 # TileCopyTla（L1 → BT 偏特化）
 
-> [代码位置](../../../../../../../../include/catlass/gemm/tile/ascend950/copy_l1_to_bt.hpp)（Ascend950）
+> [代码位置](../../../../../../../../include/catlass/gemm/tile/ascend950/copy_l1_to_bt.hpp)（Ascend 950）
 
 [TOC]
 
@@ -10,7 +10,7 @@
 
 与 [非 TLA CopyL1ToBT](./copy_l1_to_bt.md) 不同，TLA 版本通过 `tla::Tensor` 封装操作数，由 TLA 运行时自动推导 Layout/Shape/Stride。
 
-> **注意**：该偏特化仅支持 Ascend950 架构（`CATLASS_ARCH == 3510`）。AtlasA2 没有 TLA 版本的 L1→BT 搬运。
+> **注意**：该偏特化仅支持 Ascend 950 架构（`CATLASS_ARCH == 3510`）。Atlas A2 没有 TLA 版本的 L1→BT 搬运。
 
 ## 模板原型
 
@@ -25,7 +25,7 @@ L1 → BT 的偏特化通过 SFINAE 匹配：源 tensor 的 Layout 为 `VectorLa
 
 ## 偏特化实现
 
-### Ascend950
+### Ascend 950
 
 | 源 Tensor             | 目标 Tensor           | SFINAE 条件                                  | 说明                                                              |
 | :-------------------- | :-------------------- | :------------------------------------------- | :---------------------------------------------------------------- |
@@ -44,7 +44,7 @@ void operator()(TensorDst const &dstTensor, TensorSrc const &srcTensor);
 
 ## 调用示例
 
-### Ascend950，TLA
+### Ascend 950，TLA
 
 ```cpp
 #include "catlass/gemm/tile/copy_l1_to_bt.hpp"

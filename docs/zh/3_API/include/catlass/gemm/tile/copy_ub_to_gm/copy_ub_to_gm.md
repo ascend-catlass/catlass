@@ -10,7 +10,7 @@
 
 与 TLA 风格 [TileCopyTla](./tile_copy_tla.md) / [TileCopyTlaExt](./tile_copy_tla_ext.md) 不同，非 TLA 版本仅支持 RowMajor 排布，使用 `AscendC::DataCopyPad` 完成搬出。
 
-> **限制**：仅支持 AtlasA2 架构（`CATLASS_ARCH == 2201`）。
+> **限制**：仅支持 Atlas A2 架构（`CATLASS_ARCH == 2201`）。
 
 ## 模板原型
 
@@ -28,7 +28,7 @@ struct CopyUb2Gm {
 
 | 架构    | Layout              | 搬运指令               | 说明                                       |
 | :------ | :------------------ | :--------------------- | :----------------------------------------- |
-| AtlasA2 | RowMajor → RowMajor | `AscendC::DataCopyPad` | 逐行拷贝，行数 `shape(0)`，行长 `shape(1)` |
+| Atlas A2 | RowMajor → RowMajor | `AscendC::DataCopyPad` | 逐行拷贝，行数 `shape(0)`，行长 `shape(1)` |
 
 stride 计算：
 

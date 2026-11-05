@@ -14,7 +14,7 @@
 
   其中 `A` 是形如 `(m,k)` 的左矩阵，`B` 是形如 `(g,k,n)` 的右矩阵，`g` 为分组数量，m 轴具体切分的值由 `groupList` 确定；`scale` 为 per-channel 量化系数（形如 `(g,n)`），`perToken` 为 per-token 量化系数（形如 `(m,)`），`C` 为形如 `(m,n)` 的输出矩阵。
 
-- 支持产品型号：Atlas A2/A3系列产品
+- 支持产品型号：Atlas A2系列产品、Atlas A3系列产品
 
 ## 样例参数说明
 

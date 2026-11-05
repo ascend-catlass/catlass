@@ -33,8 +33,8 @@ struct CopyL1ToBT {
 
 | 架构      | 源 Layout    | 目标 Layout  | 位置    | 说明                                                                               |
 | :-------- | :----------- | :----------- | :------ | :--------------------------------------------------------------------------------- |
-| AtlasA2   | VectorLayout | VectorLayout | A1 → C2 | 一维向量拷贝，使用 `AscendC::DataCopy`，块大小基于 `BYTE_PER_C2`                   |
-| Ascend950 | VectorLayout | VectorLayout | A1 → C2 | 一维向量拷贝，使用 `AscendC::DataCopy`，块大小基于 `BYTE_PER_C0`，B32 类型自动对齐 |
+| Atlas A2   | VectorLayout | VectorLayout | A1 → C2 | 一维向量拷贝，使用 `AscendC::DataCopy`，块大小基于 `BYTE_PER_C2`                   |
+| Ascend 950 | VectorLayout | VectorLayout | A1 → C2 | 一维向量拷贝，使用 `AscendC::DataCopy`，块大小基于 `BYTE_PER_C0`，B32 类型自动对齐 |
 
 ## 调用接口
 
@@ -53,7 +53,7 @@ void operator()(
 
 ## 调用示例
 
-### AtlasA2
+### Atlas A2
 
 ```cpp
 #include "catlass/gemm/tile/copy_l1_to_bt.hpp"
@@ -78,7 +78,7 @@ CopyOp copyOp;
 copyOp(dstBTTensor, srcL1Tensor, layoutDst, layoutSrc);
 ```
 
-### Ascend950
+### Ascend 950
 
 ```cpp
 #include "catlass/gemm/tile/copy_l1_to_bt.hpp"

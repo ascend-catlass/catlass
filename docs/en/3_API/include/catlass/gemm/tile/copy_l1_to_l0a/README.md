@@ -119,7 +119,7 @@ auto layoutDst = tla::MakeLayout<half, layout::zN>(M, K);
 auto srcTensor = tla::MakeTensor(srcL1Tensor, layoutSrc, Arch::PositionL1{});
 auto dstTensor = tla::MakeTensor(dstL0ATensor, layoutDst, Arch::PositionL0A{});
 
-// Ascend950: zN L1 → zN L0A
+// Ascend 950: zN L1 → zN L0A
 TileCopyTla<Arch::Ascend950, decltype(srcTensor), decltype(dstTensor)> copyOp;
 copyOp(dstTensor, srcTensor);
 ```

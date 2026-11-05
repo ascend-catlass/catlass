@@ -2,7 +2,7 @@
 
 ## 概述
 
-CATLASS FlashAttention Infer是基于CATLASS Gemm API实现的亲和昇腾Ascend950硬件的FlashAttention推理算子，算子的结构可以分为以下几部分：
+CATLASS FlashAttention Infer是基于CATLASS Gemm API实现的亲和昇腾Ascend 950硬件的FlashAttention推理算子，算子的结构可以分为以下几部分：
 
 - Tiling计算；
 - Kernel实现；
@@ -108,7 +108,7 @@ using EpilogueRescaleO = Epilogue::Block::BlockEpilogue<...>;
 
 #### Tile Mmad & Tile Copy
 
-在Kernel使用的Block组件中，使用了位于tile_mmad.hpp中的TileMmadTla组件和位于tile_copy.hpp中的PackedTileCopyTlaToUB组件，并新增了针对FA Epilogue处理的TileCopySoftmax和TileCopyRescaleO组件，以及Ascend950新增的Ub->L1通路CopyUb2L1Tla组件，例如：
+在Kernel使用的Block组件中，使用了位于tile_mmad.hpp中的TileMmadTla组件和位于tile_copy.hpp中的PackedTileCopyTlaToUB组件，并新增了针对FA Epilogue处理的TileCopySoftmax和TileCopyRescaleO组件，以及Ascend 950新增的Ub->L1通路CopyUb2L1Tla组件，例如：
 
 ```c++
 using TileCopyQK = Gemm::Tile::PackedTileCopyTlaToUB<

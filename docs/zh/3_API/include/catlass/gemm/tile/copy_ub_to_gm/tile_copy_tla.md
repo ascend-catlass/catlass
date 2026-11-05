@@ -10,7 +10,7 @@
 
 与 [TileCopyTlaExt](./tile_copy_tla_ext.md) 的 PaddingRowMajor 目标排布不同，本模板的目标 Layout 为普通 RowMajor。
 
-> **限制**：仅支持 AtlasA2 架构，源和目标 layout 必须均为 RowMajor。
+> **限制**：仅支持 Atlas A2 架构，源和目标 layout 必须均为 RowMajor。
 
 ## 模板原型
 
@@ -27,7 +27,7 @@ struct TileCopyTla<Arch::AtlasA2,
 
 | 架构    | 源位置  | 目标位置 | Layout 要求         | 搬运指令               |
 | :------ | :------ | :------- | :------------------ | :--------------------- |
-| AtlasA2 | VECCALC | GM       | RowMajor → RowMajor | `AscendC::DataCopyPad` |
+| Atlas A2 | VECCALC | GM       | RowMajor → RowMajor | `AscendC::DataCopyPad` |
 
 ## 调用接口
 

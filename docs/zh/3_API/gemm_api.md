@@ -145,7 +145,7 @@ struct BlockMmad {};
 `BlockMmad`的实现不是通用的。相反，它们必须针对每个算法和NPU架构特例化。用户可以通过选择与该特例化匹配的模板参数来调度到`BlockMmad`的特例化。
 CATLASS采用基于标签的调度策略类型来特例化Block层Mmad实现，并为其提供调优能力。
 
-以下给出了一个Dispatch Policy的样例，对应AtlasA2的架构下，采用L1 Buffer上pingpong Buffer，启用unitflag优化：
+以下给出了一个Dispatch Policy的样例，对应Atlas A2的架构下，采用L1 Buffer上pingpong Buffer，启用unitflag优化：
 
 ```c++
 // 2-Buffer in L1 Buffer ,

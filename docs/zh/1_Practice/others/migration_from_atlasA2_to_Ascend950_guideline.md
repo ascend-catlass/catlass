@@ -1,14 +1,14 @@
-# AtlasA2存量算子向Ascend950代际兼容开发指导
+# Atlas A2存量算子向Ascend 950代际兼容开发指导
 
 ## 写在前面
 
-该文档主要说明，如何基于CATLASS在AtlasA2架构下的存量算子快速迁移到Ascend950架构，包括对原kernel和Block层级组件复用，并无感使用不同架构的Tile组件。
+该文档主要说明，如何基于CATLASS在Atlas A2架构下的存量算子快速迁移到Ascend 950架构，包括对原kernel和Block层级组件复用，并无感使用不同架构的Tile组件。
 
 为实现该迁移动作，推荐按照下述三个步骤进行。
 
 ## Dispatch组件调整
 
-原AtlasA2平台的存量算子使用A2代际语义的Dispatch组件以路由至所需的Block组件（如[`00_basic_matmul`](../../../../examples/00_basic_matmul/README.md)所使用的Dispatch组件为[`MmadAtlasA2Pingpong`](../../../../include/catlass/gemm/dispatch_policy.hpp#L32)），我们建议迁移后算子使用公共代际语义的Dispatch组件（除新算子需使用Ascend950代际独有的特性外），例如[`MmadPingpong`](../../../../include/catlass/gemm/dispatch_policy.hpp#L292)。
+原Atlas A2平台的存量算子使用A2代际语义的Dispatch组件以路由至所需的Block组件（如[`00_basic_matmul`](../../../../examples/00_basic_matmul/README.md)所使用的Dispatch组件为[`MmadAtlasA2Pingpong`](../../../../include/catlass/gemm/dispatch_policy.hpp#L32)），我们建议迁移后算子使用公共代际语义的Dispatch组件（除新算子需使用Ascend 950代际独有的特性外），例如[`MmadPingpong`](../../../../include/catlass/gemm/dispatch_policy.hpp#L292)。
 如果[`dispatch_policy.hpp`](../../../../include/catlass/gemm/dispatch_policy.hpp)下不包含公共代际语义的Dispatch组件，例如[`MmadAtlasA2Streamk`](../../../../include/catlass/gemm/dispatch_policy.hpp#L237)，由于当前代码仓上不包含组件`MmadStreamk`，需要进行补充：
 
 ```cpp
@@ -111,7 +111,7 @@ struct DispatchStagesGetter<MmadPingpong<ArchTag, ENABLE_UNIT_FLAG, USE_HF32_MOD
 
 ## 算子修改
 
-完成上述两方面修改后，在算子侧，需要调整`ArchTag`标识和相应的Dispatch组件(**原A2代际下Dispatch特化仍在AtlasA2下兼容**)，例如：
+完成上述两方面修改后，在算子侧，需要调整`ArchTag`标识和相应的Dispatch组件(**原A2代际下Dispatch特化仍在Atlas A2下兼容**)，例如：
 
 ```diff
 // examples/00_basic_matmul/basic_matmul.cpp(previous)
@@ -128,7 +128,7 @@ using L0TileShape = GemmShape<128, 256, 64>;
 // ...
 ```
 
-此外，与AtlasA2不同的是，`aclrtGetHardwareSyncAddr` 调用及 `hardwareSyncAddr` 变量应从Ascend950相关代码中移除，`RunAdapter` 调用签名同步简化：
+此外，与Atlas A2不同的是，`aclrtGetHardwareSyncAddr` 调用及 `hardwareSyncAddr` 变量应从Ascend 950相关代码中移除，`RunAdapter` 调用签名同步简化：
 
 ```diff
 -    // Prepare hardware sync address
@@ -139,18 +139,18 @@ using L0TileShape = GemmShape<128, 256, 64>;
 +    RunAdapter(gemm_op, arguments, stream, aicCoreNum);
 ```
 
-随后即可编译运行适配于Ascend950平台的算子（备注：编译选项请添加`-DCATLASS_ARCH=3510`）
+随后即可编译运行适配于Ascend 950平台的算子（备注：编译选项请添加`-DCATLASS_ARCH=3510`）
 
 ## 完整迁移检查清单
 
-算子从 AtlasA2 迁移到 Ascend950 时，逐项确认以下内容：
+算子从 Atlas A2 迁移到 Ascend 950 时，逐项确认以下内容：
 
 - [ ] **ArchTag**：`Arch::AtlasA2` → `Arch::Ascend950`
 - [ ] **Gemm Dispatch**：如无公共代际版本则新增（参考 `GemmPingpong`），算子侧替换
 - [ ] **Epilogue Dispatch**：如无公共代际版本则新增（参考 `EpilogueGemm`），算子侧替换
 - [ ] **Block 特化**：为新的公共 Dispatch 增加 Block 特化（参考 `BlockGemm<GemmPingpong>`）
 - [ ] **Epilogue Block 特化**：为新的公共 Epilogue Dispatch 增加 BlockEpilogue 特化
-- [ ] **Tile 类型选择器**：检查 `L1AndL0TypeSelector` 是否需 arch-aware 版本，Ascend950 L0 类型可能不同
+- [ ] **Tile 类型选择器**：检查 `L1AndL0TypeSelector` 是否需 arch-aware 版本，Ascend 950 L0 类型可能不同
 - [ ] **Arch Guard**：检查是否使用 `__NPU_ARCH__`(Device侧) 或 `CATLASS_ARCH`(Host侧) 守卫，根据需要补充
 - [ ] **hardwareSyncAddr 移除**：删除 `aclrtGetHardwareSyncAddr` 调用，`RunAdapter` 去掉第五个参数
 - [ ] **编译验证**：编译选项加 `-DCATLASS_ARCH=3510`

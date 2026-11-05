@@ -35,7 +35,7 @@ struct CopyL1ToL0A {
 
 ## 偏特化实现
 
-### AtlasA2
+### Atlas A2
 
 | 源 Layout | 目标 Layout | 元素类型          | 说明                                            |
 | :-------- | :---------- | :---------------- | :---------------------------------------------- |
@@ -48,7 +48,7 @@ struct CopyL1ToL0A {
 | nN        | zZ          | float             | float 专用，使用 LoadData2dTranspose            |
 | NDC1HWC0  | zZ          | 任意              | 卷积专用，使用 LoadData3Dv2                     |
 
-### Ascend950
+### Ascend 950
 
 | 源 Layout | 目标 Layout | 元素类型                                                 | 说明                                               |
 | :-------- | :---------- | :------------------------------------------------------- | :------------------------------------------------- |
@@ -56,7 +56,7 @@ struct CopyL1ToL0A {
 | nZ        | zN          | 非 B8/B4（int8_t/float8_e4m3_t/float8_e5m2_t/float4 等） | 转置拷贝，使用 LoadData2DParamsV2                  |
 | nZ        | zN          | B8/B4（int8_t/float8_e4m3_t/float8_e5m2_t/float4 等）    | 转置拷贝，根据 L0M 对齐情况选择单次或分步 LoadData |
 
-> **注意**：Ascend950 的 `L0Type` 目标 layout 均为 zN（非 zZ），与 AtlasA2 不同。
+> **注意**：Ascend 950 的 `L0Type` 目标 layout 均为 zN（非 zZ），与 Atlas A2 不同。
 
 ## 调用接口
 
@@ -95,7 +95,7 @@ static CopyL1ToL0A MakeCopyL1ToL0A(
 
 ## 调用示例
 
-### 基础 zN → zZ 搬运（AtlasA2，非 TLA）
+### 基础 zN → zZ 搬运（Atlas A2，非 TLA）
 
 ```cpp
 #include "catlass/gemm/tile/copy_l1_to_l0a.hpp"
@@ -122,7 +122,7 @@ CopyOp copyOp;
 copyOp(dstL0ATensor, srcL1Tensor, layoutDst, layoutSrc);
 ```
 
-### nZ → zZ 转置搬运（AtlasA2，非 TLA）
+### nZ → zZ 转置搬运（Atlas A2，非 TLA）
 
 ```cpp
 using L1Type = Gemm::GemmType<half, layout::nZ, AscendC::TPosition::A1>;
@@ -136,7 +136,7 @@ CopyOp copyOp;
 copyOp(dstL0ATensor, srcL1Tensor, layoutDst, layoutSrc);
 ```
 
-### zN → zN 搬运（Ascend950，非 TLA）
+### zN → zN 搬运（Ascend 950，非 TLA）
 
 ```cpp
 using L1Type = Gemm::GemmType<half, layout::zN, AscendC::TPosition::A1>;
@@ -144,7 +144,7 @@ using L1Type = Gemm::GemmType<half, layout::zN, AscendC::TPosition::A1>;
 auto layoutSrc = layout::zN::MakeLayout<half>(row, col);
 auto layoutDst = layout::zN::MakeLayout<half>(row, col);
 
-// Ascend950 的 L0Type 可省略，自动推导对应 layout
+// Ascend 950 的 L0Type 可省略，自动推导对应 layout
 using CopyOp = CopyL1ToL0A<Arch::Ascend950, L1Type>;
 CopyOp copyOp;
 copyOp(dstL0ATensor, srcL1Tensor, layoutDst, layoutSrc);

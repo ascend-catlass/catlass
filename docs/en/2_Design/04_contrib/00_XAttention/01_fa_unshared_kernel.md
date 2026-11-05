@@ -162,9 +162,9 @@ write out: P -> GM (DataCopy, T_BLOCK_SIZE=16 aligned)
 
 Because the KV sequence is processed in one pass, this template **does not perform rescale and normalization of O**; `gm/gl` are handed to the outside (the upper-level kernel or the combine kernel) to compute `O = OTmp / gl`. In the dual subBlock scenario, the row interval is split by head for parallel computation, and all events use `EVENT_ID3` to avoid conflicts with the GEMM side.
 
-## Ascend950 Specialization
+## Ascend 950 Specialization
 
-`EpilogueAscend950FAUnsharedSoftmax` directly inherits the AtlasA2 implementation (the AscendC vector APIs are compatible):
+`EpilogueAscend950FAUnsharedSoftmax` directly inherits the Atlas A2 implementation (the AscendC vector APIs are compatible):
 
 ```cpp
 template <class OutputType_, class InputType_, class MaskType_>

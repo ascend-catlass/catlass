@@ -15,7 +15,7 @@
 
 该模板作为 [TileCopy](../tile_copy/README.md) 的 `CopyL0CToGm` 成员类型，通常由 blockMmad 自动管理。仅在自定义 kernel 模板组装时需要显式声明。
 
-> **依赖**：本模块依赖 [copy_l0c_to_dst](../copy_l0c_to_dst/README.md) 中定义的 `ScaleGranularity` 枚举和 `CopyL0CToDstQuantMode`（Ascend950）/ `CopyL0CToGmQuantMode`（AtlasA2）量化模式映射表。
+> **依赖**：本模块依赖 [copy_l0c_to_dst](../copy_l0c_to_dst/README.md) 中定义的 `ScaleGranularity` 枚举和 `CopyL0CToDstQuantMode`（Ascend 950）/ `CopyL0CToGmQuantMode`（Atlas A2）量化模式映射表。
 
 ## 模板原型
 
@@ -40,26 +40,26 @@ struct CopyL0CToGm {
 
 | 架构      | 目标 Layout | 源 Layout | 搬运方式                                    | 说明                                            |
 | :-------- | :---------- | :-------- | :------------------------------------------ | :---------------------------------------------- |
-| AtlasA2   | RowMajor    | zN        | `AscendC::Fixpipe` + `CFG_ROW_MAJOR`        | 支持 float→half/bf16 等 cast                    |
-| AtlasA2   | zN          | zN        | `AscendC::Fixpipe` + `CFG_NZ`               | zN 排布保持，float→float 时 `channelSplit=true` |
-| AtlasA2   | NDC1HWC0    | zN        | `AscendC::Fixpipe` + `CFG_NZ`               | Conv 5D tensor                                  |
-| Ascend950 | RowMajor    | zN        | `AscendC::DataCopy` + `SetFixpipeNz2ndFlag` | NZ→RowMajor 转排布                              |
-| Ascend950 | zN          | zN        | `AscendC::DataCopy`                         | zN 排布保持，float→float 时 `channelSplit=true` |
-| Ascend950 | NDC1HWC0    | zN        | `AscendC::Fixpipe` + `CFG_NZ`               | Conv 5D tensor                                  |
+| Atlas A2   | RowMajor    | zN        | `AscendC::Fixpipe` + `CFG_ROW_MAJOR`        | 支持 float→half/bf16 等 cast                    |
+| Atlas A2   | zN          | zN        | `AscendC::Fixpipe` + `CFG_NZ`               | zN 排布保持，float→float 时 `channelSplit=true` |
+| Atlas A2   | NDC1HWC0    | zN        | `AscendC::Fixpipe` + `CFG_NZ`               | Conv 5D tensor                                  |
+| Ascend 950 | RowMajor    | zN        | `AscendC::DataCopy` + `SetFixpipeNz2ndFlag` | NZ→RowMajor 转排布                              |
+| Ascend 950 | zN          | zN        | `AscendC::DataCopy`                         | zN 排布保持，float→float 时 `channelSplit=true` |
+| Ascend 950 | NDC1HWC0    | zN        | `AscendC::Fixpipe` + `CFG_NZ`               | Conv 5D tensor                                  |
 
 ### PER_TENSOR（per-tensor 量化/反量化）
 
 | 架构      | 目标 Layout | 源 Layout | 搬运方式                                           | Params              |
 | :-------- | :---------- | :-------- | :------------------------------------------------- | :------------------ |
-| AtlasA2   | RowMajor    | zN        | `AscendC::Fixpipe` + `CFG_ROW_MAJOR` + `deqScalar` | `float scale = 1.0` |
-| Ascend950 | RowMajor    | zN        | `AscendC::Fixpipe` + `CFG_ROW_MAJOR` + `deqScalar` | `float scale = 1.0` |
+| Atlas A2   | RowMajor    | zN        | `AscendC::Fixpipe` + `CFG_ROW_MAJOR` + `deqScalar` | `float scale = 1.0` |
+| Ascend 950 | RowMajor    | zN        | `AscendC::Fixpipe` + `CFG_ROW_MAJOR` + `deqScalar` | `float scale = 1.0` |
 
 ### PER_CHANNEL（per-channel 量化/反量化）
 
 | 架构      | 目标 Layout | 源 Layout | 搬运方式                                                  | scale 参数                       |
 | :-------- | :---------- | :-------- | :-------------------------------------------------------- | :------------------------------- |
-| AtlasA2   | RowMajor    | zN        | `AscendC::Fixpipe` + `CFG_ROW_MAJOR` + `SetFixPipeConfig` | `LocalTensor<uint64_t>` 旁路     |
-| Ascend950 | RowMajor    | zN        | `AscendC::Fixpipe` + `CFG_ROW_MAJOR` 三参数               | `LocalTensor<uint64_t>` 直接传入 |
+| Atlas A2   | RowMajor    | zN        | `AscendC::Fixpipe` + `CFG_ROW_MAJOR` + `SetFixPipeConfig` | `LocalTensor<uint64_t>` 旁路     |
+| Ascend 950 | RowMajor    | zN        | `AscendC::Fixpipe` + `CFG_ROW_MAJOR` 三参数               | `LocalTensor<uint64_t>` 直接传入 |
 
 ## 调用接口
 
@@ -90,7 +90,7 @@ void operator()(
 
 ## 调用示例
 
-### NO_QUANT：float → half（AtlasA2）
+### NO_QUANT：float → half（Atlas A2）
 
 ```cpp
 #include "catlass/gemm/tile/copy_l0c_to_gm.hpp"
@@ -114,7 +114,7 @@ CopyOp copyOp;
 copyOp(dstGmTensor, srcL0CTensor, dstLayout, srcLayout);
 ```
 
-### PER_TENSOR：int32 → half 反量化（AtlasA2）
+### PER_TENSOR：int32 → half 反量化（Atlas A2）
 
 ```cpp
 using ElementAccumulator = int32_t;
@@ -130,7 +130,7 @@ CopyOp copyOp(params);
 copyOp(dstGmTensor, srcL0CTensor, dstLayout, srcLayout);
 ```
 
-### PER_CHANNEL：int32 → int8（AtlasA2）
+### PER_CHANNEL：int32 → int8（Atlas A2）
 
 ```cpp
 using ElementAccumulator = int32_t;
@@ -152,7 +152,7 @@ CopyOp copyOp;
 copyOp(dstGmTensor, srcL0CTensor, dstLayout, srcLayout);
 ```
 
-### Ascend950 RowMajor
+### Ascend 950 RowMajor
 
 ```cpp
 using GmType = Gemm::GemmType<half, layout::RowMajor>;
@@ -165,7 +165,7 @@ CopyOp copyOp;
 copyOp(dstGmTensor, srcL0CTensor, dstLayout, srcLayout);
 ```
 
-### Ascend950 zN
+### Ascend 950 zN
 
 ```cpp
 using GmType = Gemm::GemmType<float, layout::zN>;

@@ -10,7 +10,7 @@
 
 适用于需要 Prologue 预处理（如 INT4→INT8 转换）但不需要随路量化的场景。
 
-> **限制**：仅 AtlasA2 架构（`CATLASS_ARCH == 2201`）。
+> **限制**：仅 Atlas A2 架构（`CATLASS_ARCH == 2201`）。
 
 ## 引用的 Tile 组件
 

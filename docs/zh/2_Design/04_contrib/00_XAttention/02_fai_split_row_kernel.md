@@ -9,7 +9,7 @@
 | `Epilogue::EpilogueAtlasA2OnlineSoftmaxCopySumMax` | BlockEpilogue 偏特化 | `include/catlass/epilogue/block/block_epilogue_online_softmax_copy_glm.hpp` |
 | `Epilogue::EpilogueAtlasA2RescaleOWithoutDivSum` | BlockEpilogue 偏特化 | `include/catlass/epilogue/block/block_epilogue_rescale_o_no_div_rowsum.hpp` |
 
-`EpilogueAscend950OnlineSoftmaxCopySumMax` 为 Ascend950 特化，直接继承 AtlasA2 实现（`using Base::Base`），不单独展开。
+`EpilogueAscend950OnlineSoftmaxCopySumMax` 为 Ascend 950 特化，直接继承 Atlas A2 实现（`using Base::Base`），不单独展开。
 
 ## 系列概述
 

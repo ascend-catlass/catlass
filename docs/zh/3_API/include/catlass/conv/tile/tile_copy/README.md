@@ -12,8 +12,8 @@ Conv `tile_copy` 是搬运聚合模板，组合引用 Conv 场景下 GM→L1、L
 
 | API                                            | 风格   | 适用硬件           | 说明                            |
 | :--------------------------------------------- | :----- | :----------------- | :------------------------------ |
-| [TileCopy](./tile_copy.md)                     | 非 TLA | AtlasA2            | 基础聚合，4 子组件引用          |
-| [PackedTileCopyTla](./packed_tile_copy_tla.md) | TLA    | AtlasA2, Ascend950 | 自动推导中间 Layout，架构自适应 |
+| [TileCopy](./tile_copy.md)                     | 非 TLA | Atlas A2            | 基础聚合，4 子组件引用          |
+| [PackedTileCopyTla](./packed_tile_copy_tla.md) | TLA    | Atlas A2, Ascend 950 | 自动推导中间 Layout，架构自适应 |
 
 ## 调用示例
 

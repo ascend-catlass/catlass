@@ -36,7 +36,7 @@ struct CopyGmToL1DynamicOptimized
 
 ## 偏特化实现
 
-### AtlasA2 偏特化
+### Atlas A2 偏特化
 
 | GmType                                  | 目的 Layout | 实现方式                                                          |
 | :-------------------------------------- | :---------- | :---------------------------------------------------------------- |
@@ -47,7 +47,7 @@ struct CopyGmToL1DynamicOptimized
 | `GemmType<Element, PaddingRowMajor>`    | `zN`        | 继承自 `CopyGmToL1<AtlasA2, GmType<Element, PaddingRowMajor>>`    |
 | `GemmType<Element, PaddingColumnMajor>` | `nZ`        | 继承自 `CopyGmToL1<AtlasA2, GmType<Element, PaddingColumnMajor>>` |
 
-### Ascend950 偏特化
+### Ascend 950 偏特化
 
 | GmType                           | 目的 Layout | 实现方式                                            |
 | :------------------------------- | :---------- | :-------------------------------------------------- |

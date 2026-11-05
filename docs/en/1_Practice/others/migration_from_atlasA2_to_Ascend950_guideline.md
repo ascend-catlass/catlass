@@ -1,14 +1,14 @@
-# Guideline for Migrating Existing AtlasA2 Operators to Ascend950 Generation Compatibility
+# Guideline for Migrating Existing Atlas A2 Operators to Ascend 950 Generation Compatibility
 
 ## Before You Begin
 
-This document mainly explains how to quickly migrate existing operators based on CATLASS on the AtlasA2 architecture to the Ascend950 architecture, including reuse of the original kernel- and Block-level components, and transparent use of Tile components across different architectures.
+This document mainly explains how to quickly migrate existing operators based on CATLASS on the Atlas A2 architecture to the Ascend 950 architecture, including reuse of the original kernel- and Block-level components, and transparent use of Tile components across different architectures.
 
 To accomplish this migration, it is recommended to follow the three steps below.
 
 ## Dispatch Component Adjustments
 
-Existing operators on the original AtlasA2 platform use Dispatch components with A2-generation semantics to route to the required Block components (for example, the Dispatch component used by [`00_basic_matmul`](../../../../examples/00_basic_matmul/README.md) is [`MmadAtlasA2Pingpong`](../../../../include/catlass/gemm/dispatch_policy.hpp#L32)); after migration we recommend that operators use Dispatch components with common-generation semantics (unless the new operator needs features unique to the Ascend950 generation), such as [`MmadPingpong`](../../../../include/catlass/gemm/dispatch_policy.hpp#L292).
+Existing operators on the original Atlas A2 platform use Dispatch components with A2-generation semantics to route to the required Block components (for example, the Dispatch component used by [`00_basic_matmul`](../../../../examples/00_basic_matmul/README.md) is [`MmadAtlasA2Pingpong`](../../../../include/catlass/gemm/dispatch_policy.hpp#L32)); after migration we recommend that operators use Dispatch components with common-generation semantics (unless the new operator needs features unique to the Ascend 950 generation), such as [`MmadPingpong`](../../../../include/catlass/gemm/dispatch_policy.hpp#L292).
 If [`dispatch_policy.hpp`](../../../../include/catlass/gemm/dispatch_policy.hpp) does not contain a Dispatch component with common-generation semantics, such as [`MmadAtlasA2Streamk`](../../../../include/catlass/gemm/dispatch_policy.hpp#L237), it needs to be added, since the current repository does not contain the component `MmadStreamk`:
 
 ```cpp
@@ -111,7 +111,7 @@ Note that if changes at the `Epilogue` level are involved, its [`block`-level co
 
 ## Operator Modifications
 
-After completing the above two sets of modifications, on the operator side you need to adjust the `ArchTag` identifier and the corresponding Dispatch component (**Dispatch specializations of the original A2 generation remain compatible under AtlasA2**), for example:
+After completing the above two sets of modifications, on the operator side you need to adjust the `ArchTag` identifier and the corresponding Dispatch component (**Dispatch specializations of the original A2 generation remain compatible under Atlas A2**), for example:
 
 ```diff
 // examples/00_basic_matmul/basic_matmul.cpp(previous)
@@ -128,7 +128,7 @@ using L0TileShape = GemmShape<128, 256, 64>;
 // ...
 ```
 
-In addition, unlike AtlasA2, the `aclrtGetHardwareSyncAddr` call and the `hardwareSyncAddr` variable should be removed from Ascend950-related code, and the `RunAdapter` call signature is simplified accordingly:
+In addition, unlike Atlas A2, the `aclrtGetHardwareSyncAddr` call and the `hardwareSyncAddr` variable should be removed from Ascend 950-related code, and the `RunAdapter` call signature is simplified accordingly:
 
 ```diff
 -    // Prepare hardware sync address
@@ -139,18 +139,18 @@ In addition, unlike AtlasA2, the `aclrtGetHardwareSyncAddr` call and the `hardwa
 +    RunAdapter(gemm_op, arguments, stream, aicCoreNum);
 ```
 
-Afterwards, you can compile and run the operator adapted to the Ascend950 platform (note: add `-DCATLASS_ARCH=3510` to the compilation options).
+Afterwards, you can compile and run the operator adapted to the Ascend 950 platform (note: add `-DCATLASS_ARCH=3510` to the compilation options).
 
 ## Complete Migration Checklist
 
-When migrating an operator from AtlasA2 to Ascend950, confirm the following items one by one:
+When migrating an operator from Atlas A2 to Ascend 950, confirm the following items one by one:
 
 - [ ] **ArchTag**: `Arch::AtlasA2` → `Arch::Ascend950`
 - [ ] **Gemm Dispatch**: add a common-generation version if none exists (refer to `GemmPingpong`), and replace it on the operator side
 - [ ] **Epilogue Dispatch**: add a common-generation version if none exists (refer to `EpilogueGemm`), and replace it on the operator side
 - [ ] **Block specialization**: add a Block specialization for the new common Dispatch (refer to `BlockGemm<GemmPingpong>`)
 - [ ] **Epilogue Block specialization**: add a BlockEpilogue specialization for the new common Epilogue Dispatch
-- [ ] **Tile type selector**: check whether `L1AndL0TypeSelector` needs an arch-aware version; the Ascend950 L0 type may differ
+- [ ] **Tile type selector**: check whether `L1AndL0TypeSelector` needs an arch-aware version; the Ascend 950 L0 type may differ
 - [ ] **Arch Guard**: check whether `__NPU_ARCH__` (device side) or `CATLASS_ARCH` (host side) guards are used, and add them as needed
 - [ ] **hardwareSyncAddr removal**: delete the `aclrtGetHardwareSyncAddr` call and remove the fifth parameter of `RunAdapter`
 - [ ] **Compilation verification**: add `-DCATLASS_ARCH=3510` to the compilation options

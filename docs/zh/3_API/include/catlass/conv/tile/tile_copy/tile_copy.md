@@ -6,9 +6,9 @@
 
 ## 功能说明
 
-`TileCopy` 是 Conv 搬运聚合的非 TLA 版本（AtlasA2）。组合引用四个子搬运组件，以类型成员方式暴露供 block 层 Conv 使用。
+`TileCopy` 是 Conv 搬运聚合的非 TLA 版本（Atlas A2）。组合引用四个子搬运组件，以类型成员方式暴露供 block 层 Conv 使用。
 
-- 适用范围：AtlasA2
+- 适用范围：Atlas A2
 - 风格：非 TLA
 
 ## 模板原型

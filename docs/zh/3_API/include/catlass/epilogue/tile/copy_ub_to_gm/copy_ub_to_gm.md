@@ -8,7 +8,7 @@
 
 `CopyUb2Gm` 实现 epilogue 阶段从 UB 到 GM 的数据搬运操作。用于将 epilogue 处理完成后的最终结果从 Unified Buffer 写回到 Global Memory。
 
-- 适用范围：Atlas A2/A3系列产品、Ascend 950PR&950DT系列产品
+- 适用范围：Atlas A2系列产品、Atlas A3系列产品、Ascend 950PR&950DT系列产品
 - 风格：非 TLA，直接操作 `AscendC::GlobalTensor` / `AscendC::LocalTensor`
 - 通过 `AscendC::DataCopyPad` 实现带 stride 的数据搬运
 
@@ -31,9 +31,9 @@ struct CopyUb2Gm;
 
 | 架构      | GM Layout      | UB Layout      | 说明                               |
 | :-------- | :------------- | :------------- | :--------------------------------- |
-| AtlasA2   | `RowMajor`     | `RowMajor`     | 二维矩阵搬运，源 stride 按 C0 对齐 |
-| AtlasA2   | `VectorLayout` | `VectorLayout` | 一维向量搬运                       |
-| Ascend950 | `RowMajor`     | `RowMajor`     | 二维矩阵搬运                       |
+| Atlas A2   | `RowMajor`     | `RowMajor`     | 二维矩阵搬运，源 stride 按 C0 对齐 |
+| Atlas A2   | `VectorLayout` | `VectorLayout` | 一维向量搬运                       |
+| Ascend 950 | `RowMajor`     | `RowMajor`     | 二维矩阵搬运                       |
 
 ## 调用接口
 

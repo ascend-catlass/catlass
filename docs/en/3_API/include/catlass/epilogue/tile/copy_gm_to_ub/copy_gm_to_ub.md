@@ -8,7 +8,7 @@
 
 `CopyGm2Ub` implements data movement from global memory to Unified Buffer in the epilogue stage. It is used to move the final output matrices C/X/Y from global memory to Unified Buffer, for subsequent epilogue computations.
 
-- Applicability: Atlas A2/A3 series products and Ascend 950PR&950DT series products
+- Applicability: Atlas A2 series products and Atlas A3 series products and Ascend 950PR&950DT series products
 - Style: non-TLA, directly operating on `AscendC::LocalTensor`/`AscendC::GlobalTensor`
 - Data movement with stride using `AscendC::DataCopyPad`
 

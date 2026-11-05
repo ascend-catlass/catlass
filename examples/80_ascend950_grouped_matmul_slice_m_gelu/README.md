@@ -15,7 +15,7 @@
 
 ## 功能介绍
 
-该算子支持A矩阵在m轴切分，然后和B矩阵按照group分组进行矩阵乘。基于Ascend950架构，使用`MmadPreloadAsyncWithCallbackL0CToUB` dispatch policy、`BlockMmadTla` block组件、`EpilogueElemWiseGeluRegBase` dispatch policy、`BlockEpilogue` block组件、
+该算子支持A矩阵在m轴切分，然后和B矩阵按照group分组进行矩阵乘。基于Ascend 950架构，使用`MmadPreloadAsyncWithCallbackL0CToUB` dispatch policy、`BlockMmadTla` block组件、`EpilogueElemWiseGeluRegBase` dispatch policy、`BlockEpilogue` block组件、
 `TileCopy` tile组件、`TileElemwiseGeluRegbase` tile组件。
 
 ## 使用示例

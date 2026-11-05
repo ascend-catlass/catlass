@@ -160,4 +160,4 @@ Compare success.
 - 本示例仅用于CATLASS算子接入msopgen的参考，为保证代码简洁，不进行泛化的支持，如多个算子、多个平台等。
 - 目前仅提供`basic_matmul`算子接入示例。
 - 示例仅支持以下产品：
-  - `Atlas A2/A3系列产品`(`2201`架构)
+  - Atlas A2系列产品、Atlas A3系列产品（`2201`架构）

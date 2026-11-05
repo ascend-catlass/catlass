@@ -8,7 +8,7 @@
 
 `CopyL0CToGm` 实现 Conv 场景下累加结果从 L0C（zN 格式）写回 GM（NC1HWC0 格式）的非 TLA 版本。通过 `AscendC::Fixpipe` 直接通路完成数据搬运、类型转换（F322F16/F322BF16）和可选 ReLU 激活。
 
-- 适用范围：AtlasA2
+- 适用范围：Atlas A2
 - 风格：非 TLA
 
 ## 模板原型

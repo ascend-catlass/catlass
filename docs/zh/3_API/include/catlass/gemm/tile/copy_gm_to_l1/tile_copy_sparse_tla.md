@@ -8,7 +8,7 @@
 
 `TileCopySparseTla` 是 TLA 风格的 Sparse GEMM GM→L1 数据搬运模板。在 Sparse GEMM 场景中，A 矩阵以压缩格式存储（仅存储非零元素），`TileCopySparseTla` 负责将稀疏化的 A 矩阵从 GM 搬运到 L1，并将指定行优先/列优先的源数据转换为 zN 或 nZ 分形格式。
 
-> **限制**：该模板仅支持 AtlasA2 架构（`CATLASS_ARCH == 2201`），Ascend950 不支持。
+> **限制**：该模板仅支持 Atlas A2 架构（`CATLASS_ARCH == 2201`），Ascend 950 不支持。
 
 ## 模板原型
 
@@ -33,7 +33,7 @@ struct TileCopySparseTla {
 
 ## 偏特化实现
 
-### AtlasA2
+### Atlas A2
 
 | 源 Layout              | 目标 Layout | SFINAE 条件                               | 说明                             |
 | :--------------------- | :---------- | :---------------------------------------- | :------------------------------- |
@@ -54,7 +54,7 @@ void operator()(TensorDst const &dstTensor, TensorSrc const &srcTensor)
 
 ## 调用示例
 
-### RowMajor GM → zN L1（AtlasA2）
+### RowMajor GM → zN L1（Atlas A2）
 
 ```cpp
 #include "catlass/gemm/tile/copy_gm_to_l1.hpp"
@@ -78,7 +78,7 @@ TileCopySparseTla<Arch::AtlasA2, decltype(srcTensor), decltype(dstTensor)> spars
 sparseCopyOp(dstTensor, srcTensor);
 ```
 
-### ColumnMajor GM → nZ L1（AtlasA2）
+### ColumnMajor GM → nZ L1（Atlas A2）
 
 ```cpp
 auto srcLayout = tla::MakeLayout<half, layout::ColumnMajor>(M, K);

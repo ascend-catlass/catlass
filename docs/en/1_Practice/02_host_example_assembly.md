@@ -298,7 +298,7 @@ ACL_CHECK(aclrtMalloc(reinterpret_cast<void **>(&deviceC), sizeC, ACL_MEM_MALLOC
 
 This section of the code performs the following tasks:
 
-- Selects the architecture and dispatch policy (for Atlas A2/A3 series products, set `ArchTag = Arch::AtlasA2`; for Ascend 950PR&950DT series products, use `ArchTag = Arch::Ascend950`)
+- Selects the architecture and dispatch policy (for Atlas A2 series products and Atlas A3 series products, set `ArchTag = Arch::AtlasA2`; for Ascend 950PR&950DT series products, use `ArchTag = Arch::Ascend950`)
 - Defines the tile shapes (must fit L1/L0 capacity; formulas and fp16/int8/fp32 reference: [Deriving TileShape from Hardware Capacity](../2_Design/01_kernel_design/00_basics/atlasA2_hardware_info.md#deriving-tileshape-from-hardware-capacity); worked examples: [TileShape Constraints](./11_matmul_optimization.md#tileshape-constraints))
 - Assembles the Block layer and Kernel layer components
 - Initializes the Device layer adapter

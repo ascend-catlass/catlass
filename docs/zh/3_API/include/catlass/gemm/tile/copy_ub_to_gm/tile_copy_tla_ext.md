@@ -10,7 +10,7 @@
 
 与 [TileCopyTla](./tile_copy_tla.md) 的普通 RowMajor 目标不同，本模板的目标 Layout 为 PaddingRowMajor。
 
-> **限制**：仅支持 AtlasA2 架构。
+> **限制**：仅支持 Atlas A2 架构。
 
 ## 模板原型
 
@@ -29,7 +29,7 @@ struct TileCopyTlaExt<Arch::AtlasA2,
 
 | 架构    | 源位置  | 目标位置 | LayoutTagSrc | LayoutTagDst    | 搬运指令               |
 | :------ | :------ | :------- | :----------- | :-------------- | :--------------------- |
-| AtlasA2 | VECCALC | GM       | RowMajor     | PaddingRowMajor | `AscendC::DataCopyPad` |
+| Atlas A2 | VECCALC | GM       | RowMajor     | PaddingRowMajor | `AscendC::DataCopyPad` |
 
 与普通 RowMajor 目标版的关键区别：维度计算使用 `tla::get<1, 1>(dstTensor.shape())`（逻辑行数）*`tla::get<1, 0>(dstTensor.shape())`（逻辑列数），并基于 PaddingRowMajor 的 stride 计算偏移。
 

@@ -18,8 +18,8 @@
 | `CopyGmToL1B`              | `TileCopyTlaExt<ArchTag, TensorB, TensorL1B, PaddingTag/ColumnMajor, LayoutTagL1B>` | B 矩阵 GM→L1（Ext）  |
 | `CopyL1ToL0A`              | `TileCopyTla<ArchTag, TensorL1A, TensorL0A>`                                        | A 矩阵 L1→L0A（TLA） |
 | `CopyL1ToL0B`              | `TileCopyTla<ArchTag, TensorL1B, TensorL0B>`                                        | B 矩阵 L1→L0B（TLA） |
-| `CopyL0CToDst` (Ascend950) | `CopyL0CToGmTla<ArchTag, TensorL0C, TensorC>`                                       | L0C→Dst              |
-| `CopyL0CToGm` (AtlasA2)    | `CopyL0CToGmTla<ArchTag, TensorL0C, TensorC>`                                       | L0C→GM               |
+| `CopyL0CToDst` (Ascend 950) | `CopyL0CToGmTla<ArchTag, TensorL0C, TensorC>`                                       | L0C→Dst              |
+| `CopyL0CToGm` (Atlas A2)    | `CopyL0CToGmTla<ArchTag, TensorL0C, TensorC>`                                       | L0C→GM               |
 
 ## 模板原型
 

@@ -5,14 +5,14 @@
 - `include/catlass/gemm/tile/ascend950/copy_gm_to_l1.hpp` (986行)
 
 顶层调度：`include/catlass/gemm/tile/copy_gm_to_l1.hpp` 按 `CATLASS_ARCH` 宏分发：
-- `CATLASS_ARCH == 2201` (AtlasA2) → `atlasa2/copy_gm_to_l1.hpp`
-- `CATLASS_ARCH == 3510` (Ascend950) → `ascend950/copy_gm_to_l1.hpp`
+- `CATLASS_ARCH == 2201` (Atlas A2) → `atlasa2/copy_gm_to_l1.hpp`
+- `CATLASS_ARCH == 3510` (Ascend 950) → `ascend950/copy_gm_to_l1.hpp`
 
 ---
 
 ## 组件族谱
 
-### Struct 族系 (AtlasA2 / Ascend950 共性)
+### Struct 族系 (Atlas A2 / Ascend 950 共性)
 
 | Struct | 用途 | 关键分支逻辑 |
 |--------|------|-------------|
@@ -21,7 +21,7 @@
 | **CopyGmToL1DynamicOptimized** | 动态选择最优搬运策略 | rows<=16 → 逐行DataCopyParams / stride<LIMIT + !exactMatch → Nd2Nz / stride<LIMIT + exactMatch → contiguous / stride>=LIMIT → 逐行Nd2Nz |
 | **CopyGmToL1IntervalDataCopy** | half 短宽矩阵专用 (逐行 DataCopyParams) | 仅 half + RowMajor/PaddingRowMajor/ColumnMajor/PaddingColumnMajor |
 
-### TLA 变体 (AtlasA2)
+### TLA 变体 (Atlas A2)
 
 | Struct | 用途 |
 |--------|------|
@@ -30,7 +30,7 @@
 | **TileCopySparseTla** | 稀疏拷贝：RowMajor/ColumnMajor→zN, ColumnMajor→nZ, 稀疏zN→zN, 稀疏nZ→nZ |
 | **TileCopyFAQTla** | FlashAttention LoadQ: 多矩阵 ND→NZ |
 
-### TLA 变体 (Ascend950)
+### TLA 变体 (Ascend 950)
 
 | Struct | 用途 |
 |--------|------|
@@ -275,7 +275,7 @@ ASSERT_EQ(nd2nzArg->dstNzNStride, layoutDst.stride(2) / ELE_NUM_PER_C0);
 | 17 | half ColumnMajor→nZ | 逐列 DataCopyParams |
 | 18 | half PaddingColumnMajor→nZ | 逐列 DataCopyParams (use orgShape) |
 
-### 其他 Layout 特化 (AtlasA2)
+### 其他 Layout 特化 (Atlas A2)
 
 | # | 测试场景 | Struct |
 |---|---------|--------|
@@ -286,7 +286,7 @@ ASSERT_EQ(nd2nzArg->dstNzNStride, layoutDst.stride(2) / ELE_NUM_PER_C0);
 | 23 | VectorLayout→zN (A1) | CopyGmToL1 (Nd2Nz, 1-row) |
 | 24 | RowMajor→RowMajor (A1) | CopyGmToL1 (DataCopy/DataCopyParams) |
 
-### 3-Param GmType 特化 (AtlasA2)
+### 3-Param GmType 特化 (Atlas A2)
 
 | # | 测试场景 |
 |---|---------|
@@ -297,7 +297,7 @@ ASSERT_EQ(nd2nzArg->dstNzNStride, layoutDst.stride(2) / ELE_NUM_PER_C0);
 | 29 | ColumnMajor→nZ(A1) |
 | 30 | RowMajor→zN(B1) |
 
-### TLA 变体 (AtlasA2)
+### TLA 变体 (Atlas A2)
 
 | # | 测试场景 |
 |---|---------|
@@ -316,7 +316,7 @@ ASSERT_EQ(nd2nzArg->dstNzNStride, layoutDst.stride(2) / ELE_NUM_PER_C0);
 | 43 | TileCopySparseTla nZ→nZ |
 | 44 | TileCopyFAQTla multi-matrix ND→NZ |
 
-### Ascend950 特化
+### Ascend 950 特化
 
 | # | 测试场景 |
 |---|---------|

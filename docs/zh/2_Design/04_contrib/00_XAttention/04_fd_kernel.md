@@ -16,7 +16,7 @@ FD 系列共 3 个新增模板：
 | `EpilogueAtlasA2RescaleO_FD<LSE_MODE_>` | BlockEpilogue | `include/catlass/epilogue/block/block_epilogue_rescale_o_FD.hpp` |
 | `EpilogueAtlasA2CombineScale` | BlockEpilogue | `include/catlass/epilogue/block/block_epilogue_combine_scale.hpp` |
 
-其中 OnlineSoftmax_FD 与 CombineScale 在文件末尾均提供了 `EpilogueAscend950*` 同名特化（直接继承 AtlasA2 版本），用于 950 平台的 Policy 名注册。
+其中 OnlineSoftmax_FD 与 CombineScale 在文件末尾均提供了 `EpilogueAscend950*` 同名特化（直接继承 Atlas A2 版本），用于 950 平台的 Policy 名注册。
 
 ## DispatchPolicy 定义
 
@@ -40,7 +40,7 @@ struct EpilogueAtlasA2CombineScale {
     static constexpr EpilogueType TYPE = EpilogueType::ATLAS_A2;
 };
 
-// 950 平台特化（继承 AtlasA2 实现）
+// 950 平台特化（继承 Atlas A2 实现）
 template <LseMode LSE_MODE_>
 struct EpilogueAscend950OnlineSoftmax_FD : EpilogueAtlasA2OnlineSoftmax_FD<LSE_MODE_> {};
 struct EpilogueAscend950CombineScale : EpilogueAtlasA2CombineScale {};

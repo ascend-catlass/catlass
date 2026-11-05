@@ -21,9 +21,9 @@ The following figure shows the hardware architecture involved in basic Matmul ti
 
 ### TileShape Constraints
 
-From the above, TileShape must be set such that it does not exceed the L1/L0A/L0B/L0C memory space. Additionally, TileShape values must be multiples of 16. For hardware parameters of the Atlas A2/A3 series products, see [Arch::AtlasA2](../../../include/catlass/arch/arch.hpp); for hardware parameters of the Ascend 950PR&950DT series products, see [Arch::Ascend950](../../../include/catlass/arch/arch.hpp). The following uses the Atlas A2/A3 series products as the example scenario.
+From the above, TileShape must be set such that it does not exceed the L1/L0A/L0B/L0C memory space. Additionally, TileShape values must be multiples of 16. For hardware parameters of the Atlas A2 series products and Atlas A3 series products, see [Arch::AtlasA2](../../../include/catlass/arch/arch.hpp); for hardware parameters of the Ascend 950PR&950DT series products, see [Arch::Ascend950](../../../include/catlass/arch/arch.hpp). The following uses the Atlas A2 series products and Atlas A3 series products as the example scenario.
 
-For capacity formulas, a dtype quick-reference table, and how to rescale Tile when changing data types, see also [AtlasA2 Hardware Basics - Deriving TileShape from Hardware Capacity](../2_Design/01_kernel_design/00_basics/atlasA2_hardware_info.md#deriving-tileshape-from-hardware-capacity).
+For capacity formulas, a dtype quick-reference table, and how to rescale Tile when changing data types, see also [Atlas A2 Hardware Basics - Deriving TileShape from Hardware Capacity](../2_Design/01_kernel_design/00_basics/atlasA2_hardware_info.md#deriving-tileshape-from-hardware-capacity).
 
 - Scenario 1: FP16 input and output, L1TileShape<128,256,256>, L0TileShape<128,256,64>
 

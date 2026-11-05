@@ -75,7 +75,7 @@ void operator()(
 | 特性             | TileCopyTla                     | TileCopyTlaExt                               |
 | :--------------- | :------------------------------ | :------------------------------------------- |
 | 偏特化匹配方式   | `std::enable_if_t` + trait 检测 | 显式 `LayoutTagSrc` / `LayoutTagDst`         |
-| 支持的架构       | AtlasA2 / Ascend950             | 仅 AtlasA2                                   |
+| 支持的架构       | Atlas A2 / Ascend 950             | 仅 Atlas A2                                   |
 | ActualShape 参数 | 不支持                          | 支持                                         |
 | Padding layout   | 不支持                          | 支持（PaddingRowMajor / PaddingColumnMajor） |
 | 适用场景         | 通用矩阵乘 tile 搬运            | 需要部分搬运或 Padding 场景                  |

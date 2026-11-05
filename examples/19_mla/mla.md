@@ -1,6 +1,6 @@
 # CATLASS MLA
 
-CATLASS MLA是基于CATLASS Gemm API实现的亲和昇腾AtlasA2硬件的Flash-MLA算子，算子的结构可以分为以下几部分
+CATLASS MLA是基于CATLASS Gemm API实现的亲和昇腾Atlas A2硬件的Flash-MLA算子，算子的结构可以分为以下几部分
 
 - Tiling计算；
 - Kernel实现，具体有两种实现，通用的[mla_kernel.cpp](./mla_kernel.cpp)以及特化的[mla_kernel_tp1_spec.cpp](./mla_kernel_tp1_spec.cpp)；

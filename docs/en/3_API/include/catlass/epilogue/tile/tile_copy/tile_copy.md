@@ -8,7 +8,7 @@
 
 `TileCopy` is a basic template for epilogue data movement and aggregation. It combines and references basic movement templates such as `CopyGm2Ub` and `CopyUb2Gm` for use in block-level epilogue operations. Depending on the number of operands (C/D, C/X/D, C/X/Y/D), it automatically assembles the required GM → UB and UB → GM child components.
 
-- Applicability: Atlas A2/A3 series products and Ascend 950PR&950DT series products
+- Applicability: Atlas A2 series products and Atlas A3 series products and Ascend 950PR&950DT series products
 - It does not directly execute operators. Instead, it exposes its child components as type members, allowing them to be accessed.
 
 ## Template Prototype

@@ -8,9 +8,9 @@
 
 `PackedTileCopyTlaToUB` 继承自 [PackedTileCopyTla](./packed_tile_copy_tla.md)，**重写** `CopyL0CToDst` 为 `CopyL0CToUBTla`，将累加结果搬运到 UB（统一缓冲区）而非 GM。支持 UB 分拆模式（`NO_SPLIT` / `SPLIT`）。
 
-适用于 Ascend950 架构下 L0C 结果需经过 Vector 引擎后处理的场景。
+适用于 Ascend 950 架构下 L0C 结果需经过 Vector 引擎后处理的场景。
 
-> **限制**：仅 Ascend950 架构（`CATLASS_ARCH == 3510`）。
+> **限制**：仅 Ascend 950 架构（`CATLASS_ARCH == 3510`）。
 
 ## 引用的 Tile 组件
 

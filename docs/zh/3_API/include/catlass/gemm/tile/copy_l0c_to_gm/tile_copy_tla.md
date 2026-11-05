@@ -34,12 +34,12 @@ struct CopyL0CToGmTla {
 
 | 架构      | SFINAE 条件                              | 说明                                              |
 | :-------- | :--------------------------------------- | :------------------------------------------------ |
-| AtlasA2   | `isRowMajor<LayoutDst>`                  | GM RowMajor，`AscendC::Fixpipe` + `CFG_ROW_MAJOR` |
-| AtlasA2   | `iszN<ElementDst, LayoutDst>`            | GM zN，`AscendC::Fixpipe` + `CFG_NZ`              |
-| Ascend950 | `isRowMajor<LayoutDst>` + NO_QUANT       | `AscendC::DataCopy` + `SetFixpipeNz2ndFlag`       |
-| Ascend950 | `iszN<ElementDst, LayoutDst>` + NO_QUANT | `AscendC::DataCopy`，zN 保持                      |
-| Ascend950 | `isRowMajor<LayoutDst>` + PER_TENSOR     | `AscendC::Fixpipe` + `deqScalar`                  |
-| Ascend950 | `isRowMajor<LayoutDst>` + PER_CHANNEL    | `AscendC::Fixpipe` 三参数，Scale 向量直接传入     |
+| Atlas A2   | `isRowMajor<LayoutDst>`                  | GM RowMajor，`AscendC::Fixpipe` + `CFG_ROW_MAJOR` |
+| Atlas A2   | `iszN<ElementDst, LayoutDst>`            | GM zN，`AscendC::Fixpipe` + `CFG_NZ`              |
+| Ascend 950 | `isRowMajor<LayoutDst>` + NO_QUANT       | `AscendC::DataCopy` + `SetFixpipeNz2ndFlag`       |
+| Ascend 950 | `iszN<ElementDst, LayoutDst>` + NO_QUANT | `AscendC::DataCopy`，zN 保持                      |
+| Ascend 950 | `isRowMajor<LayoutDst>` + PER_TENSOR     | `AscendC::Fixpipe` + `deqScalar`                  |
+| Ascend 950 | `isRowMajor<LayoutDst>` + PER_CHANNEL    | `AscendC::Fixpipe` 三参数，Scale 向量直接传入     |
 
 ## 调用接口
 
@@ -54,7 +54,7 @@ void operator()(
 );
 ```
 
-### Ascend950 批量搬运重载（NO_QUANT only）
+### Ascend 950 批量搬运重载（NO_QUANT only）
 
 ```cpp
 template <class TensorDst, class TensorSrc>
@@ -80,7 +80,7 @@ void operator()(
 
 ## 调用示例
 
-### NO_QUANT RowMajor（AtlasA2）
+### NO_QUANT RowMajor（Atlas A2）
 
 ```cpp
 #include "catlass/gemm/tile/copy_l0c_to_gm.hpp"
@@ -105,7 +105,7 @@ CopyL0CToGmTla<Arch::AtlasA2, decltype(srcTensor), decltype(dstTensor)> copyOp;
 copyOp(dstTensor, srcTensor);
 ```
 
-### NO_QUANT zN（AtlasA2）
+### NO_QUANT zN（Atlas A2）
 
 ```cpp
 auto srcLayout = tla::MakeLayout<float, layout::zN>(M, N);
@@ -118,7 +118,7 @@ CopyL0CToGmTla<Arch::AtlasA2, decltype(srcTensor), decltype(dstTensor)> copyOp;
 copyOp(dstTensor, srcTensor);
 ```
 
-### NO_QUANT RowMajor（Ascend950）
+### NO_QUANT RowMajor（Ascend 950）
 
 ```cpp
 auto srcLayout = tla::MakeLayout<float, layout::zN>(M, N);
@@ -131,7 +131,7 @@ CopyL0CToGmTla<Arch::Ascend950, decltype(srcTensor), decltype(dstTensor)> copyOp
 copyOp(dstTensor, srcTensor);
 ```
 
-### PER_TENSOR：int32 → half（Ascend950）
+### PER_TENSOR：int32 → half（Ascend 950）
 
 ```cpp
 using ElementAccumulator = int32_t;
@@ -150,7 +150,7 @@ CopyOp copyOp(params);
 copyOp(dstTensor, srcTensor);
 ```
 
-### PER_CHANNEL：float → int8（Ascend950）
+### PER_CHANNEL：float → int8（Ascend 950）
 
 ```cpp
 using ElementAccumulator = float;

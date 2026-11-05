@@ -8,7 +8,7 @@
 
 `CopyL1ToL0BSparseTla` 是稀疏 GEMM 中 B 矩阵 L1→L0B 搬运的 TLA 模板，需要额外的 `TensorIdx`（稀疏 index tensor，`int32_t`）辅助稀疏解压。与普通 [CopyL1ToL0B](../copy_l1_to_l0b/tile_copy_tla.md) 不同，它需要通过 index 将稠密 B 矩阵在搬入 L0B 时解压为对应的 block。
 
-> **限制**：仅 AtlasA2 架构（`CATLASS_ARCH == 2201`）。
+> **限制**：仅 Atlas A2 架构（`CATLASS_ARCH == 2201`）。
 
 ## 基类声明
 
@@ -27,7 +27,7 @@ struct CopyL1ToL0BSparseTla {
 };
 ```
 
-## 偏特化实现（全 AtlasA2）
+## 偏特化实现（全 Atlas A2）
 
 | 条件             | 说明                            | 实现位置                     | API 文档                                                         |
 | :--------------- | :------------------------------ | :--------------------------- | :--------------------------------------------------------------- |

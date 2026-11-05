@@ -112,7 +112,7 @@ TRMM kernel 复用 GEMM 的 `BlockMmadTla` 完成矩阵乘主体，TRMM 自身�
 
 | 模块 | 作用 |
 | ---- | ---- |
-| `DispatchPolicy` | 选择 AtlasA2 上的 MMAD 执行策略 |
+| `DispatchPolicy` | 选择 Atlas A2 上的 MMAD 执行策略 |
 | `PackedTileCopyTla` | 负责 A/B/C 的 TLA tile 搬运 |
 | `BlockMmadTla` | 完成裁剪后的 `A_tile x B_tile -> C_tile` |
 | `BlockScheduler` | 按 C 的 M/N tile 分配 AIC 工作 |

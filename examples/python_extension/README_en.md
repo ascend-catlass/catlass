@@ -106,4 +106,4 @@ if __name__ == "__main__":
   - `OptimizedMatmul`: Optimized matrix multiplication, providing an example of CV fusion pipelines.
   - `ConvBias`: Convolution operator logic.
 - The example supports only the following products:
-  - `Atlas A2/A3 series products` (`2201` architecture)
+  - `Atlas A2 and Atlas A3 series products` (`2201` architecture)

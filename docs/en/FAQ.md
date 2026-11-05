@@ -5,7 +5,7 @@
 At the first community meeting in March 2026, we officially confirmed that the CATLASS community mainline would add support for the next-generation Ascend hardware, the Ascend 950PR&950DT series products. Official support starts with CATLASS 1.5.0. To distinguish the underlying interface implementations across platforms, this support introduces a compilation macro that must be set in the corresponding build commands.
 
 - New macro: `CATLASS_ARCH`, which specifies the target architecture. Its value is listed in the `__NPU_ARCH__` column of [SIMD BuiltIn Keywords](https://www.hiascend.com/document/detail/en/CANNCommunityEdition/latest/programug/Ascendcopdevg/docs/en/guide/programming_guide/language_extension/SIMD-BuiltIn_keyword.md).
-  - `Atlas A2/A3 series products`: `2201`
+  - `Atlas A2 and Atlas A3 series products`: `2201`
   - `Ascend 950PR&950DT series products`: `3510`
 
 - Usage by scenario:

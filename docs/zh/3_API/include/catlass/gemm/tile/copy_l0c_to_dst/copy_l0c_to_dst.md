@@ -1,6 +1,6 @@
 # CopyL0CToDstQuantMode
 
-> [代码位置](../../../../../../../../include/catlass/gemm/tile/ascend950/copy_l0c_to_dst.hpp)（Ascend950） / [atlasa2/copy_l0c_to_gm.hpp](../../../../../../../../include/catlass/gemm/tile/atlasa2/copy_l0c_to_gm.hpp)（AtlasA2 等效 `CopyL0CToGmQuantMode`）
+> [代码位置](../../../../../../../../include/catlass/gemm/tile/ascend950/copy_l0c_to_dst.hpp)（Ascend 950） / [atlasa2/copy_l0c_to_gm.hpp](../../../../../../../../include/catlass/gemm/tile/atlasa2/copy_l0c_to_gm.hpp)（Atlas A2 等效 `CopyL0CToGmQuantMode`）
 
 [TOC]
 
@@ -10,7 +10,7 @@
 
 这些类型被 [copy_l0c_to_gm](../copy_l0c_to_gm/README.md) 和 [copy_l0c_to_ub](../copy_l0c_to_ub.md) 模块 include 引用，并不直接暴露给最终用户。
 
-> **注意**：AtlasA2 架构中的等效类型名为 `CopyL0CToGmQuantMode`（定义在 `atlasa2/copy_l0c_to_gm.hpp`），命名不同但功能一致。Ascend950 额外支持更多量化模式。
+> **注意**：Atlas A2 架构中的等效类型名为 `CopyL0CToGmQuantMode`（定义在 `atlasa2/copy_l0c_to_gm.hpp`），命名不同但功能一致。Ascend 950 额外支持更多量化模式。
 
 ## ScaleGranularity
 
@@ -31,7 +31,7 @@ enum class ScaleGranularity {
 | `PER_CHANNEL` | 逐通道 scale | `uint64_t` 向量（FixPipe 旁路） | 细粒度量化                              |
 | `PER_GROUP`   | per-group    | —                               | 保留                                    |
 
-## CopyL0CToDstQuantMode（Ascend950）
+## CopyL0CToDstQuantMode（Ascend 950）
 
 将 `(ElementSrc, ElementDst, ScaleGranularity)` 映射为 AscendC `QuantMode_t`。
 
@@ -68,7 +68,7 @@ enum class ScaleGranularity {
 | `float`    | `bfloat16_t`         | `VQF322BF16_PRE` |
 | `float`    | `float`              | `VQF322F32_PRE`  |
 
-> AtlasA2 的 `CopyL0CToGmQuantMode` 不支持 `QS322BF16`、`QF322F16`、`QF322BF16`、`QF322F32` 等模式。
+> Atlas A2 的 `CopyL0CToGmQuantMode` 不支持 `QS322BF16`、`QF322F16`、`QF322BF16`、`QF322F32` 等模式。
 
 ## CopyL0CToUBMode
 

@@ -1,7 +1,7 @@
-# CATLASS A2/A3 → Ascend950 迁移
+# CATLASS A2/A3 → Ascend 950 迁移
 
 本文是 CATLASS 算子迁移活动（campaign）的技术使用指南：在人工参与决策下，将算子从
-`CATLASS_ARCH=2201`（AtlasA2/A3，`Arch::AtlasA2`）迁移到 `CATLASS_ARCH=3510`（Ascend950/A5，
+`CATLASS_ARCH=2201`（Atlas A2系列产品、Atlas A3系列产品，`Arch::AtlasA2`）迁移到 `CATLASS_ARCH=3510`（Ascend 950/A5，
 `Arch::Ascend950`）。该工作流保持算子契约不变，将目标平台编译成功与上板精度分开记录，随后还可以
 筛查并应用一项特定的非 TLA `L0C→UB` 数据通路改写。
 
@@ -420,7 +420,7 @@ python3 .agents/skills/catlass-ascend950-migration/scripts/mig.py status \
 
 ## 固定源码版本
 
-本工作流使用的所有固定 CATLASS 与 Ascend950 兼容性事实，都限定在以下两个源码修订版本之内：
+本工作流使用的所有固定 CATLASS 与 Ascend 950 兼容性事实，都限定在以下两个源码修订版本之内：
 
 - CATLASS —— https://gitcode.com/cann/catlass ，提交
   `89e1fc39881a715882b9b47459add06ba270105c`

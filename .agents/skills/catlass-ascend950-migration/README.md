@@ -1,7 +1,7 @@
-# CATLASS A2/A3 → Ascend950 migration
+# CATLASS A2/A3 → Ascend 950 migration
 
 This is the technical user guide for an attended CATLASS operator-migration campaign from
-`CATLASS_ARCH=2201` (AtlasA2/A3, `Arch::AtlasA2`) to `CATLASS_ARCH=3510` (Ascend950/A5,
+`CATLASS_ARCH=2201` (Atlas A2 and Atlas A3, `Arch::AtlasA2`) to `CATLASS_ARCH=3510` (Ascend 950/A5,
 `Arch::Ascend950`). The workflow preserves the operator contract, records a successful target
 compile separately from device accuracy, and can then screen and apply one specific non-TLA
 `L0C→UB` data-path rewrite.
@@ -458,7 +458,7 @@ recorded state and retains a **Not established** section for every claim the cam
 
 ## Pinned sources
 
-All fixed CATLASS and Ascend950 compatibility facts used by this workflow are bounded to these two
+All fixed CATLASS and Ascend 950 compatibility facts used by this workflow are bounded to these two
 source revisions:
 
 - CATLASS — https://gitcode.com/cann/catlass at

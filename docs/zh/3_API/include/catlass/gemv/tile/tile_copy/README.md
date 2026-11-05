@@ -12,8 +12,8 @@ Gemv `tile_copy` 是搬运聚合模板，根据芯片类型分为 AIV（GM↔UB�
 
 | API                                        | 芯片类型 | 适用硬件  | 数据通路    | 说明                 |
 | :----------------------------------------- | :------- | :-------- | :---------- | :------------------- |
-| [TileCopyGemvAiv](./tile_copy_gemv_aiv.md) | AIV      | AtlasA2   | GM↔UB       | VecCopy + MatrixCopy |
-| [TileCopyGemvAic](./tile_copy_gemv_aic.md) | AIC      | Ascend950 | GM→L1→L0→GM | 复用 GEMM 搬运组件   |
+| [TileCopyGemvAiv](./tile_copy_gemv_aiv.md) | AIV      | Atlas A2   | GM↔UB       | VecCopy + MatrixCopy |
+| [TileCopyGemvAic](./tile_copy_gemv_aic.md) | AIC      | Ascend 950 | GM→L1→L0→GM | 复用 GEMM 搬运组件   |
 
 ## 调用示例
 

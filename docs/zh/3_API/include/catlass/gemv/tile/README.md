@@ -13,13 +13,13 @@ GEMV 的 tile 层 API 作为 GEMV block 层的模板参数，负责矩阵-向量
 | 组件                                              | 适用硬件           | 说明                                                |
 | :------------------------------------------------ | :----------------- | :-------------------------------------------------- |
 | [vec_copy_gm_to_ub](./vec_copy_gm_to_ub.md)       | 全架构             | 向量 GM→UB 搬运                                     |
-| [vec_copy_ub_to_gm](./vec_copy_ub_to_gm.md)       | AtlasA2            | 向量 UB→GM 搬运（含 atomic add 模式）               |
-| [matrix_copy_gm_to_ub](./matrix_copy_gm_to_ub.md) | AtlasA2            | 矩阵 GM→UB 搬运（RowMajor/ColumnMajor，三级自适应） |
-| [tile_copy](./tile_copy/README.md)                | AtlasA2, Ascend950 | 搬运聚合模板（TileCopyGemvAiv / TileCopyGemvAic）   |
+| [vec_copy_ub_to_gm](./vec_copy_ub_to_gm.md)       | Atlas A2            | 向量 UB→GM 搬运（含 atomic add 模式）               |
+| [matrix_copy_gm_to_ub](./matrix_copy_gm_to_ub.md) | Atlas A2            | 矩阵 GM→UB 搬运（RowMajor/ColumnMajor，三级自适应） |
+| [tile_copy](./tile_copy/README.md)                | Atlas A2, Ascend 950 | 搬运聚合模板（TileCopyGemvAiv / TileCopyGemvAic）   |
 
 ### 向量计算
 
 | 组件                          | 适用硬件 | 说明                                                     |
 | :---------------------------- | :------- | :------------------------------------------------------- |
 | [tile_vmuls](./tile_vmuls.md) | 全架构   | 向量乘以标量（Muls）                                     |
-| [tile_vmad](./tile_vmad.md)   | AtlasA2  | 向量-矩阵乘加（Y += A * X），支持 RowMajor / ColumnMajor |
+| [tile_vmad](./tile_vmad.md)   | Atlas A2  | 向量-矩阵乘加（Y += A * X），支持 RowMajor / ColumnMajor |

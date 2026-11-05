@@ -6,11 +6,11 @@
 
 ## 功能说明
 
-`CopyL1ToL0BSparseTla` 是 AtlasA2 架构专用的 TLA 风格 sparse L1→L0B 搬运模板。在 Sparse GEMM 场景中，B 矩阵以压缩格式存储（仅存储非零元素），搬运时需要同时传入 index tensor 来指示哪些位置的元素有效。
+`CopyL1ToL0BSparseTla` 是 Atlas A2 架构专用的 TLA 风格 sparse L1→L0B 搬运模板。在 Sparse GEMM 场景中，B 矩阵以压缩格式存储（仅存储非零元素），搬运时需要同时传入 index tensor 来指示哪些位置的元素有效。
 
 与普通 [TileCopyTla](./tile_copy_tla.md) 不同，`CopyL1ToL0BSparseTla` 的 `operator()` 接受三个 tensor 参数：src、dst、index，并通过 `AscendC::LoadDataWithSparse` 指令完成带稀疏索引的搬运。
 
-> **限制**：该模板仅支持 AtlasA2 架构（`CATLASS_ARCH == 2201`），Ascend950 不支持。
+> **限制**：该模板仅支持 Atlas A2 架构（`CATLASS_ARCH == 2201`），Ascend 950 不支持。
 
 ## 模板原型
 
@@ -36,7 +36,7 @@ struct CopyL1ToL0BSparseTla {
 
 ## 偏特化实现
 
-### AtlasA2
+### Atlas A2
 
 | 源 Tensor | 目标 Tensor | Index Tensor      | SFINAE 条件                                             | 说明                             |
 | :-------- | :---------- | :---------------- | :------------------------------------------------------ | :------------------------------- |
@@ -58,7 +58,7 @@ Index tensor 中每个 `uint8_t` 元素的高 4 位和低 4 位分别表示两�
 
 ## 调用示例
 
-### zN → nZ Sparse 转置搬运（AtlasA2）
+### zN → nZ Sparse 转置搬运（Atlas A2）
 
 ```cpp
 #include "catlass/gemm/tile/copy_l1_to_l0b.hpp"
@@ -88,7 +88,7 @@ CopyL1ToL0BSparseTla<Arch::AtlasA2, half, decltype(srcTensor), decltype(dstTenso
 sparseCopyOp(dstTensor, srcTensor, idxTensor);
 ```
 
-### nZ → nZ Sparse 非转置搬运（AtlasA2，Transpose B）
+### nZ → nZ Sparse 非转置搬运（Atlas A2，Transpose B）
 
 ```cpp
 auto layoutSrc = tla::MakeLayout<half, layout::nZ>(K, N);

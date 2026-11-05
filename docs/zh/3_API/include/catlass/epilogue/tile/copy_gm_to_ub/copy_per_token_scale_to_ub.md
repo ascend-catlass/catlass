@@ -10,7 +10,7 @@
 
 典型场景：per-token dequant 中，将 per-token scale 从 GM ColumnMajor 搬运到 UB RowMajor 矩阵的第一列。
 
-- 适用范围：AtlasA2（无架构限制但有 Layout 静态断言）
+- 适用范围：Atlas A2（无架构限制但有 Layout 静态断言）
 - 风格：非 TLA，直接操作 `AscendC::LocalTensor` / `AscendC::GlobalTensor`
 - GM layout 仅支持 `ColumnMajor`
 - 通过 `AscendC::DataCopyPad` + padding 实现

@@ -27,7 +27,7 @@ CATLASS模板库中的每个样例都是在已有样例基础上的创新和扩�
     | 全载场景多核调度             | 样例25 `25_matmul_full_loadA`          | BlockScheduler直接复用 |
 
 - **创新特性**：在调研基础上，明确真正需要创新的点。样例44的核心创新在于将量化矩阵乘与A矩阵全载两种特性结合，通过复用样例25的BlockScheduler使每个核处理的基本块在N方向连续分布，最大化A矩阵的L1复用率。
-- **适用场景**：明确新特性的收益场景和限制条件。A矩阵全载在N轴较大时收益显著（A矩阵可被多次复用），但要求L1空间足够容纳`L1TileShape::M*K`的数据量，否则无法使用。该值为元素个数，占用字节数为`L1TileShape::M * K * sizeof(ElementA)`；Atlas A2/A3系列产品的L1容量为512KB，全载数据需位于可用L1空间内。N轴较大指N方向可切分出多个基本块，即`problemShape.N > L1TileShape::N`，此时同一A矩阵块可被多个N方向基本块复用；N不超过一个基本块时无法复用，性能可能低于普通模板。
+- **适用场景**：明确新特性的收益场景和限制条件。A矩阵全载在N轴较大时收益显著（A矩阵可被多次复用），但要求L1空间足够容纳`L1TileShape::M*K`的数据量，否则无法使用。该值为元素个数，占用字节数为`L1TileShape::M * K * sizeof(ElementA)`；Atlas A2系列产品、Atlas A3系列产品的L1容量为512KB，全载数据需位于可用L1空间内。N轴较大指N方向可切分出多个基本块，即`problemShape.N > L1TileShape::N`，此时同一A矩阵块可被多个N方向基本块复用；N不超过一个基本块时无法复用，性能可能低于普通模板。
 
 ### 方案设计
 
@@ -99,7 +99,7 @@ include/catlass/epilogue/block/
 └── block_epilogue_per_token_dequant_tla.hpp # 复用自样例42的BlockEpilogue
 ```
 
-**工程注册（易遗漏）**：仅新建样例目录和目录内 `CMakeLists.txt` 还不够。顶层 [`examples/CMakeLists.txt`](../../../examples/CMakeLists.txt) 通过 `EXAMPLE_ATLASA2` / `EXAMPLE_ASCEND950` 决定哪些样例进入编译；未把样例名追加到对应列表时，`bash scripts/build.sh <样例名>` 会找不到目标。按产品形态注册，例如 Atlas A2/A3：
+**工程注册（易遗漏）**：仅新建样例目录和目录内 `CMakeLists.txt` 还不够。顶层 [`examples/CMakeLists.txt`](../../../examples/CMakeLists.txt) 通过 `EXAMPLE_ATLASA2` / `EXAMPLE_ASCEND950` 决定哪些样例进入编译；未把样例名追加到对应列表时，`bash scripts/build.sh <样例名>` 会找不到目标。按产品形态注册，例如 Atlas A2系列产品、Atlas A3系列产品：
 
 ```diff
 set(EXAMPLE_ATLASA2

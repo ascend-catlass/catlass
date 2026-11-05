@@ -10,7 +10,7 @@
 
 与 TLA 风格的 [TileCopyTla](./tile_copy_tla.md) 不同，非 TLA 版本仅支持 VectorLayout（一维向量），搬运指令为 `AscendC::DataCopyPad`。
 
-> **限制**：仅支持 AtlasA2 架构（`CATLASS_ARCH == 2201`）。
+> **限制**：仅支持 Atlas A2 架构（`CATLASS_ARCH == 2201`）。
 
 ## 模板原型
 
@@ -28,7 +28,7 @@ struct CopyGm2Ub {
 
 | 架构    | Layout                      | 搬运指令               | 说明                             |
 | :------ | :-------------------------- | :--------------------- | :------------------------------- |
-| AtlasA2 | VectorLayout → VectorLayout | `AscendC::DataCopyPad` | 一维向量，单行拷贝，`blockLen=1` |
+| Atlas A2 | VectorLayout → VectorLayout | `AscendC::DataCopyPad` | 一维向量，单行拷贝，`blockLen=1` |
 
 ## 调用接口
 

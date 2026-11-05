@@ -13,7 +13,7 @@
 | API                                       | 风格   | 适用硬件           | 说明                          |
 | :---------------------------------------- | :----- | :----------------- | :---------------------------- |
 | [CopyL1ToL0A](./copy_l1_to_l0a.md)        | 非 TLA | Atlas A2           | LoadData 3D v2，含 im2col     |
-| [CopyL1ToL0ATla](./copy_l1_to_l0a_tla.md) | TLA    | Atlas A2, Ascend950 | 950 新增 `LoadDataWithStride` |
+| [CopyL1ToL0ATla](./copy_l1_to_l0a_tla.md) | TLA    | Atlas A2, Ascend 950 | 950 新增 `LoadDataWithStride` |
 
 ## 调用示例
 

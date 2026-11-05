@@ -19,7 +19,7 @@
   where $Fmap$, $Filter$, and $Output$ are the input feature map, convolution kernel, and output feature map, respectively. $h_s$ and $w_s$ are the sampling coordinates on the input feature map, and out-of-bounds positions are treated as zero.
 
 - Inputs and outputs use Ascend-friendly layouts: the feature map is `(N, C1, H, W, C0)` (`layout::NC1HWC0`), and the convolution kernel is `(Cin1, Kh, Kw, Cout, C0)` (`layout::CI1KHKWCOCI0`), where `C0 = 16`.
-- Supported products: Atlas A2/A3 series products
+- Supported products: Atlas A2 series products and Atlas A3 series products
 
 ### conv2d_bias_silu
 
@@ -35,7 +35,7 @@
 
 - Adopts an AIC (Cube Core) + AIV (Vector Core) cross-core collaborative architecture to avoid GM memory read/write of intermediate results and minimize memory access overhead.
 - Operator pipeline: **AIC core executes Conv2D (Matrix Multiply) → Cross-core synchronization → AIV core executes BiasAdd + SiLU activation (Element-wise)**.
-- Supported products: Atlas A2/A3 series products
+- Supported products: Atlas A2 series products and Atlas A3 series products
 
 ## Parameters
 
@@ -73,16 +73,16 @@ where `C1 = CeilDiv(Cin, C0)`, `Cout1 = CeilDiv(Cout, C0)`, and `C0 = 16`.
 
 - On-chip buffer constraints (lowercase symbols in the following formulas are runtime constants; others are compile-time constants):
   - `L1_STAGES * FmapSize + L1_STAGES * FilterSize <= L1_SIZE`
-    where `L1_STAGES` is 2 when double-buffering is enabled and 1 otherwise, and L1_SIZE is 512KB (Atlas A2/A3 series products). FmapSize and FilterSize are calculated as follows:
+    where `L1_STAGES` is 2 when double-buffering is enabled and 1 otherwise, and L1_SIZE is 512KB (Atlas A2 series products and Atlas A3 series products). FmapSize and FilterSize are calculated as follows:
     - `FmapSize = Cin1 * hi * wi * C0 * sizeof(ElementFmap)`, where `Cin1` is the tiling constant (number of input channels) under `FmapL1TileShape`; hi and wi can be derived from `Ho` and `Wo` (output feature map sizes) under `FmapL1TileShape`:
       1. `hi = (Ho - 1) * strideH + dilationH * (kh - 1) + 1`
       2. `wi = (Wo - 1) * strideW + dilationW * (kw - 1) + 1`
 
     - `FilterSize = Cin1 * kh * kw * Cout * C0`, where `Cin1` is the tiling constant (number of input channels) under `FilterL1TileShape`, and `Cout` is the value of `Cout` (number of output channels) under `FilterL1TileShape` aligned to `C0`
 
-  - `L0A_STAGES * FmapL0ASize <= L0A_SIZE`, where `FmapL0ASize` is `Ho * Wo * max(L0K, kh * kw * C0) * sizeof(ElementFmap)`, `L0K` is the tiling constant under `L0TileShape`, and `L0A_SIZE` is 64KB (Atlas A2/A3 series products)
-  - `L0B_STAGES * FilterL0BSize <= L0B_SIZE`, where `FilterL0BSize` is `max(L0K, kh * kw * C0) * CoutL0 * sizeof(ElementFilter)`, `L0K` is the tiling constant under `L0TileShape`, `CoutL0` is the size of `L0N` aligned to `C0`, and `L0B_SIZE` is also 64KB (Atlas A2/A3 series products)
-  - `Ho * Wo * Cout * sizeof(ElementOutput) <= L0C_SIZE`, where `L0C_SIZE` is 128KB (Atlas A2/A3 series products), and `Ho`, `Wo`, and `Cout` are all tiling constants under `FilterL1TileShape`.
+  - `L0A_STAGES * FmapL0ASize <= L0A_SIZE`, where `FmapL0ASize` is `Ho * Wo * max(L0K, kh * kw * C0) * sizeof(ElementFmap)`, `L0K` is the tiling constant under `L0TileShape`, and `L0A_SIZE` is 64KB (Atlas A2 series products and Atlas A3 series products)
+  - `L0B_STAGES * FilterL0BSize <= L0B_SIZE`, where `FilterL0BSize` is `max(L0K, kh * kw * C0) * CoutL0 * sizeof(ElementFilter)`, `L0K` is the tiling constant under `L0TileShape`, `CoutL0` is the size of `L0N` aligned to `C0`, and `L0B_SIZE` is also 64KB (Atlas A2 series products and Atlas A3 series products)
+  - `Ho * Wo * Cout * sizeof(ElementOutput) <= L0C_SIZE`, where `L0C_SIZE` is 128KB (Atlas A2 series products and Atlas A3 series products), and `Ho`, `Wo`, and `Cout` are all tiling constants under `FilterL1TileShape`.
 
   In this example, ElementFmap, ElementFilter, and ElementOutput are of the fp16 type.
 

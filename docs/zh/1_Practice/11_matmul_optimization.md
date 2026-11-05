@@ -16,16 +16,16 @@ CATLASS算子模板库的定位，是针对GEMM类算子提供的模板样例库
 
 ### Matmul硬件可视化
 
-Atlas A2/A3系列产品硬件架构，参考[昇腾社区文档-基本架构](https://www.hiascend.com/document/redirect/CannCommunityAscendChibasic)。
+Atlas A2系列产品、Atlas A3系列产品硬件架构，参考[昇腾社区文档-基本架构](https://www.hiascend.com/document/redirect/CannCommunityAscendChibasic)。
 基础matmul切块、数据搬运、计算涉及的硬件架构如下图，由于启用了doubleBuffer，在L1/L0A/L0B上会保存两块Tile数据。
 
 <img src="https://www.hiascend.com/doc_center/source/zh/CANNCommunityEdition/850/opdevg/Ascendcopdevg/figure/zh-cn_image_0000002502735896.png" width="80%">
 
 ### TileShape约束
 
-由上可知TileShape在设置时要保证不能超出L1/L0A/L0B/L0C空间大小，同时TileShape取值必须是16的倍数。Atlas A2/A3系列产品相关硬件参数参考[Arch::AtlasA2](../../../include/catlass/arch/arch.hpp)，Ascend 950PR&950DT系列产品相关硬件参数参考[Arch::Ascend950](../../../include/catlass/arch/arch.hpp)，下文以Atlas A2/A3系列产品为举例场景。
+由上可知TileShape在设置时要保证不能超出L1/L0A/L0B/L0C空间大小，同时TileShape取值必须是16的倍数。Atlas A2系列产品、Atlas A3系列产品相关硬件参数参考[Arch::AtlasA2](../../../include/catlass/arch/arch.hpp)，Ascend 950PR&950DT系列产品相关硬件参数参考[Arch::Ascend950](../../../include/catlass/arch/arch.hpp)，下文以Atlas A2系列产品、Atlas A3系列产品为举例场景。
 
-容量公式、dtype 对照表与“改数据类型时如何缩放 Tile”的速查，也可先看 [AtlasA2 硬件基础信息 - 从硬件容量反推 TileShape](../2_Design/01_kernel_design/00_basics/atlasA2_hardware_info.md#从硬件容量反推-tileshape)。
+容量公式、dtype 对照表与“改数据类型时如何缩放 Tile”的速查，也可先看 [Atlas A2 硬件基础信息 - 从硬件容量反推 TileShape](../2_Design/01_kernel_design/00_basics/atlasA2_hardware_info.md#从硬件容量反推-tileshape)。
 
 - 场景一：fp16输入输出，L1TileShape<128,256,256>，L0TileShape<128,256,64>
 

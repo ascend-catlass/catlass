@@ -8,7 +8,7 @@
 
 `TileCopyDequantTla` is a template for epilogue TLA-style dequantization movement and aggregation. It references `CopyGm2UbTla` and `CopyUb2GmTla` as child components, each of which is a template requiring `TensorSrc`/`TensorDst` type parameterization for delayed instantiation.
 
-- Applicability: Atlas A2/A3 series products and Ascend 950PR&950DT series products
+- Applicability: Atlas A2 series products and Atlas A3 series products and Ascend 950PR&950DT series products
 - Style: TLA
 
 ## Template Prototype

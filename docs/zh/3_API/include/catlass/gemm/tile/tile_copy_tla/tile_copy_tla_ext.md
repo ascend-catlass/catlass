@@ -36,7 +36,7 @@ struct TileCopyTlaExt {
 
 > **注意**：`LayoutTagSrc` 与 tensor 的物理 Layout 可能不匹配（如 `PaddingRowMajor` vs tensor 实际 `RowMajor`）。它仅用于偏特化分发标签。
 
-## 偏特化实现清单（全 AtlasA2）
+## 偏特化实现清单（全 Atlas A2）
 
 | LayoutTagSrc                     | LayoutTagDst    | 源位置     | 目标位置 | 实现位置                    | API 文档                                               |
 | :------------------------------- | :-------------- | :--------- | :------- | :-------------------------- | :----------------------------------------------------- |

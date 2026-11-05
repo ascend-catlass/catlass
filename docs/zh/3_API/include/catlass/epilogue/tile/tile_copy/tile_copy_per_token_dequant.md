@@ -8,7 +8,7 @@
 
 `TileCopyPerTokenDequant` 是 epilogue 阶段 per-token 反量化的搬运聚合模板。在 `TileCopy` 的基础上额外引入 `CopyPerTokenScale2Ub` 搬运 per-token scale 到 UB，供反量化计算使用。
 
-- 适用范围：AtlasA2
+- 适用范围：Atlas A2
 
 ## 模板原型
 

@@ -27,8 +27,8 @@ Two styles are provided: non-TLA (`TileMmad`) and TLA (`TileMmadTla`).
 | L0 Batch mmad | — | √|
 | Auto dimension extraction| — | √ (mode 4)|
 | unitFlag parallel data movement| √| √|
-| kDirectionAlign | AtlasA2 float + nZ L1A | Same as the left column|
-| GEMV mode control| Ascend 950 `disableGemv`| Ascend950 `disableGemv`|
+| kDirectionAlign | Atlas A2 float + nZ L1A | Same as the left column|
+| GEMV mode control| Ascend 950 `disableGemv`| Ascend 950 `disableGemv`|
 | GEMV auto bypass| — | Atlas A2 M = 1 → M = 16 (mode 4)|
 
 ## Examples

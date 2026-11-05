@@ -14,16 +14,16 @@ TLA 风格的 GM→UB 搬运为独立模块 [CopyGm2UbTla](../copy_gm_to_ub_tla.
 
 | API                                                     | 风格   | 适用硬件           | 说明                                                         |
 | :------------------------------------------------------ | :----- | :----------------- | :----------------------------------------------------------- |
-| [CopyGm2Ub](./copy_gm_to_ub.md)                         | 非 TLA | AtlasA2, Ascend950 | 基础 GM→UB 搬运（RowMajor / VectorLayout）                   |
-| [CopyPerTokenScale2Ub](./copy_per_token_scale_to_ub.md) | 非 TLA | AtlasA2            | Per-token scale 专用搬运（ColumnMajor→RowMajor，带 padding） |
-| [CopyGm2UbAligned](./copy_gm_to_ub_aligned.md)          | 非 TLA | AtlasA2            | 对齐优化搬运（自动处理大 stride 场景）                       |
+| [CopyGm2Ub](./copy_gm_to_ub.md)                         | 非 TLA | Atlas A2, Ascend 950 | 基础 GM→UB 搬运（RowMajor / VectorLayout）                   |
+| [CopyPerTokenScale2Ub](./copy_per_token_scale_to_ub.md) | 非 TLA | Atlas A2            | Per-token scale 专用搬运（ColumnMajor→RowMajor，带 padding） |
+| [CopyGm2UbAligned](./copy_gm_to_ub_aligned.md)          | 非 TLA | Atlas A2            | 对齐优化搬运（自动处理大 stride 场景）                       |
 
 ## 适用硬件
 
 | 硬件型号  | CopyGm2Ub              | CopyPerTokenScale2Ub | CopyGm2UbAligned |
 | :-------- | :--------------------- | :------------------- | :--------------- |
-| AtlasA2   | RowMajor, VectorLayout | ColumnMajor→RowMajor | RowMajor         |
-| Ascend950 | RowMajor, VectorLayout | -                    | -                |
+| Atlas A2   | RowMajor, VectorLayout | ColumnMajor→RowMajor | RowMajor         |
+| Ascend 950 | RowMajor, VectorLayout | -                    | -                |
 
 ## 调用示例
 

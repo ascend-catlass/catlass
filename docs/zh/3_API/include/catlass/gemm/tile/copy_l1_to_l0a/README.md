@@ -8,8 +8,8 @@
 
 `copy_l1_to_l0a` 模块提供将 A 矩阵 tile 块从 L1（Local Memory，A1 Buffer）搬运到 L0A（A2 Buffer）的模板类，支持多种数据排布格式（layout）转换。根据架构不同，实现分为两套：
 
-- **AtlasA2**（ARCH 2201）：[atlasa2/copy_l1_to_l0a.hpp](../../../../../../../../include/catlass/gemm/tile/atlasa2/copy_l1_to_l0a.hpp)
-- **Ascend950**（ARCH 3510）：[ascend950/copy_l1_to_l0a.hpp](../../../../../../../../include/catlass/gemm/tile/ascend950/copy_l1_to_l0a.hpp)
+- **Atlas A2**（ARCH 2201）：[atlasa2/copy_l1_to_l0a.hpp](../../../../../../../../include/catlass/gemm/tile/atlasa2/copy_l1_to_l0a.hpp)
+- **Ascend 950**（ARCH 3510）：[ascend950/copy_l1_to_l0a.hpp](../../../../../../../../include/catlass/gemm/tile/ascend950/copy_l1_to_l0a.hpp)
 
 模块包含 **非 TLA 风格**（直接操作 `LocalTensor`）和 **TLA 风格**（通过 `tla::Tensor` 封装）两套 API。
 
@@ -17,9 +17,9 @@
 
 | 组件名                                         | 风格   | 适用硬件            | 说明                                                |
 | :--------------------------------------------- | :----- | :------------------ | :-------------------------------------------------- |
-| [CopyL1ToL0A](./copy_l1_to_l0a.md)             | 非 TLA | AtlasA2 / Ascend950 | 基础 L1→L0A 搬运模板，支持多种 layout 转换          |
-| [TileCopyTla](./tile_copy_tla.md)              | TLA    | AtlasA2 / Ascend950 | TLA 风格 L1→L0A 搬运，通过 tla::Tensor 封装简化调用 |
-| [TileCopySparseTla](./tile_copy_sparse_tla.md) | TLA    | AtlasA2             | Sparse GEMM L1→L0A 搬运，zN→zZ LoadData3D v2        |
+| [CopyL1ToL0A](./copy_l1_to_l0a.md)             | 非 TLA | Atlas A2 / Ascend 950 | 基础 L1→L0A 搬运模板，支持多种 layout 转换          |
+| [TileCopyTla](./tile_copy_tla.md)              | TLA    | Atlas A2 / Ascend 950 | TLA 风格 L1→L0A 搬运，通过 tla::Tensor 封装简化调用 |
+| [TileCopySparseTla](./tile_copy_sparse_tla.md) | TLA    | Atlas A2             | Sparse GEMM L1→L0A 搬运，zN→zZ LoadData3D v2        |
 
 > **说明**：该模块通常不直接使用，而是作为 [TileCopy](../tile_copy/README.md) 的成员类型（`CopyL1ToL0A`），由 [blockMmad](../../block/block_mmad.md) 自动管理。仅在需要自定义 kernel 模板组装时显式声明。
 
@@ -32,7 +32,7 @@
 
 ### 架构差异
 
-| 特性              | AtlasA2    | Ascend950                 |
+| 特性              | Atlas A2    | Ascend 950                 |
 | :---------------- | :--------- | :------------------------ |
 | 目标 L0A layout   | zZ         | zN                        |
 | 基础搬运指令      | LoadData2D | LoadData2DParamsV2        |
@@ -95,7 +95,7 @@ TileCopyTla<Arch::AtlasA2, decltype(srcTensor), decltype(dstTensor)> copyOp;
 copyOp(dstTensor, srcTensor);
 ```
 
-### TLA 风格 - 转置搬运（AtlasA2）
+### TLA 风格 - 转置搬运（Atlas A2）
 
 ```cpp
 auto layoutSrc = tla::MakeLayout<half, layout::nZ>(M, K);
@@ -109,10 +109,10 @@ TileCopyTla<Arch::AtlasA2, decltype(srcTensor), decltype(dstTensor)> copyOp;
 copyOp(dstTensor, srcTensor);
 ```
 
-### TLA 风格 - Ascend950 基础搬运
+### TLA 风格 - Ascend 950 基础搬运
 
 ```cpp
-// Ascend950 目标 layout 为 zN
+// Ascend 950 目标 layout 为 zN
 auto layoutSrc = tla::MakeLayout<half, layout::zN>(M, K);
 auto layoutDst = tla::MakeLayout<half, layout::zN>(M, K);
 
@@ -124,7 +124,7 @@ TileCopyTla<Arch::Ascend950, decltype(srcTensor), decltype(dstTensor)> copyOp;
 copyOp(dstTensor, srcTensor);
 ```
 
-### TLA 风格 - Ascend950 l0Batch 批量搬运
+### TLA 风格 - Ascend 950 l0Batch 批量搬运
 
 ```cpp
 uint32_t l0Batch = 4;
@@ -133,7 +133,7 @@ uint32_t l0Batch = 4;
 copyOp(dstTensor, srcTensor, l0Batch);
 ```
 
-### TLA 风格 - Ascend950 MX Scale 搬运
+### TLA 风格 - Ascend 950 MX Scale 搬运
 
 ```cpp
 using ElementSrc = float8_e4m3_t;
@@ -168,7 +168,7 @@ copyOp(dstTensor, srcTensor, scaleTensor);
 | :---------------------------- | :--------------------------------------------- |
 | 通用矩阵乘 tile L1→L0A 搬运   | `CopyL1ToL0A`（非 TLA）或 `TileCopyTla`（TLA） |
 | 转置搬运（nZ → zZ / nZ → zN） | `CopyL1ToL0A` 或 `TileCopyTla`（自动匹配）     |
-| Ascend950 多 batch 搬运       | `TileCopyTla`（l0Batch 重载）                  |
-| Ascend950 MX 浮点量化         | `TileCopyTla`（MX Scale 重载）                 |
+| Ascend 950 多 batch 搬运       | `TileCopyTla`（l0Batch 重载）                  |
+| Ascend 950 MX 浮点量化         | `TileCopyTla`（MX Scale 重载）                 |
 | 卷积场景 NDC1HWC0 搬运        | `CopyL1ToL0A`（非 TLA，NDC1HWC0 偏特化）       |
 | 已使用 TLA 编程范式           | `TileCopyTla`（统一风格）                      |

@@ -14,7 +14,7 @@
 
   其中 $Q_{nope}$、$Q_{rope}$ 分别是形如 `(qTokenNum, numHeads, D)`、`(qTokenNum, numHeads, D_r)` 的查询矩阵的非 Rope 与 Rope 部分；$K_{nope}$、$K_{rope}$ 为分页 KV cache，形如 `(numBlocks, blockSize, kvHeads, D)`、`(numBlocks, blockSize, kvHeads, D_r)`；$V$ 与 $K_{nope}$ 共用同一份数据（MLA 吸收形式），$O$ 是形如 `(qTokenNum, numHeads, D)` 的输出矩阵。
 
-- 支持产品型号：Atlas A2/A3系列产品
+- 支持产品型号：Atlas A2系列产品、Atlas A3系列产品
 
 ## 样例参数说明
 

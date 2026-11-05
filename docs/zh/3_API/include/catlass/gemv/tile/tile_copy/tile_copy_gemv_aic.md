@@ -8,7 +8,7 @@
 
 `TileCopyGemvAic` 为 AIC（AI Core）芯片提供 GEMV 搬运子组件的聚合模板。数据通路为 GM→L1→L0A/L0B→L0C→GM，复用 GEMM 的搬运组件。中间 L1/L0A/L0B Type 通过 `Gemv::helper::L1AndL0TypeSelectorGemv` 自动推导。
 
-- 适用范围：Ascend950
+- 适用范围：Ascend 950
 - 不直接执行算子，以类型成员方式暴露子组件引用
 
 ## 模板原型

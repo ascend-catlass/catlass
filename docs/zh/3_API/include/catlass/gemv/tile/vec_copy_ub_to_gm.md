@@ -8,7 +8,7 @@
 
 `VecCopyUBToGm` 实现 GEMV 场景下从 UB 到 GM 的向量数据搬运。通过 `AscendC::DataCopyPad` 将一维向量从 Unified Buffer 写回 Global Memory。
 
-- 适用范围：AtlasA2
+- 适用范围：Atlas A2
 - 支持 `atomic_add` 模式：当 `is_atoadd = true` 时，先调用 `AscendC::SetAtomicAdd<Element>()` 再搬运
 
 ## 模板原型
@@ -28,8 +28,8 @@ struct VecCopyUBToGm;
 
 | 架构    | GmType         | is_atoadd       | 说明                           |
 | :------ | :------------- | :-------------- | :----------------------------- |
-| AtlasA2 | `VectorLayout` | `false`（默认） | 标准 `DataCopyPad` 搬运        |
-| AtlasA2 | `VectorLayout` | `true`          | `SetAtomicAdd` + `DataCopyPad` |
+| Atlas A2 | `VectorLayout` | `false`（默认） | 标准 `DataCopyPad` 搬运        |
+| Atlas A2 | `VectorLayout` | `true`          | `SetAtomicAdd` + `DataCopyPad` |
 
 ## 调用接口
 

@@ -70,7 +70,7 @@ set, a stale artifact, or a missing artifact records `unit.prove_failed` before 
 runs retain their separately required non-empty `findings.prove.stage` list.
 
 A later build, run, or evidence failure revokes an earlier pass without changing its historical rank.
-Only a later passing proof bound to the declared matching Ascend950 identity clears that revocation;
+Only a later passing proof bound to the declared matching Ascend 950 identity clears that revocation;
 re-run `prove` before SCREEN, GATE 2, APPLY, or `OPTIMIZED`.
 
 ## The frozen accuracy contract

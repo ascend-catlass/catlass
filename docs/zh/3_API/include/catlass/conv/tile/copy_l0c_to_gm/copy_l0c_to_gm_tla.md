@@ -8,7 +8,7 @@
 
 `CopyL0CToGmTla` 实现 Conv 场景下累加结果从 L0C 写回 GM 的 TLA 风格版本。通过 `AscendC::Fixpipe` 直接通路完成搬运、类型转换和可选 ReLU。
 
-- 适用范围：Atlas A2/A3系列产品、Ascend 950PR&950DT系列产品
+- 适用范围：Atlas A2系列产品、Atlas A3系列产品、Ascend 950PR&950DT系列产品
 - 风格：TLA
 
 ## 模板原型

@@ -8,7 +8,7 @@
 
 `CopyGm2UbAligned` 实现 epilogue 阶段从 GM 到 UB 的对齐搬运操作。相比 `CopyGm2Ub`，额外处理 stride 较大无法直接用 `DataCopyPad` 的场景，自动拆分为多次 `DataCopy` 或逐行搬运。
 
-- 适用范围：AtlasA2
+- 适用范围：Atlas A2
 - 风格：非 TLA，直接操作 `AscendC::LocalTensor` / `AscendC::GlobalTensor`
 - 内部逻辑：连续内存→`DataCopy`；小 stride→分块 `DataCopy`；大 stride→逐行搬运
 

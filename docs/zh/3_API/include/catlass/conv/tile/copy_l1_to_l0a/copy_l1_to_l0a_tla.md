@@ -8,8 +8,8 @@
 
 `CopyL1ToL0ATla` 实现 Conv 场景下将 Fmap 数据从 L1 搬运到 L0A 的 TLA 风格版本，同时完成 im2col 操作。
 
-- AtlasA2：`LoadData` + `Conv2dFilterParams`
-- Ascend950：`LoadDataWithStride` + `SetLoadDataRepeatWithStride`
+- Atlas A2：`LoadData` + `Conv2dFilterParams`
+- Ascend 950：`LoadDataWithStride` + `SetLoadDataRepeatWithStride`
 
 ## 模板原型
 

@@ -100,7 +100,7 @@ pip install -r requirements.txt
 > The template library provides a set of reusable templates and basic components for matrix multiplication operator development. Operator samples can be found [here](../../../examples).
 
 - Samples whose names contain `ascend950` are supported only on Ascend 950PR&950DT series products.
-- Other samples are supported only on Atlas A2/A3 series products, and the architecture tag `ArchTag` in the code is uniformly `Arch::AtlasA2`.
+- Other samples are supported only on Atlas A2 series products and Atlas A3 series products, and the architecture tag `ArchTag` in the code is uniformly `Arch::AtlasA2`.
 
 ### Building the Sample
 
@@ -115,7 +115,7 @@ bash scripts/build.sh [options] <target>
   - `--debug`: Compiles in debug mode.
   - `--msdebug`: Enables [msDebug](https://www.hiascend.com/en/document/redirect/CannCommunityToolMsdebug). For details, see [Using msDebug in a CATLASS Sample Project](./evaluation/msdebug.md).
   - `--simulator`: Enables the simulator mode. After this option is enabled, the code will not run on an actual NPU. For details, see [CATLASS Sample Simulation](./evaluation/performance_tools.md#example-with-msprof-op-simulator).
-  - `-DCATLASS_ARCH`: Specifies the NPU architecture. Currently, `2201` (Atlas A2/A3 series products) and `3510` (Ascend 950PR&950DT series products) are supported. If not specified, the default is `2201`.
+  - `-DCATLASS_ARCH`: Specifies the NPU architecture. Currently, `2201` (Atlas A2 series products and Atlas A3 series products) and `3510` (Ascend 950PR&950DT series products) are supported. If not specified, the default is `2201`.
   - `-D<option>`: Passes other build options to CMake.
 
 - `target`: Specifies the operator sample to build. You can specify a specific sample name or one of the following:

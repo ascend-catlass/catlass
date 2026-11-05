@@ -43,7 +43,7 @@ import torch_catlass
 | 设备名      | 架构 ID |
 | ----------- | ------- |
 | Ascend910B* | 2201    |
-| Ascend950*  | 3510    |
+| Ascend 950*  | 3510    |
 
 无支持设备时抛出 `RuntimeError`。架构 ID 影响：
 

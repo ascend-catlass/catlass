@@ -8,8 +8,8 @@
 
 `copy_gm_to_l1` 模块提供将 tile 块从 GM（Global Memory）搬运到 L1（Local Memory）的模板类，支持多种数据排布格式（layout）转换。根据架构不同，实现分为两套：
 
-- **AtlasA2**（ARCH 2201）：[atlasa2/copy_gm_to_l1.hpp](../../../../../../../../include/catlass/gemm/tile/atlasa2/copy_gm_to_l1.hpp)
-- **Ascend950**（ARCH 3510）：[ascend950/copy_gm_to_l1.hpp](../../../../../../../../include/catlass/gemm/tile/ascend950/copy_gm_to_l1.hpp)
+- **Atlas A2**（ARCH 2201）：[atlasa2/copy_gm_to_l1.hpp](../../../../../../../../include/catlass/gemm/tile/atlasa2/copy_gm_to_l1.hpp)
+- **Ascend 950**（ARCH 3510）：[ascend950/copy_gm_to_l1.hpp](../../../../../../../../include/catlass/gemm/tile/ascend950/copy_gm_to_l1.hpp)
 
 模块包含 **非 TLA 风格**（直接操作 `LocalTensor` / `GlobalTensor`）和 **TLA 风格**（通过 `tla::Tensor` 封装）两套 API。
 
@@ -17,14 +17,14 @@
 
 | 组件名                                                              | 风格   | 适用硬件            | 说明                                                                    |
 | :------------------------------------------------------------------ | :----- | :------------------ | :---------------------------------------------------------------------- |
-| [CopyGmToL1](./copy_gm_to_l1.md)                                    | 非 TLA | AtlasA2 / Ascend950 | 基础 GM→L1 搬运模板，支持多种 layout 转换                               |
-| [CopyGmToL1IntervalDataCopy](./copy_gm_to_l1_interval_data_copy.md) | 非 TLA | AtlasA2             | 基于 strided DataCopy 的逐行/逐列搬运，适用于矮宽/高窄数据块            |
-| [CopyGmToL1GMMPTD](./copy_gm_to_l1_gmmptd.md)                       | 非 TLA | AtlasA2 / Ascend950 | GMM PTD 场景专用搬运，含单行优化和手动 stride 接口                      |
-| [CopyGmToL1DynamicOptimized](./copy_gm_to_l1_dynamic_optimized.md)  | 非 TLA | AtlasA2 / Ascend950 | 运行时动态选择最优搬运策略（小矩阵用 strided DataCopy，大矩阵用 Nd2Nz） |
-| [TileCopyTla](./tile_copy_tla.md)                                   | TLA    | AtlasA2 / Ascend950 | TLA 风格 GM→L1 搬运，通过 tla::Tensor 封装简化调用                      |
-| [TileCopyTlaExt](./tile_copy_tla_ext.md)                            | TLA    | AtlasA2             | TLA 扩展搬运，支持 ActualShape 部分搬运和 Padding layout                |
-| [TileCopySparseTla](./tile_copy_sparse_tla.md)                      | TLA    | AtlasA2             | Sparse GEMM GM→L1 搬运，支持 RowMajor/ColumnMajor/zN/nZ→zN/nZ           |
-| [TileCopyFAQTla](./tile_copy_faq_tla.md)                            | TLA    | AtlasA2             | FlashAttention LoadQ 搬运，支持 3D 多矩阵 GM→L1 zN 转换                 |
+| [CopyGmToL1](./copy_gm_to_l1.md)                                    | 非 TLA | Atlas A2 / Ascend 950 | 基础 GM→L1 搬运模板，支持多种 layout 转换                               |
+| [CopyGmToL1IntervalDataCopy](./copy_gm_to_l1_interval_data_copy.md) | 非 TLA | Atlas A2             | 基于 strided DataCopy 的逐行/逐列搬运，适用于矮宽/高窄数据块            |
+| [CopyGmToL1GMMPTD](./copy_gm_to_l1_gmmptd.md)                       | 非 TLA | Atlas A2 / Ascend 950 | GMM PTD 场景专用搬运，含单行优化和手动 stride 接口                      |
+| [CopyGmToL1DynamicOptimized](./copy_gm_to_l1_dynamic_optimized.md)  | 非 TLA | Atlas A2 / Ascend 950 | 运行时动态选择最优搬运策略（小矩阵用 strided DataCopy，大矩阵用 Nd2Nz） |
+| [TileCopyTla](./tile_copy_tla.md)                                   | TLA    | Atlas A2 / Ascend 950 | TLA 风格 GM→L1 搬运，通过 tla::Tensor 封装简化调用                      |
+| [TileCopyTlaExt](./tile_copy_tla_ext.md)                            | TLA    | Atlas A2             | TLA 扩展搬运，支持 ActualShape 部分搬运和 Padding layout                |
+| [TileCopySparseTla](./tile_copy_sparse_tla.md)                      | TLA    | Atlas A2             | Sparse GEMM GM→L1 搬运，支持 RowMajor/ColumnMajor/zN/nZ→zN/nZ           |
+| [TileCopyFAQTla](./tile_copy_faq_tla.md)                            | TLA    | Atlas A2             | FlashAttention LoadQ 搬运，支持 3D 多矩阵 GM→L1 zN 转换                 |
 
 ## 适用硬件型号说明
 
@@ -205,7 +205,7 @@ using namespace Catlass::Gemm::Tile;
 using LayoutTagSrc = layout::RowMajor;
 using LayoutTagDst = layout::zN;
 
-// CopyGmToL1IntervalDataCopy 当前仅支持 half 类型和 AtlasA2 架构
+// CopyGmToL1IntervalDataCopy 当前仅支持 half 类型和 Atlas A2 架构
 using GmType = Gemm::GemmType<half, LayoutTagSrc>;
 
 uint32_t row = 256;

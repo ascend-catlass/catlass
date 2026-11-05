@@ -14,15 +14,15 @@ TLA 风格的 UB→GM 搬运为独立模块 [CopyUb2GmTla](../copy_ub_to_gm_tla.
 
 | API                                            | 风格   | 适用硬件           | 说明                                       |
 | :--------------------------------------------- | :----- | :----------------- | :----------------------------------------- |
-| [CopyUb2Gm](./copy_ub_to_gm.md)                | 非 TLA | AtlasA2, Ascend950 | 基础 UB→GM 搬运（RowMajor / VectorLayout） |
-| [CopyUb2GmAligned](./copy_ub_to_gm_aligned.md) | 非 TLA | AtlasA2            | 对齐优化搬运（自动处理大 stride 场景）     |
+| [CopyUb2Gm](./copy_ub_to_gm.md)                | 非 TLA | Atlas A2, Ascend 950 | 基础 UB→GM 搬运（RowMajor / VectorLayout） |
+| [CopyUb2GmAligned](./copy_ub_to_gm_aligned.md) | 非 TLA | Atlas A2            | 对齐优化搬运（自动处理大 stride 场景）     |
 
 ## 适用硬件
 
 | 硬件型号  | CopyUb2Gm              | CopyUb2GmAligned |
 | :-------- | :--------------------- | :--------------- |
-| AtlasA2   | RowMajor, VectorLayout | RowMajor         |
-| Ascend950 | RowMajor               | -                |
+| Atlas A2   | RowMajor, VectorLayout | RowMajor         |
+| Ascend 950 | RowMajor               | -                |
 
 ## 调用示例
 

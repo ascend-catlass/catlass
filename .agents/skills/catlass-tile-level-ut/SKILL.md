@@ -9,12 +9,12 @@ description: Catlass Gemm/Tile组件单元测试编写技能。当需要为 Copy
 
 | 通路 (src→dst) | 组件 | Arch | 参考文件 |
 |----------------|------|------|---------|
-| GM→L1 | CopyGmToL1 / GMMPTD / DynamicOptimized / IntervalDataCopy + TLA(TileCopyTla / TileCopyTlaExt / TileCopySparseTla / TileCopyFAQTla) | AtlasA2, Ascend950 | [referrence/copy-gm-to-l1.md](referrence/copy-gm-to-l1.md) |
-| L1→L0A | CopyL1ToL0A + TLA(TileCopyTla / TileCopySparseTla) | AtlasA2 | [referrence/copy-l1-to-l0a.md](referrence/copy-l1-to-l0a.md) |
-| L1→L0B | CopyL1ToL0B + TLA | AtlasA2 | [referrence/copy-l1-to-l0b.md](referrence/copy-l1-to-l0b.md) |
-| L0C→GM | CopyL0CToGm / CopyL0CToGmTla | Ascend950 | [referrence/copy-l0c-to-gm.md](referrence/copy-l0c-to-gm.md) |
-| GM→UB | CopyGm2Ub / CopyGm2UbAligned / CopyPerTokenScale2Ub | AtlasA2, Ascend950 | [referrence/copy-gm-to-ub.md](referrence/copy-gm-to-ub.md) |
-| UB→GM | CopyUb2Gm / CopyUb2GmAligned | AtlasA2, Ascend950 | [referrence/copy-ub-to-gm.md](referrence/copy-ub-to-gm.md) |
+| GM→L1 | CopyGmToL1 / GMMPTD / DynamicOptimized / IntervalDataCopy + TLA(TileCopyTla / TileCopyTlaExt / TileCopySparseTla / TileCopyFAQTla) | Atlas A2, Ascend 950 | [referrence/copy-gm-to-l1.md](referrence/copy-gm-to-l1.md) |
+| L1→L0A | CopyL1ToL0A + TLA(TileCopyTla / TileCopySparseTla) | Atlas A2 | [referrence/copy-l1-to-l0a.md](referrence/copy-l1-to-l0a.md) |
+| L1→L0B | CopyL1ToL0B + TLA | Atlas A2 | [referrence/copy-l1-to-l0b.md](referrence/copy-l1-to-l0b.md) |
+| L0C→GM | CopyL0CToGm / CopyL0CToGmTla | Ascend 950 | [referrence/copy-l0c-to-gm.md](referrence/copy-l0c-to-gm.md) |
+| GM→UB | CopyGm2Ub / CopyGm2UbAligned / CopyPerTokenScale2Ub | Atlas A2, Ascend 950 | [referrence/copy-gm-to-ub.md](referrence/copy-gm-to-ub.md) |
+| UB→GM | CopyUb2Gm / CopyUb2GmAligned | Atlas A2, Ascend 950 | [referrence/copy-ub-to-gm.md](referrence/copy-ub-to-gm.md) |
 
 ## About detailed referrence
 
@@ -44,8 +44,8 @@ description: Catlass Gemm/Tile组件单元测试编写技能。当需要为 Copy
 
 Tile 层搬运组件的公共入口头文件按 `CATLASS_ARCH` 宏分发到架构实现，测试时只需 include 公共头即可（如 `catlass/gemm/tile/copy_gm_to_l1.hpp`）。以 GM→L1 为例：
 
-- `CATLASS_ARCH == 2201` (AtlasA2) → `atlasa2/copy_*.hpp`
-- `CATLASS_ARCH == 3510` (Ascend950) → `ascend950/copy_*.hpp`
+- `CATLASS_ARCH == 2201` (Atlas A2) → `atlasa2/copy_*.hpp`
+- `CATLASS_ARCH == 3510` (Ascend 950) → `ascend950/copy_*.hpp`
 
 每条通路的 Struct 族谱（各特化 + 关键分支逻辑）见对应 `referrence/` 文件的「组件族谱」章节。
 
@@ -53,7 +53,7 @@ Tile 层搬运组件的公共入口头文件按 `CATLASS_ARCH` 宏分发到架�
 
 编写 UT 前先定位组件的三个特征：
 
-1. **Arch 代际**：`CATLASS_ARCH == 2201` → AtlasA2；`== 3510` → Ascend950。测试文件必须用架构守卫宏包裹（见 4.2）。部分通路仅存在于某一代（如 L0C→GM 仅 Ascend950，L1→L0A/L0B 主要在 AtlasA2）。
+1. **Arch 代际**：`CATLASS_ARCH == 2201` → Atlas A2；`== 3510` → Ascend 950。测试文件必须用架构守卫宏包裹（见 4.2）。部分通路仅存在于某一代（如 L0C→GM 仅 Ascend 950，L1→L0A/L0B 主要在 Atlas A2）。
 2. **TLA / 非TLA**：非 TLA 组件以 `GemmType<Element, Layout>` / `L1Type + L0Type` 为模板参数并接收 `layout` 对象；TLA 变体（`TileCopyTla` / `TileCopyTlaExt` / `TileCopySparseTla` / `TileCopyFAQTla`）使用 TLA tensor 接口。
 3. **所在通路 (src→dst)**：即上表的 6 条通路，决定被测头文件、搬运 API（`DataCopy` / `Nd2Nz` / `LoadData` / `LoadDataWithTranspose` / `DataCopyPad` / `Fixpipe`）以及 stub 集合。
 
@@ -68,7 +68,7 @@ Tile 层搬运组件的公共入口头文件按 `CATLASS_ARCH` 宏分发到架�
 |------|------|
 | **Struct** | 通路下的具体 Struct（基础 / GMMPTD / DynamicOptimized / Aligned / TLA 变体 …） |
 | **Arch** | `Arch::AtlasA2` / `Arch::Ascend950`（仅测组件实际支持的代际） |
-| **Element** | `float` / `half` / `int8_t` / `int4b_t`(AtlasA2) / `bfloat16_t` / `fp8_e8m0_t`(Ascend950 MX) 等 |
+| **Element** | `float` / `half` / `int8_t` / `int4b_t`(Atlas A2) / `bfloat16_t` / `fp8_e8m0_t`(Ascend 950 MX) 等 |
 | **Layout (Src→Dst)** | RowMajor↔zN、ColumnMajor↔nZ、zN↔zZ、nZ↔zN、Padding*、VectorLayout、NDC1HWC0 … |
 | **分支路径** | 正常 stride / 长 stride(逐行逐列) / 1-row 或少行 / C0 精确对齐 / 转置 / 量化(NO_QUANT/PER_TENSOR/PER_CHANNEL) |
 

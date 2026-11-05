@@ -8,7 +8,7 @@
 
 `CopyL0CToGmTla` implements the TLA-style version of writing back accumulated results from L0C to global memory in convolution scenarios. It uses `AscendC::Fixpipe` as a direct path to complete movement, type conversion, and optional ReLU.
 
-- Applicability: Atlas A2/A3 series products and Ascend 950PR&950DT series products
+- Applicability: Atlas A2 series products and Atlas A3 series products and Ascend 950PR&950DT series products
 - Style: TLA
 
 ## Template Prototype

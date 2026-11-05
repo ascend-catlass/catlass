@@ -10,8 +10,8 @@ The `copy_l1_to_bt` module provides a template class for moving the Bias Table (
 
 Since bias data is a 1D vector, this module exclusively uses `VectorLayout` (rank=1, stride=1) as the fixed data layout. The implementation is split into two architecture-specific sets:
 
-- **AtlasA2** (ARCH 2201): [atlasa2/copy_l1_to_bt.hpp](../../../../../../../../include/catlass/gemm/tile/atlasa2/copy_l1_to_bt.hpp)
-- **Ascend950** (ARCH 3510): [ascend950/copy_l1_to_bt.hpp](../../../../../../../../include/catlass/gemm/tile/ascend950/copy_l1_to_bt.hpp)
+- **Atlas A2** (ARCH 2201): [atlasa2/copy_l1_to_bt.hpp](../../../../../../../../include/catlass/gemm/tile/atlasa2/copy_l1_to_bt.hpp)
+- **Ascend 950** (ARCH 3510): [ascend950/copy_l1_to_bt.hpp](../../../../../../../../include/catlass/gemm/tile/ascend950/copy_l1_to_bt.hpp)
 
 The module provides two sets of APIs: a **non-TLA style** (directly operating on `LocalTensor`) and a **TLA style** (using `tla::Tensor` wrapper).
 

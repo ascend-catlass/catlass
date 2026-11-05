@@ -8,14 +8,14 @@
 
 GM→UB 搬运模块，负责将数据从 GM（Global Memory）搬运到 UB（Unified Buffer）。VectorLayout 的一维向量数据使用 `CopyGm2Ub`，RowMajor 的二维矩阵数据使用 `TileCopyTla`。
 
-> **限制**：仅支持 AtlasA2 架构（`CATLASS_ARCH == 2201`）。
+> **限制**：仅支持 Atlas A2 架构（`CATLASS_ARCH == 2201`）。
 
 ## API 清单
 
 | API                               | 风格   | 适用硬件 | Layout       | 说明                      |
 | :-------------------------------- | :----- | :------- | :----------- | :------------------------ |
-| [CopyGm2Ub](./copy_gm_to_ub.md)   | 非 TLA | AtlasA2  | VectorLayout | GM 一维向量 → UB          |
-| [TileCopyTla](./tile_copy_tla.md) | TLA    | AtlasA2  | RowMajor     | GM RowMajor → UB RowMajor |
+| [CopyGm2Ub](./copy_gm_to_ub.md)   | 非 TLA | Atlas A2  | VectorLayout | GM 一维向量 → UB          |
+| [TileCopyTla](./tile_copy_tla.md) | TLA    | Atlas A2  | RowMajor     | GM RowMajor → UB RowMajor |
 
 ## 调用示例
 

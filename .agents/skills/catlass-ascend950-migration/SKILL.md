@@ -1,9 +1,9 @@
 ---
 name: catlass-ascend950-migration
-description: "Migrates CATLASS operators from AtlasA2/A3 (CATLASS_ARCH=2201) to Ascend950/A5 (CATLASS_ARCH=3510) in a gated, evidence-led campaign. Use when asked to migrate, port, or retarget CATLASS operators to Ascend950/A5/3510."
+description: "Migrates CATLASS operators from Atlas A2 and Atlas A3 (CATLASS_ARCH=2201) to Ascend 950/A5 (CATLASS_ARCH=3510) in a gated, evidence-led campaign. Use when asked to migrate, port, or retarget CATLASS operators to Ascend 950/A5/3510."
 ---
 
-# CATLASS A2/A3 → Ascend950 migration
+# CATLASS A2/A3 → Ascend 950 migration
 
 Migrate one or more operators as one campaign, **one unit at a time**. A unit is one source example
 and one target example. A campaign is a cluster of units sharing one dispatch policy; run only one
@@ -272,7 +272,7 @@ See `references/06-prove.md`.
 
 SCREEN is read-only and runs only for optimization-enabled, non-TLA units with a **current** proof that
 were not set aside with GATE 1 `--skip-optimize`. Current means the latest proof attempt did not fail and
-the latest `unit.proven` binds `errors: 0` to the declared matching Ascend950 identity (`arch: "3510"`,
+the latest `unit.proven` binds `errors: 0` to the declared matching Ascend 950 identity (`arch: "3510"`,
 an A5-family SoC, and nonempty host/device). A historical `PROVEN` rank without that identity does not
 authorize SCREEN: re-run `prove` first. The sole candidate is the non-TLA CV-fused L0C→GM→UB path whose
 target can be rewritten to use L0C→UB. Establish all applicability rows from the migrated unit, record
@@ -331,7 +331,7 @@ The phase order is mandatory:
 
 `check --phase optimized` requires a proof recorded after APPLY. Before APPLY and again before
 `OPTIMIZED`, require the current proof; APPLY must not proceed from a historical `PROVEN` rank. The
-unchanged post-APPLY proof restores eligibility only when it carries the declared matching Ascend950
+unchanged post-APPLY proof restores eligibility only when it carries the declared matching Ascend 950
 hardware identity and no later proof failure overlays it. The evidence boundary still applies:
 declaring files or a measurement cannot substitute for the actual proof or profiler output. Read the
 rewrite guide only while writing this rewrite: `references/08-l0c-to-ub-rewrite.md`.

@@ -10,8 +10,8 @@ Conv 的 tile 层 API 作为 Conv block 层的模板参数，负责卷积场景�
 
 | 组件                                         | 风格         | 适用硬件           | 说明                                         |
 | :------------------------------------------- | :----------- | :----------------- | :------------------------------------------- |
-| [copy_gm_to_l1](./copy_gm_to_l1/README.md)   | 非 TLA + TLA | AtlasA2, Ascend950 | GM→L1 搬运（NC1HWC0 / CI1KHKWCOCI0）         |
-| [copy_l1_to_l0a](./copy_l1_to_l0a/README.md) | 非 TLA + TLA | AtlasA2, Ascend950 | L1→L0A 搬运（NC1HWC0→zZ，含 im2col）         |
-| [copy_l1_to_l0b](./copy_l1_to_l0b/README.md) | 非 TLA + TLA | AtlasA2, Ascend950 | L1→L0B 搬运（CI1KHKWCOCI0→nZ）               |
-| [copy_l0c_to_gm](./copy_l0c_to_gm/README.md) | 非 TLA + TLA | AtlasA2, Ascend950 | L0C→GM 写回（zN→NC1HWC0，Fixpipe）           |
-| [tile_copy](./tile_copy/README.md)           | 非 TLA + TLA | AtlasA2, Ascend950 | 搬运聚合模板（TileCopy / PackedTileCopyTla） |
+| [copy_gm_to_l1](./copy_gm_to_l1/README.md)   | 非 TLA + TLA | Atlas A2, Ascend 950 | GM→L1 搬运（NC1HWC0 / CI1KHKWCOCI0）         |
+| [copy_l1_to_l0a](./copy_l1_to_l0a/README.md) | 非 TLA + TLA | Atlas A2, Ascend 950 | L1→L0A 搬运（NC1HWC0→zZ，含 im2col）         |
+| [copy_l1_to_l0b](./copy_l1_to_l0b/README.md) | 非 TLA + TLA | Atlas A2, Ascend 950 | L1→L0B 搬运（CI1KHKWCOCI0→nZ）               |
+| [copy_l0c_to_gm](./copy_l0c_to_gm/README.md) | 非 TLA + TLA | Atlas A2, Ascend 950 | L0C→GM 写回（zN→NC1HWC0，Fixpipe）           |
+| [tile_copy](./tile_copy/README.md)           | 非 TLA + TLA | Atlas A2, Ascend 950 | 搬运聚合模板（TileCopy / PackedTileCopyTla） |

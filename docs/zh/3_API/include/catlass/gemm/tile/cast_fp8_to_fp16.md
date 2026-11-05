@@ -12,7 +12,7 @@
 
 与 `TileCastInt8ToFp16Dequant` 的区别在于 Dequant 实现不同（FP8 使用查表/位运算），且支持 ColumnMajor 排布。
 
-> **限制**：仅支持 AtlasA2 架构（`CATLASS_ARCH == 2201`）。
+> **限制**：仅支持 Atlas A2 架构（`CATLASS_ARCH == 2201`）。
 
 ## 模板原型
 

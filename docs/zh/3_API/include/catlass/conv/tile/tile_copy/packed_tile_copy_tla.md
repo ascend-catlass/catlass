@@ -6,9 +6,9 @@
 
 ## 功能说明
 
-`PackedTileCopyTla` 是 Conv 搬运聚合的 TLA 版本（AtlasA2 + Ascend950）。从 `ConvType`（Element + LayoutTag）出发，通过 `detail::TagToLayout_t` 自动推导所有中间 L1/L0A/L0B/L0C Layout，并组合 TLA 搬运子组件。
+`PackedTileCopyTla` 是 Conv 搬运聚合的 TLA 版本（Atlas A2 + Ascend 950）。从 `ConvType`（Element + LayoutTag）出发，通过 `detail::TagToLayout_t` 自动推导所有中间 L1/L0A/L0B/L0C Layout，并组合 TLA 搬运子组件。
 
-- 适用范围：Atlas A2/A3系列产品、Ascend 950PR&950DT系列产品
+- 适用范围：Atlas A2系列产品、Atlas A3系列产品、Ascend 950PR&950DT系列产品
 - 风格：TLA
 
 ## 模板原型

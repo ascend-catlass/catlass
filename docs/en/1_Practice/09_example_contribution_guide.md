@@ -63,7 +63,7 @@ After creating the example directory, also append `${id}_${op_name}` to the `EXA
 
 ### Build and Testing
 
-Run the following commands to build and test (using Atlas A2 as an example; when the build option `-DCATLASS_ARCH` is not specified, the default architecture is `2201` (Atlas A2/A3 series products)):
+Run the following commands to build and test (using Atlas A2 as an example; when the build option `-DCATLASS_ARCH` is not specified, the default architecture is `2201` (Atlas A2 series products and Atlas A3 series products)):
 
 ```bash
 # Build the operator sample.

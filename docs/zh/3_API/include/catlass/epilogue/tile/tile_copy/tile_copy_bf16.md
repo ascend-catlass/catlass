@@ -8,7 +8,7 @@
 
 `TileCopyBf16` 是 epilogue BF16 特化搬运聚合模板。复用 `TileCopy` 的组装逻辑，但强制将 X/Y/D 的 Element 替换为 `bfloat16_t`。
 
-- 适用范围：Atlas A2/A3系列产品、Ascend 950PR&950DT系列产品
+- 适用范围：Atlas A2系列产品、Atlas A3系列产品、Ascend 950PR&950DT系列产品
 
 ## 模板原型
 

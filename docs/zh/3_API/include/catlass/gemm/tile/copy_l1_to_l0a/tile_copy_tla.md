@@ -1,7 +1,7 @@
 # TileCopyTla（L1 → L0A 偏特化）
 
-> [代码位置](../../../../../../../../include/catlass/gemm/tile/atlasa2/copy_l1_to_l0a.hpp)（AtlasA2）
-> [代码位置](../../../../../../../../include/catlass/gemm/tile/ascend950/copy_l1_to_l0a.hpp)（Ascend950）
+> [代码位置](../../../../../../../../include/catlass/gemm/tile/atlasa2/copy_l1_to_l0a.hpp)（Atlas A2）
+> [代码位置](../../../../../../../../include/catlass/gemm/tile/ascend950/copy_l1_to_l0a.hpp)（Ascend 950）
 
 [TOC]
 
@@ -24,7 +24,7 @@ L1 → L0A 的偏特化通过 SFINAE 匹配：源 tensor 的 Position 为 `Ascen
 
 ## 偏特化实现
 
-### AtlasA2
+### Atlas A2
 
 | 源 Tensor      | 目标 Tensor     | SFINAE 条件                                          | 说明                                  |
 | :------------- | :-------------- | :--------------------------------------------------- | :------------------------------------ |
@@ -34,7 +34,7 @@ L1 → L0A 的偏特化通过 SFINAE 匹配：源 tensor 的 Position 为 `Ascen
 | nZ L1 (int8_t) | zZ L0A (int8_t) | `isnZ<int8_t, LayoutSrc> && iszZ<int8_t, LayoutDst>` | int8_t 转置（LoadDataWithTranspose）  |
 | nZ L1 (float)  | zZ L0A (float)  | `isnZ<float, LayoutSrc> && iszZ<float, LayoutDst>`   | float 转置（LoadData3D + SetFmatrix） |
 
-### Ascend950
+### Ascend 950
 
 | 源 Tensor         | 目标 Tensor        | SFINAE 条件                                                 | 说明                                            |
 | :---------------- | :----------------- | :---------------------------------------------------------- | :---------------------------------------------- |
@@ -43,11 +43,11 @@ L1 → L0A 的偏特化通过 SFINAE 匹配：源 tensor 的 Position 为 `Ascen
 | nZ L1（B8/B4）    | zN L0A（B8/B4）    | `is_one_of_v<Element, int8_t, float8_...> && isnZ && iszN`  | B8/B4 转置拷贝。支持 l0Batch 和 MX Scale 重载   |
 | Vector L1         | L0A                | `isVector<LayoutSrc>`                                       | Vector layout 专用路径                          |
 
-> **注意**：Ascend950 的 TLA L1→L0A 目标 layout 为 zN（非 zZ），且支持 MX Scale 浮点量化场景和 l0Batch 批量搬运。
+> **注意**：Ascend 950 的 TLA L1→L0A 目标 layout 为 zN（非 zZ），且支持 MX Scale 浮点量化场景和 l0Batch 批量搬运。
 
 ## 调用接口
 
-### 基础接口（AtlasA2 / Ascend950 通用）
+### 基础接口（Atlas A2 / Ascend 950 通用）
 
 ```cpp
 template <class TensorDst, class TensorSrc>
@@ -57,7 +57,7 @@ void operator()(TensorDst const &dstTensor, TensorSrc const &srcTensor);
 - `srcTensor`：L1 上的源 tensor（`tla::Tensor<LocalTensor, Layout, Coord, A1>`）
 - `dstTensor`：L0A 上的目标 tensor（`tla::Tensor<LocalTensor, Layout, Coord, A2>`）
 
-### l0Batch 重载（Ascend950 专用）
+### l0Batch 重载（Ascend 950 专用）
 
 ```cpp
 template <class TensorDst, class TensorSrc>
@@ -66,7 +66,7 @@ void operator()(TensorDst const &dstTensor, TensorSrc const &srcTensor, uint32_t
 
 - `l0Batch`：批量搬运的 batch 数，用于多 batch 场景的连续搬运
 
-### MX Scale 重载（Ascend950 专用，zN→zN / B8/B4 nZ→zN）
+### MX Scale 重载（Ascend 950 专用，zN→zN / B8/B4 nZ→zN）
 
 ```cpp
 template <class TensorDst, class TensorSrc, class TensorMxScale>
@@ -77,11 +77,11 @@ void operator()(TensorDst const &dstTensor, TensorSrc const &srcTensor, TensorMx
 - `dstTensor`：L0A 上的目标 tensor，元素类型 `AscendC::mx_fp8_e4m3_t` / `AscendC::mx_fp8_e5m2_t` / `float4_*`，layout 为 zN
 - `scaleTensor`：L1 上的 MX Scale tensor，元素类型 `float8_e8m0_t`，layout 为 zZ（满足 `isMxScaleForzZ` trait）
 
-> **重要**：MX Scale 搬运是 Ascend950 专有能力。在实际 kernel 组装中，scale tensor 由 `PackedMxTileCopyTla` 统一管理。GM 端 scale 数据使用 `tla::MakeMxScaleLayout<ElementMxScale, LayoutTag, isMxScaleB>(rows, cols)` 创建 layout，经 TileCopyTla 搬运到 L1 后自动转换为 zZ 排布，再通过本重载实现 L1→L0A 的带 scale 搬运。
+> **重要**：MX Scale 搬运是 Ascend 950 专有能力。在实际 kernel 组装中，scale tensor 由 `PackedMxTileCopyTla` 统一管理。GM 端 scale 数据使用 `tla::MakeMxScaleLayout<ElementMxScale, LayoutTag, isMxScaleB>(rows, cols)` 创建 layout，经 TileCopyTla 搬运到 L1 后自动转换为 zZ 排布，再通过本重载实现 L1→L0A 的带 scale 搬运。
 
 ## 调用示例
 
-### 基础 zN → zZ 搬运（AtlasA2，TLA）
+### 基础 zN → zZ 搬运（Atlas A2，TLA）
 
 ```cpp
 #include "catlass/gemm/tile/copy_l1_to_l0a.hpp"
@@ -107,7 +107,7 @@ TileCopyTla<Arch::AtlasA2, decltype(srcTensor), decltype(dstTensor)> copyOp;
 copyOp(dstTensor, srcTensor);
 ```
 
-### 转置搬运 nZ → zZ（AtlasA2，TLA）
+### 转置搬运 nZ → zZ（Atlas A2，TLA）
 
 ```cpp
 auto layoutSrc = tla::MakeLayout<half, layout::nZ>(M, K);
@@ -121,10 +121,10 @@ TileCopyTla<Arch::AtlasA2, decltype(srcTensor), decltype(dstTensor)> copyOp;
 copyOp(dstTensor, srcTensor);
 ```
 
-### 基础 zN → zN 搬运（Ascend950，TLA）
+### 基础 zN → zN 搬运（Ascend 950，TLA）
 
 ```cpp
-// Ascend950 目标 layout 为 zN
+// Ascend 950 目标 layout 为 zN
 auto layoutSrc = tla::MakeLayout<half, layout::zN>(M, K);
 auto layoutDst = tla::MakeLayout<half, layout::zN>(M, K);
 
@@ -136,16 +136,16 @@ TileCopyTla<Arch::Ascend950, decltype(srcTensor), decltype(dstTensor)> copyOp;
 copyOp(dstTensor, srcTensor);
 ```
 
-### l0Batch 批量搬运（Ascend950，TLA）
+### l0Batch 批量搬运（Ascend 950，TLA）
 
 ```cpp
 uint32_t l0Batch = 4;
 
-// Ascend950 支持 l0Batch 重载：多 batch 连续搬运
+// Ascend 950 支持 l0Batch 重载：多 batch 连续搬运
 copyOp(dstTensor, srcTensor, l0Batch);
 ```
 
-### MX Scale 搬运（Ascend950，TLA）
+### MX Scale 搬运（Ascend 950，TLA）
 
 ```cpp
 #include "catlass/gemm/tile/copy_l1_to_l0a.hpp"

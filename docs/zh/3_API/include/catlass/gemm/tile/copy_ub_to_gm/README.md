@@ -8,15 +8,15 @@
 
 UB→GM 搬运模块，负责将数据从 UB（Unified Buffer）写回 GM（Global Memory）。RowMajor 排布数据使用 `CopyUb2Gm`（非 TLA）、`TileCopyTla`（TLA RowMajor）或 `TileCopyTlaExt`（TLA PaddingRowMajor）。
 
-> **限制**：仅支持 AtlasA2 架构（`CATLASS_ARCH == 2201`）。
+> **限制**：仅支持 Atlas A2 架构（`CATLASS_ARCH == 2201`）。
 
 ## API 清单
 
 | API                                      | 风格    | 适用硬件 | Layout          | 说明                           |
 | :--------------------------------------- | :------ | :------- | :-------------- | :----------------------------- |
-| [CopyUb2Gm](./copy_ub_to_gm.md)          | 非 TLA  | AtlasA2  | RowMajor        | UB RowMajor → GM RowMajor      |
-| [TileCopyTla](./tile_copy_tla.md)        | TLA     | AtlasA2  | RowMajor        | TLA 封装，RowMajor 目标        |
-| [TileCopyTlaExt](./tile_copy_tla_ext.md) | TLA Ext | AtlasA2  | PaddingRowMajor | TLA 封装，PaddingRowMajor 目标 |
+| [CopyUb2Gm](./copy_ub_to_gm.md)          | 非 TLA  | Atlas A2  | RowMajor        | UB RowMajor → GM RowMajor      |
+| [TileCopyTla](./tile_copy_tla.md)        | TLA     | Atlas A2  | RowMajor        | TLA 封装，RowMajor 目标        |
+| [TileCopyTlaExt](./tile_copy_tla_ext.md) | TLA Ext | Atlas A2  | PaddingRowMajor | TLA 封装，PaddingRowMajor 目标 |
 
 ## 调用示例
 

@@ -1,4 +1,4 @@
-# Introduction to the AtlasA2 GEMM Hardware Instruction Set
+# Introduction to the Atlas A2 GEMM Hardware Instruction Set
 
 ## API
 

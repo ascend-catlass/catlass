@@ -8,7 +8,7 @@
 
 `CopyL1ToL0B` 实现 Conv 场景下将 Filter（卷积核）数据从 L1 搬运到 L0B（非 TLA 风格）。使用 `LoadData2D` 将 `CI1KHKWCOCI0` 布局转为 `nZ` 分形格式。
 
-- 适用范围：AtlasA2
+- 适用范围：Atlas A2
 - 风格：非 TLA
 
 ## 模板原型

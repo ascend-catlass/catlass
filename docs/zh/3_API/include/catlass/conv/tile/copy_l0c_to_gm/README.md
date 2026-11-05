@@ -12,8 +12,8 @@
 
 | API                                       | 风格   | 适用硬件           | 说明                          |
 | :---------------------------------------- | :----- | :----------------- | :---------------------------- |
-| [CopyL0CToGm](./copy_l0c_to_gm.md)        | 非 TLA | AtlasA2            | Fixpipe + F322F16/BF16 + ReLU |
-| [CopyL0CToGmTla](./copy_l0c_to_gm_tla.md) | TLA    | AtlasA2, Ascend950 | TLA 版本                      |
+| [CopyL0CToGm](./copy_l0c_to_gm.md)        | 非 TLA | Atlas A2            | Fixpipe + F322F16/BF16 + ReLU |
+| [CopyL0CToGmTla](./copy_l0c_to_gm_tla.md) | TLA    | Atlas A2, Ascend 950 | TLA 版本                      |
 
 ## 调用示例
 

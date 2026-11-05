@@ -29,7 +29,7 @@ struct CopyUb2L1Tla;
 
 | 模板参数    | 说明                                  |
 | :---------- | :------------------------------------ |
-| `ArchTag`   | 架构标签，仅 Ascend950 有特化         |
+| `ArchTag`   | 架构标签，仅 Ascend 950 有特化         |
 | `TensorSrc` | 源 TLA Tensor，UB 位置，zN 非对齐布局 |
 | `TensorDst` | 目的 TLA Tensor，L1 位置，zN 对齐布局 |
 

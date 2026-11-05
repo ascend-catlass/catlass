@@ -12,16 +12,16 @@ L0C→GM 搬运模块，负责将矩阵乘累加结果从 L0C（Accumulator Buff
 
 | API                                                    | 风格   | 适用硬件            | 说明                                  |
 | :----------------------------------------------------- | :----- | :------------------ | :------------------------------------ |
-| [CopyL0CToGm](./copy_l0c_to_gm.md)                     | 非 TLA | AtlasA2 / Ascend950 | L0C→GM，支持 RowMajor / zN / NDC1HWC0 |
-| [CopyL0CToGmTla](./tile_copy_tla.md)                   | TLA    | AtlasA2 / Ascend950 | L0C→GM TLA 封装，SFINAE 自动派发      |
-| [CopyL0CToGmSparseTla](./copy_l0c_to_gm_sparse_tla.md) | TLA    | AtlasA2             | Sparse GEMM L0C→GM 搬运，Fixpipe v220 |
+| [CopyL0CToGm](./copy_l0c_to_gm.md)                     | 非 TLA | Atlas A2 / Ascend 950 | L0C→GM，支持 RowMajor / zN / NDC1HWC0 |
+| [CopyL0CToGmTla](./tile_copy_tla.md)                   | TLA    | Atlas A2 / Ascend 950 | L0C→GM TLA 封装，SFINAE 自动派发      |
+| [CopyL0CToGmSparseTla](./copy_l0c_to_gm_sparse_tla.md) | TLA    | Atlas A2             | Sparse GEMM L0C→GM 搬运，Fixpipe v220 |
 
 ## 适用硬件型号
 
 | 架构                | 非 TLA                   | TLA                                      |
 | :------------------ | :----------------------- | :--------------------------------------- |
-| AtlasA2（`2201`）   | RowMajor / zN / NDC1HWC0 | RowMajor / zN (NO_QUANT)                 |
-| Ascend950（`3510`） | RowMajor / zN / NDC1HWC0 | RowMajor / zN + PER_TENSOR / PER_CHANNEL |
+| Atlas A2（`2201`）   | RowMajor / zN / NDC1HWC0 | RowMajor / zN (NO_QUANT)                 |
+| Ascend 950（`3510`） | RowMajor / zN / NDC1HWC0 | RowMajor / zN + PER_TENSOR / PER_CHANNEL |
 
 ## 调用示例
 

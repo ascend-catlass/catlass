@@ -17,7 +17,7 @@
 
 ```cpp
 template <
-    class ArchTag_,          // 架构标签（静态断言仅 Ascend950）
+    class ArchTag_,          // 架构标签（静态断言仅 Ascend 950）
     class ElementSrc_,       // 源元素类型（静态断言 int32_t）
     class ElementScale_,     // per-channel scale 元素类型（half/bfloat16_t/float）
     class ElementPerToken_,  // per-token scale 元素类型（half/bfloat16_t/float）

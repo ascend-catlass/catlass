@@ -9,7 +9,7 @@ This document covers the 4 new templates of the Flash Attention inference (FAI) 
 | `Epilogue::EpilogueAtlasA2OnlineSoftmaxCopySumMax` | BlockEpilogue partial specialization | `include/catlass/epilogue/block/block_epilogue_online_softmax_copy_glm.hpp` |
 | `Epilogue::EpilogueAtlasA2RescaleOWithoutDivSum` | BlockEpilogue partial specialization | `include/catlass/epilogue/block/block_epilogue_rescale_o_no_div_rowsum.hpp` |
 
-`EpilogueAscend950OnlineSoftmaxCopySumMax` is the Ascend950 specialization, which directly inherits the AtlasA2 implementation (`using Base::Base`) and is not expanded separately.
+`EpilogueAscend950OnlineSoftmaxCopySumMax` is the Ascend 950 specialization, which directly inherits the Atlas A2 implementation (`using Base::Base`) and is not expanded separately.
 
 ## Series Overview
 

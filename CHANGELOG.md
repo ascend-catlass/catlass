@@ -7,10 +7,10 @@
 #### CATLASS Python
 
 - 关键特性
-  - **SIMD**：面向 Ascend950 扩展 SIMD OP 及配套搬运与矩阵计算能力：补齐对齐连续、对齐非连续（DataBlock 跨步）、非对齐连续三类场景下 Load/Store 的 `PostModeUpdate` 模式，搬运完成后按步长自动更新地址；支持 Histogram 的 `FREQUENCY` 与 `ACCUMULATE` 两种模式；L0C→GM 与 L0C→UB 搬出均支持随路 ReLU（`relu_enable`）；补齐 PER_TENSOR / PER_CHANNEL 量化及配套 scale 搬入、`tla.gather` Reg→Reg、无符号整数相关搬运/Compare/Cast，以及 L1→BiasTable 与普通 Matmul 带 Bias。
+  - **SIMD**：面向 Ascend 950 扩展 SIMD OP 及配套搬运与矩阵计算能力：补齐对齐连续、对齐非连续（DataBlock 跨步）、非对齐连续三类场景下 Load/Store 的 `PostModeUpdate` 模式，搬运完成后按步长自动更新地址；支持 Histogram 的 `FREQUENCY` 与 `ACCUMULATE` 两种模式；L0C→GM 与 L0C→UB 搬出均支持随路 ReLU（`relu_enable`）；补齐 PER_TENSOR / PER_CHANNEL 量化及配套 scale 搬入、`tla.gather` Reg→Reg、无符号整数相关搬运/Compare/Cast，以及 L1→BiasTable 与普通 Matmul 带 Bias。
   - **SIMT**：正式上线 SIMT 编程能力：通过 `tla.vec.func(mode="simt", thread_block_dim=...)` 描述逐线程标量计算，支持线程坐标、跨 Block 标量捕获与任务划分、GM/UB 逐线程访问，以及算术、比较、选择、类型转换与浮点数学等线程级运算，并可与 Cube/SIMD 同 Kernel 混用。
   - **框架能力**：支持以类实例组织 Kernel：类内可封装 `tla.kernel` 并访问成员变量，`tla.compile` 可编译类实例或其绑定方法，实例属性作为编译期常量参与编排与缓存。
-- 更多样例（新增 Ascend950 Python 样例）
+- 更多样例（新增 Ascend 950 Python 样例）
   - [Flash Attention Infer](https://gitcode.com/cann/catlass/blob/v2.2.0/python/tla_dsl/examples/end_to_end/flash_attention_infer/README.md)：在既有 nomask 路径上完善 KV 分页（块表寻址）与独立 causal mask kernel，覆盖 FP16/BF16、BSND/TND、GQA、页边界与尾块场景。
   - [MX Matmul](https://gitcode.com/cann/catlass/blob/v2.2.0/python/tla_dsl/examples/end_to_end/mx_mmad/README.md)：演示 MX FP8/FP4 数据准备、E8M0 缩放块、GM→L1→L0 带 scale 搬运、`tla.mmad_mx` 与 FP32 结果回写。
   - [SIMT 多 Block 协作](https://gitcode.com/cann/catlass/blob/v2.2.0/python/tla_dsl/examples/end_to_end/simt/multiple_blocks_simt/README.md)：通过 3D 线程坐标线性化与全局步长，将任务分配至多个 Block，覆盖不同 Block 数、线程配置及非整除长度。
@@ -20,15 +20,15 @@
 
 #### CATLASS C++
 
-- 更多样例（新增 Ascend950 样例）
-  - [Ascend950 HSTU Infer](https://gitcode.com/cann/catlass/blob/v2.2.0/examples/83_ascend950_hstu_infer/README.md)：实现 `S=QKᵀ`、`P=siluScale×S×sigmoid(S)`、`O=PV` 计算链路，支持可选 causal 乘法掩码，覆盖 NTD/TND 布局、变长序列与 Paged KV Cache。
+- 更多样例（新增 Ascend 950 样例）
+  - [Ascend 950 HSTU Infer](https://gitcode.com/cann/catlass/blob/v2.2.0/examples/83_ascend950_hstu_infer/README.md)：实现 `S=QKᵀ`、`P=siluScale×S×sigmoid(S)`、`O=PV` 计算链路，支持可选 causal 乘法掩码，覆盖 NTD/TND 布局、变长序列与 Paged KV Cache。
 - 文档资料
-  - 对齐 CanImplement、Host 输入检查与 README 约束：建立输入支持矩阵，使数据类型、布局、形状、对齐、分页和 Mask 约束与实现一致；对非法输入在 Kernel 启动前给出明确诊断，并补齐合法边界与非法输入回归用例（首批覆盖含 Basic Matmul、Grouped Matmul、Optimized Matmul、Quant 系列、Ascend950 相关样例、X-Attention、Basic SYRK 等）。
+  - 对齐 CanImplement、Host 输入检查与 README 约束：建立输入支持矩阵，使数据类型、布局、形状、对齐、分页和 Mask 约束与实现一致；对非法输入在 Kernel 启动前给出明确诊断，并补齐合法边界与非法输入回归用例（首批覆盖含 Basic Matmul、Grouped Matmul、Optimized Matmul、Quant 系列、Ascend 950 相关样例、X-Attention、Basic SYRK 等）。
 - Bugfix&优化
   - 优化 [Broadcast Matmul PerBlock Quant](https://gitcode.com/cann/catlass/blob/v2.2.0/examples/62_ascend950_broadcast_matmul_perblock_quant/README.md) 与 [A8W4 Grouped MX Matmul](https://gitcode.com/cann/catlass/blob/v2.2.0/examples/74_ascend950_weight_quant_a8w4_grouped_mx_matmul/README.md) 的 golden 生成：E4M3 LUT 改为分块向量化 + 二分最近邻，消除 FP4 索引重复重算；产物逐字节一致，Broadcast Matmul PerBlock Quant 单用例耗时由约 37 分钟降至约数秒量级。
   - 修复 [MLA](https://gitcode.com/cann/catlass/blob/v2.2.0/examples/19_mla/README.md) 以加代乘原子重缩放在零值、非规格数与指数下溢边界的精度问题，并补齐 UB 复用同步、移除可能误清合法大数的极值清零逻辑。
   - 修复 Conv3d/Conv2d 输出尺寸计算在 `uint32` 下的无符号下溢，非法 shape（含 `stride=0`）在 CanImplement / Host 入口拦截。
-  - 修复 [Ascend950 Flash Attention Chunk Prefill](https://gitcode.com/cann/catlass/blob/v2.2.0/examples/70_ascend950_flash_attention_chunk_prefill/README.md) 在 `kvHeads != 1` 时的精度问题，并补充约束与 README。
+  - 修复 [Ascend 950 Flash Attention Chunk Prefill](https://gitcode.com/cann/catlass/blob/v2.2.0/examples/70_ascend950_flash_attention_chunk_prefill/README.md) 在 `kvHeads != 1` 时的精度问题，并补充约束与 README。
   - 修复 [A8W4 MX Matmul](https://gitcode.com/cann/catlass/blob/v2.2.0/examples/59_ascend950_a8w4_mx_matmul/README.md) optest 与 example 对齐问题。
   - 修复 catlass_cppgen EVG 模板遗漏 Bias 入参的问题。
 
@@ -37,7 +37,7 @@
 #### CATLASS Python
 
 - 关键特性
-  - 面向 Ascend950 扩展低精度计算与寄存器编程能力：
+  - 面向 Ascend 950 扩展低精度计算与寄存器编程能力：
     - 支持 MXFP8/MXFP4 矩阵乘、E8M0 缩放块及 MX 布局，新增 `copy(..., scale=...)` 和 `mmad_mx` 接口。
     - 扩展寄存器数据搬运能力，支持连续/非连续对齐搬入、多种 LoadDist 模式，以及单元素和双寄存器交织搬出。
     - 新增带 Mask 的寄存器向量/标量移位操作，支持有符号右移。
@@ -53,8 +53,8 @@
 
 #### CATLASS C++
 
-- 更多样例（新增 Ascend950 样例 1 个, AtlasA2/AtlasA3 样例1个）
-  - [Ascend950 Basic SYRK](https://gitcode.com/cann/catlass/blob/v2.1.0/examples/82_ascend950_basic_syrk/README.md)：支持 `Y = X·Xᵀ` 对称秩更新，仅计算下三角分块，并通过一次计算完成对称位置写回。
+- 更多样例（新增 Ascend 950 样例 1 个，Atlas A2系列产品、Atlas A3系列产品样例 1 个）
+  - [Ascend 950 Basic SYRK](https://gitcode.com/cann/catlass/blob/v2.1.0/examples/82_ascend950_basic_syrk/README.md)：支持 `Y = X·Xᵀ` 对称秩更新，仅计算下三角分块，并通过一次计算完成对称位置写回。
   - [Atlas A2 X-Attention](https://gitcode.com/cann/catlass/blob/v2.1.0/examples/78_x_attention/README.md)：提供数据生成、Tiling、Kernel、Host 和 PyTorch 参考实现，融合 shared/unshared KV 注意力并支持两种缓存组合。
 - Bugfix&优化
   - 修复 Basic Conv2D 大 padding 与输出通道非对齐场景的越界和精度问题。
@@ -87,26 +87,26 @@
 - 关键特性
   - 新增 [CATLASS官方文档站](https://catlass.readthedocs.io/zh-cn/latest/)，为开发者提供一站式学习与开发体验
   - 新增 [catlass_cppgen 代码生成框架](https://gitcode.com/cann/catlass/blob/v2.0.0/python/catlass_cppgen/README.md)：基于 Python 的算子代码生成框架，支持定义算子参数、选择优化策略并自动生成 C++ 核函数代码，覆盖 GEMM 与 GroupGEMM 类算子，配套 EVG、OpTensor 等 API 文档与单元测试
-- 更多样例（新增样例 9 个，其中 Ascend950 样例 6 个、AtlasA2 样例 3 个）
-  - [Ascend950 Svd Quant Matmul](https://gitcode.com/cann/catlass/blob/v2.0.0/examples/61_ascend950_svd_quant_matmul/README.md)：SVD 低秩分解量化，主通路 W4A4 量化 + 低秩旁路高精度计算
-  - [Ascend950 Dual-Level Quant MX BatchMatmul](https://gitcode.com/cann/catlass/blob/v2.0.0/examples/63_ascend950_dual_level_quant_mx_batch_matmul/README.md)：二级量化 + MXFP4 BatchMatmul
-  - [Ascend950 Grouped MXFP8 Matmul SwiGLU MX Quant](https://gitcode.com/cann/catlass/blob/v2.0.0/examples/65_ascend950_fp8_mx_grouped_matmul_slice_m_swiglu_mx_quant/README.md)：Grouped MXFP8 矩阵乘 + SwiGLU + MXFP8 量化
-  - [Ascend950 Grouped MXFP8 Matmul Finalize Routing](https://gitcode.com/cann/catlass/blob/v2.0.0/examples/71_ascend950_fp8_mx_grouped_matmul_finalize_routing/README.md)：Grouped MXFP8 矩阵乘 + Finalize Routing 融合，提供确定性与非确定性两个版本
-  - [Ascend950 A8W4 Grouped MX Matmul](https://gitcode.com/cann/catlass/blob/v2.0.0/examples/74_ascend950_weight_quant_a8w4_grouped_mx_matmul/README.md)：伪量化场景的 A8W4 Grouped MX 矩阵乘
-  - [Ascend950 Grouped Matmul Slice M Gelu](https://gitcode.com/cann/catlass/blob/v2.0.0/examples/80_ascend950_grouped_matmul_slice_m_gelu/README.md)：Grouped Matmul SliceM + Gelu 融合
-  - [AtlasA2 Symm](https://gitcode.com/cann/catlass/blob/v2.0.0/examples/75_symm/README.md)：对称矩阵乘
-  - [AtlasA2 Trmm](https://gitcode.com/cann/catlass/blob/v2.0.0/examples/76_trmm/README.md)：三角矩阵乘
-  - [AtlasA2 Planar Complex Matmul](https://gitcode.com/cann/catlass/blob/v2.0.0/examples/77_planar_complex_matmul/README.md)：平面复数矩阵乘，输出实部与虚部两路结果
+- 更多样例（新增样例 9 个，其中 Ascend 950 样例 6 个、Atlas A2 样例 3 个）
+  - [Ascend 950 Svd Quant Matmul](https://gitcode.com/cann/catlass/blob/v2.0.0/examples/61_ascend950_svd_quant_matmul/README.md)：SVD 低秩分解量化，主通路 W4A4 量化 + 低秩旁路高精度计算
+  - [Ascend 950 Dual-Level Quant MX BatchMatmul](https://gitcode.com/cann/catlass/blob/v2.0.0/examples/63_ascend950_dual_level_quant_mx_batch_matmul/README.md)：二级量化 + MXFP4 BatchMatmul
+  - [Ascend 950 Grouped MXFP8 Matmul SwiGLU MX Quant](https://gitcode.com/cann/catlass/blob/v2.0.0/examples/65_ascend950_fp8_mx_grouped_matmul_slice_m_swiglu_mx_quant/README.md)：Grouped MXFP8 矩阵乘 + SwiGLU + MXFP8 量化
+  - [Ascend 950 Grouped MXFP8 Matmul Finalize Routing](https://gitcode.com/cann/catlass/blob/v2.0.0/examples/71_ascend950_fp8_mx_grouped_matmul_finalize_routing/README.md)：Grouped MXFP8 矩阵乘 + Finalize Routing 融合，提供确定性与非确定性两个版本
+  - [Ascend 950 A8W4 Grouped MX Matmul](https://gitcode.com/cann/catlass/blob/v2.0.0/examples/74_ascend950_weight_quant_a8w4_grouped_mx_matmul/README.md)：伪量化场景的 A8W4 Grouped MX 矩阵乘
+  - [Ascend 950 Grouped Matmul Slice M Gelu](https://gitcode.com/cann/catlass/blob/v2.0.0/examples/80_ascend950_grouped_matmul_slice_m_gelu/README.md)：Grouped Matmul SliceM + Gelu 融合
+  - [Atlas A2 Symm](https://gitcode.com/cann/catlass/blob/v2.0.0/examples/75_symm/README.md)：对称矩阵乘
+  - [Atlas A2 Trmm](https://gitcode.com/cann/catlass/blob/v2.0.0/examples/76_trmm/README.md)：三角矩阵乘
+  - [Atlas A2 Planar Complex Matmul](https://gitcode.com/cann/catlass/blob/v2.0.0/examples/77_planar_complex_matmul/README.md)：平面复数矩阵乘，输出实部与虚部两路结果
 - 工具支持
   - [optest](https://gitcode.com/cann/catlass/blob/v2.0.0/tests/optest/README.md) 接口扩展至 72 个，新增 Symm、Trmm、PlanarComplexMatmul、GroupedMatmulSliceMGelu、A8W4GroupedMxMatmul 等 10 个接口
-  - Agent Skill 新增 [CANNBot CATLASS C++](https://gitcode.com/cann/cannbot/blob/master/plugins-official/catlass-op-generator/quickstart.md)、CANNBot CATLASS Python 算子自动生成工具链，及[A2/A3 向 Ascend950 迁移工作流](https://gitcode.com/cann/catlass/tree/v2.0.0/.agents/skills/catlass-ascend950-migration)和[Tile 层级单元测试编写技能](https://gitcode.com/cann/catlass/tree/v2.0.0/.agents/skills/catlass-tile-level-ut)
+  - Agent Skill 新增 [CANNBot CATLASS C++](https://gitcode.com/cann/cannbot/blob/master/plugins-official/catlass-op-generator/quickstart.md)、CANNBot CATLASS Python 算子自动生成工具链，及[A2/A3 向 Ascend 950 迁移工作流](https://gitcode.com/cann/catlass/tree/v2.0.0/.agents/skills/catlass-ascend950-migration)和[Tile 层级单元测试编写技能](https://gitcode.com/cann/catlass/tree/v2.0.0/.agents/skills/catlass-tile-level-ut)
 - 文档资料
   - 更新 README 中 gcc 版本约束说明
   - 更新 Gemm/Tile UT 依赖说明
 - Bugfix&优化
   - MLA 算子优化：加入 `AMLATp1Spec` 特化Kernel模板，采取KV-split 均衡分核策略，并修复golden类型读取错误问题
-  - 修复 Ascend950 A8W4 MxMatmul 样例在非对齐场景下的精度问题
-  - 修复 Ascend950 MxGroupedMatmulSliceM 样例在 MxFp4 类型和transB场景下的精度问题
+  - 修复 Ascend 950 A8W4 MxMatmul 样例在非对齐场景下的精度问题
+  - 修复 Ascend 950 MxGroupedMatmulSliceM 样例在 MxFp4 类型和transB场景下的精度问题
   - 修复 optest下的Quant Optimized Matmul Tla 在非对齐 shape 下 JIT 编译失败的问题
 
 ## CATLASS 1.X
@@ -114,37 +114,37 @@
 ### CATLASS 1.6.0
 
 - 关键特性
-  - 全面支持 **Ascend950**，新增全套 [Tile层组件](https://gitcode.com/cann/catlass/tree/v1.6.0/include/catlass/gemm/tile/ascend950)（文档见[Gemm/Tile类模板概述](https://gitcode.com/cann/catlass/blob/v1.6.0/docs/zh/3_API/include/catlass/gemm/tile/README.md)），兼容 Atlas A2/A3，并新增对 **Atlas A2/Atlas A3** 及 **Ascend950** 架构下Gemm类全量Tile层组件的[**单元测试**](https://gitcode.com/cann/catlass/blob/v1.6.0/tests/unittest/catlass/gemm/tile/README.md)
-  - 新增 [**MXFP8 / MXFP4 量化模板体系**](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/53_ascend950_fp8_mx_matmul/README.md)，基于Ascend950架构支持 MXFP8/MXFP4 量化矩阵乘、A8W4 MX矩阵乘等样例
+  - 全面支持 **Ascend 950**，新增全套 [Tile层组件](https://gitcode.com/cann/catlass/tree/v1.6.0/include/catlass/gemm/tile/ascend950)（文档见[Gemm/Tile类模板概述](https://gitcode.com/cann/catlass/blob/v1.6.0/docs/zh/3_API/include/catlass/gemm/tile/README.md)），兼容 Atlas A2系列产品、Atlas A3系列产品，并新增对 **Atlas A2/Atlas A3** 及 **Ascend 950** 架构下Gemm类全量Tile层组件的[**单元测试**](https://gitcode.com/cann/catlass/blob/v1.6.0/tests/unittest/catlass/gemm/tile/README.md)
+  - 新增 [**MXFP8 / MXFP4 量化模板体系**](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/53_ascend950_fp8_mx_matmul/README.md)，基于Ascend 950架构支持 MXFP8/MXFP4 量化矩阵乘、A8W4 MX矩阵乘等样例
   - 新增 [**基于Mutex 同步原语的 BlockMmad**](https://gitcode.com/cann/catlass/blob/v1.6.0/include/catlass/gemm/block/block_mmad_pingpong_mutex_tla.hpp)，提供更简化的block组件代码实现
   - 新增 [**EVG 声明式后处理框架**](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/64_ascend950_matmul_evg/README.md)，支持以声明式方式描述 Epilogue 后处理逻辑
   - 支持使用 AscendC CMake 构建系统编译
-- 更多样例 （新增Ascend950 样例16个，AtlasA2/AtlasA3 样例1个）
-  - [Ascend950 Flash Attention Chunk Prefill](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/70_ascend950_flash_attention_chunk_prefill/README.md)
-  - [Ascend950 MXFP8 Matmul](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/53_ascend950_fp8_mx_matmul/README.md)
-  - [Ascend950 MXFP4 Matmul](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/54_ascend950_fp4_mx_matmul/README.md)
-  - [Ascend950 A8W4 MX Matmul](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/59_ascend950_a8w4_mx_matmul/README.md)
-  - [Ascend950 MXFP8 BatchMatmul](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/58_ascend950_fp8_mx_batch_matmul/README.md)
-  - [Ascend950 MXFP8/MXFP4 GroupedMatmul](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/55_ascend950_mx_grouped_matmul_slice_m/README.md)
-  - [Ascend950 Matmul Full Dequant](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/57_ascend950_matmul_full_dequant/README.md)
-  - [Ascend950 Broadcast Matmul PerBlock Quant](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/62_ascend950_broadcast_matmul_perblock_quant/README.md)
-  - [Ascend950 matmul Evg](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/64_ascend950_matmul_evg/README.md)
-  - [Ascend950 GroupedMatmul](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/60_ascend950_grouped_matmul_slice_m/README.md)
-  - [Ascend950 BatchedMatmul](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/67_ascend950_batched_matmul/README.md)
-  - [Ascend950 Matmul FullLoadA](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/73_ascend950_matmul_full_loadA/README.md)
-  - [Ascend950 StreamK Matmul](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/66_ascend950_streamk_matmul/README.md)
-  - [Ascend950 MultiCoreSplitkMatmul](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/68_ascend950_multi_core_splitk_matmul/README.md)
-  - [Ascend950 TailMultiCoreSplitkMatmul](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/69_ascend950_tail_multi_core_splitk_matmul/README.md)
-  - [Ascend950 Conv2d](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/56_ascend950_basic_conv2d_tla/README.md)
-  - [AtlasA2 Quant Matmul 多核切K](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/52_quant_multi_core_splitk_matmul_tla/README.md)
+- 更多样例 （新增Ascend 950 样例16个，Atlas A2系列产品、Atlas A3系列产品样例1个）
+  - [Ascend 950 Flash Attention Chunk Prefill](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/70_ascend950_flash_attention_chunk_prefill/README.md)
+  - [Ascend 950 MXFP8 Matmul](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/53_ascend950_fp8_mx_matmul/README.md)
+  - [Ascend 950 MXFP4 Matmul](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/54_ascend950_fp4_mx_matmul/README.md)
+  - [Ascend 950 A8W4 MX Matmul](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/59_ascend950_a8w4_mx_matmul/README.md)
+  - [Ascend 950 MXFP8 BatchMatmul](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/58_ascend950_fp8_mx_batch_matmul/README.md)
+  - [Ascend 950 MXFP8/MXFP4 GroupedMatmul](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/55_ascend950_mx_grouped_matmul_slice_m/README.md)
+  - [Ascend 950 Matmul Full Dequant](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/57_ascend950_matmul_full_dequant/README.md)
+  - [Ascend 950 Broadcast Matmul PerBlock Quant](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/62_ascend950_broadcast_matmul_perblock_quant/README.md)
+  - [Ascend 950 matmul Evg](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/64_ascend950_matmul_evg/README.md)
+  - [Ascend 950 GroupedMatmul](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/60_ascend950_grouped_matmul_slice_m/README.md)
+  - [Ascend 950 BatchedMatmul](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/67_ascend950_batched_matmul/README.md)
+  - [Ascend 950 Matmul FullLoadA](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/73_ascend950_matmul_full_loadA/README.md)
+  - [Ascend 950 StreamK Matmul](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/66_ascend950_streamk_matmul/README.md)
+  - [Ascend 950 MultiCoreSplitkMatmul](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/68_ascend950_multi_core_splitk_matmul/README.md)
+  - [Ascend 950 TailMultiCoreSplitkMatmul](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/69_ascend950_tail_multi_core_splitk_matmul/README.md)
+  - [Ascend 950 Conv2d](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/56_ascend950_basic_conv2d_tla/README.md)
+  - [Atlas A2 Quant Matmul 多核切K](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/52_quant_multi_core_splitk_matmul_tla/README.md)
 - 工具支持
   - 新增 [算子级测试框架（optest）](https://gitcode.com/cann/catlass/blob/v1.6.0/tests/optest/README.md)，支持 JIT 与 Prebuilt 两种模式，使用弱符号机制统一 prebuilt kernel 加载，并完成 63 个存量及新增样例的 torch_catlass 测试接口接入，覆盖 Matmul、GroupedMatmul、Flash Attention等算子类型
-  - [msTuner 工具增强](https://gitcode.com/cann/catlass/blob/v1.6.0/tools/tuner/README.md)：支持 -xasc 编译及 Ascend950 架构寻优
+  - [msTuner 工具增强](https://gitcode.com/cann/catlass/blob/v1.6.0/tools/tuner/README.md)：支持 -xasc 编译及 Ascend 950 架构寻优
   - 新增 [Agent Skill 开发工具](https://gitcode.com/cann/catlass/tree/v1.6.0/.agents)，当前具备支持生成样例torch接口、生成样例optest交付件等场景的自动化功能
   - 新增 CI/构建辅助设施：pre-commit 脚本、依赖描述文件等
 - 文档资料
   - 新增 [EVG 声明式后处理框架文档](https://gitcode.com/cann/catlass/tree/v1.6.0/docs/zh/2_Design/03_evg/01_evg_design.md)
-  - 新增 [存量非 TLA 算子向 Ascend950 平台迁移文档](https://gitcode.com/cann/catlass/tree/v1.6.0/docs/zh/1_Practice/others/migration_from_atlasA2_to_Ascend950_guideline.md)
+  - 新增 [存量非 TLA 算子向 Ascend 950 平台迁移文档](https://gitcode.com/cann/catlass/tree/v1.6.0/docs/zh/1_Practice/others/migration_from_atlasA2_to_Ascend950_guideline.md)
   - [tile 相关 API 文档](https://gitcode.com/cann/catlass/tree/v1.6.0/docs/zh/3_API/README.md) 补充完善
   - 文档新增中英文目录，完成多轮纠错整改及跳转链接修复
 - Bugfix&优化
@@ -157,20 +157,20 @@
 ### CATLASS 1.5.0
 
 - 关键特性
-  - 新增支持 **Ascend950** 架构与配套底层模板组件
+  - 新增支持 **Ascend 950** 架构与配套底层模板组件
   - **TLA** 增强：引入 `origin_shape`，新增 `TileView`、`MakeTensorLike`、Tensor `operator()` 等接口，并完善布局与张量表达
   - **Matmul 泛化工程**扩展：支持 **W8A8 Per-Token + Per-Channel** 动态量化路径、**分批编译**，并补充相关设计文档
   - **FixPipe** 能力延伸：新增/完善 Matmul FixPipe 优化与 **GMM + FixPipe + Dequant** 等组合模板与样例
   - 适配 **CANN 9.0.0.beta2**；在使用 **g++** 与毕昇工具链链接时，需显式链接 **profapi**（编译器非兼容性变更说明）
-  - 新增 **单元测试**（unittest）与 **CI** 对 Ascend950 的适配
+  - 新增 **单元测试**（unittest）与 **CI** 对 Ascend 950 的适配
 - 更多样例
-  - [Ascend950 基础 Matmul](https://gitcode.com/cann/catlass/blob/v1.5.0/examples/43_ascend950_basic_matmul/README.md)
-  - [Ascend950 Matmul FixPipe 优化](https://gitcode.com/cann/catlass/blob/v1.5.0/examples/46_ascend950_matmul_fixpipe_opti/README.md)
-  - [Ascend950 Grouped Matmul SliceM Per-Token Dequant](https://gitcode.com/cann/catlass/blob/v1.5.0/examples/47_ascend950_grouped_matmul_slice_m_per_token_dequant/README.md)
-  - [Ascend950 Grouped Matmul Per-Tensor & Per-Channel Dequant](https://gitcode.com/cann/catlass/blob/v1.5.0/examples/48_ascend950_grouped_matmul_slice_m_per_tensor_per_channel_dequant/README.md)
-  - [Ascend950 Flash Attention 推理](https://gitcode.com/cann/catlass/blob/v1.5.0/examples/49_ascend950_flash_attention_infer/README.md)
-  - [Ascend950 基础 Matmul GEMV](https://gitcode.com/cann/catlass/blob/v1.5.0/examples/50_ascend950_basic_matmul_gemv/README.md)
-  - [Ascend950 Quant Matmul Per-Group & Per-Block TLA](https://gitcode.com/cann/catlass/blob/v1.5.0/examples/51_ascend950_quant_matmul_per_group_per_block_tla/README.md)（Per-Group*Per-Block 量化组合）
+  - [Ascend 950 基础 Matmul](https://gitcode.com/cann/catlass/blob/v1.5.0/examples/43_ascend950_basic_matmul/README.md)
+  - [Ascend 950 Matmul FixPipe 优化](https://gitcode.com/cann/catlass/blob/v1.5.0/examples/46_ascend950_matmul_fixpipe_opti/README.md)
+  - [Ascend 950 Grouped Matmul SliceM Per-Token Dequant](https://gitcode.com/cann/catlass/blob/v1.5.0/examples/47_ascend950_grouped_matmul_slice_m_per_token_dequant/README.md)
+  - [Ascend 950 Grouped Matmul Per-Tensor & Per-Channel Dequant](https://gitcode.com/cann/catlass/blob/v1.5.0/examples/48_ascend950_grouped_matmul_slice_m_per_tensor_per_channel_dequant/README.md)
+  - [Ascend 950 Flash Attention 推理](https://gitcode.com/cann/catlass/blob/v1.5.0/examples/49_ascend950_flash_attention_infer/README.md)
+  - [Ascend 950 基础 Matmul GEMV](https://gitcode.com/cann/catlass/blob/v1.5.0/examples/50_ascend950_basic_matmul_gemv/README.md)
+  - [Ascend 950 Quant Matmul Per-Group & Per-Block TLA](https://gitcode.com/cann/catlass/blob/v1.5.0/examples/51_ascend950_quant_matmul_per_group_per_block_tla/README.md)（Per-Group*Per-Block 量化组合）
   - [Quant Optimized Matmul TLA](https://gitcode.com/cann/catlass/blob/v1.5.0/examples/42_quant_optimized_matmul_tla/README.md)
   - [Quant Matmul Full LoadA TLA](https://gitcode.com/cann/catlass/blob/v1.5.0/examples/44_quant_matmul_full_loadA_tla/README.md)
   - [Strided Batched Matmul TLA](https://gitcode.com/cann/catlass/blob/v1.5.0/examples/45_strided_batched_matmul_tla/README.md)
@@ -184,10 +184,10 @@
   - 泛化工程补充 **MultiCoreSplitK**、**StreamK**、**单核切 K** 等相关说明文档
   - 修复 [ascendc\_dump 文档](https://gitcode.com/cann/catlass/blob/v1.5.0/docs/1_Practice/evaluation_tools/ascendc_dump.md) 中的错误表述
 - Bugfix&优化
-  - 修复 TLA **OriginShape** 与 **Flash Attention Golden** 等相关问题；完善 Ascend950 FA 的 Block/Epilogue 等实现路径
+  - 修复 TLA **OriginShape** 与 **Flash Attention Golden** 等相关问题；完善 Ascend 950 FA 的 Block/Epilogue 等实现路径
   - 调整 [CopyGmToL1](https://gitcode.com/cann/catlass/blob/v1.5.0/include/catlass/gemm/tile/copy_gm_to_l1.hpp) 中 `blockLen` 计算逻辑，无需再为对齐 **C0\_NUM\_PER\_FRACTAL** 做不必要向上取整
   - **Nan 专项**：在 `exp11` 等路径为 **Ki=0** 场景补充清零，避免脏数据影响模型精度
-  - 修复 **CopyL0CToDstQuantMode** 等问题；Ascend950 架构标识由 **3501** 更正为 **3510**
+  - 修复 **CopyL0CToDstQuantMode** 等问题；Ascend 950 架构标识由 **3501** 更正为 **3510**
   - 修复间接头文件引用、License 注释与多处文档笔误；持续消除代码规范告警与风格清理
 
 ### CATLASS 1.4.0

@@ -16,7 +16,7 @@ The FD series adds 3 templates in total:
 | `EpilogueAtlasA2RescaleO_FD<LSE_MODE_>` | BlockEpilogue | `include/catlass/epilogue/block/block_epilogue_rescale_o_FD.hpp` |
 | `EpilogueAtlasA2CombineScale` | BlockEpilogue | `include/catlass/epilogue/block/block_epilogue_combine_scale.hpp` |
 
-Both OnlineSoftmax_FD and CombineScale provide an `EpilogueAscend950*` specialization with the same name at the end of the file (directly inheriting the AtlasA2 version), used to register the Policy name for the 950 platform.
+Both OnlineSoftmax_FD and CombineScale provide an `EpilogueAscend950*` specialization with the same name at the end of the file (directly inheriting the Atlas A2 version), used to register the Policy name for the 950 platform.
 
 ## DispatchPolicy Definition
 

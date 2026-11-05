@@ -19,8 +19,8 @@
 
 | 架构             | `kDirectionAlign`                       | `disableGemv`                             | 说明           |
 | :--------------- | :-------------------------------------- | :---------------------------------------- | :------------- |
-| AtlasA2 (2201)   | `float` + `ColumnMajor`/`nZ` L1A 时开启 | —                                         | K 方向对齐优化 |
-| Ascend950 (3510) | —                                       | L1A 为 `VectorLayout` 时 false，其他 true | GEMV 模式控制  |
+| Atlas A2 (2201)   | `float` + `ColumnMajor`/`nZ` L1A 时开启 | —                                         | K 方向对齐优化 |
+| Ascend 950 (3510) | —                                       | L1A 为 `VectorLayout` 时 false，其他 true | GEMV 模式控制  |
 
 ## 模板原型
 

@@ -27,7 +27,7 @@ struct TileCopyTla {
 
 ## 偏特化实现清单
 
-### AtlasA2（Arch::AtlasA2，CATLASS_ARCH == 2201）
+### Atlas A2（Arch::AtlasA2，CATLASS_ARCH == 2201）
 
 | 方向                    | SFINAE 条件                                             | 实现位置                     | API 文档                                             |
 | :---------------------- | :------------------------------------------------------ | :--------------------------- | :--------------------------------------------------- |
@@ -41,7 +41,7 @@ struct TileCopyTla {
 | GM→UB                   | `isRowMajor<LayoutSrc>` && `isRowMajor<LayoutDst>`      | `atlasa2/copy_gm_to_ub.hpp`  | [copy_gm_to_ub](../copy_gm_to_ub/tile_copy_tla.md)   |
 | UB→GM                   | `isRowMajor<LayoutSrc>` && `isRowMajor<LayoutDst>`      | `atlasa2/copy_ub_to_gm.hpp`  | [copy_ub_to_gm](../copy_ub_to_gm/tile_copy_tla.md)   |
 
-### Ascend950（Arch::Ascend950，CATLASS_ARCH == 3510）
+### Ascend 950（Arch::Ascend950，CATLASS_ARCH == 3510）
 
 | 方向                    | SFINAE 条件                                             | 实现位置                       | API 文档                                             |
 | :---------------------- | :------------------------------------------------------ | :----------------------------- | :--------------------------------------------------- |

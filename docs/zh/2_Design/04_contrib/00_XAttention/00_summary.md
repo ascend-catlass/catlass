@@ -10,7 +10,7 @@
 | [02_fai_split_row_kernel.md](./02_fai_split_row_kernel.md) | FAI SplitRow | 推理 Flash Attention，按行切分免 Combine 的 split-KV 变体 | 4 个 |
 | [03_xfai_kernel.md](./03_xfai_kernel.md) | XFAI | Atlas A2 推理 Flash Attention，AIC QK→AIV Softmax→AIC PV 跨核流水，支持 Paged KV | 5 个 |
 | [04_fd_kernel.md](./04_fd_kernel.md) | FD | XFAI 的深度性能演化版（Flash Attention-Decode 形态），含通用 CombineScale | 3 个 |
-| [05_xa_tla_kernel.md](./05_xa_tla_kernel.md) | XA TLA | Atlas A5（Ascend950）TLA 指令版 Flash Attention，shared/unshared 双形态 | 8 个 |
+| [05_xa_tla_kernel.md](./05_xa_tla_kernel.md) | XA TLA | Atlas A5（Ascend 950）TLA 指令版 Flash Attention，shared/unshared 双形态 | 8 个 |
 
 ## 新增模板清单
 
@@ -53,6 +53,6 @@
 - **02 FAI SplitRow**：按行切分的 split-KV 免合并变体（`CopySumMax` 记录行统计量替代 Combine 步骤）；
 - **03 XFAI**：AIC/AIV 跨核流水"QK→OnlineSoftmax→PV→RescaleO"，`l1BufAddrStart` 共享 L1，`PAGED_CACHE_FLAG` 原生分页 KV，`CombineScale` 收口 split-KV 合并；
 - **04 FD**：XFAI 的深度性能演化版，dm 按周期分区等优化，`CombineScale` 通用化为 `EpilogueAtlasA2CombineScale`；
-- **05 XA TLA**：面向 Atlas A5（Ascend950）的 TLA 指令实现，shared/unshared 两种 expert 形态各配 QK/PV/Softmax 模板。
+- **05 XA TLA**：面向 Atlas A5（Ascend 950）的 TLA 指令实现，shared/unshared 两种 expert 形态各配 QK/PV/Softmax 模板。
 
 各系列的 DispatchPolicy 定义、算法设计（数据布局/流水组织/跨核同步）、系列间差异对比与基于 xllm-ops（https://gitcode.com/xLLM-AI/xllm_ops，`x_attention` / `x_flash_attention_infer`）的真实工程使用示例，详见对应设计文档。

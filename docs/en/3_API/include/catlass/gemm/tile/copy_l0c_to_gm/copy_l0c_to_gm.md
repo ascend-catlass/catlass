@@ -152,7 +152,7 @@ CopyOp copyOp;
 copyOp(dstGmTensor, srcL0CTensor, dstLayout, srcLayout);
 ```
 
-### Ascend950 RowMajor
+### Ascend 950 RowMajor
 
 ```cpp
 using GmType = Gemm::GemmType<half, layout::RowMajor>;
@@ -165,7 +165,7 @@ CopyOp copyOp;
 copyOp(dstGmTensor, srcL0CTensor, dstLayout, srcLayout);
 ```
 
-### Ascend950 zN
+### Ascend 950 zN
 
 ```cpp
 using GmType = Gemm::GemmType<float, layout::zN>;

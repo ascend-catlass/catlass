@@ -1,4 +1,4 @@
-# AtlasA2 Hardware Basics
+# Atlas A2 Hardware Basics
 
 ## Programming Model
 

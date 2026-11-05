@@ -10,7 +10,7 @@
 
 适用于量化推理场景：GM 上存储量化 weight，Prologue 中完成反量化，L0C→GM 写回时进行 per-tensor 量化。
 
-> **限制**：仅 AtlasA2 架构（`CATLASS_ARCH == 2201`）。
+> **限制**：仅 Atlas A2 架构（`CATLASS_ARCH == 2201`）。
 
 ## 引用的 Tile 组件
 

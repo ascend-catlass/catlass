@@ -12,12 +12,12 @@ The tile-layer API of the epilogue acts as a template parameter for the epilogue
 
 | Component| Style| Applicable Hardware| Description|
 | :------ | :------ | :------ | :------ |
-| [copy_gm_to_ub](./copy_gm_to_ub/README.md) | Non-TLA| AtlasA2, Ascend950 | GM to UB copy (CopyGm2Ub, CopyPerTokenScale2Ub, CopyGm2UbAligned)|
-| [copy_gm_to_ub_tla](./copy_gm_to_ub_tla.md) | TLA | AtlasA2, Ascend950 | GM to UB TLA copy (CopyGm2UbTla)|
-| [copy_ub_to_gm](./copy_ub_to_gm/README.md) | Non-TLA| AtlasA2, Ascend950 | UB to GM copy (CopyUb2Gm, CopyUb2GmAligned)|
-| [copy_ub_to_gm_tla](./copy_ub_to_gm_tla.md) | TLA | AtlasA2, Ascend950 | UB to GM TLA copy (CopyUb2GmTla)|
-| [copy_ub_to_l1_tla](./copy_ub_to_l1_tla.md) | TLA | Ascend950 | UB to L1 copy (zN format)|
-| [tile_copy](./tile_copy/README.md) | Composite| AtlasA2, Ascend950 | Copy composite template (TileCopy, TileCopyBf16, PerTokenDequant, etc.)|
+| [copy_gm_to_ub](./copy_gm_to_ub/README.md) | Non-TLA| Atlas A2, Ascend 950 | GM to UB copy (CopyGm2Ub, CopyPerTokenScale2Ub, CopyGm2UbAligned)|
+| [copy_gm_to_ub_tla](./copy_gm_to_ub_tla.md) | TLA | Atlas A2, Ascend 950 | GM to UB TLA copy (CopyGm2UbTla)|
+| [copy_ub_to_gm](./copy_ub_to_gm/README.md) | Non-TLA| Atlas A2, Ascend 950 | UB to GM copy (CopyUb2Gm, CopyUb2GmAligned)|
+| [copy_ub_to_gm_tla](./copy_ub_to_gm_tla.md) | TLA | Atlas A2, Ascend 950 | UB to GM TLA copy (CopyUb2GmTla)|
+| [copy_ub_to_l1_tla](./copy_ub_to_l1_tla.md) | TLA | Ascend 950 | UB to L1 copy (zN format)|
+| [tile_copy](./tile_copy/README.md) | Composite| Atlas A2, Ascend 950 | Copy composite template (TileCopy, TileCopyBf16, PerTokenDequant, etc.)|
 
 ### Broadcast Components
 
@@ -43,8 +43,8 @@ The tile-layer API of the epilogue acts as a template parameter for the epilogue
 
 | Component| Style| Applicable Hardware| Description|
 | :------ | :------ | :------ | :------ |
-| [tile_cast](./tile_cast.md) | Non-TLA| AtlasA2, Ascend950 | Type conversion (Cast)|
-| [tile_pertoken_dequant](./tile_pertoken_dequant.md) | TLA | Ascend950 | Per-token dequantization (int32 → fp)|
+| [tile_cast](./tile_cast.md) | Non-TLA| Atlas A2, Ascend 950 | Type conversion (Cast)|
+| [tile_pertoken_dequant](./tile_pertoken_dequant.md) | TLA | Ascend 950 | Per-token dequantization (int32 → fp)|
 
 ### Swizzle
 

@@ -33,7 +33,7 @@ foreach(ARCH_CONFIG ${ARCH_CONFIGS})
     endif()
 endforeach()
 
-# EVG (epilogue/fusion) is Ascend950-only; skip on Atlas A2/A3 UT.
+# EVG (epilogue/fusion) is Ascend950-only; skip on Atlas A2 and Atlas A3 UT.
 if(NOT CATLASS_ARCH STREQUAL "3510")
     list(FILTER CATLASS_HEADERS EXCLUDE REGEX "epilogue/fusion")
 endif()

@@ -8,7 +8,7 @@
 
 `TileCopyBf16` is a template for epilogue BF16 specialization movement and aggregation. It reuses the assembly logic of `TileCopy`, but enforces replacement of the `Element` type of X/Y/D with `bfloat16_t`.
 
-- Applicability: Atlas A2/A3 series products and Ascend 950PR&950DT series products
+- Applicability: Atlas A2 series products and Atlas A3 series products and Ascend 950PR&950DT series products
 
 ## Template Prototype
 

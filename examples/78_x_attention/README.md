@@ -17,7 +17,7 @@
 
   shared KV 只取 shared_kv_lens[b] 个有效 token，上式省略分页映射。支持 MHA、MQA、GQA，不额外施加 attention mask。
 
-- 样例支持产品型号：Atlas A2/A3系列产品（`CATLASS_ARCH=2201`），至少两个 Cube 核。
+- 样例支持产品型号：Atlas A2系列产品、Atlas A3系列产品（`CATLASS_ARCH=2201`），至少两个 Cube 核。
 
 | cacheMode | shared KV | unshared KV | 索引方式 |
 |---|---|---|---|
@@ -102,7 +102,7 @@ PyTorch 接口的 query/output shape 为 `(B*R,H,D)`；mode 0 的 unshared KV �
 
 ### 执行示例
 
-准备匹配 Atlas A2/A3系列产品的 CANN 环境；生成数据需要 Python 3、NumPy，bf16 另需 ml_dtypes。从 CATLASS 仓库根目录执行：
+准备匹配 Atlas A2系列产品、Atlas A3系列产品的 CANN 环境；生成数据需要 Python 3、NumPy，bf16 另需 ml_dtypes。从 CATLASS 仓库根目录执行：
 
 1. 加载环境并编译样例。
 

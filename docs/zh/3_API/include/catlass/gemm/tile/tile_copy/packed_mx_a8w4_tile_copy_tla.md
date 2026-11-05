@@ -14,7 +14,7 @@
 - B 矩阵为 INT4（`ElementPrologueB_`，Prologue 前类型）→ INT8（`ElementB_`，Prologue 后类型）
 - **重写** `CopyL1ToL0B` 以适配 Prologue 后的 B 数据类型
 
-> **限制**：仅 AtlasA2 架构（`CATLASS_ARCH == 2201`）。
+> **限制**：仅 Atlas A2 架构（`CATLASS_ARCH == 2201`）。
 
 ## 引用的 Tile 组件
 

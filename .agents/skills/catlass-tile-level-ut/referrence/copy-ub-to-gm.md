@@ -71,7 +71,7 @@ args[2]  = count(uint32_t)
 
 **与 CopyGm2Ub 的关键差异**：
 - CopyUb2Gm 的 `DataCopyPad` 只有 3 个参数，无 `padParams`
-- Ascend950 RowMajor 的 `srcStride` 使用 `ELE_NUM_PER_C0` 分母（与 AtlasA2 一致）
+- Ascend 950 RowMajor 的 `srcStride` 使用 `ELE_NUM_PER_C0` 分母（与 Atlas A2 一致）
 
 ---
 

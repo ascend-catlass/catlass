@@ -53,7 +53,7 @@
 
 ### 执行示例
 
-1. 进入项目根目录，编译样例代码生成相应的算子可执行文件。本用例为 Ascend950（3510）算子，编译时需加 `-DCATLASS_ARCH=3510`。
+1. 进入项目根目录，编译样例代码生成相应的算子可执行文件。本用例为 Ascend 950（3510）算子，编译时需加 `-DCATLASS_ARCH=3510`。
 
     ```bash
     bash scripts/build.sh 58_ascend950_fp8_mx_batch_matmul -DCATLASS_ARCH=3510

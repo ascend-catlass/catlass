@@ -4,7 +4,7 @@
 
 ---
 
-## 组件族谱（非TLA AtlasA2）
+## 组件族谱（非TLA Atlas A2）
 
 ### 3-param 特化（L1Type + L0Type）
 

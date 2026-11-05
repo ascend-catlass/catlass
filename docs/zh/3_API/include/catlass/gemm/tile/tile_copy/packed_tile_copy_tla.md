@@ -21,8 +21,8 @@
 | `CopyL1ToL0A`              | `TileCopyTla<ArchTag, TensorL1A, TensorL0A>`                                   | A 矩阵 L1→L0A（TLA）       |
 | `CopyL1ToL0B`              | `TileCopyTla<ArchTag, TensorL1B, TensorL0B>`                                   | B 矩阵 L1→L0B（TLA）       |
 | `CopyL1ToBT`               | `TileCopyTla<ArchTag, TensorL1Bias, TensorL0Bias>` 或 `EmptyClass`             | Bias L1→BT（条件性）       |
-| `CopyL0CToDst` (Ascend950) | `CopyL0CToGmTla<ArchTag, TensorL0C, TensorC, DEQUANT_GRANULARITY, ReluEnable>` | L0C→Dst（TLA）             |
-| `CopyL0CToGm` (AtlasA2)    | `CopyL0CToGmTla<ArchTag, TensorL0C, TensorC, DEQUANT_GRANULARITY, ReluEnable>` | L0C→GM（TLA）              |
+| `CopyL0CToDst` (Ascend 950) | `CopyL0CToGmTla<ArchTag, TensorL0C, TensorC, DEQUANT_GRANULARITY, ReluEnable>` | L0C→Dst（TLA）             |
+| `CopyL0CToGm` (Atlas A2)    | `CopyL0CToGmTla<ArchTag, TensorL0C, TensorC, DEQUANT_GRANULARITY, ReluEnable>` | L0C→GM（TLA）              |
 
 ## 模板原型
 
@@ -50,7 +50,7 @@ struct PackedTileCopyTla;
 | `ElementBias`          | `void`     | 如非 void，则开启 Bias 搬运通道                |
 | `ReluEnable_`          | `false`    | 传递给 `CopyL0CToGmTla` 的 ReLU 开关           |
 | `DEQUANT_GRANULARITY_` | `NO_QUANT` | `PER_TENSOR` / `PER_CHANNEL` / `NO_QUANT`      |
-| `L0CCopyMode`          | `CopyToGM` | AtlasA2 用 `CopyToGM`，Ascend950 用 `CopyToUB` |
+| `L0CCopyMode`          | `CopyToGM` | Atlas A2 用 `CopyToGM`，Ascend 950 用 `CopyToUB` |
 
 ## 布局推导链（以 RowMajor A 为例）
 

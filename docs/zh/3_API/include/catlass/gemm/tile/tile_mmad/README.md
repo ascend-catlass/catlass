@@ -14,8 +14,8 @@ Tile 层 Mmad 模块完成 L0A*L0B → L0C 的矩阵乘加 `C += A * B`，直接
 
 | API                               | 风格   | 支持 Bias | L0 Batch | 自动维度 | 架构                | 说明                           |
 | :-------------------------------- | :----- | :-------- | :------- | :------- | :------------------ | :----------------------------- |
-| [TileMmad](./tile_mmad.md)        | 非 TLA | ✓         | —        | —        | AtlasA2 + Ascend950 | 直接操作 AscendC::LocalTensor  |
-| [TileMmadTla](./tile_mmad_tla.md) | TLA    | ✓         | ✓        | ✓        | AtlasA2 + Ascend950 | tla::Tensor 封装，自动维度提取 |
+| [TileMmad](./tile_mmad.md)        | 非 TLA | ✓         | —        | —        | Atlas A2 + Ascend 950 | 直接操作 AscendC::LocalTensor  |
+| [TileMmadTla](./tile_mmad_tla.md) | TLA    | ✓         | ✓        | ✓        | Atlas A2 + Ascend 950 | tla::Tensor 封装，自动维度提取 |
 
 ## 功能对比
 
@@ -27,9 +27,9 @@ Tile 层 Mmad 模块完成 L0A*L0B → L0C 的矩阵乘加 `C += A * B`，直接
 | L0 Batch mmad     | —                         | ✓                                  |
 | 自动维度提取      | —                         | ✓（模式 4）                        |
 | unitFlag 并行搬运 | ✓                         | ✓                                  |
-| kDirectionAlign   | AtlasA2 float + nZ L1A    | 同左                               |
-| GEMV 模式控制     | Ascend950 `disableGemv`   | Ascend950 `disableGemv`            |
-| GEMV 自动规避     | —                         | AtlasA2 M=1→M=16（模式 4）         |
+| kDirectionAlign   | Atlas A2 float + nZ L1A    | 同左                               |
+| GEMV 模式控制     | Ascend 950 `disableGemv`   | Ascend 950 `disableGemv`            |
+| GEMV 自动规避     | —                         | Atlas A2 M=1→M=16（模式 4）         |
 
 ## 调用示例
 

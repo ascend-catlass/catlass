@@ -10,7 +10,7 @@
 
 与普通 [CopyL0CToGmTla](./tile_copy_tla.md) 不同，`CopyL0CToGmSparseTla` 通过 `FixpipeParamsV220` 参数结构体（而非 `FixpipeParams`）控制搬运尺寸，适用于 Sparse GEMM 场景中与 dense 输出混合的场景。
 
-> **限制**：该模板仅支持 AtlasA2 架构（`CATLASS_ARCH == 2201`），仅 NO_QUANT 模式。
+> **限制**：该模板仅支持 Atlas A2 架构（`CATLASS_ARCH == 2201`），仅 NO_QUANT 模式。
 
 ## 模板原型
 
@@ -37,7 +37,7 @@ struct CopyL0CToGmSparseTla {
 
 ## 偏特化实现
 
-### AtlasA2
+### Atlas A2
 
 | 源        | 目标 Layout | 量化模式 | SFINAE 条件             | 说明                        |
 | :-------- | :---------- | :------- | :---------------------- | :-------------------------- |
@@ -57,7 +57,7 @@ void operator()(TensorDst const &dstTensor, TensorSrc const &srcTensor)
 
 ## 调用示例
 
-### L0C → GM RowMajor（AtlasA2）
+### L0C → GM RowMajor（Atlas A2）
 
 ```cpp
 #include "catlass/gemm/tile/copy_l0c_to_gm.hpp"

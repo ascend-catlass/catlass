@@ -8,7 +8,7 @@
 
 `TileCopySparseTla` 是稀疏 GEMM 专用的 TLA 搬运模板，与 [TileCopyTla](./tile_copy_tla.md) 的核心区别在于源/目标 Tensor 可能为不同的元素类型（如 B index 数据 `int32_t`）。结构与 `TileCopyTla` 类似，通过 SFINAE 自动分发。
 
-> **限制**：仅 AtlasA2 架构（`CATLASS_ARCH == 2201`）。
+> **限制**：仅 Atlas A2 架构（`CATLASS_ARCH == 2201`）。
 
 ## 基类声明
 
@@ -25,7 +25,7 @@ struct TileCopySparseTla {
 };
 ```
 
-## 偏特化实现清单（全 AtlasA2）
+## 偏特化实现清单（全 Atlas A2）
 
 | 方向   | 说明                                        | 实现位置                     | API 文档                                                    |
 | :----- | :------------------------------------------ | :--------------------------- | :---------------------------------------------------------- |

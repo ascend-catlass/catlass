@@ -8,7 +8,7 @@
 
 `TileCopyDequantTla` 是 epilogue TLA 风格反量化的搬运聚合模板。引用 `CopyGm2UbTla` 和 `CopyUb2GmTla` 作为子组件，每个子组件为需要 `TensorSrc`/`TensorDst` 类型参数化延迟实例化的模板。
 
-- 适用范围：Atlas A2/A3系列产品、Ascend 950PR&950DT系列产品
+- 适用范围：Atlas A2系列产品、Atlas A3系列产品、Ascend 950PR&950DT系列产品
 - 风格：TLA
 
 ## 模板原型

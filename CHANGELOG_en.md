@@ -53,7 +53,7 @@
 
 #### CATLASS C++
 
-- More Examples (One New Ascend 950 Example and One Atlas A2/A3 Example)
+- More Examples (One New Ascend 950 Example and One Atlas A2 and Atlas A3 Example)
   - [Ascend 950 Basic SYRK](https://gitcode.com/cann/catlass/blob/v2.1.0/examples/82_ascend950_basic_syrk/README.md): Supports the symmetric rank update `Y = X·Xᵀ`, computing only lower-triangular tiles and writing both symmetric positions from a single computation.
   - [Atlas A2 X-Attention](https://gitcode.com/cann/catlass/blob/v2.1.0/examples/78_x_attention/README.md): Provides data generation, Tiling, Kernel, Host, and PyTorch reference implementations; fuses shared/unshared KV attention and supports two cache combinations.
 - Bug Fixes & Optimizations
@@ -114,12 +114,12 @@
 ### CATLASS 1.6.0
 
 - Key Features
-  - Added full support for **Ascend 950**, with a complete set of [Tile components](https://gitcode.com/cann/catlass/tree/v1.6.0/include/catlass/gemm/tile/ascend950) (see the [Gemm/Tile Template Overview](https://gitcode.com/cann/catlass/blob/v1.6.0/docs/zh/3_API/include/catlass/gemm/tile/README.md)) compatible with Atlas A2/A3, and added [**unit tests**](https://gitcode.com/cann/catlass/blob/v1.6.0/tests/unittest/catlass/gemm/tile/README.md) for all Gemm Tile components on **Atlas A2/Atlas A3** and **Ascend 950** architectures.
+  - Added full support for **Ascend 950**, with a complete set of [Tile components](https://gitcode.com/cann/catlass/tree/v1.6.0/include/catlass/gemm/tile/ascend950) (see the [Gemm/Tile Template Overview](https://gitcode.com/cann/catlass/blob/v1.6.0/docs/zh/3_API/include/catlass/gemm/tile/README.md)) compatible with Atlas A2 and Atlas A3, and added [**unit tests**](https://gitcode.com/cann/catlass/blob/v1.6.0/tests/unittest/catlass/gemm/tile/README.md) for all Gemm Tile components on **Atlas A2/Atlas A3** and **Ascend 950** architectures.
   - Added [**MXFP8 / MXFP4 quantization templates**](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/53_ascend950_fp8_mx_matmul/README.md), supporting MXFP8/MXFP4 quantized matrix multiplication and A8W4 MX matrix multiplication on Ascend 950.
   - Added [**BlockMmad based on Mutex synchronization primitives**](https://gitcode.com/cann/catlass/blob/v1.6.0/include/catlass/gemm/block/block_mmad_pingpong_mutex_tla.hpp), simplifying Block component implementations.
   - Added the [**EVG declarative post-processing framework**](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/64_ascend950_matmul_evg/README.md) for describing Epilogue logic declaratively.
   - Supported compilation with the Ascend C CMake build system.
-- More Examples (16 New Ascend 950 Examples and One Atlas A2/A3 Example)
+- More Examples (16 New Ascend 950 Examples and One Atlas A2 and Atlas A3 Example)
   - [Ascend 950 Flash Attention Chunk Prefill](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/70_ascend950_flash_attention_chunk_prefill/README.md)
   - [Ascend 950 MXFP8 Matmul](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/53_ascend950_fp8_mx_matmul/README.md)
   - [Ascend 950 MXFP4 Matmul](https://gitcode.com/cann/catlass/blob/v1.6.0/examples/54_ascend950_fp4_mx_matmul/README.md)
@@ -166,7 +166,7 @@
 - More Examples
   - [Ascend 950 Basic Matmul](https://gitcode.com/cann/catlass/blob/v1.5.0/examples/43_ascend950_basic_matmul/README.md)
   - [Ascend 950 Matmul FixPipe Optimization](https://gitcode.com/cann/catlass/blob/v1.5.0/examples/46_ascend950_matmul_fixpipe_opti/README.md)
-  - [Ascend950 Grouped Matmul SliceM Per-Token Dequant](https://gitcode.com/cann/catlass/blob/v1.5.0/examples/47_ascend950_grouped_matmul_slice_m_per_token_dequant/README.md)
+  - [Ascend 950 Grouped Matmul SliceM Per-Token Dequant](https://gitcode.com/cann/catlass/blob/v1.5.0/examples/47_ascend950_grouped_matmul_slice_m_per_token_dequant/README.md)
   - [Ascend 950 Grouped Matmul Per-Tensor & Per-Channel Dequant](https://gitcode.com/cann/catlass/blob/v1.5.0/examples/48_ascend950_grouped_matmul_slice_m_per_tensor_per_channel_dequant/README.md)
   - [Ascend 950 Flash Attention Inference](https://gitcode.com/cann/catlass/blob/v1.5.0/examples/49_ascend950_flash_attention_infer/README.md)
   - [Ascend 950 Basic Matmul GEMV](https://gitcode.com/cann/catlass/blob/v1.5.0/examples/50_ascend950_basic_matmul_gemv/README.md)

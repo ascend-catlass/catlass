@@ -144,7 +144,7 @@ using L1Type = Gemm::GemmType<half, layout::zN, AscendC::TPosition::A1>;
 auto layoutSrc = layout::zN::MakeLayout<half>(row, col);
 auto layoutDst = layout::zN::MakeLayout<half>(row, col);
 
-// On Ascend950, L0Type is optional, and the corresponding layout is automatically deduced.
+// On Ascend 950, L0Type is optional, and the corresponding layout is automatically deduced.
 using CopyOp = CopyL1ToL0A<Arch::Ascend950, L1Type>;
 CopyOp copyOp;
 copyOp(dstL0ATensor, srcL1Tensor, layoutDst, layoutSrc);

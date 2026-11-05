@@ -13,10 +13,10 @@
 | 模板                                                   | 分发方式       | 适用硬件            | 说明                           |
 | :----------------------------------------------------- | :------------- | :------------------ | :----------------------------- |
 | [TileCopyTla](./tile_copy_tla.md)                      | SFINAE trait   | Atlas A2 + Ascend 950 | 核心 TLA 搬运，自动匹配 layout |
-| [TileCopyTlaExt](./tile_copy_tla_ext.md)               | 显式 LayoutTag | AtlasA2             | 扩展版，支持 Padding layout    |
-| [TileCopySparseTla](./tile_copy_sparse_tla.md)         | SFINAE trait   | AtlasA2             | 稀疏 GEMM 搬运                 |
-| [CopyL1ToL0BSparseTla](./copy_l1_to_l0b_sparse_tla.md) | SFINAE trait   | AtlasA2             | 稀疏 B L1→L0B（带 index）      |
-| [TileCopyFAQTla](./tile_copy_faq_tla.md)               | 固定匹配       | AtlasA2             | FA LoadQ GM→L1 zN              |
+| [TileCopyTlaExt](./tile_copy_tla_ext.md)               | 显式 LayoutTag | Atlas A2             | 扩展版，支持 Padding layout    |
+| [TileCopySparseTla](./tile_copy_sparse_tla.md)         | SFINAE trait   | Atlas A2             | 稀疏 GEMM 搬运                 |
+| [CopyL1ToL0BSparseTla](./copy_l1_to_l0b_sparse_tla.md) | SFINAE trait   | Atlas A2             | 稀疏 B L1→L0B（带 index）      |
+| [TileCopyFAQTla](./tile_copy_faq_tla.md)               | 固定匹配       | Atlas A2             | FA LoadQ GM→L1 zN              |
 
 ## 模板关系图
 

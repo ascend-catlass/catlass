@@ -1,6 +1,6 @@
 # CATLASS MLA
 
-CATLASS MLA is a Flash-MLA operator optimized for Ascend AtlasA2 hardware, implemented based on the CATLASS GEMM API. The operator architecture consists of the following hierarchical layers:
+CATLASS MLA is a Flash-MLA operator optimized for Ascend Atlas A2 hardware, implemented based on the CATLASS GEMM API. The operator architecture consists of the following hierarchical layers:
 
 - Tiling parameter calculation
 - Kernel implementations, featuring two variants: the generic [mla_kernel.cpp](./mla_kernel.cpp) and the specialized [mla_kernel_tp1_spec.cpp](./mla_kernel_tp1_spec.cpp)

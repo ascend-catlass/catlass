@@ -11,8 +11,8 @@
 
 ```plain
 tests/unittest/catlass/gemm/tile
-├── ascend950                              # ascend950架构下Tile层组件UT
-├── atlasa2                                # atlasa2架构下Tile层组件UT
+├── ascend950                              # ascend 950架构下Tile层组件UT
+├── atlasa2                                # Atlas A2架构下Tile层组件UT
 ├── common                                 # 辅助组件
 ├── README.md
 ├── test_copy_l1_to_fp.cpp                 # L1->FP数据通路测试
@@ -81,10 +81,10 @@ bash scripts/build.sh --tests catlass_unittest -DENABLE_COVERAGE=ON
 默认在`build/tests/unittest/`下生成可执行文件，并以代际编号区分，分别执行如下：
 
 ```bash
-# AtlasA2 代际下Tile组件单元测试
+# Atlas A2代际下Tile组件单元测试
 ./build/tests/unittest/catlass_unittest_2201
 
-# Ascend950 代际下Tile组件单元测试
+# Ascend 950 代际下Tile组件单元测试
 ./build/tests/unittest/catlass_unittest_3510
 ```
 

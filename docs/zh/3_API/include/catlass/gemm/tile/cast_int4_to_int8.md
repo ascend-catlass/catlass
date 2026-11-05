@@ -12,7 +12,7 @@
 
 转换通过 Vector 引擎的 `AscendC::Cast` 两次中转完成：INT4 → half → INT8。
 
-> **限制**：仅支持 AtlasA2 架构（`CATLASS_ARCH == 2201`）。COMPUTE_LEN 不允许超过 24*1024。
+> **限制**：仅支持 Atlas A2 架构（`CATLASS_ARCH == 2201`）。COMPUTE_LEN 不允许超过 24*1024。
 
 ## 模板原型
 

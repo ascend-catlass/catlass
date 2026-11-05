@@ -8,7 +8,7 @@
 
 `MatrixCopyGmToUB` 实现 GEMV 场景下矩阵数据从 GM 到 UB 的搬运。根据 stride 和元素数量自动选择最优搬运策略（`DataCopy` 连续块 / 跨步块 / 单行搬运）。
 
-- 适用范围：AtlasA2
+- 适用范围：Atlas A2
 - 支持 RowMajor 和 ColumnMajor 两种矩阵布局
 - 当 `stride >= STRIDE_LIMIT(65536)` 时回退到单行逐条搬运
 
@@ -28,8 +28,8 @@ struct MatrixCopyGmToUB;
 
 | 架构    | GmType        | 搬运策略                             |
 | :------ | :------------ | :----------------------------------- |
-| AtlasA2 | `RowMajor`    | 三级自适应（连续块 / 跨步块 / 单行） |
-| AtlasA2 | `ColumnMajor` | 三级自适应（连续块 / 跨步块 / 单行） |
+| Atlas A2 | `RowMajor`    | 三级自适应（连续块 / 跨步块 / 单行） |
+| Atlas A2 | `ColumnMajor` | 三级自适应（连续块 / 跨步块 / 单行） |
 
 **三级搬运策略**：
 

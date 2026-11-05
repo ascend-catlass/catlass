@@ -8,7 +8,7 @@
 
 `CopyUb2GmTla` 实现 epilogue 阶段从 UB 到 GM 的 TLA 风格数据搬运。通过 `tla::Tensor` 封装操作数，利用 SFINAE 根据源/目的 Layout 自动选择搬运策略。
 
-- 适用范围：Atlas A2/A3系列产品（RowMajor）、Ascend 950PR&950DT系列产品（RowMajor）
+- 适用范围：Atlas A2系列产品、Atlas A3系列产品（RowMajor）、Ascend 950PR&950DT系列产品（RowMajor）
 - 风格：TLA（`tla::Tensor` 接口）
 - 与 [CopyUb2Gm](./copy_ub_to_gm/README.md) 的区别：TLA 风格，通过 `decltype` 推导模板参数
 
@@ -23,8 +23,8 @@ struct CopyUb2GmTla;
 
 | 架构      | SFINAE 条件                          | 搬运方式                      |
 | :-------- | :----------------------------------- | :---------------------------- |
-| AtlasA2   | `isRowMajor<Src> && isRowMajor<Dst>` | `DataCopyPad`，C0 对齐 stride |
-| Ascend950 | `isRowMajor<Src> && isRowMajor<Dst>` | `DataCopyPad`，C0 对齐 stride |
+| Atlas A2   | `isRowMajor<Src> && isRowMajor<Dst>` | `DataCopyPad`，C0 对齐 stride |
+| Ascend 950 | `isRowMajor<Src> && isRowMajor<Dst>` | `DataCopyPad`，C0 对齐 stride |
 
 ## 调用接口
 

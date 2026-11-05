@@ -8,7 +8,7 @@
 
 `CopyL1ToL0BTla` 实现 Conv 场景下将 Filter 数据从 L1 搬运到 L0B 的 TLA 风格版本。
 
-- 适用范围：Atlas A2/A3系列产品、Ascend 950PR&950DT系列产品
+- 适用范围：Atlas A2系列产品、Atlas A3系列产品、Ascend 950PR&950DT系列产品
 - 风格：TLA
 
 ## 模板原型

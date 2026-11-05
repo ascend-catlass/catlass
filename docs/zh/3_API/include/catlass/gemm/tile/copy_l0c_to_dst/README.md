@@ -12,9 +12,9 @@
 
 | API                                                       | 风格 | 适用硬件            | 说明            |
 | :-------------------------------------------------------- | :--- | :------------------ | :-------------- |
-| [CopyL0CToDstQuantMode](./copy_l0c_to_dst.md)             | —    | Ascend950           | 量化模式映射    |
-| [ScaleGranularity](./copy_l0c_to_dst.md#scalegranularity) | —    | AtlasA2 / Ascend950 | Scale 粒度枚举  |
-| [CopyL0CToUBMode](./copy_l0c_to_dst.md)                   | —    | Ascend950           | UB 搬运模式枚举 |
+| [CopyL0CToDstQuantMode](./copy_l0c_to_dst.md)             | —    | Ascend 950           | 量化模式映射    |
+| [ScaleGranularity](./copy_l0c_to_dst.md#scalegranularity) | —    | Atlas A2 / Ascend 950 | Scale 粒度枚举  |
+| [CopyL0CToUBMode](./copy_l0c_to_dst.md)                   | —    | Ascend 950           | UB 搬运模式枚举 |
 
 ## 依赖关系
 
@@ -28,5 +28,5 @@ copy_l0c_to_dst  (基础设施)
 
 | 架构                                | 支持情况                                                                            |
 | :---------------------------------- | :---------------------------------------------------------------------------------- |
-| AtlasA2（`CATLASS_ARCH == 2201`）   | `ScaleGranularity` + 等效 `CopyL0CToGmQuantMode`（在 `atlasa2/copy_l0c_to_gm.hpp`） |
-| Ascend950（`CATLASS_ARCH == 3510`） | `CopyL0CToDstQuantMode` + `CopyL0CToUBMode` + 模板声明                              |
+| Atlas A2（`CATLASS_ARCH == 2201`）   | `ScaleGranularity` + 等效 `CopyL0CToGmQuantMode`（在 `atlasa2/copy_l0c_to_gm.hpp`） |
+| Ascend 950（`CATLASS_ARCH == 3510`） | `CopyL0CToDstQuantMode` + `CopyL0CToUBMode` + 模板声明                              |

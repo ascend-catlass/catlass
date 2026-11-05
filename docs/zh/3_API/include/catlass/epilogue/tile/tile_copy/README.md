@@ -12,11 +12,11 @@ Epilogue `tile_copy` 是搬运聚合模板，组合引用 `CopyGm2Ub`、`CopyUb2
 
 | API                                                         | 风格   | 适用硬件           | 说明                    |
 | :---------------------------------------------------------- | :----- | :----------------- | :---------------------- |
-| [TileCopy](./tile_copy.md)                                  | 非 TLA | AtlasA2, Ascend950 | 基础聚合，2/3/4 Operand |
-| [TileCopyBf16](./tile_copy_bf16.md)                         | 非 TLA | AtlasA2, Ascend950 | BF16 强制类型特化       |
-| [TileCopyPerTokenDequant](./tile_copy_per_token_dequant.md) | 非 TLA | AtlasA2            | Per-token 反量化聚合    |
-| [TileCopyW4A4Gemm](./tile_copy_w4a4_gemm.md)                | 非 TLA | AtlasA2            | W4A4 GEMM 反量化聚合    |
-| [TileCopyDequantTla](./tile_copy_dequant_tla.md)            | TLA    | AtlasA2, Ascend950 | TLA dequant 聚合        |
+| [TileCopy](./tile_copy.md)                                  | 非 TLA | Atlas A2, Ascend 950 | 基础聚合，2/3/4 Operand |
+| [TileCopyBf16](./tile_copy_bf16.md)                         | 非 TLA | Atlas A2, Ascend 950 | BF16 强制类型特化       |
+| [TileCopyPerTokenDequant](./tile_copy_per_token_dequant.md) | 非 TLA | Atlas A2            | Per-token 反量化聚合    |
+| [TileCopyW4A4Gemm](./tile_copy_w4a4_gemm.md)                | 非 TLA | Atlas A2            | W4A4 GEMM 反量化聚合    |
+| [TileCopyDequantTla](./tile_copy_dequant_tla.md)            | TLA    | Atlas A2, Ascend 950 | TLA dequant 聚合        |
 
 ## 调用示例
 

@@ -1,4 +1,4 @@
-# AtlasA2 GEMM类硬件指令集介绍
+# Atlas A2 GEMM类硬件指令集介绍
 
 ## API
 

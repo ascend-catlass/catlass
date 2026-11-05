@@ -100,7 +100,7 @@ pip install -r requirements.txt
 > 模板库提供了一套可复用的模板、基础组件，用于矩阵乘法算子开发，算子样例可见[样例目录](../../../examples)。
 
 - 样例名称里带`ascend950`字样的仅支持Ascend 950PR&950DT系列产品。
-- 其他样例仅支持Atlas A2/A3系列产品，代码中架构标签`ArchTag`统一使用`Arch::AtlasA2`。
+- 其他样例仅支持Atlas A2系列产品、Atlas A3系列产品，代码中架构标签`ArchTag`统一使用`Arch::AtlasA2`。
 
 ### 编译样例
 
@@ -115,7 +115,7 @@ bash scripts/build.sh [options] <target>
   - `--debug`：以Debug模式进行编译。
   - `--msdebug`：启用[msDebug](https://www.hiascend.com/document/redirect/CannCommunityToolMsdebug)工具，详见[在CATLASS样例工程使用msDebug](./evaluation/msdebug.md)。
   - `--simulator`：启用仿真器模式，该选项启用后将不在实际NPU上执行，详见[CATLASS样例仿真](./evaluation/performance_tools.md#msprof-op-simulator-example)。
-  - `-DCATLASS_ARCH`：指明NPU架构，当前支持`2201`（Atlas A2/A3系列产品）和`3510`（Ascend 950PR&950DT系列产品），不指明则默认为`2201`。
+  - `-DCATLASS_ARCH`：指明NPU架构，当前支持`2201`（Atlas A2系列产品、Atlas A3系列产品）和`3510`（Ascend 950PR&950DT系列产品），不指明则默认为`2201`。
   - `-D<option>`：给CMake传递其他的编译选项。
 
 - `target`：要编译的算子样例，可指定为特定的样例名，也可指定为：

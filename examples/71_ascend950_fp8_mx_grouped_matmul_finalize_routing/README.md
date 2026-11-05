@@ -25,7 +25,7 @@ experimental
 
 ## 使用示例
 
-- 获取代码之后编译相应的算子可执行文件，可参考 [quickstart](../../docs/zh/1_Practice/01_quick_start.md#编译执行)，本用例为 Ascend950（3510）算子，编译时需加 `-DCATLASS_ARCH=3510`。
+- 获取代码之后编译相应的算子可执行文件，可参考 [quickstart](../../docs/zh/1_Practice/01_quick_start.md#编译执行)，本用例为 Ascend 950（3510）算子，编译时需加 `-DCATLASS_ARCH=3510`。
 - 本目录提供两个版本：**确定性版**（`ColumnBlockSwizzle`调度）和**非确定性版**（`GemmGroupedAswtTailSplitSwizzle`调度，多核利用率更高），两者输入参数与精度一致，仅调度策略不同。
 - 输入参数说明：`problem_count, m, n, k, trans_b, group_list_type, enable_bias, batch, data_parallel_size, enable_shared_input, shared_input_weight, shared_input_offset, quant_type, device_id`（Device ID 可选，默认为 0）
 

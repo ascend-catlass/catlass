@@ -73,7 +73,7 @@ description: 审查 CATLASS Markdown 文档中 markdownlint 无法覆盖的语�
 | -------- | ------------ | ---- |
 | `Atlas A2` / `Atlas A3` | `AtlasA2` / `AtlasA3` | 产品名，中间必须带空格 |
 | `Ascend 950` / `Ascend 950PR` / `Ascend 950DT` | `Ascend950` / `Ascend950PR` | 产品名，中间必须带空格 |
-| `Atlas A2/A3系列产品` | `Atlas A2/A3产品` | 同时指代 A2、A3 两代产品时的合写形式；单独指代仍用 `Atlas A2` / `Atlas A3` |
+| `Atlas A2系列产品、Atlas A3系列产品` | `Atlas A2/A3产品` | 同时指代 A2、A3 两代产品时的合写形式；单独指代仍用 `Atlas A2` / `Atlas A3` |
 | `Ascend 950PR&950DT系列产品` | `Ascend 950PR/Ascend 950DT产品` | 同时指代 950PR、950DT 时的合写形式 |
 | `AI Core` | `AICore` | 计算核心，中间必须带空格 |
 | `Ascend C` | `AscendC` / `asc-devkit` | 正文写法必须带空格；仅 C++ 命名空间 `AscendC::` 保持无空格原样；不使用 `asc-devkit` 指代 Ascend C |
@@ -86,7 +86,7 @@ description: 审查 CATLASS Markdown 文档中 markdownlint 无法覆盖的语�
 
 代码形式优先：术语位于代码块或行内代码中时保持代码原样，不补空格、不拆分；仅正文、标题、表格文字按上表更正。
 
-- 产品与项目名保持原样：`CATLASS`、`CANN`、`TLA`、`Ascend`、`Atlas A2/A3`、`Ascend 950`；不使用代号式替换。
+- 产品与项目名保持原样：`CATLASS`、`CANN`、`TLA`、`Ascend`、`Atlas A2 and Atlas A3`、`Ascend 950`；不使用代号式替换。
 - API、类、函数、宏、文件路径、命令、环境变量、URL、锚点、代码标识符保持原样，不翻译、不改写。
 
 ### 2. 中文错别字与用词

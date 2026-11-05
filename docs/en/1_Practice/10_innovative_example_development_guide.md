@@ -27,7 +27,7 @@ Before writing code, you first need to clarify the core requirements of the oper
     | Multi-core scheduling in the full-load scenario             | example 25 `25_matmul_full_loadA`          | BlockScheduler reused directly |
 
 - **Innovative features**: based on the investigation, identify the points that truly need innovation. The core innovation of example 44 is combining the two features of quantized matrix multiply and A-matrix full load, and reusing the BlockScheduler of example 25 so that the basic blocks handled by each core are distributed contiguously along N, maximizing the L1 reuse rate of the A matrix.
-- **Applicable scenarios**: clarify the benefit scenarios and constraints of the new feature. A-matrix full load brings significant benefits when the N axis is large (the A matrix can be reused many times), but it requires the L1 space to be large enough to hold the data volume of `L1TileShape::M*K`; otherwise it cannot be used. This value is an element count, and the occupied bytes are `L1TileShape::M * K * sizeof(ElementA)`; the L1 capacity of Atlas A2/A3 series products is 512 KB, and the fully loaded data must fit in the available L1 space. A large N axis means that multiple basic blocks can be split along N, that is, `problemShape.N > L1TileShape::N`; in this case the same A-matrix block can be reused by multiple N-direction basic blocks. When N does not exceed one basic block, the A matrix cannot be reused and performance may be lower than that of the ordinary template.
+- **Applicable scenarios**: clarify the benefit scenarios and constraints of the new feature. A-matrix full load brings significant benefits when the N axis is large (the A matrix can be reused many times), but it requires the L1 space to be large enough to hold the data volume of `L1TileShape::M*K`; otherwise it cannot be used. This value is an element count, and the occupied bytes are `L1TileShape::M * K * sizeof(ElementA)`; the L1 capacity of Atlas A2 series products and Atlas A3 series products is 512 KB, and the fully loaded data must fit in the available L1 space. A large N axis means that multiple basic blocks can be split along N, that is, `problemShape.N > L1TileShape::N`; in this case the same A-matrix block can be reused by multiple N-direction basic blocks. When N does not exceed one basic block, the A matrix cannot be reused and performance may be lower than that of the ordinary template.
 
 ### Solution Design
 
@@ -99,7 +99,7 @@ include/catlass/epilogue/block/
 └── block_epilogue_per_token_dequant_tla.hpp # BlockEpilogue reused from example 42
 ```
 
-**Project registration (easy to miss):** Creating the example directory and its local `CMakeLists.txt` is not enough. The top-level [`examples/CMakeLists.txt`](../../../examples/CMakeLists.txt) decides which examples are built via `EXAMPLE_ATLASA2` / `EXAMPLE_ASCEND950`; if the example name is not appended to the matching list, `bash scripts/build.sh <example_name>` will not find the target. Register by product form, for example on Atlas A2/A3:
+**Project registration (easy to miss):** Creating the example directory and its local `CMakeLists.txt` is not enough. The top-level [`examples/CMakeLists.txt`](../../../examples/CMakeLists.txt) decides which examples are built via `EXAMPLE_ATLASA2` / `EXAMPLE_ASCEND950`; if the example name is not appended to the matching list, `bash scripts/build.sh <example_name>` will not find the target. Register by product form, for example on Atlas A2 and Atlas A3:
 
 ```diff
 set(EXAMPLE_ATLASA2

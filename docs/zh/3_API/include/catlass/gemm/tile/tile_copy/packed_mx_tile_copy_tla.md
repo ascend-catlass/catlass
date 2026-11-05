@@ -10,7 +10,7 @@
 
 MX Scale 是一种 FP8 量化中使用的块级（block-wise）scale，以 `float8_e8m0_t` 存储。Pack 阶段将 GM 上的 scale 通过 TLA 搬入 L1（A 侧转换为 zZ 布局，B 侧转换为 nN 布局），再由 `PackedMxTileCopyTla` 管理后续 Tile 操作的调度。
 
-> **限制**：仅 AtlasA2 架构（`CATLASS_ARCH == 2201`）。
+> **限制**：仅 Atlas A2 架构（`CATLASS_ARCH == 2201`）。
 
 ## 引用的 Tile 组件
 

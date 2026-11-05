@@ -10,7 +10,7 @@ This directory (04_contrib/00_XAttention) collects the design documents for **23
 | [02_fai_split_row_kernel.md](./02_fai_split_row_kernel.md) | FAI SplitRow | Inference Flash Attention, a split-KV variant that splits by row and avoids Combine | 4 |
 | [03_xfai_kernel.md](./03_xfai_kernel.md) | XFAI | Atlas A2 inference Flash Attention with AIC QK → AIV Softmax → AIC PV cross-core pipeline, supporting Paged KV | 5 |
 | [04_fd_kernel.md](./04_fd_kernel.md) | FD | A deeply performance-evolved version of XFAI (FlashAttention-Decode form), including a general CombineScale | 3 |
-| [05_xa_tla_kernel.md](./05_xa_tla_kernel.md) | XA TLA | Atlas A5 (Ascend950) TLA instruction version of Flash Attention, in both shared/unshared forms | 8 |
+| [05_xa_tla_kernel.md](./05_xa_tla_kernel.md) | XA TLA | Atlas A5 (Ascend 950) TLA instruction version of Flash Attention, in both shared/unshared forms | 8 |
 
 ## New Template List
 
@@ -53,6 +53,6 @@ This directory (04_contrib/00_XAttention) collects the design documents for **23
 - **02 FAI SplitRow**: a row-split split-KV variant that avoids merging (`CopySumMax` records row statistics instead of the Combine step);
 - **03 XFAI**: AIC/AIV cross-core pipeline "QK → OnlineSoftmax → PV → RescaleO", `l1BufAddrStart` shared L1, `PAGED_CACHE_FLAG` native paged KV, `CombineScale` closing out the split-KV merge;
 - **04 FD**: a deeply performance-evolved version of XFAI, with optimizations such as partitioning dm by cycle, and `CombineScale` generalized to `EpilogueAtlasA2CombineScale`;
-- **05 XA TLA**: a TLA instruction implementation for Atlas A5 (Ascend950), with QK/PV/Softmax templates for the shared and unshared expert forms.
+- **05 XA TLA**: a TLA instruction implementation for Atlas A5 (Ascend 950), with QK/PV/Softmax templates for the shared and unshared expert forms.
 
 For the DispatchPolicy definitions of each series, the algorithm design (data layout / pipeline organization / cross-core synchronization), the differences between series, and real engineering usage examples based on xllm-ops (https://gitcode.com/xLLM-AI/xllm_ops, `x_attention` / `x_flash_attention_infer`), see the corresponding design documents.

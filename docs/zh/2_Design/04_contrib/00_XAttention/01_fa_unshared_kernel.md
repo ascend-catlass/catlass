@@ -162,9 +162,9 @@ ll = ReduceSum(ls, row)                   // WholeReduceSum + Add 折叠
 
 由于 KV 序列一次处理完，本模板**不做 O 的 rescale 与归一化**，`gm/gl` 交由外部（上层 kernel 或 combine kernel）完成 `O = OTmp / gl`。双 subBlock 场景下按 head 切分行区间并行计算，事件全部使用 `EVENT_ID3` 避免与 GEMM 侧冲突。
 
-## Ascend950 特化
+## Ascend 950 特化
 
-`EpilogueAscend950FAUnsharedSoftmax` 直接继承 AtlasA2 实现（Ascend C 向量 API 兼容）：
+`EpilogueAscend950FAUnsharedSoftmax` 直接继承 Atlas A2 实现（Ascend C 向量 API 兼容）：
 
 ```cpp
 template <class OutputType_, class InputType_, class MaskType_>

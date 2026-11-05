@@ -149,7 +149,7 @@ Constraints:
 
 - Must be called inside a `@tla.kernel`-decorated kernel function.
 - Must be called inside `tla.cube()` or `tla.vector()`; when `mode=4`, `aiv_id` must be 0 or 1.
-- Under `@tla.kernel(core_ratio=tla.arch.C1V1)`, Ascend950 CV 1:1
+- Under `@tla.kernel(core_ratio=tla.arch.C1V1)`, Ascend 950 CV 1:1
   handshakes expect `pipe=tla.arch.SCALAR` (`PIPE_S`), matching AscendC
   SyncAll. The compiler does not rewrite a wrong wait pipe; the caller
   must pass `SCALAR` explicitly (see

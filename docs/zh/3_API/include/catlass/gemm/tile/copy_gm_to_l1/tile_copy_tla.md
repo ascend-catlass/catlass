@@ -40,7 +40,7 @@ tla::Tensor<AscendC::LocalTensor<ElementDst>,  LayoutDst, CoordDst, AscendC::TPo
 
 ## 偏特化实现
 
-### AtlasA2 偏特化
+### Atlas A2 偏特化
 
 所有偏特化的 `Enable` 条件通过 `std::enable_if_t<cond>` 约束。
 
@@ -51,7 +51,7 @@ tla::Tensor<AscendC::LocalTensor<ElementDst>,  LayoutDst, CoordDst, AscendC::TPo
 | `iszN<ElementSrc, LayoutSrc>` | `iszN<ElementDst, LayoutDst>` | zN → zN（保持格式） |
 | `isnZ<ElementSrc, LayoutSrc>` | `isnZ<ElementDst, LayoutDst>` | nZ → nZ（保持格式） |
 
-### Ascend950 偏特化
+### Ascend 950 偏特化
 
 | 源 Layout 条件                                    | 目的 Layout 条件                        | 说明                        |
 | :------------------------------------------------ | :-------------------------------------- | :-------------------------- |
@@ -67,7 +67,7 @@ tla::Tensor<AscendC::LocalTensor<ElementDst>,  LayoutDst, CoordDst, AscendC::TPo
 
 ## 调用接口
 
-### 基础调用接口（AtlasA2 全部偏特化 + Ascend950 zN/nZ/Vector/MX Scale）
+### 基础调用接口（Atlas A2 全部偏特化 + Ascend 950 zN/nZ/Vector/MX Scale）
 
 ```cpp
 template <class TensorDst, class TensorSrc>
@@ -82,9 +82,9 @@ void operator()(
 | `dstTensor` | 目的 TLA Tensor（L1, TPosition::A1） |
 | `srcTensor` | 源 TLA Tensor（GM, TPosition::GM）   |
 
-### 扩展调用接口（Ascend950 RowMajor/ColumnMajor 偏特化）
+### 扩展调用接口（Ascend 950 RowMajor/ColumnMajor 偏特化）
 
-Ascend950 的 RowMajor → zN 和 ColumnMajor → nZ 偏特化额外支持多矩阵搬运参数：
+Ascend 950 的 RowMajor → zN 和 ColumnMajor → nZ 偏特化额外支持多矩阵搬运参数：
 
 ```cpp
 template <class TensorDst, class TensorSrc>

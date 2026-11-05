@@ -8,7 +8,7 @@
 
 `TileCopyW4A4Gemm` 是 epilogue 阶段 W4A4 GEMM 反量化的搬运聚合模板。与 `TileCopyPerTokenDequant` 类似，但不包含 per-channel scale 搬运（W4A4 使用 per-token scale 和 group size）。
 
-- 适用范围：AtlasA2
+- 适用范围：Atlas A2
 
 ## 模板原型
 

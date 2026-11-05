@@ -8,7 +8,7 @@
 
 `CopyL1ToL0A` 实现 Conv 场景下将 Fmap 数据从 L1 搬运到 L0A（非 TLA 风格），同时完成 im2col 操作。通过 `LoadData3D`/`LoadData3DParamsV2` 将 `NC1HWC0` 布局转为 `zZ` 分形格式。
 
-- 适用范围：AtlasA2
+- 适用范围：Atlas A2
 - 风格：非 TLA
 
 ## 模板原型

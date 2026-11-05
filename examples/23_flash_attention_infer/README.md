@@ -11,7 +11,7 @@
 
   其中 $Q$ 是形如 `(qTokenNum, numHeads, headDim)` 的查询矩阵，$K$、$V$ 为分页 KV cache，形如 `(numBlocks, blockSize, kvHeads, headDim)`，$d$ 为 `headDim`，$M$ 为掩码（`maskType=0` 时无掩码，`maskType=1` 时为 causal 掩码）；GQA/MQA 场景下 `numHeads` 为 `kvHeads` 的正整数倍。
 
-- 支持产品型号：Atlas A2/A3系列产品
+- 支持产品型号：Atlas A2系列产品、Atlas A3系列产品
 
 ## 样例参数说明
 

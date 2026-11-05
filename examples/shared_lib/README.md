@@ -144,4 +144,4 @@ bash scripts/build.sh -DCATLASS_BUILD_USAGE shared_lib
   - `OptimizedMatmul`：优化矩阵乘法，提供CV融合的示例
   - `ConvBias`：卷积算子
 - 示例仅支持以下产品：
-  - `Atlas A2/A3系列产品`(`2201`架构)
+  - Atlas A2系列产品、Atlas A3系列产品（`2201`架构）

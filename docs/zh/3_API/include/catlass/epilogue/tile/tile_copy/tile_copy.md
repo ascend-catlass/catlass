@@ -8,7 +8,7 @@
 
 `TileCopy` 是 epilogue 搬运聚合的基础模板，组合引用 `CopyGm2Ub`、`CopyUb2Gm` 等基础搬运模板供 block 层 epilogue 使用。根据 operands 数量（C/D、C/X/D、C/X/Y/D）自动组装所需的 GM→UB 和 UB→GM 子组件。
 
-- 适用范围：Atlas A2/A3系列产品、Ascend 950PR&950DT系列产品
+- 适用范围：Atlas A2系列产品、Atlas A3系列产品、Ascend 950PR&950DT系列产品
 - 不直接执行算子，以类型成员方式暴露子组件引用
 
 ## 模板原型

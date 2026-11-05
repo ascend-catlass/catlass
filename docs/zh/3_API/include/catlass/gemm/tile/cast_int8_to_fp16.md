@@ -12,7 +12,7 @@
 
 与 [TileCastFp8ToFp16Dequant](./cast_fp8_to_fp16.md) 的区别在于元素类型为 `int8_t`（而非 FP8），Dequant 操作为 `Cast` + `Adds` + `Muls`（而非 FP8 专用的查表/位运算）。
 
-> **限制**：仅支持 AtlasA2 架构（`CATLASS_ARCH == 2201`）。COMPUTE_LEN 不允许超过 32*1024。
+> **限制**：仅支持 Atlas A2 架构（`CATLASS_ARCH == 2201`）。COMPUTE_LEN 不允许超过 32*1024。
 
 ## 模板原型
 

@@ -268,7 +268,7 @@ ACL_CHECK(aclrtMalloc(reinterpret_cast<void **>(&deviceC), sizeC, ACL_MEM_MALLOC
 
 这部分代码主要完成以下工作：
 
-- 选择架构和调度策略（Atlas A2/A3系列产品设置 `ArchTag = Arch::AtlasA2`，Ascend 950PR&950DT系列产品使用 `ArchTag = Arch::Ascend950`）
+- 选择架构和调度策略（Atlas A2系列产品、Atlas A3系列产品设置 `ArchTag = Arch::AtlasA2`，Ascend 950PR&950DT系列产品使用 `ArchTag = Arch::Ascend950`）
 - 定义Tile形状（须满足 L1/L0 容量；公式与 fp16/int8/fp32 对照见 [从硬件容量反推 TileShape](../2_Design/01_kernel_design/00_basics/atlasA2_hardware_info.md#从硬件容量反推-tileshape)，完整算例见 [TileShape约束](./11_matmul_optimization.md#tileshape约束)）
 - 组装Block层和Kernel层组件
 - 初始化Device层适配器

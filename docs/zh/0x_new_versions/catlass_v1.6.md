@@ -1,6 +1,6 @@
 # 概述
 
-Ascend950平台在硬件特性上，新增了多项内容。其中与CATLASS关联的特性主要有
+Ascend 950平台在硬件特性上，新增了多项内容。其中与CATLASS关联的特性主要有
 
 - 新增支持MX Scaling
 - 新增L0C→UB通路，并支持多搬运模式
@@ -11,7 +11,7 @@ Ascend950平台在硬件特性上，新增了多项内容。其中与CATLASS关�
 为扩展支持新平台兼容旧平台并进一步提升易用性，CATLASS发布新版，相关新增能力主要为两方面
 
 - 适配950对应的硬件新增能力，如支持新增通路，扩展BlockEpilogue，支持CopyL0CToDst，新增BlockPrologue等
-- 扩展TLA(Tensor Layout Abstraction)的相关接口，新增支持EVG(Epilogue Visitor Graph)功能
+- 扩展 TLA（Tensor Layout Abstraction，张量布局抽象）相关接口，新增支持 EVG（Epilogue Visitor Graph，用于将 GEMM 后处理操作组织为可组合模板节点的声明式计算图）
 
 # CATLASS针对950新增能力适配
 

@@ -36,7 +36,7 @@ struct CopyL1ToL0B {
 
 ## 偏特化实现
 
-### AtlasA2 — Gemm 场景（zZ/zN → nZ）
+### Atlas A2 — Gemm 场景（zZ/zN → nZ）
 
 | 源 Layout | 目标 Layout | 元素类型                | 说明                                              |
 | :-------- | :---------- | :---------------------- | :------------------------------------------------ |
@@ -50,7 +50,7 @@ struct CopyL1ToL0B {
 | nZ （B1） | nZ （B2）   | 任意                    | nZ→nZ 非转置拷贝（直传）                          |
 | nZ （A1） | nZ （B2）   | 任意                    | nZ→nZ 直传（单参数 L1Type 偏特化）                |
 
-### AtlasA2 — GEMV 场景（zN/nN → zN）
+### Atlas A2 — GEMV 场景（zN/nN → zN）
 
 | 源 Layout | 目标 Layout | 元素类型 | 说明                      |
 | :-------- | :---------- | :------- | :------------------------ |
@@ -59,7 +59,7 @@ struct CopyL1ToL0B {
 | nN （B1） | zN （B2）   | float    | float GEMV 用 nN→zN 转置  |
 | nZ （B1） | zN （B2）   | int8_t   | int8_t GEMV 用 nZ→zN 转置 |
 
-### Ascend950
+### Ascend 950
 
 | 源 Layout           | 目标 Layout | 元素类型                    | 说明                                                           |
 | :------------------ | :---------- | :-------------------------- | :------------------------------------------------------------- |
@@ -67,7 +67,7 @@ struct CopyL1ToL0B {
 | zN （A1），非 B8/B4 | nZ （B2）   | 非 int8_t/float8_/float4 等 | zN→nZ 转置拷贝，使用 LoadData2DParamsV2                        |
 | zN （A1），B8/B4    | nZ （B2）   | int8_t/float8_/float4 等    | B8/B4 zN→nZ 转置拷贝，根据 L0N 对齐情况选择单次或分步 LoadData |
 
-> **注意**：Ascend950 的 L0Type 目标 layout 为 nZ（非 zZ），且 L1Type 的 Position 为 A1（非 B1），与 AtlasA2 不同。
+> **注意**：Ascend 950 的 L0Type 目标 layout 为 nZ（非 zZ），且 L1Type 的 Position 为 A1（非 B1），与 Atlas A2 不同。
 
 ## 调用接口
 
@@ -84,7 +84,7 @@ void operator()(
 
 ## 调用示例
 
-### zZ → nZ 转置搬运（AtlasA2，非 TLA）
+### zZ → nZ 转置搬运（Atlas A2，非 TLA）
 
 ```cpp
 #include "catlass/gemm/tile/copy_l1_to_l0b.hpp"
@@ -109,7 +109,7 @@ CopyOp copyOp;
 copyOp(dstL0BTensor, srcL1Tensor, layoutDst, layoutSrc);
 ```
 
-### zN → nZ 转置搬运（AtlasA2，单参数 L1Type）
+### zN → nZ 转置搬运（Atlas A2，单参数 L1Type）
 
 ```cpp
 using L1Type = Gemm::GemmType<half, layout::zN, AscendC::TPosition::A1>;
@@ -123,7 +123,7 @@ CopyOp copyOp;
 copyOp(dstL0BTensor, srcL1Tensor, layoutDst, layoutSrc);
 ```
 
-### nZ → nZ 直传搬运（AtlasA2，非 TLA）
+### nZ → nZ 直传搬运（Atlas A2，非 TLA）
 
 ```cpp
 using L1Type = Gemm::GemmType<half, layout::nZ, AscendC::TPosition::B1>;
@@ -137,7 +137,7 @@ CopyOp copyOp;
 copyOp(dstL0BTensor, srcL1Tensor, layoutDst, layoutSrc);
 ```
 
-### nZ → nZ 搬运（Ascend950，非 TLA）
+### nZ → nZ 搬运（Ascend 950，非 TLA）
 
 ```cpp
 using L1Type = Gemm::GemmType<half, layout::nZ, AscendC::TPosition::A1>;

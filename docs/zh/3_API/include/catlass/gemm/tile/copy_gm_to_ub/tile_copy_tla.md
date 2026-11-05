@@ -8,7 +8,7 @@
 
 `TileCopyTla` 的 GM→UB 偏特化负责将 RowMajor 二维矩阵数据从 GM 搬运到 UB（Unified Buffer，`VECCALC`），供 Vector 引擎访问。与 [CopyGm2Ub](./copy_gm_to_ub.md) 的 VectorLayout 不同，TLA 版本支持 RowMajor 二维排布，使用 `AscendC::DataCopyPad` 逐行完成搬运。
 
-> **限制**：仅支持 AtlasA2 架构，源和目标 layout 必须均为 RowMajor。
+> **限制**：仅支持 Atlas A2 架构，源和目标 layout 必须均为 RowMajor。
 
 ## 模板原型
 
@@ -25,7 +25,7 @@ struct TileCopyTla<Arch::AtlasA2,
 
 | 架构    | 源位置 | 目标位置 | Layout 要求         | 搬运指令               |
 | :------ | :----- | :------- | :------------------ | :--------------------- |
-| AtlasA2 | GM     | VECCALC  | RowMajor → RowMajor | `AscendC::DataCopyPad` |
+| Atlas A2 | GM     | VECCALC  | RowMajor → RowMajor | `AscendC::DataCopyPad` |
 
 逐行拷贝，每行的长度为 `col * sizeof(ElementSrc)` 字节，行数为 `row`，源 stride 为目标 stride 的字节偏移。
 

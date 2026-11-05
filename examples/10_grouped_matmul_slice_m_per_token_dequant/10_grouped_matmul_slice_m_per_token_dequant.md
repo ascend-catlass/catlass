@@ -13,7 +13,7 @@
 
 ## 样例实现
 
-CATLASS GMM_sliceM_perToken_Dequant样例算子是基于CATLASS Gemm API实现的亲和昇腾AtlasA2硬件的GMM算子，算子的结构可以分为以下几部分
+CATLASS GMM_sliceM_perToken_Dequant样例算子是基于CATLASS Gemm API实现的亲和昇腾Atlas A2硬件的GMM算子，算子的结构可以分为以下几部分
 
 - **Example组装**，[grouped_matmul_slice_m_per_token_dequant.cpp](../10_grouped_matmul_slice_m_per_token_dequant/grouped_matmul_slice_m_per_token_dequant.cpp)；
 - **Kernel实现**，[grouped_matmul_slice_m_per_token_dequant_multistage_workspace.hpp](../../include/catlass/gemm/kernel/grouped_matmul_slice_m_per_token_dequant_multistage_workspace.hpp)；

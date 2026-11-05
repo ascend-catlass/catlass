@@ -10,7 +10,7 @@
 
 B 矩阵通过 `CopyGmToL1BIdx` 额外搬运 CSR/COO 格式的 index 数据（`int32_t`），L1→L0B 使用 `CopyL1ToL0BSparseTla` 结合 index 进行稀疏解压。
 
-> **限制**：仅 AtlasA2 架构（`CATLASS_ARCH == 2201`）。
+> **限制**：仅 Atlas A2 架构（`CATLASS_ARCH == 2201`）。
 
 ## 引用的 Tile 组件
 

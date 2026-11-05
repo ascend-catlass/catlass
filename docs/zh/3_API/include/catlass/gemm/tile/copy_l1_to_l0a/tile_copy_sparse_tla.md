@@ -8,7 +8,7 @@
 
 `TileCopySparseTla` 在 `copy_l1_to_l0a.hpp` 中定义的偏特化负责 Sparse GEMM 场景下将稀疏化的 A 矩阵 tile 块从 L1（A1 Buffer）搬运到 L0A（A2 Buffer）。通过 `LoadData3DParamsV2Pro` + `LoadData` 指令实现 zN→zZ 的格式转换。
 
-> **限制**：该模板仅支持 AtlasA2 架构（`CATLASS_ARCH == 2201`），Ascend950 不支持。
+> **限制**：该模板仅支持 Atlas A2 架构（`CATLASS_ARCH == 2201`），Ascend 950 不支持。
 
 ## 模板原型
 
@@ -33,7 +33,7 @@ struct TileCopySparseTla {
 
 ## 偏特化实现
 
-### AtlasA2
+### Atlas A2
 
 | 源 Layout | 目标 Layout | SFINAE 条件                          | 说明                       |
 | :-------- | :---------- | :----------------------------------- | :------------------------- |
@@ -53,7 +53,7 @@ void operator()(TensorDst const &dstTensor, TensorSrc const &srcTensor)
 
 ## 调用示例
 
-### zN L1 → zZ L0A（AtlasA2）
+### zN L1 → zZ L0A（Atlas A2）
 
 ```cpp
 #include "catlass/gemm/tile/copy_l1_to_l0a.hpp"

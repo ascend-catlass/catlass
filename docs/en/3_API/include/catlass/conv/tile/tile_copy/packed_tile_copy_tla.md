@@ -8,7 +8,7 @@
 
 `PackedTileCopyTla` is the TLA version (Atlas A2 and Ascend 950) for convolution movement and aggregation. Starting from `ConvType` (Element and LayoutTag), it uses `detail::TagToLayout_t` to automatically infer all intermediate layouts for L1/L0A/L0B/L0C and then combines the TLA movement child components.
 
-- Applicability: Atlas A2/A3 series products and Ascend 950PR&950DT series products
+- Applicability: Atlas A2 series products and Atlas A3 series products and Ascend 950PR&950DT series products
 - Style: TLA
 
 ## Template Prototype

@@ -10,7 +10,7 @@
 
 与 [CopyL0CToGm](./copy_l0c_to_gm/README.md) 不同，UB 搬运的目的地是 Vector 计算单元可直接访问的 Unified Buffer，可实现 GM 写回前的中间处理。
 
-> **限制**：仅支持 TLA 风格，仅支持 Ascend950 架构（`CATLASS_ARCH == 3510`）。AtlasA2 无 L0C→UB 通道。
+> **限制**：仅支持 TLA 风格，仅支持 Ascend 950 架构（`CATLASS_ARCH == 3510`）。Atlas A2 无 L0C→UB 通道。
 >
 > **依赖**：本模块依赖 [copy_l0c_to_dst](./copy_l0c_to_dst/README.md) 中定义的 `ScaleGranularity`、`CopyL0CToDstQuantMode` 和 `CopyL0CToUBMode`。
 

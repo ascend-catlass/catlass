@@ -100,7 +100,7 @@ Dimension inference:
 - `n = tla::get<1>(l0CTensor.layout().originShape())`
 - `k = tla::get<1>(l0ATensor.layout().originShape())`
 
-On AtlasA2, m is auto-promoted to 16 when `m=1` to avoid low-efficiency GEMV.
+On Atlas A2, m is auto-promoted to 16 when `m=1` to avoid low-efficiency GEMV.
 
 ## Examples
 

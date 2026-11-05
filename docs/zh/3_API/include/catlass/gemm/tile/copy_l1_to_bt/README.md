@@ -10,8 +10,8 @@
 
 由于 Bias 数据是一维向量，该模块固定使用 `VectorLayout`（rank=1、stride=1 的一维排布）作为唯一的数据排布格式。根据架构不同，实现分为两套：
 
-- **AtlasA2**（ARCH 2201）：[atlasa2/copy_l1_to_bt.hpp](../../../../../../../../include/catlass/gemm/tile/atlasa2/copy_l1_to_bt.hpp)
-- **Ascend950**（ARCH 3510）：[ascend950/copy_l1_to_bt.hpp](../../../../../../../../include/catlass/gemm/tile/ascend950/copy_l1_to_bt.hpp)
+- **Atlas A2**（ARCH 2201）：[atlasa2/copy_l1_to_bt.hpp](../../../../../../../../include/catlass/gemm/tile/atlasa2/copy_l1_to_bt.hpp)
+- **Ascend 950**（ARCH 3510）：[ascend950/copy_l1_to_bt.hpp](../../../../../../../../include/catlass/gemm/tile/ascend950/copy_l1_to_bt.hpp)
 
 模块包含 **非 TLA 风格**（直接操作 `LocalTensor`）和 **TLA 风格**（通过 `tla::Tensor` 封装）两套 API。
 
@@ -19,8 +19,8 @@
 
 | 组件名                            | 风格   | 适用硬件            | 说明                                        |
 | :-------------------------------- | :----- | :------------------ | :------------------------------------------ |
-| [CopyL1ToBT](./copy_l1_to_bt.md)  | 非 TLA | AtlasA2 / Ascend950 | 基础 L1→BT 一维向量搬运，使用 DataCopy 指令 |
-| [TileCopyTla](./tile_copy_tla.md) | TLA    | Ascend950           | TLA 风格 L1→BT 搬运，通过 tla::Tensor 封装  |
+| [CopyL1ToBT](./copy_l1_to_bt.md)  | 非 TLA | Atlas A2 / Ascend 950 | 基础 L1→BT 一维向量搬运，使用 DataCopy 指令 |
+| [TileCopyTla](./tile_copy_tla.md) | TLA    | Ascend 950           | TLA 风格 L1→BT 搬运，通过 tla::Tensor 封装  |
 
 > **说明**：该模块通常不直接使用，而是作为 [TileCopy](../tile_copy/README.md) 的成员类型（`CopyL1ToBT`），由 [blockMmad](../../block/block_mmad.md) 自动管理。仅在需要自定义 kernel 模板组装时显式声明。
 
@@ -33,7 +33,7 @@
 
 ### 架构差异
 
-| 特性              | AtlasA2             | Ascend950              |
+| 特性              | Atlas A2             | Ascend 950              |
 | :---------------- | :------------------ | :--------------------- |
 | 目标 Buffer       | C2（Bias Table）    | C2（Bias Table）       |
 | 搬运指令          | `AscendC::DataCopy` | `AscendC::DataCopy`    |
@@ -69,7 +69,7 @@ CopyOp copyOp;
 copyOp(dstBTTensor, srcL1Tensor, layoutDst, layoutSrc);
 ```
 
-### TLA 风格（TileCopyTla，Ascend950）
+### TLA 风格（TileCopyTla，Ascend 950）
 
 ```cpp
 #include "catlass/gemm/tile/copy_l1_to_bt.hpp"
@@ -99,6 +99,6 @@ copyOp(dstTensor, srcTensor);
 | 场景                       | 推荐模板                                      |
 | :------------------------- | :-------------------------------------------- |
 | 通用 Bias Table L1→BT 搬运 | `CopyL1ToBT`（非 TLA）                        |
-| AtlasA2 Bias Table 搬运    | `CopyL1ToBT`（非 TLA）                        |
-| Ascend950 Bias Table 搬运  | `CopyL1ToBT`（非 TLA）或 `TileCopyTla`（TLA） |
-| 已使用 TLA 编程范式        | `TileCopyTla`（统一风格，仅 Ascend950）       |
+| Atlas A2 Bias Table 搬运    | `CopyL1ToBT`（非 TLA）                        |
+| Ascend 950 Bias Table 搬运  | `CopyL1ToBT`（非 TLA）或 `TileCopyTla`（TLA） |
+| 已使用 TLA 编程范式        | `TileCopyTla`（统一风格，仅 Ascend 950）       |

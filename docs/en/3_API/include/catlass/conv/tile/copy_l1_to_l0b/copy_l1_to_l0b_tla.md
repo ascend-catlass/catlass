@@ -8,7 +8,7 @@
 
 `CopyL1ToL0BTla` implements filter data movement from L1 to L0B (TLA style) in convolution scenarios.
 
-- Applicability: Atlas A2/A3 series products and Ascend 950PR&950DT series products
+- Applicability: Atlas A2 series products and Atlas A3 series products and Ascend 950PR&950DT series products
 - Style: TLA
 
 ## Template Prototype
