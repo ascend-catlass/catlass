@@ -12,7 +12,7 @@ import sys
 import symtable
 import textwrap
 from dataclasses import dataclass
-from types import FunctionType, ModuleType
+from types import CodeType, FunctionType, ModuleType
 from typing import Any, Callable, Iterable, Iterator, NoReturn
 
 
@@ -2988,24 +2988,9 @@ class _FrontendControlFlowTransformer(ast.NodeTransformer):
             return None
         if current.id in shadowed_names:
             return None
-        target = self._global_symbols.get(current.id)
-        for attribute in reversed(attributes):
-            try:
-                target = inspect.getattr_static(target, attribute)
-            except (AttributeError, TypeError):
-                members = inspect.getattr_static(target, "_members", None)
-                if object.__getattribute__(members, "__class__") is dict:
-                    if attribute not in members:
-                        return None
-                    target = members[attribute]
-                    continue
-                # Module exports via ``__getattr__`` (e.g. ``catlass.tla.arch``)
-                # are invisible to ``getattr_static``.
-                try:
-                    target = getattr(target, attribute)
-                except Exception:
-                    return None
-        return target
+        return _resolve_global_attribute_chain(
+            self._global_symbols, current.id, tuple(reversed(attributes))
+        )
 
     def visit_Attribute(self, node: ast.Attribute) -> Any:
         value = self.visit(node.value)
@@ -3271,10 +3256,492 @@ def _prepare_function_source(fn: Callable[..., Any]) -> _PreparedFunctionSource 
     )
 
 
+@dataclass(frozen=True, eq=False)
+class _RewritePlan:
+    """Compiled rewrite of one function, before it is bound to any globals.
+
+    Analysis, transform and ``compile`` are the expensive part of a rewrite;
+    ``_bind_rewrite_plan`` binds the plan to the live globals, defaults and
+    closure cells, so every lowering still gets a fresh function.
+    """
+
+    code: CodeType
+    filename: str
+    root_freevars: frozenset[str]
+    tensor_store_helper_name: str
+    source_snapshot_name: str
+    source_snapshot: _SourceSnapshot
+
+
+_ReadEntries = tuple[tuple[str, Any, Any, Any], ...]
+
+
+@dataclass(frozen=True, eq=False)
+class _RewriteMemo:
+    """What ``_preprocess_for_lowering`` remembers on a function object."""
+
+    code: CodeType
+    hooks: tuple[tuple[str, Any], ...]
+    global_deps: tuple[tuple[str, Any], ...]
+    attribute_deps: tuple[tuple[str, tuple[str, ...], Any, int], ...]
+    reads: _ReadEntries
+    callee_reads: tuple[tuple[Any, CodeType, _ReadEntries], ...]
+    plan: _RewritePlan | None
+
+
+# In-process rewrite memo. The compiled rewrite is kept on the function object it
+# was built from. It is built on the first lowering and reused while the code
+# object and the frontend hooks are unchanged, and it lives as long as
+# the function. A failed rewrite stores nothing, so it re-runs and re-raises.
+# The rewrite also reads global state, so the memo records the value of every
+# name the function resolves in the global scope and how far each
+# ``name.attr...`` call path resolves statically. That is by lexical scope: a
+# parameter, local or closure variable that shares its name with a host variable
+# is not a dependency. The language validation reads more: closure cells,
+# builtins and container elements. It logs each value it read (``_ValidationReads``)
+# and the memo replays that log. The validation also checks every @tla.jit helper
+# the function resolves, so each helper gets a log of its own, replayed against
+# the helper's environment: a change only a helper reads is still seen when the
+# helper is not called. The memo is rebuilt when a name is rebound, added or
+# removed, a call path now resolves elsewhere, a helper's code object is replaced
+# or a logged read now returns another object. Checking the memo never runs user
+# code: it stops at an attribute that only ``__getattr__`` could provide, so the
+# receiver is compared by identity and what it returns is read live while
+# tracing. A validation that went through
+# user code (a ``__getitem__`` override) cannot be replayed, so it is not memoized.
+# The memo is replaced as a whole, so concurrent lowerings at worst rebuild it.
+_REWRITE_MEMO_ATTR = "_tla_rewrite_memo"
+_GLOBAL_MISSING = object()
+
+
+def _clear_rewrite_memo(fn: FunctionType) -> None:
+    with contextlib.suppress(AttributeError):
+        delattr(fn, _REWRITE_MEMO_ATTR)
+
+
+def _symbol_sources(fn: FunctionType, name: str) -> tuple[Any, Any, Any]:
+    """What ``name`` is in the closure, the globals and the builtins of ``fn``.
+
+    The validation resolves a name from one of these three, so while the three
+    are the same objects the validation resolves the name to the same value. A
+    filled closure cell shadows the globals and builtins of that name, so only
+    the cell is read then. This reads them directly; ``inspect.getclosurevars``
+    would disassemble ``fn``.
+    """
+
+    cell = _UNKNOWN_LANGUAGE_VALUE
+    code = fn.__code__
+    if name in code.co_freevars:
+        try:
+            cell = fn.__closure__[code.co_freevars.index(name)].cell_contents
+        except ValueError:  # the cell is still empty
+            pass
+        else:
+            return cell, _UNKNOWN_LANGUAGE_VALUE, _UNKNOWN_LANGUAGE_VALUE
+    fn_globals = fn.__globals__
+    builtin_names = fn_globals.get("__builtins__", builtins.__dict__)
+    if inspect.ismodule(builtin_names):
+        builtin_names = builtin_names.__dict__
+    return (
+        cell,
+        fn_globals.get(name, _UNKNOWN_LANGUAGE_VALUE),
+        builtin_names.get(name, _UNKNOWN_LANGUAGE_VALUE),
+    )
+
+
+_BUILTIN_ITEM_GETTERS = (
+    (tuple, tuple.__getitem__),
+    (list, list.__getitem__),
+    (dict, dict.__getitem__),
+)
+
+
+def _builtin_item_getter(container: Any) -> Callable[[Any, Any], Any] | None:
+    """The built-in ``__getitem__`` of ``container``, or ``None`` for user code."""
+
+    for base, getter in _BUILTIN_ITEM_GETTERS:
+        if isinstance(container, base):
+            return getter if type(container).__getitem__ is getter else None
+    return None
+
+
+def _read_element(container: Any, key: Any) -> Any:
+    """``container[key]`` for a built-in container, without running user code."""
+
+    getter = _builtin_item_getter(container)
+    if getter is None:
+        return _UNKNOWN_LANGUAGE_VALUE
+    try:
+        return getter(container, key)
+    except (IndexError, KeyError, TypeError):
+        return _UNKNOWN_LANGUAGE_VALUE
+
+
+def _read_attribute(owner: Any, attribute: str) -> Any:
+    """``owner.attribute`` as the validation sees it: static, never ``__getattr__``."""
+
+    try:
+        return inspect.getattr_static(owner, attribute)
+    except (AttributeError, TypeError):
+        members = inspect.getattr_static(owner, "_members", None)
+        if _is_exact_builtin_dict(members) and attribute in members:
+            return members[attribute]
+        return _UNKNOWN_LANGUAGE_VALUE
+
+
+class _ValidationReads:
+    """The values one validation read from the function's environment.
+
+    Each entry is ``(kind, subject, key, value)``: ``name`` looks the name
+    ``subject`` up (``value`` is its ``_symbol_sources``), ``item`` reads
+    ``subject[key]`` from a built-in container and ``attr`` reads ``key`` from
+    ``subject`` statically. The memo replays the entries, so ``replayable`` turns
+    false when a read went through user code, which a replay must not run.
+
+    A helper validated on behalf of the function gets a log of its own
+    (``callee``), because its reads belong to the helper's environment.
+    """
+
+    def __init__(self) -> None:
+        self.replayable = True
+        self._entries: dict[tuple[str, Any, Any], tuple[str, Any, Any, Any]] = {}
+        self._callees: dict[int, tuple[Any, CodeType, _ValidationReads]] = {}
+
+    def callee(self, helper: Any) -> _ValidationReads:
+        """The log for a helper validated on behalf of this function."""
+
+        entry = self._callees.get(id(helper))
+        if entry is None:
+            entry = (helper, helper.__code__, _ValidationReads())
+            self._callees[id(helper)] = entry
+        return entry[2]
+
+    def is_replayable(self) -> bool:
+        return self.replayable and all(
+            reads.is_replayable() for _, _, reads in self._callees.values()
+        )
+
+    def callee_entries(self) -> tuple[tuple[Any, CodeType, _ReadEntries], ...]:
+        entries = []
+        for helper, code, reads in self._callees.values():
+            entries.append((helper, code, reads.entries()))
+            entries.extend(reads.callee_entries())
+        return tuple(entries)
+
+    def name(self, fn: FunctionType, name: str) -> None:
+        if ("name", name, None) not in self._entries:
+            self._entries[("name", name, None)] = (
+                "name",
+                name,
+                None,
+                _symbol_sources(fn, name),
+            )
+
+    def item(self, container: Any, key: Any, value: Any) -> None:
+        if _builtin_item_getter(container) is None:
+            self.replayable = False
+            return
+        self._entries.setdefault(
+            ("item", id(container), key), ("item", container, key, value)
+        )
+
+    def attribute(self, owner: Any, attribute: str, value: Any) -> None:
+        self._entries.setdefault(
+            ("attr", id(owner), attribute), ("attr", owner, attribute, value)
+        )
+
+    def entries(self) -> _ReadEntries:
+        return tuple(self._entries.values())
+
+
+def _validation_reads_hold(fn: FunctionType, reads: _ReadEntries) -> bool:
+    # Identity, never ``==``: comparing the objects could run user ``__eq__``.
+    for kind, subject, key, value in reads:
+        if kind == "name":
+            held = all(
+                current is recorded
+                for current, recorded in zip(_symbol_sources(fn, subject), value)
+            )
+        elif kind == "item":
+            held = _read_element(subject, key) is value
+        else:
+            held = _read_attribute(subject, key) is value
+        if not held:
+            return False
+    return True
+
+
+@dataclass(frozen=True)
+class _RewriteSourceFacts:
+    """Syntax shared by the rewrite's global and attribute dependencies."""
+
+    mentioned_names: frozenset[str]
+    declared_globals: frozenset[str]
+    call_paths: tuple[tuple[str, tuple[str, ...]], ...]
+
+
+def _collect_rewrite_source_facts(target: ast.FunctionDef) -> _RewriteSourceFacts:
+    """Collect dependency syntax in one walk, without resolving Python objects."""
+
+    names: set[str] = set()
+    declared_globals: set[str] = set()
+    paths: set[tuple[str, tuple[str, ...]]] = set()
+    for node in ast.walk(target):
+        if isinstance(node, ast.Name):
+            names.add(node.id)
+        elif isinstance(node, ast.Global):
+            names.update(node.names)
+            declared_globals.update(node.names)
+        elif isinstance(node, ast.Nonlocal):
+            names.update(node.names)
+        elif isinstance(node, ast.Call):
+            attributes: list[str] = []
+            current = node.func
+            while isinstance(current, ast.Attribute):
+                attributes.append(current.attr)
+                current = current.value
+            if attributes and isinstance(current, ast.Name):
+                paths.add((current.id, tuple(reversed(attributes))))
+    return _RewriteSourceFacts(
+        frozenset(names), frozenset(declared_globals), tuple(sorted(paths))
+    )
+
+
+def _symtable_global_names(prepared: _PreparedFunctionSource) -> set[str] | None:
+    """Names CPython's symbol table resolves as globals in the extracted source."""
+
+    try:
+        root = symtable.symtable(prepared.source_text, prepared.filename, "exec")
+    except (SyntaxError, ValueError):
+        return None
+    names: set[str] = set()
+    pending = list(root.get_children())
+    while pending:
+        table = pending.pop()
+        names.update(
+            symbol.get_name() for symbol in table.get_symbols() if symbol.is_global()
+        )
+        pending.extend(table.get_children())
+    return names
+
+
+def _global_scope_names(
+    fn: FunctionType,
+    prepared: _PreparedFunctionSource,
+    target: ast.FunctionDef,
+    *,
+    _source_facts: _RewriteSourceFacts | None = None,
+) -> frozenset[str]:
+    """Names the function resolves in the global scope, by CPython's scoping rules.
+
+    Parameters, locals, and comprehension and lambda variables are left out: a host
+    variable that shares their name is not something the rewrite reads. So are the
+    closure variables of ``fn`` (``co_freevars``). The extracted source is analyzed
+    without the scopes around it, so they look like globals; only a ``global``
+    statement in the function makes one of them the module global. The ``def``
+    statement itself (decorators, defaults, annotations) is evaluated outside the
+    function's scope, so its names are kept, except the closure variables: the
+    statement runs in the enclosing function, which binds them. Source that cannot
+    be analyzed on its own (``nonlocal`` of a closure variable) keeps every name it
+    mentions.
+    """
+
+    facts = (
+        _collect_rewrite_source_facts(target)
+        if _source_facts is None
+        else _source_facts
+    )
+    names = _symtable_global_names(prepared)
+    if names is None:
+        names = set(facts.mentioned_names)
+    closure_names = set(fn.__code__.co_freevars)
+    names -= closure_names - facts.declared_globals
+    signature = [*target.decorator_list, target.args]
+    if target.returns is not None:
+        signature.append(target.returns)
+    for node in signature:
+        names.update(
+            n.id
+            for n in ast.walk(node)
+            if isinstance(n, ast.Name) and n.id not in closure_names
+        )
+    return frozenset(names)
+
+
+def _rewrite_global_deps(
+    fn: FunctionType,
+    target: ast.FunctionDef,
+    global_names: frozenset[str],
+    *,
+    _source_facts: _RewriteSourceFacts | None = None,
+) -> tuple[tuple[str, Any], ...]:
+    """Current values of the global names ``target`` mentions.
+
+    ``global_names`` (``_global_scope_names``) limits them to names that resolve in
+    the global scope.
+    """
+
+    facts = (
+        _collect_rewrite_source_facts(target)
+        if _source_facts is None
+        else _source_facts
+    )
+    fn_globals = fn.__globals__
+    return tuple(
+        (name, fn_globals.get(name, _GLOBAL_MISSING))
+        for name in sorted(facts.mentioned_names & global_names)
+    )
+
+
+def _resolve_global_attribute_chain(
+    global_symbols: dict[str, Any], root: str, attributes: tuple[str, ...]
+) -> Any | None:
+    """Follow ``root.attr...`` through ``global_symbols`` the way the rewrite does.
+
+    This may call ``__getattr__``, so only the rewrite itself uses it; the memo
+    uses ``_static_attribute_prefix``.
+    """
+
+    target = global_symbols.get(root)
+    for attribute in attributes:
+        try:
+            target = inspect.getattr_static(target, attribute)
+        except (AttributeError, TypeError):
+            members = inspect.getattr_static(target, "_members", None)
+            if object.__getattribute__(members, "__class__") is dict:
+                if attribute not in members:
+                    return None
+                target = members[attribute]
+                continue
+            # Module exports via ``__getattr__`` (e.g. ``catlass.tla.arch``)
+            # are invisible to ``getattr_static``.
+            try:
+                target = getattr(target, attribute)
+            except Exception:
+                return None
+    return target
+
+
+def _static_attribute_prefix(
+    global_symbols: dict[str, Any], root: str, attributes: tuple[str, ...]
+) -> tuple[Any, int]:
+    """Resolve ``root.attr...`` without running user code.
+
+    Returns the object reached and how many attributes were resolved. It stops
+    at the first attribute that only ``__getattr__`` could provide, so the
+    receiver of that dynamic access is what the caller gets back.
+    """
+
+    target = global_symbols.get(root)
+    for depth, attribute in enumerate(attributes):
+        try:
+            target = inspect.getattr_static(target, attribute)
+        except (AttributeError, TypeError):
+            members = inspect.getattr_static(target, "_members", None)
+            if object.__getattribute__(members, "__class__") is dict:
+                if attribute in members:
+                    target = members[attribute]
+                    continue
+            return target, depth
+    return target, len(attributes)
+
+
+def _rewrite_attribute_deps(
+    fn: FunctionType,
+    target: ast.FunctionDef,
+    global_names: frozenset[str],
+    *,
+    _source_facts: _RewriteSourceFacts | None = None,
+) -> tuple[tuple[str, tuple[str, ...], Any, int], ...]:
+    """How far each ``global.attr...`` call path in ``target`` resolves right now.
+
+    ``global_names`` (``_global_scope_names``) drops call paths rooted at a local
+    or a closure variable.
+    """
+
+    facts = (
+        _collect_rewrite_source_facts(target)
+        if _source_facts is None
+        else _source_facts
+    )
+    fn_globals = fn.__globals__
+    return tuple(
+        (root, chain, *_static_attribute_prefix(fn_globals, root, chain))
+        for root, chain in facts.call_paths
+        if root in fn_globals and root in global_names
+    )
+
+
+def _attribute_dep_holds(
+    global_symbols: dict[str, Any],
+    root: str,
+    attributes: tuple[str, ...],
+    resolved: Any,
+    depth: int,
+) -> bool:
+    # Identity, never ``==``: comparing the objects could run user ``__eq__``.
+    current, current_depth = _static_attribute_prefix(global_symbols, root, attributes)
+    return current is resolved and current_depth == depth
+
+
+def _rewrite_memo_is_valid(
+    fn: FunctionType, memo: _RewriteMemo, hooks: tuple[tuple[str, Any], ...]
+) -> bool:
+    if memo.code is not fn.__code__ or memo.hooks != hooks:
+        return False
+    fn_globals = fn.__globals__
+    return (
+        all(
+            fn_globals.get(name, _GLOBAL_MISSING) is value
+            for name, value in memo.global_deps
+        )
+        and all(
+            _attribute_dep_holds(fn_globals, root, attributes, resolved, depth)
+            for root, attributes, resolved, depth in memo.attribute_deps
+        )
+        and _validation_reads_hold(fn, memo.reads)
+        and all(
+            helper.__code__ is code and _validation_reads_hold(helper, reads)
+            for helper, code, reads in memo.callee_reads
+        )
+    )
+
+
 def _preprocess_for_lowering(fn: FunctionType, **hooks: Any) -> FunctionType:
-    prepared = _prepare_function_source(fn)
-    validate_language_boundaries(fn, _prepared_source=prepared)
-    return maybe_transform_for_lowering(fn, _prepared_source=prepared, **hooks)
+    hook_key = tuple(sorted(hooks.items(), key=lambda item: item[0]))
+    memo = getattr(fn, _REWRITE_MEMO_ATTR, None)
+    if memo is None or not _rewrite_memo_is_valid(fn, memo, hook_key):
+        prepared = _prepare_function_source(fn)
+        reads = _ValidationReads()
+        validate_language_boundaries(fn, _prepared_source=prepared, _reads=reads)
+        if prepared is None or prepared.target is None:
+            raise SyntaxError("Tla DSL function source could not be analyzed")
+        # The rewrite mutates the target, so read the global state first.
+        source_facts = _collect_rewrite_source_facts(prepared.target)
+        global_names = _global_scope_names(
+            fn, prepared, prepared.target, _source_facts=source_facts
+        )
+        global_deps = _rewrite_global_deps(
+            fn, prepared.target, global_names, _source_facts=source_facts
+        )
+        attribute_deps = _rewrite_attribute_deps(
+            fn, prepared.target, global_names, _source_facts=source_facts
+        )
+        memo = _RewriteMemo(
+            code=fn.__code__,
+            hooks=hook_key,
+            global_deps=global_deps,
+            attribute_deps=attribute_deps,
+            reads=reads.entries(),
+            callee_reads=reads.callee_entries(),
+            plan=_build_rewrite_plan(fn, prepared),
+        )
+        if reads.is_replayable():
+            with contextlib.suppress(AttributeError, TypeError):
+                setattr(fn, _REWRITE_MEMO_ATTR, memo)
+    if memo.plan is None:
+        return fn
+    return _bind_rewrite_plan(fn, memo.plan, **hooks)
 
 
 def maybe_transform_for_lowering(
@@ -3297,16 +3764,42 @@ def maybe_transform_for_lowering(
 ) -> FunctionType:
     """Return a transformed callable when source-driven control-flow lowering is needed."""
 
-    prepared = _prepared_source or _prepare_function_source(fn)
-    if prepared is None:
+    plan = _build_rewrite_plan(fn, _prepared_source or _prepare_function_source(fn))
+    if plan is None:
         return fn
+    return _bind_rewrite_plan(
+        fn,
+        plan,
+        internal_for=internal_for,
+        internal_region=internal_region,
+        internal_if=internal_if,
+        internal_if_expr=internal_if_expr,
+        internal_bool_and=internal_bool_and,
+        internal_bool_or=internal_bool_or,
+        internal_bool_not=internal_bool_not,
+        internal_compare=internal_compare,
+        internal_any=internal_any,
+        internal_all=internal_all,
+        internal_bool=internal_bool,
+        internal_min=internal_min,
+        internal_max=internal_max,
+    )
+
+
+def _build_rewrite_plan(
+    fn: FunctionType, prepared: _PreparedFunctionSource | None
+) -> _RewritePlan | None:
+    """Analyze and rewrite ``fn``; ``None`` when it needs no source-driven lowering."""
+
+    if prepared is None:
+        return None
     source = prepared.source_text
     filename = prepared.filename
     line_offset = prepared.line_offset
     module_ast = prepared.module_ast
     target = prepared.target
     if target is None:
-        return fn
+        return None
     has_scope_declaration = _has_scope_declaration(target)
     scope_facts = _scope_facts_for_transform(
         source, filename, target, has_scope_declaration=has_scope_declaration
@@ -3330,12 +3823,11 @@ def maybe_transform_for_lowering(
         is_root=True,
         child_plans=shadow_plan.child_plans,
     ):
-        return fn
+        return None
 
     target.decorator_list = []
-    exec_globals = dict(fn.__globals__)
     transformer = _FrontendControlFlowTransformer(
-        exec_globals,
+        dict(fn.__globals__),
         filename=filename,
         line_offset=line_offset,
         source_text=source,
@@ -3349,7 +3841,43 @@ def maybe_transform_for_lowering(
     ast.fix_missing_locations(transformed)
     if line_offset:
         ast.increment_lineno(transformed, line_offset)
+    return _RewritePlan(
+        code=compile(
+            transformed,
+            filename=filename,
+            mode="exec",
+        ),
+        filename=filename,
+        root_freevars=frozenset(root_freevars),
+        tensor_store_helper_name=transformer.tensor_store_helper_name,
+        source_snapshot_name=transformer._source_snapshot_name,
+        source_snapshot=transformer._source_snapshot,
+    )
 
+
+def _bind_rewrite_plan(
+    fn: FunctionType,
+    plan: _RewritePlan,
+    *,
+    internal_for: Any,
+    internal_region: Any,
+    internal_if: Any,
+    internal_if_expr: Any,
+    internal_bool_and: Any,
+    internal_bool_or: Any,
+    internal_bool_not: Any,
+    internal_compare: Any,
+    internal_any: Any,
+    internal_all: Any,
+    internal_bool: Any,
+    internal_min: Any,
+    internal_max: Any,
+) -> FunctionType:
+    """Bind ``plan`` to the live globals, defaults and closure cells of ``fn``."""
+
+    filename = plan.filename
+    root_freevars = plan.root_freevars
+    exec_globals = dict(fn.__globals__)
     exec_globals[_INTERNAL_FOR] = internal_for
     exec_globals[_INTERNAL_REGION] = internal_region
     exec_globals[_INTERNAL_IF] = internal_if
@@ -3372,8 +3900,8 @@ def maybe_transform_for_lowering(
     exec_globals[_INTERNAL_CHECKED_DSL_IDENTITY] = _checked_dsl_identity
     exec_globals[_INTERNAL_INDEX_ADD] = _index_add
     exec_globals[_INTERNAL_INDEX_SUB] = _index_sub
-    exec_globals[transformer.tensor_store_helper_name] = _tensor_store
-    exec_globals[transformer._source_snapshot_name] = transformer._source_snapshot
+    exec_globals[plan.tensor_store_helper_name] = _tensor_store
+    exec_globals[plan.source_snapshot_name] = plan.source_snapshot
     exec_globals[_INTERNAL_ATTACH_SOURCE_INFO] = _attach_source_info
     from ..tla_ast_decorators import (
         _internal_lazy_attribute,
@@ -3402,12 +3930,7 @@ def maybe_transform_for_lowering(
     exec_globals[_WHILE_SELECTOR] = while_selector
     exec_globals["__tladsl_builtins__"] = builtins
     namespace: dict[str, Any] = {}
-    code = compile(
-        transformed,
-        filename=filename,
-        mode="exec",
-    )
-    exec(code, exec_globals, namespace)
+    exec(plan.code, exec_globals, namespace)
     if root_freevars:
         closure_factory = namespace.get(_CLOSURE_FACTORY_NAME)
         if not isinstance(closure_factory, FunctionType):
@@ -3453,6 +3976,7 @@ def validate_language_boundaries(
     fn: Callable[..., Any],
     *,
     _prepared_source: _PreparedFunctionSource | None = None,
+    _reads: _ValidationReads | None = None,
 ) -> None:
     """Validate calls and class use reachable from one decorated function."""
 
@@ -3468,6 +3992,7 @@ def validate_language_boundaries(
         filename=prepared.filename,
         line_offset=prepared.line_offset,
         statement_facts=prepared.statement_facts,
+        reads=_reads,
     )
 
 
@@ -3481,12 +4006,17 @@ def _validate_language_boundaries(
     validated: set[int] | None = None,
     validating: set[int] | None = None,
     statement_facts: _StatementFactsCache | None = None,
+    reads: _ValidationReads | None = None,
 ) -> None:
     """Validate the boundary between Python staging and DSL lowering.
 
     Ordinary inspectable Python code is valid while a kernel is being staged.
     The frontend owns only values that cross the kernel ABI, explicit runtime
     promotion, or a transformed runtime-control-flow region.
+
+    ``reads`` logs every value the validation takes from the environment of
+    ``fn``. Only the root function logs: a helper's reads belong to its own
+    environment and its own memo.
     """
 
     validated = validated if validated is not None else set()
@@ -3525,7 +4055,12 @@ def _validate_language_boundaries(
 
     def resolve(node: ast.AST) -> Any:
         if isinstance(node, ast.Name):
-            return aliases.get(node.id, symbols.get(node.id, _UNKNOWN_LANGUAGE_VALUE))
+            if node.id in aliases:
+                return aliases[node.id]
+            value = symbols.get(node.id, _UNKNOWN_LANGUAGE_VALUE)
+            if reads is not None:
+                reads.name(fn, node.id)
+            return value
         literal_types = {
             ast.Dict: dict,
             ast.List: list,
@@ -3543,29 +4078,32 @@ def _validate_language_boundaries(
                 and isinstance(node.slice.value, int)
             ):
                 try:
-                    return container[node.slice.value]
+                    element = container[node.slice.value]
                 except IndexError:
-                    return _UNKNOWN_LANGUAGE_VALUE
+                    element = _UNKNOWN_LANGUAGE_VALUE
+                if reads is not None:
+                    reads.item(container, node.slice.value, element)
+                return element
             if _is_exact_builtin_dict(container) and isinstance(
                 node.slice, ast.Constant
             ):
                 try:
-                    return container[node.slice.value]
+                    element = container[node.slice.value]
                 except (KeyError, TypeError):
-                    return _UNKNOWN_LANGUAGE_VALUE
+                    element = _UNKNOWN_LANGUAGE_VALUE
+                if reads is not None:
+                    reads.item(container, node.slice.value, element)
+                return element
             return _UNKNOWN_LANGUAGE_VALUE
         if not isinstance(node, ast.Attribute):
             return _UNKNOWN_LANGUAGE_VALUE
         owner = resolve(node.value)
         if owner is _UNKNOWN_LANGUAGE_VALUE:
             return owner
-        try:
-            return inspect.getattr_static(owner, node.attr)
-        except (AttributeError, TypeError):
-            members = inspect.getattr_static(owner, "_members", None)
-            if isinstance(members, dict) and node.attr in members:
-                return members[node.attr]
-            return _UNKNOWN_LANGUAGE_VALUE
+        value = _read_attribute(owner, node.attr)
+        if reads is not None:
+            reads.attribute(owner, node.attr, value)
+        return value
 
     def is_jit(value: Any) -> bool:
         from ..dsl import is_jit_callable
@@ -3600,6 +4138,7 @@ def _validate_language_boundaries(
             line_offset=int(helper_lineno) - 1,
             validated=validated,
             validating=validating,
+            reads=reads.callee(helper) if reads is not None else None,
         )
 
     def is_supported_isinstance_type(node: ast.AST) -> bool:

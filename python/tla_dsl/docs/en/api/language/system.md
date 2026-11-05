@@ -191,6 +191,7 @@ Parameters:
 - None.
 
 Returns:
+
 - `tuple[Int32, Int32, Int32]`: the thread's `(x, y, z)` index.
 
 Constraints:
@@ -317,6 +318,7 @@ Parameters:
 - None.
 
 Returns:
+
 - `tuple[Int32, Int32, Int32]`: the block's `(x, y, z)` thread extents.
 
 Constraints:

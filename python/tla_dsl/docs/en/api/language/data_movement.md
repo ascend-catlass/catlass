@@ -442,6 +442,7 @@ Parameters:
   logical dimension of the tensor. Required.
 
 Returns:
+
 - `Numeric`: the element, typed by the tensor's element type
   (`Bool` for an i1 tensor).
 

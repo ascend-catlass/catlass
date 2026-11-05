@@ -53,7 +53,7 @@ fp8 格式没有同类型 cast。
 函数原型：
 
 ```python
-VectorSSA.to(dst_type: Any, params: CastParams, mask: Any | None = None) -> Any
+tla.VectorSSA.to(dst_type: Any, params: CastParams, mask: Any | None = None) -> Any
 ```
 
 参数说明：

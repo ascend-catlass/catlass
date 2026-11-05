@@ -81,6 +81,7 @@ Parameters:
   | `ge` | Greater than or equal |
   | `eq` | Equal |
   | `ne` | Not equal |
+
 - `mask` (`MaskSSA | None`): Optional execution mask; `None` means all lanes enabled. Optional, default `None`.
 
 Constraints:

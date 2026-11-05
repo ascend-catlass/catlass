@@ -4379,7 +4379,7 @@ def make_stride(
           Common patterns:
 
           | Layout | Typical `make_stride(...)` | Meaning |
-          |---|---|---|
+          | --- | --- | --- |
           | RowMajor 2D `(M, N)` | `(N, 1)` | Row step is `N` elements; column step is 1 |
           | ColumnMajor 2D `(M, N)` | `(1, M)` | Row step is 1; column step is `M` |
           | `zN` / `nZ` / … | nested `((s00, s01), (s10, s11))` | Same nesting as physical `shape`; values must match the layout tag |
@@ -9551,6 +9551,7 @@ def cmp(
           | `ge` | Greater than or equal |
           | `eq` | Equal |
           | `ne` | Not equal |
+
         - `mask` (`MaskSSA | None`): Optional execution mask; `None` means all lanes enabled. Optional, default `None`.
 
         Constraints:
@@ -10046,6 +10047,7 @@ def arch_thread_idx(
         - None.
 
         Returns:
+
         - `tuple[Int32, Int32, Int32]`: the thread's `(x, y, z)` index.
 
         Constraints:
@@ -10161,6 +10163,7 @@ def arch_thread_block_dim(
         - None.
 
         Returns:
+
         - `tuple[Int32, Int32, Int32]`: the block's `(x, y, z)` thread extents.
 
         Constraints:

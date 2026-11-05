@@ -202,7 +202,7 @@ def kernel(limit: int) -> None:
 函数原型：
 
 ```python
-~Integer -> 'Integer'
+tla.Integer.__invert__() -> 'Integer'
 ```
 
 参数说明：

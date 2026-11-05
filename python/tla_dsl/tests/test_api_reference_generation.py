@@ -4,7 +4,46 @@ import ast
 import difflib
 import importlib
 import pathlib
+import re
 import sys
+
+import pytest
+
+
+def _generated_kernel_section(relative: str, api_name: str) -> str:
+    package_root = pathlib.Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(package_root / "tools"))
+    generator = importlib.import_module("generate_kernel_api_reference")
+    page = generator.generate_pages(docs_dir=package_root / "docs" / "en" / "api")[
+        pathlib.Path(relative)
+    ]
+    heading = re.search(rf"(?m)^#{{2,6}} `{re.escape(api_name)}`$", page)
+    assert heading is not None, f"missing API section: {api_name}"
+    section = page[heading.end() :]
+    return re.split(r"(?m)^#{2,6} ", section, maxsplit=1)[0]
+
+
+def test_generated_comparison_keeps_mask_outside_the_mode_table() -> None:
+    section = _generated_kernel_section("language/simd/compare_select.md", "tla.cmp")
+    # Without a blank line the Markdown tables extension consumes this parameter
+    # as an extra table row instead of a separate list item.
+    assert re.search(r"(?m)^[ \t]*\|[^\n]*\|[ \t]*\n(?:[ \t]*\n)+- `mask`", section)
+
+
+@pytest.mark.parametrize(
+    ("relative", "api_name"),
+    [
+        ("language/data_movement.md", "tla.Tensor.__getitem__"),
+        ("language/system.md", "tla.arch.thread_idx"),
+        ("language/system.md", "tla.arch.thread_block_dim"),
+    ],
+)
+def test_generated_reference_separates_return_lists(
+    relative: str, api_name: str
+) -> None:
+    section = _generated_kernel_section(relative, api_name)
+    # A list cannot interrupt the preceding paragraph in Python-Markdown.
+    assert re.search(r"(?m)^Returns:\n(?:[ \t]*\n)+- ", section)
 
 
 def _assert_generated_pages_are_current(module_name: str, regen_hint: str) -> None:

@@ -124,7 +124,7 @@ Parameters:
   Common patterns:
 
   | Layout | Typical `make_stride(...)` | Meaning |
-  |---|---|---|
+  | --- | --- | --- |
   | RowMajor 2D `(M, N)` | `(N, 1)` | Row step is `N` elements; column step is 1 |
   | ColumnMajor 2D `(M, N)` | `(1, M)` | Row step is 1; column step is `M` |
   | `zN` / `nZ` / … | nested `((s00, s01), (s10, s11))` | Same nesting as physical `shape`; values must match the layout tag |
