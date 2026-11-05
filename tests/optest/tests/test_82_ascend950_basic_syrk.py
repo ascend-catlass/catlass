@@ -15,9 +15,14 @@ import torch_catlass
 from common import only_on_3510
 
 
+def _random_npu(shape, dtype, seed):
+    generator = torch.Generator().manual_seed(seed)
+    return torch.randn(shape, generator=generator).to(dtype).to("npu")
+
+
 @only_on_3510
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16], ids=["bf16", "fp16"])
-@pytest.mark.parametrize("m,k", [(256, 256), (512, 128), (300, 200)])
+@pytest.mark.parametrize("m,k", [(256, 256), (300, 200)])
 def test_ascend950_basic_syrk(m, k, dtype):
     """Compare CATLASS Ascend950 Basic SYRK against torch.matmul(X, X.T)."""
     x = torch.randn(m, k, dtype=dtype, device="npu")
@@ -29,6 +34,107 @@ def test_ascend950_basic_syrk(m, k, dtype):
     assert result.dtype == dtype
     assert result.device.type == "npu"
     assert torch.allclose(result.float(), expected.float(), rtol=1e-2, atol=1e-2)
+
+
+@only_on_3510
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+def test_ascend950_basic_syrk_batched_triangular_schedule(dtype):
+    x = _random_npu((3, 768, 384), dtype, seed=3097)
+
+    result = torch_catlass.ascend950_basic_syrk(x)
+    expected = torch.matmul(x.float(), x.float().transpose(-2, -1)).to(dtype)
+
+    assert result.shape == expected.shape
+    torch.testing.assert_close(result.float(), expected.float(), rtol=1e-2, atol=1e-2)
+
+
+@only_on_3510
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16], ids=["fp16", "bf16"])
+@pytest.mark.parametrize(
+    "batch,m,k,tile,splitk,transposed",
+    [
+        (None, 32, 129, 64, 1, False),
+        (None, 300, 513, 128, 1, False),  # non-32-aligned M
+    ],
+)
+def test_ascend950_basic_syrk_fp32_output(batch, m, k, tile, splitk, transposed, dtype):
+    """Compare FP32 output for direct launches."""
+    generator = torch.Generator().manual_seed(3097)
+    prefix = () if batch is None else (batch,)
+    physical_shape = prefix + ((k, m) if transposed else (m, k))
+    physical = (torch.randn(physical_shape, generator=generator) * k**-0.5).to(dtype)
+    logical = physical.transpose(-2, -1) if transposed else physical
+    wide = logical.double()
+    expected = wide @ wide.transpose(-2, -1)
+    device = physical.to("npu")
+    x = device.transpose(-2, -1) if transposed else device
+
+    result = torch_catlass.ascend950_basic_syrk(
+        x, outDType=torch.float32, tile=tile, splitk=splitk
+    )
+    actual = result.cpu()
+    assert actual.shape == prefix + (m, m)
+    assert actual.dtype == torch.float32
+    assert torch.equal(actual, actual.transpose(-2, -1))
+    torch.testing.assert_close(actual.double(), expected, rtol=2e-5, atol=2e-6)
+
+
+@only_on_3510
+@pytest.mark.parametrize("m,k,tile,splitk", [(64, 3, 64, 1)])
+def test_ascend950_basic_syrk_fp32_preserves_small_products(m, k, tile, splitk):
+    # FP32 output preserves products that are rounded or flushed in FP16 output.
+    x = torch.full((m, k), 2.0**-14, dtype=torch.float16, device="npu")
+    expected = torch.full((m, m), k * 2.0**-28, dtype=torch.float32)
+    actual = torch_catlass.ascend950_basic_syrk(
+        x, outDType="fp32", tile=tile, splitk=splitk
+    ).cpu()
+    lowp = torch_catlass.ascend950_basic_syrk(x, tile=tile, splitk=splitk).cpu().float()
+    assert torch.equal(actual, expected)
+    assert not torch.equal(lowp, expected)
+
+
+@only_on_3510
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16], ids=["fp16", "bf16"])
+@pytest.mark.parametrize("fp32_output", [False, True], ids=["lowp", "fp32"])
+@pytest.mark.parametrize(
+    "batch,m,k,tile,splitk,transposed",
+    [
+        (None, 64, 129, 64, 1, False),
+        (None, 300, 513, 128, 1, True),  # partial diagonal tile, column-major
+        (2, 544, 513, 256, 1, False),  # batched diagonal tails
+    ],
+)
+def test_ascend950_basic_syrk_distinct_operands(
+    batch, m, k, tile, splitk, transposed, dtype, fp32_output
+):
+    generator = torch.Generator().manual_seed(3097)
+    prefix = () if batch is None else (batch,)
+    shape = prefix + ((k, m) if transposed else (m, k))
+    a = (torch.randn(shape, generator=generator) * k**-0.5).to(dtype)
+    b = (torch.randn(shape, generator=generator) * k**-0.5).to(dtype)
+    logical_a = a.transpose(-2, -1) if transposed else a
+    logical_b = b.transpose(-2, -1) if transposed else b
+    full = logical_a.double() @ logical_b.double().transpose(-2, -1)
+    expected = full.tril() + full.tril(-1).transpose(-2, -1)
+    x, xt = a.to("npu"), b.to("npu")
+    if transposed:
+        x, xt = x.transpose(-2, -1), xt.transpose(-2, -1)
+    result = torch_catlass.ascend950_basic_syrk(
+        x, xt, torch.float32 if fp32_output else dtype, tile, splitk
+    ).cpu()
+    assert torch.isfinite(result).all()
+    assert torch.equal(result, result.transpose(-2, -1))
+    if fp32_output:
+        torch.testing.assert_close(result.double(), expected, rtol=2e-5, atol=2e-6)
+    else:
+        torch.testing.assert_close(result.float(), expected.float(), rtol=1e-2, atol=1e-3)
+
+
+@only_on_3510
+def test_ascend950_basic_syrk_rejects_splitk():
+    x = torch.zeros((64, 513), dtype=torch.bfloat16, device="npu")
+    with pytest.raises(RuntimeError, match="splitk must be 0.*or 1"):
+        torch_catlass.ascend950_basic_syrk(x, splitk=2)
 
 
 if __name__ == "__main__":

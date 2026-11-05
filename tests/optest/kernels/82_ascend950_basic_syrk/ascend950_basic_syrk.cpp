@@ -9,6 +9,8 @@
  * the software repository for the full text of the License.
  */
 
+#include <string>
+
 #include "catlass_kernel.h"
 #include "jit_compiler.h"
 #include "jit_macro_generator.h"
@@ -18,18 +20,19 @@ namespace CatlassKernel {
 /**
  * @brief example 82_ascend950_basic_syrk: Resolve and launch JIT BasicSyrkTla.
  *
- * Y = X * X^T. Runtime params reuse MatmulParams with m == n (output is square).
+ * Y = X * X^T. Runtime params reuse MatmulParams with m == n (output is square);
+ * params.tileMN is baked in as CATLASS_JIT_SYRK_TILE.
  */
 extern "C" void Ascend950BasicSyrk(
     const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const MatmulParams& params)
 {
     auto macros = JitMacroGenerator<TParams>::generate("ascend950_basic_syrk", tParams);
-    auto* entry =
-        JitCompiler::instance().getKernel("ascend950_basic_syrk_impl.cpp", macros, JitKernelType::AIC);
+    macros["CATLASS_JIT_SYRK_TILE"] = std::to_string(params.tileMN);
+    auto* entry = JitCompiler::instance().getKernel(
+        "ascend950_basic_syrk_impl.cpp", macros, JitKernelType::MIX);
     if (entry) {
         entry(blockNum, stream, &params);
     }
-    aclrtSynchronizeStream(stream);
 }
 
 } // namespace CatlassKernel

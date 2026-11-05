@@ -130,7 +130,7 @@ from .grouped_matmul_slice_m_gelu import grouped_matmul_slice_m_gelu  # example 
 from .matrix_inverse import matrix_inverse  # example 78
 from .x_attention import x_attention  # example 78
 from .ascend950_basic_syrk import ascend950_basic_syrk  # example 82
-from .ascend950_syrk import ascend950_syrk  # 84
+from .ascend950_syrk import ascend950_syrk  # example 84
 
 from .ascend950_quant_matmul import (  # example 79, 81
     ascend950_fp4_mx_quant_matmul,
@@ -238,5 +238,5 @@ __all__ = [
     "matrix_inverse",  # example 78
     "x_attention",  # example 78
     "ascend950_basic_syrk",  # example 82
-    "ascend950_syrk",  # 84
+    "ascend950_syrk",  # example 84
 ]

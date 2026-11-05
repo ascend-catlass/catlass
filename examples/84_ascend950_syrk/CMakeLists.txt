@@ -12,3 +12,7 @@ set_source_files_properties(syrk_tla.cpp PROPERTIES LANGUAGE ASC)
 catlass_example_add_executable(84_ascend950_syrk mix syrk_tla.cpp)
 target_compile_definitions(84_ascend950_syrk PRIVATE L2_CACHE_HINT)
 target_link_libraries(84_ascend950_syrk PRIVATE m)
+
+set_source_files_properties(batched_basic_syrk.cpp PROPERTIES LANGUAGE ASC)
+catlass_example_add_executable(84_ascend950_batched_basic_syrk mix batched_basic_syrk.cpp)
+target_link_libraries(84_ascend950_batched_basic_syrk PRIVATE m)

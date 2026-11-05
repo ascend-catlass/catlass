@@ -74,6 +74,7 @@ struct MatmulParams {
     uint32_t x1QuantMode = 0;         ///< Example 57 x1 quant mode (QuantMode enum value).
     uint32_t x2QuantMode = 0;         ///< Example 57 x2 quant mode (QuantMode enum value).
     bool hasQuantBias = false;        ///< Example 57 optional bias flag.
+    uint32_t tileMN = 256;            ///< Square SYRK output tile edge (SYRK kernels only).
 };
 
 /**
@@ -561,10 +562,11 @@ __attribute__((weak)) void Ascend950MatmulFullLoadA(
 __attribute__((weak)) void Symm(const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const SymmParams& params);
 
 /**
- * @brief JIT interface for example 82_ascend950_basic_syrk.
+ * @brief JIT interface for example 82_ascend950_basic_syrk (AIC only).
  *
- * Y = X * X^T. ``params.m`` must equal ``params.n``; only ``inputAddr[0]`` (X) and
- * ``outputAddr[0]`` (Y) are consumed.
+ * Y = X * X^T. ``params.m`` must equal ``params.n``; ``inputAddr[0]`` (X), ``inputAddr[1]``
+ * (Xt, normally the same buffer) and ``outputAddr[0]`` (Y) are consumed, and
+ * ``params.tileMN`` selects the square output tile edge.
  */
 __attribute__((weak)) void Ascend950BasicSyrk(
     const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const MatmulParams& params);

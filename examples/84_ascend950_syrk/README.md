@@ -68,3 +68,12 @@
 | `alpha`    | $X X^{T}$ 缩放系数                        | 浮点数                       |
 | `beta`     | $Y$ 缩放系数                              | 浮点数                       |
 | `deviceId` | 使用的 NPU 卡 ID（默认 0）                | 在设备 NPU 有效范围内        |
+
+## Batched basic SYRK
+
+`batched_basic_syrk.cpp` uses distinct BF16 inputs and FP32 output, with CPU accuracy and symmetry checks.
+
+```bash
+bash scripts/build.sh -DCATLASS_ARCH=3510 84_ascend950_batched_basic_syrk
+./output/bin/84_ascend950_batched_basic_syrk 300 513 2 0
+```
