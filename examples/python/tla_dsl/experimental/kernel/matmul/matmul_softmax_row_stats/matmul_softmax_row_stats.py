@@ -1,9 +1,11 @@
 # -----------------------------------------------------------------------------------------------------------
-# CATLASS Python DSL kernels for matmul_softmax_stats.
-#
-# Two kernels:
-#   main  : GEMM + online softmax statistics (z never lands in GM)
-#   merge : fold the per-V-segment partial (max, sum) into the final statistics
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
 # -----------------------------------------------------------------------------------------------------------
 
 import catlass.tla as tla
@@ -25,13 +27,12 @@ MIN_F = -3.4028234663852886e38
 
 
 @tla.kernel
-def mss_main_kernel(
-    hidden: tla.Tensor,  # [M, H] bf16 RowMajor
-    weight: tla.Tensor,  # [H, V] bf16 RowMajor (host pre-transposes [V, H])
-    part_max: tla.Tensor,  # [M, NV] fp32 per V-segment partial max
-    part_sum: tla.Tensor,  # [M, NV] fp32 per V-segment partial exp-sum
+def msrs_main_kernel(
+    x: tla.Tensor,  # [M, H] bf16 RowMajor
+    w: tla.Tensor,  # [H, V] bf16 RowMajor (host pre-transposes [V, H])
+    tile_max: tla.Tensor,  # [M, NV] fp32 per V-segment partial max
+    tile_sum: tla.Tensor,  # [M, NV] fp32 per V-segment partial exp-sum
     inv_temperature: float,
-    tiles_per_seg: int,
     m_real: int,
     v_real: int,
     NV: tla.Constexpr[int],
@@ -39,17 +40,18 @@ def mss_main_kernel(
     c0 = 0
     c1 = 1
 
-    m = hidden.origin_shape[0]
-    h = hidden.origin_shape[1]
-    v = weight.origin_shape[1]
+    m = x.origin_shape[0]
+    h = x.origin_shape[1]
+    v = w.origin_shape[1]
 
     grid_m = (m + BM - 1) // BM
     h_tiles = (h + BH - 1) // BH
     k_sub = (BH + SK - 1) // SK
     nv_tiles = tla.as_numeric((v + BN - 1) // BN)
+    tiles_per_seg = (nv_tiles + NV - 1) // NV
     total_blocks = grid_m * NV
 
-    dtype_in = hidden.ptr.dtype
+    dtype_in = x.ptr.dtype
 
     # C/V crossing: one cross flag handed back and forth (VECTOR -> FIX -> VECTOR).
     exchange = tla.cross_flag("exchange")
@@ -108,7 +110,7 @@ def mss_main_kernel(
 
         for blk in tla.range(tla.arch.block_idx(), total_blocks, tla.arch.block_num()):
             # Segment-major: consecutive blocks are consecutive M tiles inside one
-            # V segment, so all concurrently running cores sweep the same weight
+            # V segment, so all concurrently running cores sweep the same rhs
             # stream together (L2 sharing) instead of 28 disjoint 160 MB regions.
             seg = blk // grid_m
             mb = blk - seg * grid_m
@@ -123,10 +125,10 @@ def mss_main_kernel(
                     # free wait is deferred to just before the first MAC so this
                     # GM->L1 load overlaps the previous tile's FixPipe drain.
                     gm_a_p = tla.tile_view(
-                        hidden, tla.make_shape(BM, BH), tla.make_coord(mb, c0)
+                        x, tla.make_shape(BM, BH), tla.make_coord(mb, c0)
                     )
                     gm_b_p = tla.tile_view(
-                        weight, tla.make_shape(BH, BN), tla.make_coord(c0, vt)
+                        w, tla.make_shape(BH, BN), tla.make_coord(c0, vt)
                     )
                     l1_a_p = tla.make_tensor_like(l1a0_ptr, gm_a_p, tla.arch.zN)
                     l1_b_p = tla.make_tensor_like(l1b0_ptr, gm_b_p, tla.arch.zN)
@@ -153,12 +155,12 @@ def mss_main_kernel(
                         # Prefetch the next K tile into the other stage.
                         if hb + c1 < h_tiles:
                             gm_a_n = tla.tile_view(
-                                hidden,
+                                x,
                                 tla.make_shape(BM, BH),
                                 tla.make_coord(mb, hb + c1),
                             )
                             gm_b_n = tla.tile_view(
-                                weight,
+                                w,
                                 tla.make_shape(BH, BN),
                                 tla.make_coord(hb + c1, vt),
                             )
@@ -188,10 +190,10 @@ def mss_main_kernel(
                         cur_a_ptr = l1a0_ptr if buf == c0 else l1a1_ptr
                         cur_b_ptr = l1b0_ptr if buf == c0 else l1b1_ptr
                         gm_a_c = tla.tile_view(
-                            hidden, tla.make_shape(BM, BH), tla.make_coord(mb, hb)
+                            x, tla.make_shape(BM, BH), tla.make_coord(mb, hb)
                         )
                         gm_b_c = tla.tile_view(
-                            weight, tla.make_shape(BH, BN), tla.make_coord(hb, vt)
+                            w, tla.make_shape(BH, BN), tla.make_coord(hb, vt)
                         )
                         l1_a = tla.make_tensor_like(cur_a_ptr, gm_a_c, tla.arch.zN)
                         l1_b = tla.make_tensor_like(cur_b_ptr, gm_b_c, tla.arch.zN)
@@ -361,7 +363,8 @@ def mss_main_kernel(
                         ncols = tla.as_numeric(BN)
                     tla.cross_core_wait_flag(exchange, tla.arch.VECTOR)
 
-                    # Pass 1: tile row max + the rescale factor of the online update.
+                    # Online update per row: tile max first, then the rescale factor
+                    # and the exp-sum, all from the registers loaded for this tile.
                     # Complexity: O(BM * BN) vector work per tile.
                     with tla.vec.func(mode="simd"):
                         preg_all = tla.create_mask(
@@ -463,7 +466,7 @@ def mss_main_kernel(
                                 ),
                                 mask=preg_all,
                             )
-                            tile_sum = sv.reduce(tla.ReductionOp.ADD, mask=preg_all)
+                            tile_exp_sum = sv.reduce(tla.ReductionOp.ADD, mask=preg_all)
                             old_sum = tla.tile_view(
                                 ub_rsum, tla.make_shape(1), tla.make_coord(r1)
                             ).load(params=brc)
@@ -474,7 +477,7 @@ def mss_main_kernel(
                             )
                             scale = tla.exp(delta, mask=preg_all)
                             new_sum = tla.add(
-                                tile_sum,
+                                tile_exp_sum,
                                 tla.mul(old_sum, scale, mask=preg_all),
                                 mask=preg_all,
                             )
@@ -494,21 +497,21 @@ def mss_main_kernel(
                     ptid, _, _ = tla.arch.thread_idx()
                     pgrow = sub_row0 + ptid
                     if pgrow < m_real:
-                        part_max[pgrow, seg] = ub_rmax[ptid]
-                        part_sum[pgrow, seg] = ub_rsum[ptid]
+                        tile_max[pgrow, seg] = ub_rmax[ptid]
+                        tile_sum[pgrow, seg] = ub_rsum[ptid]
 
 
 @tla.kernel
-def mss_merge_kernel(
-    part_max: tla.Tensor,  # [M, NV] fp32
-    part_sum: tla.Tensor,  # [M, NV] fp32
-    local_max: tla.Tensor,  # [M] fp32
-    exp_sum: tla.Tensor,  # [M] fp32
+def msrs_merge_kernel(
+    tile_max: tla.Tensor,  # [M, NV] fp32
+    tile_sum: tla.Tensor,  # [M, NV] fp32
+    row_max: tla.Tensor,  # [M] fp32
+    row_sum: tla.Tensor,  # [M] fp32
     nv_tiles: int,
-    tiles_per_seg: int,
     NV: tla.Constexpr[int],
 ) -> None:
-    m = local_max.origin_shape[0]
+    m = row_max.origin_shape[0]
+    tiles_per_seg = (nv_tiles + NV - 1) // NV
 
     # Complexity: O(M * NV) scalar work, NV is a small compile-time constant.
     with tla.vector():
@@ -522,18 +525,18 @@ def mss_merge_kernel(
                 for ms1 in tla.range(0, NV):
                     lo1 = ms1 * tiles_per_seg
                     if lo1 < nv_tiles:
-                        value1 = part_max[mr, ms1]
+                        value1 = tile_max[mr, ms1]
                         if value1 > mx:
                             mx = value1
                 total = tla.as_numeric(0.0)
                 for ms2 in tla.range(0, NV):
                     lo2 = ms2 * tiles_per_seg
                     if lo2 < nv_tiles:
-                        total = total + part_sum[mr, ms2] * tla.exp(
-                            part_max[mr, ms2] - mx
+                        total = total + tile_sum[mr, ms2] * tla.exp(
+                            tile_max[mr, ms2] - mx
                         )
-                local_max[mr] = mx
-                exp_sum[mr] = total
+                row_max[mr] = mx
+                row_sum[mr] = total
 
 
 # ======================================================================================
@@ -541,41 +544,41 @@ def mss_merge_kernel(
 # ======================================================================================
 
 _COMPILED = {}
-# The LM-head shard is read-only while decoding, so its [V, H] -> [H, V]
-# (plus zero padding) transform is cached across calls.  The key carries the
-# buffer address, shape, dtype and torch version counter, so an in-place update
-# of the shard invalidates the entry instead of serving stale weights.
-_WEIGHT_CACHE = {}
+# The right operand is read-only across calls, so its [V, H] -> [H, V] (plus
+# zero padding) transform is cached.  The key carries the buffer address, shape,
+# dtype and torch version counter, so an in-place update invalidates the entry
+# instead of serving a stale buffer.
+_W_CACHE = {}
 
 
-def v_pad_target(weight, bn):
-    rows = int(weight.shape[0])
+def v_pad_target(w, bn):
+    rows = int(w.shape[0])
     return ((rows + bn - 1) // bn) * bn
 
 
-def _weight_hv(weight, v_pad, h_pad):
+def _w_hv(w, v_pad, h_pad):
     import torch
 
-    local_vocab, hidden_size = int(weight.shape[0]), int(weight.shape[1])
+    v, h = int(w.shape[0]), int(w.shape[1])
     key = (
-        weight.data_ptr(),
-        tuple(weight.shape),
-        str(weight.dtype),
-        int(getattr(weight, "_version", 0)),
+        w.data_ptr(),
+        tuple(w.shape),
+        str(w.dtype),
+        int(getattr(w, "_version", 0)),
         v_pad,
         h_pad,
     )
-    cached = _WEIGHT_CACHE.get(key)
+    cached = _W_CACHE.get(key)
     if cached is not None:
         return cached
-    if v_pad != local_vocab or h_pad != hidden_size:
-        padded = torch.zeros((v_pad, h_pad), dtype=weight.dtype, device=weight.device)
-        padded[:local_vocab, :hidden_size] = weight
+    if v_pad != v or h_pad != h:
+        padded = torch.zeros((v_pad, h_pad), dtype=w.dtype, device=w.device)
+        padded[:v, :h] = w
     else:
-        padded = weight
+        padded = w
     result = padded.t().contiguous()
-    _WEIGHT_CACHE.clear()
-    _WEIGHT_CACHE[key] = result
+    _W_CACHE.clear()
+    _W_CACHE[key] = result
     return result
 
 
@@ -594,28 +597,26 @@ def _tla_tensor(buffer, layout_tag):
     return from_dlpack(buffer, layout_tag=layout_tag)
 
 
-def run(hidden, weight, temperature):
-    """Return ``(local_max, exp_sum)``; see README.md for semantics."""
+def run(x, w, temperature):
+    """Return ``(row_max, row_sum)``; see README.md for semantics."""
     import torch
 
-    num_tokens, hidden_size = hidden.shape
-    local_vocab = weight.shape[0]
-    device = hidden.device
+    m, h = x.shape
+    v = w.shape[0]
+    device = x.device
 
-    local_max = torch.empty(num_tokens, dtype=torch.float32, device=device)
-    exp_sum = torch.empty(num_tokens, dtype=torch.float32, device=device)
-    if num_tokens == 0:
-        return local_max, exp_sum
+    row_max = torch.empty(m, dtype=torch.float32, device=device)
+    row_sum = torch.empty(m, dtype=torch.float32, device=device)
+    if m == 0:
+        return row_max, row_sum
 
     bm, bn = BM, BN
 
     inv_temperature = 1.0 / float(temperature)
 
-    grid_m = (num_tokens + bm - 1) // bm
-    nv_tiles = (local_vocab + bn - 1) // bn
-    device_index = (
-        int(str(hidden.device).split(":")[-1]) if ":" in str(hidden.device) else 0
-    )
+    grid_m = (m + bm - 1) // bm
+    nv_tiles = (v + bn - 1) // bn
+    device_index = int(str(x.device).split(":")[-1]) if ":" in str(x.device) else 0
     cube_cores, vector_cores = _core_counts(device_index)
     # Wave quantization: grid = grid_m * nv blocks must land on a core-count
     # multiple, otherwise the last wave runs with idle cores (64 blocks on 28
@@ -633,60 +634,57 @@ def run(hidden, weight, temperature):
             nv = cand
             best_waste = waste
         cand = cand + 1
-    tiles_per_seg = (nv_tiles + nv - 1) // nv
 
-    part_max = torch.empty((num_tokens, nv), dtype=torch.float32, device=device)
-    part_sum = torch.empty_like(part_max)
+    tile_max = torch.empty((m, nv), dtype=torch.float32, device=device)
+    tile_sum = torch.empty_like(tile_max)
 
     # Partial GM->L1 tiles have no working copy route, so every GEMM operand is
     # zero-padded up to whole tiles.  Zero padding is exact for M (rows beyond the
-    # token count are dropped) and for H (extra K terms contribute 0); the padded
-    # V columns are masked out by v_real.
-    m_pad = ((num_tokens + bm - 1) // bm) * bm
-    h_pad = ((hidden_size + BH - 1) // BH) * BH
-    if m_pad != num_tokens or h_pad != hidden_size:
-        hidden_use = torch.zeros((m_pad, h_pad), dtype=hidden.dtype, device=device)
-        hidden_use[:num_tokens, :hidden_size] = hidden
+    # row count are dropped by the m_real guard) and for H (extra K terms
+    # contribute 0); the padded V columns are masked out by v_real.
+    m_pad = ((m + bm - 1) // bm) * bm
+    h_pad = ((h + BH - 1) // BH) * BH
+    if m_pad != m or h_pad != h:
+        x_pad = torch.zeros((m_pad, h_pad), dtype=x.dtype, device=device)
+        x_pad[:m, :h] = x
     else:
-        hidden_use = hidden
+        x_pad = x
 
-    h_t = _tla_tensor(hidden_use, tla.arch.RowMajor)
-    # The DSL copy has no ColumnMajor-GM -> zN-L1 route, so the [V, H] shard is
-    # transposed to a [H, V] row-major operand once per call (see README.md).  A
-    # partial (V % BN != 0) weight tile also has no working GM->L1 route, so the
-    # shard is zero-padded up to a BN multiple; the padded columns are excluded
-    # from max/exp-sum by the kernel mask (v_real below).
-    weight_hv = _weight_hv(weight, v_pad_target(weight, bn), h_pad)
-    w_t = _tla_tensor(weight_hv, tla.arch.RowMajor)
-    pmax_t = _tla_tensor(part_max, tla.arch.RowMajor)
-    psum_t = _tla_tensor(part_sum, tla.arch.RowMajor)
-    emax_t = _tla_tensor(local_max, tla.arch.RowMajor)
-    esum_t = _tla_tensor(exp_sum, tla.arch.RowMajor)
+    x_t = _tla_tensor(x_pad, tla.arch.RowMajor)
+    # The DSL copy has no ColumnMajor-GM -> zN-L1 route, so the [V, H] operand is
+    # transposed once to a [H, V] row-major form (cached across calls, see
+    # README.md).  A partial (V % BN != 0) rhs tile also has no working GM->L1
+    # route, so the operand is zero-padded up to a BN multiple; the padded columns
+    # are excluded from max/exp-sum by the kernel mask (v_real below).
+    w_hv = _w_hv(w, v_pad_target(w, bn), h_pad)
+    w_t = _tla_tensor(w_hv, tla.arch.RowMajor)
+    tmax_t = _tla_tensor(tile_max, tla.arch.RowMajor)
+    tsum_t = _tla_tensor(tile_sum, tla.arch.RowMajor)
+    rmax_t = _tla_tensor(row_max, tla.arch.RowMajor)
+    rsum_t = _tla_tensor(row_sum, tla.arch.RowMajor)
 
-    key = (num_tokens, hidden_size, local_vocab, nv)
+    key = (m, h, v, nv)
     entry = _COMPILED.get(key)
     if entry is None:
         stats_artifact = tla.compile(
-            mss_main_kernel,
-            h_t,
+            msrs_main_kernel,
+            x_t,
             w_t,
-            pmax_t,
-            psum_t,
+            tmax_t,
+            tsum_t,
             inv_temperature,
-            tiles_per_seg,
-            num_tokens,
-            local_vocab,
+            m,
+            v,
             nv,
             options="--npu-arch 3510",
         )
         merge_artifact = tla.compile(
-            mss_merge_kernel,
-            pmax_t,
-            psum_t,
-            emax_t,
-            esum_t,
+            msrs_merge_kernel,
+            tmax_t,
+            tsum_t,
+            rmax_t,
+            rsum_t,
             nv_tiles,
-            tiles_per_seg,
             nv,
             options="--npu-arch 3510",
         )
@@ -695,23 +693,21 @@ def run(hidden, weight, temperature):
     stats_artifact, merge_artifact, cube_cores, vector_cores = entry
 
     stats_artifact(
-        h_t,
+        x_t,
         w_t,
-        pmax_t,
-        psum_t,
+        tmax_t,
+        tsum_t,
         inv_temperature,
-        tiles_per_seg,
-        num_tokens,
-        local_vocab,
+        m,
+        v,
         block_num=cube_cores,
     )
     merge_artifact(
-        pmax_t,
-        psum_t,
-        emax_t,
-        esum_t,
+        tmax_t,
+        tsum_t,
+        rmax_t,
+        rsum_t,
         nv_tiles,
-        tiles_per_seg,
         block_num=vector_cores,
     )
-    return local_max, exp_sum
+    return row_max, row_sum
