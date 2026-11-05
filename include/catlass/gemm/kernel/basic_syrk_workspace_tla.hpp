@@ -133,12 +133,13 @@ public:
         uint8_t* ptrD;
         float alpha;
         float beta;
+        /// Cores this launch uses; each writes its own CORE_BYTES workspace slice.
         uint32_t aicCoreNum;
     };
 
     static bool CanImplement(const Arguments& args)
     {
-        return args.problemShape.m() == args.problemShape.n();
+        return args.problemShape.m() == args.problemShape.n() && args.aicCoreNum > 0;
     }
 
     static size_t GetWorkspaceSize(const Arguments& args)
@@ -154,7 +155,6 @@ public:
         int64_t strideY = static_cast<int64_t>(m) * m;
         int64_t strideD = strideY;
         using LayoutTagY = layout::RowMajor;
-        using LayoutTagD = layout::RowMajor;
         return Params{
             args.batchCount,
             args.problemShape,
@@ -165,7 +165,7 @@ public:
             tla::MakeLayout<ElementX, LayoutTagX>(m, k),
             tla::MakeLayout<ElementXt, LayoutTagXt>(k, m),
             tla::MakeLayout<ElementY, LayoutTagY>(m, m),
-            tla::MakeLayout<ElementD, LayoutTagD>(m, m),
+            tla::MakeLayout<ElementD, LayoutTagY>(m, m),
             strideX,
             strideY,
             strideD,
@@ -217,9 +217,6 @@ public:
         for (uint32_t loopIdx = coreIdx; loopIdx < coreLoops; loopIdx += AscendC::GetBlockNum()) {
             uint32_t batchIdx = blockScheduler.GetBatchIdx(loopIdx);
             GemmCoord blockCoord = blockScheduler.GetBlockCoord(loopIdx);
-            if (blockCoord.m() < blockCoord.n()) {
-                continue;
-            }
 
             int64_t batchOffsetX = static_cast<int64_t>(batchIdx) * params.strideX;
             auto tensorX = tla::MakeTensor(gmX[batchOffsetX], params.layoutX, Arch::PositionGM{});
@@ -274,9 +271,6 @@ public:
         for (uint32_t loopIdx = aicBlockIdx; loopIdx < coreLoops; loopIdx += aicBlockNum) {
             uint32_t batchIdx = blockScheduler.GetBatchIdx(loopIdx);
             GemmCoord blockCoord = blockScheduler.GetBlockCoord(loopIdx);
-            if (blockCoord.m() < blockCoord.n()) {
-                continue;
-            }
 
             GemmCoord actualBlockShape = blockScheduler.GetActualBlockShape(blockCoord);
             uint32_t mActual = actualBlockShape.m();

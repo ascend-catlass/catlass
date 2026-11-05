@@ -16,7 +16,12 @@ from common import only_on_3510
 
 
 def _assert_allclose_with_diagnostics(
-    actual: torch.Tensor, expected: torch.Tensor, *, rtol: float, atol: float, expect_symmetric: bool
+    actual: torch.Tensor,
+    expected: torch.Tensor,
+    *,
+    rtol: float,
+    atol: float,
+    expect_symmetric: bool,
 ) -> None:
     if actual.dim() == 3:
         for batch_idx in range(actual.shape[0]):
@@ -71,13 +76,15 @@ def _assert_allclose_with_diagnostics(
 )
 def test_ascend950_syrk(b, m, k, dtype, alpha, beta):
     """Compare CATLASS Ascend950 SYRK against alpha*X@X.T + beta*Y."""
-    torch.manual_seed(0)
-    x = torch.randn((b, m, k), dtype=dtype, device="npu")
-    # Asymmetric Y (not forced symmetric) to validate dual-path AXPBY.
-    y = torch.randn((b, m, m), dtype=dtype, device="npu")
+    generator = torch.Generator().manual_seed(3097)
+    x = torch.randn((b, m, k), generator=generator).to(dtype).to("npu")
+    # An asymmetric residual verifies that beta updates both output triangles.
+    y = torch.randn((b, m, m), generator=generator).to(dtype).to("npu")
 
     result = torch_catlass.ascend950_syrk(x, y, alpha=alpha, beta=beta)
-    expected = (alpha * torch.matmul(x.float(), x.float().transpose(-1, -2)) + beta * y.float()).to(dtype)
+    expected = (alpha * torch.matmul(x.float(), x.float().transpose(-1, -2)) + beta * y.float()).to(
+        dtype
+    )
 
     assert result.shape == (b, m, m)
     assert result.dtype == dtype
@@ -88,21 +95,86 @@ def test_ascend950_syrk(b, m, k, dtype, alpha, beta):
 
 
 @only_on_3510
-def test_ascend950_syrk_mixed_y_d_dtype():
-    """Y (input) and D (output) may use different fp16/bf16 dtypes."""
+@pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16, torch.float32])
+def test_ascend950_syrk_float32_output(dtype):
+    """D may be float32 while X and Y keep the input dtype."""
     torch.manual_seed(0)
-    x = torch.randn((1, 256, 256), dtype=torch.bfloat16, device="npu")
-    y = torch.randn((1, 256, 256), dtype=torch.bfloat16, device="npu")
-    out_dtype = torch.float16
+    x = torch.randn((1, 256, 256), dtype=dtype, device="npu")
+    y = torch.randn((1, 256, 256), dtype=dtype, device="npu")
 
-    result = torch_catlass.ascend950_syrk(x, y, alpha=1.0, beta=1.0, outDType=out_dtype)
-    expected = (
-        torch.matmul(x.float(), x.float().transpose(-1, -2)) + y.float()
-    ).to(out_dtype)
+    result = torch_catlass.ascend950_syrk(x, y, alpha=1.0, beta=1.0, outDType=torch.float32)
+    expected = torch.matmul(x.float(), x.float().transpose(-1, -2)) + y.float()
 
     assert result.shape == (1, 256, 256)
-    assert result.dtype == out_dtype
-    _assert_allclose_with_diagnostics(result, expected, rtol=1e-2, atol=1e-2, expect_symmetric=False)
+    assert result.dtype == torch.float32
+    _assert_allclose_with_diagnostics(
+        result, expected, rtol=1e-2, atol=1e-2, expect_symmetric=False
+    )
+
+
+@only_on_3510
+def test_ascend950_syrk_transposed_mat():
+    """A transposed view of a packed buffer is a layout, not a copy."""
+    torch.manual_seed(0)
+    base = torch.randn((1, 512, 256), dtype=torch.bfloat16, device="npu")
+    x = base.transpose(-1, -2)  # (1, 256, 512), column-major view
+    y = torch.randn((1, 256, 256), dtype=torch.bfloat16, device="npu")
+
+    result = torch_catlass.ascend950_syrk(x, y, alpha=1.0, beta=1.0)
+    expected = (torch.matmul(x.float(), x.float().transpose(-1, -2)) + y.float()).to(torch.bfloat16)
+
+    assert result.shape == (1, 256, 256)
+    _assert_allclose_with_diagnostics(
+        result, expected, rtol=1e-2, atol=1e-2, expect_symmetric=False
+    )
+
+
+@only_on_3510
+def test_ascend950_syrk_offset_view():
+    """A sliced view must read from its own offset, not the start of the storage."""
+    torch.manual_seed(0)
+    base = torch.randn((2, 256, 256), dtype=torch.bfloat16, device="npu")
+    x = base[1]
+    y = torch.randn((256, 256), dtype=torch.bfloat16, device="npu")
+
+    result = torch_catlass.ascend950_syrk(x, y, alpha=1.0, beta=1.0)
+    expected = (torch.matmul(x.float(), x.float().t()) + y.float()).to(torch.bfloat16)
+
+    _assert_allclose_with_diagnostics(
+        result, expected, rtol=1e-2, atol=1e-2, expect_symmetric=False
+    )
+
+
+@only_on_3510
+def test_ascend950_syrk_rejects_unrelated_output_dtype():
+    """D must be the input dtype or float32; anything else would reinterpret Y."""
+    x = torch.randn((1, 256, 256), dtype=torch.bfloat16, device="npu")
+    y = torch.randn((1, 256, 256), dtype=torch.bfloat16, device="npu")
+
+    with pytest.raises(RuntimeError, match="outDType"):
+        torch_catlass.ascend950_syrk(x, y, alpha=1.0, beta=1.0, outDType=torch.float16)
+
+
+@only_on_3510
+@pytest.mark.parametrize("m", [280, 1000])
+def test_ascend950_syrk_m_not_a_multiple_of_the_tile(m):
+    """The last tile is a partial one, so the epilogue pads its rows in UB.
+
+    The padding has to keep every 16-bit row starting at a 32-byte boundary; padding
+    to a float size instead put the rows at the wrong offsets and corrupted the output.
+    """
+    torch.manual_seed(0)
+    k = 256
+    x = torch.randn((m, k), dtype=torch.bfloat16, device="npu")
+    y = torch.randn((m, m), dtype=torch.bfloat16, device="npu")
+
+    result = torch_catlass.ascend950_syrk(x, y, alpha=1.0, beta=1.0)
+    expected = (torch.matmul(x.float(), x.float().t()) + y.float()).to(torch.bfloat16)
+
+    assert result.shape == (m, m)
+    _assert_allclose_with_diagnostics(
+        result, expected, rtol=1e-2, atol=1e-2, expect_symmetric=False
+    )
 
 
 if __name__ == "__main__":

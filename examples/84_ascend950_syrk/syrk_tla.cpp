@@ -16,7 +16,7 @@
 #include "catlass/catlass.hpp"
 #include "catlass/epilogue/block/block_epilogue_syrk_axpby.hpp"
 #include "catlass/gemm/block/block_mmad_syrk_tla.hpp"
-#include "catlass/gemm/block/block_swizzle.hpp"
+#include "catlass/gemm/block/block_scheduler_syrk.h"
 #include "catlass/gemm/kernel/basic_syrk_workspace_tla.hpp"
 #include "catlass/gemm_coord.hpp"
 #include "catlass/layout/layout.hpp"
@@ -97,12 +97,12 @@ static void Run(const Options& options)
     using BlockMmad = Gemm::Block::BlockMmadSyrkTla<L1TileShape, L0TileShape, ElementX, ElementP>;
     using BlockEpilogue = Epilogue::Block::BlockEpilogueSyrkAxpby<Arch::Ascend950, ElementY, ElementD>;
 
-    uint32_t taskNum = batch * CeilDiv(m, tla::get<0>(L1TileShape{})) * CeilDiv(m, tla::get<1>(L1TileShape{}));
-    uint32_t aicCoreUsed = min(aicCoreNum, taskNum);
-
-    // Swizzle offset is 3 and direction is 1.
-    using BlockScheduler = typename Gemm::Block::GemmIdentityBlockSwizzle<3, 1>;
+    using BlockScheduler = Gemm::Block::SyrkBlockScheduler;
     using MatmulKernel = Gemm::Kernel::BasicSyrkWorkspaceTla<BlockMmad, BlockEpilogue, BlockScheduler>;
+
+    BlockScheduler scheduler(GemmCoord{m, m, k}, Catlass::MakeCoord(MatmulKernel::L1_TILE_M, MatmulKernel::L1_TILE_N));
+    uint32_t taskNum = batch * scheduler.GetCoreLoops();
+    uint32_t aicCoreUsed = min(aicCoreNum, taskNum);
 
     typename MatmulKernel::Arguments arguments{batch,   GemmCoord{m, m, k}, deviceX,      deviceY,
                                                deviceD, options.alpha,      options.beta, aicCoreUsed};

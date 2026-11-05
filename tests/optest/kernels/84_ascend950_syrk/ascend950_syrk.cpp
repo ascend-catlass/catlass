@@ -25,7 +25,6 @@ extern "C" void Ascend950Syrk(
     const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const SyrkParams& params)
 {
     auto macros = JitMacroGenerator<TParams>::generate("ascend950_syrk", tParams);
-    macros["CATLASS_JIT_BLOCK_SCHEDULER"] = "31";
     auto* entry = JitCompiler::instance().getKernel("ascend950_syrk_impl.cpp", macros, JitKernelType::MIX);
     if (entry) {
         entry(blockNum, stream, &params);

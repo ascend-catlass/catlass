@@ -20,8 +20,9 @@ def ascend950_syrk(
         input: Square matrix ``C`` with shape ``(M, M)`` or ``(B, M, M)`` on NPU.
         alpha: Scale for ``mat @ mat.T``.
         beta: Scale for ``input``.
-        outDType: Output dtype. Defaults to ``mat.dtype``. Accepted strings
-            include ``float16`` / ``fp16`` and ``bfloat16`` / ``bf16``.
+        outDType: Output dtype, either ``mat.dtype`` or ``float32``. Defaults to
+            ``mat.dtype``. Accepted strings include ``float16`` / ``fp16``,
+            ``bfloat16`` / ``bf16`` and ``float32`` / ``fp32``.
 
     Returns:
         Output tensor with shape ``(M, M)`` or ``(B, M, M)`` on the active NPU device.

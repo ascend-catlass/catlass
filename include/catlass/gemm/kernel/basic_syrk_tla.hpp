@@ -29,13 +29,18 @@
 namespace Catlass::Gemm::Kernel {
 
 /**
- * @brief Kernel-level SYRK: Y = X * X^T (Ascend950 only).
+ * @brief Kernel-level SYRK: Y = X * X^T (Ascend950 only), batched over batchCount.
  *
- * Scheduling rules (lower-triangle only):
- * 1. blockCoord.m() <  blockCoord.n() -> skip
- * 2. blockCoord.m() == blockCoord.n() -> compute & write once
- * 3. blockCoord.m() >  blockCoord.n() -> compute & dual-write (nz2nd + nz2dn)
+ * X (M, K) and Xt (K, M) are the plain and transposed views of the same data, so ptrXt
+ * normally equals ptrX; with distinct buffers the caller must guarantee a symmetric
+ * result.
  *
+ * Only the lower triangle is computed. loopIdx counts straight through the (batch,
+ * tileRow, tileColumn) triples that have tileRow >= tileColumn, so a core never picks up
+ * a tile of the upper triangle only to discard it again.
+ * 1. blockCoord.m() == blockCoord.n() -> a diagonal tile: compute and write it once (nz2nd)
+ * 2. blockCoord.m() >  blockCoord.n() -> compute once, then write the tile (nz2nd) and its
+ *    transpose (nz2dn), which fills the matching tile of the upper triangle
  */
 template <class BlockMmad_, class BlockEpilogue_, class BlockScheduler_>
 class BasicSyrkTla {
@@ -64,9 +69,14 @@ public:
     static constexpr uint32_t L1_TILE_K = tla::get<2>(L1TileShape{});
 
     struct Params {
+        uint32_t batchCount;
         GemmCoord problemShape; // (M, M, K)
         GM_ADDR ptrX;
+        GM_ADDR ptrXt;
         GM_ADDR ptrY;
+        int64_t strideX;
+        int64_t strideXt;
+        int64_t strideY;
         LayoutX layoutX;
         LayoutXt layoutXt;
         LayoutY layoutY;
@@ -78,11 +88,17 @@ public:
 
         CATLASS_HOST_DEVICE
         Params(
-            GemmCoord const& problemShape_, GM_ADDR ptrX_, GM_ADDR ptrY_, LayoutX layoutX_, LayoutXt layoutXt_,
+            uint32_t batchCount_, GemmCoord const& problemShape_, GM_ADDR ptrX_, GM_ADDR ptrXt_, GM_ADDR ptrY_,
+            int64_t strideX_, int64_t strideXt_, int64_t strideY_, LayoutX layoutX_, LayoutXt layoutXt_,
             LayoutY layoutY_, LayoutYT layoutYT_)
-            : problemShape(problemShape_),
+            : batchCount(batchCount_),
+              problemShape(problemShape_),
               ptrX(ptrX_),
+              ptrXt(ptrXt_),
               ptrY(ptrY_),
+              strideX(strideX_),
+              strideXt(strideXt_),
+              strideY(strideY_),
               layoutX(layoutX_),
               layoutXt(layoutXt_),
               layoutY(layoutY_),
@@ -91,8 +107,10 @@ public:
     };
 
     struct Arguments {
+        uint32_t batchCount;
         GemmCoord problemShape; // (M, M, K)
         uint8_t* ptrX;
+        uint8_t* ptrXt;
         uint8_t* ptrY;
     };
 
@@ -120,9 +138,14 @@ public:
         uint32_t m = args.problemShape.m();
         uint32_t k = args.problemShape.k();
         return Params{
+            args.batchCount,
             args.problemShape,
             args.ptrX,
+            args.ptrXt,
             args.ptrY,
+            static_cast<int64_t>(m) * k,
+            static_cast<int64_t>(m) * k,
+            static_cast<int64_t>(m) * m,
             tla::MakeLayout<ElementX, LayoutTagX>(m, k),
             tla::MakeLayout<ElementXt, LayoutTagXt>(k, m),
             tla::MakeLayout<ElementY, LayoutTagY>(m, m),
@@ -141,28 +164,30 @@ public:
     CATLASS_DEVICE void operator()<AscendC::AIC>(Params const& params)
     {
         BlockScheduler blockScheduler(params.problemShape, MakeCoord(L1_TILE_M, L1_TILE_N));
-        uint32_t coreLoops = blockScheduler.GetCoreLoops();
+        uint32_t coreLoops = params.batchCount * blockScheduler.GetCoreLoops();
 
         Arch::Resource<ArchTag> resource;
         BlockMmad blockMmad(resource);
 
         AscendC::GlobalTensor<ElementX> gmX;
         gmX.SetGlobalBuffer((__gm__ ElementX*)params.ptrX);
+        AscendC::GlobalTensor<ElementXt> gmXt;
+        gmXt.SetGlobalBuffer((__gm__ ElementXt*)params.ptrXt);
         AscendC::GlobalTensor<ElementY> gmY;
         gmY.SetGlobalBuffer((__gm__ ElementY*)params.ptrY);
 
-        auto tensorX = tla::MakeTensor(gmX, params.layoutX, Arch::PositionGM{});
-        auto tensorXt = tla::MakeTensor(gmX, params.layoutXt, Arch::PositionGM{});
-        auto tensorY = tla::MakeTensor(gmY, params.layoutY, Arch::PositionGM{});
-        auto tensorYT = tla::MakeTensor(gmY, params.layoutYT, Arch::PositionGM{});
-
         for (uint32_t loopIdx = AscendC::GetBlockIdx(); loopIdx < coreLoops; loopIdx += AscendC::GetBlockNum()) {
+            uint32_t batchIdx = blockScheduler.GetBatchIdx(loopIdx);
             GemmCoord blockCoord = blockScheduler.GetBlockCoord(loopIdx);
-            if (blockCoord.m() < blockCoord.n()) {
-                continue;
-            }
 
             GemmCoord actualBlockShape = blockScheduler.GetActualBlockShape(blockCoord);
+            int64_t batchOffsetX = batchIdx * params.strideX;
+            int64_t batchOffsetXt = batchIdx * params.strideXt;
+            int64_t batchOffsetY = batchIdx * params.strideY;
+            auto tensorX = tla::MakeTensor(gmX[batchOffsetX], params.layoutX, Arch::PositionGM{});
+            auto tensorXt = tla::MakeTensor(gmXt[batchOffsetXt], params.layoutXt, Arch::PositionGM{});
+            auto tensorY = tla::MakeTensor(gmY[batchOffsetY], params.layoutY, Arch::PositionGM{});
+            auto tensorYT = tla::MakeTensor(gmY[batchOffsetY], params.layoutYT, Arch::PositionGM{});
             auto tileX = tla::GetTile(
                 tensorX, tla::MakeCoord(blockCoord.m() * L1_TILE_M, blockCoord.k() * L1_TILE_K),
                 tla::MakeShape(actualBlockShape.m(), actualBlockShape.k()));

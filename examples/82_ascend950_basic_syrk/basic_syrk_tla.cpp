@@ -17,7 +17,7 @@
 #include "catlass/arch/arch.hpp"
 #include "catlass/catlass.hpp"
 #include "catlass/gemm/block/block_mmad_syrk_tla.hpp"
-#include "catlass/gemm/block/block_swizzle.hpp"
+#include "catlass/gemm/block/block_scheduler_syrk.h"
 #include "catlass/gemm/device/device_gemm.hpp"
 #include "catlass/layout/layout.hpp"
 #include "catlass/status.hpp"
@@ -40,11 +40,11 @@ static int Run(const Options& options)
     // Layout tags are fixed by BlockMmadSyrkTla; use the default TileCopy.
     using BlockMmad = Gemm::Block::BlockMmadSyrkTla<L1TileShape, L0TileShape, ElementX, ElementY>;
     using BlockEpilogue = void;
-    using BlockScheduler = typename Gemm::Block::GemmIdentityBlockSwizzle<3, 1>;
+    using BlockScheduler = Gemm::Block::SyrkBlockScheduler;
     using MatmulKernel = Gemm::Kernel::BasicSyrkTla<BlockMmad, BlockEpilogue, BlockScheduler>;
     using MatmulAdapter = Gemm::Device::DeviceGemm<MatmulKernel>;
 
-    MatmulKernel::Arguments arguments{options.problemShape, nullptr, nullptr};
+    MatmulKernel::Arguments arguments{1, options.problemShape, nullptr, nullptr, nullptr};
     if (MatmulAdapter::CanImplement(arguments) != Status::kSuccess) {
         std::cerr << "Unsupported SYRK shape: require M=N, 1<=M<=8192, 1<=K<=65536 and M*K<=67108864." << std::endl;
         return 1;
@@ -89,10 +89,13 @@ static int Run(const Options& options)
 
     auto aicCoreNum = platform_ascendc::PlatformAscendCManager::GetInstance()->GetCoreNumAic();
 
-    uint32_t taskNum = CeilDiv(m, tla::get<0>(L1TileShape{})) * CeilDiv(m, tla::get<1>(L1TileShape{}));
+    BlockScheduler scheduler(
+        options.problemShape, Catlass::MakeCoord(MatmulKernel::L1_TILE_M, MatmulKernel::L1_TILE_N));
+    uint32_t taskNum = scheduler.GetCoreLoops();
     uint32_t aicCoreUsed = min(aicCoreNum, taskNum);
 
     arguments.ptrX = deviceX;
+    arguments.ptrXt = deviceX;
     arguments.ptrY = deviceY;
 
     MatmulAdapter matmulOp;

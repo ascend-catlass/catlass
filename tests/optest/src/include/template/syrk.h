@@ -17,6 +17,7 @@
 
 #include "catlass_kernel_jit.h"
 #include "common/run_npu_func.h"
+#include "template/syrk_layout.h"
 #include "torch_utils.h"
 #include "type_utils.hpp"
 
@@ -37,21 +38,27 @@ struct SyrkLike {
     static OutputType Run(
         const at::Tensor& mat, const at::Tensor& input, double alpha, double beta, const c10::ScalarType& outDType)
     {
+        TORCH_CHECK(mat.dim() == 2 || mat.dim() == 3, "ascend950_syrk expects a 2-D/3-D mat of shape (M, K)/(B, M, K)");
         TORCH_CHECK(
-            mat.dim() == 2 || mat.dim() == 3, "ascend950_syrk expects a 2-D/3-D mat of shape (M, K)/(B, M, K)");
-        TORCH_CHECK(
-            input.dim() == 2 || input.dim() == 3,
-            "ascend950_syrk expects a 2-D/3-D input of shape (M, M)/(B, M, M)");
+            input.dim() == 2 || input.dim() == 3, "ascend950_syrk expects a 2-D/3-D input of shape (M, M)/(B, M, M)");
         TORCH_CHECK(mat.dim() == input.dim(), "ascend950_syrk expects mat and input to have the same rank");
         TORCH_CHECK(
-            mat.scalar_type() == at::kBFloat16 || mat.scalar_type() == at::kHalf,
-            "ascend950_syrk currently supports bfloat16 / float16 mat (X)");
+            mat.scalar_type() == at::kBFloat16 || mat.scalar_type() == at::kHalf || mat.scalar_type() == at::kFloat,
+            "ascend950_syrk supports bfloat16 / float16 / float32 inputs");
+        TORCH_CHECK(input.scalar_type() == mat.scalar_type(), "ascend950_syrk expects input dtype to match mat");
+        // Any other output dtype would make the epilogue reinterpret Y's bits.
         TORCH_CHECK(
-            input.scalar_type() == at::kBFloat16 || input.scalar_type() == at::kHalf,
-            "ascend950_syrk currently supports bfloat16 / float16 input (Y)");
+            outDType == mat.scalar_type() || outDType == at::kFloat,
+            "ascend950_syrk expects outDType to be the input dtype or float32");
+
+        const SyrkOperandLayout layoutX = ClassifySyrkOperand(mat);
         TORCH_CHECK(
-            outDType == at::kBFloat16 || outDType == at::kHalf,
-            "ascend950_syrk currently supports bfloat16 / float16 output (D)");
+            layoutX != SyrkOperandLayout::kUnsupported,
+            "ascend950_syrk expects mat to be row-major or a transposed view of a packed buffer");
+        // The epilogue reads Y and writes D as row-major (M, M), so those must be packed.
+        TORCH_CHECK(
+            ClassifySyrkOperand(input) == SyrkOperandLayout::kRowMajor,
+            "ascend950_syrk expects input to be row-major and contiguous");
 
         int64_t lastDim = mat.dim() - 1;
         int64_t secondLastDim = mat.dim() - 2;
@@ -65,11 +72,9 @@ struct SyrkLike {
         tParams.element["A"] = TorchDtypeToAclDtype(mat.scalar_type());
         tParams.element["B"] = TorchDtypeToAclDtype(input.scalar_type());
         tParams.element["C"] = TorchDtypeToAclDtype(outDType);
-        tParams.transpose["A"] = false;
-        tParams.transpose["B"] = false;
+        tParams.transpose["A"] = (layoutX == SyrkOperandLayout::kTransposed);
         tParams.transpose["C"] = false;
         tParams.useNz["A"] = false;
-        tParams.useNz["B"] = false;
         tParams.useNz["C"] = false;
 
         params.batch = mat.dim() == 3 ? static_cast<uint32_t>(mat.size(0)) : 1;
@@ -80,8 +85,8 @@ struct SyrkLike {
         params.beta = static_cast<float>(beta);
 
         params.inputAddr.resize(2);
-        params.inputAddr[0] = static_cast<uint8_t*>(const_cast<void*>(mat.storage().data()));
-        params.inputAddr[1] = static_cast<uint8_t*>(const_cast<void*>(input.storage().data()));
+        params.inputAddr[0] = static_cast<uint8_t*>(mat.data_ptr());
+        params.inputAddr[1] = static_cast<uint8_t*>(input.data_ptr());
 
         OutputType output;
         if (params.batch > 1) {
@@ -92,7 +97,7 @@ struct SyrkLike {
             output = GetOutputTensor({params.m, params.n}, AclDtypeToTorchDtype(tParams.elem("C")));
         }
         params.outputAddr.resize(1);
-        params.outputAddr[0] = static_cast<uint8_t*>(const_cast<void*>(output.storage().data()));
+        params.outputAddr[0] = static_cast<uint8_t*>(output.data_ptr());
 
         aclrtStream stream = c10_npu::getCurrentNPUStream().stream(false);
         uint32_t aicCoreNum = platform_ascendc::PlatformAscendCManager::GetInstance()->GetCoreNumAic();

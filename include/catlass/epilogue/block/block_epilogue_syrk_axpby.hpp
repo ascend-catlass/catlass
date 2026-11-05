@@ -29,10 +29,11 @@ namespace Catlass::Epilogue::Block {
 /**
  * @brief AIV epilogue for SYRK workspace path: D = alpha * P + beta * Y.
  *
- * P is float in GM workspace (RowMajor tile). Y is ElementY, D is ElementD in GM.
+ * P is float in GM workspace (RowMajor tile). Y is ElementY, D is ElementD in GM;
+ * a float operand on either side skips its conversion buffer.
  * Processes the tile in UB-sized row chunks.
  */
-template <class ArchTag_, class ElementY_, class ElementD_>
+template <class ArchTag_, class ElementY_, class ElementD_ = ElementY_>
 class BlockEpilogueSyrkAxpby {
 public:
     using ArchTag = ArchTag_;
@@ -40,9 +41,19 @@ public:
     using ElementD = ElementD_;
     using ElementCompute = float;
 
+    static constexpr bool Y_NEEDS_CAST = !std::is_same_v<ElementY, ElementCompute>;
+    static constexpr bool D_NEEDS_CAST = !std::is_same_v<ElementD, ElementCompute>;
+
     static constexpr uint32_t MAX_COLS = 256;
     static constexpr uint32_t COMPUTE_ROWS = 64;
-    static constexpr uint32_t ELE_NUM_PER_BLK = BYTE_PER_BLK / sizeof(ElementCompute);
+    // A UB row always starts on a 32-byte boundary, so rows are padded in units of the
+    // smallest element held here. Padding in float units instead would start a 16-bit row
+    // halfway through those 32 bytes.
+    static constexpr size_t MIN_ELEMENT_BYTES_YD =
+        (sizeof(ElementY) < sizeof(ElementD)) ? sizeof(ElementY) : sizeof(ElementD);
+    static constexpr size_t MIN_ELEMENT_BYTES =
+        (MIN_ELEMENT_BYTES_YD < sizeof(ElementCompute)) ? MIN_ELEMENT_BYTES_YD : sizeof(ElementCompute);
+    static constexpr uint32_t ELE_NUM_PER_BLK = BYTE_PER_BLK / MIN_ELEMENT_BYTES;
     static constexpr uint32_t ALIGN_COLS = RoundUp(MAX_COLS, ELE_NUM_PER_BLK);
     static constexpr uint32_t CHUNK_ELEMS = COMPUTE_ROWS * ALIGN_COLS;
 
@@ -50,10 +61,11 @@ public:
     using LayoutD = detail::TagToLayout_t<ElementD, layout::RowMajor>;
     using LayoutP = detail::TagToLayout_t<ElementCompute, layout::RowMajor>;
 
-    static constexpr uint32_t UB_BYTES_USED = CHUNK_ELEMS * sizeof(ElementCompute) + // ubP
-                                              CHUNK_ELEMS * sizeof(ElementY) +       // ubY
-                                              CHUNK_ELEMS * sizeof(ElementCompute) + // ubYFp32
-                                              CHUNK_ELEMS * sizeof(ElementD);        // ubD
+    static constexpr uint32_t UB_BYTES_USED =
+        CHUNK_ELEMS * sizeof(ElementCompute) +                // ubP
+        (Y_NEEDS_CAST ? CHUNK_ELEMS * sizeof(ElementY) : 0) + // ubY (raw Y)
+        CHUNK_ELEMS * sizeof(ElementCompute) +                // ubYFp32 (Y in compute precision)
+        (D_NEEDS_CAST ? CHUNK_ELEMS * sizeof(ElementD) : 0);  // ubD (converted output)
     static_assert(UB_BYTES_USED <= ArchTag::UB_SIZE, "BlockEpilogueSyrkAxpby exceeds UB");
 
     struct Params {
@@ -85,11 +97,15 @@ public:
         uint32_t offset = 0;
         ubP_ = resource.ubBuf.template GetBufferByByte<ElementCompute>(offset);
         offset += CHUNK_ELEMS * sizeof(ElementCompute);
-        ubY_ = resource.ubBuf.template GetBufferByByte<ElementY>(offset);
-        offset += CHUNK_ELEMS * sizeof(ElementY);
+        if constexpr (Y_NEEDS_CAST) {
+            ubY_ = resource.ubBuf.template GetBufferByByte<ElementY>(offset);
+            offset += CHUNK_ELEMS * sizeof(ElementY);
+        }
         ubYFp32_ = resource.ubBuf.template GetBufferByByte<ElementCompute>(offset);
         offset += CHUNK_ELEMS * sizeof(ElementCompute);
-        ubD_ = resource.ubBuf.template GetBufferByByte<ElementD>(offset);
+        if constexpr (D_NEEDS_CAST) {
+            ubD_ = resource.ubBuf.template GetBufferByByte<ElementD>(offset);
+        }
 
         AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(EVENT_ID0);
         AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID0);
@@ -135,8 +151,8 @@ public:
             uint32_t chunkRows = (rows - r) < maxRowsPerChunk ? (rows - r) : maxRowsPerChunk;
             uint32_t chunkElems = chunkRows * alignCols;
 
-            // ubY_ is also the MTE3 output buffer. Do not let the next Y load
-            // overwrite it before the previous GM store has completed.
+            // The store reads either ubD_ or ubP_. Do not let the next chunk's loads
+            // overwrite those buffers before the previous GM store has completed.
             AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(EVENT_ID1);
 
             auto tileP = GetTile(tensorP, tla::MakeCoord(r, 0), tla::MakeShape(chunkRows, cols));
@@ -156,17 +172,26 @@ public:
 
             if (params_.beta != static_cast<ElementCompute>(0)) {
                 auto tileY = GetTile(tensorY, tla::MakeCoord(gmRow + r, gmCol), tla::MakeShape(chunkRows, cols));
-                auto layoutYUb = tla::MakeLayout<ElementY, layout::RowMajor>(chunkRows, alignCols);
-                auto tensorYUb = tla::MakeTensor(ubY_, layoutYUb, Arch::PositionUB{});
+                if constexpr (Y_NEEDS_CAST) {
+                    auto layoutYUb = tla::MakeLayout<ElementY, layout::RowMajor>(chunkRows, alignCols);
+                    auto tensorYUb = tla::MakeTensor(ubY_, layoutYUb, Arch::PositionUB{});
+                    using CopyGmToUbY = Tile::CopyGm2UbTla<ArchTag, decltype(tileY), decltype(tensorYUb)>;
+                    CopyGmToUbY copyGmToUbY;
+                    copyGmToUbY(tensorYUb, tileY);
+                    AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID1);
+                    AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID1);
 
-                using CopyGmToUbY = Tile::CopyGm2UbTla<ArchTag, decltype(tileY), decltype(tensorYUb)>;
-                CopyGmToUbY copyGmToUbY;
-                copyGmToUbY(tensorYUb, tileY);
-                AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID1);
-                AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID1);
-
-                AscendC::Cast(ubYFp32_, ubY_, AscendC::RoundMode::CAST_NONE, chunkElems);
-                AscendC::PipeBarrier<PIPE_V>();
+                    AscendC::Cast(ubYFp32_, ubY_, AscendC::RoundMode::CAST_NONE, chunkElems);
+                    AscendC::PipeBarrier<PIPE_V>();
+                } else {
+                    auto layoutYUb = tla::MakeLayout<ElementCompute, layout::RowMajor>(chunkRows, alignCols);
+                    auto tensorYUb = tla::MakeTensor(ubYFp32_, layoutYUb, Arch::PositionUB{});
+                    using CopyGmToUbY = Tile::CopyGm2UbTla<ArchTag, decltype(tileY), decltype(tensorYUb)>;
+                    CopyGmToUbY copyGmToUbY;
+                    copyGmToUbY(tensorYUb, tileY);
+                    AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID1);
+                    AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID1);
+                }
                 AscendC::Muls(ubYFp32_, ubYFp32_, params_.beta, chunkElems);
                 AscendC::PipeBarrier<PIPE_V>();
                 AscendC::Add(ubP_, ubP_, ubYFp32_, chunkElems);
@@ -174,7 +199,9 @@ public:
             }
 
             AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID0);
-            AscendC::Cast(ubD_, ubP_, AscendC::RoundMode::CAST_RINT, chunkElems);
+            if constexpr (D_NEEDS_CAST) {
+                AscendC::Cast(ubD_, ubP_, AscendC::RoundMode::CAST_RINT, chunkElems);
+            }
             // Cast is the last vector read of ubP_. Release ubP_ to MTE2 only
             // after this instruction, otherwise the next chunk can overwrite
             // it while the current cast is still in flight.
@@ -183,11 +210,19 @@ public:
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID0);
 
             auto tileD = GetTile(tensorD, tla::MakeCoord(gmRow + r, gmCol), tla::MakeShape(chunkRows, cols));
-            auto layoutDUb = tla::MakeLayout<ElementD, layout::RowMajor>(chunkRows, alignCols);
-            auto tensorDUb = tla::MakeTensor(ubD_, layoutDUb, Arch::PositionUB{});
-            using CopyUbToGmD = Tile::CopyUb2GmTla<ArchTag, decltype(tensorDUb), decltype(tileD)>;
-            CopyUbToGmD copyUbToGmD;
-            copyUbToGmD(tileD, tensorDUb);
+            if constexpr (D_NEEDS_CAST) {
+                auto layoutDUb = tla::MakeLayout<ElementD, layout::RowMajor>(chunkRows, alignCols);
+                auto tensorDUb = tla::MakeTensor(ubD_, layoutDUb, Arch::PositionUB{});
+                using CopyUbToGmD = Tile::CopyUb2GmTla<ArchTag, decltype(tensorDUb), decltype(tileD)>;
+                CopyUbToGmD copyUbToGmD;
+                copyUbToGmD(tileD, tensorDUb);
+            } else {
+                auto layoutDUb = tla::MakeLayout<ElementCompute, layout::RowMajor>(chunkRows, alignCols);
+                auto tensorDUb = tla::MakeTensor(ubP_, layoutDUb, Arch::PositionUB{});
+                using CopyUbToGmD = Tile::CopyUb2GmTla<ArchTag, decltype(tensorDUb), decltype(tileD)>;
+                CopyUbToGmD copyUbToGmD;
+                copyUbToGmD(tileD, tensorDUb);
+            }
             AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID0);
             AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(EVENT_ID1);
 

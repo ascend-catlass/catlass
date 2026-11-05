@@ -24,8 +24,6 @@ extern "C" void Ascend950BasicSyrk(
     const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const MatmulParams& params)
 {
     auto macros = JitMacroGenerator<TParams>::generate("ascend950_basic_syrk", tParams);
-    // Match example: GemmIdentityBlockSwizzle<3, 1>
-    macros["CATLASS_JIT_BLOCK_SCHEDULER"] = "31";
     auto* entry =
         JitCompiler::instance().getKernel("ascend950_basic_syrk_impl.cpp", macros, JitKernelType::AIC);
     if (entry) {

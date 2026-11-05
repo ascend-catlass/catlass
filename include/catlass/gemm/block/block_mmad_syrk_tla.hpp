@@ -34,17 +34,19 @@ namespace Catlass::Gemm::Block {
 /**
  * @brief Block-level SYRK mmad for Ascend950: Y = X * X^T.
  *
- * Layout tags are fixed by the op contract (not user-configurable):
- * - X  : RowMajor    [M, K]
- * - Xt : ColumnMajor [K, M]  (transpose view of the same GM buffer)
+ * X and Xt are two views of the same GM buffer, so their layout tags are always
+ * opposite; either pairing is accepted:
+ * - X  : RowMajor    [M, K]  with Xt : ColumnMajor [K, M]
+ * - X  : ColumnMajor [M, K]  with Xt : RowMajor    [K, M]
  * - Y  : RowMajor    [M, M]
  *
  * Dispatch is fixed to MmadPingpong<Ascend950, false> (unitFlag off; HF32 / L1-resident off).
  * Dual-write cannot use unitFlag: one mmad 0b11 pairs with only one Fixpipe 0b11.
- * L0C→GM is synchronized with M_FIX; both stores use the tile CopyL0CToGmTla wrappers
- * (RowMajor nz2nd / ColumnMajor nz2dn) with default unitFlag=0.
+ * L0C reads are synchronized with M_FIX. A GM destination uses the tile CopyL0CToGmTla
+ * wrappers (RowMajor nz2nd / ColumnMajor nz2dn) with default unitFlag=0; a UB destination
+ * (TPosition::VECCALC) instead splits the tile by rows (SPLIT_M) to the paired AIVs.
  *
- * Dual-write policy (see example README):
+ * Dual-write policy for a GM destination (see example README):
  * - diagonal block: write once (nz2nd)
  * - lower triangle: write (m,n) via nz2nd and (n,m) via nz2dn (transpose)
  */
@@ -63,17 +65,16 @@ public:
     using TileCopy = TileCopy_;
     using TileMmad = TileMmad_;
 
-    // Fixed by Y = X * X^T with ND RowMajor storage of X / Y.
-    using LayoutTagX = layout::RowMajor;
-    using LayoutTagXt = layout::ColumnMajor;
+    // TileCopy selects matching layouts for X and its transpose view.
+    using LayoutTagX = typename TileCopy::LayoutTagA;
+    using LayoutTagXt = typename TileCopy::LayoutTagB;
     using LayoutTagY = layout::RowMajor;
 
     static_assert(
-        std::is_same_v<typename TileCopy::LayoutTagA, LayoutTagX>,
-        "BlockMmadSyrkTla requires TileCopy LayoutTagA = RowMajor (X)");
-    static_assert(
-        std::is_same_v<typename TileCopy::LayoutTagB, LayoutTagXt>,
-        "BlockMmadSyrkTla requires TileCopy LayoutTagB = ColumnMajor (X^T)");
+        (std::is_same_v<LayoutTagX, layout::RowMajor> && std::is_same_v<LayoutTagXt, layout::ColumnMajor>) ||
+            (std::is_same_v<LayoutTagX, layout::ColumnMajor> && std::is_same_v<LayoutTagXt, layout::RowMajor>),
+        "BlockMmadSyrkTla requires TileCopy (LayoutTagA, LayoutTagB) to be "
+        "(RowMajor, ColumnMajor) or (ColumnMajor, RowMajor): Xt must be the transpose view of X");
     static_assert(
         std::is_same_v<typename TileCopy::LayoutTagC, LayoutTagY>,
         "BlockMmadSyrkTla requires TileCopy LayoutTagC = RowMajor (Y)");
@@ -218,21 +219,20 @@ public:
      *
      * @param tensorY   RowMajor tile at (m,n) — nz2nd destination
      * @param tensorYT  ColumnMajor view tile at the same (m,n) coords — nz2dn lands at RowMajor (n,m)
+     * @param diagonalStore Optional diagonal epilogue; the caller keeps L0C live until it returns.
      */
-    template <class TensorX, class TensorXt, class TensorY, class TensorYT>
+    template <class TensorX, class TensorXt, class TensorY, class TensorYT, class DiagonalStore = void>
     CATLASS_DEVICE void operator()(
         TensorX& tensorX, TensorXt& tensorXt, TensorY& tensorY, TensorYT& tensorYT, GemmCoord const& actualShape,
-        GemmCoord const& blockCoord)
+        GemmCoord const& blockCoord, DiagonalStore* diagonalStore = nullptr)
     {
         using CopyGmToL1X = typename TileCopy::template CopyGmToL1A<TensorX>;
         using CopyGmToL1Xt = typename TileCopy::template CopyGmToL1B<TensorXt>;
         CopyGmToL1X copyGmToL1X;
         CopyGmToL1Xt copyGmToL1Xt;
 
-        using CopyL0CToGmNz2nd = typename TileCopy::template CopyL0CToDst<TensorY>;
-        using CopyL0CToGmNz2dn = typename TileCopy::template CopyL0CToDst<TensorYT>;
-        CopyL0CToGmNz2nd copyL0CToGmNz2nd;
-        CopyL0CToGmNz2dn copyL0CToGmNz2dn;
+        using CopyL0CToDst = typename TileCopy::template CopyL0CToDst<TensorY>;
+        CopyL0CToDst copyL0CToDst;
 
         // L1_M/N == L0_M/N: one L0 mmad covers the whole L1 tile on M/N.
         uint32_t mActual = actualShape.m();
@@ -336,14 +336,23 @@ public:
             kL1Actual = kL1ActualNext;
         }
 
-        // Dual-write: one M_FIX covers both stores; unitFlag stays 0 (tile-wrapper default).
         AscendC::SetFlag<AscendC::HardEvent::M_FIX>(l0CEventList[0]);
         AscendC::WaitFlag<AscendC::HardEvent::M_FIX>(l0CEventList[0]);
-        if (blockCoord.m() == blockCoord.n()) {
-            copyL0CToGmNz2nd(tensorY, tensorL0C);
+        if constexpr (TensorY::position == AscendC::TPosition::VECCALC) {
+            // SPLIT_M sends the two row halves to the paired AIV tensors.
+            copyL0CToDst(tensorY, tensorL0C);
         } else {
-            copyL0CToGmNz2nd(tensorY, tensorL0C);
-            copyL0CToGmNz2dn(tensorYT, tensorL0C);
+            // Store the lower tile and, when needed, its transposed counterpart.
+            using CopyL0CToTransposeDst = typename TileCopy::template CopyL0CToDst<TensorYT>;
+            CopyL0CToTransposeDst copyL0CToTransposeDst;
+            if constexpr (!std::is_void_v<DiagonalStore>) {
+                (*diagonalStore)(tensorL0C);
+            } else if (blockCoord.m() == blockCoord.n()) {
+                copyL0CToDst(tensorY, tensorL0C);
+            } else {
+                copyL0CToDst(tensorY, tensorL0C);
+                copyL0CToTransposeDst(tensorYT, tensorL0C);
+            }
         }
         AscendC::SetFlag<AscendC::HardEvent::FIX_M>(l0CEventList[0]);
     }

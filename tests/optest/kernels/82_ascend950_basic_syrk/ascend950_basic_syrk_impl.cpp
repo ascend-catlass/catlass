@@ -16,7 +16,7 @@
 #include "catlass/arch/arch.hpp"
 #include "catlass/catlass.hpp"
 #include "catlass/gemm/block/block_mmad_syrk_tla.hpp"
-#include "catlass/gemm/block/block_swizzle.hpp"
+#include "catlass/gemm/block/block_scheduler_syrk.h"
 #include "catlass/gemm/kernel/basic_syrk_tla.hpp"
 #include "catlass/gemm_coord.hpp"
 #include "catlass/layout/layout.hpp"
@@ -47,19 +47,14 @@ using L0TileShape = tuple<C<256>, C<256>, C<64>>;
 using BlockMmad = Gemm::Block::BlockMmadSyrkTla<L1TileShape, L0TileShape, ElementX, ElementY>;
 using BlockEpilogue = void;
 
-#ifndef CATLASS_JIT_BLOCK_SCHEDULER
-#define CATLASS_JIT_BLOCK_SCHEDULER 31
-#endif
-using BlockScheduler = typename Gemm::Block::GemmIdentityBlockSwizzle<
-    (CATLASS_JIT_BLOCK_SCHEDULER / 10), (CATLASS_JIT_BLOCK_SCHEDULER % 10)>;
+using BlockScheduler = Gemm::Block::SyrkBlockScheduler;
 
 using MatmulKernel = Gemm::Kernel::BasicSyrkTla<BlockMmad, BlockEpilogue, BlockScheduler>;
 
 extern "C" void run(uint32_t blockNum, aclrtStream stream, const CatlassKernel::MatmulParams* params)
 {
     typename MatmulKernel::Arguments arguments{
-        GemmCoord{params->m, params->n, params->k},
-        params->inputAddr[0],
+        1, GemmCoord{params->m, params->n, params->k}, params->inputAddr[0], params->inputAddr[0],
         params->outputAddr[0]};
     Catlass::RunKernel<MatmulKernel>(arguments, stream, blockNum);
 }
