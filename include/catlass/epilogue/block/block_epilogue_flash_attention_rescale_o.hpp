@@ -139,7 +139,7 @@ public:
         __ubuf__ T* goUb, __ubuf__ T* loUb, __ubuf__ T* dmUb, uint32_t row, uint32_t colFullLoop, uint32_t colTail,
         uint32_t vlElemNum)
     {
-        using namespace AscendC::MicroAPI;
+        using namespace AscendC::Reg;
         RegTensor<float> dmVreg;
         RegTensor<float> goPreVreg;
         RegTensor<float> goPreRollVreg;
@@ -171,7 +171,7 @@ public:
         __ubuf__ T* goUb, __ubuf__ T* loUb, __ubuf__ T* dmUb, __ubuf__ T* glUb, uint32_t row, uint32_t colFullLoop,
         uint32_t colTail, uint32_t vlElemNum)
     {
-        using namespace AscendC::MicroAPI;
+        using namespace AscendC::Reg;
         RegTensor<float> dmVreg;
         RegTensor<float> goPreVreg;
         RegTensor<float> goPreRollVreg;
@@ -209,7 +209,7 @@ public:
         __ubuf__ T* goUb, __ubuf__ T* loUb, __ubuf__ T* glUb, uint32_t row, uint32_t colFullLoop, uint32_t colTail,
         uint32_t vlElemNum)
     {
-        using namespace AscendC::MicroAPI;
+        using namespace AscendC::Reg;
         RegTensor<float> goCurVreg;
         RegTensor<float> goCurRollVreg;
         RegTensor<float> glVreg;

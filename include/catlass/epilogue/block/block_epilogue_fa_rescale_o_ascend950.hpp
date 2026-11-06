@@ -108,7 +108,7 @@ private:
     CATLASS_DEVICE_SIMD_VF void FlashUpdateNew(
         __ubuf__ T* updateUb, __ubuf__ T* curUb, __ubuf__ T* expMaxUb, uint16_t m, uint16_t nLoops, uint32_t tailN)
     {
-        using namespace AscendC::MicroAPI;
+        using namespace AscendC::Reg;
         RegTensor<float> expMaxVreg;
         RegTensor<float> preSrcVreg;
         RegTensor<float> curSrcVreg;
@@ -141,7 +141,7 @@ private:
         __ubuf__ T* updateUb, __ubuf__ T* curUb, __ubuf__ T* expMaxUb, __ubuf__ T* expSumUb, uint16_t m,
         uint16_t nLoops, uint32_t tailN)
     {
-        using namespace AscendC::MicroAPI;
+        using namespace AscendC::Reg;
         RegTensor<float> expMaxVreg;
         RegTensor<float> preSrcVreg;
         RegTensor<float> curSrcVreg;
@@ -178,7 +178,7 @@ private:
     CATLASS_DEVICE_SIMD_VF void LastDivNew(
         __ubuf__ T* updateUb, __ubuf__ T* curUb, __ubuf__ T* expSumUb, uint16_t m, uint16_t nLoops, uint32_t tailN)
     {
-        using namespace AscendC::MicroAPI;
+        using namespace AscendC::Reg;
         RegTensor<float> curSrcVreg;
         RegTensor<float> divDstVreg;
         RegTensor<float> expSumVreg;

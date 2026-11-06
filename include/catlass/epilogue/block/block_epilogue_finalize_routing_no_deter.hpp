@@ -258,7 +258,7 @@ private:
     AscendC::LocalTensor<ElementC> l0cOutUb_;
     uint16_t yCrossPingPongID_ = 0;
 
-    // 使用 __VEC_SCOPE__ + MicroAPI 实现 Logit 乘法（参考 block_epilogue_finalize_routing.h）
+    // 使用 __VEC_SCOPE__ + Reg 实现 Logit 乘法（参考 block_epilogue_finalize_routing.h）
     // 通过 DIST_BRC_B32 内联广播 logit 值，避免单独的 Brcb 步骤
     CATLASS_DEVICE
     void VFDoLogitMuls(
@@ -272,18 +272,17 @@ private:
         logitUbAddr += offsetLogit;
         __VEC_SCOPE__
         {
-            AscendC::MicroAPI::RegTensor<ElementC> vregLogit;
-            AscendC::MicroAPI::RegTensor<ElementC> vregRe, vDstReg;
-            AscendC::MicroAPI::MaskReg mask;
+            AscendC::Reg::RegTensor<ElementC> vregLogit;
+            AscendC::Reg::RegTensor<ElementC> vregRe, vDstReg;
+            AscendC::Reg::MaskReg mask;
             for (uint16_t i = 0; i < repeatTimesLogit; ++i) {
-                AscendC::MicroAPI::DataCopy<ElementC, AscendC::MicroAPI::LoadDist::DIST_BRC_B32>(
-                    vregLogit, logitUbAddr + i);
+                AscendC::Reg::LoadAlign<ElementC, AscendC::Reg::LoadDist::DIST_BRC_B32>(vregLogit, logitUbAddr + i);
                 uint32_t elementNum = actualN;
                 for (uint16_t j = 0; j < repeatTimesRe; ++j) {
-                    mask = AscendC::MicroAPI::UpdateMask<ElementC>(elementNum);
-                    AscendC::MicroAPI::DataCopy(vregRe, gmmUbAddr + i * alignN + j * vlForFloatNumber);
-                    AscendC::MicroAPI::Mul(vDstReg, vregLogit, vregRe, mask);
-                    AscendC::MicroAPI::DataCopy(outUbAddr + i * alignN + j * vlForFloatNumber, vDstReg, mask);
+                    mask = AscendC::Reg::UpdateMask<ElementC>(elementNum);
+                    AscendC::Reg::LoadAlign(vregRe, gmmUbAddr + i * alignN + j * vlForFloatNumber);
+                    AscendC::Reg::Mul(vDstReg, vregLogit, vregRe, mask);
+                    AscendC::Reg::StoreAlign(outUbAddr + i * alignN + j * vlForFloatNumber, vDstReg, mask);
                 }
             }
         }

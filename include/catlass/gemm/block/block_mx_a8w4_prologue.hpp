@@ -400,48 +400,45 @@ public:
     {
         __ubuf__ ElementOut* weightOutUbAddr = wParams.weightOutUbAddr;
         __ubuf__ ElementOut* weightOutUbAddr1 = wParams.weightOutUbAddr1;
-        AscendC::MicroAPI::RegTensor<uint8_t> wDIntlv0, wDIntlv1, wLoad0, sAnd0, sAnd1, wShr, wShl, s1, wOr0, wOr1,
-            wdup1, wdup4;
-        AscendC::MicroAPI::RegTensor<int8_t> wdup0, wdup2, wdup3;
-        AscendC::MicroAPI::MaskReg preg = AscendC::MicroAPI::CreateMask<uint8_t, AscendC::MicroAPI::MaskPattern::ALL>();
-        AscendC::MicroAPI::Duplicate<int8_t, AscendC::MicroAPI::MaskMergeMode::ZEROING>(wdup0, DUP_CONFIG_2, preg);
-        AscendC::MicroAPI::Duplicate<uint8_t, AscendC::MicroAPI::MaskMergeMode::ZEROING>(
-            wdup1, DUP_CONFIG_MODE_1C, preg);
-        AscendC::MicroAPI::Duplicate<int8_t, AscendC::MicroAPI::MaskMergeMode::ZEROING>(wdup2, DUP_CONFIG_2, preg);
-        AscendC::MicroAPI::Duplicate<int8_t, AscendC::MicroAPI::MaskMergeMode::ZEROING>(wdup3, DUP_CONFIG_4, preg);
-        AscendC::MicroAPI::Duplicate<uint8_t, AscendC::MicroAPI::MaskMergeMode::ZEROING>(wdup4, DUP_FLAG_80, preg);
+        AscendC::Reg::RegTensor<uint8_t> wDIntlv0, wDIntlv1, wLoad0, sAnd0, sAnd1, wShr, wShl, s1, wOr0, wOr1, wdup1,
+            wdup4;
+        AscendC::Reg::RegTensor<int8_t> wdup0, wdup2, wdup3;
+        AscendC::Reg::MaskReg preg = AscendC::Reg::CreateMask<uint8_t, AscendC::Reg::MaskPattern::ALL>();
+        AscendC::Reg::Duplicate<int8_t, AscendC::Reg::MaskMergeMode::ZEROING>(wdup0, DUP_CONFIG_2, preg);
+        AscendC::Reg::Duplicate<uint8_t, AscendC::Reg::MaskMergeMode::ZEROING>(wdup1, DUP_CONFIG_MODE_1C, preg);
+        AscendC::Reg::Duplicate<int8_t, AscendC::Reg::MaskMergeMode::ZEROING>(wdup2, DUP_CONFIG_2, preg);
+        AscendC::Reg::Duplicate<int8_t, AscendC::Reg::MaskMergeMode::ZEROING>(wdup3, DUP_CONFIG_4, preg);
+        AscendC::Reg::Duplicate<uint8_t, AscendC::Reg::MaskMergeMode::ZEROING>(wdup4, DUP_FLAG_80, preg);
         // 一次处理一个N轴
         for (uint16_t outIdx = 0; outIdx < wParams.outExtend; ++outIdx) {
             uint32_t maskWeight0Tmp = wParams.maskB8Tail0;
             uint32_t maskWeight1Tmp = wParams.maskB8Tail1;
             for (uint16_t repeatIdx = 0; repeatIdx < wParams.innerExtend; ++repeatIdx) {
-                AscendC::MicroAPI::MaskReg MaskRegB8Tail0 = AscendC::MicroAPI::UpdateMask<uint8_t>(maskWeight0Tmp);
-                AscendC::MicroAPI::MaskReg MaskRegB8Tail1 = AscendC::MicroAPI::UpdateMask<uint8_t>(maskWeight1Tmp);
-                AscendC::MicroAPI::AddrReg aregWeightB8 = AscendC::MicroAPI::CreateAddrReg<uint8_t>(
+                AscendC::Reg::MaskReg MaskRegB8Tail0 = AscendC::Reg::UpdateMask<uint8_t>(maskWeight0Tmp);
+                AscendC::Reg::MaskReg MaskRegB8Tail1 = AscendC::Reg::UpdateMask<uint8_t>(maskWeight1Tmp);
+                AscendC::Reg::AddrReg aregWeightB8 = AscendC::Reg::CreateAddrReg<uint8_t>(
                     outIdx, RoundUp(wParams.kUbLen, static_cast<int32_t>(K_ALIGN_SIZE)) >> 1, repeatIdx,
                     VEC_MAX_ELEM_B8);
-                AscendC::MicroAPI::LoadAlign(wLoad0, (__ubuf__ uint8_t*&)wParams.weightInUbBaseAddr, aregWeightB8);
+                AscendC::Reg::LoadAlign(wLoad0, (__ubuf__ uint8_t*&)wParams.weightInUbBaseAddr, aregWeightB8);
                 // 提取E/M
-                AscendC::MicroAPI::ShiftRight(wShr, wLoad0, wdup0, preg); // vr1
-                AscendC::MicroAPI::And(wShr, wShr, wdup1, preg);          // vr1
-                AscendC::MicroAPI::ShiftLeft(wShl, wLoad0, wdup2, preg);  // vr2
-                AscendC::MicroAPI::And(wShl, wShl, wdup1, preg);          // vr2
+                AscendC::Reg::ShiftRight(wShr, wLoad0, wdup0, preg); // vr1
+                AscendC::Reg::And(wShr, wShr, wdup1, preg);          // vr1
+                AscendC::Reg::ShiftLeft(wShl, wLoad0, wdup2, preg);  // vr2
+                AscendC::Reg::And(wShl, wShl, wdup1, preg);          // vr2
                 // 提取S
-                AscendC::MicroAPI::ShiftLeft(s1, wLoad0, wdup3, preg); // vr3
-                AscendC::MicroAPI::And(sAnd0, s1, wdup4, preg);        // vr3
-                AscendC::MicroAPI::And(sAnd1, wLoad0, wdup4, preg);    // vr4
+                AscendC::Reg::ShiftLeft(s1, wLoad0, wdup3, preg); // vr3
+                AscendC::Reg::And(sAnd0, s1, wdup4, preg);        // vr3
+                AscendC::Reg::And(sAnd1, wLoad0, wdup4, preg);    // vr4
                 // 合并S/E/M
-                AscendC::MicroAPI::Or(wOr0, wShr, sAnd1, preg); // odd
-                AscendC::MicroAPI::Or(wOr1, wShl, sAnd0, preg); // even
-                AscendC::MicroAPI::Interleave(wDIntlv0, wDIntlv1, wOr1, wOr0);
-                AscendC::MicroAPI::StoreAlign<
-                    uint8_t, AscendC::MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
-                    AscendC::MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+                AscendC::Reg::Or(wOr0, wShr, sAnd1, preg); // odd
+                AscendC::Reg::Or(wOr1, wShl, sAnd0, preg); // even
+                AscendC::Reg::Interleave(wDIntlv0, wDIntlv1, wOr1, wOr0);
+                AscendC::Reg::StoreAlign<
+                    uint8_t, AscendC::Reg::DataCopyMode::DATA_BLOCK_COPY, AscendC::Reg::PostLiteral::POST_MODE_UPDATE>(
                     (__ubuf__ uint8_t*&)weightOutUbAddr, wDIntlv0, wParams.dataBlockStride, wParams.repeatStride,
                     MaskRegB8Tail0);
-                AscendC::MicroAPI::StoreAlign<
-                    uint8_t, AscendC::MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
-                    AscendC::MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+                AscendC::Reg::StoreAlign<
+                    uint8_t, AscendC::Reg::DataCopyMode::DATA_BLOCK_COPY, AscendC::Reg::PostLiteral::POST_MODE_UPDATE>(
                     (__ubuf__ uint8_t*&)weightOutUbAddr1, wDIntlv1, wParams.dataBlockStride, wParams.repeatStride,
                     MaskRegB8Tail1);
             }

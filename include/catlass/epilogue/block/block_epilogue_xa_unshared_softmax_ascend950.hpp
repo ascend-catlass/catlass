@@ -250,7 +250,7 @@ private:
                 Select(srcVreg0, srcVreg0, minVreg, pregCompare0);
                 Select(srcVreg0, srcVreg0, minVreg, pregTailN);
                 StoreAlign<ElementS, StoreDist::DIST_NORM_B32>(srcUb + i * S2BaseSize, srcVreg0, pregFull);
-                ReduceMax(maxVreg, srcVreg0, pregFull);
+                Reduce<AscendC::Reg::ReduceType::MAX>(maxVreg, srcVreg0, pregFull);
             } else {
                 LoadAlign(srcVreg0, srcUb + i * S2BaseSize);
                 LoadAlign(srcVreg1, srcUb + i * S2BaseSize + FLOAT_REP_SIZE);
@@ -269,7 +269,7 @@ private:
                 StoreAlign<ElementS, StoreDist::DIST_NORM_B32>(
                     srcUb + i * S2BaseSize + FLOAT_REP_SIZE, srcVreg1, pregFull);
                 Max(maxTmpVreg, srcVreg0, srcVreg1, pregFull);
-                ReduceMax(maxVreg, maxTmpVreg, pregFull);
+                Reduce<AscendC::Reg::ReduceType::MAX>(maxVreg, maxTmpVreg, pregFull);
             }
             StoreUnAlign<ElementS, PostLiteral::POST_MODE_UPDATE>(maxUb, maxVreg, maxUreg, 1);
         }

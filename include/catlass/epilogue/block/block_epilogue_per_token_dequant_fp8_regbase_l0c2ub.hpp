@@ -221,7 +221,7 @@ public:
             AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(eventId);
             AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(eventId);
             if constexpr (std::is_same<ElementScale, float8_e8m0_t>::value) {
-                // High-level API doesn't support float8_e8m0_t -> float, use MicroAPI instead
+                // High-level API doesn't support float8_e8m0_t -> float, use Reg instead
                 __ubuf__ float8_e8m0_t* srcAddr = (__ubuf__ float8_e8m0_t*)ubScale.GetPhyAddr();
                 __ubuf__ float* dstAddr = (__ubuf__ float*)ubScaleFp32.GetPhyAddr();
                 CastFp8E8m0ToFp32(dstAddr, srcAddr, TileShape::COLUMN);
@@ -231,7 +231,7 @@ public:
             }
 
             if constexpr (std::is_same<ElementPerTokenScale, float8_e8m0_t>::value) {
-                // High-level API doesn't support float8_e8m0_t -> float, use MicroAPI instead
+                // High-level API doesn't support float8_e8m0_t -> float, use Reg instead
                 __ubuf__ float8_e8m0_t* srcAddr = (__ubuf__ float8_e8m0_t*)ubPerTokenScale.GetPhyAddr();
                 __ubuf__ float* dstAddr = (__ubuf__ float*)ubPerTokenScaleFp32.GetPhyAddr();
                 CastFp8E8m0ToFp32(dstAddr, srcAddr, TileShape::ROW);
@@ -326,35 +326,33 @@ private:
         }
     }
 
-    /// Cast float8_e8m0_t to fp32 using MicroAPI
+    /// Cast float8_e8m0_t to fp32 using Reg
     CATLASS_DEVICE_SIMD_VF void CastFp8E8m0ToFp32(
         __ubuf__ float* dstPtr, __ubuf__ ElementPerTokenScale* srcPtr, uint32_t count)
     {
-        namespace MicroAPI = AscendC::MicroAPI;
+        namespace Reg = AscendC::Reg;
 
-        static constexpr MicroAPI::CastTrait castTraitFp8ToBf16 = {
-            MicroAPI::RegLayout::ZERO, MicroAPI::SatMode::UNKNOWN, MicroAPI::MaskMergeMode::ZEROING,
-            AscendC::RoundMode::CAST_RINT};
+        static constexpr Reg::CastTrait castTraitFp8ToBf16 = {
+            Reg::RegLayout::ZERO, Reg::SatMode::UNKNOWN, Reg::MaskMergeMode::ZEROING, AscendC::RoundMode::CAST_RINT};
 
-        static constexpr MicroAPI::CastTrait castTraitBf16ToFp32 = {
-            MicroAPI::RegLayout::ZERO, MicroAPI::SatMode::UNKNOWN, MicroAPI::MaskMergeMode::ZEROING,
-            AscendC::RoundMode::CAST_NONE};
+        static constexpr Reg::CastTrait castTraitBf16ToFp32 = {
+            Reg::RegLayout::ZERO, Reg::SatMode::UNKNOWN, Reg::MaskMergeMode::ZEROING, AscendC::RoundMode::CAST_NONE};
 
-        MicroAPI::RegTensor<ElementPerTokenScale> vRegFp8;
-        MicroAPI::RegTensor<bfloat16_t> vRegBf16;
-        MicroAPI::RegTensor<float> vRegFp32;
-        MicroAPI::MaskReg maskAll;
+        Reg::RegTensor<ElementPerTokenScale> vRegFp8;
+        Reg::RegTensor<bfloat16_t> vRegBf16;
+        Reg::RegTensor<float> vRegFp32;
+        Reg::MaskReg maskAll;
 
         constexpr uint32_t ELE_NUM_PER_REPEAT = 64;
         uint16_t repeatTimes = static_cast<uint16_t>((count + ELE_NUM_PER_REPEAT - 1) / ELE_NUM_PER_REPEAT);
 
         for (uint16_t i = 0; i < repeatTimes; ++i) {
-            maskAll = MicroAPI::UpdateMask<float>(count);
-            MicroAPI::DataCopy<ElementPerTokenScale, MicroAPI::LoadDist::DIST_UNPACK4_B8>(
+            maskAll = Reg::UpdateMask<float>(count);
+            Reg::LoadAlign<ElementPerTokenScale, Reg::LoadDist::DIST_UNPACK4_B8>(
                 vRegFp8, srcPtr + i * ELE_NUM_PER_REPEAT);
-            MicroAPI::Cast<bfloat16_t, ElementPerTokenScale, castTraitFp8ToBf16>(vRegBf16, vRegFp8, maskAll);
-            MicroAPI::Cast<float, bfloat16_t, castTraitBf16ToFp32>(vRegFp32, vRegBf16, maskAll);
-            MicroAPI::StoreAlign<float, MicroAPI::StoreDist::DIST_NORM_B32>(
+            Reg::Cast<bfloat16_t, ElementPerTokenScale, castTraitFp8ToBf16>(vRegBf16, vRegFp8, maskAll);
+            Reg::Cast<float, bfloat16_t, castTraitBf16ToFp32>(vRegFp32, vRegBf16, maskAll);
+            Reg::StoreAlign<float, Reg::StoreDist::DIST_NORM_B32>(
                 dstPtr + i * ELE_NUM_PER_REPEAT * 4, vRegFp32, maskAll);
         }
     }

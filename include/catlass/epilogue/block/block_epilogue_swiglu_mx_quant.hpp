@@ -168,18 +168,17 @@ private:
         __ubuf__ int8_t* dstAddr = (__ubuf__ int8_t*)dstUb.GetPhyAddr();
         __VEC_SCOPE__
         {
-            AscendC::MicroAPI::MaskReg maskScaleN;
+            AscendC::Reg::MaskReg maskScaleN;
             for (uint16_t mIdx = 0; mIdx < mSize; ++mIdx) {
                 uint32_t elemNum = blockScaleN;
-                maskScaleN = AscendC::MicroAPI::UpdateMask<int8_t>(elemNum);
-                AscendC::MicroAPI::RegTensor<int8_t> vreg0;
-                AscendC::MicroAPI::UnalignReg u0;
+                maskScaleN = AscendC::Reg::UpdateMask<int8_t>(elemNum);
+                AscendC::Reg::RegTensor<int8_t> vreg0;
+                AscendC::Reg::UnalignReg u0;
                 __ubuf__ int8_t* rowSrc = srcAddr + mIdx * blockScaleN;
-                AscendC::MicroAPI::DataCopyUnAlignPre(u0, rowSrc);
-                AscendC::MicroAPI::DataCopyUnAlign(vreg0, u0, rowSrc);
+                AscendC::Reg::LoadUnAlignPre(u0, rowSrc);
+                AscendC::Reg::LoadUnAlign(vreg0, u0, rowSrc);
                 __ubuf__ int8_t* dstUb = dstAddr + mIdx * UB_ALIGN_SIZE;
-                AscendC::MicroAPI::DataCopy<int8_t, AscendC::MicroAPI::StoreDist::DIST_NORM_B8>(
-                    dstUb, vreg0, maskScaleN);
+                AscendC::Reg::StoreAlign<int8_t, AscendC::Reg::StoreDist::DIST_NORM_B8>(dstUb, vreg0, maskScaleN);
             }
         }
     }

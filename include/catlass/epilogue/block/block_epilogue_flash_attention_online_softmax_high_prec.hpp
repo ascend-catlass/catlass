@@ -491,7 +491,7 @@ private:
         uint16_t nLoops, uint32_t tailN, uint32_t nPadding, ElementInput dScale, uint16_t S2BaseSize,
         uint32_t blockStride, uint32_t repeatStride)
     {
-        using namespace AscendC::MicroAPI;
+        using namespace AscendC::Reg;
         RegTensor<float> minVreg;
         RegTensor<float> srcVreg;
         RegTensor<float> srcVreg_unroll;
@@ -544,11 +544,11 @@ private:
                 srcUb + i * S2BaseSize + FLOAT_REP_SIZE, srcVreg_unroll_new, pregFull);
             Max(maxTmpVreg, srcVreg, srcVreg_unroll_new, pregFull);
             // [0, 1, 2, 4, 5, .., 63] -> reduce -> [63, 0, 0, .., 0]
-            Reduce<AscendC::MicroAPI::ReduceType::MAX, float, float, AscendC::MicroAPI::MaskMergeMode::ZEROING>(
+            Reduce<AscendC::Reg::ReduceType::MAX, float, float, AscendC::Reg::MaskMergeMode::ZEROING>(
                 maxSrcVreg, maxTmpVreg, pregFull);
             StoreUnAlign<float, PostLiteral::POST_MODE_UPDATE>(newMaxUb, maxSrcVreg, maxUreg, 1);
         }
-        StoreUnAlignPost<float, AscendC::MicroAPI::PostLiteral::POST_MODE_UPDATE>(newMaxUb, maxUreg, 0);
+        StoreUnAlignPost<float, AscendC::Reg::PostLiteral::POST_MODE_UPDATE>(newMaxUb, maxUreg, 0);
         if constexpr (isUpdate) {
             LocalMemBar<MemType::VEC_STORE, MemType::VEC_LOAD>();
             LoadAlign(maxSrcVreg, newMaxUbStart);
@@ -559,15 +559,14 @@ private:
         LocalMemBar<MemType::VEC_STORE, MemType::VEC_LOAD>();
 
         for (uint16_t i = 0; i < m; ++i) {
-            LoadAlign<float, AscendC::MicroAPI::LoadDist::DIST_BRC_B32>(maxBrcVreg, newMaxUbStart + i);
-            LoadAlign<float, AscendC::MicroAPI::LoadDist::DIST_DINTLV_B32>(
-                srcVreg, srcVreg_unroll, srcUb + i * S2BaseSize);
+            LoadAlign<float, AscendC::Reg::LoadDist::DIST_BRC_B32>(maxBrcVreg, newMaxUbStart + i);
+            LoadAlign<float, AscendC::Reg::LoadDist::DIST_DINTLV_B32>(srcVreg, srcVreg_unroll, srcUb + i * S2BaseSize);
             ExpSub(expEvenVreg, srcVreg, maxBrcVreg, pregFull);
             ExpSub(expOddVreg, srcVreg_unroll, maxBrcVreg, pregFull);
             Add(expSumVreg, expEvenVreg, expOddVreg, pregFull);
-            Reduce<AscendC::MicroAPI::ReduceType::SUM, float, float, AscendC::MicroAPI::MaskMergeMode::ZEROING>(
+            Reduce<AscendC::Reg::ReduceType::SUM, float, float, AscendC::Reg::MaskMergeMode::ZEROING>(
                 expSumVreg, expSumVreg, pregFull);
-            StoreUnAlign<float, AscendC::MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+            StoreUnAlign<float, AscendC::Reg::PostLiteral::POST_MODE_UPDATE>(
                 ((__ubuf__ float*&)expSumUb), expSumVreg, expSumUreg, 1);
 
             if constexpr (AscendC::IsSameType<ElementP, bfloat16_t>::value) {
@@ -576,8 +575,8 @@ private:
                 Or((RegTensor<uint16_t>&)vreg_exp_bf16, (RegTensor<uint16_t>&)vreg_exp_even_bf16,
                    (RegTensor<uint16_t>&)vreg_exp_odd_bf16, preg_all_b16);
                 StoreAlign<
-                    bfloat16_t, AscendC::MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
-                    AscendC::MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+                    bfloat16_t, AscendC::Reg::DataCopyMode::DATA_BLOCK_COPY,
+                    AscendC::Reg::PostLiteral::POST_MODE_UPDATE>(
                     ((__ubuf__ bfloat16_t*&)expUb), vreg_exp_bf16, blockStride, 1, preg_all_b16);
             } else {
                 Cast<half, float, castTraitZero>(vreg_exp_even_f16, expEvenVreg, pregFull);
@@ -585,12 +584,11 @@ private:
                 Or((RegTensor<uint16_t>&)vreg_exp_f16, (RegTensor<uint16_t>&)vreg_exp_even_f16,
                    (RegTensor<uint16_t>&)vreg_exp_odd_f16, preg_all_b16);
                 StoreAlign<
-                    half, AscendC::MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
-                    AscendC::MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+                    half, AscendC::Reg::DataCopyMode::DATA_BLOCK_COPY, AscendC::Reg::PostLiteral::POST_MODE_UPDATE>(
                     ((__ubuf__ half*&)expUb), vreg_exp_f16, blockStride, 1, preg_all_b16);
             }
         }
-        StoreUnAlignPost<float, AscendC::MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+        StoreUnAlignPost<float, AscendC::Reg::PostLiteral::POST_MODE_UPDATE>(
             ((__ubuf__ float*&)expSumUb), expSumUreg, 0);
     }
 
@@ -601,7 +599,7 @@ private:
         uint16_t nLoops, uint32_t tailN, uint32_t nPadding, ElementInput dScale, uint16_t S2BaseSize,
         uint32_t blockStride, uint32_t repeatStride)
     {
-        using namespace AscendC::MicroAPI;
+        using namespace AscendC::Reg;
         RegTensor<float> minVreg;
         RegTensor<float> srcVreg;
         RegTensor<float> srcVreg_unroll;
@@ -648,11 +646,11 @@ private:
             Muls(srcVreg, srcVreg, dScale, pregTailN);
             Select(srcVreg_unroll_new, srcVreg, minVreg, pregTailN);
             StoreAlign<float, StoreDist::DIST_NORM_B32>(srcUb + i * S2BaseSize, srcVreg_unroll_new, pregFull);
-            Reduce<AscendC::MicroAPI::ReduceType::MAX, float, float, AscendC::MicroAPI::MaskMergeMode::ZEROING>(
+            Reduce<AscendC::Reg::ReduceType::MAX, float, float, AscendC::Reg::MaskMergeMode::ZEROING>(
                 maxSrcVreg, srcVreg_unroll_new, pregFull);
             StoreUnAlign<float, PostLiteral::POST_MODE_UPDATE>(newMaxUb, maxSrcVreg, maxUreg, 1);
         }
-        StoreUnAlignPost<float, AscendC::MicroAPI::PostLiteral::POST_MODE_UPDATE>(newMaxUb, maxUreg, 0);
+        StoreUnAlignPost<float, AscendC::Reg::PostLiteral::POST_MODE_UPDATE>(newMaxUb, maxUreg, 0);
         if constexpr (isUpdate) {
             LocalMemBar<MemType::VEC_STORE, MemType::VEC_LOAD>();
             LoadAlign(maxSrcVreg, newMaxUbStart);
@@ -663,31 +661,30 @@ private:
         LocalMemBar<MemType::VEC_STORE, MemType::VEC_LOAD>();
 
         for (uint16_t i = 0; i < m; ++i) {
-            LoadAlign<float, AscendC::MicroAPI::LoadDist::DIST_BRC_B32>(maxBrcVreg, newMaxUbStart + i);
+            LoadAlign<float, AscendC::Reg::LoadDist::DIST_BRC_B32>(maxBrcVreg, newMaxUbStart + i);
             LoadAlign(srcVreg, srcUb + i * S2BaseSize);
             ExpSub(expEvenVreg, srcVreg, maxBrcVreg, pregFull);
-            Reduce<AscendC::MicroAPI::ReduceType::SUM, float, float, AscendC::MicroAPI::MaskMergeMode::ZEROING>(
+            Reduce<AscendC::Reg::ReduceType::SUM, float, float, AscendC::Reg::MaskMergeMode::ZEROING>(
                 expSumVreg, expEvenVreg, pregFull);
-            StoreUnAlign<float, AscendC::MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+            StoreUnAlign<float, AscendC::Reg::PostLiteral::POST_MODE_UPDATE>(
                 ((__ubuf__ float*&)expSumUb), expSumVreg, expSumUreg, 1);
 
             if constexpr (AscendC::IsSameType<ElementP, bfloat16_t>::value) {
                 Cast<bfloat16_t, float, castTraitZero>(vreg_exp_bf16, expEvenVreg, pregFull);
                 DeInterleave(vreg_exp_even_bf16, vreg_exp_odd_bf16, vreg_exp_bf16, vreg_exp_bf16);
                 StoreAlign<
-                    bfloat16_t, AscendC::MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
-                    AscendC::MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+                    bfloat16_t, AscendC::Reg::DataCopyMode::DATA_BLOCK_COPY,
+                    AscendC::Reg::PostLiteral::POST_MODE_UPDATE>(
                     ((__ubuf__ bfloat16_t*&)expUb), vreg_exp_even_bf16, blockStride, 1, preg_all_b16);
             } else {
                 Cast<half, float, castTraitZero>(vreg_exp_f16, expEvenVreg, pregFull);
                 DeInterleave(vreg_exp_even_f16, vreg_exp_odd_f16, vreg_exp_f16, vreg_exp_f16);
                 StoreAlign<
-                    half, AscendC::MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
-                    AscendC::MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+                    half, AscendC::Reg::DataCopyMode::DATA_BLOCK_COPY, AscendC::Reg::PostLiteral::POST_MODE_UPDATE>(
                     ((__ubuf__ half*&)expUb), vreg_exp_even_f16, blockStride, 1, preg_all_b16);
             }
         }
-        StoreUnAlignPost<float, AscendC::MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+        StoreUnAlignPost<float, AscendC::Reg::PostLiteral::POST_MODE_UPDATE>(
             ((__ubuf__ float*&)expSumUb), expSumUreg, 0);
     }
 
@@ -698,7 +695,7 @@ private:
         __ubuf__ ElementMask* maskUb, uint16_t m, uint16_t nLoops, uint32_t tailN, uint32_t nPadding,
         ElementInput dScale, uint16_t S2BaseSize, uint32_t blockStride, uint32_t repeatStride)
     {
-        using namespace AscendC::MicroAPI;
+        using namespace AscendC::Reg;
         RegTensor<float> minVreg;
         RegTensor<float> srcVreg;
         RegTensor<float> srcVreg_unroll;
@@ -780,11 +777,11 @@ private:
             StoreAlign<float, StoreDist::DIST_NORM_B32>(
                 srcUb + i * S2BaseSize + FLOAT_REP_SIZE, srcVreg_unroll_new, pregFull);
             Max(maxTmpVreg, srcVreg_mask, srcVreg_unroll_new, pregFull);
-            Reduce<AscendC::MicroAPI::ReduceType::MAX, float, float, AscendC::MicroAPI::MaskMergeMode::ZEROING>(
+            Reduce<AscendC::Reg::ReduceType::MAX, float, float, AscendC::Reg::MaskMergeMode::ZEROING>(
                 maxSrcVreg, maxTmpVreg, pregFull);
             StoreUnAlign<float, PostLiteral::POST_MODE_UPDATE>(newMaxUb, maxSrcVreg, maxUreg, 1);
         }
-        StoreUnAlignPost<float, AscendC::MicroAPI::PostLiteral::POST_MODE_UPDATE>(newMaxUb, maxUreg, 0);
+        StoreUnAlignPost<float, AscendC::Reg::PostLiteral::POST_MODE_UPDATE>(newMaxUb, maxUreg, 0);
         if constexpr (isUpdate) {
             LocalMemBar<MemType::VEC_STORE, MemType::VEC_LOAD>();
             LoadAlign(maxSrcVreg, newMaxUbStart);
@@ -795,16 +792,15 @@ private:
         LocalMemBar<MemType::VEC_STORE, MemType::VEC_LOAD>();
 
         for (uint16_t i = 0; i < m; ++i) {
-            LoadAlign<float, AscendC::MicroAPI::LoadDist::DIST_BRC_B32>(maxBrcVreg, newMaxUbStart + i);
-            LoadAlign<float, AscendC::MicroAPI::LoadDist::DIST_DINTLV_B32>(
-                srcVreg, srcVreg_unroll, srcUb + i * S2BaseSize);
+            LoadAlign<float, AscendC::Reg::LoadDist::DIST_BRC_B32>(maxBrcVreg, newMaxUbStart + i);
+            LoadAlign<float, AscendC::Reg::LoadDist::DIST_DINTLV_B32>(srcVreg, srcVreg_unroll, srcUb + i * S2BaseSize);
             ExpSub(expEvenVreg, srcVreg, maxBrcVreg, pregFull);
             ExpSub(expOddVreg, srcVreg_unroll, maxBrcVreg, pregFull);
 
             Add(expSumVreg, expEvenVreg, expOddVreg, pregFull);
-            Reduce<AscendC::MicroAPI::ReduceType::SUM, float, float, AscendC::MicroAPI::MaskMergeMode::ZEROING>(
+            Reduce<AscendC::Reg::ReduceType::SUM, float, float, AscendC::Reg::MaskMergeMode::ZEROING>(
                 expSumVreg, expSumVreg, pregFull);
-            StoreUnAlign<float, AscendC::MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+            StoreUnAlign<float, AscendC::Reg::PostLiteral::POST_MODE_UPDATE>(
                 ((__ubuf__ float*&)expSumUb), expSumVreg, expSumUreg, 1);
 
             if constexpr (AscendC::IsSameType<ElementP, bfloat16_t>::value) {
@@ -813,8 +809,8 @@ private:
                 Or((RegTensor<uint16_t>&)vreg_exp_bf16, (RegTensor<uint16_t>&)vreg_exp_even_bf16,
                    (RegTensor<uint16_t>&)vreg_exp_odd_bf16, preg_all_b16);
                 StoreAlign<
-                    bfloat16_t, AscendC::MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
-                    AscendC::MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+                    bfloat16_t, AscendC::Reg::DataCopyMode::DATA_BLOCK_COPY,
+                    AscendC::Reg::PostLiteral::POST_MODE_UPDATE>(
                     ((__ubuf__ bfloat16_t*&)expUb), vreg_exp_bf16, blockStride, 1, preg_all_b16);
             } else {
                 Cast<half, float, castTraitZero>(vreg_exp_even_f16, expEvenVreg, pregFull);
@@ -822,12 +818,11 @@ private:
                 Or((RegTensor<uint16_t>&)vreg_exp_f16, (RegTensor<uint16_t>&)vreg_exp_even_f16,
                    (RegTensor<uint16_t>&)vreg_exp_odd_f16, preg_all_b16);
                 StoreAlign<
-                    half, AscendC::MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
-                    AscendC::MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+                    half, AscendC::Reg::DataCopyMode::DATA_BLOCK_COPY, AscendC::Reg::PostLiteral::POST_MODE_UPDATE>(
                     ((__ubuf__ half*&)expUb), vreg_exp_f16, blockStride, 1, preg_all_b16);
             }
         }
-        StoreUnAlignPost<float, AscendC::MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+        StoreUnAlignPost<float, AscendC::Reg::PostLiteral::POST_MODE_UPDATE>(
             ((__ubuf__ float*&)expSumUb), expSumUreg, 0);
     }
 
@@ -838,7 +833,7 @@ private:
         __ubuf__ ElementMask* maskUb, uint16_t m, uint16_t nLoops, uint32_t tailN, uint32_t nPadding,
         ElementInput dScale, uint16_t S2BaseSize, uint32_t blockStride, uint32_t repeatStride)
     {
-        using namespace AscendC::MicroAPI;
+        using namespace AscendC::Reg;
         RegTensor<float> minVreg;
         RegTensor<float> srcVreg;
         RegTensor<float> srcVreg_unroll;
@@ -895,11 +890,11 @@ private:
             Select(srcVreg_mask, srcVreg, minVreg, pregCompare);
             Select(srcVreg_unroll_new, srcVreg_mask, minVreg, pregTailN);
             StoreAlign<float, StoreDist::DIST_NORM_B32>(srcUb + i * S2BaseSize, srcVreg_unroll_new, pregFull);
-            Reduce<AscendC::MicroAPI::ReduceType::MAX, float, float, AscendC::MicroAPI::MaskMergeMode::ZEROING>(
+            Reduce<AscendC::Reg::ReduceType::MAX, float, float, AscendC::Reg::MaskMergeMode::ZEROING>(
                 maxSrcVreg, srcVreg_unroll_new, pregFull);
             StoreUnAlign<float, PostLiteral::POST_MODE_UPDATE>(newMaxUb, maxSrcVreg, maxUreg, 1);
         }
-        StoreUnAlignPost<float, AscendC::MicroAPI::PostLiteral::POST_MODE_UPDATE>(newMaxUb, maxUreg, 0);
+        StoreUnAlignPost<float, AscendC::Reg::PostLiteral::POST_MODE_UPDATE>(newMaxUb, maxUreg, 0);
         if constexpr (isUpdate) {
             LocalMemBar<MemType::VEC_STORE, MemType::VEC_LOAD>();
             LoadAlign(maxSrcVreg, newMaxUbStart);
@@ -910,31 +905,30 @@ private:
         LocalMemBar<MemType::VEC_STORE, MemType::VEC_LOAD>();
 
         for (uint16_t i = 0; i < m; ++i) {
-            LoadAlign<float, AscendC::MicroAPI::LoadDist::DIST_BRC_B32>(maxBrcVreg, newMaxUbStart + i);
+            LoadAlign<float, AscendC::Reg::LoadDist::DIST_BRC_B32>(maxBrcVreg, newMaxUbStart + i);
             LoadAlign(srcVreg, srcUb + i * S2BaseSize);
             ExpSub(expEvenVreg, srcVreg, maxBrcVreg, pregFull);
-            Reduce<AscendC::MicroAPI::ReduceType::SUM, float, float, AscendC::MicroAPI::MaskMergeMode::ZEROING>(
+            Reduce<AscendC::Reg::ReduceType::SUM, float, float, AscendC::Reg::MaskMergeMode::ZEROING>(
                 expSumVreg, expEvenVreg, pregFull);
-            StoreUnAlign<float, AscendC::MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+            StoreUnAlign<float, AscendC::Reg::PostLiteral::POST_MODE_UPDATE>(
                 ((__ubuf__ float*&)expSumUb), expSumVreg, expSumUreg, 1);
 
             if constexpr (AscendC::IsSameType<ElementP, bfloat16_t>::value) {
                 Cast<bfloat16_t, float, castTraitZero>(vreg_exp_bf16, expEvenVreg, pregFull);
                 DeInterleave(vreg_exp_even_bf16, vreg_exp_odd_bf16, vreg_exp_bf16, vreg_exp_bf16);
                 StoreAlign<
-                    bfloat16_t, AscendC::MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
-                    AscendC::MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+                    bfloat16_t, AscendC::Reg::DataCopyMode::DATA_BLOCK_COPY,
+                    AscendC::Reg::PostLiteral::POST_MODE_UPDATE>(
                     ((__ubuf__ bfloat16_t*&)expUb), vreg_exp_even_bf16, blockStride, 1, preg_all_b16);
             } else {
                 Cast<half, float, castTraitZero>(vreg_exp_f16, expEvenVreg, pregFull);
                 DeInterleave(vreg_exp_even_f16, vreg_exp_odd_f16, vreg_exp_f16, vreg_exp_f16);
                 StoreAlign<
-                    half, AscendC::MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
-                    AscendC::MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+                    half, AscendC::Reg::DataCopyMode::DATA_BLOCK_COPY, AscendC::Reg::PostLiteral::POST_MODE_UPDATE>(
                     ((__ubuf__ half*&)expUb), vreg_exp_even_f16, blockStride, 1, preg_all_b16);
             }
         }
-        StoreUnAlignPost<float, AscendC::MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+        StoreUnAlignPost<float, AscendC::Reg::PostLiteral::POST_MODE_UPDATE>(
             ((__ubuf__ float*&)expSumUb), expSumUreg, 0);
     }
 
@@ -945,7 +939,7 @@ private:
         uint32_t mFirstTile, ElementInput dScale, uint16_t S2BaseSize, uint32_t blockStride, uint32_t repeatStride,
         __ubuf__ float* expMaxUb, __ubuf__ ElementS* lastExpSumUb)
     {
-        using namespace AscendC::MicroAPI;
+        using namespace AscendC::Reg;
         RegTensor<float> src0Vreg;
         RegTensor<float> src1Vreg;
         RegTensor<float> src2Vreg;
@@ -1055,12 +1049,12 @@ private:
             StoreAlign<float, StoreDist::DIST_NORM_B32>(LastMaxUbStart, max0Vreg, pregTailN);
         }
 
-        StoreAlign<float, AscendC::MicroAPI::StoreDist::DIST_NORM_B32>((__ubuf__ float*&)newMaxUb, max0Vreg, pregFull);
+        StoreAlign<float, AscendC::Reg::StoreDist::DIST_NORM_B32>((__ubuf__ float*&)newMaxUb, max0Vreg, pregFull);
 
-        Duplicate<float, AscendC::MicroAPI::MaskMergeMode::ZEROING, float>(sum0Vreg, 0, pregFull);
-        Duplicate<float, AscendC::MicroAPI::MaskMergeMode::ZEROING, float>(sum1Vreg, 0, pregFull);
-        Duplicate<float, AscendC::MicroAPI::MaskMergeMode::ZEROING, float>(sum2Vreg, 0, pregFull);
-        Duplicate<float, AscendC::MicroAPI::MaskMergeMode::ZEROING, float>(sum3Vreg, 0, pregFull);
+        Duplicate<float, AscendC::Reg::MaskMergeMode::ZEROING, float>(sum0Vreg, 0, pregFull);
+        Duplicate<float, AscendC::Reg::MaskMergeMode::ZEROING, float>(sum1Vreg, 0, pregFull);
+        Duplicate<float, AscendC::Reg::MaskMergeMode::ZEROING, float>(sum2Vreg, 0, pregFull);
+        Duplicate<float, AscendC::Reg::MaskMergeMode::ZEROING, float>(sum3Vreg, 0, pregFull);
 
         for (int32_t i = 0; i < mFirstTile; i++) {
             LoadAlign(src0Fp32Vreg, srcUb + i * S2BaseSize);
@@ -1087,8 +1081,8 @@ private:
                 DeInterleave(
                     vreg_x_exp_bf16_1_pack, vreg_x_exp_bf16_1_packa, vreg_x_exp_even_bf16_1, vreg_x_exp_odd_bf16_1);
                 StoreAlign<
-                    bfloat16_t, AscendC::MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
-                    AscendC::MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+                    bfloat16_t, AscendC::Reg::DataCopyMode::DATA_BLOCK_COPY,
+                    AscendC::Reg::PostLiteral::POST_MODE_UPDATE>(
                     ((__ubuf__ bfloat16_t*&)expUb), vreg_x_exp_bf16_pack, blockStride, 1, preg_136);
 
                 if constexpr (mTileNum >= MAligendTileNum::Zero) {
@@ -1098,8 +1092,8 @@ private:
                     Add(sum2Vreg, exp2Fp32Vreg, sum2Vreg, pregTailN);
                 }
                 StoreAlign<
-                    bfloat16_t, AscendC::MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
-                    AscendC::MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+                    bfloat16_t, AscendC::Reg::DataCopyMode::DATA_BLOCK_COPY,
+                    AscendC::Reg::PostLiteral::POST_MODE_UPDATE>(
                     ((__ubuf__ bfloat16_t*&)x_exp_1), vreg_x_exp_bf16_1_pack, blockStride, 1, preg_136);
                 if constexpr (mTileNum >= MAligendTileNum::One) {
                     Add(sum1Vreg, exp1Fp32Vreg, sum1Vreg, pregTailN);
@@ -1116,8 +1110,7 @@ private:
                 DeInterleave(
                     vreg_x_exp_f16_1_pack, vreg_x_exp_f16_1_packa, vreg_x_exp_even_f16_1, vreg_x_exp_odd_f16_1);
                 StoreAlign<
-                    half, AscendC::MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
-                    AscendC::MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+                    half, AscendC::Reg::DataCopyMode::DATA_BLOCK_COPY, AscendC::Reg::PostLiteral::POST_MODE_UPDATE>(
                     ((__ubuf__ half*&)expUb), vreg_x_exp_f16_pack, blockStride, 1, preg_136);
 
                 if constexpr (mTileNum >= MAligendTileNum::Zero) {
@@ -1127,8 +1120,7 @@ private:
                     Add(sum2Vreg, exp2Fp32Vreg, sum2Vreg, pregTailN);
                 }
                 StoreAlign<
-                    half, AscendC::MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
-                    AscendC::MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+                    half, AscendC::Reg::DataCopyMode::DATA_BLOCK_COPY, AscendC::Reg::PostLiteral::POST_MODE_UPDATE>(
                     ((__ubuf__ half*&)x_exp_1), vreg_x_exp_f16_1_pack, blockStride, 1, preg_136);
                 if constexpr (mTileNum >= MAligendTileNum::One) {
                     Add(sum1Vreg, exp1Fp32Vreg, sum1Vreg, pregTailN);
@@ -1165,8 +1157,8 @@ private:
                     DeInterleave(
                         vreg_x_exp_bf16_1_pack, vreg_x_exp_bf16_1_packa, vreg_x_exp_even_bf16_1, vreg_x_exp_odd_bf16_1);
                     StoreAlign<
-                        bfloat16_t, AscendC::MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
-                        AscendC::MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+                        bfloat16_t, AscendC::Reg::DataCopyMode::DATA_BLOCK_COPY,
+                        AscendC::Reg::PostLiteral::POST_MODE_UPDATE>(
                         ((__ubuf__ bfloat16_t*&)expUb), vreg_x_exp_bf16_pack, blockStride, 1, preg_136);
 
                     if constexpr (mTileNum > MAligendTileNum::Zero) {
@@ -1176,8 +1168,8 @@ private:
                         Add(sum2Vreg, exp2Fp32Vreg, sum2Vreg, pregTailN);
                     }
                     StoreAlign<
-                        bfloat16_t, AscendC::MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
-                        AscendC::MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+                        bfloat16_t, AscendC::Reg::DataCopyMode::DATA_BLOCK_COPY,
+                        AscendC::Reg::PostLiteral::POST_MODE_UPDATE>(
                         ((__ubuf__ bfloat16_t*&)x_exp_1), vreg_x_exp_bf16_1_pack, blockStride, 1, preg_136);
                     if constexpr (mTileNum > MAligendTileNum::One) {
                         Add(sum1Vreg, exp1Fp32Vreg, sum1Vreg, pregTailN);
@@ -1191,8 +1183,7 @@ private:
                     DeInterleave(
                         vreg_x_exp_f16_1_pack, vreg_x_exp_f16_1_packa, vreg_x_exp_even_f16_1, vreg_x_exp_odd_f16_1);
                     StoreAlign<
-                        half, AscendC::MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
-                        AscendC::MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+                        half, AscendC::Reg::DataCopyMode::DATA_BLOCK_COPY, AscendC::Reg::PostLiteral::POST_MODE_UPDATE>(
                         ((__ubuf__ half*&)expUb), vreg_x_exp_f16_pack, blockStride, 1, preg_136);
 
                     if constexpr (mTileNum > MAligendTileNum::Zero) {
@@ -1202,8 +1193,7 @@ private:
                         Add(sum2Vreg, exp2Fp32Vreg, sum2Vreg, pregTailN);
                     }
                     StoreAlign<
-                        half, AscendC::MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
-                        AscendC::MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+                        half, AscendC::Reg::DataCopyMode::DATA_BLOCK_COPY, AscendC::Reg::PostLiteral::POST_MODE_UPDATE>(
                         ((__ubuf__ half*&)x_exp_1), vreg_x_exp_f16_1_pack, blockStride, 1, preg_136);
                     if constexpr (mTileNum > MAligendTileNum::One) {
                         Add(sum1Vreg, exp1Fp32Vreg, sum1Vreg, pregTailN);
@@ -1218,7 +1208,7 @@ private:
             Add(updateExpSumVreg, updateExpSumVreg, sum0Vreg, pregFull);
             StoreAlign<float, StoreDist::DIST_NORM_B32>(lastExpSumUb, updateExpSumVreg, pregFull);
         }
-        StoreAlign<float, AscendC::MicroAPI::StoreDist::DIST_NORM_B32>((__ubuf__ float*&)expSumUb, sum0Vreg, pregFull);
+        StoreAlign<float, AscendC::Reg::StoreDist::DIST_NORM_B32>((__ubuf__ float*&)expSumUb, sum0Vreg, pregFull);
     }
 
     template <typename ElementS>
@@ -1226,7 +1216,7 @@ private:
         __ubuf__ float* sumUb, __ubuf__ float* maxUb, __ubuf__ ElementS* expSumUb, __ubuf__ ElementS* nowMaxUb,
         uint16_t mLoops, uint32_t tailM)
     {
-        using namespace AscendC::MicroAPI;
+        using namespace AscendC::Reg;
 
         constexpr static CastTrait castTrait = {
             RegLayout::ZERO,
@@ -1273,7 +1263,7 @@ private:
         __ubuf__ float* sumUb, __ubuf__ float* expMaxUb, __ubuf__ float* maxUb, __ubuf__ ElementS* expSumUb,
         __ubuf__ ElementS* nowMaxUb, uint16_t mLoops, uint32_t tailM)
     {
-        using namespace AscendC::MicroAPI;
+        using namespace AscendC::Reg;
 
         constexpr static CastTrait castTrait = {
             RegLayout::ZERO,

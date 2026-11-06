@@ -19,7 +19,7 @@
 namespace Catlass::Epilogue::Tile {
 
 #if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
-using namespace AscendC::MicroAPI;
+using namespace AscendC::Reg;
 #endif
 template <
     class ArchTag_, class ActType_, class GateType_, class CalcType_, class GluResType_, class QuantOutType_,
@@ -91,17 +91,17 @@ struct TileSwigluAndMxQuant {
                 uint32_t srcOffset = mIdx * nSrcUbAligned + vfBlockIdx * sizePerRepeat;
                 uint32_t dstOffset = mIdx * nDstUbAligned + vfBlockIdx * sizePerRepeat;
 
-                DataCopy(actCalcReg, actData + srcOffset);
+                LoadAlign(actCalcReg, actData + srcOffset);
 
                 Muls(negActReg, actCalcReg, -float_one, maskN);
                 Exp(expNegActReg, negActReg, maskN);
                 Adds(onePlusExpReg, expNegActReg, float_one, maskN);
                 Div<float, &DIV_MODE>(swishOutputReg, actCalcReg, onePlusExpReg, maskN);
-                DataCopy(gateCalcReg, gateData + srcOffset);
+                LoadAlign(gateCalcReg, gateData + srcOffset);
                 Mul(gluCalcReg, swishOutputReg, gateCalcReg, maskN);
 
                 Cast<GluResType, CalcType, ctCalcToGluRes>(gluGluResReg, gluCalcReg, maskN);
-                DataCopy<bfloat16_t, StoreDist::DIST_PACK_B32>(gluRes + dstOffset, gluGluResReg, maskN);
+                StoreAlign<bfloat16_t, StoreDist::DIST_PACK_B32>(gluRes + dstOffset, gluGluResReg, maskN);
             }
         }
 
@@ -147,19 +147,18 @@ struct TileSwigluAndMxQuant {
                 scaleMask1 = UpdateMask<bfloat16_t>(totalDataCount);
                 scaleMask2 = UpdateMask<bfloat16_t>(totalDataCount);
 
-                DataCopy<bfloat16_t, PostLiteral::POST_MODE_UPDATE, LoadDist::DIST_DINTLV_B16>(
+                LoadAlign<bfloat16_t, PostLiteral::POST_MODE_UPDATE, LoadDist::DIST_DINTLV_B16>(
                     vdExp0, vdExp1, gluRes, vlForHalfNumber * 2);
 
                 And(vdExpExtract0, (RegTensor<uint16_t>&)vdExp0, expMaskBF16, scaleMask1);
                 And(vdExpExtract1, (RegTensor<uint16_t>&)vdExp1, expMaskBF16, scaleMask1);
 
                 Max(vdMaxExp, vdExpExtract0, vdExpExtract1, scaleMask1);
-                ReduceMaxWithDataBlock(vdMaxExp, vdMaxExp, scaleMask1);
+                ReduceDataBlock<AscendC::Reg::ReduceType::MAX>(vdMaxExp, vdMaxExp, scaleMask1);
 
-                DataCopyUnAlign<uint16_t, PostLiteral::POST_MODE_UPDATE>(
-                    maxExp, vdMaxExp, uRegMaxExp, elementAfterReduce);
+                StoreUnAlign<uint16_t, PostLiteral::POST_MODE_UPDATE>(maxExp, vdMaxExp, uRegMaxExp, elementAfterReduce);
             }
-            DataCopyUnAlignPost(maxExp, uRegMaxExp, 0);
+            StoreUnAlignPost(maxExp, uRegMaxExp, 0);
         }
         return;
     }
@@ -190,7 +189,7 @@ struct TileSwigluAndMxQuant {
             for (uint16_t i = 0; i < loopScaleNum; i++) {
                 preMaskScale = UpdateMask<uint16_t>(totalScaleCount);
 
-                DataCopy<uint16_t, PostLiteral::POST_MODE_UPDATE>(vdMaxExp, maxExp, vlForHalfNumber);
+                LoadAlign<uint16_t, PostLiteral::POST_MODE_UPDATE>(vdMaxExp, maxExp, vlForHalfNumber);
 
                 Compare<uint16_t, AscendC::CMPMODE::NE>(cmpResult, vdMaxExp, expMask, preMaskScale);
                 Compare<uint16_t, AscendC::CMPMODE::NE>(zeroMask, vdMaxExp, zeroReg, preMaskScale);
@@ -202,7 +201,7 @@ struct TileSwigluAndMxQuant {
                 Select<uint16_t>(scaleValue, scaleValue, fp8NanReg, cmpResult);
                 Select<uint16_t>(scaleValue, scaleValue, zeroReg, zeroMask);
 
-                DataCopy<uint16_t, PostLiteral::POST_MODE_UPDATE, StoreDist::DIST_PACK_B16>(
+                StoreAlign<uint16_t, PostLiteral::POST_MODE_UPDATE, StoreDist::DIST_PACK_B16>(
                     scaleWriteAddr, scaleValue, vlForHalfNumber >> 1, preMaskScale);
 
                 Compare<uint16_t, AscendC::CMPMODE::EQ>(specialDataMask, sharedExp, scaleBias, preMaskScale);
@@ -211,7 +210,7 @@ struct TileSwigluAndMxQuant {
                 Select<uint16_t>(halfScaleVal, halfScaleVal, zeroReg, zeroMask);
                 Select<uint16_t>(halfScaleVal, specialExpReg, halfScaleVal, specialDataMask);
 
-                DataCopy<uint16_t, PostLiteral::POST_MODE_UPDATE>(
+                StoreAlign<uint16_t, PostLiteral::POST_MODE_UPDATE>(
                     halfScale, halfScaleVal, vlForHalfNumber, preMaskScale);
             }
         }
@@ -248,9 +247,9 @@ struct TileSwigluAndMxQuant {
                 dataMask2 = UpdateMask<bfloat16_t>(totalDataCount);
                 dataMask3 = UpdateMask<bfloat16_t>(totalDataCount2);
                 dataMask4 = UpdateMask<bfloat16_t>(totalDataCount2);
-                DataCopy<bfloat16_t, PostLiteral::POST_MODE_UPDATE, LoadDist::DIST_DINTLV_B16>(
+                LoadAlign<bfloat16_t, PostLiteral::POST_MODE_UPDATE, LoadDist::DIST_DINTLV_B16>(
                     vdExp0, vdExp1, gluRes, vlForHalfNumber * 2);
-                DataCopy<uint16_t, PostLiteral::POST_MODE_UPDATE, LoadDist::DIST_E2B_B16>(
+                LoadAlign<uint16_t, PostLiteral::POST_MODE_UPDATE, LoadDist::DIST_E2B_B16>(
                     halfScaleForMul, halfScale, elementAfterReduce);
 
                 Mul(vdExp0, vdExp0, (RegTensor<bfloat16_t>&)halfScaleForMul, dataMask1);
@@ -266,13 +265,13 @@ struct TileSwigluAndMxQuant {
                 Interleave(vdExp1FP32Zero, vdExp1FP32One, vdExp1FP32Zero, vdExp1FP32One);
                 Cast<QuantOutType, float, castTrait32to8>(vdExp1FP8Zero, vdExp1FP32Zero, dataMask4);
                 Cast<QuantOutType, float, castTrait32to8>(vdExp1FP8One, vdExp1FP32One, dataMask4);
-                DataCopy<int8_t, PostLiteral::POST_MODE_UPDATE, StoreDist::DIST_PACK4_B32>(
+                StoreAlign<int8_t, PostLiteral::POST_MODE_UPDATE, StoreDist::DIST_PACK4_B32>(
                     quantOut, (RegTensor<int8_t>&)vdExp0FP8Zero, OUT_ELE_NUM_ONE_BLK, dataMask3);
-                DataCopy<int8_t, PostLiteral::POST_MODE_UPDATE, StoreDist::DIST_PACK4_B32>(
+                StoreAlign<int8_t, PostLiteral::POST_MODE_UPDATE, StoreDist::DIST_PACK4_B32>(
                     quantOut, (RegTensor<int8_t>&)vdExp0FP8One, OUT_ELE_NUM_ONE_BLK, dataMask3);
-                DataCopy<int8_t, PostLiteral::POST_MODE_UPDATE, StoreDist::DIST_PACK4_B32>(
+                StoreAlign<int8_t, PostLiteral::POST_MODE_UPDATE, StoreDist::DIST_PACK4_B32>(
                     quantOut, (RegTensor<int8_t>&)vdExp1FP8Zero, OUT_ELE_NUM_ONE_BLK, dataMask4);
-                DataCopy<int8_t, PostLiteral::POST_MODE_UPDATE, StoreDist::DIST_PACK4_B32>(
+                StoreAlign<int8_t, PostLiteral::POST_MODE_UPDATE, StoreDist::DIST_PACK4_B32>(
                     quantOut, (RegTensor<int8_t>&)vdExp1FP8One, OUT_ELE_NUM_ONE_BLK, dataMask4);
             }
         }

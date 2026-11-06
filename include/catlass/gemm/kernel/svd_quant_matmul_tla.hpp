@@ -387,7 +387,7 @@ struct SmoothQuant {
     CATLASS_DEVICE_SIMD_VF void ComputeSmoothX(
         __ubuf__ T* srcAddr, __ubuf__ T* srcSmoothAddr, __ubuf__ T* smoothXAddr, uint16_t dim0, uint16_t dim1)
     {
-        using namespace AscendC::MicroAPI;
+        using namespace AscendC::Reg;
         RegTensor<T> vdX;
         RegTensor<T> vdSmooth;
         RegTensor<T> vdXdst;
@@ -399,8 +399,8 @@ struct SmoothQuant {
             __ubuf__ T* srcSmoothAddr1 = srcSmoothAddr;
             for (uint16_t j = 0; j < loopNum; j++) {
                 mulMask = UpdateMask<T>(calNum);
-                DataCopy<T, PostLiteral::POST_MODE_UPDATE, LoadDist::DIST_NORM>(vdX, srcAddr1, ELE_NUM_REG_VF);
-                DataCopy<T, PostLiteral::POST_MODE_UPDATE, LoadDist::DIST_NORM>(
+                LoadAlign<T, PostLiteral::POST_MODE_UPDATE, LoadDist::DIST_NORM>(vdX, srcAddr1, ELE_NUM_REG_VF);
+                LoadAlign<T, PostLiteral::POST_MODE_UPDATE, LoadDist::DIST_NORM>(
                     vdSmooth, srcSmoothAddr1, ELE_NUM_REG_VF);
                 Mul(vdXdst, vdX, vdSmooth, mulMask);
                 StoreAlign(smoothXAddr + i * dim1 + ELE_NUM_REG_VF * j, vdXdst, mulMask);
@@ -411,7 +411,7 @@ struct SmoothQuant {
     CATLASS_DEVICE_SIMD_VF void ComputeMaxExp(
         __ubuf__ T* srcAddr, __ubuf__ uint16_t* maxExpAddr, uint32_t totalCountInUB, uint16_t loopNum, T qmaxInv)
     {
-        using namespace AscendC::MicroAPI;
+        using namespace AscendC::Reg;
         RegTensor<T> vdExp0;
         RegTensor<T> vdExp1;
         RegTensor<bfloat16_t> vdExp0BF16;
@@ -454,7 +454,7 @@ struct SmoothQuant {
         for (uint16_t i = 0; i < loopNum; i++) {
             scaleMask1 = UpdateMask<T>(totalCountInUB);
             // scaleMask2 = UpdateMask<T>(totalCountInUB);
-            DataCopy<T, PostLiteral::POST_MODE_UPDATE, LoadDist::DIST_DINTLV_B16>(
+            LoadAlign<T, PostLiteral::POST_MODE_UPDATE, LoadDist::DIST_DINTLV_B16>(
                 vdExp0, vdExp1, srcAddr, ELE_NUM_REG_VF * DIGIT_TWO);
 
             // v = 2^(x-127)*(1+尾数/128)
@@ -498,18 +498,18 @@ struct SmoothQuant {
             Select<uint16_t>(vdExpExtract1, vdExpExtractCeil1, vdExpExtract1, hasMantissa1);
 
             Max(vdMaxExp, vdExpExtract0, vdExpExtract1, scaleMask1);
-            ReduceMaxWithDataBlock(vdMaxExp, vdMaxExp, scaleMask1);
+            ReduceDataBlock<AscendC::Reg::ReduceType::MAX>(vdMaxExp, vdMaxExp, scaleMask1);
 
-            DataCopyUnAlign<uint16_t, PostLiteral::POST_MODE_UPDATE>(maxExpAddr, vdMaxExp, u1, ELE_AFTER_REDUCE);
+            StoreUnAlign<uint16_t, PostLiteral::POST_MODE_UPDATE>(maxExpAddr, vdMaxExp, u1, ELE_AFTER_REDUCE);
         }
-        DataCopyUnAlignPost(maxExpAddr, u1, 0);
+        StoreUnAlignPost(maxExpAddr, u1, 0);
     }
 
     CATLASS_DEVICE_SIMD_VF void ComputeScale(
         __ubuf__ uint16_t* maxExpAddr, __ubuf__ uint16_t* mxScaleLocalAddr, __ubuf__ uint16_t* halfScaleLocalAddr,
         uint32_t totalScaleInUB, uint16_t loopNumScale)
     {
-        using namespace AscendC::MicroAPI;
+        using namespace AscendC::Reg;
         RegTensor<uint16_t> expMask;
         Duplicate(expMask, MAX_EXP_FOR_BF16);
         RegTensor<uint16_t> vdMaxExp;
@@ -540,7 +540,7 @@ struct SmoothQuant {
         Duplicate(specialExpRegTensor, SPECIAL_EXP_THRESHOLD);
         for (uint16_t i = 0; i < loopNumScale; i++) {
             preMaskScale = UpdateMask<uint16_t>(totalScaleInUB);
-            DataCopy<uint16_t, PostLiteral::POST_MODE_UPDATE>(vdMaxExp, maxExpAddr, ELE_NUM_REG_VF);
+            LoadAlign<uint16_t, PostLiteral::POST_MODE_UPDATE>(vdMaxExp, maxExpAddr, ELE_NUM_REG_VF);
             Compare<uint16_t, AscendC::CMPMODE::NE>(cmpResult, vdMaxExp, expMask, preMaskScale); // INF/NAN
             Compare<uint16_t, AscendC::CMPMODE::NE>(zeroMask, vdMaxExp, zeroRegTensor, preMaskScale);
             Compare<uint16_t, AscendC::CMPMODE::LE>(invalidDataMask, vdMaxExp, maxExpValue, preMaskScale);
@@ -552,7 +552,7 @@ struct SmoothQuant {
             Select<uint16_t>(scaleValue, scaleValue, fp8NanRegTensor, cmpResult);
             Select<uint16_t>(scaleValue, scaleValue, zeroRegTensor, zeroMask);
 
-            DataCopy<uint16_t, PostLiteral::POST_MODE_UPDATE, StoreDist::DIST_PACK_B16>(
+            StoreAlign<uint16_t, PostLiteral::POST_MODE_UPDATE, StoreDist::DIST_PACK_B16>(
                 mxScaleLocalAddr, scaleValue, ELE_NUM_REG_VF / DIGIT_TWO, preMaskScale);
 
             Compare<uint16_t, AscendC::CMPMODE::EQ>(specialDataMask, sharedExp, scaleBias, preMaskScale);
@@ -561,7 +561,7 @@ struct SmoothQuant {
             Select<uint16_t>(halfScale, halfScale, zeroRegTensor, zeroMask);
             Select<uint16_t>(halfScale, specialExpRegTensor, halfScale, specialDataMask);
 
-            DataCopy<uint16_t, PostLiteral::POST_MODE_UPDATE>(
+            StoreAlign<uint16_t, PostLiteral::POST_MODE_UPDATE>(
                 halfScaleLocalAddr, halfScale, ELE_NUM_REG_VF, preMaskScale);
         }
     }
@@ -571,7 +571,7 @@ struct SmoothQuant {
         __ubuf__ T* srcAddr, __ubuf__ uint16_t* halfScaleLocalAddr, __ubuf__ int8_t* outLocalAddr,
         uint32_t totalCountInUB, uint16_t loopNum)
     {
-        using namespace AscendC::MicroAPI;
+        using namespace AscendC::Reg;
         MaskReg dataMask1;
         RegTensor<uint16_t> halfScaleForMul;
         RegTensor<T> vdExp0;
@@ -592,9 +592,9 @@ struct SmoothQuant {
             RegLayout::UNKNOWN, SatMode::UNKNOWN, MaskMergeMode::ZEROING, toBf16RoundMode};
         for (uint16_t i = 0; i < loopNum; i++) {
             dataMask1 = UpdateMask<T>(totalCountInUB);
-            DataCopy<T, PostLiteral::POST_MODE_UPDATE, LoadDist::DIST_DINTLV_B16>(
+            LoadAlign<T, PostLiteral::POST_MODE_UPDATE, LoadDist::DIST_DINTLV_B16>(
                 vdExp0, vdExp1, srcAddr, ELE_NUM_REG_VF * DIGIT_TWO);
-            DataCopy<uint16_t, PostLiteral::POST_MODE_UPDATE, LoadDist::DIST_E2B_B16>(
+            LoadAlign<uint16_t, PostLiteral::POST_MODE_UPDATE, LoadDist::DIST_E2B_B16>(
                 halfScaleForMul, halfScaleLocalAddr, ELE_AFTER_REDUCE);
 
             if constexpr (AscendC::Std::IsSame<T, half>::value) {
@@ -617,9 +617,9 @@ struct SmoothQuant {
                 Cast<U, T, castTrait>(vdExp0FP4, vdExp0, dataMask1);
                 Cast<U, T, castTrait>(vdExp1FP4, vdExp1, dataMask1);
             }
-            DataCopy<int8_t, PostLiteral::POST_MODE_UPDATE, StoreDist::DIST_PACK4_B32>(
+            StoreAlign<int8_t, PostLiteral::POST_MODE_UPDATE, StoreDist::DIST_PACK4_B32>(
                 outLocalAddr, (RegTensor<int8_t>&)vdExp0FP4, OUT_ELE_NUM_ONE_BLK, dataMask1);
-            DataCopy<int8_t, PostLiteral::POST_MODE_UPDATE, StoreDist::DIST_PACK4_B32>(
+            StoreAlign<int8_t, PostLiteral::POST_MODE_UPDATE, StoreDist::DIST_PACK4_B32>(
                 outLocalAddr, (RegTensor<int8_t>&)vdExp1FP4, OUT_ELE_NUM_ONE_BLK, dataMask1);
         }
     }
@@ -627,7 +627,7 @@ struct SmoothQuant {
     template <class HalfReg, class MaskReg>
     CATLASS_DEVICE_SIMD_CALLEE void FP16Convert(HalfReg& output, HalfReg& input, MaskReg& mask)
     {
-        using namespace AscendC::MicroAPI;
+        using namespace AscendC::Reg;
         RegTensor<uint16_t> specialValueTensor;
         RegTensor<uint16_t> newMantissa;
         RegTensor<uint16_t> andResult;

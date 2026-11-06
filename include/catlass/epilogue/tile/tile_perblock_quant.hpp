@@ -20,7 +20,7 @@
 namespace Catlass::Epilogue::Tile {
 
 #if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
-using namespace AscendC::MicroAPI;
+using namespace AscendC::Reg;
 #endif
 
 template <class ArchTag_, class ElementSrc_, class ElementDst_, class ElementScale_>
@@ -76,7 +76,7 @@ struct TilePerBlockQuant {
             Max((RegTensor<uint16_t>&)srcMaxReg, (RegTensor<uint16_t>&)srcMaxReg, (RegTensor<uint16_t>&)srcReg,
                 pregFullB16);
         }
-        Reduce<AscendC::MicroAPI::ReduceType::MAX>(
+        Reduce<AscendC::Reg::ReduceType::MAX>(
             (RegTensor<uint16_t>&)srcMaxReg, (RegTensor<uint16_t>&)srcMaxReg, pregFullB16);
         Cast<float, bfloat16_t, ctHalf2Fp32Zero>(srcMaxReg, (RegTensor<bfloat16_t>&)srcMaxReg, pregFullB16);
         Duplicate(srcMaxReg, srcMaxReg, pregFullB32);

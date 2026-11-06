@@ -20,7 +20,7 @@
 namespace Catlass::Epilogue::Tile {
 
 #if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
-using namespace AscendC::MicroAPI;
+using namespace AscendC::Reg;
 #endif
 template <
     class ArchTag_, class ElementSrc_, class ElementScale_, class ElementPerToken_, class ElementDst_, class TileShape_>

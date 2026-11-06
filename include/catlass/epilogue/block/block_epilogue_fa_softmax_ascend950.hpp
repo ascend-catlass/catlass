@@ -237,7 +237,7 @@ private:
         __ubuf__ ElementS* srcUb, __ubuf__ uint8_t* maskUb, __ubuf__ uint8_t* maskUbUnroll, __ubuf__ ElementS* newMaxUb,
         uint16_t m, uint32_t tailN, ElementS dScale)
     {
-        using namespace AscendC::MicroAPI;
+        using namespace AscendC::Reg;
         RegTensor<float> minVreg;
         RegTensor<float> srcVreg0;
         RegTensor<float> srcVreg1;
@@ -273,7 +273,7 @@ private:
                 StoreAlign<ElementS, StoreDist::DIST_NORM_B32>(
                     srcUb + i * S2BaseSize + FLOAT_REP_SIZE, srcVreg1, pregFull);
                 Max(maxTmpVreg, srcVreg0, srcVreg1, pregFull);
-                ReduceMax(maxVreg, maxTmpVreg, pregFull);
+                Reduce<AscendC::Reg::ReduceType::MAX>(maxVreg, maxTmpVreg, pregFull);
             } else {
                 LoadAlign(srcVreg0, srcUb + i * S2BaseSize);
                 Muls(srcVreg0, srcVreg0, dScale, pregTailN);
@@ -284,7 +284,7 @@ private:
                 }
                 Select(srcVreg0, srcVreg0, minVreg, pregTailN);
                 StoreAlign<ElementS, StoreDist::DIST_NORM_B32>(srcUb + i * S2BaseSize, srcVreg0, pregFull);
-                ReduceMax(maxVreg, srcVreg0, pregFull);
+                Reduce<AscendC::Reg::ReduceType::MAX>(maxVreg, srcVreg0, pregFull);
             }
             StoreUnAlign<float, PostLiteral::POST_MODE_UPDATE>(newMaxUb, maxVreg, maxUreg, 1);
         }
@@ -294,7 +294,7 @@ private:
     template <typename ElementS>
     CATLASS_DEVICE_SIMD_VF void UpdateMax(__ubuf__ ElementS* nowMaxUb, __ubuf__ ElementS* lastMaxUb, uint32_t tailM)
     {
-        using namespace AscendC::MicroAPI;
+        using namespace AscendC::Reg;
         RegTensor<float> nowMaxVreg;
         RegTensor<float> lastMaxVreg;
         RegTensor<float> maxVreg;
@@ -311,7 +311,7 @@ private:
         __ubuf__ ElementP* expUb, __ubuf__ ElementS* srcUb, __ubuf__ ElementS* nowMaxUb, __ubuf__ ElementS* expSumUb,
         ElementS pScaleValue, uint16_t m, uint32_t blockStride)
     {
-        using namespace AscendC::MicroAPI;
+        using namespace AscendC::Reg;
         constexpr static CastTrait castTraitZero = {
             RegLayout::ZERO,
             SatMode::SAT,
@@ -380,7 +380,7 @@ private:
         __ubuf__ ElementP* expUb, __ubuf__ ElementS* srcUb, __ubuf__ ElementS* nowMaxUb, __ubuf__ ElementS* expSumUb,
         ElementS pScaleValue, uint16_t m, uint32_t blockStride)
     {
-        using namespace AscendC::MicroAPI;
+        using namespace AscendC::Reg;
         constexpr static CastTrait castTraitRintZero = {
             RegLayout::ZERO,
             SatMode::SAT,
@@ -460,7 +460,7 @@ private:
         __ubuf__ ElementS* sumUb, __ubuf__ ElementS* expMaxUb, __ubuf__ ElementS* maxUb, __ubuf__ ElementS* expSumUb,
         __ubuf__ ElementS* nowMaxUb, uint32_t tailM)
     {
-        using namespace AscendC::MicroAPI;
+        using namespace AscendC::Reg;
         RegTensor<float> nowMaxVreg;
         RegTensor<float> lastMaxVreg;
         RegTensor<float> expMaxVreg;

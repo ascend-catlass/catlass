@@ -97,12 +97,12 @@ public:
     static constexpr uint32_t L1_BLOCKS_PER_SUBTILE = SUB_TILE_K / LEVEL1_BLOCK_SIZE;
     static constexpr uint32_t L1_BLOCKS_PER_L0 = LEVEL0_BLOCK_SIZE / LEVEL1_BLOCK_SIZE; // 16
 
-    // MicroAPI vector lane counts
+    // Reg vector lane counts
     static constexpr uint32_t VL_HALF = 128;
     static constexpr uint32_t VL_FLOAT = 64;
     static constexpr uint32_t UB_BLK = 32;
 
-    // MicroAPI bit-manipulation constants.
+    // Reg bit-manipulation constants.
     static constexpr uint16_t ABS_FOR_UINT16 = 0x7fff;
     static constexpr uint16_t NAN_CUSTOMIZATION = 0x7f81;
     static constexpr uint16_t NAN_FOR_FP8_E8M0 = 0x00ff;
@@ -277,7 +277,7 @@ private:
     }
 
     // =======================================================================
-    // MicroAPI helpers for the dual-level quantization flow.
+    // Reg helpers for the dual-level quantization flow.
     // =======================================================================
 
     // -----------------------------------------------------------------------
@@ -315,7 +315,7 @@ private:
 
     CATLASS_DEVICE_SIMD_CALLEE void ComputeLevel0AndXTmpImpl(__ubuf__ ElementInput* xAddr, __ubuf__ float* s1Addr)
     {
-        namespace MAPI = AscendC::MicroAPI;
+        namespace MAPI = AscendC::Reg;
         CATLASS_DUAL_LEVEL_QUANT_MX_CAST_TRAIT(kCastXToFp32Zero, ZERO, UNKNOWN, UNKNOWN);
 
         MAPI::RegTensor<ElementInput> x0, x1, x2, x3;
@@ -340,13 +340,13 @@ private:
         }
 
         auto* loadAddr = xAddr;
-        MAPI::DataCopy<ElementInput, MAPI::PostLiteral::POST_MODE_UPDATE, MAPI::LoadDist::DIST_NORM>(
+        MAPI::LoadAlign<ElementInput, MAPI::PostLiteral::POST_MODE_UPDATE, MAPI::LoadDist::DIST_NORM>(
             x0, loadAddr, VL_HALF);
-        MAPI::DataCopy<ElementInput, MAPI::PostLiteral::POST_MODE_UPDATE, MAPI::LoadDist::DIST_NORM>(
+        MAPI::LoadAlign<ElementInput, MAPI::PostLiteral::POST_MODE_UPDATE, MAPI::LoadDist::DIST_NORM>(
             x1, loadAddr, VL_HALF);
-        MAPI::DataCopy<ElementInput, MAPI::PostLiteral::POST_MODE_UPDATE, MAPI::LoadDist::DIST_NORM>(
+        MAPI::LoadAlign<ElementInput, MAPI::PostLiteral::POST_MODE_UPDATE, MAPI::LoadDist::DIST_NORM>(
             x2, loadAddr, VL_HALF);
-        MAPI::DataCopy<ElementInput, MAPI::PostLiteral::POST_MODE_UPDATE, MAPI::LoadDist::DIST_NORM>(
+        MAPI::LoadAlign<ElementInput, MAPI::PostLiteral::POST_MODE_UPDATE, MAPI::LoadDist::DIST_NORM>(
             x3, loadAddr, VL_HALF);
 
         MAPI::And(absX0, (MAPI::RegTensor<uint16_t>&)x0, absForXReg, maskAll16);
@@ -366,7 +366,7 @@ private:
         MAPI::Max(absX0, absX0, absX1, maskAll16);
         MAPI::Max(absX2, absX2, absX3, maskAll16);
         MAPI::Max(absX0, absX0, absX2, maskAll16);
-        MAPI::ReduceMax(absX0, absX0, maskAll16);
+        MAPI::Reduce<MAPI::ReduceType::MAX>(absX0, absX0, maskAll16);
 
         MAPI::Cast<float, ElementInput, kCastXToFp32Zero>(
             level0Scale, (MAPI::RegTensor<ElementInput>&)absX0, maskAll16);
@@ -396,7 +396,7 @@ private:
         __ubuf__ ElementInput* xTmpAddr, RegTensorFloat level0ScaleReg, RegTensorInput xReg, RegTensorFloat& xZeroFP32,
         RegTensorFloat& xOneFP32)
     {
-        namespace MAPI = AscendC::MicroAPI;
+        namespace MAPI = AscendC::Reg;
         CATLASS_DUAL_LEVEL_QUANT_MX_CAST_TRAIT(kCastXToFp32Zero, ZERO, UNKNOWN, UNKNOWN);
         CATLASS_DUAL_LEVEL_QUANT_MX_CAST_TRAIT(kCastXToFp32One, ONE, UNKNOWN, UNKNOWN);
         CATLASS_DUAL_LEVEL_QUANT_MX_CAST_TRAIT(kCastFp32ToBF16, ZERO, NO_SAT, CAST_RINT);
@@ -426,7 +426,7 @@ private:
         MAPI::Interleave(xZero, xOne, xZero, xOne);
         MAPI::Select<ElementInput>(xZero, xReg, xZero, zeroMask);
 
-        MAPI::DataCopy(xTmpAddr, xZero, maskAll16);
+        MAPI::StoreAlign(xTmpAddr, xZero, maskAll16);
     }
 
     // -----------------------------------------------------------------------
@@ -461,7 +461,7 @@ private:
     CATLASS_DEVICE_SIMD_CALLEE void ComputeLevel1ScaleAndReciprocalImpl(
         __ubuf__ ElementInput* xTmpAddr, __ubuf__ uint8_t* s2Addr, __ubuf__ uint16_t* recipAddr)
     {
-        namespace MAPI = AscendC::MicroAPI;
+        namespace MAPI = AscendC::Reg;
         CATLASS_DUAL_LEVEL_QUANT_MX_CAST_TRAIT(kCastHalfToBF16, UNKNOWN, UNKNOWN, CAST_TRUNC);
 
         MAPI::RegTensor<ElementInput> xTmp0, xTmp1;
@@ -493,7 +493,7 @@ private:
         auto* recipWrite = recipAddr;
 
         for (uint16_t i = 0; i < 2; ++i) {
-            MAPI::DataCopy<ElementInput, MAPI::PostLiteral::POST_MODE_UPDATE, MAPI::LoadDist::DIST_DINTLV_B16>(
+            MAPI::LoadAlign<ElementInput, MAPI::PostLiteral::POST_MODE_UPDATE, MAPI::LoadDist::DIST_DINTLV_B16>(
                 xTmp0, xTmp1, xLoad, VL_HALF * 2);
 
             if constexpr (std::is_same_v<ElementInput, half>) {
@@ -513,7 +513,7 @@ private:
             }
 
             MAPI::Max(xTmp0Exp, xTmp1Exp, xTmp0Exp, maskAll16);
-            MAPI::ReduceMaxWithDataBlock(xTmp0Exp, xTmp0Exp, maskAll16);
+            MAPI::ReduceDataBlock<MAPI::ReduceType::MAX>(xTmp0Exp, xTmp0Exp, maskAll16);
 
             MAPI::Compare<uint16_t, AscendC::CMPMODE::NE>(infMask, xTmp0Exp, expMaskBF16Reg, maskAll16);
             MAPI::Compare<uint16_t, AscendC::CMPMODE::NE>(zeroMask, xTmp0Exp, zeroReg, maskAll16);
@@ -536,7 +536,7 @@ private:
             MAPI::Select<uint16_t>(reversedShareExp1, reversedShareExp1, nanBF16Reg, infMask);
             MAPI::Select<uint16_t>(reversedShareExp1, reversedShareExp1, zeroReg, zeroMask);
             MAPI::Select<uint16_t>(reversedShareExp1, specialExpReg, reversedShareExp1, invalidDataMask);
-            MAPI::DataCopy<uint16_t, MAPI::PostLiteral::POST_MODE_UPDATE>(
+            MAPI::StoreAlign<uint16_t, MAPI::PostLiteral::POST_MODE_UPDATE>(
                 recipWrite, reversedShareExp1, UB_BLK / sizeof(uint16_t), maskReduceB16);
         }
     }
@@ -553,7 +553,7 @@ private:
     CATLASS_DEVICE_SIMD_CALLEE void ComputeFp4PackedImpl(
         __ubuf__ ElementInput* xTmpAddr, __ubuf__ uint8_t* yAddr, __ubuf__ uint16_t* recipAddr)
     {
-        namespace MAPI = AscendC::MicroAPI;
+        namespace MAPI = AscendC::Reg;
         CATLASS_DUAL_LEVEL_QUANT_MX_CAST_TRAIT(kCastBF16ToFp4, ZERO, SAT, CAST_RINT);
         CATLASS_DUAL_LEVEL_QUANT_MX_CAST_TRAIT(kCastHalfToBF16Trunc, UNKNOWN, UNKNOWN, CAST_TRUNC);
 
@@ -571,10 +571,10 @@ private:
         auto* recipRead = recipAddr;
 
         for (uint16_t i = 0; i < 2; ++i) {
-            MAPI::DataCopy<uint16_t, MAPI::PostLiteral::POST_MODE_UPDATE, MAPI::LoadDist::DIST_E2B_B16>(
+            MAPI::LoadAlign<uint16_t, MAPI::PostLiteral::POST_MODE_UPDATE, MAPI::LoadDist::DIST_E2B_B16>(
                 scaleForMulFP16, recipRead, UB_BLK / sizeof(uint16_t));
 
-            MAPI::DataCopy<ElementInput, MAPI::PostLiteral::POST_MODE_UPDATE, MAPI::LoadDist::DIST_DINTLV_B16>(
+            MAPI::LoadAlign<ElementInput, MAPI::PostLiteral::POST_MODE_UPDATE, MAPI::LoadDist::DIST_DINTLV_B16>(
                 xTmp0, xTmp1, xLoad, VL_HALF * 2);
 
             if constexpr (std::is_same_v<ElementInput, half>) {
@@ -595,9 +595,9 @@ private:
                 MAPI::Cast<fp4x2_e2m1_t, bfloat16_t, kCastBF16ToFp4>(y1FP4, xTmp1, dataMaskB16);
             }
 
-            MAPI::DataCopy<uint8_t, MAPI::PostLiteral::POST_MODE_UPDATE, MAPI::StoreDist::DIST_PACK4_B32>(
+            MAPI::StoreAlign<uint8_t, MAPI::PostLiteral::POST_MODE_UPDATE, MAPI::StoreDist::DIST_PACK4_B32>(
                 yWrite, (MAPI::RegTensor<uint8_t>&)y0FP4, 64, dataMaskB8);
-            MAPI::DataCopy<uint8_t, MAPI::PostLiteral::POST_MODE_UPDATE, MAPI::StoreDist::DIST_PACK4_B32>(
+            MAPI::StoreAlign<uint8_t, MAPI::PostLiteral::POST_MODE_UPDATE, MAPI::StoreDist::DIST_PACK4_B32>(
                 yWrite, (MAPI::RegTensor<uint8_t>&)y1FP4, 64, dataMaskB8);
         }
     }
@@ -605,7 +605,7 @@ private:
     template <class HalfReg, class MaskReg>
     CATLASS_DEVICE_SIMD_CALLEE void FP16Convert(HalfReg& output, HalfReg& input, MaskReg& mask)
     {
-        namespace MAPI = AscendC::MicroAPI;
+        namespace MAPI = AscendC::Reg;
         MAPI::RegTensor<uint16_t> specialValueTensor, newMantissa, andResult, newValue;
         MAPI::MaskReg specialMask, nonzeroMask;
         MAPI::Duplicate(specialValueTensor, static_cast<uint16_t>(0x00ff));
