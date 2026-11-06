@@ -44,6 +44,26 @@ FIXPIPE_QUANT_SRC_DST = (
     ("i32", "u8"),
 )
 
+#: The basic_mixed per-tensor example ships float destinations only.
+MIXED_FIXPIPE_QUANT_SRC_DST = (
+    ("f32", "f32"),
+    ("f32", "f16"),
+    ("f32", "bf16"),
+    ("i32", "f16"),
+    ("i32", "bf16"),
+)
+
+#: Shapes the mixed per-tensor example adds over basic_mmad: it walks the grid
+#: of tiles from one kernel, so the tail tile is ragged on either axis and K can
+#: be ragged too. MIXED_TILING is 64x64 at every level.
+#: (label, m, n, k, extra-args)
+MIXED_FIXPIPE_SHAPES = (
+    ("tiles-row", "150", "100", "64", ("--layout-c", "row", "--block-num", "1")),
+    ("tiles-col", "150", "100", "64", ("--layout-c", "col", "--block-num", "1")),
+    ("ragged-col", "33", "65", "17", ("--layout-c", "col")),
+    ("ragged-row-i32", "65", "33", "17", ("--layout-c", "row", "--dtype-ab", "i8")),
+)
+
 VADD_DTYPES = ("i8", "i16", "i32", "f16", "f32")
 VADD_MODES = ("", "--use-mutex", "--use-mutex-with", "--use-atomic-add")
 
@@ -427,6 +447,69 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         "host-make-tensor-torch-vadd",
         [["end_to_end/host_make_tensor_torch_vadd.py", *dev, "--block-num", "1"]],
     )
+
+    # basic_mixed fixpipe per-tensor quant: the cube writes L0C into the UB tile
+    # of the AIV that owns the block and the vector side stores it out, so the
+    # two cores hand UB back and forth per block. The dtype map is the float
+    # half of the basic_mmad one -- 8-bit destinations are not part of this
+    # example -- and, as there, `--layout-c col` takes the transposing (nz2dn)
+    # fixpipe and applies the quant to the transposed store.
+    for src, dst in MIXED_FIXPIPE_QUANT_SRC_DST:
+        # The example names the accumulator by its operands: f32 MMAD is
+        # `--dtype-ab f32`, the i32 MMAD is `--dtype-ab i8` (i8 x i8 -> i32).
+        dtype_ab = "f32" if src == "f32" else "i8"
+        for layout_c in ("row", "col"):
+            for relu in (0, 1):
+                yield (
+                    f"mixed-fixpipe-per-tensor-{layout_c}-{src}-{dst}-relu{relu}",
+                    [[
+                        "tla/kernel/matmul/basic_mixed/basic_mixed_fixpipe_per_tensor.py",
+                        "--dtype-ab", dtype_ab, "--dtype-c", dst,
+                        "--relu-enable", str(relu),
+                        "--layout-c", layout_c,
+                        *dev,
+                    ]],
+                )
+    # What this example adds over basic_mmad is the grid walk: one kernel covers
+    # every tile, so the hand-off repeats per block and the tail tile comes out
+    # smaller than a full one on either axis.
+    for label, m, n, k, extra in MIXED_FIXPIPE_SHAPES:
+        yield (
+            f"mixed-fixpipe-per-tensor-{label}",
+            [[
+                "tla/kernel/matmul/basic_mixed/basic_mixed_fixpipe_per_tensor.py",
+                "--m", m, "--n", n, "--k", k, *extra, *dev,
+            ]],
+        )
+
+    # The per-channel twin. Instead of one scalar, the scale is a tensor with one
+    # entry per output column: packed into a uint64 word per column and staged
+    # GM -> L1 once per task block, because each block covers a different run of
+    # columns. That per-block staging is the part basic_mmad cannot cover -- its
+    # example runs a single tile -- so the shape cases below are what exercise
+    # the rewrite and the tail-block crop.
+    for src, dst in MIXED_FIXPIPE_QUANT_SRC_DST:
+        dtype_ab = "f32" if src == "f32" else "i8"
+        for layout_c in ("row", "col"):
+            for relu in (0, 1):
+                yield (
+                    f"mixed-fixpipe-per-channel-{layout_c}-{src}-{dst}-relu{relu}",
+                    [[
+                        "tla/kernel/matmul/basic_mixed/basic_mixed_fixpipe_per_channel.py",
+                        "--dtype-ab", dtype_ab, "--dtype-c", dst,
+                        "--relu-enable", str(relu),
+                        "--layout-c", layout_c,
+                        *dev,
+                    ]],
+                )
+    for label, m, n, k, extra in MIXED_FIXPIPE_SHAPES:
+        yield (
+            f"mixed-fixpipe-per-channel-{label}",
+            [[
+                "tla/kernel/matmul/basic_mixed/basic_mixed_fixpipe_per_channel.py",
+                "--m", m, "--n", n, "--k", k, *extra, *dev,
+            ]],
+        )
 
     # --- mixed-core handshake and standalone control-flow probes ---
     # flash_attention_infer routes --mask to two independently compiled

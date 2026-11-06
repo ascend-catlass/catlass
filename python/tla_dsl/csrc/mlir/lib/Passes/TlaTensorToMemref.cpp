@@ -987,20 +987,20 @@ std::string getCopyRouteCallee(
         return l0cToDstCallee("copy_l0c_to_gm_ColumnMajor_");
     }
     // L0C (fp32 MMAD acc) -> UB row-major: dst may be f32 / f16 / bf16 (narrowing
-    // on fixpipe). Per-tensor quant is not wired up on this route yet, so it
-    // stays on the NO_QUANT element set, but the symbol is spelled the same way
-    // as every other L0C route: both operand types. One rule for the whole
-    // family beats a per-route exception, and the extra type costs nothing.
+    // on fixpipe), and both quant routes widen the legal set to the 8-bit
+    // destinations. The symbol is spelled the same way as every other L0C route:
+    // both operand types. One rule for the whole family beats a per-route
+    // exception, and the extra type costs nothing.
     if (*srcSpace == hivm::AddressSpace::L0C && *dstSpace == hivm::AddressSpace::UB &&
         srcLayout == LayoutTag::L0Clayout && dstLayout == LayoutTag::RowMajor) {
-        if (!isLegalFixpipeElementType(srcElementType, dstElem, /*isQuantMode=*/false))
+        if (!isLegalFixpipeElementType(srcElementType, dstElem, isQuantMode))
             return {};
         return l0cToDstCallee("copy_l0c_to_ub_RowMajor_");
     }
-    // L0C (fp32 MMAD acc) -> UB col-major: as row-major above, NO_QUANT only.
+    // L0C (fp32 MMAD acc) -> UB col-major: as row-major above.
     if (*srcSpace == hivm::AddressSpace::L0C && *dstSpace == hivm::AddressSpace::UB &&
         srcLayout == LayoutTag::L0Clayout && dstLayout == LayoutTag::ColumnMajor) {
-        if (!isLegalFixpipeElementType(srcElementType, dstElem, /*isQuantMode=*/false))
+        if (!isLegalFixpipeElementType(srcElementType, dstElem, isQuantMode))
             return {};
         return l0cToDstCallee("copy_l0c_to_ub_ColumnMajor_");
     }

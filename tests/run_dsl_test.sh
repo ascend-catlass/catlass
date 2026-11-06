@@ -16,7 +16,8 @@
 # examples/python/tla_dsl/dsl_tutorials/extern_op (extern_vecadd.py, extern_dual_core.py),
 # examples/python/tla_dsl/tla/kernel/matmul/basic_mixed (basic_mixed.py), examples/python/tla_dsl/tla/kernel/matmul/basic_mixed (basic_mixed_mutex.py) and
 # examples/python/tla_dsl/tla/kernel/matmul/basic_mixed (basic_mixed_ub2l1.py, basic_mixed_store_zN.py,
-# basic_mixed_store_zNUnAlign.py, basic_mixed_fixpipe_nz2dn.py).
+# basic_mixed_store_zNUnAlign.py, basic_mixed_fixpipe_nz2dn.py,
+# basic_mixed_fixpipe_per_tensor.py, basic_mixed_fixpipe_per_channel.py).
 # examples/python/tla_dsl/dsl_tutorials/vector_simd_ops (binary_op.py, masked_binary.py,
 # bitwise_ops.py, reduction_ops.py, compare_mask.py, unary_ops.py, arange_op.py,
 # interleave_op.py, mask_interleave_op.py, pack_op.py, mask_select_op.py, load_dintlv_op.py, load_store_mask.py,
@@ -110,6 +111,8 @@ BASIC_MIXED_UB2L1_REL="tla/kernel/matmul/basic_mixed/basic_mixed_ub2l1.py"
 BASIC_MIXED_STORE_ZN_REL="tla/kernel/matmul/basic_mixed/basic_mixed_store_zN.py"
 BASIC_MIXED_STORE_ZNUNALIGN_REL="tla/kernel/matmul/basic_mixed/basic_mixed_store_zNUnAlign.py"
 BASIC_MIXED_FIXPIPE_NZ2DN_REL="tla/kernel/matmul/basic_mixed/basic_mixed_fixpipe_nz2dn.py"
+BASIC_MIXED_FIXPIPE_PER_TENSOR_REL="tla/kernel/matmul/basic_mixed/basic_mixed_fixpipe_per_tensor.py"
+BASIC_MIXED_FIXPIPE_PER_CHANNEL_REL="tla/kernel/matmul/basic_mixed/basic_mixed_fixpipe_per_channel.py"
 MASKED_BINARY_REL="dsl_tutorials/vector_simd_ops/masked_binary.py"
 BITWISE_OPS_REL="dsl_tutorials/vector_simd_ops/bitwise_ops.py"
 BINARY_OP_REL="dsl_tutorials/vector_simd_ops/binary_op.py"
@@ -185,7 +188,9 @@ Run end-to-end validation for:
   - basic_vadd (basic_vadd.py with per-dtype CLI invocations, plus mutex variants)
   - extern_op (extern_vecadd.py and extern_dual_core.py)
   - basic_mixed (basic_mixed.py with dynamic GM mnk list, including --use-mutex; basic_mixed_ub2l1.py,
-    basic_mixed_store_zN.py, basic_mixed_store_zNUnAlign.py for m=64/m=50)
+    basic_mixed_store_zN.py, basic_mixed_store_zNUnAlign.py for m=64/m=50;
+    basic_mixed_fixpipe_per_tensor.py and basic_mixed_fixpipe_per_channel.py with float
+    destinations, row/col layout-c, with and without relu, plus multi-tile and ragged shapes)
   - binary_op (binary_op.py <op> --all-dtypes for add/sub/mul/div/max/min/add_unalign/add_brc_b32)
   - masked_binary (masked_binary.py masked_binary --all-dtypes)
   - bitwise_ops (bitwise_ops.py bitwise_ops --all-dtypes)
@@ -472,6 +477,14 @@ if [[ ! -f "${EXAMPLES_DIR}/${BASIC_MIXED_STORE_ZNUNALIGN_REL}" ]]; then
 fi
 if [[ ! -f "${EXAMPLES_DIR}/${BASIC_MIXED_FIXPIPE_NZ2DN_REL}" ]]; then
     echo "error: missing ${BASIC_MIXED_FIXPIPE_NZ2DN_REL} under ${EXAMPLES_DIR}" >&2
+    exit 1
+fi
+if [[ ! -f "${EXAMPLES_DIR}/${BASIC_MIXED_FIXPIPE_PER_TENSOR_REL}" ]]; then
+    echo "error: missing ${BASIC_MIXED_FIXPIPE_PER_TENSOR_REL} under ${EXAMPLES_DIR}" >&2
+    exit 1
+fi
+if [[ ! -f "${EXAMPLES_DIR}/${BASIC_MIXED_FIXPIPE_PER_CHANNEL_REL}" ]]; then
+    echo "error: missing ${BASIC_MIXED_FIXPIPE_PER_CHANNEL_REL} under ${EXAMPLES_DIR}" >&2
     exit 1
 fi
 if [[ ! -f "${EXAMPLES_DIR}/${MASKED_BINARY_REL}" ]]; then

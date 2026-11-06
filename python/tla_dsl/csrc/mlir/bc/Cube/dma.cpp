@@ -259,6 +259,39 @@ CATLASS_DEVICE void copyL0CToUB(
     }
 }
 
+template <class ArchTag, LayoutTag DstLayout, typename ElementSrc, typename ElementDst, bool ReluEnable = false>
+CATLASS_DEVICE void copyL0CToUBQuantPerTensor(
+    memref_t<__cc__ ElementSrc, 1>* src, memref_t<__ubuf__ ElementDst, 1>* dst, const TensorDesc& srcDesc,
+    const TensorDesc& dstDesc, uint8_t unitFlag, uint8_t subBlockId, float quantScale, int32_t quantOffset)
+{
+    auto srcTensor = makeL0CTensor<LayoutTag::L0Clayout, ElementSrc>(src, srcDesc);
+    auto dstTensor = makeUBTensor<DstLayout, ElementDst>(dst, dstDesc);
+    constexpr auto splitMode = Catlass::Gemm::Tile::CopyL0CToUBMode::NO_SPLIT;
+    using CopyL0CToUBTla = Catlass::Gemm::Tile::CopyL0CToUBTla<
+        ArchTag, decltype(srcTensor), decltype(dstTensor), splitMode, Catlass::Gemm::Tile::ScaleGranularity::PER_TENSOR,
+        ReluEnable>;
+    typename CopyL0CToUBTla::Params params(quantScale, quantOffset);
+    CopyL0CToUBTla{params}(dstTensor, srcTensor, (bool)subBlockId, unitFlag);
+}
+
+// L0C -> UB per-channel dequant (NO_SPLIT). Same L1 uint64 scale tile as
+// copyL0CToGMQuantPerChannel.
+template <class ArchTag, LayoutTag DstLayout, typename ElementSrc, typename ElementDst, bool ReluEnable = false>
+CATLASS_DEVICE void copyL0CToUBQuantPerChannel(
+    memref_t<__cc__ ElementSrc, 1>* src, memref_t<__ubuf__ ElementDst, 1>* dst, memref_t<__cbuf__ uint64_t, 1>* scale,
+    const TensorDesc& srcDesc, const TensorDesc& dstDesc, const TensorDesc& scaleDesc, uint8_t unitFlag,
+    uint8_t subBlockId)
+{
+    auto srcTensor = makeL0CTensor<LayoutTag::L0Clayout, ElementSrc>(src, srcDesc);
+    auto dstTensor = makeUBTensor<DstLayout, ElementDst>(dst, dstDesc);
+    auto quantTensor = makeL1Tensor<LayoutTag::VectorLayout, uint64_t>(scale, scaleDesc);
+    constexpr auto splitMode = Catlass::Gemm::Tile::CopyL0CToUBMode::NO_SPLIT;
+    Catlass::Gemm::Tile::CopyL0CToUBTla<
+        ArchTag, decltype(srcTensor), decltype(dstTensor), splitMode,
+        Catlass::Gemm::Tile::ScaleGranularity::PER_CHANNEL, ReluEnable>{}(
+        dstTensor, srcTensor, quantTensor, (bool)subBlockId, unitFlag);
+}
+
 #if ((defined(__NPU_ARCH__) && __NPU_ARCH__ == 3510) || (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510))
 // MX L1 -> L0 loads. The scale rides along with the *load*, not the matmul:
 // the copy templates take a third (e8m0, zZ, L1) tensor, and the L0 element type
@@ -637,6 +670,30 @@ REGISTER_L1_TO_L0B_MX_FP4(nZ, float4_e1m2x2_t)
     REGISTER_L0C_TO_GM_PER_TENSOR_NORELU(LayoutDst, DTypeSrc, DTypeDst) \
     REGISTER_L0C_TO_GM_PER_TENSOR_RELU(LayoutDst, DTypeSrc, DTypeDst)
 
+#define REGISTER_L0C_TO_UB_PER_TENSOR_NORELU(LayoutDst, DTypeSrc, DTypeDst)                                     \
+    [aicore] __attribute__((always_inline)) void                                                                \
+        _mlir_ciface_copy_l0c_to_ub_##LayoutDst##_nosplit_pertensor_##DTypeSrc##_##DTypeDst(                    \
+            memref_t<__cc__ DTypeSrc, 1>* src, memref_t<__ubuf__ DTypeDst, 1>* dst, DESC_ABI_PARAMS(src),       \
+            DESC_ABI_PARAMS(dst), uint8_t unitFlag, uint8_t subBlockId, float quantScale, int32_t quantOffset)  \
+    {                                                                                                           \
+        copyL0CToUBQuantPerTensor<Catlass::Arch::Ascend950, LayoutTag::LayoutDst, DTypeSrc, DTypeDst, false>(   \
+            src, dst, TENSOR_DESC_12(src), TENSOR_DESC_12(dst), unitFlag, subBlockId, quantScale, quantOffset); \
+    }
+
+#define REGISTER_L0C_TO_UB_PER_TENSOR_RELU(LayoutDst, DTypeSrc, DTypeDst)                                       \
+    [aicore] __attribute__((always_inline)) void                                                                \
+        _mlir_ciface_copy_l0c_to_ub_##LayoutDst##_nosplit_pertensor_relu_##DTypeSrc##_##DTypeDst(               \
+            memref_t<__cc__ DTypeSrc, 1>* src, memref_t<__ubuf__ DTypeDst, 1>* dst, DESC_ABI_PARAMS(src),       \
+            DESC_ABI_PARAMS(dst), uint8_t unitFlag, uint8_t subBlockId, float quantScale, int32_t quantOffset)  \
+    {                                                                                                           \
+        copyL0CToUBQuantPerTensor<Catlass::Arch::Ascend950, LayoutTag::LayoutDst, DTypeSrc, DTypeDst, true>(    \
+            src, dst, TENSOR_DESC_12(src), TENSOR_DESC_12(dst), unitFlag, subBlockId, quantScale, quantOffset); \
+    }
+
+#define REGISTER_L0C_TO_UB_PER_TENSOR(LayoutDst, DTypeSrc, DTypeDst)    \
+    REGISTER_L0C_TO_UB_PER_TENSOR_NORELU(LayoutDst, DTypeSrc, DTypeDst) \
+    REGISTER_L0C_TO_UB_PER_TENSOR_RELU(LayoutDst, DTypeSrc, DTypeDst)
+
 #define REGISTER_L0C_TO_L1_NORELU(LayoutDst, DTypeSrc, DTypeDst)                                                    \
     [aicore] __attribute__((always_inline)) void _mlir_ciface_copy_l0c_to_l1_##LayoutDst##_##DTypeSrc##_##DTypeDst( \
         memref_t<__cc__ DTypeSrc, 1>* src, memref_t<__cbuf__ DTypeDst, 1>* dst, DESC_ABI_PARAMS(src),               \
@@ -723,6 +780,26 @@ REGISTER_L0C_TO_GM_PER_TENSOR(ColumnMajor, int32_t, bf16)
 REGISTER_L0C_TO_GM_PER_TENSOR(ColumnMajor, int32_t, int8_t)
 REGISTER_L0C_TO_GM_PER_TENSOR(ColumnMajor, int32_t, uint8_t)
 
+// l0c to ub per-tensor quant are all nosplit
+REGISTER_L0C_TO_UB_PER_TENSOR(RowMajor, float, float)
+REGISTER_L0C_TO_UB_PER_TENSOR(RowMajor, float, half)
+REGISTER_L0C_TO_UB_PER_TENSOR(RowMajor, float, bf16)
+REGISTER_L0C_TO_UB_PER_TENSOR(RowMajor, float, int8_t)
+REGISTER_L0C_TO_UB_PER_TENSOR(RowMajor, float, uint8_t)
+REGISTER_L0C_TO_UB_PER_TENSOR(RowMajor, int32_t, half)
+REGISTER_L0C_TO_UB_PER_TENSOR(RowMajor, int32_t, bf16)
+REGISTER_L0C_TO_UB_PER_TENSOR(RowMajor, int32_t, int8_t)
+REGISTER_L0C_TO_UB_PER_TENSOR(RowMajor, int32_t, uint8_t)
+REGISTER_L0C_TO_UB_PER_TENSOR(ColumnMajor, float, float)
+REGISTER_L0C_TO_UB_PER_TENSOR(ColumnMajor, float, half)
+REGISTER_L0C_TO_UB_PER_TENSOR(ColumnMajor, float, bf16)
+REGISTER_L0C_TO_UB_PER_TENSOR(ColumnMajor, float, int8_t)
+REGISTER_L0C_TO_UB_PER_TENSOR(ColumnMajor, float, uint8_t)
+REGISTER_L0C_TO_UB_PER_TENSOR(ColumnMajor, int32_t, half)
+REGISTER_L0C_TO_UB_PER_TENSOR(ColumnMajor, int32_t, bf16)
+REGISTER_L0C_TO_UB_PER_TENSOR(ColumnMajor, int32_t, int8_t)
+REGISTER_L0C_TO_UB_PER_TENSOR(ColumnMajor, int32_t, uint8_t)
+
 REGISTER_L0C_TO_L1(zN, float, float)
 REGISTER_L0C_TO_L1(zN, float, half)
 REGISTER_L0C_TO_L1(zN, float, bf16)
@@ -765,6 +842,32 @@ REGISTER_L0C_TO_UB(ColumnMajor, nosplit, NO_SPLIT, int32_t, int32_t)
 #define REGISTER_L0C_TO_GM_PER_CHANNEL(LayoutDst, DTypeSrc, DTypeDst)    \
     REGISTER_L0C_TO_GM_PER_CHANNEL_NORELU(LayoutDst, DTypeSrc, DTypeDst) \
     REGISTER_L0C_TO_GM_PER_CHANNEL_RELU(LayoutDst, DTypeSrc, DTypeDst)
+
+#define REGISTER_L0C_TO_UB_PER_CHANNEL_NORELU(LayoutDst, DTypeSrc, DTypeDst)                                         \
+    [aicore] __attribute__((always_inline)) void                                                                     \
+        _mlir_ciface_copy_l0c_to_ub_##LayoutDst##_nosplit_perchannel_##DTypeSrc##_##DTypeDst(                        \
+            memref_t<__cc__ DTypeSrc, 1>* src, memref_t<__ubuf__ DTypeDst, 1>* dst, DESC_ABI_PARAMS(src),            \
+            DESC_ABI_PARAMS(dst), uint8_t unitFlag, uint8_t subBlockId, memref_t<__cbuf__ uint64_t, 1>* quant,       \
+            DESC_ABI_PARAMS(quant))                                                                                  \
+    {                                                                                                                \
+        copyL0CToUBQuantPerChannel<Catlass::Arch::Ascend950, LayoutTag::LayoutDst, DTypeSrc, DTypeDst, false>(       \
+            src, dst, quant, TENSOR_DESC_12(src), TENSOR_DESC_12(dst), TENSOR_DESC_12(quant), unitFlag, subBlockId); \
+    }
+
+#define REGISTER_L0C_TO_UB_PER_CHANNEL_RELU(LayoutDst, DTypeSrc, DTypeDst)                                           \
+    [aicore] __attribute__((always_inline)) void                                                                     \
+        _mlir_ciface_copy_l0c_to_ub_##LayoutDst##_nosplit_perchannel_relu_##DTypeSrc##_##DTypeDst(                   \
+            memref_t<__cc__ DTypeSrc, 1>* src, memref_t<__ubuf__ DTypeDst, 1>* dst, DESC_ABI_PARAMS(src),            \
+            DESC_ABI_PARAMS(dst), uint8_t unitFlag, uint8_t subBlockId, memref_t<__cbuf__ uint64_t, 1>* quant,       \
+            DESC_ABI_PARAMS(quant))                                                                                  \
+    {                                                                                                                \
+        copyL0CToUBQuantPerChannel<Catlass::Arch::Ascend950, LayoutTag::LayoutDst, DTypeSrc, DTypeDst, true>(        \
+            src, dst, quant, TENSOR_DESC_12(src), TENSOR_DESC_12(dst), TENSOR_DESC_12(quant), unitFlag, subBlockId); \
+    }
+
+#define REGISTER_L0C_TO_UB_PER_CHANNEL(LayoutDst, DTypeSrc, DTypeDst)    \
+    REGISTER_L0C_TO_UB_PER_CHANNEL_NORELU(LayoutDst, DTypeSrc, DTypeDst) \
+    REGISTER_L0C_TO_UB_PER_CHANNEL_RELU(LayoutDst, DTypeSrc, DTypeDst)
 // PER_CHANNEL quant: the L1 uint64 scale tile rides along as the fixpipe dequant
 // tensor instead of a scalar. The symbol carries both element types, as the
 // per-tensor and no-quant routes do, so f32- and i32-accumulator registrations
@@ -788,5 +891,25 @@ REGISTER_L0C_TO_GM_PER_CHANNEL(ColumnMajor, int32_t, half)
 REGISTER_L0C_TO_GM_PER_CHANNEL(ColumnMajor, int32_t, bf16)
 REGISTER_L0C_TO_GM_PER_CHANNEL(ColumnMajor, int32_t, int8_t)
 REGISTER_L0C_TO_GM_PER_CHANNEL(ColumnMajor, int32_t, uint8_t)
+
+// L0C -> UB per-channel quant is nosplit only.
+REGISTER_L0C_TO_UB_PER_CHANNEL(RowMajor, float, float)
+REGISTER_L0C_TO_UB_PER_CHANNEL(RowMajor, float, half)
+REGISTER_L0C_TO_UB_PER_CHANNEL(RowMajor, float, bf16)
+REGISTER_L0C_TO_UB_PER_CHANNEL(RowMajor, float, int8_t)
+REGISTER_L0C_TO_UB_PER_CHANNEL(RowMajor, float, uint8_t)
+REGISTER_L0C_TO_UB_PER_CHANNEL(RowMajor, int32_t, half)
+REGISTER_L0C_TO_UB_PER_CHANNEL(RowMajor, int32_t, bf16)
+REGISTER_L0C_TO_UB_PER_CHANNEL(RowMajor, int32_t, int8_t)
+REGISTER_L0C_TO_UB_PER_CHANNEL(RowMajor, int32_t, uint8_t)
+REGISTER_L0C_TO_UB_PER_CHANNEL(ColumnMajor, float, float)
+REGISTER_L0C_TO_UB_PER_CHANNEL(ColumnMajor, float, half)
+REGISTER_L0C_TO_UB_PER_CHANNEL(ColumnMajor, float, bf16)
+REGISTER_L0C_TO_UB_PER_CHANNEL(ColumnMajor, float, int8_t)
+REGISTER_L0C_TO_UB_PER_CHANNEL(ColumnMajor, float, uint8_t)
+REGISTER_L0C_TO_UB_PER_CHANNEL(ColumnMajor, int32_t, half)
+REGISTER_L0C_TO_UB_PER_CHANNEL(ColumnMajor, int32_t, bf16)
+REGISTER_L0C_TO_UB_PER_CHANNEL(ColumnMajor, int32_t, int8_t)
+REGISTER_L0C_TO_UB_PER_CHANNEL(ColumnMajor, int32_t, uint8_t)
 #endif
 }

@@ -14,6 +14,7 @@ D_{i,j} &= \Sigma_{k} A_{i,k}B_{k,j} + C_{i,j}
 $$
 
 - [`basic_mixed_fixpipe_nz2dn`](basic_mixed_fixpipe_nz2dn.py) 实现基本矩阵乘功能，无后续加和操作。
+- [`basic_mixed_fixpipe_per_tensor`](basic_mixed_fixpipe_per_tensor.py) 与 [`basic_mixed_fixpipe_per_channel`](basic_mixed_fixpipe_per_channel.py) 在 `L0C`→`UB` 通路上启用 FIXPIPE 量化，同样不含加和。
 
 与基础矩阵乘相比，CV 融合除 AIC 上的矩阵计算外，还包含 AIV 上的加法运算，二者之间存在两条数据通路：
 
@@ -28,6 +29,8 @@ $$
 ./basic_mixed
 ├── basic_mixed.py
 ├── basic_mixed_fixpipe_nz2dn.py
+├── basic_mixed_fixpipe_per_channel.py
+├── basic_mixed_fixpipe_per_tensor.py
 ├── basic_mixed_mutex.py
 ├── basic_mixed_store_zN.py
 ├── basic_mixed_store_zNUnAlign.py
@@ -42,6 +45,8 @@ $$
 | [**`basic_mixed.py`**](basic_mixed.py)                                 | 基础 CV 融合示例，CUBE 单元矩阵乘计算完成后经`L0C`→`UB` 通路搬移到 UB，AIV 上执行逐元素加法，是其他变体的基准版本。 |
 | [**`basic_mixed_mutex.py`**](basic_mixed_mutex.py)                     | 使用`Mutex` 原语实现流水同步的 CV 融合示例。                                                                           |
 | [**`basic_mixed_fixpipe_nz2dn.py`**](basic_mixed_fixpipe_nz2dn.py)     | 使用`L0C`→`UB` 通路定向搬运到 AIV0 上进行计算。                                                                     |
+| [**`basic_mixed_fixpipe_per_tensor.py`**](basic_mixed_fixpipe_per_tensor.py) | `L0C`→`UB` 通路上启用 FIXPIPE 的 per-tensor 量化，整块 tile 共用一个标量 scale，按块编号奇偶分派 AIV。 |
+| [**`basic_mixed_fixpipe_per_channel.py`**](basic_mixed_fixpipe_per_channel.py) | 同上，但每个输出通道一个 scale，dequant tensor 按块由 GM 搬入 L1。 |
 | [**`basic_mixed_ub2l1.py`**](basic_mixed_ub2l1.py)                     | 启用`UB`→`L1` 通路的 CV 融合示例，AIV 将矩阵 A 从 GM 经 UB 搬运到 L1，不改动数据排布。                              |
 | [**`basic_mixed_store_zN.py`**](basic_mixed_store_zN.py)               | 启用`UB`→`L1` 通路的 CV 融合示例，AIV 将矩阵 A 转为 `zN` 排布后再写入 L1。                                        |
 | [**`basic_mixed_store_zNUnAlign.py`**](basic_mixed_store_zNUnAlign.py) | 同上，但使用`zNUnAlign` 排布，M 轴不对齐到分形大小。                                                                   |
@@ -49,6 +54,8 @@ $$
 ## 约束说明
 
 - 本目录下示例固定采用 `f32` 数据类型。
+- `basic_mixed_fixpipe_per_tensor.py` 与 `basic_mixed_fixpipe_per_channel.py` 例外：输入 `--dtype-ab` 可选 `f32` 或 `i8`（`i8` 累加到 `i32`），输出 `--dtype-c` 可选 `f32` / `f16` / `bf16`，不支持 `i8` / `u8`。
+- 上述两个量化示例的 K 轴不切分，要求 `k` 不超过一个 L1 tile（`MIXED_TILING.l1_tk`，即 `k <= 64`）；M、N 不受 tile 大小限制，由 kernel 遍历 tile 网格。
 
 ## 使用示例
 
@@ -92,6 +99,12 @@ python examples/python/tla_dsl/tla/kernel/matmul/basic_mixed/basic_mixed_ub2l1.p
 # 启用 UB -> L1 通路并做 zN 排布转换
 python examples/python/tla_dsl/tla/kernel/matmul/basic_mixed/basic_mixed_store_zN.py
 python examples/python/tla_dsl/tla/kernel/matmul/basic_mixed/basic_mixed_store_zNUnAlign.py
+
+# FIXPIPE per-tensor 量化（可选 --layout-c col 走转置通路）
+python examples/python/tla_dsl/tla/kernel/matmul/basic_mixed/basic_mixed_fixpipe_per_tensor.py
+
+# FIXPIPE per-channel 量化
+python examples/python/tla_dsl/tla/kernel/matmul/basic_mixed/basic_mixed_fixpipe_per_channel.py
 ```
 
 执行测试后，预期输出：
@@ -145,6 +158,73 @@ from catlass.params import CopyL0C2DstParams, L0C2UBMode
 ub_c = tla.make_tensor_like(ub_c_ptr, l0_c, tla.arch.ColumnMajor)
 tla.copy(ub_c, l0_c, params=CopyL0C2DstParams(l0c2ub_mode=L0C2UBMode.NO_SPLIT_VEC_0))
 ```
+
+## basic_mixed_fixpipe_per_tensor
+
+**文件**：`basic_mixed_fixpipe_per_tensor.py`
+
+在 `L0C`→`UB` 通路上启用 FIXPIPE 的 per-tensor 量化：一个标量 `quant_scale` 在搬出 L0C 时作用于整块 tile。kernel 遍历 tile 网格（K 轴不切分），并按块的线性编号奇偶将每个任务块交给一个 AIV：偶数块归 AIV0、奇数块归 AIV1，因此 FIXPIPE 需按奇偶分别指定 `NO_SPLIT_VEC_0` / `NO_SPLIT_VEC_1`：
+
+```python
+import catlass.tla as tla
+from catlass.params import CopyL0C2DstParams, L0C2UBMode, QuantMode
+
+# ...
+if block_linear % 2 == 0:
+    tla.copy(
+        ub_c,
+        l0_c,
+        params=CopyL0C2DstParams(
+            unit_flag=0b11,
+            l0c2ub_mode=L0C2UBMode.NO_SPLIT_VEC_0,
+            relu_enable=relu_enable,
+            quant_mode=QuantMode.PER_TENSOR,
+            quant_scale=quant_scale,
+        ),
+    )
+```
+
+`quant_scale` 是运行时标量（普通 kernel 参数，不是 `tla.Constexpr`），因此一份编译产物可服务任意 scale。`--layout-c col` 时同一次搬运经转置（nz2dn）FIXPIPE 写出，量化与转置在一趟内完成。
+
+执行后输出形如 `--- mnk=(128,128,64) layout=row/row/row dtype=f32/f32 acc=f32 dst=f16 relu=False quant_scale=<scale> ---`，随后为 `passed=True`。
+
+## basic_mixed_fixpipe_per_channel
+
+**文件**：`basic_mixed_fixpipe_per_channel.py`
+
+与 `basic_mixed_fixpipe_per_tensor` 相同，但 scale 是逐输出通道的张量而非标量。每个通道的 f32 scale 打包成一个 `uint64` 字，作为 FIXPIPE 的 dequant tensor 由 GM 搬到 L1：
+
+```python
+import catlass.tla as tla
+from catlass.params import CopyL0C2DstParams, L0C2UBMode, QuantMode
+
+# ...
+l1_quant = tla.make_tensor(
+    l1_quant_ptr,
+    tla.make_layout(
+        tla.make_shape(gm_c.origin_shape[1]),
+        tla.make_stride(1),
+        layoutTag=tla.arch.VectorLayout,
+    ),
+)
+tla.copy(l1_quant, gm_quant)
+# ...
+tla.copy(
+    ub_c,
+    l0_c,
+    params=CopyL0C2DstParams(
+        unit_flag=0b11,
+        l0c2ub_mode=L0C2UBMode.NO_SPLIT_VEC_0,
+        relu_enable=relu_enable,
+        quant_mode=QuantMode.PER_CHANNEL,
+        quant_tensor=l1_quant,
+    ),
+)
+```
+
+每个任务块覆盖的列区间不同，因此 dequant tensor 需按块重新搬运一次，并用一对 flag（`quant_full` / `quant_free`）与 FIXPIPE 同步。`uint64` 只在 L1 上的 rank-1 `VectorLayout` 一种形态被接受，且只能通过 `tla.make_tensor` 构造。
+
+scale 由 host 侧随机生成，没有对应命令行参数；输出行因此不含 `quant_scale` 字段。
 
 ## basic_mixed_ub2l1
 

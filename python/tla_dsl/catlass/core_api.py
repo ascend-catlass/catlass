@@ -5489,11 +5489,19 @@ _SUPPORTED_CUBE_FIXPIPE_ROUTES = {
     ("gm", "RowMajor", "-", "PER_TENSOR", True): {"f32": ("f32", "f16", "bf16", "i8", "u8"), "i32": ("f16", "bf16", "i8", "u8")},
     ("gm", "ColumnMajor", "-", "PER_TENSOR", False): {"f32": ("f32", "f16", "bf16", "i8", "u8"), "i32": ("f16", "bf16", "i8", "u8")},
     ("gm", "ColumnMajor", "-", "PER_TENSOR", True): {"f32": ("f32", "f16", "bf16", "i8", "u8"), "i32": ("f16", "bf16", "i8", "u8")},
+    ("ub", "RowMajor", "nosplit", "PER_TENSOR", False): {"f32": ("f32", "f16", "bf16"), "i32": ("f16", "bf16")},
+    ("ub", "RowMajor", "nosplit", "PER_TENSOR", True): {"f32": ("f32", "f16", "bf16"), "i32": ("f16", "bf16")},
+    ("ub", "ColumnMajor", "nosplit", "PER_TENSOR", False): {"f32": ("f32", "f16", "bf16"), "i32": ("f16", "bf16")},
+    ("ub", "ColumnMajor", "nosplit", "PER_TENSOR", True): {"f32": ("f32", "f16", "bf16"), "i32": ("f16", "bf16")},
 
     ("gm", "RowMajor", "-", "PER_CHANNEL", False): {"f32": ("f32", "f16", "bf16", "i8", "u8"), "i32": ("f16", "bf16", "i8", "u8")},
     ("gm", "RowMajor", "-", "PER_CHANNEL", True): {"f32": ("f32", "f16", "bf16", "i8", "u8"), "i32": ("f16", "bf16", "i8", "u8")},
     ("gm", "ColumnMajor", "-", "PER_CHANNEL", False): {"f32": ("f32", "f16", "bf16", "i8", "u8"), "i32": ("f16", "bf16", "i8", "u8")},
     ("gm", "ColumnMajor", "-", "PER_CHANNEL", True): {"f32": ("f32", "f16", "bf16", "i8", "u8"), "i32": ("f16", "bf16", "i8", "u8")},
+    ("ub", "RowMajor", "nosplit", "PER_CHANNEL", False): {"f32": ("f32", "f16", "bf16"), "i32": ("f16", "bf16")},
+    ("ub", "RowMajor", "nosplit", "PER_CHANNEL", True): {"f32": ("f32", "f16", "bf16"), "i32": ("f16", "bf16")},
+    ("ub", "ColumnMajor", "nosplit", "PER_CHANNEL", False): {"f32": ("f32", "f16", "bf16"), "i32": ("f16", "bf16")},
+    ("ub", "ColumnMajor", "nosplit", "PER_CHANNEL", True): {"f32": ("f32", "f16", "bf16"), "i32": ("f16", "bf16")},
 }
 # fmt: on
 

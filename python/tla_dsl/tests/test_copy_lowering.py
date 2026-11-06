@@ -939,6 +939,31 @@ def copy_l0c_to_gm_pertensor_no_scale_kernel(gm_c: tla.Tensor) -> None:
         )
 
 
+@tla.kernel
+def copy_l0c_to_ub_pertensor_kernel(gm_c: tla.Tensor) -> None:
+    """L0C -> UB (nosplit) with PER_TENSOR quant, ColumnMajor destination."""
+    gm_tile = tla.tile_view(gm_c, tla.make_shape(32, 32), tla.make_coord(0, 0))
+    l0c = tla.make_tensor_like(
+        tla.allocate((32, 32), tla.Float32, tla.AddressSpace.l0c, 512),
+        gm_tile,
+        tla.arch.L0Clayout,
+    )
+    ub = tla.make_tensor_like(
+        tla.allocate((32, 32), tla.Float16, tla.AddressSpace.ub, 512),
+        l0c,
+        tla.arch.ColumnMajor,
+    )
+    with tla.cube():
+        tla.copy(
+            ub,
+            l0c,
+            tla.params.CopyL0C2DstParams(
+                quant_mode=tla.params.QuantMode.PER_TENSOR,
+                quant_scale=1.0,
+            ),
+        )
+
+
 def test_frontend_accepts_l0c_to_gm_pertensor_f16() -> None:
     """f32 accumulator -> f16 GM with PER_TENSOR quant is a supported route."""
     gm = _fp_tensor(tla.Float16, tla.arch.RowMajor)
@@ -950,6 +975,13 @@ def test_frontend_accepts_l0c_to_gm_pertensor_int8() -> None:
     """f32 accumulator -> int8 GM is admitted by the PER_TENSOR route table."""
     gm = _fp_tensor(tla.Int8, tla.arch.RowMajor)
     mlir = copy_l0c_to_gm_pertensor_kernel.dump_mlir(type_args=(gm,))
+    assert "quant_mode = #tla.quant_mode<PER_TENSOR>" in mlir
+
+
+def test_frontend_accepts_l0c_to_ub_pertensor_column_major() -> None:
+    """L0C -> UB nosplit PER_TENSOR with a ColumnMajor destination."""
+    gm = _fp_tensor(tla.Float16, tla.arch.RowMajor)
+    mlir = copy_l0c_to_ub_pertensor_kernel.dump_mlir(type_args=(gm,))
     assert "quant_mode = #tla.quant_mode<PER_TENSOR>" in mlir
 
 
