@@ -56,6 +56,13 @@ Constraints:
   be whole 16×C0 blocks, or 32×32 for 1-byte types.
 - `GM`→`L1` / `L1`→`biasbuf` contiguous runs use rank-1 `VectorLayout`;
   multi-row bias tiles are not representable — slice one row.
+- PER_CHANNEL dequant parameters (`CopyL0C2DstParams.quant_tensor`)
+  are a rank-1 `VectorLayout` tile in the `L1` address space, element
+  type `u64`, unit stride. One element carries the dequant parameter
+  shared by every element of one output channel, so the run must hold
+  exactly one element per channel of the destination tile, ``originShape[1]``
+  after `tile_view` cropping. When both lengths are static, a mismatch
+  fails compilation.
 - Whole-tile DMA uses `tla.copy`. For register-level UB unaligned
   access, use `tensor.load` / `tensor.store` with `UnalignLoadParams` /
   `UnalignStoreParams`.

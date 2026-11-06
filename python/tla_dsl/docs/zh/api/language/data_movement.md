@@ -96,6 +96,10 @@ fixpipe 支持随路 quant 与 relu；quant 模式支持 `NO_QUANT`、`PER_TENSO
 
 - 链路为 (l0c acc) → quant（可选）→ relu（可选）→ 写出到 dst。
 - `NO_QUANT` 含纯数据类型转换，如 `f32`→`f16`、`f32`→`bf16`。
+- PER_CHANNEL 的反量化参数（`quant_tensor`）为 rank-1 `VectorLayout`，位于 L1，
+  `u64` 元素、stride 1。每通道一个元素，通道内全部元素共享该反量化参数；长度
+  须与目标 tile 的通道数精确一致（`tile_view` 裁剪后的 `originShape[1]`），两侧
+  长度均为编译期常量时不相等即编译报错。元素类型、地址空间与布局由前端校验。
 - 目的为 UB 时额外有 `split_mode`：nosplit（`NO_SPLIT_VEC_0`、`NO_SPLIT_VEC_1`）与
   split（`SPLIT_M`、`SPLIT_N`）。
 - 目的为 `(ub, ColumnMajor)` 时仅支持 `nosplit`。

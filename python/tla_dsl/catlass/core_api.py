@@ -5892,6 +5892,13 @@ def copy(
           be whole 16×C0 blocks, or 32×32 for 1-byte types.
         - `GM`→`L1` / `L1`→`biasbuf` contiguous runs use rank-1 `VectorLayout`;
           multi-row bias tiles are not representable — slice one row.
+        - PER_CHANNEL dequant parameters (`CopyL0C2DstParams.quant_tensor`)
+          are a rank-1 `VectorLayout` tile in the `L1` address space, element
+          type `u64`, unit stride. One element carries the dequant parameter
+          shared by every element of one output channel, so the run must hold
+          exactly one element per channel of the destination tile, ``originShape[1]``
+          after `tile_view` cropping. When both lengths are static, a mismatch
+          fails compilation.
         - Whole-tile DMA uses `tla.copy`. For register-level UB unaligned
           access, use `tensor.load` / `tensor.store` with `UnalignLoadParams` /
           `UnalignStoreParams`.
@@ -6034,18 +6041,70 @@ def copy(
                 "CopyL0C2DstParams", "quant_tensor", params.quant_tensor, "tensor", 5
             )
             quant_tensor = _as_value(params.quant_tensor)
-            # The fixpipe reads one packed dequant word per output channel, and
-            # that word is a u64: an fp32 scale in [31:0], the int8 sign selector
+            # The fixpipe reads one packed dequant element per output channel, and
+            # that element is a u64: an fp32 scale in [31:0], the int8 sign selector
             # in [46], and the 9-bit offset in [45:37]. Anything else would reach
             # bc as a dma copy of the wrong element width -- and the flat
             # GM -> L1 route only registers u64 -- so refuse it here, where the
             # message can name the argument.
-            quant_dtype = _tla_tensor_type_for_mlir_value(quant_tensor).element_type
+            quant_desc = _tla_tensor_type_for_mlir_value(quant_tensor)
+            quant_dtype = quant_desc.element_type
             if str(quant_dtype).strip().lower() != "u64":
                 _op_error(
                     "CopyL0C2DstParams",
                     "invalid argument 'quant_tensor' (position 5): expected a u64 "
-                    f"tile of packed dequant words, got {quant_dtype}",
+                    f"tile of packed dequant elements, got {quant_dtype}",
+                )
+            # Width is not the whole contract. The bc wrapper materializes this
+            # operand as an L1 VectorLayout run (`makeL1Tensor<..., uint64_t>`),
+            # and `makeVectorTlaLayout` on the device side hardcodes the element
+            # stride to a literal 1 -- a strided run would be read contiguously
+            # anyway. `make_tensor` already refuses a VectorLayout tile whose
+            # stride is anything but a static 1, but a tensor bound from the host
+            # never goes through it.
+            quant_addrspace = str(quant_desc.addrspace).strip().lower()
+            if quant_addrspace != _U64_TILE_ADDRSPACE:
+                _op_error(
+                    "CopyL0C2DstParams",
+                    "invalid argument 'quant_tensor' (position 5): the per-channel "
+                    f"dequant elements must be staged in {_U64_TILE_ADDRSPACE}, "
+                    f"got {quant_addrspace}",
+                )
+            if quant_desc.layout_tag != _U64_TILE_LAYOUT_TAG:
+                _op_error(
+                    "CopyL0C2DstParams",
+                    "invalid argument 'quant_tensor' (position 5): the per-channel "
+                    f"dequant elements must be a flat {_U64_TILE_LAYOUT_TAG} run, "
+                    f"got {quant_desc.layout_tag}",
+                )
+            # A rank-1 VectorLayout descriptor is a single stride leaf.
+            quant_stride_leaf = _components_to_type_tree(quant_desc.stride)
+            quant_stride = (
+                quant_stride_leaf[0]
+                if isinstance(quant_stride_leaf, tuple)
+                else quant_stride_leaf
+            )
+            if quant_stride != 1:
+                _op_error(
+                    "CopyL0C2DstParams",
+                    "invalid argument 'quant_tensor' (position 5): the per-channel "
+                    "dequant elements must be a unit-stride run, got stride "
+                    f"{quant_stride if quant_stride is not None else 'dynamic'}",
+                )
+            # Static length check: the run must line up with the destination
+            # tile's columns exactly -- quant and the C tile share the same
+            # tiling, so a static mismatch means one of the two was cropped
+            # against the wrong tail. A dynamic leaf skips the check, and
+            # matching the channels is then the caller's contract.
+            (quant_n,) = quant_desc.origin_shape
+            (_, dst_n) = _flat_dim_pair_from_tree(dst_desc.origin_shape)
+            if None not in (quant_n, dst_n) and quant_n != dst_n:
+                _op_error(
+                    "CopyL0C2DstParams",
+                    "invalid argument 'quant_tensor' (position 5): the per-channel "
+                    f"dequant run holds {quant_n} elements but the destination "
+                    f"tile spans {dst_n} output channels; the run must match "
+                    "the destination's channel count exactly",
                 )
         params_value = _tla_ops_gen.CopyL0C2DstParams(
             _tla_type_bridge.copy_l0c2dst_params_type_get(ctx),

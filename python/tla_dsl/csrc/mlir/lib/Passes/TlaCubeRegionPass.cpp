@@ -699,7 +699,10 @@ struct LowerTlaCopyPattern : public OpRewritePattern<::tla::CopyOp> {
                 op->emitError("missing descriptor for per-channel quant tensor");
                 return failure();
             }
-            info.quantDesc = quantIt->second;
+            const TensorDescriptor& quantDesc = quantIt->second;
+            if (!validateTensorDescriptor(op, quantDesc, "malformed descriptor for per-channel quant tensor"))
+                return failure();
+            info.quantDesc = quantDesc;
         }
         if (info.relu_enable) {
             extraDesc += "relu_";

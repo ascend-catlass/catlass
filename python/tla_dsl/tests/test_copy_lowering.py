@@ -1086,13 +1086,12 @@ def test_frontend_rejects_pertensor_offset_that_is_not_i32(
         _pertensor_offset_kernel(offset).dump_mlir(type_args=(gm,))
 
 
-def _perchannel_quant_kernel(quant_dtype: object):
-    """Build a PER_CHANNEL kernel whose quant_tensor has ``quant_dtype``.
+def _perchannel_quant_kernel():
+    """Build a PER_CHANNEL kernel that hands ``quant`` to the fixpipe as-is.
 
-    The fixpipe reads one packed dequant word per output channel, and that word
-    is u64. A tile of any other element type would reach bc as a copy of the
-    wrong width -- and only u64 is registered on the flat GM -> L1 route -- so
-    the frontend refuses it rather than failing later in the pass pipeline.
+    The element type, address space and layout of ``quant`` all come from the
+    host tensor bound at ``type_args``; the frontend checks that triple where
+    the copy's parameters are built.
     """
 
     @tla.kernel
@@ -1116,19 +1115,66 @@ def _perchannel_quant_kernel(quant_dtype: object):
     return kernel
 
 
-def _quant_tensor(dtype: object) -> object:
+def _quant_tensor(
+    dtype: object,
+    *,
+    addrspace: object = tla.AddressSpace.l1,
+    layout_tag: object = tla.arch.VectorLayout,
+    stride: object = 1,
+    origin_shape: object = (32,),
+) -> object:
+    """A host-side sample of the flat L1 dequant run the fixpipe reads."""
     return make_fake_tensor(
-        dtype, (32,), (1,), origin_shape=(32,), layout_tag=tla.arch.VectorLayout
+        dtype,
+        origin_shape,
+        (stride,),
+        origin_shape=origin_shape,
+        layout_tag=layout_tag,
+        addrspace=addrspace,
     )
 
 
 def test_frontend_accepts_perchannel_u64_quant_tensor() -> None:
-    """The packed dequant words are u64; that is the accepted element type."""
+    """The packed dequant elements are u64; that is the accepted element type."""
     gm = _fp_tensor(tla.Int8, tla.arch.RowMajor)
-    mlir = _perchannel_quant_kernel(tla.UInt64).dump_mlir(
+    mlir = _perchannel_quant_kernel().dump_mlir(
         type_args=(gm, _quant_tensor(tla.UInt64))
     )
     assert "quant_mode = #tla.quant_mode<PER_CHANNEL>" in mlir
+
+
+@pytest.mark.parametrize(
+    ("label", "quant_len"),
+    [
+        ("short", 4),
+        ("long", 40),
+    ],
+)
+def test_frontend_rejects_perchannel_quant_run_not_matching_static_channels(
+    label: str, quant_len: int
+) -> None:
+    """A run whose static length differs from the destination's static N is
+    refused, whichever side is longer.
+
+    The destination tile is the fixed 32x32 sample, so a run of 4 or 40
+    elements cannot line up with its 32 channels. The check needs both
+    lengths static; the dynamic pass-through is covered separately.
+    """
+    gm = _fp_tensor(tla.Int8, tla.arch.RowMajor)
+    with pytest.raises(
+        runtime_mod.TlaCoreAPIError,
+        match=(
+            rf"quant_tensor.*holds {quant_len} elements but the destination "
+            r"tile spans 32 output channels; the run must match the "
+            r"destination's channel count exactly"
+        ),
+    ):
+        _perchannel_quant_kernel().dump_mlir(
+            type_args=(
+                gm,
+                _quant_tensor(tla.UInt64, origin_shape=(quant_len,)),
+            )
+        )
 
 
 @pytest.mark.parametrize(
@@ -1149,7 +1195,63 @@ def test_frontend_rejects_perchannel_quant_tensor_that_is_not_u64(
         runtime_mod.TlaCoreAPIError,
         match=r"quant_tensor.*expected a u64 tile",
     ):
-        _perchannel_quant_kernel(dtype).dump_mlir(type_args=(gm, _quant_tensor(dtype)))
+        _perchannel_quant_kernel().dump_mlir(type_args=(gm, _quant_tensor(dtype)))
+
+
+@pytest.mark.parametrize(
+    ("label", "addrspace", "layout_tag", "message"),
+    [
+        (
+            "gm-vectorlayout",
+            tla.AddressSpace.gm,
+            tla.arch.VectorLayout,
+            r"must be staged in l1",
+        ),
+        (
+            "l1-rowmajor",
+            tla.AddressSpace.l1,
+            tla.arch.RowMajor,
+            r"must be a flat VectorLayout run",
+        ),
+    ],
+)
+def test_frontend_rejects_perchannel_quant_tensor_outside_the_l1_run(
+    label: str, addrspace: object, layout_tag: object, message: str
+) -> None:
+    """u64 alone is not the contract: the runtime reads an L1 VectorLayout run.
+
+    Both shapes below compile through bc -- the wrapper builds the operand as an
+    L1 VectorLayout tile regardless -- so a GM or two-dimensional scale tile has
+    to be refused where it is passed, not left to read the wrong memory.
+    """
+    gm = _fp_tensor(tla.Int8, tla.arch.RowMajor)
+    with pytest.raises(runtime_mod.TlaCoreAPIError, match=message):
+        _perchannel_quant_kernel().dump_mlir(
+            type_args=(
+                gm,
+                _quant_tensor(
+                    tla.UInt64, addrspace=addrspace, layout_tag=layout_tag
+                ),
+            )
+        )
+
+
+def test_frontend_rejects_perchannel_quant_tensor_that_is_not_unit_stride() -> None:
+    """The device side builds the run with a literal stride of 1.
+
+    `makeVectorTlaLayout` hardcodes it, so a strided run would be read
+    contiguously and dequantize against the wrong elements. `make_tensor` already
+    refuses a strided VectorLayout tile; a tensor bound from the host does not go
+    through it, so the copy checks again.
+    """
+    gm = _fp_tensor(tla.Int8, tla.arch.RowMajor)
+    with pytest.raises(
+        runtime_mod.TlaCoreAPIError,
+        match=r"quant_tensor.*must be a unit-stride run",
+    ):
+        _perchannel_quant_kernel().dump_mlir(
+            type_args=(gm, _quant_tensor(tla.UInt64, stride=2))
+        )
 
 
 def _u64_tile_kernel(addrspace: object, layout_tag: object):
