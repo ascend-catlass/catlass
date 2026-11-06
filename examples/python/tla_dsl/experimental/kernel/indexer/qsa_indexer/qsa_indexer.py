@@ -47,7 +47,11 @@ def _qsa_indexer_all_visible_stage(
         tla.pipe_barrier(tla.pipes.ALL)
 
 
-@tla.kernel
+# AutoSync inserts the intra-core mutexes. The hand-written mutex version was
+# ~1.5% slower than the old flag version on cube-heavy shapes (4096 rows,
+# 128 pages, page_size=64); AutoSync was the fastest or within noise on every
+# tested shape.
+@tla.kernel(auto_sync="v0")
 def qsa_indexer(
     q: tla.Tensor,
     compressed_k: tla.Tensor,
@@ -125,12 +129,6 @@ def _qsa_indexer_mixed_topk_stage(
 
     aic_to_aiv = tla.cross_flag("qsa_score_ready", mode=4)
     aiv_to_aic = tla.cross_flag("qsa_score_free", mode=4)
-
-    mutex_l1_q = tla.mutex("qsa_l1_q", id=0)
-    mutex_l1_k = tla.mutex("qsa_l1_k", id=1)
-    mutex_l0_q = tla.mutex("qsa_l0_q", id=2)
-    mutex_l0_k = tla.mutex("qsa_l0_k", id=3)
-    mutex_l0_c = tla.mutex("qsa_l0_c", id=4)
 
     l1_q_ptr = tla.allocate(
         MIXED_TILE_M * query_heads * head_dim,
@@ -235,35 +233,16 @@ def _qsa_indexer_mixed_topk_stage(
                 )
                 l1_q = tla.make_tensor_like(l1_q_ptr, gm_q, tla.arch.zN)
                 l1_k = tla.make_tensor_like(l1_k_ptr, gm_k, tla.arch.nZ)
-                mutex_l1_q.lock(pipe=tla.arch.MTE2)
                 tla.copy(l1_q, gm_q)
-                mutex_l1_q.unlock(pipe=tla.arch.MTE2)
-                mutex_l1_k.lock(pipe=tla.arch.MTE2)
                 tla.copy(l1_k, gm_k)
-                mutex_l1_k.unlock(pipe=tla.arch.MTE2)
 
                 l0_q = tla.make_tensor_like(l0_q_ptr, l1_q, tla.arch.zN)
                 l0_k = tla.make_tensor_like(l0_k_ptr, l1_k, tla.arch.nZ)
-                mutex_l1_q.lock(pipe=tla.arch.MTE1)
-                mutex_l0_q.lock(pipe=tla.arch.MTE1)
                 tla.copy(l0_q, l1_q)
-                mutex_l1_q.unlock(pipe=tla.arch.MTE1)
-                mutex_l0_q.unlock(pipe=tla.arch.MTE1)
-                mutex_l1_k.lock(pipe=tla.arch.MTE1)
-                mutex_l0_k.lock(pipe=tla.arch.MTE1)
                 tla.copy(l0_k, l1_k)
-                mutex_l1_k.unlock(pipe=tla.arch.MTE1)
-                mutex_l0_k.unlock(pipe=tla.arch.MTE1)
-                mutex_l0_q.lock(pipe=tla.arch.CUBE)
-                mutex_l0_k.lock(pipe=tla.arch.CUBE)
-                mutex_l0_c.lock(pipe=tla.arch.CUBE)
 
                 l0_c = tla.make_tensor_like(l0_c_ptr, raw_matrix, tla.arch.L0Clayout)
                 tla.mmad(l0_c, l0_q, l0_k, init_c=True)
-                mutex_l0_q.unlock(pipe=tla.arch.CUBE)
-                mutex_l0_k.unlock(pipe=tla.arch.CUBE)
-                mutex_l0_c.unlock(pipe=tla.arch.CUBE)
-                mutex_l0_c.lock(pipe=tla.arch.FIX)
 
                 raw_ub = tla.make_tensor(
                     raw_ub_ptr,
@@ -280,7 +259,6 @@ def _qsa_indexer_mixed_topk_stage(
                         l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M
                     ),
                 )
-                mutex_l0_c.unlock(pipe=tla.arch.FIX)
                 tla.cross_core_set_flag(aic_to_aiv, tla.arch.FIX, aiv_id=0)
                 tla.cross_core_set_flag(aic_to_aiv, tla.arch.FIX, aiv_id=1)
 
