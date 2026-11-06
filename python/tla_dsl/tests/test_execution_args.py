@@ -77,7 +77,9 @@ def test_launch_rejects_unbound_tensor_in_each_container(
             kernel_abi=layout, argument_trees=(build_runtime_argument_tree(value),)
         ),
         uses_scalar_print=False,
+        simt_print_formats=None,
         uses_tensor_print=False,
+        print_argument_layout=(),
         print_metadata=None,
         print_tensor_position=None,
         is_mixed=False,

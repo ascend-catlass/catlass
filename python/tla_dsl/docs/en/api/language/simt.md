@@ -12,7 +12,7 @@ Do not edit manually. Update docstrings/Examples in catlass/core_api.py
 
 [Language Reference](index.md) | [API Quick Reference](../quick_reference.md)
 
-The per-thread vector execution mode, entered with `tla.vec.func(mode="simt", thread_block_dim=...)`. The body is the program of *one thread*: each thread addresses memory by index through ordinary element access, with no tiles, no vector registers and no UB staging.
+The per-thread vector execution mode, entered with `tla.vec.func(mode="simt", thread_block_dim=...)`. The body describes the code executed by each thread. A thread gets its index with `tla.arch.thread_idx()`, reads and writes GM/UB elements with `tensor[index]`, and computes on scalar values. Supported operations and restrictions are listed below.
 
 ```python
 with tla.vector():
@@ -37,13 +37,14 @@ The body is per-thread scalar code. These are available:
 - Element access on a `gm` or `ub` tensor (`tensor[i]`, `tensor[i] = value`) -- see **Element Access** below.
 - Scalar arithmetic, comparison, selection and conversion on `Numeric` values, each emitting its per-thread op -- see **Basic Arithmetic**, **Compare and Select** and **Type Conversion** below.
 - `tla.range` loops and runtime `if`.
+- `tla.print` for per-thread scalars, formatted strings, and GM/UB prefixes -- see [Debug and Printing](../language/debug.md).
 - `tla.arch.thread_idx` / `thread_block_dim` / `sync_threads`, and the launch-level `tla.arch.block_idx` / `block_num` -- see **System Variable Access**.
 
 These are not, and are rejected when the kernel is compiled:
 
-- Register-vector and mask ops -- `VectorSSA` / `MaskSSA` values, the arithmetic and mask APIs under **SIMD Vector Compute**, `Tensor.load` / `Tensor.store`, `tla.full`, `tla.create_mask`. A SIMT thread has no vector register of its own.
+- Register-vector and mask ops -- `VectorSSA` / `MaskSSA` values, the arithmetic and mask APIs under **SIMD Vector Compute**, `Tensor.load` / `Tensor.store`, `tla.full`, `tla.create_mask`. These APIs operate on SIMD register-vector values.
 - `tla.copy`: a DMA needs the tensor itself, and a SIMT region may capture only scalar runtime values. Stage data before the region, or let each thread address global memory directly.
-- `tla.local_mem_bar`, `tla.pipe_barrier` and `tla.print`.
+- `tla.local_mem_bar` and `tla.pipe_barrier`.
 - `while` loops, in any `tla.vec.func`; carry the iteration through `tla.range` instead.
 - A nested `tla.vec.func`.
 

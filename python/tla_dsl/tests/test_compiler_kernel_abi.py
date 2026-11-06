@@ -253,21 +253,12 @@ def test_native_bridge_excludes_hidden_debug_workspace_from_public_abi() -> None
 def test_native_bridge_excludes_hidden_print_tensor_workspace_from_public_abi() -> (
     None
 ):
-    with mlir_ir.Context() as context:
-        context.allow_unregistered_dialects = True
-        module = mlir_ir.Module.parse(
-            """
-            module {
-              func.func @print_workspace(
-                  %workspace: i64 {tla.print_tensor.workspace},
-                  %value: memref<1xi32>
-              ) attributes {hacc.entry} {
-                return
-              }
-            }
-            """
-        )
-        result = compiler_bridge.lower_tlair_module_to_mlir(module)
+    @tla.kernel
+    def print_workspace(value: tla.Tensor):
+        with tla.vector():
+            tla.print(value, 1)
+
+    result = _native_lower(print_workspace, type_args=(_gm_i32_tensor(),))
 
     assert result.kernel_abi is not None
     assert result.kernel_abi.entrypoint == "print_workspace"
@@ -395,6 +386,9 @@ def test_typed_bridge_returns_versioned_compiler_kernel_abi_layout(
             return {
                 "lowered_mlir": f"module {{ func.func @{entrypoint}() }}",
                 "pass_ir_dump": "",
+                "runtime_metadata": compiler_bridge.KernelRuntimeMetadata(
+                    entrypoint
+                ).to_dict(),
                 "kernel_abi": {
                     "schema_version": 3,
                     "entrypoint": entrypoint,
@@ -451,6 +445,9 @@ def test_typed_bridge_preserves_signed_unsigned_and_float_mlir_types(
                 offset += max(storage_size, 4)
             return {
                 "lowered_mlir": "module { func.func @typed() }",
+                "runtime_metadata": compiler_bridge.KernelRuntimeMetadata(
+                    "typed"
+                ).to_dict(),
                 "kernel_abi": {
                     "schema_version": 3,
                     "entrypoint": "typed",
@@ -588,6 +585,7 @@ def test_kernel_abi_from_dict_rejects_incoherent_structured_scalar(
 
 
 class _FakeLowered:
+    entrypoint = "artifact_kernel"
     module = object()
     extern_compile_specs = ()
     argument_trees = ()
@@ -652,6 +650,7 @@ def test_compile_artifact_propagates_and_persists_kernel_abi(
         lambda *_a, **_k: compiler_bridge.TlaLoweringResult(
             "module { func.func @artifact_kernel(!llvm.ptr, i32) }",
             kernel_abi=layout,
+            runtime_metadata=compiler_bridge.KernelRuntimeMetadata(layout.entrypoint),
         ),
     )
 

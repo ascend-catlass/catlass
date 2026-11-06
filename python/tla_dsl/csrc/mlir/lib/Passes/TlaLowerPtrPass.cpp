@@ -1,6 +1,7 @@
 #include "Passes/TlaSimtUbLimits.h"
 #include "Passes/TlaTensorToMemref.h"
 #include "PassesCommon.h"
+#include "Passes/TlaDebugPrint.h"
 #include "PassesInternal.h"
 #include "TlaScratchAllocation.h"
 
@@ -330,9 +331,8 @@ static LogicalResult checkSingleDynamicUbRegion(ModuleOp module)
     return result;
 }
 
-static LogicalResult declareUbBudget(ModuleOp module, const TlaScratchAllocationPlan& plan)
+static LogicalResult declareUbBudget(ModuleOp module, uint64_t ubBytes)
 {
-    uint64_t ubBytes = ubHighWaterBytes(plan);
     // A SIMT region anywhere puts the whole kernel on the SIMT budget: every
     // stage shares one Unified Buffer with the Data Cache.
     const bool simt = moduleHasSimtVecFunc(module);
@@ -411,12 +411,13 @@ public:
 
         // Refuse an over-budget kernel before reserving anything: the error
         // names the limit and the mode, which a launch failure cannot.
-        if (failed(declareUbBudget(module, *allocationPlan))) {
+        auto ubBytes = reserveVfPrintFormats(module, ubHighWaterBytes(*allocationPlan));
+        if (failed(ubBytes) || failed(declareUbBudget(module, *ubBytes))) {
             signalPassFailure();
             return;
         }
 
-        LLVM::GlobalOp ubScratch = createUbScratchGlobal(module, ubHighWaterBytes(*allocationPlan));
+        LLVM::GlobalOp ubScratch = createUbScratchGlobal(module, *ubBytes);
 
         // UPDATE load/store keep next-window !tla.ptr results as SSA (no
         // identity tensor_ptr placeholder). Ordinary tensor_ptr ops still resolve.
@@ -438,7 +439,7 @@ public:
         RewritePatternSet patterns(context);
         ConversionTarget target(*context);
         patterns.add<LowerAllocPtrPattern>(converter, context, allocationPlan->offsetByAllocResult, ubScratch);
-        patterns.add<LowerDynamicUbBasePattern>(converter, context, ubHighWaterBytes(*allocationPlan));
+        patterns.add<LowerDynamicUbBasePattern>(converter, context, *ubBytes);
         patterns.add<LowerIntToPtrPattern, LowerRecastPtrPattern, LowerPtrAddPattern>(converter, context);
         scf::populateSCFStructuralTypeConversionsAndLegality(converter, patterns, target);
         populateFunctionOpInterfaceTypeConversionPattern<func::FuncOp>(patterns, converter);

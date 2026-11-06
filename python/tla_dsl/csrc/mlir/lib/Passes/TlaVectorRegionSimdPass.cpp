@@ -1,5 +1,6 @@
 #include "PassesCommon.h"
 #include "PassesInternal.h"
+#include "Passes/TlaDebugPrint.h"
 #include "Passes/TlaTensorToMemref.h"
 #include "Passes/TlaVectorRegionCommon.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
@@ -3558,6 +3559,102 @@ static LogicalResult lowerScfIf(
     return success();
 }
 
+static Value vfPrintCount(OpBuilder& b, Location loc, Value count, int64_t capacity)
+{
+    Value value = ::tla::castValueToI64(b, loc, count);
+    Value zero = b.create<arith::ConstantIntOp>(loc, 0, 64);
+    Value limit = b.create<arith::ConstantIntOp>(loc, capacity, 64);
+    value = b.create<arith::MaxSIOp>(loc, value, zero);
+    value = b.create<arith::MinSIOp>(loc, value, limit);
+    return b.create<arith::TruncIOp>(loc, b.getI32Type(), value);
+}
+
+static LogicalResult emitVfDumpCall(
+    OpBuilder& b, Location loc, ModuleOp module, StringRef kind, Type elementType, ValueRange operands)
+{
+    std::string diagnostic;
+    auto suffix = getPrintTensorHelperSuffix(elementType, diagnostic);
+    if (failed(suffix))
+        return emitError(loc, diagnostic);
+    std::string name = ("tla_vf_print_" + kind + "_" + *suffix).str();
+    auto callee = module.lookupSymbol<func::FuncOp>(name);
+    if (!callee) {
+        OpBuilder mb(module.getBodyRegion());
+        SmallVector<Type> types;
+        for (Value operand : operands)
+            types.push_back(operand.getType());
+        callee = mb.create<func::FuncOp>(loc, name, b.getFunctionType(types, {}));
+        annotateAivLibraryCall(callee);
+        callee->setAttr("hacc.always_inline", b.getUnitAttr());
+    }
+    b.create<func::CallOp>(loc, callee, operands);
+    return success();
+}
+
+static LogicalResult lowerVfRegisterPrint(
+    ::tla::PrintVectorOp op, OpBuilder& b, ModuleOp module, DenseMap<Value, Value>& valueMap)
+{
+    Value value = valueMap.lookup(op.getValue());
+    Value length = lookupOrCloneScalarValue(b, op.getLength(), valueMap);
+    if (!value || !length)
+        return op.emitError("cannot capture VF register print operands");
+    auto type = cast<::tla::VectorSSAType>(op.getValue().getType());
+    Value count = vfPrintCount(b, op.getLoc(), length, 2048 / type.getElementType().getIntOrFloatBitWidth());
+    auto id = op->getAttrOfType<IntegerAttr>("tla.vf_print_id");
+    if (!id)
+        return op.emitError("VF register print call ID was not assigned");
+    Value callId = b.create<arith::ConstantIntOp>(op.getLoc(), id.getInt(), 32);
+    return emitVfDumpCall(b, op.getLoc(), module, "reg", type.getElementType(), {value, count, callId});
+}
+
+static LogicalResult lowerVfTensorPrint(
+    ::tla::PrintTensorOp op, OpBuilder& b, ModuleOp module, DenseMap<Value, Value>& valueMap)
+{
+    auto desc = op.getValue().getDefiningOp<::tla::TensorDescOp>();
+    auto type = cast<::tla::TlaTensorType>(op.getValue().getType());
+    if (!desc || type.getPtr().getAddrspace() != AddressSpace::ub)
+        return op.emitError("tensor printing inside a SIMD vec.func requires UB storage");
+    Value value = valueMap.lookup(op.getValue());
+    Value length = lookupOrCloneScalarValue(b, op.getLength(), valueMap);
+    if (!value || !length)
+        return op.emitError("cannot capture VF tensor print operands");
+    Location loc = op.getLoc();
+    int64_t rank = op.getShape().size();
+    SmallVector<Value> shape;
+    auto layout = type.getLayout().getLayoutTag();
+    bool packed = layout != LayoutTag::RowMajor && layout != LayoutTag::ColumnMajor;
+    for (unsigned i = 0; i < rank; ++i) {
+        Value extent;
+        if (op.getShape()[i] >= 0)
+            extent = b.create<arith::ConstantIntOp>(loc, op.getShape()[i], 64);
+        else {
+            Value original = rank == 1 ? desc.getShape1() :
+                             packed    ? (i == 0 ? desc.getOriginShape0() : desc.getOriginShape1()) :
+                                         (i == 0 ? desc.getShape0() : desc.getShape1());
+            extent = lookupOrCloneScalarValue(b, original, valueMap);
+            if (!extent)
+                return op.emitError("cannot capture VF tensor print shape");
+            extent = ::tla::castValueToI64(b, loc, extent);
+        }
+        shape.push_back(extent);
+    }
+    Value elements = shape.front();
+    if (rank == 2)
+        elements = b.create<arith::MulIOp>(loc, elements, shape.back());
+    length = b.create<arith::MinSIOp>(loc, length, elements);
+    Type elementType = type.getPtr().getPointee();
+    Value count = vfPrintCount(b, loc, length, 1952 * 8 / elementType.getIntOrFloatBitWidth());
+    Value shape0 = b.create<arith::TruncIOp>(loc, b.getI32Type(), shape.front());
+    Value shape1 = rank == 2 ? Value(b.create<arith::TruncIOp>(loc, b.getI32Type(), shape.back())) :
+                               Value(b.create<arith::ConstantIntOp>(loc, 0, 32));
+    Value rankValue = b.create<arith::ConstantIntOp>(loc, rank, 32);
+    auto id = op->getAttrOfType<IntegerAttr>("tla.vf_print_id");
+    if (!id)
+        return op.emitError("VF tensor print call ID was not assigned");
+    Value callId = b.create<arith::ConstantIntOp>(loc, id.getInt(), 32);
+    return emitVfDumpCall(b, loc, module, "ub", elementType, {value, count, shape0, shape1, rankValue, callId});
+}
+
 static LogicalResult lowerNestedVectorOp(
     Operation& op, OpBuilder& b, ModuleOp module, DenseMap<Value, Value>& valueMap, AutoFullPredicateCache& fullMasks)
 {
@@ -3609,6 +3706,20 @@ static LogicalResult lowerNestedVectorOp(
 
     if (auto loadUpdateOp = dyn_cast<::tla::LoadUpdateOp>(op))
         return lowerLoadUpdate(loadUpdateOp, b, module, valueMap, fullMasks);
+    if (auto printOp = dyn_cast<::tla::DebugPrintOp>(op)) {
+        SmallVector<Value> values;
+        for (Value value : printOp.getValues()) {
+            Value mapped = lookupOrCloneScalarValue(b, value, valueMap);
+            if (!mapped)
+                return printOp.emitError("cannot capture VF print operand");
+            values.push_back(mapped);
+        }
+        return lowerVfScalarPrint(b, printOp, values);
+    }
+    if (auto printOp = dyn_cast<::tla::PrintVectorOp>(op))
+        return lowerVfRegisterPrint(printOp, b, module, valueMap);
+    if (auto printOp = dyn_cast<::tla::PrintTensorOp>(op))
+        return lowerVfTensorPrint(printOp, b, module, valueMap);
 
     if (auto loadUnalignUpdateOp = dyn_cast<::tla::LoadUnalignUpdateOp>(op))
         return lowerLoadUnalignUpdate(loadUnalignUpdateOp, b, valueMap);
@@ -4167,6 +4278,10 @@ static LogicalResult collectVectorHelperOperands(
             addVectorHelperOperand(storeUnalignUpdateOp.getDest(), operands, aliases);
             continue;
         }
+        if (auto printOp = dyn_cast<::tla::PrintTensorOp>(op)) {
+            addVectorHelperOperand(printOp.getValue(), operands, aliases);
+            continue;
+        }
         if (auto gatherOp = dyn_cast<::tla::GatherOp>(op)) {
             // Only UB-tensor gather needs a helper memref argument.
             if (isa<::tla::TlaTensorType>(gatherOp.getX().getType()))
@@ -4264,8 +4379,8 @@ static FailureOr<func::FuncOp> buildHelperFunc(
     moduleBuilder.setInsertionPointAfter(parentFunc);
 
     Block* body = vecFuncOp.getBody().empty() ? nullptr : &vecFuncOp.getBody().front();
-    if (!body || helperOperands.empty())
-        return vecFuncOp.emitOpError("vector helper needs a body and at least one memref operand"), failure();
+    if (!body)
+        return vecFuncOp.emitOpError("vector helper needs a body"), failure();
 
     SmallVector<Type> functionInputs;
     functionInputs.reserve(helperOperands.size());
@@ -4427,7 +4542,9 @@ public:
         SmallVector<::tla::StoreUpdateOp, 2> storeUpdates;
         SmallVector<Value, 4> unalignLoads;
         int unalignStores = 0;
+        bool hasDebugPrint = false;
         vecFuncOp->walk([&](Operation* op) {
+            hasDebugPrint |= isa<::tla::DebugPrintOp, ::tla::PrintVectorOp, ::tla::PrintTensorOp>(op);
             if (auto load = dyn_cast<::tla::LoadOp>(op)) {
                 loads.push_back(load);
             } else if (auto loadUpdate = dyn_cast<::tla::LoadUpdateOp>(op)) {
@@ -4453,7 +4570,9 @@ public:
             }
             return WalkResult::advance();
         });
-        if (stores.empty() && storeUpdates.empty() && unalignStores == 0) {
+        if (hasDebugPrint && module->hasAttr("tla.ub_reserve_released"))
+            return vecFuncOp.emitError("VF printing requires the default reserved UB");
+        if (stores.empty() && storeUpdates.empty() && unalignStores == 0 && !hasDebugPrint) {
             // Scalar-only (or empty) VF cannot be outlined as a BiSheng helper — that
             // path requires tla.store or tla.store_update. If there is also no tile
             // load/compute, inline the body into the parent (same as tla.vector
@@ -4683,7 +4802,7 @@ public:
             invalidScalarAccessBase = true;
             return failure();
         }
-        if (helperOperands.empty())
+        if (helperOperands.empty() && !hasDebugPrint)
             return rewriter.notifyMatchFailure(vecFuncOp, "expected vector region tensor operands");
         // Scalars captured from outside the region (e.g. a sub_block_idx computed at
         // the top of the kernel) are passed as trailing scalar arguments.
@@ -4834,9 +4953,16 @@ public:
         for (Value scalar : scalarOperands)
             callOperands.push_back(scalar);
 
+        if (hasDebugPrint) {
+            Value workspace = getOrAppendDebugPrintWorkspaceArg(funcOp);
+            emitVfDebugBoundary(rewriter, vecFuncOp.getLoc(), module, workspace, true);
+            module->setAttr("tla.vf_debug", UnitAttr::get(rewriter.getContext()));
+        }
         auto call = rewriter.create<func::CallOp>(vecFuncOp.getLoc(), helper, callOperands);
         call->setAttr("hivm.vector_function", UnitAttr::get(rewriter.getContext()));
         call->setAttr("no_inline", UnitAttr::get(rewriter.getContext()));
+        if (hasDebugPrint)
+            emitVfDebugBoundary(rewriter, vecFuncOp.getLoc(), module, Value{}, false);
         rewriter.eraseOp(vecFuncOp);
         return success();
     }

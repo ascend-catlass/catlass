@@ -4,6 +4,7 @@
 #include "catlass/catlass.hpp"
 #include "kernel_operator.h"
 #include "../print_tensor_workspace.h"
+#include "../print_fifo.h"
 
 namespace {
 // CANN's 1 MiB debug FIFO reserves 48 bytes for the shape TLV and 72 bytes
@@ -40,6 +41,12 @@ template <typename ElementType>
         return;
 
     tla::print_tensor::InitializeWorkspace(print_workspace);
+    // Preflight before CANN's waiting ring-buffer path. Each physical core has
+    // a single scalar writer, including the VF drainer.
+    auto* fifo = tla::debug::GetFifo(print_workspace);
+    uint64_t recordBytes = 72 + ((count * sizeof(ElementType) + 31) & ~uint64_t{31});
+    if (!tla::debug::CanWrite(fifo, recordBytes))
+        return;
     AscendC::ShapeInfo shapeInfo =
         MakeShapeInfo(static_cast<uint32_t>(signedShape0), static_cast<uint32_t>(signedShape1));
     AscendC::GlobalTensor<ElementType> tensor;
@@ -71,6 +78,12 @@ template <typename ElementType>
         return;
 
     tla::print_tensor::InitializeWorkspace(print_workspace);
+    // Preflight before CANN's waiting ring-buffer path. Each physical core has
+    // a single scalar writer, including the VF drainer.
+    auto* fifo = tla::debug::GetFifo(print_workspace);
+    uint64_t recordBytes = 72 + ((count * sizeof(ElementType) + 31) & ~uint64_t{31});
+    if (!tla::debug::CanWrite(fifo, recordBytes))
+        return;
     auto* print_address = reinterpret_cast<__gm__ uint8_t*>(print_workspace);
     g_sysPrintFifoSpace = print_address;
     uint32_t shape[2] = {static_cast<uint32_t>(signedShape0), static_cast<uint32_t>(signedShape1)};
@@ -102,6 +115,13 @@ template <typename ElementType>
         return;
 
     tla::print_tensor::InitializeWorkspace(print_workspace);
+    // Preflight before CANN's waiting ring-buffer path. Each physical core has
+    // a single scalar writer, including the VF drainer.
+    auto* fifo = tla::debug::GetFifo(print_workspace);
+    // C310 Fixpipe copies a complete 16x16 f32 tile even for a smaller typed view.
+    uint64_t recordBytes = 72 + 256 * sizeof(float);
+    if (!tla::debug::CanWrite(fifo, recordBytes))
+        return;
     auto* print_address = reinterpret_cast<__gm__ uint8_t*>(print_workspace);
     g_sysPrintFifoSpace = print_address;
     uint32_t shape[2] = {16U, 16U};
@@ -119,7 +139,8 @@ template <typename ElementType>
 
 extern "C" {
 
-__attribute__((used, section(".tla_print_tensor_abi"))) const char tla_print_tensor_abi[] = "tla_print_tensor_abi";
+__attribute__((used, section(".tla_print_tensor_abi"))) const char tla_print_tensor_abi_shared_v2[] =
+    "tla_print_tensor_abi_shared_v2";
 
 #if ((defined(__NPU_ARCH__) && __NPU_ARCH__ == 3510) || (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510))
 #define TLA_PRINT_TENSOR_WRAPPER(SUFFIX, TYPE)                                                         \

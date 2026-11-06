@@ -13,7 +13,7 @@ from catlass import bc_compile
 def helper_build(tmp_path: Path, monkeypatch):
     sources = {
         "Cube": ("printf", "mmad", "debug_tunnel", "dma", "print_tensor"),
-        "Vector": ("vdiv", "printf", "dma", "print_tensor"),
+        "Vector": ("vdiv", "printf", "dma", "print_tensor", "vf_print"),
     }
     source_root = tmp_path / "stubs"
     for subdir, names in sources.items():
@@ -59,9 +59,9 @@ def test_build_variants_preserves_print_order_and_compiles_components_once(
         "debug_tunnel\ndma\nmmad\nprint_tensor\nprintf\n"
     )
     assert (cache / "meta_op.aiv.print.c310.bc").read_text() == (
-        "dma\nprint_tensor\nprintf\nvdiv\n"
+        "dma\nprint_tensor\nprintf\nvdiv\nvf_print\n"
     )
-    assert len(compiled) == len(set(compiled)) == 9
+    assert len(compiled) == len(set(compiled)) == 10
     manifest = json.loads((cache / "manifest.json").read_text())
     assert {item["name"] for item in manifest["bc_files"]} == {
         path.name for path in cache.glob("*.bc")
@@ -69,7 +69,7 @@ def test_build_variants_preserves_print_order_and_compiles_components_once(
 
     # Both aggregates reuse their existing outputs during an ordinary rebuild.
     bc_compile.init()
-    assert len(compiled) == 9
+    assert len(compiled) == 10
 
 
 @pytest.mark.parametrize("variant", ["normal", "print"])
@@ -134,5 +134,5 @@ def test_force_rebuild_replaces_legacy_aggregate_without_removing_kernel_cache(
     )
     assert not (cache / "stale_component.aic.c310.bc").exists()
     assert kernel_binary.read_bytes() == b"existing compiled kernel"
-    assert len(compiled) == len(set(compiled)) == 9
+    assert len(compiled) == len(set(compiled)) == 10
     bc_compile.check_bc(bc_dir=cache)

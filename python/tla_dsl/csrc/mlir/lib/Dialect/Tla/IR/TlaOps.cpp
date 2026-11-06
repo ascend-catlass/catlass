@@ -1756,6 +1756,26 @@ mlir::LogicalResult DebugPrintOp::verify()
     return mlir::success();
 }
 
+mlir::LogicalResult PrintVectorOp::verify()
+{
+    if (!hasEnclosing<VecFuncOp>(getOperation()))
+        return emitOpError("must be nested inside a SIMD tla.vec.func");
+    auto parent = getOperation()->getParentOfType<VecFuncOp>();
+    if (auto mode = parent->getAttrOfType<mlir::StringAttr>("mode");
+        mode && !mode.getValue().equals_insensitive("simd"))
+        return emitOpError("register printing requires SIMD mode");
+    auto element = getValue().getType().getElementType();
+    if (!isSupportedPrintTensorInteger(element) && !element.isF16() && !element.isF32())
+        return emitOpError("unsupported register print dtype; expected ") << kPrintTensorSupportedDtypes;
+    llvm::APInt length;
+    if (mlir::matchPattern(getLength(), mlir::m_ConstantInt(&length))) {
+        int64_t count = length.getSExtValue();
+        if (count <= 0 || count > 2048 / element.getIntOrFloatBitWidth())
+            return emitOpError("register prefix length is outside the physical lane capacity");
+    }
+    return mlir::success();
+}
+
 mlir::LogicalResult PrintTensorOp::verify()
 {
     // CANN's 1 MiB debug FIFO reserves 48 bytes for the shape TLV and 72 bytes
@@ -1765,6 +1785,14 @@ mlir::LogicalResult PrintTensorOp::verify()
     auto tensorType = getValue().getType();
     auto ptr = tensorType.getPtr();
     auto elementType = ptr.getPointee();
+    if (auto vf = getOperation()->getParentOfType<VecFuncOp>()) {
+        auto mode = vf->getAttrOfType<mlir::StringAttr>("mode");
+        bool simt = mode && mode.getValue().equals_insensitive("simt");
+        if (simt && ptr.getAddrspace() != AddressSpace::gm && ptr.getAddrspace() != AddressSpace::ub)
+            return emitOpError("tensor printing inside a SIMT vec.func requires GM or UB storage");
+        if (!simt && ptr.getAddrspace() != AddressSpace::ub)
+            return emitOpError("tensor printing inside a SIMD vec.func requires UB storage");
+    }
     if (ptr.getAddrspace() != AddressSpace::gm && ptr.getAddrspace() != AddressSpace::ub &&
         ptr.getAddrspace() != AddressSpace::l1 && ptr.getAddrspace() != AddressSpace::l0c)
         return emitOpError("requires a GM-, UB-, L1-, or L0C-resident tensor");
@@ -1908,6 +1936,11 @@ mlir::LogicalResult PrintTensorOp::verify()
         int64_t maxLength = ptr.getAddrspace() == AddressSpace::l1  ? 8 :
                             ptr.getAddrspace() == AddressSpace::l0c ? 256 :
                                                                       kMaxFloat32Elements;
+        if (auto vf = getOperation()->getParentOfType<VecFuncOp>()) {
+            auto mode = vf->getAttrOfType<mlir::StringAttr>("mode");
+            if (!mode || !mode.getValue().equals_insensitive("simt"))
+                maxLength = 1952 * 8 / elementType.getIntOrFloatBitWidth();
+        }
         if (length < 1 || length > maxLength)
             return emitOpError() << "length must be between 1 and " << maxLength << " elements";
         if (product && length > *product)

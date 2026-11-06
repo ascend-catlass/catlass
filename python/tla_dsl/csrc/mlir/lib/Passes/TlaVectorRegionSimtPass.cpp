@@ -1,3 +1,4 @@
+#include "Passes/TlaDebugPrint.h"
 #include "PassesCommon.h"
 #include "PassesInternal.h"
 #include "Passes/TlaTensorToMemref.h"
@@ -81,7 +82,7 @@ using LowerBlockDimPattern = LowerSimtTripleOpPattern<
 // are reported separately: they are cloned into the outlined body instead of
 // consuming an ABI slot.
 struct SimtCaptures {
-    SmallVector<Value, 4> tensors;        // tla.tensor values reached by scalar access
+    SmallVector<Value, 4> tensors;        // tla.tensor values reached by scalar access or printing
     SmallVector<Value, 4> scalars;        // everything else that must be passed in
     SmallVector<Operation*, 8> constants; // clone into the body
 };
@@ -100,13 +101,16 @@ static void collectSimtCaptures(::tla::VecFuncOp vecFuncOp, SimtCaptures& captur
     SetVector<Operation*> constantSet;
 
     region.walk([&](Operation* op) {
-        // Tensor operands of scalar accesses become memref parameters.
+        // Tensor operands of scalar accesses and prints become memref parameters.
         if (auto load = dyn_cast<::tla::SimtLoadOp>(op)) {
             if (isDefinedOutside(load.getSource(), region))
                 tensorSet.insert(load.getSource());
         } else if (auto store = dyn_cast<::tla::SimtStoreOp>(op)) {
             if (isDefinedOutside(store.getDest(), region))
                 tensorSet.insert(store.getDest());
+        } else if (auto print = dyn_cast<::tla::PrintTensorOp>(op)) {
+            if (isDefinedOutside(print.getValue(), region))
+                tensorSet.insert(print.getValue());
         }
         for (Value operand : op->getOperands()) {
             if (!isDefinedOutside(operand, region))
@@ -729,6 +733,13 @@ public:
         for (Value scalar : captures.scalars)
             paramTypes.push_back(scalar.getType());
 
+        bool hasPrint = false;
+        vecFuncOp.walk([&](Operation* op) { hasPrint |= isa<DebugPrintOp, PrintTensorOp>(op); });
+        Value printWorkspace;
+        if (hasPrint) {
+            printWorkspace = getOrAppendSimtPrintWorkspaceArg(parentFunc);
+            paramTypes.push_back(callBuilder.getI64Type());
+        }
         ModuleOp mod = module;
         OpBuilder moduleBuilder(mod.getBodyRegion());
         moduleBuilder.setInsertionPointToEnd(mod.getBody());
@@ -753,7 +764,8 @@ public:
         ArrayRef<BlockArgument> vfArgs = vfBody->getArguments();
         for (auto [tensor, arg] : llvm::zip_equal(captures.tensors, vfArgs.take_front(captures.tensors.size())))
             mapping.map(tensor, arg);
-        for (auto [scalar, arg] : llvm::zip_equal(captures.scalars, vfArgs.drop_front(captures.tensors.size())))
+        for (auto [scalar, arg] :
+             llvm::zip_equal(captures.scalars, vfArgs.slice(captures.tensors.size(), captures.scalars.size())))
             mapping.map(scalar, arg);
         for (Operation* constant : captures.constants)
             bodyBuilder.clone(*constant, mapping);
@@ -766,6 +778,8 @@ public:
             bodyBuilder.clone(op, mapping);
         bodyBuilder.create<func::ReturnOp>(loc);
 
+        if (hasPrint && failed(lowerSimtPrints(vf, vfArgs.back())))
+            return failure();
         if (failed(rewriteSimtAccessesOntoParams(vf)))
             return failure();
         lowerSimtTripleOpsIn<
@@ -793,6 +807,8 @@ public:
         // positional, so this must match the parameter list built above.
         for (Value scalar : captures.scalars)
             launchArgs.push_back(scalar);
+        if (hasPrint)
+            launchArgs.push_back(printWorkspace);
         auto i64 = callBuilder.getI64Type();
         Value tx = callBuilder.create<arith::ConstantOp>(loc, i64, callBuilder.getI64IntegerAttr(blockDimX));
         Value ty = callBuilder.create<arith::ConstantOp>(loc, i64, callBuilder.getI64IntegerAttr(blockDimY));

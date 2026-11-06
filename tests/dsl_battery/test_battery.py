@@ -88,7 +88,8 @@ PRINT_TENSOR_UB_VARIANTS = (
     ("base", "2", "2", ("--all-dtypes",)),
     ("aligned-offset", "1", "1", ("--all-dtypes",)),
 )
-LOCAL_PRINT_CASE_ID = "print-tensor-local-memory"
+L1_PRINT_CASE_ID = "print-tensor-l1-memory"
+L0C_PRINT_CASE_ID = "print-tensor-l0c-memory"
 
 EVG_OPS = (
     "add",
@@ -910,6 +911,18 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
             ]],
         )
 
+    yield (
+        "vf-print-repeated",
+        [["dsl_tutorials/debug_print/vf_print.py", "--run", "--calls", "2", *dev]],
+    )
+    yield (
+        "vf-print-mixed-subblocks",
+        [["dsl_tutorials/debug_print/vf_print_mixed.py", "--run", "--block-num", "2", *dev]],
+    )
+    yield (
+        "simt-print-repeated",
+        [["dsl_tutorials/debug_print/simt_print.py", "--run", *dev]],
+    )
     # --- debug_print ---
     yield (
         "debug-print-matrix",
@@ -992,13 +1005,11 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
     l1_nz_base = [*local_common, "--storage", "l1", "--layout", "nz", "--all-dtypes"]
     l0c_base = [*local_common, "--storage", "l0c", "--all-dtypes"]
     yield (
-        LOCAL_PRINT_CASE_ID,
+        L1_PRINT_CASE_ID,
         [
             l1_zn_base,
             list(l1_zn_base),
             l1_nz_base,
-            l0c_base,
-            list(l0c_base),
             [*local_common, "--storage", "l1", "--layout", "zn", "--case", "aligned-offset", "--dtype", "i8"],
             [*local_common, "--storage", "l1", "--layout", "nz", "--case", "aligned-offset", "--dtype", "f16"],
             [*local_common, "--storage", "l1", "--layout", "zn", "--calls", "2"],
@@ -1008,6 +1019,13 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
                 "--case", "block-dependent", "--dtype", "f32",
                 "--block-num", "2",
             ],
+        ],
+    )
+    yield (
+        L0C_PRINT_CASE_ID,
+        [
+            l0c_base,
+            list(l0c_base),
             [
                 *local_common,
                 "--storage", "l0c",
@@ -1032,7 +1050,7 @@ def _ids() -> list[str]:
 def test_case(case_id: str, device: int) -> None:
     import example_runner
 
-    if case_id == LOCAL_PRINT_CASE_ID:
+    if case_id == L1_PRINT_CASE_ID:
         from catlass.base_dsl.runtime import ascend_debug_fifo
 
         if reason := ascend_debug_fifo._debug_bus_support_error():
@@ -1045,13 +1063,13 @@ def test_case(case_id: str, device: int) -> None:
         try:
             rc = example_runner.run_case([str(script), *argv[1:]])
         except Exception as exc:
-            # Driver may advertise RES_DBG_ADDR but fail at open (error 62).
-            if case_id == LOCAL_PRINT_CASE_ID:
+            # Only missing interfaces are optional. Mapping/decode errors fail.
+            if case_id == L1_PRINT_CASE_ID:
                 from catlass.base_dsl.runtime.ascend_debug_fifo import (
-                    AscDebugFifoError,
+                    AscDebugUnsupportedError,
                 )
 
-                if isinstance(exc, AscDebugFifoError):
+                if isinstance(exc, AscDebugUnsupportedError):
                     pytest.skip(str(exc))
             raise
         assert rc == 0, f"{argv[0]} {' '.join(argv[1:])} exited {rc}"

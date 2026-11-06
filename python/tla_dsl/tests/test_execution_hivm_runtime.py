@@ -11,7 +11,6 @@ import os
 import re
 import struct
 import sys
-import time
 import types
 
 import pytest
@@ -30,6 +29,7 @@ jit_executor_mod = pytest.importorskip(
 
 from catlass.base_dsl.runtime.argument_tree import ArgumentTreeError
 from catlass.tla.runtime import make_fake_tensor
+from catlass.compiler_metadata import KernelRuntimeMetadata, PrintTensorMetadata
 
 
 _EXAMPLES_DIR = (
@@ -189,6 +189,16 @@ def test_print_tensor_example_selects_ub_kernel(case, kernel_name) -> None:
     assert example._kernel(args).fn.__name__ == kernel_name
 
 
+def _empty_mlir_module():
+    from catlass._mlir import ir
+    from catlass._tla_type_bridge import load_tla_dialect
+
+    with ir.Context() as context:
+        load_tla_dialect(context)
+        context.allow_unregistered_dialects = True
+        return ir.Module.parse("module {}")
+
+
 def test_prepare_hivmc_input_uses_aic_aggregate_print_tensor_helper(
     require_bc, tmp_path
 ) -> None:
@@ -201,7 +211,10 @@ def test_prepare_hivmc_input_uses_aic_aggregate_print_tensor_helper(
 
     compiler_input, selected = execution._create_stamped_hivmc_input(
         mlir_path,
-        execution.TlaCompileOption(kernel_mode="aic", arch_scope="aic.c310"),
+        _empty_mlir_module(),
+        KernelRuntimeMetadata(
+            "kernel", uses_tensor_print=True, print_helper_core="aic"
+        ),
         bitcodes=template_bc,
     )
 
@@ -229,7 +242,10 @@ def test_prepare_hivmc_input_rejects_outdated_print_tensor_aggregate(
     with pytest.raises(execution.TlaRuntimeUnavailableError, match="ABI marker"):
         execution._create_stamped_hivmc_input(
             mlir_path,
-            execution.TlaCompileOption(kernel_mode="aiv", arch_scope="aiv.c310"),
+            _empty_mlir_module(),
+            KernelRuntimeMetadata(
+                "kernel", uses_tensor_print=True, print_helper_core="aiv"
+            ),
             bitcodes=str(stale_aggregate),
         )
 
@@ -261,7 +277,10 @@ def test_prepare_hivmc_input_uses_mixed_split_aggregate_print_tensor_helper(
 
     _, selected = execution._create_stamped_hivmc_input(
         mlir_path,
-        execution.TlaCompileOption(kernel_mode="mix"),
+        _empty_mlir_module(),
+        KernelRuntimeMetadata(
+            "kernel", uses_tensor_print=True, print_helper_core=print_split
+        ),
         bitcodes=template_bc,
     )
 
@@ -626,6 +645,9 @@ class _FakeLowered:
         self.module = module
         self.extern_compile_specs = ()
         self._text = text
+        self.entrypoint = (
+            "aggregate_kernel" if "aggregate_kernel" in text else "zero_arg_kernel"
+        )
         self.argument_trees = argument_trees
 
     def asm(self, *, generic: bool = False) -> str:
@@ -682,6 +704,7 @@ def test_public_compile_dry_run_invokes_typed_bridge_and_hivmc_a5(
         lambda module, **_kwargs: compiler_bridge.TlaLoweringResult(
             "module { func.func @zero_arg_kernel() }\n",
             kernel_abi=_zero_arg_kernel_abi(),
+            runtime_metadata=KernelRuntimeMetadata("zero_arg_kernel"),
         ),
     )
     helper_lookups = []
@@ -744,25 +767,31 @@ def test_public_compile_dry_run_invokes_typed_bridge_and_hivmc_a5(
     ]
 
 
-def test_prepare_hivmc_input_stamps_only_debug_print_mlir(tmp_path) -> None:
-    mlir_path = tmp_path / "lowered.mlir"
-    mlir_path.write_text(
-        "module { func.func @kernel(%workspace: memref<?xi8> "
-        "{tla.debug_print.workspace}) }"
-    )
-    template_bc = tmp_path / "meta_op.aic.print.c310.bc"
-    template_bc.write_bytes(b"bc")
+def test_prepare_hivmc_input_stamps_only_debug_print_mlir(tmp_path):
+    from catlass._mlir import ir
+    from catlass._tla_type_bridge import load_tla_dialect
 
-    compiler_input, bitcodes = execution._create_stamped_hivmc_input(
-        mlir_path,
-        execution.TlaCompileOption(kernel_mode="aic", arch_scope="aic.c310"),
-        bitcodes=str(template_bc.resolve()),
-    )
-
-    assert compiler_input != mlir_path
-    assert bitcodes == str(template_bc.resolve())
-    assert "hivm.aic_bitcode" in compiler_input.read_text()
-    assert "hivm.aic_bitcode" not in mlir_path.read_text()
+    with ir.Context() as context:
+        load_tla_dialect(context)
+        context.allow_unregistered_dialects = True
+        module = ir.Module.parse("module {}")
+        path = tmp_path / "lowered.mlir"
+        path.write_text(str(module))
+        bc = tmp_path / "meta_op.aic.print.c310.bc"
+        bc.write_bytes(b"bc")
+        metadata = KernelRuntimeMetadata(
+            "kernel",
+            kernel_mode="aic",
+            uses_scalar_print=True,
+            print_argument_layout=("user", "fifo"),
+        )
+        compiler_input, bitcodes = execution._create_stamped_hivmc_input(
+            path, module, metadata, bitcodes=str(bc)
+        )
+        assert compiler_input != path
+        assert bitcodes == str(bc)
+        assert path.read_text() == "module {\n}\n"
+        assert compiler_input.read_text() != path.read_text()
 
 
 @pytest.mark.parametrize(
@@ -776,12 +805,12 @@ def test_prepare_hivmc_input_stamps_only_debug_print_mlir(tmp_path) -> None:
     ids=("ordinary", "scalar-print", "tensor-print", "local-memory"),
 )
 def test_select_bc_aggregate_variant(workspace_attr, expected) -> None:
-    lowered = (
-        f"module {{ func.func @kernel(%workspace: i64 {{{workspace_attr}}}) }}"
-        if workspace_attr
-        else "module { func.func @kernel() }"
+    metadata = KernelRuntimeMetadata(
+        "kernel",
+        uses_scalar_print=workspace_attr == "tla.debug_print.workspace",
+        uses_tensor_print=workspace_attr == "tla.print_tensor.workspace",
+        uses_debug_tunnel=workspace_attr == "tla.debug_tunnel.state",
     )
-    metadata = execution._analyze_artifact_static_metadata("module {}", lowered)
 
     assert execution._select_bc_aggregate_variant(metadata) == expected
 
@@ -800,40 +829,41 @@ def test_prepare_hivmc_input_rejects_normal_aggregate_for_tensor_print(tmp_path)
     ):
         execution._create_stamped_hivmc_input(
             mlir_path,
-            execution.TlaCompileOption(kernel_mode="aiv", arch_scope="aiv.c310"),
+            None,
+            KernelRuntimeMetadata(
+                "kernel", uses_tensor_print=True, print_helper_core="aiv"
+            ),
             bitcodes=str(normal_bc),
         )
 
 
 def test_prepare_hivmc_input_keeps_selected_helpers_for_debug_tunnel(
     monkeypatch, tmp_path
-) -> None:
-    mlir_path = tmp_path / "lowered.mlir"
-    mlir_path.write_text(
-        "module { func.func @kernel(%state: i64 {tla.debug_tunnel.state}) }"
-    )
+):
+    path = tmp_path / "lowered.mlir"
     selected = str(tmp_path / "meta_op.aic.print.c310.bc")
+    module = types.SimpleNamespace(
+        operation=types.SimpleNamespace(get_asm=lambda **kwargs: "module {}")
+    )
     stamped = []
     monkeypatch.setattr(
         execution,
         "_stamp_hivm_template_bitcode_attrs",
-        lambda path, paths: stamped.append((path, paths)),
+        lambda mod, paths: stamped.append((mod, paths)),
     )
     monkeypatch.setattr(
         execution,
         "_get_bc_paths",
-        lambda *_args, **_kwargs: pytest.fail("selected helpers must not be resolved again"),
+        lambda *args, **kwargs: pytest.fail("must reuse selected helpers"),
     )
-
     compiler_input, bitcodes = execution._create_stamped_hivmc_input(
-        mlir_path,
-        execution.TlaCompileOption(kernel_mode="aic", arch_scope="aic.c310"),
+        path,
+        module,
+        KernelRuntimeMetadata("kernel", uses_debug_tunnel=True),
         bitcodes=selected,
     )
-
-    assert compiler_input != mlir_path
-    assert bitcodes == selected
-    assert stamped == [(compiler_input, selected)]
+    assert compiler_input != path and bitcodes == selected
+    assert stamped == [(module, selected)]
 
 
 def test_generated_kernel_bridge_lowers_live_module(monkeypatch, tmp_path) -> None:
@@ -863,6 +893,7 @@ def test_generated_kernel_bridge_lowers_live_module(monkeypatch, tmp_path) -> No
         return compiler_bridge.TlaLoweringResult(
             "module { func.func @zero_arg_kernel() }\n",
             kernel_abi=_zero_arg_kernel_abi(),
+            runtime_metadata=KernelRuntimeMetadata("zero_arg_kernel"),
         )
 
     monkeypatch.setattr(
@@ -983,6 +1014,7 @@ def test_force_recompile_refreshes_launched_artifact_in_memory_cache(
         lambda *_args, **_kwargs: compiler_bridge.TlaLoweringResult(
             "module { func.func @zero_arg_kernel() }\n",
             kernel_abi=_zero_arg_kernel_abi(),
+            runtime_metadata=KernelRuntimeMetadata("zero_arg_kernel"),
         ),
     )
 
@@ -1152,6 +1184,7 @@ def test_cache_hit_preserves_recursive_tree_and_launches_same_payload(
         lambda *_args, **_kwargs: compiler_bridge.TlaLoweringResult(
             "module { func.func @aggregate_kernel(!llvm.ptr, i32) }\n",
             kernel_abi=layout,
+            runtime_metadata=KernelRuntimeMetadata(layout.entrypoint),
         ),
     )
 
@@ -1245,6 +1278,7 @@ def test_cache_hits_ignore_helper_manifest_records(
         lambda *_args, **_kwargs: compiler_bridge.TlaLoweringResult(
             "module { func.func @zero_arg_kernel() }",
             kernel_abi=_zero_arg_kernel_abi(),
+            runtime_metadata=KernelRuntimeMetadata("zero_arg_kernel"),
         ),
     )
     monkeypatch.setattr(
@@ -1326,6 +1360,7 @@ def test_compile_rejects_invalid_lowering_before_hivmc(
         lambda *_args, **_kwargs: compiler_bridge.TlaLoweringResult(
             lowered_mlir,
             kernel_abi=kernel_abi,
+            runtime_metadata=KernelRuntimeMetadata("zero_arg_kernel"),
         ),
     )
     monkeypatch.setattr(
@@ -1385,6 +1420,7 @@ def test_lower_tlair_module_to_mlir_uses_typed_extension(monkeypatch) -> None:
             return {
                 "lowered_mlir": "module { func.func @zero_arg_kernel() }\n",
                 "pass_ir_dump": "after-pass-dump",
+                "runtime_metadata": KernelRuntimeMetadata("zero_arg_kernel").to_dict(),
                 "diagnostics": [
                     {
                         "severity": "warning",
@@ -2093,17 +2129,12 @@ def test_run_tla_lowering_to_mlir_preserves_typed_failure_without_cli_fallback(
     assert exc_info.value.diagnostics == (diagnostic,)
 
 
-def test_resolve_compile_option_from_lowered_mlir_updates_kernel_mode() -> None:
-    compile_option = execution.TlaCompileOption()
-
-    updated = execution._resolve_compile_option_from_lowered_mlir(
-        compile_option,
-        "module { func.func @kernel() { vector.transfer_read %arg0[%c0], %cst : memref<1xf32>, vector<1xf32> } }",
-        has_logical_mixed_handoff=False,
+def test_resolve_compile_option_from_metadata_updates_kernel_mode():
+    updated = execution._resolve_compile_option_from_metadata(
+        execution.TlaCompileOption(), KernelRuntimeMetadata("kernel", kernel_mode="aic")
     )
-
-    assert updated.kernel_mode == "aiv"
-    assert updated.arch_scope == "aiv.c310"
+    assert updated.kernel_mode == "aic"
+    assert updated.arch_scope == "aic.c310"
 
 
 def test_build_hivmc_a5_command_links_template_bitcode_for_aic(tmp_path) -> None:
@@ -2232,131 +2263,77 @@ def _debug_kernel_abi(launch_args, *, entrypoint: str):
     )
 
 
-def _prepared_test_compiled_function(
-    **compiled_fields,
-) -> jit_executor_mod.JitCompiledFunction:
+def _prepared_test_compiled_function(**compiled_fields):
     compiled_fields = dict(compiled_fields)
-    compile_option = compiled_fields.pop("compile_option", None)
-    kernel_mode = compiled_fields.pop("kernel_mode", None)
-    if compile_option is None:
-        kernel_mode = kernel_mode or "aiv"
-        core_type = "aic" if kernel_mode == "aic" else "aiv"
-        compile_option = execution.TlaCompileOption(
-            kernel_mode=kernel_mode,
-            arch_scope=f"{core_type}.c310",
-        )
-    tlair_mlir = compiled_fields.pop("tlair_mlir")
-    lowered_llvm = compiled_fields.pop("lowered_llvm")
-    entrypoint = compiled_fields.pop("entrypoint")
-    kernel_abi = compiled_fields.pop("kernel_abi")
+    option = compiled_fields.pop("compile_option", None)
+    mode = compiled_fields.pop("kernel_mode", "aiv")
+    option = option or execution.TlaCompileOption(kernel_mode=mode)
+    entrypoint = compiled_fields["entrypoint"]
+    legacy = compiled_fields.pop("legacy_print", {})
+    packer = execution._prepare_abi_packer(
+        compiled_fields["kernel_abi"], expected_entrypoint=entrypoint
+    )
     pass_ir_dump = compiled_fields.pop("pass_ir_dump", "")
-    metadata = execution._analyze_artifact_static_metadata(tlair_mlir, lowered_llvm)
-    expected_entrypoint = (
-        metadata.logical_mixed_handoff.entrypoint
-        if metadata.logical_mixed_handoff is not None
-        else entrypoint
-    )
-    abi_packer = execution._prepare_abi_packer(
-        kernel_abi, expected_entrypoint=expected_entrypoint
-    )
-    return execution._new_jit_compiled_function(
+    result = execution._new_jit_compiled_function(
         **compiled_fields,
-        tlair_mlir=tlair_mlir,
-        lowered_llvm=lowered_llvm,
-        entrypoint=entrypoint,
-        kernel_abi=kernel_abi,
-        abi_packer=abi_packer,
-        uses_scalar_print=metadata.uses_scalar_print,
-        uses_tensor_print=metadata.uses_tensor_print,
-        logical_mixed_handoff=metadata.logical_mixed_handoff,
-        compile_option=compile_option,
+        compile_option=option,
         pass_ir_dump=pass_ir_dump,
+        runtime_metadata=KernelRuntimeMetadata(
+            entrypoint,
+            kernel_mode=option.kernel_mode,
+            aiv_subblock_count=2 if option.kernel_mode == "mix" else 1,
+        ),
+        abi_packer=packer,
+    )
+    # Legacy launch protocol tests construct runtime state directly. Compiler
+    # metadata tests below exercise the new structured contract separately.
+    return jit_executor_mod.JitCompiledFunction(
+        jit_module=replace(result.jit_module, **legacy), artifacts=result.artifacts
     )
 
 
-def _replace_prepared_test_compiled_function(
-    compiled: jit_executor_mod.JitCompiledFunction, **changes
-) -> jit_executor_mod.JitCompiledFunction:
-    fields = {
-        "cache_key": compiled.cache_key,
-        "cache_dir": compiled.artifacts.cache_dir,
-        "tlair_mlir": compiled.artifacts.MLIR,
-        "lowered_llvm": compiled.artifacts.LLVM,
-        "entrypoint": compiled.entrypoint,
-        "compiler_bridge_path": compiled.artifacts.compiler_bridge_path,
-        "hivmc_path": compiled.artifacts.hivmc_path,
-        "kernel_binary_path": compiled.kernel_binary_path,
-        "kernel_abi": compiled.execution_args.kernel_abi,
-        "kernel_mode": compiled.kernel_mode,
-        "pass_ir_dump": compiled.artifacts.PASS_IR_DUMP or "",
-    }
-    fields.update(changes)
-    return _prepared_test_compiled_function(**fields)
+def _replace_prepared_test_compiled_function(compiled, **changes):
+    option = changes.pop("compile_option", None)
+    if option is not None:
+        changes["kernel_mode"] = option.kernel_mode
+        changes["is_mixed"] = option.kernel_mode == "mix"
+        changes["aiv_subblock_count"] = 2 if option.kernel_mode == "mix" else 1
+        if compiled.jit_module.uses_tensor_print and option.kernel_mode != "mix":
+            changes["print_helper_core"] = option.kernel_mode
+    return jit_executor_mod.JitCompiledFunction(
+        jit_module=replace(compiled.jit_module, **changes), artifacts=compiled.artifacts
+    )
 
 
-def _debug_print_artifact(
-    tmp_path, *, entrypoint: str = "debug", launch_args=(tla.Int32(7),)
-):
+def _debug_print_artifact(tmp_path, *, entrypoint="debug", launch_args=(tla.Int32(7),)):
     return _prepared_test_compiled_function(
         cache_key="cache",
         cache_dir=tmp_path,
-        tlair_mlir="module {}",
-        lowered_llvm=(
-            f"module {{ func.func @{entrypoint}(%arg0: i32, "
-            "%arg1: i64 {tla.debug_print.workspace}) }"
-        ),
+        tlair_mlir="",
+        lowered_llvm="",
         entrypoint=entrypoint,
         compiler_bridge_path=None,
         hivmc_path=tmp_path / "hivmc-a5",
         kernel_binary_path=tmp_path / "kernel.o",
         kernel_abi=_debug_kernel_abi(launch_args, entrypoint=entrypoint),
+        legacy_print={"uses_scalar_print": True},
     )
 
 
 def _print_tensor_artifact(
     tmp_path,
     *,
-    entrypoint: str = "dump",
-    shape: tuple[int, ...] = (4, 4),
-    storage: str = "gm",
-    static_length: int | None = None,
-    mixed: bool = False,
+    entrypoint="dump",
+    shape=(4, 4),
+    storage="gm",
+    static_length=None,
+    mixed=False,
 ):
-    rendered_shape = ", ".join(str(extent) for extent in shape)
-    length_attribute = (
-        f"length = {static_length} : i64, " if static_length is not None else ""
-    )
     return _prepared_test_compiled_function(
         cache_key="cache",
         cache_dir=tmp_path,
-        tlair_mlir=(
-            'module { "tla.func"() ({ "tla.print_tensor"(%value, %length) '
-            f"<{{{length_attribute}shape = array<i64: {rendered_shape}>}}> : "
-            f"(!tla.tensor<!tla.ptr<f32, {storage}, 4>>, i64) -> () "
-            '"tla.return"() : () -> () '
-            "}) {function_type = () -> (), "
-            f'sym_name = "{entrypoint}"}} : () -> () }}'
-        ),
-        lowered_llvm=(
-            (
-                "module {\n"
-                "func.func private @_mlir_ciface_tla_print_tensor_ub_f32()\n"
-                f"func.func @{entrypoint}_mix_aic(%value: i64, "
-                "%workspace: i64 {tla.print_tensor.workspace}) "
-                "{ return }\n"
-                f"func.func @{entrypoint}_mix_aiv(%value: i64, "
-                "%workspace: i64 {tla.print_tensor.workspace}) {\n"
-                "call @_mlir_ciface_tla_print_tensor_ub_f32() : () -> ()\n"
-                "return\n"
-                "}\n"
-                "}"
-            )
-            if mixed
-            else (
-                f"module {{ func.func @{entrypoint}(%workspace: i64 "
-                "{tla.print_tensor.workspace}, %value: i64) }"
-            )
-        ),
+        tlair_mlir="",
+        lowered_llvm="",
         entrypoint=entrypoint,
         compiler_bridge_path=None,
         hivmc_path=tmp_path / "hivmc-a5",
@@ -2366,26 +2343,34 @@ def _print_tensor_artifact(
             total_size=8,
             entrypoint=entrypoint,
         ),
+        kernel_mode="mix" if mixed else "aiv",
+        legacy_print={
+            "uses_tensor_print": True,
+            "print_metadata": (
+                PrintTensorMetadata(
+                    shape,
+                    static_length,
+                    "f32",
+                    storage.upper(),
+                    dynamic_execution=static_length is None,
+                ),
+            ),
+            "print_helper_core": "aiv",
+            "print_tensor_position": storage.upper()
+            if storage in {"l1", "l0c"}
+            else None,
+        },
     )
 
 
-def _two_print_tensor_artifact(tmp_path, *, storage: str = "gm"):
+def _two_print_tensor_artifact(tmp_path, *, storage="gm"):
     artifact = _print_tensor_artifact(tmp_path, shape=(2, 2), storage=storage)
-    first = (
-        '%length0 = "arith.constant"() <{value = 4 : i64}> : () -> i64 '
-        '"tla.print_tensor"(%value, %length0) '
-        "<{shape = array<i64: 2, 2>}> : "
-        f"(!tla.tensor<!tla.ptr<f32, {storage}, 4>>, i64) -> ()"
-    )
-    second = (
-        '%length1 = "arith.constant"() <{value = 2 : i64}> : () -> i64 '
-        '"tla.print_tensor"(%value, %length1) '
-        "<{shape = array<i64: 2, 2>}> : "
-        f"(!tla.tensor<!tla.ptr<f32, {storage}, 4>>, i64) -> ()"
-    )
     return _replace_prepared_test_compiled_function(
         artifact,
-        tlair_mlir=f"module {{ func.func @dump() {{ {first} {second} }} }}",
+        print_metadata=tuple(
+            PrintTensorMetadata((2, 2), length, "f32", storage.upper(), call=index)
+            for index, length in enumerate((4, 2))
+        ),
     )
 
 
@@ -2888,24 +2873,30 @@ def test_print_tensor_workspace_uses_fixed_one_mib_core_records(
         )
 
 
-def test_mixed_aiv_print_tensor_capacity_counts_both_subblocks(
+@pytest.mark.parametrize("subblocks", [1, 2])
+def test_mixed_aiv_print_tensor_capacity_counts_subblocks(
     tmp_path,
+    subblocks,
 ) -> None:
     artifact = _print_tensor_artifact(tmp_path, storage="ub", mixed=True)
+    artifact = _replace_prepared_test_compiled_function(
+        artifact, aiv_subblock_count=subblocks
+    )
+    limit = execution._PRINT_TENSOR_CORE_RECORDS // subblocks
     accepted = _launch_and_capture(
         artifact=artifact,
         compile_option=execution.TlaCompileOption(kernel_mode="mix"),
         launch_args=[_TypedPointer(0x1000)],
-        block_num=execution._PRINT_TENSOR_CORE_RECORDS // 2,
+        block_num=limit,
     )
 
-    assert accepted.block_num == 54
+    assert accepted.block_num == limit
     with pytest.raises(execution.TlaExecutionError, match="core records"):
         _launch_and_capture(
             artifact=artifact,
             compile_option=execution.TlaCompileOption(kernel_mode="mix"),
             launch_args=[_TypedPointer(0x1000)],
-            block_num=55,
+            block_num=limit + 1,
         )
 
 
@@ -2915,13 +2906,9 @@ def test_print_tensor_capacity_rejects_static_calls_exceeding_each_core_record(
     artifact = _two_print_tensor_artifact(tmp_path)
     artifact = _replace_prepared_test_compiled_function(
         artifact,
-        tlair_mlir=artifact.artifacts.MLIR.replace(
-            "value = 4 : i64", "value = 262112 : i64"
-        )
-        .replace("value = 2 : i64", "value = 262112 : i64")
-        .replace(
-            "shape = array<i64: 2, 2>",
-            "shape = array<i64: 262112>",
+        print_metadata=tuple(
+            replace(record, shape=(262112,), count=262112)
+            for record in artifact.jit_module.print_metadata
         ),
     )
 
@@ -2940,15 +2927,16 @@ def test_print_tensor_capacity_allows_partial_dynamic_output(
     artifact = _two_print_tensor_artifact(tmp_path)
     artifact = _replace_prepared_test_compiled_function(
         artifact,
-        tlair_mlir=artifact.artifacts.MLIR.replace(
-            '%length0 = "arith.constant"() <{value = 4 : i64}> : () -> i64 ',
-            "",
-            1,
+        print_metadata=(
+            replace(
+                artifact.jit_module.print_metadata[0],
+                count=None,
+                dynamic_execution=True,
+            ),
+            artifact.jit_module.print_metadata[1],
         ),
     )
-    metadata = execution._print_tensor_static_metadata_records(
-        artifact.artifacts.MLIR, entrypoint=artifact.entrypoint
-    )
+    metadata = artifact.jit_module.print_metadata
     assert [record.count for record in metadata] == [None, 2]
 
     with pytest.warns(RuntimeWarning, match="cannot be validated"):
@@ -2966,15 +2954,12 @@ def test_print_tensor_capacity_warns_for_dynamic_control_flow(tmp_path) -> None:
     artifact = _two_print_tensor_artifact(tmp_path)
     artifact = _replace_prepared_test_compiled_function(
         artifact,
-        tlair_mlir=artifact.artifacts.MLIR.replace(
-            "shape = array<i64: 2, 2>",
-            "shape = array<i64: 2, 2>, dynamic_execution",
-            1,
+        print_metadata=(
+            replace(artifact.jit_module.print_metadata[0], dynamic_execution=True),
+            artifact.jit_module.print_metadata[1],
         ),
     )
-    metadata = execution._print_tensor_static_metadata_records(
-        artifact.artifacts.MLIR, entrypoint=artifact.entrypoint
-    )
+    metadata = artifact.jit_module.print_metadata
     assert metadata[0].dynamic_execution is True
 
     with pytest.warns(RuntimeWarning, match="runtime control flow"):
@@ -2986,104 +2971,6 @@ def test_print_tensor_capacity_warns_for_dynamic_control_flow(tmp_path) -> None:
         )
 
     assert plan.block_num == 1
-
-
-def test_print_tensor_metadata_requires_one_static_shape() -> None:
-    with pytest.raises(execution.TlaExecutionError, match="static shape metadata"):
-        execution._print_tensor_static_metadata_records(
-            "module { func.func @kernel() }"
-        )
-
-
-def test_print_tensor_metadata_reads_generic_tlair_shape() -> None:
-    mlir = (
-        '"tla.print_tensor"(%value, %length) '
-        "<{shape = array<i64: 2, 3>}> : "
-        "(!tla.tensor<!tla.layout<!tla.shape<2,3>, !tla.stride<3,1>, "
-        "!tla.shape<2,3>, RowMajor>, !tla.coord<0,0>, "
-        "!tla.ptr<f32, gm, 4>>, i64) -> ()"
-    )
-
-    assert execution._print_tensor_static_metadata_records(mlir) == (
-        execution._PrintTensorMetadata(
-            shape=(2, 3),
-            count=None,
-            dtype="f32",
-            position="GM",
-            dynamic_execution=True,
-        ),
-    )
-
-
-def test_print_tensor_metadata_reads_ub_storage() -> None:
-    mlir = (
-        '"tla.print_tensor"(%value, %length) '
-        "<{shape = array<i64: 2, 3>}> : "
-        "(!tla.tensor<!tla.layout<!tla.shape<2,3>, !tla.stride<3,1>, "
-        "!tla.shape<2,3>, RowMajor>, !tla.coord<0,0>, "
-        "!tla.ptr<f32, ub, 32>>, i64) -> ()"
-    )
-
-    assert execution._print_tensor_static_metadata_records(mlir) == (
-        execution._PrintTensorMetadata(
-            shape=(2, 3),
-            count=None,
-            dtype="f32",
-            position="UB",
-            dynamic_execution=True,
-        ),
-    )
-
-
-def test_print_tensor_metadata_reads_dynamic_shape_pattern() -> None:
-    mlir = (
-        '"tla.print_tensor"(%value, %length) '
-        "<{shape = array<i64: -1, 4>}> : "
-        "(!tla.tensor<!tla.layout<!tla.shape<?,4>, !tla.stride<4,1>, "
-        "!tla.shape<16,4>, RowMajor>, !tla.coord<0,0>, "
-        "!tla.ptr<f32, gm, 4>>, i64) -> ()"
-    )
-
-    assert execution._print_tensor_static_metadata_records(mlir) == (
-        execution._PrintTensorMetadata(
-            shape=(-1, 4),
-            count=None,
-            dtype="f32",
-            position="GM",
-            dynamic_execution=True,
-        ),
-    )
-
-
-def test_print_tensor_metadata_and_decode_are_scoped_to_second_entrypoint() -> None:
-    first = (
-        '"tla.func"() ({ '
-        '"tla.print_tensor"(%value, %length0) '
-        "<{length = 4 : i64, shape = array<i64: 2, 2>}> : "
-        "(!tla.tensor<!tla.ptr<f32, gm, 4>>, i64) -> () "
-        '"tla.print_tensor"(%value, %length1) '
-        "<{length = 2 : i64, shape = array<i64: 2, 2>}> : "
-        "(!tla.tensor<!tla.ptr<f32, gm, 4>>, i64) -> () "
-        '}) {sym_name = "first"} : () -> ()'
-    )
-    second = (
-        '"tla.func"() ({ '
-        '"tla.print_tensor"(%value, %length) '
-        "<{length = 4 : i64, shape = array<i64: 2, 2>}> : "
-        "(!tla.tensor<!tla.ptr<f32, gm, 4>>, i64) -> () "
-        '}) {sym_name = "second"} : () -> ()'
-    )
-    metadata = execution._print_tensor_static_metadata_records(
-        f"module {{ {first} {second} }}", entrypoint="second"
-    )
-
-    assert metadata == (execution._PrintTensorMetadata((2, 2), 4, "f32", "GM", call=0),)
-    decoded = execution._decode_native_print_tensor_records(
-        _identified_print_tensor_record(call=0),
-        metadata=metadata,
-        block_count=1,
-    )
-    assert decoded[0][0].call == 0
 
 
 @pytest.mark.parametrize("core_type", ("aic", "aiv"))
@@ -3102,19 +2989,8 @@ def test_print_tensor_launch_accepts_multiblock_block_num(tmp_path, core_type) -
 
 
 def test_compiled_function_prepares_print_metadata_once(monkeypatch, tmp_path) -> None:
-    calls: list[str] = []
-    original = execution._print_tensor_static_metadata_records
-
-    def _record_metadata_analysis(*args, **kwargs):
-        calls.append(kwargs["entrypoint"])
-        return original(*args, **kwargs)
-
-    monkeypatch.setattr(
-        execution,
-        "_print_tensor_static_metadata_records",
-        _record_metadata_analysis,
-    )
     compiled = _print_tensor_artifact(tmp_path)
+    metadata = compiled.jit_module.print_metadata
     _install_fake_launch_context(monkeypatch, device=0, stream=0)
     monkeypatch.setattr(execution, "load_binary", lambda **_kwargs: (11, 12))
     monkeypatch.setattr(execution, "launch_kernel", lambda **_kwargs: None)
@@ -3141,7 +3017,7 @@ def test_compiled_function_prepares_print_metadata_once(monkeypatch, tmp_path) -
             stream=0,
         )
 
-    assert calls == ["dump"]
+    assert compiled.jit_module.print_metadata is metadata
 
 
 @pytest.mark.parametrize(
@@ -3207,18 +3083,7 @@ def test_execute_mixed_aic_print_omits_subblock(monkeypatch, tmp_path, capfd) ->
     _install_print_tensor_loader(monkeypatch, _identified_print_tensor_record())
     artifact = _replace_prepared_test_compiled_function(
         _print_tensor_artifact(tmp_path, shape=(2, 2), mixed=True),
-        lowered_llvm=(
-            "module {\n"
-            "func.func private @_mlir_ciface_tla_print_tensor_gm_f32()\n"
-            "func.func @dump_mix_aic(%value: i64, %workspace: i64 "
-            "{tla.print_tensor.workspace}) {\n"
-            "call @_mlir_ciface_tla_print_tensor_gm_f32() : () -> ()\n"
-            "return\n"
-            "}\n"
-            "func.func @dump_mix_aiv(%value: i64, %workspace: i64 "
-            "{tla.print_tensor.workspace}) { return }\n"
-            "}\n"
-        ),
+        print_helper_core="aic",
     )
 
     _execute_kernel_with_new_context(
@@ -4241,6 +4106,7 @@ def test_mixed_handoff_supplies_debug_workspace_without_public_argument(
             'tla.debug_print.workspace}) attributes {mix_mode = "mix"} }'
         ),
         entrypoint="debug_mixed",
+        legacy_print={"uses_scalar_print": True},
         compiler_bridge_path=None,
         hivmc_path=tmp_path / "hivmc-a5",
         kernel_binary_path=tmp_path / "kernel.o",

@@ -293,6 +293,9 @@ class JitModule:
     print_metadata: tuple[Any, ...] | None
     print_helper_core: str | None
     print_tensor_position: str | None = None
+    simt_print_formats: bytes | None = None
+    print_argument_layout: tuple[str, ...] = ()
+    aiv_subblock_count: int = 1
     # UB accounting. ub_bytes is the kernel's requirement; the window is what a
     # SIMT kernel declares at launch, and 0 for a kernel that declares nothing.
     ub_static_bytes: int = 0
@@ -421,35 +424,44 @@ class JitExecutor:
                 block_num,
                 helper_core=module.print_helper_core,
                 mixed=module.is_mixed,
+                aiv_subblock_count=module.aiv_subblock_count,
+                # Tensor-only launches retain their existing static preflight.
+                # Mixed/VF logs have no legacy aggregate metadata and rely on
+                # the device's bounded writer instead.
+                **(
+                    {"bounded": not print_metadata}
+                    if module.print_argument_layout
+                    else {}
+                ),
             )
 
         payload = module.execution_args.generate_launch_payload(args)
-        payload = execution_mod._append_debug_print_workspace_payload(
-            payload, enabled=module.uses_scalar_print
-        )
-        if uses_tensor_print:
-            extension = bytearray(payload)
-            execution_mod._align_payload(extension, execution_mod._POINTER_ABI_SIZE)
-            extension.extend(
-                execution_mod._PRINT_TENSOR_WORKSPACE_SENTINEL.to_bytes(
-                    execution_mod._POINTER_ABI_SIZE,
-                    byteorder="little",
-                    signed=False,
-                )
+        if not module.print_argument_layout:
+            payload = execution_mod._append_debug_print_workspace_payload(
+                payload, enabled=module.uses_scalar_print
             )
-            payload = bytes(extension)
-        if module.print_tensor_position in {"L1", "L0C"}:
-            extension = bytearray(payload)
-            execution_mod._align_payload(extension, execution_mod._POINTER_ABI_SIZE)
-            extension.extend(
-                execution_mod._DEBUG_TUNNEL_STATE_SENTINEL.to_bytes(
-                    execution_mod._POINTER_ABI_SIZE,
-                    byteorder="little",
-                    signed=False,
+            if uses_tensor_print:
+                extension = bytearray(payload)
+                execution_mod._align_payload(extension, execution_mod._POINTER_ABI_SIZE)
+                extension.extend(
+                    execution_mod._PRINT_TENSOR_WORKSPACE_SENTINEL.to_bytes(
+                        execution_mod._POINTER_ABI_SIZE,
+                        byteorder="little",
+                        signed=False,
+                    )
                 )
-            )
-            payload = bytes(extension)
-
+                payload = bytes(extension)
+            if module.print_tensor_position in {"L1", "L0C"}:
+                extension = bytearray(payload)
+                execution_mod._align_payload(extension, execution_mod._POINTER_ABI_SIZE)
+                extension.extend(
+                    execution_mod._DEBUG_TUNNEL_STATE_SENTINEL.to_bytes(
+                        execution_mod._POINTER_ABI_SIZE,
+                        byteorder="little",
+                        signed=False,
+                    )
+                )
+                payload = bytes(extension)
         raw_stream = launch_kwargs.get("stream")
         if raw_stream is None:
             from .runtime.ascend_stream_adapter import current_stream
@@ -471,8 +483,28 @@ class JitExecutor:
                     uses_scalar_print=module.uses_scalar_print,
                     uses_tensor_print=uses_tensor_print,
                     is_mixed=module.is_mixed,
+                    **(
+                        {"aiv_subblock_count": module.aiv_subblock_count}
+                        if module.is_mixed
+                        and (
+                            module.uses_scalar_print
+                            or uses_tensor_print
+                            or module.simt_print_formats is not None
+                        )
+                        else {}
+                    ),
                     print_tensor_position=module.print_tensor_position,
                     device_id=self.device,
+                    **(
+                        {"print_argument_layout": module.print_argument_layout}
+                        if module.print_argument_layout
+                        else {}
+                    ),
+                    **(
+                        {"simt_print_formats": module.simt_print_formats}
+                        if module.simt_print_formats is not None
+                        else {}
+                    ),
                 )
             except execution_mod.TlaRuntimeUnavailableError as exc:
                 from .runtime import ascend as ascend_rt
@@ -496,7 +528,17 @@ class JitExecutor:
                     f"smaller ub=."
                 ) from exc
 
-        if print_metadata is None:
+        # The legacy Tensor-only renderer captures stdout and emits only Tensor
+        # lines. Shared launches already validate each record in the transport;
+        # capturing them here would silently discard scalar and SIMT output.
+        if print_metadata is None or (
+            module.print_argument_layout
+            and (
+                module.uses_scalar_print
+                or module.simt_print_formats is not None
+                or module.print_helper_core == "both"
+            )
+        ):
             launch()
         else:
             native_output = execution_mod._capture_c_stdout(launch)
@@ -506,7 +548,7 @@ class JitExecutor:
             helper_core = module.print_helper_core
             assert helper_core is not None
             expected_subblocks: tuple[int | None, ...] = (
-                (0, 1)
+                tuple(range(module.aiv_subblock_count))
                 if helper_core == "aiv" and module.is_mixed
                 else (0,)
                 if helper_core == "aiv"
@@ -531,6 +573,9 @@ class JitExecutor:
                         subblock=record.subblock,
                     )
                 )
+            for line in native_output.splitlines():
+                if line.startswith("TLA print: output truncated"):
+                    print(line)
 
         return execution_mod.TlaExecutionResult(
             binary_handle=self.binary_handle,

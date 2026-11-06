@@ -24,7 +24,7 @@ module {
 // GM-LABEL: func.func @print_tensor_mixed_gm_mix_aiv(
 // GM-SAME: %arg0: memref<4x4xf32, #hivm.address_space<gm>>, %arg1: i32,
 // GM-SAME: %[[AIV_WORKSPACE:arg[0-9]+]]: i64 {{.*}}hacc.arg_type = #hacc.arg_type<workspace>{{.*}}tla.print_tensor.workspace
-// GM: call @_mlir_ciface_tla_print_tensor_gm_f32(%[[AIV_WORKSPACE]], {{.*}}, {{.*}}, {{.*}}, {{.*}})
+// GM: call @_mlir_ciface_tla_print_tensor_gm_f32_aiv(%[[AIV_WORKSPACE]], {{.*}}, {{.*}}, {{.*}}, {{.*}})
 // GM-NOT: _mlir_ciface_tla_print_tensor_ub_f32
 // GM-NOT: tla.print_tensor
 

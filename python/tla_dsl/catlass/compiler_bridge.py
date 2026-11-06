@@ -9,6 +9,7 @@ from types import ModuleType
 from typing import Any, TYPE_CHECKING, Mapping, Sequence
 
 from . import _tla_type_bridge
+from .compiler_metadata import KernelRuntimeMetadata
 from .frontend_diagnostics import (
     SourceLocation,
     render_code_frame,
@@ -365,6 +366,7 @@ class TlaLoweringResult:
     # follows from ub_bytes: a kernel may have a region and no static
     # allocations, and the base is the high-water mark rounded up.
     ub_dynamic_base: int = -1
+    runtime_metadata: KernelRuntimeMetadata | None = None
 
 
 def _bridge_diagnostic(value: Any) -> BridgeDiagnostic:
@@ -458,6 +460,10 @@ def lower_tlair_module_to_mlir(
             pass_ir_dump=pass_ir_dump,
             input_mlir=input_mlir,
         )
+    if "runtime_metadata" not in result:
+        raise RuntimeError(
+            "Native compiler lacks structured runtime metadata; rebuild the matching DSL native extension."
+        )
     return TlaLoweringResult(
         lowered_mlir=str(result["lowered_mlir"]),
         pass_ir_dump=pass_ir_dump,
@@ -465,6 +471,11 @@ def lower_tlair_module_to_mlir(
         ub_static_bytes=int(result.get("ub_static_bytes", 0)),
         ub_programmable_bytes=int(result.get("ub_programmable_bytes", 0)),
         ub_dynamic_base=int(result.get("ub_dynamic_base", -1)),
+        runtime_metadata=(
+            KernelRuntimeMetadata.from_dict(result["runtime_metadata"])
+            if result["runtime_metadata"] is not None
+            else None
+        ),
     )
 
 

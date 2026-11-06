@@ -1,5 +1,6 @@
 #include "Dialect/Tla/IR/TlaAttrs.h"
 #include "Dialect/Tla/IR/TlaDialect.h"
+#include "Dialect/Tla/IR/TlaOps.h"
 #include "Dialect/Tla/IR/TlaTypes.h"
 #include "Passes.h"
 #include "Passes/TlaSimtUbLimits.h"
@@ -13,6 +14,7 @@
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/Location.h"
+#include "mlir/IR/Matchers.h"
 #include "mlir/Interfaces/FunctionInterfaces.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
@@ -26,6 +28,7 @@
 #include "llvm/Support/raw_ostream.h"
 
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "bishengir/Dialect/HACC/IR/HACC.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -727,7 +730,8 @@ std::optional<py::dict> buildKernelAbi(ModuleOp module, const KernelPointerProve
         }
         bool anyMemrefField = false;
         for (auto [index, type] : llvm::enumerate(argTypes)) {
-            if (function.getArgAttr(index, "tla.debug_print.workspace") ||
+            if (function.getArgAttr(index, "tla.simt_print.workspace") ||
+                function.getArgAttr(index, "tla.debug_print.workspace") ||
                 function.getArgAttr(index, "tla.print_tensor.workspace") ||
                 function.getArgAttr(index, "tla.debug_tunnel.state"))
                 continue;
@@ -823,6 +827,154 @@ std::optional<py::dict> buildKernelAbi(ModuleOp module, const KernelPointerProve
     return layouts.front();
 }
 
+// Capture source facts before lowering erases PrintTensorOp. VF records use
+// their own self-describing protocol and must not enter the legacy FIFO bound.
+py::dict collectPrintTensorMetadata(ModuleOp module)
+{
+    py::dict records;
+    module.walk([&](::tla::FuncOp function) {
+        py::list tensors;
+        function.walk([&](::tla::PrintTensorOp op) {
+            if (op->getParentOfType<::tla::VecFuncOp>())
+                return;
+            auto ptr = op.getValue().getType().getPtr();
+            py::dict tensor;
+            tensor["shape"] = std::vector<int64_t>(op.getShape().begin(), op.getShape().end());
+            APInt length;
+            bool constant = matchPattern(op.getLength(), m_ConstantInt(&length));
+            tensor["count"] = constant ? py::cast(length.getSExtValue()) : py::none();
+            tensor["dtype"] = printType(ptr.getPointee());
+            tensor["position"] = stringifyAddressSpace(ptr.getAddrspace()).str();
+            tensor["call"] = py::len(tensors);
+            tensor["dynamic_execution"] = !constant || op->hasAttr("dynamic_execution") ||
+                                          llvm::any_of(op.getShape(), [](int64_t extent) { return extent < 0; });
+            tensors.append(tensor);
+        });
+        records[py::str(function.getSymName().str())] = tensors;
+    });
+    return records;
+}
+
+py::dict buildRuntimeMetadata(ModuleOp module, StringRef entrypoint, const py::dict& sourceTensors)
+{
+    py::dict result;
+    result["schema_version"] = 2;
+    result["entrypoint"] = entrypoint.str();
+    auto target = module->getAttrOfType<hacc::TargetAttr>(hacc::TargetAttr::name);
+    if (!target || target.getTarget().getValue() != "Ascend950PR_9589")
+        throw std::runtime_error("Unsupported or missing kernel target in runtime metadata.");
+    result["target_arch"] = "c310";
+
+    SmallVector<func::FuncOp> entries;
+    for (auto function : module.getOps<func::FuncOp>())
+        if (!function.isDeclaration() && function->hasAttr("hacc.entry"))
+            entries.push_back(function);
+    bool mixed = entries.size() == 2;
+    int32_t aivSubblockCount = 1;
+    bool scalar = false, tensor = false, simt = false, tunnel = false;
+    SmallVector<StringRef> layout;
+    std::string mode;
+    for (auto [index, function] : llvm::enumerate(entries)) {
+        auto core = function->getAttrOfType<hivm::TFuncCoreTypeAttr>(hivm::TFuncCoreTypeAttr::name);
+        if (!core ||
+            (core.getFuncCoreType() != hivm::TFuncCoreType::AIC && core.getFuncCoreType() != hivm::TFuncCoreType::AIV))
+            throw std::runtime_error("Missing concrete entrypoint core type in runtime metadata.");
+        mode = core.getFuncCoreType() == hivm::TFuncCoreType::AIC ? "aic" : "aiv";
+        if (mixed) {
+            auto ratio = function->getAttrOfType<hivm::TCoreRatioAttr>(hivm::TCoreRatioAttr::name);
+            if (!ratio || ratio.getCube() != 1 || (ratio.getVector() != 1 && ratio.getVector() != 2))
+                throw std::runtime_error("Missing or unsupported MIX core ratio in runtime metadata.");
+            if (index != 0 && aivSubblockCount != ratio.getVector())
+                throw std::runtime_error("Mixed entrypoints have different core ratios.");
+            aivSubblockCount = ratio.getVector();
+        }
+        SmallVector<StringRef> functionLayout;
+        if (auto attr = function->getAttrOfType<StringAttr>("tla.print.layout"))
+            attr.getValue().split(functionLayout, ',');
+        if (index == 0)
+            layout = functionLayout;
+        else if (layout != functionLayout)
+            throw std::runtime_error("Mixed entrypoints have different print context layouts.");
+        SmallVector<StringRef> actualLayout;
+        for (unsigned argument = 0; argument < function.getNumArguments(); ++argument) {
+            StringRef role = "user";
+            if (function.getArgAttr(argument, "tla.debug_print.workspace") ||
+                function.getArgAttr(argument, "tla.print_tensor.workspace"))
+                role = "fifo";
+            else if (function.getArgAttr(argument, "tla.simt_print.workspace"))
+                role = "simt";
+            else if (function.getArgAttr(argument, "tla.debug_tunnel.state"))
+                role = "tunnel";
+            if (actualLayout.empty() || role != "user" || actualLayout.back() != "user")
+                actualLayout.push_back(role);
+            scalar |= static_cast<bool>(function.getArgAttr(argument, "tla.debug_print.workspace"));
+            tensor |= static_cast<bool>(function.getArgAttr(argument, "tla.print_tensor.workspace"));
+            simt |= static_cast<bool>(function.getArgAttr(argument, "tla.simt_print.workspace"));
+            tunnel |= static_cast<bool>(function.getArgAttr(argument, "tla.debug_tunnel.state"));
+        }
+        // Zero user arguments still have a logical insertion point in layout.
+        if (!functionLayout.empty()) {
+            if (!llvm::is_contained(actualLayout, "user")) {
+                auto user = llvm::find(functionLayout, "user");
+                if (user != functionLayout.end()) {
+                    auto index = user - functionLayout.begin();
+                    if (static_cast<size_t>(index) > actualLayout.size())
+                        throw std::runtime_error("Invalid user insertion point in print context layout.");
+                    actualLayout.insert(actualLayout.begin() + index, "user");
+                }
+            }
+            if (actualLayout != functionLayout)
+                throw std::runtime_error("Print context layout does not match the entrypoint arguments.");
+        }
+    }
+    result["kernel_mode"] = mixed ? "mix" : mode;
+    result["aiv_subblock_count"] = aivSubblockCount;
+    result["uses_scalar_print"] = scalar;
+    result["uses_tensor_print"] = tensor;
+    result["uses_debug_tunnel"] = tunnel;
+    py::list contextLayout;
+    for (StringRef role : layout)
+        contextLayout.append(role.str());
+    result["print_argument_layout"] = contextLayout;
+
+    bool aicTensor = false, aivTensor = false, l1 = false, l0c = false, simtScalar = false;
+    module.walk([&](func::CallOp call) {
+        StringRef callee = call.getCallee();
+        callee.consume_front("_mlir_ciface_");
+        simtScalar |= callee == "tla_simt_printf";
+        if (!callee.consume_front("tla_print_tensor_"))
+            return;
+        auto function = call->getParentOfType<func::FuncOp>();
+        auto core = function->getAttrOfType<hivm::TFuncCoreTypeAttr>(hivm::TFuncCoreTypeAttr::name);
+        if (!core)
+            throw std::runtime_error("Tensor print helper has no enclosing core type.");
+        aicTensor |= core.getFuncCoreType() == hivm::TFuncCoreType::AIC;
+        aivTensor |= core.getFuncCoreType() == hivm::TFuncCoreType::AIV;
+        l1 |= callee.starts_with("l1_");
+        l0c |= callee.starts_with("l0c_");
+    });
+    result["print_helper_core"] = aicTensor && aivTensor ? py::cast("both") :
+                                  aicTensor              ? py::cast("aic") :
+                                  aivTensor              ? py::cast("aiv") :
+                                                           py::none();
+    py::list positions;
+    if (l1)
+        positions.append("L1");
+    if (l0c)
+        positions.append("L0C");
+    result["local_print_positions"] = positions;
+    auto formats = module->getAttrOfType<StringAttr>("tla.simt_print.formats");
+    if (simtScalar && !formats)
+        throw std::runtime_error("SIMT scalar print format metadata is missing.");
+    result["simt_print_formats"] = simt ? py::cast(formats ? formats.getValue().str() : "") : py::none();
+    bool sharedRecords = scalar || simt || (aicTensor && aivTensor);
+    auto key = py::str(entrypoint.str());
+    result["tensor_records"] = py::list();
+    if (tensor && !sharedRecords && sourceTensors.contains(key))
+        result["tensor_records"] = sourceTensors[key];
+    return result;
+}
+
 py::dict lowerToMlir(
     MlirModule cModule, std::vector<std::string> printBefore, std::vector<std::string> printAfter, bool printBeforeAll,
     bool printAfterAll)
@@ -837,6 +989,7 @@ py::dict lowerToMlir(
     PassManager tlaPm(context);
     ::tla::tools::buildTlaCompilePassManagers(*context, tlaPm);
     KernelPointerProvenance pointerProvenance = collectKernelPointerProvenance(module);
+    py::dict sourceTensors = collectPrintTensorMetadata(module);
 
     std::string passDump;
     llvm::raw_string_ostream passDumpStream(passDump);
@@ -899,10 +1052,14 @@ py::dict lowerToMlir(
     // collection is meaningful only for successful lowering and must never
     // replace the compiler diagnostic that caused the failure.
     if (success) {
-        if (auto kernelAbi = buildKernelAbi(module, pointerProvenance))
+        if (auto kernelAbi = buildKernelAbi(module, pointerProvenance)) {
             result["kernel_abi"] = *kernelAbi;
-        else
+            result["runtime_metadata"] =
+                buildRuntimeMetadata(module, py::cast<std::string>((*kernelAbi)["entrypoint"]), sourceTensors);
+        } else {
             result["kernel_abi"] = py::none();
+            result["runtime_metadata"] = py::none();
+        }
     } else {
         result["kernel_abi"] = py::none();
     }

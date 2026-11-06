@@ -62,8 +62,9 @@ CATLASS_DSL_FORCE_RECOMPILE=1 python print_tensor.py --run --storage ub --case d
 Native AIC L1 printing uses CANN's C310 debug bus and opens the required
 DebugTunnel automatically. The battery covers both layouts, all dtypes,
 aligned offsets, repeated calls, cache reuse, and a two-core block-dependent
-case. The host state follows CANN 9.1's private ABI; other releases require
-separate validation.
+case. The host state depends on CANN's private DebugTunnel ABI and has been
+validated with CANN 9.2.0. A CANN upgrade requires checking that ABI and validating
+L1/L0C printing again.
 
 Run it with `--storage l1 --layout zn --arch-scope aic.c310`.
 
@@ -86,7 +87,7 @@ Run it with `--storage l0c --dtype f32 --arch-scope aic.c310`.
 | Length | Static or integer-SSA 1–262,112 element prefix, no greater than runtime tensor size | Zero, negative, over 262,112, or over tensor size |
 | Dynamic control flow | GM print sites under runtime `if` and `tla.range` | multi-block or dynamic-shape variants of this example case |
 | Layout | GM/UB TLA layouts; L1 `zN [M,C0]` and `nZ [C0,N]`, where C0 is 32 bytes; one aligned 16x16 `L0Clayout` tile | Other L1/L0C layouts or partial L0C tiles |
-| Baseline | Ascend950PR, CANN 9.1.0 or later | Other device/CANN combinations are not declared |
+| Baseline | Ascend 950PR, validated with CANN 9.2.0 | Other device/CANN combinations are not declared |
 
 `tla.print(value, length, /)` derives dtype and the concrete runtime shape from
 the tensor. Length is an element count, not a byte count, and may be a Python

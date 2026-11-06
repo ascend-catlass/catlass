@@ -112,4 +112,4 @@ nav_order: 5
 | [`tla.arch.get_capacity_in_bytes`](language/system.md#tlaarchget_capacity_in_bytes) | 查询编译目标的片上存储容量。 | Host 或 Kernel；作为编译期常量折叠。仅限片上地址空间；UB 可用量仍受编译器预留影响。 |
 | [`tla.arch.get_dyn_ub`](language/system.md#tlaarchget_dyn_ub) | 获取启动时指定大小的动态 UB pointer。 | Kernel；每 kernel 至多一个区域。启动传 `ub=` 指定字节数；kernel 内尺寸不做边界检查。 |
 | [`tla.TlaJitFunction.dump_mlir`](runtime/compile_launch.md#tlatlajitfunctiondump_mlir) | 返回前端 TLA IR，不构建或启动二进制。 | Host；类型样本规则与编译相同。 |
-| [`tla.print`](language/debug.md#tlaprint) | 打印标量或受支持的物理 tensor 前缀。 | Kernel / Cube 或 Vector；SIMT 内不可用。受位置、layout、dtype、前缀与输出长度限制。 |
+| [`tla.print`](language/debug.md#tlaprint) | 打印标量、格式化字符串或 Tensor／寄存器前缀。 | Kernel / Cube 或 Vector，包括 `vec.func`。SIMD：标量／寄存器／UB；SIMT：标量／GM／UB。dtype、长度和同步规则见 API 说明。 |

@@ -91,7 +91,9 @@ _MODE_CORE_TYPES: dict[str, list[str]] = {
 }
 
 _BC_AGGREGATE_VARIANTS = ("normal", "print")
-_PRINT_COMPONENTS = frozenset({"printf", "print_tensor", "debug_tunnel"})
+_PRINT_COMPONENTS = frozenset(
+    {"printf", "print_tensor", "debug_tunnel", "vf_print", "simt_print"}
+)
 
 
 def _meta_op_filename(core_type: str, cce_arch: str, variant: str) -> str:
@@ -231,7 +233,7 @@ def _ccec_id(ccec: Path) -> str:
 def compute_cache_key(ccec: Path) -> str:
     """Cache key = catlass version ID + ccec identity."""
     return hashlib.sha256(
-        f"{_catlass_version_id()}:{_ccec_id(ccec)}".encode()
+        f"{_catlass_version_id()}:{_ccec_id(ccec)}:shared-print-v3".encode()
     ).hexdigest()[:16]
 
 
@@ -266,6 +268,17 @@ def compile_stub(cpp: Path, out_bc: Path, core_type: str, cfg: BCConfig) -> None
 
     if cfg.paths.bc_include.is_dir():
         args.append(f"-I{cfg.paths.bc_include}")
+
+    if cpp.name in {"vf_print.cpp", "simt_print.cpp"}:
+        asc = cfg.toolchain.ascend_home / "asc"
+        if (asc / "include" / "utils" / "debug" / "asc_printf.h").is_file():
+            args.extend([f"-I{asc / 'include'}", f"-I{asc}"])
+        # VF helpers contain scalar accesses to UB. CANN's early optimization
+        # translates those accesses for the enclosing execution unit; at this
+        # point the external helper is not yet in its final vector function.
+        # Defer those passes until the kernel links and inlines the helper.
+        # The final kernel still receives the normal O2 optimization pipeline.
+        args.extend(["-Xclang", "-disable-llvm-passes"])
 
     if aicore_arch is not None:
         args.extend(["--cce-enable-print", f"--cce-aicore-arch={aicore_arch}"])

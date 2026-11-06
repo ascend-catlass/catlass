@@ -444,11 +444,9 @@ def test_mixed_handoff_uses_logical_abi_count_for_dynamic_gm(
         ') attributes {mix_mode = "mix"} }'
     )
     kernel_abi = _two_tensor_memref_field_layout()
-    metadata = execution._analyze_artifact_static_metadata("module {}", lowered)
-    assert metadata.logical_mixed_handoff is not None
+    metadata = compiler_bridge.KernelRuntimeMetadata("basic_mixed", kernel_mode="mix")
     abi_packer = execution._prepare_abi_packer(
-        kernel_abi,
-        expected_entrypoint=metadata.logical_mixed_handoff.entrypoint,
+        kernel_abi, expected_entrypoint=metadata.entrypoint
     )
     compile_option = execution.TlaCompileOption(kernel_mode="mix")
     compiled = execution._new_jit_compiled_function(
@@ -462,9 +460,7 @@ def test_mixed_handoff_uses_logical_abi_count_for_dynamic_gm(
         kernel_binary_path=tmp_path / "kernel.o",
         kernel_abi=kernel_abi,
         abi_packer=abi_packer,
-        uses_scalar_print=metadata.uses_scalar_print,
-        uses_tensor_print=metadata.uses_tensor_print,
-        logical_mixed_handoff=metadata.logical_mixed_handoff,
+        runtime_metadata=metadata,
         compile_option=compile_option,
         pass_ir_dump="",
     )

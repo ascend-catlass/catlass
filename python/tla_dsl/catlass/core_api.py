@@ -3910,10 +3910,10 @@ def _emit_tensor_print(
 ) -> None:
     """Dump a physical prefix of one rank-1/rank-2 supported GM, UB, L1, or L0C tensor.
 
-    The logical tensor shape is display metadata; values are read contiguously
-    from the effective physical address without gathering through strides.
-    Static or runtime shape leaves and static or SSA lengths are supported in
-    AIC-only or AIV-only C310 kernels across one or more launch blocks.
+    Read contiguously from the view's starting address without following strides.
+    The view shape describes the log and also bounds the printed element count.
+    Placement, shape and length checks apply to outer, SIMD and SIMT calls;
+    SIMT requires static shapes.
     """
     if _runtime._current_frontend_state() is None:
         _op_error("print", "tensor printing is only available in lowered Tla IR")
@@ -3932,6 +3932,9 @@ def _emit_tensor_print(
         _op_error("print", "expected a TLA tensor")
     descriptor = _tla_tensor_type_for_mlir_value(value)
     addrspace = descriptor.addrspace.lower()
+    in_vf = _runtime._has_enclosing_region("vec.func")
+    if in_vf and not _runtime._in_simt_vec_func() and addrspace != "ub":
+        _op_error("print", "tensor printing inside a SIMD vec.func requires UB storage")
     if addrspace not in ("gm", "ub", "l1", "l0c"):
         _op_error("print", "requires a GM-, UB-, L1-, or L0C-resident tensor")
     if descriptor.element_type not in _PRINT_TENSOR_SUPPORTED_DTYPES:
@@ -4050,6 +4053,8 @@ def _emit_tensor_print(
         if addrspace == "l0c"
         else _PRINT_TENSOR_MAX_F32_ELEMENTS
     )
+    if in_vf and not _runtime._in_simt_vec_func():
+        max_length = 1952 // dtype_size_bytes(descriptor.element_type)
     if length is None:
         if dynamic_shape:
             _op_error("print", "dynamic-shaped tensors require an explicit length")
@@ -4062,7 +4067,7 @@ def _emit_tensor_print(
         static_length = element_count
     else:
         resolved_length = _resolve_bound_value(length)
-        if isinstance(resolved_length, bool):
+        if isinstance(resolved_length, (bool, float)):
             _op_error("print", "length must be an integer or integer SSA value")
         if (
             isinstance(resolved_length, Numeric)
@@ -4099,31 +4104,79 @@ def _emit_tensor_print(
         parent = parent.parent
 
 
+def _emit_vector_print(
+    value: Any, length: Any, *, loc: mlir_ir.Location | None
+) -> None:
+    _require_frontend_state("print")
+    _runtime._require_enclosing_region("print", "vec.func")
+    register = _as_value(value)
+    descriptor = _vector_ssa_type_for_mlir_value(register)
+    if (
+        descriptor is None
+        or descriptor.element_type not in _PRINT_TENSOR_SUPPORTED_DTYPES
+    ):
+        _op_error(
+            "print",
+            f"register dtype must be one of {_PRINT_TENSOR_SUPPORTED_DTYPES_TEXT}",
+        )
+    capacity = 256 // dtype_size_bytes(descriptor.element_type)
+    if length is None:
+        length = descriptor.valid_lanes or capacity
+    resolved = _resolve_bound_value(length)
+    if isinstance(resolved, (bool, float)) or (
+        isinstance(resolved, Numeric) and not type(resolved).is_integer
+    ):
+        _op_error("print", "register prefix length must be an integer")
+    if isinstance(resolved, mlir_ir.Value) and not (
+        mlir_ir.IntegerType.isinstance(resolved.type)
+        or isinstance(resolved.type, mlir_ir.IndexType)
+    ):
+        _op_error("print", "register prefix length must be an integer")
+    static_length = _const_int_value(length)
+    if static_length is not None and not 1 <= static_length <= capacity:
+        _op_error("print", f"register prefix length must be between 1 and {capacity}")
+    _tla_ops_gen.print_vector(register, _as_i64_value(length, loc=loc), loc=loc)
+
+
 def print(*args: object, **kwargs: object) -> None:
     """Directory: Debug APIs
     Description:
-        Print a scalar, a formatted scalar string, or a supported physical tensor prefix from GM, UB, L1, or L0C inside a `cube` / `vector` region.
+        Print scalars, formatted strings, Tensor prefixes, or SIMD register values from a kernel.
 
         Parameters:
         - *`args`* (`object`): Values to print (variadic positional arguments). Required.
         - **`kwargs`** (`object`): Keyword arguments are not accepted; passing any raises an error. Optional.
 
         Constraints:
-        - Must be called inside a `@tla.kernel`-decorated kernel function.
-        - Must be called inside `tla.cube()` or `tla.vector()`.
-        - GM/UB support the documented tensor dtypes and a rank-1/rank-2 physical prefix.
-        - L1 requires AIC placement, a supported dtype, a 32-byte-aligned zN/nZ dense prefix whose C0 dimension spans 32 bytes, and at most 8 elements.
-        - L0C requires AIC placement, a supported dtype, L0Clayout, and exactly one 32-byte-aligned 16x16 typed view (256 elements).
-        - Aggregate FIFO use is checked for statically executed tensor prints. Runtime lengths, dynamic shapes, and prints under dynamic control flow emit a warning because their aggregate output cannot be bounded before launch; excessive output may be truncated or omitted.
+        - Call inside a `@tla.kernel` function, within `tla.cube()` / `tla.vector()` or their SIMD/SIMT `tla.vec.func` regions. Prints in these scopes can coexist; output order across threads, cores and channels is unspecified.
+        - Supported dtypes are `f16`, `f32`, `i8`, `i16`, `i32`, `u8`, `u16`, and `u32`.
+        - Strings must be compile-time ASCII strings. Format strings accept at most eight `{}` scalar fields; `{{` and `}}` print literal braces.
+        - Outside `vec.func`, Cube supports GM/L1/L0C Tensors and Vector supports GM/UB Tensors. SIMD supports scalars, registers and UB Tensors; SIMT supports per-thread scalars and statically shaped GM/UB Tensors.
+        - GM/UB Tensors must be rank 1 or 2. Printing reads consecutive elements from the view starting address, without following strides or rearranging layouts. The caller ensures the data is ready and the contiguous memory is readable.
+        - `length` is an integer element count. Omit it for a static Tensor only when all elements fit one call. Static lengths must be positive and within the view and per-call limits. Runtime length handling differs by execution mode; see the Printing Guide.
+        - A register defaults to its compile-time valid element count, or its physical capacity when that count is dynamic. Explicit lengths are bounded by physical capacity; uninitialized elements have unspecified values.
+        - L1 requires Cube placement, a 32-byte-aligned zN/nZ dense prefix with a 32-byte C0 dimension, and at most 8 elements. L0C requires Cube placement, L0Clayout and one 32-byte-aligned 16x16 view (256 elements). L1 and L0C printing cannot coexist in one kernel; L0A/L0B are unsupported.
+        - SIMD orders print reads against preceding/subsequent Vector stores. SIMT printing does not synchronize threads; shared UB requires block-wide synchronization. Other algorithm dependencies remain the caller's responsibility.
+        - Printing adds buffer, transfer and stream-synchronization costs. Remove calls before performance measurements; runtime conditions can retain these costs.
+        - See the [Printing Guide](../kernel_development/evaluation/print.md) for per-call limits, alignment, runtime lengths, synchronization examples, log capacity, truncation and error recovery.
 
         Example:
         ```python
+        # source_gm and source_ub contain 64 ready FP32 elements.
         with tla.vector():
-            tla.print(x_scalar)
-            tla.print(x_ub, 64)  # tensor + prefix length
+            tla.print("length={}", 64)
+            tla.print(source_gm, 8)
+            with tla.vec.func(mode="simd"):
+                values = source_ub.load()
+                tla.print(values, 4)
+                tla.print(source_ub, 4)
 
-        with tla.cube():
-            tla.print(x_l0c, 256)  # one aligned 16x16 CO1 tile
+            with tla.vec.func(mode="simt", thread_block_dim=32):
+                thread, _, _ = tla.arch.thread_idx()
+                if thread < 4:
+                    tla.print("thread={} value={}", thread, source_gm[thread])
+                if thread == 0:
+                    tla.print(source_gm, 8)
         ```
     """
     if kwargs:
@@ -4133,6 +4186,17 @@ def print(*args: object, **kwargs: object) -> None:
 
     original_value = args[0]
     value = _resolve_bound_value(original_value)
+    if _category(original_value) == "vector_ssa":
+        if len(args) > 2:
+            _op_error(
+                "print", "register printing expects a value and optional prefix length"
+            )
+        loc = (
+            _capture_user_loc()
+            if _runtime._current_frontend_state() is not None
+            else None
+        )
+        return _emit_vector_print(value, args[1] if len(args) == 2 else None, loc=loc)
     if _category(original_value) == "tensor":
         if len(args) > 2:
             _op_error(

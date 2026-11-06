@@ -78,6 +78,13 @@ def Tla_PrintTensorOp : Tla_Op<"print_tensor", [MemoryEffects<[MemWrite]>]> {
   let hasVerifier = 1;
 }
 
+def Tla_PrintVectorOp : Tla_Op<"print_vector", [MemoryEffects<[MemWrite]>]> {
+  let summary = "Print a register prefix from a real SIMD vector function";
+  let arguments = (ins Tla_VectorSSAType:$value, I64:$length);
+  let assemblyFormat = "$value `length` `=` $length attr-dict `:` qualified(type($value)) `,` type($length)";
+  let hasVerifier = 1;
+}
+
 def Tla_ReturnOp : Tla_Op<"return", [Terminator]> {
   let summary = "Return";
   let description = [{

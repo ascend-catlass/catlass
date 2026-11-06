@@ -31,9 +31,7 @@ def _test_compiled_function(*, cache_key: str) -> tla.JitCompiledFunction:
         kernel_binary_path=Path("/tmp/kernel.o"),
         kernel_abi=object(),
         abi_packer=object(),
-        uses_scalar_print=False,
-        uses_tensor_print=False,
-        logical_mixed_handoff=None,
+        runtime_metadata=execution.KernelRuntimeMetadata("fake_kernel"),
         compile_option=execution.TlaCompileOption(),
         pass_ir_dump="",
     )

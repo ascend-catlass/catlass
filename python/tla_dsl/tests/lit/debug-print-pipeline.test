@@ -43,12 +43,12 @@ module {
 }
 // END-LOWER
 // LOWER-DAG: func.func private @_mlir_ciface_tla_printf_x_i8(i8, i64)
-// LOWER-DAG: func.func private @_mlir_ciface_tla_printf_x_i16(i16, i64)
+// LOWER-DAG: func.func private @_mlir_ciface_tla_printf_x_i16_aiv(i16, i64)
 // LOWER-DAG: func.func private @_mlir_ciface_tla_printf_x_i32(i32, i64)
-// LOWER-DAG: func.func private @_mlir_ciface_tla_printf_x_u8(ui8, i64)
+// LOWER-DAG: func.func private @_mlir_ciface_tla_printf_x_u8_aiv(ui8, i64)
 // LOWER-DAG: func.func private @_mlir_ciface_tla_printf_x_u16(ui16, i64)
-// LOWER-DAG: func.func private @_mlir_ciface_tla_printf_x_u32(ui32, i64)
-// LOWER-DAG: func.func private @_mlir_ciface_tla_printf_v_f16(f16, i64)
+// LOWER-DAG: func.func private @_mlir_ciface_tla_printf_x_u32_aiv(ui32, i64)
+// LOWER-DAG: func.func private @_mlir_ciface_tla_printf_v_f16_aiv(f16, i64)
 // LOWER-DAG: func.func private @_mlir_ciface_tla_printf_v_f32(f32, i64)
 // LOWER-DAG: llvm.mlir.global internal constant @tla_debug_print_format_f8fea83e3244911b("hello\00")
 // LOWER-DAG: llvm.mlir.global internal constant @{{.*}}("all=%d %d %d %u %u %u %f %f\00")
@@ -67,12 +67,12 @@ module {
 // LOWER-NOT: memref.extract_aligned_pointer_as_index
 // LOWER-NOT: arith.index_cast
 // LOWER-DAG: call @_mlir_ciface_tla_printf_x_i8(%{{.*}}, %{{.*}})
-// LOWER-DAG: call @_mlir_ciface_tla_printf_x_i16(%{{.*}}, %{{.*}})
+// LOWER-DAG: call @_mlir_ciface_tla_printf_x_i16_aiv(%{{.*}}, %{{.*}})
 // LOWER-DAG: call @_mlir_ciface_tla_printf_x_i32(%{{.*}}, %{{.*}})
-// LOWER-DAG: call @_mlir_ciface_tla_printf_x_u8(%{{.*}}, %{{.*}})
+// LOWER-DAG: call @_mlir_ciface_tla_printf_x_u8_aiv(%{{.*}}, %{{.*}})
 // LOWER-DAG: call @_mlir_ciface_tla_printf_x_u16(%{{.*}}, %{{.*}})
-// LOWER-DAG: call @_mlir_ciface_tla_printf_x_u32(%{{.*}}, %{{.*}})
-// LOWER-DAG: call @_mlir_ciface_tla_printf_v_f16(%{{.*}}, %{{.*}})
+// LOWER-DAG: call @_mlir_ciface_tla_printf_x_u32_aiv(%{{.*}}, %{{.*}})
+// LOWER-DAG: call @_mlir_ciface_tla_printf_v_f16_aiv(%{{.*}}, %{{.*}})
 // LOWER-DAG: call @_mlir_ciface_tla_printf_v_f32(%{{.*}}, %{{.*}})
 // LOWER-LABEL: func.func @debug_print_formatted_aic
 // LOWER-SAME: %[[AIC_WORKSPACE:arg[0-9]+]]: i64 {{.*}}hacc.arg_type = #hacc.arg_type<workspace>{{.*}}tla.debug_print.workspace

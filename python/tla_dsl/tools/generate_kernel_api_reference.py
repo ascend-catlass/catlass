@@ -182,10 +182,11 @@ DIRECTORY_SECTIONS: list[tuple[str, str]] = [
     (
         "SIMT Vector Compute",
         "The per-thread vector execution mode, entered with "
-        '`tla.vec.func(mode="simt", thread_block_dim=...)`. The body is the '
-        "program of *one thread*: each thread addresses memory by index "
-        "through ordinary element access, with no tiles, no vector registers "
-        "and no UB staging.\n"
+        '`tla.vec.func(mode="simt", thread_block_dim=...)`. The body describes the '
+        "code executed by each thread. A thread gets its index with "
+        "`tla.arch.thread_idx()`, reads and writes GM/UB elements with "
+        "`tensor[index]`, and computes on scalar values. Supported operations "
+        "and restrictions are listed below.\n"
         "\n"
         "```python\n"
         "with tla.vector():\n"
@@ -221,6 +222,8 @@ DIRECTORY_SECTIONS: list[tuple[str, str]] = [
         "`Numeric` values, each emitting its per-thread op -- see **Basic "
         "Arithmetic**, **Compare and Select** and **Type Conversion** below.\n"
         "- `tla.range` loops and runtime `if`.\n"
+        "- `tla.print` for per-thread scalars, formatted strings, and GM/UB "
+        "prefixes -- see [Debug and Printing](language/debug.md).\n"
         "- `tla.arch.thread_idx` / `thread_block_dim` / `sync_threads`, and "
         "the launch-level `tla.arch.block_idx` / `block_num` -- see "
         "**System Variable Access**.\n"
@@ -229,12 +232,12 @@ DIRECTORY_SECTIONS: list[tuple[str, str]] = [
         "\n"
         "- Register-vector and mask ops -- `VectorSSA` / `MaskSSA` values, the "
         "arithmetic and mask APIs under **SIMD Vector Compute**, "
-        "`Tensor.load` / `Tensor.store`, `tla.full`, `tla.create_mask`. A SIMT "
-        "thread has no vector register of its own.\n"
+        "`Tensor.load` / `Tensor.store`, `tla.full`, `tla.create_mask`. These "
+        "APIs operate on SIMD register-vector values.\n"
         "- `tla.copy`: a DMA needs the tensor itself, and a SIMT region may "
         "capture only scalar runtime values. Stage data before the region, or "
         "let each thread address global memory directly.\n"
-        "- `tla.local_mem_bar`, `tla.pipe_barrier` and `tla.print`.\n"
+        "- `tla.local_mem_bar` and `tla.pipe_barrier`.\n"
         "- `while` loops, in any `tla.vec.func`; carry the iteration through "
         "`tla.range` instead.\n"
         "- A nested `tla.vec.func`.",

@@ -165,13 +165,23 @@ def launch_kernel(
     uses_scalar_print: bool = False,
     uses_tensor_print: bool = False,
     is_mixed: bool = False,
+    aiv_subblock_count: int = 1,
     print_tensor_position: str | None = None,
     device_id: int | None = None,
+    simt_print_formats: bytes | None = None,
+    print_argument_layout: tuple[str, ...] = (),
 ) -> None:
     """Launch via PyACL ``acl.rt.launch_kernel_with_host_args`` (Host args blob).
 
     ``cfg`` / ``placeHolderArray`` must be lists (``None`` fails PyACL parse).
     """
+    if simt_print_formats is not None and "simt" not in print_argument_layout:
+        from .ascend_debug_fifo import AscDebugFifoError
+
+        raise AscDebugFifoError(
+            "SIMT print requires a compiler-produced context layout"
+        )
+
     import acl
 
     block_num = int(block_num)
@@ -197,8 +207,24 @@ def launch_kernel(
             "acl.rt.launch_kernel_with_host_args",
         )
 
-    uses_print_fifo = uses_scalar_print or uses_tensor_print
-    if uses_print_fifo:
+    if print_argument_layout:
+        from .ascend_print import launch_with_print
+
+        launch_with_print(
+            launch_kernel=_acl_launch,
+            payload=payload,
+            layout=print_argument_layout,
+            block_num=block_num,
+            stream=int(stream),
+            device=int(device_id or 0),
+            is_mixed=is_mixed,
+            aiv_subblock_count=aiv_subblock_count,
+            tensor_position=print_tensor_position,
+            simt_formats=simt_print_formats,
+        )
+        return
+
+    if uses_scalar_print or uses_tensor_print:
         from .ascend_debug_fifo import launch_with_debug_fifo
 
         launch_with_debug_fifo(
@@ -209,6 +235,7 @@ def launch_kernel(
             uses_scalar_print=uses_scalar_print,
             uses_tensor_print=uses_tensor_print,
             is_mixed=is_mixed,
+            aiv_subblock_count=aiv_subblock_count,
             print_tensor_position=print_tensor_position,
             device=int(device_id or 0),
         )

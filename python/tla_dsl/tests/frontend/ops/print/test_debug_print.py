@@ -545,7 +545,6 @@ def test_debug_print_rejects_invalid_format_calls(
             for value in (tla.Int64(1), tla.UInt64(1))
         ],
         (_pointer_kernel, (), _SCALAR_ERROR),
-        (_vector_value_kernel, (_host_vector_tensor(),), _SCALAR_ERROR),
         (
             _formatted_vector_value_kernel,
             (_host_vector_tensor(),),
@@ -579,3 +578,8 @@ def test_tensor_print_defers_effective_alignment_to_runtime() -> None:
     mlir = _tensor_kernel.dump_mlir(type_args=(_host_vector_tensor(),))
 
     assert "tla.print_tensor" in mlir
+
+
+def test_debug_print_accepts_register_prefix() -> None:
+    mlir = _vector_value_kernel.dump_mlir(type_args=(_host_vector_tensor(),))
+    assert "tla.print_vector" in mlir

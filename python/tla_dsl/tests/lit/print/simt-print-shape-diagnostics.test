@@ -1,0 +1,35 @@
+// RUN: sed -n '/BEGIN-COLUMNS$/,/END-COLUMNS$/p' %s | %tla_compile - -o - | %filecheck %s --check-prefix=BOUNDARY
+// RUN: sed -n '/BEGIN-COLUMNS$/,/END-COLUMNS$/p' %s | sed 's/4294967295/4294967296/g' | not %tla_compile - -o /dev/null 2>&1 | %filecheck %s --check-prefix=RANGE
+// RUN: sed -n '/BEGIN-ROWS$/,/END-ROWS$/p' %s | %tla_compile - -o - | %filecheck %s --check-prefix=BOUNDARY
+// RUN: sed -n '/BEGIN-ROWS$/,/END-ROWS$/p' %s | sed 's/4294967295/4294967296/g' | not %tla_compile - -o /dev/null 2>&1 | %filecheck %s --check-prefix=RANGE
+// BOUNDARY: llvm.mlir.constant(-1 : i32) : i32
+// BOUNDARY: call @_mlir_ciface_tla_simt_print_gm
+// RANGE: SIMT tensor print dimensions must be between 1 and 4294967295
+
+// BEGIN-COLUMNS
+module {
+  tla.func @column_limit(%source: !tla.tensor<!tla.layout<!tla.shape<4294967295>, !tla.stride<1>, !tla.shape<4294967295>, RowMajor>, !tla.coord<0>, !tla.ptr<f32, gm, 4>>) {
+    "tla.vector"() ({
+      "tla.vec.func"() ({
+        %count = arith.constant 1 : i64
+        tla.print_tensor %source length = %count shape = [4294967295] : <!tla.layout<!tla.shape<4294967295>, !tla.stride<1>, !tla.shape<4294967295>, RowMajor>, !tla.coord<0>, !tla.ptr<f32, gm, 4>>, i64
+      }) {mode = "simt", thread_block_dim = array<i64: 32, 1, 1>} : () -> ()
+    }) : () -> ()
+    tla.return
+  }
+}
+// END-COLUMNS
+
+// BEGIN-ROWS
+module {
+  tla.func @row_limit(%source: !tla.tensor<!tla.layout<!tla.shape<4294967295,1>, !tla.stride<1,1>, !tla.shape<4294967295,1>, RowMajor>, !tla.coord<0,0>, !tla.ptr<f32, gm, 4>>) {
+    "tla.vector"() ({
+      "tla.vec.func"() ({
+        %count = arith.constant 1 : i64
+        tla.print_tensor %source length = %count shape = [4294967295, 1] : <!tla.layout<!tla.shape<4294967295,1>, !tla.stride<1,1>, !tla.shape<4294967295,1>, RowMajor>, !tla.coord<0,0>, !tla.ptr<f32, gm, 4>>, i64
+      }) {mode = "simt", thread_block_dim = array<i64: 32, 1, 1>} : () -> ()
+    }) : () -> ()
+    tla.return
+  }
+}
+// END-ROWS

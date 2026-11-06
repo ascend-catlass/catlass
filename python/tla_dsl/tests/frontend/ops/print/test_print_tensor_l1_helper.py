@@ -72,6 +72,7 @@ class _FakeHal:
         self.unmapped: list[tuple[int, int, int, int, int]] = []
         monkeypatch.setattr(fifo_mod, "_DEBUG_CORE_RECORDS", records)
         monkeypatch.setattr(fifo_mod, "_RING_BUFFER_BYTES", 64)
+        monkeypatch.setattr(fifo_mod, "_driver_device_id", lambda device: device)
         monkeypatch.setattr(fifo_mod, "_driver_hal", lambda: (self.map, self.unmap))
 
     @staticmethod
@@ -157,16 +158,66 @@ def test_debug_bus_support_probe_accepts_supported_driver(monkeypatch) -> None:
     assert unmap_resource.restype is ctypes.c_int
 
 
+@pytest.mark.parametrize("error_cls", [RuntimeError, fifo_mod.AscDebugFifoError])
 def test_debug_bus_support_probe_does_not_hide_unexpected_failures(
     monkeypatch,
+    error_cls,
 ) -> None:
     def fail_probe() -> None:
-        raise RuntimeError("unexpected driver failure")
+        raise error_cls("unexpected driver failure")
 
     monkeypatch.setattr(fifo_mod, "_driver_hal", fail_probe)
 
-    with pytest.raises(RuntimeError, match="unexpected driver failure"):
+    with pytest.raises(error_cls, match="unexpected driver failure"):
         fifo_mod._debug_bus_support_error()
+
+
+@pytest.mark.parametrize("user,logic", [(0, 3), (1, 1)])
+def test_driver_device_id_uses_cann_mapping(monkeypatch, user, logic):
+    def translate(device, output):
+        assert device == user
+        output._obj.value = logic
+        return 0
+
+    monkeypatch.setattr(
+        fifo_mod.ctypes,
+        "CDLL",
+        lambda name: SimpleNamespace(aclrtGetLogicDevIdByUserDevId=translate),
+    )
+    assert fifo_mod._driver_device_id(user) == logic
+    assert translate.argtypes == [ctypes.c_int32, ctypes.POINTER(ctypes.c_int32)]
+
+
+def test_driver_mapping_failure_is_not_unsupported_capability(monkeypatch):
+    translate = _FakeDriverFunction(107000)
+    monkeypatch.setattr(
+        fifo_mod.ctypes,
+        "CDLL",
+        lambda name: SimpleNamespace(aclrtGetLogicDevIdByUserDevId=translate),
+    )
+    with pytest.raises(fifo_mod.AscDebugFifoError, match="ret=107000") as error:
+        fifo_mod._driver_device_id(0)
+    assert not isinstance(error.value, fifo_mod.AscDebugUnsupportedError)
+
+
+def test_missing_cann_mapping_interface_is_explicit(monkeypatch):
+    monkeypatch.setattr(fifo_mod.ctypes, "CDLL", lambda name: SimpleNamespace())
+    with pytest.raises(fifo_mod.AscDebugUnsupportedError, match="aclrtGetLogic"):
+        fifo_mod._driver_device_id(0)
+
+
+def test_fifo_map_and_unmap_use_the_same_translated_device(monkeypatch):
+    _FakeAcl(monkeypatch)
+    hal = _FakeHal(monkeypatch, records=2)
+    calls = []
+    monkeypatch.setattr(
+        fifo_mod, "_driver_device_id", lambda user: calls.append(user) or 3
+    )
+    capture = fifo_mod.open_fifo(1, needs_debug_bus=True, device=0)
+    fifo_mod.destroy_fifo(capture)
+    assert calls == [0]
+    assert [entry[0] for entry in hal.mapped] == [3, 3]
+    assert [entry[0] for entry in hal.unmapped] == [3, 3]
 
 
 def test_debug_fifo_ignores_shape_slots_beyond_declared_rank() -> None:

@@ -1,6 +1,6 @@
 // RUN: sed -n '/BEGIN-DYNAMIC$/,/END-DYNAMIC$/p' %s | %tla_compile - -o /dev/null 2>&1 | %filecheck %s --check-prefix=DYNAMIC
 // RUN: sed -n '/BEGIN-DYNAMIC-L1$/,/END-DYNAMIC-L1$/p' %s | %tla_compile - -o /dev/null 2>&1 | %filecheck %s --check-prefix=DYNAMIC-L1
-// RUN: sed -n '/BEGIN-MIXED-DEBUG$/,/END-MIXED-DEBUG$/p' %s | not %tla_compile - -o /dev/null 2>&1 | %filecheck %s --check-prefix=MIXED-DEBUG
+// RUN: sed -n '/BEGIN-MIXED-DEBUG$/,/END-MIXED-DEBUG$/p' %s | %tla_compile - -o - | %filecheck %s --check-prefix=MIXED-DEBUG
 // RUN: sed -n '/BEGIN-L0C-OFFSET-ALIGN$/,/END-L0C-OFFSET-ALIGN$/p' %s | not %tla_compile - -o /dev/null 2>&1 | %filecheck %s --check-prefix=L0C-OFFSET-ALIGN
 // RUN: sed -n '/BEGIN-L1-MAX$/,/END-L1-MAX$/p' %s | %tla_compile - -o /dev/null
 // RUN: sed -n '/BEGIN-L1-MAX$/,/END-L1-MAX$/p' %s | sed -e 's/8388608/8388609/g' -e 's/134217728/134217729/g' -e 's/134217727/134217728/g' | not %tla_compile - -o /dev/null 2>&1 | %filecheck %s --check-prefix=L1-RANGE
@@ -44,7 +44,11 @@ module {
   }
 }
 // END-MIXED-DEBUG
-// MIXED-DEBUG: scalar debug FIFO and native tensor print cannot share a kernel module
+// MIXED-DEBUG: tla.print.layout = "fifo,user"
+// MIXED-DEBUG-LABEL: func.func @mixed_debug_and_tensor(
+// MIXED-DEBUG-SAME: %[[FIFO:arg[0-9]+]]: i64 {{.*}}tla.debug_print.workspace, tla.print_tensor.workspace
+// MIXED-DEBUG: call @_mlir_ciface_tla_printf_x_i32({{.*}}, %[[FIFO]])
+// MIXED-DEBUG: call @_mlir_ciface_tla_print_tensor_gm_f32(%[[FIFO]],
 
 // BEGIN-L0C-OFFSET-ALIGN
 module {

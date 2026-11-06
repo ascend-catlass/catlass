@@ -1,12 +1,18 @@
 #include "PassesCommon.h"
 #include "PassesInternal.h"
 #include "Passes/TlaTensorToMemref.h"
+#include "Passes/TlaDebugPrint.h"
+#include "Passes/TlaVectorRegionCommon.h"
+#include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/BitVector.h"
+#include "llvm/Support/MathExtras.h"
 
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 
 #include <cstdint>
+#include <limits>
 
 namespace tla {
 
@@ -248,7 +254,9 @@ static FailureOr<uint16_t> getPrintTensorCallId(uint32_t ordinal, std::string& d
     return failure();
 }
 
-static BlockArgument getOrAppendDebugPrintWorkspaceArg(func::FuncOp funcOp)
+} // namespace
+
+BlockArgument getOrAppendDebugPrintWorkspaceArg(func::FuncOp funcOp)
 {
     MLIRContext* ctx = funcOp.getContext();
     for (BlockArgument arg : funcOp.getArguments()) {
@@ -270,6 +278,8 @@ static BlockArgument getOrAppendDebugPrintWorkspaceArg(func::FuncOp funcOp)
         argIndex, hacc::KernelArgTypeAttr::name, hacc::KernelArgTypeAttr::get(ctx, hacc::KernelArgType::kWorkspace));
     return workspaceArg;
 }
+
+namespace {
 
 static BlockArgument getOrPrependPrintTensorWorkspaceArg(func::FuncOp funcOp)
 {
@@ -377,7 +387,7 @@ static void annotatePrintfRuntimeCall(func::FuncOp funcOp)
     funcOp->setAttr(hivm::TFuncCoreTypeAttr::name, hivm::TFuncCoreTypeAttr::get(ctx, hivm::TFuncCoreType::AIC_OR_AIV));
 }
 
-static func::FuncOp getOrCreateRuntimeCall(ModuleOp module, StringRef name, ArrayRef<Type> operandTypes)
+static func::FuncOp getOrCreateDebugRuntimeCall(ModuleOp module, StringRef name, ArrayRef<Type> operandTypes)
 {
     if (auto existing = module.lookupSymbol<func::FuncOp>(name)) {
         annotatePrintfRuntimeCall(existing);
@@ -472,6 +482,274 @@ static FailureOr<SmallVector<Value, 12>> buildFormattedValuesCallOperands(
     return callOperands;
 }
 
+} // namespace
+
+static FailureOr<std::string> getVfPrintFormat(DebugPrintOp op)
+{
+    if (op.getFormat())
+        return getGeneratedDebugPrintFormat(op);
+    Type type = op.getValues().front().getType();
+    return std::string(isa<FloatType>(type) ? "v=%f" : type.isUnsignedInteger() ? "x=%u" : "x=%d");
+}
+
+BlockArgument getOrAppendSimtPrintWorkspaceArg(func::FuncOp function)
+{
+    constexpr StringLiteral attribute = "tla.simt_print.workspace";
+    for (BlockArgument argument : function.getArguments())
+        if (function.getArgAttr(argument.getArgNumber(), attribute))
+            return argument;
+    unsigned index = function.getNumArguments();
+    auto type = IntegerType::get(function.getContext(), 64);
+    function.insertArgument(index, type, DictionaryAttr::get(function.getContext()), function.getLoc());
+    function.setArgAttr(index, attribute, UnitAttr::get(function.getContext()));
+    function.setArgAttr(
+        index, hacc::KernelArgTypeAttr::name,
+        hacc::KernelArgTypeAttr::get(function.getContext(), hacc::KernelArgType::kWorkspace));
+    // Both mixed entries consume the same host argument blob. Reserve the
+    // SIMT slot in the peer before later passes append legacy print contexts,
+    // even though only AIV executes the SIMT function.
+    if (isMixedSplitFunction(function)) {
+        constexpr StringLiteral aicSuffix = "_mix_aic";
+        constexpr StringLiteral aivSuffix = "_mix_aiv";
+        StringRef name = function.getSymName();
+        StringRef suffix = name.ends_with(aicSuffix) ? aicSuffix : aivSuffix;
+        StringRef peerSuffix = suffix == aicSuffix ? aivSuffix : aicSuffix;
+        auto module = function->getParentOfType<ModuleOp>();
+        if (auto peer = module.lookupSymbol<func::FuncOp>((name.drop_back(suffix.size()) + peerSuffix).str()))
+            (void)getOrAppendSimtPrintWorkspaceArg(peer);
+    }
+    return function.getArgument(index);
+}
+
+LogicalResult lowerSimtPrints(func::FuncOp function, Value workspace)
+{
+    ModuleOp module = function->getParentOfType<ModuleOp>();
+    SmallVector<Operation*> prints;
+    function.walk([&](Operation* operation) {
+        if (isa<DebugPrintOp, PrintTensorOp>(operation))
+            prints.push_back(operation);
+    });
+    for (Operation* operation : prints) {
+        OpBuilder builder(operation);
+        Location loc = operation->getLoc();
+        auto constant = [&](int64_t value, unsigned width = 32) -> Value {
+            return builder.create<arith::ConstantIntOp>(loc, value, width);
+        };
+        SmallVector<Value> operands{workspace};
+        std::string name;
+        if (auto scalar = dyn_cast<DebugPrintOp>(operation)) {
+            auto format = getVfPrintFormat(scalar);
+            if (failed(format))
+                return failure();
+            // Hex keeps this compile metadata unambiguous in textual MLIR and
+            // avoids placing inaccessible device globals in a SIMT function.
+            std::string blob;
+            if (auto previous = module->getAttrOfType<StringAttr>("tla.simt_print.formats"))
+                blob = previous.getValue().str();
+            operands.push_back(constant(blob.size() / 2));
+            constexpr char hex[] = "0123456789abcdef";
+            for (unsigned char byte : *format) {
+                blob += hex[byte >> 4];
+                blob += hex[byte & 15];
+            }
+            blob += "00";
+            module->setAttr("tla.simt_print.formats", builder.getStringAttr(blob));
+            operands.push_back(constant(scalar.getValues().size()));
+            for (unsigned slot = 0; slot < 8; ++slot) {
+                if (slot >= scalar.getValues().size()) {
+                    operands.push_back(constant(0, 64));
+                    continue;
+                }
+                auto value = createFormattedScalarSlot(builder, loc, scalar.getValues()[slot]);
+                if (failed(value))
+                    return scalar.emitError("unsupported SIMT print scalar type");
+                operands.push_back(*value);
+            }
+            name = "_mlir_ciface_tla_simt_printf";
+        } else {
+            auto tensor = cast<PrintTensorOp>(operation);
+            // The outlining map has replaced the tensor descriptor with the
+            // correctly offset, address-space-qualified flat memref parameter.
+            Value source = operation->getOperand(0);
+            auto type = dyn_cast<MemRefType>(source.getType());
+            if (!type || !type.hasStaticShape())
+                return tensor.emitError("SIMT tensor printing requires a static GM or UB view");
+            auto space = dyn_cast<IntegerAttr>(type.getMemorySpace());
+            if (!space || (space.getInt() != 1 && space.getInt() != 6))
+                return tensor.emitError("SIMT tensor printing requires GM or UB storage");
+            Value pointer = builder.create<::mlir::memref::ExtractAlignedPointerAsIndexOp>(loc, source);
+            pointer = builder.create<arith::IndexCastOp>(loc, builder.getI64Type(), pointer);
+            auto pointerType = LLVM::LLVMPointerType::get(builder.getContext(), space.getInt());
+            operands.push_back(builder.create<LLVM::IntToPtrOp>(loc, pointerType, pointer));
+            operands.push_back(tensor.getLength());
+            auto shape = tensor.getShape();
+            int64_t rows = shape.size() == 2 ? shape[0] : 1;
+            int64_t columns = shape.back();
+            if (rows <= 0 || columns <= 0)
+                return tensor.emitError("SIMT tensor printing requires a static positive shape");
+            if (rows > std::numeric_limits<uint32_t>::max() || columns > std::numeric_limits<uint32_t>::max())
+                return tensor.emitError("SIMT tensor print dimensions must be between 1 and 4294967295");
+            operands.push_back(constant(std::min<int64_t>({rows * columns, type.getNumElements(), 262112})));
+            Type element = type.getElementType();
+            std::string diagnostic;
+            auto suffix = getPrintTensorHelperSuffix(element, diagnostic);
+            if (failed(suffix))
+                return tensor.emitError(diagnostic);
+            unsigned code = llvm::StringSwitch<unsigned>(*suffix)
+                                .Case("f32", 0)
+                                .Case("f16", 1)
+                                .Case("i8", 2)
+                                .Case("i32", 3)
+                                .Case("u8", 4)
+                                .Case("i16", 6)
+                                .Case("u16", 7)
+                                .Case("u32", 8)
+                                .Default(0);
+            operands.push_back(constant(code));
+            operands.push_back(constant(rows));
+            operands.push_back(constant(columns));
+            operands.push_back(constant(shape.size()));
+            name = space.getInt() == 1 ? "_mlir_ciface_tla_simt_print_gm" : "_mlir_ciface_tla_simt_print_ub";
+        }
+        SmallVector<Type> types;
+        for (Value operand : operands)
+            types.push_back(operand.getType());
+        auto callee = getOrCreateDebugRuntimeCall(module, name, types);
+        callee->setAttr(
+            hivm_regbaseintrins::kDavinciCallingConvAttrName,
+            hivm_regbaseintrins::SIMT_CallableAttr::get(builder.getContext()));
+        builder.create<func::CallOp>(loc, callee, operands);
+        operation->erase();
+    }
+    return success();
+}
+
+FailureOr<uint64_t> reserveVfPrintFormats(ModuleOp module, uint64_t bytes)
+{
+    uint32_t callId = 0;
+    auto numbered = module.walk([&](Operation* operation) {
+        if (!isa<PrintVectorOp, PrintTensorOp>(operation))
+            return WalkResult::advance();
+        auto vf = operation->getParentOfType<VecFuncOp>();
+        if (!vf || !vecregion::isSimdVecFunc(vf))
+            return WalkResult::advance();
+        if (callId > 0xffff) {
+            operation->emitError("VF print call ID exceeds the 16-bit descriptor range");
+            return WalkResult::interrupt();
+        }
+        operation->setAttr("tla.vf_print_id", IntegerAttr::get(IntegerType::get(module.getContext(), 32), callId++));
+        return WalkResult::advance();
+    });
+    if (numbered.wasInterrupted())
+        return failure();
+    if (callId)
+        module->setAttr("tla.vf_print.count", IntegerAttr::get(IntegerType::get(module.getContext(), 32), callId));
+    llvm::StringMap<uint64_t> offsets;
+    auto result = module.walk([&](DebugPrintOp op) {
+        auto vf = op->getParentOfType<VecFuncOp>();
+        if (!vf || !vecregion::isSimdVecFunc(vf))
+            return WalkResult::advance();
+        auto format = getVfPrintFormat(op);
+        if (failed(format))
+            return WalkResult::interrupt();
+        // CANN's 2024-byte VF buffer holds a 24-byte TLV header, 8-byte
+        // argument slots and the NUL-terminated format. Its alignment helper
+        // rounds up to 8 bytes, then adds another 8 bytes. Validate before
+        // outlining so rejection propagates as a pass failure, not a mismatch.
+        size_t recordBytes = llvm::alignTo(size_t{24} + 8 * op.getValues().size() + format->size() + 1, size_t{8}) + 8;
+        if (recordBytes > 2024) {
+            op.emitError("formatted VF print record exceeds the 2024-byte debug buffer");
+            return WalkResult::interrupt();
+        }
+        if (bytes > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) - format->size() - 8) {
+            op.emitError("VF print format reservation overflows the UB address range");
+            return WalkResult::interrupt();
+        }
+        auto [entry, inserted] = offsets.try_emplace(*format, llvm::alignTo(bytes, uint64_t{4}));
+        if (inserted)
+            bytes = entry->second + llvm::alignTo(format->size() + 1, size_t{4});
+        op->setAttr("tla.vf_format_offset", IntegerAttr::get(IntegerType::get(module.getContext(), 64), entry->second));
+        return WalkResult::advance();
+    });
+    if (result.wasInterrupted())
+        return failure();
+    return bytes;
+}
+
+LogicalResult lowerVfScalarPrint(OpBuilder& builder, DebugPrintOp op, ValueRange values)
+{
+    ModuleOp module = op->getParentOfType<ModuleOp>();
+    Location loc = op.getLoc();
+    auto formatOr = getVfPrintFormat(op);
+    if (failed(formatOr))
+        return failure();
+    const auto& format = *formatOr;
+    size_t bytes = llvm::alignTo(format.size() + 1, size_t{4});
+    auto global = module.lookupSymbol<LLVM::GlobalOp>("tla_ub_scratch");
+    auto offset = op->getAttrOfType<IntegerAttr>("tla.vf_format_offset");
+    if (!global || !offset)
+        return op.emitError("VF print format was not reserved by tla-lower-ptr");
+    auto ptrType = LLVM::LLVMPointerType::get(builder.getContext(), 6);
+    Value scratch = builder.create<LLVM::AddressOfOp>(loc, global);
+    Value address = builder.create<LLVM::GEPOp>(
+        loc, ptrType, builder.getI8Type(), scratch, ArrayRef<LLVM::GEPArg>{static_cast<int32_t>(offset.getInt())});
+    // Match CANN's VF string-literal lowering: an on-chip global initialized
+    // with immediate word stores at the print site, with no GM access in VF.
+    std::string padded = format;
+    padded.resize(bytes, '\0');
+    for (size_t offset = 0; offset < bytes; offset += 4) {
+        uint32_t word = 0;
+        for (unsigned byte = 0; byte < 4; ++byte)
+            word |= static_cast<uint32_t>(static_cast<uint8_t>(padded[offset + byte])) << (8 * byte);
+        Value value = builder.create<arith::ConstantIntOp>(loc, word, 32);
+        Value ptr = builder.create<LLVM::GEPOp>(
+            loc, ptrType, builder.getI8Type(), address, ArrayRef<LLVM::GEPArg>{static_cast<int32_t>(offset)});
+        builder.create<LLVM::StoreOp>(loc, value, ptr);
+    }
+    Value zero = builder.create<arith::ConstantIntOp>(loc, 0, 64);
+    Value count = builder.create<arith::ConstantIntOp>(loc, values.size(), 32);
+    SmallVector<Value> operands = {address, count};
+    for (unsigned i = 0; i < 8; ++i) {
+        if (i >= values.size()) {
+            operands.push_back(zero);
+            continue;
+        }
+        auto slot = createFormattedScalarSlot(builder, loc, values[i]);
+        if (failed(slot))
+            return op.emitError("VF scalar print requires a scalar value; print a register with a prefix length");
+        operands.push_back(*slot);
+    }
+    SmallVector<Type> types;
+    for (Value value : operands)
+        types.push_back(value.getType());
+    auto callee = getOrCreateDebugRuntimeCall(module, "_mlir_ciface_tla_vf_printf", types);
+    builder.create<func::CallOp>(loc, callee, operands);
+    return success();
+}
+
+void emitVfDebugBoundary(OpBuilder& builder, Location loc, ModuleOp module, Value workspace, bool begin)
+{
+    SmallVector<Value> operands;
+    SmallVector<Type> types;
+    if (begin) {
+        operands.push_back(workspace);
+        types.push_back(workspace.getType());
+    }
+    auto callee = getOrCreateDebugRuntimeCall(
+        module, begin ? "_mlir_ciface_tla_vf_debug_begin" : "_mlir_ciface_tla_vf_debug_end", types);
+    builder.create<func::CallOp>(loc, callee, operands);
+}
+
+namespace {
+
+// Mixed modules link both core libraries. Give AIV implementations distinct
+// symbols so a same-named AIC helper cannot supply its block/subblock encoding.
+static std::string corePrintHelperName(func::FuncOp function, StringRef name)
+{
+    return name.str() +
+           (isMixedSplitFunction(function) && getFunctionCoreType(function) == hivm::TFuncCoreType::AIV ? "_aiv" : "");
+}
+
 static LogicalResult lowerLegacyDebugPrint(::tla::DebugPrintOp op, PatternRewriter& rewriter, ModuleOp module)
 {
     if (op->getNumResults() != 0 || op->getNumOperands() != 1)
@@ -495,7 +773,8 @@ static LogicalResult lowerLegacyDebugPrint(::tla::DebugPrintOp op, PatternRewrit
         return op.emitError() << diagnostic;
 
     BlockArgument workspace = getOrAppendDebugPrintWorkspaceArg(funcOp);
-    auto callee = getOrCreateRuntimeCall(module, helper->callee, {value.getType(), workspace.getType()});
+    auto callee = getOrCreateDebugRuntimeCall(
+        module, corePrintHelperName(funcOp, helper->callee), {value.getType(), workspace.getType()});
     rewriter.create<func::CallOp>(op.getLoc(), callee, ValueRange{value, workspace});
     rewriter.eraseOp(op);
     return success();
@@ -529,7 +808,8 @@ static LogicalResult lowerFormattedDebugPrint(::tla::DebugPrintOp op, PatternRew
         LLVM::GlobalOp global =
             getOrCreateStringFormatGlobal(module, rewriter, op.getLoc(), *helperSuffix, *generatedFormat);
         Value formatPtr = createStringFormatPointer(rewriter, op.getLoc(), global);
-        auto callee = getOrCreateRuntimeCall(module, kStringFormatCalleeName, {ptrType, i64Type, workspace.getType()});
+        auto callee = getOrCreateDebugRuntimeCall(
+            module, corePrintHelperName(funcOp, kStringFormatCalleeName), {ptrType, i64Type, workspace.getType()});
         SmallVector<Value, 3> callOperands;
         callOperands.push_back(formatPtr);
         callOperands.push_back(
@@ -544,8 +824,9 @@ static LogicalResult lowerFormattedDebugPrint(::tla::DebugPrintOp op, PatternRew
     LLVM::GlobalOp global =
         getOrCreateStringFormatGlobal(module, rewriter, op.getLoc(), *helperSuffix, *generatedFormat);
     Value formatPtr = createStringFormatPointer(rewriter, op.getLoc(), global);
-    auto callee =
-        getOrCreateRuntimeCall(module, kValuesFormatCalleeName, getFormattedValuesHelperTypes(rewriter.getContext()));
+    auto callee = getOrCreateDebugRuntimeCall(
+        module, corePrintHelperName(funcOp, kValuesFormatCalleeName),
+        getFormattedValuesHelperTypes(rewriter.getContext()));
     FailureOr<SmallVector<Value, 12>> callOperands =
         buildFormattedValuesCallOperands(rewriter, op.getLoc(), *generatedFormat, formatPtr, op.getValues(), workspace);
     if (failed(callOperands))
@@ -682,6 +963,8 @@ static LogicalResult lowerPrintTensor(
                                                                               "_mlir_ciface_tla_print_tensor_gm_";
     }
     calleeName.append(helperSuffix->data(), helperSuffix->size());
+    if (tensorType.getPtr().getAddrspace() == AddressSpace::gm)
+        calleeName = corePrintHelperName(funcOp, calleeName);
     BlockArgument workspace = getOrCreatePrintTensorWorkspaceArg(funcOp, module);
     BlockArgument debugTunnelState = isLocalDump ? getOrCreateDebugTunnelStateArg(funcOp, module) : BlockArgument();
     SmallVector<Type> calleeTypes;
@@ -695,7 +978,7 @@ static LogicalResult lowerPrintTensor(
             workspace.getType(), tensorI64.getType(), count.getType(), packedShape.getType(), encodedCallId.getType()};
         callOperands = {workspace, tensorI64, count, packedShape, encodedCallId};
     }
-    auto callee = getOrCreateRuntimeCall(module, calleeName, calleeTypes);
+    auto callee = getOrCreateDebugRuntimeCall(module, calleeName, calleeTypes);
     if (isLocalDump) {
         callee->setAttr(
             hivm::TFuncCoreTypeAttr::name,
@@ -707,6 +990,109 @@ static LogicalResult lowerPrintTensor(
     rewriter.create<func::CallOp>(op.getLoc(), callee, callOperands);
     rewriter.eraseOp(op);
     return success();
+}
+
+// Split entries consume the same packed host arguments. Consolidate contexts
+// after all lowering passes have created their uses, preserving Tensor's
+// established leading workspace in non-mixed kernels.
+static void normalizePrintEntryGroup(ModuleOp module, ArrayRef<func::FuncOp> entries)
+{
+    bool scalar = false, tensor = false, simt = false, tunnel = false, mixed = false;
+    for (auto function : entries) {
+        mixed |= isMixedSplitFunction(function);
+        for (BlockArgument argument : function.getArguments()) {
+            unsigned index = argument.getArgNumber();
+            scalar |= static_cast<bool>(function.getArgAttr(index, kDebugPrintWorkspaceAttrName));
+            tensor |= static_cast<bool>(function.getArgAttr(index, kPrintTensorWorkspaceAttrName));
+            simt |= static_cast<bool>(function.getArgAttr(index, "tla.simt_print.workspace"));
+            tunnel |= static_cast<bool>(function.getArgAttr(index, kDebugTunnelStateAttrName));
+        }
+    }
+    if (!scalar && !tensor && !simt && !tunnel)
+        return;
+    SmallVector<StringRef> layout;
+    bool leadingFifo = tensor && !mixed;
+    if (leadingFifo)
+        layout.push_back("fifo");
+    layout.push_back("user");
+    if (simt)
+        layout.push_back("simt");
+    if ((scalar || tensor) && !leadingFifo)
+        layout.push_back("fifo");
+    if (tunnel)
+        layout.push_back("tunnel");
+
+    auto* context = module.getContext();
+    for (auto function : entries) {
+        SmallVector<BlockArgument> original(function.getArguments());
+        auto role = [&](BlockArgument argument) -> StringRef {
+            unsigned index = argument.getArgNumber();
+            if (function.getArgAttr(index, kDebugPrintWorkspaceAttrName) ||
+                function.getArgAttr(index, kPrintTensorWorkspaceAttrName))
+                return "fifo";
+            if (function.getArgAttr(index, "tla.simt_print.workspace"))
+                return "simt";
+            if (function.getArgAttr(index, kDebugTunnelStateAttrName))
+                return "tunnel";
+            return "user";
+        };
+        for (StringRef kind : layout) {
+            if (kind == "user") {
+                for (BlockArgument argument : original) {
+                    if (role(argument) != "user")
+                        continue;
+                    function.insertArgument(
+                        function.getNumArguments(), argument.getType(),
+                        function.getArgAttrDict(argument.getArgNumber()), argument.getLoc());
+                    argument.replaceAllUsesWith(function.getArguments().back());
+                }
+                continue;
+            }
+            unsigned index = function.getNumArguments();
+            function.insertArgument(
+                index, IntegerType::get(context, 64), DictionaryAttr::get(context), function.getLoc());
+            function.setArgAttr(
+                index, hacc::KernelArgTypeAttr::name,
+                hacc::KernelArgTypeAttr::get(context, hacc::KernelArgType::kWorkspace));
+            if (kind == "fifo") {
+                if (scalar)
+                    function.setArgAttr(index, kDebugPrintWorkspaceAttrName, UnitAttr::get(context));
+                if (tensor)
+                    function.setArgAttr(index, kPrintTensorWorkspaceAttrName, UnitAttr::get(context));
+            } else {
+                function.setArgAttr(
+                    index,
+                    kind == "simt" ? StringRef("tla.simt_print.workspace") : StringRef(kDebugTunnelStateAttrName),
+                    UnitAttr::get(context));
+            }
+            for (BlockArgument argument : original)
+                if (role(argument) == kind)
+                    argument.replaceAllUsesWith(function.getArgument(index));
+        }
+        llvm::BitVector erase(function.getNumArguments());
+        erase.set(0, original.size());
+        function.eraseArguments(erase);
+        function->setAttr("tla.print.layout", StringAttr::get(context, llvm::join(layout, ",")));
+    }
+}
+
+static void normalizePrintArguments(ModuleOp module)
+{
+    llvm::StringMap<SmallVector<func::FuncOp>> groups;
+    for (auto function : module.getOps<func::FuncOp>()) {
+        if (!function->hasAttr("hacc.entry") || function.isDeclaration())
+            continue;
+        StringRef name = function.getSymName();
+        if (isMixedSplitFunction(function) && (name.ends_with("_mix_aic") || name.ends_with("_mix_aiv")))
+            name = name.drop_back(8);
+        groups[name].push_back(function);
+    }
+    for (auto& group : groups)
+        normalizePrintEntryGroup(module, group.second);
+    if (groups.size() == 1) {
+        if (auto layout = groups.begin()->second.front()->getAttr("tla.print.layout"))
+            module->setAttr("tla.print.layout", layout);
+    }
 }
 
 class TlaLowerDebugPrintPass : public PassWrapper<TlaLowerDebugPrintPass, OperationPass<ModuleOp>> {
@@ -734,11 +1120,6 @@ public:
         module.walk([&](::tla::DebugPrintOp op) { ops.push_back(op); });
         SmallVector<::tla::PrintTensorOp, 8> printOps;
         module.walk([&](::tla::PrintTensorOp op) { printOps.push_back(op); });
-        if (!ops.empty() && !printOps.empty()) {
-            printOps.front().emitError("scalar debug FIFO and native tensor print cannot share a kernel module");
-            signalPassFailure();
-            return;
-        }
         for (::tla::DebugPrintOp op : ops) {
             if (!op || !op->getBlock())
                 continue;
@@ -783,7 +1164,8 @@ public:
                     return;
                 }
             }
-            uint32_t ordinal = nextCallId[funcOp.getOperation()]++;
+            auto vfCount = module->getAttrOfType<IntegerAttr>("tla.vf_print.count");
+            uint32_t ordinal = nextCallId[funcOp.getOperation()]++ + (vfCount ? vfCount.getInt() : 0);
             std::string callIdDiagnostic;
             FailureOr<uint16_t> callId = getPrintTensorCallId(ordinal, callIdDiagnostic);
             if (failed(callId)) {
@@ -819,7 +1201,7 @@ public:
                 return;
             }
             auto makeTunnelLifecycleCall = [&](StringRef name) {
-                auto lifecycle = getOrCreateRuntimeCall(module, name, ArrayRef<Type>{stateArg.getType()});
+                auto lifecycle = getOrCreateDebugRuntimeCall(module, name, ArrayRef<Type>{stateArg.getType()});
                 lifecycle->setAttr(
                     hivm::TFuncCoreTypeAttr::name,
                     hivm::TFuncCoreTypeAttr::get(funcOp.getContext(), hivm::TFuncCoreType::AIC));
@@ -843,6 +1225,7 @@ public:
                 exitBuilder.create<func::CallOp>(returnOp.getLoc(), finish, ValueRange{stateArg});
             }
         }
+        normalizePrintArguments(module);
     }
 };
 

@@ -128,6 +128,20 @@ class LoweredTlaIR:
         default_factory=tuple
     )
 
+    @property
+    def entrypoint(self) -> str:
+        """Read the frontend symbol before the first cache lookup."""
+        entries = [
+            mlir_ir.StringAttr(op.attributes["sym_name"]).value
+            for op in self.module.body.operations
+            if op.operation.name == "tla.func"
+        ]
+        if len(entries) != 1:
+            raise TlaLoweringError(
+                "Runtime compilation requires exactly one TLA entrypoint"
+            )
+        return entries[0]
+
     def asm(self, *, generic: bool | None = None) -> str:
         emit_generic = self.generic if generic is None else bool(generic)
         if self._asm is None or emit_generic != self.generic:

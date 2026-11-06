@@ -22,13 +22,16 @@ DEBUG_TUNNEL_STATE_SENTINEL = int.from_bytes(b"TLA_DTUN", "big")
 
 _DEBUG_CORE_RECORDS = 108
 _RING_BUFFER_BYTES = 1 << 20
+_FIFO_CONTROL_BYTES = 128
 _MAGIC = 0xAE86
 _PRINT_TENSOR_DESCRIPTOR_NAMESPACE = 0x54500000
-_PRINT_TENSOR_DESCRIPTOR_NAMESPACE_MASK = 0xFFFC0000
+_PRINT_TENSOR_DESCRIPTOR_NAMESPACE_MASK = 0xFFF80000
+_VF_RECORD_TAG = 0x00040000
 _GLOBAL_MEMORY_POSITION = 0
 _UNIFIED_BUFFER_POSITION = 1
 _LEVEL1_MEMORY_POSITION = 2
 _LEVEL0C_MEMORY_POSITION = 5
+_REGISTER_POSITION = 8
 
 _FIFO_SCALAR = 1
 _FIFO_TENSOR = 2
@@ -86,10 +89,15 @@ class _FifoData:
     ring_buffer_offset: int
     ring_buffer_bytes: int
     debug_bus_mappings: tuple[_DebugBusMapping, ...] = ()
+    aiv_subblock_count: int = 1
 
 
 class AscDebugFifoError(TlaRuntimeUnavailableError):
     """Raised when FIFO open/close/decode fails."""
+
+
+class AscDebugUnsupportedError(AscDebugFifoError):
+    """The installed runtime or driver lacks a required debug interface."""
 
 
 @dataclass
@@ -334,6 +342,27 @@ def _acl_memcpy(dst: int, src: int, size: int, kind: int) -> None:
     )
 
 
+def _driver_device_id(device: int) -> int:
+    """Translate an ACL user device ID to the logic ID required by driver HAL."""
+    try:
+        translate = ctypes.CDLL("libascendcl.so").aclrtGetLogicDevIdByUserDevId
+    except (OSError, AttributeError) as exc:
+        raise AscDebugUnsupportedError(
+            "L1 tensor printing requires aclrtGetLogicDevIdByUserDevId"
+        ) from exc
+    translate.argtypes = [ctypes.c_int32, ctypes.POINTER(ctypes.c_int32)]
+    translate.restype = ctypes.c_int
+    logic_device = ctypes.c_int32(-1)
+    check_acl_errors(
+        translate(int(device), ctypes.byref(logic_device)),
+        "aclrtGetLogicDevIdByUserDevId",
+        error_cls=AscDebugFifoError,
+    )
+    if logic_device.value < 0:
+        raise AscDebugFifoError("CANN returned a negative driver logic device ID")
+    return logic_device.value
+
+
 def _driver_hal() -> tuple[Any, Any]:
     try:
         lib = ctypes.CDLL("libascend_hal.so")
@@ -341,7 +370,7 @@ def _driver_hal() -> tuple[Any, Any]:
         map_resource = lib.halResMap
         unmap_resource = lib.halResUnmap
     except (OSError, AttributeError) as exc:
-        raise AscDebugFifoError(
+        raise AscDebugUnsupportedError(
             "L1 tensor printing requires driver HAL support for "
             "halGetMaxResMapType, halResMap, and halResUnmap"
         ) from exc
@@ -356,7 +385,7 @@ def _driver_hal() -> tuple[Any, Any]:
     unmap_resource.argtypes = [ctypes.c_uint, ctypes.POINTER(_DriverResourceMapInfo)]
     unmap_resource.restype = ctypes.c_int
     if int(get_max()) < _DRIVER_RESOURCE_DEBUG_ADDRESS:
-        raise AscDebugFifoError(
+        raise AscDebugUnsupportedError(
             "L1 tensor printing requires a driver that supports RES_DBG_ADDR"
         )
     return map_resource, unmap_resource
@@ -367,7 +396,7 @@ def _debug_bus_support_error() -> str | None:
 
     try:
         _driver_hal()
-    except AscDebugFifoError as exc:
+    except AscDebugUnsupportedError as exc:
         return str(exc)
     return None
 
@@ -376,12 +405,24 @@ def open_fifo(
     block_num: int,
     *,
     mixed_handoff: bool = False,
+    aiv_subblock_count: int = 1,
     needs_debug_bus: bool = False,
     device: int = 0,
 ) -> _FifoData:
+    if (
+        type(aiv_subblock_count) is not int
+        or aiv_subblock_count not in (1, 2)
+        or (not mixed_handoff and aiv_subblock_count != 1)
+    ):
+        raise AscDebugFifoError("invalid AIV subblock count for print FIFO")
+    if _RING_BUFFER_BYTES <= 0 or _RING_BUFFER_BYTES % 8:
+        raise AscDebugFifoError(
+            "print FIFO capacity must preserve 8-byte write-control alignment"
+        )
+    driver_device = _driver_device_id(device) if needs_debug_bus else device
     ring_offset = _ring_buffer_offset()
     block_length = _align_up(ring_offset + _RING_BUFFER_BYTES + _WRITE_SIZE, 64)
-    region_size = block_length * _DEBUG_CORE_RECORDS
+    region_size = (block_length + _FIFO_CONTROL_BYTES) * _DEBUG_CORE_RECORDS
     device_ptr = _acl_malloc(region_size)
     host_ptr = 0
     debug_bus_mappings: list[_DebugBusMapping] = []
@@ -423,7 +464,7 @@ def open_fifo(
             # Publish each core's DebugBus aperture in its matching FIFO header.
             driver_hal = _driver_hal()
             for i in range(_DEBUG_CORE_RECORDS):
-                mapping = _DebugBusMapping.open(device, i, driver_hal=driver_hal)
+                mapping = _DebugBusMapping.open(driver_device, i, driver_hal=driver_hal)
                 debug_bus_mappings.append(mapping)
                 ctypes.c_uint64.from_address(
                     host_ptr + i * block_length + 32
@@ -459,6 +500,7 @@ def open_fifo(
         record_count=_DEBUG_CORE_RECORDS,
         launch_block_count=int(block_num),
         mixed_handoff=bool(mixed_handoff),
+        aiv_subblock_count=aiv_subblock_count,
         block_length=block_length,
         ring_buffer_offset=ring_offset,
         ring_buffer_bytes=_RING_BUFFER_BYTES,
@@ -730,6 +772,15 @@ def _print_scalar_records(host: memoryview, fifo: _FifoData) -> None:
                     _print_scalar_tlv(ring[offset : offset + total], total, i)
                     or printed
                 )
+            elif typ == _FIFO_TENSOR:
+                # SIMD VF dumps share the scalar debug FIFO and may be
+                # interleaved with formatted scalar records in program order.
+                chunk = ring[offset : offset + total]
+                shape, logical, subblock = _tensor_record_metadata(
+                    chunk, total, fifo, vf_record=True
+                )
+                _render_tensor(chunk, shape, logical, subblock=subblock)
+                printed = True
             offset += total
     if not printed:
         _write_stdout("TLA debug: no records captured\n")
@@ -761,7 +812,13 @@ def _format_tensor_value(data_type: int, payload: bytes, index: int) -> str:
     raise AscDebugFifoError(f"unsupported tensor dtype code {data_type}")
 
 
-def _render_tensor(tlv: memoryview, shape_tlv: memoryview, logical_block: int) -> None:
+def _render_tensor(
+    tlv: memoryview,
+    shape_tlv: memoryview,
+    logical_block: int,
+    *,
+    subblock: int | None = None,
+) -> None:
     data_type = struct.unpack_from("<I", tlv, 12)[0]
     desc = struct.unpack_from("<I", tlv, 16)[0]
     position = struct.unpack_from("<H", tlv, 24)[0]
@@ -779,9 +836,11 @@ def _render_tensor(tlv: memoryview, shape_tlv: memoryview, logical_block: int) -
         _UNIFIED_BUFFER_POSITION: "UB",
         _LEVEL1_MEMORY_POSITION: "L1",
         _LEVEL0C_MEMORY_POSITION: "L0C",
+        _REGISTER_POSITION: "REG",
     }[position]
     parts = [f"DumpTensor: call={desc & 0xFFFF}, block={logical_block}, "]
-    subblock = _decode_subblock(desc)
+    if subblock is None:
+        subblock = _decode_subblock(desc)
     if subblock >= 0:
         parts.append(f"subblock={subblock}, ")
     shape_text = ",".join(str(shape[i]) for i in range(shape_dim))
@@ -845,6 +904,7 @@ def _validate_tensor_tlv(tlv: memoryview, total: int, shape_tlv: memoryview) -> 
         _UNIFIED_BUFFER_POSITION,
         _LEVEL1_MEMORY_POSITION,
         _LEVEL0C_MEMORY_POSITION,
+        _REGISTER_POSITION,
     ):
         raise AscDebugFifoError(
             "malformed tensor print FIFO: unsupported tensor position"
@@ -905,6 +965,45 @@ def _validate_tensor_tlv(tlv: memoryview, total: int, shape_tlv: memoryview) -> 
         )
 
 
+def _tensor_record_metadata(
+    chunk: memoryview, total: int, fifo: _FifoData, *, vf_record: bool = False
+) -> tuple[memoryview, int, int]:
+    shape = _embedded_shape_tlv(chunk)
+    if shape is None:
+        raise AscDebugFifoError(
+            "malformed tensor print FIFO: tensor record missing shape"
+        )
+    _validate_tensor_tlv(chunk, total, shape)
+    desc = struct.unpack_from("<I", chunk, 16)[0]
+    block_idx = struct.unpack_from("<H", chunk, 26)[0]
+    subblock = _decode_subblock(desc)
+    logical = int(block_idx)
+    if vf_record:
+        position = struct.unpack_from("<H", chunk, 24)[0]
+        if (
+            position not in (_REGISTER_POSITION, _UNIFIED_BUFFER_POSITION)
+            or subblock != -1
+        ):
+            raise AscDebugFifoError(
+                "malformed VF print FIFO: invalid position or descriptor"
+            )
+        # CANN VF records encode block * subblockdim + subblockid, without
+        # the descriptor tag used by the legacy native Tensor helper.
+        if fifo.mixed_handoff:
+            logical, subblock = divmod(block_idx, fifo.aiv_subblock_count)
+    elif fifo.mixed_handoff and subblock >= 0:
+        if block_idx % fifo.aiv_subblock_count != subblock:
+            raise AscDebugFifoError(
+                "malformed tensor print FIFO: tensor block index does not match mixed AIV subblock"
+            )
+        logical = block_idx // fifo.aiv_subblock_count
+    if logical >= fifo.launch_block_count:
+        raise AscDebugFifoError(
+            "malformed tensor print FIFO: tensor block index exceeds launch block_num"
+        )
+    return shape, logical, subblock
+
+
 def _decode_tensor_records(host: memoryview, fifo: _FifoData) -> None:
     records: list[tuple[memoryview, memoryview, int]] = []
     for i in range(fifo.record_count):
@@ -944,26 +1043,7 @@ def _decode_tensor_records(host: memoryview, fifo: _FifoData) -> None:
                 raise AscDebugFifoError(
                     "malformed tensor print FIFO: unexpected record type"
                 )
-            shape_tlv = _embedded_shape_tlv(chunk)
-            if shape_tlv is None:
-                raise AscDebugFifoError(
-                    "malformed tensor print FIFO: tensor record missing shape"
-                )
-            _validate_tensor_tlv(chunk, total, shape_tlv)
-            desc = struct.unpack_from("<I", chunk, 16)[0]
-            block_idx = struct.unpack_from("<H", chunk, 26)[0]
-            subblock = _decode_subblock(desc)
-            logical = int(block_idx)
-            if fifo.mixed_handoff and subblock >= 0:
-                if block_idx % 2 != subblock:
-                    raise AscDebugFifoError(
-                        "malformed tensor print FIFO: tensor block index does not match mixed AIV subblock"
-                    )
-                logical = block_idx // 2
-            if logical >= fifo.launch_block_count:
-                raise AscDebugFifoError(
-                    "malformed tensor print FIFO: tensor block index exceeds launch block_num"
-                )
+            shape_tlv, logical, _ = _tensor_record_metadata(chunk, total, fifo)
             records.append((shape_tlv, chunk, logical))
             offset += total
     if not records:
@@ -971,6 +1051,85 @@ def _decode_tensor_records(host: memoryview, fifo: _FifoData) -> None:
         return
     for shape_tlv, tlv, logical in records:
         _render_tensor(tlv, shape_tlv, logical)
+
+
+def read_print_fifo(fifo: _FifoData) -> None:
+    """Decode a shared FIFO record by record, without taking resource ownership."""
+    host_ptr = _acl_malloc_host(fifo.region_size)
+    try:
+        _acl_memcpy(
+            host_ptr, fifo.device_ptr, fifo.region_size, _ACL_MEMCPY_DEVICE_TO_HOST
+        )
+        host = (ctypes.c_char * fifo.region_size).from_address(host_ptr)
+        view = memoryview(host).cast("B")
+        printed = False
+        for core in range(fifo.record_count):
+            record = view[core * fifo.block_length : (core + 1) * fifo.block_length]
+            if struct.unpack_from("<H", record, 16)[0] != _MAGIC:
+                raise AscDebugFifoError("malformed print FIFO: invalid magic")
+            ring = record[fifo.ring_buffer_offset :]
+            control, length, written = struct.unpack_from(
+                "<IIQ", ring, fifo.ring_buffer_bytes
+            )
+            if (
+                control != _FIFO_BUF_IN
+                or length != 16
+                or written > fifo.ring_buffer_bytes
+            ):
+                raise AscDebugFifoError("malformed print FIFO: invalid write control")
+            offset = 0
+            while offset < written:
+                if written - offset < 8:
+                    raise AscDebugFifoError(
+                        "malformed print FIFO: truncated record header"
+                    )
+                kind, length = struct.unpack_from("<II", ring, offset)
+                total = length + 8
+                if not length or total > written - offset:
+                    raise AscDebugFifoError(
+                        "malformed print FIFO: record length out of bounds"
+                    )
+                chunk = ring[offset : offset + total]
+                if kind == _FIFO_SCALAR:
+                    printed = _print_scalar_tlv(chunk, total, core) or printed
+                elif kind == _FIFO_TENSOR:
+                    if total < _PRINT_TENSOR_TLV_SIZE:
+                        raise AscDebugFifoError(
+                            "malformed print FIFO: truncated tensor"
+                        )
+                    descriptor = struct.unpack_from("<I", chunk, 16)[0]
+                    shape, block, subblock = _tensor_record_metadata(
+                        chunk, total, fifo, vf_record=bool(descriptor & _VF_RECORD_TAG)
+                    )
+                    _render_tensor(
+                        chunk,
+                        shape,
+                        block,
+                        subblock=subblock if subblock >= 0 else None,
+                    )
+                    printed = True
+                else:
+                    raise AscDebugFifoError(
+                        "malformed print FIFO: unexpected record type"
+                    )
+                offset += total
+        truncated = [
+            core
+            for core in range(fifo.record_count)
+            if struct.unpack_from(
+                "<I",
+                view,
+                fifo.block_length * fifo.record_count + core * _FIFO_CONTROL_BYTES,
+            )[0]
+        ]
+        if truncated:
+            _write_stdout(
+                f"TLA print: output truncated; capacity exhausted on core(s) {truncated}\n"
+            )
+        if not printed:
+            _write_stdout("TLA debug: no records captured\n")
+    finally:
+        _acl_free_host(host_ptr)
 
 
 def close_fifo(
@@ -1036,6 +1195,7 @@ def launch_with_debug_fifo(
     uses_scalar_print: bool,
     uses_tensor_print: bool,
     is_mixed: bool,
+    aiv_subblock_count: int = 1,
     print_tensor_position: str | None = None,
 ) -> None:
     """Open FIFO if needed, rewrite args, invoke ``launch_kernel``, then close."""
@@ -1052,7 +1212,10 @@ def launch_with_debug_fifo(
     needs_debug_bus = print_tensor_position == "L1"
     fifo = open_fifo(
         block_num,
-        mixed_handoff=mixed_tensor_handoff,
+        # Decoding needs the launch mode even when VF records use the scalar
+        # FIFO. Argument rewriting below still uses the native Tensor protocol.
+        mixed_handoff=is_mixed,
+        aiv_subblock_count=aiv_subblock_count,
         needs_debug_bus=needs_debug_bus,
         device=device,
     )
@@ -1132,6 +1295,7 @@ def launch_with_debug_fifo(
 
 __all__ = [
     "AscDebugFifoError",
+    "AscDebugUnsupportedError",
     "DEBUG_PRINT_WORKSPACE_SENTINEL",
     "PRINT_TENSOR_WORKSPACE_SENTINEL",
     "DEBUG_TUNNEL_STATE_SENTINEL",

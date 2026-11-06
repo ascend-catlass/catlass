@@ -18,7 +18,7 @@ module {
 }
 // END-LOWER
 // LOWER-DAG: func.func private @_mlir_ciface_tla_printf_x_i32(i32, i64)
-// LOWER-DAG: func.func private @_mlir_ciface_tla_printf_v_f32(f32, i64)
+// LOWER-DAG: func.func private @_mlir_ciface_tla_printf_v_f32_aiv(f32, i64)
 // LOWER-DAG: func.func private @_mlir_ciface_tla_printf_format_values(!llvm.ptr, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)
 // LOWER-NOT: func.func private @_mlir_ciface_tla_printf_format_{{[0-9a-f]}}
 // LOWER-LABEL: func.func @debug_print_mixed_mix_aic
@@ -33,7 +33,7 @@ module {
 // LOWER-NOT: func_dyn_memref_args
 // LOWER-NOT: memref.extract_aligned_pointer_as_index
 // LOWER-NOT: arith.index_cast
-// LOWER: call @_mlir_ciface_tla_printf_format_values(%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %[[AIV_WORKSPACE]]) {{.*}}tla.debug_print.format = "mix v={}"
-// LOWER: call @_mlir_ciface_tla_printf_v_f32(%{{.*}}, %[[AIV_WORKSPACE]])
+// LOWER: call @_mlir_ciface_tla_printf_format_values_aiv(%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %[[AIV_WORKSPACE]]) {{.*}}tla.debug_print.format = "mix v={}"
+// LOWER: call @_mlir_ciface_tla_printf_v_f32_aiv(%{{.*}}, %[[AIV_WORKSPACE]])
 // LOWER-NOT: tla.debug_print %
 // LOWER-NOT: tla.debug_print format

@@ -52,6 +52,10 @@ from .compiler_bridge import (
 )
 from .frontend_diagnostics import verbose_errors_enabled
 from .types import dtype_size_bytes
+from .compiler_metadata import (
+    KernelRuntimeMetadata,
+    PrintTensorMetadata as _PrintTensorMetadata,
+)
 
 if TYPE_CHECKING:
     from .base_dsl.jit_executor import JitCompiledFunction
@@ -91,10 +95,10 @@ _PRINT_TENSOR_WORKSPACE_SENTINEL = int.from_bytes(
 )
 _DEBUG_TUNNEL_STATE_SENTINEL = int.from_bytes(b"TLA_DTUN", byteorder="big")
 # Cache compatibility tokens; change only when the corresponding ABI changes.
-_DEBUG_PRINT_WORKSPACE_ABI_REVISION = "debug-print-workspace-i64-v1"
-_PRINT_TENSOR_WORKSPACE_ABI_REVISION = "print-tensor-workspace-i64-dynamic-shape-typed-multirecord-mixed-subblock-l1-l0c-local-memref-abi"
+_DEBUG_PRINT_WORKSPACE_ABI_REVISION = "debug-print-shared-fifo-layout-v4"
+_PRINT_TENSOR_WORKSPACE_ABI_REVISION = "print-tensor-shared-fifo-v2"
 _DEBUG_TUNNEL_STATE_ABI_REVISION = "debug-tunnel-state-i64-v1"
-_PRINT_TENSOR_HELPER_ABI_MARKER = b"tla_print_tensor_abi"
+_PRINT_TENSOR_HELPER_ABI_MARKER = b"tla_print_tensor_abi_shared_v2"
 _PRINT_TENSOR_MAX_BLOCKS = 1 << 16  # uint16_t block_idx
 _PRINT_TENSOR_CORE_RECORDS = 108  # RuntimeWrapper::kDebugCoreRecords
 _PRINT_TENSOR_FIFO_BYTES = 1 << 20  # kRingBufferBytes
@@ -122,11 +126,10 @@ _HIVM_TEMPLATE_BITCODE_ATTRS = {
     "meta_op.aiv.print.c310.bc": ("hivm.aiv_bitcode", "hivm.aiv_bitcode"),
 }
 _MAX_KERNEL_ABI_PAYLOAD_SIZE = 1 << 20
-# Bumped when HIVMC append-bisheng defaults change (e.g. cce-vf-auto-sync=fused,
-# cce-enable-dynamic-misched=true, cce-vf-aa-between-iters=false), so
-# pre-existing disk caches cannot silently reuse binaries built under the old
-# HIVMC-injected ``global`` autosync policy.
-_ONLINE_CACHE_ABI_VERSION = 11
+# Bump when compiler options or cached launch metadata changes. Version 13
+# retains the HIVMC alias-analysis workaround and requires schema-v2 runtime
+# metadata, including the compiler-produced MIX AIV subblock count.
+_ONLINE_CACHE_ABI_VERSION = 13
 
 
 class TlaExecutionError(RuntimeError):
@@ -198,21 +201,10 @@ class TlaUnsupportedAbiError(TlaExecutionError):
 
 @dataclass(frozen=True)
 class _PrintTensorDTypeSpec:
-    mlir_token: str
     native_name: str
     numeric_kind: str
     minimum: int | None = None
     maximum: int | None = None
-
-
-@dataclass(frozen=True)
-class _PrintTensorMetadata:
-    shape: tuple[int, ...]
-    count: int | None
-    dtype: str
-    position: str
-    call: int = 0
-    dynamic_execution: bool = False
 
 
 @dataclass(frozen=True)
@@ -228,17 +220,14 @@ class _NativePrintTensorRecord:
 
 
 _PRINT_TENSOR_DTYPES = {
-    "f16": _PrintTensorDTypeSpec("f16", "float16", "float"),
-    "f32": _PrintTensorDTypeSpec("f32", "float32", "float"),
-    "i8": _PrintTensorDTypeSpec("i8", "int8", "integer", -128, 127),
-    "i16": _PrintTensorDTypeSpec("i16", "int16", "integer", -32768, 32767),
-    "i32": _PrintTensorDTypeSpec("i32", "int32", "integer", -2147483648, 2147483647),
-    "u8": _PrintTensorDTypeSpec("ui8", "uint8", "integer", 0, 255),
-    "u16": _PrintTensorDTypeSpec("ui16", "uint16", "integer", 0, 65535),
-    "u32": _PrintTensorDTypeSpec("ui32", "uint32", "integer", 0, 4294967295),
-}
-_PRINT_TENSOR_DTYPES_BY_MLIR = {
-    spec.mlir_token: token for token, spec in _PRINT_TENSOR_DTYPES.items()
+    "f16": _PrintTensorDTypeSpec("float16", "float"),
+    "f32": _PrintTensorDTypeSpec("float32", "float"),
+    "i8": _PrintTensorDTypeSpec("int8", "integer", -128, 127),
+    "i16": _PrintTensorDTypeSpec("int16", "integer", -32768, 32767),
+    "i32": _PrintTensorDTypeSpec("int32", "integer", -2147483648, 2147483647),
+    "u8": _PrintTensorDTypeSpec("uint8", "integer", 0, 255),
+    "u16": _PrintTensorDTypeSpec("uint16", "integer", 0, 65535),
+    "u32": _PrintTensorDTypeSpec("uint32", "integer", 0, 4294967295),
 }
 _PRINT_TENSOR_DTYPES_BY_NATIVE = {
     spec.native_name: token for token, spec in _PRINT_TENSOR_DTYPES.items()
@@ -258,7 +247,7 @@ class TlaCompileOption:
     cache_dir: Path | None = None
     force_recompile: bool = False
     kernel_mode: str = "aiv"
-    # Placeholder until ``_resolve_compile_option_from_lowered_mlir``; derived from
+    # Placeholder until ``_resolve_compile_option_from_metadata``; derived from
     # public ``--npu-arch`` default (not a separate Host knob).
     arch_scope: str = _arch_scope_for_target_impl(
         target_arch=_resolve_npu_arch(DEFAULT_NPU_ARCH),
@@ -301,19 +290,6 @@ class _PreparedAbiPacker:
     host_size: int
     slots: tuple[_PreparedAbiSlot, ...]
     memref_runs: tuple[_PreparedMemrefRun, ...]
-
-
-@dataclass(frozen=True)
-class _LogicalMixedHandoff:
-    entrypoint: str
-
-
-@dataclass(frozen=True)
-class _ArtifactStaticMetadata:
-    uses_scalar_print: bool
-    uses_tensor_print: bool
-    uses_debug_tunnel: bool
-    logical_mixed_handoff: _LogicalMixedHandoff | None
 
 
 _MEMORY_COMPILE_CACHE_LOCK = threading.RLock()
@@ -391,7 +367,7 @@ def _compile_kernel(
     )
     extern_compile_specs = lowered.extern_compile_specs
     tlair_mlir = lowered.asm(generic=True)
-    entrypoint = _extract_entrypoint(tlair_mlir)
+    entrypoint = lowered.entrypoint
     # Everything below needs CANN; the frontend IR does not, so flush it first.
     _write_early_tlair_dump(entrypoint, tlair_mlir)
     compiler_bridge_path = resolve_bridge_extension_path()
@@ -455,20 +431,15 @@ def _compile_kernel(
         pass_dump_path = (
             artifact_dir / str(cached_pass_dump) if cached_pass_dump else None
         )
+        static_metadata = _runtime_metadata_from_manifest(cached, entrypoint=entrypoint)
         if (
-            _cache_manifest_has_current_workspace_abis(cached)
+            static_metadata is not None
+            and _cache_manifest_has_current_workspace_abis(cached)
             and kernel_binary_path.exists()
             and mlir_path.exists()
         ):
             lowered_llvm = mlir_path.read_text()
-            static_metadata = _analyze_compiled_artifact_static_metadata(
-                tlair_mlir, lowered_llvm
-            )
-            expected_entrypoint = (
-                static_metadata.logical_mixed_handoff.entrypoint
-                if static_metadata.logical_mixed_handoff is not None
-                else entrypoint
-            )
+            expected_entrypoint = static_metadata.entrypoint
             cached_kernel_abi, cached_abi_packer = _prepared_kernel_abi_from_manifest(
                 cached, expected_entrypoint=expected_entrypoint
             )
@@ -481,21 +452,16 @@ def _compile_kernel(
                 compiler_bridge_path=compiler_bridge_path,
                 hivmc_path=hivmc,
                 kernel_binary_path=kernel_binary_path,
-                compile_option=_resolve_compile_option_from_lowered_mlir(
+                compile_option=_resolve_compile_option_from_metadata(
                     compile_option,
-                    lowered_llvm,
-                    has_logical_mixed_handoff=(
-                        static_metadata.logical_mixed_handoff is not None
-                    ),
+                    static_metadata,
                 ),
                 pass_ir_dump=pass_dump_path.read_text()
                 if pass_dump_path and pass_dump_path.exists()
                 else "",
                 kernel_abi=cached_kernel_abi,
                 abi_packer=cached_abi_packer,
-                uses_scalar_print=static_metadata.uses_scalar_print,
-                uses_tensor_print=static_metadata.uses_tensor_print,
-                logical_mixed_handoff=static_metadata.logical_mixed_handoff,
+                runtime_metadata=static_metadata,
                 ub_static_bytes=int(cached.get("ub_static_bytes", 0)),
                 ub_programmable_bytes=int(cached.get("ub_programmable_bytes", 0)),
                 ub_dynamic_base=int(cached.get("ub_dynamic_base", -1)),
@@ -547,23 +513,20 @@ def _compile_kernel(
     # device-code step, which does. After the emptiness check, so a failed
     # lowering is reported as that rather than exported as an empty artifact.
     _write_early_lowering_dump(entrypoint, lowered_llvm, lowering_result.pass_ir_dump)
-    static_metadata = _analyze_compiled_artifact_static_metadata(
-        tlair_mlir, lowered_llvm
-    )
-    resolved_option = _resolve_compile_option_from_lowered_mlir(
+    static_metadata = lowering_result.runtime_metadata
+    if static_metadata is None or static_metadata.entrypoint != entrypoint:
+        raise TlaKernelCompileError(
+            "Missing or inconsistent compiler-produced runtime metadata; rebuild the matching DSL."
+        )
+    resolved_option = _resolve_compile_option_from_metadata(
         compile_option,
-        lowered_llvm,
-        has_logical_mixed_handoff=(static_metadata.logical_mixed_handoff is not None),
+        static_metadata,
     )
     kernel_abi = getattr(lowering_result, "kernel_abi", None)
     # Already accounts for a released reserve: the module is stamped before
     # lowering, so the pass and the host agree on one number.
     ub_programmable_bytes = lowering_result.ub_programmable_bytes
-    expected_entrypoint = (
-        static_metadata.logical_mixed_handoff.entrypoint
-        if static_metadata.logical_mixed_handoff is not None
-        else entrypoint
-    )
+    expected_entrypoint = static_metadata.entrypoint
     abi_packer = _prepare_compiled_abi_packer(
         kernel_abi, expected_entrypoint=expected_entrypoint
     )
@@ -576,7 +539,7 @@ def _compile_kernel(
     bitcodes = _resolve_hivm_template_bitcode(resolved_option, variant=variant)
     helper_bitcode_files = bitcodes.split(",")
     hivmc_mlir_path, _ = _create_stamped_hivmc_input(
-        mlir_path, resolved_option, bitcodes=bitcodes
+        mlir_path, lowered.module, static_metadata, bitcodes=bitcodes
     )
     user_bitcodes: list[Path] = []
     # Group dependencies by source content and compile target, because even if
@@ -645,6 +608,7 @@ def _compile_kernel(
         "helper_bitcode_files": helper_bitcode_files,
         "arch_scope": resolved_option.arch_scope,
         "kernel_abi": kernel_abi_to_dict(kernel_abi),
+        "runtime_metadata": static_metadata.to_dict(),
         # Read back on a cache hit, where lowering never runs to produce them.
         "ub_static_bytes": lowering_result.ub_static_bytes,
         "ub_programmable_bytes": ub_programmable_bytes,
@@ -670,9 +634,7 @@ def _compile_kernel(
         compile_option=resolved_option,
         kernel_abi=kernel_abi,
         abi_packer=abi_packer,
-        uses_scalar_print=static_metadata.uses_scalar_print,
-        uses_tensor_print=static_metadata.uses_tensor_print,
-        logical_mixed_handoff=static_metadata.logical_mixed_handoff,
+        runtime_metadata=static_metadata,
         ub_static_bytes=lowering_result.ub_static_bytes,
         ub_programmable_bytes=ub_programmable_bytes,
         ub_dynamic_base=lowering_result.ub_dynamic_base,
@@ -719,9 +681,7 @@ def _new_jit_compiled_function(
     pass_ir_dump: str,
     kernel_abi: KernelAbiLayout | None,
     abi_packer: _PreparedAbiPacker | None,
-    uses_scalar_print: bool,
-    uses_tensor_print: bool,
-    logical_mixed_handoff: _LogicalMixedHandoff | None,
+    runtime_metadata: KernelRuntimeMetadata,
     ub_static_bytes: int = 0,
     ub_programmable_bytes: int = 0,
     ub_dynamic_base: int = -1,
@@ -741,30 +701,16 @@ def _new_jit_compiled_function(
             "kernel ABI was not validated while constructing the compiled function"
         )
 
-    is_mixed = logical_mixed_handoff is not None and compile_option.kernel_mode == "mix"
-    print_metadata = (
-        _print_tensor_static_metadata_records(tlair_mlir, entrypoint=entrypoint)
-        if uses_tensor_print
-        else None
-    )
-    print_helper_core = (
-        _mixed_print_tensor_helper_core(lowered_llvm)
-        if uses_tensor_print and compile_option.kernel_mode == "mix"
-        else (
-            _core_type_from_arch_scope(compile_option.arch_scope)
-            if uses_tensor_print
-            else None
+    runtime_metadata.validate()
+    if (
+        runtime_metadata.entrypoint != entrypoint
+        or runtime_metadata.kernel_mode != compile_option.kernel_mode
+    ):
+        raise TlaUnsupportedAbiError(
+            "runtime metadata does not match the launch entrypoint or core type"
         )
-    )
-    local_print_positions = {
-        metadata.position
-        for metadata in (print_metadata or ())
-        if metadata.position in {"L1", "L0C"}
-    }
-    if len(local_print_positions) > 1:
-        raise TlaExecutionError("one kernel cannot mix L1 and L0C tensor prints")
-    print_tensor_position = (
-        next(iter(local_print_positions)) if len(local_print_positions) == 1 else None
+    print_metadata = (
+        runtime_metadata.tensor_records if runtime_metadata.uses_tensor_print else None
     )
 
     return JitCompiledFunction(
@@ -780,12 +726,23 @@ def _new_jit_compiled_function(
                     None if argument_trees is None else tuple(argument_trees)
                 ),
             ),
-            uses_scalar_print=uses_scalar_print,
-            uses_tensor_print=uses_tensor_print,
-            is_mixed=is_mixed,
+            uses_scalar_print=runtime_metadata.uses_scalar_print,
+            uses_tensor_print=runtime_metadata.uses_tensor_print,
+            is_mixed=runtime_metadata.is_mixed,
+            aiv_subblock_count=runtime_metadata.aiv_subblock_count,
             print_metadata=print_metadata,
-            print_helper_core=print_helper_core,
-            print_tensor_position=print_tensor_position,
+            print_helper_core=runtime_metadata.print_helper_core,
+            print_tensor_position=(
+                runtime_metadata.local_print_positions[0]
+                if runtime_metadata.local_print_positions
+                else None
+            ),
+            simt_print_formats=(
+                bytes.fromhex(runtime_metadata.simt_print_formats)
+                if runtime_metadata.simt_print_formats is not None
+                else None
+            ),
+            print_argument_layout=runtime_metadata.print_argument_layout,
             ub_static_bytes=ub_static_bytes,
             ub_programmable_bytes=ub_programmable_bytes,
             ub_dynamic_base=ub_dynamic_base,
@@ -881,9 +838,13 @@ def _validate_print_tensor_fifo_capacity(
     *,
     helper_core: str,
     mixed: bool,
+    aiv_subblock_count: int = 1,
+    bounded: bool = False,
 ) -> None:
     block_count = _checked_print_tensor_block_count(block_num)
-    records_per_block = 2 if helper_core == "aiv" and mixed else 1
+    records_per_block = (
+        aiv_subblock_count if helper_core in {"aiv", "both"} and mixed else 1
+    )
     core_records = block_count * records_per_block
     if core_records > _PRINT_TENSOR_CORE_RECORDS:
         raise TlaExecutionError(
@@ -904,13 +865,13 @@ def _validate_print_tensor_fifo_capacity(
                 "tla.print_tensor record exceeds the per-print FIFO capacity: "
                 f"{record_bytes} bytes, capacity is {_PRINT_TENSOR_FIFO_BYTES} bytes"
             )
-    if static_bytes > _PRINT_TENSOR_FIFO_BYTES:
+    if static_bytes > _PRINT_TENSOR_FIFO_BYTES and not bounded:
         raise TlaExecutionError(
             "statically executed tla.print_tensor aggregate output exceeds the per-core "
             f"FIFO capacity: {static_bytes} bytes, capacity is "
             f"{_PRINT_TENSOR_FIFO_BYTES} bytes"
         )
-    if dynamic_sites:
+    if dynamic_sites and not bounded:
         warnings.warn(
             "tla.print_tensor uses runtime length, dynamic shape, or runtime "
             "control flow; aggregate use of the fixed 1 MiB per-core FIFO "
@@ -1385,52 +1346,6 @@ def _prepare_compiled_abi_packer(
         ) from exc
 
 
-def _extract_mixed_handoff_entrypoints(mlir_text: str) -> tuple[str, str] | None:
-    names = re.findall(
-        r"(?:func\.func|\"func\.func\")\s+@([A-Za-z_][A-Za-z0-9_]*)",
-        mlir_text,
-    )
-    aic_names = [name for name in names if name.endswith("_mix_aic")]
-    aiv_names = [name for name in names if name.endswith("_mix_aiv")]
-    if len(aic_names) != 1 or len(aiv_names) != 1:
-        return None
-    return aic_names[0], aiv_names[0]
-
-
-def _extract_logical_mixed_handoff(mlir_text: str) -> _LogicalMixedHandoff | None:
-    entrypoints = _extract_mixed_handoff_entrypoints(mlir_text)
-    if entrypoints is None:
-        return None
-    aic_entrypoint, aiv_entrypoint = entrypoints
-    logical_entrypoint = aic_entrypoint.removesuffix("_mix_aic")
-    if aiv_entrypoint.removesuffix("_mix_aiv") != logical_entrypoint:
-        return None
-    return _LogicalMixedHandoff(logical_entrypoint)
-
-
-def _analyze_artifact_static_metadata(
-    tlair_mlir: str, lowered_llvm: str
-) -> _ArtifactStaticMetadata:
-    mlir_text = lowered_llvm or tlair_mlir
-    return _ArtifactStaticMetadata(
-        uses_scalar_print="tla.debug_print.workspace" in mlir_text,
-        uses_tensor_print="tla.print_tensor.workspace" in mlir_text,
-        uses_debug_tunnel="tla.debug_tunnel.state" in mlir_text,
-        logical_mixed_handoff=_extract_logical_mixed_handoff(mlir_text),
-    )
-
-
-def _analyze_compiled_artifact_static_metadata(
-    tlair_mlir: str, lowered_llvm: str
-) -> _ArtifactStaticMetadata:
-    try:
-        return _analyze_artifact_static_metadata(tlair_mlir, lowered_llvm)
-    except TlaUnsupportedAbiError as exc:
-        raise TlaKernelCompileError(
-            f"Invalid compiler-produced launch metadata: {exc}"
-        ) from exc
-
-
 def _capture_c_stdout(launch: Callable[[], None]) -> str:
     libc = ctypes.CDLL(None)
     with _NATIVE_PRINT_TENSOR_STDOUT_LOCK:
@@ -1450,136 +1365,6 @@ def _capture_c_stdout(launch: Callable[[], None]) -> str:
                 return captured.read().decode("utf-8", errors="replace")
         finally:
             os.close(saved_stdout)
-
-
-def _print_tensor_static_metadata_records(
-    tlair_mlir: str, *, entrypoint: str | None = None
-) -> tuple[_PrintTensorMetadata, ...]:
-    function_text = (
-        _mlir_entrypoint_text(tlair_mlir, entrypoint)
-        if entrypoint is not None
-        else tlair_mlir
-    )
-    op_matches = list(re.finditer(r'"tla\.print_tensor"', function_text))
-    if not op_matches:
-        raise TlaExecutionError(
-            "tla.print_tensor requires static shape metadata; found 0 records"
-        )
-    constants = {
-        match.group("result"): int(match.group("value"))
-        for match in re.finditer(
-            r'(?P<result>%[A-Za-z0-9_.$-]+)\s*=\s*"arith\.constant"\(\)'
-            r"\s*<\{\s*value\s*=\s*(?P<value>\d+)\s*:\s*i64\s*\}>",
-            function_text,
-        )
-    }
-    op_ends = [match.start() for match in op_matches[1:]]
-    op_ends.append(len(function_text))
-    metadata = []
-    for call, (match, end) in enumerate(zip(op_matches, op_ends)):
-        op_text = function_text[match.start() : end]
-        operand_match = re.match(
-            r'"tla\.print_tensor"\(\s*[^,]+,\s*'
-            r"(?P<length>%[A-Za-z0-9_.$-]+)\s*\)",
-            op_text,
-        )
-        metadata.append(
-            _parse_print_tensor_static_metadata(
-                op_text,
-                call=call,
-                length=(
-                    constants.get(operand_match.group("length"))
-                    if operand_match is not None
-                    else None
-                ),
-            )
-        )
-    return tuple(metadata)
-
-
-def _mlir_entrypoint_text(mlir_text: str, entrypoint: str) -> str:
-    function_matches = list(
-        re.finditer(
-            r'"(?:tla|func)\.func"\s*\('
-            r"|(?:tla|func)\.func\s+@(?P<name>[A-Za-z_][A-Za-z0-9_]*)\b",
-            mlir_text,
-        )
-    )
-    for index, match in enumerate(function_matches):
-        end = (
-            function_matches[index + 1].start()
-            if index + 1 < len(function_matches)
-            else len(mlir_text)
-        )
-        function_text = mlir_text[match.start() : end]
-        name = match.group("name")
-        if name is None:
-            name_match = re.search(r'\bsym_name\s*=\s*"([^"]+)"', function_text)
-            name = name_match.group(1) if name_match is not None else None
-        if name == entrypoint:
-            return function_text
-    raise TlaExecutionError(
-        f"tla.print_tensor entrypoint {entrypoint!r} is missing from the compiled artifact"
-    )
-
-
-def _parse_print_tensor_static_metadata(
-    op_text: str, *, call: int, length: int | None = None
-) -> _PrintTensorMetadata:
-    shape_match = re.search(r"\bshape\s*=\s*array<i64:\s*([-\d,\s]+)>", op_text)
-    if shape_match is None:
-        raise TlaExecutionError(
-            "tla.print_tensor static shape metadata is missing from the compiled artifact"
-        )
-    operand_match = re.search(
-        r"!tla\.ptr<\s*([^,\s>]+)\s*,\s*(gm|ub|l1|l0c)\s*,", op_text
-    )
-    if operand_match is None:
-        raise TlaExecutionError(
-            "tla.print_tensor operand type metadata is missing or malformed"
-        )
-    mlir_dtype = operand_match.group(1)
-    position = operand_match.group(2).upper()
-    shape = tuple(int(item.strip()) for item in shape_match.group(1).split(","))
-    if len(shape) not in (1, 2) or any(extent == 0 or extent < -1 for extent in shape):
-        raise TlaExecutionError(
-            "tla.print_tensor static shape metadata contains an invalid extent"
-        )
-    length_match = re.search(r"\blength\s*=\s*(\d+)", op_text)
-    if length is None and length_match is not None:
-        length = int(length_match.group(1))
-    max_length = (
-        8
-        if position == "L1"
-        else 256
-        if position == "L0C"
-        else _PRINT_TENSOR_MAX_F32_ELEMENTS
-    )
-    if length is not None and (
-        not 1 <= length <= max_length
-        or (all(extent > 0 for extent in shape) and length > math.prod(shape))
-    ):
-        raise TlaExecutionError(
-            "tla.print_tensor static length metadata is invalid for the tensor shape"
-        )
-    dtype = _PRINT_TENSOR_DTYPES_BY_MLIR.get(mlir_dtype)
-    if dtype is None:
-        raise TlaExecutionError(
-            f"tla.print_tensor runtime metadata has unsupported dtype {mlir_dtype!r}; "
-            "supported: f16, f32, i8, i16, i32, ui8, ui16, ui32"
-        )
-    return _PrintTensorMetadata(
-        shape=shape,
-        count=length,
-        dtype=dtype,
-        position=position,
-        call=call,
-        dynamic_execution=(
-            length is None
-            or any(extent < 0 for extent in shape)
-            or "dynamic_execution" in op_text
-        ),
-    )
 
 
 def _print_tensor_decode_error(detail: str) -> TlaExecutionError:
@@ -1821,7 +1606,7 @@ def compile_option_from_kwargs(kwargs: Mapping[str, Any]) -> TlaCompileOption:
     parsed_options = _parse_compile_options_from_str(kwargs.get("options"))
     npu_arch = str(parsed_options.get("npu_arch", DEFAULT_NPU_ARCH))
     target_arch = _resolve_npu_arch(npu_arch)
-    # Placeholder until ``_resolve_compile_option_from_lowered_mlir`` reads core type.
+    # Placeholder until ``_resolve_compile_option_from_metadata`` reads core type.
     arch_scope = _arch_scope_for_target(target_arch=target_arch, core_type="aiv")
     _, core_type = _parse_arch_scope(arch_scope)
     cache_dir_env = os.getenv("CATLASS_DSL_CACHE_DIR")
@@ -1856,55 +1641,17 @@ def compile_option_for_launch(
     return replace(compile_option, cache_enabled=False, cache_dir=temp_dir)
 
 
-def _resolve_compile_option_from_lowered_mlir(
-    compile_option: TlaCompileOption,
-    mlir_text: str,
-    *,
-    has_logical_mixed_handoff: bool,
+def _resolve_compile_option_from_metadata(
+    compile_option: TlaCompileOption, metadata: KernelRuntimeMetadata
 ) -> TlaCompileOption:
-    target_arch, core_type = _parse_arch_scope(compile_option.arch_scope)
-    kernel_mode = compile_option.kernel_mode
-
-    if has_logical_mixed_handoff:
-        core_type = "aic"
-        kernel_mode = "mix"
-    elif (
-        "hivm.module_core_type<AIC>" in mlir_text
-        or "hivm.func_core_type = #hivm.func_core_type<AIC>" in mlir_text
-    ):
-        core_type = "aic"
-        kernel_mode = "aic"
-    elif (
-        "hivm.module_core_type<AIV>" in mlir_text
-        or "hivm.func_core_type = #hivm.func_core_type<AIV>" in mlir_text
-    ):
-        core_type = "aiv"
-        kernel_mode = "aiv"
-
-    if "dav-c310" in mlir_text or 'hacc.target<"Ascend950PR_9589">' in mlir_text:
-        target_arch = "c310"
-
-    arch_scope = _arch_scope_for_target(target_arch=target_arch, core_type=core_type)
-    if (
-        compile_option.kernel_mode == kernel_mode
-        and compile_option.arch_scope == arch_scope
-    ):
-        return compile_option
     return replace(
         compile_option,
-        kernel_mode=kernel_mode,
-        arch_scope=arch_scope,
+        kernel_mode=metadata.kernel_mode,
+        arch_scope=_arch_scope_for_target(
+            target_arch=metadata.target_arch,
+            core_type="aic" if metadata.is_mixed else metadata.kernel_mode,
+        ),
     )
-
-
-def _extract_entrypoint(mlir_text: str) -> str:
-    match = re.search(r"@([A-Za-z_][A-Za-z0-9_]*)\s*\(", mlir_text)
-    if match:
-        return match.group(1)
-    sym_match = re.search(r'sym_name\s*=\s*"([A-Za-z_][A-Za-z0-9_]*)"', mlir_text)
-    if sym_match:
-        return sym_match.group(1)
-    raise TlaExecutionError("Could not infer kernel entrypoint from lowered MLIR.")
 
 
 def _cache_key(
@@ -2582,124 +2329,51 @@ def _build_hivmc_a5_command(
 
 def _create_stamped_hivmc_input(
     mlir_path: Path,
-    compile_option: TlaCompileOption,
+    module: Any,
+    metadata: KernelRuntimeMetadata,
     *,
     bitcodes: str,
 ) -> tuple[Path, str | None]:
-    """Stamp a private HIVMC input only when debug-print helpers are present.
-
-    Ordinary and external-function kernels rely on ``--link-aicore-bitcode``.
-    Debug / ``print_tensor`` helpers also need module attrs
-    ``hivm.aiv_bitcode`` / ``hivm.aic_bitcode``, so copy and stamp a private
-    ``*.hivmc-input.mlir`` only for those kernels.
-    """
-    compiler_text = mlir_path.read_text()
-    if (
-        "tla.debug_print.workspace" not in compiler_text
-        and "tla.print_tensor.workspace" not in compiler_text
-        and "tla.debug_tunnel.state" not in compiler_text
-    ):
+    """Set print BC attributes on the live module; retain the unstamped artifact."""
+    if _select_bc_aggregate_variant(metadata) == "normal":
         return mlir_path, None
+    if metadata.uses_tensor_print:
+        helper_core = metadata.print_helper_core
+        for core in ("aic", "aiv") if helper_core == "both" else (helper_core,):
+            candidates = [
+                Path(path)
+                for path in bitcodes.split(",")
+                if Path(path).name == f"meta_op.{core}.print.c310.bc"
+            ]
+            if len(candidates) != 1:
+                raise TlaRuntimeUnavailableError(
+                    f"C310 {core} aggregate print tensor bitcode was not selected"
+                )
+            if _PRINT_TENSOR_HELPER_ABI_MARKER not in candidates[0].read_bytes():
+                raise TlaRuntimeUnavailableError(
+                    "C310 aggregate print tensor bitcode does not provide the required ABI marker"
+                )
+    _stamp_hivm_template_bitcode_attrs(module, bitcodes)
     compiler_input = mlir_path.with_name(f"{mlir_path.stem}.hivmc-input.mlir")
-    compiler_input.write_text(compiler_text)
-    if "tla.print_tensor.workspace" in compiler_text:
-        helper_core_type = (
-            _mixed_print_tensor_helper_core(compiler_text)
-            if compile_option.kernel_mode == "mix"
-            else _core_type_from_arch_scope(compile_option.arch_scope)
-        )
-        if helper_core_type not in {"aic", "aiv"}:
-            raise TlaRuntimeUnavailableError(
-                "tla.print_tensor helper split could not be determined"
-            )
-        aggregate_candidates = [
-            Path(path)
-            for path in bitcodes.split(",")
-            if Path(path).name == f"meta_op.{helper_core_type}.print.c310.bc"
-        ]
-        if len(aggregate_candidates) != 1:
-            raise TlaRuntimeUnavailableError(
-                f"C310 {helper_core_type} aggregate print tensor bitcode was not selected"
-            )
-        if _PRINT_TENSOR_HELPER_ABI_MARKER not in aggregate_candidates[0].read_bytes():
-            raise TlaRuntimeUnavailableError(
-                "C310 aggregate print tensor bitcode does not provide the required ABI marker"
-            )
-    _stamp_hivm_template_bitcode_attrs(compiler_input, bitcodes)
+    compiler_input.write_text(module.operation.get_asm(enable_debug_info=True) + "\n")
     return compiler_input, bitcodes
 
 
-def _mixed_print_tensor_helper_core(compiler_text: str) -> str:
-    helper_call = re.search(r"\bcall\s+@_mlir_ciface_tla_print_tensor_", compiler_text)
-    if helper_call is None:
-        raise TlaRuntimeUnavailableError(
-            "mixed tla.print_tensor helper call is missing from lowered MLIR"
-        )
-    functions = list(
-        re.finditer(
-            r"func\.func(?:\s+private)?\s+@(?P<name>[^\s(]+)\s*\(",
-            compiler_text,
-        )
-    )
-    containing_function = [
-        match for match in functions if match.start() < helper_call.start()
-    ]
-    if not containing_function:
-        raise TlaRuntimeUnavailableError(
-            "mixed tla.print_tensor helper split could not be determined"
-        )
-    split = re.search(r"_mix_(aic|aiv)$", containing_function[-1].group("name"))
-    if split is None:
-        raise TlaRuntimeUnavailableError(
-            "mixed tla.print_tensor helper call is not inside a split function"
-        )
-    return split.group(1)
+def _stamp_hivm_template_bitcode_attrs(module: Any, bitcodes: str) -> None:
+    from catlass._mlir import ir as mlir_ir
 
-
-def _stamp_hivm_template_bitcode_attrs(mlir_path: Path, bitcodes: str) -> None:
-    text = mlir_path.read_text()
-    additions: list[str] = []
-    added_attr_names: set[str] = set()
-    for raw_path in bitcodes.split(","):
-        path = Path(raw_path)
-        attr = _HIVM_TEMPLATE_BITCODE_ATTRS.get(path.name)
-        if attr is None or attr[0] in text or attr[0] in added_attr_names:
-            continue
-        added_attr_names.add(attr[0])
-        additions.append(
-            f"{attr[0]} = #hivm.{attr[1].removeprefix('hivm.')}<{json.dumps(str(path))}>"
-        )
-    if not additions:
-        return
-    add_text = ", ".join(additions)
-    attributes_re = re.compile(
-        r"(?P<prefix>\bmodule(?:\s+@[^\s{]+)?\s+attributes\s*\{)"
-        r"(?P<body>.*?)"
-        r"(?P<suffix>\}\s*\{)",
-        re.DOTALL,
-    )
-    match = attributes_re.search(text)
-    if match:
-        body = match.group("body").strip()
-        new_body = f"{add_text}, {body}" if body else add_text
-        mlir_path.write_text(
-            text[: match.start()]
-            + match.group("prefix")
-            + new_body
-            + match.group("suffix")
-            + text[match.end() :]
-        )
-        return
-
-    match = re.search(r"(?P<prefix>\bmodule(?:\s+@[^\s{]+)?)(?P<brace>\s*\{)", text)
-    if match:
-        mlir_path.write_text(
-            text[: match.start()]
-            + match.group("prefix")
-            + f" attributes {{{add_text}}}"
-            + match.group("brace")
-            + text[match.end() :]
-        )
+    with module.context:
+        for raw_path in bitcodes.split(","):
+            path = Path(raw_path)
+            attr = _HIVM_TEMPLATE_BITCODE_ATTRS.get(path.name)
+            if attr is None or attr[0] in module.operation.attributes:
+                continue
+            # Parse only the typed attribute value, with MLIR's string escaping.
+            # The module and its user strings are never searched or rewritten.
+            value = mlir_ir.StringAttr.get(str(path))
+            module.operation.attributes[attr[0]] = mlir_ir.Attribute.parse(
+                f"#{attr[1]}<{value}>"
+            )
 
 
 def _mlir_build_dirs() -> list[Path]:
@@ -2712,13 +2386,14 @@ def _mlir_build_dirs() -> list[Path]:
 
 
 def _select_bc_aggregate_variant(
-    static_metadata: _ArtifactStaticMetadata,
+    static_metadata: KernelRuntimeMetadata,
 ) -> str:
     """Select one BC aggregate variant for all cores after lowering on a cache miss."""
     if (
         static_metadata.uses_scalar_print
         or static_metadata.uses_tensor_print
         or static_metadata.uses_debug_tunnel
+        or static_metadata.uses_simt_print
     ):
         return "print"
     return "normal"
@@ -2973,6 +2648,53 @@ def _run_tla_lowering_to_mlir(
         )
 
 
+def _validate_vf_debug_environment(
+    lowered_module: Any, compile_option: "TlaCompileOption | None"
+) -> None:
+    """VF debug bitcode uses CANN's default reserved-UB buffer address."""
+    operation = getattr(lowered_module, "operation", None)
+    if operation is None:
+        return
+
+    def has_vf_print(op: Any, in_vf: bool = False) -> bool:
+        in_vf = in_vf or (
+            op.name == "tla.vec.func"
+            and str(op.attributes["mode"]).strip('"') == "simd"
+        )
+        if in_vf and op.name in {
+            "tla.debug_print",
+            "tla.print_vector",
+            "tla.print_tensor",
+        }:
+            return True
+        return any(
+            has_vf_print(child, in_vf)
+            for region in op.regions
+            for block in region.blocks
+            for child in block.operations
+        )
+
+    if not has_vf_print(operation):
+        return
+    if compile_option is not None and (
+        compile_option.cce_disable_asc_reserved_ubuf
+        or compile_option.cce_disable_vf_stack_reserved_ubuf
+    ):
+        raise TlaKernelCompileError(
+            "Printing inside SIMD vec.func requires CANN's default reserved UB; "
+            "neither reserved-UB disabling option may be enabled."
+        )
+    ascend_home = os.getenv("ASCEND_HOME_PATH")
+    if (
+        not ascend_home
+        or not (Path(ascend_home) / "asc/include/utils/debug/asc_printf.h").is_file()
+    ):
+        raise TlaKernelCompileError(
+            "Printing inside SIMD vec.func requires the CANN VF debug headers "
+            "(asc/include/utils/debug/asc_printf.h)."
+        )
+
+
 def _mark_ub_reserve_released(
     lowered_module: Any, compile_option: "TlaCompileOption | None"
 ) -> None:
@@ -3014,6 +2736,7 @@ def _run_typed_bridge_to_mlir(
             "Python runtime compilation requires a live MLIR module. "
             "String TLA MLIR lowering is not supported."
         )
+    _validate_vf_debug_environment(lowered_module, compile_option)
     _mark_ub_reserve_released(lowered_module, compile_option)
     try:
         # Host surface is a single PRINT_IR switch; bridge still takes
@@ -3238,6 +2961,20 @@ def _cache_manifest_has_current_workspace_abis(
         and manifest.get("debug_tunnel_state_abi_revision")
         == _DEBUG_TUNNEL_STATE_ABI_REVISION
     )
+
+
+def _runtime_metadata_from_manifest(
+    manifest: Mapping[str, Any], *, entrypoint: str
+) -> KernelRuntimeMetadata | None:
+    try:
+        metadata = KernelRuntimeMetadata.from_dict(manifest.get("runtime_metadata"))
+        if metadata.entrypoint != entrypoint:
+            return None
+        return metadata
+    except (KeyError, TypeError, ValueError):
+        # Recompile old/incomplete metadata; never infer missing launch facts
+        # from cached IR text or interpret them as a kernel without printing.
+        return None
 
 
 def _prepared_kernel_abi_from_manifest(

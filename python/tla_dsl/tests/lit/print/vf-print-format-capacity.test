@@ -1,0 +1,28 @@
+// RUN: split-file %s %t
+// RUN: %python %t/generate.py 1991 0 | %tla_compile - -o - | %filecheck %s --check-prefix=PASS
+// RUN: %python %t/generate.py 1992 0 | not %tla_compile - -o /dev/null 2>&1 | %filecheck %s --check-prefix=LIMIT
+// RUN: %python %t/generate.py 1927 8 | %tla_compile - -o - | %filecheck %s --check-prefix=PASS
+// RUN: %python %t/generate.py 1928 8 | not %tla_compile - -o /dev/null 2>&1 | %filecheck %s --check-prefix=LIMIT
+
+// CANN aligns the header, slots and NUL-terminated format to 8 bytes, then
+// adds another 8 bytes. Check the last fitting and first overflowing formats.
+// PASS: call @_mlir_ciface_tla_vf_printf
+// LIMIT: formatted VF print record exceeds the 2024-byte debug buffer
+
+//--- generate.py
+import sys
+
+length, slots = map(int, sys.argv[1:])
+message = "x" * (length - slots * 2) + "{}" * slots
+operands = ", ".join(["%value"] * slots)
+types = ", ".join(["i32"] * slots)
+print('''module {
+  tla.func @format_capacity(%value: i32) {
+    "tla.vector"() ({
+      "tla.vec.func"() ({
+        tla.debug_print format "MESSAGE"(OPERANDS) : (TYPES)
+      }) {mode = "simd"} : () -> ()
+    }) : () -> ()
+    tla.return
+  }
+}'''.replace("MESSAGE", message).replace("OPERANDS", operands).replace("TYPES", types))

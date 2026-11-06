@@ -14,9 +14,8 @@ Do not regenerate this file from a glossary.
 
 [语言参考](index.md) | [API 速查](../quick_reference.md)
 
-逐线程向量执行模式，以 `tla.vec.func(mode="simt", thread_block_dim=...)` 进入。
-函数体是*单线程*程序：各线程通过普通元素访问按索引寻址，无 tile、无向量寄存器、
-无 UB 暂存。
+SIMT 是逐线程的向量执行模式，以 `tla.vec.func(mode="simt", thread_block_dim=...)` 进入。
+函数体描述每个线程执行的代码。线程通过 `tla.arch.thread_idx()` 获取自身索引，使用 `tensor[index]` 读写 GM／UB 中的元素，并通过标量运算处理数据。支持的接口和限制见下方说明。
 
 ```python
 with tla.vector():
@@ -47,6 +46,7 @@ with tla.vector():
 - 对 `Numeric` 的标量算术、比较、选择与转换，各自生成逐线程 op——见下方
   [基础算术](#基础算术)、[比较与选择](#比较与选择)、[类型转换](#类型转换)。
 - `tla.range` 循环与运行期 `if`。
+- `tla.print`：逐线程标量、格式化字符串及 GM／UB 前缀，见 [调试与打印](debug.md)。
 - `tla.arch.thread_idx` / `thread_block_dim` / `sync_threads`，以及 launch 级
   `tla.arch.block_idx` / `block_num`——见 [系统变量访问](system.md#系统变量访问)。
 
@@ -54,10 +54,10 @@ with tla.vector():
 
 - 寄存器向量与 mask 相关——`VectorSSA` / `MaskSSA`、[SIMD 向量计算](simd/index.md#simd-向量计算)
   下的算术与 mask 接口、`Tensor.load` / `Tensor.store`、`tla.full`、
-  `tla.create_mask`。SIMT 线程没有自己的向量寄存器。
+  `tla.create_mask`。这些接口用于 SIMD 寄存器向量编程。
 - `tla.copy`：DMA 需要捕获 tensor 本身，而 SIMT 区域只能捕获标量运行期值。
   可在进入区域前完成搬数，或让各线程直接按索引访问全局内存。
-- `tla.local_mem_bar`、`tla.pipe_barrier`、`tla.print`。
+- `tla.local_mem_bar`、`tla.pipe_barrier`。
 - 任意 `tla.vec.func` 内的 `while`；迭代请用 `tla.range`。
 - 嵌套的 `tla.vec.func`。
 

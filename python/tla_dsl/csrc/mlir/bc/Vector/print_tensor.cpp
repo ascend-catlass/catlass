@@ -3,6 +3,7 @@
 #include "catlass/catlass.hpp"
 #include "kernel_operator.h"
 #include "../print_tensor_workspace.h"
+#include "../print_fifo.h"
 
 namespace {
 // CANN's 1 MiB debug FIFO reserves 48 bytes for the shape TLV and 72 bytes
@@ -34,6 +35,12 @@ template <typename ElementType>
         return;
 
     tla::print_tensor::InitializeWorkspace(print_workspace);
+    // Preflight before CANN's waiting ring-buffer path. Each physical core has
+    // a single scalar writer, including the VF drainer.
+    auto* fifo = tla::debug::GetFifo(print_workspace);
+    uint64_t recordBytes = 72 + ((count * sizeof(ElementType) + 31) & ~uint64_t{31});
+    if (!tla::debug::CanWrite(fifo, recordBytes))
+        return;
     AscendC::ShapeInfo shapeInfo =
         MakeShapeInfo(static_cast<uint32_t>(signedShape0), static_cast<uint32_t>(signedShape1));
     AscendC::GlobalTensor<ElementType> tensor;
@@ -59,6 +66,12 @@ template <typename ElementType>
         return;
 
     tla::print_tensor::InitializeWorkspace(print_workspace);
+    // Preflight before CANN's waiting ring-buffer path. Each physical core has
+    // a single scalar writer, including the VF drainer.
+    auto* fifo = tla::debug::GetFifo(print_workspace);
+    uint64_t recordBytes = 72 + ((count * sizeof(ElementType) + 31) & ~uint64_t{31});
+    if (!tla::debug::CanWrite(fifo, recordBytes))
+        return;
     AscendC::ShapeInfo shapeInfo =
         MakeShapeInfo(static_cast<uint32_t>(signedShape0), static_cast<uint32_t>(signedShape1));
     AscendC::LocalTensor<ElementType> tensor(AscendC::TPosition::VECCALC, static_cast<uint32_t>(tensor_address), count);
@@ -75,7 +88,8 @@ template <typename ElementType>
 
 extern "C" {
 
-__attribute__((used, section(".tla_print_tensor_abi"))) const char tla_print_tensor_abi[] = "tla_print_tensor_abi";
+__attribute__((used, section(".tla_print_tensor_abi"))) const char tla_print_tensor_abi_shared_v2[] =
+    "tla_print_tensor_abi_shared_v2";
 
 #if ((defined(__NPU_ARCH__) && __NPU_ARCH__ == 3510) || (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510))
 #define TLA_PRINT_TENSOR_WRAPPER(SUFFIX, TYPE)                                                         \
@@ -93,6 +107,22 @@ TLA_PRINT_TENSOR_WRAPPER(u8, uint8_t)
 TLA_PRINT_TENSOR_WRAPPER(u16, uint16_t)
 TLA_PRINT_TENSOR_WRAPPER(u32, uint32_t)
 #undef TLA_PRINT_TENSOR_WRAPPER
+
+#define TLA_PRINT_TENSOR_AIV_WRAPPER(SUFFIX, TYPE)                                                \
+    [aicore] __attribute__((always_inline)) void _mlir_ciface_tla_print_tensor_gm_##SUFFIX##_aiv( \
+        uint64_t workspace, uint64_t address, uint64_t count, uint64_t shape, uint64_t call)      \
+    {                                                                                             \
+        printTensor<TYPE>(workspace, address, count, shape, call);                                \
+    }
+TLA_PRINT_TENSOR_AIV_WRAPPER(f16, half)
+TLA_PRINT_TENSOR_AIV_WRAPPER(f32, float)
+TLA_PRINT_TENSOR_AIV_WRAPPER(i8, int8_t)
+TLA_PRINT_TENSOR_AIV_WRAPPER(i16, int16_t)
+TLA_PRINT_TENSOR_AIV_WRAPPER(i32, int32_t)
+TLA_PRINT_TENSOR_AIV_WRAPPER(u8, uint8_t)
+TLA_PRINT_TENSOR_AIV_WRAPPER(u16, uint16_t)
+TLA_PRINT_TENSOR_AIV_WRAPPER(u32, uint32_t)
+#undef TLA_PRINT_TENSOR_AIV_WRAPPER
 
 #define TLA_PRINT_TENSOR_UB_WRAPPER(SUFFIX, TYPE)                                                      \
     [aicore] __attribute__((always_inline)) void _mlir_ciface_tla_print_tensor_ub_##SUFFIX(            \
