@@ -644,6 +644,17 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
     )
     yield ("vector-reduction-ops", [["dsl_tutorials/vector_simd_ops/reduction_ops.py", "--batch-run", *dev]])
     yield (
+        "vector-reduce-intra-block-ops",
+        [
+            [
+                "end_to_end/reduction_intra_block_ops.py",
+                op, "--run", "--dtype", dtype, *dev,
+            ]
+            for op in ("add", "max", "min")
+            for dtype in ("f32", "i16")
+        ],
+    )
+    yield (
         "vector-load-store-scalar-after-reduction",
         [["dsl_tutorials/vector_simd_ops/load_and_store_scalar_after_reduction.py", *dev]],
     )

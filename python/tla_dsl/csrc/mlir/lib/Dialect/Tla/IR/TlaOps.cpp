@@ -1194,6 +1194,57 @@ mlir::LogicalResult ReduceOp::verify()
     return verifyMaskMatchesVector(getOperation(), getMask(), getOperand().getType());
 }
 
+mlir::LogicalResult ReduceIntraBlockOp::verify()
+{
+    if (!hasEnclosingRegion<VecFuncOp>(getOperation()))
+        return emitOpError("must be nested inside a tla.vec.func region");
+
+    if ((getKind() != "add") && (getKind() != "max") && (getKind() != "min"))
+        return emitOpError() << "kind must be add, max, or min, got \"" << getKind() << "\"";
+
+    auto operandTy = mlir::dyn_cast<VectorSSAType>(getOperand().getType());
+    if (!operandTy)
+        return emitOpError("operand must be !tla.vector");
+    auto resultTy = mlir::dyn_cast<VectorSSAType>(getResult().getType());
+    if (!resultTy)
+        return emitOpError("result must be !tla.vector");
+    if (resultTy != operandTy) {
+        // ADD on 16-bit sources widens to a 32-bit result (the same widening
+        // behavior as vcadd): the Vcgadd dst is 32-bit, and the DSL returns it
+        // as-is instead of casting back, so block sums may exceed the source
+        // type's representable range and stay exact in i32/ui32.
+        auto operandElem = mlir::dyn_cast<mlir::IntegerType>(operandTy.getElementType());
+        bool widenAdd = (getKind() == "add") && operandElem && (operandElem.getWidth() == 16);
+        if (!widenAdd)
+            return emitOpError("result type must match operand type (packed mirror)");
+        // The widening keeps the operand's sign category: i16 -> i32, ui16 -> ui32.
+        auto resultElem = mlir::dyn_cast<mlir::IntegerType>(resultTy.getElementType());
+        if (!resultElem || (resultElem.getWidth() != 32) || (resultElem.getSignedness() != operandElem.getSignedness()))
+            return emitOpError() << "add on i16/ui16 widens the result to the matching 32-bit type "
+                                 << "(i16->i32, ui16->ui32), got " << resultTy.getElementType();
+        // Lane count halves per 32-bit result lane, rounding up so a tail's
+        // last valid element keeps its widened lane (one valid i16 lane still
+        // yields one valid i32 result lane).
+        if ((operandTy.getValidLanes() != mlir::ShapedType::kDynamic) &&
+            (resultTy.getValidLanes() != ((operandTy.getValidLanes() + 1) / 2)))
+            return emitOpError() << "add on i16/ui16 keeps the 256B container, expected "
+                                 << ((operandTy.getValidLanes() + 1) / 2) << " result lane(s), got "
+                                 << resultTy.getValidLanes();
+    }
+
+    // The Vcg group-reduction instructions cover f16/f32 and 16/32-bit integers
+    // (S/U variants). i8/u8/i64/bf16/f8 are not supported.
+    mlir::Type elem = operandTy.getElementType();
+    bool supported = mlir::isa<mlir::Float16Type, mlir::Float32Type>(elem);
+    if (auto intType = mlir::dyn_cast<mlir::IntegerType>(elem))
+        supported = (intType.getWidth() == 16) || (intType.getWidth() == 32);
+    if (!supported)
+        return emitOpError() << "unsupported reduce_intra_block element type " << elem
+                             << " (supported: f16/f32/i16/i32/ui16/ui32)";
+
+    return verifyMaskMatchesVector(getOperation(), getMask(), getOperand().getType());
+}
+
 mlir::LogicalResult LoadOp::verify()
 {
     if (!hasEnclosingRegion<VecFuncOp>(getOperation()))

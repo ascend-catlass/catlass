@@ -476,6 +476,26 @@ def Tla_ReduceOp : Tla_Op<"reduce", [Pure]> {
   let hasVerifier = 1;
 }
 
+def Tla_ReduceIntraBlockOp : Tla_Op<"reduce_intra_block", [Pure]> {
+  let summary = "Per-32B-block reduction on VectorSSA values (packed result)";
+  let description = [{
+    Reduce each 32-byte data block of a register-resident VectorSSA value under
+    a mask. Each block's result
+    is written contiguously to the least significant lanes of the result vector;
+    the remaining lanes of each block are 0. The result mirrors the operand
+    type, except that `add` on i16/ui16 returns the widened 32-bit instruction
+    destination (i32/ui32, half the lanes), with no cast back to 16 bits.
+  }];
+  let arguments = (ins Tla_VectorSSAType:$operand, Tla_MaskSSAType:$mask,
+                       StrAttr:$kind);
+  let results = (outs Tla_VectorSSAType:$result);
+  let assemblyFormat = [{
+    $operand `mask` $mask attr-dict `:`
+    qualified(type($operand)) `mask` qualified(type($mask)) `->` qualified(type($result))
+  }];
+  let hasVerifier = 1;
+}
+
 def Tla_InterleaveOp : Tla_Op<"interleave", [Pure]> {
   let summary = "Interleave on VectorSSA or MaskSSA values";
   let arguments = (ins AnyTypeOf<[Tla_VectorSSAType, Tla_MaskSSAType]>:$src0,

@@ -106,6 +106,7 @@ _PARENT_EXPORTS = (
     "types",
     "core",
     "ReductionOp",
+    "ReduceMode",
     "PASSES",
     "__version__",
 )
@@ -202,6 +203,10 @@ def __getattr__(name: str) -> Any:
         from ..core_api import ReductionOp
 
         value = ReductionOp
+    elif name == "ReduceMode":
+        from ..params import ReduceMode
+
+        value = ReduceMode
     elif name == "PASSES":
         value = ()
     elif name == "__version__":

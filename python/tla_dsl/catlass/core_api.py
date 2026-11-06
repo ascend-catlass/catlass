@@ -164,6 +164,7 @@ from .params import (
     L0C2UBMode,
     MemType,
     QuantMode,
+    ReduceMode,
 )
 
 
@@ -264,6 +265,33 @@ def _check_reduction_element_type_supported(op_name: str, element_type: str) -> 
     _op_error(
         op_name,
         f"unsupported reduction element type {element_type}; "
+        f"supported element types are {supported}",
+    )
+
+
+# Vcg group-reduction instructions (ReduceIntraBlock) cover f16/f32 and
+# 16/32-bit integers only; i8/u8/i64/bf16/f8 are not supported.
+_SUPPORTED_REDUCE_INTRA_BLOCK_ELEMENT_TYPES = frozenset(
+    {
+        "f16",
+        "f32",
+        "i16",
+        "i32",
+        "u16",
+        "u32",
+    }
+)
+
+
+def _check_reduce_intra_block_element_type_supported(
+    op_name: str, element_type: str
+) -> None:
+    if element_type in _SUPPORTED_REDUCE_INTRA_BLOCK_ELEMENT_TYPES:
+        return
+    supported = ", ".join(sorted(_SUPPORTED_REDUCE_INTRA_BLOCK_ELEMENT_TYPES))
+    _op_error(
+        op_name,
+        f"unsupported reduce_intra_block element type {element_type}; "
         f"supported element types are {supported}",
     )
 
@@ -779,6 +807,7 @@ class VectorSSA(_RegisterSSA):
         self,
         kind: ReductionOp,
         *,
+        mode: ReduceMode = ReduceMode.INTER_BLOCK,
         mask: Any,
         init_value: Any | None = None,
         reduction_profile: Any | None = None,
@@ -787,21 +816,46 @@ class VectorSSA(_RegisterSSA):
         """Directory: SIMD Vector Compute / Discrete and Aggregate
 
         Description:
-            Reduce this register-resident vector under a mask to a one-lane
-            fragment (`tla.ReductionOp.ADD` / `MAX` / `MIN`). Broadcast the
-            result back to full width with `tla.full(fragment, dtype=...)`.
+            Reduce this register-resident vector under a mask. `mode` picks
+            the reduction scope:
+            - `ReduceMode.INTER_BLOCK` (default): reduce across all lanes
+              (`tla.ReductionOp.ADD` / `MAX` / `MIN`) to a one-lane fragment.
+              Broadcast the result back to full width with
+              `tla.full(fragment, dtype=...)`.
+            - `ReduceMode.INTRA_BLOCK`: reduce each 32-byte data block
+              independently (`tla.ReductionOp.ADD` / `MAX` / `MIN`); each
+              block's result is written contiguously to the least significant
+              lanes of the returned vector (packed); lanes not occupied by a
+              block result are 0, and a fully masked-off block's result lane
+              carries the identity value (see Constraints). The result
+              mirrors the operand shape and element type, except for `ADD`
+              on i16/u16 sources, which returns the widened 32-bit result
+              (see Constraints).
 
             Parameters:
             - `kind` (`ReductionOp`): Reduction kind (`ADD`, `MAX`, or `MIN`). Required.
+            - `mode` (`ReduceMode`): Reduction scope. Optional, default `ReduceMode.INTER_BLOCK`.
             - `mask` (`MaskSSA`): Predicates which lanes participate. Required.
-            - `init_value`: Reserved; only `None` is supported today. Optional, default `None`.
-            - `reduction_profile`: Reserved; only `None` is supported today. Optional, default `None`.
+            - `init_value`: Reserved; only `None` is supported today (`INTER_BLOCK`). Optional, default `None`.
+            - `reduction_profile`: Reserved; only `None` is supported today (`INTER_BLOCK`). Optional, default `None`.
 
             Constraints:
             - Must be called inside a `@tla.kernel`-decorated kernel function.
-            - Must be called inside `tla.vec.func()`.
+            - Must be called inside `tla.vec.func()`; `INTRA_BLOCK` requires
+              `tla.vec.func(mode="simd")`.
             - Element type must be one of f16/f32/i16/i32/u16/u32.
-            - `init_value` and `reduction_profile` must be omitted or `None`.
+            - `INTER_BLOCK`: `init_value` and `reduction_profile` must be omitted or `None`.
+            - `INTRA_BLOCK`: `init_value` and `reduction_profile` must be omitted or `None`.
+              A fully masked-off block yields the hardware identity: 0 for
+              `ADD`; for `MAX` the element type's minimum (negative infinity
+              for floating point) and for `MIN` the element type's maximum
+              (positive infinity for floating point).
+            - `INTRA_BLOCK` `ADD` on i16/u16 sources returns the widened
+              32-bit result of the underlying instruction (same as vcadd): the
+              result has half the lanes rounded up with i32/u32 element type
+              (so a tail's last valid element keeps its widened lane), and no
+              cast back to 16 bits is performed. Block sums that exceed the
+              source type's range stay exact in the i32/u32 result.
 
             Example:
             ```python
@@ -809,11 +863,15 @@ class VectorSSA(_RegisterSSA):
                 m = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
                 total = src_reg.reduce(tla.ReductionOp.ADD, mask=m)
                 broadcast = tla.full(total, dtype=tla.Float32)
+                packed = src_reg.reduce(
+                    tla.ReductionOp.ADD, mode=tla.ReduceMode.INTRA_BLOCK, mask=m
+                )
             ```
         """
         return _emit_vector_reduce(
             self,
             kind,
+            mode=mode,
             mask=mask,
             init_value=init_value,
             reduction_profile=reduction_profile,
@@ -9167,6 +9225,7 @@ def _emit_vector_reduce(
     operand: VectorSSA,
     kind: ReductionOp,
     *,
+    mode: ReduceMode = ReduceMode.INTER_BLOCK,
     mask: MaskSSA,
     init_value: Any | None = None,
     reduction_profile: Any | None = None,
@@ -9175,6 +9234,11 @@ def _emit_vector_reduce(
     op_name = "VectorSSA.reduce"
     _require_category(op_name, "operand", operand, "vector_ssa", 0)
     _require_category(op_name, "mask", mask, "mask_ssa", 1)
+    if not isinstance(mode, ReduceMode):
+        _op_error(
+            op_name,
+            f"invalid argument 'mode': expected ReduceMode, got {_type_name(mode)}",
+        )
     if init_value is not None:
         raise NotImplementedError(f"{op_name} only supports init_value=None")
     if reduction_profile is not None:
@@ -9189,9 +9253,47 @@ def _emit_vector_reduce(
     _runtime._require_enclosing_region(op_name, "vec.func")
     operand_value = _as_value(operand)
     operand_desc = _vector_ssa_type_for_mlir_value(operand_value)
-    _check_reduction_element_type_supported(op_name, operand_desc.element_type)
     mask_value = _as_value(mask)
     _require_mask_matches_vector(op_name, mask_value, operand_value)
+    # The two scopes emit different IR ops (the lowering stays separate); only
+    # the frontend dispatch is merged here.
+    if mode is ReduceMode.INTRA_BLOCK:
+        if _runtime._in_simt_vec_func():
+            _op_error(
+                op_name, "INTRA_BLOCK is only supported in tla.vec.func(mode='simd')"
+            )
+        _check_reduce_intra_block_element_type_supported(
+            op_name, operand_desc.element_type
+        )
+        # ADD on 16-bit sources returns the widened 32-bit dst (same as vcadd):
+        # the lane count halves per 32-bit result lane, rounding up so a tail's
+        # last valid element keeps its widened lane (one valid i16 lane still
+        # yields one valid i32 result lane). A dynamic lane count stays dynamic
+        # in the widened result, matching the dynamic pass-through convention
+        # of _cast_result_descriptor.
+        if kind is ReductionOp.ADD and operand_desc.element_type in ("i16", "u16"):
+            widened_lanes = (
+                None
+                if operand_desc.valid_lanes is None
+                else (operand_desc.valid_lanes + 1) // 2
+            )
+            result_desc = TlaVectorSSATypeDescriptor(
+                widened_lanes,
+                "i32" if operand_desc.element_type == "i16" else "u32",
+            )
+        else:
+            result_desc = TlaVectorSSATypeDescriptor(
+                operand_desc.valid_lanes, operand_desc.element_type
+            )
+        result = _tla_ops_gen.reduce_intra_block(
+            result_desc.to_mlir_type(operand_value.type.context),
+            operand_value,
+            mask_value,
+            kind.value,
+            loc=loc,
+        )
+        return VectorSSA(result)
+    _check_reduction_element_type_supported(op_name, operand_desc.element_type)
     result_desc = _reduction_result_descriptor(operand_value)
     result = _tla_ops_gen.reduce(
         result_desc.to_mlir_type(operand_value.type.context),
@@ -10665,6 +10767,7 @@ _require_generated("bitwise_or")
 _require_generated("bitwise_xor")
 _require_generated("divs")
 _require_generated("reduce")
+_require_generated("reduce_intra_block")
 _require_generated("bitcast")
 _require_generated("interleave")
 _require_generated("deinterleave")

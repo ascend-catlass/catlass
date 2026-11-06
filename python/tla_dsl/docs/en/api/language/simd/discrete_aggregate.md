@@ -20,29 +20,54 @@ Gather elements from a UB tensor by index, and masked reductions (`VectorSSA.red
 
 Description:
 
-Reduce this register-resident vector under a mask to a one-lane
-fragment (`tla.ReductionOp.ADD` / `MAX` / `MIN`). Broadcast the
-result back to full width with `tla.full(fragment, dtype=...)`.
+Reduce this register-resident vector under a mask. `mode` picks
+the reduction scope:
+- `ReduceMode.INTER_BLOCK` (default): reduce across all lanes
+  (`tla.ReductionOp.ADD` / `MAX` / `MIN`) to a one-lane fragment.
+  Broadcast the result back to full width with
+  `tla.full(fragment, dtype=...)`.
+- `ReduceMode.INTRA_BLOCK`: reduce each 32-byte data block
+  independently (`tla.ReductionOp.ADD` / `MAX` / `MIN`); each
+  block's result is written contiguously to the least significant
+  lanes of the returned vector (packed); lanes not occupied by a
+  block result are 0, and a fully masked-off block's result lane
+  carries the identity value (see Constraints). The result
+  mirrors the operand shape and element type, except for `ADD`
+  on i16/u16 sources, which returns the widened 32-bit result
+  (see Constraints).
 
 Prototype:
 
 ```python
-tla.VectorSSA.reduce(kind: ReductionOp, *, mask: Any, init_value: Any | None = None, reduction_profile: Any | None = None) -> Any
+tla.VectorSSA.reduce(kind: ReductionOp, *, mode: ReduceMode = ReduceMode.INTER_BLOCK, mask: Any, init_value: Any | None = None, reduction_profile: Any | None = None) -> Any
 ```
 
 Parameters:
 
 - `kind` (`ReductionOp`): Reduction kind (`ADD`, `MAX`, or `MIN`). Required.
+- `mode` (`ReduceMode`): Reduction scope. Optional, default `ReduceMode.INTER_BLOCK`.
 - `mask` (`MaskSSA`): Predicates which lanes participate. Required.
-- `init_value`: Reserved; only `None` is supported today. Optional, default `None`.
-- `reduction_profile`: Reserved; only `None` is supported today. Optional, default `None`.
+- `init_value`: Reserved; only `None` is supported today (`INTER_BLOCK`). Optional, default `None`.
+- `reduction_profile`: Reserved; only `None` is supported today (`INTER_BLOCK`). Optional, default `None`.
 
 Constraints:
 
 - Must be called inside a `@tla.kernel`-decorated kernel function.
-- Must be called inside `tla.vec.func()`.
+- Must be called inside `tla.vec.func()`; `INTRA_BLOCK` requires
+  `tla.vec.func(mode="simd")`.
 - Element type must be one of f16/f32/i16/i32/u16/u32.
-- `init_value` and `reduction_profile` must be omitted or `None`.
+- `INTER_BLOCK`: `init_value` and `reduction_profile` must be omitted or `None`.
+- `INTRA_BLOCK`: `init_value` and `reduction_profile` must be omitted or `None`.
+  A fully masked-off block yields the hardware identity: 0 for
+  `ADD`; for `MAX` the element type's minimum (negative infinity
+  for floating point) and for `MIN` the element type's maximum
+  (positive infinity for floating point).
+- `INTRA_BLOCK` `ADD` on i16/u16 sources returns the widened
+  32-bit result of the underlying instruction (same as vcadd): the
+  result has half the lanes rounded up with i32/u32 element type
+  (so a tail's last valid element keeps its widened lane), and no
+  cast back to 16 bits is performed. Block sums that exceed the
+  source type's range stay exact in the i32/u32 result.
 
 Example:
 
@@ -51,6 +76,9 @@ with tla.vec.func(mode="simd"):
     m = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
     total = src_reg.reduce(tla.ReductionOp.ADD, mask=m)
     broadcast = tla.full(total, dtype=tla.Float32)
+    packed = src_reg.reduce(
+        tla.ReductionOp.ADD, mode=tla.ReduceMode.INTRA_BLOCK, mask=m
+    )
 ```
 
 ---

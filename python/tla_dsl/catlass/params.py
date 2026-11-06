@@ -63,6 +63,21 @@ class RegPart(enum.Enum):
         return self.value
 
 
+class ReduceMode(enum.Enum):
+    """Vector reduction scope selection.
+
+    INTER_BLOCK (default) reduces the whole vector across all 32-byte data
+    blocks to a one-lane fragment; INTRA_BLOCK reduces each 32-byte block
+    independently and returns the packed per-block results.
+    """
+
+    INTRA_BLOCK = "intra_block"
+    INTER_BLOCK = "inter_block"
+
+    def __str__(self) -> str:
+        return self.value
+
+
 @dataclass
 class CopyParams:
     """Marker annotation for base copy params."""

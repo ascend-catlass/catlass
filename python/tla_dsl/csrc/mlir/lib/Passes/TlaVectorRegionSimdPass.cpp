@@ -646,10 +646,10 @@ static bool isVectorComputeOp(Operation* op)
     return getAnyVectorOperationInfo(op).has_value() || isa_and_nonnull<::tla::CmpOp>(op) ||
            isa_and_nonnull<::tla::WhereOp>(op) || isa_and_nonnull<::tla::SqueezeOp>(op) ||
            isa_and_nonnull<::tla::HistogramsOp>(op) || isa_and_nonnull<::tla::ReduceOp>(op) ||
-           isa_and_nonnull<::tla::GatherOp>(op) || isa_and_nonnull<::tla::CastOp>(op) ||
-           isa_and_nonnull<::tla::BitCastOp>(op) || isa_and_nonnull<::tla::PackOp>(op) ||
-           isa_and_nonnull<::tla::UnpackOp>(op) || isa_and_nonnull<::tla::InterleaveOp>(op) ||
-           isa_and_nonnull<::tla::DeInterleaveOp>(op);
+           isa_and_nonnull<::tla::ReduceIntraBlockOp>(op) || isa_and_nonnull<::tla::GatherOp>(op) ||
+           isa_and_nonnull<::tla::CastOp>(op) || isa_and_nonnull<::tla::BitCastOp>(op) ||
+           isa_and_nonnull<::tla::PackOp>(op) || isa_and_nonnull<::tla::UnpackOp>(op) ||
+           isa_and_nonnull<::tla::InterleaveOp>(op) || isa_and_nonnull<::tla::DeInterleaveOp>(op);
 }
 
 static void annotateAivLibraryCall(func::FuncOp callee)
@@ -2818,6 +2818,110 @@ static LogicalResult lowerReduce(
     return success();
 }
 
+// tla.reduce_intra_block: per-32B-block group reduction
+// lowered directly to the Vcg regbase instructions. The container value is
+// already a full 256-byte register vector, so no pad is required: the
+// instruction treats inactive (mask=0) elements as identity values (0 for ADD,
+// -INF/+INF for MAX/MIN) and packs each block's result contiguously into the
+// LSBs of the destination. The user mask is passed through unchanged.
+static LogicalResult lowerReduceIntraBlock(
+    ::tla::ReduceIntraBlockOp rdbOp, OpBuilder& b, ModuleOp module, DenseMap<Value, Value>& valueMap,
+    AutoFullPredicateCache& fullMasks)
+{
+    Operation& op = *rdbOp.getOperation();
+    Location loc = op.getLoc();
+    Value operand = valueMap.lookup(rdbOp.getOperand());
+    if (!operand)
+        return failure();
+    auto operandTy = dyn_cast<VectorType>(operand.getType());
+    if (!operandTy)
+        return failure();
+    // The Vcg S/U variant selection follows the tla element type; the AVE
+    // container element is signless.
+    Type tlaElem = tlaElementOr(rdbOp->getOperand(0).getType(), operandTy.getElementType());
+    auto opCtx = deriveVecCtxForElement(tlaElem);
+    if (failed(opCtx))
+        return failure();
+    if (!rdbOp.getMask())
+        return rdbOp.emitError("tla.reduce_intra_block requires an explicit mask"), failure();
+    Value mask = valueMap.lookup(rdbOp.getMask());
+    if (!mask)
+        return failure();
+    VectorType pregVecType = fullPregVecType(b.getContext());
+    Value preg = castMaskToPregType(b, loc, mask, pregVecType);
+
+    auto kindAttr = rdbOp->getAttrOfType<StringAttr>("kind");
+    if (!kindAttr)
+        return rdbOp.emitError("tla.reduce_intra_block requires string kind attribute"), failure();
+    StringRef kind = kindAttr.getValue();
+    // Defensive mirror of the ReduceIntraBlockOp verifier constraints: the
+    // Vcg dst is presented as the op's TLA result type, so a hand-written op
+    // whose result type violates the widening/mirror rules would lower into
+    // mismatched IR. Reject it here instead of ignoring the result type.
+    auto tlaOperandTy = dyn_cast<::tla::VectorSSAType>(rdbOp.getOperand().getType());
+    auto tlaResultTy = dyn_cast<::tla::VectorSSAType>(rdbOp.getResult().getType());
+    if (!tlaResultTy)
+        return rdbOp.emitError("tla.reduce_intra_block result must be !tla.vector"), failure();
+    auto opElem = dyn_cast<IntegerType>(tlaElem);
+    auto resElem = dyn_cast<IntegerType>(tlaResultTy.getElementType());
+    bool widenAdd = (kind == "add") && opElem && (opElem.getWidth() == 16);
+    if (widenAdd) {
+        // The widening keeps the operand's sign category: i16 -> i32, ui16 -> ui32.
+        if (!resElem || (resElem.getWidth() != 32) || (resElem.getSignedness() != opElem.getSignedness()))
+            return rdbOp.emitError() << "add on i16/ui16 widens the result to the matching 32-bit type "
+                                     << "(i16->i32, ui16->ui32), got " << tlaResultTy.getElementType(),
+                   failure();
+        // Lane count halves per 32-bit result lane, rounding up so a tail's
+        // last valid element keeps its widened lane.
+        if ((tlaOperandTy.getValidLanes() != ShapedType::kDynamic) &&
+            (tlaResultTy.getValidLanes() != ((tlaOperandTy.getValidLanes() + 1) / 2)))
+            return rdbOp.emitError() << "add on i16/ui16 keeps the 256B container, expected "
+                                     << ((tlaOperandTy.getValidLanes() + 1) / 2) << " result lane(s), got "
+                                     << tlaResultTy.getValidLanes(),
+                   failure();
+    } else if (
+        (tlaResultTy.getElementType() != tlaElem) ||
+        (tlaOperandTy && (tlaResultTy.getValidLanes() != tlaOperandTy.getValidLanes()))) {
+        return rdbOp.emitError("result type must match operand type (packed mirror)"), failure();
+    }
+    bool isUnsigned = false;
+    if (auto intType = dyn_cast<IntegerType>(tlaElem))
+        isUnsigned = intType.isUnsigned();
+
+    Value result;
+    if (kind == "add") {
+        // ADD on 16-bit sources accumulates into a 32-bit destination (the same
+        // widening behavior as vcadd): each block sum is written as a 32-bit
+        // value into the LSBs. The LLVM-side intrinsic signature requires the
+        // source to have the destination's type, so the Vcgadd is emitted on the
+        // 16-bit container and the result register is re-presented as a 64-lane
+        // i32 vector with a zero-cost bitcast. No Vcvtii cast back: block sums
+        // beyond the source type's range stay exact in the i32/ui32 result, and
+        // truncation is the user's decision.
+        result = isUnsigned ?
+                     b.create<hivm_regbaseintrins::VcgaddUXInstrOp>(loc, opCtx->vecType, operand, preg).getRes() :
+                     b.create<hivm_regbaseintrins::VcgaddSXInstrOp>(loc, opCtx->vecType, operand, preg).getRes();
+        if (isa<IntegerType>(tlaElem) && (dyn_cast<IntegerType>(tlaElem).getWidth() == 16)) {
+            VectorType wideType = VectorType::get({64}, b.getI32Type());
+            result = b.create<mlir::vector::BitCastOp>(loc, wideType, result).getResult();
+        }
+    } else if (kind == "max") {
+        result = isUnsigned ?
+                     b.create<hivm_regbaseintrins::VcgmaxUInstrOp>(loc, opCtx->vecType, operand, preg).getRes() :
+                     b.create<hivm_regbaseintrins::VcgmaxSInstrOp>(loc, opCtx->vecType, operand, preg).getRes();
+    } else if (kind == "min") {
+        result = isUnsigned ?
+                     b.create<hivm_regbaseintrins::VcgminUInstrOp>(loc, opCtx->vecType, operand, preg).getRes() :
+                     b.create<hivm_regbaseintrins::VcgminSInstrOp>(loc, opCtx->vecType, operand, preg).getRes();
+    } else {
+        return rdbOp.emitError() << "tla.reduce_intra_block supports only add, max, and min reductions, got \"" << kind
+                                 << "\"",
+               failure();
+    }
+    valueMap[op.getResult(0)] = result;
+    return success();
+}
+
 static LogicalResult lowerPack(::tla::PackOp packOp, OpBuilder& b, ModuleOp module, DenseMap<Value, Value>& valueMap)
 {
     Location loc = packOp.getLoc();
@@ -3854,6 +3958,9 @@ static LogicalResult lowerNestedVectorOp(
     if (auto reduceOp = dyn_cast<::tla::ReduceOp>(op))
         return lowerReduce(reduceOp, b, module, valueMap, fullMasks);
 
+    if (auto rdbOp = dyn_cast<::tla::ReduceIntraBlockOp>(op))
+        return lowerReduceIntraBlock(rdbOp, b, module, valueMap, fullMasks);
+
     if (auto packOp = dyn_cast<::tla::PackOp>(op))
         return lowerPack(packOp, b, module, valueMap);
     if (auto unpackOp = dyn_cast<::tla::UnpackOp>(op))
@@ -4717,6 +4824,13 @@ public:
                 if (!producedValues.contains(operand))
                     return rewriter.notifyMatchFailure(
                         vecFuncOp, "expected tla.reduce operand from tla.load or prior compute op");
+            } else if (auto reduceDataBlockOp = dyn_cast<::tla::ReduceIntraBlockOp>(computeOp)) {
+                if (!producedValues.contains(reduceDataBlockOp.getMask()))
+                    return rewriter.notifyMatchFailure(
+                        vecFuncOp, "expected tla.reduce_intra_block mask from a legal mask producer");
+                if (!producedValues.contains(reduceDataBlockOp.getOperand()))
+                    return rewriter.notifyMatchFailure(
+                        vecFuncOp, "expected tla.reduce_intra_block operand from tla.load or prior compute op");
             } else if (auto packOp = dyn_cast<::tla::PackOp>(computeOp)) {
                 if (!producedValues.contains(packOp.getSrc()))
                     return rewriter.notifyMatchFailure(
