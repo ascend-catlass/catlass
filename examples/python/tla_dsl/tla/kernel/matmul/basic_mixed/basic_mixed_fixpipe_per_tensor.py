@@ -225,11 +225,13 @@ def basic_mixed_fixpipe_per_tensor_kernel(
         vec_idx = tla.arch.sub_block_idx()
 
         # A cross flag carries one direction only, so each AIV publishes its own
-        # UB as free once before the loop, on its own channel.
+        # UB as free once before the loop, on its own channel. Publishing on
+        # MTE3, the pipe that drains UB to GM, keeps every "UB is free" on one
+        # pipe: the set then orders against that AIV's own MTE3 stores.
         if vec_idx == c0:
-            tla.cross_core_set_flag(fix_ready, tla.arch.MTE2, aiv_id=0)
+            tla.cross_core_set_flag(fix_ready, tla.arch.MTE3, aiv_id=0)
         else:
-            tla.cross_core_set_flag(fix_ready, tla.arch.MTE2, aiv_id=1)
+            tla.cross_core_set_flag(fix_ready, tla.arch.MTE3, aiv_id=1)
 
         block_range = tla.range(
             tla.arch.block_idx(), total_blocks, tla.arch.block_num()
@@ -273,16 +275,21 @@ def basic_mixed_fixpipe_per_tensor_kernel(
                     layoutTag=tla.arch.RowMajor,
                 ),
             )
+            # The store out of UB is an MTE3 operation, so both halves of the
+            # handshake must ride MTE3: the wait, and the set that tells the
+            # fixpipe the tile is drained. A set on another pipe would be issued
+            # in parallel with the copy, letting the next fixpipe write UB while
+            # this store still reads it.
             if vec_idx == c0:
                 if block_linear % 2 == c0:
                     tla.cross_core_wait_flag(fix_done, tla.arch.MTE3, aiv_id=0)
                     tla.copy(gm_out, ub_src)
-                    tla.cross_core_set_flag(fix_ready, tla.arch.MTE2, aiv_id=0)
+                    tla.cross_core_set_flag(fix_ready, tla.arch.MTE3, aiv_id=0)
             else:
                 if block_linear % 2 == 1:
                     tla.cross_core_wait_flag(fix_done, tla.arch.MTE3, aiv_id=1)
                     tla.copy(gm_out, ub_src)
-                    tla.cross_core_set_flag(fix_ready, tla.arch.MTE2, aiv_id=1)
+                    tla.cross_core_set_flag(fix_ready, tla.arch.MTE3, aiv_id=1)
 
         tla.pipe_barrier(tla.pipes.ALL)
 
