@@ -55,23 +55,16 @@ def msrs_main_kernel(
 
     # C/V crossing: one cross flag handed back and forth (VECTOR -> FIX -> VECTOR).
     exchange = tla.cross_flag("exchange")
-    # Same-core producer/consumer flags.
-    l1a_ready0 = tla.flag("l1a_ready0", tla.arch.MTE2, tla.arch.MTE1)
-    l1b_ready0 = tla.flag("l1b_ready0", tla.arch.MTE2, tla.arch.MTE1)
-    l1a_free0 = tla.flag("l1a_free0", tla.arch.MTE1, tla.arch.MTE2)
-    l1b_free0 = tla.flag("l1b_free0", tla.arch.MTE1, tla.arch.MTE2)
-    l1a_ready1 = tla.flag("l1a_ready1", tla.arch.MTE2, tla.arch.MTE1)
-    l1b_ready1 = tla.flag("l1b_ready1", tla.arch.MTE2, tla.arch.MTE1)
-    l1a_free1 = tla.flag("l1a_free1", tla.arch.MTE1, tla.arch.MTE2)
-    l1b_free1 = tla.flag("l1b_free1", tla.arch.MTE1, tla.arch.MTE2)
-    l0_ready0 = tla.flag("l0_ready0", tla.arch.MTE1, tla.arch.CUBE)
-    l0_ready1 = tla.flag("l0_ready1", tla.arch.MTE1, tla.arch.CUBE)
-    l0a_free0 = tla.flag("l0a_free0", tla.arch.CUBE, tla.arch.MTE1)
-    l0a_free1 = tla.flag("l0a_free1", tla.arch.CUBE, tla.arch.MTE1)
-    l0b_free0 = tla.flag("l0b_free0", tla.arch.CUBE, tla.arch.MTE1)
-    l0b_free1 = tla.flag("l0b_free1", tla.arch.CUBE, tla.arch.MTE1)
-    mmad_done = tla.flag("mmad_done", tla.arch.CUBE, tla.arch.FIX)
-    l0c_free = tla.flag("l0c_free", tla.arch.FIX, tla.arch.CUBE)
+    # Same-core buffers are shared by their producer and consumer pipes.
+    mutex_l1a0 = tla.mutex("l1a0", id=0)
+    mutex_l1b0 = tla.mutex("l1b0", id=1)
+    mutex_l1a1 = tla.mutex("l1a1", id=2)
+    mutex_l1b1 = tla.mutex("l1b1", id=3)
+    mutex_l0a0 = tla.mutex("l0a0", id=4)
+    mutex_l0b0 = tla.mutex("l0b0", id=5)
+    mutex_l0a1 = tla.mutex("l0a1", id=6)
+    mutex_l0b1 = tla.mutex("l0b1", id=7)
+    mutex_l0c = tla.mutex("l0c", id=8)
 
     l1a0_ptr = tla.allocate(BM * BH, dtype_in, tla.AddressSpace.l1, 512)
     l1b0_ptr = tla.allocate(BH * BN, dtype_in, tla.AddressSpace.l1, 512)
@@ -98,16 +91,6 @@ def msrs_main_kernel(
 
         # Two L1 stages so the GM->L1 load of the next K tile runs under the
         # MTE1 + MAC of the current one (L1 is the pipeline bottleneck otherwise).
-        tla.set_flag(l1a_free0)
-        tla.set_flag(l1b_free0)
-        tla.set_flag(l1a_free1)
-        tla.set_flag(l1b_free1)
-        tla.set_flag(l0a_free0)
-        tla.set_flag(l0b_free0)
-        tla.set_flag(l0a_free1)
-        tla.set_flag(l0b_free1)
-        tla.set_flag(l0c_free)
-
         for blk in tla.range(tla.arch.block_idx(), total_blocks, tla.arch.block_num()):
             # Segment-major: consecutive blocks are consecutive M tiles inside one
             # V segment, so all concurrently running cores sweep the same rhs
@@ -122,7 +105,7 @@ def msrs_main_kernel(
             if vt_lo < vt_hi:
                 for vt in tla.range(vt_lo, vt_hi):
                     # Prologue: stage the first K tile into L1 buffer 0.  The L0C
-                    # free wait is deferred to just before the first MAC so this
+                    # mutex lock is deferred to just before the first MAC so this
                     # GM->L1 load overlaps the previous tile's FixPipe drain.
                     gm_a_p = tla.tile_view(
                         x, tla.make_shape(BM, BH), tla.make_coord(mb, c0)
@@ -132,25 +115,25 @@ def msrs_main_kernel(
                     )
                     l1_a_p = tla.make_tensor_like(l1a0_ptr, gm_a_p, tla.arch.zN)
                     l1_b_p = tla.make_tensor_like(l1b0_ptr, gm_b_p, tla.arch.zN)
-                    tla.wait_flag(l1a_free0)
-                    tla.wait_flag(l1b_free0)
+                    mutex_l1a0.lock(pipe=tla.arch.MTE2)
+                    mutex_l1b0.lock(pipe=tla.arch.MTE2)
                     tla.copy(l1_a_p, gm_a_p)
                     tla.copy(l1_b_p, gm_b_p)
-                    tla.set_flag(l1a_ready0)
-                    tla.set_flag(l1b_ready0)
+                    mutex_l1a0.unlock(pipe=tla.arch.MTE2)
+                    mutex_l1b0.unlock(pipe=tla.arch.MTE2)
 
                     # First MAC of this V tile must not start before the previous
                     # tile's L0C->UB copy has consumed L0C.
-                    tla.wait_flag(l0c_free)
+                    mutex_l0c.lock(pipe=tla.arch.CUBE)
 
                     buf = tla.as_numeric(c0)
                     for hb in tla.range(c0, h_tiles, c1):
                         if buf == c0:
-                            tla.wait_flag(l1a_ready0)
-                            tla.wait_flag(l1b_ready0)
+                            mutex_l1a0.lock(pipe=tla.arch.MTE1)
+                            mutex_l1b0.lock(pipe=tla.arch.MTE1)
                         else:
-                            tla.wait_flag(l1a_ready1)
-                            tla.wait_flag(l1b_ready1)
+                            mutex_l1a1.lock(pipe=tla.arch.MTE1)
+                            mutex_l1b1.lock(pipe=tla.arch.MTE1)
 
                         # Prefetch the next K tile into the other stage.
                         if hb + c1 < h_tiles:
@@ -173,19 +156,19 @@ def msrs_main_kernel(
                                 next_b_ptr, gm_b_n, tla.arch.zN
                             )
                             if buf == c0:
-                                tla.wait_flag(l1a_free1)
-                                tla.wait_flag(l1b_free1)
+                                mutex_l1a1.lock(pipe=tla.arch.MTE2)
+                                mutex_l1b1.lock(pipe=tla.arch.MTE2)
                             else:
-                                tla.wait_flag(l1a_free0)
-                                tla.wait_flag(l1b_free0)
+                                mutex_l1a0.lock(pipe=tla.arch.MTE2)
+                                mutex_l1b0.lock(pipe=tla.arch.MTE2)
                             tla.copy(l1_a_n, gm_a_n)
                             tla.copy(l1_b_n, gm_b_n)
                             if buf == c0:
-                                tla.set_flag(l1a_ready1)
-                                tla.set_flag(l1b_ready1)
+                                mutex_l1a1.unlock(pipe=tla.arch.MTE2)
+                                mutex_l1b1.unlock(pipe=tla.arch.MTE2)
                             else:
-                                tla.set_flag(l1a_ready0)
-                                tla.set_flag(l1b_ready0)
+                                mutex_l1a0.unlock(pipe=tla.arch.MTE2)
+                                mutex_l1b0.unlock(pipe=tla.arch.MTE2)
 
                         cur_a_ptr = l1a0_ptr if buf == c0 else l1a1_ptr
                         cur_b_ptr = l1b0_ptr if buf == c0 else l1b1_ptr
@@ -208,18 +191,21 @@ def msrs_main_kernel(
                         )
                         l0_a_p = tla.make_tensor_like(l0a0_ptr, l1_a_p0, tla.arch.zN)
                         l0_b_p = tla.make_tensor_like(l0b0_ptr, l1_b_p0, tla.arch.nZ)
-                        tla.wait_flag(l0a_free0)
-                        tla.wait_flag(l0b_free0)
+                        mutex_l0a0.lock(pipe=tla.arch.MTE1)
+                        mutex_l0b0.lock(pipe=tla.arch.MTE1)
                         tla.copy(l0_a_p, l1_a_p0)
                         tla.copy(l0_b_p, l1_b_p0)
-                        tla.set_flag(l0_ready0)
+                        mutex_l0a0.unlock(pipe=tla.arch.MTE1)
+                        mutex_l0b0.unlock(pipe=tla.arch.MTE1)
 
                         lbuf = tla.as_numeric(c0)
                         for sk in tla.range(c0, k_sub, c1):
                             if lbuf == c0:
-                                tla.wait_flag(l0_ready0)
+                                mutex_l0a0.lock(pipe=tla.arch.CUBE)
+                                mutex_l0b0.lock(pipe=tla.arch.CUBE)
                             else:
-                                tla.wait_flag(l0_ready1)
+                                mutex_l0a1.lock(pipe=tla.arch.CUBE)
+                                mutex_l0b1.lock(pipe=tla.arch.CUBE)
 
                             # Next-chunk views are built unconditionally (they are pure
                             # metadata); only the guarded copy below touches them.
@@ -243,17 +229,19 @@ def msrs_main_kernel(
                             )
                             if sk + c1 < k_sub:
                                 if lbuf == c0:
-                                    tla.wait_flag(l0a_free1)
-                                    tla.wait_flag(l0b_free1)
+                                    mutex_l0a1.lock(pipe=tla.arch.MTE1)
+                                    mutex_l0b1.lock(pipe=tla.arch.MTE1)
                                 else:
-                                    tla.wait_flag(l0a_free0)
-                                    tla.wait_flag(l0b_free0)
+                                    mutex_l0a0.lock(pipe=tla.arch.MTE1)
+                                    mutex_l0b0.lock(pipe=tla.arch.MTE1)
                                 tla.copy(l0_a_n, l1_a_q)
                                 tla.copy(l0_b_n, l1_b_q)
                                 if lbuf == c0:
-                                    tla.set_flag(l0_ready1)
+                                    mutex_l0a1.unlock(pipe=tla.arch.MTE1)
+                                    mutex_l0b1.unlock(pipe=tla.arch.MTE1)
                                 else:
-                                    tla.set_flag(l0_ready0)
+                                    mutex_l0a0.unlock(pipe=tla.arch.MTE1)
+                                    mutex_l0b0.unlock(pipe=tla.arch.MTE1)
 
                             cur_l0a_ptr = l0a0_ptr if lbuf == c0 else l0a1_ptr
                             cur_l0b_ptr = l0b0_ptr if lbuf == c0 else l0b1_ptr
@@ -280,25 +268,25 @@ def msrs_main_kernel(
                                 l0_c, l0_a, l0_b, init_c=init_c, unit_flag=unit_flag
                             )
                             if lbuf == c0:
-                                tla.set_flag(l0a_free0)
-                                tla.set_flag(l0b_free0)
+                                mutex_l0a0.unlock(pipe=tla.arch.CUBE)
+                                mutex_l0b0.unlock(pipe=tla.arch.CUBE)
                             else:
-                                tla.set_flag(l0a_free1)
-                                tla.set_flag(l0b_free1)
+                                mutex_l0a1.unlock(pipe=tla.arch.CUBE)
+                                mutex_l0b1.unlock(pipe=tla.arch.CUBE)
                             lbuf = c1 - lbuf
 
                         if buf == c0:
-                            tla.set_flag(l1a_free0)
-                            tla.set_flag(l1b_free0)
+                            mutex_l1a0.unlock(pipe=tla.arch.MTE1)
+                            mutex_l1b0.unlock(pipe=tla.arch.MTE1)
                         else:
-                            tla.set_flag(l1a_free1)
-                            tla.set_flag(l1b_free1)
+                            mutex_l1a1.unlock(pipe=tla.arch.MTE1)
+                            mutex_l1b1.unlock(pipe=tla.arch.MTE1)
                         buf = c1 - buf
 
                     # L0C (fp32 [BM, BN]) -> both AIV UB halves.  unit_flag=3 closes
                     # the accumulation chain so FixPipe observes a complete tile.
-                    tla.set_flag(mmad_done)
-                    tla.wait_flag(mmad_done)
+                    mutex_l0c.unlock(pipe=tla.arch.CUBE)
+                    mutex_l0c.lock(pipe=tla.arch.FIX)
                     tla.cross_core_wait_flag(exchange, tla.arch.FIX)
                     tla.copy(
                         ub_z_full,
@@ -309,7 +297,7 @@ def msrs_main_kernel(
                         ),
                     )
                     tla.cross_core_set_flag(exchange, tla.arch.FIX)
-                    tla.set_flag(l0c_free)
+                    mutex_l0c.unlock(pipe=tla.arch.FIX)
 
     with tla.vector():
         sub = tla.arch.sub_block_idx()
