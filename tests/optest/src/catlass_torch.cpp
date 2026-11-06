@@ -498,7 +498,7 @@ static auto& x_attention = XAttentionOp::Run;
 REGISTER_TORCH_FUNC(x_attention);
 
 // ── example 82_ascend950_basic_syrk ──
-using Ascend950BasicSyrkOp = BasicSyrkLike<CatlassKernel::Ascend950BasicSyrk>;
+using Ascend950BasicSyrkOp = BasicSyrkLike<CatlassKernel::Ascend950BasicSyrk, CatlassKernel::Ascend950SyrkPolynomial>;
 static auto& ascend950_basic_syrk = Ascend950BasicSyrkOp::Run;
 REGISTER_TORCH_FUNC(ascend950_basic_syrk);
 

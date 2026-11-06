@@ -86,3 +86,8 @@ bash scripts/build.sh -DCATLASS_ARCH=3510 84_ascend950_batched_basic_syrk
 bash scripts/build.sh -DCATLASS_ARCH=3510 84_ascend950_syrk_polynomial
 ./output/bin/84_ascend950_syrk_polynomial 160 513 2 0.75 -0.25 1.25 0
 ```
+
+## Split-K
+
+Both executables accept a trailing `--splitk N`: `1` (default), `2`, `4`, `8`, `16`, or `32`.
+Values above `1` require `M` to be a multiple of 32; short K dimensions may use fewer slices.

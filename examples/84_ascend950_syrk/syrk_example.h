@@ -38,17 +38,32 @@ inline uint32_t ParseInteger(const char* text)
     return static_cast<uint32_t>(value);
 }
 
+inline uint32_t ParseSplit(int& argc, const char** argv)
+{
+    uint32_t splitk = 1;
+    if (argc >= 3 && std::string(argv[argc - 2]) == "--splitk") {
+        splitk = ParseInteger(argv[argc - 1]);
+        argc -= 2;
+    }
+    return splitk;
+}
+
 struct Options {
     uint32_t m;
     uint32_t k;
     uint32_t batch;
     int32_t device = 0;
+    uint32_t splitk = 1;
     float alpha = 1.0f;
     float beta = 0.0f;
     float diagonal = 0.0f;
 
     void Validate() const
     {
+        if (splitk == 0 || splitk > 32 || (splitk & (splitk - 1)) != 0 || (splitk > 1 && m % 32 != 0)) {
+            throw std::invalid_argument(
+                "splitk must be a power of two <=32; split-K requires M to be a multiple of 32");
+        }
         constexpr uint64_t MAX_ELEMENTS = 67108864;
         if (m < 32 || m > 8192 || k == 0 || k > 65536 || batch == 0 || uint64_t{batch} * m * k > MAX_ELEMENTS ||
             uint64_t{batch} * m * m > MAX_ELEMENTS) {

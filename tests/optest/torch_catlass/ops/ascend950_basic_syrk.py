@@ -46,7 +46,9 @@ def ascend950_basic_syrk(
             include ``float16`` / ``fp16``, ``bfloat16`` / ``bf16`` and
             ``float32`` / ``fp32``. Inputs must be FP16 or BF16.
         tile: Square output tile edge: 0 (auto), 64, 128 or 256.
-        splitk: 0 (auto) or 1; both select the single-pass kernel.
+        splitk: K slices; 0 selects a factor from the shape and 1 disables it.
+            Other values must be a power of two up to 32, and split-K only runs
+            when ``M`` is a multiple of 32.
 
     Returns:
         Output ``Y`` with shape ``(M, M)`` or ``(B, M, M)`` on the active NPU device.
@@ -93,7 +95,7 @@ def ascend950_syrk_polynomial(
         outDType: Output dtype, FP16 or BF16 only. Defaults to
             ``residual.dtype``, or ``matX.dtype`` when there is no residual.
         tile: Square output tile edge: 0 (auto), 64, 128 or 256.
-        splitk: 0 (auto) or 1; both select the single-pass kernel.
+        splitk: K slices; 0 selects a factor from the shape and 1 disables it.
 
     Returns:
         Output with shape ``(M, M)`` or ``(B, M, M)`` on the active NPU device.

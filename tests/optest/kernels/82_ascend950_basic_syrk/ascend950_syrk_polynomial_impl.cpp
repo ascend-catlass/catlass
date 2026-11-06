@@ -19,6 +19,7 @@
 #include "catlass/catlass.hpp"
 #include "catlass/gemm/block/block_mmad_syrk_tla.hpp"
 #include "catlass/gemm/block/block_scheduler_syrk.h"
+#include "catlass/gemm/kernel/basic_syrk_polynomial_splitk_tla.h"
 #include "catlass/gemm/kernel/basic_syrk_polynomial_tla.h"
 #include "catlass/gemm_coord.hpp"
 #include "catlass/layout/layout.hpp"
@@ -63,20 +64,41 @@ using LayoutTagX = layout::CATLASS_JIT_LAYOUT_A;
 using LayoutTagXt =
     std::conditional_t<std::is_same_v<LayoutTagX, layout::RowMajor>, layout::ColumnMajor, layout::RowMajor>;
 
+// 0: single-pass kernel (L0C -> UB -> epilogue). 1: split-K (L0C -> FP32 workspace,
+// device barrier, then reduce + epilogue on the AIVs).
+#if defined(CATLASS_JIT_SYRK_SPLITK) && CATLASS_JIT_SYRK_SPLITK
+// Split-K writes FP32 partial tiles to a GM workspace instead of handing L0C to the AIVs.
+using TileCopy = Gemm::Tile::PackedTileCopyTla<
+    Arch::Ascend950, ElementX, LayoutTagX, ElementX, LayoutTagXt, float, layout::RowMajor>;
+#else
 using TileCopy = Gemm::Tile::PackedTileCopyTlaToUB<
     Arch::Ascend950, ElementX, LayoutTagX, ElementX, LayoutTagXt, float, layout::RowMajor, void,
     Gemm::Tile::CopyL0CToUBMode::SPLIT_M>;
+#endif
 using BlockMmad = Gemm::Block::BlockMmadSyrkTla<L1TileShape, L0TileShape, ElementX, ElementY, TileCopy>;
 
 using BlockScheduler = Gemm::Block::SyrkBlockScheduler;
+#if defined(CATLASS_JIT_SYRK_SPLITK) && CATLASS_JIT_SYRK_SPLITK
+using Kernel = Gemm::Kernel::BasicSyrkPolynomialSplitkTla<BlockMmad, BlockScheduler>;
+#else
 using Kernel = Gemm::Kernel::BasicSyrkPolynomialTla<BlockMmad, BlockScheduler>;
+#endif
 
 extern "C" void run(uint32_t blockNum, aclrtStream stream, const CatlassKernel::SyrkPolynomialParams* params)
 {
+#if defined(CATLASS_JIT_SYRK_SPLITK) && CATLASS_JIT_SYRK_SPLITK
+    typename Kernel::Arguments arguments{params->batch,        GemmCoord{params->m, params->n, params->k},
+                                         params->inputAddr[0], params->inputAddr[1],
+                                         params->inputAddr[2], params->outputAddr[0],
+                                         params->inputAddr[3], // caller-owned FP32 partial-tile workspace
+                                         params->alpha,        params->beta,
+                                         params->diagonal,     params->splitk};
+#else
     typename Kernel::Arguments arguments{params->batch,        GemmCoord{params->m, params->n, params->k},
                                          params->inputAddr[0], params->inputAddr[1],
                                          params->inputAddr[2], params->outputAddr[0],
                                          params->alpha,        params->beta,
                                          params->diagonal};
+#endif
     Catlass::RunKernel<Kernel>(arguments, stream, blockNum);
 }

@@ -22,6 +22,7 @@ extern "C" void Ascend950SyrkPolynomial(
 {
     auto macros = JitMacroGenerator<TParams>::generate("ascend950_syrk_polynomial", tParams);
     macros["CATLASS_JIT_SYRK_TILE"] = std::to_string(params.tileMN);
+    macros["CATLASS_JIT_SYRK_SPLITK"] = (params.splitk > 1) ? "1" : "0";
     auto* entry = JitCompiler::instance().getKernel("ascend950_syrk_polynomial_impl.cpp", macros, JitKernelType::MIX);
     if (entry) {
         entry(blockNum, stream, &params);

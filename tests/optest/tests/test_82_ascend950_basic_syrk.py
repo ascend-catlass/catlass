@@ -90,10 +90,14 @@ def test_ascend950_syrk_polynomial_without_residual(dtype):
     [
         (None, 32, 129, 64, 1, False),
         (None, 300, 513, 128, 1, False),  # non-32-aligned M
+        (1, 384, 1025, 128, 4, True),  # batch of one, uneven K slices, column-major X
+        (5, 544, 513, 256, 4, True),  # M tail, column-major X
+        (3, 1024, 257, 128, 2, False),  # K tail
+        (1, 256, 16384, 0, 0, False),  # automatic configuration
     ],
 )
 def test_ascend950_basic_syrk_fp32_output(batch, m, k, tile, splitk, transposed, dtype):
-    """Compare FP32 output for direct launches."""
+    """Compare FP32 output for direct and split-K launches."""
     generator = torch.Generator().manual_seed(3097)
     prefix = () if batch is None else (batch,)
     physical_shape = prefix + ((k, m) if transposed else (m, k))
@@ -115,7 +119,7 @@ def test_ascend950_basic_syrk_fp32_output(batch, m, k, tile, splitk, transposed,
 
 
 @only_on_3510
-@pytest.mark.parametrize("m,k,tile,splitk", [(64, 3, 64, 1)])
+@pytest.mark.parametrize("m,k,tile,splitk", [(64, 3, 64, 1), (384, 513, 128, 4)])
 def test_ascend950_basic_syrk_fp32_preserves_small_products(m, k, tile, splitk):
     # FP32 output preserves products that are rounded or flushed in FP16 output.
     x = torch.full((m, k), 2.0**-14, dtype=torch.float16, device="npu")
@@ -137,6 +141,8 @@ def test_ascend950_basic_syrk_fp32_preserves_small_products(m, k, tile, splitk):
         (None, 64, 129, 64, 1, False),
         (None, 300, 513, 128, 1, True),  # partial diagonal tile, column-major
         (2, 544, 513, 256, 1, False),  # batched diagonal tails
+        (1, 384, 1025, 128, 4, True),  # split-K, column-major, uneven K
+        (None, 1024, 1024, 256, 0, False),  # automatic split-K
     ],
 )
 def test_ascend950_basic_syrk_distinct_operands(
@@ -166,15 +172,8 @@ def test_ascend950_basic_syrk_distinct_operands(
 
 
 @only_on_3510
-def test_ascend950_basic_syrk_rejects_splitk():
-    x = torch.zeros((64, 513), dtype=torch.bfloat16, device="npu")
-    with pytest.raises(RuntimeError, match="splitk must be 0.*or 1"):
-        torch_catlass.ascend950_basic_syrk(x, splitk=2)
-
-
-@only_on_3510
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
-@pytest.mark.parametrize("splitk", [1])
+@pytest.mark.parametrize("splitk", [1, 4])
 def test_ascend950_syrk_polynomial_distinct_operands(dtype, splitk):
     batch, m, k = 2, 384, 513
     x = _random_npu((batch, m, k), dtype, seed=3097) * k**-0.5
@@ -191,13 +190,6 @@ def test_ascend950_syrk_polynomial_distinct_operands(dtype, splitk):
     assert torch.isfinite(result).all()
     assert torch.equal(result, result.transpose(-2, -1))
     torch.testing.assert_close(result.float(), expected.float(), rtol=1e-2, atol=2e-3)
-
-
-@only_on_3510
-def test_ascend950_syrk_polynomial_rejects_splitk():
-    x = torch.zeros((64, 513), dtype=torch.bfloat16, device="npu")
-    with pytest.raises(RuntimeError, match="splitk must be 0.*or 1"):
-        torch_catlass.ascend950_syrk_polynomial(x, x, None, 1.0, 0.0, splitk=2)
 
 
 if __name__ == "__main__":

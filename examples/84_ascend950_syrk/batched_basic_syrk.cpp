@@ -14,6 +14,7 @@
 #include "catlass/gemm/block/block_scheduler_syrk.h"
 #include "catlass/gemm/kernel/basic_syrk_symmetric_tla.h"
 #include "syrk_example.h"
+#include "syrk_splitk.h"
 
 using namespace Catlass;
 using namespace tla;
@@ -31,18 +32,25 @@ CATLASS_GLOBAL __mix__(1, 2) void BatchedBasicSyrk(Kernel::Params params)
 
 int main(int argc, const char** argv)
 {
-    if (argc != 4 && argc != 5) {
-        std::cerr << "Usage: " << argv[0] << " m k batch [device_id]" << std::endl;
-        return 1;
-    }
     try {
+        const uint32_t splitk = SyrkExample::ParseSplit(argc, argv);
+        if (argc != 4 && argc != 5) {
+            std::cerr << "Usage: " << argv[0] << " m k batch [device_id] [--splitk factor]" << std::endl;
+            return 1;
+        }
         SyrkExample::Options options{
             SyrkExample::ParseInteger(argv[1]), SyrkExample::ParseInteger(argv[2]), SyrkExample::ParseInteger(argv[3])};
+        options.splitk = splitk;
         if (argc == 5) {
             options.device = SyrkExample::ParseInteger(argv[4]);
         }
         return SyrkExample::Run<float>(
-            options, [options](uint8_t* x, uint8_t* xt, uint8_t*, uint8_t* y, aclrtStream stream, uint32_t cores) {
+            options,
+            [options](uint8_t* x, uint8_t* xt, uint8_t* residual, uint8_t* y, aclrtStream stream, uint32_t cores) {
+                if (options.splitk > 1) {
+                    SyrkExample::LaunchSplit<float>(options, x, xt, residual, y, stream, cores);
+                    return;
+                }
                 Kernel::Arguments arguments{options.batch, GemmCoord{options.m, options.m, options.k}, x, xt, y};
                 if (!Kernel::CanImplement(arguments)) {
                     throw std::invalid_argument("unsupported basic SYRK arguments");

@@ -124,7 +124,6 @@ inline SyrkLaunchConfig SyrkChooseConfig(
 
 using BasicSyrkKernelFn =
     void (*)(const uint32_t, aclrtStream, const CatlassKernel::TParams&, const CatlassKernel::MatmulParams&);
-
 using SyrkPolynomialKernelFn =
     void (*)(const uint32_t, aclrtStream, const CatlassKernel::TParams&, const CatlassKernel::SyrkPolynomialParams&);
 
@@ -132,9 +131,11 @@ using SyrkPolynomialKernelFn =
  * @brief Torch adapter for Y = X * X^T (example 82_ascend950_basic_syrk).
  *
  * Reuses MatmulParams with m == n; inputAddr[0] (X), inputAddr[1] (Xt, normally the same
- * buffer) and outputAddr[0] (Y) are used.
+ * buffer) and outputAddr[0] (Y) are used. A chosen split factor > 1 launches
+ * SplitkKernelFunc (the split-K polynomial kernel) with alpha = 1, beta = 0 and an
+ * FP32 workspace instead.
  */
-template <BasicSyrkKernelFn KernelFunc>
+template <BasicSyrkKernelFn KernelFunc, SyrkPolynomialKernelFn SplitkKernelFunc>
 struct BasicSyrkLike {
     using OutputType = at::Tensor;
 
@@ -146,7 +147,8 @@ struct BasicSyrkLike {
             tileMN == 0 || tileMN == 64 || tileMN == 128 || tileMN == 256,
             "ascend950_basic_syrk tile edge must be 0 (auto), 64, 128 or 256");
         TORCH_CHECK(
-            splitk == 0 || splitk == 1, "ascend950_basic_syrk splitk must be 0 (auto) or 1 for single-pass execution");
+            splitk == 0 || (splitk > 0 && (splitk & (splitk - 1)) == 0 && splitk <= 32),
+            "ascend950_basic_syrk splitk must be 0 (auto) or a power of two <= 32");
         TORCH_CHECK(
             matX.dim() == 2 || matX.dim() == 3, "ascend950_basic_syrk expects X with shape (M, K) or (B, M, K)");
         const SyrkOperandLayout layoutX = ClassifySyrkOperand(matX);
@@ -183,7 +185,11 @@ struct BasicSyrkLike {
         params.n = params.m; // Y is [M, M]
 
         uint32_t aicCoreNum = platform_ascendc::PlatformAscendCManager::GetInstance()->GetCoreNumAic();
-        SyrkLaunchConfig config = SyrkChooseConfig(tileMN, splitk, false, params.batch, params.m, params.k, aicCoreNum);
+        // The split-K kernel uses 32-row epilogue bands, so other shapes use
+        // the single-pass kernel.
+        const bool splitkEligible = (params.m % 32 == 0);
+        SyrkLaunchConfig config =
+            SyrkChooseConfig(tileMN, splitk, splitkEligible, params.batch, params.m, params.k, aicCoreNum);
         params.tileMN = config.tileMN;
 
         params.inputAddr.resize(2);
@@ -199,6 +205,39 @@ struct BasicSyrkLike {
         params.outputAddr[0] = static_cast<uint8_t*>(output.data_ptr());
 
         aclrtStream stream = c10_npu::getCurrentNPUStream().stream(false);
+        if (config.splitk > 1) {
+            at::Tensor workspace;
+            try {
+                workspace = GetOutputTensor({static_cast<int64_t>(config.wsElems)}, at::kFloat);
+            } catch (const std::exception& e) {
+                TORCH_WARN(
+                    "ascend950_basic_syrk: could not allocate the ", config.wsElems * sizeof(float),
+                    " byte split-K workspace (", e.what(), "); falling back to splitk=1");
+                config.splitk = 1;
+                config.wsElems = 0;
+            }
+            if (config.splitk > 1) {
+                CatlassKernel::SyrkPolynomialParams splitParams;
+                splitParams.batch = params.batch;
+                splitParams.m = params.m;
+                splitParams.n = params.n;
+                splitParams.k = params.k;
+                splitParams.alpha = 1.0f;
+                splitParams.beta = 0.0f;
+                splitParams.diagonal = 0.0f;
+                splitParams.tileMN = params.tileMN;
+                splitParams.splitk = config.splitk;
+                splitParams.inputAddr.resize(4);
+                splitParams.inputAddr[0] = params.inputAddr[0];
+                splitParams.inputAddr[1] = params.inputAddr[1];
+                splitParams.inputAddr[2] = params.outputAddr[0]; // unread with beta == 0
+                splitParams.outputAddr.resize(1);
+                splitParams.outputAddr[0] = params.outputAddr[0];
+                splitParams.inputAddr[3] = static_cast<uint8_t*>(workspace.data_ptr());
+                RUN_NPU_FUNC(SplitkKernelFunc, aicCoreNum, stream, tParams, splitParams);
+                return output;
+            }
+        }
         RUN_NPU_FUNC(KernelFunc, aicCoreNum, stream, tParams, params);
         return output;
     }
@@ -209,7 +248,8 @@ struct BasicSyrkLike {
  *
  * inputAddr[0] (X) and inputAddr[1] (Xt, the transposed view; normally the same buffer)
  * must yield a symmetric product, and the residual C at inputAddr[2] must be symmetric
- * too: only the lower triangle is computed and the upper one is mirrored.
+ * too: only the lower triangle is computed and the upper one is mirrored. A chosen split
+ * factor > 1 selects the split-K kernel and puts its FP32 workspace in inputAddr[3].
  */
 template <SyrkPolynomialKernelFn KernelFunc>
 struct SyrkPolynomialLike {
@@ -222,8 +262,7 @@ struct SyrkPolynomialLike {
         TORCH_CHECK(
             tileMN == 0 || tileMN == 64 || tileMN == 128 || tileMN == 256,
             "syrk polynomial tile edge must be 0 (auto), 64, 128 or 256");
-        TORCH_CHECK(
-            splitk == 0 || splitk == 1, "syrk polynomial splitk must be 0 (auto) or 1 for single-pass execution");
+        TORCH_CHECK(splitk >= 0, "syrk polynomial splitk must be >= 0");
         TORCH_CHECK(matX.dim() == 2 || matX.dim() == 3, "syrk polynomial expects (M,K) or (B,M,K)");
         const SyrkOperandLayout layoutX = ClassifySyrkOperand(matX);
         TORCH_CHECK(
@@ -272,11 +311,12 @@ struct SyrkPolynomialLike {
         params.alpha = static_cast<float>(alpha);
         params.beta = static_cast<float>(beta);
         params.diagonal = static_cast<float>(diagonal);
-        params.inputAddr.resize(3);
+        params.inputAddr.resize(4);
         params.inputAddr[0] = static_cast<uint8_t*>(const_cast<void*>(matX.data_ptr()));
         params.inputAddr[1] = static_cast<uint8_t*>(const_cast<void*>(matXt.data_ptr()));
         params.inputAddr[2] =
             residual.has_value() ? static_cast<uint8_t*>(const_cast<void*>(residual->data_ptr())) : nullptr;
+        params.inputAddr[3] = nullptr;
 
         // Preserve a leading batch dimension, including a batch of one.
         OutputType output =
@@ -293,8 +333,22 @@ struct SyrkPolynomialLike {
         aclrtStream stream = c10_npu::getCurrentNPUStream().stream(false);
         uint32_t aicCoreNum = platform_ascendc::PlatformAscendCManager::GetInstance()->GetCoreNumAic();
 
-        SyrkLaunchConfig config = SyrkChooseConfig(tileMN, splitk, false, params.batch, params.m, params.k, aicCoreNum);
+        SyrkLaunchConfig config = SyrkChooseConfig(tileMN, splitk, true, params.batch, params.m, params.k, aicCoreNum);
         params.tileMN = config.tileMN;
+        params.splitk = config.splitk;
+        // Keep split-K workspace alive through the kernel launch.
+        at::Tensor workspace;
+        if (params.splitk > 1) {
+            try {
+                workspace = GetOutputTensor({static_cast<int64_t>(config.wsElems)}, at::kFloat);
+                params.inputAddr[3] = static_cast<uint8_t*>(workspace.data_ptr());
+            } catch (const std::exception& e) {
+                TORCH_WARN(
+                    "syrk polynomial: could not allocate the ", config.wsElems * sizeof(float),
+                    " byte split-K workspace (", e.what(), "); falling back to splitk=1");
+                params.splitk = 1;
+            }
+        }
         RUN_NPU_FUNC(KernelFunc, aicCoreNum, stream, tParams, params);
         return output;
     }

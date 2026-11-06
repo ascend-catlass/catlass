@@ -14,6 +14,7 @@
 #include "catlass/gemm/block/block_scheduler_syrk.h"
 #include "catlass/gemm/kernel/basic_syrk_polynomial_tla.h"
 #include "syrk_example.h"
+#include "syrk_splitk.h"
 
 using namespace Catlass;
 using namespace tla;
@@ -44,16 +45,19 @@ static float ParseFloat(const char* text)
 
 int main(int argc, const char** argv)
 {
-    if (argc != 7 && argc != 8) {
-        std::cerr << "Usage: " << argv[0] << " m k batch alpha beta diagonal [device_id]" << std::endl;
-        return 1;
-    }
     try {
+        const uint32_t splitk = SyrkExample::ParseSplit(argc, argv);
+        if (argc != 7 && argc != 8) {
+            std::cerr << "Usage: " << argv[0] << " m k batch alpha beta diagonal [device_id] [--splitk factor]"
+                      << std::endl;
+            return 1;
+        }
         SyrkExample::Options options{
             SyrkExample::ParseInteger(argv[1]), SyrkExample::ParseInteger(argv[2]), SyrkExample::ParseInteger(argv[3])};
         options.alpha = ParseFloat(argv[4]);
         options.beta = ParseFloat(argv[5]);
         options.diagonal = ParseFloat(argv[6]);
+        options.splitk = splitk;
         if (argc == 8) {
             options.device = SyrkExample::ParseInteger(argv[7]);
         }
@@ -63,6 +67,10 @@ int main(int argc, const char** argv)
         return SyrkExample::Run<bfloat16>(
             options,
             [options](uint8_t* x, uint8_t* xt, uint8_t* residual, uint8_t* y, aclrtStream stream, uint32_t cores) {
+                if (options.splitk > 1) {
+                    SyrkExample::LaunchSplit<bfloat16_t>(options, x, xt, residual, y, stream, cores);
+                    return;
+                }
                 Kernel::Arguments arguments{options.batch,
                                             GemmCoord{options.m, options.m, options.k},
                                             x,

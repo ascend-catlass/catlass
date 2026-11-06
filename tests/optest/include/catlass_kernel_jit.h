@@ -151,6 +151,7 @@ struct SyrkParams : public MatmulParams {
  */
 struct SyrkPolynomialParams : public GemmParams {
     float diagonal = 0.0f; ///< Diagonal shift in D = alpha * X @ X^T + beta * C + diagonal * I.
+    uint32_t splitk = 1;   ///< K slices; > 1 selects the split-K kernel (inputAddr[3] = FP32 workspace).
 };
 
 /**
@@ -594,8 +595,9 @@ __attribute__((weak)) void Ascend950Syrk(
 /**
  * @brief JIT interface for the SYRK polynomial kernels (MIX, 82_ascend950_basic_syrk).
  *
- * D = alpha * X @ X^T + beta * C + diagonal * I. The single-pass kernel
- * hands each L0C tile to the paired AIVs.
+ * D = alpha * X @ X^T + beta * C + diagonal * I. ``params.splitk > 1`` selects the split-K
+ * kernel, which reduces FP32 partial tiles from the ``inputAddr[3]`` workspace; otherwise
+ * the single-pass kernel hands each L0C tile to the paired AIVs.
  */
 __attribute__((weak)) void Ascend950SyrkPolynomial(
     const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const SyrkPolynomialParams& params);

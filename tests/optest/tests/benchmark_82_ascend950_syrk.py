@@ -77,7 +77,7 @@ def main():
     parser.add_argument("--k", type=int, default=4096)
     parser.add_argument("--dtype", choices=("fp16", "bf16"), default="bf16")
     parser.add_argument("--tile", type=int, default=256)
-    parser.add_argument("--splitk", type=int, choices=(0, 1), default=1)
+    parser.add_argument("--splitk", type=int, choices=(0, 1, 2, 4, 8, 16, 32), default=4)
     parser.add_argument("--alpha", type=float, default=2.0315)
     parser.add_argument("--beta", type=float, default=-4.7750)
     parser.add_argument("--diagonal", type=float, default=3.4445)
