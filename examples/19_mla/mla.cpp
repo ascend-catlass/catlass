@@ -191,8 +191,6 @@ static bool CheckOutput(const Options& options, const vector<ElementOutput>& act
             tolerance = {std::ldexp(1.0, -133), 0.0, true};
         }
         auto metrics = golden::CompareElementwise(actual, reference, tolerance);
-        cout << "elements=" << actual.size() << " mismatches=" << metrics.mismatchCount
-             << " max_abs=" << metrics.maxAbsoluteError << " rmse=" << metrics.rmse << endl;
         return metrics.passed;
     }
     vector<float> reference(actual.size());
@@ -426,7 +424,6 @@ static bool Run(const Options& options)
         throw std::runtime_error("Invalid MLA tiling parameters");
     }
     uint32_t tilingKey = MLATiling::GetMLATilingKey(numHeads, dTypeKey, (const uint32_t*)tilingHost);
-    std::cout << "tilingKey : " << tilingKey << std::endl;
 
     ACL_CHECK(aclrtMemcpy(tilingDevice, tilingSize, tilingHost, tilingSize, ACL_MEMCPY_HOST_TO_DEVICE));
 

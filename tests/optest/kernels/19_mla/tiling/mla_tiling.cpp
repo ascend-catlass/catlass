@@ -249,8 +249,6 @@ uint32_t GetKVSplitParam(const MLAInfo &mlaInfo, uint32_t &blockDim, uint32_t *t
     }
     tilingHost[TILING_PROCESSNUM] = cuTaskVal;
     tilingHost[TILING_KVCORENUM] = MAX_KV_SPLIT_NUM;
-    std::cout << "TILING_MAX_KVCORENUM = " << tilingHost[TILING_KVCORENUM] << std::endl;
-    std::cout << "TILING_PROCESSNUM = " << tilingHost[TILING_PROCESSNUM] << std::endl;
 
     // Set lOffsetInfo and OfdOffsetInfo
     AddrOffsets addrOffsets;
@@ -290,14 +288,10 @@ uint32_t GetKVSplitParamSpec(const MLAInfo &mlaInfo, uint32_t &blockDim, uint32_
 
     tilingHost[TILING_FORMERTASKNUM] = formerTaskNum;
     tilingHost[TILING_TAILTASKNUM] = tailTaskNum;
-    std::cout << "TILING_FORMERTASKNUM = " << tilingHost[TILING_FORMERTASKNUM] << std::endl;
-    std::cout << "TILING_TAILTASKNUM = " << tilingHost[TILING_TAILTASKNUM] << std::endl;
     if (tailTaskNum == 0) {
         tilingHost[TILING_KVCORENUM] = 1;
         tilingHost[TILING_KVSPLIT] = tilingHost[TILING_MAX_KVSEQLEN];
         tilingHost[TILING_PROCESSNUM] = 0;
-        std::cout << "TILING_KVSPLIT = " << tilingHost[TILING_KVSPLIT] << std::endl;
-        std::cout << "TILING_KVCORENUM = " << tilingHost[TILING_KVCORENUM] << std::endl;
         return blockDim;
     }
 
@@ -392,7 +386,6 @@ uint32_t GetKVSplitParamSpec(const MLAInfo &mlaInfo, uint32_t &blockDim, uint32_
     tilingHost[TILING_PROCESSNUM] = cuTaskVal;
     tilingHost[CUTASK_START_OFFSET + cuTaskIdx++] = TILING_HEAD_SIZE;
     tilingHost[TILING_KVCORENUM] = MAX_KV_SPLIT_NUM;
-    std::cout << "TILING_MAX_KVCORENUM = " << tilingHost[TILING_KVCORENUM] << std::endl;
 
     AddrOffsets addrOffsets{};
     prevTaskNum = 0;

@@ -34,7 +34,7 @@
 | `numBlocks` | Attr | - | `int` | 等于 `keyCache.size(0)`，且 `numBlocks ≥ batch * ceil(kvSeqlen / blockSize)` |
 | `blockTable` | Input | `(batch, ceil(kvSeqlen/blockSize))` | `int32` | 元素为 KV cache 物理块号，条数 `≥ batch * ceil(kvSeqlen / blockSize)` |
 | `actualSeqLengths` | Input | `(batch+1,)` | `int64` | Q 长度累积前缀和（cumsum），末项 = 总 token 数 = `query.size(0)` |
-| `actualSeqLengthsKv` | Input | `(batch,)` | `int64` | 逐 batch KV 长度 |
+| `actualSeqLengthsKV` | Input | `(batch,)` | `int64` | 逐 batch KV 长度 |
 | `output` | Output | `(batch*qSeqlen, numHeads, vHeadSize)` | `fp16/bf16` | layout 固定 `RowMajor` |
 
 ## 使用范围说明

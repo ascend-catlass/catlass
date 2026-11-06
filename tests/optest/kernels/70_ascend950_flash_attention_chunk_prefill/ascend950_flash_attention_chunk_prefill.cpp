@@ -847,7 +847,7 @@ void PFAmpl(const uint32_t blockNum, aclrtStream stream, const FlashAttentionChu
     uint64_t lseSize = (uint64_t)numTokens * (uint64_t)numHeads * sizeof(int32_t);
     uint64_t kSize = (uint64_t)numBlocks * (uint64_t)blockSize * (uint64_t)kvHeads * (uint64_t)qkHeadSize * sizeof(half);
     uint64_t vSize = (uint64_t)numBlocks * (uint64_t)blockSize * (uint64_t)kvHeads * (uint64_t)vHeadSize * sizeof(half);
-    uint64_t maskSize = 2048 * 2048 * sizeof(half);
+    uint64_t maskSize = 2048 * 2048 * sizeof(int8_t);
     uint64_t blockTableSize = static_cast<uint64_t>(
         batch * ((maxKvSeqlen + blockSize - 1) / blockSize) * sizeof(int32_t)
     );
@@ -927,10 +927,6 @@ void PFAmpl(const uint32_t blockNum, aclrtStream stream, const FlashAttentionChu
     faiContext.kvSeqlenList = reinterpret_cast<int64_t *>(kvSeqHost);
     faiContext.preToken = preToken;
     faiContext.nextToken = nextToken;
-    cout << "preToken " << preToken << endl;
-    cout << "nextToken " << nextToken << endl;
-    cout << "cacheLayout " << cacheLayout << endl;
-    cout << "maskType " << maskType << endl;
 
     // flashDecodeFlag determination
     int64_t maxQSeqlenCalc = 0;
@@ -960,8 +956,7 @@ void PFAmpl(const uint32_t blockNum, aclrtStream stream, const FlashAttentionChu
     bool isLongSeq = (numTasks <= 0.8 * aicCoreNum) && (minKVSeqlenCalc >= aicCoreNum * 512);
     bool isShortSeq = (numTasks <= 0.4 * aicCoreNum) && (minKVSeqlenCalc >= 1024);
     faiContext.flashDecodeFlag = false;
-    cout << "faiContext.flashDecodeFlag " << faiContext.flashDecodeFlag << endl;
-    
+
     FAInferTiling fai_tiling(faiContext);
     fai_tiling.SetCoreNum(aicCoreNum);
     fai_tiling.DoTiling(faiTilingData);
@@ -969,20 +964,11 @@ void PFAmpl(const uint32_t blockNum, aclrtStream stream, const FlashAttentionChu
 
     uint8_t *workspaceDevice{nullptr};
     faiTilingData.workSpaceSize = 1024 * 1024 * 32 * 4;
-    cout << "faiTilingData.workSpaceSize " << faiTilingData.workSpaceSize << endl;
-    ACL_CHECK(aclrtMalloc((void **)(&workspaceDevice), faiTilingData.workSpaceSize, ACL_MEM_MALLOC_HUGE_FIRST));
-    
+    ACL_CHECK(aclrtMalloc((void**)(&workspaceDevice), faiTilingData.workSpaceSize, ACL_MEM_MALLOC_HUGE_FIRST));
+
     uint8_t *oDevice = params.outputAddr.at(0);
     uint8_t *lseDevice{nullptr};
-    cout << "lseSize " << lseSize << endl;
-    ACL_CHECK(aclrtMalloc((void **)(&lseDevice), lseSize * 2, ACL_MEM_MALLOC_HUGE_FIRST));
-    uint8_t *tilingDevice;
-    cout << "tilingSize " << tilingSize << endl;
-    ACL_CHECK(aclrtMalloc((void **)(&tilingDevice), tilingSize, ACL_MEM_MALLOC_HUGE_FIRST));
-
-    // get tiling
-    void *tilingHost = nullptr;
-    ACL_CHECK(aclrtMallocHost(&tilingHost, tilingSize));
+    ACL_CHECK(aclrtMalloc((void**)(&lseDevice), lseSize * 2, ACL_MEM_MALLOC_HUGE_FIRST));
     uint32_t blockDim = aicCoreNum;
     if (faiContext.flashDecodeFlag) {
         auto needCoreNum = faiTilingData.get_needCoreNum();
@@ -992,8 +978,9 @@ void PFAmpl(const uint32_t blockNum, aclrtStream stream, const FlashAttentionChu
     }
 
     // tiling output
-    tilingHost = reinterpret_cast<void *>(&faiTilingData);
-    ACL_CHECK(aclrtMemcpy(tilingDevice, tilingSize, tilingHost, tilingSize, ACL_MEMCPY_HOST_TO_DEVICE));
+    uint8_t* tilingDevice;
+    ACL_CHECK(aclrtMalloc((void**)(&tilingDevice), tilingSize, ACL_MEM_MALLOC_HUGE_FIRST));
+    ACL_CHECK(aclrtMemcpy(tilingDevice, tilingSize, &faiTilingData, tilingSize, ACL_MEMCPY_HOST_TO_DEVICE));
 
     if (cacheLayout == "nd") {
         if (dataType == ACL_FLOAT16) {
@@ -1017,20 +1004,16 @@ void PFAmpl(const uint32_t blockNum, aclrtStream stream, const FlashAttentionChu
         }
     }
     ACL_CHECK(aclrtSynchronizeStream(stream));
-    // // Free host memory allocations.
-    // FreeMem(qSeqHost, qSeqDevice);
-    // FreeMem(kvSeqHost, kvSeqDevice);
-    // FreeMem(qHost, qDevice);
-    // FreeMem(kHost, kDevice);
-    // FreeMem(vHost, vDevice);
-    // FreeMem(maskHost, maskDevice);
-    // FreeMem(blockTableHost, blockTableDevice);
-    // aclrtFree(oDevice);
-    // aclrtFree(tilingDevice);
-    // aclrtFree(workspaceDevice);
-    // aclrtFreeHost(tilingHost);
-    // aclrtFreeHost(qNtokens);
-
+    aclrtFree(tilingDevice);
+    aclrtFree(lseDevice);
+    aclrtFree(workspaceDevice);
+    aclrtFreeHost(qSeqHost);
+    aclrtFreeHost(kvSeqHost);
+    aclrtFreeHost(qHost);
+    aclrtFreeHost(kHost);
+    aclrtFreeHost(vHost);
+    aclrtFreeHost(maskHost);
+    aclrtFreeHost(blockTableHost);
     // // Destroy specified Stream and reset device.
     // ACL_CHECK(aclrtDestroyStream(stream));
     // ACL_CHECK(aclFinalize());

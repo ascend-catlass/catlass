@@ -201,10 +201,8 @@ namespace optiling{
         tilingKey += static_cast<uint64_t>(COMP_CAUSAL_MASK_KEY);
         tilingKey += static_cast<uint64_t>(LAYOUTQ_TND_KEY);
         if (faInfo_.dataType == DataType::FP16) {
-            std::cout << "faInfo_.dataType:" << "fp16" << std::endl;
             tilingKey += static_cast<uint64_t>(DTYPE_FP16_KEY);
         } else if (faInfo_.dataType == DataType::BF16) {
-            std::cout << "faInfo_.dataType:" << "bf16" << std::endl;
             tilingKey += static_cast<uint64_t>(DTYPE_BF16_KEY);
         }
         if (faInfo_.innerPrecise == 1) {

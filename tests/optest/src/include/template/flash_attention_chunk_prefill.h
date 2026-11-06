@@ -20,7 +20,7 @@
 
 #include "catlass_kernel_prebuilt.h"
 #include "common/run_npu_func.h"
-#include "torch_utils.h"
+#include "../../../utils/include/torch_utils.h"
 
 namespace CatlassKernelWrapper {
 
@@ -61,8 +61,8 @@ struct Ascend950FlashAttentionChunkPrefillHost {
         int64_t vembeddingSize = value.size(3);
         int64_t batch = actual_seq_lengths.numel() - 1;
 
-        int64_t qSeqlen = actual_seq_lengths.max().item<int64_t>();
-        int64_t kvSeqlen = actual_seq_lengths_kv.max().item<int64_t>();
+        int64_t qSeqlen = actual_seq_lengths.cpu().max().item<int64_t>();
+        int64_t kvSeqlen = actual_seq_lengths_kv.cpu().max().item<int64_t>();
 
         uint32_t maskType = 0;
         if (sparse_mode == 0) {
@@ -106,6 +106,18 @@ struct Ascend950FlashAttentionChunkPrefillHost {
         params.outputAddr[0] = static_cast<uint8_t*>(const_cast<void*>(output.storage().data()));
         return output;
     }
+
+    static at::Tensor ToNzStorage(const at::Tensor& t)
+    {
+        int64_t n = t.size(0);
+        int64_t c = t.size(1);
+        int64_t s = t.size(2);
+        int64_t h = t.size(3);
+        at::Tensor nz = t.reshape({n, c, s, h / 16, 16}).permute({0, 1, 3, 2, 4}).contiguous().view(-1);
+        at::Tensor out = at::empty_like(t);
+        out.view(-1).copy_(nz);
+        return out;
+    }
 };
 
 struct Ascend950FlashAttentionChunkPrefillOp : Ascend950FlashAttentionChunkPrefillHost {
@@ -126,10 +138,15 @@ struct Ascend950FlashAttentionChunkPrefillOp : Ascend950FlashAttentionChunkPrefi
         int64_t sparse_mode)
     {
         CatlassKernel::FlashAttentionChunkPrefillParams params;
+        at::Tensor keyIn = key;
+        at::Tensor valueIn = value;
+        if (cache_layout == "nz") {
+            keyIn = ToNzStorage(key);
+            valueIn = ToNzStorage(value);
+        }
         GetKernelInfo(
-            query, key, value, actual_seq_lengths, actual_seq_lengths_kv,
-            atten_mask, block_table, input_layout, num_heads,
-            num_key_value_heads, block_size, num_blocks, cache_layout, sparse_mode, params);
+            query, keyIn, valueIn, actual_seq_lengths, actual_seq_lengths_kv, atten_mask, block_table, input_layout,
+            num_heads, num_key_value_heads, block_size, num_blocks, cache_layout, sparse_mode, params);
         OutputType output = AllocOutput(params);
         aclrtStream stream = c10_npu::getCurrentNPUStream().stream(false);
         uint32_t aicCoreNum = platform_ascendc::PlatformAscendCManager::GetInstance()->GetCoreNumAic();
