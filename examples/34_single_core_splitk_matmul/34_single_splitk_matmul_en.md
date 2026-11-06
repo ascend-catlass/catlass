@@ -77,7 +77,7 @@ _Assemble the Kernel and instantiate the object to complete operator computation
 - [Assemble the kernel](../34_single_core_splitk_matmul/single_core_splitk.cpp#L143) using the preceding template.
 - [Pass the kernel to the adapter](../34_single_core_splitk_matmul/single_core_splitk.cpp#L160) and [instantiate it](../34_single_core_splitk_matmul/single_core_splitk.cpp#L148).
 - Construct the [input arguments](../34_single_core_splitk_matmul/single_core_splitk.cpp#L163).
-- [Pass arguments](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L150) to the kernel side.
+- [Pass arguments](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L202) to the kernel side.
 - Call the kernel layer to [calculate workspace requirements](../34_single_core_splitk_matmul/single_core_splitk.cpp#L166).
 - [Allocate workspace on the device side](../34_single_core_splitk_matmul/single_core_splitk.cpp#L166) (if necessary).
 - [Initialize the operator with the adapter](../34_single_core_splitk_matmul/single_core_splitk.cpp#L166).
@@ -105,12 +105,12 @@ This section describes the structures and key functions at the kernel level, the
 
 The following structures and key functions are implemented in the [kernel layer](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp):
 
-- [struct Params](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L84): parameters required for operator execution at runtime
-- [struct Arguments](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L116): encapsulates the parameters passed from the host side.
-- [static size_t GetWorkspaceSize](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L128): pre-calculates the space required for alignment.
-- [static Params ToUnderlyingArguments](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L150): parses the input parameters on the host side into the `Params` structure on the operator side.
-- [void operator()`<AscendC::AIV>`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L204): execution code for the AIV (Vector) part.
-- [void operator()`<AscendC::AIC>`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L253): execution code for the AIC (Cube) part.
+- [struct Params](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L86): parameters required for operator execution at runtime
+- [struct Arguments](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L126): encapsulates the parameters passed from the host side.
+- [static size_t GetWorkspaceSize](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L138): pre-calculates the space required for alignment.
+- [static Params ToUnderlyingArguments](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L163): parses the input parameters on the host side into the `Params` structure on the operator side.
+- [void operator()`<AscendC::AIV>`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L205): execution code for the AIV (Vector) part.
+- [void operator()`<AscendC::AIC>`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L255): execution code for the AIC (Cube) part.
 
 ## AIV/AIC Computation Process
 
@@ -121,14 +121,14 @@ The following describes the specific execution steps performed by the AIV and AI
 
 - If alignment for Matrix A or B is enabled:
   - [Initialize GlobalTensor](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L208): `gmA`, `gmWA` (or `gmB`, `gmWB`)
-  - [Instantiate the PaddingA](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#212) object to allocate Unified Buffer (UB) resources so that data can be managed before and after alignment.
-  - Invoke the execution `operator()` of the PaddingA object to [run the data alignment](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#213) operation.
-  - Perform [inter-core synchronization](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#228) and set the flag bit (`CrossCoreSetFlag`) to notify the AIC that alignment is complete.
+  - [Instantiate the PaddingA](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L213) object to allocate Unified Buffer (UB) resources so that data can be managed before and after alignment.
+  - Invoke the execution `operator()` of the PaddingA object to [run the data alignment](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L214) operation.
+  - Perform [inter-core synchronization](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L229) and set the flag bit (`CrossCoreSetFlag`) to notify the AIC that alignment is complete.
 
 - Result matrix write-out pipeline:
-  - [Wait for the AIC](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#233) to complete computation (`CrossCoreWaitFlag`).
-  - [Initialize GlobalTensor](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#234) destinations: `gmC` (target destination address) and `gmWC` (temporary workspace accumulation address).
-  - Copy data to the target address while performing [data casting and layout precision mapping](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#240) (`RemovePaddingNDAndCastC`).
+  - [Wait for the AIC](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L233) to complete computation (`CrossCoreWaitFlag`).
+  - [Initialize GlobalTensor](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L235) destinations: `gmC` (target destination address) and `gmWC` (temporary workspace accumulation address).
+  - Copy data to the target address while performing [data casting and layout precision mapping](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp) (`RemovePaddingNDAndCastC`).
 
 </details>
 
@@ -136,17 +136,17 @@ The following describes the specific execution steps performed by the AIV and AI
 <summary><strong>Operation Performed by AIC</strong></summary>
 
 - If the left or right matrix requires alignment:
-  - Perform inter-core synchronization and [wait for the AIV completion flag](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#255) (`CrossCoreWaitFlag`).
-  - [Initialize GlobalTensor](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#270): `gmWA`, `gmWB`.
+  - Perform inter-core synchronization and [wait for the AIV completion flag](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L258) (`CrossCoreWaitFlag`).
+  - [Initialize GlobalTensor](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp): `gmWA`, `gmWB`.
 
-- [Initialize `GlobalTensor`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L270): `gmA`, `gmB`, `gmC`
-- Initialize the [`BlockScheduler`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#260) and [`BlockMmad`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#300) objects.
+- [Initialize `GlobalTensor`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp): `gmA`, `gmB`, `gmC`
+- Initialize the [`BlockScheduler`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L261) and [`BlockMmad`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L302) objects.
 - Fetch the current AIC identifier `coreIdx`, total AIC count `coreNum` (resolved within the [swizzle policy](../../include/catlass/gemm/block/block_swizzle.hpp)), and the required `coreLoops`.
 - Enter the main loop (loop times `coreLoops`).
-  - Calculate the current matrix read offsets [`gmOffsetA`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#333) and [`gmOffsetB`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#334), alongside the next data block offsets [`gmOffsetNextA`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#341) and [`gmOffsetNextB`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#342) (if double-buffering is enabled).
+  - Calculate the current matrix read offsets [`gmOffsetA`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L333) and [`gmOffsetB`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L334), alongside the next data block offsets [`gmOffsetNextA`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L339) and [`gmOffsetNextB`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L340) (if double-buffering is enabled).
   > Note: Under the current optimized algorithm, the left matrix is overloaded, meaning `gmOffsetNextA` is not actively enabled.
-  - Calculate [`needLoadNextA`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#325) and [`needLoadNextB`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#326) to identify whether to preload.
-  - Invoke `blockMmad` to execute an [AIC computation block](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#345), resolving the corresponding fractal matrix operations on L1A and L1B caches.
+  - Calculate [`needLoadNextA`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L325) and [`needLoadNextB`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L326) to identify whether to preload.
+  - Invoke `blockMmad` to execute an [AIC computation block](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L343), resolving the corresponding fractal matrix operations on L1A and L1B caches.
   > Note: `blockMmad` dynamically evaluates the K-axis tiling state to decide whether to enable atomic additions on GM.
   - Set the synchronization flag bit to notify the AIV that computation is complete.
   - Disable atomic addition states.

@@ -77,7 +77,7 @@ _组装Kernel并实例化该对象，完成算子计算_
 - 使用前述模板[组装Kernel](../34_single_core_splitk_matmul/single_core_splitk.cpp#L143)
 - 将[Kernel传入适配器](../34_single_core_splitk_matmul/single_core_splitk.cpp#L160)并[实例化](../34_single_core_splitk_matmul/single_core_splitk.cpp#L148)
 - 构造[入参参数](../34_single_core_splitk_matmul/single_core_splitk.cpp#L163)
-- 向Kernel侧[传入参数](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L150)
+- 向Kernel侧[传入参数](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L202)
 - 调用Kernel层[Workspace计算](../34_single_core_splitk_matmul/single_core_splitk.cpp#L166)
 - 在Device侧[申请Workspace](../34_single_core_splitk_matmul/single_core_splitk.cpp#L166)(如有必要)
 - [适配器初始化算子](../34_single_core_splitk_matmul/single_core_splitk.cpp#L166)
@@ -105,12 +105,12 @@ _完成最后结果的验证与回收处理_
 
 以下是在[Kernel层](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp)所实现的结构体与关键函数
 
-- [`struct Params`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L84)：运行时算子执行所需的参数
-- [`struct Arguments`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L116)：封装Host侧传入的参数
-- [`static size_t GetWorkspaceSize`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L128)：预先计算对齐所需的空间
-- [`static Params ToUnderlyingArguments`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L150)：将Host侧入参解析为算子侧的`Params`结构体
-- [`void operator()<AscendC::AIV>`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L204)：AIV(Vector)部分执行代码
-- [`void operator()<AscendC::AIC>`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L253): AIC(Cube)部分执行代码
+- [`struct Params`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L86)：运行时算子执行所需的参数
+- [`struct Arguments`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L126)：封装Host侧传入的参数
+- [`static size_t GetWorkspaceSize`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L138)：预先计算对齐所需的空间
+- [`static Params ToUnderlyingArguments`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L163)：将Host侧入参解析为算子侧的`Params`结构体
+- [`void operator()<AscendC::AIV>`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L205)：AIV(Vector)部分执行代码
+- [`void operator()<AscendC::AIC>`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L255): AIC(Cube)部分执行代码
 
 ## AIV/AIC部分计算流程
 
@@ -121,14 +121,14 @@ _完成最后结果的验证与回收处理_
 
 - 如果A或B的对齐处理启用：
   - [初始化GlobalTensor](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L208)：gmA， gmWA(或gmB, gmWB)
-  - [实例化PaddingA](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#212)对象，完成资源申请，以便在UB(Unified Buffer)上存储对齐前后的数据
-  - 调用PaddingA对象的`operator()`方法，即[执行数据对齐](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#213)操作
-  - 进行[核间同步](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#228)，设置标志位通知AIC对齐操作已完成(`CrossCoreSetFlag`)
+  - [实例化PaddingA](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L213)对象，完成资源申请，以便在UB(Unified Buffer)上存储对齐前后的数据
+  - 调用PaddingA对象的`operator()`方法，即[执行数据对齐](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L214)操作
+  - 进行[核间同步](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L229)，设置标志位通知AIC对齐操作已完成(`CrossCoreSetFlag`)
 
 - 结果矩阵搬出：
-  - [等待AIC](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#233)完成计算(`CrossCoreWaitFlag`)
-  - [初始化GlobalTensor](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#234)：`gmC`(目的地址), `gmWC`(临时累加地址)
-  - 将数据搬出到目的地址，进行[升精度映射](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#240)(`RemovePaddingNDAndCastC`)
+  - [等待AIC](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L233)完成计算(`CrossCoreWaitFlag`)
+  - [初始化GlobalTensor](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L235)：`gmC`(目的地址), `gmWC`(临时累加地址)
+  - 将数据搬出到目的地址，进行[升精度映射](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp)(`RemovePaddingNDAndCastC`)
 
 </details>
 
@@ -136,17 +136,17 @@ _完成最后结果的验证与回收处理_
 <summary><strong>AIC上所执行的操作</strong></summary>
 
 - 如果对左/右矩阵有对齐处理：
-  - 核间同步，[等待AIV完成标志位](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#255)(`CrossCoreWaitFlag`)
-  - [初始化`GlobalTensor`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#270)：`gmWA`, `gmWB`
+  - 核间同步，[等待AIV完成标志位](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L258)(`CrossCoreWaitFlag`)
+  - [初始化`GlobalTensor`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp)：`gmWA`, `gmWB`
 
-- [初始化`GlobalTensor`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#270): `gmA`, `gmB`, `gmC`
-- 初始化[`BlockScheduler`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#260)和[`BlockMmad`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#300)对象
-- 获取当前AIC序号`coreIdx`、AIC总数`coreNum`（在[`Swizzle`策略](../../include/catlass/gemm/block/block_swizzle.hpp)内）以及所需的[`coreLoops`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#262)
+- [初始化`GlobalTensor`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp): `gmA`, `gmB`, `gmC`
+- 初始化[`BlockScheduler`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L261)和[`BlockMmad`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L302)对象
+- 获取当前AIC序号`coreIdx`、AIC总数`coreNum`（在[`Swizzle`策略](../../include/catlass/gemm/block/block_swizzle.hpp)内）以及所需的[`coreLoops`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L263)
 - 进入主循环（循环次`coreLoops`）
-  - 计算当前A，B矩阵读入的偏移量[`gmOffsetA`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#333), [`gmOffsetB`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#334)以及下一块的偏移量[`gmOffsetNextA`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#341), [`gmOffsetNextB`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#342)(如果开DoubleBuffer)
+  - 计算当前A，B矩阵读入的偏移量[`gmOffsetA`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L333), [`gmOffsetB`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L334)以及下一块的偏移量[`gmOffsetNextA`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L339), [`gmOffsetNextB`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L340)(如果开DoubleBuffer)
   > 注意：优化算法下左矩阵重载，因此`gmOffsetNextA`实际不会“启用”
-  - 计算[`needLoadNextA`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#325)、[`needLoadNextB`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#326)，用以标识是否预加载
-  - 调用`blockMmad`进行一次[AIC计算](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#345)（完成L1A与L1B上相对应的分形矩阵计算）
+  - 计算[`needLoadNextA`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L325)、[`needLoadNextB`](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L326)，用以标识是否预加载
+  - 调用`blockMmad`进行一次[AIC计算](../../include/catlass/gemm/kernel/single_core_slicek_matmul.hpp#L343)（完成L1A与L1B上相对应的分形矩阵计算）
   > 注意：`blockMmad`会依据K轴方向上切K情况，决定是否启用GM上的原子加
   - 设置标志位，通知AIV 计算已完成
   - 关闭原子加
