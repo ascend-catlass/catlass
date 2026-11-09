@@ -310,7 +310,7 @@ class CopyL0C2DstParams(CopyParams):
         if not isinstance(self.unit_flag, int):
             raise TlaLoweringError(f"{cls_name}.unit_flag must be a compile-time int")
         if self.unit_flag not in VALID_UNIT_FLAG:
-            raise ValueError(f"{cls_name}.unig_flag must be one of {VALID_UNIT_FLAG}")
+            raise ValueError(f"{cls_name}.unit_flag must be one of {VALID_UNIT_FLAG}")
         if not isinstance(self.relu_enable, bool):
             raise TlaLoweringError(
                 f"{cls_name}.relu_enable must be a compile-time bool"
