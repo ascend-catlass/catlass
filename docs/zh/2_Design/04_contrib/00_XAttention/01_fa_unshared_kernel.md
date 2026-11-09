@@ -176,7 +176,7 @@ class BlockEpilogue<EpilogueAscend950FAUnsharedSoftmax, OutputType_, InputType_,
 
 ## 使用示例
 
-摘自 xllm-ops（https://gitcode.com/xLLM-AI/xllm_ops）`x_attention/op_kernel/x_attention_catlass_helper.h` 的 `CallUnsharedInferKernel`（真实工程用法）：
+摘自 [xllm-ops](https://gitcode.com/xLLM-AI/xllm_ops)`x_attention/op_kernel/x_attention_catlass_helper.h` 的 `CallUnsharedInferKernel`（真实工程用法）：
 
 ```cpp
 using QKL1TileShape = GemmShape<128, 256, 128>;

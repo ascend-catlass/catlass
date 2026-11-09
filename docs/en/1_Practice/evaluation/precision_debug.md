@@ -128,7 +128,7 @@ CATLASS adopts a template-based layered design. A complete sample consists of fo
 
 Using `44_quant_matmul_full_loadA_tla` as an example, its complete component hierarchy is as follows:
 
-```
+```text
 Device layer: DeviceGemm<MatmulKernel>
     ↓ Assembles
 Kernel layer: QuantMatmulFullLoadATla<BlockMmad, BlockEpilogue, BlockScheduler, workspaceStages>
@@ -205,7 +205,7 @@ After locating the specific block, further perform binary search on its internal
 
 **If the issue is in BlockMmad:**
 
-```
+```text
 BlockMmad
     ├── TileCopy (data movement tile)
     │   └── Replace it with simple DataCopy to validate data movement logic.
@@ -221,7 +221,7 @@ BlockMmad
 
 **If the issue is in BlockEpilogue** (using the quantization epilogue in sample 44 as an example):
 
-```
+```text
 BlockEpilogue
     ├── TileRowBroadcastMulTla → Replace it with element-wise Mul to validate the broadcast logic.
     │   - Check whether the broadcast dimension is correct (broadcasting scale along row direction).
@@ -262,7 +262,7 @@ For dynamic samples such as `102_dynamic_optimized_matmul`, the module breakdown
 
 ### Binary Search Process
 
-```
+```text
 Precision comparison fails
     │
     ├─ Use a simple test case (M=N=K=16) to validate the golden function → If the function is incorrect, fix the function.
@@ -293,7 +293,7 @@ The following diagnostic patterns cover the most common precision issues in CATL
 
 **Troubleshooting**
 
-```
+```text
 Pass for FP32 but fail for FP16/BF16
     │
     ├─ Check the accumulator precision.
@@ -325,7 +325,7 @@ Pass for FP32 but fail for FP16/BF16
 
 **Troubleshooting**
 
-```
+```text
 Failure for specific shapes/parameters
     │
     ├─ Failure for small shapes (M, N, K < the corresponding dimension of TileShape)
@@ -480,7 +480,7 @@ When quick methods cannot locate the issue, use modular binary search. This is t
 
 **Binary Search Hierarchy (from Coarse to Fine):**
 
-```
+```text
 Level 1: [For samples with tiling] Tiling vs. kernel implementation
     └─ Replace with known correct tiling parameters to determine which side the issue lies on.
     └─ Note: The kernel layer itself may have issues in aspects such as pipeline synchronization and assembly logic. The tiling layer does not necessarily cause the issue.
@@ -527,7 +527,7 @@ When binary search cannot locate the issue, use the comparison method as a fallb
 
 ### Strategy Selection Decision-Making Tree
 
-```
+```text
 Precision comparison fails
     │
     ├─ Can quick methods locate the issue?

@@ -103,7 +103,7 @@ void SubCoreCompute(...) {
 
 三角 mask 偏移计算（causal 语义）：
 
-```
+```test
 if (triUp >= kvSStartIdx) {
     maskStart = RoundDown(triUp - kvSStartIdx, BLOCK);  // 三角起点折算到本 stackTile 内偏移
 } else {
@@ -143,7 +143,7 @@ public:
 
 对每个 stackTile 周期：
 
-```
+```test
 非首 tile:
     WaitFlag(V_MTE3, EVENT_ID3) → DataCopy lo(旧O) → SetFlag(MTE2_V, EVENT_ID0)
     Brcb dm 广播到 tv
@@ -200,7 +200,7 @@ public:
 
 ### 合并算法（五步）
 
-```
+```test
 ① BlockReduceMax(8→1) 压缩 sharedGm/Gl（shared 路每行按 SOFTMAX_BROAD_SIZE=8 重复存放）
 ② realGm = max(sharedGm, unsharedGm)
 ③ α = exp(sharedGm - realGm);  β = exp(unsharedGm - realGm)
@@ -216,7 +216,7 @@ public:
 
 ## 使用示例
 
-以下摘自 xllm-ops（https://gitcode.com/xLLM-AI/xllm_ops）真实工程 `x_flash_attention_infer/op_kernel/x_flash_attention_infer_fd.h`。
+以下摘自[xllm-ops](https://gitcode.com/xLLM-AI/xllm_ops) 真实工程 `x_flash_attention_infer/op_kernel/x_flash_attention_infer_fd.h`。
 
 ### 类型组装（FDInfer 入口）
 

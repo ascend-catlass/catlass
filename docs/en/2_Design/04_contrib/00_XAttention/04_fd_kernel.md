@@ -103,7 +103,7 @@ Two call entries are provided:
 
 Triangular mask offset computation (causal semantics):
 
-```
+```test
 if (triUp >= kvSStartIdx) {
     maskStart = RoundDown(triUp - kvSStartIdx, BLOCK);  // convert the triangle start into an offset within this stackTile
 } else {
@@ -143,7 +143,7 @@ It has two more type parameters than OnlineSoftmax: `UpdateType_` (precision of 
 
 For each stackTile cycle:
 
-```
+```test
 non-first tile:
     WaitFlag(V_MTE3, EVENT_ID3) → DataCopy lo(old O) → SetFlag(MTE2_V, EVENT_ID0)
     Brcb dm broadcast to tv
@@ -200,7 +200,7 @@ Only two type parameters (no mask / lse template parameters), it is a purely gen
 
 ### Merge Algorithm (Five Steps)
 
-```
+```test
 1. BlockReduceMax(8→1) compresses sharedGm/Gl (each row of the shared path is stored repeated by SOFTMAX_BROAD_SIZE=8)
 2. realGm = max(sharedGm, unsharedGm)
 3. α = exp(sharedGm - realGm);  β = exp(unsharedGm - realGm)
@@ -216,7 +216,7 @@ The main loop uses `rowLoopNum + preLoad=1` double buffering (pingpongFlag toggl
 
 ## Usage Example
 
-The following is excerpted from the real xllm-ops (https://gitcode.com/xLLM-AI/xllm_ops) engineering file `x_flash_attention_infer/op_kernel/x_flash_attention_infer_fd.h`.
+The following is excerpted from the real [xllm-ops](https://gitcode.com/xLLM-AI/xllm_ops) engineering file `x_flash_attention_infer/op_kernel/x_flash_attention_infer_fd.h`.
 
 ### Type Assembly (FDInfer Entry)
 

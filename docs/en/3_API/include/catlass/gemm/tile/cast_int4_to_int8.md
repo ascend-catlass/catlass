@@ -45,6 +45,7 @@ TileCastInt4ToInt8(Arch::Resource<ArchTag> const &resource, Params const &params
 ```
 
 Allocate double buffering from the Resource Unified Buffer.
+
 - `ubInTensor[2]`*`COMPUTE_LEN / 2` bytes (INT4 compact storage input)
 - `ubOutTensor[2]`*`COMPUTE_LEN` bytes (INT8 output)
 - `ubWorkspace[2]`*`COMPUTE_LEN * sizeof(half)` bytes (half workspace for intermediate conversion)

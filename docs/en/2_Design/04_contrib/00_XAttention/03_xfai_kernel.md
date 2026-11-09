@@ -168,7 +168,7 @@ Three reduction specializations are dispatched according to the column width of 
 
 ### Online Softmax Core Flow
 
-```
+```text
 CopySGmToUb                // S from GM into UB
 ScaleS                     // S *= scaleValue
 [ApplyMask]                // optional: add mask32 * (-3e38) to S to implement masking
@@ -221,7 +221,7 @@ Constructor: `BlockEpilogue(resource)`.
 
 ### Core Algorithm: Fusing New and Old O
 
-```
+```text
 lo  = gInput[current block]          // read the previous round of O (or read OTmp directly on the first round)
 go  = gUpdate * dm_block + lo        // dm is row-broadcast via Brcb; that is, O_new = exp(gm_old-gm_new)*O_old + PV_cur
 if (!isLastStackTile):
@@ -266,7 +266,7 @@ Task traversal: `for (process = subBlockID; process < kvSplitCoreNum * 2; proces
 
 For each q row, merge the splitNum local LSE values (denoted `ll[n]`) into a global value:
 
-```
+```text
 lm = ReduceMax(ll)                  // the maximum of the local maxima of all splits
 tl = exp(ll - lm)                   // shift to prevent overflow
 rs = Ln(ReduceSum(tl))              // the core step of log-sum-exp
@@ -276,7 +276,7 @@ gl = exp(ll - ts)                   // final scaling coefficient of each split
 
 ### O Merge
 
-```
+```text
 O_final = Σ_n O_n * gl[n]           // BroadCast + Mul + Add loop, loFloat pingpong accumulation
 ```
 
@@ -312,7 +312,7 @@ Selection points when competing with [FAI SplitRow](./02_fai_split_row_kernel.md
 
 ## Usage Example (Excerpted from Real xllm-ops Engineering)
 
-The following code is excerpted from `x_flash_attention_infer/op_kernel/x_flash_attention_infer.h` of xllm_ops (https://gitcode.com/xLLM-AI/xllm_ops) and demonstrates the complete assembly and invocation of the five templates.
+The following code is excerpted from `x_flash_attention_infer/op_kernel/x_flash_attention_infer.h` of [xllm-ops](https://gitcode.com/xLLM-AI/xllm_ops) and demonstrates the complete assembly and invocation of the five templates.
 
 ### Type Assembly (FAInfer Entry)
 

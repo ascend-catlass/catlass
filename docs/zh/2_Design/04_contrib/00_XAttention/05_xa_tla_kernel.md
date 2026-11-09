@@ -303,7 +303,7 @@ CombineScaleKernel<EpilogueCombineScale>;
 
 ## 使用示例
 
-以下摘自 xllm-ops（https://gitcode.com/xLLM-AI/xllm_ops）`x_attention/op_kernel/x_attention_catlass_helper.h`（124 行），展示三个 kernel 的组装入口。
+以下摘自 [xllm-ops](https://gitcode.com/xLLM-AI/xllm_ops)`x_attention/op_kernel/x_attention_catlass_helper.h`（124 行），展示三个 kernel 的组装入口。
 
 ### Shared 路入口：CallSharedInferKernel
 

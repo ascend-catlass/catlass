@@ -12,7 +12,7 @@ The series contains the following templates:
 
 The cooperation among the three:
 
-```
+```text
 Q @ K^T ──► (S) ──► FAUnsharedSoftmax ──► P(f16/bf16), gm(rowMax), gl(rowSum)
    UnsharedFAQK                      │
                                      └─(cross-core notify softmaxReady)─► P @ V ──► OTmp(f32) ──► external combine: O = OTmp / gl
@@ -147,7 +147,7 @@ Because the start of the effective interval of each head shifts with `round * ma
 
 ### Algorithm Flow (SubCoreCompute)
 
-```
+```text
 S = DataCopy(GM)                          // MTE2, EVENT_ID3
 S = S * tor                               // Muls scale
 S = S + unsharedMask                      // additive mask (out-of-range positions become -inf)
@@ -176,7 +176,7 @@ class BlockEpilogue<EpilogueAscend950FAUnsharedSoftmax, OutputType_, InputType_,
 
 ## Usage Example
 
-Excerpted from `CallUnsharedInferKernel` in `x_attention/op_kernel/x_attention_catlass_helper.h` of xllm-ops (https://gitcode.com/xLLM-AI/xllm_ops) (real engineering usage):
+Excerpted from `CallUnsharedInferKernel` in `x_attention/op_kernel/x_attention_catlass_helper.h` of [xllm-ops](https://gitcode.com/xLLM-AI/xllm_ops) (real engineering usage):
 
 ```cpp
 using QKL1TileShape = GemmShape<128, 256, 128>;

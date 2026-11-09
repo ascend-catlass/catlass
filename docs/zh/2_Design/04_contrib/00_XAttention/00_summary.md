@@ -55,4 +55,4 @@
 - **04 FD**：XFAI 的深度性能演化版，dm 按周期分区等优化，`CombineScale` 通用化为 `EpilogueAtlasA2CombineScale`；
 - **05 XA TLA**：面向 Atlas A5（Ascend 950）的 TLA 指令实现，shared/unshared 两种 expert 形态各配 QK/PV/Softmax 模板。
 
-各系列的 DispatchPolicy 定义、算法设计（数据布局/流水组织/跨核同步）、系列间差异对比与基于 xllm-ops（https://gitcode.com/xLLM-AI/xllm_ops，`x_attention` / `x_flash_attention_infer`）的真实工程使用示例，详见对应设计文档。
+各系列的 DispatchPolicy 定义、算法设计（数据布局/流水组织/跨核同步）、系列间差异对比与基于 [xllm-ops](https://gitcode.com/xLLM-AI/xllm_ops)（`x_attention` / `x_flash_attention_infer`）的真实工程使用示例，详见对应设计文档。

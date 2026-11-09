@@ -55,4 +55,4 @@ This directory (04_contrib/00_XAttention) collects the design documents for **23
 - **04 FD**: a deeply performance-evolved version of XFAI, with optimizations such as partitioning dm by cycle, and `CombineScale` generalized to `EpilogueAtlasA2CombineScale`;
 - **05 XA TLA**: a TLA instruction implementation for Atlas A5 (Ascend 950), with QK/PV/Softmax templates for the shared and unshared expert forms.
 
-For the DispatchPolicy definitions of each series, the algorithm design (data layout / pipeline organization / cross-core synchronization), the differences between series, and real engineering usage examples based on xllm-ops (https://gitcode.com/xLLM-AI/xllm_ops, `x_attention` / `x_flash_attention_infer`), see the corresponding design documents.
+For the DispatchPolicy definitions of each series, the algorithm design (data layout / pipeline organization / cross-core synchronization), the differences between series, and real engineering usage examples based on [xllm-ops](https://gitcode.com/xLLM-AI/xllm_ops) (`x_attention` / `x_flash_attention_infer`), see the corresponding design documents.

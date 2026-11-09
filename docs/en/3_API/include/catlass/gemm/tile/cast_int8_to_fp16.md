@@ -44,6 +44,7 @@ TileCastInt8ToFp16Dequant(Arch::Resource<ArchTag> const &resource, Params const 
 ```
 
 Allocate double buffering from the Resource Unified Buffer.
+
 - `ubInTensor[2]`*`COMPUTE_LEN` bytes (INT8 input)
 - `ubOutTensor[2]`*`COMPUTE_LEN * sizeof(half)` bytes (FP16 output)
 

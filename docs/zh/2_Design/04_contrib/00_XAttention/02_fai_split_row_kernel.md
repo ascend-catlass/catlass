@@ -246,7 +246,7 @@ if (isLastStackTile):
 
 ### 真实工程组装（xllm_ops x_attention）
 
-摘自 xllm_ops（https://gitcode.com/xLLM-AI/xllm_ops）`x_attention/op_kernel/x_attention_catlass_helper.h` 的 `CallSharedInferKernelShort`：
+摘自 [xllm-ops](https://gitcode.com/xLLM-AI/xllm_ops)`x_attention/op_kernel/x_attention_catlass_helper.h` 的 `CallSharedInferKernelShort`：
 
 ```cpp
 using INPUT_T = ...;                 // Q/K/V/P/O 与 mask 的元素类型（如 fp16）

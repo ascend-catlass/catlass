@@ -312,7 +312,7 @@ O_final = Σ_n O_n * gl[n]           // BroadCast + Mul + Add 循环，loFloat �
 
 ## 使用示例（摘自 xllm-ops 真实工程）
 
-以下代码摘自 xllm_ops（https://gitcode.com/xLLM-AI/xllm_ops）`x_flash_attention_infer/op_kernel/x_flash_attention_infer.h`，演示五个模板的完整组装与调用。
+以下代码摘自 [xllm-ops](https://gitcode.com/xLLM-AI/xllm_ops)`x_flash_attention_infer/op_kernel/x_flash_attention_infer.h`，演示五个模板的完整组装与调用。
 
 ### 类型组装（FAInfer 入口）
 

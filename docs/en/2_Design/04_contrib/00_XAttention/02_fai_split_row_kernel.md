@@ -84,7 +84,7 @@ Q is transferred once through `loadQGM()`, using the extended signature `copyGmT
 
 The three-level loop structure of `operator()`:
 
-```
+```text
 nL1Loop  split stackSeqTile by L1TileShape::N (last round getBlockShape takes the remainder)
  └─ mL0Loop  split row blocks by L0TileShape::M
      └─ kL0Loop  split the K dimension by L0TileShape::K
@@ -118,7 +118,7 @@ static_assert: `M * K <= 32768` (the L1A double-buffer capacity limit).
 
 ### Execution Timing (Core Design)
 
-```
+```text
 1. kLoop = CeilDiv(stackSeqTile, blockSize)
    └─ loop moves all of V into L1B by block page (look up blockTable when paged), event EVENT_ID2
 2. Arch::CrossCoreWaitFlag(softmaxFlag)
@@ -166,7 +166,7 @@ The adjacent row sum / row maximum use a pingpong layout (`ROW_SUM_PINGPONG_OFFS
 
 For each stackTile, the global `gm` (max) and `gl` (sum) are maintained per row:
 
-```
+```text
 lm = rowmax(scale · S)                  // row maximum of this tile
 hm = isFirst ? lm : max(lm, gm)         // update the global maximum
 dm = isFirst ? 1 : exp(gm - hm)         // historical scaling coefficient
@@ -220,7 +220,7 @@ Note that the hm/gl/dm offsets are **exactly the same** as the layout of the Onl
 
 ### Core Algorithm
 
-```
+```text
 WaitFlag(V_MTE2, EVENT_ID3)        // wait until OTmp is readable (handshake with the PV GEMM)
 if (isFirstStackTile):
     go = lo                          // the first block is placed directly
@@ -246,7 +246,7 @@ Unlike the row halving of OnlineSoftmax, this epilogue adapts along the qN dimen
 
 ### Real Engineering Assembly (xllm_ops x_attention)
 
-Excerpted from `CallSharedInferKernelShort` in `x_attention/op_kernel/x_attention_catlass_helper.h` of xllm_ops (https://gitcode.com/xLLM-AI/xllm_ops):
+Excerpted from `CallSharedInferKernelShort` in `x_attention/op_kernel/x_attention_catlass_helper.h` of [xllm-ops](https://gitcode.com/xLLM-AI/xllm_ops):
 
 ```cpp
 using INPUT_T = ...;                 // element type of Q/K/V/P/O and mask (for example fp16)

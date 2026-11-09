@@ -212,7 +212,7 @@ BlockEpilogue(Resource *resource, uint32_t &ubBufAddrStart,
 - **UB resources**: 7 groups of pingpong buffers (attn/gm/gl of shared/unshared + finalAttn, each `[2]`) + 3 tmp buffers (finalGl/expMaxShared/expMaxUnShared);
 - **Merge mathematics (standard LSE merge)**:
 
-```
+```text
 finalMax  = max(sharedMax, unsharedMax)
 finalGl   = sharedSum*exp(sharedMax − finalMax) + unsharedSum*exp(unsharedMax − finalMax)
 O_final   = (O_shared*exp(sharedMax − finalMax) + O_unshared*exp(unsharedMax − finalMax)) / finalGl
@@ -303,7 +303,7 @@ CombineScaleKernel<EpilogueCombineScale>;
 
 ## Usage Example
 
-The following is excerpted from xllm-ops (https://gitcode.com/xLLM-AI/xllm_ops) `x_attention/op_kernel/x_attention_catlass_helper.h` (124 lines), showing the assembly entries of the three kernels.
+The following is excerpted from [xllm-ops](https://gitcode.com/xLLM-AI/xllm_ops) `x_attention/op_kernel/x_attention_catlass_helper.h` (124 lines), showing the assembly entries of the three kernels.
 
 ### Shared Path Entry: CallSharedInferKernel
 
