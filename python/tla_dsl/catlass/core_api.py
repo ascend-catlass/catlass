@@ -185,6 +185,36 @@ _MASK_CMP_MODES = ("lt", "le", "gt", "ge", "eq", "ne")
 # mantissa split, and the two matmul operands may use different ones.
 _FP4_FORMATS = frozenset({"f4e2m1", "f4e1m2"})
 
+
+def _odd_fp4_origin_extent(desc) -> int | None:
+    """The packed-axis origin extent of an fp4 tile, when it is statically odd.
+
+    The fp4 staging routes do not run on fp4 descriptors: the AIV backend
+    refuses sub-byte floats, so ``Vector/dma.cpp`` converts the descriptor to
+    byte denomination (``fp4RowMajorDescToBytes``) and copies as ``int8_t``.
+    That conversion halves the extents, which only round-trips while they are
+    even. An odd extent of ``n`` nibbles needs ``(n + 1) / 2`` bytes, so the
+    halved length stops one nibble short and the copy drops the final element
+    -- or, on a load, never reads it.
+
+    Rejecting the shape keeps that a dispatch error rather than a silent wrong
+    answer. Supporting it needs a read-modify-write of the tail byte, so the
+    nibble beyond the logical tile survives; ``mx_tensor.cpp``'s
+    ``preserveFp4Tail`` does exactly that for the UB-side store, but a DMA
+    descriptor has no equivalent.
+
+    Returns the offending extent, or ``None`` when it is even or not a static
+    integer (a dynamic extent is left to the device, as elsewhere in copy).
+    """
+    origin = getattr(desc, "origin_shape", None)
+    if not origin:
+        return None
+    last = origin[-1]
+    if isinstance(last, int) and last % 2:
+        return last
+    return None
+
+
 _MAKE_TENSOR_SUPPORTED_ELEMENT_TYPES = frozenset(
     # fp8 tiles are staged and computed on like any other element type: the
     # vector routes carry them (Vector/dma.cpp registers the copies) and
@@ -5568,6 +5598,9 @@ _SUPPORTED_VECTOR_COPY_ROUTES = {
         "u8",
         "f8e4m3fn",
         "f8e5m2",
+        "f8e8m0",
+        "f4e2m1",
+        "f4e1m2",
     ),
     ("ub", "RowMajor", "gm", "RowMajor"): (
         "f32",
@@ -5581,6 +5614,9 @@ _SUPPORTED_VECTOR_COPY_ROUTES = {
         "u8",
         "f8e4m3fn",
         "f8e5m2",
+        "f8e8m0",
+        "f4e2m1",
+        "f4e1m2",
     ),
     # UB -> UB is DataCopy (MOV.UB.TO.UB) throughout, with a ragged row rounded
     # up to whole 32-byte blocks, so every element width is carried, 1-byte
@@ -5591,8 +5627,11 @@ _SUPPORTED_VECTOR_COPY_ROUTES = {
     # same logical (M, N) shape lands as an (N, M) array. VNCHWCONV carries every
     # UB element width.
     ("ub", "RowMajor", "ub", "ColumnMajor"): ("f32", "f16", "bf16", "i32", "i16", "i8", "f8e4m3fn", "f8e5m2"),
-    ("ub", "RowMajor", "l1", "zN"): ("f32", "f16", "bf16", "i8", "f8e4m3fn", "f8e5m2"),
-    ("ub", "zN", "l1", "zN"): ("f32", "f16", "bf16", "i8", "f8e4m3fn", "f8e5m2"),
+    ("ub", "RowMajor", "l1", "zN"): ("f32", "f16", "bf16", "i8", "f8e4m3fn", "f8e5m2", "f4e2m1", "f4e1m2"),
+    ("ub", "zN", "l1", "zN"): ("f32", "f16", "bf16", "i8", "f8e4m3fn", "f8e5m2", "f4e2m1", "f4e1m2"),
+    # The block scale keeps its own fractal layouts on both sides.
+    ("ub", "zZMxScale", "l1", "zZMxScale"): ("f8e8m0",),
+    ("ub", "nNMxScale", "l1", "nNMxScale"): ("f8e8m0",),
     ("ub", "zNUnAlign", "l1", "zN"): ("f32", "f16", "bf16", "i8", "f8e4m3fn", "f8e5m2"),
 }
 
@@ -6276,6 +6315,18 @@ def copy(
                     "unsupported copy route "
                     f"{_route[0]},{src_layout} -> {_route[1]},{dst_layout} {src_dtype}",
                 )
+            elif src_dtype in _FP4_FORMATS:
+                for _side, _desc in (("src", src_desc), ("dst", dst_desc)):
+                    _odd = _odd_fp4_origin_extent(_desc)
+                    if _odd is not None:
+                        _op_error(
+                            "copy",
+                            f"invalid argument '{_side}': packed {src_dtype} is "
+                            f"staged as bytes, so its innermost origin extent "
+                            f"must be even; got {_odd}. An odd extent leaves a "
+                            "nibble outside the halved byte length, which the "
+                            "copy would drop",
+                        )
         params_value = None
 
     # Check if atomic mode enabled and acquire lowered atomic_mode_attr

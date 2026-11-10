@@ -373,6 +373,22 @@ CATLASS_DEVICE auto makeGMMxScaleTensor(memref_t<__gm__ uint8_t, 2>* memref, con
     }
 }
 
+// The UB counterpart, for a scale block produced on the vector unit. Same ABI
+// (u8) and the same restored e8m0 element type; only the position differs.
+template <LayoutTag Tag>
+CATLASS_DEVICE auto makeUBMxScaleTensor(memref_t<__ubuf__ uint8_t, 1>* memref, const TensorDesc& desc)
+{
+    AscendC::LocalTensor<float8_e8m0_t> tensor(AscendC::TPosition::VECCALC, localAddr(memref), elementCount(memref));
+    if constexpr (Tag == LayoutTag::zZMxScale) {
+        return tla::MakeTensor(
+            tensor, makeMxScalezZTlaLayout(desc), makeTlaTileCoord(desc), Catlass::Arch::PositionUB{});
+    } else {
+        static_assert(Tag == LayoutTag::nNMxScale, "MX scale tile supports zZMxScale (A) / nNMxScale (B) only");
+        return tla::MakeTensor(
+            tensor, makeMxScalenNTlaLayout(desc), makeTlaTileCoord(desc), Catlass::Arch::PositionUB{});
+    }
+}
+
 // The scale block travels over the ABI as u8 (MLIR has no e8m0 type); the
 // element type is restored here, where the copy templates require it.
 template <LayoutTag Tag>
@@ -410,6 +426,24 @@ CATLASS_DEVICE auto makeL1Fp4Tensor(memref_t<__cbuf__ int8_t, 1>* memref, const 
     } else {
         return tla::MakeTensor(
             tensor, makezNTlaLayout<TFp4>(desc), makeTlaTileCoord(desc), Catlass::Arch::PositionL1{});
+    }
+}
+
+// The UB counterpart of makeL1Fp4Tensor. Same reasoning: the ABI hands the tile
+// over as bytes, and restoring TFp4 here gives the layout math its 4-bit
+// element width, so a descriptor counted in fp4 elements spans half as many
+// bytes.
+template <typename TFp4, LayoutTag Tag>
+CATLASS_DEVICE auto makeUBFp4Tensor(memref_t<__ubuf__ int8_t, 1>* memref, const TensorDesc& desc)
+{
+    static_assert(Tag == LayoutTag::RowMajor || Tag == LayoutTag::zN, "UB fp4 tile supports RowMajor / zN only");
+    AscendC::LocalTensor<TFp4> tensor(AscendC::TPosition::VECCALC, localAddr(memref), elementCount(memref));
+    if constexpr (Tag == LayoutTag::RowMajor) {
+        return tla::MakeTensor(
+            tensor, makeRowMajorTlaLayout<TFp4>(desc), makeTlaTileCoord(desc), Catlass::Arch::PositionUB{});
+    } else {
+        return tla::MakeTensor(
+            tensor, makezNTlaLayout<TFp4>(desc), makeTlaTileCoord(desc), Catlass::Arch::PositionUB{});
     }
 }
 

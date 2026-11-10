@@ -692,7 +692,20 @@ static StringRef copyRuntimeElemSuffix(Type elementType)
 
 // Vector staging shares copyRuntimeElemSuffix with the other copy routes.
 // fp8 is registered on GM<->UB and UB->L1 like int8_t; fixpipe remains
-// independently restricted by isLegalFixpipeElementType below.
+// independently restricted by isLegalFixpipeElementType below. Packed fp4
+// and e8m0 staging use their own registered suffixes.
+static StringRef vectorPathElemSuffix(Type elementType)
+{
+    if (::llvm::isa<::tla::Float4E2M1Type>(elementType))
+        return "float4_e2m1x2_t";
+    if (::llvm::isa<::tla::Float4E1M2Type>(elementType))
+        return "float4_e1m2x2_t";
+    // An e8m0 block scale is one opaque byte and stages like any other, so it
+    // gets a vector suffix here even though it has no cast path.
+    if (::llvm::isa<::tla::Float8E8M0Type>(elementType))
+        return "float8_e8m0_t";
+    return copyRuntimeElemSuffix(elementType);
+}
 
 // Whether fixpipe can carry this L0C element type out to the given destination
 // type.
@@ -749,7 +762,7 @@ std::string getCopyRouteCallee(
         srcLayout == LayoutTag::RowMajor && dstLayout == LayoutTag::zN) {
         if (srcElementType != dstElem)
             return {};
-        StringRef suffix = copyRuntimeElemSuffix(srcElementType);
+        StringRef suffix = vectorPathElemSuffix(srcElementType);
         if (suffix.empty())
             return {};
         return Twine("copy_ub_RowMajor_to_l1_zN_").concat(suffix).str();
@@ -758,7 +771,7 @@ std::string getCopyRouteCallee(
         (srcLayout == LayoutTag::zN || srcLayout == LayoutTag::zNUnAlign) && dstLayout == LayoutTag::zN) {
         if (srcElementType != dstElem)
             return {};
-        StringRef suffix = copyRuntimeElemSuffix(srcElementType);
+        StringRef suffix = vectorPathElemSuffix(srcElementType);
         if (suffix.empty())
             return {};
         return Twine("copy_ub_zN_to_l1_zN_").concat(suffix).str();
@@ -768,7 +781,7 @@ std::string getCopyRouteCallee(
         srcLayout == LayoutTag::RowMajor && dstLayout == LayoutTag::RowMajor) {
         if (srcElementType != dstElem)
             return {};
-        StringRef suffix = copyRuntimeElemSuffix(srcElementType);
+        StringRef suffix = vectorPathElemSuffix(srcElementType);
         if (suffix.empty())
             return {};
         return Twine("copy_gm_RowMajor_to_ub_RowMajor_").concat(suffix).str();
@@ -803,7 +816,7 @@ std::string getCopyRouteCallee(
         srcLayout == LayoutTag::RowMajor && dstLayout == LayoutTag::RowMajor) {
         if (srcElementType != dstElem)
             return {};
-        StringRef suffix = copyRuntimeElemSuffix(srcElementType);
+        StringRef suffix = vectorPathElemSuffix(srcElementType);
         if (suffix.empty())
             return {};
         return Twine("copy_ub_RowMajor_to_gm_RowMajor_").concat(suffix).str();
@@ -867,6 +880,17 @@ std::string getCopyRouteCallee(
         }
         if (!src.empty())
             return (Twine("copy_gm_") + src + "_to_l1_" + dst + "_uint8_t").str();
+    }
+
+    // MX scale UB -> L1, for a scale produced on the vector unit. No reorder
+    // here, unlike the GM route above: both sides are already in scale order,
+    // so the tags must match and the copy is a strided block move. That is what
+    // keeps a vector-computed scale off the global-memory detour.
+    if (*srcSpace == hivm::AddressSpace::UB && *dstSpace == hivm::AddressSpace::L1 && isScaleElem(srcElementType) &&
+        isScaleElem(dstElem) && srcLayout == dstLayout &&
+        (dstLayout == LayoutTag::zZMxScale || dstLayout == LayoutTag::nNMxScale)) {
+        StringRef tag = stringifyLayoutTag(dstLayout);
+        return (Twine("copy_ub_") + tag + "_to_l1_" + tag + "_uint8_t").str();
     }
 
     // Element types live in the condition, not a check inside the body -- a body
@@ -1118,8 +1142,9 @@ static bool isAicTemplateRuntimeCall(StringRef name)
 
 static bool isAivTemplateRuntimeCall(StringRef name)
 {
-    return name.starts_with("copy_ub_RowMajor_to_l1_zN_") || name.starts_with("copy_ub_zN_to_l1_zN_") ||
-           name.starts_with("copy_gm_RowMajor_to_ub_RowMajor_") ||
+    return name.starts_with("copy_ub_zZMxScale_to_l1_zZMxScale_") ||
+           name.starts_with("copy_ub_nNMxScale_to_l1_nNMxScale_") || name.starts_with("copy_ub_RowMajor_to_l1_zN_") ||
+           name.starts_with("copy_ub_zN_to_l1_zN_") || name.starts_with("copy_gm_RowMajor_to_ub_RowMajor_") ||
            name.starts_with("copy_ub_RowMajor_to_gm_RowMajor_") ||
            name.starts_with("copy_ub_RowMajor_to_ub_RowMajor_") ||
            name.starts_with("copy_ub_RowMajor_to_ub_ColumnMajor_");

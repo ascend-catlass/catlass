@@ -14,6 +14,86 @@ Do not edit manually. Update docstrings/Examples in catlass/core_api.py
 
 APIs under `tla.experimental` may change or be removed without backward-compatibility guarantees. Use the ordinary `tla.kernel` and `tla.jit` decorators; this namespace does not select another compiler.
 
+## `tla.experimental.mx_to`
+
+**Source:** [`catlass.tla.experimental.mx_to`](../../../../catlass/tla/experimental/__init__.py)
+
+Description:
+
+Convert tensor tiles to, from, or between microscaling formats.
+
+The source and destination are UB tensor tiles. Use an ordinary `Tensor`
+for dense `f16`, `bf16` or `f32` values and a `(payload, scale)` tuple
+for MX values. The operation writes the conversion into the destination
+and returns that same destination object.
+
+Call this in `tla.vector()`. The bitcode path loops over the complete tile.
+One- and two-dimensional tensors support strided rows or columns. Standard
+two-dimensional blocked layouts, including `zN`, `nZ`, `zZMxScale`, and
+`nNMxScale`, are supported by a general bitcode path. MX-to-MX conversion
+can change the scale grouping axis. MX tile coordinates
+must start on a 32-element group boundary. Contiguous packed FP4 tiles
+must start on a byte boundary.
+In conversions between dense and MX tensors, the dense tensor may have
+different strides, including a different contiguous axis. Scale tensors
+can use different strides from the payload tensors.
+The general layout path stages individual groups and can be slower than
+the contiguous and supported strided fast paths.
+For runtime shapes, strides, or coordinates, the caller must ensure the
+alignment requirements, matching payload shapes, sufficient scale extents,
+and an even row stride for two-dimensional packed FP4 tiles. When a
+blocked layout's grouping axis is inferred from runtime extents, that
+axis must contain at least 32 elements.
+For two-dimensional layouts the scale grouping axis must be identifiable
+unambiguously from compile-time payload and scale extents. Source and
+destination payload storage must not overlap each other or any scale
+storage. Input and output scales may share storage if their views begin
+at the same address. Destination layouts must map distinct logical
+elements or scale groups to distinct storage locations. `VLn` masks select the first
+n values in grouping order (destination groups for MX outputs, otherwise
+source groups),
+and `ALLF` selects none. Inactive payload elements are written as zero;
+output scales are still written, and widening copies the input scales.
+Other masks and
+unsupported layouts raise an error. GM↔UB copies remain explicit.
+
+Prototype:
+
+```python
+tla.experimental.mx_to(src: Tensor | tuple[Tensor, Tensor], dst: Tensor | tuple[Tensor, Tensor], *, round_mode: RoundMode = RoundMode.CAST_ROUND, mask: Any | None = None) -> Tensor | tuple[Tensor, Tensor]
+```
+
+Parameters:
+
+- `src` (`Tensor | tuple[Tensor, Tensor]`): dense UB tile or MX
+  `(payload, scale)` pair. Required.
+- `dst` (`Tensor | tuple[Tensor, Tensor]`): destination tile or MX
+  `(payload, scale)` pair. Required and returned unchanged.
+- `round_mode` (`RoundMode`): payload rounding mode. Optional;
+  defaults to `RoundMode.CAST_ROUND`.
+- `mask` (`pattern | None`): `ALL`, `ALLF`, or a `VLn` prefix pattern.
+
+Constraints:
+
+- Must be called inside a `@tla.kernel` decorated function and directly
+  inside `tla.vector()`, outside `tla.vec.func()`.
+- At least one operand must be a `(payload, scale)` pair; dense-to-dense conversion is
+  not an MX conversion.
+- A dense source must target a `(payload, scale)` pair; an MX source may target a dense
+  tensor or another `(payload, scale)` pair.
+- MXFP4 destinations support `RoundMode.CAST_ROUND` only.
+
+Example:
+
+```python
+with tla.vector():
+    tla.experimental.mx_to(dense_ub, mx_fp8_ub)
+    tla.experimental.mx_to(mx_fp8_ub, dense_out_ub)
+    tla.experimental.mx_to(mx_fp8_ub, mx_fp4_ub)
+```
+
+---
+
 ## `tla.experimental.img2col`
 
 **Source:** [`catlass.tla.experimental.img2col`](../../../../catlass/tla/experimental/__init__.py)

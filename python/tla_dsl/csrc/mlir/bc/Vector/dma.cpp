@@ -2,6 +2,10 @@
 
 #include "catlass/epilogue/tile/tile_copy.hpp"
 
+// The MX block scale UB -> L1 specialization, kept out of the shared CATLASS
+// header because it is a DSL-side concept. Must precede the instantiations below.
+#include "mx_copy_ub_to_l1.h"
+
 template <class ArchTag, LayoutTag SrcLayout, LayoutTag DstLayout, typename T>
 CATLASS_DEVICE void copyGMToUB(
     memref_t<__gm__ T, 2>* src, memref_t<__ubuf__ T, 1>* dst, const TensorDesc& srcDesc, const TensorDesc& dstDesc)
@@ -255,6 +259,75 @@ CATLASS_DEVICE void copyUBToL1(
             reinterpret_cast<memref_t<__cbuf__ int8_t, 1>*>(dst), TENSOR_DESC_12(src), TENSOR_DESC_12(dst));     \
     }
 
+// Packed fp4 on the vector routes.
+//
+// fp4 cannot reach the copy templates at all: the AIV backend refuses every
+// sub-byte float outright -- "fp4e2m1x2 ... type only supports pointer
+// operations, scalar float type semantics are not supported" -- the same wall
+// fp8 hit. Unlike fp8 the workaround is not a plain reinterpret, because two
+// fp4 elements share a byte, so the descriptor is converted to byte
+// denomination here and the copy runs on int8_t.
+//
+// Only the packed axis changes: a RowMajor tile of (rows, cols) fp4 elements is
+// (rows, cols/2) bytes with half the row stride, so the row count and any
+// coordinate along it are untouched.
+CATLASS_DEVICE TensorDesc fp4RowMajorDescToBytes(const TensorDesc& d)
+{
+    TensorDesc b = d;
+    b.shape1 = d.shape1 / 2;
+    b.stride0 = d.stride0 / 2;
+    b.originShape1 = d.originShape1 / 2;
+    b.coord1 = d.coord1 / 2;
+    return b;
+}
+
+// The zN counterpart of fp4RowMajorDescToBytes. zN partitions into 32-byte C0s
+// whatever the element width, so an fp4 zN tile and an int8 zN tile of half the
+// columns are the same bytes: the fractal shape is untouched and only the
+// column extent and the stride between C0 columns halve.
+CATLASS_DEVICE TensorDesc fp4zNDescToBytes(const TensorDesc& d)
+{
+    TensorDesc b = d;
+    b.stride3 = d.stride3 / 2;
+    b.originShape1 = d.originShape1 / 2;
+    b.coord1 = d.coord1 / 2;
+    return b;
+}
+
+// UB -> L1 goes through int8 tensors and byte descriptors, exactly as the
+// GM <-> UB fp4 routes do.
+//
+// Keeping the real fp4 type here instead -- on the argument that the layout
+// math runs on SizeOfBits and no scalar float value is ever formed -- compiles,
+// and then faults on device (error type 3, 507015) for every shape tried, down
+// to one block with one K tile and a single DataCopy. The GM <-> UB round trip
+// passes over the same buffers, and skipping only this store lets the same
+// kernel run clean, so the typed instantiation is what does not work.
+template <class ArchTag, typename TFp4, LayoutTag SrcLayout, LayoutTag DstLayout>
+CATLASS_DEVICE void copyUBToL1Fp4(
+    memref_t<__ubuf__ int8_t, 1>* src, memref_t<__cbuf__ int8_t, 1>* dst, const TensorDesc& srcDesc,
+    const TensorDesc& dstDesc)
+{
+    auto srcBytes = (SrcLayout == LayoutTag::RowMajor) ? fp4RowMajorDescToBytes(srcDesc) : fp4zNDescToBytes(srcDesc);
+    auto srcTensor = makeUBTensor<SrcLayout, int8_t>(src, srcBytes);
+    auto dstTensor = makeL1Tensor<DstLayout, int8_t>(dst, fp4zNDescToBytes(dstDesc));
+    Catlass::Epilogue::Tile::CopyUb2L1Tla<ArchTag, decltype(srcTensor), decltype(dstTensor)>{}(dstTensor, srcTensor);
+}
+
+// The MX block scale, UB -> L1. This is what lets a scale computed on the
+// vector unit reach the cube without a detour through global memory: the
+// element tile takes the zN route above and the scale takes this one, and the
+// two are joined at the L1 -> L0 load, which is where MX has always joined them.
+template <class ArchTag, LayoutTag SrcLayout, LayoutTag DstLayout>
+CATLASS_DEVICE void copyUBToL1MxScale(
+    memref_t<__ubuf__ uint8_t, 1>* src, memref_t<__cbuf__ uint8_t, 1>* dst, const TensorDesc& srcDesc,
+    const TensorDesc& dstDesc)
+{
+    auto srcTensor = makeUBMxScaleTensor<SrcLayout>(src, srcDesc);
+    auto dstTensor = makeL1MxScaleTensor<DstLayout>(dst, dstDesc);
+    Catlass::Epilogue::Tile::CopyUb2L1Tla<ArchTag, decltype(srcTensor), decltype(dstTensor)>{}(dstTensor, srcTensor);
+}
+
 extern "C" {
 #if ((defined(__NPU_ARCH__) && __NPU_ARCH__ == 3510) || (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510))
 
@@ -320,6 +393,25 @@ REGISTER_UB_TO_GM(RowMajor, RowMajor, uint16_t)
 REGISTER_UB_TO_GM(RowMajor, RowMajor, uint32_t)
 REGISTER_UB_TO_GM_AS_BYTES(RowMajor, RowMajor, fp8_e4m3fn_t)
 REGISTER_UB_TO_GM_AS_BYTES(RowMajor, RowMajor, fp8_e5m2_t)
+// The MX block scale on the vector routes. An e8m0 exponent is one opaque byte,
+// so it stages exactly like fp8 -- the AIV refuses the type in the copy
+// templates for the same reason, and the same byte instantiation carries it.
+// This is what lets a kernel compute scales on the vector unit and get them
+// back out; the reordering into an L1 MxScale block is a separate leg.
+REGISTER_GM_TO_UB_AS_BYTES(RowMajor, RowMajor, float8_e8m0_t)
+REGISTER_UB_TO_GM_AS_BYTES(RowMajor, RowMajor, float8_e8m0_t)
+
+#define REGISTER_UB_TO_L1_MX_SCALE(SrcLayout, DstLayout)                                                         \
+    [aicore] __attribute__((always_inline)) void _mlir_ciface_copy_ub_##SrcLayout##_to_l1_##DstLayout##_uint8_t( \
+        memref_t<__ubuf__ uint8_t, 1>* src, memref_t<__cbuf__ uint8_t, 1>* dst, DESC_ABI_PARAMS(src),            \
+        DESC_ABI_PARAMS(dst))                                                                                    \
+    {                                                                                                            \
+        copyUBToL1MxScale<Catlass::Arch::Ascend950, LayoutTag::SrcLayout, LayoutTag::DstLayout>(                 \
+            src, dst, TENSOR_DESC_12(src), TENSOR_DESC_12(dst));                                                 \
+    }
+
+REGISTER_UB_TO_L1_MX_SCALE(zZMxScale, zZMxScale)
+REGISTER_UB_TO_L1_MX_SCALE(nNMxScale, nNMxScale)
 
 // fp8 rides the route as bytes: DataCopy moves blocks, so the element type only
 // has to describe the width. int8_t is registered directly.
@@ -376,15 +468,61 @@ REGISTER_UB_TO_UB_T_AS_BYTES(RowMajor, ColumnMajor, fp8_e5m2_t)
 REGISTER_UB_TO_L1(RowMajor, zN, float)
 REGISTER_UB_TO_L1(RowMajor, zN, half)
 REGISTER_UB_TO_L1(RowMajor, zN, bf16)
+// Byte staging, for data the vector core carries opaquely: a sub-byte format
+// such as fp4 cannot be named on any route, so a kernel stages it as raw bytes
+// and re-types it with tla.recast_ptr once it is in L1. fp8 does not need this
+// -- it has its own typed UB->L1 entries below. GM<->UB already register
+// int8_t; without the matching UB->L1 the staging path stops one hop short of
+// the cube.
+REGISTER_UB_TO_L1(RowMajor, zN, int8_t)
 REGISTER_UB_TO_L1(zN, zN, float)
 REGISTER_UB_TO_L1(zN, zN, half)
 REGISTER_UB_TO_L1(zN, zN, bf16)
-REGISTER_UB_TO_L1(RowMajor, zN, int8_t)
 REGISTER_UB_TO_L1(zN, zN, int8_t)
 REGISTER_UB_TO_L1_AS_BYTES(RowMajor, zN, fp8_e4m3fn_t)
 REGISTER_UB_TO_L1_AS_BYTES(RowMajor, zN, fp8_e5m2_t)
 REGISTER_UB_TO_L1_AS_BYTES(zN, zN, fp8_e4m3fn_t)
 REGISTER_UB_TO_L1_AS_BYTES(zN, zN, fp8_e5m2_t)
+
+// Named by the fp4 encoding rather than by a storage suffix, the same way the
+// cube's GM -> L1 fp4 routes are: no byte type would say which of the two 4-bit
+// formats the tile holds, and the caller's tile is typed fp4 on both sides.
+#define REGISTER_GM_TO_UB_FP4(NameSrc, NameDst, TFp4)                                                            \
+    [aicore] __attribute__((always_inline)) void _mlir_ciface_copy_gm_##NameSrc##_to_ub_##NameDst##_##TFp4(      \
+        memref_t<__gm__ int8_t, 2>* src, memref_t<__ubuf__ int8_t, 1>* dst, DESC_ABI_PARAMS(src),                \
+        DESC_ABI_PARAMS(dst))                                                                                    \
+    {                                                                                                            \
+        copyGMToUB<Catlass::Arch::Ascend950, LayoutTag::NameSrc, LayoutTag::NameDst, int8_t>(                    \
+            src, dst, fp4RowMajorDescToBytes(TENSOR_DESC_12(src)), fp4RowMajorDescToBytes(TENSOR_DESC_12(dst))); \
+    }
+
+#define REGISTER_UB_TO_GM_FP4(NameSrc, NameDst, TFp4)                                                            \
+    [aicore] __attribute__((always_inline)) void _mlir_ciface_copy_ub_##NameSrc##_to_gm_##NameDst##_##TFp4(      \
+        memref_t<__ubuf__ int8_t, 1>* src, memref_t<__gm__ int8_t, 2>* dst, DESC_ABI_PARAMS(src),                \
+        DESC_ABI_PARAMS(dst))                                                                                    \
+    {                                                                                                            \
+        copyUBToGM<Catlass::Arch::Ascend950, LayoutTag::NameSrc, LayoutTag::NameDst, int8_t>(                    \
+            src, dst, fp4RowMajorDescToBytes(TENSOR_DESC_12(src)), fp4RowMajorDescToBytes(TENSOR_DESC_12(dst))); \
+    }
+
+REGISTER_GM_TO_UB_FP4(RowMajor, RowMajor, float4_e2m1x2_t)
+REGISTER_GM_TO_UB_FP4(RowMajor, RowMajor, float4_e1m2x2_t)
+REGISTER_UB_TO_GM_FP4(RowMajor, RowMajor, float4_e2m1x2_t)
+REGISTER_UB_TO_GM_FP4(RowMajor, RowMajor, float4_e1m2x2_t)
+
+#define REGISTER_UB_TO_L1_FP4(NameSrc, NameDst, TFp4)                                                       \
+    [aicore] __attribute__((always_inline)) void _mlir_ciface_copy_ub_##NameSrc##_to_l1_##NameDst##_##TFp4( \
+        memref_t<__ubuf__ int8_t, 1>* src, memref_t<__cbuf__ int8_t, 1>* dst, DESC_ABI_PARAMS(src),         \
+        DESC_ABI_PARAMS(dst))                                                                               \
+    {                                                                                                       \
+        copyUBToL1Fp4<Catlass::Arch::Ascend950, TFp4, LayoutTag::NameSrc, LayoutTag::NameDst>(              \
+            src, dst, TENSOR_DESC_12(src), TENSOR_DESC_12(dst));                                            \
+    }
+
+REGISTER_UB_TO_L1_FP4(RowMajor, zN, float4_e2m1x2_t)
+REGISTER_UB_TO_L1_FP4(RowMajor, zN, float4_e1m2x2_t)
+REGISTER_UB_TO_L1_FP4(zN, zN, float4_e2m1x2_t)
+REGISTER_UB_TO_L1_FP4(zN, zN, float4_e1m2x2_t)
 
 #endif
 }

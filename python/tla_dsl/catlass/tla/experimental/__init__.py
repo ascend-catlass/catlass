@@ -7,20 +7,166 @@ from typing import Any
 
 from catlass._mlir import ir as mlir_ir
 
+from ... import runtime as _runtime
 from ...base_dsl.op import dsl_user_op
 from ...core_api import (
     IndexLike,
     _as_index_value,
     _as_value,
     _flatten_tla_tuple,
+    _MaskPattern,
     _op_error,
     _require_category,
     _tla_ops_gen,
     _tla_tensor_type_for_mlir_value,
 )
+from ...params import CastParams, RoundMode
 from ..typing import Tensor
 
-__all__ = ["Img2colParams", "img2col"]
+__all__ = ["Img2colParams", "img2col", "mx_to"]
+
+
+@dsl_user_op
+def mx_to(
+    src: Tensor | tuple[Tensor, Tensor],
+    dst: Tensor | tuple[Tensor, Tensor],
+    *,
+    round_mode: RoundMode = RoundMode.CAST_ROUND,
+    mask: Any | None = None,
+    loc: mlir_ir.Location | None = None,
+) -> Tensor | tuple[Tensor, Tensor]:
+    """Directory: Experimental APIs
+    Description:
+        Convert tensor tiles to, from, or between microscaling formats.
+
+        The source and destination are UB tensor tiles. Use an ordinary `Tensor`
+        for dense `f16`, `bf16` or `f32` values and a `(payload, scale)` tuple
+        for MX values. The operation writes the conversion into the destination
+        and returns that same destination object.
+
+        Call this in `tla.vector()`. The bitcode path loops over the complete tile.
+        One- and two-dimensional tensors support strided rows or columns. Standard
+        two-dimensional blocked layouts, including `zN`, `nZ`, `zZMxScale`, and
+        `nNMxScale`, are supported by a general bitcode path. MX-to-MX conversion
+        can change the scale grouping axis. MX tile coordinates
+        must start on a 32-element group boundary. Contiguous packed FP4 tiles
+        must start on a byte boundary.
+        In conversions between dense and MX tensors, the dense tensor may have
+        different strides, including a different contiguous axis. Scale tensors
+        can use different strides from the payload tensors.
+        The general layout path stages individual groups and can be slower than
+        the contiguous and supported strided fast paths.
+        For runtime shapes, strides, or coordinates, the caller must ensure the
+        alignment requirements, matching payload shapes, sufficient scale extents,
+        and an even row stride for two-dimensional packed FP4 tiles. When a
+        blocked layout's grouping axis is inferred from runtime extents, that
+        axis must contain at least 32 elements.
+        For two-dimensional layouts the scale grouping axis must be identifiable
+        unambiguously from compile-time payload and scale extents. Source and
+        destination payload storage must not overlap each other or any scale
+        storage. Input and output scales may share storage if their views begin
+        at the same address. Destination layouts must map distinct logical
+        elements or scale groups to distinct storage locations. `VLn` masks select the first
+        n values in grouping order (destination groups for MX outputs, otherwise
+        source groups),
+        and `ALLF` selects none. Inactive payload elements are written as zero;
+        output scales are still written, and widening copies the input scales.
+        Other masks and
+        unsupported layouts raise an error. GM↔UB copies remain explicit.
+
+        Parameters:
+        - `src` (`Tensor | tuple[Tensor, Tensor]`): dense UB tile or MX
+          `(payload, scale)` pair. Required.
+        - `dst` (`Tensor | tuple[Tensor, Tensor]`): destination tile or MX
+          `(payload, scale)` pair. Required and returned unchanged.
+        - `round_mode` (`RoundMode`): payload rounding mode. Optional;
+          defaults to `RoundMode.CAST_ROUND`.
+        - `mask` (`pattern | None`): `ALL`, `ALLF`, or a `VLn` prefix pattern.
+
+        Constraints:
+        - Must be called inside a `@tla.kernel` decorated function and directly
+          inside `tla.vector()`, outside `tla.vec.func()`.
+        - At least one operand must be a `(payload, scale)` pair; dense-to-dense conversion is
+          not an MX conversion.
+        - A dense source must target a `(payload, scale)` pair; an MX source may target a dense
+          tensor or another `(payload, scale)` pair.
+        - MXFP4 destinations support `RoundMode.CAST_ROUND` only.
+
+        Example:
+        ```python
+        with tla.vector():
+            tla.experimental.mx_to(dense_ub, mx_fp8_ub)
+            tla.experimental.mx_to(mx_fp8_ub, dense_out_ub)
+            tla.experimental.mx_to(mx_fp8_ub, mx_fp4_ub)
+        ```
+    """
+    from .._mx_bitcode import (
+        _is_mx_tensor_pair,
+        try_mx_tensor_bitcode,
+        validate_mx_tensor_arguments,
+    )
+
+    src_is_mx = _is_mx_tensor_pair(src)
+    dst_is_mx = _is_mx_tensor_pair(dst)
+    if not isinstance(src, Tensor) and not src_is_mx:
+        _op_error(
+            "mx_to",
+            f"src must be a Tensor or (payload, scale) tuple, got {type(src).__name__}",
+        )
+    if not isinstance(dst, Tensor) and not dst_is_mx:
+        _op_error(
+            "mx_to",
+            f"dst must be a Tensor or (payload, scale) tuple, got {type(dst).__name__}",
+        )
+    if not src_is_mx and not dst_is_mx:
+        _op_error(
+            "mx_to", "at least one of src or dst must be a `(payload, scale)` pair"
+        )
+    if not isinstance(round_mode, RoundMode):
+        _op_error(
+            "mx_to", f"round_mode must be RoundMode, got {type(round_mode).__name__}"
+        )
+    if (
+        dst_is_mx
+        and dst[0].dtype in {"f4e2m1", "f4e1m2"}
+        and round_mode != RoundMode.CAST_ROUND
+    ):
+        _op_error("mx_to", "MXFP4 destinations support only RoundMode.CAST_ROUND")
+    params = CastParams(round_mode=round_mode)
+    if mask is not None and not isinstance(mask, (Tensor, _MaskPattern, str)):
+        _op_error(
+            "mx_to",
+            f"mask must be a Tensor or fixed tla.mask pattern, got {type(mask).__name__}",
+        )
+    _runtime._require_enclosing_region("mx_to", "vector")
+    if _runtime._has_enclosing_region("vec.func"):
+        _op_error(
+            "mx_to",
+            "must be called directly inside tla.vector(), outside tla.vec.func()",
+        )
+    token = mask._token if isinstance(mask, _MaskPattern) else mask
+    if mask is not None and (
+        not isinstance(token, str)
+        or token
+        not in {
+            "ALL",
+            "ALLF",
+            "VL1",
+            "VL2",
+            "VL3",
+            "VL4",
+            "VL8",
+            "VL16",
+            "VL32",
+            "VL64",
+            "VL128",
+        }
+    ):
+        _op_error("mx_to", "unsupported mask; use ALL, ALLF, or a VLn prefix pattern")
+    validate_mx_tensor_arguments(src, dst)
+    if try_mx_tensor_bitcode(src, dst, params, mask, loc=loc):
+        return dst
+    _op_error("mx_to", "unsupported tensor layout for whole-tile bitcode conversion")
 
 
 @dataclass(frozen=True)

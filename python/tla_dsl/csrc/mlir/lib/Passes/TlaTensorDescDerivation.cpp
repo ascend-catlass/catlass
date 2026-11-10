@@ -807,17 +807,23 @@ mlir::LogicalResult TensorDescriptorDerivation::derive(mlir::func::FuncOp funcOp
                 shape[1] = *shape1Or;
                 shape[2] = one;
                 shape[3] = one;
-                constexpr int64_t linearStrideAlignmentBytes = 32;
-                int64_t elementBytes = getByteSizeOfFixedWidthScalarType(childInfo->elementType);
+                // Counted in bits, not bytes: a sub-byte element still tiles the
+                // 32-byte stride quantum, it just takes more of them -- fp4 puts
+                // 64 elements in it where int8 puts 32.
+                // getByteSizeOfFixedWidthScalarType answers 0 for a sub-byte type
+                // and would reject it here.
+                constexpr int64_t linearStrideAlignmentBits = 32 * 8;
+                int64_t elementBits = getBitSizeOfFixedWidthScalarType(childInfo->elementType);
+                // i1 is addressed as a byte, not as a bit.
                 if (childInfo->elementType.isInteger(1))
-                    elementBytes = 1;
-                if (elementBytes <= 0 || linearStrideAlignmentBytes % elementBytes != 0) {
+                    elementBits = 8;
+                if (elementBits <= 0 || linearStrideAlignmentBits % elementBits != 0) {
                     op->emitError() << "tla.make_tensor_like cannot derive a 32-byte-aligned stride for element type "
                                     << childInfo->elementType;
                     derivationFailed = true;
                     return;
                 }
-                int64_t alignmentElements = linearStrideAlignmentBytes / elementBytes;
+                int64_t alignmentElements = linearStrideAlignmentBits / elementBits;
                 auto alignLinearExtent = [&](Value extent) -> Value {
                     Value multiple = getOrCreateConstant(op, alignmentElements, 0);
                     Value one = getOrCreateConstant(op, 1, 0);
