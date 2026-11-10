@@ -272,6 +272,7 @@ def basic_mmad_atomic_add_kernel(
                         l0_c,
                         tla.params.CopyL0C2DstParams(unit_flag=0b11),
                     )
+                tla.pipe_barrier(tla.pipes.FIX)
 
                 l1_buf_idx = c1 - l1_buf_idx
 
