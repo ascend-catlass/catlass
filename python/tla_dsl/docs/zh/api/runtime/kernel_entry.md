@@ -262,7 +262,7 @@ compiled_ep(tx, ty, block_num=1)  # 不再传 abs_epilogue
 函数原型：
 
 ```python
-tla.extern(*, source: str, name: str | None = None, include_dirs: str | os.PathLike[str] | Sequence[str | os.PathLike[str]] = ()) -> Callable[[Callable[..., None]], ExternFunction]
+tla.extern(*, source: str, name: str | None = None, include_dirs: str | os.PathLike[str] | Sequence[str | os.PathLike[str]] = ()) -> Callable[[Callable[..., object]], ExternFunction]
 ```
 
 参数说明：
@@ -276,10 +276,19 @@ tla.extern(*, source: str, name: str | None = None, include_dirs: str | os.PathL
 
 - `name` 必须是合法 C 标识符，且 `source` 非空。
 - 参数必须是位置参数、无默认值，并用
-  `tla.Pointer[dtype, address_space]` 或具体 TLA 数值类型注解。
-- 返回注解必须是 `None`。
-- 调用必须落在恰好一个 `tla.cube()` 或 `tla.vector()` 区域内，且在
-  `tla.vec.func()` 之外。
+  `tla.Pointer[dtype, address_space]`、具体 TLA 数值类型或
+  `tla.VectorSSA[dtype]` 注解。
+- 返回注解必须是 `None` 或一个 `tla.VectorSSA[dtype]`。
+  寄存器 dtype 支持 `Float16`、`BFloat16`、`Float32`，以及
+  `Int8/16/32/64`、`UInt8/16/32/64`。每个寄存器的全部 lane 必须有效：
+  8/16/32/64 位元素分别对应 256/128/64/32 个 lane，共 256 字节。
+  参数与返回值可以使用不同 dtype；外部实现须填满返回寄存器的全部 lane。
+- 寄存器参数和结果必须在同一个 SIMD VF 内使用，返回值可继续参与 TLA 运算。
+  `Int64`/`UInt64` 寄存器可由另一个 extern 返回；现有 tensor API 不支持直接 load 这些寄存器类型。
+- 调用必须位于恰好一个 `tla.cube()` 或 `tla.vector()` 区域内。
+  含 extern 调用的 SIMD VF 必须有显式 tensor 访存，或至少有一次 extern 调用传入
+  `tla.Pointer`。普通 `Int64` 参数按标量处理。编译器为该区域生成 VF 函数，生成失败时报错。
+  extern 实现必须能内联到当前 VF，不能再启动另一个 VF。SIMT VF 不支持 extern 调用。
 - 同一 kernel 内，一个符号只能对应一个 extern 声明对象；共享同一份
   `source` 的声明必须使用完全相同的有序 `include_dirs`。
 

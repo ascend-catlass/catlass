@@ -1,3 +1,4 @@
+#include "Passes/TlaVectorRegionCommon.h"
 #include "PassesCommon.h"
 #include "PassesInternal.h"
 
@@ -9,7 +10,35 @@ namespace {
 
 static bool isVectorCall(::tla::CallExternOp op)
 {
-    return op->getParentOfType<::tla::VectorOp>() != nullptr;
+    return op->getParentOfType<::tla::VectorOp>() ||
+           getFunctionCoreType(op->getParentOfType<func::FuncOp>()) == hivm::TFuncCoreType::AIV;
+}
+
+// Validate that a SIMD VF with an extern call has either tensor memory access or extern pointer argument.
+static LogicalResult verifyExternMemorySource(::tla::VecFuncOp vf)
+{
+    if (!vecregion::isSimdVecFunc(vf))
+        return success();
+    bool hasExtern = false;
+    auto walkResult = vf.walk([&](Operation* nested) {
+        if (auto call = dyn_cast<::tla::CallExternOp>(nested)) {
+            hasExtern = true;
+            if (llvm::any_of(call.getOperandTypes(), [](Type t) { return isa<::tla::PtrType>(t); }))
+                return WalkResult::interrupt();
+        }
+        if (isa<::tla::LoadOp, ::tla::StoreOp, ::tla::LoadUpdateOp, ::tla::StoreUpdateOp, ::tla::LoadUnalignUpdateOp,
+                ::tla::StoreUnalignUpdateOp, ::tla::ScalarLoadOp, ::tla::ScalarStoreOp, ::tla::CopyOp>(nested))
+            return WalkResult::interrupt();
+        if (auto gather = dyn_cast<::tla::GatherOp>(nested);
+            gather && isa<::tla::TlaTensorType>(gather.getX().getType()))
+            return WalkResult::interrupt();
+        return WalkResult::advance();
+    });
+    const bool hasMemorySource = walkResult.wasInterrupted();
+    if (hasExtern && !hasMemorySource)
+        return vf.emitOpError(
+            "SIMD VF with an extern call requires a tensor memory access or an extern pointer argument");
+    return success();
 }
 
 static void updateCallCoreType(func::FuncOp callee, bool isVector)
@@ -27,7 +56,7 @@ static void updateCallCoreType(func::FuncOp callee, bool isVector)
     }
 }
 
-// Lower tla.call_extern to a private func.func declaration + func.call.
+// Lower tla.call_extern outside vf to a private func.func declaration + func.call.
 class TlaLowerExternCallPass : public PassWrapper<TlaLowerExternCallPass, OperationPass<ModuleOp>> {
 public:
     MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(TlaLowerExternCallPass)
@@ -42,7 +71,7 @@ public:
     }
     StringRef getDescription() const override
     {
-        return "Lower tla.call_extern to a private func.call declaration";
+        return "Declare extern functions and lower calls outside SIMD VFs";
     }
     void getDependentDialects(DialectRegistry& registry) const override
     {
@@ -52,6 +81,14 @@ public:
     void runOnOperation() override
     {
         ModuleOp module = getOperation();
+        if (module
+                .walk([&](::tla::VecFuncOp vf) {
+                    return failed(verifyExternMemorySource(vf)) ? WalkResult::interrupt() : WalkResult::advance();
+                })
+                .wasInterrupted()) {
+            signalPassFailure();
+            return;
+        }
         SmallVector<::tla::CallExternOp, 4> calls;
         module.walk([&](::tla::CallExternOp op) { calls.push_back(op); });
 
@@ -59,7 +96,7 @@ public:
             StringRef symbol = op.getCallee();
             bool isVector = isVectorCall(op);
             SmallVector<Type, 4> operandTypes(op.getOperandTypes());
-            auto functionType = FunctionType::get(module.getContext(), operandTypes, TypeRange{});
+            auto functionType = FunctionType::get(module.getContext(), operandTypes, op.getResultTypes());
             func::FuncOp callee = module.lookupSymbol<func::FuncOp>(symbol);
             if (!callee) {
                 OpBuilder moduleBuilder(module.getBodyRegion());
@@ -77,6 +114,9 @@ public:
             }
             updateCallCoreType(callee, isVector);
 
+            // SIMD outlining emits the call inside the generated VF function.
+            if (op->getParentOfType<::tla::VecFuncOp>())
+                continue;
             OpBuilder builder(op);
             builder.create<func::CallOp>(op.getLoc(), callee, op.getOperands());
             op.erase();

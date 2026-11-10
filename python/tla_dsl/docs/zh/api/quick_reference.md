@@ -26,7 +26,7 @@ nav_order: 5
 | --- | --- | --- |
 | [`@tla.kernel`](runtime/kernel_entry.md#tlakernel) | 声明 kernel 入口并得到 `TlaJitFunction`。 | Host 装饰器；函数体不在 Host 执行，且禁止直接调用。启动前须编译。 |
 | [`@tla.jit`](runtime/kernel_entry.md#tlajit) | 声明 kernel lowering 期间内联的 device helper。 | 在 Host 声明；无独立 `compile` / `dump_mlir`，helper 之间不可递归调用。 |
-| [`@tla.extern`](runtime/kernel_entry.md#tlaextern) | 声明由内联源码实现的 Ascend C ABI 入口。 | Host 声明；调用位于单个 Cube 或 Vector 区域，且不在 `tla.vec.func` 内。 |
+| [`@tla.extern`](runtime/kernel_entry.md#tlaextern) | 声明由内联源码实现的 Ascend C ABI 入口。 | Host 声明；调用位于单个 Cube 或 Vector 区域，可在 SIMD VF 内调用。SIMT VF 不支持 extern 调用。 |
 | [`tla.compile`](runtime/compile_launch.md#tlacompile) | 从类型样本编译 kernel，返回 `JitCompiledFunction`。 | Host；类型样本不必绑定 NPU 缓冲。`block_num` / `stream` 等启动参数写在编译结果上。 |
 | [`tla.JitCompiledFunction.__call__`](runtime/compile_launch.md#tlajitcompiledfunction__call__) | 启动已编译 kernel，并复用 executor 与二进制。 | Host；tensor 实参须为已绑定的 NPU 缓冲，`make_fake_tensor` 结果不能启动。 |
 | [`tla.from_dlpack`](runtime/host_tensor.md#tlafrom_dlpack) | 零拷贝绑定 DLPack tensor 为 TLA Host tensor。 | Host；`layout_tag` 必填。NPU 缓冲可启动，CPU 缓冲只提供编译元数据。 |

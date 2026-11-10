@@ -353,16 +353,57 @@ mlir::LogicalResult MmadOp::verify()
 
 mlir::LogicalResult CallExternOp::verify()
 {
+    auto vf = (*this)->getParentOfType<VecFuncOp>();
     bool inVector = hasEnclosing<VectorOp>(getOperation());
     bool inCube = hasEnclosing<CubeOp>(getOperation());
-    if (inVector == inCube)
+    if (vf) {
+        // The enclosing vector wrapper is gone between SIMT and SIMD lowering.
+        if (inCube || !hasEnclosingRegion<VectorOp>(getOperation()))
+            return emitOpError("SIMD extern requires a vector region");
+        auto mode = vf->getAttrOfType<mlir::StringAttr>("mode");
+        if (mode && mode.getValue().equals_insensitive("simt"))
+            return emitOpError("not supported inside a SIMT tla.vec.func");
+    } else if (inVector == inCube)
         return emitOpError("must be nested inside exactly one tla.vector or tla.cube region");
-    if (inVector && hasEnclosing<VecFuncOp>(getOperation()))
-        return emitOpError("must be outside tla.vec.func");
-    for (mlir::Type type : getOperandTypes()) {
+    auto isExternRegister = [](mlir::Type type) {
+        auto reg = mlir::dyn_cast<VectorSSAType>(type);
+        if (!reg)
+            return false;
+        auto element = reg.getElementType();
+        auto integer = mlir::dyn_cast<mlir::IntegerType>(element);
+        bool supported = element.isF16() || element.isBF16() || element.isF32() ||
+                         (integer && !integer.isSigned() &&
+                          (integer.getWidth() == 8 || integer.getWidth() == 16 || integer.getWidth() == 32 ||
+                           integer.getWidth() == 64));
+        return supported && reg.getValidLanes() == 256 * 8 / element.getIntOrFloatBitWidth();
+    };
+    for (mlir::Value operand : getOperands()) {
+        mlir::Type type = operand.getType();
+        if (mlir::isa<VectorSSAType>(type)) {
+            if (!vf || !isExternRegister(type))
+                return emitOpError(
+                    "register arguments require a SIMD VF and a full 256-byte register "
+                    "of f16, bf16, f32, or 8/16/32/64-bit integer elements");
+            if (!vf.getBody().isAncestor(operand.getParentRegion()))
+                return emitOpError("register arguments must be defined in the same SIMD VF");
+            continue;
+        }
         if (mlir::isa<PtrType, mlir::IntegerType, mlir::FloatType>(type))
             continue;
-        return emitOpError("operands must be !tla.ptr or scalar integer/float (not index), got ") << type;
+        return emitOpError(
+                   "operands must be !tla.ptr, scalar integer/float (not index), or a supported !tla.vector, got ")
+               << type;
+    }
+    if (getNumResults() > 1)
+        return emitOpError("supports at most one register result");
+    for (mlir::Value result : getResults()) {
+        if (!vf || !isExternRegister(result.getType()))
+            return emitOpError(
+                "register results require a SIMD VF and a full 256-byte register "
+                "of f16, bf16, f32, or 8/16/32/64-bit integer elements");
+        for (mlir::Operation* user : result.getUsers())
+            if (user->getParentOfType<VecFuncOp>() != vf)
+                return emitOpError("register results must be used in the same SIMD VF");
     }
     return mlir::success();
 }

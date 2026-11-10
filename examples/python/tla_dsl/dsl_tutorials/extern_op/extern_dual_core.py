@@ -21,7 +21,7 @@ OP_SOURCE_CODES = r"""
 
 extern "C" {
 
-[aicore] __attribute__((always_inline)) void tla_user_store_i32(
+__aicore__ __attribute__((always_inline)) void tla_user_store_i32(
     uint64_t dst_gm_addr, int32_t index, int32_t value) {
   auto dst = reinterpret_cast<__gm__ int32_t *>(dst_gm_addr);
   dst[index] = value;

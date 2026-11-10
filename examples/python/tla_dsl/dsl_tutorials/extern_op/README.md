@@ -4,7 +4,7 @@
 
 ## VecAdd 功能说明
 
-目录包含四个示例：
+目录包含以下示例：
 
 | 文件 | 概述 |
 |------|------|
@@ -12,6 +12,9 @@
 | [**`extern_vecadd.py`**](extern_vecadd.py) | 外部 Ascend C 函数与 TLA DSL 混合编程示例，包含外部函数源码、ABI 声明和 VecAdd Kernel。 |
 | [**`extern_multi_ops.py`**](extern_multi_ops.py) | 两个独立外部 Ascend C 算子组成 GM→UB→GM round-trip。 |
 | [**`extern_custom_include.py`**](extern_custom_include.py) | 使用 `include_dirs` 引用用户头文件，并将头文件常量写回 Host 验证。 |
+| [**`extern_simd_vf_add.py`**](extern_simd_vf_add.py) | 在 SIMD VF 内向 extern 传入 UB 指针，由外部 Reg API 完成加法。 |
+| [**`extern_simd_reg_add.py`**](extern_simd_reg_add.py) | 在 SIMD VF 内按值传入两个 Float32 寄存器，将返回的寄存器交给 DSL store。 |
+| [**`extern_simd_reg_types.py`**](extern_simd_reg_types.py) | 验证 FP16、BF16、FP32 和 8/16/32/64 位整数寄存器的传参、返回及跨类型返回，对全部 256 字节按位取反。 |
 
 向量加法示例实现两个一维向量的逐元素加法，计算公式为：
 
@@ -48,9 +51,11 @@ $$
 - 相同 symbol 可以为不同 Kernel 分别声明；同一 Kernel 内只能使用其中一个声明对象，相同声明可以调用多次。
 - 同一 Kernel 内，相同 source 只能使用同一组规范化、有序的 `include_dirs`；不同 Kernel 可以分别配置。
 - `include_dirs` 可按顺序指定用户头文件搜索目录；相对路径按 extern 声明文件所在目录解析。
-- 外部函数声明只支持位置固定、无默认值的参数。参数类型必须标注为 `tla.Pointer[dtype, address_space]` 或具体的 TLA 数值类型（如 `tla.Int32`），返回类型必须标注为 `None`。
-- Kernel 调用外部函数时，需要传入显式指针（例如 `tensor.ptr`），且参数个数、数据类型和指针地址空间必须与声明完全一致。
-- 外部函数必须在一个 `tla.vector()` 或 `tla.cube()` 区域内调用，不能在 `tla.vec.func(...)` 中调用。
+- 外部函数声明只支持位置固定、无默认值的参数。参数类型支持 `tla.Pointer[dtype, address_space]`、具体的 TLA 数值类型（如 `tla.Int32`）和 `tla.VectorSSA[dtype]`。返回类型为 `None` 或一个 `tla.VectorSSA[dtype]`。
+- 寄存器 dtype 支持 `Float16`、`BFloat16`、`Float32` 和 `Int8/16/32/64`、`UInt8/16/32/64`，有效 lane 数必须为 `256 / sizeof(dtype)`。每个参数和返回值独立声明 dtype；外部实现须填满返回寄存器。Int64/UInt64 寄存器可由 extern 返回，现有 tensor API 不支持直接 load。
+- 指针参数传入显式指针（例如 `tensor.ptr`）。参数个数、数据类型和指针地址空间须与声明匹配。
+- 寄存器参数和结果在同一 SIMD VF 内使用；该 VF 必须有显式 tensor 访存或 extern 指针参数。外部入口使用对应的 `vector_half`、`vector_bfloat16_t`、`vector_float` 或 `vector_int8_t` / `vector_int16_t` / `vector_int32_t` / `vector_int64_t`、`vector_uint8_t` / `vector_uint16_t` / `vector_uint32_t` / `vector_uint64_t` 按值传参和返回，并标注 `always_inline`。整数 signedness 在 TLA 类型检查时保留，LLVM 向量 ABI 使用 signless 整数。
+- 外部函数必须在一个 `tla.vector()` 或 `tla.cube()` 区域内调用，可以在 `tla.vec.func(mode="simd")` 中调用，不可在simt vf中调用。
 - 单个 Kernel 可以调用多个外部函数；相同 source 对每个实际使用的 core target 只编译一次，不同 source 按首次调用顺序编号并分别编译。
 - 外部调用当前需要显式编写流水同步，不能与 `@tla.kernel(auto_sync="v0")` 组合使用。样例通过 `flag` 的 `set` / `wait` 保证外部 GM→UB 搬运完成后，再进入后续 VECTOR 或 MTE3 流水。
 
@@ -65,6 +70,9 @@ extern_vecadd.py [-h] [--device DEVICE]
 extern_dual_core.py [-h] [--device DEVICE]
 extern_multi_ops.py [-h] [--device DEVICE]
 extern_custom_include.py [-h] [--device DEVICE]
+extern_simd_vf_add.py [-h] [--device DEVICE]
+extern_simd_reg_add.py [-h] [--device DEVICE]
+extern_simd_reg_types.py [-h] [--device DEVICE] [--dtype {all,f16,bf16,f32,i8,u8,i16,u16,i32,u32,i64,u64}]
 ```
 
 ### 执行示例
@@ -84,6 +92,12 @@ python examples/python/tla_dsl/dsl_tutorials/extern_op/extern_multi_ops.py --dev
 
 # 执行 extern op，验证从用户头文件读取并写回的值
 python examples/python/tla_dsl/dsl_tutorials/extern_op/extern_custom_include.py --device 0
+
+# 在 SIMD VF 内按值传入寄存器，验证外部 Reg API 的计算结果
+python examples/python/tla_dsl/dsl_tutorials/extern_op/extern_simd_reg_add.py --device 0
+
+# 检查全部 11 种寄存器类型，也可用 --dtype bf16 单独检查一种类型
+python examples/python/tla_dsl/dsl_tutorials/extern_op/extern_simd_reg_types.py --device 0
 
 # 忽略进程内缓存和磁盘缓存，强制重新编译后执行
 CATLASS_DSL_FORCE_RECOMPILE=1 \
@@ -109,7 +123,7 @@ passed; kernel=<cache_dir>/<cache_key>/kernel.o
 ```cpp
 extern "C" {
 
-[aicore] __attribute__((always_inline)) void tla_user_gm_to_ub_f32(
+__aicore__ __attribute__((always_inline)) void tla_user_gm_to_ub_f32(
     uint64_t src_gm_addr, uint64_t dst_ub_addr, int32_t count) {
   AscendC::GlobalTensor<float> src;
   src.SetGlobalBuffer(reinterpret_cast<__gm__ float *>(src_gm_addr),

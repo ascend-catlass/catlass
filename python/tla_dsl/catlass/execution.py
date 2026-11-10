@@ -1996,6 +1996,7 @@ def _ascendc_builtin_include_dirs(ascend_home: Path) -> list[Path]:
     return [
         path.resolve()
         for path in (
+            ascend_home / "include",
             asc_root,
             asc_root / "impl" / "adv_api",
             asc_root / "impl" / "basic_api",
@@ -2006,6 +2007,7 @@ def _ascendc_builtin_include_dirs(ascend_home: Path) -> list[Path]:
             asc_root / "impl" / "utils",
             asc_root / "include",
             asc_root / "include" / "adv_api",
+            asc_root / "include" / "adv_api" / "matmul",
             asc_root / "include" / "aicpu_api",
             asc_root / "include" / "basic_api",
             asc_root / "include" / "basic_api" / "reg_compute",
@@ -2015,6 +2017,8 @@ def _ascendc_builtin_include_dirs(ascend_home: Path) -> list[Path]:
             asc_root / "include" / "simt_api",
             asc_root / "include" / "tiling",
             asc_root / "include" / "utils",
+            asc_root / "include" / "utils" / "debug",
+            ascend_home / "include" / "ascendc" / "highlevel_api",
             highlevel_api,
             Path(__file__).resolve().parents[3] / "include",
         )

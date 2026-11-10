@@ -13,13 +13,37 @@ from catlass._mlir import ir as mlir_ir  # type: ignore[assignment]
 
 from ..base_dsl.op import dsl_user_op
 from ..base_dsl.typing import Numeric, TypedPointer
+from ..types import TlaVectorSSATypeDescriptor, dtype_size_bytes
 
 
 _SYMBOL_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
-ExternArgType: TypeAlias = TypedPointer | type[Numeric]
+ExternArgType: TypeAlias = TypedPointer | type[Numeric] | TlaVectorSSATypeDescriptor
 _IncludeDir: TypeAlias = str | os.PathLike[str]
+
+
+def _extern_register_type(element_type: str) -> TlaVectorSSATypeDescriptor:
+    if element_type not in (
+        "f16",
+        "bf16",
+        "f32",
+        "i8",
+        "i16",
+        "i32",
+        "i64",
+        "u8",
+        "u16",
+        "u32",
+        "u64",
+    ):
+        raise TypeError(
+            "extern VectorSSA annotations support Float16, BFloat16, Float32 "
+            "and Int/UInt8/16/32/64"
+        )
+    return TlaVectorSSATypeDescriptor(
+        256 // dtype_size_bytes(element_type), element_type
+    )
 
 
 @dataclass(frozen=True)
@@ -30,20 +54,21 @@ class ExternFunction:
     symbol: str
     arg_types: tuple[ExternArgType, ...]
     include_dirs: tuple[Path, ...] = ()
+    return_type: TlaVectorSSATypeDescriptor | None = None
 
     @dsl_user_op
     def __call__(
         self,
         *args: object,
         loc: mlir_ir.Location | None = None,
-    ) -> None:
+    ) -> object:
         """Emit a call to this external function during frontend lowering."""
 
         # Importing here keeps declaration independent from the frontend's
         # comparatively heavy core_api module.
         from ..core_api import _emit_extern_call
 
-        _emit_extern_call(self, args, loc=loc)
+        return _emit_extern_call(self, args, loc=loc)
 
 
 def _validate_symbol(symbol: object) -> str:
@@ -53,6 +78,10 @@ def _validate_symbol(symbol: object) -> str:
 
 
 def _validate_arg_type(annotation: object, *, parameter: str) -> ExternArgType:
+    if isinstance(annotation, TlaVectorSSATypeDescriptor):
+        if annotation != _extern_register_type(annotation.element_type):
+            raise TypeError("extern registers must have all lanes valid (256 bytes)")
+        return annotation
     if isinstance(annotation, TypedPointer):
         return annotation
     if (
@@ -62,8 +91,9 @@ def _validate_arg_type(annotation: object, *, parameter: str) -> ExternArgType:
     ):
         return annotation
     raise TypeError(
-        "tla.extern parameter annotations must be Pointer[dtype, memory_space] "
-        f"or a concrete Numeric type; parameter {parameter!r} has {annotation!r}"
+        "tla.extern parameter annotations must be Pointer[dtype, memory_space], "
+        "VectorSSA[dtype] or a concrete Numeric type; "
+        f"parameter {parameter!r} has {annotation!r}"
     )
 
 
@@ -72,7 +102,7 @@ def extern(
     source: str,
     name: str | None = None,
     include_dirs: _IncludeDir | Sequence[_IncludeDir] = (),
-) -> Callable[[Callable[..., None]], ExternFunction]:
+) -> Callable[[Callable[..., object]], ExternFunction]:
     """Directory: Decorators
     Description:
         Declare a Ascend C ABI entry point implemented by inline Ascend C source. The
@@ -91,10 +121,22 @@ def extern(
     Constraints:
         - `name` must be a valid C identifier, and `source` must be non-empty.
         - Parameters must be positional, have no defaults, and be annotated with
-          `tla.Pointer[dtype, address_space]` or a concrete TLA numeric type.
-        - The return annotation must be `None`.
-        - Calls must be inside exactly one `tla.cube()` or `tla.vector()` region
-          and outside `tla.vec.func()`.
+          `tla.Pointer[dtype, address_space]`, a concrete TLA numeric type,
+          or `tla.VectorSSA[dtype]`.
+        - The return annotation must be `None` or one `tla.VectorSSA[dtype]`.
+          Supported register dtypes are `Float16`, `BFloat16`, `Float32`, and
+          `Int8/16/32/64` / `UInt8/16/32/64`. Every register must have all lanes
+          valid: 256 for 8-bit, 128 for 16-bit, 64 for 32-bit, and 32 for 64-bit
+          elements (one 256-byte register). The external implementation must fill
+          every lane of the result.
+        - Register arguments and results must be used within the same SIMD VF.
+          The result can feed subsequent TLA operations.
+        - Calls must be inside exactly one `tla.cube()` or `tla.vector()` region.
+          A SIMD VF containing an extern call must access tensor memory or pass a
+          `tla.Pointer` to at least one extern call. An ordinary `Int64` argument counts
+          as a scalar. The compiler outlines the VF or reports an error. The extern
+          implementation must inline into that VF without starting another VF. SIMT
+          VFs do not support extern calls.
         - Within one kernel, a symbol may use only one extern declaration object;
           declarations sharing the same source must use identical ordered
           `include_dirs`.
@@ -133,7 +175,7 @@ def extern(
         raise ValueError("tla.extern source must not be empty")
     explicit_symbol = None if name is None else _validate_symbol(name)
 
-    def decorator(fn: Callable[..., None]) -> ExternFunction:
+    def decorator(fn: Callable[..., object]) -> ExternFunction:
         signature = inspect.signature(fn)
         hints = get_type_hints(fn)
         symbol = (
@@ -162,11 +204,14 @@ def extern(
 
         # Validity check
         return_annotation = hints.get("return", signature.return_annotation)
-        if return_annotation not in (None, type(None)):
+        return_type = None
+        if isinstance(return_annotation, TlaVectorSSATypeDescriptor):
+            return_type = _validate_arg_type(return_annotation, parameter="return")
+        elif return_annotation not in (None, type(None)):
             if return_annotation is inspect.Signature.empty:
                 detail = "is missing"
             else:
-                detail = f"must be None, got {return_annotation!r}"
+                detail = f"must be None or VectorSSA[dtype], got {return_annotation!r}"
             raise TypeError(f"tla.extern return annotation for {fn.__name__} {detail}")
 
         arg_types: list[ExternArgType] = []
@@ -198,6 +243,7 @@ def extern(
             symbol=symbol,
             arg_types=tuple(arg_types),
             include_dirs=resolved_include_dirs,
+            return_type=return_type,
         )
 
     return decorator

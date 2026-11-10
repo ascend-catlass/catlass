@@ -119,8 +119,8 @@ with tla.vec.func(mode="simd"):
 `VectorSSA.to` 的职责，在此会被拒绝。`tla.Bool`（i1）、`tla.Float8E8M0` 与打包的
 fp4 格式不是合法的 `!tla.vector` 元素类型，同样会被拒绝。
 
-需要注意，`i64`/`u64` 虽然可以通过校验，但目前并不可达：`tla.make_tensor_like`
-拒绝 `i64` 元素类型，因此没有任何路径能产生 64 位的 vector 寄存器。
+`i64`/`u64` 寄存器可由 extern 返回，并在两种类型间进行 bitcast。
+现有 tensor API 不支持直接 load 这些寄存器类型。
 
 函数原型：
 

@@ -105,9 +105,9 @@ preserved. A width change is `VectorSSA.to`'s job and is rejected
 here. `tla.Bool` (i1), `tla.Float8E8M0` and the packed fp4 formats
 are not valid `!tla.vector` element types and are rejected too.
 
-Note that `i64`/`u64` verify but are not reachable in practice:
-nothing can currently produce a 64-bit vector register, because
-`tla.make_tensor_like` rejects an `i64` element type.
+`i64`/`u64` registers can be returned by an extern and bitcast to
+each other. The tensor API does not provide direct loads of these
+register types.
 
 Prototype:
 

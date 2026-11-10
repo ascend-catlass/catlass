@@ -17,7 +17,7 @@ OP_SOURCE_CODES = r"""
 
 extern "C" {
 
-[aicore] __attribute__((always_inline)) void tla_user_gm_to_ub_f32(
+__aicore__ __attribute__((always_inline)) void tla_user_gm_to_ub_f32(
     uint64_t src_gm_addr, uint64_t dst_ub_addr, int32_t count) {
   AscendC::GlobalTensor<float> src;
   src.SetGlobalBuffer(reinterpret_cast<__gm__ float *>(src_gm_addr),

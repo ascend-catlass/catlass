@@ -155,6 +155,19 @@ static uint64_t computeDynamicUbBaseBytes(::tla::DynamicUbBaseOp op, uint64_t ub
     return (ubHighWaterBytes + alignment - 1) / alignment * alignment;
 }
 
+// Convert the operands of extern calls retained for SIMD outlining.
+struct LowerExternOperandsPattern : public OpConversionPattern<::tla::CallExternOp> {
+    using OpConversionPattern::OpConversionPattern;
+
+    LogicalResult matchAndRewrite(
+        ::tla::CallExternOp op, OpAdaptor adaptor, ConversionPatternRewriter& rewriter) const override
+    {
+        rewriter.replaceOpWithNewOp<::tla::CallExternOp>(
+            op, op.getResultTypes(), op.getCalleeAttr(), adaptor.getOperands());
+        return success();
+    }
+};
+
 struct LowerAllocPtrPattern : public OpConversionPattern<::tla::AllocPtrOp> {
     LowerAllocPtrPattern(
         TypeConverter& converter, MLIRContext* context, const llvm::DenseMap<Value, uint64_t>& offsetByAllocResult,
@@ -440,7 +453,8 @@ public:
         ConversionTarget target(*context);
         patterns.add<LowerAllocPtrPattern>(converter, context, allocationPlan->offsetByAllocResult, ubScratch);
         patterns.add<LowerDynamicUbBasePattern>(converter, context, *ubBytes);
-        patterns.add<LowerIntToPtrPattern, LowerRecastPtrPattern, LowerPtrAddPattern>(converter, context);
+        patterns.add<LowerIntToPtrPattern, LowerRecastPtrPattern, LowerPtrAddPattern, LowerExternOperandsPattern>(
+            converter, context);
         scf::populateSCFStructuralTypeConversionsAndLegality(converter, patterns, target);
         populateFunctionOpInterfaceTypeConversionPattern<func::FuncOp>(patterns, converter);
         populateCallOpTypeConversionPattern(patterns, converter);
@@ -453,6 +467,8 @@ public:
         target.addIllegalOp<::tla::AllocPtrOp, ::tla::DynamicUbBaseOp, ::tla::RecastPtrOp, ::tla::PtrAddOp>();
         target.addDynamicallyLegalOp<::tla::TensorPtrOp>([](::tla::TensorPtrOp op) { return op.use_empty(); });
         target.addDynamicallyLegalOp<::tla::IntToPtrOp>(isPointerConsumerBoundary);
+        target.addDynamicallyLegalOp<::tla::CallExternOp>(
+            [&](::tla::CallExternOp op) { return converter.isLegal(op.getOperandTypes()); });
         // Leave memref↔tensor scaffolding legal so tla-finalize-memref can DCE
         // dead bridge casts. Same-width integer casts are the unsigned
         // debug-print bridge: arith.constant cannot return uiN, and

@@ -34,7 +34,7 @@ GM_TO_UB_SOURCE = r"""
 
 extern "C" {
 
-[aicore] __attribute__((always_inline)) void tla_multi_gm_to_ub_f32(
+__aicore__ __attribute__((always_inline)) void tla_multi_gm_to_ub_f32(
     uint64_t src_gm_addr, uint64_t dst_ub_addr, int32_t count) {
   AscendC::GlobalTensor<float> src;
   src.SetGlobalBuffer(reinterpret_cast<__gm__ float *>(src_gm_addr),
@@ -54,7 +54,7 @@ UB_TO_GM_SOURCE = r"""
 
 extern "C" {
 
-[aicore] __attribute__((always_inline)) void tla_multi_ub_to_gm_f32(
+__aicore__ __attribute__((always_inline)) void tla_multi_ub_to_gm_f32(
     uint64_t src_ub_addr, uint64_t dst_gm_addr, int32_t count) {
   AscendC::LocalTensor<float> src(AscendC::TPosition::VECCALC,
                                   static_cast<uint32_t>(src_ub_addr),

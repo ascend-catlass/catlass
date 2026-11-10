@@ -91,10 +91,10 @@ _CAST_SAME_TYPE_FLOAT_DTYPES = frozenset({"f16", "bf16", "f32"})
 # register is an i8 carrier holding two values per lane, which makes
 # reinterpreting it a src_format question rather than a bitcast.
 #
-# i64/u64 are admitted and verify correctly, but note there is no supported way
-# to *obtain* a 64-bit vector register today -- tla.make_tensor_like rejects an
-# i64 element type, so the load path cannot produce one. They are kept so the
-# op stays correct for a 64-bit vector if one ever becomes constructible.
+# i64/u64 registers can be returned by an extern and bitcast to each other.
+# Their tensor load path remains unavailable: tla.make_tensor_like rejects
+# these element types. Extern-produced registers follow the same-width
+# restriction as other bitcast inputs.
 _BITCAST_ELEMENT_TYPES = frozenset(
     {
         "i8",
@@ -781,6 +781,15 @@ class VectorSSA(_RegisterSSA):
     _expected_type = "!tla.vector<NxT>"
 
     @classmethod
+    def __class_getitem__(cls, dtype: type[Numeric]) -> TlaVectorSSATypeDescriptor:
+        """Describe a full register of the given dtype in an extern signature."""
+        from .tla.ffi import _extern_register_type
+
+        if not isinstance(dtype, type) or not issubclass(dtype, Numeric):
+            raise TypeError("VectorSSA[dtype] requires a concrete TLA numeric type")
+        return _extern_register_type(dtype.dtype)
+
+    @classmethod
     def _matches_register_type(cls, value_type: mlir_ir.Type) -> bool:
         return _tla_type_bridge.type_is_vector_ssa(value_type)
 
@@ -1041,9 +1050,9 @@ class VectorSSA(_RegisterSSA):
             here. `tla.Bool` (i1), `tla.Float8E8M0` and the packed fp4 formats
             are not valid `!tla.vector` element types and are rejected too.
 
-            Note that `i64`/`u64` verify but are not reachable in practice:
-            nothing can currently produce a 64-bit vector register, because
-            `tla.make_tensor_like` rejects an `i64` element type.
+            `i64`/`u64` registers can be returned by an extern and bitcast to
+            each other. The tensor API does not provide direct loads of these
+            register types.
 
             Parameters:
             - `dst_type` (`type[Numeric]`): Same-width element type to
@@ -11004,7 +11013,7 @@ def _emit_extern_call(
     args: tuple[object, ...],
     *,
     loc: mlir_ir.Location | None = None,
-) -> None:
+) -> VectorSSA | None:
     """Validate and emit a call to a declared external function."""
 
     _require_frontend_state("extern")
@@ -11016,8 +11025,13 @@ def _emit_extern_call(
             "extern",
             "call must be nested inside exactly one of tla.vector() or tla.cube()",
         )
-    if in_vector and _runtime._has_enclosing_region("vec.func"):
-        _op_error("extern", "call must be outside tla.vec.func()")
+    if _runtime._in_simt_vec_func():
+        _op_error("extern", "call is not supported inside a SIMT tla.vec.func()")
+    has_register = extern_function.return_type is not None or any(
+        isinstance(t, TlaVectorSSATypeDescriptor) for t in extern_function.arg_types
+    )
+    if has_register:
+        _runtime._require_enclosing_region("extern register call", "vec.func")
     core_type = "aiv" if in_vector else "aic"
     if len(args) != len(extern_function.arg_types):
         _op_error(
@@ -11029,7 +11043,20 @@ def _emit_extern_call(
     for position, (arg, expected) in enumerate(
         zip(args, extern_function.arg_types, strict=True)
     ):
-        if isinstance(expected, TypedPointer):
+        if isinstance(expected, TlaVectorSSATypeDescriptor):
+            _require_category(
+                "extern", f"argument {position}", arg, "vector_ssa", position
+            )
+            value = _as_value(arg)
+            actual = _vector_ssa_type_for_mlir_value(value)
+            if actual != expected:
+                _op_error(
+                    "extern",
+                    f"argument {position} of {extern_function.symbol} requires a full "
+                    f"{expected.element_type} register ({expected.valid_lanes} valid lanes), "
+                    f"got {value.type}",
+                )
+        elif isinstance(expected, TypedPointer):
             # Pointer case: get and validate ptr type, pointee type and address space.
             resolved = _resolve_bound_value(arg)
             if isinstance(arg, Tensor) or (
@@ -11105,11 +11132,21 @@ def _emit_extern_call(
         )
 
     # Create the call op and record it in usage.
-    call_op = _tla_ops_gen.call_extern(extern_function.symbol, operands, loc=loc)
+    result_types = (
+        [extern_function.return_type.to_mlir_type()]
+        if extern_function.return_type is not None
+        else []
+    )
+    call_op = _tla_ops_gen.CallExternOp(
+        result_types, extern_function.symbol, operands, loc=loc
+    ).operation
     if usage is None:
         usage = _ExternUsage(function=extern_function)
         state.extern_usages[extern_function.symbol] = usage
     usage.calls.append((call_op, core_type))
+    if result_types:
+        return VectorSSA(call_op.results[0])
+    return None
 
 
 _mask_namespace = _Namespace()

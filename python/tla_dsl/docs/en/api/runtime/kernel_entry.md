@@ -288,7 +288,7 @@ describe the symbol and argument ABI emitted by calls inside a TLA kernel.
 Prototype:
 
 ```python
-tla.extern(*, source: str, name: str | None = None, include_dirs: str | os.PathLike[str] | Sequence[str | os.PathLike[str]] = ()) -> Callable[[Callable[..., None]], ExternFunction]
+tla.extern(*, source: str, name: str | None = None, include_dirs: str | os.PathLike[str] | Sequence[str | os.PathLike[str]] = ()) -> Callable[[Callable[..., object]], ExternFunction]
 ```
 
 Parameters:
@@ -305,10 +305,22 @@ Constraints:
 
 - `name` must be a valid C identifier, and `source` must be non-empty.
 - Parameters must be positional, have no defaults, and be annotated with
-  `tla.Pointer[dtype, address_space]` or a concrete TLA numeric type.
-- The return annotation must be `None`.
-- Calls must be inside exactly one `tla.cube()` or `tla.vector()` region
-  and outside `tla.vec.func()`.
+  `tla.Pointer[dtype, address_space]`, a concrete TLA numeric type,
+  or `tla.VectorSSA[dtype]`.
+- The return annotation must be `None` or one `tla.VectorSSA[dtype]`.
+  Supported register dtypes are `Float16`, `BFloat16`, `Float32`, and
+  `Int8/16/32/64` / `UInt8/16/32/64`. Every register must have all lanes
+  valid: 256 for 8-bit, 128 for 16-bit, 64 for 32-bit, and 32 for 64-bit
+  elements (one 256-byte register). The external implementation must fill
+  every lane of the result.
+- Register arguments and results must be used within the same SIMD VF.
+  The result can feed subsequent TLA operations.
+- Calls must be inside exactly one `tla.cube()` or `tla.vector()` region.
+  A SIMD VF containing an extern call must access tensor memory or pass a
+  `tla.Pointer` to at least one extern call. An ordinary `Int64` argument counts
+  as a scalar. The compiler outlines the VF or reports an error. The extern
+  implementation must inline into that VF without starting another VF. SIMT
+  VFs do not support extern calls.
 - Within one kernel, a symbol may use only one extern declaration object;
   declarations sharing the same source must use identical ordered
   `include_dirs`.

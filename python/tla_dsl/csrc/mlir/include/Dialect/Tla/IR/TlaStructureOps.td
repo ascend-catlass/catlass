@@ -44,10 +44,13 @@ def Tla_CallExternOp : Tla_Op<"call_extern", [MemoryEffects<[MemRead, MemWrite]>
   let description = [{
     Calls one C ABI device function supplied by user LLVM bitcode. Pointer
     operands remain !tla.ptr until tla-lower-ptr converts them to i64 byte
-    addresses. v1 has no results and conservatively models unknown memory
-    reads and writes.
+    addresses. SIMD calls also accept full 256-byte registers of f16, bf16,
+    f32, and 8/16/32/64-bit integer elements, and may return one such register.
+    Each argument and result has its own element type.
+    Calls conservatively model unknown memory reads and writes.
   }];
   let arguments = (ins FlatSymbolRefAttr:$callee, Variadic<AnyType>:$operands);
+  let results = (outs Variadic<AnyType>:$results);
   let assemblyFormat = [{
     $callee `(` $operands `)` attr-dict `:` functional-type($operands, results)
   }];

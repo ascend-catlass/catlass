@@ -169,6 +169,13 @@ def inside_vec_func_kernel(gm: tla.Tensor) -> None:
 
 
 @tla.kernel
+def inside_simt_func_kernel(value: tla.Int32) -> None:
+    with tla.vector():
+        with tla.vec.func(mode="simt", thread_block_dim=64):
+            tla_user_dual_core(value)
+
+
+@tla.kernel
 def wrong_scalar_type_kernel(gm: tla.Tensor) -> None:
     ub = tla.allocate(256, tla.Float32, tla.AddressSpace.ub, 256)
     with tla.vector():
@@ -355,8 +362,10 @@ def test_extern_rejects_tensor_and_requests_explicit_pointer() -> None:
 def test_extern_checks_call_region() -> None:
     with pytest.raises(TlaCoreAPIError, match="exactly one.*vector.*cube"):
         outside_vector_kernel.dump_mlir(type_args=(_fake_gm_tensor(),))
-    with pytest.raises(TlaCoreAPIError, match="outside tla.vec.func"):
-        inside_vec_func_kernel.dump_mlir(type_args=(_fake_gm_tensor(),))
+    with pytest.raises(TlaCoreAPIError, match="SIMT tla.vec.func"):
+        inside_simt_func_kernel.dump_mlir(type_args=(tla.Int32(1),))
+    lowered = _lower_kernel(inside_vec_func_kernel, _fake_gm_tensor())
+    assert lowered.extern_compile_specs == (_compile_spec(EXTERN_SOURCE_CODE, {"aiv"}),)
 
 
 def test_extern_infers_aic_and_mixed_call_targets() -> None:

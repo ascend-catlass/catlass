@@ -3775,6 +3775,23 @@ static LogicalResult lowerNestedVectorOp(
         return success();
     }
 
+    if (auto call = dyn_cast<::tla::CallExternOp>(op)) {
+        SmallVector<Value> args;
+        for (Value operand : call.getOperands()) {
+            Value mapped = lookupOrCloneScalarValue(b, operand, valueMap);
+            if (!mapped)
+                return call.emitOpError("failed to map extern argument into the VF");
+            args.push_back(mapped);
+        }
+        auto callee = module.lookupSymbol<func::FuncOp>(call.getCallee());
+        if (!callee)
+            return call.emitOpError("failed to find extern callee in module: ") << call.getCallee();
+        auto lowered = b.create<func::CallOp>(loc, callee, args);
+        for (auto [source, result] : llvm::zip(call.getResults(), lowered.getResults()))
+            valueMap[source] = result;
+        return success();
+    }
+
     if (auto ptrToInt = dyn_cast<::tla::PtrToIntOp>(op)) {
         Value mapped = lookupOrCloneScalarValue(b, ptrToInt.getPtr(), valueMap);
         if (!mapped)
@@ -4064,7 +4081,8 @@ static LogicalResult lowerNestedVectorOp(
 
     // Rebuild the descriptor view used by a scalar access from the base memref
     // passed to the helper.
-    if (isa<mlir::memref::ExtractStridedMetadataOp, mlir::memref::ReinterpretCastOp>(op)) {
+    if (isa<mlir::memref::ExtractStridedMetadataOp, mlir::memref::ReinterpretCastOp,
+            mlir::memref::ExtractAlignedPointerAsIndexOp>(op)) {
         IRMapping mapper;
         for (Value operand : op.getOperands()) {
             Value mapped = lookupOrCloneScalarValue(b, operand, valueMap);
@@ -4395,8 +4413,14 @@ static LogicalResult collectVectorHelperOperands(
                 addVectorHelperOperand(gatherOp.getX(), operands, aliases);
             continue;
         }
-        // Bridged scalar accesses (after tla-lower-scalar-access) appear as
-        // memref.load/store.
+        // A memref-backed tensor.ptr in an extern argument reads the aligned address.
+        if (auto addr = dyn_cast<mlir::memref::ExtractAlignedPointerAsIndexOp>(op)) {
+            auto source = getScalarAccessHelperMemref(addr.getSource(), outlinedRegion, callSite, dominanceInfo);
+            if (failed(source))
+                return failure();
+            addVectorHelperOperand(*source, operands, aliases);
+            continue;
+        }
         if (auto memLoad = dyn_cast<mlir::memref::LoadOp>(op)) {
             FailureOr<Value> source =
                 getScalarAccessHelperMemref(memLoad.getMemRef(), outlinedRegion, callSite, dominanceInfo);
@@ -4650,9 +4674,12 @@ public:
         SmallVector<Value, 4> unalignLoads;
         int unalignStores = 0;
         bool hasDebugPrint = false;
+        bool hasExtern = false;
         vecFuncOp->walk([&](Operation* op) {
             hasDebugPrint |= isa<::tla::DebugPrintOp, ::tla::PrintVectorOp, ::tla::PrintTensorOp>(op);
-            if (auto load = dyn_cast<::tla::LoadOp>(op)) {
+            if (isa<::tla::CallExternOp>(op)) {
+                hasExtern = true;
+            } else if (auto load = dyn_cast<::tla::LoadOp>(op)) {
                 loads.push_back(load);
             } else if (auto loadUpdate = dyn_cast<::tla::LoadUpdateOp>(op)) {
                 loadUpdates.push_back(loadUpdate);
@@ -4679,12 +4706,15 @@ public:
         });
         if (hasDebugPrint && module->hasAttr("tla.ub_reserve_released"))
             return vecFuncOp.emitError("VF printing requires the default reserved UB");
-        if (stores.empty() && storeUpdates.empty() && unalignStores == 0 && !hasDebugPrint) {
+        if (!hasExtern && stores.empty() && storeUpdates.empty() && unalignStores == 0 && !hasDebugPrint) {
             // Scalar-only (or empty) VF cannot be outlined as a BiSheng helper — that
             // path requires tla.store or tla.store_update. If there is also no tile
             // load/compute, inline the body into the parent (same as tla.vector
             // flattening) so scalar_load/store + scf stay legal for later
             // convert-scf-to-cf.
+            // tla.call_extern is opaque, it may have side effects, so if
+            // there is no opaque extern or vector stores, flatten scalar-only
+            // regions.
             if (!loads.empty() || !loadUpdates.empty() || !unalignLoads.empty() || !fulls.empty() ||
                 !createMasks.empty() || !updateMasks.empty() || !aranges.empty() || !computeOps.empty())
                 return rewriter.notifyMatchFailure(
@@ -4697,6 +4727,9 @@ public:
         // Validate the graph: every compute operand and store source must come from
         // a tla.load result or a prior compute result inside this region.
         DenseSet<Value> producedValues;
+        vecFuncOp.walk([&](::tla::CallExternOp call) {
+            producedValues.insert(call.getResults().begin(), call.getResults().end());
+        });
         for (::tla::LoadOp load : loads) {
             producedValues.insert(load.getResult());
             if (Value result2 = load.getResult2())
@@ -4916,7 +4949,7 @@ public:
             invalidScalarAccessBase = true;
             return failure();
         }
-        if (helperOperands.empty() && !hasDebugPrint)
+        if (helperOperands.empty() && !hasDebugPrint && !hasExtern)
             return rewriter.notifyMatchFailure(vecFuncOp, "expected vector region tensor operands");
         // Scalars captured from outside the region (e.g. a sub_block_idx computed at
         // the top of the kernel) are passed as trailing scalar arguments.
@@ -5167,6 +5200,33 @@ public:
         ModuleOp module = getOperation();
         nextVectorRegionId = 0;
 
+        // Extern signatures were checked in TLA types before ptr lowering.
+        // Convert declarations here, e.g. !tla.vector<128xf16> to vector<128xf16>.
+        for (func::FuncOp func : module.getOps<func::FuncOp>()) {
+            if (!func.isDeclaration())
+                continue;
+            SmallVector<Type> inputs, results;
+            for (Type type : func.getArgumentTypes()) {
+                auto lowered = lowerSCFCarrierType(type);
+                if (failed(lowered)) {
+                    func.emitOpError("cannot lower extern argument type ") << type;
+                    signalPassFailure();
+                    return;
+                }
+                inputs.push_back(*lowered);
+            }
+            for (Type type : func.getResultTypes()) {
+                auto lowered = lowerSCFCarrierType(type);
+                if (failed(lowered)) {
+                    func.emitOpError("cannot lower extern result type ") << type;
+                    signalPassFailure();
+                    return;
+                }
+                results.push_back(*lowered);
+            }
+            func.setType(FunctionType::get(&getContext(), inputs, results));
+        }
+
         // Snapshot the functions up front: lowering a vec.func appends a new
         // vector_region helper to the module, and that helper must not be fed back
         // through the lowering/folding driver (it already holds lowered AVE ops and
@@ -5206,6 +5266,18 @@ public:
                 signalPassFailure();
                 return;
             }
+        }
+
+        // A pattern can decline a match without failing the greedy driver.
+        // Never hand an unoutlined extern VF to the backend as successful IR.
+        if (module
+                .walk([&](::tla::CallExternOp call) {
+                    call.emitOpError("failed to outline enclosing SIMD VF for extern @") << call.getCallee();
+                    return WalkResult::interrupt();
+                })
+                .wasInterrupted()) {
+            signalPassFailure();
+            return;
         }
 
         // `module.getOps<func::FuncOp>()` visits only direct functions. Inline any

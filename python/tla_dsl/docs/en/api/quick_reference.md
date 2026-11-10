@@ -23,7 +23,7 @@ Context labels: **Host** means a Python script outside `@tla.kernel`; **kernel**
 | --- | --- | --- |
 | [`@tla.kernel`](runtime/kernel_entry.md#tlakernel) | Declare a kernel entry and obtain a `TlaJitFunction`. | Host decorator; the body is not executed on the Host, and direct invocation is disabled. Compile before launch. |
 | [`@tla.jit`](runtime/kernel_entry.md#tlajit) | Declare a device helper inlined during kernel lowering. | Declared on the Host; no standalone `compile` or `dump_mlir`, and no recursive helper calls. |
-| [`@tla.extern`](runtime/kernel_entry.md#tlaextern) | Declare an Ascend C ABI entry implemented by inline source. | Host declaration; calls belong in one Cube or Vector region and outside `tla.vec.func`. |
+| [`@tla.extern`](runtime/kernel_entry.md#tlaextern) | Declare an Ascend C ABI entry implemented by inline source. | Host declaration; calls belong in one Cube or Vector region, including SIMD VFs. SIMT VFs are unsupported. |
 | [`tla.compile`](runtime/compile_launch.md#tlacompile) | Compile a kernel from type samples and return a `JitCompiledFunction`. | Host; samples need not be bound NPU buffers. Launch options such as `block_num` and `stream` belong to the compiled call. |
 | [`tla.JitCompiledFunction.__call__`](runtime/compile_launch.md#tlajitcompiledfunction__call__) | Launch a compiled kernel and reuse its executor and binary. | Host; tensor arguments must be bound NPU buffers. `make_fake_tensor` results cannot be launched. |
 | [`tla.from_dlpack`](runtime/host_tensor.md#tlafrom_dlpack) | Bind a DLPack tensor as a TLA Host tensor without copying device data. | Host; `layout_tag` is required. NPU buffers support launch; CPU buffers provide compile-only metadata. |

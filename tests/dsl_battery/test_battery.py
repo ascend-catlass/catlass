@@ -396,6 +396,14 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
 
     # --- extern_op: user-provided Ascend C functions called from TLA kernels ---
     yield (
+        "extern-simd-reg-types",
+        [["dsl_tutorials/extern_op/extern_simd_reg_types.py", *dev]],
+    )
+    yield (
+        "extern-simd-reg-add",
+        [["dsl_tutorials/extern_op/extern_simd_reg_add.py", *dev]],
+    )
+    yield (
         "extern-vecadd",
         [["dsl_tutorials/extern_op/extern_vecadd.py", *dev]],
     )
@@ -410,6 +418,10 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
     yield (
         "extern-custom-include",
         [["dsl_tutorials/extern_op/extern_custom_include.py", *dev]],
+    )
+    yield (
+        "extern-simd-vf-add",
+        [["dsl_tutorials/extern_op/extern_simd_vf_add.py", *dev]],
     )
 
     # --- basic_mixed ---

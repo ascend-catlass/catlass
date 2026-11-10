@@ -26,7 +26,7 @@ OP_SOURCE_CODE = r"""
 
 extern "C" {
 
-[aicore] __attribute__((always_inline)) void tla_user_custom_include(
+__aicore__ __attribute__((always_inline)) void tla_user_custom_include(
     uint64_t dst_gm_addr) {
   auto dst = reinterpret_cast<__gm__ int32_t *>(dst_gm_addr);
   dst[0] = tla_custom::kHeaderValue;
