@@ -227,13 +227,15 @@ struct TileCopyTla<
 };
 
 /// Partial specialization for CopyGmToL1, Ascend950, VectorLayout in and VectorLayout out.
+///
+/// Default two-arg path uses DataCopyPad with an exact byte length from originShape,
+/// matching CopyGm2UbTla VectorLayout. CeilDiv+DataCopy would over-read GM whenever
+/// originShape is not C0-aligned (e.g. bias rem tiles).
 template <class ElementSrc, class ElementDst, class LayoutSrc, class LayoutDst, class CoordSrc, class CoordDst>
 struct TileCopyTla<
     Arch::Ascend950, tla::Tensor<AscendC::GlobalTensor<ElementSrc>, LayoutSrc, CoordSrc, AscendC::TPosition::GM>,
     tla::Tensor<AscendC::LocalTensor<ElementDst>, LayoutDst, CoordDst, AscendC::TPosition::A1>,
     std::enable_if_t<tla::detail::isVector<LayoutSrc>::value && tla::detail::isVector<LayoutDst>::value>> {
-    static constexpr uint32_t ELE_NUM_PER_C0 = BytesToBits(BYTE_PER_C0) / SizeOfBits<ElementSrc>::value;
-
     // Methods
 
     CATLASS_DEVICE
@@ -248,20 +250,19 @@ struct TileCopyTla<
                 TensorSrc::position == AscendC::TPosition::GM && TensorDst::position == AscendC::TPosition::A1,
             "The input parameters do not match. TensorSrc must be GM and Vector, "
             "while TensorDst must be L1 and Vector");
-
-        AscendC::DataCopyParams intriParams;
-        intriParams.blockCount = 1;
-        intriParams.blockLen = CeilDiv(tla::get<0>(srcTensor.originShape()), ELE_NUM_PER_C0);
-        intriParams.srcStride = 0;
-        intriParams.dstStride = 0;
+        static_assert(
+            SizeOfBits<ElementSrc>::value == BytesToBits(sizeof(ElementSrc)),
+            "VectorLayout GM->L1 DataCopyPad requires byte-addressable elements");
 
         auto dstOffset = dstTensor.layout()(dstTensor.coord());
         auto srcOffset = srcTensor.layout()(srcTensor.coord());
-
-        AscendC::DataCopy(dstTensor.data()[dstOffset], srcTensor.data()[srcOffset], intriParams);
+        AscendC::DataCopyExtParams intriParams(1, tla::get<0>(srcTensor.originShape()) * sizeof(ElementSrc), 0, 0, 0);
+        // Same default Pad args as CopyGm2UbTla VectorLayout: exact bytes, no fill.
+        AscendC::DataCopyPadExtParams<ElementSrc> padParams(false, 0, 0, static_cast<ElementSrc>(0));
+        AscendC::DataCopyPad(dstTensor.data()[dstOffset], srcTensor.data()[srcOffset], intriParams, padParams);
     }
 
-    // Explicit opt-in for vectors without GM tail padding.
+    // Explicit opt-in that fills the L1 C0 tail with padValue.
     template <class TensorDst, class TensorSrc>
     CATLASS_DEVICE void operator()(TensorDst const& dstTensor, TensorSrc const& srcTensor, ElementSrc padValue)
     {
