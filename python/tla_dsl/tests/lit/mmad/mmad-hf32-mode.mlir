@@ -2,9 +2,10 @@
 // and SPR.CTRL[47] (rounding select), the DSL equivalents of AscendC::SetHF32Mode
 // and AscendC::SetHF32TransMode.
 //
-// HF32_NEAREST_ZERO -> set_ctrl true  at ctrl[46], set_ctrl true  at ctrl[47] (func entry).
-// HF32_NEAREST_EVEN -> set_ctrl true  at ctrl[46], set_ctrl false at ctrl[47] (func entry).
-// HF32_DISABLE      -> set_ctrl false at ctrl[46], set_ctrl false at ctrl[47] (func entry).
+// Owned by tla-insert-implicit-ctrl (InitSoc leaves CTRL[46]/[47]=0):
+// HF32_NEAREST_ZERO -> set_ctrl true  at ctrl[46], set_ctrl true  at ctrl[47].
+// HF32_NEAREST_EVEN -> set_ctrl true  at ctrl[46], set_ctrl false at ctrl[47].
+// HF32_DISABLE      -> no insert (already matches InitSoc); epilogue still clears.
 // mixed (NEAREST_ZERO + NEAREST_EVEN) -> per-mmad set_ctrl at ctrl[46]/ctrl[47].
 //
 // RUN: %tla_compile %s -o - | %filecheck %s --check-prefix=NZ
@@ -111,15 +112,14 @@ module {
 
 // NE-LABEL: func.func @mmad_hf32_nearest_even
 // NE: hivm.hir.set_ctrl true at ctrl[46]
-// NE: hivm.hir.set_ctrl false at ctrl[47]
+// InitSoc already leaves CTRL[47]=0; only [46] is written before the call.
 // NE: call @mmad_float_float_float
 // NE: hivm.hir.set_ctrl false at ctrl[46]
 // NE: hivm.hir.set_ctrl false at ctrl[47]
 // NE-NOT: tla.mmad
 
 // DIS-LABEL: func.func @mmad_hf32_disable
-// DIS: hivm.hir.set_ctrl false at ctrl[46]
-// DIS: hivm.hir.set_ctrl false at ctrl[47]
+// DIS-NOT: hivm.hir.set_ctrl true at ctrl[46]
 // DIS: call @mmad_float_float_float
 // DIS: hivm.hir.set_ctrl false at ctrl[46]
 // DIS: hivm.hir.set_ctrl false at ctrl[47]
@@ -129,7 +129,7 @@ module {
 // MIXED: hivm.hir.set_ctrl true at ctrl[46]
 // MIXED: hivm.hir.set_ctrl true at ctrl[47]
 // MIXED: call @mmad_float_float_float
-// MIXED: hivm.hir.set_ctrl true at ctrl[46]
+// CTRL[46] already 1 from the first mmad; only CTRL[47] flips for NEAREST_EVEN.
 // MIXED: hivm.hir.set_ctrl false at ctrl[47]
 // MIXED: call @mmad_float_float_float
 // MIXED: hivm.hir.set_ctrl false at ctrl[46]

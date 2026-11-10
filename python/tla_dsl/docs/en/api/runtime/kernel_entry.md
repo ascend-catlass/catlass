@@ -77,6 +77,12 @@ executed on the Host. Returns a `TlaJitFunction`. Direct invocation of a
 kernel is disabled; compile it explicitly with `tla.compile`, then call the
 returned `JitCompiledFunction` to launch.
 
+Every device kernel entry automatically initializes SoC / control
+state (no separate user API). See
+[Kernel-Entry SoC State Initialization](../../kernel_development/core_concepts/soc_state_init.md)
+for which states are rewritten and how that affects related
+capabilities.
+
 Prototype:
 
 ```python

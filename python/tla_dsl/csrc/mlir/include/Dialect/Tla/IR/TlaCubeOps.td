@@ -11,19 +11,11 @@ def Tla_MmadOp : Tla_Op<"mmad", []> {
     Perform a matrix multiply-accumulate on tensor views. Must be nested inside a
     ``tla.cube`` region.
 
-    ``compute_order`` is always supplied by the frontend. The lowering emits
-    ``hivm.set_ctrl`` on ``CTRL[51]`` (0 = ``M_FIRST``, 1 = ``N_FIRST``): when
-    every mmad in a function agrees on the value it is emitted once at the
-    function entry; if a function mixes values it is emitted ahead of each mmad
-    runtime call instead.
-
-    ``hf32_mode`` is always supplied by the frontend. The lowering emits
-    ``hivm.set_ctrl`` on ``CTRL[46]`` (enable HF32 rounding) and ``CTRL[47]``
-    (rounding mode, ``HF32_NEAREST_ZERO`` -> 1 / ``HF32_NEAREST_EVEN`` -> 0,
-    mirroring ``AscendC::SetHF32Mode`` / ``AscendC::SetHF32TransMode``): when
-    every mmad in a function agrees on the value it is emitted once at the
-    function entry; if a function mixes values it is emitted ahead of each mmad
-    runtime call instead.
+    ``compute_order`` / ``hf32_mode`` are always supplied by the frontend.
+    ``TlaInsertImplicitCtrlPass`` emits coalesced ``hivm.set_ctrl`` for
+    ``CTRL[51]`` (``M_FIRST``/``N_FIRST``) and ``CTRL[46]``/``CTRL[47]``
+    (HF32 enable / rounding select). Requirements that already match the
+    InitSoc defaults are registered but do not insert.
   }];
   let arguments = (ins Tla_TensorType:$acc, Tla_TensorType:$lhs, Tla_TensorType:$rhs,
                        I1:$init_c, I64:$unit_flag, Optional<Tla_TensorType>:$bias,

@@ -8,8 +8,7 @@ module {
 }
 
 // HIVM-LABEL: func.func @kernel
-// HIVM: hivm.hir.set_ctrl false at ctrl[60]
-// HIVM-NEXT: hivm.hir.set_ctrl true at ctrl[48]
+// Plain HIVM funcs without HACC entry attrs are skipped by the prologue pass.
 // HIVM-COUNT-1: hivm.hir.pipe_barrier[<PIPE_ALL>]
 // HIVM: return
 

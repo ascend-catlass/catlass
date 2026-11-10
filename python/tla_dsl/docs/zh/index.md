@@ -23,6 +23,7 @@ nav_order: 0
 | [语法约束](kernel_development/core_concepts/syntax_guide.md) | `@tla.kernel` 内允许的 Python 写法。 |
 | [同步使用指南](kernel_development/core_concepts/sync.md) | 何时需要同步，flag / cross_flag / mutex / barrier 的选择与排查。 |
 | [环境变量](kernel_development/core_concepts/env_vars.md) | `CATLASS_DSL_*` 及相关环境变量。 |
+| [Kernel 入口 SoC 状态初始化](kernel_development/core_concepts/soc_state_init.md) | 入口自动初始化的状态清单及其效果。 |
 | [构建 API 文档](api/generate_api_docs.md) | 如何从英文 docstring 重新生成 Kernel / 程序生命周期参考。 |
 
 英文语言参考 / 程序生命周期参考由脚本生成（`python tools/generate_kernel_api_reference.py`、

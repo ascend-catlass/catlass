@@ -89,6 +89,10 @@ artifact(tiling, block_num=1)
 返回 `TlaJitFunction`。不允许直接调用 kernel；应先用 `tla.compile`
 显式编译，再调用返回的 `JitCompiledFunction` 启动。
 
+每个 device kernel 入口会自动完成 SoC / 控制状态初始化（无单独用户 API）。
+入口改写了哪些状态、对相关能力有何影响，见
+[Kernel 入口 SoC 状态初始化](../../kernel_development/core_concepts/soc_state_init.md)。
+
 函数原型：
 
 ```python

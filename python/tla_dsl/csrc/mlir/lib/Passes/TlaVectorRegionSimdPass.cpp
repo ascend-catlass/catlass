@@ -1460,8 +1460,7 @@ static FailureOr<Value> createVectorCastResult(
 
     // AVE vextf has no rounding operand and its lowering only produces f32.
     // The direct f16 -> bf16 instruction preserves every lane without a part
-    // selector. It has no saturation operand, so only UNKNOWN is accepted;
-    // kernel entry configures CTRL[48] for non-saturation.
+    // selector. It has no saturation operand, so only UNKNOWN is accepted.
     if (s.isF16() && d.isBF16()) {
         if (static_cast<::SatMode>(trait[1]) != ::SatMode::unknown)
             return emitError(loc, "f16->bf16 cast only supports UNKNOWN sat_mode"), failure();

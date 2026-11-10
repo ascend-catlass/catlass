@@ -3,17 +3,6 @@
 namespace tla {
 namespace {
 
-// CTRL[48] is for saturation control of FP8/Hif8/FP16/BF16 computation in
-// CUBE/FIXPIPE/VECTOR/SCALAR /AIPP/WAIPP.
-static constexpr unsigned int SaturationControlBit = 48;
-
-// CTRL[60] is the control bit to override saturation behavior for Vector Thread
-// Extension Instructions SIMD.VCVTFI, SIMD.VCVTII, SIMD.VCVTFF and SIMT.F2F.
-static constexpr unsigned int OverrideSaturationBit = 60;
-
-// CTRL[56] is the mask-control bit; it must be cleared on AIV (vector) kernels.
-static constexpr unsigned int MaskControlBit = 56;
-
 // CTRL[51] is the mmad M/N compute-direction priority bit.
 static constexpr unsigned int ComputeOrderBit = 51;
 
@@ -22,6 +11,30 @@ static constexpr unsigned int HF32ModeBit = 46;
 
 // CTRL[47] is the mmad HF32 rounding-mode select bit.
 static constexpr unsigned int HF32TransModeBit = 47;
+
+// Call BC helpers by ``_mlir_ciface_*`` directly (same pattern as
+// ``tla-lower-scalar-ops``). AIC and AIV must use distinct symbols: hivmc links
+// both meta_op.aic and meta_op.aiv into each subcore via
+// ``--link-aicore-bitcode``, so a shared name would let the cube body
+// (``set_padding``) win and run on AIV → scalar instruction abnormal.
+static constexpr StringLiteral kInitSocStateCalleeAic = "_mlir_ciface_tla_init_soc_state_aic";
+static constexpr StringLiteral kInitSocStateCalleeAiv = "_mlir_ciface_tla_init_soc_state_aiv";
+
+static func::FuncOp getOrCreateInitSocStateDecl(ModuleOp module, StringLiteral callee, hivm::TFuncCoreType coreType)
+{
+    if (auto existing = module.lookupSymbol<func::FuncOp>(callee))
+        return existing;
+
+    OpBuilder builder(module.getBodyRegion());
+    builder.setInsertionPointToStart(module.getBody());
+    auto func =
+        builder.create<func::FuncOp>(module.getLoc(), callee, builder.getFunctionType(/*inputs=*/{}, /*results=*/{}));
+    func.setPrivate();
+    MLIRContext* ctx = module.getContext();
+    func->setAttr(hacc::stringifyEnum(hacc::HACCToLLVMIRTranslateAttr::ALWAYS_INLINE), UnitAttr::get(ctx));
+    func->setAttr(hivm::TFuncCoreTypeAttr::name, hivm::TFuncCoreTypeAttr::get(ctx, coreType));
+    return func;
+}
 
 class TlaPrologueEpiloguePass : public PassWrapper<TlaPrologueEpiloguePass, OperationPass<ModuleOp>> {
 public:
@@ -45,8 +58,9 @@ public:
         MLIRContext* ctx = &getContext();
         OpBuilder builder(ctx);
         auto pipeAll = hivm::PipeAttr::get(ctx, hivm::PIPE::PIPE_ALL);
+        ModuleOp module = getOperation();
 
-        for (func::FuncOp funcOp : getOperation().getOps<func::FuncOp>()) {
+        for (func::FuncOp funcOp : module.getOps<func::FuncOp>()) {
             if (funcOp.isDeclaration())
                 continue;
             if (!hasRequiredHaccEntryAttrs(funcOp))
@@ -54,12 +68,22 @@ public:
 
             Block& entry = funcOp.getBody().front();
             Location loc = funcOp.getLoc();
+            std::optional<hivm::TFuncCoreType> coreType = getFunctionCoreType(funcOp);
+            if (!coreType) {
+                funcOp.emitError("HACC entry is missing hivm.func_core_type");
+                return signalPassFailure();
+            }
+            // Declare only the callee this entry needs. Emitting both AIC and
+            // AIV private decls into an AIV-only module makes
+            // ``_resolve_compile_option_from_lowered_mlir`` see an AIC
+            // ``func_core_type`` and wrongly select meta_op.aic bitcode.
+            bool isAiv = *coreType == hivm::TFuncCoreType::AIV;
+            StringLiteral callee = isAiv ? kInitSocStateCalleeAiv : kInitSocStateCalleeAic;
+            func::FuncOp initSoc = getOrCreateInitSocStateDecl(module, callee, *coreType);
 
+            // Kernel entry: InitSocState only (no extra CTRL[60]/[48]/[56] writes).
             builder.setInsertionPointToStart(&entry);
-            builder.create<hivm::SetCtrlOp>(loc, false, OverrideSaturationBit);
-            builder.create<hivm::SetCtrlOp>(loc, true, SaturationControlBit);
-            if (getFunctionCoreType(funcOp) == hivm::TFuncCoreType::AIV)
-                builder.create<hivm::SetCtrlOp>(loc, false, MaskControlBit);
+            builder.create<func::CallOp>(loc, initSoc, ValueRange{});
 
             Operation* terminator = entry.getTerminator();
             Operation* lastBodyOp = terminator ? terminator->getPrevNode() : nullptr;

@@ -69,6 +69,8 @@ module attributes {tla.module_exec_units = "cube"} {
   }) {tla.exec_units = "cube", function_type = (!tla.tensor<!tla.layout<!tla.shape<32,32>, !tla.stride<32,1>, !tla.shape<32,32>, RowMajor>, !tla.coord<0,0>, !tla.ptr<f32, gm, 4>>, !tla.tensor<!tla.layout<!tla.shape<32,32>, !tla.stride<32,1>, !tla.shape<32,32>, RowMajor>, !tla.coord<0,0>, !tla.ptr<f32, gm, 4>>, !tla.tensor<!tla.layout<!tla.shape<32,32>, !tla.stride<32,1>, !tla.shape<32,32>, RowMajor>, !tla.coord<0,0>, !tla.ptr<f32, gm, 4>>) -> (), sym_name = "basic_mmad"} : () -> ()
 }
 
+// CHECK: func.func private @_mlir_ciface_tla_init_soc_state_aic()
+// CHECK-SAME: hivm.func_core_type = #hivm.func_core_type<AIC>
 // CHECK: func.func private @mmad_float_float_float
 // CHECK-SAME: hacc.always_inline
 // CHECK-SAME: hivm.func_core_type = #hivm.func_core_type<AIC>
@@ -90,8 +92,7 @@ module attributes {tla.module_exec_units = "cube"} {
 // CHECK-SAME: hivm.func_core_type = #hivm.func_core_type<AIC>
 // CHECK-SAME: llvm.emit_c_interface
 // CHECK-LABEL: func.func @basic_mmad(%arg0: memref<32x32xf32, #hivm.address_space<gm>>, %arg1: memref<32x32xf32, #hivm.address_space<gm>>, %arg2: memref<32x32xf32, #hivm.address_space<gm>>)
-// CHECK-COUNT-1: hivm.hir.set_ctrl false at ctrl[60]
-// CHECK-COUNT-1: hivm.hir.set_ctrl true at ctrl[48]
+// CHECK: call @_mlir_ciface_tla_init_soc_state_aic()
 // CHECK-DAG: hivm.hir.pointer_cast{{.*}}memref<65536xf32, #hivm.address_space<cbuf>>
 // CHECK-DAG: hivm.hir.pointer_cast{{.*}}memref<1024xf32, #hivm.address_space<ca>>
 // CHECK-DAG: hivm.hir.pointer_cast{{.*}}memref<1024xf32, #hivm.address_space<cb>>

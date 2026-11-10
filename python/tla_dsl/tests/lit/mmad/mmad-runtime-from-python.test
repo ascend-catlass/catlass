@@ -41,8 +41,7 @@
 // F32-DAG: [[INIT:%.*]] = llvm.mlir.constant(true) : i1
 // F32-DAG: [[UNIT:%.*]] = llvm.mlir.constant(3 : i8) : i8
 // F32-DAG: [[MN:%.*]] = llvm.mlir.constant(32 : i64) : i64
-// F32-COUNT-1: hivm.hir.set_ctrl false at ctrl[60]
-// F32-COUNT-1: hivm.hir.set_ctrl true at ctrl[48]
+// F32-COUNT-1: call @_mlir_ciface_tla_init_soc_state_aic()
 // F32: call @mmad_float_float_float({{%.*}}, {{%.*}}, {{%.*}}, [[MN]], [[MN]], [[MN]], [[INIT]], [[UNIT]])
 // F32-NOT: tla.mmad
 

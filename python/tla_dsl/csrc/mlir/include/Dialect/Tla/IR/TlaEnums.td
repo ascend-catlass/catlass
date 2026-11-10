@@ -324,8 +324,8 @@ def Tla_HistogramsBinAttr : Tla_EnumAttr<"HistogramsBin", "histograms_bin"> {
 }
 
 // ComputeOrder: mmad M/N compute-direction priority (CTRL[51]).
-// M_FIRST(0) is the hardware default; N_FIRST(1) flips the priority. Lowered to
-// hivm::SetCtrlOp in TlaCubeRegionPass; absence keeps the hardware default.
+// M_FIRST(0) is the hardware / InitSoc default; N_FIRST(1) flips the priority.
+// Implicit SetCtrl is owned by TlaInsertImplicitCtrlPass.
 def Tla_ComputeOrder_MFirst : I32EnumAttrCase<"M_FIRST", 0>;
 def Tla_ComputeOrder_NFirst : I32EnumAttrCase<"N_FIRST", 1>;
 def Tla_ComputeOrder_Enum : Tla_I32Enum<"ComputeOrder",
@@ -344,7 +344,8 @@ def Tla_ComputeOrderAttr : Tla_EnumAttr<"ComputeOrder", "compute_order"> {
 }
 
 // HF32Mode: mmad HF32 rounding mode (CTRL[46] enable, CTRL[47] rounding).
-// HF32_DISABLE(0) is the hardware default (no HF32 rounding).
+// HF32_DISABLE(0) is the hardware / InitSoc default (no HF32 rounding).
+// Implicit SetCtrl is owned by TlaInsertImplicitCtrlPass.
 def Tla_HF32Mode_Disable : I32EnumAttrCase<"HF32_DISABLE", 0>;
 def Tla_HF32Mode_NearestZero : I32EnumAttrCase<"HF32_NEAREST_ZERO", 1>;
 def Tla_HF32Mode_NearestEven : I32EnumAttrCase<"HF32_NEAREST_EVEN", 2>;

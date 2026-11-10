@@ -1,9 +1,10 @@
 // Verify the compute_order attribute on tla.mmad lowers to SPR.CTRL[51].
 
-// N_FIRST  -> hivm.hir.set_ctrl true  at ctrl[51] at function entry, restored after.
-// default -> hivm.hir.set_ctrl false at ctrl[51] at function entry, restored after.
-// dual N_FIRST -> one set_ctrl true at ctrl[51] at function entry covers both mmads.
-// mixed (N_FIRST + M_FIRST) -> per-mmad set_ctrl at ctrl[51], none at function entry.
+// Owned by tla-insert-implicit-ctrl (InitSoc leaves CTRL[51]=0 / M_FIRST):
+// N_FIRST  -> hivm.hir.set_ctrl true  at ctrl[51], restored after.
+// default  -> no insert (already matches InitSoc); epilogue still clears.
+// dual N_FIRST -> one set_ctrl true at ctrl[51] covers both mmads.
+// mixed (N_FIRST + M_FIRST) -> per-mmad set_ctrl at ctrl[51].
 //
 // RUN: %tla_compile %s -o - | %filecheck %s --check-prefix=NFIRST
 // RUN: %tla_compile %s -o - | %filecheck %s --check-prefix=DEFAULT
@@ -105,7 +106,6 @@ module {
 
 // DEFAULT-LABEL: func.func @mmad_default
 // DEFAULT-NOT: hivm.hir.set_ctrl true at ctrl[51]
-// DEFAULT: hivm.hir.set_ctrl false at ctrl[51]
 // DEFAULT: call @mmad_float_float_float
 // DEFAULT: hivm.hir.set_ctrl false at ctrl[51]
 // DEFAULT-NOT: tla.mmad

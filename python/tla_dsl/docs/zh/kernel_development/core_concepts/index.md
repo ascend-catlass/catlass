@@ -18,3 +18,4 @@ CATLASS Python 的核心概念与编程模型，包括 语法约束、控制流�
 | [结构化 Kernel 参数](structured_arguments.md) | tuple/list、结构化对象、静态字段与自定义 adapter 的传参方式。 |
 | [程序生命周期参考](../../api/runtime/index.md) | Host 侧 `@tla.kernel`、`tla.compile` / 启动、Host tensor。 |
 | [环境变量](env_vars.md) | `CATLASS_DSL_*` 及相关环境变量。 |
+| [Kernel 入口 SoC 状态初始化](soc_state_init.md) | 入口自动初始化的状态清单、效果与出口恢复。 |

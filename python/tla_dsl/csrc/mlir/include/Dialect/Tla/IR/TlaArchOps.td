@@ -88,3 +88,7 @@ def Tla_SyncThreadsOp : Tla_Op<"arch.sync_threads", []> {
   }];
   let assemblyFormat = [{ attr-dict }];
 }
+
+// InitSocState is NOT a user-facing TLA op. ``tla-prologue-epilogue`` injects
+// ``func.call @_mlir_ciface_tla_init_soc_state`` (Scalar BC → AscendC::InitSocState)
+// at every HACC entry (InitSoc only; no extra CTRL[60]/[48]/[56]). No public API.

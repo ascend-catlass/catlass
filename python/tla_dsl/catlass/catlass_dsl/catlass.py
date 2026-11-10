@@ -38,6 +38,12 @@ class CatlassBaseDSL(BaseDSL):
             kernel is disabled; compile it explicitly with `tla.compile`, then call the
             returned `JitCompiledFunction` to launch.
 
+            Every device kernel entry automatically initializes SoC / control
+            state (no separate user API). See
+            [Kernel-Entry SoC State Initialization](../kernel_development/core_concepts/soc_state_init.md)
+            for which states are rewritten and how that affects related
+            capabilities.
+
             Parameters:
             - *`fn`* (`Callable[..., Any] | None`): The function being decorated.
               Use `@tla.kernel` or `@tla.kernel(auto_sync=...)`; call `tla.kernel(fn)`

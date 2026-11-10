@@ -18,3 +18,4 @@ and Host-side compile and launch.
 | [Structured Kernel Arguments](structured_arguments.md) | How to pass tuple/list, structured objects, static fields, and custom adapters. |
 | [Program Lifecycle Reference](../../api/runtime/index.md) | Host-side `@tla.kernel`, `tla.compile` / launch, Host tensor. |
 | [Python Environment Variables](env_vars.md) | `CATLASS_DSL_*` and related environment variables. |
+| [Kernel-Entry SoC State Initialization](soc_state_init.md) | Automatic entry-state checklist, effects, and exit restore. |

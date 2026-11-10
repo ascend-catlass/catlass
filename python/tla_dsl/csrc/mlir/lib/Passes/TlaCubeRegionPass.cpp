@@ -43,34 +43,25 @@ static StringRef fp4CppType(Type elementType)
     return ::llvm::isa<::tla::Float4E1M2Type>(elementType) ? "float4_e1m2x2_t" : "float4_e2m1x2_t";
 }
 
-// CTRL[51] selects the mmad M/N compute-direction priority
-static constexpr unsigned int ComputeOrderBit = 51;
-
-// CTRL[46] enables the mmad HF32 rounding mode
-static constexpr unsigned int HF32ModeBit = 46;
-
-// CTRL[47] selects the mmad HF32 rounding mode:
-// 0 = NEAREST_EVEN (hardware default), 1 = NEAREST_ZERO
-static constexpr unsigned int HF32TransModeBit = 47;
-
 // Shared by tla.mmad and tla.mmad_mx: the two ops differ only in whether the
 // L0 operands carry an attached e8m0 scale block, which changes the callee's
 // L0 element types (mx_fp8_*) and therefore selects mad_mx over mad. The
 // operand list, shape contract and descriptor handling are identical.
+//
+// CTRL[51]/[46]/[47] for compute_order / hf32_mode are owned by
+// TlaInsertImplicitCtrlPass (coalesced against InitSoc defaults); this pattern
+// only emits the runtime call.
 template <typename MmadOpTy>
 struct LowerTlaMmadPatternImpl : public OpRewritePattern<MmadOpTy> {
     static constexpr bool kIsMx = std::is_same_v<MmadOpTy, ::tla::MmadMxOp>;
 
     LowerTlaMmadPatternImpl(
         MLIRContext* ctx, DenseMap<Value, TensorDescriptor>& tensorDescriptorByValue,
-        SmallVectorImpl<Operation*>& toErase, DenseMap<Value, Value>& loweredMemrefByValue,
-        bool funcLevelComputeOrderSet, bool funcLevelHF32Set)
+        SmallVectorImpl<Operation*>& toErase, DenseMap<Value, Value>& loweredMemrefByValue)
         : OpRewritePattern<MmadOpTy>(ctx),
           tensorDescriptorByValue(tensorDescriptorByValue),
           toErase(toErase),
-          loweredMemrefByValue(loweredMemrefByValue),
-          funcLevelComputeOrderSet(funcLevelComputeOrderSet),
-          funcLevelHF32Set(funcLevelHF32Set)
+          loweredMemrefByValue(loweredMemrefByValue)
     {}
 
     LogicalResult matchAndRewrite(MmadOpTy op, PatternRewriter& rewriter) const override
@@ -368,23 +359,6 @@ struct LowerTlaMmadPatternImpl : public OpRewritePattern<MmadOpTy> {
                                           nI64,        kI64,        initCVal,    unitFlagVal};
         if (biasValue)
             operands.push_back(*biasRuntime);
-        if (!funcLevelComputeOrderSet) {
-            auto computeOrderAttr = op->template getAttrOfType<::tla::ComputeOrderAttr>("compute_order");
-            bool isNFirst = computeOrderAttr.getValue() == ComputeOrder::N_FIRST;
-            rewriter.create<hivm::SetCtrlOp>(op.getLoc(), isNFirst, ComputeOrderBit);
-        }
-        // HF32 is an fp32 rounding mode, so it exists only on tla.mmad; tla.mmad_mx
-        // carries no hf32_mode attribute and this is compiled out for it.
-        if constexpr (!kIsMx) {
-            if (!funcLevelHF32Set) {
-                auto modeAttr = op->template getAttrOfType<::tla::HF32ModeAttr>("hf32_mode");
-                HF32Mode mode = modeAttr.getValue();
-                bool enableHF32 = mode != HF32Mode::HF32_DISABLE;
-                bool nearestZero = mode == HF32Mode::HF32_NEAREST_ZERO;
-                rewriter.create<hivm::SetCtrlOp>(op.getLoc(), enableHF32, HF32ModeBit);
-                rewriter.create<hivm::SetCtrlOp>(op.getLoc(), nearestZero, HF32TransModeBit);
-            }
-        }
         rewriter.create<func::CallOp>(op.getLoc(), callee, operands);
         toErase.push_back(op.getOperation());
         return success();
@@ -394,8 +368,6 @@ private:
     DenseMap<Value, TensorDescriptor>& tensorDescriptorByValue;
     SmallVectorImpl<Operation*>& toErase;
     DenseMap<Value, Value>& loweredMemrefByValue;
-    bool funcLevelComputeOrderSet;
-    bool funcLevelHF32Set;
 };
 
 using LowerTlaMmadPattern = LowerTlaMmadPatternImpl<::tla::MmadOp>;
@@ -1180,67 +1152,11 @@ public:
                 return failure();
         }
 
-        // Lower tla.mmad.
-        // CTRL[51] (mmad M/N compute-direction priority) is global and persists once
-        // set, so when every mmad in this function agrees on compute_order it is set
-        // once at the function entry. If the function mixes M_FIRST/N_FIRST the
-        // per-mmad path in LowerTlaMmadPattern is used instead.
-        std::optional<ComputeOrder> funcLevelComputeOrder;
-        bool computeOrderConflict = false;
-        // Both mmad flavours drive the same CTRL[51] bit, so they are surveyed
-        // together -- a function mixing tla.mmad and tla.mmad_mx must still agree.
-        root->walk([&](Operation* op) {
-            if (!llvm::isa<::tla::MmadOp, ::tla::MmadMxOp>(op))
-                return;
-            auto attr = op->getAttrOfType<::tla::ComputeOrderAttr>("compute_order");
-            ComputeOrder order = attr.getValue();
-            if (funcLevelComputeOrder && *funcLevelComputeOrder != order)
-                computeOrderConflict = true;
-            else if (!funcLevelComputeOrder)
-                funcLevelComputeOrder = order;
-        });
-        bool funcLevelComputeOrderSet = false;
-        if (funcLevelComputeOrder && !computeOrderConflict) {
-            Block& entry = funcOp.getBody().front();
-            PatternRewriter builder(funcOp.getContext());
-            builder.setInsertionPointToStart(&entry);
-            bool isNFirst = *funcLevelComputeOrder == ComputeOrder::N_FIRST;
-            builder.create<hivm::SetCtrlOp>(funcOp.getLoc(), isNFirst, ComputeOrderBit);
-            funcLevelComputeOrderSet = true;
-        }
-
-        // CTRL[46]/CTRL[47] (mmad HF32 rounding mode) are global and persist once
-        // set, so when every mmad in this function agrees on hf32_mode they are set
-        // once at the function entry. If the function mixes values the per-mmad path
-        // in LowerTlaMmadPattern is used instead.
-        std::optional<HF32Mode> funcLevelHF32Mode;
-        bool HF32Conflict = false;
-        root->walk([&](::tla::MmadOp op) {
-            auto attr = op->getAttrOfType<::tla::HF32ModeAttr>("hf32_mode");
-            HF32Mode mode = attr.getValue();
-            if (funcLevelHF32Mode && *funcLevelHF32Mode != mode)
-                HF32Conflict = true;
-            else if (!funcLevelHF32Mode)
-                funcLevelHF32Mode = mode;
-        });
-        bool funcLevelHF32Set = false;
-        if (funcLevelHF32Mode && !HF32Conflict) {
-            Block& entry = funcOp.getBody().front();
-            PatternRewriter builder(funcOp.getContext());
-            builder.setInsertionPointToStart(&entry);
-            HF32Mode mode = *funcLevelHF32Mode;
-            bool enableHF32 = mode != HF32Mode::HF32_DISABLE;
-            bool nearestZero = mode == HF32Mode::HF32_NEAREST_ZERO;
-            builder.create<hivm::SetCtrlOp>(funcOp.getLoc(), enableHF32, HF32ModeBit);
-            builder.create<hivm::SetCtrlOp>(funcOp.getLoc(), nearestZero, HF32TransModeBit);
-            funcLevelHF32Set = true;
-        }
-        LowerTlaMmadPattern lowerMmad(
-            &getContext(), tensorDescriptorByValue, toErase, lowering.loweredMemrefByValue, funcLevelComputeOrderSet,
-            funcLevelHF32Set);
+        // Lower tla.mmad / tla.mmad_mx. CTRL for compute_order / hf32_mode is
+        // inserted earlier by TlaInsertImplicitCtrlPass.
+        LowerTlaMmadPattern lowerMmad(&getContext(), tensorDescriptorByValue, toErase, lowering.loweredMemrefByValue);
         LowerTlaMmadMxPattern lowerMmadMx(
-            &getContext(), tensorDescriptorByValue, toErase, lowering.loweredMemrefByValue, funcLevelComputeOrderSet,
-            funcLevelHF32Set);
+            &getContext(), tensorDescriptorByValue, toErase, lowering.loweredMemrefByValue);
         SmallVector<Operation*, 16> mmadOps;
         root->walk([&](Operation* op) {
             if (llvm::isa<::tla::MmadOp, ::tla::MmadMxOp>(op))
