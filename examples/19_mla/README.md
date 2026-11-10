@@ -44,7 +44,7 @@
 
 本样例面向 MLA decode 场景，使用 Paged KV cache 承载长上下文：
 
-- `numHeads` 取值 {16, 32, 64, 128}，分别对应模型侧 TP8/TP4/TP2/TP1 场景；取 `128` 时走 TP1 特化 kernel。通用 kernel（`numHeads ∈ {16,32,64}`）的 `batch` 上限受 AIC 核数限制，TP1 特化 kernel 要求 `batch ≤ 40`。
+- `numHeads` 取值 {16, 32, 64, 128}，分别对应模型侧 TP8/TP4/TP2/TP1 场景；取 `128` 时走 TP1 特化 kernel。通用 kernel（`numHeads ∈ {16,32,64}`）在 `qSeqlen > 1` 时要求 `batch ≤ AIC 核数`（`qSeqlen = 1` 时不受此限制），TP1 特化 kernel 要求 `batch ≤ 40`。
 - `qSeqlen` 支持 `1~4`，覆盖常规 decode 与 MTP 场景；`kvSeqlen` 支持 `128~16384`。
 - kernel 支持 `sparseMode` `0`（无 mask）/`1`（causal mask）两种掩码模式，当前样例的 `gen_data.py` 固定按 `sparseMode=0` 生成数据。
 - `Q`/`K`（及其 Rope 部分）张量的数值范围推荐在 `[-5, 5]` 以内，避免过大的动态范围致使绝对误差超阈值上限。

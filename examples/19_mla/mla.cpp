@@ -207,7 +207,7 @@ static bool CheckOutput(const Options& options, const vector<ElementOutput>& act
 
 static bool CanImplement(
     const vector<uint32_t>& qSeqlenList, const vector<uint32_t>& kvSeqlenList, uint32_t numHeads, uint32_t numBlocks,
-    uint32_t blockSize, const string& dataType)
+    uint32_t blockSize, const string& dataType, uint32_t batch, uint32_t aicCoreNum)
 {
     if (qSeqlenList.empty() || kvSeqlenList.empty() || qSeqlenList.size() != kvSeqlenList.size()) {
         cerr << "[ERROR] qSeqlenList/kvSeqlenList must be non-empty and of the same size, got " << qSeqlenList.size()
@@ -233,6 +233,17 @@ static bool CanImplement(
     }
     if (numHeads != 16 && numHeads != 32 && numHeads != 64 && numHeads != 128) {
         cerr << "[ERROR] numHeads must be 16, 32, 64 or 128 (TP8/TP4/TP2/TP1), got " << numHeads << endl;
+        return false;
+    }
+    uint32_t maxQseqlen = 0;
+    for (uint32_t qSeqlen : qSeqlenList) {
+        if (qSeqlen > maxQseqlen) {
+            maxQseqlen = qSeqlen;
+        }
+    }
+    if (numHeads != 128 && maxQseqlen > 1 && batch > aicCoreNum) {
+        cerr << "[ERROR] generic kernel (numHeads in {16, 32, 64}) requires batch (" << batch << ") <= AIC core num ("
+             << aicCoreNum << ") when qSeqlen > 1, got maxQseqlen=" << maxQseqlen << endl;
         return false;
     }
     if (blockSize != 128) {
@@ -300,8 +311,8 @@ static bool Run(const Options& options)
     }
 
     if (!CanImplement(
-            options.qSeqlenList, options.kvSeqlenList, options.numHeads, options.numBlocks, options.blockSize,
-            dataType)) {
+            options.qSeqlenList, options.kvSeqlenList, options.numHeads, options.numBlocks, options.blockSize, dataType,
+            options.batch, aicCoreNum)) {
         ACL_CHECK(aclrtDestroyStream(stream));
         ACL_CHECK(aclrtResetDevice(options.deviceId));
         ACL_CHECK(aclFinalize());
