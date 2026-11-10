@@ -192,3 +192,97 @@ def test_region_helpers_keep_region_stub_behavior() -> None:
     stub = tla.cube()
     assert stub.__class__.__name__ == "_RegionStub"
     assert _category(stub) == "region"
+
+
+def test_cache_key_is_a_plain_value_tuple() -> None:
+    tensor = make_fake_tensor(tla.Float16, (128, 64), (64, 1))
+    key = tensor.__cache_key__
+    assert isinstance(key, tuple)
+    assert isinstance(key[0], str)
+    assert (128, 64) in key and (64, 1) in key
+    # The key is plain data: no pointer, no storage, no runtime objects.
+    assert tensor.data_ptr not in key
+    for part in key:
+        assert part is None or isinstance(part, (str, int, tuple))
+    assert hash(key) == hash(key)
+
+
+def test_cache_key_is_equal_for_equal_metadata_and_memoized() -> None:
+    a = make_fake_tensor(tla.Float16, (128, 64), (64, 1))
+    b = make_fake_tensor(tla.Float16, (128, 64), (64, 1))
+    assert a.__cache_key__ == b.__cache_key__
+    assert a.__cache_key__ is a.__cache_key__
+
+
+def test_cache_key_changes_when_the_shape_is_marked_dynamic() -> None:
+    tensor = make_fake_tensor(tla.Float16, (128, 64), (64, 1))
+    before = tensor.__cache_key__
+    tensor.mark_compact_shape_dynamic(0)
+    assert tensor.__cache_key__ != before
+
+
+def test_cache_key_tracks_alignment_and_layout_token() -> None:
+    tensor = make_fake_tensor(tla.Float16, (128, 64), (64, 1))
+    before = tensor.__cache_key__
+    tensor._assumed_align = 32
+    assert tensor.__cache_key__ != before
+
+    other = make_fake_tensor(
+        tla.Float16, (128, 64), (64, 1), layout_tag=tla.arch.ColumnMajor
+    )
+    assert other.__cache_key__ != tensor.__cache_key__
+
+
+def test_cache_key_is_not_the_type_object() -> None:
+    tensor = make_fake_tensor(tla.Float16, (128, 64), (64, 1))
+    type_object = tensor.tla_tensor_type_descriptor()
+    assert type_object is not None
+    assert tensor.__cache_key__ != type_object
+
+
+def test_cache_key_is_equal_for_equal_specializations() -> None:
+    # The key has to answer "would this compile to the same kernel?", not "is
+    # this the same buffer".  Two bindings that differ only in a dimension
+    # already marked dynamic specialize identically and must share a key.
+    a = make_fake_tensor(tla.Float16, (128, 64), (64, 1))
+    b = make_fake_tensor(tla.Float16, (256, 64), (64, 1))
+    a.mark_compact_shape_dynamic(0)
+    b.mark_compact_shape_dynamic(0)
+    assert a.__cache_key__ == b.__cache_key__
+
+
+def test_cache_key_agrees_with_the_lowered_type() -> None:
+    # Every field the key records must agree with what lowering builds; a key
+    # that disagrees silently misses the cache.
+    a = make_fake_tensor(tla.Float16, (128, 64), (64, 1))
+    b = make_fake_tensor(tla.Float16, (256, 64), (64, 1))
+    a.mark_compact_shape_dynamic(0)
+    b.mark_compact_shape_dynamic(0)
+    assert a.tla_tensor_type_descriptor() == b.tla_tensor_type_descriptor()
+
+    tensor = make_fake_tensor(
+        tla.Float16, (128, 64), (64, 1), layout_tag=tla.arch.ColumnMajor
+    )
+    tensor.mark_compact_shape_dynamic(0)
+    key = tensor.__cache_key__
+    descriptor = tensor.tla_tensor_type_descriptor()
+    assert key[4] == descriptor.layout.shape.tree
+    assert key[5] == descriptor.layout.stride.tree
+    assert key[6] == descriptor.layout.origin_shape.tree
+    assert key[7] == descriptor.coord
+    assert key[3] == descriptor.ptr_alignment
+    assert key[0] == descriptor.element_type
+    assert key[1] == descriptor.addrspace
+    assert key[2] == descriptor.layout.layout_tag
+
+
+def test_cache_key_does_not_leak_a_dynamic_extent() -> None:
+    # A concrete extent must not survive into the key once its mode is dynamic,
+    # otherwise each runtime size produces a fresh key and the cache never hits.
+    tensor = make_fake_tensor(tla.Float16, (128, 64), (64, 1))
+    tensor.mark_compact_shape_dynamic(0)
+    key = tensor.__cache_key__
+    flat = tuple(str(part) for part in key)
+    assert "128" not in " ".join(flat)
+    assert key[4] == (None, 64)
+    assert key[6] == (None, 64)

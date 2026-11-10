@@ -257,6 +257,7 @@ class _Tensor(TensorABC):
     ) -> None:
         self._external_binding = False
         self._assumed_align: int | None = None
+        self._cache_key_memo: tuple[Any, ...] | None = None
         # DLPack ownership, set by from_dlpack: the consumed DLManagedTensor is
         # released by _dlpack_release when this tensor dies, and _dlpack_source
         # keeps the producer object itself alive meanwhile.
@@ -368,6 +369,7 @@ class _Tensor(TensorABC):
         self.coord = coord_tree
         self._flat_shape = tuple(_flatten_int_leaves_tree(shape_tree))
         self._flat_stride = tuple(_flatten_int_leaves_tree(stride_tree))
+        self._cache_key_memo: tuple[Any, ...] | None = None
         return self
 
     @property
@@ -678,6 +680,58 @@ class _Tensor(TensorABC):
         if assumed is not None:
             return max(1, int(assumed))
         return max(1, dtype_size_bytes(str(self.dtype)))
+
+    @property
+    def __cache_key__(self) -> tuple[Any, ...]:
+        """Hashable description of what a kernel specializes on.
+
+        Covers the element type, address space, layout token, pointer alignment
+        and the shape / stride / origin / coord trees. Dynamic modes contribute
+        ``None`` rather than the bound extent, so equal specializations share a
+        key. Memoized; the memo is invalidated when the binding is re-marked.
+        """
+        cached = getattr(self, "_cache_key_memo", None)
+        if cached is not None:
+            guard = cached[0]
+            if (
+                guard[0] is self._shape
+                and guard[1] is self._stride
+                and guard[2] is self.origin_shape
+                and guard[3] is self.coord
+                and guard[4] is self._dynamic_shape_tree
+                and guard[5] is self._dynamic_stride_tree
+                and guard[6] is self._dynamic_origin_shape_tree
+                and guard[7] is self._dtype
+                and guard[8] == self.addrspace
+                and guard[9] == self.layout_tag
+                and guard[10] == self._assumed_align
+            ):
+                return cached[1]
+        guard = (
+            self._shape,
+            self._stride,
+            self.origin_shape,
+            self.coord,
+            self._dynamic_shape_tree,
+            self._dynamic_stride_tree,
+            self._dynamic_origin_shape_tree,
+            self._dtype,
+            self.addrspace,
+            self.layout_tag,
+            self._assumed_align,
+        )
+        key = (
+            str(self._dtype),
+            str(self.addrspace),
+            str(self.layout_tag),
+            self._ptr_alignment(),
+            self._layout_shape_components(),
+            self._layout_stride_components(),
+            self._layout_origin_shape_components(),
+            self.coord,
+        )
+        self._cache_key_memo = (guard, key)
+        return key
 
     def tla_tensor_type_descriptor(self) -> TlaTensorTypeDescriptor:
         """Structured ``!tla.tensor`` descriptor from host metadata."""
