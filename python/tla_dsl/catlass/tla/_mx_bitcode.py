@@ -215,7 +215,11 @@ def _byte_ptr(tensor: Tensor, offset):
 
 def _emit_bitcode(symbol, pointers, scalars, loc):
     """Emit the common pointer-and-i32 ABI used by the MX bitcode helpers."""
+    # tla.extern returns values since it gained VectorSSA results, so the op
+    # takes its result types first. These are void calls: the meta-op writes
+    # through the pointers it is handed.
     _tla_ops_gen.call_extern(
+        [],
         symbol,
         [_as_value(ptr) for ptr in pointers]
         + [Int32(value).ir_value(loc=loc) for value in scalars],
