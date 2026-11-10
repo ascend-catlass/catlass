@@ -270,7 +270,7 @@ public:
 
     static bool CanImplement(const Arguments& args)
     {
-        return true;
+        return args.problemCount <= MAX_TENSOR_COUNT;
     }
 
     static size_t GetWorkspaceSize(const Arguments& args)

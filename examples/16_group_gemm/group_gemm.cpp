@@ -135,19 +135,53 @@ inline bool IsSameStride(layout::ColumnMajor layout1, layout::ColumnMajor layout
     return layout1.stride(1) == layout2.stride(1);
 }
 
-static void Run(Options& options)
+static int Run(Options& options)
 {
+    const uint32_t align = 256;
+    using LayoutA = layout::RowMajor;
+    using LayoutB = layout::RowMajor;
+    using LayoutX = layout::RowMajor;
+
+    using ArchTag = Arch::AtlasA2;
+    constexpr bool enableUnitFlag = true;
+    constexpr bool enableShuffleK = true;
+    constexpr bool enableABBA = true;
+    using GemmBlockDispatchPolicy = Gemm::GemmAtlasA2<enableUnitFlag, enableShuffleK, enableABBA>;
+    using EpilogueBlockDispatchPolicy = Epilogue::EpilogueAtlasA2Gemm;
+    using AType = Gemm::GemmType<half, LayoutA>;
+    using BType = Gemm::GemmType<half, LayoutB>;
+    using CType = Gemm::GemmType<half, LayoutX>;
+    using XType = Gemm::GemmType<half, LayoutX>;
+    using DType = XType;
+    using ComputeType = CType;
+    using L1TileShape = GemmShape<128, 256, 256>;
+    using L0TileShape = GemmShape<128, 256, 64>;
+    using TileShapeCast = MatrixShape<L1TileShape::M / 2, L1TileShape::N>;
+    using GemmBlock = Gemm::Block::BlockGemm<GemmBlockDispatchPolicy, L1TileShape, L0TileShape, AType, BType, CType>;
+    constexpr uint32_t computeLength = L1TileShape::MN / 2;
+    using TileElemWiseAddGemm = Epilogue::Tile::TileElemWiseAdd<ArchTag, ComputeType, computeLength>;
+    using TileElemWiseMulsGemm = Epilogue::Tile::TileElemWiseMuls<ArchTag, ComputeType, computeLength>;
+    using TileElemWistCastD = Epilogue::Tile::TileCast<ArchTag, DType, ComputeType, TileShapeCast>;
+    using EpilogueTileCopy = Epilogue::Tile::TileCopy<ArchTag, CType, XType, DType>;
+    using EpilogueBlock = Epilogue::Block::BlockEpilogue<
+        EpilogueBlockDispatchPolicy, CType, XType, DType, TileElemWiseAddGemm, TileElemWiseMulsGemm, TileElemWistCastD,
+        EpilogueTileCopy>;
+    using GroupGemmKernel = Gemm::Kernel::KernelGroupGemm<GemmBlock, EpilogueBlock>;
+
+    typename GroupGemmKernel::Arguments capabilityArguments{};
+    capabilityArguments.problemCount = options.groupCnt;
+    if (Gemm::Device::DeviceGemm<GroupGemmKernel>::CanImplement(capabilityArguments) != Status::kSuccess) {
+        std::cerr << "Unsupported group count: require groupCnt <= " << GroupGemmKernel::MAX_TENSOR_COUNT << "."
+                  << std::endl;
+        return -1;
+    }
+
     aclrtStream stream{nullptr};
     ACL_CHECK(aclInit(nullptr));
     ACL_CHECK(aclrtSetDevice(options.deviceId));
     ACL_CHECK(aclrtCreateStream(&stream));
 
     uint32_t groupCnt = options.groupCnt;
-
-    const uint32_t align = 256;
-    using LayoutA = layout::RowMajor;
-    using LayoutB = layout::RowMajor;
-    using LayoutX = layout::RowMajor;
 
     // crate grouped matmul problem shapes and layouts
     std::vector<GemmCoord> problemShapeList(groupCnt);
@@ -264,38 +298,12 @@ static void Run(Options& options)
     ACL_CHECK(aclrtGetHardwareSyncAddr(reinterpret_cast<void**>(&hardwareSyncAddr)));
 
     auto aicCoreNum = platform_ascendc::PlatformAscendCManager::GetInstance()->GetCoreNumAic();
-    using ArchTag = Arch::AtlasA2;
-    constexpr bool enableUnitFlag = true;
-    constexpr bool enableShuffleK = true;
-    constexpr bool enableABBA = true;
-    using GemmBlockDispatchPolicy = Gemm::GemmAtlasA2<enableUnitFlag, enableShuffleK, enableABBA>;
-    using EpilogueBlockDispatchPolicy = Epilogue::EpilogueAtlasA2Gemm;
-    using AType = Gemm::GemmType<half, LayoutA>;
-    using BType = Gemm::GemmType<half, LayoutB>;
-    using CType = Gemm::GemmType<half, LayoutX>;
-    using XType = Gemm::GemmType<half, LayoutX>;
-    using DType = XType;
-    using ComputeType = CType;
-    using L1TileShape = GemmShape<128, 256, 256>;
-    using L0TileShape = GemmShape<128, 256, 64>;
-    using TileShapeCast = MatrixShape<L1TileShape::M / 2, L1TileShape::N>;
-    using GemmBlock = Gemm::Block::BlockGemm<GemmBlockDispatchPolicy, L1TileShape, L0TileShape, AType, BType, CType>;
-    constexpr uint32_t computeLength = L1TileShape::MN / 2;
-    using TileElemWiseAddGemm = Epilogue::Tile::TileElemWiseAdd<ArchTag, ComputeType, computeLength>;
-    using TileElemWiseMulsGemm = Epilogue::Tile::TileElemWiseMuls<ArchTag, ComputeType, computeLength>;
-    using TileElemWistCastD = Epilogue::Tile::TileCast<ArchTag, DType, ComputeType, TileShapeCast>;
-    using EpilogueTileCopy = Epilogue::Tile::TileCopy<ArchTag, CType, XType, DType>;
-    using EpilogueBlock = Epilogue::Block::BlockEpilogue<
-        EpilogueBlockDispatchPolicy, CType, XType, DType, TileElemWiseAddGemm, TileElemWiseMulsGemm, TileElemWistCastD,
-        EpilogueTileCopy>;
-    using GroupGemmKernel = Gemm::Kernel::KernelGroupGemm<GemmBlock, EpilogueBlock>;
     typename GroupGemmKernel::Arguments arguments{groupCnt,    problemShapeListDevice, deviceAlpha, deviceBeta,
                                                   deviceA,     layoutAListDevice,      deviceB,     layoutBListDevice,
                                                   gmWorkspace, layoutXListDevice,      deviceWA,    layoutWAListDevice,
                                                   deviceWB,    layoutWBListDevice,     deviceX,     deviceX};
     using GroupGemmAdapter = Gemm::Device::DeviceGemm<GroupGemmKernel>;
     GroupGemmAdapter groupgemm_op;
-    groupgemm_op.CanImplement(arguments);
     RunAdapter(groupgemm_op, arguments, stream, aicCoreNum, hardwareSyncAddr);
 
     std::vector<fp16_t> hostRes(allMNCnt);
@@ -330,6 +338,7 @@ static void Run(Options& options)
     ACL_CHECK(aclrtDestroyStream(stream));
     ACL_CHECK(aclrtResetDevice(options.deviceId));
     ACL_CHECK(aclFinalize());
+    return 0;
 }
 
 int main(int argc, const char** argv)
@@ -338,6 +347,5 @@ int main(int argc, const char** argv)
     if (options.Parse(argc, argv) != 0) {
         return -1;
     }
-    Run(options);
-    return 0;
+    return Run(options);
 }
