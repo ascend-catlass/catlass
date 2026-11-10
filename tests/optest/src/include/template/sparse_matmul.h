@@ -62,6 +62,11 @@ struct SparseMatmulLike {
         logicalK = mat2.size(0) * 2;
         TORCH_CHECK(k1 == logicalK, "mat1 and mat2 shapes cannot be multiplied (",
                     m, "x", k1, " and ", logicalK, "x", n, ")");
+        // The NZ index layout uses 8 bytes (64 k elements) per group and 16 rows
+        // per fractal, so the n*k/8-byte index buffer only covers aligned shapes.
+        TORCH_CHECK(k1 % 64 == 0 && n % 16 == 0,
+                    "sparse_matmul_tla requires k % 64 == 0 and n % 16 == 0, got k=",
+                    k1, ", n=", n);
         params.m = static_cast<uint32_t>(m);
         params.k = static_cast<uint32_t>(k1);
         params.n = static_cast<uint32_t>(n);

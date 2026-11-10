@@ -64,14 +64,8 @@ static int64_t GetTotalBlockNum(int atomic, const MatmulShape& shape)
     return blockNum;
 }
 
-static void Run(const Options& options)
+static int Run(const Options& options)
 {
-    aclrtStream stream{nullptr};
-
-    ACL_CHECK(aclInit(nullptr));
-    ACL_CHECK(aclrtSetDevice(options.deviceId));
-    ACL_CHECK(aclrtCreateStream(&stream));
-
     uint32_t m = options.problemShape.m();
     uint32_t n = options.problemShape.n();
     uint32_t k = options.problemShape.k();
@@ -83,9 +77,47 @@ static void Run(const Options& options)
     using LayoutTagA = layout::RowMajor;
     using LayoutTagB = layout::ColumnMajor; // trans B
     using LayoutTagC = layout::RowMajor;
+
+    using ArchTag = Arch::AtlasA2;
+    using DispatchPolicy = Gemm::SparseMatmulMultiBlockOnKAxis<ArchTag, false>;
+    using L1TileShape = Shape<_128, _256, _128>;
+    using L0TileShape = Shape<_128, _256, _64>;
+
+    using ProblemShape = MatmulShape;
+    MatmulShape shape = {m, n, k, 1};
+
+    using TileCopy =
+        Gemm::Tile::SparseTileCopyTla<ArchTag, ElementA, LayoutTagA, ElementB, LayoutTagB, ElementC, LayoutTagC>;
+    using BlockMmad = Gemm::Block::BlockMmadSparseTla<
+        DispatchPolicy, L1TileShape, L0TileShape, ElementA, ElementB, ElementC, void, TileCopy>;
+    using BlockEpilogue = void;
+    using BlockScheduler = Gemm::Block::BlockSchedulerIterateK<ProblemShape, L1TileShape, L0TileShape>;
+    using MatmulKernel = Gemm::Kernel::KernelSparseMatmul<ProblemShape, BlockMmad, BlockEpilogue, BlockScheduler>;
+
     LayoutTagA tagA = LayoutTagA::MakeLayout<ElementA>(m, k);
     LayoutTagB tagB = LayoutTagB::MakeLayout<ElementB>(k / 2, n);
     LayoutTagC tagC = LayoutTagC::MakeLayout<ElementC>(m, n);
+
+    auto layoutA = tla::MakeLayoutFromTag(tagA);
+    auto layoutB = tla::MakeLayoutFromTag(tagB);
+    auto layoutC = tla::MakeLayoutFromTag(tagC);
+
+    using Arguments = typename MatmulKernel::Arguments;
+    // CanImplement only reads problemShape, so no layouts or GM addresses are needed here.
+    Arguments probeArgs{};
+    probeArgs.problemShape = shape;
+    if (!MatmulKernel::CanImplement(probeArgs)) {
+        std::cerr << "Unsupported problem configuration: sparse matmul requires b == 1, k % 64 == 0, "
+                     "n % 16 == 0, inner dimensions within limits, and L0/L1 tile capacity."
+                  << std::endl;
+        return -1;
+    }
+
+    aclrtStream stream{nullptr};
+
+    ACL_CHECK(aclInit(nullptr));
+    ACL_CHECK(aclrtSetDevice(options.deviceId));
+    ACL_CHECK(aclrtCreateStream(&stream));
 
     size_t lenA = tagA.Capacity();
     size_t lenB = tagB.Capacity(); // For 4:2 sparse pattern, only half of the elements are stored
@@ -130,30 +162,6 @@ static void Run(const Options& options)
     // Get the number of cube cores of the current hardware
     auto aicCoreNum = platform_ascendc::PlatformAscendCManager::GetInstance()->GetCoreNumAic();
 
-    using ArchTag = Arch::AtlasA2;
-    using DispatchPolicy = Gemm::SparseMatmulMultiBlockOnKAxis<ArchTag, false>;
-    using L1TileShape = Shape<_128, _256, _128>;
-    using L0TileShape = Shape<_128, _256, _64>;
-
-    auto layoutA = tla::MakeLayoutFromTag(tagA);
-    auto layoutB = tla::MakeLayoutFromTag(tagB);
-    auto layoutC = tla::MakeLayoutFromTag(tagC);
-
-    using ProblemShape = MatmulShape;
-
-    MatmulShape shape = {m, n, k, 1};
-
-    using TileCopy =
-        Gemm::Tile::SparseTileCopyTla<ArchTag, ElementA, LayoutTagA, ElementB, LayoutTagB, ElementC, LayoutTagC>;
-    using BlockMmad = Gemm::Block::BlockMmadSparseTla<
-        DispatchPolicy, L1TileShape, L0TileShape, ElementA, ElementB, ElementC, void, TileCopy>;
-    using BlockEpilogue = void;
-
-    using BlockScheduler = Gemm::Block::BlockSchedulerIterateK<ProblemShape, L1TileShape, L0TileShape>;
-
-    // kernel level
-    using MatmulKernel = Gemm::Kernel::KernelSparseMatmul<ProblemShape, BlockMmad, BlockEpilogue, BlockScheduler>;
-    using Arguments = typename MatmulKernel::Arguments;
     Arguments args = {
         shape,                                                                         // problem shape
         {deviceA, deviceB, deviceC, deviceBias, deviceIdx, layoutA, layoutB, layoutC}, // mmad args
@@ -162,7 +170,6 @@ static void Run(const Options& options)
     using MatmulAdapter = Gemm::Device::DeviceGemm<MatmulKernel>;
 
     MatmulAdapter matmulOp;
-    matmulOp.CanImplement(args);
     sizeWorkspace = matmulOp.GetWorkspaceSize(args);
     if (sizeWorkspace > 0) {
         ACL_CHECK(aclrtMalloc(reinterpret_cast<void**>(&deviceWorkspace), sizeWorkspace, ACL_MEM_MALLOC_HUGE_FIRST));
@@ -201,6 +208,7 @@ static void Run(const Options& options)
     ACL_CHECK(aclrtDestroyStream(stream));
     ACL_CHECK(aclrtResetDevice(options.deviceId));
     ACL_CHECK(aclFinalize());
+    return 0;
 }
 
 int main(int argc, const char** argv)
@@ -209,6 +217,5 @@ int main(int argc, const char** argv)
     if (options.Parse(argc, argv) != 0) {
         return -1;
     }
-    Run(options);
-    return 0;
+    return Run(options);
 }

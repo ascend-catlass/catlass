@@ -245,6 +245,13 @@ public:
         if (k % 8 != 0) { // 8: Sparse k must be multiple of 8
             return Status::kInvalid;
         }
+        // The index tensor is addressed with an NZ fractal layout: k is grouped in
+        // INDEX_MATRIX_OFFSET bytes (64 elements) and n in C0_NUM_PER_FRACTAL rows.
+        // Its span is CeilDiv(k, 64) * 8 * RoundUp(n, 16) bytes, which fits the
+        // n*k/8-byte index buffer only when k and n are aligned.
+        if (k % (INDEX_MATRIX_OFFSET * INDEX_MATRIX_OFFSET) != 0 || n % C0_NUM_PER_FRACTAL != 0) {
+            return Status::kInvalid;
+        }
         // Check matrix size exceeds limit
         if (!tla::detail::isColumnMajor<LayoutA>::value && k > MATRIX_INNER_DIM_LIMIT_SIZE) { // mk matrix k limit
             return Status::kInvalid;
