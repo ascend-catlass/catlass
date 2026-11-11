@@ -1,0 +1,161 @@
+// RUN: sed -n '/^\/\/ BEGIN_I8$/,/^\/\/ END_I8$/p' %s | sed '1d;$d;s|^// ||' > %t.i8.mlir && not %tla_compile %t.i8.mlir -o - 2>&1 | %filecheck %s --check-prefix=I8
+// RUN: sed -n '/^\/\/ BEGIN_U8$/,/^\/\/ END_U8$/p' %s | sed '1d;$d;s|^// ||' > %t.u8.mlir && not %tla_compile %t.u8.mlir -o - 2>&1 | %filecheck %s --check-prefix=U8
+// RUN: sed -n '/^\/\/ BEGIN_I64$/,/^\/\/ END_I64$/p' %s | sed '1d;$d;s|^// ||' > %t.i64.mlir && not %tla_compile %t.i64.mlir -o - 2>&1 | %filecheck %s --check-prefix=I64
+// RUN: sed -n '/^\/\/ BEGIN_U64$/,/^\/\/ END_U64$/p' %s | sed '1d;$d;s|^// ||' > %t.u64.mlir && not %tla_compile %t.u64.mlir -o - 2>&1 | %filecheck %s --check-prefix=U64
+// RUN: sed -n '/^\/\/ BEGIN_E8M0$/,/^\/\/ END_E8M0$/p' %s | sed '1d;$d;s|^// ||' > %t.e8m0.mlir && not %tla_compile %t.e8m0.mlir -o - 2>&1 | %filecheck %s --check-prefix=E8M0
+
+// I8: unsupported L1 fill destination element type
+// U8: unsupported L1 fill destination element type
+// I64: unsupported L1 fill destination element type
+// U64: unsupported L1 fill destination element type
+// E8M0: unsupported L1 fill destination element type
+
+// BEGIN_I8
+// module {
+//   tla.func @unsupported_i8(%value: i32) {
+//     %raw = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<i8, l1, 512>
+//     %ptr = tla.recast_ptr %raw : !tla.ptr<i8, l1, 512> -> !tla.ptr<i8, l1, 512>
+//     %shape = tla.make_shape -> !tla.shape<(16,2),(32,2)>
+//     %stride = tla.make_stride -> !tla.stride<(32,512),(1,1024)>
+//     %origin = tla.make_shape -> !tla.shape<32,64>
+//     %layout = tla.make_layout %shape, %stride origin %origin {layoutTag = #tla.layout_tag<zN>} :
+//       !tla.shape<(16,2),(32,2)>, !tla.stride<(32,512),(1,1024)> origin !tla.shape<32,64> ->
+//       !tla.layout<!tla.shape<(16,2),(32,2)>, !tla.stride<(32,512),(1,1024)>, !tla.shape<32,64>, zN>
+//     %zero_coord = tla.make_coord -> !tla.coord<0,0>
+//     %dst = tla.make_tensor %ptr, %layout, %zero_coord :
+//       !tla.ptr<i8, l1, 512>,
+//       !tla.layout<!tla.shape<(16,2),(32,2)>, !tla.stride<(32,512),(1,1024)>, !tla.shape<32,64>, zN>,
+//       !tla.coord<0,0> ->
+//       !tla.tensor<!tla.layout<!tla.shape<(16,2),(32,2)>, !tla.stride<(32,512),(1,1024)>, !tla.shape<32,64>, zN>, !tla.coord<0,0>, !tla.ptr<i8, l1, 512>>
+//     %zero = arith.constant 1 : i32
+//     %fill_coord = tla.make_coord -> !tla.coord<0,32>
+//     %fill_shape = tla.make_shape -> !tla.shape<32,32>
+//     "tla.cube"() ({
+//       tla.fill %dst, %zero, %fill_coord, %fill_shape :
+//         !tla.tensor<!tla.layout<!tla.shape<(16,2),(32,2)>, !tla.stride<(32,512),(1,1024)>, !tla.shape<32,64>, zN>, !tla.coord<0,0>, !tla.ptr<i8, l1, 512>>,
+//         i32, !tla.coord<0,32>, !tla.shape<32,32>
+//     }) : () -> ()
+//     tla.return
+//   }
+// }
+// END_I8
+
+// BEGIN_U8
+// module {
+//   tla.func @unsupported_u8(%value: i32) {
+//     %raw = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<i8, l1, 512>
+//     %ptr = tla.recast_ptr %raw : !tla.ptr<i8, l1, 512> -> !tla.ptr<ui8, l1, 512>
+//     %shape = tla.make_shape -> !tla.shape<(16,2),(32,2)>
+//     %stride = tla.make_stride -> !tla.stride<(32,512),(1,1024)>
+//     %origin = tla.make_shape -> !tla.shape<32,64>
+//     %layout = tla.make_layout %shape, %stride origin %origin {layoutTag = #tla.layout_tag<zN>} :
+//       !tla.shape<(16,2),(32,2)>, !tla.stride<(32,512),(1,1024)> origin !tla.shape<32,64> ->
+//       !tla.layout<!tla.shape<(16,2),(32,2)>, !tla.stride<(32,512),(1,1024)>, !tla.shape<32,64>, zN>
+//     %zero_coord = tla.make_coord -> !tla.coord<0,0>
+//     %dst = tla.make_tensor %ptr, %layout, %zero_coord :
+//       !tla.ptr<ui8, l1, 512>,
+//       !tla.layout<!tla.shape<(16,2),(32,2)>, !tla.stride<(32,512),(1,1024)>, !tla.shape<32,64>, zN>,
+//       !tla.coord<0,0> ->
+//       !tla.tensor<!tla.layout<!tla.shape<(16,2),(32,2)>, !tla.stride<(32,512),(1,1024)>, !tla.shape<32,64>, zN>, !tla.coord<0,0>, !tla.ptr<ui8, l1, 512>>
+//     %zero = arith.constant 1 : i32
+//     %fill_coord = tla.make_coord -> !tla.coord<0,32>
+//     %fill_shape = tla.make_shape -> !tla.shape<32,32>
+//     "tla.cube"() ({
+//       tla.fill %dst, %zero, %fill_coord, %fill_shape :
+//         !tla.tensor<!tla.layout<!tla.shape<(16,2),(32,2)>, !tla.stride<(32,512),(1,1024)>, !tla.shape<32,64>, zN>, !tla.coord<0,0>, !tla.ptr<ui8, l1, 512>>,
+//         i32, !tla.coord<0,32>, !tla.shape<32,32>
+//     }) : () -> ()
+//     tla.return
+//   }
+// }
+// END_U8
+
+// BEGIN_I64
+// module {
+//   tla.func @unsupported_i64(%value: i32) {
+//     %raw = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<i8, l1, 512>
+//     %ptr = tla.recast_ptr %raw : !tla.ptr<i8, l1, 512> -> !tla.ptr<i64, l1, 512>
+//     %shape = tla.make_shape -> !tla.shape<(16,2),(32,2)>
+//     %stride = tla.make_stride -> !tla.stride<(32,512),(1,1024)>
+//     %origin = tla.make_shape -> !tla.shape<32,64>
+//     %layout = tla.make_layout %shape, %stride origin %origin {layoutTag = #tla.layout_tag<zN>} :
+//       !tla.shape<(16,2),(32,2)>, !tla.stride<(32,512),(1,1024)> origin !tla.shape<32,64> ->
+//       !tla.layout<!tla.shape<(16,2),(32,2)>, !tla.stride<(32,512),(1,1024)>, !tla.shape<32,64>, zN>
+//     %zero_coord = tla.make_coord -> !tla.coord<0,0>
+//     %dst = tla.make_tensor %ptr, %layout, %zero_coord :
+//       !tla.ptr<i64, l1, 512>,
+//       !tla.layout<!tla.shape<(16,2),(32,2)>, !tla.stride<(32,512),(1,1024)>, !tla.shape<32,64>, zN>,
+//       !tla.coord<0,0> ->
+//       !tla.tensor<!tla.layout<!tla.shape<(16,2),(32,2)>, !tla.stride<(32,512),(1,1024)>, !tla.shape<32,64>, zN>, !tla.coord<0,0>, !tla.ptr<i64, l1, 512>>
+//     %zero = arith.constant 1 : i32
+//     %fill_coord = tla.make_coord -> !tla.coord<0,32>
+//     %fill_shape = tla.make_shape -> !tla.shape<32,32>
+//     "tla.cube"() ({
+//       tla.fill %dst, %zero, %fill_coord, %fill_shape :
+//         !tla.tensor<!tla.layout<!tla.shape<(16,2),(32,2)>, !tla.stride<(32,512),(1,1024)>, !tla.shape<32,64>, zN>, !tla.coord<0,0>, !tla.ptr<i64, l1, 512>>,
+//         i32, !tla.coord<0,32>, !tla.shape<32,32>
+//     }) : () -> ()
+//     tla.return
+//   }
+// }
+// END_I64
+
+// BEGIN_U64
+// module {
+//   tla.func @unsupported_u64(%value: i32) {
+//     %raw = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<i8, l1, 512>
+//     %ptr = tla.recast_ptr %raw : !tla.ptr<i8, l1, 512> -> !tla.ptr<ui64, l1, 512>
+//     %shape = tla.make_shape -> !tla.shape<(16,2),(32,2)>
+//     %stride = tla.make_stride -> !tla.stride<(32,512),(1,1024)>
+//     %origin = tla.make_shape -> !tla.shape<32,64>
+//     %layout = tla.make_layout %shape, %stride origin %origin {layoutTag = #tla.layout_tag<zN>} :
+//       !tla.shape<(16,2),(32,2)>, !tla.stride<(32,512),(1,1024)> origin !tla.shape<32,64> ->
+//       !tla.layout<!tla.shape<(16,2),(32,2)>, !tla.stride<(32,512),(1,1024)>, !tla.shape<32,64>, zN>
+//     %zero_coord = tla.make_coord -> !tla.coord<0,0>
+//     %dst = tla.make_tensor %ptr, %layout, %zero_coord :
+//       !tla.ptr<ui64, l1, 512>,
+//       !tla.layout<!tla.shape<(16,2),(32,2)>, !tla.stride<(32,512),(1,1024)>, !tla.shape<32,64>, zN>,
+//       !tla.coord<0,0> ->
+//       !tla.tensor<!tla.layout<!tla.shape<(16,2),(32,2)>, !tla.stride<(32,512),(1,1024)>, !tla.shape<32,64>, zN>, !tla.coord<0,0>, !tla.ptr<ui64, l1, 512>>
+//     %zero = arith.constant 1 : i32
+//     %fill_coord = tla.make_coord -> !tla.coord<0,32>
+//     %fill_shape = tla.make_shape -> !tla.shape<32,32>
+//     "tla.cube"() ({
+//       tla.fill %dst, %zero, %fill_coord, %fill_shape :
+//         !tla.tensor<!tla.layout<!tla.shape<(16,2),(32,2)>, !tla.stride<(32,512),(1,1024)>, !tla.shape<32,64>, zN>, !tla.coord<0,0>, !tla.ptr<ui64, l1, 512>>,
+//         i32, !tla.coord<0,32>, !tla.shape<32,32>
+//     }) : () -> ()
+//     tla.return
+//   }
+// }
+// END_U64
+
+// BEGIN_E8M0
+// module {
+//   tla.func @unsupported_e8m0(%value: i32) {
+//     %raw = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<i8, l1, 512>
+//     %ptr = tla.recast_ptr %raw : !tla.ptr<i8, l1, 512> -> !tla.ptr<!tla.f8e8m0, l1, 512>
+//     %shape = tla.make_shape -> !tla.shape<(16,2),(32,2)>
+//     %stride = tla.make_stride -> !tla.stride<(32,512),(1,1024)>
+//     %origin = tla.make_shape -> !tla.shape<32,64>
+//     %layout = tla.make_layout %shape, %stride origin %origin {layoutTag = #tla.layout_tag<zN>} :
+//       !tla.shape<(16,2),(32,2)>, !tla.stride<(32,512),(1,1024)> origin !tla.shape<32,64> ->
+//       !tla.layout<!tla.shape<(16,2),(32,2)>, !tla.stride<(32,512),(1,1024)>, !tla.shape<32,64>, zN>
+//     %zero_coord = tla.make_coord -> !tla.coord<0,0>
+//     %dst = tla.make_tensor %ptr, %layout, %zero_coord :
+//       !tla.ptr<!tla.f8e8m0, l1, 512>,
+//       !tla.layout<!tla.shape<(16,2),(32,2)>, !tla.stride<(32,512),(1,1024)>, !tla.shape<32,64>, zN>,
+//       !tla.coord<0,0> ->
+//       !tla.tensor<!tla.layout<!tla.shape<(16,2),(32,2)>, !tla.stride<(32,512),(1,1024)>, !tla.shape<32,64>, zN>, !tla.coord<0,0>, !tla.ptr<!tla.f8e8m0, l1, 512>>
+//     %zero = arith.constant 1 : i32
+//     %fill_coord = tla.make_coord -> !tla.coord<0,32>
+//     %fill_shape = tla.make_shape -> !tla.shape<32,32>
+//     "tla.cube"() ({
+//       tla.fill %dst, %zero, %fill_coord, %fill_shape :
+//         !tla.tensor<!tla.layout<!tla.shape<(16,2),(32,2)>, !tla.stride<(32,512),(1,1024)>, !tla.shape<32,64>, zN>, !tla.coord<0,0>, !tla.ptr<!tla.f8e8m0, l1, 512>>,
+//         i32, !tla.coord<0,32>, !tla.shape<32,32>
+//     }) : () -> ()
+//     tla.return
+//   }
+// }
+// END_E8M0

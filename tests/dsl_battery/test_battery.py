@@ -90,6 +90,16 @@ PRINT_TENSOR_UB_VARIANTS = (
 )
 L1_PRINT_CASE_ID = "print-tensor-l1-memory"
 L0C_PRINT_CASE_ID = "print-tensor-l0c-memory"
+L1_FILL_VARIANTS = (
+    ("i16", "zn"),
+    ("u16", "nz"),
+    ("f16", "zn"),
+    ("bf16", "nz"),
+    ("i32", "zn"),
+    ("u32", "nz"),
+    ("f32", "zn"),
+)
+L1_FILL_CASE_IDS = {f"fill-l1-{dtype}" for dtype, _ in L1_FILL_VARIANTS}
 
 EVG_OPS = (
     "add",
@@ -1043,6 +1053,14 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
             [[f"dsl_tutorials/structured_arguments/{name}.py", *dev]],
         )
 
+    # --- end_to_end: one nonzero value and layout per Fill dtype ---
+    for dtype, layout in L1_FILL_VARIANTS:
+        yield (
+            f"fill-l1-{dtype}",
+            [["end_to_end/fill_op.py", *dev, "--dtype", dtype,
+              "--layout", layout, "--case", "gap"]],
+        )
+
     # --- print_tensor, local AIC storage ---
     # Base cases sweep dtypes; repeated entries verify in-process cache reuse.
     local_common = [
@@ -1098,7 +1116,7 @@ def _ids() -> list[str]:
 def test_case(case_id: str, device: int) -> None:
     import example_runner
 
-    if case_id == L1_PRINT_CASE_ID:
+    if case_id == L1_PRINT_CASE_ID or case_id in L1_FILL_CASE_IDS:
         from catlass.base_dsl.runtime import ascend_debug_fifo
 
         if reason := ascend_debug_fifo._debug_bus_support_error():

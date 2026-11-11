@@ -369,7 +369,7 @@ with tla.vec.func(mode="simd"):
 **源码：** [`catlass.tla.tensor._Tensor.fill`](../../../../catlass/tla/tensor.py)
 功能说明：
 
-用常量填充本 L1 zN/nZ tile（当前仅支持写零）。
+用常量填充本 L1 zN/nZ tile。
 
 函数原型：
 
@@ -379,18 +379,18 @@ tla.Tensor.fill(value: int | float) -> None
 
 参数说明：
 
-- `value`（`int | float`）：trace 期标量；当前仅支持 ``0``
-  （设备写入全零比特模式）。
+- `value`（`int | float`）：trace 期标量，按目标类型编码。整数目标要求取值范围内的
+  `int`；浮点目标接受 `int` 或 `float`，有限值转换时溢出会报错。
 
 约束说明：
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用，并嵌套在 `tla.cube()` 内。
 - 目的地须为带 ``zN`` 或 ``nZ`` 标签的 L1 tensor。
-- 填充范围为 ``[coord, coord + origin_shape)``；C0 轴起点向上对齐到 32 字节
-  边界，前导的不完整 C0 单元不写。
-- 支持的元素类型：打包的 fp4/fp8 操作数格式
-  （``f4e2m1``/``f4e1m2``/``f8e4m3fn``/``f8e5m2``），且仅支持填零。
-  更宽类型、8 位整数与 e8m0 scale tile 不支持。
+- 填充范围为 ``[coord, coord + origin_shape)``。C0 轴（32 字节）的两端均向上对齐。
+  起点处不完整的块保持不动；最后一个块可能包含逻辑范围外的物理 Padding，
+  分配容量必须覆盖该 Padding。
+- 支持的元素类型：``i16/u16/f16/bf16/i32/u32/f32``，以及打包的 fp4/fp8 操作数格式
+  （``f4e2m1``/``f4e1m2``/``f8e4m3fn``/``f8e5m2``，仅支持填零）。
 
 调用示例：
 

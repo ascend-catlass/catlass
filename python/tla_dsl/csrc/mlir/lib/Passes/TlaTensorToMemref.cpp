@@ -1041,15 +1041,14 @@ std::string getCopyRouteCallee(
 
 std::string getFillCallee(::LayoutTag dstLayout, Type dstElementType)
 {
-    // Fill covers only the packed cube operand formats, zero-only (the MX pad
-    // use case); the verifier rejects everything else before lowering. fp4
-    // packs two elements per byte, so the bc wrapper instantiates the fp4 x2
-    // encoding over byte storage -- the same rule as the GM->L1 fp4 copy.
+    // fp4 uses byte storage in the ABI and restores its logical width in BC.
     StringRef suffix;
     if (::tla::isPackedFp4Type(dstElementType)) {
         suffix = ::llvm::isa<::tla::Float4E1M2Type>(dstElementType) ? StringRef("float4_e1m2x2_t") :
                                                                       StringRef("float4_e2m1x2_t");
-    } else if (::mlir::isa<::mlir::Float8E4M3FNType, ::mlir::Float8E5M2Type>(dstElementType)) {
+    } else if (
+        ::tla::isOfficialL1FillElementType(dstElementType) ||
+        ::mlir::isa<::mlir::Float8E4M3FNType, ::mlir::Float8E5M2Type>(dstElementType)) {
         suffix = copyRuntimeElemSuffix(dstElementType);
     }
     if (suffix.empty())

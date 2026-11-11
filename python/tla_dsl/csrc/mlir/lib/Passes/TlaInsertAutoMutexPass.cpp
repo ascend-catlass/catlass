@@ -552,13 +552,7 @@ static LogicalResult collectInstructionPlans(
             plans.push_back(std::move(plan));
             return;
         }
-        // tla.fill zeroes a pad region of an L1 zN/nZ tile through the bc's
-        // AscendC::Fill helper: an MTE2 instruction, same pipe window as the
-        // GM->L1 copy whose tile it pads. It therefore needs the same mutex
-        // treatment as tla.copy -- otherwise an in-kernel pad fill could run
-        // against a concurrent producer or consumer of the same L1 buffer. The
-        // fill reads nothing, so the destination tile is its only local
-        // resource.
+        // AscendC::Fill writes L1 on MTE2; lock only the destination buffer.
         if (auto fill = dyn_cast<::tla::FillOp>(operation)) {
             FailureOr<MutexIdSpace> idSpace = resolveMutexIdSpace(func, fill);
             if (failed(idSpace)) {

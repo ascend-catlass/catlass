@@ -311,8 +311,8 @@ def test_fill_zero_value_bit_pattern_fp8() -> None:
     assert "tla.fill" in mlir
 
 
-def test_fill_rejects_nonzero_for_any_type() -> None:
-    """The zero-only contract applies to every supported element type."""
+def test_fill_rejects_nonzero_for_packed_types() -> None:
+    """Packed fp4/fp8 retain the zero-only contract."""
 
     for dtype in (tla.Float8E4M3FN, tla.Float8E5M2, tla.Float4E2M1, tla.Float4E1M2):
 
@@ -327,25 +327,6 @@ def test_fill_rejects_nonzero_for_any_type() -> None:
             return _kernel
 
         with pytest.raises((TlaLoweringError, tla.TlaCoreAPIError), match="supports only value 0"):
-            _build().dump_mlir()
-
-
-def test_fill_rejects_wider_types() -> None:
-    """The 16b/32b fill routes were removed with the zero-only contract."""
-
-    for dtype in (tla.Float16, tla.BFloat16, tla.Float32, tla.Int16, tla.Int32):
-
-        def _build(dtype=dtype):
-            @tla.kernel
-            def _kernel() -> None:
-                t = _l1_tensor((32, 64), dtype, tla.arch.zN)
-                with tla.cube():
-                    t.fill(0)
-                _ = t
-
-            return _kernel
-
-        with pytest.raises((TlaLoweringError, tla.TlaCoreAPIError), match="fp4/fp8 operand formats"):
             _build().dump_mlir()
 
 

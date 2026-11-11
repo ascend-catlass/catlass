@@ -600,15 +600,15 @@ mlir::LogicalResult FillOp::verify()
     LayoutTag tag = dstTy.getLayout().getLayoutTag();
     if (tag != LayoutTag::zN && tag != LayoutTag::nZ)
         return emitOpError("fill destination must be tagged zN or nZ");
-    // Fill exists for the MX pad use case: zeroing a packed fp4/fp8 operand
-    // tile. Wider types and the e8m0 scale format have no fill route in the
-    // bc layer, so refuse them here rather than at lowering time.
     ::mlir::Type elem = dstTy.getPtr().getPointee();
-    if (!::tla::isPackedFp4Type(elem) && !mlir::isa<::mlir::Float8E4M3FNType, ::mlir::Float8E5M2Type>(elem))
-        return emitOpError("fill destination element type must be fp4 or fp8");
-    ::llvm::APInt valueBits;
-    if (mlir::matchPattern(getValue(), mlir::m_ConstantInt(&valueBits)) && !valueBits.isZero())
-        return emitOpError("fill value must be 0");
+    bool zeroOnly = ::tla::isPackedFp4Type(elem) || mlir::isa<mlir::Float8E4M3FNType, mlir::Float8E5M2Type>(elem);
+    if (!zeroOnly && !::tla::isOfficialL1FillElementType(elem))
+        return emitOpError("unsupported L1 fill destination element type");
+    if (zeroOnly) {
+        ::llvm::APInt valueBits;
+        if (!mlir::matchPattern(getValue(), mlir::m_ConstantInt(&valueBits)) || !valueBits.isZero())
+            return emitOpError("fp4/fp8 fill requires a constant zero bit pattern");
+    }
     return mlir::success();
 }
 // One thread block may hold at most this many threads on the supported targets.

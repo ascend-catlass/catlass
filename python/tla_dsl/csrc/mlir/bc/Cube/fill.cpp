@@ -1,10 +1,11 @@
 #include "../dma_common.h"
 
+#include <type_traits>
+
 // L1 fill: write a scalar bit pattern into a C0-column-granular region of an
 // L1 zN/nZ tile. Backs the tla.fill op (Tensor.fill on the Python side).
 // The region arrives as a flat rank-2 (coord, extent) pair on the tile's
-// logical axes, already cropped by the frontend against the tile's origin
-// shape. Two axes matter:
+// logical axes, taken from the tile's coord and origin shape. Two axes matter:
 //   - the C0-packed axis (C0e-element units laid end to end): dim1 for zN,
 //     dim0 for nZ. Fill writes 32-byte blocks, i.e. whole C0
 //     columns, so both ends of this axis are aligned up to C0 boundaries and
@@ -28,7 +29,14 @@ CATLASS_DEVICE void fillL1Impl(
     int32_t valueBits)
 {
     static_assert(Tag == LayoutTag::zN || Tag == LayoutTag::nZ, "L1 fill supports zN/nZ tiles only");
-    constexpr uint32_t eleNumPerC0 = Catlass::BytesToBits(Catlass::BYTE_PER_C0) / Catlass::SizeOfBits<T>::value;
+    constexpr uint32_t elemBits = Catlass::SizeOfBits<T>::value;
+    static_assert(elemBits == 4 || elemBits == 8 || elemBits == 16 || elemBits == 32);
+    constexpr uint32_t eleNumPerC0 = Catlass::BytesToBits(Catlass::BYTE_PER_C0) / elemBits;
+    using FillT = std::conditional_t<(elemBits <= 16), uint16_t, uint32_t>;
+    if constexpr (elemBits < 16) {
+        if (valueBits != 0)
+            return;
+    }
 
     // Region axes after the tag dispatch: "fractal row" is the 16-element
     // fractal-row axis, "C0 column" the C0-packed axis (32-byte columns laid
@@ -47,7 +55,7 @@ CATLASS_DEVICE void fillL1Impl(
         c0ColExt = ext0;
         unitStride = desc.stride1;
     }
-    if (fractalRowExt <= 0) {
+    if (fractalRowExt <= 0 || c0ColExt <= 0) {
         return;
     }
 
@@ -68,22 +76,16 @@ CATLASS_DEVICE void fillL1Impl(
         return;
     }
 
-    // Every supported element type is 8 bits or less of payload (fp8, or fp4
-    // restored to its logical type for the layout math), so the fill always
-    // writes uint16_t patterns; the i32 bit pattern narrows accordingly. The
-    // frontend admits only 0, which is 0x0000 in every width.
-    const uint16_t initValue = static_cast<uint16_t>(valueBits);
-
     const int64_t elemOffset = fractalRowCrd * eleNumPerC0 + (c0ColStart / eleNumPerC0) * unitStride;
-    const int64_t byteOffset = elemOffset * Catlass::SizeOfBits<T>::value / 8;
-    AscendC::LocalTensor<uint16_t> dstTensor(
+    const int64_t byteOffset = elemOffset * elemBits / 8;
+    AscendC::LocalTensor<FillT> dstTensor(
         AscendC::TPosition::A1, baseAddr + static_cast<uint32_t>(byteOffset),
-        static_cast<uint32_t>(fractalRowExt * Catlass::BYTE_PER_C0 / sizeof(uint16_t)));
-    AscendC::InitConstValueParams<uint16_t> params;
+        static_cast<uint32_t>(fractalRowExt * Catlass::BYTE_PER_C0 / sizeof(FillT)));
+    AscendC::InitConstValueParams<FillT> params;
     params.repeatTimes = static_cast<uint16_t>(repeatTimes);
     params.blockNum = static_cast<uint16_t>(fractalRowExt);
     params.dstGap = static_cast<uint16_t>(unitStrideBlocks - fractalRowExt);
-    params.initValue = initValue;
+    params.initValue = static_cast<FillT>(static_cast<uint32_t>(valueBits));
     AscendC::Fill(dstTensor, params);
 }
 
@@ -99,9 +101,22 @@ extern "C" {
         fillL1Impl<LayoutTag::Layout, DType>(localAddr(dst), TENSOR_DESC_12(dst), crd0, crd1, ext0, ext1, valueBits); \
     }
 
-// Only the packed fp4/fp8 operand formats have a fill route: the op exists to
-// zero the K-pad tail of an MX operand tile, so the wider 16b/32b variants
-// were dropped with the zero-only contract.
+REGISTER_FILL_L1(zN, int16_t)
+REGISTER_FILL_L1(zN, uint16_t)
+REGISTER_FILL_L1(zN, half)
+REGISTER_FILL_L1(zN, bf16)
+REGISTER_FILL_L1(zN, int32_t)
+REGISTER_FILL_L1(zN, uint32_t)
+REGISTER_FILL_L1(zN, float)
+REGISTER_FILL_L1(nZ, int16_t)
+REGISTER_FILL_L1(nZ, uint16_t)
+REGISTER_FILL_L1(nZ, half)
+REGISTER_FILL_L1(nZ, bf16)
+REGISTER_FILL_L1(nZ, int32_t)
+REGISTER_FILL_L1(nZ, uint32_t)
+REGISTER_FILL_L1(nZ, float)
+
+// Packed fp8 retains zero-only fill.
 REGISTER_FILL_L1(zN, fp8_e4m3fn_t)
 REGISTER_FILL_L1(zN, fp8_e5m2_t)
 REGISTER_FILL_L1(nZ, fp8_e4m3fn_t)

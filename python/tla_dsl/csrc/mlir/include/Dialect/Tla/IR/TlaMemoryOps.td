@@ -141,17 +141,16 @@ def Tla_FillOp : Tla_Op<"fill", []> {
   let summary = "Fill a region of an L1 zN/nZ tile with a scalar bit pattern";
   let description = [{
     Fill ``dst`` with ``value`` over the region ``[coord, coord + shape)``.
-    Cube only: the destination must be an L1 tile tagged ``zN`` or ``nZ``, with
-    a fp4/fp8 element type, and ``value`` must be 0 -- the op exists to
-    zero the K-pad tail of an MX operand tile, nothing else.
+    Cube only: the destination must be an L1 tile tagged ``zN`` or ``nZ``.
+    Supported elements are i16/ui16/f16/bf16/i32/ui32/f32 and packed fp4/fp8.
+    Packed fp4/fp8 require a constant zero bit pattern.
 
-    ``value`` travels as its i32 bit pattern (a uint16 pattern for the
-    fp4/fp8 storage). The frontend crops ``shape`` against the tile's origin
-    shape and the given coord before this op is formed. The device helper
-    aligns the coordinate up to the C0 boundary (32 bytes) along the layout's
-    C0 axis before filling, so a fill that starts or ends inside a C0 block
-    degrades to the enclosing aligned blocks and a zero-length fill is a
-    no-op.
+    ``value`` carries the target element's bits in i32; 16-bit destinations
+    use its low 16 bits.
+    The device aligns both ends of the layout's C0 axis up to 32-byte
+    boundaries and writes ``[alignUp(start), alignUp(end))``. A partial
+    starting block is untouched; the final block may include physical
+    Padding beyond the logical extent, which must fit the allocation.
   }];
   let arguments = (ins Tla_TensorType:$dst, I32:$value,
                          Tla_CoordType:$coord, Tla_ShapeType:$shape);

@@ -7,6 +7,8 @@ import inspect
 import math
 import os
 import sys
+
+import numpy as np
 from dataclasses import dataclass
 from enum import Enum
 from itertools import chain
@@ -115,7 +117,17 @@ _BITCAST_ELEMENT_TYPES = frozenset(
 from catlass._mlir.dialects import tla as _tla_ops_gen  # type: ignore[import-not-found]
 from .base_dsl import ast_helpers as _ast_helpers
 from .base_dsl.op import _ExternUsage, dsl_user_op, _capture_user_loc
-from .base_dsl.typing import Bool, Float32, Int8, Int16, Int32, Numeric, as_numeric
+from .base_dsl.typing import (
+    BFloat16,
+    Bool,
+    Float16,
+    Float32,
+    Int8,
+    Int16,
+    Int32,
+    Numeric,
+    as_numeric,
+)
 from .base_dsl.typing import Pointer, TypedPointer
 from .tla.tensor import normalize_tile_view_coord
 from .tla.typing import Tensor
@@ -5833,25 +5845,61 @@ def _modify_doc_copy(fn: Callable[..., Any]) -> None:
     )
 
 
-# tla.fill (Tensor.fill) element rules: only the packed fp4/fp8 cube operand
-# formats are supported, and only to zero the tile (the MX pad use case) --
-# wider types and non-zero patterns are refused up front.
-_FILL_SUPPORTED_ELEMENT_TYPES = frozenset({"f4e2m1", "f4e1m2", "f8e4m3fn", "f8e5m2"})
+# Packed fp4/fp8 remain zero-only; 16/32-bit types accept scalar bit patterns.
+_FILL_ZERO_ONLY_TYPES = frozenset({"f4e2m1", "f4e1m2", "f8e4m3fn", "f8e5m2"})
+_FILL_INTEGER_TYPES = {
+    "i16": (16, True),
+    "u16": (16, False),
+    "i32": (32, True),
+    "u32": (32, False),
+}
+_FILL_FLOAT_TYPES = {
+    "f16": (Float16, 0x7C00),
+    "bf16": (BFloat16, 0x7F80),
+    "f32": (Float32, 0x7F800000),
+}
+_FILL_SUPPORTED_ELEMENT_TYPES = (
+    _FILL_ZERO_ONLY_TYPES | _FILL_INTEGER_TYPES.keys() | _FILL_FLOAT_TYPES.keys()
+)
 
 
 def _fill_value_bits(op_name: str, element_type: str, value: Any) -> int:
-    """Convert a trace-time scalar to the i32 bit pattern consumed by tla.fill."""
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    """Encode a trace-time scalar in the destination type, carried by signed i32."""
+    if type(value) not in (int, float):
         _op_error(
             op_name,
             f"fill value must be a trace-time int or float, got {type(value).__name__}",
         )
-    if value != 0:
-        _op_error(
-            op_name,
-            f"fill of {element_type} supports only value 0, got {value!r}",
-        )
-    return 0
+    if element_type in _FILL_ZERO_ONLY_TYPES:
+        if value != 0:
+            _op_error(
+                op_name, f"fill of {element_type} supports only value 0, got {value!r}"
+            )
+        return 0
+    if element_type in _FILL_INTEGER_TYPES:
+        width, signed = _FILL_INTEGER_TYPES[element_type]
+        if not isinstance(value, int):
+            _op_error(op_name, f"fill of {element_type} requires an int")
+        lower = -(1 << (width - 1)) if signed else 0
+        upper = (1 << (width - int(signed))) - 1
+        if not lower <= value <= upper:
+            _op_error(
+                op_name, f"fill value must be in [{lower}, {upper}] for {element_type}"
+            )
+        bits = value & ((1 << width) - 1)
+    elif element_type in _FILL_FLOAT_TYPES:
+        dtype, exponent_mask = _FILL_FLOAT_TYPES[element_type]
+        try:
+            scalar = float(value)
+            with np.errstate(over="ignore", invalid="ignore"):
+                bits = dtype._host_bits(scalar)
+        except (OverflowError, ValueError):
+            _op_error(op_name, f"fill value cannot be encoded as {element_type}")
+        if math.isfinite(scalar) and (bits & exponent_mask) == exponent_mask:
+            _op_error(op_name, f"fill value overflows {element_type}")
+    else:
+        _op_error(op_name, f"unsupported fill element type {element_type!r}")
+    return bits if bits < (1 << 31) else bits - (1 << 32)
 
 
 def _tensor_fill_impl(
@@ -5889,9 +5937,9 @@ def _tensor_fill_impl(
     if element_type not in _FILL_SUPPORTED_ELEMENT_TYPES:
         _op_error(
             op_name,
-            f"unsupported element type {element_type!r}: fill supports only the "
-            "packed fp4/fp8 operand formats (f4e2m1/f4e1m2/f8e4m3fn/f8e5m2), "
-            "zero only",
+            f"unsupported element type {element_type!r}: fill supports "
+            "i16/u16/f16/bf16/i32/u32/f32 types and packed fp4/fp8 formats "
+            "(zero only for fp4/fp8)",
         )
 
     # The region is the tile itself. bc places the fill relative to the buffer

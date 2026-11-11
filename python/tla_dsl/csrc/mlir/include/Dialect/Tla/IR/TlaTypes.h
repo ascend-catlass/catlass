@@ -59,6 +59,12 @@ inline bool isLinearLayout(::LayoutTag layoutTag)
     return layoutTag == ::LayoutTag::RowMajor || layoutTag == ::LayoutTag::ColumnMajor || isVectorLayout(layoutTag);
 }
 
+inline bool isOfficialL1FillElementType(::mlir::Type type)
+{
+    return type.isF16() || type.isBF16() || type.isF32() || type.isSignlessInteger(16) || type.isUnsignedInteger(16) ||
+           type.isSignlessInteger(32) || type.isUnsignedInteger(32);
+}
+
 inline int64_t getByteSizeOfFixedWidthScalarType(::mlir::Type type)
 {
     if (type.isBF16() || type.isF16())

@@ -428,7 +428,7 @@ with tla.vec.func(mode="simd"):
 
 Description:
 
-Fill this L1 zN/nZ tile with a constant (currently only zero).
+Fill this L1 zN/nZ tile with a constant.
 
 Prototype:
 
@@ -438,21 +438,23 @@ tla.Tensor.fill(value: int | float) -> None
 
 Parameters:
 
-- `value` (`int | float`): Trace-time scalar; only ``0`` is
-  supported (the device writes the zero bit pattern).
+- `value` (`int | float`): Trace-time scalar, encoded in the
+  destination type. Integer destinations require an in-range
+  `int`; floating destinations accept `int` or `float` and
+  reject finite overflow.
 
 Constraints:
 
 - Must be called inside a `@tla.kernel`-decorated kernel function and
   nested inside `tla.cube()`.
 - Destination must be an L1 tensor tagged ``zN`` or ``nZ``.
-- Fill covers ``[coord, coord + origin_shape)``; the C0 axis start
-  is aligned up to a 32-byte boundary, so a partial leading C0 unit
-  is left untouched.
-- Supported element types: the packed fp4/fp8 operand formats
-  (``f4e2m1``/``f4e1m2``/``f8e4m3fn``/``f8e5m2``), zero only.
-  Wider types, 8-bit integers and e8m0 scale tiles are not
-  supported.
+- Fill covers ``[coord, coord + origin_shape)``. Both boundaries
+  along the C0 axis (32 bytes) are aligned up. The partial starting
+  block is untouched; the final block may include physical Padding
+  beyond the logical extent, which must fit the allocation.
+- Supported element types: ``i16/u16/f16/bf16/i32/u32/f32`` and
+  the packed fp4/fp8 operand formats
+  (``f4e2m1``/``f4e1m2``/``f8e4m3fn``/``f8e5m2``, zero only).
 
 Example:
 

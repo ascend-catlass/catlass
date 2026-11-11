@@ -909,8 +909,7 @@ static FailureOr<std::array<Value, 2>> materializeFillIndexPair(
 
 // tla.fill lowers to an inlinable L1 fill runtime template on the AIC core. The
 // payload carries the destination's 12-field descriptor, the flat rank-2 fill
-// region (coord + extent, both cropped by the frontend against the tile's origin
-// shape), and the i32 fill bit pattern.
+// region (the tile coord and origin shape), and the i32 fill bit pattern.
 struct LowerTlaFillPattern : public OpRewritePattern<::tla::FillOp> {
     LowerTlaFillPattern(
         MLIRContext* ctx, DenseMap<Value, TensorDescriptor>& tensorDescriptorByValue,
@@ -1126,7 +1125,7 @@ public:
                 passFailed = true;
         }
 
-        // tla.fill: explicit L1 pad-region initialization (zN/nZ destinations),
+        // tla.fill: initialize an L1 region with a constant value (zN/nZ destinations),
         // lowered like the copy routes so the region lands in the same MTE2 window.
         LowerTlaFillPattern lowerFill(&getContext(), tensorDescriptorByValue, toErase, lowering.loweredMemrefByValue);
         SmallVector<::tla::FillOp, 8> fillOps;
