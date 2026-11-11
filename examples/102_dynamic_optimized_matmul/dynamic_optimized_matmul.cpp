@@ -8,6 +8,7 @@
  * See LICENSE in the root of the software repository for the full text of the License.
  */
 
+#include <iostream>
 #include "golden.hpp"
 #include "helper.hpp"
 #include "catlass/layout/layout.hpp"

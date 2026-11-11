@@ -15,6 +15,7 @@
 #define K_MAX_SHAPE_DIM 0
 #endif
 
+#include <iostream>
 #include <string>
 
 #include "catlass/gemm/kernel/mx_matmul_tla.hpp"

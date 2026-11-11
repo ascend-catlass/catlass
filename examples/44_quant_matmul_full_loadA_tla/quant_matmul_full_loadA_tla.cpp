@@ -15,6 +15,7 @@
 #define K_MAX_SHAPE_DIM 0
 #endif
 
+#include <iostream>
 #include "catlass/gemm/kernel/quant_matmul_full_loadA_tla.hpp"
 
 #include "catlass/arch/arch.hpp"

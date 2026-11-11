@@ -14,6 +14,7 @@
 #ifndef K_MAX_SHAPE_DIM
 #define K_MAX_SHAPE_DIM 0
 #endif
+#include <cstdio>
 #include <fstream>
 #include <iostream>
 #include <sstream>

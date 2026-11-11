@@ -11,6 +11,7 @@
 #ifndef EXAMPLES_ASCEND950_SYRK_SPLITK_H
 #define EXAMPLES_ASCEND950_SYRK_SPLITK_H
 
+#include <iostream>
 #include "catlass/gemm/block/block_mmad_syrk_tla.hpp"
 #include "catlass/gemm/block/block_scheduler_syrk.h"
 #include "catlass/gemm/kernel/basic_syrk_polynomial_splitk_tla.h"

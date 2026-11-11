@@ -15,6 +15,8 @@
 #endif
 
 // Helper methods to check for errors
+#include <iostream>
+#include <cstdio>
 #include "fai_kernel.cpp"
 #include "fai_tiling.cpp"
 #include "golden.hpp"

@@ -14,6 +14,7 @@
 #define K_MAX_SHAPE_DIM 0
 #endif
 
+#include <iostream>
 #include "catlass/gemm/kernel/quant_matmul_per_group_per_block_tla.hpp"
 
 #include "catlass/arch/arch.hpp"

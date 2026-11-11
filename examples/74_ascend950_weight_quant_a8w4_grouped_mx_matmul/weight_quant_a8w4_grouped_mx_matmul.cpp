@@ -13,6 +13,7 @@
 #define K_MAX_SHAPE_DIM 0
 #endif
 
+#include <iostream>
 #include "catlass/gemm/kernel/weight_quant_a8w4_grouped_mx_matmul.hpp"
 
 #include "catlass/arch/arch.hpp"

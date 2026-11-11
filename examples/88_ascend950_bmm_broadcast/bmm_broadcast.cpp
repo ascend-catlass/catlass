@@ -12,6 +12,7 @@
 #define K_MAX_SHAPE_DIM 0
 #endif
 
+#include <iostream>
 #include "catlass/gemm/kernel/batched_matmul_broadcast_tla.h"
 
 #include "catlass/gemm/block/block_mmad.hpp"

@@ -12,6 +12,7 @@
 #define K_MAX_SHAPE_DIM 0
 #endif
 
+#include <iostream>
 #include "catlass/gemm/kernel/basic_syrk_tla.hpp"
 
 #include "catlass/arch/arch.hpp"

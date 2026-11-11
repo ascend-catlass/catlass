@@ -13,6 +13,7 @@
 #define K_MAX_SHAPE_DIM 0
 #endif
 
+#include <iostream>
 #include "catlass/gemm/kernel/a8w4_mx_matmul.hpp"
 
 #include "catlass/arch/arch.hpp"

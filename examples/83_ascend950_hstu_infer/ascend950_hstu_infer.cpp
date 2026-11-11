@@ -17,6 +17,8 @@
 
 #define NO_OVERLAP_IN_MULTI_REPEAT
 
+#include <iostream>
+#include <cstdio>
 #include "catlass/arch/arch.hpp"
 #include "catlass/catlass.hpp"
 
@@ -129,7 +131,6 @@ static void Run(const Options& options)
     // Parameters initialization.
     uint32_t batch = options.batch;
     uint32_t qSeqlen = options.qSeqlen;
-    uint32_t kvSeqlen = options.kvSeqlen;
     uint32_t numHeads = options.numHeads;
     uint32_t kvHeads = options.kvHeads;
     uint32_t embeddingSize = options.embeddingSize;

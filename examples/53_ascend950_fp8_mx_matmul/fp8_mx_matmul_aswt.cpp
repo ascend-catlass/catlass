@@ -15,6 +15,7 @@
 #define K_MAX_SHAPE_DIM 0
 #endif
 
+#include <iostream>
 #include <algorithm>
 #include <cstdint>
 #include <string>

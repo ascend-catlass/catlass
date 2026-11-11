@@ -11,6 +11,7 @@
 #ifndef EXAMPLES_ASCEND950_SYRK_EXAMPLE_H
 #define EXAMPLES_ASCEND950_SYRK_EXAMPLE_H
 
+#include <iostream>
 #include <cmath>
 #include <cstring>
 #include <limits>

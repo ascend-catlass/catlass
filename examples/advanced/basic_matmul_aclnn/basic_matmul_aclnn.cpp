@@ -9,6 +9,7 @@
  * See LICENSE in the root of the software repository for the full text of the License.
  */
 
+#include <iostream>
 #include "aclnn_catlass_basic_matmul.h"
 #include "golden.hpp"
 #include "helper.hpp"

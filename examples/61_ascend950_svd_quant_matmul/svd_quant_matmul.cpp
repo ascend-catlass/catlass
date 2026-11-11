@@ -15,6 +15,7 @@
 #define K_MAX_SHAPE_DIM 0
 #endif
 
+#include <iostream>
 #include "catlass/gemm/kernel/svd_quant_matmul_tla.hpp"
 
 #include <acl/acl.h>

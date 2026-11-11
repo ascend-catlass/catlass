@@ -15,6 +15,7 @@
 #define K_MAX_SHAPE_DIM 0
 #endif
 
+#include <iostream>
 #include "catlass/gemm/kernel/w4a4_matmul_per_token_per_channel_dequant.hpp"
 
 #include "catlass/arch/arch.hpp"
