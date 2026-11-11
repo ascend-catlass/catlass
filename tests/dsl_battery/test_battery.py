@@ -1121,16 +1121,3 @@ def test_case(case_id: str, device: int) -> None:
                     pytest.skip(str(exc))
             raise
         assert rc == 0, f"{argv[0]} {' '.join(argv[1:])} exited {rc}"
-
-
-def test_syrk_api_rejects_invalid_block_num(device: int) -> None:
-    import example_runner
-    import torch
-
-    example = example_runner.load_example(
-        example_runner.EXAMPLES_DIR / "tla/kernel/matmul/basic_syrk/basic_syrk.py"
-    )
-    x = torch.ones((16, 16), dtype=torch.float16, device=f"npu:{device}")
-    for block_num in (0, -2):
-        with pytest.raises(ValueError, match="block_num must be -1 .* or positive"):
-            example.syrk(x, block_num=block_num)

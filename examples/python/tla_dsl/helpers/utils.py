@@ -59,8 +59,11 @@ def get_block_num(block_num: int, device: int = 0, *, kind: str = "vector") -> i
     Non-``-1`` uses the host argument. ``-1`` means full-device launch:
     pure vector → ``vector_core_num`` (AIV); cube/mix → ``cube_core_num`` (AIC).
     """
-    if int(block_num) != -1:
-        return max(1, int(block_num))
+    if block_num != -1 and block_num <= 0:
+        raise ValueError("block_num must be -1 (automatic) or positive")
+    block_num = int(block_num)
+    if block_num != -1:
+        return block_num
     props = torch.npu.get_device_properties(int(device))
     if kind == "vector":
         return max(1, int(props.vector_core_num))

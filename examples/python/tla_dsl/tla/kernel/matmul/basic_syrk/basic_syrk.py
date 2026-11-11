@@ -1190,8 +1190,6 @@ def _prepare_launch(
 
     from helpers import create_tla_tensor, get_block_num
 
-    if block_num != -1 and block_num <= 0:
-        raise ValueError("block_num must be -1 (automatic) or positive")
     batch = x.shape[0] if x.ndim == 3 else 1
     m, k = x.shape[-2:]
     block_num = get_block_num(block_num, x.device.index, kind="mix")
