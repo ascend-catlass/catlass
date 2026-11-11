@@ -1140,7 +1140,7 @@ public:
     {
         return Conv2dParams(
             dataSizes[0], dataSizes[1], dataSizes[2], dataSizes[3], dataSizes[4], filterSizes[0], filterSizes[1],
-            pads[0], pads[1], pads[2], pads[3], strides[0], strides[1], strides[2], strides[3]);
+            pads[0], pads[1], pads[2], pads[3], strides[0], strides[1], dilations[0], dilations[1]);
     }
 
     CATLASS_HOST_DEVICE
