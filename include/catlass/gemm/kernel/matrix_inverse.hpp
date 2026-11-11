@@ -106,7 +106,10 @@ public:
 
     static bool CanImplement(const Arguments& args)
     {
-        return args.N > 0 && args.ptrA != nullptr;
+        // PanelGetrf 在 UB 上依次叠加 ubU/ubT/ubTmp 三段长度为 bufSize 的缓冲，
+        // bufSize 最大为 RoundUp8(N)，需保证 3*bufSize*sizeof(Element) 不超过 UB 容量。
+        constexpr uint32_t MAX_N = ArchTag::UB_SIZE / (3 * sizeof(Element));
+        return args.N > 0 && args.N <= MAX_N;
     }
 
     static size_t GetWorkspaceSize(const Arguments& args)

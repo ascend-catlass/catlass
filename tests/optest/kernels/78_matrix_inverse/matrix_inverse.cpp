@@ -75,7 +75,9 @@ void MatrixInverseImpl(const uint32_t blockNum, aclrtStream stream, const Matrix
     typename InverterKernel::Arguments arguments{N, deviceA, layoutA, deviceIpiv, nullptr};
 
     InverterAdapter invOp;
-    invOp.CanImplement(arguments);
+    if (invOp.CanImplement(arguments) != Status::kSuccess) {
+        return;
+    }
 
     size_t sizeWorkspace = invOp.GetWorkspaceSize(arguments);
     uint8_t* deviceWorkspace = nullptr;

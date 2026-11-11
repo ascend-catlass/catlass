@@ -37,14 +37,39 @@ using namespace tla;
 
 static void Run(uint32_t N, int32_t deviceId)
 {
+    using Element = float;
+    using LayoutTag = layout::RowMajor;
+
+    // Define kernel types
+    using ArchTag = Arch::AtlasA2;
+    constexpr bool enableUnitFlag = true;
+    constexpr bool useHF32 = false;
+
+    using DispatchPolicy = Gemm::MmadPingpong<ArchTag, enableUnitFlag, useHF32>;
+    using L1TileShape = Shape<_128, _128, _256>;
+    using L0TileShape = Shape<_128, _128, _64>;
+    using TileCopy = Gemm::Tile::PackedTileCopyTla<ArchTag, Element, LayoutTag, Element, LayoutTag, Element, LayoutTag>;
+    using BlockMmadType =
+        Gemm::Block::BlockMmadTla<DispatchPolicy, L1TileShape, L0TileShape, Element, Element, Element, void, TileCopy>;
+    using BlockSchedulerType = Gemm::Block::GemmIdentityBlockSwizzle<>;
+
+    using InverterKernel = Gemm::Kernel::MatrixInverse<ArchTag, float, BlockMmadType, BlockSchedulerType>;
+    using InverterAdapter = Gemm::Device::DeviceGemm<InverterKernel>;
+
+    // CanImplement only depends on N, so validate it before initializing the device.
+    auto layoutA = tla::MakeLayout<Element, LayoutTag>(N, N);
+    InverterKernel::Arguments probeArgs{N, nullptr, layoutA, nullptr, nullptr};
+    if (InverterAdapter::CanImplement(probeArgs) != Status::kSuccess) {
+        std::cerr << "Unsupported N=" << N << ": matrix inverse requires N <= "
+                  << ArchTag::UB_SIZE / (3 * sizeof(Element)) << "." << std::endl;
+        return;
+    }
+
     aclrtStream stream{nullptr};
 
     ACL_CHECK(aclInit(nullptr));
     ACL_CHECK(aclrtSetDevice(deviceId));
     ACL_CHECK(aclrtCreateStream(&stream));
-
-    using Element = float;
-    using LayoutTag = layout::RowMajor;
 
     size_t lenA = static_cast<size_t>(N) * N;
     size_t lenIpiv = static_cast<size_t>(N);
@@ -74,28 +99,10 @@ static void Run(uint32_t N, int32_t deviceId)
     // Get core count
     auto aicCoreNum = platform_ascendc::PlatformAscendCManager::GetInstance()->GetCoreNumAic();
 
-    // Define kernel types
-    using ArchTag = Arch::AtlasA2;
-    constexpr bool enableUnitFlag = true;
-    constexpr bool useHF32 = false;
-
-    using DispatchPolicy = Gemm::MmadPingpong<ArchTag, enableUnitFlag, useHF32>;
-    using L1TileShape = Shape<_128, _128, _256>;
-    using L0TileShape = Shape<_128, _128, _64>;
-    using TileCopy = Gemm::Tile::PackedTileCopyTla<ArchTag, Element, LayoutTag, Element, LayoutTag, Element, LayoutTag>;
-    using BlockMmadType =
-        Gemm::Block::BlockMmadTla<DispatchPolicy, L1TileShape, L0TileShape, Element, Element, Element, void, TileCopy>;
-    using BlockSchedulerType = Gemm::Block::GemmIdentityBlockSwizzle<>;
-
-    using InverterKernel = Gemm::Kernel::MatrixInverse<ArchTag, float, BlockMmadType, BlockSchedulerType>;
-    using InverterAdapter = Gemm::Device::DeviceGemm<InverterKernel>;
-
     // Set up arguments
-    auto layoutA = tla::MakeLayout<Element, LayoutTag>(N, N);
     InverterKernel::Arguments arguments{N, deviceA, layoutA, deviceIpiv, nullptr};
 
     InverterAdapter invOp;
-    invOp.CanImplement(arguments);
 
     size_t sizeWorkspace = invOp.GetWorkspaceSize(arguments);
     uint8_t* deviceWorkspace = nullptr;
