@@ -637,6 +637,31 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
                     ]],
                 )
 
+    # --- fused_ffn: Up→Act→SyncAll→Down; one case per legal combo ---
+    # Axes: activation × dtype × layout × bias. SwiGLU rejects canonical.
+    _FFN_SCRIPT = "tla/kernel/matmul/fused_ffn/fused_ffn.py"
+    _FFN_SHAPE = ("--m", "128", "--k", "256", "--h", "512", "--n", "256")
+    for act in ("silu", "gelu", "swiglu"):
+        layouts = ("linear",) if act == "swiglu" else ("linear", "canonical")
+        for dtype in ("f16", "bf16"):
+            for layout in layouts:
+                for use_bias in (False, True):
+                    bias_tag = "bias" if use_bias else "nobias"
+                    argv = [
+                        _FFN_SCRIPT,
+                        *_FFN_SHAPE,
+                        "--dtype", dtype,
+                        "--activation", act,
+                        "--layout", layout,
+                        *dev,
+                    ]
+                    if use_bias:
+                        argv.append("--bias")
+                    yield (
+                        f"fused-ffn-{act}-{dtype}-{layout}-{bias_tag}",
+                        [argv],
+                    )
+
     # --- vector_ops: each of these sweeps or batches many kernels internally ---
     yield (
         "vector-masked-binary",

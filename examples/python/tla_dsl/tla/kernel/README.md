@@ -14,6 +14,7 @@
 | [`batched_matmul/`](matmul/batched_matmul/README.md) | 批量矩阵乘。 |
 | [`multi_core_splitk_matmul/`](matmul/multi_core_splitk_matmul/README.md) | 多核切 K 矩阵乘，含尾块切分变体。 |
 | [`mx_mmad/`](matmul/mx_mmad/README.md) | 微缩放（MX FP8/FP4）矩阵乘，演示 scale 搬运与 `tla.mmad_mx`。 |
+| [`fused_ffn/`](matmul/fused_ffn/README.md) | 融合 FFN：`Up Matmul → Act → SyncAll → Down Matmul`（SiLU / GELU / SwiGLU，可选 Cube BT bias）。 |
 
 ## 注意力（attention）
 
