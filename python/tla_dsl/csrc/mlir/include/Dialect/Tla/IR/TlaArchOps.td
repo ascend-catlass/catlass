@@ -8,6 +8,17 @@
 // Included by Dialect/Tla/IR/Tla.td, the file mlir-tblgen is run on.
 //===----------------------------------------------------------------------===//
 
+// Deliberately not Pure: these controls must survive dead-code elimination.
+def Tla_ProfStartOp : Tla_Op<"prof_start", []> {
+  let summary = "Start best-effort device profiling at this position";
+  let assemblyFormat = [{ attr-dict }];
+}
+
+def Tla_ProfEndOp : Tla_Op<"prof_end", []> {
+  let summary = "End best-effort device profiling at this position";
+  let assemblyFormat = [{ attr-dict }];
+}
+
 // Grid coordinates. Used by every kernel -- SIMD, SIMT, cube and mixed alike.
 def Tla_BlockNumOp : Tla_Op<"arch.block_num", [Pure]> {
   let summary = "Block count";

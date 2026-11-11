@@ -41,6 +41,7 @@ void registerTlaPasses()
     registerTlaFinalizeMemrefPass();
     registerTlaPrologueEpiloguePass();
     registerTlaInsertImplicitCtrlPass();
+    registerTlaLowerProfilingPass();
     registerTlaLowerAVEToRegbaseIntrinsPass();
     registerTlaLowerScalarOpsPass();
 }
@@ -78,6 +79,9 @@ void buildTlaPipeline(OpPassManager& pm)
     pm.addPass(createTlaLowerFlagBarrierToHivmPass());
     pm.addPass(createTlaLowerMutexToStdPass());
     pm.addPass(createTlaPrologueEpiloguePass());
+    // Preserve user boundaries through splitting, outlining and region lowering.
+    // Materialize controls only once the kernel's structural rewrites are done.
+    pm.addPass(createTlaLowerProfilingPass());
     pm.addPass(createCSEPass());
     // Fuse AVE instruction sequences after every TLA/vector/arith producer has
     // been lowered. In particular, vsub followed by vexp becomes vexpdif on

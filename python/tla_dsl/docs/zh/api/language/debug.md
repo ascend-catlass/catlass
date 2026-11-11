@@ -68,3 +68,71 @@ with tla.vector():
         if thread == 0:
             tla.print(source_gm, 8)
 ```
+
+---
+
+## `tla.prof_start`
+
+**源码：** [`catlass.core_api.prof_start`](../../../../catlass/core_api.py)
+
+在当前位置启动尽力而为的设备性能采集。在 A5 上，通过 `msprof op` 的
+`KernelScale` 指标采集。降低为原生序列：`PIPE_ALL` 屏障、设置 CTRL 位 0、
+`PIPE_ALL` 屏障。
+
+```python
+tla.prof_start() -> None
+```
+
+无参数。每个 kernel 特化仅使用一对 start/end。调用方负责位置、执行次数和
+同步；不提供计时保证。
+
+```python
+with tla.cube():
+    tla.prof_start()
+    tla.mmad(acc, lhs, rhs, init_c=True)
+    tla.prof_end()
+```
+
+## `tla.prof_end`
+
+**源码：** [`catlass.core_api.prof_end`](../../../../catlass/core_api.py)
+
+结束 `tla.prof_start()` 开启的区间。降低为原生序列：`PIPE_ALL` 屏障、清除
+CTRL 位 0、`PIPE_ALL` 屏障。
+
+```python
+tla.prof_end() -> None
+```
+
+无参数。构建 IR 时要求存在尚未结束的 start，但不证明动态配对。错误的位置可能
+导致编译失败或 kernel 挂起。
+
+```python
+with tla.cube():
+    tla.prof_start()
+    tla.mmad(acc, lhs, rhs, init_c=True)
+    tla.prof_end()
+```
+
+## `tla.prof_scope`
+
+**源码：** [`catlass.core_api.prof_scope`](../../../../catlass/core_api.py)
+
+在代码块前后发出相同的 start/end 对，不移动或扩大区间。仅添加原生性能采集
+屏障；这些屏障会改变重叠关系，不保证得到隔离的计时。
+
+```python
+tla.prof_scope() -> _ProfScope
+```
+
+无参数。每个 kernel 特化仅使用一个区间。构建 IR 时拒绝可直接检测的嵌套或重复
+配对，但不证明执行次数和同步。在 A5 上验证的 Vector 位置是在标量调用方中包围
+完整的 `tla.vec.func` 调用；不支持的位置可能编译失败。不承诺支持 SIMT、多个
+区间或嵌套区间。
+
+```python
+with tla.vector():
+    with tla.prof_scope():
+        with tla.vec.func(mode="simd"):
+            dst.store(tla.add(lhs.load(), rhs.load()))
+```

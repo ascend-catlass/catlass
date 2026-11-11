@@ -1,0 +1,13 @@
+// RUN: %python %S/Inputs/profiling-outer.py > %t.mlir
+// RUN: %tla_compile %t.mlir -o %t.out --mlir-print-ir-after=tla-lower-profiling 2>&1 | %filecheck %s
+
+// One frontend pair becomes a separate native gate on each split issuer.
+// CHECK-LABEL: func.func @outer_pair_mix_aic
+// CHECK: hivm.hir.set_ctrl true at ctrl[0]
+// CHECK-NEXT: hivm.hir.pipe_barrier[<PIPE_ALL>]
+// CHECK-NEXT: hivm.hir.pipe_barrier[<PIPE_M>]
+// CHECK-NEXT: hivm.hir.pipe_barrier[<PIPE_ALL>]
+// CHECK-NEXT: hivm.hir.set_ctrl false at ctrl[0]
+// CHECK-LABEL: func.func @outer_pair_mix_aiv
+// CHECK: hivm.hir.set_ctrl true at ctrl[0]
+// CHECK: hivm.hir.set_ctrl false at ctrl[0]

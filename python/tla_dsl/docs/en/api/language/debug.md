@@ -66,3 +66,114 @@ with tla.vector():
         if thread == 0:
             tla.print(source_gm, 8)
 ```
+
+---
+
+## `tla.prof_start`
+
+**Source:** [`catlass.core_api.prof_start`](../../../../catlass/core_api.py)
+
+Description:
+
+Start best-effort device profiling at this position. On A5, collect
+with msprof op's KernelScale metric. Emits the native ALL barrier,
+CTRL bit 0 set, ALL barrier sequence.
+
+Prototype:
+
+```python
+tla.prof_start() -> None
+```
+
+Parameters:
+
+- None.
+
+Constraints:
+
+- Use one start/end pair per kernel specialization.
+- Placement, execution count and synchronization remain the caller's
+  responsibility. No timing guarantee is provided.
+
+Example:
+
+```python
+with tla.cube():
+    tla.prof_start()
+    tla.mmad(acc, lhs, rhs, init_c=True)
+    tla.prof_end()
+```
+
+---
+
+## `tla.prof_end`
+
+**Source:** [`catlass.core_api.prof_end`](../../../../catlass/core_api.py)
+
+Description:
+
+End the interval opened by `tla.prof_start()`. Emits the native ALL
+barrier, CTRL bit 0 clear, ALL barrier sequence.
+
+Prototype:
+
+```python
+tla.prof_end() -> None
+```
+
+Parameters:
+
+- None.
+
+Constraints:
+
+- Requires an unmatched start while staging; dynamic pairing is not proved.
+- Invalid placement can fail compilation or hang the kernel.
+
+Example:
+
+```python
+with tla.cube():
+    tla.prof_start()
+    tla.mmad(acc, lhs, rhs, init_c=True)
+    tla.prof_end()
+```
+
+---
+
+## `tla.prof_scope`
+
+**Source:** [`catlass.core_api.prof_scope`](../../../../catlass/core_api.py)
+
+Description:
+
+Emit the same profiling start/end pair around the body without moving
+or widening it. Adds only the native profiling fences, which perturb
+overlap; no guarantee of isolated timing is provided.
+
+Prototype:
+
+```python
+tla.prof_scope() -> _ProfScope
+```
+
+Parameters:
+
+- None.
+
+Constraints:
+
+- Use one region per kernel specialization. Obvious nested or duplicate
+  pairs are rejected; execution count and synchronization are not proved.
+- Validated A5 Vector placement surrounds a complete `tla.vec.func`
+  call in its scalar caller. Unsupported placement may fail compilation.
+- SIMT, multiple intervals and nested intervals are not promised.
+
+Example:
+
+```python
+with tla.vector():
+    with tla.prof_scope():
+        with tla.vec.func(mode="simd"):
+            dst.store(tla.add(lhs.load(), rhs.load()))
+```

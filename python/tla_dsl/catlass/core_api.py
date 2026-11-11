@@ -10847,6 +10847,8 @@ _require_generated("set_flag")
 _require_generated("store")
 _require_generated("wait_flag")
 _require_generated("pipe_barrier")
+_require_generated("prof_start")
+_require_generated("prof_end")
 _require_generated("mutex")
 _require_generated("mutex_lock")
 _require_generated("mutex_unlock")
@@ -11276,6 +11278,110 @@ def _resolve_arch_layout_tag(value: Any | None, *, for_op: str) -> str:
     return token
 
 
+@dsl_user_op
+def prof_start(*, loc: mlir_ir.Location | None = None) -> None:
+    """Directory: Debug APIs
+    Description:
+        Start best-effort device profiling at this position. On A5, collect
+        with msprof op's KernelScale metric. Emits the native ALL barrier,
+        CTRL bit 0 set, ALL barrier sequence.
+
+        Parameters:
+        - None.
+
+        Constraints:
+        - Use one start/end pair per kernel specialization.
+        - Placement, execution count and synchronization remain the caller's
+          responsibility. No timing guarantee is provided.
+
+        Example:
+        ```python
+        with tla.cube():
+            tla.prof_start()
+            tla.mmad(acc, lhs, rhs, init_c=True)
+            tla.prof_end()
+        ```
+    """
+    _require_frontend_state("prof_start")
+    state = _runtime._current_frontend_state()
+    if state.prof_started:
+        raise TlaCoreAPIError("tla.prof_start: only one profiling pair is supported")
+    _tla_ops_gen.prof_start(loc=loc)
+    state.prof_started = True
+
+
+@dsl_user_op
+def prof_end(*, loc: mlir_ir.Location | None = None) -> None:
+    """Directory: Debug APIs
+    Description:
+        End the interval opened by `tla.prof_start()`. Emits the native ALL
+        barrier, CTRL bit 0 clear, ALL barrier sequence.
+
+        Parameters:
+        - None.
+
+        Constraints:
+        - Requires an unmatched start while staging; dynamic pairing is not proved.
+        - Invalid placement can fail compilation or hang the kernel.
+
+        Example:
+        ```python
+        with tla.cube():
+            tla.prof_start()
+            tla.mmad(acc, lhs, rhs, init_c=True)
+            tla.prof_end()
+        ```
+    """
+    _require_frontend_state("prof_end")
+    state = _runtime._current_frontend_state()
+    if not state.prof_started or state.prof_ended:
+        raise TlaCoreAPIError("tla.prof_end: expected an unmatched prof_start")
+    _tla_ops_gen.prof_end(loc=loc)
+    state.prof_ended = True
+
+
+class _ProfScope:
+    def __init__(self, loc: mlir_ir.Location | None) -> None:
+        self.loc = loc
+
+    def __enter__(self) -> None:
+        prof_start(loc=self.loc)
+
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
+        if exc_type is None:
+            prof_end(loc=self.loc)
+        return False
+
+
+@dsl_user_op
+def prof_scope(*, loc: mlir_ir.Location | None = None) -> _ProfScope:
+    """Directory: Debug APIs
+    Description:
+        Emit the same profiling start/end pair around the body without moving
+        or widening it. Adds only the native profiling fences, which perturb
+        overlap; no guarantee of isolated timing is provided.
+
+        Parameters:
+        - None.
+
+        Constraints:
+        - Use one region per kernel specialization. Obvious nested or duplicate
+          pairs are rejected; execution count and synchronization are not proved.
+        - Validated A5 Vector placement surrounds a complete `tla.vec.func`
+          call in its scalar caller. Unsupported placement may fail compilation.
+        - SIMT, multiple intervals and nested intervals are not promised.
+
+        Example:
+        ```python
+        with tla.vector():
+            with tla.prof_scope():
+                with tla.vec.func(mode="simd"):
+                    dst.store(tla.add(lhs.load(), rhs.load()))
+        ```
+    """
+    return _ProfScope(loc)
+
+
 __all__ = [
     "TlaCoreAPIError",
     "dsl_user_op",
@@ -11296,6 +11402,9 @@ __all__ = [
     "set_flag",
     "wait_flag",
     "pipe_barrier",
+    "prof_start",
+    "prof_end",
+    "prof_scope",
     "local_mem_bar",
     "mutex",
     "mutex_guard",

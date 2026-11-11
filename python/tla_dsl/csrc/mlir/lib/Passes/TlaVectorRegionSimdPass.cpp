@@ -4095,6 +4095,13 @@ static LogicalResult lowerNestedVectorOp(
         return success();
     }
 
+    // Keep profiling boundaries at their original position inside the helper.
+    // The late profiling pass, not outlining, materializes hardware controls.
+    if (isa<::tla::ProfStartOp, ::tla::ProfEndOp>(op)) {
+        b.clone(op);
+        return success();
+    }
+
     if (op.hasTrait<OpTrait::IsTerminator>())
         return success();
 

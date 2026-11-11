@@ -31,6 +31,7 @@ void registerTlaCubeRegionPass();
 void registerTlaFinalizeMemrefPass();
 void registerTlaPrologueEpiloguePass();
 void registerTlaInsertImplicitCtrlPass();
+void registerTlaLowerProfilingPass();
 void registerTlaLowerAVEToRegbaseIntrinsPass();
 
 std::unique_ptr<mlir::Pass> createTlaVectorRegionSimdPass();

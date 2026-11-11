@@ -1,0 +1,41 @@
+// RUN: %python %S/Inputs/profiling.py 0 | %tla_compile - -o %t --mlir-print-ir-after=tla-lower-profiling 2>&1 | %filecheck %s --check-prefix=CUBE
+// RUN: %python %S/Inputs/profiling.py 1 | %tla_compile - -o %t --mlir-print-ir-after=tla-lower-profiling 2>&1 | %filecheck %s --check-prefix=VECTOR
+// RUN: %python %S/Inputs/profiling.py 2 | %tla_compile - -o %t --mlir-print-ir-after=tla-lower-profiling 2>&1 | %filecheck %s --check-prefix=INSIDE
+
+// Cube-only controls remain in the AIC half of the split mixed function.
+// CUBE-LABEL: func.func @mixed_markers_mix_aic
+// CUBE: hivm.hir.pipe_barrier[<PIPE_ALL>]
+// CUBE-NEXT: hivm.hir.set_ctrl true at ctrl[0]
+// CUBE-NEXT: hivm.hir.pipe_barrier[<PIPE_ALL>]
+// CUBE-NEXT: hivm.hir.pipe_barrier[<PIPE_M>]
+// CUBE-NEXT: hivm.hir.pipe_barrier[<PIPE_ALL>]
+// CUBE-NEXT: hivm.hir.set_ctrl false at ctrl[0]
+// CUBE-NEXT: hivm.hir.pipe_barrier[<PIPE_ALL>]
+// CUBE-LABEL: func.func @mixed_markers_mix_aiv
+// CUBE-NOT: ctrl[0]
+
+// Caller markers bracket the first outlined call, not both vector functions.
+// VECTOR-LABEL: func.func @mixed_markers_mix_aic
+// VECTOR-NOT: ctrl[0]
+// VECTOR-LABEL: func.func @mixed_markers_mix_aiv
+// VECTOR: hivm.hir.set_ctrl true at ctrl[0]
+// VECTOR-NEXT: hivm.hir.pipe_barrier[<PIPE_ALL>]
+// VECTOR: call @[[HELPER:vector_region_[0-9]+]]
+// VECTOR-NEXT: hivm.hir.pipe_barrier[<PIPE_ALL>]
+// VECTOR-NEXT: hivm.hir.set_ctrl false at ctrl[0]
+// VECTOR-NEXT: hivm.hir.pipe_barrier[<PIPE_ALL>]
+// VECTOR: call @
+// VECTOR: func.func private @[[HELPER]]
+// VECTOR-NOT: ctrl[0]
+
+// Markers inside a VF stay in its helper, between load and add/store; no hoist.
+// This checks placement, not a guarantee that the backend supports that usage.
+// INSIDE-LABEL: func.func @mixed_markers_mix_aic
+// INSIDE-NOT: ctrl[0]
+// INSIDE-LABEL: func.func @mixed_markers_mix_aiv
+// INSIDE-NOT: ctrl[0]
+// INSIDE-LABEL: func.func private @
+// INSIDE: ave.hir.vload
+// INSIDE: hivm.hir.set_ctrl true at ctrl[0]
+// INSIDE: ave.hir.vadd
+// INSIDE: hivm.hir.set_ctrl false at ctrl[0]

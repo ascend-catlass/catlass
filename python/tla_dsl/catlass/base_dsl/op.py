@@ -51,6 +51,8 @@ class _FrontendEmitState:
     #: that belong to the other, which is otherwise a silent wrong-results bug.
     mx_scaled_l0_values: set[Any] = field(default_factory=set)
     mutex_guard_depth: int = 0
+    prof_started: bool = False
+    prof_ended: bool = False
     #: Stack of enclosing region wrappers, each one of "cube" / "vector" /
     #: "vec.func" (the wrapper's own name).
     active_regions: list[str] = field(default_factory=list)
@@ -87,6 +89,10 @@ def _frontend_emission(
     token = _FRONTEND_EMIT_STATE.set(state)
     try:
         yield state
+        if state.prof_started and not state.prof_ended:
+            from ..runtime import TlaCoreAPIError
+
+            raise TlaCoreAPIError("tla.prof_start: missing prof_end")
     finally:
         _FRONTEND_EMIT_STATE.reset(token)
 
