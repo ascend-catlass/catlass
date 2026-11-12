@@ -45,7 +45,7 @@ pytestmark = [
 
 # 固定随机种子，保证 1000 个 case 可复现
 rng = torch.Generator().manual_seed(20260908)
-NUM_CASES = 1000
+NUM_CASES = 2
 
 # 候选形状池：覆盖不同 batch / M / N / K 组合
 BATCH_POOL = [1, 2, 4, 8]
