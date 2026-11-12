@@ -82,17 +82,17 @@ public:
     {
 #if (defined(CATLASS_ARCH) && CATLASS_ARCH == 2201)
         if (hardwareSyncAddr == 0) {
-            Catlass::KernelAdapter<GemmKernel><<<blockDim, nullptr, stream>>>(params_);
+            Catlass::KernelAdapter<GemmKernel><<<blockDim, dynUBufSize, stream>>>(params_);
         } else {
-            Catlass::KernelAdapter<GemmKernel><<<blockDim, nullptr, stream>>>(params_, hardwareSyncAddr);
+            Catlass::KernelAdapter<GemmKernel><<<blockDim, dynUBufSize, stream>>>(params_, hardwareSyncAddr);
         }
-#elif (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
-        Catlass::KernelAdapter<GemmKernel><<<blockDim, nullptr, stream>>>(params_);
+#elif (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
+        Catlass::KernelAdapter<GemmKernel><<<blockDim, dynUBufSize, stream>>>(params_);
 #endif
         return Status::kSuccess;
     }
 
-#if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
     /// Launches an Ascend 950 kernel with the configured dynamic UB window.
     inline Status RunSimt(aclrtStream stream, uint32_t blockDim)
     {

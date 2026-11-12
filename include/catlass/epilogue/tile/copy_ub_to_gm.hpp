@@ -146,6 +146,14 @@ struct CopyUb2Gm<Arch::Ascend950, Gemm::GemmType<Element, layout::RowMajor>> {
         AscendC::DataCopyPad(dstTensor, srcTensor, dataCopyParams);
     }
 };
+#if defined(CATLASS_ARCH) && (CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202)
+template <typename Element>
+struct CopyUb2Gm<Arch::Ascend960DT, Gemm::GemmType<Element, layout::RowMajor>>
+    : CopyUb2Gm<Arch::Ascend950, Gemm::GemmType<Element, layout::RowMajor>> {};
+template <typename Element>
+struct CopyUb2Gm<Arch::Ascend960PR, Gemm::GemmType<Element, layout::RowMajor>>
+    : CopyUb2Gm<Arch::Ascend950, Gemm::GemmType<Element, layout::RowMajor>> {};
+#endif
 
 template <typename Element>
 struct CopyUb2Gm<Arch::Ascend950, Gemm::GemmType<Element, layout::VectorLayout>> {
@@ -173,6 +181,14 @@ struct CopyUb2Gm<Arch::Ascend950, Gemm::GemmType<Element, layout::VectorLayout>>
         }
     };
 };
+#if defined(CATLASS_ARCH) && (CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202)
+template <typename Element>
+struct CopyUb2Gm<Arch::Ascend960DT, Gemm::GemmType<Element, layout::VectorLayout>>
+    : CopyUb2Gm<Arch::Ascend950, Gemm::GemmType<Element, layout::VectorLayout>> {};
+template <typename Element>
+struct CopyUb2Gm<Arch::Ascend960PR, Gemm::GemmType<Element, layout::VectorLayout>>
+    : CopyUb2Gm<Arch::Ascend950, Gemm::GemmType<Element, layout::VectorLayout>> {};
+#endif
 
 #endif // CATLASS_ARCH == 3510 || __NPU_ARCH__ == 3510
 
@@ -316,6 +332,15 @@ struct CopyUb2Gm<Arch::Ascend950, Gemm::GemmType<Element, layout::NC1HWC0>> {
         }
     };
 };
+#if defined(CATLASS_ARCH) && (CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202)
+template <typename Element>
+struct CopyUb2Gm<Arch::Ascend960DT, Gemm::GemmType<Element, layout::NC1HWC0>>
+    : CopyUb2Gm<Arch::Ascend950, Gemm::GemmType<Element, layout::NC1HWC0>> {};
+template <typename Element>
+struct CopyUb2Gm<Arch::Ascend960PR, Gemm::GemmType<Element, layout::NC1HWC0>>
+    : CopyUb2Gm<Arch::Ascend950, Gemm::GemmType<Element, layout::NC1HWC0>> {};
+#endif
+
 #endif
 } // namespace Catlass::Epilogue::Tile
 

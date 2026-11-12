@@ -16,6 +16,8 @@
 #endif
 #if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
 #include "catlass/gemm/tile/ascend950/copy_l1_to_l0b.hpp"
+#elif (defined(CATLASS_ARCH) && (CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
+#include "catlass/gemm/tile/ascend960/copy_l1_to_l0b.hpp"
 #endif
 
 #endif

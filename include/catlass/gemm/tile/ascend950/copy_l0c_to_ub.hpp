@@ -545,6 +545,7 @@ struct CopyL0CToUBTla<
     }
 };
 
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
 template <class TensorSrc_, class ElementDst_, class LayoutDst_, class CoordDst_, bool ReluEnable_>
 struct CopyL0CToUBTla<
     Catlass::Arch::Ascend950, TensorSrc_,
@@ -633,6 +634,7 @@ struct CopyL0CToUBTla<
             dstTensor.data()[dstOffset], srcTensor.data()[srcOffset], intriParams);
     }
 };
+#endif
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////
 

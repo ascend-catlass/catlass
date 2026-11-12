@@ -17,6 +17,8 @@ list(FILTER CATLASS_HEADERS EXCLUDE REGEX "block")
 set(ARCH_CONFIGS
     "2201\;atlasa2"
     "3510\;ascend950"
+    "9201\;ascend960"
+    "9202\;ascend960"
 )
 
 foreach(ARCH_CONFIG ${ARCH_CONFIGS})
@@ -54,3 +56,22 @@ foreach(CATLASS_HEADER ${CATLASS_HEADERS})
 
     # install(TARGETS ${TEST_TARGET} DESTINATION obj COMPONENT catlass_test_self_contained_includes)
 endforeach()
+
+# No dav-920 toolchain in CI: the 9201/9202 entries only keep ascend960 out of the 2201/3510 sweeps.
+# gemm/tile/ascend960 headers are instead checked for self-containment on the dav-3510 toolchain with
+# CATLASS_ARCH overridden to each of 9201 and 9202.
+if(CATLASS_ARCH STREQUAL "3510")
+    file(GLOB CATLASS_960_HEADERS ${CATLASS_INCLUDE_DIR}/gemm/tile/ascend960/*.hpp)
+    foreach(CATLASS_HEADER ${CATLASS_960_HEADERS})
+        file(RELATIVE_PATH REL_CATLASS_HEADER ${CATLASS_INCLUDE_DIR} ${CATLASS_HEADER})
+        string(REPLACE "/" "_" TEST_TARGET ${REL_CATLASS_HEADER})
+        string(REPLACE "." "_" TEST_TARGET ${TEST_TARGET})
+        foreach(NPU_ARCH_OVERRIDE 9201 9202)
+            add_library(${TEST_TARGET}_${NPU_ARCH_OVERRIDE} OBJECT test_self_contained_includes.cpp)
+            target_compile_definitions(${TEST_TARGET}_${NPU_ARCH_OVERRIDE} PRIVATE
+                CATLASS_ARCH=${NPU_ARCH_OVERRIDE} CATLASS_TEST_HEADER=${REL_CATLASS_HEADER})
+            target_compile_options(${TEST_TARGET}_${NPU_ARCH_OVERRIDE} PRIVATE -Wno-macro-redefined)
+            add_dependencies(test_self_contained_includes ${TEST_TARGET}_${NPU_ARCH_OVERRIDE})
+        endforeach()
+    endforeach()
+endif()

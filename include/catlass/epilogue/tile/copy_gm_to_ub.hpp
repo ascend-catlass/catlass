@@ -187,6 +187,14 @@ struct CopyGm2Ub<Arch::Ascend950, Gemm::GemmType<Element, layout::RowMajor>> {
         AscendC::DataCopyPad(dstTensor, srcTensor, dataCopyParams, padParams);
     }
 };
+#if defined(CATLASS_ARCH) && (CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202)
+template <class Element>
+struct CopyGm2Ub<Arch::Ascend960DT, Gemm::GemmType<Element, layout::RowMajor>>
+    : CopyGm2Ub<Arch::Ascend950, Gemm::GemmType<Element, layout::RowMajor>> {};
+template <class Element>
+struct CopyGm2Ub<Arch::Ascend960PR, Gemm::GemmType<Element, layout::RowMajor>>
+    : CopyGm2Ub<Arch::Ascend950, Gemm::GemmType<Element, layout::RowMajor>> {};
+#endif
 
 template <class Element>
 struct CopyGm2Ub<Arch::Ascend950, Gemm::GemmType<Element, layout::VectorLayout>> {
@@ -215,6 +223,15 @@ struct CopyGm2Ub<Arch::Ascend950, Gemm::GemmType<Element, layout::VectorLayout>>
         }
     };
 };
+#if defined(CATLASS_ARCH) && (CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202)
+template <class Element>
+struct CopyGm2Ub<Arch::Ascend960DT, Gemm::GemmType<Element, layout::VectorLayout>>
+    : CopyGm2Ub<Arch::Ascend950, Gemm::GemmType<Element, layout::VectorLayout>> {};
+template <class Element>
+struct CopyGm2Ub<Arch::Ascend960PR, Gemm::GemmType<Element, layout::VectorLayout>>
+    : CopyGm2Ub<Arch::Ascend950, Gemm::GemmType<Element, layout::VectorLayout>> {};
+#endif
+
 #endif // CATLASS_ARCH == 3510 || __NPU_ARCH__ == 3510
 
 template <class Element>
@@ -261,6 +278,14 @@ struct CopyGm2UbAligned<Arch::Ascend950, Gemm::GemmType<Element, layout::RowMajo
         }
     }
 };
+#if defined(CATLASS_ARCH) && (CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202)
+template <class Element>
+struct CopyGm2UbAligned<Arch::Ascend960DT, Gemm::GemmType<Element, layout::RowMajor>>
+    : CopyGm2UbAligned<Arch::Ascend950, Gemm::GemmType<Element, layout::RowMajor>> {};
+template <class Element>
+struct CopyGm2UbAligned<Arch::Ascend960PR, Gemm::GemmType<Element, layout::RowMajor>>
+    : CopyGm2UbAligned<Arch::Ascend950, Gemm::GemmType<Element, layout::RowMajor>> {};
+#endif
 
 ////////////////////////////////////////////////////////////
 // NC1HWC0 specialized copies for Conv2d epilogue
@@ -404,6 +429,15 @@ struct CopyGm2Ub<Arch::Ascend950, Gemm::GemmType<Element, layout::NC1HWC0>> {
         }
     };
 };
+#if defined(CATLASS_ARCH) && (CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202)
+template <typename Element>
+struct CopyGm2Ub<Arch::Ascend960DT, Gemm::GemmType<Element, layout::NC1HWC0>>
+    : CopyGm2Ub<Arch::Ascend950, Gemm::GemmType<Element, layout::NC1HWC0>> {};
+template <typename Element>
+struct CopyGm2Ub<Arch::Ascend960PR, Gemm::GemmType<Element, layout::NC1HWC0>>
+    : CopyGm2Ub<Arch::Ascend950, Gemm::GemmType<Element, layout::NC1HWC0>> {};
+#endif
+
 #endif
 } // namespace Catlass::Epilogue::Tile
 

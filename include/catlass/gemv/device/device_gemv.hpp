@@ -73,9 +73,9 @@ public:
     inline Status Run(aclrtStream stream, uint32_t blockDim, uint64_t hardwareSyncAddr)
     {
         if (hardwareSyncAddr == 0) {
-            Catlass::KernelAdapter<GemvKernel><<<blockDim, nullptr, stream>>>(params_);
+            Catlass::KernelAdapter<GemvKernel><<<blockDim, dynUBufSize, stream>>>(params_);
         } else {
-            Catlass::KernelAdapter<GemvKernel><<<blockDim, nullptr, stream>>>(params_, hardwareSyncAddr);
+            Catlass::KernelAdapter<GemvKernel><<<blockDim, dynUBufSize, stream>>>(params_, hardwareSyncAddr);
         }
         return Status::kSuccess;
     }

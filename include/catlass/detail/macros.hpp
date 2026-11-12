@@ -21,10 +21,16 @@
 #else
 #define CATLASS_HOST_DEVICE
 #endif
-#if defined(CATLASS_ARCH) && CATLASS_ARCH == 3510
+#if defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202)
 #define CATLASS_DEVICE_SIMD_VF __simd_vf__ static
 #define CATLASS_DEVICE_SIMD_CALLEE __simd_callee__ static
 #endif
 #define CATLASS_GLOBAL __global__ __aicore__
+
+#if defined(CATLASS_ARCH) && CATLASS_ARCH == 9202
+constexpr auto dynUBufSize = 0;
+#else
+constexpr auto dynUBufSize = nullptr;
+#endif
 
 #endif // CATLASS_DETAIL_MACROS_HPP

@@ -36,6 +36,26 @@ struct Ascend950 {
     static constexpr uint32_t L0C_SIZE = 256 * 1024;
 };
 
+struct Ascend960DT {
+    static constexpr uint32_t BIAS_SIZE = 4 * 1024;
+    static constexpr uint32_t FIXBUF_SIZE = 16 * 1024;
+    static constexpr uint32_t UB_SIZE = 376 * 1024;
+    static constexpr uint32_t L1_SIZE = 512 * 1024;
+    static constexpr uint32_t L0A_SIZE = 64 * 1024;
+    static constexpr uint32_t L0B_SIZE = 64 * 1024;
+    static constexpr uint32_t L0C_SIZE = 256 * 1024;
+};
+
+struct Ascend960PR {
+    static constexpr uint32_t BIAS_SIZE = 4 * 1024;
+    static constexpr uint32_t FIXBUF_SIZE = 16 * 1024;
+    static constexpr uint32_t UB_SIZE = 376 * 1024;
+    static constexpr uint32_t L1_SIZE = 512 * 1024;
+    static constexpr uint32_t L0A_SIZE = 64 * 1024;
+    static constexpr uint32_t L0B_SIZE = 64 * 1024;
+    static constexpr uint32_t L0C_SIZE = 512 * 1024;
+};
+
 template <AscendC::TPosition POS>
 using PositionType = std::integral_constant<AscendC::TPosition, POS>;
 
