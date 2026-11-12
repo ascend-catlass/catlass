@@ -113,13 +113,19 @@ struct Options {
             return false;
         }
 
-        if (fmapRelated[1] + pads[0] * 2 <=
-                dilations[0] * (filterRelated[0] - 1) + 1 /* di + 2 * padD <= dD * (kd - 1) + 1*/
-            || fmapRelated[3] + pads[1] * 2 <=
-                   dilations[1] * (filterRelated[1] - 1) + 1 /* hi + 2 * padH <= dH * (kh - 1) + 1*/
-            || fmapRelated[4] + pads[2] * 2 <=
-                   dilations[2] * (filterRelated[2] - 1) + 1 /* wi + 2 * padW <= dW * (kw - 1) + 1*/) {
-            // filter size should not be larger than map size.
+        if (fmapRelated[2] == 0 || fmapRelated[5] == 0 || filterRelated[0] == 0 || filterRelated[1] == 0 ||
+            filterRelated[2] == 0) {
+            // cin1, cin0, kd, kh and kw are used as divisors in kernel, they should not be 0.
+            return false;
+        }
+
+        if (fmapRelated[1] + pads[0] * 2 <
+                dilations[0] * (filterRelated[0] - 1) + 1 /* di + 2 * padD < dD * (kd - 1) + 1*/
+            || fmapRelated[3] + pads[1] * 2 <
+                   dilations[1] * (filterRelated[1] - 1) + 1 /* hi + 2 * padH < dH * (kh - 1) + 1*/
+            || fmapRelated[4] + pads[2] * 2 <
+                   dilations[2] * (filterRelated[2] - 1) + 1 /* wi + 2 * padW < dW * (kw - 1) + 1*/) {
+            // The filter should not be larger than the padded map, otherwise the output size is 0.
             return false;
         }
 
@@ -127,81 +133,21 @@ struct Options {
     }
 };
 
-static void Run(const Options& options)
+static int Run(const Options& options)
 {
     if (!options.CanImplement()) {
         std::cerr << "[ERROR]Invalid input parameters!" << std::endl;
-        return;
+        return -1;
     }
-
-    aclrtStream stream{nullptr};
-
-    ACL_CHECK(aclInit(nullptr));
-    ACL_CHECK(aclrtSetDevice(options.deviceId));
-    ACL_CHECK(aclrtCreateStream(&stream));
 
     Conv3dParams problemShape = Conv3dParams::MakeConvCoord(
         options.fmapRelated.data(), options.filterRelated.data(), options.pads.data(), options.strides.data(),
         options.dilations.data());
 
-    uint32_t n = problemShape.batch();
-    uint32_t di = problemShape.di();
-    uint32_t cin1 = problemShape.cin1();
-    uint32_t hi = problemShape.hi();
-    uint32_t wi = problemShape.wi();
-    uint32_t cin0 = problemShape.cin0();
-    uint32_t kdc1khkw = problemShape.kdc1khkw();
-    uint32_t n1 = problemShape.n1();
-    uint32_t n0 = problemShape.n0();
-    uint32_t dout = problemShape.dout();
-    uint32_t ho = problemShape.ho();
-    uint32_t wo = problemShape.wo();
-    uint32_t cout1 = problemShape.cout1();
-    uint32_t cout0 = problemShape.cout0();
-    uint32_t cout = problemShape.cout();
-
-    size_t lenFmap = static_cast<size_t>(n) * di * cin1 * hi * wi * cin0;
-    size_t lenFilter = static_cast<size_t>(kdc1khkw) * n1 * n0 * cin0;
-    size_t lenBias = static_cast<size_t>(cout);
-    size_t lenOut = static_cast<size_t>(n) * dout * cout1 * ho * wo * cout0;
-
-    size_t sizeFmap = lenFmap * sizeof(fp16_t);
-    size_t sizeFilter = lenFilter * sizeof(fp16_t);
-    size_t sizeOut = lenOut * sizeof(fp16_t);
-    size_t sizeBias = lenBias * sizeof(fp16_t);
-
     using LayoutFmap = layout::NDC1HWC0;
     using LayoutFilter = layout::KDC1KHKWN1N0C0;
     using LayoutOut = layout::NDC1HWC0;
     using LayoutBias = layout::VectorLayout;
-    LayoutFmap layoutFmap{n, di, cin1, hi * wi, cin0};
-    LayoutFilter layoutFilter{kdc1khkw, n1, n0, cin0};
-    LayoutOut layoutOut{n, dout, cout1, ho * wo, cout0};
-
-    std::vector<fp16_t> hostFmap(lenFmap);
-    std::vector<fp16_t> hostFilter(lenFilter);
-    std::vector<fp16_t> hostBias(lenBias);
-    ReadFile("./data/fmap.bin", hostFmap.data(), sizeFmap);
-    ReadFile("./data/weight.bin", hostFilter.data(), sizeFilter);
-    ReadFile("./data/bias.bin", hostBias.data(), sizeBias);
-
-    uint8_t* deviceFmap{nullptr};
-    ACL_CHECK(aclrtMalloc(reinterpret_cast<void**>(&deviceFmap), sizeFmap, ACL_MEM_MALLOC_HUGE_FIRST));
-    ACL_CHECK(aclrtMemcpy(deviceFmap, sizeFmap, hostFmap.data(), sizeFmap, ACL_MEMCPY_HOST_TO_DEVICE));
-
-    uint8_t* deviceFilter{nullptr};
-    ACL_CHECK(aclrtMalloc(reinterpret_cast<void**>(&deviceFilter), sizeFilter, ACL_MEM_MALLOC_HUGE_FIRST));
-    ACL_CHECK(aclrtMemcpy(deviceFilter, sizeFilter, hostFilter.data(), sizeFilter, ACL_MEMCPY_HOST_TO_DEVICE));
-
-    uint8_t* deviceBias{nullptr};
-    ACL_CHECK(aclrtMalloc(reinterpret_cast<void**>(&deviceBias), sizeBias, ACL_MEM_MALLOC_HUGE_FIRST));
-    ACL_CHECK(aclrtMemcpy(deviceBias, sizeBias, hostBias.data(), sizeBias, ACL_MEMCPY_HOST_TO_DEVICE));
-
-    uint8_t* deviceOut{nullptr};
-    ACL_CHECK(aclrtMalloc(reinterpret_cast<void**>(&deviceOut), sizeOut, ACL_MEM_MALLOC_HUGE_FIRST));
-
-    // Get the number of cube cores of the current hardware
-    auto aicCoreNum = platform_ascendc::PlatformAscendCManager::GetInstance()->GetCoreNumAic();
 
     constexpr uint32_t l1AStages = 1;
     constexpr uint32_t l1BStages = 1;
@@ -234,10 +180,77 @@ static void Run(const Options& options)
     // kernel level
     using ConvKernel = Conv::Kernel::ConvBias<BlockConv, BlockEpilogue, BlockScheduler>;
 
+    // CanImplement only depends on problemShape, so probe it with empty GM addresses before device initialization.
+    ConvKernel::Arguments probeArguments{problemShape, nullptr, nullptr, nullptr, nullptr};
+    if (!ConvKernel::CanImplement(probeArguments)) {
+        std::cerr << "[ERROR]Invalid input parameters!" << std::endl;
+        return -1;
+    }
+
+    aclrtStream stream{nullptr};
+
+    ACL_CHECK(aclInit(nullptr));
+    ACL_CHECK(aclrtSetDevice(options.deviceId));
+    ACL_CHECK(aclrtCreateStream(&stream));
+
+    uint32_t n = problemShape.batch();
+    uint32_t di = problemShape.di();
+    uint32_t cin1 = problemShape.cin1();
+    uint32_t hi = problemShape.hi();
+    uint32_t wi = problemShape.wi();
+    uint32_t cin0 = problemShape.cin0();
+    uint32_t kdc1khkw = problemShape.kdc1khkw();
+    uint32_t n1 = problemShape.n1();
+    uint32_t n0 = problemShape.n0();
+    uint32_t dout = problemShape.dout();
+    uint32_t ho = problemShape.ho();
+    uint32_t wo = problemShape.wo();
+    uint32_t cout1 = problemShape.cout1();
+    uint32_t cout0 = problemShape.cout0();
+    uint32_t cout = problemShape.cout();
+
+    size_t lenFmap = static_cast<size_t>(n) * di * cin1 * hi * wi * cin0;
+    size_t lenFilter = static_cast<size_t>(kdc1khkw) * n1 * n0 * cin0;
+    size_t lenBias = static_cast<size_t>(cout);
+    size_t lenOut = static_cast<size_t>(n) * dout * cout1 * ho * wo * cout0;
+
+    size_t sizeFmap = lenFmap * sizeof(fp16_t);
+    size_t sizeFilter = lenFilter * sizeof(fp16_t);
+    size_t sizeOut = lenOut * sizeof(fp16_t);
+    size_t sizeBias = lenBias * sizeof(fp16_t);
+
+    LayoutFmap layoutFmap{n, di, cin1, hi * wi, cin0};
+    LayoutFilter layoutFilter{kdc1khkw, n1, n0, cin0};
+    LayoutOut layoutOut{n, dout, cout1, ho * wo, cout0};
+
+    std::vector<fp16_t> hostFmap(lenFmap);
+    std::vector<fp16_t> hostFilter(lenFilter);
+    std::vector<fp16_t> hostBias(lenBias);
+    ReadFile("./data/fmap.bin", hostFmap.data(), sizeFmap);
+    ReadFile("./data/weight.bin", hostFilter.data(), sizeFilter);
+    ReadFile("./data/bias.bin", hostBias.data(), sizeBias);
+
+    uint8_t* deviceFmap{nullptr};
+    ACL_CHECK(aclrtMalloc(reinterpret_cast<void**>(&deviceFmap), sizeFmap, ACL_MEM_MALLOC_HUGE_FIRST));
+    ACL_CHECK(aclrtMemcpy(deviceFmap, sizeFmap, hostFmap.data(), sizeFmap, ACL_MEMCPY_HOST_TO_DEVICE));
+
+    uint8_t* deviceFilter{nullptr};
+    ACL_CHECK(aclrtMalloc(reinterpret_cast<void**>(&deviceFilter), sizeFilter, ACL_MEM_MALLOC_HUGE_FIRST));
+    ACL_CHECK(aclrtMemcpy(deviceFilter, sizeFilter, hostFilter.data(), sizeFilter, ACL_MEMCPY_HOST_TO_DEVICE));
+
+    uint8_t* deviceBias{nullptr};
+    ACL_CHECK(aclrtMalloc(reinterpret_cast<void**>(&deviceBias), sizeBias, ACL_MEM_MALLOC_HUGE_FIRST));
+    ACL_CHECK(aclrtMemcpy(deviceBias, sizeBias, hostBias.data(), sizeBias, ACL_MEMCPY_HOST_TO_DEVICE));
+
+    uint8_t* deviceOut{nullptr};
+    ACL_CHECK(aclrtMalloc(reinterpret_cast<void**>(&deviceOut), sizeOut, ACL_MEM_MALLOC_HUGE_FIRST));
+
+    // Get the number of cube cores of the current hardware
+    auto aicCoreNum = platform_ascendc::PlatformAscendCManager::GetInstance()->GetCoreNumAic();
+
     using ConvAdapter = Conv::Device::DeviceConv<ConvKernel>;
     ConvKernel::Arguments arguments{problemShape, deviceFmap, deviceFilter, deviceOut, deviceBias};
     ConvAdapter conv_op;
-    conv_op.CanImplement(arguments);
     size_t sizeWorkspace = conv_op.GetWorkspaceSize(arguments);
     uint8_t* deviceWorkspace = nullptr;
     if (sizeWorkspace > 0) {
@@ -272,6 +285,7 @@ static void Run(const Options& options)
     ACL_CHECK(aclrtDestroyStream(stream));
     ACL_CHECK(aclrtResetDevice(options.deviceId));
     ACL_CHECK(aclFinalize());
+    return 0;
 }
 
 int main(int argc, const char** argv)
@@ -280,6 +294,5 @@ int main(int argc, const char** argv)
     if (options.Parse(argc, argv) != 0) {
         return -1;
     }
-    Run(options);
-    return 0;
+    return Run(options);
 }

@@ -81,8 +81,12 @@ public:
     static bool CanImplement(const Arguments& args)
     {
         const Conv3dParams& shape = args.problemShape;
-        if (shape.sD() == 0 || shape.sH() == 0 || shape.sW() == 0 || shape.dout() == 0 || shape.ho() == 0 ||
-            shape.wo() == 0) {
+        if (shape.sD() == 0 || shape.sH() == 0 || shape.sW() == 0 || shape.dD() == 0 || shape.dH() == 0 ||
+            shape.dW() == 0 || shape.dout() == 0 || shape.ho() == 0 || shape.wo() == 0) {
+            return false;
+        }
+        // These dimensions are used as divisors or moduli when BlockConv initializes and loads L1.
+        if (shape.kd() == 0 || shape.kh() == 0 || shape.kw() == 0 || shape.cin1() == 0 || shape.cin0() == 0) {
             return false;
         }
         return true;

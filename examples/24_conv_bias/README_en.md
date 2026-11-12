@@ -30,10 +30,11 @@
 
 - The following basic constraints must be satisfied:
   - The dilation factors `dilations` and the convolution strides `strides` must not be zero.
+  - The convolution kernel sizes `kd`, `kh`, and `kw` and the channel split factors `cin0` and `cin1` must not be zero.
   - The effective receptive field of the convolution kernel must not exceed the input feature map size, that is:
-    - `di + 2 * padD > dD * (kd - 1) + 1`
-    - `hi + 2 * padH > dH * (kh - 1) + 1`
-    - `wi + 2 * padW > dW * (kw - 1) + 1`
+    - `di + 2 * padD >= dD * (kd - 1) + 1`
+    - `hi + 2 * padH >= dH * (kh - 1) + 1`
+    - `wi + 2 * padW >= dW * (kw - 1) + 1`
 
     where `di`, `hi`, and `wi` are the depth, height, and width of the input feature map, `kd`, `kh`, and `kw` are the depth, height, and width of the convolution kernel, `dD`, `dH`, and `dW` are the dilation factors along the three axes, and `padD`, `padH`, and `padW` are the padding sizes along the corresponding axes. If any constraint is violated, the program prints `[ERROR]Invalid input parameters!` and exits.
 

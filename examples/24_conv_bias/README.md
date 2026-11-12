@@ -30,10 +30,11 @@
 
 - 需满足以下基础约束：
   - 膨胀系数`dilations`和卷积核计算步幅`strides`均不能为零
+  - 卷积核尺寸`kd`、`kh`、`kw`与通道拆分数`cin0`、`cin1`均不能为零
   - 卷积核的有效感受野大小不能超过输入特征图的大小，需满足：
-    - `di + 2 * padD > dD * (kd - 1) + 1`
-    - `hi + 2 * padH > dH * (kh - 1) + 1`
-    - `wi + 2 * padW > dW * (kw - 1) + 1`
+    - `di + 2 * padD >= dD * (kd - 1) + 1`
+    - `hi + 2 * padH >= dH * (kh - 1) + 1`
+    - `wi + 2 * padW >= dW * (kw - 1) + 1`
 
     其中`di`，`hi`，`wi`为输入特征图的深度、高度和宽度，`kd`，`kh`，`kw`为卷积核的深度、高度和宽度，`dD`，`dH`，`dW`为上述三个方向上的膨胀系数，`padD`，`padH`，`padW`为对应方向上的填充大小。不满足上述约束时，程序打印`[ERROR]Invalid input parameters!`并退出。
 
