@@ -306,6 +306,10 @@ void Profiler::CreateReadThread()
             for (int i = 0; i < ret; ++i) {
                 int curLen = prof_channel_read(channels[i].deviceId, channels[i].channelId,
                     &outBuf_[0], outBuf_.size());
+                if (curLen <= 0) {
+                    // 驱动失败时返回负值，不能据此构造插入区间
+                    continue;
+                }
                 data.insert(data.end(), outBuf_.begin(), outBuf_.begin() + curLen);
             }
             if (!data.empty() && callBack_) {
