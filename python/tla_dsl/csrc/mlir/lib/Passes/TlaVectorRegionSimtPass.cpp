@@ -1,6 +1,7 @@
 #include "Passes/TlaDebugPrint.h"
 #include "PassesCommon.h"
 #include "PassesInternal.h"
+#include "TlaSimtWarpLowering.h"
 #include "Passes/TlaTensorToMemref.h"
 #include "Passes/TlaVectorRegionCommon.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
@@ -789,6 +790,8 @@ public:
             ::tla::ThreadBlockDimOp, hivm_regbaseintrins::BlockDimXOp, hivm_regbaseintrins::BlockDimYOp,
             hivm_regbaseintrins::BlockDimZOp>(vf);
         lowerSimtArithmeticIn(vf);
+        if (failed(lowerSimtWarpOpsIn(vf, blockDimX, blockDimY, blockDimZ)))
+            return failure();
         lowerSimtSyncThreadsIn(vf);
 
         // ---- the launch ----

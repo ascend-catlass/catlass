@@ -59,6 +59,17 @@ def Tla_SubBlockIdxOp : Tla_Op<"arch.sub_block_idx", [Pure]> {
 
 // Thread coordinates. SIMT only: meaningful inside a ``tla.vec.func`` with
 // ``mode = "simt"``.
+def Tla_ArchLaneIdxOp : Tla_Op<"arch.lane_idx", [Pure]> {
+  let summary = "SIMT lane index within the current warp";
+  let description = [{
+    Return the x-fastest linear thread index modulo 32 as signless ``i32``.
+    Only available inside a ``tla.vec.func`` with ``mode = "simt"``.
+  }];
+  let results = (outs I32:$result);
+  let hasVerifier = 1;
+  let assemblyFormat = [{ attr-dict `->` type($result) }];
+}
+
 def Tla_ThreadIdxOp : Tla_Op<"arch.thread_idx", [Pure]> {
   let summary = "SIMT thread index";
   let description = [{

@@ -165,6 +165,88 @@ sid = tla.arch.sub_block_idx()
 
 ---
 
+### `tla.arch.warpsize`
+
+**Source:** [`catlass.core_api.arch_warpsize`](../../../../catlass/core_api.py)
+
+Description:
+
+Return the SIMT warp size as the `Int32` constant 32.
+
+A warp groups 32 consecutive threads in x-fastest linear order.
+A final partial warp does not change this constant.
+
+Prototype:
+
+```python
+tla.arch.warpsize() -> Int32
+```
+
+Parameters:
+
+- None.
+
+Returns:
+
+- `Int32`: the constant 32.
+
+Constraints:
+
+- Must be called inside a `@tla.kernel`-decorated kernel function.
+- Only available inside `tla.vec.func(mode="simt")`.
+
+Example:
+
+```python
+with tla.vec.func(mode="simt", thread_block_dim=48):
+    tid, _, _ = tla.arch.thread_idx()
+    gm_out[tid] = tla.arch.warpsize()
+```
+
+---
+
+### `tla.arch.lane_idx`
+
+**Source:** [`catlass.core_api.arch_lane_idx`](../../../../catlass/core_api.py)
+
+Description:
+
+Return the calling thread's lane index within its warp as `Int32`.
+
+The index is in `[0, 31]` and equals
+`(x + y * BX + z * BX * BY) % 32`, where `(x, y, z)` is the
+thread index and `(BX, BY, BZ)` is `thread_block_dim`.
+Branches do not renumber lanes. This query does not synchronize threads.
+
+Prototype:
+
+```python
+tla.arch.lane_idx() -> Int32
+```
+
+Parameters:
+
+- None.
+
+Returns:
+
+- `Int32`: the calling thread's lane index.
+
+Constraints:
+
+- Must be called inside a `@tla.kernel`-decorated kernel function.
+- Only available inside `tla.vec.func(mode="simt")`.
+
+Example:
+
+```python
+with tla.vec.func(mode="simt", thread_block_dim=48):
+    tid, _, _ = tla.arch.thread_idx()
+    gm_out[tid] = tla.arch.lane_idx()
+```
+
+---
+
 ### `tla.arch.thread_idx`
 
 **Source:** [`catlass.core_api.arch_thread_idx`](../../../../catlass/core_api.py)

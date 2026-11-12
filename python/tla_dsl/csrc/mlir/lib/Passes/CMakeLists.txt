@@ -25,6 +25,7 @@ add_library(TlaPasses
   TlaVectorRegionCommon.cpp
   TlaVectorRegionSimdPass.cpp
   TlaVectorRegionSimtPass.cpp
+  TlaSimtWarpLowering.cpp
   ../Dialect/Tla/IR/TlaDialect.cpp
   ../Dialect/Tla/IR/TlaAttrs.cpp
   ../Dialect/Tla/IR/TlaOps.cpp

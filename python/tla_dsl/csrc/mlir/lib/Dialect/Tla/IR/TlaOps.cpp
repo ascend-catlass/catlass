@@ -616,6 +616,15 @@ mlir::LogicalResult FillOp::verify()
 // value is a uint32_t, so an unchecked product would also truncate.
 static constexpr int64_t kMaxSimtThreadsPerBlock = 2048;
 
+mlir::LogicalResult ArchLaneIdxOp::verify()
+{
+    auto region = getOperation()->getParentOfType<VecFuncOp>();
+    auto mode = region ? region->getAttrOfType<mlir::StringAttr>("mode") : mlir::StringAttr{};
+    if (!mode || !mode.getValue().equals_insensitive("simt"))
+        return emitOpError("must be nested inside a tla.vec.func with mode='simt'");
+    return mlir::success();
+}
+
 mlir::LogicalResult VecFuncOp::verify()
 {
     if (!hasEnclosingRegion<VectorOp>(getOperation()))

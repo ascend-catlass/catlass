@@ -1,0 +1,61 @@
+// RUN: sed -n '/^\/\/ BEGIN_OUTSIDE$/,/^\/\/ END_OUTSIDE$/p' %s | sed '1d;$d;s|^// ||' > %t.OUTSIDE.mlir && not %tla_compile %t.OUTSIDE.mlir -o %t 2>&1 | %filecheck %s --check-prefix=OUTSIDE
+// OUTSIDE: error: 'tla.arch.lane_idx' op
+// OUTSIDE-SAME: simt
+
+// BEGIN_OUTSIDE
+// module {
+//   func.func @bad_lane() {
+//     %lane = tla.arch.lane_idx -> i32
+//     return
+//   }
+// }
+// END_OUTSIDE
+
+// RUN: sed -n '/^\/\/ BEGIN_VECTOR$/,/^\/\/ END_VECTOR$/p' %s | sed '1d;$d;s|^// ||' > %t.VECTOR.mlir && not %tla_compile %t.VECTOR.mlir -o %t 2>&1 | %filecheck %s --check-prefix=VECTOR
+// VECTOR: error: 'tla.arch.lane_idx' op
+// VECTOR-SAME: simt
+
+// BEGIN_VECTOR
+// module {
+//   func.func @bad_lane() {
+//     "tla.vector"() ({
+//       %lane = tla.arch.lane_idx -> i32
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_VECTOR
+
+// RUN: sed -n '/^\/\/ BEGIN_SIMD$/,/^\/\/ END_SIMD$/p' %s | sed '1d;$d;s|^// ||' > %t.SIMD.mlir && not %tla_compile %t.SIMD.mlir -o %t 2>&1 | %filecheck %s --check-prefix=SIMD
+// SIMD: error: 'tla.arch.lane_idx' op
+// SIMD-SAME: simt
+
+// BEGIN_SIMD
+// module {
+//   func.func @bad_lane() {
+//     "tla.vector"() ({
+//       "tla.vec.func"() ({
+//         %lane = tla.arch.lane_idx -> i32
+//       }) {mode = "simd"} : () -> ()
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_SIMD
+
+// RUN: sed -n '/^\/\/ BEGIN_DEFAULT_SIMD$/,/^\/\/ END_DEFAULT_SIMD$/p' %s | sed '1d;$d;s|^// ||' > %t.DEFAULT_SIMD.mlir && not %tla_compile %t.DEFAULT_SIMD.mlir -o %t 2>&1 | %filecheck %s --check-prefix=DEFAULT_SIMD
+// DEFAULT_SIMD: error: 'tla.arch.lane_idx' op
+// DEFAULT_SIMD-SAME: simt
+
+// BEGIN_DEFAULT_SIMD
+// module {
+//   func.func @bad_lane() {
+//     "tla.vector"() ({
+//       "tla.vec.func"() ({
+//         %lane = tla.arch.lane_idx -> i32
+//       }) : () -> ()
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_DEFAULT_SIMD

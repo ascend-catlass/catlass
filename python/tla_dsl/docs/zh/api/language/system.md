@@ -170,6 +170,88 @@ sid = tla.arch.sub_block_idx()
 
 ---
 
+### `tla.arch.warpsize`
+
+**源码：** [`catlass.core_api.arch_warpsize`](../../../../catlass/core_api.py)
+
+功能说明：
+
+返回 SIMT warp 大小，即 `Int32` 常量 32。
+
+warp 按 x 维优先的线性顺序将每 32 个连续线程分为一组。
+最后一个 warp 的线程数不足 32 时，该常量仍为 32。
+
+函数原型：
+
+```python
+tla.arch.warpsize() -> Int32
+```
+
+参数说明：
+
+- 无。
+
+返回值：
+
+- `Int32`：常量 32。
+
+约束说明：
+
+- 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
+- 仅在 `tla.vec.func(mode="simt")` 内可用。
+
+调用示例：
+
+```python
+with tla.vec.func(mode="simt", thread_block_dim=48):
+    tid, _, _ = tla.arch.thread_idx()
+    gm_out[tid] = tla.arch.warpsize()
+```
+
+---
+
+### `tla.arch.lane_idx`
+
+**源码：** [`catlass.core_api.arch_lane_idx`](../../../../catlass/core_api.py)
+
+功能说明：
+
+返回调用线程在其 warp 内的 lane 索引，类型为 `Int32`。
+
+索引范围为 `[0, 31]`，计算公式为
+`(x + y * BX + z * BX * BY) % 32`，其中 `(x, y, z)` 为线程索引，
+`(BX, BY, BZ)` 为 `thread_block_dim`。
+分支不会重新编号 lane。该查询不执行线程同步。
+
+函数原型：
+
+```python
+tla.arch.lane_idx() -> Int32
+```
+
+参数说明：
+
+- 无。
+
+返回值：
+
+- `Int32`：调用线程的 lane 索引。
+
+约束说明：
+
+- 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
+- 仅在 `tla.vec.func(mode="simt")` 内可用。
+
+调用示例：
+
+```python
+with tla.vec.func(mode="simt", thread_block_dim=48):
+    tid, _, _ = tla.arch.thread_idx()
+    gm_out[tid] = tla.arch.lane_idx()
+```
+
+---
+
 ### `tla.arch.thread_idx`
 
 **源码：** [`catlass.core_api.arch_thread_idx`](../../../../catlass/core_api.py)

@@ -10402,6 +10402,77 @@ def arch_sub_block_idx(*, loc: mlir_ir.Location | None = None) -> Int32:
     return Int32(value)
 
 
+def _require_arch_warp_region(op_name: str) -> None:
+    _require_frontend_state(op_name)
+    if not _runtime._in_simt_vec_func():
+        _op_error(op_name, "is only available inside a tla.vec.func with mode='simt'")
+
+
+@dsl_user_op
+def arch_warpsize(*, loc: mlir_ir.Location | None = None) -> Int32:
+    """Directory: System Variable Access / Architecture Helpers
+    Description:
+        Return the SIMT warp size as the `Int32` constant 32.
+
+        A warp groups 32 consecutive threads in x-fastest linear order.
+        A final partial warp does not change this constant.
+
+        Parameters:
+        - None.
+
+        Returns:
+
+        - `Int32`: the constant 32.
+
+        Constraints:
+        - Must be called inside a `@tla.kernel`-decorated kernel function.
+        - Only available inside `tla.vec.func(mode="simt")`.
+
+        Example:
+        ```python
+        with tla.vec.func(mode="simt", thread_block_dim=48):
+            tid, _, _ = tla.arch.thread_idx()
+            gm_out[tid] = tla.arch.warpsize()
+        ```
+    """
+    _require_arch_warp_region("arch.warpsize")
+    return Int32(32)
+
+
+@dsl_user_op
+def arch_lane_idx(*, loc: mlir_ir.Location | None = None) -> Int32:
+    """Directory: System Variable Access / Architecture Helpers
+    Description:
+        Return the calling thread's lane index within its warp as `Int32`.
+
+        The index is in `[0, 31]` and equals
+        `(x + y * BX + z * BX * BY) % 32`, where `(x, y, z)` is the
+        thread index and `(BX, BY, BZ)` is `thread_block_dim`.
+        Branches do not renumber lanes. This query does not synchronize threads.
+
+        Parameters:
+        - None.
+
+        Returns:
+
+        - `Int32`: the calling thread's lane index.
+
+        Constraints:
+        - Must be called inside a `@tla.kernel`-decorated kernel function.
+        - Only available inside `tla.vec.func(mode="simt")`.
+
+        Example:
+        ```python
+        with tla.vec.func(mode="simt", thread_block_dim=48):
+            tid, _, _ = tla.arch.thread_idx()
+            gm_out[tid] = tla.arch.lane_idx()
+        ```
+    """
+    _require_arch_warp_region("arch.lane_idx")
+    i32 = mlir_ir.IntegerType.get_signless(32)
+    return Int32(_tla_ops_gen.arch_lane_idx(i32, loc=loc))
+
+
 @dsl_user_op
 def arch_thread_idx(
     *, loc: mlir_ir.Location | None = None
@@ -10924,6 +10995,7 @@ _require_generated("arch_sub_block_idx")
 _require_generated("arch_block_num")
 _require_generated("arch_thread_block_dim")
 _require_generated("arch_thread_idx")
+_require_generated("arch_lane_idx")
 _require_generated("simt_add")
 _require_generated("simt_sub")
 _require_generated("simt_mul")
@@ -10944,6 +11016,8 @@ arch._set("sub_block_idx", arch_sub_block_idx)
 arch._set("block_num", arch_block_num)
 arch._set("thread_block_dim", arch_thread_block_dim)
 arch._set("thread_idx", arch_thread_idx)
+arch._set("warpsize", arch_warpsize)
+arch._set("lane_idx", arch_lane_idx)
 arch._set("sync_threads", arch_sync_threads)
 arch._set("get_capacity_in_bytes", arch_get_capacity_in_bytes)
 arch._set("get_dyn_ub", arch_get_dyn_ub)
