@@ -78,7 +78,7 @@ def Tla_ScalarValueType : AnyTypeOf<[AnyInteger, AnyFloat, Index],
 def Tla_IntegerOrIndexType : AnyTypeOf<[AnyInteger, Index],
     "TLA integer-or-index SSA value type">;
 
-// Cube element formats that this MLIR has no builtin type for.
+// Element encodings that this MLIR has no builtin type for.
 //
 // LLVM 19 ships Float8E4M3FN / Float8E5M2 and nothing narrower: Float4E2M1FN and
 // Float8E8M0FNU both arrive in LLVM 20. Spelling them as dialect types rather
@@ -87,25 +87,28 @@ def Tla_IntegerOrIndexType : AnyTypeOf<[AnyInteger, Index],
 // so a shared integer carrier cannot tell them apart and the encoding has to be
 // smuggled alongside on an attribute that nothing verifies against the type.
 //
-// These are storage-only: no arithmetic is ever performed on them in MLIR (the
-// cube's mad_mx does it), so they need no float semantics. At the memref
-// boundary they are buffered as i8 -- see storageTypeAndCount -- which is what
-// keeps every byte-denominated thing downstream meaning bytes.
+// Logical FP4 and E8M0 describe Cube storage. HiF8 also supports explicit
+// SIMD register conversion and transport; arithmetic requires conversion.
+// At the memref boundary these are buffered as i8 -- see storageTypeAndCount.
 //
-// When the toolchain reaches LLVM 20 these become aliases for the builtin
-// Float4E2M1FN / Float8E8M0FNU and nothing else has to change.
-class Tla_CubeElementType<string name, string typeMnemonic, string desc>
+// With LLVM 20 the logical FP4 and E8M0 types can use the corresponding
+// builtin formats. HiF8 remains a separate encoding.
+class Tla_EncodedElementType<string name, string typeMnemonic, string desc>
     : TypeDef<TlaDialect, name, []> {
   let mnemonic = typeMnemonic;
   let summary = desc;
 }
 
-def Tla_Float4E2M1Type : Tla_CubeElementType<"Float4E2M1", "f4e2m1",
+def Tla_Float4E2M1Type : Tla_EncodedElementType<"Float4E2M1", "f4e2m1",
     "Packed 4-bit float, 2-bit exponent / 1-bit mantissa (OCP MXFP4).">;
-def Tla_Float4E1M2Type : Tla_CubeElementType<"Float4E1M2", "f4e1m2",
+def Tla_Float4E1M2Type : Tla_EncodedElementType<"Float4E1M2", "f4e1m2",
     "Packed 4-bit float, 1-bit exponent / 2-bit mantissa.">;
-def Tla_Float8E8M0Type : Tla_CubeElementType<"Float8E8M0", "f8e8m0",
+def Tla_Float8E8M0Type : Tla_EncodedElementType<"Float8E8M0", "f8e8m0",
     "8-bit shared exponent (OCP microscaling scale block).">;
+
+// Byte-addressable numeric encoding, carried as i8 at storage boundaries.
+def Tla_HiFloat8Type : Tla_EncodedElementType<"HiFloat8", "hif8",
+    "HiFloat8 payload with tapered exponent and mantissa fields.">;
 
 def Tla_PtrType : TypeDef<TlaDialect, "Ptr", []> {
   let summary = "First-class pointer SSA value (pointee, address space, alignment).";

@@ -55,6 +55,7 @@ def _cast_kernel(dst_dtype: type[tla.Numeric], params: tla.params.CastParams):
         (tla.params.RoundMode.CAST_NONE, 4),
         (tla.params.RoundMode.CAST_RINT, 5),
         (tla.params.RoundMode.CAST_ODD, 6),
+        (tla.params.RoundMode.CAST_HYBRID, 7),
     ],
 )
 def test_round_mode_trait_codes(mode, code) -> None:

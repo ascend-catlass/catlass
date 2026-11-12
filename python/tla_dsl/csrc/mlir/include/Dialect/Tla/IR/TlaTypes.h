@@ -76,8 +76,8 @@ inline int64_t getByteSizeOfFixedWidthScalarType(::mlir::Type type)
     // fp8 cube operand formats (f8E4M3FN / f8E5M2) are byte-sized.
     if (::llvm::isa<::mlir::Float8E4M3FNType, ::mlir::Float8E5M2Type>(type))
         return 1;
-    // An e8m0 scale block is one opaque byte per shared exponent.
-    if (::llvm::isa<::tla::Float8E8M0Type>(type))
+    // HiF8 data and E8M0 shared exponents each occupy one byte.
+    if (::llvm::isa<::tla::Float8E8M0Type, ::tla::HiFloat8Type>(type))
         return 1;
     if (auto intTy = ::llvm::dyn_cast<::mlir::IntegerType>(type)) {
         if (intTy.getWidth() % 8 == 0)
@@ -157,7 +157,7 @@ inline bool isPackedFp4Type(::mlir::Type type)
 /// builtin for it. These are buffered as i8 at the memref boundary.
 inline bool isTlaCustomElementType(::mlir::Type type)
 {
-    return isPackedFp4Type(type) || ::llvm::isa<::tla::Float8E8M0Type>(type);
+    return isPackedFp4Type(type) || ::llvm::isa<::tla::Float8E8M0Type, ::tla::HiFloat8Type>(type);
 }
 
 using coord = ::mlir::Type;

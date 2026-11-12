@@ -618,7 +618,7 @@ static std::optional<AnyVectorOperationInfo> getAnyVectorOperationInfo(Operation
 // The mask-register width (b8/b16/b32) matching the element type.
 static hivmave::MaskWidth maskWidthForElement(Type elementType)
 {
-    unsigned bits = elementType.getIntOrFloatBitWidth();
+    unsigned bits = getBitSizeOfFixedWidthScalarType(elementType);
     if (bits <= 8)
         return hivmave::MaskWidth::B8;
     if (bits <= 16)
@@ -744,6 +744,32 @@ static func::FuncOp getOrCreateVectorPackUnpackLibraryCall(
     auto type = FunctionType::get(module.getContext(), {srcType}, {dstType});
     auto callee = moduleBuilder.create<func::FuncOp>(loc, name, type);
     annotateAivLibraryCall(callee);
+    return callee;
+}
+
+static std::string getHiFloat8CastLibraryCallName(Type srcElement, ArrayRef<int32_t> trait)
+{
+    std::string name;
+    if (srcElement.isF32()) {
+        name = "lowp_cast_f32_to_hif8_";
+        name += static_cast<::RoundMode>(trait[2]) == ::RoundMode::cast_hybrid ? "hybrid_" : "round_";
+        name += static_cast<::SatMode>(trait[1]) == ::SatMode::sat ? "sat" : "nosat";
+    } else {
+        name = "lowp_cast_hif8_to_f32";
+    }
+    return name + "_slot" + std::to_string(trait[0]);
+}
+
+static func::FuncOp getOrCreateLowpCastLibraryCall(
+    ModuleOp module, Location loc, ArrayRef<Type> inputTypes, VectorType resultType, StringRef name)
+{
+    if (auto existing = module.lookupSymbol<func::FuncOp>(name))
+        return existing;
+    OpBuilder moduleBuilder(module.getBodyRegion());
+    auto type = FunctionType::get(module.getContext(), inputTypes, {resultType});
+    auto callee = moduleBuilder.create<func::FuncOp>(loc, name, type);
+    annotateAivLibraryCall(callee);
+    callee->setAttr("hacc.always_inline", moduleBuilder.getUnitAttr());
     return callee;
 }
 
@@ -1219,7 +1245,7 @@ static Value allTrueMaskFor(AutoFullPredicateCache& cache, Location loc, VectorT
 // vextf ignore the attribute entirely and never call this for effect.
 static hivm::RoundModeAttr mapCastRoundMode(OpBuilder& b, ::RoundMode mode)
 {
-    hivm::RoundMode hv = hivm::RoundMode::ROUND;
+    hivm::RoundMode hv;
     switch (mode) {
         case ::RoundMode::cast_round:
             hv = hivm::RoundMode::ROUND;
@@ -1240,6 +1266,9 @@ static hivm::RoundModeAttr mapCastRoundMode(OpBuilder& b, ::RoundMode mode)
         case ::RoundMode::cast_odd:
             hv = hivm::RoundMode::ODD;
             break;
+        default:
+            // HiF8 HYBRID is handled by the register helper, not HIVM rounding.
+            return {};
     }
     return hivm::RoundModeAttr::get(b.getContext(), hv);
 }
@@ -1449,6 +1478,8 @@ static FailureOr<Value> createVectorCastResult(
     Type s = srcVecType.getElementType();
     Type d = dstVecType.getElementType();
     auto rnd = mapCastRoundMode(b, static_cast<::RoundMode>(trait[2]));
+    if (!rnd)
+        return emitError(loc, "unsupported rounding mode for native vector cast"), failure();
     BoolAttr sat = b.getBoolAttr(static_cast<::SatMode>(trait[1]) == ::SatMode::sat);
     auto part = mapCastPart(b, static_cast<::RegSlot>(trait[0]));
     auto pp = mapCastPP(b, static_cast<::RegSlot>(trait[0]));
@@ -1706,6 +1737,8 @@ struct VecLowerCtx {
 // Signedness for Compare/Cast/Div/Reduce/Max/Min stays on the tla type.
 static Type aveVectorElementType(Type elementType)
 {
+    if (isa<::tla::HiFloat8Type>(elementType))
+        return IntegerType::get(elementType.getContext(), 8);
     if (auto intType = dyn_cast<IntegerType>(elementType))
         if (intType.isUnsigned())
             return IntegerType::get(elementType.getContext(), intType.getWidth());
@@ -2008,7 +2041,7 @@ static FailureOr<Value> createImplicitVectorStoreMask(
     // i64 IR historically used a B32 PLT predicate for omitted masks; keep that
     // behavior instead of introducing an unproven B32 PGE encoding for B64
     // stores. Proper B64 predicate support is separate work.
-    bool supportsImplicitAll = opCtx.elementType.getIntOrFloatBitWidth() <= 32;
+    bool supportsImplicitAll = getBitSizeOfFixedWidthScalarType(opCtx.elementType) <= 32;
 
     // FIRST_ELEMENT modes ignore predicate bits in the backend. Supplying a
     // destination-tail PLT would only add work and suggest semantics that the
@@ -2361,6 +2394,27 @@ static LogicalResult lowerLoad(
                    "load_dist values require one vector result "
                    "(optional live !tla.ptr is separate)"),
                failure();
+    if (pattern == hivmave::LoadDist::DINTLV_B32) {
+        // NPU-IR's partial AVE conversion can leave this two-result load
+        // unconverted when its consumer is a register helper call. Emit the
+        // same native intrinsic here, with the complete view offset, so the
+        // load composes directly with either native ops or helpers.
+        auto metadata = b.create<mlir::memref::ExtractStridedMetadataOp>(loc, source);
+        Value base = b.create<mlir::memref::ExtractAlignedPointerAsIndexOp>(loc, metadata.getBaseBuffer());
+        Value four = b.create<arith::ConstantIndexOp>(loc, 4);
+        Value offset = b.create<arith::MulIOp>(loc, metadata.getOffset(), four);
+        Value address = b.create<arith::AddIOp>(loc, base, offset);
+        Value pointer = intToUbPtr(b, loc, ::tla::castValueToI64(b, loc, address));
+        Value constantZero = b.create<arith::ConstantIntOp>(loc, 0, 32);
+        Value distribution = b.create<arith::ConstantIntOp>(loc, static_cast<uint32_t>(pattern), 32);
+        auto pairType = LLVM::LLVMStructType::getLiteral(b.getContext(), {opCtx->vecType, opCtx->vecType});
+        Value pair = b.create<hivm_regbaseintrins::Vldsx2V64F32InstrOp>(
+                          loc, pairType, pointer, constantZero, distribution, constantZero)
+                         .getResult();
+        valueMap[loadOp.getResult()] = b.create<LLVM::ExtractValueOp>(loc, pair, 0);
+        valueMap[r2] = b.create<LLVM::ExtractValueOp>(loc, pair, 1);
+        return success();
+    }
     // Strided block load (vsldb): lower through a library call like the
     // store-with-stride path. The tile memref supplies the base address;
     // the gather reads all 8 DataBlocks, so the predicate is all-true.
@@ -2530,7 +2584,7 @@ static LogicalResult lowerBitCast(::tla::BitCastOp bitCastOp, OpBuilder& b, Dens
     auto srcVecType = dyn_cast<VectorType>(src.getType());
     if (!srcVecType)
         return bitCastOp.emitError("tla.bitcast source is not a vector value"), failure();
-    Type dstElementType = bitCastOp.getResult().getType().getElementType();
+    Type dstElementType = aveVectorElementType(bitCastOp.getResult().getType().getElementType());
     // Values stay signless; signedness lives in the !tla.vector type only.
     if (auto intType = dyn_cast<IntegerType>(dstElementType))
         if (!intType.isSignless())
@@ -2564,6 +2618,20 @@ static LogicalResult lowerCast(
     Type tlaSrcElem = cast<::tla::VectorSSAType>(castOp.getSource().getType()).getElementType();
     Type tlaDstElem = dstType.getElementType();
     auto dstVecType = VectorType::get({*dstLanesOr}, aveVectorElementType(tlaDstElem));
+    if (isa<::tla::HiFloat8Type>(tlaSrcElem) || isa<::tla::HiFloat8Type>(tlaDstElem)) {
+        std::string name = getHiFloat8CastLibraryCallName(tlaSrcElem, castOp.getTrait());
+        int64_t maskLanes = srcVecType.getNumElements();
+        Value mask = castOp.getMask() ? valueMap.lookup(castOp.getMask()) : fullMasks.get(loc, maskLanes);
+        if (!mask)
+            return failure();
+        SmallVector<Value> args{src, castMaskToPregType(b, loc, mask, fullPregVecType(b.getContext()))};
+        SmallVector<Type> inputTypes;
+        for (auto arg : args)
+            inputTypes.push_back(arg.getType());
+        auto callee = getOrCreateLowpCastLibraryCall(module, loc, inputTypes, dstVecType, name);
+        valueMap[castOp.getResult()] = b.create<func::CallOp>(loc, callee, args).getResult(0);
+        return success();
+    }
     // Reject casts whose source or destination element type has no AVE cast path
     // (i1/bool, f64). Unsigned routes are gated by createUnsignedVectorCastResult.
     if (!isSupportedCastElementType(tlaSrcElem) || !isSupportedCastElementType(tlaDstElem))
@@ -3762,6 +3830,23 @@ static LogicalResult lowerNestedVectorOp(
     Operation& op, OpBuilder& b, ModuleOp module, DenseMap<Value, Value>& valueMap, AutoFullPredicateCache& fullMasks)
 {
     Location loc = op.getLoc();
+    // Encodings are transported as bytes downstream, but must never silently
+    // acquire integer arithmetic semantics. Reinterpret explicitly for bit
+    // operations or convert to a native computation dtype first.
+    bool hasHiFloat8 = llvm::any_of(
+                           op.getOperandTypes(),
+                           [](Type type) {
+                               auto vec = dyn_cast<::tla::VectorSSAType>(type);
+                               return vec && isa<::tla::HiFloat8Type>(vec.getElementType());
+                           }) ||
+                       llvm::any_of(op.getResultTypes(), [](Type type) {
+                           auto vec = dyn_cast<::tla::VectorSSAType>(type);
+                           return vec && isa<::tla::HiFloat8Type>(vec.getElementType());
+                       });
+    if (hasHiFloat8 && !isa<
+                           ::tla::CastOp, ::tla::BitCastOp, ::tla::LoadOp, ::tla::StoreOp, ::tla::WhereOp,
+                           ::tla::InterleaveOp, ::tla::DeInterleaveOp, ::tla::GatherOp, scf::ForOp, scf::IfOp>(op))
+        return op.emitError("HiFloat8 arithmetic is unsupported; convert or bitcast the register explicitly");
 
     // make_shape / make_coord are dead after tla-lower-tensor-desc (their leaves
     // were folded into tensor_desc operands); skip them. (tla-finalize-memref

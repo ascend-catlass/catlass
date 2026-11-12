@@ -22,6 +22,14 @@ Description:
 
 Convert a register-resident vector to another element type.
 
+Float32 -> HiFloat8 supports CAST_ROUND (nearest, ties away) and
+CAST_HYBRID, SAT/NOSAT and four slots; result j occupies byte
+4*j + reg_slot. HiFloat8 -> Float32 reads those slots without
+rounding. Use Float32 for arithmetic or UInt8 bitcast to inspect
+encoded bits. CAST_HYBRID is only supported for Float32 -> HiFloat8;
+it follows CANN's native hybrid rounding and does not guarantee the
+nearest representable value. The default is CAST_ROUND.
+
 Prototype:
 
 ```python
@@ -42,7 +50,7 @@ Constraints:
 - Must be called inside a `@tla.kernel`-decorated kernel function.
 - Must be called inside `tla.vec.func()`.
 - Supported targets: signed i8..i64, unsigned u8..u32 on reachable
-  routes, f16/bf16/f32, f8e4m3fn/f8e5m2. Not supported: bool, f64,
+  routes, f16/bf16/f32, f8e4m3fn/f8e5m2, hif8. Not supported: bool, f64,
   f8e8m0, fp8-to-fp8, fp8-to-integer.
 - A same-type cast (`f16`->`f16`, `bf16`->`bf16`, `f32`->`f32`)
   keeps the element type and re-rounds every lane: only `round_mode`
@@ -50,12 +58,13 @@ Constraints:
   supported. `sat_mode` `SAT` is refused (a same-type cast never
   saturates), and `reg_slot` must be `ZERO` or `ONE`.
 - `reg_slot` `TWO` and `THREE` name a pack quarter. They are valid
-  on a 4x integer cast and the direct fp8<->f32 path.
+  on a 4x integer cast and the direct fp8/HiF8<->f32 instruction.
 - `params.round_mode` accepts `CAST_ROUND` / `CAST_FLOOR` /
   `CAST_CEIL` / `CAST_TRUNC` / `CAST_RINT` / `CAST_ODD` /
-  `CAST_NONE` (not AscendC `CAST_HYBRID`). `CAST_NONE` must be
-  passed explicitly: lossless casts drop the round operand;
-  lossy casts lower as `CAST_RINT` (ties to even).
+  `CAST_NONE`. `CAST_HYBRID` is supported only for Float32 ->
+  HiFloat8. `CAST_NONE` must be passed explicitly: lossless casts
+  drop the round operand; lossy casts lower as `CAST_RINT`
+  (ties to even).
 
 Example:
 
@@ -100,7 +109,7 @@ clearing a sign bit -- without a store/load round trip through UB at
 a different element type.
 
 The same-width pairs are `f32`/`i32`/`u32`, `f16`/`bf16`/`i16`/`u16`,
-`i8`/`u8`/`f8e4m3fn`/`f8e5m2`, and `i64`/`u64`. The lane count is
+`i8`/`u8`/`f8e4m3fn`/`f8e5m2`/`hif8`, and `i64`/`u64`. The lane count is
 preserved. A width change is `VectorSSA.to`'s job and is rejected
 here. `tla.Bool` (i1), `tla.Float8E8M0` and the packed fp4 formats
 are not valid `!tla.vector` element types and are rejected too.

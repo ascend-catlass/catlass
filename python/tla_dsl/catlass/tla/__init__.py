@@ -96,6 +96,7 @@ _PARENT_EXPORTS = (
     "Float4E2M1",
     "Float4E1M2",
     "Float8E8M0",
+    "HiFloat8",
     "utils",
     "pipes",
     "arch",
@@ -183,6 +184,7 @@ def __getattr__(name: str) -> Any:
         "Float4E2M1",
         "Float4E1M2",
         "Float8E8M0",
+        "HiFloat8",
     ):
         from .. import types as _types
 

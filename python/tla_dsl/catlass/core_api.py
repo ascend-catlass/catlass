@@ -21,7 +21,7 @@ from catlass._mlir._mlir_libs._mlir import (  # type: ignore[import-not-found]
 from catlass._mlir.dialects import arith as _mlir_arith  # type: ignore[import-not-found]
 
 from . import _tla_type_bridge
-from .params import CastParams, SatMode
+from .params import CastParams, RoundMode, SatMode
 
 # Element-type tokens the tla.cast lowering supports: signed ints, unsigned
 # ints and the AVE float set. Bool (i1) and Float64 (f64) are rejected by
@@ -43,13 +43,14 @@ _CAST_TOKEN_BITS = {
     "u64": 64,
     "f8e4m3fn": 8,
     "f8e5m2": 8,
+    "hif8": 8,
     "f16": 16,
     "bf16": 16,
     "f32": 32,
 }
 _CAST_UNSIGNED_DTYPES = frozenset({"u8", "u16", "u32", "u64"})
 _CAST_SUPPORTED_DTYPES = (
-    frozenset({"i8", "i16", "i32", "i64", "f16", "bf16", "f32"})
+    frozenset({"i8", "i16", "i32", "i64", "f16", "bf16", "f32", "hif8"})
     | _CAST_UNSIGNED_DTYPES
     | _CAST_FP8_DTYPES
 )
@@ -78,20 +79,14 @@ _CAST_UNSIGNED_ROUTES = frozenset(
 _CAST_SAME_TYPE_FLOAT_DTYPES = frozenset({"f16", "bf16", "f32"})
 
 # Element types tla.bitcast may reinterpret. Membership is not the whole rule:
-# the source and destination must also have the *same* width, which is checked
-# against dtype_size_bytes rather than enumerated as pairs.
+# source and destination must also have the same width, checked against
+# dtype_size_bytes rather than enumerated as pairs. HiF8 retains its format in
+# TLA IR and uses a byte register in native lowering.
 #
-# Two 1-byte formats are deliberately absent, for the same underlying reason:
-# !tla.vector requires a builtin MLIR integer or float element type (see
-# VectorSSAType::verify), and neither f8e8m0 nor the packed fp4 formats is one.
-# f8e8m0 is spelled as the TLA dialect type !tla.f8e8m0 because LLVM 19 has no
-# Float8E8M0FNU, so !tla.vector<Nxf8e8m0> cannot be constructed at all; naming
-# it here would turn a frontend mistake into a failure deep in the
-# vector-region lowering. When the toolchain reaches LLVM 20 and f8e8m0 becomes
-# a builtin float, it can simply be added below. fp4 is excluded on top of that
-# because a 4-bit float is not a register element type either way: an fp4
-# register is an i8 carrier holding two values per lane, which makes
-# reinterpreting it a src_format question rather than a bitcast.
+# E8M0 remains storage-only: LLVM 19 has no builtin Float8E8M0FNU, and this
+# interface has no register lowering for !tla.f8e8m0. Logical FP4 types are also
+# excluded: their 4-bit values differ from byte registers holding two values
+# per lane. Supporting either format requires its own register representation.
 #
 # i64/u64 registers can be returned by an extern and bitcast to each other.
 # Their tensor load path remains unavailable: tla.make_tensor_like rejects
@@ -112,6 +107,7 @@ _BITCAST_ELEMENT_TYPES = frozenset(
         "f32",
         "f8e4m3fn",
         "f8e5m2",
+        "hif8",
     }
 )
 from catlass._mlir.dialects import tla as _tla_ops_gen  # type: ignore[import-not-found]
@@ -250,6 +246,7 @@ _MAKE_TENSOR_SUPPORTED_ELEMENT_TYPES = frozenset(
         "u8",
         "f8e4m3fn",
         "f8e5m2",
+        "hif8",
     }
 )
 
@@ -943,6 +940,14 @@ class VectorSSA(_RegisterSSA):
         Description:
             Convert a register-resident vector to another element type.
 
+            Float32 -> HiFloat8 supports CAST_ROUND (nearest, ties away) and
+            CAST_HYBRID, SAT/NOSAT and four slots; result j occupies byte
+            4*j + reg_slot. HiFloat8 -> Float32 reads those slots without
+            rounding. Use Float32 for arithmetic or UInt8 bitcast to inspect
+            encoded bits. CAST_HYBRID is only supported for Float32 -> HiFloat8;
+            it follows CANN's native hybrid rounding and does not guarantee the
+            nearest representable value. The default is CAST_ROUND.
+
             Parameters:
             - `dst_type` (`type[Numeric]`): Element type to convert to. Required.
             - `params` (`CastParams`): Rounding, saturation and register slot. Required.
@@ -955,7 +960,7 @@ class VectorSSA(_RegisterSSA):
             - Must be called inside a `@tla.kernel`-decorated kernel function.
             - Must be called inside `tla.vec.func()`.
             - Supported targets: signed i8..i64, unsigned u8..u32 on reachable
-              routes, f16/bf16/f32, f8e4m3fn/f8e5m2. Not supported: bool, f64,
+              routes, f16/bf16/f32, f8e4m3fn/f8e5m2, hif8. Not supported: bool, f64,
               f8e8m0, fp8-to-fp8, fp8-to-integer.
             - A same-type cast (`f16`->`f16`, `bf16`->`bf16`, `f32`->`f32`)
               keeps the element type and re-rounds every lane: only `round_mode`
@@ -963,12 +968,13 @@ class VectorSSA(_RegisterSSA):
               supported. `sat_mode` `SAT` is refused (a same-type cast never
               saturates), and `reg_slot` must be `ZERO` or `ONE`.
             - `reg_slot` `TWO` and `THREE` name a pack quarter. They are valid
-              on a 4x integer cast and the direct fp8<->f32 path.
+              on a 4x integer cast and the direct fp8/HiF8<->f32 instruction.
             - `params.round_mode` accepts `CAST_ROUND` / `CAST_FLOOR` /
               `CAST_CEIL` / `CAST_TRUNC` / `CAST_RINT` / `CAST_ODD` /
-              `CAST_NONE` (not AscendC `CAST_HYBRID`). `CAST_NONE` must be
-              passed explicitly: lossless casts drop the round operand;
-              lossy casts lower as `CAST_RINT` (ties to even).
+              `CAST_NONE`. `CAST_HYBRID` is supported only for Float32 ->
+              HiFloat8. `CAST_NONE` must be passed explicitly: lossless casts
+              drop the round operand; lossy casts lower as `CAST_RINT`
+              (ties to even).
 
             Example:
             ```python
@@ -1010,7 +1016,7 @@ class VectorSSA(_RegisterSSA):
                 f"unsupported cast target dtype '{dst_type.dtype}': tla.cast "
                 f"supports signed integers (i8/i16/i32/i64), unsigned integers "
                 f"(u8/u16/u32/u64) and floats "
-                f"(f16/bf16/f32/f8e4m3fn/f8e5m2); bool, f64 and "
+                f"(f16/bf16/f32/f8e4m3fn/f8e5m2/hif8); bool, f64 and "
                 f"f8e8m0 are not supported",
             )
         if not isinstance(params, CastParams):
@@ -1028,6 +1034,25 @@ class VectorSSA(_RegisterSSA):
         src_desc = _vector_ssa_type_for_mlir_value(operand_value)
         dst_token = _dtype_to_str(dst_type)
         src_token = src_desc.element_type
+        if params.round_mode is RoundMode.CAST_HYBRID and (src_token, dst_token) != (
+            "f32",
+            "hif8",
+        ):
+            _op_error("cast", "CAST_HYBRID only supports Float32->HiFloat8")
+        if src_token == "hif8" or dst_token == "hif8":
+            if (src_token, dst_token) not in (("f32", "hif8"), ("hif8", "f32")):
+                _op_error(
+                    "cast",
+                    "HiFloat8 pairs with Float32; compose other routes explicitly",
+                )
+            if dst_token == "hif8" and params.round_mode not in (
+                RoundMode.CAST_ROUND,
+                RoundMode.CAST_HYBRID,
+            ):
+                _op_error(
+                    "cast",
+                    "FP32->HiF8 supports CAST_ROUND or CAST_HYBRID",
+                )
         if (
             src_token == "f16"
             and dst_token == "bf16"
@@ -1087,7 +1112,7 @@ class VectorSSA(_RegisterSSA):
             a different element type.
 
             The same-width pairs are `f32`/`i32`/`u32`, `f16`/`bf16`/`i16`/`u16`,
-            `i8`/`u8`/`f8e4m3fn`/`f8e5m2`, and `i64`/`u64`. The lane count is
+            `i8`/`u8`/`f8e4m3fn`/`f8e5m2`/`hif8`, and `i64`/`u64`. The lane count is
             preserved. A width change is `VectorSSA.to`'s job and is rejected
             here. `tla.Bool` (i1), `tla.Float8E8M0` and the packed fp4 formats
             are not valid `!tla.vector` element types and are rejected too.
@@ -5613,6 +5638,7 @@ _SUPPORTED_VECTOR_COPY_ROUTES = {
         "f8e8m0",
         "f4e2m1",
         "f4e1m2",
+        "hif8",
     ),
     ("ub", "RowMajor", "gm", "RowMajor"): (
         "f32",
@@ -5629,6 +5655,7 @@ _SUPPORTED_VECTOR_COPY_ROUTES = {
         "f8e8m0",
         "f4e2m1",
         "f4e1m2",
+        "hif8",
     ),
     # UB -> UB is DataCopy (MOV.UB.TO.UB) throughout, with a ragged row rounded
     # up to whole 32-byte blocks, so every element width is carried, 1-byte
@@ -7962,6 +7989,11 @@ def _emit_vector_binary(
     mask_value = _as_value(mask) if mask is not None else None
     lhs_desc = _vector_ssa_type_for_mlir_value(lhs_value)
     rhs_desc = _vector_ssa_type_for_mlir_value(rhs_value)
+    if lhs_desc.element_type == "hif8":
+        _op_error(
+            op_name,
+            "HiFloat8 arithmetic requires an explicit numeric conversion or bitcast",
+        )
     if lhs_desc.element_type != rhs_desc.element_type:
         _op_error(
             op_name,
@@ -10133,7 +10165,8 @@ def _require_reg_slot_reachable(src_token: str, dst_token: str, slot: RegSlot) -
     # u8 -> f32 is composed as a 4x widen then convert; reg_slot still names
     # the pack quarter of the widen leg.
     u8_f32_pair = src_token == "u8" and dst_token == "f32"
-    if (int_pair and ratio >= 4) or fp8_f32_pair or u8_f32_pair:
+    hif8_f32_pair = (src_token, dst_token) in (("f32", "hif8"), ("hif8", "f32"))
+    if (int_pair and ratio >= 4) or fp8_f32_pair or u8_f32_pair or hif8_f32_pair:
         return
     _op_error(
         "cast",

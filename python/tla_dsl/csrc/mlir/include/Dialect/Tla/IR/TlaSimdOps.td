@@ -571,7 +571,7 @@ def Tla_LoadOp : Tla_Op<"load", []> {
 
     * ``!tla.vector`` — data load. Optional ``load_dist`` / ``unaligned_ub_access``.
       Dual-destination ``dintlv_b32`` produces a second result (even/odd b32
-      elements), lowering to ``ave.hir.vload <DINTLV_B32>``. Unaligned path
+      elements), requiring aligned access. Unaligned path
       lowers to ``ave.hir.vload`` with ``vldas``/``vldus`` via HIVMAVE.
       Optional compile-time ``block_stride`` (i32 attribute) enables strided
       block load (AscendC ``vsldb``): one instruction gathers 8 DataBlocks

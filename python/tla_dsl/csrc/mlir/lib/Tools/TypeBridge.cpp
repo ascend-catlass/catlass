@@ -389,7 +389,7 @@ int64_t crossFlagMode(MlirType type)
     return checkedTlaType<::tla::CrossFlagType>(type, "!tla.cross_flag type").getMode();
 }
 
-// The cube element formats this MLIR has no builtin for. See Tla.td.
+// Element formats this MLIR has no builtin for. See Tla.td.
 MlirType float4E2M1TypeGet(MlirContext context)
 {
     MLIRContext* ctx = bridgeContext(context);
@@ -406,6 +406,12 @@ MlirType float8E8M0TypeGet(MlirContext context)
 {
     MLIRContext* ctx = bridgeContext(context);
     return toMlirType(::tla::Float8E8M0Type::get(ctx), "tla.f8e8m0");
+}
+
+MlirType hiFloat8TypeGet(MlirContext context)
+{
+    MLIRContext* ctx = bridgeContext(context);
+    return toMlirType(::tla::HiFloat8Type::get(ctx), "tla.hif8");
 }
 
 MlirType mutexTypeGet(MlirContext context)
@@ -1104,6 +1110,7 @@ PYBIND11_MODULE(_tla_type_bridge_native, m)
     m.def("float4_e2m1_type_get", &float4E2M1TypeGet, py::arg("context"));
     m.def("float4_e1m2_type_get", &float4E1M2TypeGet, py::arg("context"));
     m.def("float8_e8m0_type_get", &float8E8M0TypeGet, py::arg("context"));
+    m.def("hifloat8_type_get", &hiFloat8TypeGet, py::arg("context"));
     m.def("copy_l0c2dst_params_type_get", &copyL0C2DstParamsTypeGet, py::arg("context"));
 
     m.def("type_is_ptr", &typeIs<::tla::PtrType>, py::arg("type"));

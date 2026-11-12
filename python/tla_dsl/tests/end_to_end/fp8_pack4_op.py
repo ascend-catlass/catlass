@@ -125,11 +125,13 @@ def make_layout_kernel(
     return transfer
 
 
-def make_fp8_kernel(dtype, count, *, narrow, saturate=False, stride=1):
+def make_fp8_kernel(
+    dtype, count, *, narrow, saturate=False, stride=1, cast_params=None
+):
     padded = (count + 63) // 64 * 64
     source_capacity = GUARD + padded * (stride if narrow else 1) + 64
     destination_capacity = GUARD + padded + 64
-    cast = CastParams(
+    cast = cast_params or CastParams(
         round_mode=RoundMode.CAST_RINT,
         sat_mode=SatMode.SAT if saturate else SatMode.NOSAT,
     )

@@ -1,0 +1,12 @@
+// RUN: not %tla_compile %s -o - 2>&1 | %filecheck %s
+// CHECK: 'tla.load' op load_dist dintlv_b32 requires aligned UB access
+
+!src = !tla.tensor<!tla.layout<!tla.shape<128>, !tla.stride<1>, !tla.shape<128>, RowMajor>, !tla.coord<0>, !tla.ptr<f32, ub, 4>>
+module {
+  func.func @unaligned_dintlv(%src: !src) {
+    "tla.vec.func"() ({
+      %even, %odd = tla.load %src {load_dist = #tla.load_dist<dintlv_b32>, unaligned_ub_access} : !src -> !tla.vector<64xf32>, !tla.vector<64xf32>
+    }) {mode = "simd"} : () -> ()
+    return
+  }
+}

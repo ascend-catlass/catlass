@@ -53,10 +53,20 @@ def _kernel(params, masked=False, lanes=128):
 @pytest.mark.parametrize("round_mode", tuple(tla.params.RoundMode))
 @pytest.mark.parametrize("reg_slot", (tla.params.RegSlot.ZERO, tla.params.RegSlot.ONE))
 @pytest.mark.parametrize("masked", (False, True))
-def test_half_to_bf16_compiles(round_mode, reg_slot, masked, isolated_compile_cache):
+def test_half_to_bf16_round_mode_contract(
+    round_mode, reg_slot, masked, isolated_compile_cache
+):
     params = tla.params.CastParams(
         reg_slot=reg_slot, sat_mode=tla.params.SatMode.UNKNOWN, round_mode=round_mode
     )
+    if round_mode is tla.params.RoundMode.CAST_HYBRID:
+        with pytest.raises(
+            tla.TlaCoreAPIError, match="CAST_HYBRID only supports Float32->HiFloat8"
+        ):
+            _kernel(params, masked).dump_mlir(
+                type_args=(_gm(tla.Float16), _gm(tla.BFloat16))
+            )
+        return
     _kernel(params, masked).compile(
         type_args=(_gm(tla.Float16), _gm(tla.BFloat16)), options="--npu-arch 3510"
     )

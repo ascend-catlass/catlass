@@ -199,6 +199,10 @@ def float8_e8m0_type_get(context: mlir_ir.Context) -> mlir_ir.Type:
     return _load_bridge_extension().float8_e8m0_type_get(context)
 
 
+def hifloat8_type_get(context: mlir_ir.Context) -> mlir_ir.Type:
+    return _load_bridge_extension().hifloat8_type_get(context)
+
+
 def copy_l0c2dst_params_type_get(context: mlir_ir.Context) -> mlir_ir.Type:
     return _load_bridge_extension().copy_l0c2dst_params_type_get(context)
 

@@ -36,5 +36,7 @@ module {
 }
 
 // CHECK-LABEL: func.func private @vector_region_
-// CHECK: ave.hir.vload <DINTLV_B32>
-// CHECK-SAME: into vector<64xf32>, vector<64xf32>
+// CHECK: hivm_regbaseintrins.intr.hivm.vldsx2.v64f32
+// CHECK-SAME: !llvm.struct<(vector<64xf32>, vector<64xf32>)>
+// CHECK: llvm.extractvalue {{.*}}[0]
+// CHECK: llvm.extractvalue {{.*}}[1]

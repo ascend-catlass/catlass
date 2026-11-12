@@ -1201,6 +1201,22 @@ mlir::LogicalResult CastOp::verify()
 {
     if (!hasEnclosingRegion<VecFuncOp>(getOperation()))
         return emitOpError("must be nested inside a tla.vec.func region");
+    auto source = getSource().getType().getElementType();
+    auto dest = getResult().getType().getElementType();
+    auto trait = getTrait();
+    if (trait.size() == 3 && trait[2] == static_cast<int32_t>(::RoundMode::cast_hybrid) &&
+        !(source.isF32() && mlir::isa<HiFloat8Type>(dest)))
+        return emitOpError("CAST_HYBRID only supports Float32->HiFloat8");
+    if (isa<::tla::HiFloat8Type>(source) || isa<::tla::HiFloat8Type>(dest)) {
+        if (trait.size() != 3 || trait[0] < 0 || trait[0] > 3 || trait[1] < 0 || trait[1] > 2 || trait[2] < 0 ||
+            !::symbolizeRoundMode(trait[2]))
+            return emitOpError("trait must contain valid register-slot, saturation and rounding codes");
+        if (!((source.isF32() && mlir::isa<HiFloat8Type>(dest)) || (mlir::isa<HiFloat8Type>(source) && dest.isF32())))
+            return emitOpError("HiFloat8 pairs with Float32; compose other routes explicitly");
+        if (mlir::isa<HiFloat8Type>(dest) && trait[2] != static_cast<int32_t>(::RoundMode::cast_round) &&
+            trait[2] != static_cast<int32_t>(::RoundMode::cast_hybrid))
+            return emitOpError("FP32->HiF8 supports CAST_ROUND or CAST_HYBRID");
+    }
     return verifyMaskMatchesVector(getOperation(), getMask(), getSource().getType());
 }
 
@@ -1379,6 +1395,8 @@ mlir::LogicalResult LoadOp::verify()
     mlir::Value result2 = getResult2();
     bool result2IsVector = result2 && mlir::isa<VectorSSAType>(result2.getType());
     if (isDintlv) {
+        if (getUnalignedUbAccess().value_or(false))
+            return emitOpError("load_dist dintlv_b32 requires aligned UB access");
         if (!result2IsVector)
             return emitOpError("load_dist dintlv_b32 requires a second !tla.vector result");
     } else if (result2) {

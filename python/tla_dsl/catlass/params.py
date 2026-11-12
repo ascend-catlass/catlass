@@ -400,7 +400,7 @@ class RoundMode(enum.Enum):
 
     ``CAST_NONE`` matches AscendC: it must be passed explicitly. Lossless casts
     drop the round operand; lossy casts lower as ``CAST_RINT``. ``CAST_HYBRID``
-    is not exposed.
+    selects native hybrid rounding for Float32 -> HiFloat8 only.
     """
 
     CAST_ROUND = "cast_round"  # round to nearest, tie away from zero
@@ -410,6 +410,7 @@ class RoundMode(enum.Enum):
     CAST_NONE = "cast_none"  # AscendC CAST_NONE: lossless no-rnd / lossy RINT
     CAST_RINT = "cast_rint"  # round to nearest, tie to even (banker's)
     CAST_ODD = "cast_odd"  # Von Neumann rounding (round to odd)
+    CAST_HYBRID = "cast_hybrid"  # native HiF8 hybrid rounding (Float32 -> HiFloat8)
 
     def __str__(self) -> str:
         return self.value
@@ -453,6 +454,7 @@ _ROUND_MODE_CODE = {
     RoundMode.CAST_NONE: 4,
     RoundMode.CAST_RINT: 5,
     RoundMode.CAST_ODD: 6,
+    RoundMode.CAST_HYBRID: 7,
 }
 
 

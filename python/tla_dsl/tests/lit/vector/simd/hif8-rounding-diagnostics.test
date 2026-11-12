@@ -1,0 +1,16 @@
+// RUN: not %tla_compile %s -o %t 2>&1 | %filecheck %s
+// RUN: sed -e 's/64xf32/256x!tla.hif8/g' -e 's/128xf16/64xf32/g' %s > %t.reverse.mlir
+// RUN: not %tla_compile %t.reverse.mlir -o %t.reverse 2>&1 | %filecheck %s
+// RUN: sed -e 's/128xf16/256x!tla.hif8/g' -e 's/0, 2, 7/0, 2, 2/' %s > %t.mode.mlir
+// RUN: not %tla_compile %t.mode.mlir -o %t.mode 2>&1 | %filecheck %s --check-prefix=MODE
+// CHECK: 'tla.cast' op CAST_HYBRID only supports Float32->HiFloat8
+// MODE: 'tla.cast' op FP32->HiF8 supports CAST_ROUND or CAST_HYBRID
+
+module {
+  func.func @invalid_rounding(%source: !tla.vector<64xf32>) {
+    "tla.vec.func"() ({
+      %result = "tla.cast"(%source) <{trait = array<i32: 0, 2, 7>}> : (!tla.vector<64xf32>) -> !tla.vector<128xf16>
+    }) {mode = "simd"} : () -> ()
+    return
+  }
+}

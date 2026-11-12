@@ -24,14 +24,21 @@ Do not regenerate this file from a glossary.
 
 将寄存器内的 vector 转换为另一种元素类型。
 
+FP32→HiF8 支持 `CAST_ROUND`（最近舍入，中点远离零）和 `CAST_HYBRID`、
+`SAT`/`NOSAT` 和四个 register slot；结果 `j` 位于字节位置 `4*j + reg_slot`。
+HiF8→FP32 读取相同 slot，无需舍入。
+算术运算先转换为 Float32，查看编码使用 UInt8 bitcast。
+`CAST_HYBRID` 仅支持 FP32→HiF8，采用 CANN 原生混合舍入，
+结果不保证是最近的可表示值。默认使用 `CAST_ROUND`。
+
 lowering 支持有符号整数 `tla.Int8` ~ `tla.Int64`、浮点 `tla.Float16` /
 `tla.BFloat16` / `tla.Float32`，以及两种 OCP fp8 格式 `tla.Float8E4M3FN` /
 `tla.Float8E5M2`。无符号整数、`tla.Bool`（i1）、`tla.Float64` 与 `tla.Float8E8M0`
 会被拒绝。
 
-`tla.Float16` 到 `tla.BFloat16` 使用一条直接转换指令，保留全部 lane，支持所有
-舍入模式。`sat_mode` 必须为 `UNKNOWN`；由于指令没有饱和模式参数，`NOSAT`
-和 `SAT` 均会被拒绝。对于这一等宽转换，`reg_slot` 的 `ZERO` 与 `ONE` 效果相同。
+`tla.Float16` 到 `tla.BFloat16` 使用一条直接转换指令，保留全部 lane，支持
+通用舍入模式（不含 HiF8 专用的 `CAST_HYBRID`）。`sat_mode` 必须为 `UNKNOWN`；
+由于指令没有饱和模式参数，`NOSAT` 和 `SAT` 均会被拒绝。对于这一等宽转换，`reg_slot` 的 `ZERO` 与 `ONE` 效果相同。
 
 fp8 操作数可与 `tla.Float32`、`tla.Float16`、`tla.BFloat16` 互相转换。其中只有
 f32 这一对是单条指令：f16 与 bf16 两对由 lowering 展开为经过 f32 的两次 cast，
@@ -46,8 +53,8 @@ cast——也没有 fp8 与整数之间的路径。
 fp8 格式没有同类型 cast。
 
 `CastParams.round_mode` 支持 `CAST_ROUND` / `CAST_FLOOR` / `CAST_CEIL` /
-`CAST_TRUNC` / `CAST_RINT` / `CAST_ODD` / `CAST_NONE`（不含 AscendC 的
-`CAST_HYBRID`）。`CAST_NONE` 须显式传入：无损转换（如 `f16→f32`）仍走无
+`CAST_TRUNC` / `CAST_RINT` / `CAST_ODD` / `CAST_NONE`；`CAST_HYBRID` 仅支持
+FP32→HiF8。`CAST_NONE` 须显式传入：无损转换（如 `f16→f32`）仍走无
 `rnd` 的指令；有损转换按 `CAST_RINT`（ties to even）处理。
 
 函数原型：
@@ -72,7 +79,7 @@ tla.VectorSSA.to(dst_type: Any, params: CastParams, mask: Any | None = None) -> 
   `UNKNOWN` 与 `NOSAT` 均可），`reg_slot` 必须为 `ZERO` 或 `ONE`：该转换没有
   饱和参数，也没有 pack-quarter 选择子。
 - `reg_slot` 的 `TWO` 与 `THREE` 指向 pack 的四分之一，仅在位宽变化为 4 倍的整数
-  cast 以及直接的 fp8<->f32 指令上合法。
+  cast 以及直接的 fp8/HiF8<->f32 指令上合法。
 - 线程级标量 cast 在 `mode="simt"` 下使用 `Numeric.to`；本方法是 vector（AVE）
   形态，始终需要 `CastParams`。
 
@@ -115,7 +122,7 @@ with tla.vec.func(mode="simd"):
 `2**k`、清除符号位——而不必经由 UB 以另一种元素类型存取一轮。
 
 同位宽的组合为 `f32`/`i32`/`u32`、`f16`/`bf16`/`i16`/`u16`、
-`i8`/`u8`/`f8e4m3fn`/`f8e5m2` 以及 `i64`/`u64`，lane 数保持不变。位宽变化属于
+`i8`/`u8`/`f8e4m3fn`/`f8e5m2`/`hif8` 以及 `i64`/`u64`，lane 数保持不变。位宽变化属于
 `VectorSSA.to` 的职责，在此会被拒绝。`tla.Bool`（i1）、`tla.Float8E8M0` 与打包的
 fp4 格式不是合法的 `!tla.vector` 元素类型，同样会被拒绝。
 

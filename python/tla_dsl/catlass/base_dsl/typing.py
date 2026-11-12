@@ -757,6 +757,12 @@ def _mlir_f8e8m0() -> mlir_ir.Type:
     return float8_e8m0_type_get(mlir_ir.Context.current)
 
 
+def _mlir_hif8() -> mlir_ir.Type:
+    from .._tla_type_bridge import hifloat8_type_get
+
+    return hifloat8_type_get(mlir_ir.Context.current)
+
+
 class Numeric(metaclass=NumericMeta, is_abstract=True):
     """Numeric type and value (``DslType`` / ``NumericMeta`` first-class).
 
@@ -871,7 +877,12 @@ class Numeric(metaclass=NumericMeta, is_abstract=True):
         else:
             # Dialect floats have no mlir_ir class for isinstance dispatch.
             printed = str(ty)
-            if printed not in ("!tla.f4e2m1", "!tla.f4e1m2", "!tla.f8e8m0"):
+            if printed not in (
+                "!tla.f4e2m1",
+                "!tla.f4e1m2",
+                "!tla.f8e8m0",
+                "!tla.hif8",
+            ):
                 raise TypeError(f"unsupported element type for Numeric: {ty!r}")
             token = printed.removeprefix("!tla.")
         try:
@@ -1501,6 +1512,10 @@ class Float8E5M2(
     Float, metaclass=FloatMeta, width=8, dtype="f8e5m2", mlir_type=_mlir_f8e5m2
 ):
     """OCP E5M2, the wider-exponent 8-bit float operand format."""
+
+
+class HiFloat8(Float, metaclass=FloatMeta, width=8, dtype="hif8", mlir_type=_mlir_hif8):
+    """HiF8 encoding; use SIMD conversion to Float32 for arithmetic."""
 
 
 class Float4E2M1(

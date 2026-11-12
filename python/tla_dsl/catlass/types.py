@@ -586,6 +586,7 @@ _TENSOR_DTYPE_SIZES: dict[str, int] = {
     "f8e5m2": 1,
     # An e8m0 shared exponent is one opaque byte.
     "f8e8m0": 1,
+    "hif8": 1,
 }
 
 
@@ -803,6 +804,7 @@ from .base_dsl.typing import (
     Float4E2M1,
     Float4E1M2,
     Float8E8M0,
+    HiFloat8,
 )
 
 __all__ = [
@@ -852,6 +854,7 @@ __all__ = [
     "Float4E2M1",
     "Float4E1M2",
     "Float8E8M0",
+    "HiFloat8",
     "annotation_to_category",
     "dtype_size_bytes",
     "dtype_size_bits",

@@ -320,11 +320,11 @@ LogicalResult VectorSSAType::verify(function_ref<InFlightDiagnostic()> emitError
                                     int64_t validLanes, Type elementType) {
   if (!elementType)
     return emitError() << "tla.vector element type must be non-null";
-  if (!mlir::isa<IntegerType, FloatType>(elementType))
+  if (!mlir::isa<IntegerType, FloatType, HiFloat8Type>(elementType))
     return emitError() << "tla.vector element type must be an integer or float, got "
                        << elementType;
 
-  unsigned bitWidth = elementType.getIntOrFloatBitWidth();
+  unsigned bitWidth = getBitSizeOfFixedWidthScalarType(elementType);
   if (bitWidth == 0 || bitWidth % 8 != 0)
     return emitError() << "tla.vector element type must have a byte-aligned width, got "
                        << elementType;

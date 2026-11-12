@@ -861,6 +861,23 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
             [["end_to_end/fp8_pack4_op.py", "--case", fp8_case, *dev]],
         )
 
+    for round_mode in ("round", "hybrid"):
+        for hif8_case in ("core", "slots", "masks"):
+            yield (
+                f"vector-hif8-{round_mode}-{hif8_case}",
+                [
+                    [
+                        "end_to_end/hif8_op.py",
+                        "--case",
+                        hif8_case,
+                        "--round-mode",
+                        round_mode,
+                        "--run",
+                        *dev,
+                    ]
+                ],
+            )
+
     # Same-width bit reinterpretation: the f32 round trips through i32 and u32
     # are subtracted to zero, so a rewritten register shows as a mismatch
     # rather than hiding behind the exponent term.

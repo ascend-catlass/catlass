@@ -377,7 +377,7 @@ def Tla_SatModeEnum : Tla_I32Enum<"SatMode", "Cast saturation behaviour on overf
 
 // RoundMode: rounding applied on precision loss (HIVM round_mode).
 // Codes 0-3 are frozen ABI for existing IR; 4-6 append AscendC CAST_NONE /
-// CAST_RINT / CAST_ODD. CAST_HYBRID is intentionally omitted.
+// CAST_RINT / CAST_ODD. Code 7 adds HiF8-specific CAST_HYBRID.
 // CAST_NONE is a policy: lossless casts drop the round operand; lossy casts
 // lower as RINT (ties to even), matching AscendC.
 def Tla_RoundMode_CastRound : I32EnumAttrCase<"cast_round", 0>;
@@ -387,6 +387,7 @@ def Tla_RoundMode_CastTrunc : I32EnumAttrCase<"cast_trunc", 3>;
 def Tla_RoundMode_CastNone : I32EnumAttrCase<"cast_none", 4>;
 def Tla_RoundMode_CastRint : I32EnumAttrCase<"cast_rint", 5>;
 def Tla_RoundMode_CastOdd : I32EnumAttrCase<"cast_odd", 6>;
+def Tla_RoundMode_CastHybrid : I32EnumAttrCase<"cast_hybrid", 7>;
 def Tla_RoundModeEnum : Tla_I32Enum<"RoundMode", "Cast rounding mode on precision loss.", [
   Tla_RoundMode_CastRound,
   Tla_RoundMode_CastFloor,
@@ -394,7 +395,8 @@ def Tla_RoundModeEnum : Tla_I32Enum<"RoundMode", "Cast rounding mode on precisio
   Tla_RoundMode_CastTrunc,
   Tla_RoundMode_CastNone,
   Tla_RoundMode_CastRint,
-  Tla_RoundMode_CastOdd
+  Tla_RoundMode_CastOdd,
+  Tla_RoundMode_CastHybrid
 ]>;
 
 // The three cast knobs are carried on tla.cast as a builtin DenseI32ArrayAttr of
