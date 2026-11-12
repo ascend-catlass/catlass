@@ -95,4 +95,4 @@ Compare success.
 
 - 在`examples/103_dynamic_optimized_quant_matmul_per_token_basic/include/do_tiling_b8.h`中，将所有`DoTilingB8LayoutXX`函数中使用的`fp16_t`替换为`bfloat16`。
 - 在`examples/103_dynamic_optimized_quant_matmul_per_token_basic/dynamic_optimized_quant_matmul_per_token_basic.cpp`中，搜索`fp16_t`替换为`bfloat16`。
-- 在`examples/103_dynamic_optimized_quant_matmul_per_token_basic/impl/scripts/per_token_matmul_template.py`中，将`element_c`由`half`替换为`bfloat16_t`。
+- 在`examples/103_dynamic_optimized_quant_matmul_per_token_basic/impl/scripts/templates/per_token_matmul_template.py`中，将`element_c`由`half`替换为`bfloat16_t`。

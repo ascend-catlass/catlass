@@ -53,7 +53,7 @@ inputs = {
 callback_name, evg_args, evg_str, _ = evg(fn_src=fn_src, example_inputs=inputs)
 print(callback_name)  # "EVGResult"
 print(evg_args)       # typename EVGResult::Arguments evg_args{...};
-print(evg_str)        # using Result = Catlass::Epilogue::Fusion::VisitorAuStore<...>; ...
+print(evg_str)        # using Result = Catlass::Epilogue::Fusion::VisitorAuxStore<...>; ...
 ```
 
 ### 支持的 Epilogue 算子

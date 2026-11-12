@@ -12,14 +12,14 @@ The XA TLA series adds 8 templates in total (4 GEMM + 4 Epilogue):
 
 | Template | Type | File |
 | --- | --- | --- |
-| `MmadXASharedQK` | BlockMmadTla | `include/catlass/gemm/block/block_mmad_tla_xa_shared_qk_ascend950.hpp` |
-| `MmadXAUnsharedQK` | BlockMmadTla | `include/catlass/gemm/block/block_mmad_tla_xa_unshared_qk_ascend950.hpp` |
-| `MmadXASharedPV` | BlockMmadTla | `include/catlass/gemm/block/block_mmad_tla_xa_shared_pv_ascend950.hpp` |
-| `MmadXAUnsharedPV` | BlockMmadTla | `include/catlass/gemm/block/block_mmad_tla_xa_unshared_pv_ascend950.hpp` |
-| `EpilogueXASharedSoftmax` | BlockEpilogue | `include/catlass/epilogue/block/block_epilogue_xa_shared_softmax_ascend950.hpp` |
-| `EpilogueXAUnsharedSoftmax` | BlockEpilogue | `include/catlass/epilogue/block/block_epilogue_xa_unshared_softmax_ascend950.hpp` |
-| `EpilogueXASharedRescaleO` | BlockEpilogue | `include/catlass/epilogue/block/block_epilogue_xa_shared_rescale_ascend950.hpp` |
-| `EpilogueXACombineScale` | BlockEpilogue | `include/catlass/epilogue/block/block_epilogue_xa_combine_scale_ascend950.hpp` |
+| `MmadXASharedQK` | BlockMmadTla | `include/catlass/gemm/block/block_mmad_xa_shared_qk_tla.hpp` |
+| `MmadXAUnsharedQK` | BlockMmadTla | `include/catlass/gemm/block/block_mmad_xa_unshared_qk_tla.hpp` |
+| `MmadXASharedPV` | BlockMmadTla | `include/catlass/gemm/block/block_mmad_xa_shared_pv_tla.hpp` |
+| `MmadXAUnsharedPV` | BlockMmadTla | `include/catlass/gemm/block/block_mmad_xa_unshared_pv_tla.hpp` |
+| `EpilogueAscend950XASharedSoftmax` | BlockEpilogue | `include/catlass/epilogue/block/block_epilogue_xa_shared_softmax_ascend950.hpp` |
+| `EpilogueAscend950XAUnsharedSoftmax` | BlockEpilogue | `include/catlass/epilogue/block/block_epilogue_xa_unshared_softmax_ascend950.hpp` |
+| `EpilogueAscend950XASharedRescaleO` | BlockEpilogue | `include/catlass/epilogue/block/block_epilogue_xa_shared_rescale_ascend950.hpp` |
+| `EpilogueAscend950XACombineScale` | BlockEpilogue | `include/catlass/epilogue/block/block_epilogue_xa_combine_scale_ascend950.hpp` |
 
 Overall three-path data flow:
 
@@ -41,7 +41,7 @@ graph LR
         V2[V unshared] --> PV2
         PV2 --> O2[partial O writes GM directly]
     end
-    RC -->|O/max/sum write GM| CB[EpilogueXACombineScale]
+    RC -->|O/max/sum write GM| CB[EpilogueAscend950XACombineScale]
     O2 -->|O/max/sum write GM| CB
     CB --> OUT[final Attention output]
 ```
@@ -65,13 +65,13 @@ struct MmadXASharedQK : MmadBase<ArchTag_, false> {
 // Epilogue namespace: 4 empty-shell structs
 namespace Catlass::Epilogue {
 template <typename ArchTag_>
-struct EpilogueXASharedSoftmax { using ArchTag = ArchTag_; };
-// EpilogueXAUnsharedSoftmax / EpilogueXASharedRescaleO / EpilogueXACombineScale are analogous
+struct EpilogueAscend950XASharedSoftmax { using ArchTag = ArchTag_; };
+// EpilogueAscend950XAUnsharedSoftmax / EpilogueAscend950XASharedRescaleO / EpilogueAscend950XACombineScale are analogous
 } // namespace Catlass::Epilogue
 
 // pull in all 8 block specialization implementations under the 950 architecture
 #if CATLASS_ARCH == 3510
-#include "catlass/gemm/block/block_mmad_tla_xa_shared_qk_ascend950.hpp"
+#include "catlass/gemm/block/block_mmad_xa_shared_qk_tla.hpp"
 // ... the remaining 7 headers
 #endif
 ```
@@ -150,11 +150,11 @@ class BlockMmadTla<MmadXASharedQK<ArchTag_>, L1TileShape_, L0TileShape_,
 
 ## Epilogue Template Design
 
-### EpilogueXASharedSoftmax: Streaming Online Softmax
+### EpilogueAscend950XASharedSoftmax: Streaming Online Softmax
 
 ```cpp
 template <typename Policy_, typename L1TileShape_, typename PType_, typename SType_>
-class BlockEpilogue<EpilogueXASharedSoftmax<...>, ...> {
+class BlockEpilogue<EpilogueAscend950XASharedSoftmax<...>, ...> {
     BlockEpilogue(Resource *resource, uint32_t &ubBufAddrStart,
                   float scaleValue, int32_t qHeads);
     // operator() has 18 parameters in total
@@ -173,7 +173,7 @@ class BlockEpilogue<EpilogueXASharedSoftmax<...>, ...> {
   7. `UpdateExpSumAndExpMax`: `nowExpSum = lastExpSum*exp(lastMax-nowMax) + curSum`;
   8. On `isLastKv`, `CopyOutMaxAndSum`: Brcb + `DataCopyPad` write the per-row max/sum to GM by `qHeads` stride (for CombineScale to consume).
 
-### EpilogueXAUnsharedSoftmax: Mask + Independent Softmax
+### EpilogueAscend950XAUnsharedSoftmax: Mask + Independent Softmax
 
 ```cpp
 BlockEpilogue(Resource *resource, uint32_t &ubBufAddrStart, float scaleValue,
@@ -186,7 +186,7 @@ BlockEpilogue(Resource *resource, uint32_t &ubBufAddrStart, float scaleValue,
 - **Independent per step**: there is no `isUpdate/isLastKv` streaming logic; each task performs one complete softmax (exp/max/sum are all independent values of this step), and `CopyOutMaxAndSum` **executes on every call** (`DataCopyPad` writes GM, V_MTE3 EVENT_ID7 synchronization);
 - `QK_UB_RELEASE_FLAG` is uint16_t (distinguishing it from the uint64_t of the Shared path).
 
-### EpilogueXASharedRescaleO: O Accumulation + PV Release Loop Closure
+### EpilogueAscend950XASharedRescaleO: O Accumulation + PV Release Loop Closure
 
 ```cpp
 BlockEpilogue(Resource *resource, uint32_t &ubBufAddrStart);  // only 2 parameters
@@ -200,7 +200,7 @@ BlockEpilogue(Resource *resource, uint32_t &ubBufAddrStart);  // only 2 paramete
   3. `isLastKv`: `CopyUbToGmO` writes the final partial O;
   4. **`CrossCoreSetFlag(PV_RELEASE_FLAG)`**: after consuming `pvRes`, release the UB double buffer of the PV GEMM — this is the consumer of `PV_UB_RELEASE_FLAG` in `MmadXASharedPV`, forming a complete producer-consumer loop closure.
 
-### EpilogueXACombineScale: Dual-Path LSE Merge
+### EpilogueAscend950XACombineScale: Dual-Path LSE Merge
 
 ```cpp
 BlockEpilogue(Resource *resource, uint32_t &ubBufAddrStart,
@@ -240,8 +240,8 @@ The three assembled kernels are located in the `x_attention/op_kernel/arch35/` d
 SharedFaInferKernel<BlockMmadQK, BlockMmadPV, EpilogueOnlineSoftmax, EpilogueRescaleO, KVLEN_T>;
 // BlockMmadQK = BlockMmadTla<MmadXASharedQK<...>, Shape<_128,_128,_128>, Shape<_128,_128,_128>, ...>
 // BlockMmadPV = BlockMmadTla<MmadXASharedPV<...>, ...>
-// EpilogueOnlineSoftmax = BlockEpilogue<EpilogueXASharedSoftmax<...>, ...>
-// EpilogueRescaleO      = BlockEpilogue<EpilogueXASharedRescaleO<...>, ...>
+// EpilogueOnlineSoftmax = BlockEpilogue<EpilogueAscend950XASharedSoftmax<...>, ...>
+// EpilogueRescaleO      = BlockEpilogue<EpilogueAscend950XASharedRescaleO<...>, ...>
 ```
 
 It uses a **4-level software pipeline** with the `taskArgList[4]` ring queue, and the main loop condition is `qTaskId < taskEndId + 3` (running 3 extra rounds to drain the pipeline):
@@ -273,7 +273,7 @@ graph LR
 UnSharedInferKernel<BlockMmadQK, BlockMmadPV, EpilogueSoftmax, KVLEN_T, TABLE_T>;
 // BlockMmadQK = BlockMmadTla<MmadXAUnsharedQK<...>, ...>
 // BlockMmadPV = BlockMmadTla<MmadXAUnsharedPV<...>, ...>
-// EpilogueSoftmax = BlockEpilogue<EpilogueXAUnsharedSoftmax<...>, ...>
+// EpilogueSoftmax = BlockEpilogue<EpilogueAscend950XAUnsharedSoftmax<...>, ...>
 ```
 
 A **3-level software pipeline** with the `taskArgList[3]` ring queue, and the main loop condition is `groupTaskId < taskEndId + 2`:
@@ -294,7 +294,7 @@ A **3-level software pipeline** with the `taskArgList[3]` ring queue, and the ma
 
 ```cpp
 CombineScaleKernel<EpilogueCombineScale>;
-// EpilogueCombineScale = BlockEpilogue<EpilogueXACombineScale<...>, InputType, OutputType>
+// EpilogueCombineScale = BlockEpilogue<EpilogueAscend950XACombineScale<...>, InputType, OutputType>
 ```
 
 - **Pure AIV kernel**: the AIC is specialized to an empty `return`, and all work is done on the Vector core;
@@ -324,9 +324,9 @@ __aicore__ inline void CallSharedInferKernel(const TILING_T &tiling, SharedInfo 
     using BlockMmadPV = Catlass::Gemm::BlockMmadTla<Catlass::Gemm::MmadXASharedPV<Arch::Ascend950>,
             ShapeType, L0ShapeType, ElementS, INPUT_T, ElementOTmp, Catlass::Gemm::Tag, ...>;
     using EpilogueOnlineSoftmax = Catlass::Epilogue::BlockEpilogue<
-            Catlass::Epilogue::EpilogueXASharedSoftmax<Arch::Ascend950>, ...>;
+            Catlass::Epilogue::EpilogueAscend950XASharedSoftmax<Arch::Ascend950>, ...>;
     using EpilogueRescaleO = Catlass::Epilogue::BlockEpilogue<
-            Catlass::Epilogue::EpilogueXASharedRescaleO<Arch::Ascend950>, ...>;
+            Catlass::Epilogue::EpilogueAscend950XASharedRescaleO<Arch::Ascend950>, ...>;
 
     using Kernel = SharedFaInferKernel<BlockMmadQK, BlockMmadPV,
                                         EpilogueOnlineSoftmax, EpilogueRescaleO, KVLEN_T>;
@@ -342,7 +342,7 @@ using BlockMmadQK = Catlass::Gemm::BlockMmadTla<Catlass::Gemm::MmadXAUnsharedQK<
 using BlockMmadPV = Catlass::Gemm::BlockMmadTla<Catlass::Gemm::MmadXAUnsharedPV<Arch::Ascend950>,
         ShapeType, L0ShapeType, ElementS, INPUT_T, ElementOTmp, Catlass::Gemm::Tag, ...>;
 using EpilogueSoftmax = Catlass::Epilogue::BlockEpilogue<
-        Catlass::Epilogue::EpilogueXAUnsharedSoftmax<Arch::Ascend950>, ...>;
+        Catlass::Epilogue::EpilogueAscend950XAUnsharedSoftmax<Arch::Ascend950>, ...>;
 
 using Kernel = UnSharedInferKernel<BlockMmadQK, BlockMmadPV, EpilogueSoftmax, KVLEN_T, TABLE_T>;
 Kernel::Invoke(...);  // blockTableGm page table + unshared K/V
@@ -352,7 +352,7 @@ Kernel::Invoke(...);  // blockTableGm page table + unshared K/V
 
 ```cpp
 using EpilogueCombineScale = Catlass::Epilogue::BlockEpilogue<
-        Catlass::Epilogue::EpilogueXACombineScale<Arch::Ascend950>, OutputType, InputType>;
+        Catlass::Epilogue::EpilogueAscend950XACombineScale<Arch::Ascend950>, OutputType, InputType>;
 using Kernel = CombineScaleKernel<EpilogueCombineScale>;
 Kernel::Invoke(sharedMax, sharedSum, sharedAttn, unsharedMax, unsharedSum,
                unsharedAttn, finalOut, totalRowNum, rowNumPerLoop, headDim);

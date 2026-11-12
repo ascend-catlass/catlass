@@ -95,4 +95,4 @@ The current example output data type is `fp16`. To change it to `bf16`, modify t
 
 - In `examples/103_dynamic_optimized_quant_matmul_per_token_basic/include/do_tiling_b8.h`, replace `fp16_t` used in all `DoTilingB8LayoutXX` functions with `bfloat16`.
 - In `examples/103_dynamic_optimized_quant_matmul_per_token_basic/dynamic_optimized_quant_matmul_per_token_basic.cpp`, search for `fp16_t` and replace it with `bfloat16`.
-- In `examples/103_dynamic_optimized_quant_matmul_per_token_basic/impl/scripts/per_token_matmul_template.py`, replace `element_c` from `half` with `bfloat16_t`.
+- In `examples/103_dynamic_optimized_quant_matmul_per_token_basic/impl/scripts/templates/per_token_matmul_template.py`, replace `element_c` from `half` with `bfloat16_t`.

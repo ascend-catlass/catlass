@@ -14,6 +14,7 @@
 | `catlass-tile-level-ut`         | 为 Gemm/Tile 拷贝组件（CopyGmToL1 等及 TLA 变体）编写单元测试。 | `.agents/skills/catlass-tile-level-ut/`         |
 | `catlass-docs-review`          | 审查文档语言与用词问题（术语、错别字、模糊量化、规格来源、数值单位），改文档后触发。 | `.agents/skills/catlass-docs-review/`           |
 | `catlass-docs-translation`      | 改动文档后先判定待同步的英文文档与行号，再按 Git 增量更新。 | `.agents/skills/catlass-docs-translation/`      |
+| `catlass-docs-consistency`      | 检测文档与代码一致性：静态检查构建目标、运行参数、路径、include 与 API 符号，也可按代际上板执行文档命令。 | `.agents/skills/catlass-docs-consistency/`      |
 
 ## 文档改动后的语言审查
 

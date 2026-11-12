@@ -1,0 +1,32 @@
+{
+  "a2a3": {
+    "enabled": true,
+    "arch": "2201",
+    "aliases": ["Atlas A2", "Atlas A3"],
+    "build_flags": ["-DCATLASS_ARCH=2201"],
+    "preflight": "npu-smi info",
+    "build_timeout_sec": 1800,
+    "run_timeout_sec": 300,
+    "env": {}
+  },
+  "ascend950": {
+    "enabled": true,
+    "arch": "3510",
+    "aliases": ["Ascend 950", "Ascend950", "Atlas 950"],
+    "build_flags": ["-DCATLASS_ARCH=3510"],
+    "preflight": "npu-smi info",
+    "build_timeout_sec": 1800,
+    "run_timeout_sec": 300,
+    "env": {}
+  },
+  "ascend960": {
+    "enabled": false,
+    "arch": null,
+    "aliases": ["Ascend 960", "Ascend960", "Atlas 960"],
+    "note": "Reserved: set arch and enabled=true once the toolchain supports the generation.",
+    "preflight": "npu-smi info",
+    "build_timeout_sec": 1800,
+    "run_timeout_sec": 300,
+    "env": {}
+  }
+}
