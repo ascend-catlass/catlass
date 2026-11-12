@@ -3905,6 +3905,18 @@ def _materialize_debug_print_numeric(
 ) -> mlir_ir.Value:
     value_type = type(value).mlir_type()
     if isinstance(value.value, mlir_ir.Value):
+        if (
+            type(value).is_integer
+            and not type(value).signed
+            and value.value.type != value_type
+        ):
+            # Printing uses the operand type to select unsigned formatting and extension.
+            return mlir_ir.Operation.create(
+                "builtin.unrealized_conversion_cast",
+                operands=[value.value],
+                results=[value_type],
+                loc=loc,
+            ).results[0]
         return value.value
     if mlir_ir.IntegerType.isinstance(value_type):
         int_type = mlir_ir.IntegerType(value_type)

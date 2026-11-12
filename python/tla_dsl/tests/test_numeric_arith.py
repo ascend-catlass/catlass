@@ -580,3 +580,44 @@ def test_odd_constant_folds(value, expected) -> None:
     """A literal must fold the way conv_f322f16o rounds it."""
     folded = float(tla.Float32(value).to(tla.Float16, round_mode=_SRM.ODD).value)
     assert folded == expected
+
+
+@pytest.mark.parametrize("dtype", [tla.UInt8, tla.UInt16, tla.UInt32, tla.UInt64])
+def test_unsigned_abs_is_identity(dtype) -> None:
+    high = 1 << (dtype.width - 1)
+    for value in (0, 1, high, 2 * high - 1, 2 * high - 2):
+        scalar = dtype(value)
+        assert abs(scalar) is scalar
+
+    @tla.kernel
+    def kernel(source: tla.Tensor, output: tla.Tensor) -> None:
+        with tla.vector():
+            with tla.vec.func(mode="simt", thread_block_dim=32):
+                tid, _, _ = tla.arch.thread_idx()
+                value = dtype(source[tid])
+                output[tid] = abs(value).to(tla.Int64)
+
+    signed_type = getattr(tla, f"Int{dtype.width}")
+    mlir = kernel.dump_mlir(
+        type_args=(
+            _gm_tensor_1d(32, dtype=signed_type),
+            _gm_tensor_1d(32, dtype=tla.Int64),
+        )
+    )
+    assert "math.absi" not in mlir
+    assert "tla.simt_store" in mlir
+
+
+@pytest.mark.parametrize(
+    "dtype,op", [(tla.Int32, "math.absi"), (tla.Float32, "tla.simt_abs")]
+)
+def test_simt_signed_abs_keeps_operation(dtype, op) -> None:
+    @tla.kernel
+    def kernel(source: tla.Tensor, output: tla.Tensor) -> None:
+        with tla.vector():
+            with tla.vec.func(mode="simt", thread_block_dim=32):
+                tid, _, _ = tla.arch.thread_idx()
+                output[tid] = abs(source[tid])
+
+    tensor = _gm_tensor_1d(32, dtype=dtype)
+    assert op in kernel.dump_mlir(type_args=(tensor, tensor))

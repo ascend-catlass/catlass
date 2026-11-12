@@ -12,9 +12,12 @@ The lowering itself (``tla.simt_* -> arith.*``) is covered by the lit test
 
 from __future__ import annotations
 
-import catlass.tla as tla
-from catlass.tla.runtime import make_fake_tensor
+import pytest
 from catlass._mlir.dialects import tla as tla_ops_gen
+
+from catlass import tla
+from catlass.base_dsl import BaseDSL
+from catlass.tla.runtime import make_fake_tensor
 
 
 @tla.kernel
@@ -168,3 +171,99 @@ def test_simt_region_emits_simt_ops_for_integers() -> None:
         assert op_name in mlir, f"{op_name} not emitted for an integer SIMT region"
     for op_name in ("arith.divsi", "arith.addi", "arith.muli"):
         assert op_name not in mlir, f"{op_name} leaked into an integer SIMT region"
+
+
+@tla.kernel
+def _simt_integer_signedness_kernel(
+    src: tla.Tensor, dst: tla.Tensor, dtype: tla.Constexpr[type]
+) -> None:
+    with tla.vector():  # noqa: SIM117 - preserve DSL region nesting
+        with tla.vec.func(mode="simt", thread_block_dim=64):
+            tid, _, _ = tla.arch.thread_idx()
+            value = dtype(src[tid].ir_value())
+            high_bit = dtype(0x80000000 if dtype is tla.UInt32 else -0x80000000)
+            bits = (value + dtype(1)) & high_bit
+            dst[tid] = bits.to(tla.Int64)
+            dst[tid + 64] = (value > dtype(0)).to(tla.Int64)
+
+
+@pytest.mark.parametrize("dtype", [tla.Int32, tla.UInt32])
+def test_simt_integer_signedness_survives_constructor_and_operations(dtype) -> None:
+    src, _ = _int_tensors()
+    dst = make_fake_tensor(tla.Int64, (128,), (1,))
+    kernel = _simt_integer_signedness_kernel
+    lowered = BaseDSL()._lower(
+        kernel.fn,
+        kind=kernel.kind,
+        options=dict(kernel.options),
+        type_args=(src, dst, dtype),
+        location=kernel.decorator_location,
+    )
+    assert lowered.module.operation.verify()
+    mlir = lowered.asm()
+    assert "tla.simt_add" in mlir
+    assert "arith.andi" in mlir
+    assert ("isUnsigned" in mlir) == (dtype is tla.UInt32)
+    extension = "extsi" if dtype is tla.Int32 else "extui"
+    assert any(
+        f'tla.simt_cast "{extension}"' in line and ": i32 to i64" in line
+        for line in mlir.splitlines()
+    )
+
+
+@pytest.mark.parametrize("dtype", [tla.UInt8, tla.UInt16, tla.UInt32, tla.UInt64])
+def test_simt_unsigned_tensor_boundaries(dtype):
+    @tla.kernel
+    def kernel(src: tla.Tensor, dst: tla.Tensor):
+        with tla.vector():
+            with tla.vec.func(mode="simt", thread_block_dim=32):
+                tid, _, _ = tla.arch.thread_idx()
+                dst[tid] = src[tid] + dtype(1)
+                dst[tid] = dtype(1)
+                dst[tid] = 1
+
+    tensor = make_fake_tensor(dtype, (32,), (1,), layout_tag=tla.arch.RowMajor)
+    ir = kernel.dump_mlir(type_args=(tensor, tensor))
+    assert "tla.simt_load" in ir
+    assert "tla.simt_store" in ir
+    assert "builtin.unrealized_conversion_cast" in ir
+    assert "tla.simt_add" in ir
+
+
+def test_simt_unsigned_store_rejects_implicit_signed_conversion():
+    @tla.kernel
+    def kernel(src: tla.Tensor, dst: tla.Tensor):
+        with tla.vector():
+            with tla.vec.func(mode="simt", thread_block_dim=32):
+                dst[0] = src[0]
+
+    src = make_fake_tensor(tla.Int32, (32,), (1,), layout_tag=tla.arch.RowMajor)
+    dst = make_fake_tensor(tla.UInt32, (32,), (1,), layout_tag=tla.arch.RowMajor)
+    with pytest.raises(Exception, match="cast explicitly"):
+        kernel.dump_mlir(type_args=(src, dst))
+
+
+@pytest.mark.parametrize("dtype", [tla.UInt8, tla.UInt16, tla.UInt32, tla.UInt64])
+def test_simt_unsigned_capture_dominance(dtype):
+    @tla.kernel
+    def kernel(arg: object, src: tla.Tensor, dst: tla.Tensor):
+        with tla.vector():
+            captured = src[0]
+            with tla.vec.func(mode="simt", thread_block_dim=32):
+                tid, _, _ = tla.arch.thread_idx()
+                if tid < 16:
+                    dst[tid] = captured + dtype(1)
+                else:
+                    dst[tid] = arg + dtype(1)
+            with tla.vec.func(mode="simt", thread_block_dim=32):
+                dst[0] = tla.where(arg > dtype(0), captured, arg)
+                dst[1] = (captured // dtype(3)) + (arg % dtype(3))
+                dst[2] = arg >> dtype(1)
+            dst[0] = captured
+
+    tensor = make_fake_tensor(dtype, (32,), (1,), layout_tag=tla.arch.RowMajor)
+    ir = kernel.dump_mlir(type_args=(dtype(0), tensor, tensor))
+    assert "builtin.module" not in ir  # Invalid IR falls back to generic printing.
+    assert "tla.simt_add" in ir
+    assert "arith.divui" in ir
+    assert "arith.remui" in ir

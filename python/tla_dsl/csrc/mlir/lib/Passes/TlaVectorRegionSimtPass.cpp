@@ -731,8 +731,12 @@ public:
                              (nextSimtRegionId ? std::to_string(nextSimtRegionId) : std::string());
         ++nextSimtRegionId;
 
-        for (Value scalar : captures.scalars)
-            paramTypes.push_back(scalar.getType());
+        for (Value scalar : captures.scalars) {
+            Type type = scalar.getType();
+            if (auto integer = dyn_cast<IntegerType>(type))
+                type = rewriter.getIntegerType(integer.getWidth());
+            paramTypes.push_back(type);
+        }
 
         bool hasPrint = false;
         vecFuncOp.walk([&](Operation* op) { hasPrint |= isa<DebugPrintOp, PrintTensorOp>(op); });
@@ -766,8 +770,12 @@ public:
         for (auto [tensor, arg] : llvm::zip_equal(captures.tensors, vfArgs.take_front(captures.tensors.size())))
             mapping.map(tensor, arg);
         for (auto [scalar, arg] :
-             llvm::zip_equal(captures.scalars, vfArgs.slice(captures.tensors.size(), captures.scalars.size())))
-            mapping.map(scalar, arg);
+             llvm::zip_equal(captures.scalars, vfArgs.slice(captures.tensors.size(), captures.scalars.size()))) {
+            Value mapped = arg;
+            if (arg.getType() != scalar.getType())
+                mapped = bodyBuilder.create<UnrealizedConversionCastOp>(loc, scalar.getType(), arg).getResult(0);
+            mapping.map(scalar, mapped);
+        }
         for (Operation* constant : captures.constants)
             bodyBuilder.clone(*constant, mapping);
 
@@ -808,8 +816,14 @@ public:
         }
         // Captured runtime scalars follow the buffers, in capture order: the ABI is
         // positional, so this must match the parameter list built above.
-        for (Value scalar : captures.scalars)
+        for (Value scalar : captures.scalars) {
+            if (auto integer = dyn_cast<IntegerType>(scalar.getType()); integer && !integer.isSignless())
+                scalar =
+                    callBuilder
+                        .create<UnrealizedConversionCastOp>(loc, callBuilder.getIntegerType(integer.getWidth()), scalar)
+                        .getResult(0);
             launchArgs.push_back(scalar);
+        }
         if (hasPrint)
             launchArgs.push_back(printWorkspace);
         auto i64 = callBuilder.getI64Type();

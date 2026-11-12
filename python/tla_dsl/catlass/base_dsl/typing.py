@@ -36,6 +36,18 @@ _T = TypeVar("_T")
 _TOKEN_TO_NUMERIC: dict[str, type["Numeric"]] = {}
 
 
+def _scalar_mlir_type(dtype: type["Numeric"]) -> mlir_ir.Type:
+    """SIMT computes on signless integers; Numeric retains their signedness.
+
+    Keep ``dtype.mlir_type()`` unchanged for tensor storage and SIMD typing.
+    """
+    from ..runtime import _in_simt_vec_func
+
+    if dtype.is_integer and _in_simt_vec_func():
+        return mlir_ir.IntegerType.get_signless(dtype.width)
+    return dtype.mlir_type()
+
+
 def _binary_op(
     op: Callable[..., Any],
     *,
@@ -198,7 +210,7 @@ def _binary_op(
                 result = mlir_ir.Operation.create(
                     _SIMT_OPS[op],
                     operands=[lhs_ir, rhs_ir],
-                    results=[res_type.mlir_type()],
+                    results=[_scalar_mlir_type(res_type)],
                     loc=loc,
                 ).results[0]
                 return res_type(result)
@@ -250,7 +262,7 @@ def _binary_op(
         result = mlir_ir.Operation.create(
             name,
             operands=[lhs_ir, rhs_ir],
-            results=[res_type.mlir_type()],
+            results=[_scalar_mlir_type(res_type)],
             loc=loc,
         ).results[0]
         return res_type(result)
@@ -812,8 +824,10 @@ class Numeric(metaclass=NumericMeta, is_abstract=True):
                     _bind_frontend_category(self.value, "numeric")
                 return
         if isinstance(value, mlir_ir.Value):
-            expected = cls.mlir_type()
-            if str(value.type) != str(expected):
+            expected = _scalar_mlir_type(cls)
+            # Keep existing storage-typed values intact; SIMT-produced values
+            # additionally use the signless computation representation.
+            if str(value.type) not in (str(expected), str(cls.mlir_type())):
                 # MLIR ``index`` is not a user Numeric; cast at construction
                 # into the requested signed integer type.
                 if isinstance(value.type, mlir_ir.IndexType):
@@ -892,9 +906,23 @@ class Numeric(metaclass=NumericMeta, is_abstract=True):
 
     def ir_value(self, *, loc: mlir_ir.Location | None = None) -> mlir_ir.Value:
         if isinstance(self.value, mlir_ir.Value):
+            expected = _scalar_mlir_type(type(self))
+            if (
+                type(self).is_integer
+                and not type(self).signed
+                and expected.is_signless
+                and self.value.type != expected
+            ):
+                # Convert at this use; caching would cross region/branch boundaries.
+                return mlir_ir.Operation.create(
+                    "builtin.unrealized_conversion_cast",
+                    operands=[self.value],
+                    results=[expected],
+                    loc=loc,
+                ).results[0]
             return self.value
         cls = type(self)
-        element_type = cls.mlir_type()
+        element_type = _scalar_mlir_type(cls)
         if cls.is_float:
             return mlir_ir.Operation.create(
                 "arith.constant",
@@ -908,12 +936,19 @@ class Numeric(metaclass=NumericMeta, is_abstract=True):
             raise TypeError(
                 f"expected integer literal for {cls.__name__}, got {self.value!r}"
             )
+        int_value = int(self.value)
+        if (
+            not cls.signed
+            and element_type.is_signless
+            and (1 << (cls.width - 1)) <= int_value < (1 << cls.width)
+        ):
+            # IntegerAttr's Python binding accepts int64_t, including for i64.
+            # Pass the signed spelling of the same unsigned bit pattern.
+            int_value -= 1 << cls.width
         return mlir_ir.Operation.create(
             "arith.constant",
             results=[element_type],
-            attributes={
-                "value": mlir_ir.IntegerAttr.get(element_type, int(self.value))
-            },
+            attributes={"value": mlir_ir.IntegerAttr.get(element_type, int_value)},
             loc=loc,
         ).results[0]
 
@@ -999,7 +1034,7 @@ class Numeric(metaclass=NumericMeta, is_abstract=True):
                     return dtype(_round_host_float(float(self.value), round_mode))
             return dtype(self, loc=loc)
         src = self.ir_value(loc=loc)
-        dst_ty = dtype.mlir_type()
+        dst_ty = _scalar_mlir_type(dtype)
         src_ty = type(self)
         if str(src.type) == str(dst_ty):
             return dtype(src)
@@ -1089,10 +1124,12 @@ class Numeric(metaclass=NumericMeta, is_abstract=True):
                 f"vs {dtype.__name__}({dtype.width})"
             )
         src = self.ir_value(loc=loc)
+        if src.type == _scalar_mlir_type(dtype):
+            return dtype(src)
         result = mlir_ir.Operation.create(
             "arith.bitcast",
             operands=[src],
-            results=[dtype.mlir_type()],
+            results=[_scalar_mlir_type(dtype)],
             loc=loc,
         ).results[0]
         return dtype(result)
@@ -1174,6 +1211,8 @@ class Numeric(metaclass=NumericMeta, is_abstract=True):
 
     @dsl_user_op
     def __abs__(self, *, loc: mlir_ir.Location | None = None) -> "Numeric":
+        if type(self).is_integer and not type(self).signed:
+            return self
         if isinstance(self.value, (int, float, bool)):
             return type(self)(abs(self.value))
         if _current_frontend_state() is None:

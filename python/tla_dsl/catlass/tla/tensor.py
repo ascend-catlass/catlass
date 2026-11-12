@@ -1561,7 +1561,15 @@ class _Tensor(TensorABC):
             int_ty = mlir_ir.IntegerType(elem_type)
             if int_ty.width == 1:
                 return Bool(result)
-        return Numeric.from_mlir_type(elem_type)(result)
+        dtype = Numeric.from_mlir_type(elem_type)
+        if _runtime._in_simt_vec_func() and dtype.is_integer and not dtype.signed:
+            result = mlir_ir.Operation.create(
+                "builtin.unrealized_conversion_cast",
+                operands=[result],
+                results=[mlir_ir.IntegerType.get_signless(dtype.width)],
+                loc=loc,
+            ).results[0]
+        return dtype(result)
 
     @dsl_user_op
     def __setitem__(
@@ -1679,6 +1687,19 @@ class _Tensor(TensorABC):
                     f"scalar literal, got {_type_name(data)}",
                 )
             store_value = _Tensor._cvt_to_dest(self, num, elem_type, loc=loc)
+        if (
+            _runtime._in_simt_vec_func()
+            and mlir_ir.IntegerType.isinstance(elem_type)
+            and mlir_ir.IntegerType(elem_type).is_unsigned
+            and store_value.type
+            == mlir_ir.IntegerType.get_signless(mlir_ir.IntegerType(elem_type).width)
+        ):
+            store_value = mlir_ir.Operation.create(
+                "builtin.unrealized_conversion_cast",
+                operands=[store_value],
+                results=[elem_type],
+                loc=loc,
+            ).results[0]
         if str(store_value.type) != str(elem_type):
             raise TlaLoweringError(
                 f"tla.scalar_store value type mismatch: expected {elem_type}, got {store_value.type}"

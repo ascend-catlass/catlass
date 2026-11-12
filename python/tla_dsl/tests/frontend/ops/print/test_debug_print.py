@@ -583,3 +583,24 @@ def test_tensor_print_defers_effective_alignment_to_runtime() -> None:
 def test_debug_print_accepts_register_prefix() -> None:
     mlir = _vector_value_kernel.dump_mlir(type_args=(_host_vector_tensor(),))
     assert "tla.print_vector" in mlir
+
+
+@pytest.mark.parametrize("dtype", [tla.UInt8, tla.UInt16, tla.UInt32])
+def test_simt_print_preserves_unsigned_ssa(dtype) -> None:
+    @tla.kernel
+    def kernel(source: tla.Tensor) -> None:
+        with tla.vector():
+            with tla.vec.func(mode="simt", thread_block_dim=32):
+                tid, _, _ = tla.arch.thread_idx()
+                signed = source[tid]
+                value = dtype(signed)
+                tla.print(value)
+                tla.print("unsigned={} signed={}", value, signed)
+
+    signed_type = getattr(tla, f"Int{dtype.width}")
+    source = make_fake_tensor(signed_type, (32,), (1,), layout_tag=tla.arch.RowMajor)
+    mlir = kernel.dump_mlir(type_args=(source,))
+    lines = [line for line in mlir.splitlines() if "tla.debug_print" in line]
+    assert len(lines) == 2
+    assert all(f"ui{dtype.width}" in line for line in lines)
+    assert "builtin.unrealized_conversion_cast" in mlir
