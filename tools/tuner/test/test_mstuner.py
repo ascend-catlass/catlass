@@ -49,8 +49,8 @@ class MsTunerCatlassTest(unittest.TestCase):
             shutil.rmtree(MsTunerCatlassTest.MSTUNER_TEST_TEMP_PATH, ignore_errors=True)
 
 
-    def compile_lib_catlass_kernels(self, kernel_name: str):
-        macro_str = '-DCATLASS_LIBRARY_KERNELS=' + kernel_name
+    def compile_lib_catlass_kernels(self, kernel_desc: str):
+        macro_str = '-DCATLASS_LIBRARY_KERNELS=' + kernel_desc
         compile_cmd = [
             'bash', 'scripts/build.sh', '--clean', macro_str, 'mstuner_catlass'
         ]
@@ -64,7 +64,7 @@ class MsTunerCatlassTest(unittest.TestCase):
         csv_file_name = case_name + '.csv'
         csv_file_path = os.path.join(MsTunerCatlassTest.MSTUNER_TEST_TEMP_PATH, csv_file_name)
 
-        result = self.compile_lib_catlass_kernels(case_name)
+        result = self.compile_lib_catlass_kernels(self.KERNEL_INSTANCES[case_name])
         self.assertEqual(
             result.returncode, 0,
             f'build libcatlass_kernels.so for {case_name} failed: {result.stderr}'
@@ -82,11 +82,58 @@ class MsTunerCatlassTest(unittest.TestCase):
             f'running mstuner_catlass for {case_name} with {case_args} failed: {result.stderr}'
         )
 
+        # The single-instance filter is matched by substring. A stale or
+        # mismatched CATLASS_LIBRARY_KERNELS description would still build and
+        # run "successfully" while tuning 0 operations, yielding a header-only
+        # CSV. Assert the intended kernel was actually tuned to avoid a silent
+        # pass that loses regression coverage.
+        self.assertIn(
+            'Initializing 1 operations', result.stdout,
+            f'expected exactly 1 operation to be tuned for {case_name}, got: {result.stdout}'
+        )
+
         self.assertEqual(
             os.path.exists(csv_file_path), True,
             f'csv file not generated for {case_name} with {case_args} failed: {result.stdout}'
         )
 
+        with open(csv_file_path, encoding='utf-8') as csv_file:
+            csv_lines = csv_file.read().splitlines()
+        self.assertGreaterEqual(
+            len(csv_lines) - 1, 1,
+            f'no tuning result rows generated for {case_name}: {csv_file_path} is header-only'
+        )
+        self.assertIn(
+            self.KERNEL_INSTANCES[case_name], '\n'.join(csv_lines[1:]),
+            f'expected kernel instance for {case_name} not found in tuning result: {csv_file_path}'
+        )
+
+
+
+    # Build only the largest search-space instance of each operator (the last
+    # valid tile-shape combination, i.e. max L1/L0 tile shape) instead of the
+    # whole search space, so each case compiles a single kernel. See
+    # tools/tuner/README.md for the single-instance CATLASS_LIBRARY_KERNELS usage.
+    KERNEL_INSTANCES = {
+        '00_basic_matmul':
+            'catlass_gemm_00_basic_matmul_fp16xRowMajor_fp16xRowMajor_fp16xRowMajor_128x256x256_128x256x64_swizzle3x0',
+        '02_grouped_matmul_slice_m':
+            'catlass_gemm_02_grouped_matmul_slice_m_fp16xColumnMajor_fp16xRowMajor_fp16xRowMajor_256x128x256_256x128x32_swizzle3x1',
+        '06_optimized_matmul_padding_ab':
+            'catlass_gemm_06_optimized_matmul_padding_ab_fp16xRowMajor_fp16xRowMajor_fp16xRowMajor_256x128x256_256x128x64_swizzle3x0',
+        '06_optimized_matmul_padding_a_only':
+            'catlass_gemm_06_optimized_matmul_padding_a_only_fp16xRowMajor_fp16xRowMajor_fp16xRowMajor_256x128x256_256x128x64_swizzle3x0',
+        '06_optimized_matmul_padding_b_only':
+            'catlass_gemm_06_optimized_matmul_padding_b_only_fp16xRowMajor_fp16xRowMajor_fp16xRowMajor_256x128x256_256x128x64_swizzle3x0',
+        '06_optimized_matmul_without_padding':
+            'catlass_gemm_06_optimized_matmul_without_padding_fp16xRowMajor_fp16xRowMajor_fp16xRowMajor_256x128x256_256x128x64_swizzle3x0',
+        '08_grouped_matmul':
+            'catlass_gemm_08_grouped_matmul_fp16xColumnMajor_fp16xRowMajor_fp16xRowMajor_256x128x256_256x128x32_swizzle3x1',
+        '12_quant_matmul':
+            'catlass_gemm_12_quant_matmul_int8xColumnMajor_int8xColumnMajor_fp16xRowMajor_256x128x512_256x128x64_swizzle3x1',
+        '27_matmul_gelu':
+            'catlass_gemm_27_matmul_gelu_fp16xRowMajor_fp16xRowMajor_fp16xRowMajor_256x128x256_256x128x64_swizzle3x0',
+    }
 
     # add custom test cases below
     mstuner_cases = [
