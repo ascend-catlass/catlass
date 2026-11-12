@@ -36,7 +36,7 @@ def _static_f16_mmad_kernel() -> None:
         tla.arch.nZ,
     )
     acc = tla.make_tensor_like(
-        tla.allocate((128, 128), tla.Float32, tla.AddressSpace.l0c, 512),
+        tla.allocate((128, 128), tla.Float32, tla.AddressSpace.l0c, 1024),
         acc_parent,
         tla.arch.L0Clayout,
     )
@@ -69,7 +69,7 @@ def _static_bf16_mmad_kernel() -> None:
         tla.arch.nZ,
     )
     acc = tla.make_tensor_like(
-        tla.allocate((128, 128), tla.Float32, tla.AddressSpace.l0c, 512),
+        tla.allocate((128, 128), tla.Float32, tla.AddressSpace.l0c, 1024),
         acc_parent,
         tla.arch.L0Clayout,
     )
@@ -102,7 +102,7 @@ def _static_f32_mmad_kernel() -> None:
         tla.arch.nZ,
     )
     acc = tla.make_tensor_like(
-        tla.allocate((32, 32), tla.Float32, tla.AddressSpace.l0c, 512),
+        tla.allocate((32, 32), tla.Float32, tla.AddressSpace.l0c, 1024),
         acc_parent,
         tla.arch.L0Clayout,
     )
@@ -136,7 +136,7 @@ def _static_i8_mmad_kernel() -> None:
     )
     # The integer route accumulates in i32, not fp32.
     acc = tla.make_tensor_like(
-        tla.allocate((128, 128), tla.Int32, tla.AddressSpace.l0c, 512),
+        tla.allocate((128, 128), tla.Int32, tla.AddressSpace.l0c, 1024),
         acc_parent,
         tla.arch.L0Clayout,
     )
@@ -144,8 +144,12 @@ def _static_i8_mmad_kernel() -> None:
         tla.mmad(acc, lhs, rhs, init_c=True, unit_flag=3)
 
 
-def _mx_mmad_kernel(elem_a, elem_b):
-    """MX kernel: scales ride the L1->L0 load, and the matmul is tla.mmad_mx."""
+def _mx_mmad_kernel(elem_a, elem_b, l0_align=1024):
+    """MX kernel: scales ride the L1->L0 load, and the matmul is tla.mmad_mx.
+
+    ``l0_align`` is what the L0A / L0B operands are allocated with. mxfp8 needs
+    1024; passing 512 produces the misaligned case the verifier has to reject.
+    """
 
     @tla.kernel
     def _kernel() -> None:
@@ -170,14 +174,20 @@ def _mx_mmad_kernel(elem_a, elem_b):
             tla.allocate((2, 128), tla.Float8E8M0, tla.AddressSpace.l1, 512),
             tla.make_layout(tla.make_shape(2, 128), tla.make_stride(128, 1)),
         )
+        # mxfp8 needs the L0A / L0B operands on a 1024-byte boundary; the 512
+        # every other L0 user gets by with is half a block here.
         lhs = tla.make_tensor_like(
-            tla.allocate((128, 64), elem_a, tla.AddressSpace.l0a, 512), l1a, tla.arch.zN
+            tla.allocate((128, 64), elem_a, tla.AddressSpace.l0a, l0_align),
+            l1a,
+            tla.arch.zN,
         )
         rhs = tla.make_tensor_like(
-            tla.allocate((64, 128), elem_b, tla.AddressSpace.l0b, 512), l1b, tla.arch.nZ
+            tla.allocate((64, 128), elem_b, tla.AddressSpace.l0b, l0_align),
+            l1b,
+            tla.arch.nZ,
         )
         acc = tla.make_tensor_like(
-            tla.allocate((128, 128), tla.Float32, tla.AddressSpace.l0c, 512),
+            tla.allocate((128, 128), tla.Float32, tla.AddressSpace.l0c, 1024),
             accp,
             tla.arch.L0Clayout,
         )
@@ -260,7 +270,7 @@ def _mx_half_scaled_mmad_kernel(scale_lhs=True, use_mx_op=False):
             tla.arch.nZ,
         )
         acc = tla.make_tensor_like(
-            tla.allocate((128, 128), tla.Float32, tla.AddressSpace.l0c, 512),
+            tla.allocate((128, 128), tla.Float32, tla.AddressSpace.l0c, 1024),
             accp,
             tla.arch.L0Clayout,
         )
@@ -333,7 +343,7 @@ def _mxfp4_mmad_kernel(fmt, rhs_fmt=None, scale=True):
             tla.allocate((64, 128), rhs_t, tla.AddressSpace.l0b, 512), src_b, tla.arch.nZ
         )
         acc = tla.make_tensor_like(
-            tla.allocate((128, 128), tla.Float32, tla.AddressSpace.l0c, 512),
+            tla.allocate((128, 128), tla.Float32, tla.AddressSpace.l0c, 1024),
             accp,
             tla.arch.L0Clayout,
         )
@@ -371,7 +381,7 @@ def _dynamic_init_mmad_kernel(
         tla.allocate((32, 32), tla.Float32, tla.AddressSpace.l0b, 512), mem_b, tla.arch.nZ
     )
     acc = tla.make_tensor_like(
-        tla.allocate((32, 32), tla.Float32, tla.AddressSpace.l0c, 512), mem_c, tla.arch.L0Clayout
+        tla.allocate((32, 32), tla.Float32, tla.AddressSpace.l0c, 1024), mem_c, tla.arch.L0Clayout
     )
     with tla.cube():
         for outer in tla.range(0, 2, 1):
@@ -391,7 +401,7 @@ def _dynamic_unit_mmad_kernel(
         tla.allocate((32, 32), tla.Float32, tla.AddressSpace.l0b, 512), mem_b, tla.arch.nZ
     )
     acc = tla.make_tensor_like(
-        tla.allocate((32, 32), tla.Float32, tla.AddressSpace.l0c, 512), mem_c, tla.arch.L0Clayout
+        tla.allocate((32, 32), tla.Float32, tla.AddressSpace.l0c, 1024), mem_c, tla.arch.L0Clayout
     )
     with tla.cube():
         for outer in tla.range(0, 2, 1):
@@ -411,7 +421,7 @@ def _dynamic_init_unit_mmad_kernel(
         tla.allocate((32, 32), tla.Float32, tla.AddressSpace.l0b, 512), mem_b, tla.arch.nZ
     )
     acc = tla.make_tensor_like(
-        tla.allocate((32, 32), tla.Float32, tla.AddressSpace.l0c, 512), mem_c, tla.arch.L0Clayout
+        tla.allocate((32, 32), tla.Float32, tla.AddressSpace.l0c, 1024), mem_c, tla.arch.L0Clayout
     )
     with tla.cube():
         for outer in tla.range(0, 2, 1):
@@ -475,7 +485,7 @@ def _fp8_mmad_kernel(elem_a, elem_b):
             tla.arch.nZ,
         )
         acc = tla.make_tensor_like(
-            tla.allocate((128, 128), tla.Float32, tla.AddressSpace.l0c, 512),
+            tla.allocate((128, 128), tla.Float32, tla.AddressSpace.l0c, 1024),
             acc_parent,
             tla.arch.L0Clayout,
         )
@@ -542,7 +552,7 @@ def _i8_fixpipe_kernel(mem_a: tla.Tensor, mem_b: tla.Tensor, mem_c: tla.Tensor) 
         tla.allocate((64, 128), tla.Int8, tla.AddressSpace.l0b, 512), mem_b, tla.arch.nZ
     )
     acc = tla.make_tensor_like(
-        tla.allocate((128, 128), tla.Int32, tla.AddressSpace.l0c, 512), mem_c, tla.arch.L0Clayout
+        tla.allocate((128, 128), tla.Int32, tla.AddressSpace.l0c, 1024), mem_c, tla.arch.L0Clayout
     )
     ub_c = tla.make_tensor_like(
         tla.allocate((128, 128), tla.Int32, tla.AddressSpace.ub, 256), mem_c, tla.arch.RowMajor
@@ -574,6 +584,7 @@ def main() -> None:
             "fp8-vector-copy",
             "mx",
             "mx-mixed",
+            "mx-misaligned",
             "mxfp4",
             "mxfp4-e1m2",
             "mx-half-scaled",
@@ -606,6 +617,10 @@ def main() -> None:
         kernel, type_args = _mx_mmad_kernel(tla.Float8E4M3FN, tla.Float8E4M3FN), ()
     elif case == "mx-mixed":
         kernel, type_args = _mx_mmad_kernel(tla.Float8E5M2, tla.Float8E4M3FN), ()
+    elif case == "mx-misaligned":
+        # 512 is legal for every other L0 user, so the frontend accepts it; only
+        # the matmul knows this operand is mxfp8 and needs 1024.
+        kernel, type_args = _mx_mmad_kernel(tla.Float8E4M3FN, tla.Float8E4M3FN, 512), ()
     elif case == "mxfp4":
         kernel, type_args = _mxfp4_mmad_kernel("f4e2m1"), ()
     elif case == "mxfp4-e1m2":

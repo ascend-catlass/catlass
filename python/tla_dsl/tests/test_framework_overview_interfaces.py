@@ -237,7 +237,7 @@ def test_interface_recast_ptr() -> None:
 def _kernel_allocate_typed_ptr() -> None:
     _ = tla.allocate((16, 16), tla.Float16, tla.AddressSpace.l1, 512)
     _ = tla.allocate(128, tla.Float32, tla.AddressSpace.ub, 256)
-    _ = tla.allocate(((2, 4), 8), tla.Int16, tla.AddressSpace.l0c, 128)
+    _ = tla.allocate(((2, 4), 8), tla.Int16, tla.AddressSpace.l0c, 1024)
 
 
 def test_interface_allocate_typed_ptr() -> None:
@@ -245,11 +245,13 @@ def test_interface_allocate_typed_ptr() -> None:
     mlir = _kernel_allocate_typed_ptr.dump_mlir()
     assert mlir.count("tla.alloc_ptr") == 3
     assert "tla.recast_ptr" not in mlir
-    assert "size_bytes = 512" in mlir
-    assert "size_bytes = 128" in mlir
+    # Every request lands on a block: 512 bytes of f16 and of f32, and 128 bytes
+    # of i16 rounded up to the 1024-byte L0C block.
+    assert mlir.count("size_bytes = 512") == 2
+    assert "size_bytes = 1024" in mlir
     assert "!tla.ptr<f16, l1, 512>" in mlir
     assert "!tla.ptr<f32, ub, 256>" in mlir
-    assert "!tla.ptr<i16, l0c, 128>" in mlir
+    assert "!tla.ptr<i16, l0c, 1024>" in mlir
 
 
 # -----------------------------------------------------------------------------

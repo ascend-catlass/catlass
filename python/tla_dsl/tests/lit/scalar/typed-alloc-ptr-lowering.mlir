@@ -4,11 +4,11 @@ module {
   func.func @typed_alloc_ptr() {
     %0 = "tla.alloc_ptr"() {size_bytes = 512 : i64} : () -> !tla.ptr<f16, l1, 512>
     %1 = "tla.alloc_ptr"() {size_bytes = 512 : i64} : () -> !tla.ptr<f32, ub, 256>
-    %2 = "tla.alloc_ptr"() {size_bytes = 128 : i64} : () -> !tla.ptr<i16, l0c, 128>
-    func.call @sink(%0, %1, %2) : (!tla.ptr<f16, l1, 512>, !tla.ptr<f32, ub, 256>, !tla.ptr<i16, l0c, 128>) -> ()
+    %2 = "tla.alloc_ptr"() {size_bytes = 128 : i64} : () -> !tla.ptr<i16, l0c, 1024>
+    func.call @sink(%0, %1, %2) : (!tla.ptr<f16, l1, 512>, !tla.ptr<f32, ub, 256>, !tla.ptr<i16, l0c, 1024>) -> ()
     func.return
   }
-  func.func private @sink(!tla.ptr<f16, l1, 512>, !tla.ptr<f32, ub, 256>, !tla.ptr<i16, l0c, 128>)
+  func.func private @sink(!tla.ptr<f16, l1, 512>, !tla.ptr<f32, ub, 256>, !tla.ptr<i16, l0c, 1024>)
 }
 
 // UB is reserved through a symbol so that the object reports the bytes as

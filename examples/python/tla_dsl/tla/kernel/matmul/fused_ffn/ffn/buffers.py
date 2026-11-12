@@ -141,7 +141,7 @@ def allocate_gemm_pingpong(
     )
     # CPP HALF_L0C pingpong: two slots when dbL0C=2 (tile×2 ≤ L0C).
     l0c_n = l0c_slot * L0C_DB if tla.const_expr(L0C_DB > 1) else l0c_slot
-    l0c_ptr = tla.allocate(l0c_n, tla.Float32, tla.AddressSpace.l0c, 512)
+    l0c_ptr = tla.allocate(l0c_n, tla.Float32, tla.AddressSpace.l0c, 1024)
     # Cube BT: GM→L1 (fp32 VectorLayout) → biasbuf ping-pong (2×baseN).
     # Unused when elems==0. BT HW is 4096B (=1024 fp32); ASWT caps baseN
     # via btSize/DB/fp32 so 2×slot fits.

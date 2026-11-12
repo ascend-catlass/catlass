@@ -10,8 +10,8 @@
 // BEGIN-DYNAMIC
 module {
   tla.func @dynamic_l0c_length(%length: i64) {
-    %raw = "tla.alloc_ptr"() <{size_bytes = 1024 : i64}> : () -> !tla.ptr<i8, l0c, 512>
-    %ptr = "tla.recast_ptr"(%raw) : (!tla.ptr<i8, l0c, 512>) -> !tla.ptr<f32, l0c, 512>
+    %raw = "tla.alloc_ptr"() <{size_bytes = 1024 : i64}> : () -> !tla.ptr<i8, l0c, 1024>
+    %ptr = "tla.recast_ptr"(%raw) : (!tla.ptr<i8, l0c, 1024>) -> !tla.ptr<f32, l0c, 1024>
     %shape = "tla.make_shape"() : () -> !tla.shape<(16,1),(16,1)>
     %stride = "tla.make_stride"() : () -> !tla.stride<(16,256),(1,256)>
     %origin = "tla.make_shape"() : () -> !tla.shape<16,16>
@@ -20,10 +20,10 @@ module {
       !tla.layout<!tla.shape<(16,1),(16,1)>, !tla.stride<(16,256),(1,256)>, !tla.shape<16,16>, L0Clayout>
     %coord = "tla.make_coord"() : () -> !tla.coord<0,0>
     %value = "tla.make_tensor"(%ptr, %layout, %coord) :
-      (!tla.ptr<f32, l0c, 512>, !tla.layout<!tla.shape<(16,1),(16,1)>, !tla.stride<(16,256),(1,256)>, !tla.shape<16,16>, L0Clayout>, !tla.coord<0,0>) ->
-      !tla.tensor<!tla.layout<!tla.shape<(16,1),(16,1)>, !tla.stride<(16,256),(1,256)>, !tla.shape<16,16>, L0Clayout>, !tla.coord<0,0>, !tla.ptr<f32, l0c, 512>>
+      (!tla.ptr<f32, l0c, 1024>, !tla.layout<!tla.shape<(16,1),(16,1)>, !tla.stride<(16,256),(1,256)>, !tla.shape<16,16>, L0Clayout>, !tla.coord<0,0>) ->
+      !tla.tensor<!tla.layout<!tla.shape<(16,1),(16,1)>, !tla.stride<(16,256),(1,256)>, !tla.shape<16,16>, L0Clayout>, !tla.coord<0,0>, !tla.ptr<f32, l0c, 1024>>
     "tla.cube"() ({
-      tla.print_tensor %value length = %length shape = [16, 16] : !tla.tensor<!tla.layout<!tla.shape<(16,1),(16,1)>, !tla.stride<(16,256),(1,256)>, !tla.shape<16,16>, L0Clayout>, !tla.coord<0,0>, !tla.ptr<f32, l0c, 512>>, i64
+      tla.print_tensor %value length = %length shape = [16, 16] : !tla.tensor<!tla.layout<!tla.shape<(16,1),(16,1)>, !tla.stride<(16,256),(1,256)>, !tla.shape<16,16>, L0Clayout>, !tla.coord<0,0>, !tla.ptr<f32, l0c, 1024>>, i64
     }) : () -> ()
     tla.return
   }
@@ -53,7 +53,7 @@ module {
 // BEGIN-L0C-OFFSET-ALIGN
 module {
   tla.func @misaligned_l0c_offset() {
-    %ptr = "tla.alloc_ptr"() <{size_bytes = 512 : i64}> : () -> !tla.ptr<i8, l0c, 512>
+    %ptr = "tla.alloc_ptr"() <{size_bytes = 512 : i64}> : () -> !tla.ptr<i8, l0c, 1024>
     %shape = "tla.make_shape"() : () -> !tla.shape<(16,1),(16,1)>
     %stride = "tla.make_stride"() : () -> !tla.stride<(16,17),(1,256)>
     %origin = "tla.make_shape"() : () -> !tla.shape<16,16>
@@ -62,11 +62,11 @@ module {
       !tla.layout<!tla.shape<(16,1),(16,1)>, !tla.stride<(16,17),(1,256)>, !tla.shape<16,16>, L0Clayout>
     %coord = "tla.make_coord"() : () -> !tla.coord<16,0>
     %value = "tla.make_tensor"(%ptr, %layout, %coord) :
-      (!tla.ptr<i8, l0c, 512>, !tla.layout<!tla.shape<(16,1),(16,1)>, !tla.stride<(16,17),(1,256)>, !tla.shape<16,16>, L0Clayout>, !tla.coord<16,0>) ->
-      !tla.tensor<!tla.layout<!tla.shape<(16,1),(16,1)>, !tla.stride<(16,17),(1,256)>, !tla.shape<16,16>, L0Clayout>, !tla.coord<16,0>, !tla.ptr<i8, l0c, 512>>
+      (!tla.ptr<i8, l0c, 1024>, !tla.layout<!tla.shape<(16,1),(16,1)>, !tla.stride<(16,17),(1,256)>, !tla.shape<16,16>, L0Clayout>, !tla.coord<16,0>) ->
+      !tla.tensor<!tla.layout<!tla.shape<(16,1),(16,1)>, !tla.stride<(16,17),(1,256)>, !tla.shape<16,16>, L0Clayout>, !tla.coord<16,0>, !tla.ptr<i8, l0c, 1024>>
     %length = arith.constant 256 : i64
     "tla.cube"() ({
-      tla.print_tensor %value length = %length shape = [16, 16] : !tla.tensor<!tla.layout<!tla.shape<(16,1),(16,1)>, !tla.stride<(16,17),(1,256)>, !tla.shape<16,16>, L0Clayout>, !tla.coord<16,0>, !tla.ptr<i8, l0c, 512>>, i64
+      tla.print_tensor %value length = %length shape = [16, 16] : !tla.tensor<!tla.layout<!tla.shape<(16,1),(16,1)>, !tla.stride<(16,17),(1,256)>, !tla.shape<16,16>, L0Clayout>, !tla.coord<16,0>, !tla.ptr<i8, l0c, 1024>>, i64
     }) : () -> ()
     tla.return
   }
@@ -126,7 +126,7 @@ module {
 // BEGIN-L0C-MAX
 module {
   tla.func @largest_l0c_byte_offset() {
-    %ptr = "tla.alloc_ptr"() <{size_bytes = 256 : i64}> : () -> !tla.ptr<i8, l0c, 512>
+    %ptr = "tla.alloc_ptr"() <{size_bytes = 256 : i64}> : () -> !tla.ptr<i8, l0c, 1024>
     %shape = "tla.make_shape"() : () -> !tla.shape<(16,16777216),(16,1)>
     %stride = "tla.make_stride"() : () -> !tla.stride<(16,256),(1,256)>
     %origin = "tla.make_shape"() : () -> !tla.shape<268435456,16>
@@ -135,11 +135,11 @@ module {
       !tla.layout<!tla.shape<(16,16777216),(16,1)>, !tla.stride<(16,256),(1,256)>, !tla.shape<268435456,16>, L0Clayout>
     %coord = "tla.make_coord"() : () -> !tla.coord<268435440,0>
     %value = "tla.make_tensor"(%ptr, %layout, %coord) :
-      (!tla.ptr<i8, l0c, 512>, !tla.layout<!tla.shape<(16,16777216),(16,1)>, !tla.stride<(16,256),(1,256)>, !tla.shape<268435456,16>, L0Clayout>, !tla.coord<268435440,0>) ->
-      !tla.tensor<!tla.layout<!tla.shape<(16,16777216),(16,1)>, !tla.stride<(16,256),(1,256)>, !tla.shape<268435456,16>, L0Clayout>, !tla.coord<268435440,0>, !tla.ptr<i8, l0c, 512>>
+      (!tla.ptr<i8, l0c, 1024>, !tla.layout<!tla.shape<(16,16777216),(16,1)>, !tla.stride<(16,256),(1,256)>, !tla.shape<268435456,16>, L0Clayout>, !tla.coord<268435440,0>) ->
+      !tla.tensor<!tla.layout<!tla.shape<(16,16777216),(16,1)>, !tla.stride<(16,256),(1,256)>, !tla.shape<268435456,16>, L0Clayout>, !tla.coord<268435440,0>, !tla.ptr<i8, l0c, 1024>>
     %length = arith.constant 256 : i64
     "tla.cube"() ({
-      tla.print_tensor %value length = %length shape = [16, 16] : !tla.tensor<!tla.layout<!tla.shape<(16,16777216),(16,1)>, !tla.stride<(16,256),(1,256)>, !tla.shape<268435456,16>, L0Clayout>, !tla.coord<268435440,0>, !tla.ptr<i8, l0c, 512>>, i64
+      tla.print_tensor %value length = %length shape = [16, 16] : !tla.tensor<!tla.layout<!tla.shape<(16,16777216),(16,1)>, !tla.stride<(16,256),(1,256)>, !tla.shape<268435456,16>, L0Clayout>, !tla.coord<268435440,0>, !tla.ptr<i8, l0c, 1024>>, i64
     }) : () -> ()
     tla.return
   }

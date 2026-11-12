@@ -78,7 +78,7 @@ def basic_mixed_store_zNUnAlign(
     l1b_ptr = tla.allocate(L1B_SIZE, ELEM.tla(), tla.AddressSpace.l1, 512)
     l0a_ptr = tla.allocate(L0A_SIZE, ELEM.tla(), tla.AddressSpace.l0a, 512)
     l0b_ptr = tla.allocate(L0B_SIZE, ELEM.tla(), tla.AddressSpace.l0b, 512)
-    l0c_ptr = tla.allocate(L0C_SIZE, ELEM.tla_acc(), tla.AddressSpace.l0c, 512)
+    l0c_ptr = tla.allocate(L0C_SIZE, ELEM.tla_acc(), tla.AddressSpace.l0c, 1024)
 
     ub_a_ptr = tla.allocate(UB_A_SIZE, ELEM.tla(), tla.AddressSpace.ub, 256)
     ub_a_zN_ptr = tla.allocate(UB_A_ZN_SIZE, ELEM.tla(), tla.AddressSpace.ub, 256)

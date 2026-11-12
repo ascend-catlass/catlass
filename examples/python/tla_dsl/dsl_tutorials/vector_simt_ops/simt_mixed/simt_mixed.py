@@ -99,7 +99,7 @@ def simt_mixed(
     l1b_ptr = tla.allocate(L1_STAGE_BYTES // 4, tla.Float32, tla.AddressSpace.l1, 512)
     l0a_ptr = tla.allocate(L0A_BYTES // 4, tla.Float32, tla.AddressSpace.l0a, 512)
     l0b_ptr = tla.allocate(L0B_BYTES // 4, tla.Float32, tla.AddressSpace.l0b, 512)
-    l0c_ptr = tla.allocate(L0C_BYTES // 4, tla.Float32, tla.AddressSpace.l0c, 512)
+    l0c_ptr = tla.allocate(L0C_BYTES // 4, tla.Float32, tla.AddressSpace.l0c, 1024)
 
     c_ub_ptr = tla.allocate(SIMD_ELE, _KERNEL_DTYPE, tla.AddressSpace.ub, 256)
     addend_simd_ub_ptr = tla.allocate(SIMD_ELE, _KERNEL_DTYPE, tla.AddressSpace.ub, 256)

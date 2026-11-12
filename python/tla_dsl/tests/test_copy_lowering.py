@@ -231,7 +231,7 @@ def test_kernel_gm_arg_copies_directly_to_ub(tmp_path) -> None:
 @tla.kernel
 def copy_dynamic_l0c_to_ub_split_m_kernel(gm_c: tla.Tensor) -> None:
     """Reproduce a dynamically clipped N extent flowing from L0C into UB."""
-    l0c_ptr = tla.allocate((128, 128), tla.Float32, tla.AddressSpace.l0c, 512)
+    l0c_ptr = tla.allocate((128, 128), tla.Float32, tla.AddressSpace.l0c, 1024)
     ub_ptr = tla.allocate((64, 128), tla.Float32, tla.AddressSpace.ub, 512)
 
     for col in tla.range(tla.arch.block_idx(), 1, tla.arch.block_num()):
@@ -905,7 +905,7 @@ def copy_l0c_to_gm_pertensor_kernel(gm_c: tla.Tensor) -> None:
     """L0C -> GM with PER_TENSOR quant; dtype-c comes from ``gm_c``."""
     gm_tile = tla.tile_view(gm_c, tla.make_shape(32, 32), tla.make_coord(0, 0))
     l0c = tla.make_tensor_like(
-        tla.allocate((32, 32), tla.Float32, tla.AddressSpace.l0c, 512),
+        tla.allocate((32, 32), tla.Float32, tla.AddressSpace.l0c, 1024),
         gm_tile,
         tla.arch.L0Clayout,
     )
@@ -925,7 +925,7 @@ def copy_l0c_to_gm_pertensor_no_scale_kernel(gm_c: tla.Tensor) -> None:
     """PER_TENSOR without a quant_scale operand."""
     gm_tile = tla.tile_view(gm_c, tla.make_shape(32, 32), tla.make_coord(0, 0))
     l0c = tla.make_tensor_like(
-        tla.allocate((32, 32), tla.Float32, tla.AddressSpace.l0c, 512),
+        tla.allocate((32, 32), tla.Float32, tla.AddressSpace.l0c, 1024),
         gm_tile,
         tla.arch.L0Clayout,
     )
@@ -944,7 +944,7 @@ def copy_l0c_to_ub_pertensor_kernel(gm_c: tla.Tensor) -> None:
     """L0C -> UB (nosplit) with PER_TENSOR quant, ColumnMajor destination."""
     gm_tile = tla.tile_view(gm_c, tla.make_shape(32, 32), tla.make_coord(0, 0))
     l0c = tla.make_tensor_like(
-        tla.allocate((32, 32), tla.Float32, tla.AddressSpace.l0c, 512),
+        tla.allocate((32, 32), tla.Float32, tla.AddressSpace.l0c, 1024),
         gm_tile,
         tla.arch.L0Clayout,
     )
@@ -1014,7 +1014,7 @@ def copy_l0c_to_gm_pertensor_offset_kernel(gm_c: tla.Tensor) -> None:
     """PER_TENSOR quant with a runtime-style int quant_offset."""
     gm_tile = tla.tile_view(gm_c, tla.make_shape(32, 32), tla.make_coord(0, 0))
     l0c = tla.make_tensor_like(
-        tla.allocate((32, 32), tla.Float32, tla.AddressSpace.l0c, 512),
+        tla.allocate((32, 32), tla.Float32, tla.AddressSpace.l0c, 1024),
         gm_tile,
         tla.arch.L0Clayout,
     )
@@ -1042,7 +1042,7 @@ def copy_l0c_to_gm_pertensor_i32_offset_kernel(gm_c: tla.Tensor) -> None:
     """PER_TENSOR quant with an explicit Int32 quant_offset."""
     gm_tile = tla.tile_view(gm_c, tla.make_shape(32, 32), tla.make_coord(0, 0))
     l0c = tla.make_tensor_like(
-        tla.allocate((32, 32), tla.Float32, tla.AddressSpace.l0c, 512),
+        tla.allocate((32, 32), tla.Float32, tla.AddressSpace.l0c, 1024),
         gm_tile,
         tla.arch.L0Clayout,
     )
@@ -1079,7 +1079,7 @@ def _pertensor_offset_kernel(offset: object):
     def kernel(gm_c: tla.Tensor) -> None:
         gm_tile = tla.tile_view(gm_c, tla.make_shape(32, 32), tla.make_coord(0, 0))
         l0c = tla.make_tensor_like(
-            tla.allocate((32, 32), tla.Float32, tla.AddressSpace.l0c, 512),
+            tla.allocate((32, 32), tla.Float32, tla.AddressSpace.l0c, 1024),
             gm_tile,
             tla.arch.L0Clayout,
         )
@@ -1130,7 +1130,7 @@ def _perchannel_quant_kernel():
     def kernel(gm_c: tla.Tensor, quant: tla.Tensor) -> None:
         gm_tile = tla.tile_view(gm_c, tla.make_shape(32, 32), tla.make_coord(0, 0))
         l0c = tla.make_tensor_like(
-            tla.allocate((32, 32), tla.Float32, tla.AddressSpace.l0c, 512),
+            tla.allocate((32, 32), tla.Float32, tla.AddressSpace.l0c, 1024),
             gm_tile,
             tla.arch.L0Clayout,
         )

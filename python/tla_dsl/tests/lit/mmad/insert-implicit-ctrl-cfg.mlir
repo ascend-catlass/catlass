@@ -8,7 +8,7 @@
 !l1 = !tla.tensor<!tla.layout<!tla.shape<32,32>, !tla.stride<32,1>, !tla.shape<32,32>, RowMajor>, !tla.coord<0,0>, !tla.ptr<f32, l1, 512>>
 !l0a = !tla.tensor<!tla.layout<!tla.shape<(16,2),(8,4)>, !tla.stride<(8,128),(1,256)>, !tla.shape<32,32>, zN>, !tla.coord<0,0>, !tla.ptr<f32, l0a, 512>>
 !l0b = !tla.tensor<!tla.layout<!tla.shape<(8,4),(16,2)>, !tla.stride<(1,256),(8,128)>, !tla.shape<32,32>, nZ>, !tla.coord<0,0>, !tla.ptr<f32, l0b, 512>>
-!l0c = !tla.tensor<!tla.layout<!tla.shape<(16,2),(16,2)>, !tla.stride<(16,256),(1,512)>, !tla.shape<32,32>, L0Clayout>, !tla.coord<0,0>, !tla.ptr<f32, l0c, 512>>
+!l0c = !tla.tensor<!tla.layout<!tla.shape<(16,2),(16,2)>, !tla.stride<(16,256),(1,512)>, !tla.shape<32,32>, L0Clayout>, !tla.coord<0,0>, !tla.ptr<f32, l0c, 1024>>
 
 module {
 
@@ -32,8 +32,8 @@ module {
     %7 = tla.make_tensor_like %6 like %5 layoutTag(#tla.layout_tag<zN>) : !tla.ptr<f32, l0a, 512>, !l1 -> !l0a
     %8 = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<f32, l0b, 512>
     %9 = tla.make_tensor_like %8 like %5 layoutTag(#tla.layout_tag<nZ>) : !tla.ptr<f32, l0b, 512>, !l1 -> !l0b
-    %10 = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<f32, l0c, 512>
-    %11 = tla.make_tensor_like %10 like %5 layoutTag(#tla.layout_tag<L0Clayout>) : !tla.ptr<f32, l0c, 512>, !l1 -> !l0c
+    %10 = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<f32, l0c, 1024>
+    %11 = tla.make_tensor_like %10 like %5 layoutTag(#tla.layout_tag<L0Clayout>) : !tla.ptr<f32, l0c, 1024>, !l1 -> !l0c
     tla.cube {
       %true = arith.constant true
       %c3_i64 = arith.constant 3 : i64
@@ -67,8 +67,8 @@ module {
     %7 = tla.make_tensor_like %6 like %5 layoutTag(#tla.layout_tag<zN>) : !tla.ptr<f32, l0a, 512>, !l1 -> !l0a
     %8 = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<f32, l0b, 512>
     %9 = tla.make_tensor_like %8 like %5 layoutTag(#tla.layout_tag<nZ>) : !tla.ptr<f32, l0b, 512>, !l1 -> !l0b
-    %10 = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<f32, l0c, 512>
-    %11 = tla.make_tensor_like %10 like %5 layoutTag(#tla.layout_tag<L0Clayout>) : !tla.ptr<f32, l0c, 512>, !l1 -> !l0c
+    %10 = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<f32, l0c, 1024>
+    %11 = tla.make_tensor_like %10 like %5 layoutTag(#tla.layout_tag<L0Clayout>) : !tla.ptr<f32, l0c, 1024>, !l1 -> !l0c
     tla.cube {
       %true = arith.constant true
       %false = arith.constant false

@@ -109,11 +109,18 @@ def _l0c_print_kernel(
     dtype: type[tla.Numeric],
     length: int = 256,
     *,
-    alignment: int = 512,
+    alignment: int = 1024,
+    make_ptr: bool = False,
 ):
     @tla.kernel
     def kernel(value: tla.Tensor) -> None:
-        ptr = tla.allocate(256, dtype, tla.AddressSpace.l0c, alignment)
+        # tla.allocate requires a whole number of blocks, so an under-aligned
+        # buffer can only be spelled with make_ptr.
+        ptr = (
+            tla.make_ptr(dtype, 0x1000, tla.AddressSpace.l0c, assumed_align=alignment)
+            if make_ptr
+            else tla.allocate(256, dtype, tla.AddressSpace.l0c, alignment)
+        )
         local = tla.make_tensor_like(ptr, value, tla.arch.L0Clayout)
         with tla.cube():
             tla.print(local, length)
@@ -128,10 +135,17 @@ def _l1_print_kernel(
     length: int = 8,
     alignment: int = 256,
     vector: bool = False,
+    make_ptr: bool = False,
 ):
     @tla.kernel
     def kernel(value: tla.Tensor) -> None:
-        ptr = tla.allocate(40, dtype, tla.AddressSpace.l1, alignment)
+        # tla.allocate requires a whole number of blocks, so an under-aligned
+        # buffer can only be spelled with make_ptr.
+        ptr = (
+            tla.make_ptr(dtype, 0x1000, tla.AddressSpace.l1, assumed_align=alignment)
+            if make_ptr
+            else tla.allocate(40, dtype, tla.AddressSpace.l1, alignment)
+        )
         local = tla.make_tensor_like(ptr, value, layout)
         if vector:
             with tla.vector():
@@ -417,7 +431,7 @@ def test_print_tensor_rejects_length_above_tensor_size() -> None:
     ("kernel", "tensor", "match"),
     (
         (
-            _l0c_print_kernel(tla.Float32, alignment=16),
+            _l0c_print_kernel(tla.Float32, alignment=16, make_ptr=True),
             _host_tensor((16, 16)),
             "32-byte aligned L0C address",
         ),
@@ -431,7 +445,7 @@ def test_print_tensor_rejects_length_above_tensor_size() -> None:
         ),
         (_l1_print_kernel(), _host_tensor((4, 4)), r"logical shape \[M, 8\]"),
         (
-            _l1_print_kernel(alignment=4),
+            _l1_print_kernel(alignment=4, make_ptr=True),
             _host_tensor((4, 8)),
             "32-byte aligned L1 address",
         ),

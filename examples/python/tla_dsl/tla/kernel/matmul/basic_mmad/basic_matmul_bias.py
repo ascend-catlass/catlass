@@ -114,7 +114,7 @@ def basic_mmad_bias_kernel(
     l1_bias_ptr = tla.allocate(_tiling.l1_tn, bias_dtype, tla.AddressSpace.l1, 512)
     l0_bias_ptr = tla.allocate(_tiling.l0_tn, bias_dtype, tla.AddressSpace.biasbuf, 512)
     l0c_ptr = tla.allocate(
-        _tiling.l0_tm * _tiling.l0_tn, acc_dtype, tla.AddressSpace.l0c, 512
+        _tiling.l0_tm * _tiling.l0_tn, acc_dtype, tla.AddressSpace.l0c, 1024
     )
 
     grid_m = (m + _tiling.l1_tm - 1) // _tiling.l1_tm

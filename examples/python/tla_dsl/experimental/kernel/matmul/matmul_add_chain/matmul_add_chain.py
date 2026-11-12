@@ -81,7 +81,7 @@ def matmul_add_chain_kernel(
     l0b0_ptr = tla.allocate(_l0_tk * _tn, dtype_a, tla.AddressSpace.l0b, 512)
     l0b1_ptr = tla.allocate(_l0_tk * _tn, dtype_a, tla.AddressSpace.l0b, 512)
 
-    l0c_ptr = tla.allocate(_tm * _tn, DTYPE_C, tla.AddressSpace.l0c, 512)
+    l0c_ptr = tla.allocate(_tm * _tn, DTYPE_C, tla.AddressSpace.l0c, 1024)
 
     ub_acc_ptr0 = tla.allocate(UB_SLOT_ELEMS, dtype_io, tla.AddressSpace.ub, 256)
     ub_aux_ptr0 = tla.allocate(UB_SLOT_ELEMS, dtype_io, tla.AddressSpace.ub, 256)

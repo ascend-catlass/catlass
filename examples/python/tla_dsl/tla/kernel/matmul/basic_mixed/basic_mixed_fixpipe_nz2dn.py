@@ -66,7 +66,7 @@ def basic_mixed_fixpipe_nz2dn(
     l1b_ptr = tla.allocate(L1B_SIZE, tla.Float32, tla.AddressSpace.l1, 512)
     l0a_ptr = tla.allocate(L0A_SIZE, tla.Float32, tla.AddressSpace.l0a, 512)
     l0b_ptr = tla.allocate(L0B_SIZE, tla.Float32, tla.AddressSpace.l0b, 512)
-    l0c_ptr = tla.allocate(L0C_SIZE, tla.Float32, tla.AddressSpace.l0c, 512)
+    l0c_ptr = tla.allocate(L0C_SIZE, tla.Float32, tla.AddressSpace.l0c, 1024)
 
     ub_c_ptr = tla.allocate(UB_C_SIZE, tla.Float32, tla.AddressSpace.ub, 256)
 

@@ -62,7 +62,7 @@ def matmul_kernel(a: tla.Tensor, b: tla.Tensor, c: tla.Tensor) -> None:
     l1b_ptr = tla.allocate(K * N, tla.Float16, tla.AddressSpace.l1, 512)
     l0a_ptr = tla.allocate(M * K, tla.Float16, tla.AddressSpace.l0a, 512)
     l0b_ptr = tla.allocate(K * N, tla.Float16, tla.AddressSpace.l0b, 512)
-    l0c_ptr = tla.allocate(M * N, tla.Float32, tla.AddressSpace.l0c, 512)
+    l0c_ptr = tla.allocate(M * N, tla.Float32, tla.AddressSpace.l0c, 1024)
 
     with tla.cube():
         # GM -> L1

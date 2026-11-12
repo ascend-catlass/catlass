@@ -34,6 +34,8 @@ C_SLICE_ROWS = M1 // 2
 UB_SCORE_STRIDE = N1 // 2
 WORKSPACE_ROW_STRIDE = N1
 QK_ALIGNMENT_BYTES = 512
+# L0C needs the 1024-byte tla.mmad accumulator alignment.
+L0C_ALIGNMENT_BYTES = 1024
 # SPLIT_N requires each AIV Query half to align to 16 columns.
 QUERY_HALF_ALIGNMENT_TOKENS = 16
 QUERY_ALIGNMENT_TOKENS = 2 * QUERY_HALF_ALIGNMENT_TOKENS
@@ -82,10 +84,10 @@ def allocate_qk():
         tla.allocate(K0 * N1, tla.BFloat16, tla.AddressSpace.l0b, QK_ALIGNMENT_BYTES),
         tla.allocate(K0 * N1, tla.BFloat16, tla.AddressSpace.l0b, QK_ALIGNMENT_BYTES),
         tla.allocate(
-            C_SLICE_ROWS * N1, tla.Float32, tla.AddressSpace.l0c, QK_ALIGNMENT_BYTES
+            C_SLICE_ROWS * N1, tla.Float32, tla.AddressSpace.l0c, L0C_ALIGNMENT_BYTES
         ),
         tla.allocate(
-            C_SLICE_ROWS * N1, tla.Float32, tla.AddressSpace.l0c, QK_ALIGNMENT_BYTES
+            C_SLICE_ROWS * N1, tla.Float32, tla.AddressSpace.l0c, L0C_ALIGNMENT_BYTES
         ),
         tla.mutex(resource="block_mean_attention_score_l0c_0", id=8),
         tla.mutex(resource="block_mean_attention_score_l0c_1", id=9),

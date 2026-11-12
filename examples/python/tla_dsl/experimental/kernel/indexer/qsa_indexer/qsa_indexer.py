@@ -154,11 +154,12 @@ def _qsa_indexer_mixed_topk_stage(
         tla.AddressSpace.l0b,
         512,
     )
+    # L0C accumulators are fed to tla.mmad, which needs 1024-byte alignment.
     l0_c_ptr = tla.allocate(
         MIXED_TILE_M * query_heads * page_size,
         tla.Float32,
         tla.AddressSpace.l0c,
-        512,
+        1024,
     )
     raw_ub_ptr = tla.allocate(
         MIXED_TILE_M * query_heads * page_size,

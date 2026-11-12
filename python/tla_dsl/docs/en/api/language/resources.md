@@ -34,13 +34,34 @@ Parameters:
 - `dtype` (`type[Numeric]`): Element numeric type. Required.
 - `mem_scope` (`AddressSpace`): On-chip address space; see
   **System Variable Access / On-chip Address Spaces**. Required.
-- `byte_alignment` (`int`): Byte alignment requirement. Required.
+- `byte_alignment` (`int`): Byte alignment requirement. Required. Must be
+  a whole multiple of the space's local-memory alignment; a smaller or
+  non-multiple value is refused.
 
 Constraints:
 
 - Must be called inside a `@tla.kernel`-decorated kernel function.
-- `mem_scope` must be on-chip (`l1` / `l0a` / `l0b` / `l0c` / `ub`),
-  not `gm` / `generic`; `shape` must be fully static.
+- `mem_scope` must be on-chip (`l1` / `l0a` / `l0b` / `l0c` / `ub` /
+  `biasbuf`), not `gm` / `generic`; `shape` must be fully static.
+- `byte_alignment` must be a whole multiple of the space's local-memory
+  alignment, since a buffer cannot start mid-block: 32 bytes for `l1` / `ub`, 512 for
+  `l0a` / `l0b`, 1024 for `l0c`, 64 for `biasbuf`. L0C is stricter than
+  the L0 transfer block because `tla.mmad` requires a 1024-byte aligned
+  accumulator. Multiples are kept as asked, power of two or not (1024 is
+  fine, and so is 1536 for L0A); anything else -- including a value
+  below that alignment -- is refused rather than rounded up, because
+  raising it would place the buffer at an alignment the caller did not
+  ask for.
+- The allocation size is rounded up to `byte_alignment` as well, so the
+  start address and the `size_bytes` follow the same alignment:
+  allocating 16 bytes in UB at `byte_alignment=32` takes 32, at 256
+  takes 256.
+- The allocations made in one kernel must fit the chosen space once
+  summed, alignment padding included. The limit is the buffer capacity:
+  512 KiB for `l1`, 64 KiB each for `l0a` / `l0b`, 256 KiB for `l0c`.
+  `ub` is checked against its whole 256 KiB here; the tighter ceiling
+  (248 KiB, or less for a SIMT kernel) is applied during lowering, which
+  is where the core type and the compiler-reserve switches are known.
 - Scratch for a `tla.vec.func(mode="simt")` region must be allocated
   *outside* that region and viewed with `tla.make_tensor`: a SIMT region
   establishes no UB base of its own, and outlining passes the buffer to

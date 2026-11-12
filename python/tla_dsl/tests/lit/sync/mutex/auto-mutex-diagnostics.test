@@ -82,15 +82,15 @@ module {
 //--- scalar.mlir
 !scalar_layout = !tla.layout<!tla.shape<1>, !tla.stride<1>, !tla.shape<1>, RowMajor>
 !scalar_coord = !tla.coord<0>
-!scalar_ub = !tla.tensor<!scalar_layout, !scalar_coord, !tla.ptr<f32, ub, 4>>
+!scalar_ub = !tla.tensor<!scalar_layout, !scalar_coord, !tla.ptr<f32, ub, 32>>
 module {
   tla.func @uncovered_ub_scalar() attributes {tla.auto_sync = "v0"} {
-    %ptr = tla.alloc_ptr{size_bytes = 4} -> !tla.ptr<f32, ub, 4>
+    %ptr = tla.alloc_ptr{size_bytes = 32} -> !tla.ptr<f32, ub, 32>
     %shape = tla.make_shape -> !tla.shape<1>
     %stride = tla.make_stride -> !tla.stride<1>
     %layout = tla.make_layout %shape, %stride : !tla.shape<1>, !tla.stride<1> -> !scalar_layout
     %coord = tla.make_coord -> !scalar_coord
-    %tensor = tla.make_tensor %ptr, %layout, %coord : !tla.ptr<f32, ub, 4>, !scalar_layout, !scalar_coord -> !scalar_ub
+    %tensor = tla.make_tensor %ptr, %layout, %coord : !tla.ptr<f32, ub, 32>, !scalar_layout, !scalar_coord -> !scalar_ub
     %c0 = arith.constant 0 : index
     "tla.vector"() ({
       %value = tla.scalar_load %tensor[%c0] : !scalar_ub -> f32
@@ -137,15 +137,15 @@ module {
 !gm = !tla.tensor<!tla.layout<!tla.shape<32,32>, !tla.stride<32,1>, !tla.shape<32,32>, RowMajor>, !tla.coord<0,0>, !tla.ptr<f32, gm, 4>>
 !l0a = !tla.tensor<!tla.layout<!tla.shape<(16,2),(8,4)>, !tla.stride<(8,128),(1,256)>, !tla.shape<32,32>, zN>, !tla.coord<0,0>, !tla.ptr<f32, l0a, 512>>
 !l0b = !tla.tensor<!tla.layout<!tla.shape<(8,4),(16,2)>, !tla.stride<(1,256),(8,128)>, !tla.shape<32,32>, nZ>, !tla.coord<0,0>, !tla.ptr<f32, l0b, 512>>
-!l0c = !tla.tensor<!tla.layout<!tla.shape<(16,2),(16,2)>, !tla.stride<(16,256),(1,512)>, !tla.shape<32,32>, L0Clayout>, !tla.coord<0,0>, !tla.ptr<f32, l0c, 512>>
+!l0c = !tla.tensor<!tla.layout<!tla.shape<(16,2),(16,2)>, !tla.stride<(16,256),(1,512)>, !tla.shape<32,32>, L0Clayout>, !tla.coord<0,0>, !tla.ptr<f32, l0c, 1024>>
 module {
   tla.func @dynamic_unit_flag(%unit: i64, %gm: !gm) attributes {tla.auto_sync = "v0"} {
     %pa = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<f32, l0a, 512>
     %pb = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<f32, l0b, 512>
-    %pc = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<f32, l0c, 512>
+    %pc = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<f32, l0c, 1024>
     %a = "tla.make_tensor_like"(%pa, %gm) {layoutTag = #tla.layout_tag<zN>} : (!tla.ptr<f32, l0a, 512>, !gm) -> !l0a
     %b = "tla.make_tensor_like"(%pb, %gm) {layoutTag = #tla.layout_tag<nZ>} : (!tla.ptr<f32, l0b, 512>, !gm) -> !l0b
-    %c = "tla.make_tensor_like"(%pc, %gm) {layoutTag = #tla.layout_tag<L0Clayout>} : (!tla.ptr<f32, l0c, 512>, !gm) -> !l0c
+    %c = "tla.make_tensor_like"(%pc, %gm) {layoutTag = #tla.layout_tag<L0Clayout>} : (!tla.ptr<f32, l0c, 1024>, !gm) -> !l0c
     %init = arith.constant true
     "tla.cube"() ({
       tla.mmad %c, %a, %b, %init, %unit {compute_order = #tla.compute_order<M_FIRST>, hf32_mode = #tla.hf32_mode<HF32_DISABLE>} : !l0c, !l0a, !l0b, i1, i64
@@ -158,15 +158,15 @@ module {
 !mixed_gm = !tla.tensor<!tla.layout<!tla.shape<32,32>, !tla.stride<32,1>, !tla.shape<32,32>, RowMajor>, !tla.coord<0,0>, !tla.ptr<f32, gm, 4>>
 !mixed_l0a = !tla.tensor<!tla.layout<!tla.shape<(16,2),(8,4)>, !tla.stride<(8,128),(1,256)>, !tla.shape<32,32>, zN>, !tla.coord<0,0>, !tla.ptr<f32, l0a, 512>>
 !mixed_l0b = !tla.tensor<!tla.layout<!tla.shape<(8,4),(16,2)>, !tla.stride<(1,256),(8,128)>, !tla.shape<32,32>, nZ>, !tla.coord<0,0>, !tla.ptr<f32, l0b, 512>>
-!mixed_l0c = !tla.tensor<!tla.layout<!tla.shape<(16,2),(16,2)>, !tla.stride<(16,256),(1,512)>, !tla.shape<32,32>, L0Clayout>, !tla.coord<0,0>, !tla.ptr<f32, l0c, 512>>
+!mixed_l0c = !tla.tensor<!tla.layout<!tla.shape<(16,2),(16,2)>, !tla.stride<(16,256),(1,512)>, !tla.shape<32,32>, L0Clayout>, !tla.coord<0,0>, !tla.ptr<f32, l0c, 1024>>
 module {
   tla.func @mixed_unit_flag(%cond: i1, %gm: !mixed_gm) attributes {tla.auto_sync = "v0"} {
     %pa = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<f32, l0a, 512>
     %pb = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<f32, l0b, 512>
-    %pc = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<f32, l0c, 512>
+    %pc = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<f32, l0c, 1024>
     %a = "tla.make_tensor_like"(%pa, %gm) {layoutTag = #tla.layout_tag<zN>} : (!tla.ptr<f32, l0a, 512>, !mixed_gm) -> !mixed_l0a
     %b = "tla.make_tensor_like"(%pb, %gm) {layoutTag = #tla.layout_tag<nZ>} : (!tla.ptr<f32, l0b, 512>, !mixed_gm) -> !mixed_l0b
-    %c = "tla.make_tensor_like"(%pc, %gm) {layoutTag = #tla.layout_tag<L0Clayout>} : (!tla.ptr<f32, l0c, 512>, !mixed_gm) -> !mixed_l0c
+    %c = "tla.make_tensor_like"(%pc, %gm) {layoutTag = #tla.layout_tag<L0Clayout>} : (!tla.ptr<f32, l0c, 1024>, !mixed_gm) -> !mixed_l0c
     %init = arith.constant true
     %unit = scf.if %cond -> (i64) {
       %zero = arith.constant 0 : i64

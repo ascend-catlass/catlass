@@ -66,7 +66,7 @@ def basic_mixed_ub2l1(
     l1b_ptr = tla.allocate(K_DIM * N_DIM, elem_t, tla.AddressSpace.l1, 512)
     l0a_ptr = tla.allocate(M_DIM * K_DIM, elem_t, tla.AddressSpace.l0a, 512)
     l0b_ptr = tla.allocate(K_DIM * N_DIM, elem_t, tla.AddressSpace.l0b, 512)
-    l0c_ptr = tla.allocate(M_DIM * N_DIM, acc_t, tla.AddressSpace.l0c, 512)
+    l0c_ptr = tla.allocate(M_DIM * N_DIM, acc_t, tla.AddressSpace.l0c, 1024)
 
     ub_a_ptr = tla.allocate(M_DIM // 2 * K_DIM, elem_t, tla.AddressSpace.ub, 256)
 

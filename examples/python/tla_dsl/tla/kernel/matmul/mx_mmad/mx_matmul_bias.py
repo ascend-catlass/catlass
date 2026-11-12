@@ -115,9 +115,11 @@ def mx_mmad_bias_kernel(
     # per 32 elements along K.
     l1sa = tla.allocate(tm * sk, tla.Float8E8M0, tla.AddressSpace.l1, 512)
     l1sb = tla.allocate(sk * tn, tla.Float8E8M0, tla.AddressSpace.l1, 512)
-    l0a = tla.allocate(tm * tk, dtype_a, tla.AddressSpace.l0a, 512)
-    l0b = tla.allocate(tk * tn, dtype_b, tla.AddressSpace.l0b, 512)
-    l0c = tla.allocate(tm * tn, tla.Float32, tla.AddressSpace.l0c, 512)
+    # mxfp8 needs its L0 operands on a 1024-byte boundary. fp4 only needs
+    # 512, and 1024 satisfies both, so one kernel can serve either family.
+    l0a = tla.allocate(tm * tk, dtype_a, tla.AddressSpace.l0a, 1024)
+    l0b = tla.allocate(tk * tn, dtype_b, tla.AddressSpace.l0b, 1024)
+    l0c = tla.allocate(tm * tn, tla.Float32, tla.AddressSpace.l0c, 1024)
     # Bias mirrors the accumulator, which every MX route keeps in fp32. One slot
     # in L1 for the GM -> L1 stage, one in the bias table buffer for the cube.
     l1_bias = tla.allocate(tn, tla.Float32, tla.AddressSpace.l1, 512)

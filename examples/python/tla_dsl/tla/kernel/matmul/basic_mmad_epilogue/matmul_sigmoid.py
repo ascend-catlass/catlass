@@ -134,7 +134,7 @@ def matmul_evg_sigmoid_kernel(
     )
 
     l0c_ptr = tla.allocate(
-        _tiling.l0_tm * _tiling.l0_tn, DTYPE_C, tla.AddressSpace.l0c, 512
+        _tiling.l0_tm * _tiling.l0_tn, DTYPE_C, tla.AddressSpace.l0c, 1024
     )
 
     # ---- UB allocates ----

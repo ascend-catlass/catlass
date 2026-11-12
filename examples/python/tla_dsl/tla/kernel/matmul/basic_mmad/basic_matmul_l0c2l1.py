@@ -81,7 +81,7 @@ def basic_matmul_l0c2l1(
     # the two-mmads shares the same l0a/l0b/l0c space
     l0a_ptr = tla.allocate(L0A_SIZE, tla.Float32, tla.AddressSpace.l0a, 512)
     l0b_ptr = tla.allocate(L0B_SIZE, tla.Float32, tla.AddressSpace.l0b, 512)
-    l0c_ptr = tla.allocate(L0C_SIZE, tla.Float32, tla.AddressSpace.l0c, 512)
+    l0c_ptr = tla.allocate(L0C_SIZE, tla.Float32, tla.AddressSpace.l0c, 1024)
 
     with tla.cube():
         # ---- C = A @ B -------------------------------------------------

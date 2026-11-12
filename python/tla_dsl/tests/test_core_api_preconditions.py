@@ -56,7 +56,8 @@ def test_allocate_returns_typed_pointer_metadata() -> None:
         assert ptr.value_type is tla.Float16
         assert ptr.addrspace == AddressSpace.l1
         assert ptr.alignment == 512
-        assert getattr(ptr, "_alloc_size_bytes") == 16
+        # 2 x 4 f16 is 16 bytes, rounded up to the 512-byte alignment.
+        assert getattr(ptr, "_alloc_size_bytes") == 512
 
 
 
@@ -553,11 +554,14 @@ def test_range_constexpr_static_loop_warning_boundary(
 
 
 _MAKE_TENSOR_LIKE_DEST_SPACE = tla.AddressSpace.ub
+_MAKE_TENSOR_LIKE_DEST_ALIGN = 32
 
 
 @tla.kernel
 def _make_tensor_like_destination_space_kernel(mem: tla.Tensor) -> None:
-    ptr = tla.allocate(121 * 104, tla.Float32, _MAKE_TENSOR_LIKE_DEST_SPACE, 32)
+    ptr = tla.allocate(
+        121 * 104, tla.Float32, _MAKE_TENSOR_LIKE_DEST_SPACE, _MAKE_TENSOR_LIKE_DEST_ALIGN
+    )
     _ = tla.make_tensor_like(ptr, mem, tla.arch.RowMajor)
 
 
@@ -591,23 +595,29 @@ def _make_tensor_like_static_source() -> tla.Tensor:
 
 
 @pytest.mark.parametrize(
-    ("space", "token"),
+    ("space", "token", "alignment"),
     (
-        (tla.AddressSpace.ub, "ub"),
-        (tla.AddressSpace.l1, "l1"),
-        (tla.AddressSpace.l0a, "l0a"),
-        (tla.AddressSpace.l0b, "l0b"),
-        (tla.AddressSpace.l0c, "l0c"),
+        (tla.AddressSpace.ub, "ub", 32),
+        (tla.AddressSpace.l1, "l1", 32),
+        (tla.AddressSpace.l0a, "l0a", 512),
+        (tla.AddressSpace.l0b, "l0b", 512),
+        (tla.AddressSpace.l0c, "l0c", 1024),
     ),
 )
 def test_make_tensor_like_accepts_only_supported_on_chip_spaces(
-    space: AddressSpace, token: str, monkeypatch: pytest.MonkeyPatch
+    space: AddressSpace,
+    token: str,
+    alignment: int,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setitem(globals(), "_MAKE_TENSOR_LIKE_DEST_SPACE", space)
+    # The kernel asks for 32, which only UB / L1 accept; the others need their
+    # own local-memory alignment, so the alignment is parameterised to match.
+    monkeypatch.setitem(globals(), "_MAKE_TENSOR_LIKE_DEST_ALIGN", alignment)
     mlir = _make_tensor_like_destination_space_kernel.dump_mlir(
         type_args=(_make_tensor_like_static_source(),)
     )
-    assert f"!tla.ptr<f32, {token}, 32>" in mlir
+    assert f"!tla.ptr<f32, {token}, {alignment}>" in mlir
 
 
 @pytest.mark.parametrize("space", (tla.AddressSpace.gm, tla.AddressSpace.generic))

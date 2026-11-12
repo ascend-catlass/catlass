@@ -4479,6 +4479,84 @@ def _static_allocation_size_bytes(
     return size_bytes
 
 
+def _resolve_allocation_alignment(
+    op_name: str, mem_scope: AddressSpace, byte_alignment: int
+) -> int:
+    """Validate the byte alignment of an on-chip allocation and return it.
+
+    The space's local-memory alignment is the only admissible alignment: an
+    address either starts on an alignment boundary or it does not, so the
+    request must be a multiple of it. A multiple is kept as asked; anything
+    else -- including a request below it -- is refused rather than silently
+    raised, because rounding it up would mean placing the buffer at an
+    alignment the caller did not ask for.
+
+    Both the start address and the allocation size follow this same
+    ``byte_alignment``: the size is rounded up to it, so a short buffer still
+    occupies a whole alignment period.
+    """
+    from .base_dsl.arch import _get_localmem_align_bytes
+
+    scope = mem_scope.name.upper()
+    localmem_alignment = _get_localmem_align_bytes(scope)
+    if byte_alignment % localmem_alignment:
+        _op_error(
+            op_name,
+            f"invalid argument 'byte_alignment': expected a multiple of the "
+            f"{localmem_alignment}-byte {scope} local-memory alignment, got {byte_alignment}. "
+            f"An address aligned to anything else would start mid-block.",
+        )
+    return byte_alignment
+
+
+def _require_allocation_fits(
+    op_name: str,
+    mem_scope: AddressSpace,
+    byte_alignment: int,
+    size_bytes: int,
+) -> None:
+    """Refuse a request that no longer fits above the ones already granted.
+
+    Each space is handed out the way ``tla-lower-ptr`` hands it out: a request
+    starts at the previous high-water mark rounded up to its own alignment, and
+    the mark advances by that start plus the size rounded up. Keeping the two
+    layers on the same rule means a kernel the frontend accepts cannot be
+    refused later for a total the frontend already counted.
+
+    UB is capped only at the whole buffer here. Its sharper ceilings -- 248 KiB
+    for SIMD, less the Data Cache for SIMT, the full buffer with both
+    ``cce-disable-*-reserved-ubuf`` switches -- depend on the core type and the
+    compile options, neither of which exists while tracing, so ``tla-lower-ptr``
+    owns them. A dynamic UB region costs nothing here: it starts above the static
+    allocations rather than being one.
+    """
+    from .base_dsl.arch import get_localmem_capacity_bytes
+
+    state = _runtime._current_frontend_state()
+    if state is None:
+        # The only caller (``allocate``) already guards with
+        # ``_require_frontend_state``; reaching here without one is a caller bug,
+        # not a supported stateless mode to account for.
+        raise TlaIRNotExecutableError(
+            f"tla.{op_name} requires the kernel frontend state"
+        )
+    scope = mem_scope.name
+    capacity = get_localmem_capacity_bytes(scope.upper())
+    already = state.allocated_bytes_by_scope.get(scope, 0)
+    aligned_start = _round_up(already, byte_alignment)
+    end = aligned_start + size_bytes
+    if end > capacity:
+        _op_error(
+            op_name,
+            f"allocation exceeds {scope.upper()} capacity: {already} bytes "
+            f"already allocated, + {aligned_start - already} bytes of alignment "
+            f"padding to offset {aligned_start}, + {size_bytes} bytes requested "
+            f"= {end} bytes, past the {capacity}-byte capacity. Split the work "
+            f"across kernels or shrink the buffers.",
+        )
+    state.allocated_bytes_by_scope[scope] = aligned_start + size_bytes
+
+
 @dsl_user_op
 def make_shape(
     *components: IndexTree,
@@ -10678,6 +10756,7 @@ def arch_get_capacity_in_bytes(mem_scope: AddressSpace) -> int:
         AddressSpace.l0b,
         AddressSpace.l0c,
         AddressSpace.ub,
+        AddressSpace.biasbuf,
     )
 
     if not isinstance(mem_scope, AddressSpace) or mem_scope not in _ON_CHIP_SCOPES:
@@ -10710,12 +10789,33 @@ def allocate(
         - `dtype` (`type[Numeric]`): Element numeric type. Required.
         - `mem_scope` (`AddressSpace`): On-chip address space; see
           **System Variable Access / On-chip Address Spaces**. Required.
-        - `byte_alignment` (`int`): Byte alignment requirement. Required.
+        - `byte_alignment` (`int`): Byte alignment requirement. Required. Must be
+          a whole multiple of the space's local-memory alignment; a smaller or
+          non-multiple value is refused.
 
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function.
-        - `mem_scope` must be on-chip (`l1` / `l0a` / `l0b` / `l0c` / `ub`),
-          not `gm` / `generic`; `shape` must be fully static.
+        - `mem_scope` must be on-chip (`l1` / `l0a` / `l0b` / `l0c` / `ub` /
+          `biasbuf`), not `gm` / `generic`; `shape` must be fully static.
+        - `byte_alignment` must be a whole multiple of the space's local-memory
+          alignment, since a buffer cannot start mid-block: 32 bytes for `l1` / `ub`, 512 for
+          `l0a` / `l0b`, 1024 for `l0c`, 64 for `biasbuf`. L0C is stricter than
+          the L0 transfer block because `tla.mmad` requires a 1024-byte aligned
+          accumulator. Multiples are kept as asked, power of two or not (1024 is
+          fine, and so is 1536 for L0A); anything else -- including a value
+          below that alignment -- is refused rather than rounded up, because
+          raising it would place the buffer at an alignment the caller did not
+          ask for.
+        - The allocation size is rounded up to `byte_alignment` as well, so the
+          start address and the `size_bytes` follow the same alignment:
+          allocating 16 bytes in UB at `byte_alignment=32` takes 32, at 256
+          takes 256.
+        - The allocations made in one kernel must fit the chosen space once
+          summed, alignment padding included. The limit is the buffer capacity:
+          512 KiB for `l1`, 64 KiB each for `l0a` / `l0b`, 256 KiB for `l0c`.
+          `ub` is checked against its whole 256 KiB here; the tighter ceiling
+          (248 KiB, or less for a SIMT kernel) is applied during lowering, which
+          is where the core type and the compiler-reserve switches are known.
         - Scratch for a `tla.vec.func(mode="simt")` region must be allocated
           *outside* that region and viewed with `tla.make_tensor`: a SIMT region
           establishes no UB base of its own, and outlining passes the buffer to
@@ -10739,9 +10839,14 @@ def allocate(
         _op_error(
             "allocate",
             "invalid argument 'mem_scope' (position 2): expected on-chip AddressSpace "
-            "(l1, l0a, l0b, l0c, ub)",
+            "(l1, l0a, l0b, l0c, ub, biasbuf)",
         )
-    size_bytes = _static_allocation_size_bytes("allocate", shape, dtype, element_bits)
+    align = _resolve_allocation_alignment("allocate", mem_scope, align)
+    size_bytes = _round_up(
+        _static_allocation_size_bytes("allocate", shape, dtype, element_bits),
+        align,
+    )
+    _require_allocation_fits("allocate", mem_scope, align, size_bytes)
 
     ctx = loc.context if loc is not None else mlir_ir.Context.current
     ptr_ty = PtrType.get(dtype.mlir_type(ctx), addr_token, align, context=ctx)

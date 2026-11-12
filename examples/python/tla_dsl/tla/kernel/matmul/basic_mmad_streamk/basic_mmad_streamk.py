@@ -136,7 +136,7 @@ def streamk_mmad_kernel(
     )
 
     l0c_ptr = tla.allocate(
-        _tiling.l0_tm * _tiling.l0_tn, DTYPE_C, tla.AddressSpace.l0c, 512
+        _tiling.l0_tm * _tiling.l0_tn, DTYPE_C, tla.AddressSpace.l0c, 1024
     )
 
     aiv_ub_tile_elems = AIV_TILE_M * _tiling.l1_tn

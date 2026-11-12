@@ -425,7 +425,7 @@ def _print_l0c(
         element_count + element_offset,
         _KERNEL_L0C_ACC_DTYPE,
         tla.AddressSpace.l0c,
-        512,
+        1024,
     )
     l0c_ptr = l0c_allocation + element_offset
     with tla.cube():

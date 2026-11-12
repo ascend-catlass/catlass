@@ -430,11 +430,12 @@ def attn_fused_kernel(
         tla.allocate(D * KV_BLOCK, tla.Float8E4M3FN, tla.AddressSpace.l0b, 512),
     ]
 
+    # L0C accumulators are fed to tla.mmad, which needs 1024-byte alignment.
     l0c_s = [
-        tla.allocate(M_BLOCK * KV_BLOCK, tla.Float32, tla.AddressSpace.l0c, 512),
-        tla.allocate(M_BLOCK * KV_BLOCK, tla.Float32, tla.AddressSpace.l0c, 512),
+        tla.allocate(M_BLOCK * KV_BLOCK, tla.Float32, tla.AddressSpace.l0c, 1024),
+        tla.allocate(M_BLOCK * KV_BLOCK, tla.Float32, tla.AddressSpace.l0c, 1024),
     ]
-    l0c_o = tla.allocate(M_BLOCK * D, tla.Float32, tla.AddressSpace.l0c, 512)
+    l0c_o = tla.allocate(M_BLOCK * D, tla.Float32, tla.AddressSpace.l0c, 1024)
 
     ub_s = [
         tla.allocate((M_BLOCK // 2) * KV_BLOCK, tla.Float32, tla.AddressSpace.ub, 256),

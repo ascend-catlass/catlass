@@ -101,9 +101,9 @@ static Value materializeI64FromPtr(OpBuilder& builder, IntegerType resultType, V
 // Name of the module-level symbol that reserves the kernel's UB scratch.
 static constexpr llvm::StringLiteral kUbScratchGlobalName = "tla_ub_scratch";
 
-// Highest UB byte the scratch plan touches. This is the number the backend must
-// see reserved: everything above it belongs to the compiler reserve and, for
-// SIMT, to the Data Cache.
+// Highest UB byte the scratch plan touches. This is the number the backend
+// must see reserved: everything above it belongs to the compiler reserve and,
+// for SIMT, to the Data Cache.
 static uint64_t ubHighWaterBytes(const TlaScratchAllocationPlan& plan)
 {
     uint64_t high = 0;

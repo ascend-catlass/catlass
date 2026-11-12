@@ -99,7 +99,7 @@ def basic_mmad_kernel(
     # Integer route: an i8 x i8 MMAD accumulates into an i32 L0C, not fp32.
     acc_dtype = tla.Int32 if acc_is_int else tla.Float32
     l0c_ptr = tla.allocate(
-        _tiling.l0_tm * _tiling.l0_tn, acc_dtype, tla.AddressSpace.l0c, 512
+        _tiling.l0_tm * _tiling.l0_tn, acc_dtype, tla.AddressSpace.l0c, 1024
     )
 
     grid_m = (m + _tiling.l1_tm - 1) // _tiling.l1_tm

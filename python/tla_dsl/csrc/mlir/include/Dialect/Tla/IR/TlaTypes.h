@@ -14,6 +14,7 @@
 #include "tla/Types.h.inc"
 
 namespace tla {
+
 ::mlir::LogicalResult getTlaIndexTreeLeaves(::llvm::ArrayRef<int64_t> tree, ::llvm::SmallVectorImpl<int64_t>& leaves);
 
 /// GM-side MX scale blocks. NZFamily descriptors -- the 2x2 nested tree of

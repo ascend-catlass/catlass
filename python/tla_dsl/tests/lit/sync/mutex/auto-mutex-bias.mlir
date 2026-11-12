@@ -17,11 +17,11 @@
 !bias = !tla.tensor<!tla.layout<!tla.shape<32>, !tla.stride<1>, !tla.shape<32>, VectorLayout>, !tla.coord<0>, !tla.ptr<f32, biasbuf, 512>>
 !l0a = !tla.tensor<!tla.layout<!tla.shape<(16,2),(8,4)>, !tla.stride<(8,128),(1,256)>, !tla.shape<32,32>, zN>, !tla.coord<0,0>, !tla.ptr<f32, l0a, 512>>
 !l0b = !tla.tensor<!tla.layout<!tla.shape<(8,4),(16,2)>, !tla.stride<(1,256),(8,128)>, !tla.shape<32,32>, nZ>, !tla.coord<0,0>, !tla.ptr<f32, l0b, 512>>
-!l0c = !tla.tensor<!tla.layout<!tla.shape<(16,2),(16,2)>, !tla.stride<(16,256),(1,512)>, !tla.shape<32,32>, L0Clayout>, !tla.coord<0,0>, !tla.ptr<f32, l0c, 512>>
+!l0c = !tla.tensor<!tla.layout<!tla.shape<(16,2),(16,2)>, !tla.stride<(16,256),(1,512)>, !tla.shape<32,32>, L0Clayout>, !tla.coord<0,0>, !tla.ptr<f32, l0c, 1024>>
 
 module {
   tla.func @auto_mutex_mmad_bias(%gm: !gm, %gm_bias: !gm_bias) attributes {tla.auto_sync = "v0"} {
-    %l0c_ptr = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<f32, l0c, 512>
+    %l0c_ptr = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<f32, l0c, 1024>
     %l0b_ptr = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<f32, l0b, 512>
     %l0a_ptr = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<f32, l0a, 512>
     %l1_ptr = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<f32, l1, 512>
@@ -30,7 +30,7 @@ module {
     %l1 = "tla.make_tensor_like"(%l1_ptr, %gm) {layoutTag = #tla.layout_tag<zN>} : (!tla.ptr<f32, l1, 512>, !gm) -> !l1
     %l0a = "tla.make_tensor_like"(%l0a_ptr, %l1) {layoutTag = #tla.layout_tag<zN>} : (!tla.ptr<f32, l0a, 512>, !l1) -> !l0a
     %l0b = "tla.make_tensor_like"(%l0b_ptr, %gm) {layoutTag = #tla.layout_tag<nZ>} : (!tla.ptr<f32, l0b, 512>, !gm) -> !l0b
-    %l0c = "tla.make_tensor_like"(%l0c_ptr, %gm) {layoutTag = #tla.layout_tag<L0Clayout>} : (!tla.ptr<f32, l0c, 512>, !gm) -> !l0c
+    %l0c = "tla.make_tensor_like"(%l0c_ptr, %gm) {layoutTag = #tla.layout_tag<L0Clayout>} : (!tla.ptr<f32, l0c, 1024>, !gm) -> !l0c
     %l1_bias = "tla.make_tensor_like"(%l1_bias_ptr, %gm_bias) {layoutTag = #tla.layout_tag<VectorLayout>} : (!tla.ptr<f32, l1, 512>, !gm_bias) -> !l1_bias
     %bias = "tla.make_tensor_like"(%bias_ptr, %gm_bias) {layoutTag = #tla.layout_tag<VectorLayout>} : (!tla.ptr<f32, biasbuf, 512>, !gm_bias) -> !bias
     %init = arith.constant true
@@ -77,20 +77,20 @@ module {
 
 !mx_gm = !tla.tensor<!tla.layout<!tla.shape<32,32>, !tla.stride<32,1>, !tla.shape<32,32>, RowMajor>, !tla.coord<0,0>, !tla.ptr<f32, gm, 4>>
 !mx_gm_bias = !tla.tensor<!tla.layout<!tla.shape<32>, !tla.stride<1>, !tla.shape<32>, VectorLayout>, !tla.coord<0>, !tla.ptr<f32, gm, 4>>
-!mx_l0a = !tla.tensor<!tla.layout<!tla.shape<(16,2),(8,4)>, !tla.stride<(8,128),(1,256)>, !tla.shape<32,32>, zN>, !tla.coord<0,0>, !tla.ptr<f8E4M3FN, l0a, 512>>
-!mx_l0b = !tla.tensor<!tla.layout<!tla.shape<(8,4),(16,2)>, !tla.stride<(1,256),(8,128)>, !tla.shape<32,32>, nZ>, !tla.coord<0,0>, !tla.ptr<f8E4M3FN, l0b, 512>>
-!mx_l0c = !tla.tensor<!tla.layout<!tla.shape<(16,2),(16,2)>, !tla.stride<(16,256),(1,512)>, !tla.shape<32,32>, L0Clayout>, !tla.coord<0,0>, !tla.ptr<f32, l0c, 512>>
+!mx_l0a = !tla.tensor<!tla.layout<!tla.shape<(16,2),(8,4)>, !tla.stride<(8,128),(1,256)>, !tla.shape<32,32>, zN>, !tla.coord<0,0>, !tla.ptr<f8E4M3FN, l0a, 1024>>
+!mx_l0b = !tla.tensor<!tla.layout<!tla.shape<(8,4),(16,2)>, !tla.stride<(1,256),(8,128)>, !tla.shape<32,32>, nZ>, !tla.coord<0,0>, !tla.ptr<f8E4M3FN, l0b, 1024>>
+!mx_l0c = !tla.tensor<!tla.layout<!tla.shape<(16,2),(16,2)>, !tla.stride<(16,256),(1,512)>, !tla.shape<32,32>, L0Clayout>, !tla.coord<0,0>, !tla.ptr<f32, l0c, 1024>>
 !mx_bias = !tla.tensor<!tla.layout<!tla.shape<32>, !tla.stride<1>, !tla.shape<32>, VectorLayout>, !tla.coord<0>, !tla.ptr<f32, biasbuf, 512>>
 
 module {
   tla.func @auto_mutex_mmad_mx_bias(%gm: !mx_gm, %gm_bias: !mx_gm_bias) attributes {tla.auto_sync = "v0"} {
-    %l0c_ptr = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<f32, l0c, 512>
-    %l0b_ptr = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<f8E4M3FN, l0b, 512>
-    %l0a_ptr = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<f8E4M3FN, l0a, 512>
+    %l0c_ptr = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<f32, l0c, 1024>
+    %l0b_ptr = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<f8E4M3FN, l0b, 1024>
+    %l0a_ptr = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<f8E4M3FN, l0a, 1024>
     %bias_ptr = tla.alloc_ptr{size_bytes = 128} -> !tla.ptr<f32, biasbuf, 512>
-    %l0a = "tla.make_tensor_like"(%l0a_ptr, %gm) {layoutTag = #tla.layout_tag<zN>} : (!tla.ptr<f8E4M3FN, l0a, 512>, !mx_gm) -> !mx_l0a
-    %l0b = "tla.make_tensor_like"(%l0b_ptr, %gm) {layoutTag = #tla.layout_tag<nZ>} : (!tla.ptr<f8E4M3FN, l0b, 512>, !mx_gm) -> !mx_l0b
-    %l0c = "tla.make_tensor_like"(%l0c_ptr, %gm) {layoutTag = #tla.layout_tag<L0Clayout>} : (!tla.ptr<f32, l0c, 512>, !mx_gm) -> !mx_l0c
+    %l0a = "tla.make_tensor_like"(%l0a_ptr, %gm) {layoutTag = #tla.layout_tag<zN>} : (!tla.ptr<f8E4M3FN, l0a, 1024>, !mx_gm) -> !mx_l0a
+    %l0b = "tla.make_tensor_like"(%l0b_ptr, %gm) {layoutTag = #tla.layout_tag<nZ>} : (!tla.ptr<f8E4M3FN, l0b, 1024>, !mx_gm) -> !mx_l0b
+    %l0c = "tla.make_tensor_like"(%l0c_ptr, %gm) {layoutTag = #tla.layout_tag<L0Clayout>} : (!tla.ptr<f32, l0c, 1024>, !mx_gm) -> !mx_l0c
     %bias = "tla.make_tensor_like"(%bias_ptr, %gm_bias) {layoutTag = #tla.layout_tag<VectorLayout>} : (!tla.ptr<f32, biasbuf, 512>, !mx_gm_bias) -> !mx_bias
     %init = arith.constant true
     %unit = arith.constant 3 : i64

@@ -72,6 +72,8 @@ def block_sparse_attention_backward_kernel(
     fp32_lanes = 64
     zero_tile_rows = 64
     alignment = 512
+    # L0C accumulators are fed to tla.mmad, which needs 1024-byte alignment.
+    l0c_alignment = 1024
     io_dtype = mem_q.ptr.dtype
     selected_count = block_indices.origin_shape[1]
     q_block_count = (q_sequence_length + q_block - 1) // q_block
@@ -136,13 +138,13 @@ def block_sparse_attention_backward_kernel(
         head_dim * kv_block, io_dtype, tla.AddressSpace.l0b, alignment
     )
     l0c_tmp_ptr = tla.allocate(
-        q_block * kv_block, tla.Float32, tla.AddressSpace.l0c, alignment
+        q_block * kv_block, tla.Float32, tla.AddressSpace.l0c, l0c_alignment
     )
     l0c_aux_ptr = tla.allocate(
-        q_block * kv_block, tla.Float32, tla.AddressSpace.l0c, alignment
+        q_block * kv_block, tla.Float32, tla.AddressSpace.l0c, l0c_alignment
     )
     l0c_dq_ptr = tla.allocate(
-        q_block * head_dim, tla.Float32, tla.AddressSpace.l0c, alignment
+        q_block * head_dim, tla.Float32, tla.AddressSpace.l0c, l0c_alignment
     )
 
     l1_q_ptr = tla.allocate(

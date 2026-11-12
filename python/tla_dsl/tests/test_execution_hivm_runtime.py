@@ -4759,16 +4759,19 @@ def test_structured_cache_preserves_dynamic_ub_launch_metadata(
     )
     for compiled, value in ((first, first_value), (second, second_value)):
         module = compiled.jit_module
-        assert (module.ub_static_bytes, module.ub_dynamic_base) == (1000, 1024)
+        # 250 f32 is 1000 bytes; UB reserves whole 32-byte blocks, so 1024.
+        assert (module.ub_static_bytes, module.ub_dynamic_base) == (1024, 1024)
         assert module.ub_programmable_bytes == 253952
-        assert compiled.get_kernel_ub_size() == 1000
+        assert compiled.get_kernel_ub_size() == 1024
         assert compiled.max_ub_bytes == 253952 - 1024
         expected = execution._pack_launch_args(
             (out, bias, value[1]), compiled.execution_args.kernel_abi
         )
         for ub in (4096, 8192):
             compiled(out, value, ub=ub)
-            assert launches[-1]["dyn_ubuf_bytes"] == ub + 24
+            # The static footprint is block-aligned now, so the region starts
+            # exactly where it ends and nothing is declared for the gap.
+            assert launches[-1]["dyn_ubuf_bytes"] == ub
             assert launches[-1]["payload"] == expected
 
 

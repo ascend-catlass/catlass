@@ -26,7 +26,10 @@ from catlass.tla.runtime import make_fake_tensor
 
 
 def _alloc(n: int) -> None:
-    tla.allocate(n, tla.Float32, tla.AddressSpace.ub, 256)
+    # 32 is UB's local-memory alignment, and each request is sized to it.
+    # A coarser alignment would round the small ones up to the same block and
+    # erase the differences these tests use to tell branches apart.
+    tla.allocate(n, tla.Float32, tla.AddressSpace.ub, 32)
 
 
 # --------------------------------------------------------------------------

@@ -446,11 +446,35 @@ mlir::LogicalResult MmadMxOp::verify()
     if (lhsFp4) {
         if (lhsTag != LayoutTag::zN || rhsTag != LayoutTag::nZ)
             return emitOpError("packed fp4 operands must be tagged zN / nZ");
+        // An fp4 ML0 buffer is addressed in 512-byte units, like any other
+        // L0 tile, so the 512 the frontend enforces for l0a / l0b is enough.
     } else {
         if (lhsTag != LayoutTag::zN || rhsTag != LayoutTag::nZ)
             return emitOpError("fp8 MX operands must be tagged zN (lhs) and nZ (rhs)");
         if (!isFp8(lhsTy.getPtr().getPointee()) || !isFp8(rhsTy.getPtr().getPointee()))
             return emitOpError("MX operands must be f8E4M3FN / f8E5M2, or fp4-tagged i8 tiles");
+
+        // mxfp8 raises the L0 alignment to 1024: the instruction reads the
+        // operand as a whole 1024-byte block, so a buffer placed on a 512-byte
+        // boundary is half a block off. The frontend cannot enforce this --
+        // tla.allocate sees only the address space, and 512 is right for every
+        // other L0 user -- so the requirement is checked here, where the
+        // element format is known. fp4 above stays at 512.
+        //
+        // The test is divisibility, not size: an alignment of N promises only
+        // that the address is a multiple of N, so it promises 1024-byte
+        // alignment exactly when 1024 divides N. 1536 is a legal L0A alignment
+        // (3 x 512) yet not a multiple of 1024, and an address it produces can
+        // land 512 bytes into an mxfp8 block -- so "at least 1024" would let it
+        // through.
+        constexpr uint64_t kMxL0AlignBytes = 1024;
+        for (auto [ptr, side] : {std::pair{lhsTy.getPtr(), "lhs"}, std::pair{rhsTy.getPtr(), "rhs"}}) {
+            if (ptr.getAlignment() % kMxL0AlignBytes != 0)
+                return emitOpError() << side << " must be " << kMxL0AlignBytes
+                                     << "-byte aligned for an mxfp8 MX operand, but the tile is aligned to "
+                                     << ptr.getAlignment()
+                                     << " bytes. Allocate it with byte_alignment=" << kMxL0AlignBytes;
+        }
     }
     return mlir::success();
 }

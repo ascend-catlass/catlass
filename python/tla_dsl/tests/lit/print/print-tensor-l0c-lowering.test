@@ -9,16 +9,16 @@
 
 module {
   tla.func @print_tensor_l0c(%tag: i32) {
-    %ptr = "tla.alloc_ptr"() <{size_bytes = 4096 : i64}> : () -> !tla.ptr<f32, l0c, 512>
+    %ptr = "tla.alloc_ptr"() <{size_bytes = 4096 : i64}> : () -> !tla.ptr<f32, l0c, 1024>
     %shape = "tla.make_shape"() : () -> !tla.shape<(16,2),(16,2)>
     %stride = "tla.make_stride"() : () -> !tla.stride<(16,256),(1,512)>
     %origin = "tla.make_shape"() : () -> !tla.shape<32,32>
     %layout = "tla.make_layout"(%shape, %stride, %origin) <{layoutTag = #tla.layout_tag<L0Clayout>}> : (!tla.shape<(16,2),(16,2)>, !tla.stride<(16,256),(1,512)>, !tla.shape<32,32>) -> !tla.layout<!tla.shape<(16,2),(16,2)>, !tla.stride<(16,256),(1,512)>, !tla.shape<32,32>, L0Clayout>
     %coord = "tla.make_coord"() : () -> !tla.coord<16,0>
-    %value = "tla.make_tensor"(%ptr, %layout, %coord) : (!tla.ptr<f32, l0c, 512>, !tla.layout<!tla.shape<(16,2),(16,2)>, !tla.stride<(16,256),(1,512)>, !tla.shape<32,32>, L0Clayout>, !tla.coord<16,0>) -> !tla.tensor<!tla.layout<!tla.shape<(16,2),(16,2)>, !tla.stride<(16,256),(1,512)>, !tla.shape<32,32>, L0Clayout>, !tla.coord<16,0>, !tla.ptr<f32, l0c, 512>>
+    %value = "tla.make_tensor"(%ptr, %layout, %coord) : (!tla.ptr<f32, l0c, 1024>, !tla.layout<!tla.shape<(16,2),(16,2)>, !tla.stride<(16,256),(1,512)>, !tla.shape<32,32>, L0Clayout>, !tla.coord<16,0>) -> !tla.tensor<!tla.layout<!tla.shape<(16,2),(16,2)>, !tla.stride<(16,256),(1,512)>, !tla.shape<32,32>, L0Clayout>, !tla.coord<16,0>, !tla.ptr<f32, l0c, 1024>>
     %length = arith.constant 256 : i64
     "tla.cube"() ({
-      tla.print_tensor %value length = %length shape = [16, 16] : !tla.tensor<!tla.layout<!tla.shape<(16,2),(16,2)>, !tla.stride<(16,256),(1,512)>, !tla.shape<32,32>, L0Clayout>, !tla.coord<16,0>, !tla.ptr<f32, l0c, 512>>, i64
+      tla.print_tensor %value length = %length shape = [16, 16] : !tla.tensor<!tla.layout<!tla.shape<(16,2),(16,2)>, !tla.stride<(16,256),(1,512)>, !tla.shape<32,32>, L0Clayout>, !tla.coord<16,0>, !tla.ptr<f32, l0c, 1024>>, i64
     }) : () -> ()
     "tla.vector"() ({
       %one = arith.constant 1 : i32

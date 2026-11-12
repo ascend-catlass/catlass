@@ -42,6 +42,8 @@ def qwen_sparse_attention_kernel(
     c0 = 0
     c1 = 1
     alignment = 512
+    # L0C accumulators are fed to tla.mmad, which needs 1024-byte alignment.
+    l0c_alignment = 1024
     min_value = -3.0e38
     max_floor = -1.0e30
     vl_f32 = 64
@@ -78,10 +80,10 @@ def qwen_sparse_attention_kernel(
     )
 
     l0c_s_ptr = tla.allocate(
-        q_block * kv_block, tla.Float32, tla.AddressSpace.l0c, alignment
+        q_block * kv_block, tla.Float32, tla.AddressSpace.l0c, l0c_alignment
     )
     l0c_o_ptr = tla.allocate(
-        q_block * head_dim, tla.Float32, tla.AddressSpace.l0c, alignment
+        q_block * head_dim, tla.Float32, tla.AddressSpace.l0c, l0c_alignment
     )
 
     ub_s_ptr = tla.allocate(

@@ -166,6 +166,7 @@ def allocate_recast_ptr_kernel() -> None:
 
 @tla.kernel
 def odd_allocate_recast_size() -> None:
+    """A request smaller than the alignment, recast to a narrower element."""
     ptr = tla.allocate(3, tla.Int8, tla.AddressSpace.ub, 512)
     tla.recast_ptr(ptr, dtype=tla.Float16)
 
@@ -372,7 +373,7 @@ def f32_mmad_generated_addrspace_kernel(
     gm_c = tla.tile_view(mem_c, tla.make_shape(32, 32), tla.make_coord(0, 0))
     l0a_ptr = tla.allocate((32, 32), tla.Float32, tla.AddressSpace.l0a, 512)
     l0b_ptr = tla.allocate((32, 32), tla.Float32, tla.AddressSpace.l0b, 512)
-    l0c_ptr = tla.allocate((32, 32), tla.Float32, tla.AddressSpace.l0c, 512)
+    l0c_ptr = tla.allocate((32, 32), tla.Float32, tla.AddressSpace.l0c, 1024)
     lhs = tla.make_tensor_like(l0a_ptr, gm_a, tla.arch.zN)
     rhs = tla.make_tensor_like(l0b_ptr, gm_b, tla.arch.nZ)
     acc = tla.make_tensor_like(l0c_ptr, gm_c, tla.arch.L0Clayout)
@@ -456,9 +457,10 @@ def test_allocate_backed_recast_ptr_preserves_pointer_type() -> None:
     assert "!tla.ptr<f32, ub, 512>" in mlir
     assert "!tla.memref<" not in mlir
 
-def test_allocate_backed_recast_ptr_allows_indivisible_size() -> None:
+def test_allocate_backed_recast_ptr_rounds_a_short_request_to_the_alignment() -> None:
+    """3 bytes at 512-byte alignment reserve 512: the size follows the alignment."""
     mlir = odd_allocate_recast_size.dump_mlir()
-    assert "size_bytes = 3" in mlir
+    assert "size_bytes = 512" in mlir
     assert "!tla.ptr<f16, ub, 512>" in mlir
 
 def test_non_const_attr_raises_specific_error() -> None:
@@ -625,7 +627,8 @@ def test_constexpr_param_is_excluded_from_runtime_function_type(compiler_tlair) 
         in mlir
     )
     assert "%arg1" not in mlir
-    assert "size_bytes = 32" in mlir
+    # 32 bytes aligned to 64 reserve 64: the size follows the alignment.
+    assert "size_bytes = 64" in mlir
 
 def test_tile_view_scales_nested_tile_coords_by_shape() -> None:
     mem = make_fake_tensor(
@@ -770,7 +773,7 @@ def test_f32_mmad_generated_addrspaces_validate() -> None:
     )
     assert "!tla.ptr<f32, l0a, 512>" in mlir
     assert "!tla.ptr<f32, l0b, 512>" in mlir
-    assert "!tla.ptr<f32, l0c, 512>" in mlir
+    assert "!tla.ptr<f32, l0c, 1024>" in mlir
     assert "tla.mmad" in mlir
 
 def test_make_tensor_like_maps_l0_pointer_to_tensor_addrspace() -> None:

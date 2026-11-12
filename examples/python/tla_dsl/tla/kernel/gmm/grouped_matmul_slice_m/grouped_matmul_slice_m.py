@@ -124,7 +124,7 @@ def grouped_matmul_slice_m_kernel(
         _tiling.l0_tk * _tiling.l0_tn, dtype_b, tla.AddressSpace.l0b, 512
     )
     l0c_ptr = tla.allocate(
-        _tiling.l0_tm * _tiling.l0_tn, DTYPE_C, tla.AddressSpace.l0c, 512
+        _tiling.l0_tm * _tiling.l0_tn, DTYPE_C, tla.AddressSpace.l0c, 1024
     )
 
     grid_n = (n_dim + _tiling.l1_tn - 1) // _tiling.l1_tn

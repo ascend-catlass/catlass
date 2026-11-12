@@ -116,7 +116,8 @@ def basic_mixed_fixpipe_per_tensor_kernel(
     l1b_ptr = tla.allocate(tk * tn, dtype_b, tla.AddressSpace.l1, 512)
     l0a_ptr = tla.allocate(l0m * l0k, dtype_a, tla.AddressSpace.l0a, 512)
     l0b_ptr = tla.allocate(l0k * l0n, dtype_b, tla.AddressSpace.l0b, 512)
-    l0c_ptr = tla.allocate(l0m * l0n, acc_dtype, tla.AddressSpace.l0c, 512)
+    # L0C accumulators are fed to tla.mmad, which needs 1024-byte alignment.
+    l0c_ptr = tla.allocate(l0m * l0n, acc_dtype, tla.AddressSpace.l0c, 1024)
     # One allocation serves both AIVs: each has its own UB address space, so the
     # same offset resolves to a private tile on either side.
     ub_ptr = tla.allocate(tm * tn, dtype_c, tla.AddressSpace.ub, 256)

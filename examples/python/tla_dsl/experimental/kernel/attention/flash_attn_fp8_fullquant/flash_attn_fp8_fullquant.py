@@ -218,8 +218,8 @@ def fafq_kernel(
     l1_p = tla.allocate(Q_BLOCK * PAGE, tla.Float8E4M3FN, tla.AddressSpace.l1, 512)
     l0a = tla.allocate(Q_BLOCK * PAGE, tla.Float8E4M3FN, tla.AddressSpace.l0a, 512)
     l0b = tla.allocate(PAGE * D, tla.Float8E4M3FN, tla.AddressSpace.l0b, 512)
-    l0c_s = tla.allocate(Q_BLOCK * PAGE, tla.Float32, tla.AddressSpace.l0c, 512)
-    l0c_o = tla.allocate(Q_BLOCK * D, tla.Float32, tla.AddressSpace.l0c, 512)
+    l0c_s = tla.allocate(Q_BLOCK * PAGE, tla.Float32, tla.AddressSpace.l0c, 1024)
+    l0c_o = tla.allocate(Q_BLOCK * D, tla.Float32, tla.AddressSpace.l0c, 1024)
 
     ub_s = tla.allocate(HALF * PAGE, tla.Float32, tla.AddressSpace.ub, 256)
     ub_o = tla.allocate(HALF * D, tla.Float32, tla.AddressSpace.ub, 256)

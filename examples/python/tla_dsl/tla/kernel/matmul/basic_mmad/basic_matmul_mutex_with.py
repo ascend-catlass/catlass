@@ -90,7 +90,7 @@ def basic_mmad_mutex_with_kernel(
     )
 
     l0c_ptr = tla.allocate(
-        (_tiling.l0_tm, _tiling.l0_tn), tla.Float32, tla.AddressSpace.l0c, 512
+        (_tiling.l0_tm, _tiling.l0_tn), tla.Float32, tla.AddressSpace.l0c, 1024
     )
 
     grid_m = (m + _tiling.l1_tm - 1) // _tiling.l1_tm

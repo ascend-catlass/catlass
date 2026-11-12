@@ -62,6 +62,13 @@ class _FrontendEmitState:
     extern_usages: dict[str, _ExternUsage] = field(default_factory=dict)
     #: Explicit ``@tla.kernel(core_ratio=...)`` when provided; else ``None``.
     core_ratio: tuple[int, int] | None = None
+    #: On-chip bytes already claimed per address-space token (``"ub"``,
+    #: ``"l1"``, ...), each value being the next free offset after the
+    #: allocations made so far. ``tla.allocate`` adds to it so that a kernel
+    #: cannot sum its way past an on-chip capacity while every individual
+    #: request looks fine; the bounds themselves live in
+    #: :mod:`catlass.base_dsl.arch`.
+    allocated_bytes_by_scope: dict[str, int] = field(default_factory=dict)
 
 
 _FRONTEND_EMIT_STATE: contextvars.ContextVar[_FrontendEmitState | None] = (

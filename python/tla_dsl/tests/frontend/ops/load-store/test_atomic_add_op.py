@@ -97,7 +97,7 @@ def atomic_add_l0c2gm(gm_tensor: tla.Tensor) -> None:
     """Test atomic add mode, data path from L0C to GM"""
 
     _m, _n = 32, 32
-    l0c_ptr = tla.allocate(_m * _n, tla.Float32, tla.AddressSpace.l0c, 512)
+    l0c_ptr = tla.allocate(_m * _n, tla.Float32, tla.AddressSpace.l0c, 1024)
     l0c_tensor = tla.make_tensor_like(l0c_ptr, gm_tensor, tla.arch.L0Clayout)
     l0c_tile = tla.tile_view(l0c_tensor, tla.make_shape(_m, _n), tla.make_coord(0, 0))
     gm_tile = tla.tile_view(gm_tensor, tla.make_shape(_m, _n), tla.make_coord(0, 0))

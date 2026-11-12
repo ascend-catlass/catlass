@@ -85,7 +85,9 @@ def chunk_gla_fwd_kernel_o_mixed_kernel(
             dtype=INPUT_DTYPE,
         )
         l0c_ptr = tla.recast_ptr(
-            tla.allocate(CHUNK * DIM * F32_BYTES, tla.UInt8, tla.AddressSpace.l0c, 512),
+            tla.allocate(
+                CHUNK * DIM * F32_BYTES, tla.UInt8, tla.AddressSpace.l0c, 1024
+            ),
             dtype=tla.Float32,
         )
         tla.set_flag(l1_free)

@@ -74,7 +74,8 @@ def msrs_main_kernel(
     l0b0_ptr = tla.allocate(SK * BN, dtype_in, tla.AddressSpace.l0b, 512)
     l0a1_ptr = tla.allocate(BM * SK, dtype_in, tla.AddressSpace.l0a, 512)
     l0b1_ptr = tla.allocate(SK * BN, dtype_in, tla.AddressSpace.l0b, 512)
-    l0c_ptr = tla.allocate(BM * BN, tla.Float32, tla.AddressSpace.l0c, 512)
+    # L0C accumulators are fed to tla.mmad, which needs 1024-byte alignment.
+    l0c_ptr = tla.allocate(BM * BN, tla.Float32, tla.AddressSpace.l0c, 1024)
 
     # Per-AIV UB: one SPLIT_M half of the L0C tile plus the statistics working set.
     ubz_ptr = tla.allocate(ROWS_PER_SUB * BN, tla.Float32, tla.AddressSpace.ub, 256)

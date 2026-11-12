@@ -29,3 +29,14 @@
 // load it. That check is a Python-side one and lives with the other copy
 // checks (tests/test_copy_lowering.py). For IR the frontend did not produce,
 // tla-cube-region still names the missing scale block on the matmul itself.
+
+// mxfp8 raises the L0A / L0B alignment to 1024. The frontend cannot enforce it:
+// tla.allocate sees only the address space, and 512 is what every other L0 user
+// gets by with -- an mxfp8 operand allocated at 512 is legal right up to the
+// matmul. The element format is only known at the mmad_mx, so the check lives
+// there. Packed fp4 keeps the 512-byte block, as the case above shows.
+
+// RUN: %python %S/Inputs/generate_mmad_ir.py mx-misaligned | not %tla_compile - -o - 2>&1 | %filecheck %s --check-prefix=MXALIGN
+
+// MXALIGN: error: 'tla.mmad_mx' op lhs must be 1024-byte aligned for an mxfp8 MX operand
+// MXALIGN-SAME: but the tile is aligned to 512 bytes

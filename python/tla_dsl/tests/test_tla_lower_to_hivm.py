@@ -158,7 +158,7 @@ def _cube_attr_kernel(mem_a: tla.Tensor, mem_b: tla.Tensor, mem_c: tla.Tensor) -
         tla.arch.nZ,
     )
     acc = tla.make_tensor_like(
-        tla.allocate((16, 16), tla.Float32, tla.AddressSpace.l0c, 512),
+        tla.allocate((16, 16), tla.Float32, tla.AddressSpace.l0c, 1024),
         acc_parent,
         tla.arch.L0Clayout,
     )
@@ -285,6 +285,9 @@ def _pointer_if_kernel(mem_a: tla.Tensor) -> None:
 @tla.kernel
 def _loop_carried_pointer_same_capacity_kernel(mem_a: tla.Tensor) -> None:
     root = tla.tile_view(mem_a, tla.make_shape(16, 4), tla.make_coord(0, 0))
+    # Both allocations take 512 bytes (256 rounded up to the 512-byte
+    # alignment), so the two edges of the join agree and the pointer carries
+    # that capacity: 256 f16 elements.
     ptr0 = tla.allocate((32, 4), tla.Float16, tla.AddressSpace.l1, 512)
     ptr1 = tla.allocate((32, 4), tla.Float16, tla.AddressSpace.l1, 512)
     selected = ptr0
@@ -298,8 +301,11 @@ def _loop_carried_pointer_same_capacity_kernel(mem_a: tla.Tensor) -> None:
 @tla.kernel
 def _loop_carried_pointer_changed_capacity_kernel(mem_a: tla.Tensor) -> None:
     root = tla.tile_view(mem_a, tla.make_shape(16, 4), tla.make_coord(0, 0))
-    ptr0 = tla.allocate((32, 4), tla.Float16, tla.AddressSpace.l1, 512)
-    ptr1 = tla.allocate((16, 4), tla.Float16, tla.AddressSpace.l1, 512)
+    # 1024 bytes versus 256 bytes, both at 512-byte alignment: the size
+    # rounds to 1024 versus 512, so the two edges of the join must carry
+    # different amounts and the extent falls back to what the copy touches.
+    ptr0 = tla.allocate((128, 4), tla.Float16, tla.AddressSpace.l1, 512)
+    ptr1 = tla.allocate((32, 4), tla.Float16, tla.AddressSpace.l1, 512)
     selected = ptr0
     with tla.cube():
         for i in tla.range(0, 2, 1):
@@ -799,7 +805,12 @@ def test_pointer_if_mixed_results_compile_through_tla_lower_ptr() -> None:
 @pytest.mark.parametrize(
     ("kernel", "expected_storage_elements"),
     (
-        (_loop_carried_pointer_same_capacity_kernel, 128),
+        # Both allocations take 512 bytes each (256 rounded up to the
+        # 512-byte L1 alignment), so the two edges of the join agree and the
+        # pointer carries that capacity: 256 f16 elements.
+        (_loop_carried_pointer_same_capacity_kernel, 256),
+        # 1024 bytes versus 512 bytes: the join cannot pick one, so the extent
+        # falls back to the 16 x 4 tile the copy actually touches.
         (_loop_carried_pointer_changed_capacity_kernel, 64),
     ),
 )

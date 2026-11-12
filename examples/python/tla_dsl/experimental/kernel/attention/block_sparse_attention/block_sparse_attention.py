@@ -44,6 +44,8 @@ def block_sparse_attention_kernel(
 ):
     q_block_sub = q_block // 2
     alignment = 512
+    # L0C accumulators are fed to tla.mmad, which needs 1024-byte alignment.
+    l0c_alignment = 1024
     l0_half_size = 32768
     vl_float_ele = 64
     min_value = -3.0e38
@@ -186,16 +188,16 @@ def block_sparse_attention_kernel(
     )
 
     l0_s_ping_ptr = tla.allocate(
-        q_block * kv_block, tla.Float32, tla.AddressSpace.l0c, alignment
+        q_block * kv_block, tla.Float32, tla.AddressSpace.l0c, l0c_alignment
     )
     l0_s_pong_ptr = tla.allocate(
-        q_block * kv_block, tla.Float32, tla.AddressSpace.l0c, alignment
+        q_block * kv_block, tla.Float32, tla.AddressSpace.l0c, l0c_alignment
     )
     l0_pv_ping_ptr = tla.allocate(
-        q_block * head_dim, tla.Float32, tla.AddressSpace.l0c, alignment
+        q_block * head_dim, tla.Float32, tla.AddressSpace.l0c, l0c_alignment
     )
     l0_pv_pong_ptr = tla.allocate(
-        q_block * head_dim, tla.Float32, tla.AddressSpace.l0c, alignment
+        q_block * head_dim, tla.Float32, tla.AddressSpace.l0c, l0c_alignment
     )
 
     ub_s_ping_ptr = tla.allocate(

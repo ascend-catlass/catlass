@@ -138,7 +138,7 @@ def multi_core_splitk_mmad_kernel(
         _tiling.l0_tk * _tiling.l0_tn, dtype_b, tla.AddressSpace.l0b, 512
     )
     l0c_ptr = tla.allocate(
-        _tiling.l0_tm * _tiling.l0_tn, DTYPE_C, tla.AddressSpace.l0c, 512
+        _tiling.l0_tm * _tiling.l0_tn, DTYPE_C, tla.AddressSpace.l0c, 1024
     )
 
     # UB: split-K gather rows; optional narrow-type cast staging.

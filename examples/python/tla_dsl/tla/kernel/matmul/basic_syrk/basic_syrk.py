@@ -526,7 +526,7 @@ def _syrk_impl(
         _tiling.l0_tk * _tiling.l1_tn, dtype_x, tla.AddressSpace.l0b, 512
     )
     l0c_ptr = tla.allocate(
-        _tiling.l1_tm * _tiling.l1_tn, tla.Float32, tla.AddressSpace.l0c, 512
+        _tiling.l1_tm * _tiling.l1_tn, tla.Float32, tla.AddressSpace.l0c, 1024
     )
 
     chunk_rows = _tiling.chunk_rows
