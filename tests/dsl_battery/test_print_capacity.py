@@ -100,7 +100,7 @@ def test_mixed_print_core_ratio(device, subblocks, capfd):
     elements = blocks * 2 * 64
     fake = make_fake_tensor(tla.Float32, (elements,), (1,), origin_shape=(elements,))
     compiled = kernel.compile(type_args=(fake, fake), options="--npu-arch 3510")
-    assert compiled.jit_module.aiv_subblock_count == subblocks
+    assert compiled.jit_module.print_config.aiv_subblock_count == subblocks
     pattern = re.compile(
         r"DumpTensor: call=([01]), block=(\d+), subblock=([01]), "
         r"data_type=float32, position=(REG|UB), shape=\[(?:4|64)\] dump_size=4 \[(.*?)\]"

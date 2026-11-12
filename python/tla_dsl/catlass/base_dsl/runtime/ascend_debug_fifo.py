@@ -15,6 +15,7 @@ from typing import Any, Callable
 
 from ...execution import TlaRuntimeUnavailableError
 from .ascend import check_acl_errors
+from .print_config import _PrintLaunchConfig
 
 DEBUG_PRINT_WORKSPACE_SENTINEL = int.from_bytes(b"TLA_PRNT", "big")
 PRINT_TENSOR_WORKSPACE_SENTINEL = int.from_bytes(b"TLA_TPRN", "big")
@@ -544,16 +545,15 @@ def _u64_list_to_args(values: list[int]) -> bytes:
 def prepare_launch_args(
     args: bytes,
     *,
-    expects_debug_fifo: bool,
-    expects_print_tensor: bool,
-    mixed_tensor_handoff: bool = False,
+    print_config: _PrintLaunchConfig,
     fifo_device_ptr: int,
-    expects_debug_tunnel: bool = False,
     debug_tunnel_device_ptr: int = 0,
 ) -> bytes:
     values = _args_to_u64_list(args)
-    if mixed_tensor_handoff and not expects_print_tensor:
-        raise AscDebugFifoError("mixed tensor handoff requires native tensor print")
+    expects_debug_fifo = print_config.uses_scalar_print
+    expects_print_tensor = print_config.uses_tensor_print
+    mixed_tensor_handoff = print_config.mixed_core and expects_print_tensor
+    expects_debug_tunnel = print_config.print_tensor_position in {"L1", "L0C"}
     debug_tunnel_value: int | None = None
     if expects_debug_tunnel:
         if not values or values[-1] != DEBUG_TUNNEL_STATE_SENTINEL:
@@ -1192,17 +1192,17 @@ def launch_with_debug_fifo(
     block_num: int,
     device: int,
     stream: int,
-    uses_scalar_print: bool,
-    uses_tensor_print: bool,
-    is_mixed: bool,
-    aiv_subblock_count: int = 1,
-    print_tensor_position: str | None = None,
+    print_config: _PrintLaunchConfig,
 ) -> None:
     """Open FIFO if needed, rewrite args, invoke ``launch_kernel``, then close."""
+    uses_scalar_print = print_config.uses_scalar_print
+    uses_tensor_print = print_config.uses_tensor_print
+    aiv_subblock_count = print_config.aiv_subblock_count
+    print_tensor_position = print_config.print_tensor_position
+    is_mixed = print_config.mixed_core
     args = payload
     expects_debug_fifo = uses_scalar_print
     expects_print_tensor = uses_tensor_print
-    mixed_tensor_handoff = is_mixed and uses_tensor_print
     expects_debug_tunnel = print_tensor_position in {"L1", "L0C"}
     needs_fifo = bool(expects_debug_fifo) or bool(expects_print_tensor)
     if not needs_fifo:
@@ -1225,11 +1225,8 @@ def launch_with_debug_fifo(
             debug_tunnel_state = _DebugTunnelHostState.open(block_num)
         rewritten = prepare_launch_args(
             args,
-            expects_debug_fifo=bool(expects_debug_fifo),
-            expects_print_tensor=expects_print_tensor,
-            mixed_tensor_handoff=mixed_tensor_handoff,
+            print_config=print_config,
             fifo_device_ptr=fifo.device_ptr,
-            expects_debug_tunnel=expects_debug_tunnel,
             debug_tunnel_device_ptr=(
                 debug_tunnel_state.state_ptr if debug_tunnel_state is not None else 0
             ),

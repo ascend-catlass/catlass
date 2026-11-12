@@ -7,6 +7,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Mapping, Sequence
 
+from .runtime.print_config import _PrintLaunchConfig
+
 if TYPE_CHECKING:
     from ..execution import TlaExecutionResult
 
@@ -287,15 +289,7 @@ class JitModule:
     entrypoint: str
     kernel_mode: str
     execution_args: ExecutionArgs
-    uses_scalar_print: bool
-    uses_tensor_print: bool
-    is_mixed: bool
-    print_metadata: tuple[Any, ...] | None
-    print_helper_core: str | None
-    print_tensor_position: str | None = None
-    simt_print_formats: bytes | None = None
-    print_argument_layout: tuple[str, ...] = ()
-    aiv_subblock_count: int = 1
+    print_config: _PrintLaunchConfig
     # UB accounting. ub_bytes is the kernel's requirement; the window is what a
     # SIMT kernel declares at launch, and 0 for a kernel that declares nothing.
     ub_static_bytes: int = 0
@@ -414,31 +408,32 @@ class JitExecutor:
         dyn_ubuf_bytes = _resolved_dyn_ubuf_bytes(
             module, int(launch_kwargs.get("ub", 0) or 0)
         )
-        uses_tensor_print = module.uses_tensor_print
-        print_metadata = module.print_metadata
+        print_config = module.print_config
+        uses_tensor_print = print_config.uses_tensor_print
+        print_metadata = print_config.print_metadata
         if uses_tensor_print:
             assert print_metadata is not None
-            assert module.print_helper_core is not None
+            assert print_config.print_helper_core is not None
             execution_mod._validate_print_tensor_fifo_capacity(
                 print_metadata,
                 block_num,
-                helper_core=module.print_helper_core,
-                mixed=module.is_mixed,
-                aiv_subblock_count=module.aiv_subblock_count,
+                helper_core=print_config.print_helper_core,
+                mixed=print_config.mixed_core,
+                aiv_subblock_count=print_config.aiv_subblock_count,
                 # Tensor-only launches retain their existing static preflight.
                 # Mixed/VF logs have no legacy aggregate metadata and rely on
                 # the device's bounded writer instead.
                 **(
                     {"bounded": not print_metadata}
-                    if module.print_argument_layout
+                    if print_config.print_argument_layout
                     else {}
                 ),
             )
 
         payload = module.execution_args.generate_launch_payload(args)
-        if not module.print_argument_layout:
+        if not print_config.print_argument_layout:
             payload = execution_mod._append_debug_print_workspace_payload(
-                payload, enabled=module.uses_scalar_print
+                payload, enabled=print_config.uses_scalar_print
             )
             if uses_tensor_print:
                 extension = bytearray(payload)
@@ -451,7 +446,7 @@ class JitExecutor:
                     )
                 )
                 payload = bytes(extension)
-            if module.print_tensor_position in {"L1", "L0C"}:
+            if print_config.print_tensor_position in {"L1", "L0C"}:
                 extension = bytearray(payload)
                 execution_mod._align_payload(extension, execution_mod._POINTER_ABI_SIZE)
                 extension.extend(
@@ -480,31 +475,8 @@ class JitExecutor:
                     block_num=block_num,
                     payload=payload,
                     dyn_ubuf_bytes=dyn_ubuf_bytes,
-                    uses_scalar_print=module.uses_scalar_print,
-                    uses_tensor_print=uses_tensor_print,
-                    is_mixed=module.is_mixed,
-                    **(
-                        {"aiv_subblock_count": module.aiv_subblock_count}
-                        if module.is_mixed
-                        and (
-                            module.uses_scalar_print
-                            or uses_tensor_print
-                            or module.simt_print_formats is not None
-                        )
-                        else {}
-                    ),
-                    print_tensor_position=module.print_tensor_position,
+                    print_config=print_config,
                     device_id=self.device,
-                    **(
-                        {"print_argument_layout": module.print_argument_layout}
-                        if module.print_argument_layout
-                        else {}
-                    ),
-                    **(
-                        {"simt_print_formats": module.simt_print_formats}
-                        if module.simt_print_formats is not None
-                        else {}
-                    ),
                 )
             except execution_mod.TlaRuntimeUnavailableError as exc:
                 from .runtime import ascend as ascend_rt
@@ -532,11 +504,11 @@ class JitExecutor:
         # lines. Shared launches already validate each record in the transport;
         # capturing them here would silently discard scalar and SIMT output.
         if print_metadata is None or (
-            module.print_argument_layout
+            print_config.print_argument_layout
             and (
-                module.uses_scalar_print
-                or module.simt_print_formats is not None
-                or module.print_helper_core == "both"
+                print_config.uses_scalar_print
+                or print_config.simt_print_formats is not None
+                or print_config.print_helper_core == "both"
             )
         ):
             launch()
@@ -545,11 +517,11 @@ class JitExecutor:
             print_block_count = execution_mod._checked_print_tensor_block_count(
                 block_num
             )
-            helper_core = module.print_helper_core
+            helper_core = print_config.print_helper_core
             assert helper_core is not None
             expected_subblocks: tuple[int | None, ...] = (
-                tuple(range(module.aiv_subblock_count))
-                if helper_core == "aiv" and module.is_mixed
+                tuple(range(print_config.aiv_subblock_count))
+                if helper_core == "aiv" and print_config.mixed_core
                 else (0,)
                 if helper_core == "aiv"
                 else (None,)
@@ -569,7 +541,7 @@ class JitExecutor:
                         dtype=metadata.dtype,
                         call=None if preserve_legacy_format else metadata.call,
                         block=record.block,
-                        position=metadata.position if module.is_mixed else None,
+                        position=metadata.position if print_config.mixed_core else None,
                         subblock=record.subblock,
                     )
                 )

@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from catlass.base_dsl.runtime import ascend_debug_fifo as fifo_mod
+from catlass.base_dsl.runtime.print_config import _PrintLaunchConfig
 
 
 class _FakeAcl:
@@ -491,10 +492,12 @@ def _launch_local(launch_kernel, *, position: str = "L1") -> None:
         block_num=1,
         device=3,
         stream=7,
-        uses_scalar_print=False,
-        uses_tensor_print=True,
-        is_mixed=False,
-        print_tensor_position=position,
+        print_config=_PrintLaunchConfig(
+            mixed_core=False,
+            uses_scalar_print=False,
+            print_tensor_position=position,
+            print_helper_core="aic",
+        ),
     )
 
 
@@ -617,11 +620,12 @@ def test_prepare_launch_args_places_fifo_by_explicit_handoff_mode(
 
     rewritten = fifo_mod.prepare_launch_args(
         payload,
-        expects_debug_fifo=False,
-        expects_print_tensor=True,
-        mixed_tensor_handoff=mixed_handoff,
+        print_config=_PrintLaunchConfig(
+            print_helper_core="aic",
+            mixed_core=mixed_handoff,
+            print_tensor_position="L1",
+        ),
         fifo_device_ptr=0x1000,
-        expects_debug_tunnel=True,
         debug_tunnel_device_ptr=0x2000,
     )
 

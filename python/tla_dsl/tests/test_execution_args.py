@@ -17,6 +17,7 @@ from catlass import compiler_bridge, execution
 from catlass._mlir import ir as mlir_ir
 from catlass.base_dsl.jit_executor import ExecutionArgs
 from catlass.base_dsl import BaseDSL
+from catlass.base_dsl.runtime.print_config import _PrintLaunchConfig
 from catlass.base_dsl.runtime.argument_tree import (
     build_runtime_argument_tree,
     flatten_runtime_leaves,
@@ -24,9 +25,7 @@ from catlass.base_dsl.runtime.argument_tree import (
 from catlass.tla.runtime import make_fake_tensor
 
 
-@pytest.mark.parametrize(
-    "container", ["direct", "tuple", "list", "dataclass"]
-)
+@pytest.mark.parametrize("container", ["direct", "tuple", "list", "dataclass"])
 @pytest.mark.parametrize("binding,pointer", [(False, 0x1000), (True, 0)])
 def test_launch_rejects_unbound_tensor_in_each_container(
     monkeypatch, container, binding, pointer
@@ -76,13 +75,15 @@ def test_launch_rejects_unbound_tensor_in_each_container(
         execution_args=ExecutionArgs(
             kernel_abi=layout, argument_trees=(build_runtime_argument_tree(value),)
         ),
-        uses_scalar_print=False,
-        simt_print_formats=None,
-        uses_tensor_print=False,
-        print_argument_layout=(),
-        print_metadata=None,
-        print_tensor_position=None,
-        is_mixed=False,
+        print_config=_PrintLaunchConfig(
+            print_argument_layout=(),
+            uses_scalar_print=False,
+            mixed_core=False,
+            print_metadata=None,
+            print_tensor_position=None,
+            simt_print_formats=None,
+            print_helper_core=None,
+        ),
         ub_dynamic_base=-1,
     )
     launched = []
@@ -140,9 +141,7 @@ def test_tree_launch_signature_follows_ported_constexpr_rule(name, runtime_names
     runtime_args = (1,) if runtime_names else ()
     binder = ExecutionArgs(
         original_signature=sig,
-        argument_trees=tuple(
-            build_runtime_argument_tree(1) for _ in runtime_names
-        ),
+        argument_trees=tuple(build_runtime_argument_tree(1) for _ in runtime_names),
     )
     assert tuple(binder.signature.parameters) == runtime_names
     assert binder.get_rectified_args_from_original_args((1, 128)) == runtime_args
@@ -155,9 +154,7 @@ def test_lowered_self_parameter_and_launch_signature_agree():
     def kernel(self, value, tile: tla.Constexpr):
         _ = self + value + tile
 
-    lowered = BaseDSL()._lower(
-        kernel, kind="kernel", options={}, type_args=(1, 3, 128)
-    )
+    lowered = BaseDSL()._lower(kernel, kind="kernel", options={}, type_args=(1, 3, 128))
     # ``self`` and ``tile`` are compile-time; only ``value`` reaches the ABI.
     assert len(lowered.argument_trees) == 1
     binder = ExecutionArgs(
@@ -287,13 +284,17 @@ def test_from_callable_without_tree_plan_keeps_legacy_rectification() -> None:
     assert binder.get_rectified_args((value,)) == (value,)
 
 
-def _structured_tensor(shape=(8,), stride=(1,), dtype=tla.Float32, *, layout_tag=tla.arch.RowMajor):
+def _structured_tensor(
+    shape=(8,), stride=(1,), dtype=tla.Float32, *, layout_tag=tla.arch.RowMajor
+):
     return make_fake_tensor(dtype, shape, stride, layout_tag=layout_tag)
+
 
 @dataclass
 class _StaticConfig:
     tile: tla.Constexpr[int] = 128
     width: tla.Constexpr[int] = 256
+
 
 def test_constexpr_only_tree_retains_logical_launch_position() -> None:
     static = _StaticConfig()
@@ -310,6 +311,7 @@ def test_constexpr_only_tree_retains_logical_launch_position() -> None:
     assert binder.get_rectified_args((static,)) == ()
     with pytest.raises(ValueError, match="compiled kernel signature"):
         binder.get_rectified_args(())
+
 
 def test_constexpr_only_tree_does_not_shift_direct_runtime_arguments() -> None:
     tensor = _structured_tensor()
@@ -330,12 +332,15 @@ def test_constexpr_only_tree_does_not_shift_direct_runtime_arguments() -> None:
     with pytest.raises(ValueError, match="compiled kernel signature"):
         binder.get_rectified_args((tensor,))
 
+
 @dataclass
 class _EmptyConfig:
     pass
 
 
-@pytest.mark.parametrize("empty", ((), [], _EmptyConfig()), ids=("tuple", "list", "dataclass"))
+@pytest.mark.parametrize(
+    "empty", ((), [], _EmptyConfig()), ids=("tuple", "list", "dataclass")
+)
 def test_empty_aggregate_retains_logical_launch_position(empty) -> None:
     tree = build_runtime_argument_tree(empty)
     assert tree.runtime_leaf_count == 0
@@ -350,6 +355,7 @@ def test_empty_aggregate_retains_logical_launch_position(empty) -> None:
     assert binder.get_rectified_args((empty,)) == ()
     with pytest.raises(ValueError, match="compiled kernel signature"):
         binder.get_rectified_args(())
+
 
 def test_top_level_none_is_a_unit_argument() -> None:
     tree = build_runtime_argument_tree(None)
@@ -376,6 +382,7 @@ def test_top_level_none_is_a_unit_argument() -> None:
     with pytest.raises(ValueError, match="compiled kernel signature"):
         binder.get_rectified_args(())
 
+
 def test_compiled_zero_runtime_parameters_reject_extra_launch_args() -> None:
     def kernel(limit: tla.Constexpr[int]) -> None:
         del limit
@@ -387,6 +394,7 @@ def test_compiled_zero_runtime_parameters_reject_extra_launch_args() -> None:
     assert binder.get_rectified_args(()) == ()
     with pytest.raises(ValueError, match="compiled kernel signature"):
         binder.get_rectified_args((1,))
+
 
 @pytest.mark.parametrize("container", ["plain", "tuple", "dataclass"])
 @pytest.mark.parametrize(
@@ -430,6 +438,7 @@ def test_scalar_launch_uses_compiler_abi_in_each_container(
     for value in invalid:
         with pytest.raises(execution.TlaUnsupportedAbiError):
             binder.generate_launch_payload((wrap(value),))
+
 
 @pytest.mark.parametrize("container", ["plain", "unit", "tuple", "dataclass"])
 @pytest.mark.parametrize("prepared", [False, True])
@@ -487,6 +496,7 @@ def test_signless_scalar_packing_is_independent_of_structure(container, prepared
         with pytest.raises(execution.TlaUnsupportedAbiError):
             binder.generate_launch_payload(arguments(invalid))
 
+
 @pytest.mark.parametrize("container", ["plain", "unit", "tuple", "dataclass"])
 @pytest.mark.parametrize("prepared", [False, True])
 def test_pointer_packing_is_independent_of_structure(container, prepared):
@@ -538,10 +548,17 @@ def test_pointer_packing_is_independent_of_structure(container, prepared):
             address.to_bytes(8, "little")
         )
     for invalid in (
-        3, True, tla.Int64(1), Pointer(), Pointer(1, 2), Pointer(-1), Pointer(2**64)
+        3,
+        True,
+        tla.Int64(1),
+        Pointer(),
+        Pointer(1, 2),
+        Pointer(-1),
+        Pointer(2**64),
     ):
         with pytest.raises(execution.TlaUnsupportedAbiError):
             binder.generate_launch_payload(arguments(invalid))
+
 
 def test_plain_launch_uses_packer_checks_without_tree_replay(monkeypatch):
     tensor = _structured_tensor()
@@ -553,17 +570,27 @@ def test_plain_launch_uses_packer_checks_without_tree_replay(monkeypatch):
         total_size=16,
         arguments=(
             compiler_bridge.KernelAbiArgument(
-                index=0, kind=compiler_bridge.KernelAbiArgumentKind.POINTER,
-                scalar=None, mlir_type="!llvm.ptr", offset=0,
-                storage_size=8, alignment=4,
+                index=0,
+                kind=compiler_bridge.KernelAbiArgumentKind.POINTER,
+                scalar=None,
+                mlir_type="!llvm.ptr",
+                offset=0,
+                storage_size=8,
+                alignment=4,
             ),
             compiler_bridge.KernelAbiArgument(
-                index=1, kind=compiler_bridge.KernelAbiArgumentKind.SCALAR,
+                index=1,
+                kind=compiler_bridge.KernelAbiArgumentKind.SCALAR,
                 scalar=compiler_bridge.KernelAbiScalarDescriptor(
-                    compiler_bridge.KernelAbiScalarCategory.INTEGER, 32,
-                    compiler_bridge.KernelAbiIntegerSignedness.SIGNLESS, None,
+                    compiler_bridge.KernelAbiScalarCategory.INTEGER,
+                    32,
+                    compiler_bridge.KernelAbiIntegerSignedness.SIGNLESS,
+                    None,
                 ),
-                mlir_type="i32", offset=8, storage_size=4, alignment=4,
+                mlir_type="i32",
+                offset=8,
+                storage_size=4,
+                alignment=4,
             ),
         ),
     )
@@ -577,18 +604,27 @@ def test_plain_launch_uses_packer_checks_without_tree_replay(monkeypatch):
         pytest.fail("plain launch should use ABI packing directly")
 
     monkeypatch.setattr(ExecutionArgs, "get_rectified_args", unexpected)
-    assert binder.generate_launch_payload((tensor, 3))[:12] == struct.pack("<Qi", 0x1234, 3)
+    assert binder.generate_launch_payload((tensor, 3))[:12] == struct.pack(
+        "<Qi", 0x1234, 3
+    )
     tensor.data_ptr = 0x5678
-    assert binder.generate_launch_payload((tensor, 4))[:12] == struct.pack("<Qi", 0x5678, 4)
+    assert binder.generate_launch_payload((tensor, 4))[:12] == struct.pack(
+        "<Qi", 0x5678, 4
+    )
     for invalid in (
-        (tensor,), (tensor, 3, 4), (3, 3), (tensor, 3.0),
-        (tensor, tla.Int64(3)), (tensor, 1 << 40),
+        (tensor,),
+        (tensor, 3, 4),
+        (3, 3),
+        (tensor, 3.0),
+        (tensor, tla.Int64(3)),
+        (tensor, 1 << 40),
     ):
         with pytest.raises(execution.TlaUnsupportedAbiError):
             binder.generate_launch_payload(invalid)
     tensor.data_ptr = -1
     with pytest.raises(execution.TlaUnsupportedAbiError):
         binder.generate_launch_payload((tensor, 3))
+
 
 def test_flat_launch_preserves_values_without_container_replay(monkeypatch) -> None:
     from catlass.base_dsl.runtime import argument_tree
@@ -611,11 +647,15 @@ def test_flat_launch_preserves_values_without_container_replay(monkeypatch) -> N
     replacement = _structured_tensor()
     assert binder.get_rectified_args((replacement, *values[1:]))[0] is replacement
     wider_scalar = tla.UInt16(7)
-    assert binder.get_rectified_args((tensor, wider_scalar, *values[2:]))[1] is wider_scalar
+    assert (
+        binder.get_rectified_args((tensor, wider_scalar, *values[2:]))[1]
+        is wider_scalar
+    )
     with pytest.raises(ValueError, match="compiled kernel signature"):
         binder.get_rectified_args(values[:-1])
     with pytest.raises(ValueError, match="compiled kernel signature"):
         binder.get_rectified_args((*values, 1))
+
 
 def test_invalid_tree_plan_is_rejected_when_binder_is_created() -> None:
     def kernel(value):
@@ -625,6 +665,7 @@ def test_invalid_tree_plan_is_rejected_when_binder_is_created() -> None:
         ExecutionArgs(
             original_signature=BaseDSL()._get_signature(kernel), argument_trees=()
         )
+
 
 def test_recursive_tree_launches_pointer_and_scalar_leaves_in_order() -> None:
     bias = _structured_tensor()

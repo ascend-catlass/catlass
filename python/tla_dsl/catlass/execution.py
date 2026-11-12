@@ -694,6 +694,7 @@ def _new_jit_compiled_function(
         JitCompiledFunction,
         JitFunctionArtifacts,
         JitModule,
+        _PrintLaunchConfig,
     )
 
     if abi_packer is None:
@@ -726,23 +727,24 @@ def _new_jit_compiled_function(
                     None if argument_trees is None else tuple(argument_trees)
                 ),
             ),
-            uses_scalar_print=runtime_metadata.uses_scalar_print,
-            uses_tensor_print=runtime_metadata.uses_tensor_print,
-            is_mixed=runtime_metadata.is_mixed,
-            aiv_subblock_count=runtime_metadata.aiv_subblock_count,
-            print_metadata=print_metadata,
-            print_helper_core=runtime_metadata.print_helper_core,
-            print_tensor_position=(
-                runtime_metadata.local_print_positions[0]
-                if runtime_metadata.local_print_positions
-                else None
+            print_config=_PrintLaunchConfig(
+                uses_scalar_print=runtime_metadata.uses_scalar_print,
+                mixed_core=runtime_metadata.is_mixed,
+                aiv_subblock_count=runtime_metadata.aiv_subblock_count,
+                print_metadata=print_metadata,
+                print_helper_core=runtime_metadata.print_helper_core,
+                print_tensor_position=(
+                    runtime_metadata.local_print_positions[0]
+                    if runtime_metadata.local_print_positions
+                    else None
+                ),
+                simt_print_formats=(
+                    bytes.fromhex(runtime_metadata.simt_print_formats)
+                    if runtime_metadata.simt_print_formats is not None
+                    else None
+                ),
+                print_argument_layout=runtime_metadata.print_argument_layout,
             ),
-            simt_print_formats=(
-                bytes.fromhex(runtime_metadata.simt_print_formats)
-                if runtime_metadata.simt_print_formats is not None
-                else None
-            ),
-            print_argument_layout=runtime_metadata.print_argument_layout,
             ub_static_bytes=ub_static_bytes,
             ub_programmable_bytes=ub_programmable_bytes,
             ub_dynamic_base=ub_dynamic_base,

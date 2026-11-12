@@ -45,14 +45,18 @@ def test_print_content_does_not_change_compiled_context(kind, core_ratio, subblo
     )
     compiled = kernel.compile(type_args=(source,), options="--npu-arch 3510")
     module = compiled.jit_module
-    assert module.uses_scalar_print
-    assert module.uses_tensor_print == (kind == "mixed")
-    assert module.is_mixed == (kind == "mixed")
-    assert module.aiv_subblock_count == subblocks
+    assert module.print_config.uses_scalar_print
+    assert module.print_config.uses_tensor_print == (kind == "mixed")
+    assert module.print_config.mixed_core == (kind == "mixed")
+    assert module.print_config.aiv_subblock_count == subblocks
     assert module.kernel_mode == ("mix" if kind == "mixed" else "aiv")
-    assert module.print_tensor_position is None
-    assert ("simt" in module.print_argument_layout) == (kind == "simt_tensor")
-    assert module.simt_print_formats == (b"" if kind == "simt_tensor" else None)
+    assert module.print_config.print_tensor_position is None
+    assert ("simt" in module.print_config.print_argument_layout) == (
+        kind == "simt_tensor"
+    )
+    assert module.print_config.simt_print_formats == (
+        b"" if kind == "simt_tensor" else None
+    )
 
 
 @pytest.mark.parametrize("storage", ["gm", "ub"])
@@ -138,15 +142,16 @@ def test_disk_cache_restores_metadata_without_parsing_ir(
     )
     restored = kernel.compile()
     assert (
-        restored.jit_module.print_argument_layout
-        == compiled.jit_module.print_argument_layout
+        restored.jit_module.print_config.print_argument_layout
+        == compiled.jit_module.print_config.print_argument_layout
     )
     assert (
-        restored.jit_module.simt_print_formats == compiled.jit_module.simt_print_formats
+        restored.jit_module.print_config.simt_print_formats
+        == compiled.jit_module.print_config.simt_print_formats
     )
     assert restored.jit_module.kernel_mode == compiled.jit_module.kernel_mode
 
-    assert restored.jit_module.aiv_subblock_count == (
+    assert restored.jit_module.print_config.aiv_subblock_count == (
         2 if core_ratio is tla.arch.C1V2 else 1
     )
 
@@ -193,7 +198,7 @@ def test_invalid_cached_metadata_recompiles(
     monkeypatch.setattr(execution, "_run_tla_lowering_to_mlir", lower)
     restored = kernel.compile()
     assert calls == [1]
-    assert restored.jit_module.print_argument_layout == ("user", "fifo")
+    assert restored.jit_module.print_config.print_argument_layout == ("user", "fifo")
     assert json.loads(path.read_text())["runtime_metadata"]["schema_version"] == 2
 
 

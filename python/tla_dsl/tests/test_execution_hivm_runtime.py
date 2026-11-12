@@ -28,13 +28,12 @@ jit_executor_mod = pytest.importorskip(
 
 
 from catlass.base_dsl.runtime.argument_tree import ArgumentTreeError
+from catlass.base_dsl.runtime.print_config import _PrintLaunchConfig
 from catlass.tla.runtime import make_fake_tensor
 from catlass.compiler_metadata import KernelRuntimeMetadata, PrintTensorMetadata
 
 
-_EXAMPLES_DIR = (
-    Path(__file__).resolve().parents[3] / "examples" / "python" / "tla_dsl"
-)
+_EXAMPLES_DIR = Path(__file__).resolve().parents[3] / "examples" / "python" / "tla_dsl"
 
 
 def _load_debug_print_example(*, mixed: bool = False):
@@ -84,10 +83,7 @@ def _load_print_tensor_example():
     previous = sys.modules.get("catlass")
     sys.modules["catlass"] = fake_catlass
     try:
-        path = (
-            _EXAMPLES_DIR
-            / "dsl_tutorials/print_tensor/print_tensor.py"
-        )
+        path = _EXAMPLES_DIR / "dsl_tutorials/print_tensor/print_tensor.py"
         spec = importlib.util.spec_from_file_location("print_tensor_example", path)
         assert spec and spec.loader
         module = importlib.util.module_from_spec(spec)
@@ -107,9 +103,7 @@ def _load_basic_mixed_example():
     previous = sys.modules.get("catlass")
     sys.modules["catlass"] = fake_catlass
     try:
-        path = (
-            _EXAMPLES_DIR / "tla/kernel/matmul/basic_mixed/basic_mixed.py"
-        )
+        path = _EXAMPLES_DIR / "tla/kernel/matmul/basic_mixed/basic_mixed.py"
         spec = importlib.util.spec_from_file_location("basic_mixed_example", path)
         assert spec and spec.loader
         module = importlib.util.module_from_spec(spec)
@@ -234,9 +228,7 @@ def test_prepare_hivmc_input_rejects_outdated_print_tensor_aggregate(
     template_bc = Path(execution._get_bc_paths("aiv"))
     stale_aggregate = tmp_path / "meta_op.aiv.print.c310.bc"
     stale_aggregate.write_bytes(
-        template_bc.read_bytes().replace(
-            execution._PRINT_TENSOR_HELPER_ABI_MARKER, b""
-        )
+        template_bc.read_bytes().replace(execution._PRINT_TENSOR_HELPER_ABI_MARKER, b"")
     )
 
     with pytest.raises(execution.TlaRuntimeUnavailableError, match="ABI marker"):
@@ -349,7 +341,10 @@ def test_debug_print_output_rejects_duplicate_multiblock_records() -> None:
 
     with pytest.raises(RuntimeError, match="distinct blocks"):
         example._verify_debug_output(
-            "\n".join("TLA printf: core=0 block=0 [AIC Block 0/1] v=1.250000" for _ in range(4)),
+            "\n".join(
+                "TLA printf: core=0 block=0 [AIC Block 0/1] v=1.250000"
+                for _ in range(4)
+            ),
             dtype="f32",
             expected_value="1.250000",
             expect_count=4,
@@ -427,7 +422,11 @@ def test_debug_print_expression_rejects_unsigned_arithmetic(dtype: str) -> None:
         ("i32", "-37", "TLA printf: core=0 block=0 [AIC Block 0/1] x=-37"),
         ("u8", "255", "TLA printf: core=0 block=0 [AIC Block 0/1] x=255"),
         ("u16", "65535", "TLA printf: core=0 block=0 [AIC Block 0/1] x=65535"),
-        ("u32", "4294967295", "TLA printf: core=0 block=0 [AIC Block 0/1] x=4294967295"),
+        (
+            "u32",
+            "4294967295",
+            "TLA printf: core=0 block=0 [AIC Block 0/1] x=4294967295",
+        ),
         ("f16", "1.250000", "TLA printf: core=0 block=0 [AIC Block 0/1] v=1.250000"),
         ("f32", "1.250000", "TLA printf: core=0 block=0 [AIC Block 0/1] v=1.250000"),
     ),
@@ -531,7 +530,12 @@ def test_debug_print_mixed_exposes_full_scalar_matrix() -> None:
 @pytest.mark.parametrize(
     ("print_region", "dtype", "expected_value", "output"),
     (
-        ("cube", "u32", "4294967295", "TLA printf: core=0 block=0 [AIC Block 0/1] x=4294967295"),
+        (
+            "cube",
+            "u32",
+            "4294967295",
+            "TLA printf: core=0 block=0 [AIC Block 0/1] x=4294967295",
+        ),
         (
             "vector",
             "i8",
@@ -735,9 +739,9 @@ def test_public_compile_dry_run_invokes_typed_bridge_and_hivmc_a5(
 
     assert compiled.artifacts.compiler_bridge_path == bridge_path
     assert compiled.artifacts.LLVM == "module { func.func @zero_arg_kernel() }\n"
-    assert compiled.jit_module.uses_tensor_print is False
-    assert compiled.jit_module.uses_scalar_print is False
-    assert compiled.jit_module.is_mixed is False
+    assert compiled.jit_module.print_config.uses_tensor_print is False
+    assert compiled.jit_module.print_config.uses_scalar_print is False
+    assert compiled.jit_module.print_config.mixed_core is False
     assert compiled.execution_args.abi_packer is not None
     cache_dir = compiled.artifacts.cache_dir
     assert cache_dir is not None
@@ -815,7 +819,9 @@ def test_select_bc_aggregate_variant(workspace_attr, expected) -> None:
     assert execution._select_bc_aggregate_variant(metadata) == expected
 
 
-def test_prepare_hivmc_input_rejects_normal_aggregate_for_tensor_print(tmp_path) -> None:
+def test_prepare_hivmc_input_rejects_normal_aggregate_for_tensor_print(
+    tmp_path,
+) -> None:
     mlir_path = tmp_path / "lowered.mlir"
     mlir_path.write_text(
         "module { func.func @kernel(%workspace: i64 {tla.print_tensor.workspace}) }"
@@ -2288,8 +2294,19 @@ def _prepared_test_compiled_function(**compiled_fields):
     # Legacy launch protocol tests construct runtime state directly. Compiler
     # metadata tests below exercise the new structured contract separately.
     return jit_executor_mod.JitCompiledFunction(
-        jit_module=replace(result.jit_module, **legacy), artifacts=result.artifacts
+        jit_module=replace(
+            result.jit_module,
+            print_config=_legacy_print_config(result.jit_module.print_config, legacy),
+        ),
+        artifacts=result.artifacts,
     )
+
+
+def _legacy_print_config(config, changes):
+    changes = dict(changes)
+    if "is_mixed" in changes:
+        changes["mixed_core"] = changes.pop("is_mixed")
+    return replace(config, **changes)
 
 
 def _replace_prepared_test_compiled_function(compiled, **changes):
@@ -2298,10 +2315,24 @@ def _replace_prepared_test_compiled_function(compiled, **changes):
         changes["kernel_mode"] = option.kernel_mode
         changes["is_mixed"] = option.kernel_mode == "mix"
         changes["aiv_subblock_count"] = 2 if option.kernel_mode == "mix" else 1
-        if compiled.jit_module.uses_tensor_print and option.kernel_mode != "mix":
+        if (
+            compiled.jit_module.print_config.uses_tensor_print
+            and option.kernel_mode != "mix"
+        ):
             changes["print_helper_core"] = option.kernel_mode
+    print_changes = {}
+    for key in tuple(changes):
+        if key != "kernel_mode":
+            print_changes[key] = changes.pop(key)
     return jit_executor_mod.JitCompiledFunction(
-        jit_module=replace(compiled.jit_module, **changes), artifacts=compiled.artifacts
+        jit_module=replace(
+            compiled.jit_module,
+            print_config=_legacy_print_config(
+                compiled.jit_module.print_config, print_changes
+            ),
+            **changes,
+        ),
+        artifacts=compiled.artifacts,
     )
 
 
@@ -2345,7 +2376,6 @@ def _print_tensor_artifact(
         ),
         kernel_mode="mix" if mixed else "aiv",
         legacy_print={
-            "uses_tensor_print": True,
             "print_metadata": (
                 PrintTensorMetadata(
                     shape,
@@ -2400,7 +2430,7 @@ def _launch_and_capture(
         )
         module = compiled.jit_module
         assert isinstance(module, jit_executor_mod.JitModule)
-        if module.print_metadata is not None:
+        if module.print_config.print_metadata is not None:
 
             def _capture_launch(launch):
                 launch()
@@ -2429,10 +2459,10 @@ def _launch_and_capture(
         kernel_mode=module.kernel_mode,
         block_num=launch["block_num"],
         payload=launch["payload"],
-        uses_scalar_print=launch["uses_scalar_print"],
-        uses_tensor_print=launch["uses_tensor_print"],
-        is_mixed=launch["is_mixed"],
-        print_tensor_position=launch.get("print_tensor_position"),
+        uses_scalar_print=launch["print_config"].uses_scalar_print,
+        uses_tensor_print=launch["print_config"].uses_tensor_print,
+        is_mixed=launch["print_config"].mixed_core,
+        print_tensor_position=launch["print_config"].print_tensor_position,
         device_id=launch.get("device_id"),
     )
 
@@ -2491,7 +2521,7 @@ def _install_print_tensor_loader(monkeypatch, output: str) -> None:
     monkeypatch.setattr(execution, "load_binary", lambda **kwargs: (11, 12))
 
     def _launch_kernel(**kwargs) -> None:
-        assert kwargs["uses_tensor_print"] is True
+        assert kwargs["print_config"].uses_tensor_print is True
         os.write(1, output.encode())
 
     monkeypatch.setattr(execution, "launch_kernel", _launch_kernel)
@@ -2908,7 +2938,7 @@ def test_print_tensor_capacity_rejects_static_calls_exceeding_each_core_record(
         artifact,
         print_metadata=tuple(
             replace(record, shape=(262112,), count=262112)
-            for record in artifact.jit_module.print_metadata
+            for record in artifact.jit_module.print_config.print_metadata
         ),
     )
 
@@ -2929,14 +2959,14 @@ def test_print_tensor_capacity_allows_partial_dynamic_output(
         artifact,
         print_metadata=(
             replace(
-                artifact.jit_module.print_metadata[0],
+                artifact.jit_module.print_config.print_metadata[0],
                 count=None,
                 dynamic_execution=True,
             ),
-            artifact.jit_module.print_metadata[1],
+            artifact.jit_module.print_config.print_metadata[1],
         ),
     )
-    metadata = artifact.jit_module.print_metadata
+    metadata = artifact.jit_module.print_config.print_metadata
     assert [record.count for record in metadata] == [None, 2]
 
     with pytest.warns(RuntimeWarning, match="cannot be validated"):
@@ -2955,11 +2985,14 @@ def test_print_tensor_capacity_warns_for_dynamic_control_flow(tmp_path) -> None:
     artifact = _replace_prepared_test_compiled_function(
         artifact,
         print_metadata=(
-            replace(artifact.jit_module.print_metadata[0], dynamic_execution=True),
-            artifact.jit_module.print_metadata[1],
+            replace(
+                artifact.jit_module.print_config.print_metadata[0],
+                dynamic_execution=True,
+            ),
+            artifact.jit_module.print_config.print_metadata[1],
         ),
     )
-    metadata = artifact.jit_module.print_metadata
+    metadata = artifact.jit_module.print_config.print_metadata
     assert metadata[0].dynamic_execution is True
 
     with pytest.warns(RuntimeWarning, match="runtime control flow"):
@@ -2990,7 +3023,7 @@ def test_print_tensor_launch_accepts_multiblock_block_num(tmp_path, core_type) -
 
 def test_compiled_function_prepares_print_metadata_once(monkeypatch, tmp_path) -> None:
     compiled = _print_tensor_artifact(tmp_path)
-    metadata = compiled.jit_module.print_metadata
+    metadata = compiled.jit_module.print_config.print_metadata
     _install_fake_launch_context(monkeypatch, device=0, stream=0)
     monkeypatch.setattr(execution, "load_binary", lambda **_kwargs: (11, 12))
     monkeypatch.setattr(execution, "launch_kernel", lambda **_kwargs: None)
@@ -3017,7 +3050,7 @@ def test_compiled_function_prepares_print_metadata_once(monkeypatch, tmp_path) -
             stream=0,
         )
 
-    assert compiled.jit_module.print_metadata is metadata
+    assert compiled.jit_module.print_config.print_metadata is metadata
 
 
 @pytest.mark.parametrize(
@@ -3578,7 +3611,9 @@ class _HostEnum(IntEnum):
         ("f32", "f", tla.Float32(3), [3, tla.Float16(3)]),
     ],
 )
-def test_pack_launch_args_checks_scalar_types_and_ranges(abi_type, pack_format, valid, invalid):
+def test_pack_launch_args_checks_scalar_types_and_ranges(
+    abi_type, pack_format, valid, invalid
+):
     size = struct.calcsize("<" + pack_format)
     layout = _kernel_abi(("scalar", abi_type, abi_type, 0, size, 4), total_size=8)
     value = valid.value if isinstance(valid, tla.Numeric) else valid
@@ -4181,10 +4216,7 @@ def test_execute_kernel_uses_typed_launch_payload(monkeypatch, tmp_path) -> None
             "block_num": 1,
             "payload": struct.pack("<I4x", 123),
             "dyn_ubuf_bytes": 0,
-            "uses_scalar_print": False,
-            "uses_tensor_print": False,
-            "is_mixed": False,
-            "print_tensor_position": None,
+            "print_config": _PrintLaunchConfig(),
             "device_id": 7,
         },
     ) in launches
@@ -4218,10 +4250,7 @@ def test_execute_kernel_conveys_scalar_print_intent_to_loader(
                 "<QQ", 7, int.from_bytes(b"TLA_PRNT", byteorder="big")
             ),
             "dyn_ubuf_bytes": 0,
-            "uses_scalar_print": True,
-            "uses_tensor_print": False,
-            "is_mixed": False,
-            "print_tensor_position": None,
+            "print_config": _PrintLaunchConfig(uses_scalar_print=True),
             "device_id": 7,
         }
     ]
@@ -4273,10 +4302,7 @@ def test_execute_kernel_uses_empty_payload_for_zero_arg(monkeypatch, tmp_path) -
             "block_num": 1,
             "payload": b"",
             "dyn_ubuf_bytes": 0,
-            "uses_scalar_print": False,
-            "uses_tensor_print": False,
-            "is_mixed": False,
-            "print_tensor_position": None,
+            "print_config": _PrintLaunchConfig(),
             "device_id": 7,
         },
     ) in launches
@@ -4460,6 +4486,8 @@ def test_compiled_function_rejects_launch_after_device_switch(
         compiled()
 
     assert launches == [1]
+
+
 def test_launch_config_declares_dyn_ubuf_size_only_when_needed() -> None:
     """A SIMT kernel's UB must reach the launch as ACL's dyn_ubuf_size attribute.
 
@@ -4483,11 +4511,12 @@ def _ub_module(**overrides):
         entrypoint="kernel",
         kernel_mode="aiv",
         execution_args=ExecutionArgs(kernel_abi=None, abi_packer=None),
-        uses_scalar_print=False,
-        uses_tensor_print=False,
-        is_mixed=False,
-        print_metadata=None,
-        print_helper_core=None,
+        print_config=_PrintLaunchConfig(
+            mixed_core=False,
+            uses_scalar_print=False,
+            print_helper_core=None,
+            print_metadata=None,
+        ),
     )
     defaults.update(overrides)
     return JitModule(**defaults)
@@ -4589,9 +4618,11 @@ def test_a_region_at_zero_is_not_mistaken_for_absence() -> None:
 def _cache_sequence_kernel(out: tla.Tensor, aux):
     out[0] = aux[0][0] + aux[1]
 
+
 @tla.kernel
 def _cache_dataclass_kernel(out: tla.Tensor, aux):
     out[0] = aux.bias[0] + aux.limit
+
 
 @tla.kernel
 def _cache_static_kernel(out: tla.Tensor, aux):

@@ -9,6 +9,7 @@ from collections.abc import Callable
 
 from . import ascend_debug_fifo as fifo
 from . import ascend_simt_print as simt
+from .print_config import _PrintLaunchConfig
 
 # Keep cleanup callbacks and their resources alive when device completion is unknown.
 _UNQUIESCED_SESSIONS: list[ExitStack] = []
@@ -43,15 +44,16 @@ def launch_with_print(
     *,
     launch_kernel: Callable[[bytes], None],
     payload: bytes,
-    layout: tuple[str, ...],
+    print_config: _PrintLaunchConfig,
     block_num: int,
     stream: int,
     device: int,
-    is_mixed: bool,
-    aiv_subblock_count: int = 1,
-    tensor_position: str | None,
-    simt_formats: bytes | None,
 ) -> None:
+    layout = print_config.print_argument_layout
+    is_mixed = print_config.mixed_core
+    aiv_subblock_count = print_config.aiv_subblock_count
+    tensor_position = print_config.print_tensor_position
+    simt_formats = print_config.simt_print_formats
     addresses: dict[str, int] = {}
     debug_fifo = None
     simt_host = None

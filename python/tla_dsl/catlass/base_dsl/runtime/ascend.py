@@ -11,6 +11,7 @@ from pathlib import Path
 from types import ModuleType
 
 from ...execution import TlaRuntimeUnavailableError
+from .print_config import _PrintLaunchConfig
 
 # acl_rt.h — PyACL does not export these macros; pass numeric literals.
 # ACL_ERROR_INVALID_PARAM. The runtime returns it for a launch whose parameters
@@ -162,19 +163,17 @@ def launch_kernel(
     block_num: int,
     payload: bytes,
     dyn_ubuf_bytes: int = 0,
-    uses_scalar_print: bool = False,
-    uses_tensor_print: bool = False,
-    is_mixed: bool = False,
-    aiv_subblock_count: int = 1,
-    print_tensor_position: str | None = None,
+    print_config: _PrintLaunchConfig = _PrintLaunchConfig(),
     device_id: int | None = None,
-    simt_print_formats: bytes | None = None,
-    print_argument_layout: tuple[str, ...] = (),
 ) -> None:
     """Launch via PyACL ``acl.rt.launch_kernel_with_host_args`` (Host args blob).
 
     ``cfg`` / ``placeHolderArray`` must be lists (``None`` fails PyACL parse).
     """
+    uses_scalar_print = print_config.uses_scalar_print
+    uses_tensor_print = print_config.uses_tensor_print
+    simt_print_formats = print_config.simt_print_formats
+    print_argument_layout = print_config.print_argument_layout
     if simt_print_formats is not None and "simt" not in print_argument_layout:
         from .ascend_debug_fifo import AscDebugFifoError
 
@@ -213,14 +212,10 @@ def launch_kernel(
         launch_with_print(
             launch_kernel=_acl_launch,
             payload=payload,
-            layout=print_argument_layout,
+            print_config=print_config,
             block_num=block_num,
             stream=int(stream),
             device=int(device_id or 0),
-            is_mixed=is_mixed,
-            aiv_subblock_count=aiv_subblock_count,
-            tensor_position=print_tensor_position,
-            simt_formats=simt_print_formats,
         )
         return
 
@@ -230,13 +225,9 @@ def launch_kernel(
         launch_with_debug_fifo(
             launch_kernel=_acl_launch,
             payload=payload,
+            print_config=print_config,
             block_num=block_num,
             stream=int(stream),
-            uses_scalar_print=uses_scalar_print,
-            uses_tensor_print=uses_tensor_print,
-            is_mixed=is_mixed,
-            aiv_subblock_count=aiv_subblock_count,
-            print_tensor_position=print_tensor_position,
             device=int(device_id or 0),
         )
         return

@@ -8,6 +8,7 @@ import pytest
 from catlass.base_dsl.runtime import ascend_debug_fifo as fifo
 from catlass.base_dsl.runtime import ascend_print as session
 from catlass.base_dsl.runtime import ascend as runtime
+from catlass.base_dsl.runtime.print_config import _PrintLaunchConfig
 from catlass.compiler_metadata import KernelRuntimeMetadata
 
 
@@ -201,13 +202,15 @@ def test_one_sync_and_cleanup_or_retention(monkeypatch, channels, failure, error
             session.launch_with_print(
                 launch_kernel=launch,
                 payload=struct.pack("<Q", 202),
-                layout=("user", *channels),
+                print_config=_PrintLaunchConfig(
+                    mixed_core=False,
+                    print_argument_layout=("user", *channels),
+                    simt_print_formats=b"value=%d\0" if "simt" in channels else None,
+                    print_tensor_position=None,
+                ),
                 block_num=1,
                 stream=9,
                 device=0,
-                is_mixed=False,
-                tensor_position=None,
-                simt_formats=b"value=%d\0" if "simt" in channels else None,
             )
         # Format strings are host metadata; only control and log data need GM.
         expected_allocations = (
@@ -236,8 +239,9 @@ def test_simt_rejects_missing_context_before_loading_runtime(monkeypatch, layout
             stream=0,
             block_num=1,
             payload=b"",
-            simt_print_formats=b"",
-            print_argument_layout=layout,
+            print_config=_PrintLaunchConfig(
+                print_argument_layout=layout, simt_print_formats=b""
+            ),
         )
 
 
@@ -258,13 +262,15 @@ def test_interruption_before_launch_releases_prepared_buffers(monkeypatch):
         session.launch_with_print(
             launch_kernel=lambda payload: pytest.fail("must not launch"),
             payload=b"",
-            layout=("user", "fifo", "simt"),
+            print_config=_PrintLaunchConfig(
+                mixed_core=False,
+                print_argument_layout=("user", "fifo", "simt"),
+                simt_print_formats=b"",
+                print_tensor_position=None,
+            ),
             block_num=1,
             stream=9,
             device=0,
-            is_mixed=False,
-            tensor_position=None,
-            simt_formats=b"",
         )
     assert sorted(freed) == [101, 202]
     assert len(session._UNQUIESCED_SESSIONS) == retained
