@@ -416,7 +416,6 @@ public:
 
         // wait QK Fixpipe finsh
         WaitCrossCoreSync<4, PIPE_V>(qkReadyFlag);
-        AscendC::PipeBarrier<PIPE_ALL>();
         AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(4);
         AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(ubSBufId + 2);
         if (isFirstKvSTile) {
