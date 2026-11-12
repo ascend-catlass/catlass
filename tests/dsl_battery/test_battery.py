@@ -535,6 +535,13 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         )
 
     # --- mixed-core handshake and standalone control-flow probes ---
+    yield (
+        "block-mean-attention-score-boundaries",
+        [[
+            "tla/kernel/attention/block_mean_attention_score/block_mean_attention_score.py",
+            "--cases", "--poison-padding", *dev,
+        ]],
+    )
     # flash_attention_infer routes --mask to two independently compiled
     # kernels: causal -> flash_attention_mask_kernel (TileMask + fine mask),
     # none -> flash_attention_nomask_kernel. Both binaries must run.

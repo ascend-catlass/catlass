@@ -21,6 +21,7 @@
 | 样例 | 概述 |
 |------|------|
 | [`flash_attention_infer/`](attention/flash_attention_infer/README.md) | FlashAttention 推理样例，覆盖 KV 分页寻址、causal mask、GQA 与尾块场景。 |
+| [`block_mean_attention_score/`](attention/block_mean_attention_score/README.md) | 按 16-token Query/Key 块计算平均注意力概率，支持动态有效长度与尾块。 |
 
 ## 卷积（conv）
 
