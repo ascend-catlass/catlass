@@ -224,15 +224,16 @@ bool Metrics::SetOutputPath(std::string_view output)
 void Metrics::PrintTop10(const std::string &head)
 {
     std::vector<Metric> tmp = metrics_;
-    auto normalEnd = std::remove_if(tmp.begin(), tmp.end(), [](const Metric &m) {
+    tmp.erase(std::remove_if(tmp.begin(), tmp.end(), [](const Metric &m) {
         return m.GetTaskDuration() == 0;
-    });
-    std::sort(tmp.begin(), normalEnd, [](const Metric &l, const Metric &r) {
+    }), tmp.end());
+    std::sort(tmp.begin(), tmp.end(), [](const Metric &l, const Metric &r) {
         return l.GetTaskDuration() < r.GetTaskDuration();
     });
     constexpr size_t NUM = 10;
-    LOGM("%sTop %lu:\n%s", DIVIDE.data(), NUM, head.c_str());
-    for (size_t i = 0; i < std::min(NUM, tmp.size()); ++i) {
+    const size_t shown = std::min(NUM, tmp.size());
+    LOGM("%sTop %lu:\n%s", DIVIDE.data(), static_cast<unsigned long>(shown), head.c_str());
+    for (size_t i = 0; i < shown; ++i) {
         LOGM("%s", tmp[i].ToString().c_str());
     }
 }

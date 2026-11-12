@@ -99,10 +99,10 @@ while [[ $# -gt 0 ]]; do
             CMAKE_OPTIONS+=("-DBUILD_TESTS=True")
             ;;
         --enable_profiling)
-            echo "${WARN}`--enable_profiling` is deprecated. The feature will be automatically enabled when the program is launched by msprof."
+            echo -e "${WARN}'--enable_profiling' is deprecated. The feature will be automatically enabled when the program is launched by msprof.${NC}"
             ;;
         --enable_ascendc_dump)
-            echo "${WARN}`--enable_ascendc_dump` is deprecated. The feature will be automatically enabled when debug code is inserted."
+            echo -e "${WARN}'--enable_ascendc_dump' is deprecated. The feature will be automatically enabled when debug code is inserted.${NC}"
             ;;
         --enable_mssanitizer)
             CMAKE_OPTIONS+=("-DENABLE_MSSANITIZER=True")
@@ -124,11 +124,11 @@ while [[ $# -gt 0 ]]; do
 done
 
 function check_3rdparty() {
-    if [[ ! -d "$CMAKE_SOURCE_DIR/3rdparty/googletest/CMakeLists.txt" && "$TARGET" == "catlass_unittest" ]]; then
+    if [[ ! -f "$CMAKE_SOURCE_DIR/3rdparty/googletest/CMakeLists.txt" && "$TARGET" == "catlass_unittest" ]]; then
         echo -e "${INFO}googletest not found, pulling it as submodule...${NC}"
-        git submodule update --init --recursive 3rdparty/googletest
-        if [[ $? -ne 0 ]]; then
-            echo -e "${ERROR}Failed to pull googletest submodule${NC}"
+        if ! git -C "$CMAKE_SOURCE_DIR" submodule update --init --recursive 3rdparty/googletest; then
+            echo -e "${ERROR}Failed to pull googletest submodule. If you use a source archive without Git metadata,${NC}" >&2
+            echo -e "${ERROR}download googletest into 3rdparty/googletest manually and retry.${NC}" >&2
             exit 1
         fi
     fi
