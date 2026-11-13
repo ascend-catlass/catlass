@@ -56,8 +56,15 @@ echo "============================================"
 echo "Step 2: Building optest..."
 echo "============================================"
 
-export CC=$(command -v gcc)
-export CXX=$(command -v g++)
+if ! CC=$(command -v gcc); then
+    echo "Error: gcc not found in PATH" >&2
+    exit 1
+fi
+if ! CXX=$(command -v g++); then
+    echo "Error: g++ not found in PATH" >&2
+    exit 1
+fi
+export CC CXX
 
 echo "Using CC=$CC, CXX=$CXX"
 pip install scikit-build-core

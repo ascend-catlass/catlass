@@ -8,6 +8,7 @@
  * See LICENSE in the root of the software repository for the full text of the License.
  */
 
+#include <cstdlib>
 #include <iostream>
 #include "golden.hpp"
 #include "helper.hpp"
@@ -105,7 +106,26 @@ static void Run(
 
 int main(int argc, const char** argv)
 {
-    const uint32_t deviceId = std::atoi(argv[argc - 1]);
+    if (argc != 7) {
+        std::cerr << "Usage: " << argv[0] << " m n k layoutTagA layoutTagB deviceId\n"
+                  << "  layoutTag: 0 for RowMajor, 1 for ColumnMajor" << std::endl;
+        return -1;
+    }
+
+    const int m = std::atoi(argv[1]);
+    const int n = std::atoi(argv[2]);
+    const int k = std::atoi(argv[3]);
+    const int layoutTagA = std::atoi(argv[4]);
+    const int layoutTagB = std::atoi(argv[5]);
+    const int deviceId = std::atoi(argv[6]);
+
+    const bool layoutValid = (layoutTagA == 0 || layoutTagA == 1) && (layoutTagB == 0 || layoutTagB == 1);
+    if (m <= 0 || n <= 0 || k <= 0 || !layoutValid || deviceId < 0) {
+        std::cerr << "Invalid arguments: m, n, k must be positive, layoutTag must be 0 or 1, "
+                  << "deviceId must be non-negative." << std::endl;
+        return -1;
+    }
+
     ACL_CHECK(aclrtSetDevice(deviceId));
     ACL_CHECK(aclInit(nullptr));
     aclrtStream stream;
@@ -113,12 +133,8 @@ int main(int argc, const char** argv)
 
     PlatformInfo platformInfo;
 
-    uint32_t m = std::atoi(argv[1]);
-    uint32_t n = std::atoi(argv[2]);
-    uint32_t k = std::atoi(argv[3]);
-    LayoutTag layoutTagA = static_cast<LayoutTag>(std::atoi(argv[4]));
-    LayoutTag layoutTagB = static_cast<LayoutTag>(std::atoi(argv[5]));
-    Run(stream, m, n, k, layoutTagA, layoutTagB, platformInfo);
+    Run(stream, static_cast<uint32_t>(m), static_cast<uint32_t>(n), static_cast<uint32_t>(k),
+        static_cast<LayoutTag>(layoutTagA), static_cast<LayoutTag>(layoutTagB), platformInfo);
 
     ACL_CHECK(aclrtDestroyStream(stream));
     ACL_CHECK(aclrtResetDevice(deviceId));

@@ -1,5 +1,9 @@
 #!/bin/bash
 
+set -o errexit
+set -o nounset
+set -o pipefail
+
 if [[ $# -ge 1 ]]; then
     ENABLE_HTML_VIEW="$1"
     PORT_INC_MAX=10
@@ -40,8 +44,8 @@ if [[ $ENABLE_HTML_VIEW -eq 1 ]]; then
     PORT_INC=0
     while lsof -i :$PORT &>/dev/null && ((PORT_INC < PORT_INC_MAX)); do
         echo "Port $PORT is already in use, trying next port..."
-        ((PORT++))
-        ((PORT_INC++))
+        PORT=$((PORT + 1))
+        PORT_INC=$((PORT_INC + 1))
     done
     echo "Starting server on port $PORT..."
     npx serve -l $PORT
