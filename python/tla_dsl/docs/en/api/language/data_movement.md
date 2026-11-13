@@ -284,8 +284,8 @@ Parameters:
   - `UnalignLoadParams`:
     - `post_mode` (`str`): `POST_MODE_NORMAL` (default) or
       `POST_MODE_UPDATE`.
-    - `post_update_stride` (`Any`): Must stay `0` (window advances
-      by `origin_shape` only). Default `0`.
+    - `post_update_stride` (`Any`): `0` (default) advances by
+      `origin_shape`; effective stride must be in `(0, VL]`. Default `0`.
   - `BlockLoadParams`:
     - `block_stride` (`int`): Heads apart in 32B DataBlocks; `0`
       repeats the first block into all 8 slots. Default `0`.
@@ -340,8 +340,10 @@ Constraints:
   UPDATE never automatically folds non-zero coordinates.
   `NormalLoadParams`: `post_update_stride=0` (default) advances
   by `tile_extent` (`origin_shape`); an explicit stride keeps
-  fill / stride-advance decoupling. `UnalignLoadParams` must
-  leave `post_update_stride` at `0` (dense `origin_shape` only).
+  fill / stride-advance decoupling. `UnalignLoadParams`: default
+  `0`→`tile_extent`; effective stride must be in `(0, VL]`. On a clean
+  `tla.range`, `tla-unalign-ureg` hoists Pre/Post outside the for;
+  `for`⊃dynamic `if` keeps per-trip dual-instr.
 
 Example:
 
@@ -407,7 +409,8 @@ Parameters:
   - `UnalignStoreParams`:
     - `post_mode` (`str`): `POST_MODE_NORMAL` (default) or
       `POST_MODE_UPDATE`.
-    - `post_update_stride` (`Any`): Must stay `0`. Default `0`.
+    - `post_update_stride` (`Any`): `0` (default) advances by
+      `origin_shape`; effective stride must be in `(0, VL]`. Default `0`.
   - `BlockStoreParams`:
     - `block_stride` (`int`): Heads apart in 32B DataBlocks.
       Default `0`.
@@ -444,8 +447,8 @@ Constraints:
   `tla.range`. Same origin window (`coord=0`) contract as UPDATE
   `load`. `NormalStoreParams`: default `post_update_stride=0`
   advances by `tile_extent` (`origin_shape`); an explicit stride is
-  decoupled. `UnalignStoreParams` must leave stride at `0`
-  (dense `origin_shape` only).
+  decoupled. `UnalignStoreParams`: default `0`→`tile_extent`;
+  effective stride must be in `(0, VL]`; clean for hoists Pre/Post.
 
 Example:
 

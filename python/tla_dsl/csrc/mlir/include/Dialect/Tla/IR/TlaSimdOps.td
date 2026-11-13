@@ -747,48 +747,96 @@ def Tla_StoreUpdateOp : Tla_Op<"store_update", [AttrSizedOperandSegments]> {
   let hasVerifier = 1;
 }
 
-// UnAlign UPDATE (dense tile_extent): each op is self-contained dual-instr
-// (load: vldas + vldus.post; store: empty ureg + vstus.post + vstas). No
-// cross-trip ureg SSA / stream Pre-Empty. HIVM ``$cceVL``/``$eleSize`` =
-// ``post_update_stride×sizeof(T)``; TLA ``next_ptr`` is the HW ``newPtr``.
+// UnAlign UPDATE: ``!tla.ureg`` is a separate SSA value (operand ureg_in /
+// result ureg_out). Python omits ureg_in; ``tla-unalign-ureg`` fills it and
+// inserts ``load_unalign_pre`` / ``create_ureg`` / ``store_unalign_post``.
+// HIVM ``$cceVL``/``$eleSize`` = ``post_update_stride×sizeof(T)``;
+// TLA ``next_ptr`` is the HW ``newPtr``.
+def Tla_LoadUnalignPreOp : Tla_Op<"load_unalign_pre", []> {
+  let summary = "LoadUnAlignPre (vldas); UnAlign load-side ureg head";
+  let arguments = (ins Tla_TensorType:$source);
+  let results = (outs Tla_UregType:$ureg);
+  let assemblyFormat = [{
+    $source attr-dict `:` type($source) `->` qualified(type($ureg))
+  }];
+}
+
+def Tla_CreateUregOp : Tla_Op<"create_ureg", []> {
+  let summary = "Create an empty !tla.ureg (HIVM init.vector.align.data)";
+  let results = (outs Tla_UregType:$ureg);
+  let assemblyFormat = [{
+    attr-dict `:` qualified(type($ureg))
+  }];
+}
+
+def Tla_StoreUnalignPostOp : Tla_Op<"store_unalign_post", []> {
+  let summary = "StoreUnAlignPost (vstas); UnAlign store-side ureg flush";
+  let description = [{
+    Flushes the store-side ureg after the ``store_unalign_update`` whose ureg
+    result is not taken as input by a later store UPDATE. ``dest`` is the next
+    window Tensor (``make_tensor`` / ``make_tensor_like`` of ``next_ptr``, or
+    the ``scf.for`` result that carries that Tensor). Inserted by
+    ``tla-unalign-ureg``.
+  }];
+  let arguments = (ins Tla_UregType:$ureg, Tla_TensorType:$dest);
+  let assemblyFormat = [{
+    $ureg `,` $dest attr-dict `:` qualified(type($ureg)) `,` type($dest)
+  }];
+}
+
 def Tla_LoadUnalignUpdateOp : Tla_Op<"load_unalign_update", []> {
-  let summary = "LoadUnAlign POST_MODE_UPDATE (vldas + vldus.post; HW next_ptr)";
+  let summary = "LoadUnAlign POST_MODE_UPDATE (vldus.post + ureg SSA; HW next_ptr)";
   let description = [{
     Loads one unaligned window. ``post_update_stride`` is an element count
-    (AscendC ``postUpdateStride``; frontend fills it from tile ``origin_shape``).
-    Lowering passes ``stride×sizeof(T)`` as HIVM ``$cceVL`` and returns the HW
-    ``newPtr``. Each op emits a local ``vldas`` (no carried ureg).
+    (AscendC ``postUpdateStride``). Python default ``0`` uses window
+    ``origin_shape``; effective stride (default or explicit) must be in
+    ``(0, VL]``. Lowering passes ``stride×sizeof(T)`` as HIVM ``$cceVL`` and
+    returns the HW ``newPtr``. Python omits ``ureg_in``; ``tla-unalign-ureg``
+    inserts ``load_unalign_pre`` and fills ``ureg_in`` from the prior UPDATE's
+    ``ureg_out`` when the next window Tensor is that prior ``next_ptr``.
   }];
   let arguments = (ins Tla_TensorType:$source,
-                       Tla_IntegerOrIndexType:$post_update_stride);
+                       Tla_IntegerOrIndexType:$post_update_stride,
+                       Optional<Tla_UregType>:$ureg_in);
   let results = (outs Tla_VectorSSAType:$result,
-                      Tla_PtrType:$next_ptr);
+                      Tla_PtrType:$next_ptr,
+                      Tla_UregType:$ureg_out);
   let assemblyFormat = [{
-    $source `post_update_stride` $post_update_stride attr-dict `:`
+    $source `post_update_stride` $post_update_stride
+    (`ureg_in` $ureg_in^)?
+    attr-dict `:`
     type($source)
     `post_update_stride` qualified(type($post_update_stride))
-    `->` qualified(type($result)) `,` qualified(type($next_ptr))
+    (`ureg_in` qualified(type($ureg_in))^)?
+    `->` qualified(type($result)) `,` qualified(type($next_ptr)) `,` qualified(type($ureg_out))
   }];
   let hasVerifier = 1;
 }
 
 def Tla_StoreUnalignUpdateOp : Tla_Op<"store_unalign_update", []> {
-  let summary = "StoreUnAlign POST_MODE_UPDATE (empty ureg + vstus.post + vstas; HW next_ptr)";
+  let summary = "StoreUnAlign POST_MODE_UPDATE (vstus.post + ureg SSA; HW next_ptr)";
   let description = [{
     Stores one unaligned window. ``post_update_stride`` is an element count
-    (AscendC ``postUpdateStride``; frontend fills it from tile ``origin_shape``).
-    Same HIVM ``$eleSize`` / HW ``newPtr`` rule as ``load_unalign_update``.
-    Each op emits empty ureg + ``vstus.post`` + ``vstas`` (no carried ureg).
+    (AscendC ``postUpdateStride``). Same default / explicit / ``(0, VL]`` rule
+    as ``load_unalign_update``. Same HIVM ``$eleSize`` / HW ``newPtr`` rule.
+    Python omits ``ureg_in``; ``tla-unalign-ureg`` inserts ``create_ureg``,
+    fills ``ureg_in``, and places ``store_unalign_post`` after the ureg that
+    is not taken by a later store UPDATE.
   }];
   let arguments = (ins Tla_TensorType:$dest,
                        Tla_VectorSSAType:$source,
-                       Tla_IntegerOrIndexType:$post_update_stride);
-  let results = (outs Tla_PtrType:$next_ptr);
+                       Tla_IntegerOrIndexType:$post_update_stride,
+                       Optional<Tla_UregType>:$ureg_in);
+  let results = (outs Tla_PtrType:$next_ptr,
+                      Tla_UregType:$ureg_out);
   let assemblyFormat = [{
-    $dest `,` $source `post_update_stride` $post_update_stride attr-dict `:`
+    $dest `,` $source `post_update_stride` $post_update_stride
+    (`ureg_in` $ureg_in^)?
+    attr-dict `:`
     type($dest) `,` qualified(type($source))
     `post_update_stride` qualified(type($post_update_stride))
-    `->` qualified(type($next_ptr))
+    (`ureg_in` qualified(type($ureg_in))^)?
+    `->` qualified(type($next_ptr)) `,` qualified(type($ureg_out))
   }];
   let hasVerifier = 1;
 }

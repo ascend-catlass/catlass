@@ -152,6 +152,8 @@ def loop_unalign_update_with_sidecar(mem_x: tla.Tensor, mem_z: tla.Tensor) -> No
             tile = tla.tile_view(x_ub, tla.make_shape(64), tla.make_coord(0))
             out = tla.tile_view(z_ub, tla.make_shape(64), tla.make_coord(0))
             side = tla.tile_view(side_ub, tla.make_shape(64), tla.make_coord(0))
+            # Natural for: UnAlign UPDATE inside the loop; sidecar ordinary store
+            # uses a fresh tile_view each trip (not UPDATE-carried).
             for _ in tla.range(2):
                 x, tile = tile.load(UNALIGN_LOAD)
                 out = out.store(x, UNALIGN_STORE)

@@ -13,14 +13,18 @@
 Modes (positional ``op``):
 
 * ``add`` — unaligned UPDATE load/store (f32 / f16 / bf16).
-  Hardware: each UnAlign UPDATE is self-contained dual-instr (load: vldas +
-  vldus.post; store: empty ureg + vstus.post + vstas). No public Pre/Post/``ureg=``.
+  Python emits UPDATE only; ``tla-unalign-ureg`` inserts
+  ``load_unalign_pre`` / ``create_ureg`` / ``store_unalign_post`` (clean
+  ``tla.range``: Pre/create before for, Post after; ``for``⊃``if`` or a
+  same-window load after store keeps per-trip dual-instr). Lowers to
+  ``vldas``+``vldus.post`` / empty ureg+``vstus.post``+``vstas``.
   ``--offset``: element offset of the first window (``1`` is not 32-byte aligned).
-  Dense only: HIVM count/advance = ``tile_extent`` (``origin_shape``); do not
-  pass ``post_update_stride``.
+  Default HIVM count/advance = ``tile_extent`` (``origin_shape``); an explicit
+  ``post_update_stride`` must be in ``(0, VL]`` and is the caller's responsibility.
   ``--tile-extent``: window length in elements (default: dtype full-register
-  width; ``1`` = one element per UPDATE trip).
-  ``--mode once``: one UPDATE trip; ``update`` (default): ``LOOPS`` trips.
+  width; ``1`` = one element per UPDATE).
+  ``--mode once``: e2e-only; set loop trips to 1 (not a DSL API).
+  ``--mode update`` (default): ``LOOPS`` trips.
   ``--inplace``: ``z = z + x`` with UnAlign load+store UPDATE on the same ``z``
   tile (shared storage identity).
 """
@@ -99,7 +103,7 @@ def load_store_unalign_op(
         y_tile = _window(y_ub, OFFSET)
         z_tile = _window(z_ub, OFFSET)
         with tla.vec.func(mode="simd"):
-            # Self-contained dual-instr each trip; ``tla.range`` carries tiles.
+            # Clean ``tla.range``: ``tla-unalign-ureg`` puts Pre/Post outside.
             trips = 1 if _MODE == "once" else LOOPS
             for _ in tla.range(trips):
                 x_reg, x_tile = x_tile.load(_LOAD_UPDATE)

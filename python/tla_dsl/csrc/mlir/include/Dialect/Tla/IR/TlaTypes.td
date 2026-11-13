@@ -72,6 +72,13 @@ def Tla_VectorSSAType : TypeDef<TlaDialect, "VectorSSA", []> {
   let genVerifyDecl = 1;
 }
 
+// UnAlign align-register carrier threaded as ordinary SSA across UPDATE ops and
+// scf.for iter_args. Not a developer-facing tile API.
+def Tla_UregType : TypeDef<TlaDialect, "Ureg", []> {
+  let mnemonic = "ureg";
+  let summary = "UnAlign ureg stream carrier (compiler-internal SSA).";
+}
+
 def Tla_ScalarValueType : AnyTypeOf<[AnyInteger, AnyFloat, Index],
     "TLA scalar SSA value type">;
 

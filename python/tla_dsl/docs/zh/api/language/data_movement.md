@@ -219,8 +219,8 @@ tla.Tensor.load(params: LoadParams | None = None) -> MaskSSA | VectorSSA | tuple
       `0` 表示按 `tile_extent`（`origin_shape`）推进。默认 `0`。
   - `UnalignLoadParams`：
     - `post_mode`（`str`）：`POST_MODE_NORMAL`（默认）或 `POST_MODE_UPDATE`。
-    - `post_update_stride`（`Any`）：须保持为 `0`（仅按 `origin_shape`
-      推进窗口）。默认 `0`。
+    - `post_update_stride`（`Any`）：`0`（默认）按 `origin_shape` 推进；
+      有效步长须在 `(0, VL]`（元素个数），由调用方保证重叠/脏 lane。默认 `0`。
   - `BlockLoadParams`：
     - `block_stride`（`int`）：块头间隔，单位为 32B DataBlock；`0` 时将首块
       复制到全部 8 槽。默认 `0`。
@@ -265,7 +265,9 @@ tla.Tensor.load(params: LoadParams | None = None) -> MaskSSA | VectorSSA | tuple
   已是原点窗（`coord=0`）；用 `tile_view`（或等价方式）切出所需 tile，UPDATE
   不会自动折非零坐标。`NormalLoadParams`：`post_update_stride=0`（默认）按
   `tile_extent`（`origin_shape`）推进；显式值保留填充与 stride 解耦。
-  `UnalignLoadParams` 须保持 `post_update_stride=0`（仅密集 `origin_shape`）。
+  `UnalignLoadParams`：默认 `0`→`tile_extent`；有效步长须在 `(0, VL]`。干净
+  `tla.range` 由 `tla-unalign-ureg` 将 Pre/Post 提到环外；`for` 内套动态
+  `if` 仍走每趟双指令。
 
 调用示例：
 
@@ -325,7 +327,8 @@ tla.Tensor.store(value: VectorSSA | MaskSSA, params: StoreParams | None = None, 
       `0` 表示按 `tile_extent`（`origin_shape`）推进。默认 `0`。
   - `UnalignStoreParams`：
     - `post_mode`（`str`）：`POST_MODE_NORMAL`（默认）或 `POST_MODE_UPDATE`。
-    - `post_update_stride`（`Any`）：须保持为 `0`。默认 `0`。
+    - `post_update_stride`（`Any`）：`0`（默认）按 `origin_shape` 推进；
+      有效步长须在 `(0, VL]`。默认 `0`。
   - `BlockStoreParams`：
     - `block_stride`（`int`）：块头间隔，单位 32B DataBlock。默认 `0`。
     - `post_mode`（`str`）：`POST_MODE_NORMAL`（默认）或 `POST_MODE_UPDATE`。
@@ -354,8 +357,8 @@ tla.Tensor.store(value: VectorSSA | MaskSSA, params: StoreParams | None = None, 
   `f16` / `bf16` / `f32`；返回下一扇窗口。在 `tla.vec.func` 内须用
   `tla.range` 赋回。与 UPDATE `load` 相同：调用前须为原点窗（`coord=0`）。
   `NormalStoreParams`：默认 `post_update_stride=0` 按 `tile_extent`
-  （`origin_shape`）推进；显式 stride 与填充解耦。`UnalignStoreParams` 须
-  保持 stride 为 `0`（仅密集 `origin_shape`）。
+  （`origin_shape`）推进；显式 stride 与填充解耦。`UnalignStoreParams`：
+  默认 `0`→`tile_extent`；有效步长须在 `(0, VL]`；干净 for 上 Pre/Post 在环外。
 
 调用示例：
 

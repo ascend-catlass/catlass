@@ -159,12 +159,14 @@ class NormalStoreParams(StoreParams):
 
 @dataclass
 class UnalignStoreParams(StoreParams):
-    """Unaligned UB vector store.
+    """Unaligned UB vector store (lowers with ``unaligned_ub_access``).
 
-    With ``post_mode=update``, leave ``post_update_stride`` at default ``0``:
-    the window advances by ``tile_extent`` (``origin_shape``; dense only).
-    Passing an explicit ``post_update_stride`` is rejected. Returns the next
-    window tile from the post-update pointer.
+    With ``post_mode=update``, ``post_update_stride=0`` (default) advances by
+    ``tile_extent`` (``origin_shape``). The effective stride (default or
+    explicit) is used as HIVM ``$eleSize`` / pointer advance and must be in
+    ``(0, VL]`` (element count for the dtype); overlapping / dirty writes are
+    the caller's responsibility.
+    Returns the next-window tile (from the HW post-update pointer).
     """
 
     post_mode: str = PostMode.POST_MODE_NORMAL
@@ -220,12 +222,14 @@ class NormalLoadParams(LoadParams):
 
 @dataclass
 class UnalignLoadParams(LoadParams):
-    """Unaligned UB vector load.
+    """Unaligned UB vector load (lowers with ``unaligned_ub_access``).
 
-    With ``post_mode=update``, leave ``post_update_stride`` at default ``0``:
-    the window advances by ``tile_extent`` (``origin_shape``; dense only).
-    Passing an explicit ``post_update_stride`` is rejected. Returns
-    ``(vector, next_tile)`` from the post-update pointer.
+    With ``post_mode=update``, ``post_update_stride=0`` (default) advances by
+    ``tile_extent`` (``origin_shape``). The effective stride (default or
+    explicit) is used as HIVM ``$cceVL`` / pointer advance and must be in
+    ``(0, VL]`` (element count for the dtype); overlapping / dirty lanes are
+    the caller's responsibility.
+    Returns ``(vector, next_tile)`` (next tile from the HW post-update pointer).
     """
 
     post_mode: str = PostMode.POST_MODE_NORMAL

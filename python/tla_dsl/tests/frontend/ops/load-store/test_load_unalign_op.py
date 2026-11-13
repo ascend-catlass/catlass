@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-from catlass.tla.runtime import make_fake_tensor
-
-
 from typing import Any
 
 import pytest
@@ -16,6 +13,8 @@ from catlass.params import (
     UnalignLoadParams,
     UnalignStoreParams,
 )
+from catlass.tla.runtime import make_fake_tensor
+
 
 
 def _ub_tensor(
@@ -291,107 +290,12 @@ def test_load_unalign_update_emits_update_ops(compiler_tlair: Any) -> None:
     )
     assert "tla.load_unalign_update" in mlir
     assert "tla.store_unalign_update" in mlir
-    assert "!tla.ureg" not in mlir
-    assert "tla.unalign_ureg_load_pre" not in mlir
-    assert "tla.unalign_ureg_store_empty" not in mlir
-
-
-@tla.kernel
-def load_unalign_update_loop_kernel(src: tla.Tensor, dst: tla.Tensor) -> None:
-    """Sliding-window UnAlign UPDATE: natural for carries tiles only."""
-    src_tile = tla.tile_view(src, tla.make_shape(64), tla.make_coord(0))
-    dst_tile = tla.tile_view(dst, tla.make_shape(64), tla.make_coord(0))
-    with tla.vector():
-        with tla.vec.func(mode="simd"):
-            for _ in tla.range(3):
-                x_reg, src_tile = src_tile.load(
-                    UnalignLoadParams(post_mode=PostMode.POST_MODE_UPDATE)
-                )
-                dst_tile = dst_tile.store(
-                    x_reg,
-                    UnalignStoreParams(post_mode=PostMode.POST_MODE_UPDATE),
-                )
-
-
-def test_load_unalign_update_loop_emits_ops(compiler_tlair: Any) -> None:
-    mlir = compiler_tlair(
-        load_unalign_update_loop_kernel,
-        type_args=(_ub_tensor(extent=256), _ub_tensor(extent=256)),
-    )
-    assert "tla.load_unalign_update" in mlir
-    assert "tla.store_unalign_update" in mlir
-    assert "scf.for" in mlir
-    assert "!tla.ureg" not in mlir
-
-
-@tla.kernel
-def load_unalign_update_loop_with_sidecar_tile_kernel(
-    src: tla.Tensor, dst: tla.Tensor, side: tla.Tensor
-) -> None:
-    """Loop carries UPDATE windows plus an ordinary (non-UPDATE) sidecar tile.
-
-    Regression for VectorRegion ``scf.for`` init lowering: sidecar / TensorDesc
-    bases may still be abstract ``!tla.ptr`` in ``valueMap`` when the for is
-    rebuilt; they must rematerialize to i64 rather than hard-fail.
-    """
-    src_tile = tla.tile_view(src, tla.make_shape(64), tla.make_coord(0))
-    dst_tile = tla.tile_view(dst, tla.make_shape(64), tla.make_coord(0))
-    side_tile = tla.tile_view(side, tla.make_shape(64), tla.make_coord(0))
-    with tla.vector():
-        with tla.vec.func(mode="simd"):
-            for _ in tla.range(3):
-                x_reg, src_tile = src_tile.load(
-                    UnalignLoadParams(post_mode=PostMode.POST_MODE_UPDATE)
-                )
-                dst_tile = dst_tile.store(
-                    x_reg,
-                    UnalignStoreParams(post_mode=PostMode.POST_MODE_UPDATE),
-                )
-                side_tile.store(x_reg)
-                side_tile = tla.tile_view(side, tla.make_shape(64), tla.make_coord(0))
-
-
-def test_load_unalign_update_loop_with_sidecar_tile(compiler_tlair: Any) -> None:
-    mlir = compiler_tlair(
-        load_unalign_update_loop_with_sidecar_tile_kernel,
-        type_args=(
-            _ub_tensor(extent=256),
-            _ub_tensor(extent=256),
-            _ub_tensor(extent=256),
-        ),
-    )
-    assert "tla.load_unalign_update" in mlir
-    assert "tla.store_unalign_update" in mlir
-    assert "scf.for" in mlir
-    assert "!tla.ureg" not in mlir
-
-
-@tla.kernel
-def load_unalign_update_inplace_loop_kernel(buf: tla.Tensor) -> None:
-    """Same-tile load+store UPDATE (in-place) inside a natural for."""
-    tile = tla.tile_view(buf, tla.make_shape(64), tla.make_coord(0))
-    with tla.vector():
-        with tla.vec.func(mode="simd"):
-            for _ in tla.range(3):
-                cur = tile
-                x_reg, _ = cur.load(
-                    UnalignLoadParams(post_mode=PostMode.POST_MODE_UPDATE)
-                )
-                tile = cur.store(
-                    x_reg,
-                    UnalignStoreParams(post_mode=PostMode.POST_MODE_UPDATE),
-                )
-
-
-def test_load_unalign_update_inplace_loop_emits_ops(compiler_tlair: Any) -> None:
-    mlir = compiler_tlair(
-        load_unalign_update_inplace_loop_kernel,
-        type_args=(_ub_tensor(extent=256),),
-    )
-    assert "tla.load_unalign_update" in mlir
-    assert "tla.store_unalign_update" in mlir
-    assert "scf.for" in mlir
-    assert "!tla.ureg" not in mlir
+    # Python emits UPDATE only; Pre/create_ureg/Post come from
+    # tla-unalign-ureg.
+    assert "!tla.ureg" in mlir
+    assert "tla.load_unalign_pre" not in mlir
+    assert "tla.create_ureg" not in mlir
+    assert "ureg_in" not in mlir
 
 
 def test_load_unalign_update_rejects_nonzero_coord(compiler_tlair: Any) -> None:
@@ -413,10 +317,35 @@ def test_load_unalign_update_rejects_nonzero_coord(compiler_tlair: Any) -> None:
         )
 
 
-def test_load_unalign_update_rejects_explicit_post_stride(
+def test_load_unalign_update_accepts_explicit_post_stride_in_vl(
     compiler_tlair: Any,
 ) -> None:
-    """UnAlign UPDATE forbids explicit post_update_stride; emit uses origin_shape."""
+    """UnAlign UPDATE accepts explicit stride in (0, VL]; VL edge covered by default-0 test."""
+
+    @tla.kernel
+    def ok_stride(src: tla.Tensor, dst: tla.Tensor) -> None:
+        src_tile = tla.tile_view(src, tla.make_shape(64), tla.make_coord(0))
+        dst_tile = tla.tile_view(dst, tla.make_shape(64), tla.make_coord(0))
+        with tla.vector():
+            with tla.vec.func(mode="simd"):
+                x, src_tile = src_tile.load(
+                    UnalignLoadParams(
+                        post_mode=PostMode.POST_MODE_UPDATE,
+                        post_update_stride=32,
+                    )
+                )
+                dst_tile.store(x)
+
+    mlir = compiler_tlair(
+        ok_stride, type_args=(_ub_tensor(extent=256), _ub_tensor(extent=256))
+    )
+    assert "tla.load_unalign_update" in mlir
+
+
+def test_load_unalign_update_rejects_post_stride_gt_vl(
+    compiler_tlair: Any,
+) -> None:
+    """UnAlign UPDATE rejects effective stride > VL (f32 VL=64)."""
 
     @tla.kernel
     def bad_stride(src: tla.Tensor, dst: tla.Tensor) -> None:
@@ -426,12 +355,34 @@ def test_load_unalign_update_rejects_explicit_post_stride(
                 src_tile.load(
                     UnalignLoadParams(
                         post_mode=PostMode.POST_MODE_UPDATE,
-                        post_update_stride=64,
+                        post_update_stride=65,
                     )
                 )
 
-    with pytest.raises(TlaLoweringError, match="do not pass post_update_stride"):
+    with pytest.raises(TlaLoweringError, match=r"\(0, VL\]"):
         compiler_tlair(bad_stride, type_args=(_ub_tensor(), _ub_tensor()))
+
+
+def test_load_unalign_update_accepts_default_stride_eq_vl(
+    compiler_tlair: Any,
+) -> None:
+    """Default 0→tile_extent allows tile_extent == VL (same as sample TILE_EXTENT)."""
+
+    @tla.kernel
+    def ok_default(src: tla.Tensor, dst: tla.Tensor) -> None:
+        src_tile = tla.tile_view(src, tla.make_shape(64), tla.make_coord(0))
+        dst_tile = tla.tile_view(dst, tla.make_shape(64), tla.make_coord(0))
+        with tla.vector():
+            with tla.vec.func(mode="simd"):
+                x, src_tile = src_tile.load(
+                    UnalignLoadParams(post_mode=PostMode.POST_MODE_UPDATE)
+                )
+                dst_tile.store(x)
+
+    mlir = compiler_tlair(
+        ok_default, type_args=(_ub_tensor(extent=256), _ub_tensor(extent=256))
+    )
+    assert "tla.load_unalign_update" in mlir
 
 
 def test_load_rejects_gm_tensor(compiler_tlair: Any) -> None:

@@ -118,6 +118,38 @@ def _tile_origin_extent(tile: _Tensor) -> Any:
     )
 
 
+def _unalign_update_stride_value(
+    params: Any, window: _Tensor, *, element_type: Any
+) -> Any:
+    """Default ``0`` → tile_extent; effective stride must be in ``(0, VL]``."""
+    from ..base_dsl.typing import as_numeric
+    from ..core_api import _as_value, _const_int_value, _vector_lane_count
+    from ..execution_lowering import TlaLoweringError
+    from ..types import dtype_size_bytes
+
+    vl = _vector_lane_count(dtype_size_bytes(str(element_type).strip().lower()))
+    static_stride = _const_int_value(params.post_update_stride)
+
+    if static_stride == 0:
+        extent = _tile_origin_extent(window)
+        effective = _const_int_value(extent)
+        result = _as_value(as_numeric(extent))
+    elif static_stride is not None:
+        effective = static_stride
+        result = _as_value(params.post_update_stride)
+    else:
+        # Dynamic explicit stride: no static bound check.
+        return _as_value(params.post_update_stride)
+
+    if effective is not None and not 0 < effective <= vl:
+        raise TlaLoweringError(
+            "UnAlign post_mode=update post_update_stride must be in "
+            f"(0, VL] for the dtype (VL={vl} elements), got "
+            f"{effective!r} (post_update_stride={params.post_update_stride!r})"
+        )
+    return result
+
+
 def _require_update_origin_window(
     tile: _Tensor,
     *,
@@ -267,8 +299,6 @@ def _validate_post_update_params(params: Any) -> bool:
         LoadDist,
         PostMode,
         StoreDist,
-        UnalignLoadParams,
-        UnalignStoreParams,
     )
 
     # Params without PostMode fields are never UPDATE.
@@ -308,7 +338,6 @@ def _validate_post_update_params(params: Any) -> bool:
         return True
 
     is_update = params.post_mode == PostMode.POST_MODE_UPDATE
-    is_unalign = isinstance(params, (UnalignLoadParams, UnalignStoreParams))
     stride = params.post_update_stride
     static_stride = None if isinstance(stride, bool) else _const_int_value(stride)
     if is_update:
@@ -322,17 +351,7 @@ def _validate_post_update_params(params: Any) -> bool:
             raise NotImplementedError(
                 f"post_mode=update with store_dist={store_dist!r} is not supported yet"
             )
-        if is_unalign:
-            # Dense-only: HIVM count/advance = tile_extent (origin_shape).
-            # Keep the field for API symmetry with Align, but forbid an
-            # explicit value — emit always uses origin_shape.
-            if static_stride is None or static_stride != 0:
-                raise TlaLoweringError(
-                    "UnAlign post_mode=update derives post_update_stride from "
-                    "tile_extent (origin_shape); do not pass post_update_stride "
-                    "(leave default 0)"
-                )
-        elif static_stride is not None and static_stride < 0:
+        if static_stride is not None and static_stride < 0:
             raise TlaLoweringError(
                 "post_mode=update post_update_stride must be >= 0 "
                 "(0 = default to tile_extent / origin_shape)"
@@ -374,7 +393,15 @@ class _Tensor(TensorABC):
 
         UPDATE windows are ordinary tiles: ``tile.load`` / ``tile.store`` with
         ``post_mode=update`` build the next window with ``make_tensor`` and
-        the loop yields that tile, the same packing as any other carried tensor.
+        the loop yields that tensor, the same packing as any other carried
+        tensor. UnAlign ureg is **not** packed on the tensor: Python emits
+        UPDATE without ureg; ``tla-unalign-ureg`` tracks load/store ureg
+        separately, fills each UPDATE's ureg input, inserts
+        ``load_unalign_pre`` / ``create_ureg`` when needed (before a *clean*
+        ``scf.for`` when the tile is already that for's iter_arg; ``for``⊃``if``
+        or a same-window load after store keeps per-trip dual-instr), and
+        places ``store_unalign_post`` after the store ureg that is not taken
+        by a later store UPDATE.
         """
         from ..core_api import _tla_tensor_type_for_mlir_value
 
@@ -571,8 +598,8 @@ class _Tensor(TensorABC):
               - `UnalignLoadParams`:
                 - `post_mode` (`str`): `POST_MODE_NORMAL` (default) or
                   `POST_MODE_UPDATE`.
-                - `post_update_stride` (`Any`): Must stay `0` (window advances
-                  by `origin_shape` only). Default `0`.
+                - `post_update_stride` (`Any`): `0` (default) advances by
+                  `origin_shape`; effective stride must be in `(0, VL]`. Default `0`.
               - `BlockLoadParams`:
                 - `block_stride` (`int`): Heads apart in 32B DataBlocks; `0`
                   repeats the first block into all 8 slots. Default `0`.
@@ -626,8 +653,10 @@ class _Tensor(TensorABC):
               UPDATE never automatically folds non-zero coordinates.
               `NormalLoadParams`: `post_update_stride=0` (default) advances
               by `tile_extent` (`origin_shape`); an explicit stride keeps
-              fill / stride-advance decoupling. `UnalignLoadParams` must
-              leave `post_update_stride` at `0` (dense `origin_shape` only).
+              fill / stride-advance decoupling. `UnalignLoadParams`: default
+              `0`→`tile_extent`; effective stride must be in `(0, VL]`. On a clean
+              `tla.range`, `tla-unalign-ureg` hoists Pre/Post outside the for;
+              `for`⊃dynamic `if` keeps per-trip dual-instr.
 
             Example:
             ```python
@@ -768,9 +797,7 @@ class _Tensor(TensorABC):
 
         if _validate_post_update_params(params):
             if isinstance(params, UnalignLoadParams):
-                # Dual instr at VectorRegion: local vldas + vldus.post.
-                from ..base_dsl.typing import as_numeric
-
+                # UPDATE only; ``tla-unalign-ureg`` inserts Pre and fills ureg.
                 window = _require_update_origin_window(self, loc=loc)
                 _require_update_unit_stride(window)
                 source = _as_value(window)
@@ -780,17 +807,21 @@ class _Tensor(TensorABC):
                     _vector_ssa_type_from_tensor_descriptor(source_desc)
                 )
                 ptr_type = _tla_type_bridge.tensor_ptr_type_get(source.type)
-                extent = _tile_origin_extent(window)
-                vec_val, next_ptr = _tla_ops_gen.load_unalign_update(
+                stride_val = _unalign_update_stride_value(
+                    params, window, element_type=source_desc.element_type
+                )
+                ctx = loc.context if loc is not None else mlir_ir.Context.current
+                ureg_type = mlir_ir.Type.parse("!tla.ureg", context=ctx)
+                vec_val, next_ptr, _ureg_out = _tla_ops_gen.load_unalign_update(
                     result_type,
                     ptr_type,
+                    ureg_type,
                     source,
-                    _as_value(as_numeric(extent)),
+                    stride_val,
                     loc=loc,
                 )
-                return VectorSSA(vec_val), _make_update_tile_from_ptr(
-                    next_ptr, window, loc=loc
-                )
+                next_tile = _make_update_tile_from_ptr(next_ptr, window, loc=loc)
+                return VectorSSA(vec_val), next_tile
             is_block = isinstance(params, BlockLoadParams)
             if not is_block and not isinstance(params, NormalLoadParams):
                 raise TlaLoweringError(
@@ -1083,7 +1114,8 @@ class _Tensor(TensorABC):
               - `UnalignStoreParams`:
                 - `post_mode` (`str`): `POST_MODE_NORMAL` (default) or
                   `POST_MODE_UPDATE`.
-                - `post_update_stride` (`Any`): Must stay `0`. Default `0`.
+                - `post_update_stride` (`Any`): `0` (default) advances by
+                  `origin_shape`; effective stride must be in `(0, VL]`. Default `0`.
               - `BlockStoreParams`:
                 - `block_stride` (`int`): Heads apart in 32B DataBlocks.
                   Default `0`.
@@ -1119,8 +1151,8 @@ class _Tensor(TensorABC):
               `tla.range`. Same origin window (`coord=0`) contract as UPDATE
               `load`. `NormalStoreParams`: default `post_update_stride=0`
               advances by `tile_extent` (`origin_shape`); an explicit stride is
-              decoupled. `UnalignStoreParams` must leave stride at `0`
-              (dense `origin_shape` only).
+              decoupled. `UnalignStoreParams`: default `0`→`tile_extent`;
+              effective stride must be in `(0, VL]`; clean for hoists Pre/Post.
 
             Example:
             ```python
@@ -1229,9 +1261,7 @@ class _Tensor(TensorABC):
             )
         if _validate_post_update_params(params):
             if isinstance(params, UnalignStoreParams):
-                # Dual instr at VectorRegion: empty ureg + vstus.post + vstas.
-                from ..base_dsl.typing import as_numeric
-
+                # UPDATE only; ``tla-unalign-ureg`` inserts create_ureg/Post.
                 if mask is not None:
                     raise TlaLoweringError(
                         "UnalignStoreParams(post_mode=update) does not accept mask="
@@ -1239,16 +1269,20 @@ class _Tensor(TensorABC):
                 window = _require_update_origin_window(self, loc=loc)
                 _require_update_unit_stride(window)
                 dest = _as_value(window)
-                _require_update_supported_dtype(
-                    _tla_tensor_type_for_mlir_value(dest).element_type
-                )
+                elem_ty = _tla_tensor_type_for_mlir_value(dest).element_type
+                _require_update_supported_dtype(elem_ty)
                 ptr_type = _tla_type_bridge.tensor_ptr_type_get(dest.type)
-                extent = _tile_origin_extent(window)
-                next_ptr = _tla_ops_gen.store_unalign_update(
+                stride_val = _unalign_update_stride_value(
+                    params, window, element_type=elem_ty
+                )
+                ctx = loc.context if loc is not None else mlir_ir.Context.current
+                ureg_type = mlir_ir.Type.parse("!tla.ureg", context=ctx)
+                next_ptr, _ureg_out = _tla_ops_gen.store_unalign_update(
                     ptr_type,
+                    ureg_type,
                     dest,
                     value_val,
-                    _as_value(as_numeric(extent)),
+                    stride_val,
                     loc=loc,
                 )
                 return _make_update_tile_from_ptr(next_ptr, window, loc=loc)

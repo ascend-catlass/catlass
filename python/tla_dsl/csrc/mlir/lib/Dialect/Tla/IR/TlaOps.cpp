@@ -1484,6 +1484,28 @@ static mlir::LogicalResult verifyUpdateStride(mlir::Operation* op, mlir::Value s
     return mlir::success();
 }
 
+/// UnAlign UPDATE stride is an element count in ``(0, VL]`` (VL = 256B / sizeof(T)).
+static mlir::LogicalResult verifyUnalignUpdateStride(mlir::Operation* op, mlir::Value stride, mlir::Type elemType)
+{
+    if (failed(verifyUpdateStride(op, stride)))
+        return mlir::failure();
+    auto constantOp = stride.getDefiningOp<mlir::arith::ConstantOp>();
+    if (!constantOp)
+        return mlir::success();
+    auto intAttr = mlir::dyn_cast<mlir::IntegerAttr>(constantOp.getValue());
+    if (!intAttr)
+        return mlir::success();
+    int64_t elemBytes = getByteSizeOfFixedWidthScalarType(elemType);
+    if (elemBytes <= 0)
+        return mlir::success();
+    constexpr int64_t kVectorRegisterBytes = 256;
+    int64_t vl = kVectorRegisterBytes / elemBytes;
+    if (intAttr.getInt() > vl)
+        return op->emitOpError("post_update_stride must be in (0, VL] for the dtype (VL=")
+               << vl << " elements), got " << intAttr.getInt();
+    return mlir::success();
+}
+
 static mlir::LogicalResult verifyUpdatePtr(mlir::Operation* op, mlir::Value ptr, mlir::Type elemType)
 {
     auto ptrTy = mlir::dyn_cast<PtrType>(ptr.getType());
@@ -1587,10 +1609,11 @@ mlir::LogicalResult LoadUnalignUpdateOp::verify()
         return mlir::failure();
     if (!mlir::isa<VectorSSAType>(getResult().getType()))
         return emitOpError("result must be !tla.vector");
-    if (failed(verifyUpdateStride(getOperation(), getPostUpdateStride())))
-        return mlir::failure();
     auto sourceType = mlir::cast<TlaTensorType>(getSource().getType());
-    return verifyUpdatePtr(getOperation(), getNextPtr(), sourceType.getPtr().getPointee());
+    mlir::Type elemType = sourceType.getPtr().getPointee();
+    if (failed(verifyUnalignUpdateStride(getOperation(), getPostUpdateStride(), elemType)))
+        return mlir::failure();
+    return verifyUpdatePtr(getOperation(), getNextPtr(), elemType);
 }
 
 mlir::LogicalResult StoreUnalignUpdateOp::verify()
@@ -1599,10 +1622,11 @@ mlir::LogicalResult StoreUnalignUpdateOp::verify()
         return mlir::failure();
     if (!mlir::isa<VectorSSAType>(getSource().getType()))
         return emitOpError("source must be !tla.vector");
-    if (failed(verifyUpdateStride(getOperation(), getPostUpdateStride())))
-        return mlir::failure();
     auto destType = mlir::cast<TlaTensorType>(getDest().getType());
-    return verifyUpdatePtr(getOperation(), getNextPtr(), destType.getPtr().getPointee());
+    mlir::Type elemType = destType.getPtr().getPointee();
+    if (failed(verifyUnalignUpdateStride(getOperation(), getPostUpdateStride(), elemType)))
+        return mlir::failure();
+    return verifyUpdatePtr(getOperation(), getNextPtr(), elemType);
 }
 
 static mlir::LogicalResult verifyConstantScalarIndexInBounds(mlir::Operation* op, mlir::Value index, int64_t length)

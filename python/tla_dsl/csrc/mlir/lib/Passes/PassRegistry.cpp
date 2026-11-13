@@ -32,6 +32,7 @@ void registerTlaPasses()
     registerTlaLowerTensorDescPass();
     registerTlaLowerBlockIdxPass();
     registerTlaVectorRegionSimtPass();
+    registerTlaUnalignUregPass();
     registerTlaVectorRegionSimdPass();
     registerTlaLowerFlagBarrierToHivmPass();
     registerTlaLowerPtrPass();
@@ -59,6 +60,9 @@ void buildTlaPipeline(OpPassManager& pm)
     pm.addPass(createTlaLowerExternCallPass());
     pm.addPass(createTlaLowerPtrPass());
     pm.addPass(createTlaSplitMixedFuncPass());
+    // Fill UnAlign UPDATE ureg while scf.for still carries !tla.tensor
+    // (before tla-lower-tensor-desc flattens carriers to scalars).
+    pm.addPass(createTlaUnalignUregPass());
     // Materialize tensor-view producer chains as tla.tensor_desc before region
     // passes consume them. Runs after tla-lower-ptr so descriptor bases use the
     // bridged memref or !tla.ptr produced by the standard pipeline.

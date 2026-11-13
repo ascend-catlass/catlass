@@ -23,6 +23,7 @@ add_library(TlaPasses
   TlaLowerProfilingPass.cpp
   TlaLowerAVEToRegbaseIntrinsPass.cpp
   TlaVectorRegionCommon.cpp
+  TlaUnalignUregPass.cpp
   TlaVectorRegionSimdPass.cpp
   TlaVectorRegionSimtPass.cpp
   TlaSimtWarpLowering.cpp

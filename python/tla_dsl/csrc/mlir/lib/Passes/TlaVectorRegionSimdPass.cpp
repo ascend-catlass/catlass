@@ -139,7 +139,7 @@ static Type dataVectorType(OpBuilder& b, Type elemType)
 }
 
 /// Emit load-side UnAlignReg Pre (AscendC ``LoadUnAlignPre`` / ``vldas``).
-/// Self-contained UPDATE: each ``load_unalign_update`` emits its own local Pre.
+/// ``tla-unalign-ureg`` inserts ``load_unalign_pre`` before the first UPDATE.
 static FailureOr<Value> emitVldas(OpBuilder& b, Location loc, Value ptr)
 {
     auto op = b.create<hivm_regbaseintrins::VldasInstrOp>(loc, uregVectorType(b), ptr);
@@ -159,8 +159,8 @@ static Value getVectorHelperStorageIdentity(Value source);
 ///
 /// ``$cceVL`` is the AscendC ``postUpdateStride`` in **bytes**
 /// (``stride_elems × sizeof(T)``, same as Align UPDATE). HW ``newPtr`` is the
-/// TLA ``next_ptr`` — no software pointer arithmetic. Each UPDATE stays
-/// self-contained (local ``vldas``); ureg is not carried across ops.
+/// TLA ``next_ptr`` — no software pointer arithmetic. ``ureg`` is carried SSA
+/// from ``load_unalign_pre`` / prior UPDATE ``ureg_out``.
 static FailureOr<std::tuple<Value, Value, Value>> emitVldusPost(
     OpBuilder& b, Location loc, Value ptr, Value ureg, Value countBytes, Type elemType)
 {
@@ -2611,15 +2611,14 @@ static LogicalResult lowerLoadUnalignUpdate(
         return failure();
     Type elemType = sourceType.getElementType();
     Value countBytes = strideElemsToByteOffI32(b, loc, postUpdateStride, elemType);
-    // Dual instr: local vldas + vldus.post (self-contained; Pre not carried).
-    FailureOr<Value> localUreg = emitVldas(b, loc, *ptrOr);
-    if (failed(localUreg))
-        return op.emitError("failed to emit vldas for unalign UPDATE"), failure();
-    FailureOr<std::tuple<Value, Value, Value>> emitted =
-        emitVldusPost(b, loc, *ptrOr, *localUreg, countBytes, elemType);
+    Value uregIn = valueMap.lookup(op.getUregIn());
+    if (!uregIn)
+        return op.emitError("load_unalign_update ureg_in not mapped in vector helper"), failure();
+    FailureOr<std::tuple<Value, Value, Value>> emitted = emitVldusPost(b, loc, *ptrOr, uregIn, countBytes, elemType);
     if (failed(emitted))
         return op.emitError("unsupported element type for tla.load_unalign_update"), failure();
     valueMap[op.getResult()] = std::get<0>(*emitted);
+    valueMap[op.getUregOut()] = std::get<1>(*emitted);
     mapUpdateNextPtrI64(
         op.getNextPtr(), b.create<LLVM::PtrToIntOp>(loc, b.getI64Type(), std::get<2>(*emitted)), valueMap);
     return success();
@@ -2894,9 +2893,9 @@ static LogicalResult lowerVectorScalarBinary(
     return success();
 }
 
-/// tla.squeeze: mask-compress src lanes via linked bitcode (vsqz). Uses
-/// NO_STORE_REG; STORE_REG + StoreUnAlign streaming writeback is not exposed
-/// until unaligned store (StoreUnAlign/StoreUnAlignPost) is available in TLA.
+/// tla.squeeze: mask-compress src lanes via linked bitcode (vsqz).
+/// Uses NO_STORE_REG; streaming writeback stays on ``store_unalign_update`` /
+/// ``store_unalign_post`` rather than squeeze STORE_REG.
 static LogicalResult lowerSqueeze(
     ::tla::SqueezeOp squeezeOp, OpBuilder& b, ModuleOp module, DenseMap<Value, Value>& valueMap,
     AutoFullPredicateCache& fullMasks)
@@ -3614,21 +3613,52 @@ static LogicalResult lowerStoreUnalignUpdate(
         return failure();
     Type elemType = srcTy.getElementType();
     Value countBytes = strideElemsToByteOffI32(b, loc, postUpdateStride, elemType);
-    // AscendC ABAB store: empty UnalignRegForStore + vstus.post + vstas (no vldas).
-    Value localUreg = emitEmptyStoreUreg(b, loc);
-    FailureOr<std::pair<Value, Value>> emitted = emitVstusPost(b, loc, src, *ptrOr, localUreg, countBytes, elemType);
+    Value uregIn = valueMap.lookup(op.getUregIn());
+    if (!uregIn)
+        return op.emitError("store_unalign_update ureg_in not mapped in vector helper"), failure();
+    FailureOr<std::pair<Value, Value>> emitted = emitVstusPost(b, loc, src, *ptrOr, uregIn, countBytes, elemType);
     if (failed(emitted))
         return op.emitError("unsupported element type for tla.store_unalign_update"), failure();
-    // Flush ureg at HW ptr after post-update (AscendC StoreUnAlignPost(..., 0)).
-    if (failed(emitVstas(b, loc, emitted->first, emitted->second)))
-        return op.emitError("failed to emit vstas for unalign store UPDATE"), failure();
+    valueMap[op.getUregOut()] = emitted->first;
     mapUpdateNextPtrI64(op.getNextPtr(), b.create<LLVM::PtrToIntOp>(loc, b.getI64Type(), emitted->second), valueMap);
+    // Stream-tail ``vstas`` comes from ``store_unalign_post`` only.
     return success();
 }
 
+static LogicalResult lowerLoadUnalignPre(::tla::LoadUnalignPreOp op, OpBuilder& b, DenseMap<Value, Value>& valueMap)
+{
+    Location loc = op.getLoc();
+    auto ptrOr = resolveEffectiveUbPtr(op.getSource(), b, loc, valueMap);
+    if (failed(ptrOr))
+        return op.emitError("load_unalign_pre requires a live UB address"), failure();
+    FailureOr<Value> ureg = emitVldas(b, loc, *ptrOr);
+    if (failed(ureg))
+        return failure();
+    valueMap[op.getUreg()] = *ureg;
+    return success();
+}
+
+static LogicalResult lowerCreateUreg(::tla::CreateUregOp op, OpBuilder& b, DenseMap<Value, Value>& valueMap)
+{
+    valueMap[op.getUreg()] = emitEmptyStoreUreg(b, op.getLoc());
+    return success();
+}
+
+static LogicalResult lowerStoreUnalignPost(::tla::StoreUnalignPostOp op, OpBuilder& b, DenseMap<Value, Value>& valueMap)
+{
+    Location loc = op.getLoc();
+    Value ureg = valueMap.lookup(op.getUreg());
+    if (!ureg)
+        return op.emitError("store_unalign_post ureg not mapped in vector helper"), failure();
+    auto ptrOr = resolveEffectiveUbPtr(op.getDest(), b, loc, valueMap);
+    if (failed(ptrOr))
+        return op.emitError("store_unalign_post requires a live UB address"), failure();
+    return emitVstas(b, loc, ureg, *ptrOr);
+}
+
 /// scf.for: rebuild the loop, including loop-carried iter_args, and lower its
-/// body. Init args and the scf.yield operands may be register, index, or
-/// scalar SSA values threaded through the helper.
+/// body. Init args and the scf.yield operands may be register, index, scalar,
+/// or ``!tla.ureg`` SSA (inserted by tla-unalign-ureg; carried like any other).
 static LogicalResult lowerScfFor(
     scf::ForOp forOp, OpBuilder& b, ModuleOp module, DenseMap<Value, Value>& valueMap,
     AutoFullPredicateCache& fullMasks)
@@ -3738,6 +3768,10 @@ static LogicalResult lowerScfFor(
         });
     if (failed(bodyStatus))
         return failure();
+    // Only remap for *results*. Do not overwrite valueMap entries for yield
+    // operands: those SSA values often exist outside the loop (e.g. ``b`` in
+    // ``a = b``), and remapping them to for-results corrupts post-loop users
+    // even on zero-trip loops. Stream-tail Post uses for results, covered here.
     for (auto [i, oldRes] : llvm::enumerate(forOp.getResults())) {
         Value newRes = newFor.getResult(i);
         if (wasIndex[i] && !oldRes.use_empty())
@@ -4006,6 +4040,13 @@ static LogicalResult lowerNestedVectorOp(
         return lowerVfRegisterPrint(printOp, b, module, valueMap);
     if (auto printOp = dyn_cast<::tla::PrintTensorOp>(op))
         return lowerVfTensorPrint(printOp, b, module, valueMap);
+
+    if (auto preOp = dyn_cast<::tla::LoadUnalignPreOp>(op))
+        return lowerLoadUnalignPre(preOp, b, valueMap);
+    if (auto emptyOp = dyn_cast<::tla::CreateUregOp>(op))
+        return lowerCreateUreg(emptyOp, b, valueMap);
+    if (auto postOp = dyn_cast<::tla::StoreUnalignPostOp>(op))
+        return lowerStoreUnalignPost(postOp, b, valueMap);
 
     if (auto loadUnalignUpdateOp = dyn_cast<::tla::LoadUnalignUpdateOp>(op))
         return lowerLoadUnalignUpdate(loadUnalignUpdateOp, b, valueMap);
@@ -4563,6 +4604,10 @@ static LogicalResult collectVectorHelperOperands(
             addVectorHelperOperand(loadUnalignUpdateOp.getSource(), operands, aliases);
             continue;
         }
+        if (auto preOp = dyn_cast<::tla::LoadUnalignPreOp>(op)) {
+            addVectorHelperOperand(preOp.getSource(), operands, aliases);
+            continue;
+        }
         if (auto storeOp = dyn_cast<::tla::StoreOp>(op)) {
             addVectorHelperOperand(storeOp.getDest(), operands, aliases);
             continue;
@@ -4573,6 +4618,10 @@ static LogicalResult collectVectorHelperOperands(
         }
         if (auto storeUnalignUpdateOp = dyn_cast<::tla::StoreUnalignUpdateOp>(op)) {
             addVectorHelperOperand(storeUnalignUpdateOp.getDest(), operands, aliases);
+            continue;
+        }
+        if (auto postOp = dyn_cast<::tla::StoreUnalignPostOp>(op)) {
+            addVectorHelperOperand(postOp.getDest(), operands, aliases);
             continue;
         }
         if (auto printOp = dyn_cast<::tla::PrintTensorOp>(op)) {
