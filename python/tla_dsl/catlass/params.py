@@ -94,6 +94,7 @@ class LoadDist:
     DIST_NORM = "norm"
     DIST_BRC_B32 = "brc_b32"
     DIST_DINTLV_B32 = "dintlv_b32"
+    DIST_DINTLV_B16 = "dintlv_b16"
     DIST_US_B8 = "us_b8"
     DIST_BRC_B16 = "brc_b16"
     DIST_US_B16 = "us_b16"
@@ -385,9 +386,12 @@ class SatMode(enum.Enum):
     ``SAT`` also turns a NaN input into ``+0`` instead of propagating it. That
     is AVE's saturating-narrow behaviour rather than anything specific to fp8 --
     ``f32 -> f16`` does the same -- so use ``NOSAT`` where NaNs must survive.
+
+    BF16-to-FP4 narrowing always saturates: it accepts ``SAT`` or ``UNKNOWN``
+    and rejects ``NOSAT``.
     """
 
-    UNKNOWN = "unknown"  # unspecified; the lowering treats this exactly as NOSAT
+    UNKNOWN = "unknown"  # native/default behavior; fixed-saturation FP4 stays saturated
     SAT = "sat"
     NOSAT = "nosat"
 

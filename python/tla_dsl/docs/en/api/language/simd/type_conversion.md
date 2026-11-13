@@ -30,6 +30,23 @@ encoded bits. CAST_HYBRID is only supported for Float32 -> HiFloat8;
 it follows CANN's native hybrid rounding and does not guarantee the
 nearest representable value. The default is CAST_ROUND.
 
+Float4E2M1x2 and Float4E1M2x2 store two FP4 values per byte,
+low nibble first. Tensor shapes and offsets count packed pairs.
+Native conversion pairs it with BFloat16: 128 consecutive BF16
+values produce 64 pair bytes at positions `4*j + reg_slot`.
+Narrowing supports SAT or UNKNOWN (fixed native saturation),
+and CAST_ROUND (ties away),
+CAST_RINT (ties even), CAST_NONE (same as CAST_RINT), CAST_FLOOR,
+CAST_CEIL and CAST_TRUNC.
+A source BF16 mask has 128 lanes; its even positions control
+whole pairs and odd positions have no effect. A 64-lane pair
+mask (`dtype=UInt32`) is also accepted, with one bit per pair.
+Widening uses a 256-lane byte mask. Masked results
+are zero. All four slots are supported. FP32 conversion requires
+explicit Python composition; a plain FP32->BF16->FP4 cast
+can double-round. These packed register types are distinct from
+logical four-bit Tensor types and do not support SIMT conversion.
+
 Prototype:
 
 ```python
@@ -41,8 +58,9 @@ Parameters:
 - `dst_type` (`type[Numeric]`): Element type to convert to. Required.
 - `params` (`CastParams`): Rounding, saturation and register slot. Required.
 - `mask` (`MaskSSA | None`): Optional execution mask; `None` means all lanes enabled. Optional, default `None`. The
-  mask is indexed in the **source** element domain: lane `i` predicates
-  source element `i`, whatever the width change. A masked-off element
+  mask is indexed in the **source** element domain; BF16-to-FP4
+  uses the even source positions or an explicit pair mask as
+  described above. A masked-off element
   contributes zero to the result.
 
 Constraints:
@@ -50,7 +68,8 @@ Constraints:
 - Must be called inside a `@tla.kernel`-decorated kernel function.
 - Must be called inside `tla.vec.func()`.
 - Supported targets: signed i8..i64, unsigned u8..u32 on reachable
-  routes, f16/bf16/f32, f8e4m3fn/f8e5m2, hif8. Not supported: bool, f64,
+  routes, f16/bf16/f32, f8e4m3fn/f8e5m2, hif8 and FP4x2 pairs.
+  Not supported: bool, f64,
   f8e8m0, fp8-to-fp8, fp8-to-integer.
 - A same-type cast (`f16`->`f16`, `bf16`->`bf16`, `f32`->`f32`)
   keeps the element type and re-rounds every lane: only `round_mode`
@@ -58,7 +77,8 @@ Constraints:
   supported. `sat_mode` `SAT` is refused (a same-type cast never
   saturates), and `reg_slot` must be `ZERO` or `ONE`.
 - `reg_slot` `TWO` and `THREE` name a pack quarter. They are valid
-  on a 4x integer cast and the direct fp8/HiF8<->f32 instruction.
+  on a 4x integer cast, the direct fp8/HiF8<->f32 instruction,
+  and BF16<->FP4x2 conversion.
 - `params.round_mode` accepts `CAST_ROUND` / `CAST_FLOOR` /
   `CAST_CEIL` / `CAST_TRUNC` / `CAST_RINT` / `CAST_ODD` /
   `CAST_NONE`. `CAST_HYBRID` is supported only for Float32 ->
@@ -99,24 +119,22 @@ with tla.vec.func(mode="simd"):
 Description:
 
 Reinterpret the bits of a register-resident vector as another
-element type of the **same bit width**. Nothing is computed and no
-hardware instruction is emitted: the register keeps its bits and
-only its element type changes, so the op is free.
+element type without numeric conversion. The physical register
+retains all 2048 bits. Element widths may differ; the physical
+and valid lane counts change to preserve their respective bit
+counts. For example, 64 Float32 lanes become 128 BFloat16 lanes,
+exposing both halfwords of each Float32 bit pattern.
 
-This is what makes a float's bit pattern reachable from CATLASS Python --
-extracting an exponent, building `2**k` by shifting into bit 23,
-clearing a sign bit -- without a store/load round trip through UB at
-a different element type.
+Supported types are `f32`/`i32`/`u32`, `f16`/`bf16`/`i16`/`u16`,
+`i8`/`u8`/`f8e4m3fn`/`f8e5m2`/`hif8`/`f4e2m1x2`/`f4e1m2x2`, and
+`i64`/`u64`. `tla.Bool`, `tla.Float8E8M0` and logical four-bit Tensor
+types are rejected. This operation changes neither byte order nor
+register slot and does not pack sparse values. Use `.to()` for
+numeric conversion and explicit rearrangement for layout changes.
 
-The same-width pairs are `f32`/`i32`/`u32`, `f16`/`bf16`/`i16`/`u16`,
-`i8`/`u8`/`f8e4m3fn`/`f8e5m2`/`hif8`, and `i64`/`u64`. The lane count is
-preserved. A width change is `VectorSSA.to`'s job and is rejected
-here. `tla.Bool` (i1), `tla.Float8E8M0` and the packed fp4 formats
-are not valid `!tla.vector` element types and are rejected too.
-
-`i64`/`u64` registers can be returned by an extern and bitcast to
-each other. The tensor API does not provide direct loads of these
-register types.
+`i64`/`u64` registers can come from extern or bitcast. This adds no
+64-bit Tensor load/store or arithmetic routes; those operations
+must independently support the element type.
 
 Prototype:
 
@@ -126,14 +144,14 @@ tla.VectorSSA.bitcast(dst_type: Any) -> Any
 
 Parameters:
 
-- `dst_type` (`type[Numeric]`): Same-width element type to
-  reinterpret as. Required.
+- `dst_type` (`type[Numeric]`): Element type to reinterpret as. Required.
 
 Constraints:
 
 - Must be called inside a `@tla.kernel`-decorated kernel function.
 - Must be called inside `tla.vec.func()`.
-- `dst_type` must have the same width as the source element type.
+- A static valid bit count must contain whole destination elements.
+- Dynamic valid ranges remain dynamic; consumers need explicit masks.
 - A bitcast to the source's own element type returns `self`.
 
 Example:

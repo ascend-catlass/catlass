@@ -349,17 +349,17 @@ def Tla_CastOp : Tla_Op<"cast", [Pure]> {
 }
 
 def Tla_BitCastOp : Tla_Op<"bitcast", [Pure]> {
-  let summary = "Same-width vector bit reinterpretation on VectorSSA values";
+  let summary = "Bit-preserving register view on VectorSSA values";
   let description = [{
     Reinterpret the bits of a register-resident VectorSSA value as another
-    element type of the **same bit width** (e.g. ``f32`` -> ``i32``,
-    ``f16`` -> ``i16``). No numeric conversion takes place and no hardware
-    instruction is emitted: the op lowers to ``vector.bitcast`` and costs zero
-    cycles.
+    element type (e.g. ``64xf32`` -> ``128xbf16`` or ``64xi32``).
+    No numeric conversion takes place. The op lowers to ``vector.bitcast``
+    without arithmetic or memory operations.
 
-    The lane count is preserved, so source and result must have the same
-    ``valid_lanes`` and the same element width. Changing the lane count is
-    ``tla.cast``'s job, not this op's. Because nothing is computed, there is no
+    The physical register size is preserved. Static ``valid_lanes`` must
+    describe the same number of valid bits on both sides; dynamic lane counts
+    stay dynamic. A partial source must contain whole destination elements.
+    Because nothing is computed, there is no
     mask and no cast trait.
   }];
   let arguments = (ins Tla_VectorSSAType:$source);
@@ -571,7 +571,9 @@ def Tla_LoadOp : Tla_Op<"load", []> {
 
     * ``!tla.vector`` — data load. Optional ``load_dist`` / ``unaligned_ub_access``.
       Dual-destination ``dintlv_b32`` produces a second result (even/odd b32
-      elements), requiring aligned access. Unaligned path
+      elements), requiring aligned access. The b16 variant, ``dintlv_b16``,
+      reads 512 bytes into two 128-lane b16 registers through native ``vldsx2``
+      intrinsics and also requires aligned access. Unaligned path
       lowers to ``ave.hir.vload`` with ``vldas``/``vldus`` via HIVMAVE.
       Optional compile-time ``block_stride`` (i32 attribute) enables strided
       block load (AscendC ``vsldb``): one instruction gathers 8 DataBlocks

@@ -110,6 +110,17 @@ def Tla_Float8E8M0Type : Tla_EncodedElementType<"Float8E8M0", "f8e8m0",
 def Tla_HiFloat8Type : Tla_EncodedElementType<"HiFloat8", "hif8",
     "HiFloat8 payload with tapered exponent and mantissa fields.">;
 
+
+def Tla_Float4E2M1x2Type : TypeDef<TlaDialect, "Float4E2M1x2", []> {
+  let mnemonic = "f4e2m1x2";
+  let summary = "One byte holding two E2M1 values, low nibble first.";
+}
+
+def Tla_Float4E1M2x2Type : TypeDef<TlaDialect, "Float4E1M2x2", []> {
+  let mnemonic = "f4e1m2x2";
+  let summary = "One byte holding two E1M2 values, low nibble first.";
+}
+
 def Tla_PtrType : TypeDef<TlaDialect, "Ptr", []> {
   let summary = "First-class pointer SSA value (pointee, address space, alignment).";
   let description = [{

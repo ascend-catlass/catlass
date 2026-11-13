@@ -1,0 +1,70 @@
+// RUN: sed -n '/^\/\/ BEGIN_MISSING$/,/^\/\/ END_MISSING$/p' %s | sed '1d;$d;s|^// ||' > %t.missing.mlir && not %tla_compile %t.missing.mlir -o %t 2>&1 | %filecheck %s --check-prefix=MISSING
+// RUN: sed -n '/^\/\/ BEGIN_WIDTH$/,/^\/\/ END_WIDTH$/p' %s | sed '1d;$d;s|^// ||' > %t.width.mlir && not %tla_compile %t.width.mlir -o %t 2>&1 | %filecheck %s --check-prefix=WIDTH
+// RUN: sed -n '/^\/\/ BEGIN_LANES$/,/^\/\/ END_LANES$/p' %s | sed '1d;$d;s|^// ||' > %t.lanes.mlir && not %tla_compile %t.lanes.mlir -o %t 2>&1 | %filecheck %s --check-prefix=LANES
+// RUN: sed -n '/^\/\/ BEGIN_TYPES$/,/^\/\/ END_TYPES$/p' %s | sed '1d;$d;s|^// ||' > %t.types.mlir && not %tla_compile %t.types.mlir -o %t 2>&1 | %filecheck %s --check-prefix=TYPES
+// RUN: sed -n '/^\/\/ BEGIN_UNALIGNED$/,/^\/\/ END_UNALIGNED$/p' %s | sed '1d;$d;s|^// ||' > %t.unaligned.mlir && not %tla_compile %t.unaligned.mlir -o %t 2>&1 | %filecheck %s --check-prefix=UNALIGNED
+
+// MISSING: requires a second !tla.vector result
+// BEGIN_MISSING
+// !source = !tla.tensor<!tla.layout<!tla.shape<256>, !tla.stride<1>, !tla.shape<256>, RowMajor>, !tla.coord<0>, !tla.ptr<bf16, ub, 32>>
+// module {
+//   func.func @bad(%source: !source) {
+//     "tla.vec.func"() ({
+//       %first = tla.load %source {load_dist = #tla.load_dist<dintlv_b16>} : !source -> !tla.vector<128xbf16>
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_MISSING
+
+// WIDTH: requires a 2-byte source element type
+// BEGIN_WIDTH
+// !source = !tla.tensor<!tla.layout<!tla.shape<256>, !tla.stride<1>, !tla.shape<256>, RowMajor>, !tla.coord<0>, !tla.ptr<f32, ub, 32>>
+// module {
+//   func.func @bad(%source: !source) {
+//     "tla.vec.func"() ({
+//       %first, %second = tla.load %source {load_dist = #tla.load_dist<dintlv_b16>} : !source -> !tla.vector<128xbf16>, !tla.vector<128xbf16>
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_WIDTH
+
+// LANES: requires two identical full 128-lane vectors
+// BEGIN_LANES
+// !source = !tla.tensor<!tla.layout<!tla.shape<256>, !tla.stride<1>, !tla.shape<256>, RowMajor>, !tla.coord<0>, !tla.ptr<bf16, ub, 32>>
+// module {
+//   func.func @bad(%source: !source) {
+//     "tla.vec.func"() ({
+//       %first, %second = tla.load %source {load_dist = #tla.load_dist<dintlv_b16>} : !source -> !tla.vector<64xbf16>, !tla.vector<64xbf16>
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_LANES
+
+// TYPES: requires two identical full 128-lane vectors
+// BEGIN_TYPES
+// !source = !tla.tensor<!tla.layout<!tla.shape<256>, !tla.stride<1>, !tla.shape<256>, RowMajor>, !tla.coord<0>, !tla.ptr<bf16, ub, 32>>
+// module {
+//   func.func @bad(%source: !source) {
+//     "tla.vec.func"() ({
+//       %first, %second = tla.load %source {load_dist = #tla.load_dist<dintlv_b16>} : !source -> !tla.vector<128xbf16>, !tla.vector<128xf16>
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_TYPES
+
+// UNALIGNED: requires aligned UB access
+// BEGIN_UNALIGNED
+// !source = !tla.tensor<!tla.layout<!tla.shape<256>, !tla.stride<1>, !tla.shape<256>, RowMajor>, !tla.coord<0>, !tla.ptr<bf16, ub, 32>>
+// module {
+//   func.func @bad(%source: !source) {
+//     "tla.vec.func"() ({
+//       %first, %second = tla.load %source {load_dist = #tla.load_dist<dintlv_b16>, unaligned_ub_access} : !source -> !tla.vector<128xbf16>, !tla.vector<128xbf16>
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_UNALIGNED

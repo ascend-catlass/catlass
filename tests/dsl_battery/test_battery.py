@@ -885,6 +885,27 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
                 ],
             )
 
+    for fp4_format in ("e2m1", "e1m2"):
+        for fp4_case in ("native", "roundtrip", "composed", "slots"):
+            yield (
+                f"vector-fp4-{fp4_format}-{fp4_case}",
+                [
+                    [
+                        "end_to_end/fp4_op.py",
+                        "--case",
+                        fp4_case,
+                        "--format",
+                        fp4_format,
+                        "--run",
+                        *dev,
+                    ]
+                ],
+            )
+    yield (
+        "vector-fp4-dintlv",
+        [["end_to_end/fp4_op.py", "--case", "dintlv", "--run", *dev]],
+    )
+
     # Same-width bit reinterpretation: the f32 round trips through i32 and u32
     # are subtracted to zero, so a rewritten register shows as a mismatch
     # rather than hiding behind the exponent term.

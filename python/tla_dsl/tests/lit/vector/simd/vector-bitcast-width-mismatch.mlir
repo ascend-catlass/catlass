@@ -1,9 +1,8 @@
 // RUN: not %tla_compile %s -o - 2>&1 | %filecheck %s
 
-// tla.bitcast only reinterprets bits; it never changes the element width or the
-// lane count. A narrowing f32 -> f16 is tla.cast's job and the verifier rejects
-// it rather than letting it reach a lowering that cannot express it.
-// CHECK: 'tla.bitcast' op requires source and result element types of the same width
+// A register view must preserve the valid bit count. 64xf32 can be viewed as
+// 128xf16, but 64xf16 would discard half of the valid source bits.
+// CHECK: 'tla.bitcast' op preserves the valid bit count
 
 !fvec = !tla.tensor<!tla.layout<!tla.shape<64>, !tla.stride<1>, !tla.shape<64>, RowMajor>, !tla.coord<0>, !tla.ptr<f32, ub, 4>>
 !hvec = !tla.tensor<!tla.layout<!tla.shape<64>, !tla.stride<1>, !tla.shape<64>, RowMajor>, !tla.coord<0>, !tla.ptr<f16, ub, 2>>

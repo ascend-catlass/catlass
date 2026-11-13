@@ -14,7 +14,7 @@ Do not regenerate this file from a glossary.
 
 [语言参考](../index.md) | [API 速查](../../quick_reference.md)
 
-寄存器 vector 上的元素类型转换（`VectorSSA.to`）与同位宽按位重解释（`VectorSSA.bitcast`）。
+寄存器 vector 上的元素类型转换（`VectorSSA.to`）与按位重解释（`VectorSSA.bitcast`）。
 
 ## `tla.VectorSSA.to`
 
@@ -33,8 +33,8 @@ HiF8→FP32 读取相同 slot，无需舍入。
 
 lowering 支持有符号整数 `tla.Int8` ~ `tla.Int64`、浮点 `tla.Float16` /
 `tla.BFloat16` / `tla.Float32`，以及两种 OCP fp8 格式 `tla.Float8E4M3FN` /
-`tla.Float8E5M2`。无符号整数、`tla.Bool`（i1）、`tla.Float64` 与 `tla.Float8E8M0`
-会被拒绝。
+`tla.Float8E5M2`。无符号整数仅支持已接入的可达转换路线；`tla.Bool`（i1）、
+`tla.Float64` 与 `tla.Float8E8M0` 会被拒绝。
 
 `tla.Float16` 到 `tla.BFloat16` 使用一条直接转换指令，保留全部 lane，支持
 通用舍入模式（不含 HiF8 专用的 `CAST_HYBRID`）。`sat_mode` 必须为 `UNKNOWN`；
@@ -57,6 +57,19 @@ fp8 格式没有同类型 cast。
 FP32→HiF8。`CAST_NONE` 须显式传入：无损转换（如 `f16→f32`）仍走无
 `rnd` 的指令；有损转换按 `CAST_RINT`（ties to even）处理。
 
+`tla.Float4E2M1x2`、`tla.Float4E1M2x2` 的每个字节保存两个 FP4 数值，低半字节在前。
+Tensor 的 shape 和 offset 按数对计数。
+原生转换与 BFloat16 配对：128 个连续 BF16 值转换为 64 个数对字节，位于
+`4*j + reg_slot`。收窄固定饱和，接受 `SAT` 或 `UNKNOWN`；支持 `CAST_ROUND`
+（中点远离零）、`CAST_RINT`（中点取偶）、`CAST_NONE`（等同 `CAST_RINT`）、
+`CAST_FLOOR`、`CAST_CEIL` 和 `CAST_TRUNC`。
+
+收窄接受 128-lane BF16 源 mask，由偶数位置控制整个数对，奇数位置无效；也接受
+64-lane 数对 mask（`dtype=UInt32`），每位控制一对。扩宽使用 256-lane 字节 mask。
+被 mask 关闭的结果为零，两个方向均支持四个 slot。FP32 转换需要显式 DSL 组合；
+普通的 FP32→BF16→FP4 连续转换可能产生 double rounding。FP4x2 与逻辑四位 Tensor
+类型不同，不支持 SIMT 转换。
+
 函数原型：
 
 ```python
@@ -68,8 +81,8 @@ tla.VectorSSA.to(dst_type: Any, params: CastParams, mask: Any | None = None) -> 
 - `dst_type`（`type[Numeric]`）：目标元素类型。必填。
 - `params`（`CastParams`）：舍入模式、饱和模式与寄存器 slot。必填。
 - `mask`（`MaskSSA | None`）：可选执行掩码；`None` 表示所有 lane 使能。选填，默认 `None`。
-  mask 按**源**元素域索引：lane `i` 谓词源元素 `i`，与位宽变化无关；被 mask 关掉的
-  元素对结果贡献为零。
+  mask 按**源**元素域索引；BF16→FP4 使用上述偶数位置或显式数对 mask。
+  被 mask 关掉的元素对结果贡献为零。
 
 约束说明：
 
@@ -79,7 +92,7 @@ tla.VectorSSA.to(dst_type: Any, params: CastParams, mask: Any | None = None) -> 
   `UNKNOWN` 与 `NOSAT` 均可），`reg_slot` 必须为 `ZERO` 或 `ONE`：该转换没有
   饱和参数，也没有 pack-quarter 选择子。
 - `reg_slot` 的 `TWO` 与 `THREE` 指向 pack 的四分之一，仅在位宽变化为 4 倍的整数
-  cast 以及直接的 fp8/HiF8<->f32 指令上合法。
+  cast、直接的 fp8/HiF8<->f32 指令以及 BF16<->FP4x2 转换上合法。
 - 线程级标量 cast 在 `mode="simt"` 下使用 `Numeric.to`；本方法是 vector（AVE）
   形态，始终需要 `CastParams`。
 
@@ -115,19 +128,18 @@ with tla.vec.func(mode="simd"):
 
 功能说明：
 
-将寄存器内 vector 的比特按另一种**同位宽**元素类型重新解释。该操作不做任何数值
-转换，也不产生硬件指令：寄存器的比特保持原样，只有元素类型改变，因此开销为零。
+将寄存器内 vector 的比特按另一种元素类型重新解释，不做数值转换。物理寄存器
+保持全部 2048 bit，源和目标元素位宽可以不同；物理 lane 数和有效 lane 数分别
+调整，保留各自的位数。例如，64 个 Float32 lane 可解释为 128 个 BFloat16 lane，
+暴露每个 Float32 比特模式中的两个半字。
 
-这使得浮点数的比特模式在 Python 前端变得可读——取出指数、通过移入第 23 位构造
-`2**k`、清除符号位——而不必经由 UB 以另一种元素类型存取一轮。
+支持 `f32`/`i32`/`u32`、`f16`/`bf16`/`i16`/`u16`、
+`i8`/`u8`/`f8e4m3fn`/`f8e5m2`/`hif8`/`f4e2m1x2`/`f4e1m2x2` 和 `i64`/`u64`。
+不支持 `tla.Bool`、`tla.Float8E8M0` 或逻辑四位 Tensor 类型。该操作不改变字节顺序
+或 register slot，也不压紧稀疏值。数值转换使用 `.to()`，布局变化使用显式重排。
 
-同位宽的组合为 `f32`/`i32`/`u32`、`f16`/`bf16`/`i16`/`u16`、
-`i8`/`u8`/`f8e4m3fn`/`f8e5m2`/`hif8` 以及 `i64`/`u64`，lane 数保持不变。位宽变化属于
-`VectorSSA.to` 的职责，在此会被拒绝。`tla.Bool`（i1）、`tla.Float8E8M0` 与打包的
-fp4 格式不是合法的 `!tla.vector` 元素类型，同样会被拒绝。
-
-`i64`/`u64` 寄存器可由 extern 返回，并在两种类型间进行 bitcast。
-现有 tensor API 不支持直接 load 这些寄存器类型。
+`i64`/`u64` 寄存器可由 extern 返回或通过 bitcast 产生。该操作不会新增 64 位
+Tensor load/store 或算术路径；后续操作须独立支持该元素类型。
 
 函数原型：
 
@@ -137,13 +149,14 @@ tla.VectorSSA.bitcast(dst_type: Any) -> Any
 
 参数说明：
 
-- `dst_type`（`type[Numeric]`）：重新解释为的同位宽元素类型。必填。
+- `dst_type`（`type[Numeric]`）：重新解释为的元素类型。必填。
 
 约束说明：
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
 - 须在 `tla.vec.func()` 内调用。
-- `dst_type` 的位宽须与源元素类型相同。
+- 静态有效位数须能组成完整的目标元素。
+- 动态有效范围保持动态，消费者须使用显式 mask。
 - 重解释为源自身的元素类型是空操作，直接返回 `self`。
 
 调用示例：

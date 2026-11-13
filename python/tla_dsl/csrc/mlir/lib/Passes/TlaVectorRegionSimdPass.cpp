@@ -238,6 +238,8 @@ static hivmave::LoadDist mapTlaLoadDistToAve(::LoadDist dist)
             return hivmave::LoadDist::BRC_B32;
         case ::LoadDist::dintlv_b32:
             return hivmave::LoadDist::DINTLV_B32;
+        case ::LoadDist::dintlv_b16:
+            return hivmave::LoadDist::DINTLV_B16;
         case ::LoadDist::us_b8:
             return hivmave::LoadDist::US_B8;
         case ::LoadDist::brc_b16:
@@ -756,6 +758,38 @@ static std::string getHiFloat8CastLibraryCallName(Type srcElement, ArrayRef<int3
         name += static_cast<::SatMode>(trait[1]) == ::SatMode::sat ? "sat" : "nosat";
     } else {
         name = "lowp_cast_hif8_to_f32";
+    }
+    return name + "_slot" + std::to_string(trait[0]);
+}
+
+static std::string getFp4CastLibraryCallName(Type srcElement, Type dstElement, ArrayRef<int32_t> trait)
+{
+    bool narrow = srcElement.isBF16();
+    Type pairType = narrow ? dstElement : srcElement;
+    std::string format = isa<Float4E2M1x2Type>(pairType) ? "f4e2m1x2" : "f4e1m2x2";
+    std::string name = narrow ? "lowp_cast_bf16_to_" + format : "lowp_cast_" + format + "_to_bf16";
+    if (narrow) {
+        switch (static_cast<::RoundMode>(trait[2])) {
+            case ::RoundMode::cast_round:
+                name += "_round";
+                break;
+            case ::RoundMode::cast_floor:
+                name += "_floor";
+                break;
+            case ::RoundMode::cast_ceil:
+                name += "_ceil";
+                break;
+            case ::RoundMode::cast_trunc:
+                name += "_trunc";
+                break;
+            case ::RoundMode::cast_none:
+            case ::RoundMode::cast_rint:
+                name += "_rint";
+                break;
+            default:
+                llvm_unreachable("FP4 rounding mode must be verified before lowering");
+        }
+        name += "_sat";
     }
     return name + "_slot" + std::to_string(trait[0]);
 }
@@ -1737,7 +1771,7 @@ struct VecLowerCtx {
 // Signedness for Compare/Cast/Div/Reduce/Max/Min stays on the tla type.
 static Type aveVectorElementType(Type elementType)
 {
-    if (isa<::tla::HiFloat8Type>(elementType))
+    if (isa<::tla::HiFloat8Type>(elementType) || isFp4PairType(elementType))
         return IntegerType::get(elementType.getContext(), 8);
     if (auto intType = dyn_cast<IntegerType>(elementType))
         if (intType.isUnsigned())
@@ -2394,23 +2428,41 @@ static LogicalResult lowerLoad(
                    "load_dist values require one vector result "
                    "(optional live !tla.ptr is separate)"),
                failure();
-    if (pattern == hivmave::LoadDist::DINTLV_B32) {
+    if (pattern == hivmave::LoadDist::DINTLV_B32 || pattern == hivmave::LoadDist::DINTLV_B16) {
         // NPU-IR's partial AVE conversion can leave this two-result load
         // unconverted when its consumer is a register helper call. Emit the
         // same native intrinsic here, with the complete view offset, so the
         // load composes directly with either native ops or helpers.
         auto metadata = b.create<mlir::memref::ExtractStridedMetadataOp>(loc, source);
         Value base = b.create<mlir::memref::ExtractAlignedPointerAsIndexOp>(loc, metadata.getBaseBuffer());
-        Value four = b.create<arith::ConstantIndexOp>(loc, 4);
-        Value offset = b.create<arith::MulIOp>(loc, metadata.getOffset(), four);
+        Value elementBytes =
+            b.create<arith::ConstantIndexOp>(loc, sourceType.getElementType().getIntOrFloatBitWidth() / 8);
+        Value offset = b.create<arith::MulIOp>(loc, metadata.getOffset(), elementBytes);
         Value address = b.create<arith::AddIOp>(loc, base, offset);
         Value pointer = intToUbPtr(b, loc, ::tla::castValueToI64(b, loc, address));
         Value constantZero = b.create<arith::ConstantIntOp>(loc, 0, 32);
         Value distribution = b.create<arith::ConstantIntOp>(loc, static_cast<uint32_t>(pattern), 32);
         auto pairType = LLVM::LLVMStructType::getLiteral(b.getContext(), {opCtx->vecType, opCtx->vecType});
-        Value pair = b.create<hivm_regbaseintrins::Vldsx2V64F32InstrOp>(
-                          loc, pairType, pointer, constantZero, distribution, constantZero)
-                         .getResult();
+        Value pair;
+        if (sourceType.getElementType().isF32()) {
+            pair = b.create<hivm_regbaseintrins::Vldsx2V64F32InstrOp>(
+                        loc, pairType, pointer, constantZero, distribution, constantZero)
+                       .getResult();
+        } else if (sourceType.getElementType().isBF16()) {
+            pair = b.create<hivm_regbaseintrins::Vldsx2V128BF16InstrOp>(
+                        loc, pairType, pointer, constantZero, distribution, constantZero)
+                       .getResult();
+        } else if (sourceType.getElementType().isF16()) {
+            pair = b.create<hivm_regbaseintrins::Vldsx2V128F16InstrOp>(
+                        loc, pairType, pointer, constantZero, distribution, constantZero)
+                       .getResult();
+        } else {
+            // Integer loads preserve bits; signed and unsigned b16 share
+            // the same native byte transfer and signless register carrier.
+            pair = b.create<hivm_regbaseintrins::Vldsx2V128U16InstrOp>(
+                        loc, pairType, pointer, constantZero, distribution, constantZero)
+                       .getResult();
+        }
         valueMap[loadOp.getResult()] = b.create<LLVM::ExtractValueOp>(loc, pair, 0);
         valueMap[r2] = b.create<LLVM::ExtractValueOp>(loc, pair, 1);
         return success();
@@ -2573,8 +2625,8 @@ static LogicalResult lowerLoadUnalignUpdate(
     return success();
 }
 
-/// tla.bitcast: same-width bit reinterpretation. The register keeps its bits
-/// and only the element type changes, so this lowers to MLIR's vector.bitcast.
+/// tla.bitcast preserves register bits while changing the element type and
+/// lane count, lowering to MLIR's vector.bitcast.
 static LogicalResult lowerBitCast(::tla::BitCastOp bitCastOp, OpBuilder& b, DenseMap<Value, Value>& valueMap)
 {
     Location loc = bitCastOp.getLoc();
@@ -2589,7 +2641,10 @@ static LogicalResult lowerBitCast(::tla::BitCastOp bitCastOp, OpBuilder& b, Dens
     if (auto intType = dyn_cast<IntegerType>(dstElementType))
         if (!intType.isSignless())
             dstElementType = b.getIntegerType(intType.getWidth());
-    auto dstVecType = VectorType::get(srcVecType.getShape(), dstElementType);
+    auto dstLanes = getVectorLaneCount(dstElementType);
+    if (failed(dstLanes))
+        return bitCastOp.emitError("unsupported register element width"), failure();
+    auto dstVecType = VectorType::get({*dstLanes}, dstElementType);
     valueMap[bitCastOp.getResult()] = b.create<mlir::vector::BitCastOp>(loc, dstVecType, src).getResult();
     return success();
 }
@@ -2621,6 +2676,21 @@ static LogicalResult lowerCast(
     if (isa<::tla::HiFloat8Type>(tlaSrcElem) || isa<::tla::HiFloat8Type>(tlaDstElem)) {
         std::string name = getHiFloat8CastLibraryCallName(tlaSrcElem, castOp.getTrait());
         int64_t maskLanes = srcVecType.getNumElements();
+        Value mask = castOp.getMask() ? valueMap.lookup(castOp.getMask()) : fullMasks.get(loc, maskLanes);
+        if (!mask)
+            return failure();
+        SmallVector<Value> args{src, castMaskToPregType(b, loc, mask, fullPregVecType(b.getContext()))};
+        SmallVector<Type> inputTypes;
+        for (auto arg : args)
+            inputTypes.push_back(arg.getType());
+        auto callee = getOrCreateLowpCastLibraryCall(module, loc, inputTypes, dstVecType, name);
+        valueMap[castOp.getResult()] = b.create<func::CallOp>(loc, callee, args).getResult(0);
+        return success();
+    }
+    if (isFp4PairType(tlaSrcElem) || isFp4PairType(tlaDstElem)) {
+        bool narrow = tlaSrcElem.isBF16();
+        std::string name = getFp4CastLibraryCallName(tlaSrcElem, tlaDstElem, castOp.getTrait());
+        int64_t maskLanes = narrow ? 64 : srcVecType.getNumElements();
         Value mask = castOp.getMask() ? valueMap.lookup(castOp.getMask()) : fullMasks.get(loc, maskLanes);
         if (!mask)
             return failure();
@@ -3847,6 +3917,17 @@ static LogicalResult lowerNestedVectorOp(
                            ::tla::CastOp, ::tla::BitCastOp, ::tla::LoadOp, ::tla::StoreOp, ::tla::WhereOp,
                            ::tla::InterleaveOp, ::tla::DeInterleaveOp, ::tla::GatherOp, scf::ForOp, scf::IfOp>(op))
         return op.emitError("HiFloat8 arithmetic is unsupported; convert or bitcast the register explicitly");
+    // Packed pairs use byte carriers, without acquiring integer arithmetic.
+    auto isFp4Vector = [](Type type) {
+        auto vec = dyn_cast<::tla::VectorSSAType>(type);
+        return vec && isFp4PairType(vec.getElementType());
+    };
+    bool hasFp4Vector =
+        llvm::any_of(op.getOperandTypes(), isFp4Vector) || llvm::any_of(op.getResultTypes(), isFp4Vector);
+    if (hasFp4Vector && !isa<
+                            ::tla::CastOp, ::tla::BitCastOp, ::tla::LoadOp, ::tla::StoreOp, ::tla::WhereOp,
+                            ::tla::InterleaveOp, ::tla::DeInterleaveOp, ::tla::GatherOp, scf::ForOp, scf::IfOp>(op))
+        return op.emitError("FP4x2 arithmetic is unsupported; convert or bitcast the register explicitly");
 
     // make_shape / make_coord are dead after tla-lower-tensor-desc (their leaves
     // were folded into tensor_desc operands); skip them. (tla-finalize-memref

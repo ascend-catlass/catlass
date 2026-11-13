@@ -1,0 +1,86 @@
+// RUN: split-file %s %t
+// RUN: not %tla_compile %t/fp4-hybrid.mlir -o %t.out 2>&1 | %filecheck %s --check-prefix=HYBRID
+// HYBRID: CAST_HYBRID only supports Float32->HiFloat8
+// RUN: not %tla_compile %t/fp4-mask.mlir -o %t.out 2>&1 | %filecheck %s --check-prefix=ERR0
+// RUN: not %tla_compile %t/fp4-nosat.mlir -o %t.out 2>&1 | %filecheck %s --check-prefix=ERR1
+// RUN: not %tla_compile %t/fp32-fp4.mlir -o %t.out 2>&1 | %filecheck %s --check-prefix=ERR2
+// RUN: not %tla_compile %t/bad-slot.mlir -o %t.out 2>&1 | %filecheck %s --check-prefix=ERR3
+// RUN: not %tla_compile %t/fp4-wide-mask.mlir -o %t.out 2>&1 | %filecheck %s --check-prefix=ERR4
+// RUN: not %tla_compile %t/fp4-odd.mlir -o %t.out 2>&1 | %filecheck %s --check-prefix=ERR5
+
+// ERR0: BF16->FP4x2 requires a 128-lane BF16 source mask or a 64-lane pair mask
+// ERR1: BF16->FP4x2 requires SAT
+// ERR2: FP4x2 pairs with BFloat16; compose other routes explicitly
+// ERR3: trait must contain valid register-slot
+// ERR4: mask has 128 predicate lanes, expected 256
+// ERR5: BF16->FP4x2 supports CAST_ROUND/CAST_FLOOR/CAST_CEIL/CAST_TRUNC/CAST_RINT/CAST_NONE only
+
+//--- fp4-mask.mlir
+module {
+  func.func @bad(%v: !tla.vector<128xbf16>, %p: !tla.mask<256>) {
+    "tla.vec.func"() ({
+      %r = "tla.cast"(%v, %p) <{trait = array<i32: 0, 1, 5>}> : (!tla.vector<128xbf16>, !tla.mask<256>) -> !tla.vector<256x!tla.f4e2m1x2>
+    }) {mode = "simd"} : () -> ()
+    return
+  }
+}
+
+//--- fp4-nosat.mlir
+module {
+  func.func @bad(%v: !tla.vector<128xbf16>, %p: !tla.mask<64>) {
+    "tla.vec.func"() ({
+      %r = "tla.cast"(%v, %p) <{trait = array<i32: 0, 2, 5>}> : (!tla.vector<128xbf16>, !tla.mask<64>) -> !tla.vector<256x!tla.f4e2m1x2>
+    }) {mode = "simd"} : () -> ()
+    return
+  }
+}
+
+//--- fp32-fp4.mlir
+module {
+  func.func @bad(%v: !tla.vector<64xf32>, %p: !tla.mask<64>) {
+    "tla.vec.func"() ({
+      %r = "tla.cast"(%v, %p) <{trait = array<i32: 0, 1, 5>}> : (!tla.vector<64xf32>, !tla.mask<64>) -> !tla.vector<256x!tla.f4e1m2x2>
+    }) {mode = "simd"} : () -> ()
+    return
+  }
+}
+
+//--- bad-slot.mlir
+module {
+  func.func @bad(%v: !tla.vector<128xbf16>, %p: !tla.mask<64>) {
+    "tla.vec.func"() ({
+      %r = "tla.cast"(%v, %p) <{trait = array<i32: 4, 1, 0>}> : (!tla.vector<128xbf16>, !tla.mask<64>) -> !tla.vector<256x!tla.f4e2m1x2>
+    }) {mode = "simd"} : () -> ()
+    return
+  }
+}
+
+//--- fp4-wide-mask.mlir
+module {
+  func.func @bad(%v: !tla.vector<256x!tla.f4e1m2x2>, %p: !tla.mask<128>) {
+    "tla.vec.func"() ({
+      %r = "tla.cast"(%v, %p) <{trait = array<i32: 0, 0, 0>}> : (!tla.vector<256x!tla.f4e1m2x2>, !tla.mask<128>) -> !tla.vector<128xbf16>
+    }) {mode = "simd"} : () -> ()
+    return
+  }
+}
+
+//--- fp4-odd.mlir
+module {
+  func.func @bad(%v: !tla.vector<128xbf16>) {
+    "tla.vec.func"() ({
+      %r = "tla.cast"(%v) <{trait = array<i32: 0, 1, 6>}> : (!tla.vector<128xbf16>) -> !tla.vector<256x!tla.f4e2m1x2>
+    }) {mode = "simd"} : () -> ()
+    return
+  }
+}
+
+//--- fp4-hybrid.mlir
+module {
+  func.func @bad(%v: !tla.vector<128xbf16>) {
+    "tla.vec.func"() ({
+      %r = "tla.cast"(%v) <{trait = array<i32: 0, 1, 7>}> : (!tla.vector<128xbf16>) -> !tla.vector<256x!tla.f4e2m1x2>
+    }) {mode = "simd"} : () -> ()
+    return
+  }
+}

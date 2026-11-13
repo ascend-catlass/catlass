@@ -71,7 +71,9 @@ def _to_bits(
         (tla.Int64, tla.UInt64, 32),
     ],
 )
-def test_same_width_bitcast_emits_op_and_keeps_lanes(src_dtype, dst_dtype, lanes) -> None:
+def test_same_width_bitcast_emits_op_and_keeps_lanes(
+    src_dtype, dst_dtype, lanes
+) -> None:
     lowered = _lower(
         _to_bits, (_ub(src_dtype, lanes), _ub(dst_dtype, lanes), dst_dtype, lanes)
     )
@@ -137,8 +139,6 @@ def _bad(
 @pytest.mark.parametrize(
     ("dst_type", "message"),
     [
-        (tla.Float16, "same element width"),
-        (tla.Int64, "same element width"),
         (tla.Bool, "unsupported destination element type"),
         # f8e8m0 is a TLA dialect type, not a builtin float, so
         # !tla.vector<Nxf8e8m0> cannot be constructed. It must be refused here
@@ -147,15 +147,17 @@ def _bad(
         # says nothing about the element type the caller actually named.
         (tla.Float8E8M0, "unsupported destination element type"),
     ],
-    ids=["narrowing", "widening", "bool", "f8e8m0"],
+    ids=["bool", "f8e8m0"],
 )
-def test_width_change_and_non_register_types_are_rejected(dst_type, message) -> None:
+def test_non_register_types_are_rejected(dst_type, message) -> None:
     with pytest.raises(TlaCoreAPIError, match=message):
         _ = _lower(_bad, (_ub(tla.Float32, 64), _ub(tla.Float32, 64), dst_type, 64))
 
 
 def test_bitcast_requires_a_concrete_numeric_target() -> None:
-    with pytest.raises(TlaCoreAPIError, match="expected a concrete Numeric element type"):
+    with pytest.raises(
+        TlaCoreAPIError, match="expected a concrete Numeric element type"
+    ):
         _ = _lower(_bad, (_ub(tla.Float32, 64), _ub(tla.Float32, 64), int, 64))
 
 
@@ -182,6 +184,31 @@ def test_bitcast_preserves_a_partial_lane_count() -> None:
 
 
 @pytest.mark.parametrize(
+    "source, dest, src_lanes, dst_lanes",
+    [
+        (tla.Float32, tla.BFloat16, 64, 128),
+        (tla.BFloat16, tla.Int32, 128, 64),
+        (tla.Int8, tla.UInt32, 256, 64),
+        (tla.Float32, tla.UInt8, 7, 28),
+        (tla.Float32, tla.Int64, 64, 32),
+    ],
+)
+def test_register_view_rescales_valid_lanes(source, dest, src_lanes, dst_lanes):
+    lowered = _lower(
+        _to_bits, (_ub(source, src_lanes), _ub(dest, dst_lanes), dest, src_lanes)
+    )
+    assert lowered.module.operation.verify()
+    (line,) = [line for line in lowered.asm().splitlines() if "tla.bitcast " in line]
+    assert f"!tla.vector<{src_lanes}x{_mlir_token(source)}>" in line
+    assert f"!tla.vector<{dst_lanes}x{_mlir_token(dest)}>" in line
+
+
+def test_register_view_rejects_incomplete_destination_element():
+    with pytest.raises(TlaCoreAPIError, match="not divisible"):
+        _ = _lower(_bad, (_ub(tla.Int8, 3), _ub(tla.Int32, 1), tla.Int32, 3))
+
+
+@pytest.mark.parametrize(
     ("src_dtype", "dst_dtype"),
     [
         (tla.Int8, tla.Float8E4M3FN),
@@ -190,7 +217,9 @@ def test_bitcast_preserves_a_partial_lane_count() -> None:
     ],
 )
 def test_fp8_element_types_are_reinterpretable(src_dtype, dst_dtype) -> None:
-    lowered = _lower(_to_bits, (_ub(src_dtype, 256), _ub(dst_dtype, 256), dst_dtype, 256))
+    lowered = _lower(
+        _to_bits, (_ub(src_dtype, 256), _ub(dst_dtype, 256), dst_dtype, 256)
+    )
     assert lowered.module.operation.verify()
     (line,) = [line for line in lowered.asm().splitlines() if "tla.bitcast " in line]
     assert f"!tla.vector<256x{_mlir_token(src_dtype)}>" in line

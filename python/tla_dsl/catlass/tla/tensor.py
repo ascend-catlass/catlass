@@ -544,7 +544,7 @@ class _Tensor(TensorABC):
             - `params` (`LoadParams | None`): Load mode. Optional, default `None`.
               - `None` / `NormalLoadParams` / `UnalignLoadParams` /
                 `BlockLoadParams` → `VectorSSA` (or a pair for
-                `DIST_DINTLV_B32`).
+                `DIST_DINTLV_B16` / `DIST_DINTLV_B32`).
               - `MaskLoadParams` → `MaskSSA`.
               - `NormalLoadParams`:
                 - `load_dist` (`str`): `tla.params.LoadDist` token. Default
@@ -554,6 +554,7 @@ class _Tensor(TensorABC):
                   |---|---|
                   | `DIST_NORM` | Default contiguous load |
                   | `DIST_BRC_B32` | Broadcast one b32 element to all lanes |
+                  | `DIST_DINTLV_B16` | Load 512 bytes; return two 128-lane b16 registers, even positions first and odd positions second |
                   | `DIST_DINTLV_B32` | f32 deinterleave; dual results |
                   | `DIST_US_B8` / `DIST_US_B16` | 2x up-sample |
                   | `DIST_BRC_B16` | Broadcast one b16 element |
@@ -598,8 +599,10 @@ class _Tensor(TensorABC):
             - Distribution modes fix the element width: `DIST_US_B8` needs
               i8/u8; `DIST_BRC_B16` / `DIST_US_B16` / `DIST_UNPACK_B16` /
               `DIST_E2B_B16` need 2-byte (f16/bf16/i16/u16); `DIST_E2B_B32`
-              needs 4-byte (f32/i32/u32); `DIST_DINTLV_B32` needs f32;
+              needs 4-byte (f32/i32/u32); `DIST_DINTLV_B16` needs 2-byte
+              (f16/bf16/i16/u16); `DIST_DINTLV_B32` needs f32;
               `DIST_BLK` works for any element size.
+            - `DIST_DINTLV_B16` requires a 32-byte-aligned source address.
             - `DIST_UNPACK4_B8` requires a 1-byte element type and a
               32-byte-aligned source address.
             - `BlockLoadParams` requires a 2/4-byte element type
@@ -830,9 +833,9 @@ class _Tensor(TensorABC):
                 next_ptr, window, loc=loc
             )
 
-        is_dintlv = (
-            isinstance(params, NormalLoadParams)
-            and params.load_dist == LoadDist.DIST_DINTLV_B32
+        is_dintlv = isinstance(params, NormalLoadParams) and params.load_dist in (
+            LoadDist.DIST_DINTLV_B16,
+            LoadDist.DIST_DINTLV_B32,
         )
         is_us_b8 = (
             isinstance(params, NormalLoadParams)
@@ -914,10 +917,15 @@ class _Tensor(TensorABC):
             )
 
         if is_dintlv:
-            # AscendNPU-IR lowers DINTLV_B32 only to vldsx2.v64f32; reject
-            # i32/u32 (and other dtypes) at the frontend until IR dispatches.
             elem = str(source_desc.element_type).strip().lower()
-            if elem != "f32":
+            if params.load_dist == LoadDist.DIST_DINTLV_B16:
+                if dtype_size_bytes(elem) != 2:
+                    raise TlaLoweringError(
+                        "DIST_DINTLV_B16 requires a 2-byte "
+                        "(f16/bf16/i16/u16) element type "
+                        f"(got {source_desc.element_type})"
+                    )
+            elif elem != "f32":
                 raise TlaLoweringError(
                     "DIST_DINTLV_B32 currently requires f32 element type "
                     f"(got {source_desc.element_type})"

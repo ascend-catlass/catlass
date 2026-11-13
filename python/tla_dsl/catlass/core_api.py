@@ -30,6 +30,7 @@ from .params import CastParams, RoundMode, SatMode
 # f8e8m0 is absent on purpose: it is a block-scale exponent, an opaque byte
 # converted by shifting rather than by a cast.
 _CAST_FP8_DTYPES = frozenset({"f8e4m3fn", "f8e5m2"})
+_FP4_PAIR_DTYPES = frozenset({"f4e2m1x2", "f4e1m2x2"})
 
 # Element width per cast token, used to tell a 4x width step from a 2x one.
 _CAST_TOKEN_BITS = {
@@ -44,6 +45,8 @@ _CAST_TOKEN_BITS = {
     "f8e4m3fn": 8,
     "f8e5m2": 8,
     "hif8": 8,
+    "f4e2m1x2": 8,
+    "f4e1m2x2": 8,
     "f16": 16,
     "bf16": 16,
     "f32": 32,
@@ -53,6 +56,7 @@ _CAST_SUPPORTED_DTYPES = (
     frozenset({"i8", "i16", "i32", "i64", "f16", "bf16", "f32", "hif8"})
     | _CAST_UNSIGNED_DTYPES
     | _CAST_FP8_DTYPES
+    | _FP4_PAIR_DTYPES
 )
 
 # Reachable unsigned cast routes. Not derivable from widths: AVE advertises
@@ -78,20 +82,17 @@ _CAST_UNSIGNED_ROUTES = frozenset(
 # instruction, so the frontend refuses them rather than let the lowering crash.
 _CAST_SAME_TYPE_FLOAT_DTYPES = frozenset({"f16", "bf16", "f32"})
 
-# Element types tla.bitcast may reinterpret. Membership is not the whole rule:
-# source and destination must also have the same width, checked against
-# dtype_size_bytes rather than enumerated as pairs. HiF8 retains its format in
-# TLA IR and uses a byte register in native lowering.
+# Element types tla.bitcast may reinterpret. Register views retain physical
+# and valid bit counts; element widths may differ. HiF8 and FP4x2 values retain their
+# formats in TLA IR and use byte registers in native lowering.
 #
 # E8M0 remains storage-only: LLVM 19 has no builtin Float8E8M0FNU, and this
 # interface has no register lowering for !tla.f8e8m0. Logical FP4 types are also
 # excluded: their 4-bit values differ from byte registers holding two values
-# per lane. Supporting either format requires its own register representation.
+# per lane.
 #
-# i64/u64 registers can be returned by an extern and bitcast to each other.
-# Their tensor load path remains unavailable: tla.make_tensor_like rejects
-# these element types. Extern-produced registers follow the same-width
-# restriction as other bitcast inputs.
+# i64/u64 registers can come from extern or bitcast. Tensor load/store and
+# arithmetic routes must independently support the element type.
 _BITCAST_ELEMENT_TYPES = frozenset(
     {
         "i8",
@@ -108,6 +109,8 @@ _BITCAST_ELEMENT_TYPES = frozenset(
         "f8e4m3fn",
         "f8e5m2",
         "hif8",
+        "f4e2m1x2",
+        "f4e1m2x2",
     }
 )
 from catlass._mlir.dialects import tla as _tla_ops_gen  # type: ignore[import-not-found]
@@ -247,6 +250,8 @@ _MAKE_TENSOR_SUPPORTED_ELEMENT_TYPES = frozenset(
         "f8e4m3fn",
         "f8e5m2",
         "hif8",
+        "f4e2m1x2",
+        "f4e1m2x2",
     }
 )
 
@@ -948,19 +953,38 @@ class VectorSSA(_RegisterSSA):
             it follows CANN's native hybrid rounding and does not guarantee the
             nearest representable value. The default is CAST_ROUND.
 
+            Float4E2M1x2 and Float4E1M2x2 store two FP4 values per byte,
+            low nibble first. Tensor shapes and offsets count packed pairs.
+            Native conversion pairs it with BFloat16: 128 consecutive BF16
+            values produce 64 pair bytes at positions `4*j + reg_slot`.
+            Narrowing supports SAT or UNKNOWN (fixed native saturation),
+            and CAST_ROUND (ties away),
+            CAST_RINT (ties even), CAST_NONE (same as CAST_RINT), CAST_FLOOR,
+            CAST_CEIL and CAST_TRUNC.
+            A source BF16 mask has 128 lanes; its even positions control
+            whole pairs and odd positions have no effect. A 64-lane pair
+            mask (`dtype=UInt32`) is also accepted, with one bit per pair.
+            Widening uses a 256-lane byte mask. Masked results
+            are zero. All four slots are supported. FP32 conversion requires
+            explicit DSL composition; a plain FP32->BF16->FP4 cast
+            can double-round. These packed register types are distinct from
+            logical four-bit Tensor types and do not support SIMT conversion.
+
             Parameters:
             - `dst_type` (`type[Numeric]`): Element type to convert to. Required.
             - `params` (`CastParams`): Rounding, saturation and register slot. Required.
             - `mask` (`MaskSSA | None`): Optional execution mask; `None` means all lanes enabled. Optional, default `None`. The
-              mask is indexed in the **source** element domain: lane `i` predicates
-              source element `i`, whatever the width change. A masked-off element
+              mask is indexed in the **source** element domain; BF16-to-FP4
+              uses the even source positions or an explicit pair mask as
+              described above. A masked-off element
               contributes zero to the result.
 
             Constraints:
             - Must be called inside a `@tla.kernel`-decorated kernel function.
             - Must be called inside `tla.vec.func()`.
             - Supported targets: signed i8..i64, unsigned u8..u32 on reachable
-              routes, f16/bf16/f32, f8e4m3fn/f8e5m2, hif8. Not supported: bool, f64,
+              routes, f16/bf16/f32, f8e4m3fn/f8e5m2, hif8 and FP4x2 pairs.
+              Not supported: bool, f64,
               f8e8m0, fp8-to-fp8, fp8-to-integer.
             - A same-type cast (`f16`->`f16`, `bf16`->`bf16`, `f32`->`f32`)
               keeps the element type and re-rounds every lane: only `round_mode`
@@ -968,7 +992,8 @@ class VectorSSA(_RegisterSSA):
               supported. `sat_mode` `SAT` is refused (a same-type cast never
               saturates), and `reg_slot` must be `ZERO` or `ONE`.
             - `reg_slot` `TWO` and `THREE` name a pack quarter. They are valid
-              on a 4x integer cast and the direct fp8/HiF8<->f32 instruction.
+              on a 4x integer cast, the direct fp8/HiF8<->f32 instruction,
+              and BF16<->FP4x2 conversion.
             - `params.round_mode` accepts `CAST_ROUND` / `CAST_FLOOR` /
               `CAST_CEIL` / `CAST_TRUNC` / `CAST_RINT` / `CAST_ODD` /
               `CAST_NONE`. `CAST_HYBRID` is supported only for Float32 ->
@@ -1016,7 +1041,7 @@ class VectorSSA(_RegisterSSA):
                 f"unsupported cast target dtype '{dst_type.dtype}': tla.cast "
                 f"supports signed integers (i8/i16/i32/i64), unsigned integers "
                 f"(u8/u16/u32/u64) and floats "
-                f"(f16/bf16/f32/f8e4m3fn/f8e5m2/hif8); bool, f64 and "
+                f"(f16/bf16/f32/f8e4m3fn/f8e5m2/hif8/f4e2m1x2/f4e1m2x2); bool, f64 and "
                 f"f8e8m0 are not supported",
             )
         if not isinstance(params, CastParams):
@@ -1053,6 +1078,32 @@ class VectorSSA(_RegisterSSA):
                     "cast",
                     "FP32->HiF8 supports CAST_ROUND or CAST_HYBRID",
                 )
+        fp4_narrow = src_token == "bf16" and dst_token in _FP4_PAIR_DTYPES
+        if src_token in _FP4_PAIR_DTYPES or dst_token in _FP4_PAIR_DTYPES:
+            if not (
+                fp4_narrow or (src_token in _FP4_PAIR_DTYPES and dst_token == "bf16")
+            ):
+                _op_error(
+                    "cast",
+                    "FP4x2 pairs with BFloat16; compose other routes explicitly",
+                )
+            if fp4_narrow and params.round_mode not in (
+                RoundMode.CAST_ROUND,
+                RoundMode.CAST_FLOOR,
+                RoundMode.CAST_CEIL,
+                RoundMode.CAST_TRUNC,
+                RoundMode.CAST_RINT,
+                RoundMode.CAST_NONE,
+            ):
+                _op_error(
+                    "cast",
+                    "BF16->FP4x2 supports CAST_ROUND/CAST_FLOOR/CAST_CEIL/CAST_TRUNC/CAST_RINT/CAST_NONE only",
+                )
+            if fp4_narrow and params.sat_mode not in (SatMode.SAT, SatMode.UNKNOWN):
+                _op_error(
+                    "cast",
+                    "BF16->FP4x2 requires SAT or UNKNOWN; the native instruction always saturates",
+                )
         if (
             src_token == "f16"
             and dst_token == "bf16"
@@ -1081,7 +1132,17 @@ class VectorSSA(_RegisterSSA):
             trait_attr = mlir_ir.DenseI32ArrayAttr.get(params.codes())
         mask_value = _as_value(mask) if mask is not None else None
         if mask_value is not None:
-            _require_mask_matches_vector("cast", mask_value, operand_value)
+            if fp4_narrow:
+                if _mask_ssa_type_for_mlir_value(mask_value).physical_lanes not in (
+                    64,
+                    128,
+                ):
+                    _op_error(
+                        "cast",
+                        "BF16->FP4x2 requires a 128-lane BF16 source mask or a 64-lane pair mask (dtype=UInt32)",
+                    )
+            else:
+                _require_mask_matches_vector("cast", mask_value, operand_value)
         result = _tla_ops_gen.cast(
             result_desc.to_mlir_type(context),
             operand_value,
@@ -1102,33 +1163,31 @@ class VectorSSA(_RegisterSSA):
 
         Description:
             Reinterpret the bits of a register-resident vector as another
-            element type of the **same bit width**. Nothing is computed and no
-            hardware instruction is emitted: the register keeps its bits and
-            only its element type changes, so the op is free.
+            element type without numeric conversion. The physical register
+            retains all 2048 bits. Element widths may differ; the physical
+            and valid lane counts change to preserve their respective bit
+            counts. For example, 64 Float32 lanes become 128 BFloat16 lanes,
+            exposing both halfwords of each Float32 bit pattern.
 
-            This is what makes a float's bit pattern reachable from the DSL --
-            extracting an exponent, building `2**k` by shifting into bit 23,
-            clearing a sign bit -- without a store/load round trip through UB at
-            a different element type.
+            Supported types are `f32`/`i32`/`u32`, `f16`/`bf16`/`i16`/`u16`,
+            `i8`/`u8`/`f8e4m3fn`/`f8e5m2`/`hif8`/`f4e2m1x2`/`f4e1m2x2`, and
+            `i64`/`u64`. `tla.Bool`, `tla.Float8E8M0` and logical four-bit Tensor
+            types are rejected. This operation changes neither byte order nor
+            register slot and does not pack sparse values. Use `.to()` for
+            numeric conversion and explicit rearrangement for layout changes.
 
-            The same-width pairs are `f32`/`i32`/`u32`, `f16`/`bf16`/`i16`/`u16`,
-            `i8`/`u8`/`f8e4m3fn`/`f8e5m2`/`hif8`, and `i64`/`u64`. The lane count is
-            preserved. A width change is `VectorSSA.to`'s job and is rejected
-            here. `tla.Bool` (i1), `tla.Float8E8M0` and the packed fp4 formats
-            are not valid `!tla.vector` element types and are rejected too.
-
-            `i64`/`u64` registers can be returned by an extern and bitcast to
-            each other. The tensor API does not provide direct loads of these
-            register types.
+            `i64`/`u64` registers can come from extern or bitcast. This adds no
+            64-bit Tensor load/store or arithmetic routes; those operations
+            must independently support the element type.
 
             Parameters:
-            - `dst_type` (`type[Numeric]`): Same-width element type to
-              reinterpret as. Required.
+            - `dst_type` (`type[Numeric]`): Element type to reinterpret as. Required.
 
             Constraints:
             - Must be called inside a `@tla.kernel`-decorated kernel function.
             - Must be called inside `tla.vec.func()`.
-            - `dst_type` must have the same width as the source element type.
+            - A static valid bit count must contain whole destination elements.
+            - Dynamic valid ranges remain dynamic; consumers need explicit masks.
             - A bitcast to the source's own element type returns `self`.
 
             Example:
@@ -1166,14 +1225,15 @@ class VectorSSA(_RegisterSSA):
             return self
         src_bytes = dtype_size_bytes(src_token)
         dst_bytes = dtype_size_bytes(dst_token)
-        if src_bytes != dst_bytes:
+        valid_lanes = src_desc.valid_lanes
+        if valid_lanes is not None and (valid_lanes * src_bytes) % dst_bytes:
             _op_error(
                 "bitcast",
-                f"requires the same element width: {src_token} is {src_bytes} "
-                f"byte(s) and {dst_token} is {dst_bytes} byte(s); use "
-                f"VectorSSA.to for a width change",
+                f"valid source byte count {valid_lanes * src_bytes} is not divisible by the {dst_bytes}-byte destination element width",
             )
-        result_desc = TlaVectorSSATypeDescriptor(src_desc.valid_lanes, dst_token)
+        if valid_lanes is not None:
+            valid_lanes = valid_lanes * src_bytes // dst_bytes
+        result_desc = TlaVectorSSATypeDescriptor(valid_lanes, dst_token)
         context = operand_value.type.context
         result = _tla_ops_gen.bitcast(
             result_desc.to_mlir_type(context),
@@ -1801,6 +1861,11 @@ def _cast_result_descriptor(
     src_lanes = src_desc.valid_lanes
     if src_lanes is None:
         return TlaVectorSSATypeDescriptor(None, dst_token)
+    if src_desc.element_type in _FP4_PAIR_DTYPES and dst_token == "bf16":
+        slot = params.codes()[0]
+        if src_lanes <= slot:
+            _op_error("cast", "FP4x2 source has no valid byte in the selected slot")
+        return TlaVectorSSATypeDescriptor(2 * ((src_lanes - slot + 3) // 4), dst_token)
     src_bytes = dtype_size_bytes(src_desc.element_type)
     dst_bytes = dtype_size_bytes(dst_token)
     if dst_bytes == src_bytes:
@@ -5729,6 +5794,8 @@ _SUPPORTED_VECTOR_COPY_ROUTES = {
         "f4e2m1",
         "f4e1m2",
         "hif8",
+        "f4e2m1x2",
+        "f4e1m2x2",
     ),
     ("ub", "RowMajor", "gm", "RowMajor"): (
         "f32",
@@ -5746,6 +5813,8 @@ _SUPPORTED_VECTOR_COPY_ROUTES = {
         "f4e2m1",
         "f4e1m2",
         "hif8",
+        "f4e2m1x2",
+        "f4e1m2x2",
     ),
     # UB -> UB is DataCopy (MOV.UB.TO.UB) throughout, with a ragged row rounded
     # up to whole 32-byte blocks, so every element width is carried, 1-byte
@@ -8084,6 +8153,11 @@ def _emit_vector_binary(
             op_name,
             "HiFloat8 arithmetic requires an explicit numeric conversion or bitcast",
         )
+    if lhs_desc.element_type in _FP4_PAIR_DTYPES:
+        _op_error(
+            op_name,
+            "FP4x2 arithmetic requires an explicit numeric conversion or bitcast",
+        )
     if lhs_desc.element_type != rhs_desc.element_type:
         _op_error(
             op_name,
@@ -10256,7 +10330,16 @@ def _require_reg_slot_reachable(src_token: str, dst_token: str, slot: RegSlot) -
     # the pack quarter of the widen leg.
     u8_f32_pair = src_token == "u8" and dst_token == "f32"
     hif8_f32_pair = (src_token, dst_token) in (("f32", "hif8"), ("hif8", "f32"))
-    if (int_pair and ratio >= 4) or fp8_f32_pair or u8_f32_pair or hif8_f32_pair:
+    fp4_pair = (src_token == "bf16" and dst_token in _FP4_PAIR_DTYPES) or (
+        src_token in _FP4_PAIR_DTYPES and dst_token == "bf16"
+    )
+    if (
+        (int_pair and ratio >= 4)
+        or fp8_f32_pair
+        or u8_f32_pair
+        or hif8_f32_pair
+        or fp4_pair
+    ):
         return
     _op_error(
         "cast",

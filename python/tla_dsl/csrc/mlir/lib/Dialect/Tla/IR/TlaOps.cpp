@@ -1250,6 +1250,25 @@ mlir::LogicalResult CastOp::verify()
             trait[2] != static_cast<int32_t>(::RoundMode::cast_hybrid))
             return emitOpError("FP32->HiF8 supports CAST_ROUND or CAST_HYBRID");
     }
+    if (isFp4PairType(source) || isFp4PairType(dest)) {
+        if (trait.size() != 3 || trait[0] < 0 || trait[0] > 3 || trait[1] < 0 || trait[1] > 2 || trait[2] < 0 ||
+            !::symbolizeRoundMode(trait[2]))
+            return emitOpError("trait must contain valid register-slot, saturation and rounding codes");
+        bool narrow = source.isBF16() && isFp4PairType(dest);
+        if (!narrow && !(isFp4PairType(source) && dest.isBF16()))
+            return emitOpError("FP4x2 pairs with BFloat16; compose other routes explicitly");
+        if (narrow && trait[1] != 0 && trait[1] != 1)
+            return emitOpError("BF16->FP4x2 requires SAT or UNKNOWN");
+        if (narrow && trait[2] == static_cast<int32_t>(::RoundMode::cast_odd))
+            return emitOpError(
+                "BF16->FP4x2 supports CAST_ROUND/CAST_FLOOR/CAST_CEIL/CAST_TRUNC/CAST_RINT/CAST_NONE only");
+        if (narrow) {
+            if (getMask() && getMask().getType().getPhysicalLanes() != 64 &&
+                getMask().getType().getPhysicalLanes() != 128)
+                return emitOpError("BF16->FP4x2 requires a 128-lane BF16 source mask or a 64-lane pair mask");
+            return mlir::success();
+        }
+    }
     return verifyMaskMatchesVector(getOperation(), getMask(), getSource().getType());
 }
 
@@ -1260,19 +1279,17 @@ mlir::LogicalResult BitCastOp::verify()
 
     VectorSSAType sourceType = getSource().getType();
     VectorSSAType resultType = getResult().getType();
-    if (sourceType.getValidLanes() != resultType.getValidLanes())
-        return emitOpError() << "preserves the lane count, got " << sourceType.getValidLanes() << " source lane(s) and "
-                             << resultType.getValidLanes() << " result lane(s)";
-
     int64_t sourceBits = getBitSizeOfFixedWidthScalarType(sourceType.getElementType());
     int64_t resultBits = getBitSizeOfFixedWidthScalarType(resultType.getElementType());
     if (sourceBits <= 0 || resultBits <= 0)
         return emitOpError() << "unsupported element type: source " << sourceType.getElementType() << ", result "
                              << resultType.getElementType();
-    if (sourceBits != resultBits)
-        return emitOpError() << "requires source and result element types of the same width, got "
-                             << sourceType.getElementType() << " (" << sourceBits << " bits) and "
-                             << resultType.getElementType() << " (" << resultBits << " bits)";
+    int64_t sourceLanes = sourceType.getValidLanes();
+    int64_t resultLanes = resultType.getValidLanes();
+    bool sourceDynamic = sourceLanes == mlir::ShapedType::kDynamic;
+    bool resultDynamic = resultLanes == mlir::ShapedType::kDynamic;
+    if (sourceDynamic != resultDynamic || (!sourceDynamic && sourceLanes * sourceBits != resultLanes * resultBits))
+        return emitOpError("preserves the valid bit count; both lane counts must be dynamic or describe equal bits");
 
     return mlir::success();
 }
@@ -1422,18 +1439,32 @@ mlir::LogicalResult LoadOp::verify()
     }
 
     bool isDintlv = false;
-    if (auto loadDistAttr = getLoadDist())
-        isDintlv = loadDistAttr->getLoadDist() == ::LoadDist::dintlv_b32;
+    bool isDintlvB16 = false;
+    if (auto loadDistAttr = getLoadDist()) {
+        isDintlvB16 = loadDistAttr->getLoadDist() == ::LoadDist::dintlv_b16;
+        isDintlv = isDintlvB16 || loadDistAttr->getLoadDist() == ::LoadDist::dintlv_b32;
+    }
 
     mlir::Value result2 = getResult2();
     bool result2IsVector = result2 && mlir::isa<VectorSSAType>(result2.getType());
     if (isDintlv) {
         if (getUnalignedUbAccess().value_or(false))
-            return emitOpError("load_dist dintlv_b32 requires aligned UB access");
+            return emitOpError(
+                isDintlvB16 ? "load_dist dintlv_b16 requires aligned UB access" :
+                              "load_dist dintlv_b32 requires aligned UB access");
         if (!result2IsVector)
-            return emitOpError("load_dist dintlv_b32 requires a second !tla.vector result");
+            return emitOpError("load_dist dintlv_b16/dintlv_b32 requires a second !tla.vector result");
+        if (isDintlvB16) {
+            auto first = mlir::cast<VectorSSAType>(getResult().getType());
+            auto second = mlir::cast<VectorSSAType>(result2.getType());
+            auto elementType = sourceType.getPtr().getPointee();
+            if (getByteSizeOfFixedWidthScalarType(elementType) != 2)
+                return emitOpError("dintlv_b16 requires a 2-byte source element type");
+            if (first != second || first.getElementType() != elementType || first.getValidLanes() != 128)
+                return emitOpError("dintlv_b16 requires two identical full 128-lane vectors matching the source type");
+        }
     } else if (result2) {
-        return emitOpError("second result is only valid as !tla.vector (dintlv_b32)");
+        return emitOpError("second result is only valid as !tla.vector (dintlv_b16/dintlv_b32)");
     }
     if (getBlockStride() && getUnalignedUbAccess())
         return emitOpError("block_stride is not supported with unaligned_ub_access");

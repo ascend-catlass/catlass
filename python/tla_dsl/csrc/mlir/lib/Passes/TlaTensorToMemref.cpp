@@ -332,7 +332,7 @@ FailureOr<int64_t> getStaticNumElements(ArrayRef<int64_t> shape)
 
 FailureOr<int64_t> getElementByteWidth(Type elementType)
 {
-    if (isa<::tla::HiFloat8Type>(elementType))
+    if (isa<::tla::HiFloat8Type, ::tla::Float4E2M1x2Type, ::tla::Float4E1M2x2Type>(elementType))
         return 1;
     if (auto intType = dyn_cast<IntegerType>(elementType)) {
         int64_t width = intType.getWidth();
@@ -664,7 +664,7 @@ static mlir::FailureOr<hivm::AddressSpace> resolveHivmAddressSpace(MLIRContext* 
 
 static StringRef copyRuntimeElemSuffix(Type elementType)
 {
-    if (isa<::tla::HiFloat8Type>(elementType))
+    if (isa<::tla::HiFloat8Type, ::tla::Float4E2M1x2Type, ::tla::Float4E1M2x2Type>(elementType))
         return "int8_t";
     if (elementType.isF32())
         return "float";

@@ -203,6 +203,14 @@ def hifloat8_type_get(context: mlir_ir.Context) -> mlir_ir.Type:
     return _load_bridge_extension().hifloat8_type_get(context)
 
 
+def float4_e2m1x2_type_get(context: mlir_ir.Context) -> mlir_ir.Type:
+    return _load_bridge_extension().float4_e2m1x2_type_get(context)
+
+
+def float4_e1m2x2_type_get(context: mlir_ir.Context) -> mlir_ir.Type:
+    return _load_bridge_extension().float4_e1m2x2_type_get(context)
+
+
 def copy_l0c2dst_params_type_get(context: mlir_ir.Context) -> mlir_ir.Type:
     return _load_bridge_extension().copy_l0c2dst_params_type_get(context)
 

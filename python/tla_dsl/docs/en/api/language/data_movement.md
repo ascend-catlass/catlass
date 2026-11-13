@@ -147,8 +147,8 @@ Supported vector copy routes
 
 |`src_addr`|`src_layout`|`dst_addr`|`dst_layout`|`dtypes`|
 |----------|------------|----------|------------|--------|
-|`gm`|`RowMajor`|`ub`|`RowMajor`|`f32`,`f16`,`bf16`,`i32`,`i16`,`i8`,`u32`,`u16`,`u8`,`f8e4m3fn`,`f8e5m2`,`f8e8m0`,`f4e2m1`,`f4e1m2`,`hif8`|
-|`ub`|`RowMajor`|`gm`|`RowMajor`|`f32`,`f16`,`bf16`,`i32`,`i16`,`i8`,`u32`,`u16`,`u8`,`f8e4m3fn`,`f8e5m2`,`f8e8m0`,`f4e2m1`,`f4e1m2`,`hif8`|
+|`gm`|`RowMajor`|`ub`|`RowMajor`|`f32`,`f16`,`bf16`,`i32`,`i16`,`i8`,`u32`,`u16`,`u8`,`f8e4m3fn`,`f8e5m2`,`f8e8m0`,`f4e2m1`,`f4e1m2`,`hif8`,`f4e2m1x2`,`f4e1m2x2`|
+|`ub`|`RowMajor`|`gm`|`RowMajor`|`f32`,`f16`,`bf16`,`i32`,`i16`,`i8`,`u32`,`u16`,`u8`,`f8e4m3fn`,`f8e5m2`,`f8e8m0`,`f4e2m1`,`f4e1m2`,`hif8`,`f4e2m1x2`,`f4e1m2x2`|
 |`ub`|`RowMajor`|`ub`|`RowMajor`|`f32`,`f16`,`bf16`,`i32`,`i16`,`i8`,`f8e4m3fn`,`f8e5m2`|
 |`ub`|`RowMajor`|`ub`|`ColumnMajor`|`f32`,`f16`,`bf16`,`i32`,`i16`,`i8`,`f8e4m3fn`,`f8e5m2`|
 |`ub`|`RowMajor`|`l1`|`zN`|`f32`,`f16`,`bf16`,`i8`,`f8e4m3fn`,`f8e5m2`,`f4e2m1`,`f4e1m2`|
@@ -215,7 +215,7 @@ Parameters:
 - `params` (`LoadParams | None`): Load mode. Optional, default `None`.
   - `None` / `NormalLoadParams` / `UnalignLoadParams` /
     `BlockLoadParams` → `VectorSSA` (or a pair for
-    `DIST_DINTLV_B32`).
+    `DIST_DINTLV_B16` / `DIST_DINTLV_B32`).
   - `MaskLoadParams` → `MaskSSA`.
   - `NormalLoadParams`:
     - `load_dist` (`str`): `tla.params.LoadDist` token. Default
@@ -225,6 +225,7 @@ Parameters:
       |---|---|
       | `DIST_NORM` | Default contiguous load |
       | `DIST_BRC_B32` | Broadcast one b32 element to all lanes |
+      | `DIST_DINTLV_B16` | Load 512 bytes; return two 128-lane b16 registers, even positions first and odd positions second |
       | `DIST_DINTLV_B32` | f32 deinterleave; dual results |
       | `DIST_US_B8` / `DIST_US_B16` | 2x up-sample |
       | `DIST_BRC_B16` | Broadcast one b16 element |
@@ -270,8 +271,10 @@ Constraints:
 - Distribution modes fix the element width: `DIST_US_B8` needs
   i8/u8; `DIST_BRC_B16` / `DIST_US_B16` / `DIST_UNPACK_B16` /
   `DIST_E2B_B16` need 2-byte (f16/bf16/i16/u16); `DIST_E2B_B32`
-  needs 4-byte (f32/i32/u32); `DIST_DINTLV_B32` needs f32;
+  needs 4-byte (f32/i32/u32); `DIST_DINTLV_B16` needs 2-byte
+  (f16/bf16/i16/u16); `DIST_DINTLV_B32` needs f32;
   `DIST_BLK` works for any element size.
+- `DIST_DINTLV_B16` requires a 32-byte-aligned source address.
 - `DIST_UNPACK4_B8` requires a 1-byte element type and a
   32-byte-aligned source address.
 - `BlockLoadParams` requires a 2/4-byte element type

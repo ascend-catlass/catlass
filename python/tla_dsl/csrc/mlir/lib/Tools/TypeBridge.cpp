@@ -414,6 +414,18 @@ MlirType hiFloat8TypeGet(MlirContext context)
     return toMlirType(::tla::HiFloat8Type::get(ctx), "tla.hif8");
 }
 
+MlirType float4E2M1x2TypeGet(MlirContext context)
+{
+    MLIRContext* ctx = bridgeContext(context);
+    return toMlirType(::tla::Float4E2M1x2Type::get(ctx), "tla.f4e2m1x2");
+}
+
+MlirType float4E1M2x2TypeGet(MlirContext context)
+{
+    MLIRContext* ctx = bridgeContext(context);
+    return toMlirType(::tla::Float4E1M2x2Type::get(ctx), "tla.f4e1m2x2");
+}
+
 MlirType mutexTypeGet(MlirContext context)
 {
     MLIRContext* ctx = bridgeContext(context);
@@ -1111,6 +1123,8 @@ PYBIND11_MODULE(_tla_type_bridge_native, m)
     m.def("float4_e1m2_type_get", &float4E1M2TypeGet, py::arg("context"));
     m.def("float8_e8m0_type_get", &float8E8M0TypeGet, py::arg("context"));
     m.def("hifloat8_type_get", &hiFloat8TypeGet, py::arg("context"));
+    m.def("float4_e2m1x2_type_get", &float4E2M1x2TypeGet, py::arg("context"));
+    m.def("float4_e1m2x2_type_get", &float4E1M2x2TypeGet, py::arg("context"));
     m.def("copy_l0c2dst_params_type_get", &copyL0C2DstParamsTypeGet, py::arg("context"));
 
     m.def("type_is_ptr", &typeIs<::tla::PtrType>, py::arg("type"));

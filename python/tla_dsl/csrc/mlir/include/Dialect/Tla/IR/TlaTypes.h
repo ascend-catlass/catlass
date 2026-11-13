@@ -15,6 +15,12 @@
 
 namespace tla {
 
+/// Packed x2 byte carriers, distinct from logical 4-bit FP4 types.
+inline bool isFp4PairType(::mlir::Type type)
+{
+    return ::llvm::isa<::tla::Float4E2M1x2Type, ::tla::Float4E1M2x2Type>(type);
+}
+
 ::mlir::LogicalResult getTlaIndexTreeLeaves(::llvm::ArrayRef<int64_t> tree, ::llvm::SmallVectorImpl<int64_t>& leaves);
 
 /// GM-side MX scale blocks. NZFamily descriptors -- the 2x2 nested tree of
@@ -77,8 +83,8 @@ inline int64_t getByteSizeOfFixedWidthScalarType(::mlir::Type type)
     // fp8 cube operand formats (f8E4M3FN / f8E5M2) are byte-sized.
     if (::llvm::isa<::mlir::Float8E4M3FNType, ::mlir::Float8E5M2Type>(type))
         return 1;
-    // HiF8 data and E8M0 shared exponents each occupy one byte.
-    if (::llvm::isa<::tla::Float8E8M0Type, ::tla::HiFloat8Type>(type))
+    // HiF8, packed FP4 pairs and E8M0 shared exponents occupy one byte.
+    if (::llvm::isa<::tla::Float8E8M0Type, ::tla::HiFloat8Type, ::tla::Float4E2M1x2Type, ::tla::Float4E1M2x2Type>(type))
         return 1;
     if (auto intTy = ::llvm::dyn_cast<::mlir::IntegerType>(type)) {
         if (intTy.getWidth() % 8 == 0)
@@ -158,7 +164,9 @@ inline bool isPackedFp4Type(::mlir::Type type)
 /// builtin for it. These are buffered as i8 at the memref boundary.
 inline bool isTlaCustomElementType(::mlir::Type type)
 {
-    return isPackedFp4Type(type) || ::llvm::isa<::tla::Float8E8M0Type, ::tla::HiFloat8Type>(type);
+    return isPackedFp4Type(type) ||
+           ::llvm::isa<::tla::Float8E8M0Type, ::tla::HiFloat8Type, ::tla::Float4E2M1x2Type, ::tla::Float4E1M2x2Type>(
+               type);
 }
 
 using coord = ::mlir::Type;

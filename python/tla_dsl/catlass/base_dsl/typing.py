@@ -775,6 +775,18 @@ def _mlir_hif8() -> mlir_ir.Type:
     return hifloat8_type_get(mlir_ir.Context.current)
 
 
+def _mlir_f4e2m1x2() -> mlir_ir.Type:
+    from .._tla_type_bridge import float4_e2m1x2_type_get
+
+    return float4_e2m1x2_type_get(mlir_ir.Context.current)
+
+
+def _mlir_f4e1m2x2() -> mlir_ir.Type:
+    from .._tla_type_bridge import float4_e1m2x2_type_get
+
+    return float4_e1m2x2_type_get(mlir_ir.Context.current)
+
+
 class Numeric(metaclass=NumericMeta, is_abstract=True):
     """Numeric type and value (``DslType`` / ``NumericMeta`` first-class).
 
@@ -896,6 +908,8 @@ class Numeric(metaclass=NumericMeta, is_abstract=True):
                 "!tla.f4e1m2",
                 "!tla.f8e8m0",
                 "!tla.hif8",
+                "!tla.f4e2m1x2",
+                "!tla.f4e1m2x2",
             ):
                 raise TypeError(f"unsupported element type for Numeric: {ty!r}")
             token = printed.removeprefix("!tla.")
@@ -922,6 +936,11 @@ class Numeric(metaclass=NumericMeta, is_abstract=True):
                 ).results[0]
             return self.value
         cls = type(self)
+        if cls.dtype in ("f4e2m1x2", "f4e1m2x2"):
+            raise TypeError(
+                f"{cls.__name__} is a packed encoding, not a scalar literal; "
+                "use a Tensor load, register conversion, or bitcast"
+            )
         element_type = _scalar_mlir_type(cls)
         if cls.is_float:
             return mlir_ir.Operation.create(
@@ -1555,6 +1574,26 @@ class Float8E5M2(
 
 class HiFloat8(Float, metaclass=FloatMeta, width=8, dtype="hif8", mlir_type=_mlir_hif8):
     """HiF8 encoding; use SIMD conversion to Float32 for arithmetic."""
+
+
+class Float4E2M1x2(
+    Numeric, metaclass=NumericMeta, width=8, dtype="f4e2m1x2", mlir_type=_mlir_f4e2m1x2
+):
+    """A byte containing two E2M1 values, low nibble first.
+
+    Vector lane counts and memory offsets count packed pairs. This is a
+    register/storage encoding, not a scalar numeric value or the logical
+    4-bit ``Float4E2M1`` Tensor/Cube element type.
+    """
+
+
+class Float4E1M2x2(
+    Numeric, metaclass=NumericMeta, width=8, dtype="f4e1m2x2", mlir_type=_mlir_f4e1m2x2
+):
+    """A byte containing two E1M2 values, low nibble first.
+
+    Like Float4E2M1x2, shapes and offsets count pairs, not 4-bit elements.
+    """
 
 
 class Float4E2M1(

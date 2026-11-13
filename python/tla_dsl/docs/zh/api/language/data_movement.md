@@ -132,8 +132,8 @@ Vector 拷贝通路
 
 |`src_addr`|`src_layout`|`dst_addr`|`dst_layout`|`dtypes`|
 |----------|------------|----------|------------|--------|
-|`gm`|`RowMajor`|`ub`|`RowMajor`|`f32`,`f16`,`bf16`,`i32`,`i16`,`i8`,`u32`,`u16`,`u8`,`f8e4m3fn`,`f8e5m2`,`f8e8m0`,`f4e2m1`,`f4e1m2`,`hif8`|
-|`ub`|`RowMajor`|`gm`|`RowMajor`|`f32`,`f16`,`bf16`,`i32`,`i16`,`i8`,`u32`,`u16`,`u8`,`f8e4m3fn`,`f8e5m2`,`f8e8m0`,`f4e2m1`,`f4e1m2`,`hif8`|
+|`gm`|`RowMajor`|`ub`|`RowMajor`|`f32`,`f16`,`bf16`,`i32`,`i16`,`i8`,`u32`,`u16`,`u8`,`f8e4m3fn`,`f8e5m2`,`f8e8m0`,`f4e2m1`,`f4e1m2`,`hif8`,`f4e2m1x2`,`f4e1m2x2`|
+|`ub`|`RowMajor`|`gm`|`RowMajor`|`f32`,`f16`,`bf16`,`i32`,`i16`,`i8`,`u32`,`u16`,`u8`,`f8e4m3fn`,`f8e5m2`,`f8e8m0`,`f4e2m1`,`f4e1m2`,`hif8`,`f4e2m1x2`,`f4e1m2x2`|
 |`ub`|`RowMajor`|`ub`|`RowMajor`|`f32`,`f16`,`bf16`,`i32`,`i16`,`i8`,`f8e4m3fn`,`f8e5m2`|
 |`ub`|`RowMajor`|`ub`|`ColumnMajor`|`f32`,`f16`,`bf16`,`i32`,`i16`,`i8`,`f8e4m3fn`,`f8e5m2`|
 |`ub`|`RowMajor`|`l1`|`zN`|`f32`,`f16`,`bf16`,`i8`,`f8e4m3fn`,`f8e5m2`,`f4e2m1`,`f4e1m2`|
@@ -188,7 +188,7 @@ tla.Tensor.load(params: LoadParams | None = None) -> MaskSSA | VectorSSA | tuple
 
 - `params`（`LoadParams | None`）：载入模式。可选，默认 `None`。
   - `None` / `NormalLoadParams` / `UnalignLoadParams` /
-    `BlockLoadParams` → `VectorSSA`（`DIST_DINTLV_B32` 时可为二元组）。
+    `BlockLoadParams` → `VectorSSA`（`DIST_DINTLV_B16` / `DIST_DINTLV_B32` 时可为二元组）。
   - `MaskLoadParams` → `MaskSSA`。
   - `NormalLoadParams`：
     - `load_dist`（`str`）：`tla.params.LoadDist` token。默认 `DIST_NORM`。
@@ -197,6 +197,7 @@ tla.Tensor.load(params: LoadParams | None = None) -> MaskSSA | VectorSSA | tuple
       | --- | --- |
       | `DIST_NORM` | 默认连续载入 |
       | `DIST_BRC_B32` | 单个 b32 元素广播到全部 lane |
+      | `DIST_DINTLV_B16` | 读取 512 字节；返回两个 128-lane b16 寄存器，依次保存偶数、奇数位置的元素 |
       | `DIST_DINTLV_B32` | f32 解交织；双返回值 |
       | `DIST_US_B8` / `DIST_US_B16` | 2 倍上采样 |
       | `DIST_BRC_B16` | 单个 b16 元素广播 |
@@ -237,7 +238,9 @@ tla.Tensor.load(params: LoadParams | None = None) -> MaskSSA | VectorSSA | tuple
 - 分发模式限定元素宽度：`DIST_US_B8` 要求 i8/u8；`DIST_BRC_B16` /
   `DIST_US_B16` / `DIST_UNPACK_B16` / `DIST_E2B_B16` 要求 2 字节
   （f16/bf16/i16/u16）；`DIST_E2B_B32` 要求 4 字节（f32/i32/u32）；
-  `DIST_DINTLV_B32` 要求 f32；`DIST_BLK` 适用于任意元素宽度。
+  `DIST_DINTLV_B16` 要求 2 字节（f16/bf16/i16/u16）；`DIST_DINTLV_B32`
+  要求 f32；`DIST_BLK` 适用于任意元素宽度。
+- `DIST_DINTLV_B16` 的实际读取地址须按 32 字节对齐。
 - `DIST_UNPACK4_B8` 要求 1 字节元素，实际读取地址须按 32 字节对齐。
 - `BlockLoadParams` 要求 2/4 字节元素类型（f32/f16/bf16/i32/u32/i16/u16）；
   `block_stride` 与 `repeat_stride` 须在 [0, 65535] 范围内。
