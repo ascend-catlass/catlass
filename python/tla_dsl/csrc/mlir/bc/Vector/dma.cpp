@@ -271,6 +271,20 @@ CATLASS_DEVICE void copyUBToL1(
 // Only the packed axis changes: a RowMajor tile of (rows, cols) fp4 elements is
 // (rows, cols/2) bytes with half the row stride, so the row count and any
 // coordinate along it are untouched.
+//
+// Every division below is exact. The routes that convert a descriptor here --
+// GM <-> UB, and UB -> L1 through copyUBToL1Fp4 below -- accept only tiles
+// whose packed extent, packed origin coordinate and halved stride are all
+// even. An odd one of the three would end mid-byte, putting the other half of
+// that byte -- an element outside the tile -- in the way, and the copy could
+// neither carry it nor disturb it. core_api.py's _partial_byte_fp4_extent and
+// _fp4_odd_byte_mapping refuse those shapes at trace time, including values
+// that are only known at run time, and carry the full reasoning.
+//
+// Which stride is the halved one is per layout, so the frontend checks it per
+// layout: stride0 on a RowMajor tile, stride3 on a zN one. Both are reachable
+// with an odd value only through an explicit layout, since every stride the
+// frontend materializes for fp4 is already even.
 CATLASS_DEVICE TensorDesc fp4RowMajorDescToBytes(const TensorDesc& d)
 {
     TensorDesc b = d;
@@ -285,6 +299,11 @@ CATLASS_DEVICE TensorDesc fp4RowMajorDescToBytes(const TensorDesc& d)
 // whatever the element width, so an fp4 zN tile and an int8 zN tile of half the
 // columns are the same bytes: the fractal shape is untouched and only the
 // column extent and the stride between C0 columns halve.
+//
+// stride3 is that stride between C0 columns, and halving it is exact because
+// the frontend requires it to be even. A layout the frontend materializes
+// derives it as a whole number of C0s, but an explicit layout can carry any
+// value, so an odd one is refused at trace time rather than assumed away here.
 CATLASS_DEVICE TensorDesc fp4zNDescToBytes(const TensorDesc& d)
 {
     TensorDesc b = d;
@@ -295,7 +314,15 @@ CATLASS_DEVICE TensorDesc fp4zNDescToBytes(const TensorDesc& d)
 }
 
 // UB -> L1 goes through int8 tensors and byte descriptors, exactly as the
-// GM <-> UB fp4 routes do.
+// GM <-> UB fp4 routes do, and carries the same whole-byte precondition: a
+// RowMajor source converts through fp4RowMajorDescToBytes and a zN tile
+// through fp4zNDescToBytes, and both halve the packed extent and the packed
+// origin coordinate.
+//
+// The destination is always zN and always converts through fp4zNDescToBytes,
+// so its C0-column pitch carries the even requirement on both registered
+// pairings -- (RowMajor, zN) as well as (zN, zN) -- and not only where the
+// source is zN.
 //
 // Keeping the real fp4 type here instead -- on the argument that the layout
 // math runs on SizeOfBits and no scalar float value is ever formed -- compiles,

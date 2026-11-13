@@ -197,32 +197,139 @@ _MASK_CMP_MODES = ("lt", "le", "gt", "ge", "eq", "ne")
 _FP4_FORMATS = frozenset({"f4e2m1", "f4e1m2"})
 
 
-def _odd_fp4_origin_extent(desc) -> int | None:
-    """The packed-axis origin extent of an fp4 tile, when it is statically odd.
+#: Packed fp4 elements per byte. The descriptor halving is exact only on a
+#: whole number of bytes, so this is the granularity the routes below require.
+_FP4_PER_BYTE = 2
+
+#: The copy routes that stage packed fp4 through byte descriptors, and so
+#: carry the halving constraint below. These are exactly the routes whose
+#: registration in ``Vector/dma.cpp`` converts the descriptor before handing it
+#: to the copy templates: GM <-> UB through ``fp4RowMajorDescToBytes``, and
+#: UB -> L1 through ``copyUBToL1Fp4``, which converts each side with whichever
+#: of ``fp4RowMajorDescToBytes`` / ``fp4zNDescToBytes`` matches its layout.
+#: Keeping the set explicit is what stops the rule from leaking onto GM -> L1,
+#: a cube route whose tiles stay in fp4 denomination and legitimately carry a
+#: runtime extent.
+_FP4_BYTE_STAGED_ROUTES = frozenset({("gm", "ub"), ("ub", "gm"), ("ub", "l1")})
+
+#: The stride each layout's byte conversion halves, as the name to report and
+#: the leaf's position in the tile's flattened stride tree counted from the end.
+#: Both converters halve the innermost origin extent and the innermost origin
+#: coordinate and differ only here: ``fp4RowMajorDescToBytes`` halves
+#: ``stride0``, the first of a RowMajor tile's two leaves, and
+#: ``fp4zNDescToBytes`` halves ``stride3``, the last of a zN tile's four -- the
+#: pitch between C0 columns. The two sit at different depths, so the position is
+#: per layout rather than shared; indexing one tree with the other's position
+#: reads a nested tuple where an integer belongs.
+#:
+#: These are the only two layouts that reach a byte-staged route: GM <-> UB is
+#: registered RowMajor <-> RowMajor, and UB -> L1 as ``(RowMajor, zN)`` and
+#: ``(zN, zN)``. Counting from the end leaves a rank-1 tile, whose tree is
+#: shorter than the position it would need, out of the stride check, which is
+#: right because such a tile has no stride between rows and its single leaf is
+#: covered by the extent rule.
+_FP4_HALVED_STRIDE_LEAF = {
+    "RowMajor": ("row stride", -2),
+    "zN": ("C0-column pitch", -1),
+}
+
+
+def _partial_byte_fp4_extent(desc) -> int | str | None:
+    """The packed-axis origin extent of a byte-staged fp4 tile, unless it is a
+    whole number of bytes.
 
     The fp4 staging routes do not run on fp4 descriptors: the AIV backend
     refuses sub-byte floats, so ``Vector/dma.cpp`` converts the descriptor to
     byte denomination (``fp4RowMajorDescToBytes``) and copies as ``int8_t``.
-    That conversion halves the extents, which only round-trips while they are
-    even. An odd extent of ``n`` nibbles needs ``(n + 1) / 2`` bytes, so the
-    halved length stops one nibble short and the copy drops the final element
-    -- or, on a load, never reads it.
+    Halving the extent is exact only on whole bytes. A row of an odd number of
+    elements ends mid-byte, and the other half of that byte is an element
+    outside the tile -- so the copy either drops the row's last element or
+    overwrites the first element past it. An even extent has neither problem:
+    34 elements are exactly 17 bytes, and copy byte for byte.
 
-    Rejecting the shape keeps that a dispatch error rather than a silent wrong
-    answer. Supporting it needs a read-modify-write of the tail byte, so the
-    nibble beyond the logical tile survives; ``mx_tensor.cpp``'s
-    ``preserveFp4Tail`` does exactly that for the UB-side store, but a DMA
-    descriptor has no equivalent.
+    A dynamic extent cannot be shown to be even, so it is refused. That is the
+    case a static-only check misses and the one that stays wrong if the check
+    is all there is: the halving happens on device, on whatever value arrives.
 
-    Returns the offending extent, or ``None`` when it is even or not a static
-    integer (a dynamic extent is left to the device, as elsewhere in copy).
+    Carrying an odd tail was implemented and withdrawn. Rounding the byte
+    length up moves the problem to the neighbouring element, and merging the
+    two halves needs a read-modify-write on the scalar unit, which a copy
+    meta-op cannot order against the DMA around it: ``PipeBarrier`` does not
+    order one pipe against another, and the event ids ``SetFlag`` would need
+    belong to the frontend's flag allocation and to the copy templates. On
+    device that read back a stale nibble, differing between two runs of one
+    kernel.
+
+    Returns the offending extent, ``"dynamic"`` when it is not a static
+    integer, or ``None`` when it is a whole number of bytes.
+
+    ``mx_to`` is deliberately more permissive and stays so: it accepts an odd
+    extent, where ``preserveFp4Tail`` does the read-modify-write a DMA
+    descriptor cannot express. Such a tile just cannot be staged to or from
+    global memory.
     """
     origin = getattr(desc, "origin_shape", None)
     if not origin:
         return None
     last = origin[-1]
-    if isinstance(last, int) and last % 2:
+    if not isinstance(last, int):
+        return "dynamic"
+    if last % _FP4_PER_BYTE:
         return last
+    return None
+
+
+def _fp4_odd_byte_mapping(
+    desc, *, stride_field: tuple[str, int] | None
+) -> tuple[str, int | str] | None:
+    """The halved stride or origin coordinate of a byte-staged fp4 tile, unless
+    both are a whole number of bytes.
+
+    A whole-byte extent fixes the length of each row, but not where the row
+    starts. An odd halved stride puts every row, or every C0 column, after the
+    first half a byte off, and an odd innermost origin coordinate does the same
+    to the tile itself; the halved descriptor can express neither.
+
+    Which stride that is depends on the layout, and a value only an explicit
+    layout can reach is still reachable: every stride the frontend materializes
+    for fp4 is even, so the odd ones arrive through ``make_layout`` and
+    ``make_fake_tensor``. Being unreachable along one path is not an invariant
+    of the field.
+
+    A value that is only known at run time is refused for the same reason
+    ``_partial_byte_fp4_extent`` refuses a dynamic extent: the halving runs on
+    device on whatever value arrives, so a coordinate of 1 silently truncates
+    to 0 and the copy reads from the element before the one asked for. The
+    descriptor carries a runtime leaf as ``None``, which a static ``% 2`` test
+    passes straight through -- that is the hole this spells out.
+
+    ``stride_field`` names the stride this tile's byte conversion halves and
+    gives its position in the flattened stride tree, or is ``None`` when the
+    conversion halves no stride; see ``_FP4_HALVED_STRIDE_LEAF``.
+
+    Returns the offending field and its value, ``"dynamic"`` in place of a
+    value that is not a static integer, or ``None`` when both are whole bytes.
+    """
+    fields = [("origin coordinate", getattr(desc, "coord", None), -1)]
+    if stride_field is not None:
+        what, index = stride_field
+        fields.insert(0, (what, getattr(desc, "stride", None), index))
+    for what, tree, index in fields:
+        if not tree:
+            continue
+        # A tile's trees are nested as deeply as its layout needs -- a zN
+        # stride is a 2x2 tree where a RowMajor one is flat -- so the leaves
+        # are flattened before the position is applied. Indexing the tree
+        # itself reads a whole subtree on the nested layouts, which is not an
+        # integer and so reports every such tile as a runtime value.
+        leaves = _flatten_tla_tuple(tree)
+        if len(leaves) < -index:
+            continue
+        value = leaves[index]
+        if not isinstance(value, int):
+            return what, "dynamic"
+        if value % _FP4_PER_BYTE:
+            return what, value
     return None
 
 
@@ -6293,6 +6400,18 @@ def copy(
         - Must be called inside a `@tla.kernel`-decorated kernel function.
         - Must be called inside `tla.cube()` or `tla.vector()`.
         - Copy size follows each tile's `origin_shape`.
+        - Packed fp4 is staged as bytes on the routes that convert the
+          descriptor before copying -- GM->UB, UB->GM and UB->L1 -- so each
+          tile's innermost `origin_shape`, its innermost origin coordinate and
+          the stride the conversion halves must all be even: two fp4 elements
+          share a byte, and an odd one of the three lands half a byte off. The
+          halved stride is the row stride of a `RowMajor` tile and the pitch
+          between C0 columns of a `zN` tile, so a `zN` destination on UB->L1
+          carries the requirement as well. A value known only at run time
+          cannot be shown to be even and is refused as well. The cube's GM->L1
+          fp4 route keeps its own denomination and is unconstrained, and
+          `tla.experimental.mx_to` still accepts an odd extent -- such a tile
+          simply cannot be staged through a byte descriptor.
         - `scale` is only valid on L1→L0A/L0B; the loaded tile must then be
           consumed by `tla.mmad_mx`.
         - For MX scale destinations (`zZMxScale` / `nNMxScale`), the source
@@ -6549,17 +6668,53 @@ def copy(
                     "unsupported copy route "
                     f"{_route[0]},{src_layout} -> {_route[1]},{dst_layout} {src_dtype}",
                 )
-            elif src_dtype in _FP4_FORMATS:
-                for _side, _desc in (("src", src_desc), ("dst", dst_desc)):
-                    _odd = _odd_fp4_origin_extent(_desc)
-                    if _odd is not None:
+            elif src_dtype in _FP4_FORMATS and _route in _FP4_BYTE_STAGED_ROUTES:
+                # Only the byte-staged routes halve the descriptor, so only
+                # they constrain the shape. Other fp4 routes keep their own
+                # denomination and are left alone.
+                _sides = (
+                    ("src", src_desc, src_layout),
+                    ("dst", dst_desc, dst_layout),
+                )
+                for _side, _desc, _layout in _sides:
+                    _bad = _fp4_odd_byte_mapping(
+                        _desc,
+                        stride_field=_FP4_HALVED_STRIDE_LEAF.get(str(_layout)),
+                    )
+                    if _bad is not None:
+                        _what, _value = _bad
+                        _detail = (
+                            "is not known until run time, so it cannot be "
+                            "shown to be even"
+                            if _value == "dynamic"
+                            else f"is {_value}"
+                        )
                         _op_error(
                             "copy",
                             f"invalid argument '{_side}': packed {src_dtype} is "
-                            f"staged as bytes, so its innermost origin extent "
-                            f"must be even; got {_odd}. An odd extent leaves a "
-                            "nibble outside the halved byte length, which the "
-                            "copy would drop",
+                            f"staged as bytes on this route, so its {_what} "
+                            f"must be even -- it {_detail}. An odd one puts "
+                            "the tile's rows, its C0 columns or its first "
+                            "element half a byte off, which the halved "
+                            "descriptor cannot express",
+                        )
+                for _side, _desc, _layout in _sides:
+                    _bad_extent = _partial_byte_fp4_extent(_desc)
+                    if _bad_extent is not None:
+                        _detail = (
+                            "is not known until run time, so it cannot be "
+                            "shown to be even"
+                            if _bad_extent == "dynamic"
+                            else f"is {_bad_extent}"
+                        )
+                        _op_error(
+                            "copy",
+                            f"invalid argument '{_side}': packed {src_dtype} is "
+                            f"staged as bytes on this route, so its innermost "
+                            f"origin extent must be even -- it {_detail}. An "
+                            "odd row ends mid-byte, and the other half of that "
+                            "byte is an element outside the tile, which the "
+                            "copy can neither carry nor disturb",
                         )
         params_value = None
 

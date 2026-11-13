@@ -45,6 +45,18 @@ Constraints:
 - Must be called inside a `@tla.kernel`-decorated kernel function.
 - Must be called inside `tla.cube()` or `tla.vector()`.
 - Copy size follows each tile's `origin_shape`.
+- Packed fp4 is staged as bytes on the routes that convert the
+  descriptor before copying -- GM->UB, UB->GM and UB->L1 -- so each
+  tile's innermost `origin_shape`, its innermost origin coordinate and
+  the stride the conversion halves must all be even: two fp4 elements
+  share a byte, and an odd one of the three lands half a byte off. The
+  halved stride is the row stride of a `RowMajor` tile and the pitch
+  between C0 columns of a `zN` tile, so a `zN` destination on UB->L1
+  carries the requirement as well. A value known only at run time
+  cannot be shown to be even and is refused as well. The cube's GM->L1
+  fp4 route keeps its own denomination and is unconstrained, and
+  `tla.experimental.mx_to` still accepts an odd extent -- such a tile
+  simply cannot be staged through a byte descriptor.
 - `scale` is only valid on L1→L0A/L0B; the loaded tile must then be
   consumed by `tla.mmad_mx`.
 - For MX scale destinations (`zZMxScale` / `nNMxScale`), the source

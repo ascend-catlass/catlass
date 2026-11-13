@@ -45,6 +45,14 @@ tla.copy(dst: Tensor, src: Tensor, params: CopyParams | None = None, *, scale: T
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
 - 须在 `tla.cube()` 或 `tla.vector()` 内调用。
 - 拷贝大小按各 tile 的 `origin_shape`。
+- packed fp4 在搬运前转换描述符的通路（GM→UB、UB→GM 与 UB→L1）按字节
+  搬运：两个 fp4 元素共用一个字节，因此各 tile 最内层的 `origin_shape`、
+  最内层起始坐标，以及转换时被折半的 stride，三者均须为偶数，任一为奇数
+  都会错开半个字节。被折半的 stride 为：`RowMajor` tile 的行 stride，
+  `zN` tile 的 C0 列间距；因此 UB→L1 的 `zN` 目的 tile 同样受此约束。
+  仅在运行期才确定的取值无法证明为偶数，因此一并拒绝。Cube 的 GM→L1 fp4
+  通路保持 fp4 计数，不受此约束；`tla.experimental.mx_to` 仍接受奇数尺寸
+  的 tile，该 tile 只是无法经由字节描述符搬运。
 - `scale` 仅对 L1→L0A/L0B 有效；由此加载的 tile 随后须由 `tla.mmad_mx` 消费。
 - MX scale 目的（`zZMxScale` / `nNMxScale`）要求源 tile 覆盖 L1 整行，
   并按行堆叠 scale block。仅在行 pitch 为编译期常量时可检查。
