@@ -5065,9 +5065,12 @@ def make_layout_with_tag(
 
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function.
-        - Only for on-chip tensor layouts: the composed layout is meant to be
-          landed on an on-chip pointer via `tla.make_tensor(ptr, layout)`, not
-          bound to GM host memory.
+        - The composed layout is meant to be landed on an on-chip pointer via
+          `tla.make_tensor(ptr, layout)`. It also serves a GM pointer when that
+          buffer is already packed the way the tag says -- a prepacked `zN` or
+          `nZ` weight, say -- which is how `tla.copy`'s GM → L1 route spells such
+          a source; it is not for binding ordinary host memory, whose layout
+          comes from the host tensor instead.
         - `shape` must be a flat 2-tuple; nested trees and `None` leaves are
           rejected — the whole extent is caller-owned.
         - The origin shape of the resulting layout equals `shape` (the aligned
@@ -5855,6 +5858,14 @@ _SUPPORTED_CUBE_COPY_ROUTES = {
         "f4e2m1",
         "f4e1m2",
     ),
+    # A GM tile already laid out in fractal order. The source tag mirrors the
+    # destination's zN, and the copy is a plain block move -- no ND -> zN
+    # reorder. Only the aligned zN is a GM source here; the tight M-axis packing
+    # belongs to the UB -> L1 route.
+    ("gm", "zN", "l1", "zN"): ("f32", "f16", "bf16", "i8", "u16", "u32", "f8e4m3fn", "f8e5m2", "f4e2m1", "f4e1m2"),
+    # The transposed mirror: a GM tile already packed as nZ (C0-row by 16-column
+    # fractals) copied to an L1 nZ tile. nZ has no unaligned variant at all.
+    ("gm", "nZ", "l1", "nZ"): ("f32", "f16", "bf16", "i8", "u16", "u32", "f8e4m3fn", "f8e5m2", "f4e2m1", "f4e1m2"),
     # NC1HWC0 feature map: the same tree on both sides, so this is a run of
     # contiguous C1 slices rather than a re-layout. It is what feeds tla.experimental.img2col.
     ("gm", "zNUnAlign", "l1", "zNUnAlign"): ("f32", "f16", "bf16"),
@@ -6430,14 +6441,22 @@ def copy(
           exactly one element per channel of the destination tile, ``originShape[1]``
           after `tile_view` cropping. When both lengths are static, a mismatch
           fails compilation.
+        - **Prepacked `GM` tiles:** a buffer already packed in fractal order is
+          tagged `zN` (or `nZ` for the transposed packing) and copied to the
+          matching `L1` tile with no re-layout. Only the aligned `zN` / `nZ` are
+          `GM` source tags — the tight M-axis is `zNUnAlign` on the `UB`→`L1`
+          route, and the `GM` `zNUnAlign` route is the NC1HWC0 feature map that
+          feeds `tla.experimental.img2col`. Size both ends for the padded tile:
+          `ceil(M/16) * 16` rows for `zN`, and `ceil(M/C0) * C0` rows by
+          `ceil(N/16) * 16` columns for `nZ`, since the block move walks whole
+          fractals and the last row group travels in full.
         - Whole-tile DMA uses `tla.copy`. For register-level UB unaligned
           access, use `tensor.load` / `tensor.store` with `UnalignLoadParams` /
           `UnalignStoreParams`.
         - **Shapes not aligned to 32 bytes:** C0 is 32 bytes. For ND GM↔UB,
           prefer a leading dimension whose byte size is a multiple of 32.
           Otherwise keep `origin_shape` as the real size and enlarge the
-          physical layout, or use unaligned load/store. For zN when `M` is
-          not a multiple of 16, use `tla.arch.zNUnAlign`.
+          physical layout, or use unaligned load/store.
 
         Example:
         ```python
@@ -6457,7 +6476,27 @@ def copy(
         with tla.cube():
             tla.copy(dst=l1_unalign, src=gm_tile)
 
-        # --- 4) Flat contiguous run: VectorLayout ---
+        # --- 4) Prepacked GM zN: a plain block move, no re-layout ---
+        # The host buffer is already zN-packed and padded to ceil(M/16) * 16 rows.
+        # Both ends carry the same tree, so the copy reorders nothing.
+        gm_zn = tla.make_tensor(
+            gm_ptr, tla.make_layout_with_tag((m_pad16, k), dtype_a, tla.arch.zN)
+        )
+        l1_zn = tla.make_tensor_like(l1_ptr, gm_zn, tla.arch.zN)
+        with tla.cube():
+            tla.copy(dst=l1_zn, src=gm_zn)
+
+        # --- 5) Prepacked GM nZ: the transposed packing, same idea ---
+        # nZ pads both axes -- ceil(M/C0) * C0 rows by ceil(N/16) * 16 columns --
+        # and the copy steps whole C0-row groups, so both buffers carry it.
+        gm_nz = tla.make_tensor(
+            gm_ptr, tla.make_layout_with_tag((m_pad_c0, n_pad16), dtype_a, tla.arch.nZ)
+        )
+        l1_nz = tla.make_tensor_like(l1_ptr, gm_nz, tla.arch.nZ)
+        with tla.cube():
+            tla.copy(dst=l1_nz, src=gm_nz)
+
+        # --- 6) Flat contiguous run: VectorLayout ---
         # A 1-N bias row is one run of elements, not a (1, N) tile. Both
         # endpoints of the staging pipeline carry the same tag: GM -> L1 first,
         # then L1 -> the bias table buffer.

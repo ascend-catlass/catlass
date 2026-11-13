@@ -300,29 +300,32 @@ def _canImplement(args: argparse.Namespace) -> None:
                 f"dtype_a={args.dtype_a!r} dtype_b={args.dtype_b!r}"
             )
 
-    # fp4 layout is fixed: A row, B col. Packed fp4 pairs two elements per byte
-    # along K, and the fractal layout requires that pairing to be the contiguous
-    # axis, so an fp4 operand can only be handed over with K contiguous: a
-    # row-major A (M, K/2) or a column-major B (N, K/2). fp8 has no such
-    # constraint -- every element is a whole byte -- so it takes all four
-    # combinations.
+    # fp4 keeps K contiguous: the nibble pairing runs along it, and every copy
+    # route into L1 -- plain, transposing or prepacked -- has to keep that pairing
+    # on the contiguous axis. So A may be row-major (M, K/2) or the prepacked zN
+    # tile, B column-major (N, K/2) or the prepacked nZ tile; `col` A and `row` B
+    # put a stride on K and are refused. fp8 has no such constraint -- a whole
+    # byte per element -- so every layout is available to it.
     if is_fp4 and (
-        getattr(args, "layout_a", "row") != "row"
-        or getattr(args, "layout_b", "col") != "col"
+        getattr(args, "layout_a", "row") not in ("row", "zN")
+        or getattr(args, "layout_b", "col") not in ("col", "nZ")
     ):
         raise SystemExit(
-            "packed fp4 requires --layout-a row --layout-b col: the two-per-byte "
-            "packing runs along K and must be the contiguous axis"
+            "packed fp4 requires --layout-a row|zN --layout-b col|nZ: the "
+            "two-per-byte packing runs along K and must be the contiguous axis, "
+            "so the transposing handovers (col A, row B) are unavailable"
         )
 
 
 def run(args: argparse.Namespace) -> int:
-    from helpers import compare, create_tla_tensor, get_block_num
+    from helpers import compare, create_tla_tensor, get_block_num, host_nd2nz
 
     # One layout per side, driving both the operand and its scale block: a
     # scale block describes the operand it scales, so they are never independent.
     # Row-major A and column-major B reach L1 through a transposing DN2NZ, the
-    # other orientations through a plain ND2NZ.
+    # other orientations -- and the prepacked zN / nZ tiles -- through a plain
+    # ND2NZ / block move. zN / nZ move no data through the DMA's re-layout path:
+    # the host hands the tile over already in fractal order.
     layout_a = getattr(args, "layout_a", "row")
     layout_b = getattr(args, "layout_b", "col")
 
@@ -362,8 +365,6 @@ def run(args: argparse.Namespace) -> int:
     )
     ref = inputs.ref
 
-    a_npu = inputs.a.npu()
-    b_npu = inputs.b.npu()
     sa_npu = inputs.scale_a.npu()
     sb_npu = inputs.scale_b.npu()
     c_npu = torch.zeros(m, n, dtype=torch.float32).npu()
@@ -375,25 +376,64 @@ def run(args: argparse.Namespace) -> int:
         # create_tla_tensor only because origin_shape has to state the count in
         # fp4 ELEMENTS while the buffer holds half that many, and the helper
         # takes no origin_shape.
+        #
+        # `zN` / `nZ` prepack the same K-contiguous bytes, so the nibble pairing
+        # survives: host_nd2nz moves whole bytes, and a 32-byte C0 run still
+        # holds 64 consecutive K elements. Only the transposing handovers (col A,
+        # row B) would put a stride on K, and _canImplement refuses those.
+        #
+        # The packing primitive always shards the buffer's *last* axis, so its
+        # tag names the orientation the buffer already has, not the layout we
+        # are building. A arrives as (M, K/2) and takes "zN". B arrives as
+        # (N, K/2) -- the quantiser pairs nibbles along K and leaves K last --
+        # so B takes the same "zN" call even though the packed order it
+        # produces is B's `nZ` fractal layout. Asking host_nd2nz for "nZ" would
+        # transpose first and shard N instead, scattering K across blocks.
         fp4_t = FP4_SEL[fmt]
+        a_buf = host_nd2nz(inputs.a, "zN") if layout_a == "zN" else inputs.a
+        b_buf = host_nd2nz(inputs.b, "zN") if layout_b == "nZ" else inputs.b
         a_t = from_dlpack(
-            a_npu,
-            layout_tag=tla.arch.RowMajor,
+            a_buf.npu(),
+            layout_tag=tla.arch.zN if layout_a == "zN" else tla.arch.RowMajor,
             origin_shape=(m, k),
             element_type=fp4_t,
         ).mark_layout_dynamic()
         b_t = from_dlpack(
-            b_npu,
-            layout_tag=tla.arch.ColumnMajor,
+            b_buf.npu(),
+            layout_tag=tla.arch.nZ if layout_b == "nZ" else tla.arch.ColumnMajor,
             origin_shape=(k, n),
             element_type=fp4_t,
         ).mark_layout_dynamic()
     else:
-        a_t = create_tla_tensor(a_npu, layout_a, FP8_SEL[args.dtype_a])
-        b_t = create_tla_tensor(b_npu, layout_b, FP8_SEL[args.dtype_b])
+        # `row` / `col` upload the host buffer as the logical tile (col already
+        # transposed by gen_data, because its buffer is (k, m) / (n, k)); `zN` /
+        # `nZ` pack it into fractal order first and hand create_tla_tensor the
+        # packed run plus the logical extent it came from. The packing is spelled
+        # out here because it moves data -- folding it into create_tla_tensor
+        # would hide a buffer rewrite behind a binder that otherwise only derives
+        # metadata.
+        elem_a = FP8_SEL[args.dtype_a]
+        elem_b = FP8_SEL[args.dtype_b]
+        if layout_a == "zN":
+            a_t = create_tla_tensor(
+                host_nd2nz(inputs.a, "zN").npu(), "zN", elem_a, origin_shape=(m, k)
+            )
+        else:
+            a_t = create_tla_tensor(inputs.a.npu(), layout_a, elem_a)
+        if layout_b == "nZ":
+            b_t = create_tla_tensor(
+                host_nd2nz(inputs.b, "nZ").npu(), "nZ", elem_b, origin_shape=(k, n)
+            )
+        else:
+            b_t = create_tla_tensor(inputs.b.npu(), layout_b, elem_b)
     c_t = create_tla_tensor(c_npu, "row")
+    # A scale block follows its operand's orientation: the transposing routes
+    # (col A, row B) interleave their groups, the plain ones do not. zN is A's
+    # plain form and nZ is B's, so both take their untransposed tag.
     tag_sa = (
-        tla.arch.RowMajorMxScaleA if layout_a == "row" else tla.arch.ColMajorMxScaleA
+        tla.arch.RowMajorMxScaleA
+        if layout_a in ("row", "zN")
+        else tla.arch.ColMajorMxScaleA
     )
     tag_sb = (
         tla.arch.RowMajorMxScaleB if layout_b == "row" else tla.arch.ColMajorMxScaleB
@@ -469,9 +509,12 @@ def main() -> int:
     p.add_argument("--m", type=int, default=256)
     p.add_argument("--n", type=int, default=512)
     p.add_argument("--k", type=int, default=1024)
-    # One per side: the operand and its scale block share an orientation.
-    p.add_argument("--layout-a", choices=("row", "col"), default="row")
-    p.add_argument("--layout-b", choices=("row", "col"), default="col")
+    # One per side: the operand and its scale block share an orientation. zN / nZ
+    # hand the operand over already packed in fractal order, so the GM -> L1 hop
+    # is a block move instead of an ND2NZ / DN2NZ re-layout; for fp4 they are the
+    # only non-transposing alternative to the default row / col pair.
+    p.add_argument("--layout-a", choices=("row", "col", "zN"), default="row")
+    p.add_argument("--layout-b", choices=("row", "col", "nZ"), default="col")
     p.add_argument(
         "--case",
         action="append",

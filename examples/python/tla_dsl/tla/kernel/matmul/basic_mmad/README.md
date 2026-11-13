@@ -130,7 +130,7 @@
 
 ```text
 basic_matmul.py [-h] [--device DEVICE] [--m M] [--n N] [--k K]
-                [--layout-a {row,col}] [--layout-b {row,col}]
+                [--layout-a {row,col,zN}] [--layout-b {row,col,nZ}]
                 [--layout-c {row,col}]
                 [--dtype-a {f16,bf16,f32,i8,f8e4m3fn,f8e5m2}]
                 [--dtype-b {f16,bf16,f32,i8,f8e4m3fn,f8e5m2}]
@@ -147,7 +147,7 @@ basic_matmul.py [-h] [--device DEVICE] [--m M] [--n N] [--k K]
 | `--m`                                       | `256`                                                 | 矩阵乘左矩阵 A 的行数                                                                      |
 | `--n`                                       | `512`                                                 | 矩阵乘右矩阵 B 的列数                                                                      |
 | `--k`                                       | `1024`                                                | 矩阵乘累加轴的大小                                                                         |
-| `--layout-a` / `--layout-b`               | `"row"` / `"row"`                                   | 左、右矩阵 A、B 的数据排布格式，可选`"row"` 或 `"col"`，表示行优先或列优先布局。       |
+| `--layout-a` / `--layout-b`               | `"row"` / `"row"`                                   | 左、右矩阵 A、B 的数据排布格式。`"row"` / `"col"` 表示行优先 / 列优先；`"zN"`（仅 A）/ `"nZ"`（仅 B）表示 host 侧先用 `host_nd2nz` 显式打包再绑定，GM→L1 只做块搬运、不再重排。       |
 | `--layout-c`                                | `"row"`                                             | 结果矩阵 C 的数据排布格式。选`"col"` 时，L0C→GM 走转置搬出（nz2dn）通路，直接写出 C 的列优先布局。 |
 | `--dtype-a` / `--dtype-b` / `--dtype-c` | `"f16"` / `"f16"` / `"f32"`                       | 左、右矩阵 A、B 和结果矩阵 C 的数据类型。A/B 可选 `"f16"`、`"bf16"`、`"f32"`、`"i8"`、`"f8e4m3fn"`、`"f8e5m2"`；C 可选 `"f16"`、`"bf16"`、`"f32"`、`"i32"`。除 fp8 两种编码可混用外，A/B 需为同一类型。i8 路由要求 A/B 均为 i8 且 C 为 i32；fp8 路由要求 A/B 均为 fp8 且 C 为 f32。 |
 | `--relu-enable`                             | `0`                                         | fixpipe是否开启随路relu                                                                       |

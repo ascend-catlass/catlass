@@ -217,18 +217,52 @@ CATLASS_DEVICE auto makeGMTensor(memref_t<__gm__ T, 2>* memref, const TensorDesc
         return tla::MakeTensor(
             makeGlobalTensor(basePtr(memref)), makeVectorTlaLayout(desc), tla::MakeCoord(makeVectorTlaCoord(desc)),
             Catlass::Arch::PositionGM{});
+    } else if constexpr (Tag == LayoutTag::zN) {
+        // A GM tile that already sits in zN fractal order. The layout constructor
+        // is the same one the L1 side uses, so the copy is a plain block move
+        // rather than an ND -> zN re-layout.
+        //
+        // This is the tag for a prepacked weight buffer. It is not the tight
+        // packing of a partial row count: a GM buffer read as zN is padded to
+        // whole 16-row fractals at both ends, so its row pitch is
+        // ceil(M/16) * 16 * C0 and there is no second tag to choose between here.
+        // A tight M axis belongs to the UB -> L1 route, where the source tile is
+        // built in UB and its pitch is the vector unit's business.
+        return tla::MakeTensor(
+            makeGlobalTensor(basePtr(memref)), makezNTlaLayout<T>(desc), makeTlaTileCoord(desc),
+            Catlass::Arch::PositionGM{});
+    } else if constexpr (Tag == LayoutTag::nZ) {
+        // The transposed mirror: the GM tile already sits in the (C0-row,
+        // 16-column) fractal order the L1 nZ tile uses, so again the same layout
+        // constructor describes both ends and the copy reorders nothing. The
+        // row-group pitch is desc.stride1 (cols rounded up to 16 times C0) and
+        // the column-group pitch is the constant fractal size, both of which the
+        // host-side layout already emits -- see the nZ branch of the frontend's
+        // layout trees.
+        //
+        // nZ has no unaligned variant at all, and both ends must be allocated for
+        // the padded tile (ceil(M/C0) * C0 rows by ceil(N/16) * 16 columns),
+        // because the copy steps whole row groups and the last one moves its full
+        // C0 rows.
+        return tla::MakeTensor(
+            makeGlobalTensor(basePtr(memref)), makenZTlaLayout<T>(desc), makeTlaTileCoord(desc),
+            Catlass::Arch::PositionGM{});
     } else if constexpr (Tag == LayoutTag::zNUnAlign) {
         // A feature map in NC1HWC0: ((hw, 1), (C0, c1)) with the c1 leaf at the
         // full-feature-map pitch. Same tree as the L1 tile it is copied into, so
         // the copy is a run of contiguous C1 slices rather than a re-layout.
+        //
+        // This is a separate route from the zN block move above -- it feeds
+        // tla.experimental.img2col and lands on an L1 zNUnAlign tile, not on an
+        // L1 zN one -- which is why both tags exist on the GM side.
         return tla::MakeTensor(
             makeGlobalTensor(basePtr(memref)), makezNUnAlignTlaLayout<T>(desc), makeTlaTileCoord(desc),
             Catlass::Arch::PositionGM{});
     } else {
         static_assert(
             Tag == LayoutTag::RowMajor || Tag == LayoutTag::ColumnMajor || Tag == LayoutTag::VectorLayout ||
-                Tag == LayoutTag::zNUnAlign,
-            "GM tensor supports RowMajor/ColumnMajor/VectorLayout/zNUnAlign only");
+                Tag == LayoutTag::zN || Tag == LayoutTag::nZ || Tag == LayoutTag::zNUnAlign,
+            "GM tensor supports RowMajor/ColumnMajor/VectorLayout/zN/nZ/zNUnAlign only");
     }
 }
 

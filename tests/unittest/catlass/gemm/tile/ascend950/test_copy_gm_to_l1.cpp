@@ -968,55 +968,6 @@ TEST_P(TileCopyGmToL1TestAscend950, ColumnMajorTonNTestFullLongStride)
     }
 }
 
-// Data-path: zN → zN
-// Element-type: no-except (float)
-// Speciality: TlaLongStride (TileCopyTla path, outer-col stride >= limit, per-fractal-col DataCopy)
-TEST_P(TileCopyGmToL1TestAscend950, zNTozNTestTlaLongStride)
-{
-    using Element = float;
-    using ArchTag = Catlass::Arch::Ascend950;
-    using CoordZero = tla::Coord<tla::Int<0>, tla::Int<0>>;
-    constexpr uint32_t ELE_NUM_PER_C0 = GetEleNumPerC0<Element>();
-    constexpr uint32_t ELE_NUM_PER_FRACTAL = BytesToBits(BYTE_PER_FRACTAL) / SizeOfBits<Element>::value;
-
-    setShape<Element>();
-    int64_t bigOuterCol = (int64_t)(STRIDE_LIMIT + 1) * ELE_NUM_PER_C0;
-    auto baseSrc = tla::MakeLayout<Element, layout::zN>(_row, _col);
-    auto layoutSrc = tla::MakeLayout(baseSrc.shape(),
-        tla::MakeStride(tla::MakeStride(tla::Int<ELE_NUM_PER_C0>{}, tla::Int<ELE_NUM_PER_FRACTAL>{}),
-                        tla::MakeStride(tla::Int<1>{}, bigOuterCol)),
-        baseSrc.originShape());
-    auto layoutDst = tla::MakeLayout<Element, layout::zN>(_row, _col);
-
-    using LayoutSrc = decltype(layoutSrc);
-    using LayoutDst = decltype(layoutDst);
-
-    AscendC::GlobalTensor<Element> gmTensor;
-    AscendC::LocalTensor<Element> l1Tensor;
-    tla::Tensor<AscendC::GlobalTensor<Element>, LayoutSrc, CoordZero, AscendC::TPosition::GM> tensorGm(gmTensor, layoutSrc);
-    tla::Tensor<AscendC::LocalTensor<Element>, LayoutDst, CoordZero, AscendC::TPosition::A1> tensorL1(l1Tensor, layoutDst);
-
-    TileCopyTla<ArchTag, decltype(tensorGm), decltype(tensorL1)> copyGmToL1;
-    copyGmToL1(tensorL1, tensorGm);
-
-    auto logs = AscendCCallLogger::Instance().GetLogs();
-    uint32_t blockCount = CeilDiv<ELE_NUM_PER_C0>(_col);
-    uint32_t blockLen = _row;
-    uint32_t srcOuterStrideCol = static_cast<uint32_t>(bigOuterCol);
-    uint32_t dstOuterStrideCol = tla::get<1, 1>(layoutDst.stride());
-    ASSERT_EQ(logs.size(), blockCount);
-    for (uint32_t i = 0; i < blockCount; ++i) {
-        BaseCheck<Element>(logs[i]);
-        ASSERT_EQ(logs[i].GetArgsAt(0).GetInstAddr(), (uint64_t)i * dstOuterStrideCol * sizeof(Element));
-        ASSERT_EQ(logs[i].GetArgsAt(1).GetInstAddr(), (uint64_t)i * srcOuterStrideCol * sizeof(Element));
-        const auto* dataCopyArg = logs[i].GetArgsAt(2).Value<AscendC::DataCopyParams>();
-        ASSERT_EQ(dataCopyArg->blockCount, _1);
-        ASSERT_EQ(dataCopyArg->blockLen, blockLen);
-        ASSERT_EQ(dataCopyArg->srcStride, _0);
-        ASSERT_EQ(dataCopyArg->dstStride, _0);
-    }
-}
-
 ///////////////////////////// TEST WITH PARAMETERIC GROUPS
 INSTANTIATE_TEST_SUITE_P(
     CopyGmToL1,

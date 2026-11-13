@@ -38,10 +38,12 @@ using TensorSrc = tla::Tensor<AscendC::GlobalTensor<Element>, LayoutSrc, CoordZe
 template <class Element, class LayoutDst>
 using TensorDst = tla::Tensor<AscendC::LocalTensor<Element>, LayoutDst, CoordZero, AscendC::TPosition::A1>;
 
-template <typename ArchTag>
+template <typename ArchTag_>
 class TypedTileCopyGmToL1TlaTest : public TileCopyTlaTest,
     public testing::WithParamInterface<TestMatrixShapeWithCoord> {
 protected:
+    using ArchTag = ArchTag_;
+
     void SetUp() override
     {
         AscendCTest::SetUp();
@@ -64,11 +66,11 @@ protected:
         ASSERT_TRUE(TileCopyTlaTest::isValidDataCopy()) << "Coord & dst shape extends original shape.";
     }
 
-    template <class Element>
+    template <class Element, bool useCopyPad = false>
     void BaseCheck(const AscendCCallLog& logTileCopy)
     {
-        ASSERT_EQ(logTileCopy.name, "DataCopy");
-        ASSERT_EQ(logTileCopy.args.size(), 3);
+        ASSERT_EQ(logTileCopy.name, useCopyPad ? "DataCopyPad" : "DataCopy");
+        ASSERT_EQ(logTileCopy.args.size(), useCopyPad ? 4 : 3);
 
         const std::type_index& T0 = logTileCopy.GetArgsTAt(0).Type();
         ASSERT_EQ(T0, typeid(Element));
@@ -274,15 +276,32 @@ protected:
                                                                                                                        \
         ASSERT_EQ(logs.size(), 1);                                                                                     \
         AscendCCallLog logTileCopy = logs[0];                                                                          \
-        BaseCheck<Element>(logTileCopy);                                                                               \
+        constexpr bool useCopyPad = std::is_same_v<ArchTag, Arch::Ascend950>;                                          \
+        BaseCheck<Element, useCopyPad>(logTileCopy);                                                                   \
                                                                                                                        \
         ASSERT_EQ(logTileCopy.GetArgsAt(0).GetInstAddr(), 0);                                                          \
                                                                                                                        \
-        const AscendC::DataCopyParams* repeatParams = logTileCopy.GetArgsAt(2).Value<AscendC::DataCopyParams>();       \
-        ASSERT_EQ(repeatParams->blockCount, _cols_by_fractal);                                                         \
-        ASSERT_EQ(repeatParams->blockLen, _row);                                                                       \
-        ASSERT_EQ(repeatParams->srcGap, static_cast<uint16_t>(_row_round - _row));                                     \
-        ASSERT_EQ(repeatParams->dstGap, static_cast<uint16_t>(_dst_row_round - _row));                                 \
+        if constexpr (std::is_same_v<ArchTag, Arch::Ascend950>) {                                                      \
+            const AscendC::DataCopyExtParams* repeatParams =                                                           \
+                logTileCopy.GetArgsAt(2).Value<AscendC::DataCopyExtParams>();                                          \
+            ASSERT_EQ(repeatParams->blockCount, _cols_by_fractal);                                                     \
+            ASSERT_EQ(repeatParams->blockLen, _row * BYTE_PER_C0);                                                     \
+            ASSERT_EQ(static_cast<int64_t>(repeatParams->srcStride),                                                   \
+                (static_cast<int64_t>(_row_round) - static_cast<int64_t>(_row)) * BYTE_PER_C0);                        \
+            ASSERT_EQ(static_cast<int64_t>(repeatParams->dstStride),                                                   \
+                static_cast<int64_t>(_dst_row_round) - static_cast<int64_t>(_row));                                    \
+                                                                                                                       \
+            const AscendC::DataCopyPadExtParams<Element>* padParams =                                                  \
+                logTileCopy.GetArgsAt(3).Value<AscendC::DataCopyPadExtParams<Element>>();                              \
+            ASSERT_FALSE(padParams->isPad);                                                                            \
+        } else {                                                                                                       \
+            const AscendC::DataCopyParams* repeatParams =                                                              \
+                logTileCopy.GetArgsAt(2).Value<AscendC::DataCopyParams>();                                             \
+            ASSERT_EQ(repeatParams->blockCount, _cols_by_fractal);                                                     \
+            ASSERT_EQ(repeatParams->blockLen, _row);                                                                   \
+            ASSERT_EQ(repeatParams->srcGap, static_cast<uint16_t>(_row_round - _row));                                 \
+            ASSERT_EQ(repeatParams->dstGap, static_cast<uint16_t>(_dst_row_round - _row));                             \
+        }                                                                                                              \
     }                                                                                                                  \
                                                                                                                        \
     /* Data-path: GM nZ → L1 nZ */ \
@@ -298,16 +317,33 @@ protected:
                                                                                                                        \
         ASSERT_EQ(logs.size(), 1);                                                                                     \
         AscendCCallLog logTileCopy = logs[0];                                                                          \
-        BaseCheck<Element>(logTileCopy);                                                                               \
+        constexpr bool useCopyPad = std::is_same_v<ArchTag, Arch::Ascend950>;                                          \
+        BaseCheck<Element, useCopyPad>(logTileCopy);                                                                   \
                                                                                                                        \
         ASSERT_EQ(logTileCopy.GetArgsAt(0).GetInstAddr(), 0);                                                          \
         ASSERT_EQ(logTileCopy.GetArgsAt(1).GetInstAddr(), 0);                                                          \
                                                                                                                        \
-        const AscendC::DataCopyParams* repeatParams = logTileCopy.GetArgsAt(2).Value<AscendC::DataCopyParams>();       \
-        ASSERT_EQ(repeatParams->blockCount, _rows_by_fractal);                                                         \
-        ASSERT_EQ(repeatParams->blockLen, _col);                                                                       \
-        ASSERT_EQ(repeatParams->srcGap, _col_round - _col);                                                            \
-        ASSERT_EQ(repeatParams->dstGap, static_cast<uint16_t>(_dst_col_round - _col));                                 \
+        if constexpr (std::is_same_v<ArchTag, Arch::Ascend950>) {                                                      \
+            const AscendC::DataCopyExtParams* repeatParams =                                                           \
+                logTileCopy.GetArgsAt(2).Value<AscendC::DataCopyExtParams>();                                          \
+            ASSERT_EQ(repeatParams->blockCount, _rows_by_fractal);                                                     \
+            ASSERT_EQ(repeatParams->blockLen, _col * BYTE_PER_C0);                                                     \
+            ASSERT_EQ(static_cast<int64_t>(repeatParams->srcStride),                                                   \
+                (static_cast<int64_t>(_col_round) - static_cast<int64_t>(_col)) * BYTE_PER_C0);                        \
+            ASSERT_EQ(static_cast<int64_t>(repeatParams->dstStride),                                                   \
+                static_cast<int64_t>(_dst_col_round) - static_cast<int64_t>(_col));                                    \
+                                                                                                                       \
+            const AscendC::DataCopyPadExtParams<Element>* padParams =                                                  \
+                logTileCopy.GetArgsAt(3).Value<AscendC::DataCopyPadExtParams<Element>>();                              \
+            ASSERT_FALSE(padParams->isPad);                                                                            \
+        } else {                                                                                                       \
+            const AscendC::DataCopyParams* repeatParams =                                                              \
+                logTileCopy.GetArgsAt(2).Value<AscendC::DataCopyParams>();                                             \
+            ASSERT_EQ(repeatParams->blockCount, _rows_by_fractal);                                                     \
+            ASSERT_EQ(repeatParams->blockLen, _col);                                                                   \
+            ASSERT_EQ(repeatParams->srcGap, _col_round - _col);                                                        \
+            ASSERT_EQ(repeatParams->dstGap, static_cast<uint16_t>(_dst_col_round - _col));                             \
+        }                                                                                                              \
     }
 
 // ============================================================================

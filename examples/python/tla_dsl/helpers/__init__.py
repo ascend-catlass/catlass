@@ -22,6 +22,7 @@ from .utils import (
     compute_ub_slot_elems,
     create_tla_tensor,
     get_block_num,
+    host_nd2nz,
     to_hf32,
 )
 
@@ -34,6 +35,7 @@ __all__ = [
     "compute_ub_slot_elems",
     "create_tla_tensor",
     "get_block_num",
+    "host_nd2nz",
     "to_hf32",
     # element-type table for the staging examples
     "ELEM_CHOICES",

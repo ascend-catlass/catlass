@@ -871,8 +871,16 @@ mlir::LogicalResult TensorDescriptorDerivation::derive(mlir::func::FuncOp funcOp
                 for (size_t i = 0; i < stride.size(); ++i) {
                     FailureOr<Value> leaf;
                     bool dynamicStrideLeaf = childInfo->strideDims[i] == ShapedType::kDynamic;
-                    bool layoutChanged = parent.layoutTag != childInfo->layoutTag;
-                    if (dynamicStrideLeaf && layoutChanged) {
+                    // A `make_tensor_like` target is a *newly addressed* buffer whose
+                    // extent is the reference tile's, so a NZFamily pitch has to come
+                    // from this child's own shape. The reference's stride describes the
+                    // buffer the reference came from: for a GM reference that is the
+                    // whole matrix, not this tile, so inheriting it makes an L1 or L0
+                    // tile stride by the far matrix's row pitch -- past the end of a
+                    // buffer sized to the tile. This is why the old `layoutChanged`
+                    // guard was not enough: zN -> zN and nZ -> nZ keep the same tag while
+                    // still moving to a differently sized buffer.
+                    if (dynamicStrideLeaf) {
                         leaf = deriveNZFamilyStrideLeafFromShape(shape, i);
                     } else {
                         leaf = materializeNZFamilyLeafFromTypeOrParent(

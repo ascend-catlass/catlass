@@ -100,32 +100,26 @@ struct TileCopyTla<
                 TensorSrc::position == AscendC::TPosition::GM && TensorDst::position == AscendC::TPosition::A1,
             "The input parameters do not match. TensorSrc must be GM and zN, while TensorDst must be L1 and zN");
 
-        const uint32_t srcOuterStrideCol = tla::get<1, 1>(srcTensor.stride());
-        const uint32_t dstOuterStrideCol = tla::get<1, 1>(dstTensor.stride());
-
         uint32_t blockCount = CeilDiv<ELE_NUM_PER_C0>(tla::get<1>(srcTensor.originShape()));
         uint32_t blockLen = tla::get<0>(srcTensor.originShape());
 
-        auto dstOffset = dstTensor.layout()(dstTensor.coord());
-        auto srcOffset = srcTensor.layout()(srcTensor.coord());
-
-        AscendC::DataCopyParams repeatParams;
-        if (srcOuterStrideCol / ELE_NUM_PER_C0 <= STRIDE_LIMIT) {
-            repeatParams.blockCount = blockCount;
-            repeatParams.blockLen = blockLen;
-            repeatParams.srcStride = srcOuterStrideCol / ELE_NUM_PER_C0 - blockLen;
-            repeatParams.dstStride = dstOuterStrideCol / ELE_NUM_PER_C0 - blockLen;
-            AscendC::DataCopy(dstTensor.data()[dstOffset], srcTensor.data()[srcOffset], repeatParams);
+        auto dstOffset = static_cast<int64_t>(dstTensor.layout()(dstTensor.coord()));
+        auto srcOffset = static_cast<int64_t>(srcTensor.layout()(srcTensor.coord()));
+        AscendC::DataCopyExtParams repeatParams(
+            static_cast<uint16_t>(blockCount), blockLen * BYTE_PER_C0,
+            static_cast<int64_t>(tla::get<1, 1>(srcTensor.stride()) / ELE_NUM_PER_C0 - blockLen) * BYTE_PER_C0,
+            static_cast<int64_t>(tla::get<1, 1>(dstTensor.stride()) / ELE_NUM_PER_C0 - blockLen), 0);
+        if constexpr (AscendC::Std::is_one_of_v<
+                          ElementSrc, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t>) {
+            AscendC::DataCopyPadExtParams<uint8_t> padParams(false, 0, 0, 0);
+            // for float4_e2m1x2_t/float4_e1m2x2_t
+            // in tensor.data()[offset], will auto convert fp4 offset to byte offset
+            AscendC::DataCopyPad(
+                dstTensor.data()[dstOffset].template ReinterpretCast<uint8_t>(),
+                srcTensor.data()[srcOffset].template ReinterpretCast<uint8_t>(), repeatParams, padParams);
         } else {
-            repeatParams.blockCount = 1;
-            repeatParams.blockLen = blockLen;
-            repeatParams.srcStride = 0;
-            repeatParams.dstStride = 0;
-            for (uint32_t i = 0; i < blockCount; i++) {
-                AscendC::DataCopy(
-                    dstTensor.data()[dstOffset + i * dstOuterStrideCol],
-                    srcTensor.data()[srcOffset + i * srcOuterStrideCol], repeatParams);
-            }
+            AscendC::DataCopyPadExtParams<ElementSrc> padParams(false, 0, 0, 0);
+            AscendC::DataCopyPad(dstTensor.data()[dstOffset], srcTensor.data()[srcOffset], repeatParams, padParams);
         }
     }
 };
@@ -212,17 +206,24 @@ struct TileCopyTla<
         uint32_t blockCount = CeilDiv<ELE_NUM_PER_C0>(tla::get<0>(srcTensor.originShape()));
         uint32_t blockLen = tla::get<1>(srcTensor.originShape());
 
-        AscendC::DataCopyParams repeatParams;
-
-        repeatParams.blockCount = blockCount;
-        repeatParams.blockLen = blockLen;
-        repeatParams.srcStride = tla::get<0, 1>(srcTensor.stride()) / ELE_NUM_PER_C0 - blockLen;
-        repeatParams.dstStride = tla::get<0, 1>(dstTensor.stride()) / ELE_NUM_PER_C0 - blockLen;
-
-        auto dstOffset = dstTensor.layout()(dstTensor.coord());
-        auto srcOffset = srcTensor.layout()(srcTensor.coord());
-
-        AscendC::DataCopy(dstTensor.data()[dstOffset], srcTensor.data()[srcOffset], repeatParams);
+        auto dstOffset = static_cast<int64_t>(dstTensor.layout()(dstTensor.coord()));
+        auto srcOffset = static_cast<int64_t>(srcTensor.layout()(srcTensor.coord()));
+        AscendC::DataCopyExtParams repeatParams(
+            static_cast<uint16_t>(blockCount), blockLen * BYTE_PER_C0,
+            static_cast<int64_t>(tla::get<0, 1>(srcTensor.stride()) / ELE_NUM_PER_C0 - blockLen) * BYTE_PER_C0,
+            static_cast<int64_t>(tla::get<0, 1>(dstTensor.stride()) / ELE_NUM_PER_C0 - blockLen), 0);
+        if constexpr (AscendC::Std::is_one_of_v<
+                          ElementSrc, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t>) {
+            AscendC::DataCopyPadExtParams<uint8_t> padParams(false, 0, 0, 0);
+            // for float4_e2m1x2_t/float4_e1m2x2_t
+            // in tensor.data()[offset], will auto convert fp4 offset to byte offset
+            AscendC::DataCopyPad(
+                dstTensor.data()[dstOffset].template ReinterpretCast<uint8_t>(),
+                srcTensor.data()[srcOffset].template ReinterpretCast<uint8_t>(), repeatParams, padParams);
+        } else {
+            AscendC::DataCopyPadExtParams<ElementSrc> padParams(false, 0, 0, 0);
+            AscendC::DataCopyPad(dstTensor.data()[dstOffset], srcTensor.data()[srcOffset], repeatParams, padParams);
+        }
     }
 };
 

@@ -20,6 +20,18 @@ MMAD_SHAPES = (("333", "444", "555"), ("1", "2", "3"))
 BIG_SHAPES = (("3200", "4096", "257"), ("8192", "2906", "1027"))
 BATCH_SHAPES = (("1", "333", "444", "555"), ("1", "1", "2", "3"), ("8", "320", "333", "444"))
 MMAD_LAYOUTS = (("row", "row"), ("row", "col"), ("col", "row"), ("col", "col"))
+#: Layout pairs for the prepacked-operand cases. `zN` / `nZ` name a GM buffer that
+#: already carries the fractal order, so they reach L1 by a block move instead of
+#: the ND2NZ re-layout `row` / `col` take. Every pairing puts at least one
+#: prepacked operand next to a re-laid-out one, so the two routes are pinned
+#: separately as well as together.
+MMAD_PREPACKED_LAYOUTS = (
+    ("zN", "nZ"),
+    ("zN", "row"),
+    ("zN", "col"),
+    ("row", "nZ"),
+    ("col", "nZ"),
+)
 #: (dtype-a/b, dtype-c)
 MMAD_TRIPLES = (
     ("f16", "f32"),
@@ -209,6 +221,37 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         device,
     )
 
+    # --- basic_mmad with prepacked operands: the `zN` / `nZ` source tags ---
+    prepacked_dev = ["--device", str(device)]
+    mmad_script = "tla/kernel/matmul/basic_mmad/basic_matmul.py"
+    for la, lb in MMAD_PREPACKED_LAYOUTS:
+        for m, n, k in MMAD_SHAPES:
+            yield (
+                f"mmad-prepacked-{m}x{n}x{k}-{la}{lb}-f16-f32",
+                [[
+                    mmad_script,
+                    "--m", m, "--n", n, "--k", k,
+                    "--layout-a", la, "--layout-b", lb,
+                    "--dtype-a", "f16", "--dtype-b", "f16", "--dtype-c", "f32",
+                    *prepacked_dev,
+                ]],
+            )
+    # Element types with a prepacked route, on the unaligned shape only. bf16 and
+    # f32 change C0 (and so the fractal geometry the host packs against); i8 adds
+    # the integer accumulator, fp8 the encoding that only exists as a byte buffer
+    # over DLPack. One full-pass case each, not the whole cross product.
+    for dab, dc in (("bf16", "bf16"), ("f32", "f32"), ("i8", "i32"), ("f8e4m3fn", "f32")):
+        yield (
+            f"mmad-prepacked-333x444x555-zNnZ-{dab}-{dc}",
+            [[
+                mmad_script,
+                "--m", "333", "--n", "444", "--k", "555",
+                "--layout-a", "zN", "--layout-b", "nZ",
+                "--dtype-a", dab, "--dtype-b", dab, "--dtype-c", dc,
+                *prepacked_dev,
+            ]],
+        )
+
     # --- mx_mmad: the microscaling matmul coverage matrix ---
     #
     # Two axes, and both are real. The operand formats are the four MXFP8
@@ -218,8 +261,12 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
     # transposing DN2NZ, the other orientations through a plain ND2NZ, so
     # the two settings exercise genuinely different copies.
     #
-    # The operands themselves have no layout axis: the GM -> L1 routes exist only
-    # for a row-major A into zN and a column-major B into nZ.
+    # The operands have a layout axis of their own, wider than the transposing
+    # pair: `zN` / `nZ` name a GM buffer that already carries the fractal order,
+    # so they reach L1 by a block move instead of an ND2NZ / DN2NZ re-layout.
+    # fp8 takes all four orientations. Packed fp4 keeps its two-per-byte pairing
+    # on the contiguous axis, so it takes the non-transposing ones -- row or zN
+    # for A, col or nZ for B -- and refuses col A / row B.
     for case in (
         "f8e4m3fn,f8e4m3fn",
         "f8e5m2,f8e5m2",
@@ -228,10 +275,8 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         "f4e2m1",
         "f4e1m2",
     ):
-        # fp8 takes all four orientations; packed fp4 needs K contiguous, which
-        # only the row/col pairing gives it.
         layouts = (
-            (("row", "col"),)
+            (("row", "col"), ("row", "nZ"), ("zN", "col"), ("zN", "nZ"))
             if case.startswith("f4")
             else (("row", "row"), ("row", "col"), ("col", "row"), ("col", "col"))
         )

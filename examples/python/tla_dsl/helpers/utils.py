@@ -91,21 +91,52 @@ _LAYOUT_TAG_BY_NAME = {
     "col": tla.arch.ColumnMajor,
     "column": tla.arch.ColumnMajor,
     "vector": tla.arch.VectorLayout,
+    "zN": tla.arch.zN,
+    "nZ": tla.arch.nZ,
 }
 
+#: The tags that describe an already-packed fractal buffer. ``create_tla_tensor``
+#: binds them, it never produces them: the packing is the caller's explicit step.
+_FRACTAL_LAYOUTS = frozenset({"zN", "nZ"})
 
-def create_tla_tensor(buf, layout: str, element_type=None):
+
+def _round_up(value: int, multiple: int) -> int:
+    """Round ``value`` up to the next multiple of ``multiple``."""
+    return (value + multiple - 1) // multiple * multiple
+
+
+def _fractal_numel(logical, layout: str, element_size: int) -> int:
+    """Element count of the padded, fractal-ordered buffer for ``logical``.
+
+    ``zN`` pads M up to 16 rows and N up to a 32-byte C0; ``nZ`` is the same
+    packing on the transpose, so it pads M up to C0 and N up to 16.
+    """
+    rows, cols = logical
+    elems_per_c0 = 32 // element_size
+    if layout == "zN":
+        return _round_up(rows, 16) * _round_up(cols, elems_per_c0)
+    return _round_up(rows, elems_per_c0) * _round_up(cols, 16)
+
+
+def create_tla_tensor(buf, layout: str, element_type=None, origin_shape=None):
     """Wrap a device buffer as a TLA tensor.
 
     ``element_type`` overrides the element type derived from the DLPack dtype.
     torch cannot export fp8 over DLPack at all, so an fp8 buffer is handed over
     as a same-width integer view with the real type supplied here.
 
-    ``layout`` is ``"row"``, ``"col"`` / ``"column"``, or ``"vector"``.
+    ``layout`` is ``"row"``, ``"col"`` / ``"column"``, ``"vector"``, ``"zN"``, or
+    ``"nZ"``.
     ``"col"`` is the spelling the existing examples and their ``--layout-a`` /
     ``--layout-b`` choices already use, so both spellings are accepted.
     ``"vector"`` is the one-dimensional contiguous tag (``tla.arch.VectorLayout``) the
     flat copy routes are keyed on; it is what a 1-D tile such as a bias row uses.
+    ``"zN"`` / ``"nZ"`` do **not** pack anything: they describe a buffer that is
+    already in that fractal order, so ``buf`` must be the flat, padded run
+    ``host_nd2nz`` produces and ``origin_shape`` must say what logical tile it
+    holds. The packing is a prepack step the caller spells out, because it moves
+    data -- ``from_dlpack`` only ever derives metadata and would otherwise pair a
+    fractal descriptor with a plain ND buffer and compute silent nonsense.
     """
     tag = _LAYOUT_TAG_BY_NAME.get(layout)
     if tag is None:
@@ -124,6 +155,38 @@ def create_tla_tensor(buf, layout: str, element_type=None):
                 f"no storage view for a {width}-bit element type {element_type.__name__}"
             )
         buf = buf.view(_STORAGE_VIEW_BY_WIDTH[width])
+    if layout in _FRACTAL_LAYOUTS:
+        if origin_shape is None:
+            raise ValueError(
+                f"create_tla_tensor layout={layout!r} describes a prepacked fractal "
+                "buffer, whose flat length no longer says what tile it holds; "
+                "pass origin_shape=(rows, cols) alongside the packed buffer"
+            )
+        logical = tuple(int(extent) for extent in origin_shape)
+        if len(logical) != 2:
+            raise ValueError(
+                f"create_tla_tensor origin_shape must be a flat 2-tuple "
+                f"(rows, cols) for layout={layout!r}; got {logical!r}"
+            )
+        if buf.dim() != 1:
+            raise ValueError(
+                f"create_tla_tensor layout={layout!r} expects the flat prepacked "
+                f"buffer host_nd2nz returns; got a {buf.dim()}-D buffer of shape "
+                f"{tuple(buf.shape)}"
+            )
+        expected = _fractal_numel(logical, layout, buf.element_size())
+        if int(buf.numel()) != expected:
+            raise ValueError(
+                f"create_tla_tensor layout={layout!r} for logical {logical} needs "
+                f"{expected} packed elements but the buffer holds {int(buf.numel())}; "
+                "pack it with host_nd2nz before binding"
+            )
+        return from_dlpack(
+            buf.contiguous(),
+            layout_tag=tag,
+            origin_shape=logical,
+            element_type=element_type,
+        ).mark_layout_dynamic()
     return from_dlpack(
         buf.contiguous(), layout_tag=tag, element_type=element_type
     ).mark_layout_dynamic()
@@ -159,3 +222,34 @@ def to_hf32(
         raise ValueError(f"Unsupported HF32 mode: {hf32_mode!r}")
 
     return rounded_bits.view(torch.float32)
+
+
+def _host_ND_2_zN_impl(x: torch.Tensor):
+    row, col = x.shape
+    C0_NUM_PER_FRACTAL = 16
+    ELE_NUM_PER_BLK = 32 // x.element_size()
+    row_aligned = _round_up(row, C0_NUM_PER_FRACTAL)
+    col_aligned = _round_up(col, ELE_NUM_PER_BLK)
+    # pad a 2-D tensor (left, right, top, bottom)
+    x_pad = torch.nn.functional.pad(
+        x, (0, col_aligned - col, 0, row_aligned - row), mode="constant", value=0
+    )
+
+    col_blocks = col_aligned // ELE_NUM_PER_BLK
+    out = x_pad.view(row_aligned, col_blocks, ELE_NUM_PER_BLK)
+    return out.permute(1, 0, 2).contiguous().reshape(-1)
+
+
+def host_nd2nz(x: torch.Tensor, tag: str) -> torch.Tensor:
+    """convert a host side torch tensor from RowMajor to zN/nZ, output tensor is a 1-D tensor without shape"""
+    if not x.is_contiguous():
+        raise ValueError("x is not contiguous!")
+    if x.ndim != 2:
+        raise ValueError("x should be a 2-dim tensor!")
+    x = x.detach().cpu()
+
+    if tag == "zN":
+        return _host_ND_2_zN_impl(x)
+    elif tag == "nZ":
+        return _host_ND_2_zN_impl(x.t().contiguous())
+    raise ValueError(f"Unsupported tag: {tag}")

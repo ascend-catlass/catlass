@@ -337,6 +337,7 @@ def run(args: argparse.Namespace) -> int:
         create_tla_tensor,
         compare,
         to_hf32,
+        host_nd2nz,
     )
 
     torch.npu.set_device(args.device)
@@ -409,20 +410,39 @@ def run(args: argparse.Namespace) -> int:
             if dtype_c in (torch.float16, torch.bfloat16):
                 ref = ref.to(dtype_c).float()
 
-    a = (
-        a.contiguous() if args.layout_a == "row" else a.permute(1, 0).contiguous()
-    ).npu()
-    b = (
-        b.contiguous() if args.layout_b == "row" else b.permute(1, 0).contiguous()
-    ).npu()
+    # The operand layouts, spelled out per side rather than folded into one
+    # expression. `row` uploads the logical tile as-is; `col` transposes it first,
+    # because its buffer is (n, m); `zN` / `nZ` pack it into fractal order on the
+    # host and hand `create_tla_tensor` the packed run plus the logical extent it
+    # came from. The packing is explicit here because it moves data -- folding it
+    # into `create_tla_tensor` would hide a buffer rewrite behind a binder that
+    # otherwise only derives metadata.
+    fp8_a = _FP8_TLA_TYPES.get(args.dtype_a)
+    fp8_b = _FP8_TLA_TYPES.get(args.dtype_b)
+    shape_a = (args.m, args.k)
+    shape_b = (args.k, args.n)
+    if args.layout_a == "zN":
+        a_tensor = create_tla_tensor(
+            host_nd2nz(a, "zN").npu(), "zN", fp8_a, origin_shape=shape_a
+        )
+    elif args.layout_a == "col":
+        a_tensor = create_tla_tensor(a.t().contiguous().npu(), "col", fp8_a)
+    else:
+        a_tensor = create_tla_tensor(a.contiguous().npu(), "row", fp8_a)
+    if args.layout_b == "nZ":
+        b_tensor = create_tla_tensor(
+            host_nd2nz(b, "nZ").npu(), "nZ", fp8_b, origin_shape=shape_b
+        )
+    elif args.layout_b == "col":
+        b_tensor = create_tla_tensor(b.t().contiguous().npu(), "col", fp8_b)
+    else:
+        b_tensor = create_tla_tensor(b.contiguous().npu(), "row", fp8_b)
     # A ColumnMajor (m, n) result is stored as an (n, m) buffer; the fixpipe
     # writes it transposed on its way out of L0C (nz2dn), so the kernel body is
     # unchanged -- the route follows the destination tensor's layout tag.
     if args.layout_c == "col":
         c = c.permute(1, 0)
     c = c.contiguous().npu()
-    a_tensor = create_tla_tensor(a, args.layout_a, _FP8_TLA_TYPES.get(args.dtype_a))
-    b_tensor = create_tla_tensor(b, args.layout_b, _FP8_TLA_TYPES.get(args.dtype_b))
     c_tensor = create_tla_tensor(c, args.layout_c, _FP8_TLA_TYPES.get(args.dtype_c))
 
     artifact = tla.compile(
@@ -465,8 +485,8 @@ def main() -> int:
     parser.add_argument("--m", type=int, default=256)
     parser.add_argument("--n", type=int, default=512)
     parser.add_argument("--k", type=int, default=1024)
-    parser.add_argument("--layout-a", choices=("row", "col"), default="row")
-    parser.add_argument("--layout-b", choices=("row", "col"), default="row")
+    parser.add_argument("--layout-a", choices=("row", "col", "zN"), default="row")
+    parser.add_argument("--layout-b", choices=("row", "col", "nZ"), default="row")
     # `col` sends the L0C -> GM store through the transposing (nz2dn) fixpipe.
     parser.add_argument("--layout-c", choices=("row", "col"), default="row")
     dtypes_ab = ("f16", "bf16", "f32", "i8", "f8e4m3fn", "f8e5m2")

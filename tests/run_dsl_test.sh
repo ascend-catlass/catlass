@@ -10,7 +10,8 @@
 # -----------------------------------------------------------------------------------------------------------
 #
 # End-to-end validation for examples/python/tla_dsl/tla/kernel/matmul/basic_mmad (basic_matmul*.py, basic_mmad_ptr.py,
-# basic_matmul_l0c2l1.py, basic_matmul_bias.py),
+# basic_matmul_l0c2l1.py, basic_matmul_bias.py; basic_matmul.py additionally runs --layout-a zN /
+# --layout-b nZ, the prepacked GM -> L1 block-move routes, alone and mixed with row/col),
 # examples/python/tla_dsl/tla/kernel/matmul/basic_syrk (basic_syrk.py).
 # examples/python/tla_dsl/tla/kernel/vec/basic_vadd (basic_vadd.py),
 # examples/python/tla_dsl/dsl_tutorials/extern_op (extern_vecadd.py, extern_dual_core.py),
@@ -176,9 +177,11 @@ usage() {
 Usage: $(basename "$0") [options]
 
 Run end-to-end validation for:
-  - basic_mmad (full flag-sync mnk/layout/dtype matrix; representative manual and automatic mutex cases;
-    atomic-add coverage for each supported input dtype; bias (1 x N) via L1 -> biasbuf for the
-    fp16 x fp16 -> fp16 and i8 x i8 -> i32 routes)
+  - basic_mmad (full flag-sync mnk/layout/dtype matrix; prepacked-operand coverage through
+    --layout-a zN / --layout-b nZ, alone and mixed with the ND2NZ layouts, across
+    f16/bf16/f32/i8/fp8; representative manual and automatic mutex cases; atomic-add coverage
+    for each supported input dtype; bias (1 x N) via L1 -> biasbuf for the fp16 x fp16 -> fp16
+    and i8 x i8 -> i32 routes)
   - basic_mmad_ptr (basic_mmad_ptr.py)
   - basic_mmad_l0c2l1 (basic_matmul_l0c2l1.py: cube-only E=(A@B)@D with L0C->L1 staging)
   - basic_syrk (fp16/bf16 input, fp32 output, aligned/tail shapes, K<=4096,

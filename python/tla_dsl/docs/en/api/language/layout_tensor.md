@@ -253,9 +253,12 @@ Parameters:
 Constraints:
 
 - Must be called inside a `@tla.kernel`-decorated kernel function.
-- Only for on-chip tensor layouts: the composed layout is meant to be
-  landed on an on-chip pointer via `tla.make_tensor(ptr, layout)`, not
-  bound to GM host memory.
+- The composed layout is meant to be landed on an on-chip pointer via
+  `tla.make_tensor(ptr, layout)`. It also serves a GM pointer when that
+  buffer is already packed the way the tag says -- a prepacked `zN` or
+  `nZ` weight, say -- which is how `tla.copy`'s GM → L1 route spells such
+  a source; it is not for binding ordinary host memory, whose layout
+  comes from the host tensor instead.
 - `shape` must be a flat 2-tuple; nested trees and `None` leaves are
   rejected — the whole extent is caller-owned.
 - The origin shape of the resulting layout equals `shape` (the aligned

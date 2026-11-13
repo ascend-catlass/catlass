@@ -10,6 +10,11 @@ from catlass.execution_lowering import TlaLoweringError
 from catlass.tla.runtime import make_fake_tensor
 
 
+def _round_up(value: int, multiple: int) -> int:
+    """Round ``value`` up to the next multiple of ``multiple``."""
+    return (value + multiple - 1) // multiple * multiple
+
+
 def _require_hivm_tla_compile() -> pathlib.Path:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
     tla_compile = (
@@ -1327,3 +1332,170 @@ def test_frontend_rejects_u64_tile_outside_the_dequant_run(
         match=r"u64 is only accepted as the L1 VectorLayout tile",
     ):
         _u64_tile_kernel(addrspace, layout_tag).dump_mlir()
+
+
+def _gm_zn_packed_to_l1_kernel(rows=20, cols=32):
+    """A prepacked GM zN tile copied straight into an L1 zN tile.
+
+    The L1 buffer is sized for the *padded* tile, not the logical one: a zN
+    destination always rounds the row count up to the 16-row fractal, so 20 rows
+    occupy 32 and the allocation has to follow. A logical-sized allocation would
+    let the copy write past it. The GM buffer is padded the same way: only the
+    aligned zN is a GM source tag, so the host packs ceil(M/16) * 16 rows.
+    """
+    padded_rows = _round_up(rows, 16)
+
+    @tla.kernel
+    def kernel(src: tla.Tensor) -> None:
+        gm = tla.make_tensor(
+            src.ptr, tla.make_layout_with_tag((rows, cols), tla.Float32, tla.arch.zN)
+        )
+        l1 = tla.make_tensor_like(
+            tla.allocate((padded_rows, cols), tla.Float32, tla.AddressSpace.l1, 512),
+            gm,
+            tla.arch.zN,
+        )
+        with tla.cube():
+            tla.copy(l1, gm)
+
+    return kernel
+
+
+def _copy_payload(lowered: str, symbol: str) -> list[int]:
+    """The 24 i64 payload operands of one lowered meta-op call."""
+    consts = dict(
+        re.findall(r"(%[0-9A-Za-z_]+) = llvm\.mlir\.constant\((\d+) : i64\)", lowered)
+    )
+    call = re.search(rf"call @{symbol}\((.*?)\)", lowered)
+    assert call is not None, lowered
+    operands = [operand.strip() for operand in call.group(1).split(",")][2:]
+    return [int(consts[operand]) for operand in operands]
+
+
+def test_prepacked_gm_zn_keeps_the_padded_row_pitch(tmp_path) -> None:
+    """A GM zN source carries its padded pitch into the descriptor.
+
+    The GM tile is a fractal-ordered buffer, so the lowering is a plain block move
+    and the only thing that travels is the pitch: zN pads M up to a multiple of
+    16, so a 20-row tile is described on a 32-row pitch. The copy reads that pitch
+    at run time and skips the padding rows of each fractal, which is exactly why
+    there is no unaligned GM variant to also get right -- a tight GM buffer would
+    need pitch 20 and the block move would then walk row groups that overlap.
+    """
+    tla_compile = _require_hivm_tla_compile()
+    rows, cols = 20, 32
+    padded_rows = _round_up(rows, 16)
+    mem = make_fake_tensor(
+        tla.Float32,
+        (rows, cols),
+        (cols, 1),
+        origin_shape=(rows, cols),
+        layout_tag=tla.arch.RowMajor,
+    )
+    mlir = _gm_zn_packed_to_l1_kernel(rows, cols).dump_mlir(type_args=(mem,))
+    input_path = tmp_path / "gm_zn_packed.mlir"
+    input_path.write_text(mlir)
+    result = subprocess.run(
+        [str(tla_compile), str(input_path), "-o", "-"],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    payload = _copy_payload(result.stdout, "copy_gm_zN_to_l1_zN_float")
+    src = payload[:12]
+    c0 = 8  # 32-byte C0 / 4-byte element
+    block_len = src[10]  # logical M
+    src_stride = src[7] // c0 - block_len
+    assert block_len == rows
+    assert src[7] // c0 == padded_rows
+    assert src_stride == padded_rows - rows
+
+
+def _gm_nz_packed_to_l1_kernel(rows=20, cols=20):
+    """A prepacked GM nZ tile copied straight into an L1 nZ tile.
+
+    Both axes pad: rows up to C0, columns up to 16. Both buffers are therefore
+    sized for the padded tile -- the block move walks whole C0-row groups, so the
+    last group is read and written in full even when the logical row count stops
+    inside it.
+    """
+    c0 = 32 // (tla.Float32.width // 8)
+    padded_rows = _round_up(rows, c0)
+    padded_cols = _round_up(cols, 16)
+
+    @tla.kernel
+    def kernel(src: tla.Tensor) -> None:
+        gm = tla.make_tensor(
+            src.ptr, tla.make_layout_with_tag((rows, cols), tla.Float32, tla.arch.nZ)
+        )
+        l1 = tla.make_tensor_like(
+            tla.allocate(
+                (padded_rows, padded_cols), tla.Float32, tla.AddressSpace.l1, 512
+            ),
+            gm,
+            tla.arch.nZ,
+        )
+        with tla.cube():
+            tla.copy(l1, gm)
+
+    return kernel
+
+
+def test_prepacked_gm_nz_keeps_its_column_pitch(tmp_path) -> None:
+    """nZ has no unaligned variant: both axes pad, and the copy reads that pitch.
+
+    N = 20 is not a multiple of 16, so the descriptor's row-group pitch is the
+    padded column count times C0 (32 * 8), not 20 * 8. Were the pitch to follow
+    the logical N instead, every row group after the first would start 12
+    columns early and read a neighbour's fractal.
+
+    M = 20 is not a multiple of C0 either, and that is the sharper constraint:
+    the move steps whole row groups, so it ends past a buffer sized to the
+    logical extent. Both ends therefore have to be allocated for the padded tile,
+    which is the contract the documentation states.
+    """
+    tla_compile = _require_hivm_tla_compile()
+    rows, cols = 20, 20
+    mem = make_fake_tensor(
+        tla.Float32,
+        (rows, cols),
+        (cols, 1),
+        origin_shape=(rows, cols),
+        layout_tag=tla.arch.RowMajor,
+    )
+    mlir = _gm_nz_packed_to_l1_kernel(rows, cols).dump_mlir(type_args=(mem,))
+    input_path = tmp_path / "gm_nz_packed.mlir"
+    input_path.write_text(mlir)
+    result = subprocess.run(
+        [str(tla_compile), str(input_path), "-o", "-"],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    payload = _copy_payload(result.stdout, "copy_gm_nZ_to_l1_nZ_float")
+    src = payload[:12]
+    c0 = 8  # 32-byte C0 / 4-byte element
+    padded_cols = _round_up(cols, 16)
+    assert src[0] == c0  # rows within one row group
+    assert src[1] == _round_up(rows, c0) // c0  # row groups
+    assert src[2] == 16  # columns within one column group
+    assert src[3] == _round_up(cols, 16) // 16  # column groups
+    assert src[11] == cols  # block length is the logical N
+    # stride1 is the row-group pitch (stride3 is the constant column-group
+    # stride), and it follows the padded column count.
+    assert src[5] // c0 == padded_cols
+    assert src[5] // c0 - src[11] == padded_cols - cols
+    # The block move steps whole row groups: blockCount is ceil(M / C0), and each
+    # step moves N 32-byte blocks (one per logical column, C0 elements each). The
+    # last group ends at element (ceil(M/C0) - 1) * padded_cols * C0 + N * C0,
+    # which is past a buffer sized M * N -- the reason both ends must be allocated
+    # for the padded tile rather than the logical extent.
+    row_groups = _round_up(rows, c0) // c0
+    assert src[1] == row_groups
+    assert src[11] == cols
+    last_group_end = (row_groups - 1) * padded_cols * c0 + src[11] * c0
+    assert last_group_end == 672
+    assert last_group_end > rows * cols
+    assert row_groups * padded_cols * c0 == 768  # the padded buffer size

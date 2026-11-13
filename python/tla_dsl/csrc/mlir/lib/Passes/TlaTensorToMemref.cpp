@@ -170,13 +170,19 @@ mlir::FailureOr<mlir::Value> materializeDescriptorBaseMemref(
         return castMemrefToType(builder, loc, desc.base, memrefType);
 
     if (isa<::tla::PtrType>(desc.base.getType())) {
-        // GM row/column-major copies back ciface stubs that take a rank-2 memref_t
-        // Materialize a rank-2 identity memref sized by the tile shape.
-        if (desc.addrspace == "gm" && isLinearLayout(desc.layoutTag)) {
+        // GM copies back ciface stubs that take a rank-2 memref_t, so a GM tile
+        // always materializes as a 2-D identity memref whatever its layout tag:
+        // the stub reads only the base pointer, and the fractal metadata travels
+        // separately in the descriptor. Linear tiles size it by their declared
+        // shape; a fractal (zN) tile has no 2-D physical shape to quote, so its
+        // logical origin extents are the view.
+        if (desc.addrspace == "gm") {
             auto allocType = MemRefType::get(
                 {ShapedType::kDynamic, ShapedType::kDynamic}, memrefType.getElementType(), AffineMap(),
                 memrefType.getMemorySpace());
-            SmallVector<Value, 2> dynamicSizes = {desc.shape[0], desc.shape[1]};
+            SmallVector<Value, 2> dynamicSizes = {desc.originShape[0], desc.originShape[1]};
+            if (isLinearLayout(desc.layoutTag))
+                dynamicSizes = {desc.shape[0], desc.shape[1]};
             return materializePtrValueAsMemref(builder, loc, desc.base, allocType, diagnosticOp, dynamicSizes);
         }
         if (auto allocationElements = getStaticAllocationElementCount(desc.base); succeeded(allocationElements)) {
@@ -691,6 +697,12 @@ static StringRef copyRuntimeElemSuffix(Type elementType)
         return "fp8_e4m3fn_t";
     if (elementType.isFloat8E5M2())
         return "fp8_e5m2_t";
+    // fp4 is the packed two-per-byte encoding: the C++ element type is the x2
+    // pair, so a route that names it selects the packed wrapper.
+    if (::llvm::isa<::tla::Float4E2M1Type>(elementType))
+        return "float4_e2m1x2_t";
+    if (::llvm::isa<::tla::Float4E1M2Type>(elementType))
+        return "float4_e1m2x2_t";
     return {};
 }
 
@@ -938,6 +950,24 @@ std::string getCopyRouteCallee(
             return {};
         return Twine("copy_gm_ColumnMajor_to_l1_nZ_").concat(suffix).str();
     }
+    if (*srcSpace == hivm::AddressSpace::GM && *dstSpace == hivm::AddressSpace::L1 && srcLayout == LayoutTag::zN &&
+        dstLayout == LayoutTag::zN) {
+        if (srcElementType != dstElem)
+            return {};
+        StringRef suffix = copyRuntimeElemSuffix(srcElementType);
+        if (suffix.empty())
+            return {};
+        return Twine("copy_gm_zN_to_l1_zN_").concat(suffix).str();
+    }
+    if (*srcSpace == hivm::AddressSpace::GM && *dstSpace == hivm::AddressSpace::L1 && srcLayout == LayoutTag::nZ &&
+        dstLayout == LayoutTag::nZ) {
+        if (srcElementType != dstElem)
+            return {};
+        StringRef suffix = copyRuntimeElemSuffix(srcElementType);
+        if (suffix.empty())
+            return {};
+        return Twine("copy_gm_nZ_to_l1_nZ_").concat(suffix).str();
+    }
     if (*srcSpace == hivm::AddressSpace::L1 && *dstSpace == hivm::AddressSpace::L0A && srcLayout == LayoutTag::zN &&
         dstLayout == LayoutTag::zN) {
         if (srcElementType != dstElem)
@@ -1130,11 +1160,13 @@ static bool isAicTemplateRuntimeCall(StringRef name)
     if (!(name.starts_with("copy_")))
         return false;
     if (!(name.ends_with("_float") || name.ends_with("_half") || name.ends_with("_bf16") || name.ends_with("_int8_t") ||
-          name.ends_with("_uint8_t") || name.ends_with("_int32_t") || name.ends_with("_fp8_e4m3fn_t") ||
-          name.ends_with("_fp8_e5m2_t") || name.ends_with("_uint64_t")))
+          name.ends_with("_uint8_t") || name.ends_with("_uint16_t") || name.ends_with("_uint32_t") ||
+          name.ends_with("_int32_t") || name.ends_with("_fp8_e4m3fn_t") || name.ends_with("_fp8_e5m2_t") ||
+          name.ends_with("_uint64_t")))
         return false;
 
     return name.starts_with("copy_gm_RowMajor_to_l1_zN_") || name.starts_with("copy_gm_ColumnMajor_to_l1_nZ_") ||
+           name.starts_with("copy_gm_zN_to_l1_zN_") || name.starts_with("copy_gm_nZ_to_l1_nZ_") ||
            name.starts_with("copy_l1_zN_to_l0a_zN_") || name.starts_with("copy_l1_nZ_to_l0a_zN_") ||
            name.starts_with("copy_l1_zN_to_l0b_nZ_") || name.starts_with("copy_l1_nZ_to_l0b_nZ_") ||
            name.starts_with("copy_l0c_to_ub_RowMajor_") || name.starts_with("copy_l0c_to_gm_RowMajor_") ||
