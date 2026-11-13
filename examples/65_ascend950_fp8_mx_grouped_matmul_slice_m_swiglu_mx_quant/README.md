@@ -1,71 +1,114 @@
 # FP8MxGroupedMatmulSliceMSwigluMxQuant Example Readme
 
-## 功能介绍
+## 功能说明
 
-- 演示 Ascend 950 上的 **Grouped MXFP8矩阵乘 + SwiGLU + MXFP8量化**：
-  - 多组（grouped）矩阵乘按 M 轴切分（slice-M）：A、B 为 MX FP8，经 `float8_e8m0` 缩放后做矩阵乘，结果按N轴均分成Act和Gate，Act和Gate进行SwiGlu激活后量化为MXFP8
-  - 本示例中 A、B 为 `float8_e4m3_t`，MX 量化scale为 `float8_e8m0_t`，量化输出结果为 `float8_e4m3_t`，量化结果scale为`float8_e8m0_t`。
-- 默认布局：A `RowMajor`、B `ColumnMajor`、Q `RowMajor`、 QScale `RowMajor`。B及其scale支持转置。
+- 算子功能：完成分组（grouped）MX FP8 矩阵乘，按 M 轴切片（slice-M）分组，再对结果执行 SwiGLU 激活后做 MX FP8 量化输出。
+- 计算公式：
+
+  $$
+    \begin{aligned}
+    \tilde{A} &= A \odot \text{MxScaleA} \\
+    \tilde{B} &= B \odot \text{MxScaleB} \\
+    C &= \tilde{A} \times \tilde{B} \\
+    \text{act}, \text{gate} &= \text{split}_{N}(C) \\
+    S &= \text{Swish}(\text{act}) \odot \text{gate} \\
+    Q, \text{QScale} &= \text{MXQuant}(S)
+    \end{aligned}
+  $$
+
+  其中`A`是形如`(m,k)`的输入矩阵，`B`是形如`(k,n)`的输入矩阵（按`(problem_count,n,k)`转置存储），`A`/`B`经各自的 MX 缩放因子反量化后做分组矩阵乘得到`C`；`C`沿 N 轴均分为`act`与`gate`两半，经 SwiGLU 激活（`Swish(act) * gate`）后按 32 元素块做 MX FP8 量化，得到形如`(m,n/2)`的输出`Q`及其缩放因子`QScale`。
+
+- 支持产品型号：Ascend 950PR&950DT系列产品
+
+## 样例参数说明
+
+| 参数 | 属性 | shape | dtype | 说明 |
+| --- | --- | --- | --- | --- |
+| `A` | Input | `(m,k)` | `float8_e4m3_t` | 左矩阵，layout支持`RowMajor` |
+| `MxScaleA` | Input | `(m,ceil(k/64),2)` | `float8_e8m0_t` | `A` 的 MX 缩放因子，沿 K 轴按 32 元素块逐块缩放 |
+| `B` | Input | `(problem_count,n,k)` | `float8_e4m3_t` | 右矩阵，layout支持`ColumnMajor`（转置存储，逻辑形状`(k,n)`），数据类型与左矩阵一致 |
+| `MxScaleB` | Input | `(problem_count,n,ceil(k/64),2)` | `float8_e8m0_t` | `B` 的 MX 缩放因子，沿 K 轴按 32 元素块逐块缩放 |
+| `GroupList` | Input | `(problem_count,)` | `int64_t` | 每组在 M 方向的行数，样例按 m 均分生成（余数分摊到前几组） |
+| `Q` | Output | `(m,n/2)` | `float8_e4m3_t` | SwiGLU 激活后 MX FP8 量化输出，layout支持`RowMajor` |
+| `QScale` | Output | `(m,ceil((n/2)/32))` | `float8_e8m0_t` | `Q` 的 MX 缩放因子 |
+
+## 使用范围说明
+
+本样例相对矩阵乘基线，增加了按 M 轴切片的分组（grouped）执行，并对矩阵乘结果做 SwiGLU 激活与 MX FP8 量化输出。
+
+支持范围：
+
+- `problemCount`（分组数）须满足 `1 ≤ problemCount ≤ 1024`。
+- `n` 须为 `128` 的整数倍。
+
+以上取值不满足时，样例在算子校验阶段直接退出。
 
 ## 代码组织
 
 ```text
-experimental
-├── gmm
-│   ├── 65_ascend950_fp8_mx_grouped_matmul_slice_m_swiglu_mx_quant
-│   │   ├── CMakeLists.txt                          # CMake 编译配置
-│   │   ├── README.md
-│   │   ├── gen_data.py                             # 生成 data/input/
-│   │   ├── compare.py                              # 计算golden，对比结果
-│   │   └── fp8_mx_grouped_matmul_slice_m_swiglu_mx_quant.cpp      # 主程序
+65_ascend950_fp8_mx_grouped_matmul_slice_m_swiglu_mx_quant
+├── README.md
+├── gen_data.py  # 生成测试数据（input/ 与 golden/）
+├── compare.py  # 计算 golden 并比对精度
+├── fp8_mx_grouped_matmul_slice_m_swiglu_mx_quant.cpp  # grouped MX FP8 矩阵乘 + SwiGLU + MX 量化示例
+└── CMakeLists.txt
 ```
 
 ## 使用示例
 
-- 获取代码之后编译相应的算子可执行文件，可参考 [quickstart](../../docs/zh/1_Practice/01_quick_start.md#编译执行)，本用例为 Ascend 950（3510）算子，编译时需加 `-DCATLASS_ARCH=3510`。
-- 执行算子
+### 命令行参数
+
+执行样例命令如下：
 
 ```bash
-# 编译指定用例
-bash scripts/build.sh 65_ascend950_fp8_mx_grouped_matmul_slice_m_swiglu_mx_quant -DCATLASS_ARCH=3510
-
-# 生成测试样例（在 examples/65_ascend950_fp8_mx_grouped_matmul_slice_m_swiglu_mx_quant/data 下生成 input/ 与 golden/）
-python3 examples/65_ascend950_fp8_mx_grouped_matmul_slice_m_swiglu_mx_quant/gen_data.py 4 256 512 1024
-# 输入参数分别对应 problem_count， m， n， k，其中n需要128对齐，problem_count不超过1024
-
-# 执行测试样例
-./output/bin/65_ascend950_fp8_mx_grouped_matmul_slice_m_swiglu_mx_quant 4 256 512 1024 0
-# 可执行文件名 | problem_count | M | n | K | Device ID
-# Device ID 可选，默认为 0
+65_ascend950_fp8_mx_grouped_matmul_slice_m_swiglu_mx_quant [problem_count] [m] [n] [k] [deviceId]
 ```
 
-执行结果如下，说明精度比对成功。
+生成测试数据命令行如下：
 
-```text
-Compare success.
+```bash
+python3 gen_data.py [problem_count] [m] [n] [k]
 ```
 
-## 使用说明
+上述命令行参数具体说明如下：
 
-1、本 example 完成 grouped MX 量化矩阵乘 + SwiGLU + 在线 MX 量化输出：
-C = (MxScaleA \* A) @ (MxScaleB \* B)
-act,gate = C
-S = Swish(act) * gate
-Q, QScale = MXQuant(S)
+| 参数 | 默认值 | 参数说明 |
+| --- | --- | --- |
+| `problem_count` | 无 | 分组数，须满足 `1 ≤ problem_count ≤ 1024` |
+| `m` | 无 | A 矩阵的 m 轴大小，须大于 `0` |
+| `n` | 无 | B 矩阵的 n 轴大小，须大于 `0` 且为 `128` 的整数倍 |
+| `k` | 无 | A/B 矩阵的 k 轴大小，须大于 `0` |
+| `deviceId` | `0` | 指定运行设备ID |
 
-2、输入B及其scale支持转置且两者转置状态须保持一致。`gen_data.py`会同时生成B转置的和不转置的文件，当前样例为B转置的示例。若要改为B不转置，请修改example示例中B的layout为layout::RowMajor和读取二进制文件的名称。因为layout隐式表征转置状态，即layout::RowMajor表示不转置，layout::ColumnMajor表示转置。
+### 执行示例
 
-3、A、B支持数据类型为float8_e4m3或float8_e5m2
-MxScaleA、MxScaleB支持数据类型为float8_e8m0
-A的shape为(m, k), MxScaleA的shape为(m, ceil(k/64), 2)
-B不转置的shape为(problem_count, k, n), MxScaleB的shape为(problem_count, ceil(k/64), n, 2)
-B转置的shape为(problem_count, n, k), MxScaleB的shape为(problem_count, n, ceil(k/64), 2)
-输出Q的数据类型为float8_e4m3或float8_e5m2，与输入A、B保持一致，shape为(m, n/2)
-输出QScale的数据类型为float8_e8m0，shape为(problem_count, ceil((n/2)/64), 2)
+1. 进入项目根目录，编译样例代码生成相应的算子可执行文件。
 
-4、关于Mx量化矩阵乘的详细特征详见[53_ascend950_fp8_mx_matmul](../53_ascend950_fp8_mx_matmul/README.md)和[54_ascend950_fp4_mx_matmul](../54_ascend950_fp4_mx_matmul/README.md)中说明文档的相关内容。
+    ```bash
+    bash scripts/build.sh 65_ascend950_fp8_mx_grouped_matmul_slice_m_swiglu_mx_quant -DCATLASS_ARCH=3510
+    ```
 
-## 特殊说明
+2. 生成测试数据。
 
-- 当前example中的L1TileShape(128,256,256)和L0TileShape(128,256,128)仅为样例[53_ascend950_fp8_mx_matmul](../53_ascend950_fp8_mx_matmul/README.md)的一半，原因在于在一次循环中需要进行两个block的matmul运算，这两次matmul的结果需要同时存在于UB上用来进行后续计算，同时后续的计算中也需要UB存放中间结果，当前场景下UB存放数据共使用约180K。因此，受限于UB大小，当前example的L1TileShape和L0TileShape仅为样例[53_ascend950_fp8_mx_matmul](../53_ascend950_fp8_mx_matmul/README.md)的一半。
-- groupList中未指定的部分将不会参与更新。如groupList为(3,4,5)，m为20，则Q[12:]和QScale[12:]的部分不会进行更新和初始化，其中数据为显存空间申请时的原数据。即Q和QScale的有效数据为Q[:12]和QScale[:12]。
+    ```bash
+    python3 examples/65_ascend950_fp8_mx_grouped_matmul_slice_m_swiglu_mx_quant/gen_data.py 4 256 512 1024
+    ```
+
+3. 执行算子。
+
+    ```bash
+    ./output/bin/65_ascend950_fp8_mx_grouped_matmul_slice_m_swiglu_mx_quant 4 256 512 1024 0
+    ```
+
+4. 执行结果如下，说明样例执行成功，精度通过：
+
+    ```text
+    Compare success.
+    ```
+
+## 补充说明
+
+- 本样例的 `L1TileShape(128,256,256)` 与 `L0TileShape(128,256,128)` 仅为样例 [53_ascend950_fp8_mx_matmul](../53_ascend950_fp8_mx_matmul/README.md) 的一半，原因在于一次循环中需要进行两个 block 的矩阵乘运算，两次结果需同时驻留 UB 供后续计算使用，后续计算还需 UB 存放中间结果，当前场景下 UB 存放数据共约 180K。受 UB 大小限制，本样例的分块仅为 53 样例的一半。
+- `groupList` 中未指定的部分不会参与更新。如 `groupList` 为 `(3,4,5)`、`m` 为 `20`，则 `Q[12:]` 与 `QScale[12:]` 的部分不会被更新与初始化，其中数据为显存空间申请时的原数据，即 `Q` 和 `QScale` 的有效数据为 `Q[:12]` 与 `QScale[:12]`。
+- `gen_data.py` 会同时生成 B 转置与不转置两份数据；当前样例为 B 转置（layout `ColumnMajor`）的示例。若需改为 B 不转置，需同步修改 `.cpp` 中 B 的 layout 为 `layout::RowMajor` 并改读对应二进制文件。layout 隐式表征转置状态：`layout::RowMajor` 表示不转置，`layout::ColumnMajor` 表示转置。
+- 关于 MX 量化矩阵乘的详细特征，参见 [53_ascend950_fp8_mx_matmul](../53_ascend950_fp8_mx_matmul/README.md) 与 [54_ascend950_fp4_mx_matmul](../54_ascend950_fp4_mx_matmul/README.md)。

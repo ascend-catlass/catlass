@@ -164,7 +164,7 @@ bool SaveResult(const std::string& filename, const std::vector<T>& data, const s
 
 template <
     class MatmulKernel, class LayoutA_, class LayoutB_, class LayoutMxScaleA_, class LayoutMxScaleB_, class LayoutC_>
-void LaunchMxGroupedMatmul(
+bool LaunchMxGroupedMatmul(
     Options const& options, uint8_t* deviceGroupList, uint8_t* deviceA, LayoutA_ const& layoutA, uint8_t* deviceB,
     LayoutB_ const& layoutB, uint8_t* deviceMxScaleA, LayoutMxScaleA_ const& layoutMxScaleA, uint8_t* deviceMxScaleB,
     LayoutMxScaleB_ const& layoutMxScaleB, uint8_t* deviceC, LayoutC_ const& layoutC, uint8_t*& deviceWorkspace,
@@ -176,27 +176,39 @@ void LaunchMxGroupedMatmul(
         deviceMxScaleA,       layoutMxScaleA,       deviceMxScaleB,  layoutMxScaleB, deviceC, layoutC};
 
     MatmulAdapter matmul_op;
-    matmul_op.CanImplement(arguments);
+    if (matmul_op.CanImplement(arguments) != Status::kSuccess) {
+        std::cerr << "CanImplement check failed." << std::endl;
+        return false;
+    }
     sizeWorkspace = matmul_op.GetWorkspaceSize(arguments);
     if (sizeWorkspace > 0) {
         ACL_CHECK(aclrtMalloc(reinterpret_cast<void**>(&deviceWorkspace), sizeWorkspace, ACL_MEM_MALLOC_HUGE_FIRST));
     }
     matmul_op.Initialize(arguments, deviceWorkspace);
     matmul_op(stream, aicCoreNum);
+    return true;
 }
 
 template <class ElementA, class ElementB, class ElementC, class L1TileShape, class L0TileShape, bool transB = false>
 void MxGroupedMatmulSliceM(Options const& options)
 {
+    // Input shape constraints: problem_count/m/n/k must be greater than 0.
+    // GroupedGemmOptionsWithMxType::Parse does not reject zero values, so check them here
+    // before any division or device allocation.
+    const uint32_t m = options.problemShape.m();
+    const uint32_t n = options.problemShape.n();
+    const uint32_t k = options.problemShape.k();
+    const uint32_t groupCount = options.problemCount;
+    if (m == 0 || n == 0 || k == 0 || groupCount == 0) {
+        std::cerr << "problem_count, m, n and k must be greater than 0" << std::endl;
+        return;
+    }
+
     aclrtStream stream{nullptr};
     ACL_CHECK(aclInit(nullptr));
     ACL_CHECK(aclrtSetDevice(options.deviceId));
     ACL_CHECK(aclrtCreateStream(&stream));
 
-    uint32_t m = options.problemShape.m();
-    uint32_t n = options.problemShape.n();
-    uint32_t k = options.problemShape.k();
-    uint32_t groupCount = options.problemCount;
     uint32_t mxScaleK = CeilDiv<MX_SCALE_GROUP_NUM>(k);
     // compute mxScale len, k must be multiples of 2
     uint32_t mxScaleAlignedK = RoundUp<2>(mxScaleK);
@@ -321,12 +333,13 @@ void MxGroupedMatmulSliceM(Options const& options)
         DispatchPolicy, L1TileShape, L0TileShape, ElementA, ElementB, ElementC, void, TileCopy>;
 #endif
     using BlockEpilogue = void;
+    bool launched = false;
 
 #if MX_GMM_ENABLE_ASWT
     using BlockScheduler = typename Gemm::Block::GemmGroupedAswtTailSplitSwizzle<4, false, transB>;
     using MatmulKernel = Gemm::Kernel::GroupedMxMatmulSliceMAswtTla<
         BlockMmad, BlockEpilogue, BlockScheduler, ElementGroupList, (MX_GMM_ENABLE_BASE_M != 0)>;
-    LaunchMxGroupedMatmul<MatmulKernel>(
+    launched = LaunchMxGroupedMatmul<MatmulKernel>(
         options, deviceGroupList, deviceA, layoutA, deviceB, layoutB, deviceMxScaleA, layoutMxScaleA, deviceMxScaleB,
         layoutMxScaleB, deviceC, layoutC, deviceWorkspace, sizeWorkspace, stream, aicCoreNum);
 #else
@@ -345,19 +358,32 @@ void MxGroupedMatmulSliceM(Options const& options)
         using BlockScheduler = typename Gemm::Block::GemmIdentityBlockSwizzle<3, 0>;
         using MatmulKernel =
             Gemm::Kernel::GroupedMxMatmulSliceMTla<BlockMmad, BlockEpilogue, BlockScheduler, ElementGroupList>;
-        LaunchMxGroupedMatmul<MatmulKernel>(
+        launched = LaunchMxGroupedMatmul<MatmulKernel>(
             options, deviceGroupList, deviceA, layoutA, deviceB, layoutB, deviceMxScaleA, layoutMxScaleA,
             deviceMxScaleB, layoutMxScaleB, deviceC, layoutC, deviceWorkspace, sizeWorkspace, stream, aicCoreNum);
     } else {
         using BlockScheduler = typename Gemm::Block::GemmIdentityBlockSwizzle<3, 1>;
         using MatmulKernel =
             Gemm::Kernel::GroupedMxMatmulSliceMTla<BlockMmad, BlockEpilogue, BlockScheduler, ElementGroupList>;
-        LaunchMxGroupedMatmul<MatmulKernel>(
+        launched = LaunchMxGroupedMatmul<MatmulKernel>(
             options, deviceGroupList, deviceA, layoutA, deviceB, layoutB, deviceMxScaleA, layoutMxScaleA,
             deviceMxScaleB, layoutMxScaleB, deviceC, layoutC, deviceWorkspace, sizeWorkspace, stream, aicCoreNum);
     }
 
 #endif
+
+    if (!launched) {
+        ACL_CHECK(aclrtFree(deviceA));
+        ACL_CHECK(aclrtFree(deviceB));
+        ACL_CHECK(aclrtFree(deviceC));
+        ACL_CHECK(aclrtFree(deviceGroupList));
+        ACL_CHECK(aclrtFree(deviceMxScaleA));
+        ACL_CHECK(aclrtFree(deviceMxScaleB));
+        ACL_CHECK(aclrtDestroyStream(stream));
+        ACL_CHECK(aclrtResetDevice(options.deviceId));
+        ACL_CHECK(aclFinalize());
+        return;
+    }
 
     ACL_CHECK(aclrtSynchronizeStream(stream));
 

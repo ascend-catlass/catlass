@@ -143,7 +143,8 @@ public:
                AscendC::Std::is_one_of_v<ElementB, float8_e4m3_t, float8_e5m2_t> &&
                std::is_same_v<ElementMxScaleA, float8_e8m0_t> && std::is_same_v<ElementMxScaleB, float8_e8m0_t> &&
                AscendC::Std::is_one_of_v<ElementQ, float8_e4m3_t, float8_e5m2_t> &&
-               std::is_same_v<ElementQScale, float8_e8m0_t> && args.problemCount <= 1024 &&
+               std::is_same_v<ElementQScale, float8_e8m0_t> && args.problemShape.m() > 0 && args.problemShape.n() > 0 &&
+               args.problemShape.k() > 0 && args.problemCount > 0 && args.problemCount <= 1024 &&
                args.problemShape.n() % 128 == 0;
     }
 

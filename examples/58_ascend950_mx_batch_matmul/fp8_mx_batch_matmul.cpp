@@ -70,16 +70,24 @@ bool SaveResult(const std::string& filename, const std::vector<T>& data)
 
 static void Run(const Options& options)
 {
+    // Input shape constraints: batch_size/m/n/k must be greater than 0.
+    // GroupedGemmOptions::Parse does not reject zero values, so check them here
+    // before any division or device allocation.
+    const uint32_t batchCount = options.problemCount;
+    const uint32_t m = options.problemShape.m();
+    const uint32_t n = options.problemShape.n();
+    const uint32_t k = options.problemShape.k();
+    if (batchCount == 0 || m == 0 || n == 0 || k == 0) {
+        std::cerr << "batch_size, m, n and k must be greater than 0" << std::endl;
+        return;
+    }
+
     aclrtStream stream{nullptr};
 
     ACL_CHECK(aclInit(nullptr));
     ACL_CHECK(aclrtSetDevice(options.deviceId));
     ACL_CHECK(aclrtCreateStream(&stream));
 
-    uint32_t batchCount = options.problemCount;
-    uint32_t m = options.problemShape.m();
-    uint32_t n = options.problemShape.n();
-    uint32_t k = options.problemShape.k();
     uint32_t mxScaleK = CeilDiv<MX_SCALE_GROUP_NUM>(k);
 
     using ElementA = float8_e4m3_t;
@@ -258,7 +266,7 @@ static void Run(const Options& options)
 
         std::vector<uint64_t> errorIndices = [&]() {
             if constexpr (std::is_same_v<ElementC, bfloat16_t>) {
-                constexpr float rtolBf16 = 1.0f / 128;  // 1 bf16 ULP
+                constexpr float rtolBf16 = 1.0f / 128; // 1 bf16 ULP
                 std::vector<uint64_t> errors;
                 for (uint64_t i = 0; i < hostC.size(); ++i) {
                     float actual = static_cast<float>(hostC[i]);

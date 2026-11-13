@@ -63,16 +63,24 @@ bool SaveResult(const std::string& filename, const std::vector<T>& data)
 
 static void Run(const Options& options)
 {
+    // Input shape constraints: batch_size/m/n/k must be greater than 0.
+    // GroupedGemmOptions::Parse does not reject zero values, so check them here
+    // before any division or device allocation.
+    const uint32_t batchCount = options.problemCount;
+    const uint32_t m = options.problemShape.m();
+    const uint32_t n = options.problemShape.n();
+    const uint32_t k = options.problemShape.k();
+    if (batchCount == 0 || m == 0 || n == 0 || k == 0) {
+        std::cerr << "batch_size, m, n and k must be greater than 0" << std::endl;
+        return;
+    }
+
     aclrtStream stream{nullptr};
 
     ACL_CHECK(aclInit(nullptr));
     ACL_CHECK(aclrtSetDevice(options.deviceId));
     ACL_CHECK(aclrtCreateStream(&stream));
 
-    uint32_t batchCount = options.problemCount;
-    uint32_t m = options.problemShape.m();
-    uint32_t n = options.problemShape.n();
-    uint32_t k = options.problemShape.k();
     uint32_t mxScaleK = CeilDiv<MX_SCALE_GROUP_NUM>(k);
 
     // FP4 数据类型：float4_e2m1x2_t（两个 4-bit 值打包在 1 字节）

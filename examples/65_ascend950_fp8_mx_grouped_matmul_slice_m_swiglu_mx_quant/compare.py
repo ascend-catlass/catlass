@@ -15,8 +15,7 @@ import sys
 import argparse
 import torch
 import numpy as np
-from en_dtypes import float8_e8m0
-from ml_dtypes import float8_e4m3fn, float8_e5m2
+from ml_dtypes import float8_e4m3fn, float8_e5m2, float8_e8m0fnu as float8_e8m0
 
 WORKSPACE = os.path.dirname(os.path.abspath(__file__))
 

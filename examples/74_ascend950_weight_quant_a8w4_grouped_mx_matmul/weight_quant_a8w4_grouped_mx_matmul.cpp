@@ -325,6 +325,12 @@ int main(int argc, const char** argv)
     if (options.Parse(argc, argv) != 0) {
         return -1;
     }
+    if (options.problemCount == 0 || options.problemShape.m() == 0 || options.problemShape.n() == 0 ||
+        options.problemShape.k() == 0) {
+        std::cerr << TOSTRING(CATLASS_EXAMPLE_NAME) << ": problem_count, m, n and k must be greater than 0"
+                  << std::endl;
+        return -1;
+    }
     Run(options);
     return 0;
 }
