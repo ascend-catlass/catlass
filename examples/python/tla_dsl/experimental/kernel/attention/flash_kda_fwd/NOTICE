@@ -1,0 +1,12 @@
+Flash KDA forward source attribution
+
+This CATLASS DSL sample adapts the algorithm, numerical conversion points and
+host scheduling from cann/cannbot-dsl, commit
+fc438d3ef03129929eb8faae3906365b3162f163,
+samples/attention/flash_kda_fwd/.
+https://gitcode.com/cann/cannbot-dsl/tree/fc438d3ef03129929eb8faae3906365b3162f163/samples/attention/flash_kda_fwd
+
+Copyright (c) 2026 Huawei Technologies Co., Ltd.
+Licensed under CANN Open Software License Agreement Version 2.0; see the
+repository root LICENSE. The candidate calls only native CATLASS DSL kernels.
+cannbot-dsl is the numerical and performance reference, not a runtime dependency.
