@@ -57,6 +57,14 @@ std::string getFillCallee(::LayoutTag dstLayout, mlir::Type dstElementType);
 llvm::SmallVector<mlir::Value, 24> buildCopyPayloadForRoute(
     mlir::OpBuilder& builder, mlir::Location loc, const TensorDescriptor& srcDesc, const TensorDescriptor& dstDesc);
 
+/// Append the trailing ``i64 gmCachePolicy`` for a GM-side BC copy stub.
+/// Reads ``src_cache_policy`` / ``dst_cache_policy`` from ``copyOp`` (default NORMAL=1).
+/// No-op when neither endpoint is GM.
+void appendGmCachePolicyOperand(
+    mlir::OpBuilder& builder, mlir::Location loc, ::tla::CopyOp copyOp, llvm::StringRef srcAddrspace,
+    llvm::StringRef dstAddrspace, llvm::SmallVectorImpl<mlir::Type>& operandTypes,
+    llvm::SmallVectorImpl<mlir::Value>& operands);
+
 /// Declare (once) the private runtime template `name`, core-annotating it (AIC or
 /// AIV, always-inline, C-interface) by symbol so the backend inlines it on the
 /// right core. Returns the existing decl if already present.

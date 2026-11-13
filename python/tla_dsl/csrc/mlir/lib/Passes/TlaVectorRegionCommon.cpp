@@ -154,11 +154,13 @@ public:
             return failure();
         SmallVector<Value, 24> payload = ::tla::buildCopyPayloadForRoute(rewriter, copyOp.getLoc(), srcDesc, dstDesc);
         SmallVector<Type, 22> operandTypes = {(*srcRuntimeMemref).getType(), (*dstRuntimeMemref).getType()};
-        operandTypes.reserve(2 + payload.size());
+        operandTypes.reserve(2 + payload.size() + 1);
         for (Value v : payload)
             operandTypes.push_back(v.getType());
         SmallVector<Value, 22> operands = {*srcRuntimeMemref, *dstRuntimeMemref};
         operands.append(payload.begin(), payload.end());
+        ::tla::appendGmCachePolicyOperand(
+            rewriter, copyOp.getLoc(), copyOp, srcDesc.addrspace, dstDesc.addrspace, operandTypes, operands);
         auto callee = ::tla::getOrCreateRuntimeCall(copyOp->getParentOfType<ModuleOp>(), calleeName, operandTypes);
 
         // Enclose `copy` with atomic add and atomic none

@@ -1120,6 +1120,25 @@ SmallVector<Value, 24> buildCopyPayloadForRoute(
     return payload;
 }
 
+void appendGmCachePolicyOperand(
+    OpBuilder& builder, Location loc, ::tla::CopyOp copyOp, StringRef srcAddrspace, StringRef dstAddrspace,
+    SmallVectorImpl<Type>& operandTypes, SmallVectorImpl<Value>& operands)
+{
+    if (srcAddrspace != "gm" && dstAddrspace != "gm")
+        return;
+    // AscendC::CacheMode::CACHE_MODE_NORMAL == 1
+    int64_t policyVal = 1;
+    if (srcAddrspace == "gm") {
+        if (auto attr = copyOp.getSrcCachePolicyAttr())
+            policyVal = static_cast<int64_t>(attr.getCachePolicy());
+    } else if (auto attr = copyOp.getDstCachePolicyAttr()) {
+        policyVal = static_cast<int64_t>(attr.getCachePolicy());
+    }
+    Type i64Ty = builder.getI64Type();
+    operandTypes.push_back(i64Ty);
+    operands.push_back(builder.create<arith::ConstantIntOp>(loc, policyVal, 64));
+}
+
 static bool isAicTemplateRuntimeCall(StringRef name)
 {
     if (name == "mmad_float_float_float" || name == "mmad_half_half_float" || name == "mmad_bf16_bf16_float" ||

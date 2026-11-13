@@ -298,6 +298,32 @@ def Tla_AtomicModeAttr : Tla_EnumAttr<"AtomicMode", "atomic_mode"> {
 }
 
 // ---------------------------------------------------------------------------
+// CachePolicy: GlobalTensor::SetL2CacheHint policy. Integer codes DISABLE=0 /
+// NORMAL=1 travel as the trailing i64 on GM-side BC copy stubs.
+// PERSISTENT is intentionally not exposed (not supported).
+// ---------------------------------------------------------------------------
+
+def Tla_CachePolicy_Disable : I32EnumAttrCase<"disable", 0>;
+def Tla_CachePolicy_Normal : I32EnumAttrCase<"normal", 1>;
+
+def Tla_CachePolicy_Enum : Tla_I32Enum<"CachePolicy", "L2 cache hint policy", [
+  Tla_CachePolicy_Disable,
+  Tla_CachePolicy_Normal
+]>;
+
+def Tla_CachePolicyAttr : Tla_EnumAttr<"CachePolicy", "cache_policy"> {
+  let parameters = (ins EnumParameter<Tla_CachePolicy_Enum>:$cache_policy);
+  let assemblyFormat = "`<` params `>`";
+  let description = [{
+    L2 cache hint for a GM-side tla.copy endpoint (SetL2CacheHint).
+
+    Integer values:
+      - disable (0)
+      - normal (1)
+  }];
+}
+
+// ---------------------------------------------------------------------------
 // Histograms: FREQUENCY / ACCUMULATE + BIN0 / BIN1
 // ---------------------------------------------------------------------------
 

@@ -15,6 +15,7 @@
 # examples/python/tla_dsl/tla/kernel/matmul/basic_syrk (basic_syrk.py).
 # examples/python/tla_dsl/tla/kernel/vec/basic_vadd (basic_vadd.py),
 # examples/python/tla_dsl/dsl_tutorials/extern_op (extern_vecadd.py, extern_dual_core.py),
+# python/tla_dsl/tests/end_to_end (l2_cache_hint.py),
 # examples/python/tla_dsl/tla/kernel/matmul/basic_mixed (basic_mixed.py), examples/python/tla_dsl/tla/kernel/matmul/basic_mixed (basic_mixed_mutex.py) and
 # examples/python/tla_dsl/tla/kernel/matmul/basic_mixed (basic_mixed_ub2l1.py, basic_mixed_store_zN.py,
 # basic_mixed_store_zNUnAlign.py, basic_mixed_fixpipe_nz2dn.py,

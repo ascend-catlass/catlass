@@ -479,6 +479,14 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         [["dsl_tutorials/extern_op/extern_simd_vf_add.py", *dev]],
     )
 
+    # --- L2 cache hint: GM→UB copy with cache_policy=DISABLE ---
+    # Script under python/tla_dsl/tests/end_to_end/. Kernel is not
+    # block-partitioned, so launch a single vector core.
+    yield (
+        "l2-cache-hint-disable",
+        [["end_to_end/l2_cache_hint.py", *dev, "--n", "256", "--block-num", "1"]],
+    )
+
     # --- basic_mixed ---
     # One test on purpose: the second invocation exercises cache reuse and is
     # only meaningful straight after the one that populates the cache.

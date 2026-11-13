@@ -8,19 +8,21 @@
 
 template <class ArchTag, LayoutTag SrcLayout, LayoutTag DstLayout, typename T>
 CATLASS_DEVICE void copyGMToUB(
-    memref_t<__gm__ T, 2>* src, memref_t<__ubuf__ T, 1>* dst, const TensorDesc& srcDesc, const TensorDesc& dstDesc)
+    memref_t<__gm__ T, 2>* src, memref_t<__ubuf__ T, 1>* dst, const TensorDesc& srcDesc, const TensorDesc& dstDesc,
+    int64_t gmCachePolicy = kCachePolicyNormal)
 {
-    auto srcTensor = makeGMTensor<SrcLayout, T>(src, srcDesc);
+    auto srcTensor = makeGMTensor<SrcLayout, T>(src, srcDesc, gmCachePolicy);
     auto dstTensor = makeUBTensor<DstLayout, T>(dst, dstDesc);
     Catlass::Epilogue::Tile::CopyGm2UbTla<ArchTag, decltype(srcTensor), decltype(dstTensor)>{}(dstTensor, srcTensor);
 }
 
 template <class ArchTag, LayoutTag SrcLayout, LayoutTag DstLayout, typename T>
 CATLASS_DEVICE void copyUBToGM(
-    memref_t<__ubuf__ T, 1>* src, memref_t<__gm__ T, 2>* dst, const TensorDesc& srcDesc, const TensorDesc& dstDesc)
+    memref_t<__ubuf__ T, 1>* src, memref_t<__gm__ T, 2>* dst, const TensorDesc& srcDesc, const TensorDesc& dstDesc,
+    int64_t gmCachePolicy = kCachePolicyNormal)
 {
     auto srcTensor = makeUBTensor<SrcLayout, T>(src, srcDesc);
-    auto dstTensor = makeGMTensor<DstLayout, T>(dst, dstDesc);
+    auto dstTensor = makeGMTensor<DstLayout, T>(dst, dstDesc, gmCachePolicy);
     Catlass::Epilogue::Tile::CopyUb2GmTla<ArchTag, decltype(srcTensor), decltype(dstTensor)>{}(dstTensor, srcTensor);
 }
 
@@ -233,20 +235,22 @@ CATLASS_DEVICE void copyUBToL1(
 // hand, moved down to where it belongs: the caller now sees a typed fp8 tile.
 #define REGISTER_GM_TO_UB_AS_BYTES(LayoutSrc, LayoutDst, DType)                                                       \
     [aicore] __attribute__((always_inline)) void _mlir_ciface_copy_gm_##LayoutSrc##_to_ub_##LayoutDst##_##DType(      \
-        memref_t<__gm__ DType, 2>* src, memref_t<__ubuf__ DType, 1>* dst, DESC_ABI_PARAMS(src), DESC_ABI_PARAMS(dst)) \
+        memref_t<__gm__ DType, 2>* src, memref_t<__ubuf__ DType, 1>* dst, DESC_ABI_PARAMS(src), DESC_ABI_PARAMS(dst), \
+        int64_t gmCachePolicy)                                                                                        \
     {                                                                                                                 \
         copyGMToUB<Catlass::Arch::Ascend950, LayoutTag::LayoutSrc, LayoutTag::LayoutDst, int8_t>(                     \
             reinterpret_cast<memref_t<__gm__ int8_t, 2>*>(src), reinterpret_cast<memref_t<__ubuf__ int8_t, 1>*>(dst), \
-            TENSOR_DESC_12(src), TENSOR_DESC_12(dst));                                                                \
+            TENSOR_DESC_12(src), TENSOR_DESC_12(dst), gmCachePolicy);                                                 \
     }
 
 #define REGISTER_UB_TO_GM_AS_BYTES(LayoutSrc, LayoutDst, DType)                                                       \
     [aicore] __attribute__((always_inline)) void _mlir_ciface_copy_ub_##LayoutSrc##_to_gm_##LayoutDst##_##DType(      \
-        memref_t<__ubuf__ DType, 1>* src, memref_t<__gm__ DType, 2>* dst, DESC_ABI_PARAMS(src), DESC_ABI_PARAMS(dst)) \
+        memref_t<__ubuf__ DType, 1>* src, memref_t<__gm__ DType, 2>* dst, DESC_ABI_PARAMS(src), DESC_ABI_PARAMS(dst), \
+        int64_t gmCachePolicy)                                                                                        \
     {                                                                                                                 \
         copyUBToGM<Catlass::Arch::Ascend950, LayoutTag::LayoutSrc, LayoutTag::LayoutDst, int8_t>(                     \
             reinterpret_cast<memref_t<__ubuf__ int8_t, 1>*>(src), reinterpret_cast<memref_t<__gm__ int8_t, 2>*>(dst), \
-            TENSOR_DESC_12(src), TENSOR_DESC_12(dst));                                                                \
+            TENSOR_DESC_12(src), TENSOR_DESC_12(dst), gmCachePolicy);                                                 \
     }
 
 #define REGISTER_UB_TO_L1_AS_BYTES(LayoutSrc, LayoutDst, DType)                                                  \
@@ -360,18 +364,20 @@ extern "C" {
 
 #define REGISTER_GM_TO_UB(LayoutSrc, LayoutDst, DType)                                                                \
     [aicore] __attribute__((always_inline)) void _mlir_ciface_copy_gm_##LayoutSrc##_to_ub_##LayoutDst##_##DType(      \
-        memref_t<__gm__ DType, 2>* src, memref_t<__ubuf__ DType, 1>* dst, DESC_ABI_PARAMS(src), DESC_ABI_PARAMS(dst)) \
+        memref_t<__gm__ DType, 2>* src, memref_t<__ubuf__ DType, 1>* dst, DESC_ABI_PARAMS(src), DESC_ABI_PARAMS(dst), \
+        int64_t gmCachePolicy)                                                                                        \
     {                                                                                                                 \
         copyGMToUB<Catlass::Arch::Ascend950, LayoutTag::LayoutSrc, LayoutTag::LayoutDst, DType>(                      \
-            src, dst, TENSOR_DESC_12(src), TENSOR_DESC_12(dst));                                                      \
+            src, dst, TENSOR_DESC_12(src), TENSOR_DESC_12(dst), gmCachePolicy);                                       \
     }
 
 #define REGISTER_UB_TO_GM(LayoutSrc, LayoutDst, DType)                                                                \
     [aicore] __attribute__((always_inline)) void _mlir_ciface_copy_ub_##LayoutSrc##_to_gm_##LayoutDst##_##DType(      \
-        memref_t<__ubuf__ DType, 1>* src, memref_t<__gm__ DType, 2>* dst, DESC_ABI_PARAMS(src), DESC_ABI_PARAMS(dst)) \
+        memref_t<__ubuf__ DType, 1>* src, memref_t<__gm__ DType, 2>* dst, DESC_ABI_PARAMS(src), DESC_ABI_PARAMS(dst), \
+        int64_t gmCachePolicy)                                                                                        \
     {                                                                                                                 \
         copyUBToGM<Catlass::Arch::Ascend950, LayoutTag::LayoutSrc, LayoutTag::LayoutDst, DType>(                      \
-            src, dst, TENSOR_DESC_12(src), TENSOR_DESC_12(dst));                                                      \
+            src, dst, TENSOR_DESC_12(src), TENSOR_DESC_12(dst), gmCachePolicy);                                       \
     }
 
 #define REGISTER_UB_TO_UB(LayoutSrc, LayoutDst, DType)                                                           \
@@ -514,22 +520,24 @@ REGISTER_UB_TO_L1_AS_BYTES(zN, zN, fp8_e5m2_t)
 // Named by the fp4 encoding rather than by a storage suffix, the same way the
 // cube's GM -> L1 fp4 routes are: no byte type would say which of the two 4-bit
 // formats the tile holds, and the caller's tile is typed fp4 on both sides.
-#define REGISTER_GM_TO_UB_FP4(NameSrc, NameDst, TFp4)                                                            \
-    [aicore] __attribute__((always_inline)) void _mlir_ciface_copy_gm_##NameSrc##_to_ub_##NameDst##_##TFp4(      \
-        memref_t<__gm__ int8_t, 2>* src, memref_t<__ubuf__ int8_t, 1>* dst, DESC_ABI_PARAMS(src),                \
-        DESC_ABI_PARAMS(dst))                                                                                    \
-    {                                                                                                            \
-        copyGMToUB<Catlass::Arch::Ascend950, LayoutTag::NameSrc, LayoutTag::NameDst, int8_t>(                    \
-            src, dst, fp4RowMajorDescToBytes(TENSOR_DESC_12(src)), fp4RowMajorDescToBytes(TENSOR_DESC_12(dst))); \
+#define REGISTER_GM_TO_UB_FP4(NameSrc, NameDst, TFp4)                                                           \
+    [aicore] __attribute__((always_inline)) void _mlir_ciface_copy_gm_##NameSrc##_to_ub_##NameDst##_##TFp4(     \
+        memref_t<__gm__ int8_t, 2>* src, memref_t<__ubuf__ int8_t, 1>* dst, DESC_ABI_PARAMS(src),               \
+        DESC_ABI_PARAMS(dst), int64_t gmCachePolicy)                                                            \
+    {                                                                                                           \
+        copyGMToUB<Catlass::Arch::Ascend950, LayoutTag::NameSrc, LayoutTag::NameDst, int8_t>(                   \
+            src, dst, fp4RowMajorDescToBytes(TENSOR_DESC_12(src)), fp4RowMajorDescToBytes(TENSOR_DESC_12(dst)), \
+            gmCachePolicy);                                                                                     \
     }
 
-#define REGISTER_UB_TO_GM_FP4(NameSrc, NameDst, TFp4)                                                            \
-    [aicore] __attribute__((always_inline)) void _mlir_ciface_copy_ub_##NameSrc##_to_gm_##NameDst##_##TFp4(      \
-        memref_t<__ubuf__ int8_t, 1>* src, memref_t<__gm__ int8_t, 2>* dst, DESC_ABI_PARAMS(src),                \
-        DESC_ABI_PARAMS(dst))                                                                                    \
-    {                                                                                                            \
-        copyUBToGM<Catlass::Arch::Ascend950, LayoutTag::NameSrc, LayoutTag::NameDst, int8_t>(                    \
-            src, dst, fp4RowMajorDescToBytes(TENSOR_DESC_12(src)), fp4RowMajorDescToBytes(TENSOR_DESC_12(dst))); \
+#define REGISTER_UB_TO_GM_FP4(NameSrc, NameDst, TFp4)                                                           \
+    [aicore] __attribute__((always_inline)) void _mlir_ciface_copy_ub_##NameSrc##_to_gm_##NameDst##_##TFp4(     \
+        memref_t<__ubuf__ int8_t, 1>* src, memref_t<__gm__ int8_t, 2>* dst, DESC_ABI_PARAMS(src),               \
+        DESC_ABI_PARAMS(dst), int64_t gmCachePolicy)                                                            \
+    {                                                                                                           \
+        copyUBToGM<Catlass::Arch::Ascend950, LayoutTag::NameSrc, LayoutTag::NameDst, int8_t>(                   \
+            src, dst, fp4RowMajorDescToBytes(TENSOR_DESC_12(src)), fp4RowMajorDescToBytes(TENSOR_DESC_12(dst)), \
+            gmCachePolicy);                                                                                     \
     }
 
 REGISTER_GM_TO_UB_FP4(RowMajor, RowMajor, float4_e2m1x2_t)

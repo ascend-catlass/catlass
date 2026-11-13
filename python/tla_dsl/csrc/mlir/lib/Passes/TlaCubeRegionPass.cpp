@@ -753,7 +753,7 @@ struct LowerTlaCopyPattern : public OpRewritePattern<::tla::CopyOp> {
                 return failure();
             SmallVector<Value, 24> payload = ::tla::buildCopyPayloadForRoute(rewriter, op.getLoc(), srcDesc, dstDesc);
             SmallVector<Type, 22> operandTypes = {(*srcRuntimeMemref).getType(), (*dstRuntimeMemref).getType()};
-            operandTypes.reserve(2 + payload.size());
+            operandTypes.reserve(2 + payload.size() + 4);
             for (Value payloadValue : payload)
                 operandTypes.push_back(payloadValue.getType());
             SmallVector<Value, 22> operands = {*srcRuntimeMemref, *dstRuntimeMemref};
@@ -792,6 +792,9 @@ struct LowerTlaCopyPattern : public OpRewritePattern<::tla::CopyOp> {
                     }
                 }
             }
+            // Trailing gmCachePolicy for GM-endpoint stubs (after unitFlag/quant).
+            ::tla::appendGmCachePolicyOperand(
+                rewriter, op.getLoc(), op, srcAddrspace, dstAddrspace, operandTypes, operands);
             auto callee = ::tla::getOrCreateRuntimeCall(op->getParentOfType<ModuleOp>(), calleeName, operandTypes);
 
             // Enclose `copy` with atomic add and atomic none

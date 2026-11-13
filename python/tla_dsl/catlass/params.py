@@ -53,6 +53,28 @@ class AtomicMode(enum.Enum):
         return self.value
 
 
+class CachePolicy(enum.Enum):
+    """L2 cache hint for GM-side ``tla.copy`` (``SetL2CacheHint``).
+
+    Prefer ``tla.copy(..., cache_policy=CachePolicy.DISABLE)``. Integer codes match
+    the trailing ``i64`` on GM-side BC copy stubs: DISABLE=0, NORMAL=1.
+    """
+
+    DISABLE = "disable"
+    NORMAL = "normal"
+
+    def __str__(self) -> str:
+        return self.value
+
+    @property
+    def abi_value(self) -> int:
+        """Integer passed through the BC copy ABI / CachePolicy encoding."""
+        return {
+            CachePolicy.DISABLE: 0,
+            CachePolicy.NORMAL: 1,
+        }[self]
+
+
 class RegPart(enum.Enum):
     """Register half selection."""
 

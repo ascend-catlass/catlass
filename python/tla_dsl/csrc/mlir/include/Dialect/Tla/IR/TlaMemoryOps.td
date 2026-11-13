@@ -34,6 +34,11 @@ def Tla_CopyOp : Tla_Op<"copy", []> {
 
     The atomic operation is enabled if ``atomic_mode`` provided, and currently only ``AtomicMode.ADD`` is supported, which is lowered to HIVM ``SetAtomicOp``
 
+    ``src_cache_policy`` / ``dst_cache_policy`` carry a ``SetL2CacheHint`` for the
+    GM endpoint of the copy (default NORMAL). Frontend entry is
+    ``tla.copy(..., cache_policy=)``; both attrs lower to a trailing ``i64``
+    on the GM-side BC stub.
+
     A microscaling (MX) L1->L0A/L0B load is ``tla.copy_mx``, which carries the
     operand's e8m0 scale block. The frontend spells that as ``tla.copy`` with a
     ``scale=`` argument, mirroring AscendC's five-argument ``LoadData``, but it
@@ -42,7 +47,9 @@ def Tla_CopyOp : Tla_Op<"copy", []> {
   let arguments = (ins
     Tla_TensorType:$dst, Tla_TensorType:$src,
     Optional<AnyTypeOf<[Tla_CopyL0C2DstParamsType]>>:$params,
-    OptionalAttr<Tla_AtomicModeAttr>:$atomic_mode);
+    OptionalAttr<Tla_AtomicModeAttr>:$atomic_mode,
+    OptionalAttr<Tla_CachePolicyAttr>:$src_cache_policy,
+    OptionalAttr<Tla_CachePolicyAttr>:$dst_cache_policy);
   let assemblyFormat = [{
     $dst `,` $src (`,` $params^)? attr-dict `:` qualified(type($dst)) `,` qualified(type($src)) (`,` qualified(type($params))^)?
   }];

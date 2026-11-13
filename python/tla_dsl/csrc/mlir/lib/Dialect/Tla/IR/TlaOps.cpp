@@ -1856,6 +1856,12 @@ mlir::LogicalResult CopyOp::verify()
                 "f32, f16, bf16, i32, i16, i8");
     }
 
+    // L2 cache hints only apply to the GM endpoint of a copy.
+    if (getSrcCachePolicyAttr() && src != AddressSpace::gm)
+        return emitOpError("src_cache_policy requires src to be in GM address space");
+    if (getDstCachePolicyAttr() && dst != AddressSpace::gm)
+        return emitOpError("dst_cache_policy requires dst to be in GM address space");
+
     return mlir::success();
 }
 

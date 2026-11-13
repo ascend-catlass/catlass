@@ -26,7 +26,7 @@ after Constraints.
 Prototype:
 
 ```python
-tla.copy(dst: Tensor, src: Tensor, params: CopyParams | None = None, *, scale: Tensor | None = None) -> None
+tla.copy(dst: Tensor, src: Tensor, params: CopyParams | None = None, *, scale: Tensor | None = None, cache_policy: CachePolicy | None = None) -> None
 ```
 
 Parameters:
@@ -39,6 +39,12 @@ Parameters:
   L1→L0A/L0B MX load. Stored as `i8`/`u8`; destination tag is
   `tla.arch.zZMxScale` (L0A) or `tla.arch.nNMxScale` (L0B).
   Default `None`.
+- `cache_policy` (`CachePolicy | None`): Optional L2 cache hint for the
+  GM endpoint of this copy (`DISABLE` / `NORMAL`). On `GM→*` routes it
+  tags the GM src; on `*→GM` routes it tags the GM dst. There is no
+  GM→GM copy route. Default `None` (omit the hint; BC uses NORMAL).
+  On non-GM routes any explicit value (including `NORMAL`) is rejected;
+  omit the argument instead.
 
 Constraints:
 
@@ -185,6 +191,11 @@ Example:
 # --- 1) Aligned GM ↔ UB (RowMajor, 32B-friendly) ---
 with tla.vector():
     tla.copy(dst=x_ub, src=x_gm)
+    tla.copy(
+        dst=x_ub,
+        src=x_gm,
+        cache_policy=tla.params.CachePolicy.DISABLE,
+    )  # optional L2 hint on GM src
     tla.copy(dst=y_gm, src=y_ub)
 
 # --- 2) ND → zN: GM RowMajor → L1 zN ---

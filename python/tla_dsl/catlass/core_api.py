@@ -163,6 +163,7 @@ from .types import (
 )
 from .params import (
     AtomicMode,
+    CachePolicy,
     RegPart,
     RegSlot,
     HF32Mode,
@@ -2113,6 +2114,31 @@ def _register_tla_tensor_metadata(
     if st is None:
         return
     st.tensor_metadata_by_value[value] = metadata
+
+
+def _resolve_copy_l2_cache_policies(
+    route: tuple[str, str],
+    cache_policy: CachePolicy | None,
+) -> tuple[CachePolicy, CachePolicy]:
+    """Map optional ``cache_policy`` onto GM copy endpoints."""
+    if cache_policy is None:
+        return CachePolicy.NORMAL, CachePolicy.NORMAL
+    if not isinstance(cache_policy, CachePolicy):
+        raise TypeError(
+            "copy cache_policy expects tla.params.CachePolicy, "
+            f"got {type(cache_policy).__name__}"
+        )
+    src_is_gm = route[0] == "gm"
+    dst_is_gm = route[1] == "gm"
+    if not src_is_gm and not dst_is_gm:
+        raise TlaLoweringError(
+            "copy cache_policy requires a GM src and/or dst endpoint, "
+            f"got route {route[0]}->{route[1]}"
+        )
+    return (
+        cache_policy if src_is_gm else CachePolicy.NORMAL,
+        cache_policy if dst_is_gm else CachePolicy.NORMAL,
+    )
 
 
 def _tensor_metadata_field(value: mlir_ir.Value, field: str) -> Any:
@@ -6390,6 +6416,7 @@ def copy(
     params: CopyParams | None = None,
     *,
     scale: Tensor | None = None,
+    cache_policy: CachePolicy | None = None,
     loc: mlir_ir.Location | None = None,
 ) -> None:
     """Directory: Data Movement
@@ -6406,6 +6433,12 @@ def copy(
           L1→L0A/L0B MX load. Stored as `i8`/`u8`; destination tag is
           `tla.arch.zZMxScale` (L0A) or `tla.arch.nNMxScale` (L0B).
           Default `None`.
+        - `cache_policy` (`CachePolicy | None`): Optional L2 cache hint for the
+          GM endpoint of this copy (`DISABLE` / `NORMAL`). On `GM→*` routes it
+          tags the GM src; on `*→GM` routes it tags the GM dst. There is no
+          GM→GM copy route. Default `None` (omit the hint; BC uses NORMAL).
+          On non-GM routes any explicit value (including `NORMAL`) is rejected;
+          omit the argument instead.
 
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function.
@@ -6463,6 +6496,11 @@ def copy(
         # --- 1) Aligned GM ↔ UB (RowMajor, 32B-friendly) ---
         with tla.vector():
             tla.copy(dst=x_ub, src=x_gm)
+            tla.copy(
+                dst=x_ub,
+                src=x_gm,
+                cache_policy=tla.params.CachePolicy.DISABLE,
+            )  # optional L2 hint on GM src
             tla.copy(dst=y_gm, src=y_ub)
 
         # --- 2) ND → zN: GM RowMajor → L1 zN ---
@@ -6785,7 +6823,22 @@ def copy(
             f"#tla.atomic_mode<{atomic_mode.value}>", context=ctx
         )
 
+    # L2 cache hints via copy(cache_policy=...). Non-NORMAL values become
+    # optional copy attrs so lowering can append the BC gmCachePolicy operand.
+    ctx = loc.context if loc is not None else mlir_ir.Context.current
+    src_cache_policy, dst_cache_policy = _resolve_copy_l2_cache_policies(
+        _route, cache_policy
+    )
     copy_attrs: dict[str, Any] = {}
+    # Non-NORMAL policies are only returned for GM endpoints by the helper above.
+    if src_cache_policy != CachePolicy.NORMAL:
+        copy_attrs["src_cache_policy"] = mlir_ir.Attribute.parse(
+            f"#tla.cache_policy<{src_cache_policy.value}>", context=ctx
+        )
+    if dst_cache_policy != CachePolicy.NORMAL:
+        copy_attrs["dst_cache_policy"] = mlir_ir.Attribute.parse(
+            f"#tla.cache_policy<{dst_cache_policy.value}>", context=ctx
+        )
 
     # A scale operand turns this into the MX L1 -> L0A/L0B load. Only that route
     # can carry one, and the scale's storage and tag must match the destination

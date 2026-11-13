@@ -84,11 +84,17 @@ CATLASS_DEVICE uint32_t elementCount(memref_t<T, Dim>* memref)
     return n;
 }
 
+/// CachePolicy integer codes for SetL2CacheHint (DISABLE=0, NORMAL=1).
+/// Matches the trailing i64 on GM-side BC copy stubs and Tla CachePolicyAttr.
+constexpr int64_t kCachePolicyNormal = 1;
+
 template <typename T>
-CATLASS_DEVICE AscendC::GlobalTensor<T> makeGlobalTensor(__gm__ T* ptr)
+CATLASS_DEVICE AscendC::GlobalTensor<T> makeGlobalTensor(__gm__ T* ptr, int64_t cachePolicy = kCachePolicyNormal)
 {
     AscendC::GlobalTensor<T> tensor;
     tensor.SetGlobalBuffer(ptr);
+    // Tag the GM address with the L2 hint (bit60+). NORMAL clears the tag.
+    tensor.SetL2CacheHint(static_cast<AscendC::CacheMode>(cachePolicy));
     return tensor;
 }
 
@@ -201,22 +207,23 @@ CATLASS_DEVICE auto makeL0CTlaLayout(const TensorDesc& desc)
 // ---------------------------------------------------------------------------
 
 template <LayoutTag Tag, typename T>
-CATLASS_DEVICE auto makeGMTensor(memref_t<__gm__ T, 2>* memref, const TensorDesc& desc)
+CATLASS_DEVICE auto makeGMTensor(
+    memref_t<__gm__ T, 2>* memref, const TensorDesc& desc, int64_t cachePolicy = kCachePolicyNormal)
 {
     if constexpr (Tag == LayoutTag::RowMajor) {
         return tla::MakeTensor(
-            makeGlobalTensor(basePtr(memref)), makeRowMajorTlaLayout<T>(desc), makeTlaTileCoord(desc),
+            makeGlobalTensor(basePtr(memref), cachePolicy), makeRowMajorTlaLayout<T>(desc), makeTlaTileCoord(desc),
             Catlass::Arch::PositionGM{});
     } else if constexpr (Tag == LayoutTag::ColumnMajor) {
         return tla::MakeTensor(
-            makeGlobalTensor(basePtr(memref)), makeColumnMajorTlaLayout(desc), makeTlaTileCoord(desc),
+            makeGlobalTensor(basePtr(memref), cachePolicy), makeColumnMajorTlaLayout(desc), makeTlaTileCoord(desc),
             Catlass::Arch::PositionGM{});
     } else if constexpr (Tag == LayoutTag::VectorLayout) {
         // VectorLayout is the flat tag: rank-1, so the VectorLayout
         // TileCopyTla specialization matches it directly.
         return tla::MakeTensor(
-            makeGlobalTensor(basePtr(memref)), makeVectorTlaLayout(desc), tla::MakeCoord(makeVectorTlaCoord(desc)),
-            Catlass::Arch::PositionGM{});
+            makeGlobalTensor(basePtr(memref), cachePolicy), makeVectorTlaLayout(desc),
+            tla::MakeCoord(makeVectorTlaCoord(desc)), Catlass::Arch::PositionGM{});
     } else if constexpr (Tag == LayoutTag::zN) {
         // A GM tile that already sits in zN fractal order. The layout constructor
         // is the same one the L1 side uses, so the copy is a plain block move
@@ -229,7 +236,7 @@ CATLASS_DEVICE auto makeGMTensor(memref_t<__gm__ T, 2>* memref, const TensorDesc
         // A tight M axis belongs to the UB -> L1 route, where the source tile is
         // built in UB and its pitch is the vector unit's business.
         return tla::MakeTensor(
-            makeGlobalTensor(basePtr(memref)), makezNTlaLayout<T>(desc), makeTlaTileCoord(desc),
+            makeGlobalTensor(basePtr(memref), cachePolicy), makezNTlaLayout<T>(desc), makeTlaTileCoord(desc),
             Catlass::Arch::PositionGM{});
     } else if constexpr (Tag == LayoutTag::nZ) {
         // The transposed mirror: the GM tile already sits in the (C0-row,
@@ -245,7 +252,7 @@ CATLASS_DEVICE auto makeGMTensor(memref_t<__gm__ T, 2>* memref, const TensorDesc
         // because the copy steps whole row groups and the last one moves its full
         // C0 rows.
         return tla::MakeTensor(
-            makeGlobalTensor(basePtr(memref)), makenZTlaLayout<T>(desc), makeTlaTileCoord(desc),
+            makeGlobalTensor(basePtr(memref), cachePolicy), makenZTlaLayout<T>(desc), makeTlaTileCoord(desc),
             Catlass::Arch::PositionGM{});
     } else if constexpr (Tag == LayoutTag::zNUnAlign) {
         // A feature map in NC1HWC0: ((hw, 1), (C0, c1)) with the c1 leaf at the
@@ -256,7 +263,7 @@ CATLASS_DEVICE auto makeGMTensor(memref_t<__gm__ T, 2>* memref, const TensorDesc
         // tla.experimental.img2col and lands on an L1 zNUnAlign tile, not on an
         // L1 zN one -- which is why both tags exist on the GM side.
         return tla::MakeTensor(
-            makeGlobalTensor(basePtr(memref)), makezNUnAlignTlaLayout<T>(desc), makeTlaTileCoord(desc),
+            makeGlobalTensor(basePtr(memref), cachePolicy), makezNUnAlignTlaLayout<T>(desc), makeTlaTileCoord(desc),
             Catlass::Arch::PositionGM{});
     } else {
         static_assert(
@@ -356,9 +363,10 @@ CATLASS_DEVICE auto makeMxScalenNTlaLayout(const TensorDesc& desc)
 // same rows / groups / pitch values the old reconstruction used, just at
 // different slots.
 template <LayoutTag Tag>
-CATLASS_DEVICE auto makeGMMxScaleTensor(memref_t<__gm__ uint8_t, 2>* memref, const TensorDesc& desc)
+CATLASS_DEVICE auto makeGMMxScaleTensor(
+    memref_t<__gm__ uint8_t, 2>* memref, const TensorDesc& desc, int64_t cachePolicy = kCachePolicyNormal)
 {
-    auto g = makeGlobalTensor(reinterpret_cast<__gm__ float8_e8m0_t*>(basePtr(memref)));
+    auto g = makeGlobalTensor(reinterpret_cast<__gm__ float8_e8m0_t*>(basePtr(memref)), cachePolicy);
     constexpr uint32_t C0 = 2; // e8m0 scale C0, fixed by the format
     const auto origin = tla::MakeShape(desc.originShape0, desc.originShape1);
     const auto coord = makeTlaTileCoord(desc);
@@ -482,12 +490,13 @@ CATLASS_DEVICE auto makeUBFp4Tensor(memref_t<__ubuf__ int8_t, 1>* memref, const 
 }
 
 template <typename TFp4, LayoutTag Tag>
-CATLASS_DEVICE auto makeGMFp4Tensor(memref_t<__gm__ int8_t, 2>* memref, const TensorDesc& desc)
+CATLASS_DEVICE auto makeGMFp4Tensor(
+    memref_t<__gm__ int8_t, 2>* memref, const TensorDesc& desc, int64_t cachePolicy = kCachePolicyNormal)
 {
     static_assert(
         Tag == LayoutTag::RowMajor || Tag == LayoutTag::ColumnMajor,
         "GM fp4 tile supports RowMajor / ColumnMajor only");
-    auto g = makeGlobalTensor(reinterpret_cast<__gm__ TFp4*>(basePtr(memref)));
+    auto g = makeGlobalTensor(reinterpret_cast<__gm__ TFp4*>(basePtr(memref)), cachePolicy);
     if constexpr (Tag == LayoutTag::ColumnMajor) {
         return tla::MakeTensor(g, makeColumnMajorTlaLayout(desc), makeTlaTileCoord(desc), Catlass::Arch::PositionGM{});
     } else {

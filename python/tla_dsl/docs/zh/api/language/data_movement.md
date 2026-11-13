@@ -27,7 +27,7 @@ Do not regenerate this file from a glossary.
 函数原型：
 
 ```python
-tla.copy(dst: Tensor, src: Tensor, params: CopyParams | None = None, *, scale: Tensor | None = None) -> None
+tla.copy(dst: Tensor, src: Tensor, params: CopyParams | None = None, *, scale: Tensor | None = None, cache_policy: CachePolicy | None = None) -> None
 ```
 
 参数说明：
@@ -39,6 +39,10 @@ tla.copy(dst: Tensor, src: Tensor, params: CopyParams | None = None, *, scale: T
 - `scale`（`Tensor | None`）：L1 上的 OCP `e8m0` 共享指数 tile，用于
   L1→L0A/L0B 的 MX load。以 `i8`/`u8` 存储；目的为 L0A 时 tag
   `tla.arch.zZMxScale`，为 L0B 时 tag `tla.arch.nNMxScale`。默认 `None`。
+- `cache_policy`（`CachePolicy | None`）：可选的 L2 缓存提示，作用于本次
+  copy 的 GM 端点（`DISABLE` / `NORMAL`）。`GM→*` 打在 GM 源上，`*→GM` 打在
+  GM 目的上；不存在 GM→GM 拷贝路由。默认 `None`（省略 hint，BC 使用
+  NORMAL）。非 GM 路由上显式传入任意值（含 `NORMAL`）都会报错，应省略该参数。
 
 约束说明：
 
