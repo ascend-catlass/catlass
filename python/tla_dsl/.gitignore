@@ -1,2 +1,5 @@
 # Runtime compilation artifacts
 artifacts/
+
+# BC cache lock inside tests/.cache (kept on purpose, never unlinked)
+tests/.cache/bc.lock

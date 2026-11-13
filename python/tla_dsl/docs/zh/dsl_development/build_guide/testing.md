@@ -11,11 +11,25 @@ cd /path/to/catlass/python/tla_dsl
 python -m pytest -q tests
 ```
 
+默认复用 `tests/.cache` 中已编译的 BC 与 kernel 产物。需要清空缓存并重新编译 BC 时传入 `--clean`，重编完成后开始测试。
+
 运行单个测试文件时使用相同入口，例如：
 
 ```bash
 python -m pytest -q tests/test_frontend_lowering.py
 ```
+
+按测试文件分发到多个 worker 并行执行：
+
+```bash
+python -m pytest -q tests -n 8 --dist loadfile
+python -m pytest -q tests -n 8 --dist loadfile --clean
+```
+
+- `-n 8` 指定 worker 数，可按机器核数调整；`-n auto` 使用全部 CPU 核。
+- `--dist loadfile` (可选)以测试文件为单位分发：同一文件内的用例仍在同一个 worker 中顺序执行，文件级共享状态不会跨 worker 干扰。
+- 多个 worker 共享 `tests/.cache`，BC 编译缓存由文件锁串行化；冷缓存下的首次运行需按文件逐个完成编译。
+- `--clean` 由 xdist 的 controller 进程在测试开始前清理一次，worker 复用重建后的缓存。
 
 ## lit test：TLA IR 降级到 NPUIR
 
@@ -65,6 +79,7 @@ bash tests/run_dsl_test.sh --device 0
 ```
 
 该脚本会加载 CANN、检查 AscendNPU-IR、构建 Python，并运行 `tests/dsl_battery` 上板回归测试。
+`tests/dsl_battery` 内的用例串行执行，不使用 `pytest-xdist`，也不使用 `-n` 参数。
 
 常用变量如下：
 

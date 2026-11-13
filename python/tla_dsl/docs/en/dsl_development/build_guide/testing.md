@@ -11,11 +11,27 @@ cd /path/to/catlass/python/tla_dsl
 python -m pytest -q tests
 ```
 
+By default the compiled BC and kernel artifacts in `tests/.cache` are reused. Pass `--clean` to wipe the cache and rebuild the BC; testing starts once the rebuild completes.
+
 Use the same entry point to run a single test file, for example:
 
 ```bash
 python -m pytest -q tests/test_frontend_lowering.py
 ```
+
+### Parallel Runs
+
+Distribute test files across workers to run them in parallel:
+
+```bash
+python -m pytest -q tests -n 8 --dist loadfile
+python -m pytest -q tests -n 8 --dist loadfile --clean
+```
+
+- `-n 8` sets the worker count; adjust it to the machine's core count, or use `-n auto` to use all CPU cores.
+- `--dist loadfile` (optional)distributes work per test file: cases in the same file still run sequentially in one worker, so file-level shared state does not interfere across workers.
+- All workers share `tests/.cache`, and the BC compilation cache is serialized by a file lock; a cold-cache first run compiles each file in turn.
+- `--clean` is performed once by the xdist controller before the tests start, and the workers reuse the rebuilt cache.
 
 ## lit test: TLA IR Lowering to NPUIR
 
@@ -65,6 +81,7 @@ bash tests/run_dsl_test.sh --device 0
 ```
 
 The script loads CANN, checks AscendNPU-IR, builds CATLASS Python and runs the on-device regression tests in `tests/dsl_battery`.
+The `tests/dsl_battery` suite runs serially without `pytest-xdist`, so `-n` is not used there.
 
 Common variables are as follows:
 

@@ -35,6 +35,7 @@ dependencies:
       - absl-py
       # dev/test
       - pytest
+      - pytest-xdist
       - ruff
       - black
       - mypy

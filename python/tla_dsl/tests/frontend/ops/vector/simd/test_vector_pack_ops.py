@@ -300,18 +300,6 @@ def _unpack_compile_kernel(
         tla.pipe_barrier(tla.pipes.ALL)
 
 
-@pytest.fixture(scope="module")
-def vector_pack_compile_cache(tmp_path_factory):
-    from catlass.bc_compile import init
-
-    # Existing aggregates are reused by init(). Compile the new stub in a
-    # fresh directory, even when running from a dirty source checkout.
-    cache_root = tmp_path_factory.mktemp("vector_pack_compile")
-    bc_dir = init(cache_dir=cache_root / "bc")
-    assert (bc_dir / "pack_reg.aiv.c310.bc").is_file()
-    return cache_root
-
-
 def _compile_inputs(src_dtype, dst_dtype):
     src_bits = int(src_dtype.dtype[1:])
     dst_bits = int(dst_dtype.dtype[1:])
@@ -335,9 +323,9 @@ def _compile_inputs(src_dtype, dst_dtype):
 @pytest.mark.parametrize(("src_dtype", "dst_dtype"), _PACK_VECTOR_PAIRS)
 @pytest.mark.parametrize("part", [tla.RegPart.LOW, tla.RegPart.HIGH])
 def test_pack_vector_compiles_to_kernel_object(
-    vector_pack_compile_cache, monkeypatch, src_dtype, dst_dtype, part
+    require_bc, src_dtype, dst_dtype, part
 ) -> None:
-    monkeypatch.setenv("CATLASS_DSL_CACHE_DIR", str(vector_pack_compile_cache))
+    del require_bc  # reuse the shared session BC cache, never rebuild it here
     compiled = tla.compile(
         _pack_compile_kernel,
         *_compile_inputs(src_dtype, dst_dtype),
@@ -351,9 +339,9 @@ def test_pack_vector_compiles_to_kernel_object(
 @pytest.mark.parametrize(("src_dtype", "dst_dtype"), _UNPACK_PAIRS)
 @pytest.mark.parametrize("part", [tla.RegPart.LOW, tla.RegPart.HIGH])
 def test_unpack_compiles_to_kernel_object(
-    vector_pack_compile_cache, monkeypatch, src_dtype, dst_dtype, part
+    require_bc, src_dtype, dst_dtype, part
 ) -> None:
-    monkeypatch.setenv("CATLASS_DSL_CACHE_DIR", str(vector_pack_compile_cache))
+    del require_bc  # reuse the shared session BC cache, never rebuild it here
     compiled = tla.compile(
         _unpack_compile_kernel,
         *_compile_inputs(src_dtype, dst_dtype),

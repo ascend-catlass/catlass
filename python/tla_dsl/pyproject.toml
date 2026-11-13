@@ -59,6 +59,7 @@ runtime = [
 dev = [
   {include-group = "runtime"},
   "pytest",
+  "pytest-xdist",
   "lit==18.1.8",
   "ruff",
   "black",
