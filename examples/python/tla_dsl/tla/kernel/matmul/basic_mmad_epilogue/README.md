@@ -23,6 +23,7 @@
 | `matmul_add.py` | D = A×B + X |
 | `matmul_add_ub.py` | D = A×B + X |
 | `matmul_bias.py` | D = A×B + bias |
+| `matmul_gelu.py` | D = Gelu(A×B)，tanh 近似 |
 | `matmul_leaky_relu.py` | D = LeakyRelu(A×B) |
 | `matmul_sigmoid.py` | D = Sigmoid(A×B) |
 | `matmul_silu.py` | D = Silu(A×B) |
@@ -37,6 +38,7 @@
 | `X` | Input | `(m,n)` | `float16/float32` | `matmul_add.py` / `matmul_add_ub.py` 的加法输入，layout 为 `RowMajor`，数据类型与输出 `D` 一致 |
 | `bias` | Input | `(1,n)` | `float16/float32` | `matmul_bias.py` 的偏置，沿 m 轴广播，数据类型与输出 `D` 一致 |
 | `alpha` | 常量 | 标量 | `float32` | `matmul_leaky_relu.py` 的负半轴斜率，默认 `0.1` |
+| `kScale` / `kCubicCoef` | 常量 | 标量 | `float32` | `matmul_gelu.py` 的 GELU 系数，取 `1.59576912` 与 `0.044715`，与 `examples/common/golden/matmul.hpp` 中 `Gelu` 一致 |
 | `D` | Output | `(m,n)` | `float16/float32` | 融合计算结果，layout 仅支持 `RowMajor` |
 
 ## 使用范围说明
@@ -53,6 +55,7 @@
 ├── matmul_add.py
 ├── matmul_add_ub.py
 ├── matmul_bias.py
+├── matmul_gelu.py
 ├── matmul_leaky_relu.py
 ├── matmul_sigmoid.py
 ├── matmul_silu.py
@@ -65,6 +68,7 @@
 | [**`matmul_add.py`**](matmul_add.py) | 实现 `D = A@B + X` 计算功能。 |
 | [**`matmul_add_ub.py`**](matmul_add_ub.py) | 实现 `D = A@B + X` 计算功能，启用 L0C -> UB 通路将矩阵乘结果搬出到 UB。 |
 | [**`matmul_bias.py`**](matmul_bias.py) | 实现 `D = A@B + bias` 计算功能，其中 `bias` 为 `(1,n)` 向量，沿 m 轴广播。 |
+| [**`matmul_gelu.py`**](matmul_gelu.py) | 实现 `D = Gelu(A@B)` 计算功能，公式为 `x / (1 + exp(-1.59576912 * (x + 0.044715 * x^3)))`。 |
 | [**`matmul_leaky_relu.py`**](matmul_leaky_relu.py) | 实现 `D = LeakyRelu(A@B)` 计算功能，其中 `α` 默认为 `0.1`。 |
 | [**`matmul_sigmoid.py`**](matmul_sigmoid.py) | 实现 `D = Sigmoid(A@B)` 计算功能。 |
 | [**`matmul_silu.py`**](matmul_silu.py) | 实现 `D = Silu(A@B)` 计算功能。 |
@@ -76,7 +80,7 @@
 
 | 算子 | `DTYPE_A` / `DTYPE_B` | `DTYPE_C` |
 |------|-------------------|---------|
-| add, bias, leaky_relu, sigmoid, silu | f16 / bf16 / f32 | f16 或 f32 |
+| add, bias, gelu, leaky_relu, sigmoid, silu | f16 / bf16 / f32 | f16 或 f32 |
 | add_ub, tanh | f16 / bf16 / f32 | f32 |
 
 ## 使用示例
