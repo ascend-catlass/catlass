@@ -608,6 +608,9 @@ def tail_multi_core_splitk_mmad_kernel(
                             reduce_acc_chunk.store(
                                 reduce_acc_chunk.load() + reduce_src_chunk.load(),
                             )
+                        tla.local_mem_bar(
+                            tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD
+                        )
 
                     if tla.const_expr(dtype_gm_c != tla.Float32):
                         # f32→f16/bf16 cast leaves values in low-16 of each B32 slot;
@@ -651,10 +654,16 @@ def tail_multi_core_splitk_mmad_kernel(
                     tla.make_stride(n, 1),
                     origin_shape=tla.make_shape(tiles_actual, n_act),
                 )
+
+                # Convert to int64 for pointer offset explicitly
+                # to avoid address overflow for possible big shape
+                l1_tm_i64 = tla.as_numeric(_tiling.l1_tm).to(tla.Int64)
+                l1_tn_i64 = tla.as_numeric(_tiling.l1_tn).to(tla.Int64)
                 gm_out_ptr = (
                     c_base_ptr
-                    + (block_row * _tiling.l1_tm + row_off) * n
-                    + block_col * _tiling.l1_tn
+                    + (block_row.to(tla.Int64) * l1_tm_i64 + row_off.to(tla.Int64))
+                    * n.to(tla.Int64)
+                    + block_col.to(tla.Int64) * l1_tn_i64
                 )
                 ub_row_layout = tla.make_layout(
                     tla.make_shape(
