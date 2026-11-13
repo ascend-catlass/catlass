@@ -11,6 +11,9 @@
 #ifndef CATLASS_GEMM_KERNEL_TAIL_SPLITK_MATMUL_TLA_HPP
 #define CATLASS_GEMM_KERNEL_TAIL_SPLITK_MATMUL_TLA_HPP
 
+#include <limits>
+#include <type_traits>
+
 #include "catlass/catlass.hpp"
 #include "catlass/arch/resource.hpp"
 #include "catlass/arch/cross_core_sync.hpp"
@@ -45,6 +48,9 @@ public:
     static constexpr uint32_t L1_TILE_M = tla::get<0>(L1TileShape{});
     static constexpr uint32_t L1_TILE_N = tla::get<1>(L1TileShape{});
     static constexpr uint32_t L1_TILE_K = tla::get<2>(L1TileShape{});
+
+    static constexpr uint32_t MIN_K = 1025;
+    static constexpr uint32_t MAX_K = 3072;
 
     /// Parameters structure
     struct Params {
@@ -94,6 +100,32 @@ public:
 
     static bool CanImplement(const Arguments& args)
     {
+        // Keep other template users (including quantized kernels) on their original contract.
+        if constexpr (
+            std::is_same_v<ArchTag, Arch::Ascend950> && std::is_same_v<ElementA, float> &&
+            std::is_same_v<ElementB, float>) {
+            uint64_t m = args.problemShape.m();
+            uint64_t n = args.problemShape.n();
+            uint64_t k = args.problemShape.k();
+            constexpr uint64_t MAX_INDEX = std::numeric_limits<uint32_t>::max();
+            if (m == 0 || n == 0 || k < MIN_K || k > MAX_K || args.aicCoreNum == 0 || m + L1_TILE_M - 1 > MAX_INDEX ||
+                n + L1_TILE_N - 1 > MAX_INDEX) {
+                return false;
+            }
+            uint64_t blocks =
+                CeilDiv(m, static_cast<uint64_t>(L1_TILE_M)) * CeilDiv(n, static_cast<uint64_t>(L1_TILE_N));
+            if (blocks <= args.aicCoreNum || 2 * blocks >= 3 * static_cast<uint64_t>(args.aicCoreNum)) {
+                return false;
+            }
+            uint32_t tailBlocks = blocks % args.aicCoreNum;
+            uint32_t slices = args.aicCoreNum / tailBlocks;
+            uint32_t kTiles = CeilDiv(args.problemShape.k(), L1_TILE_K);
+            slices = slices < kTiles ? slices : kTiles;
+            uint64_t tasks = blocks - tailBlocks + static_cast<uint64_t>(tailBlocks) * slices;
+            uint64_t tileElements = static_cast<uint64_t>(L1_TILE_M) * L1_TILE_N;
+            return tasks <= MAX_INDEX - args.aicCoreNum && args.aicCoreNum <= MAX_INDEX / tileElements &&
+                   args.aicCoreNum <= std::numeric_limits<size_t>::max() / sizeof(ElementAccumulator) / tileElements;
+        }
         return true;
     }
 

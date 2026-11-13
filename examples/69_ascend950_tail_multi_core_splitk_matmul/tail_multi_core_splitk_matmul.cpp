@@ -36,7 +36,7 @@ using namespace tla;
 
 using Options = GemmOptions;
 
-static void Run(const Options& options)
+static int Run(const Options& options)
 {
     aclrtStream stream{nullptr};
 
@@ -73,6 +73,43 @@ static void Run(const Options& options)
     size_t sizeC = lenC * sizeof(ElementC);
     size_t sizeBias = lenBias * sizeof(ElementBiasType);
 
+    using ArchTag = Arch::Ascend950;
+    constexpr bool enableUnitFlag = true;
+    constexpr bool useHF32 = false;
+    using DispatchPolicy = Gemm::MmadPingpong<ArchTag, enableUnitFlag, useHF32>;
+    using L1TileShape = Shape<Int<256>, Int<256>, Int<128>>;
+    using L0TileShape = Shape<Int<256>, Int<256>, Int<32>>;
+
+    auto layoutA = tla::MakeLayout<ElementA, LayoutTagA>(m, k);
+    auto layoutB = tla::MakeLayout<ElementB, LayoutTagB>(k, n);
+    auto layoutC = tla::MakeLayout<ElementC, LayoutTagC>(m, n);
+
+    using TileCopy = Gemm::Tile::PackedTileCopyTla<
+        ArchTag, ElementA, LayoutTagA, ElementB, LayoutTagB, ElementC, LayoutTagC, ElementBias>;
+    using BlockMmad = Gemm::Block::BlockMmadTla<
+        DispatchPolicy, L1TileShape, L0TileShape, ElementA, ElementB, ElementC, ElementBias, TileCopy>;
+    using BlockEpilogue = void;
+    using BlockScheduler = typename Gemm::Block::TailSplitkGemmIdentityBlockSwizzle<3, 0>;
+
+    // Kernel level
+    using MatmulKernel = Gemm::Kernel::TailMultiCoreSplitkMatmulTla<BlockMmad, BlockEpilogue, BlockScheduler>;
+
+    using MatmulAdapter = Gemm::Device::DeviceGemm<MatmulKernel>;
+
+    auto aicCoreNum = platform_ascendc::PlatformAscendCManager::GetInstance()->GetCoreNumAic();
+    MatmulKernel::Arguments arguments{
+        options.problemShape, nullptr, layoutA, nullptr, layoutB, nullptr, layoutC, aicCoreNum};
+    MatmulAdapter matmul_op;
+    if (matmul_op.CanImplement(arguments) != Status::kSuccess) {
+        std::cerr << "Require positive M/N, 1025 <= K <= 3072, coreNum < blocks < 1.5*coreNum, "
+                     "and valid indexing."
+                  << std::endl;
+        ACL_CHECK(aclrtDestroyStream(stream));
+        ACL_CHECK(aclrtResetDevice(options.deviceId));
+        ACL_CHECK(aclFinalize());
+        return 1;
+    }
+
     std::vector<ElementA> hostA(lenA);
     std::vector<ElementB> hostB(lenB);
     std::vector<ElementBiasType> hostBias(lenBias);
@@ -99,36 +136,10 @@ static void Run(const Options& options)
         ACL_CHECK(aclrtMemcpy(deviceBias, sizeBias, hostBias.data(), sizeBias, ACL_MEMCPY_HOST_TO_DEVICE));
     }
 
-    // Get the number of cube cores of the current hardware
-    auto aicCoreNum = platform_ascendc::PlatformAscendCManager::GetInstance()->GetCoreNumAic();
-
-    using ArchTag = Arch::Ascend950;
-    constexpr bool enableUnitFlag = true;
-    constexpr bool useHF32 = false;
-    using DispatchPolicy = Gemm::MmadPingpong<ArchTag, enableUnitFlag, useHF32>;
-    using L1TileShape = Shape<Int<256>, Int<256>, Int<128>>;
-    using L0TileShape = Shape<Int<256>, Int<256>, Int<32>>;
-
-    auto layoutA = tla::MakeLayout<ElementA, LayoutTagA>(m, k);
-    auto layoutB = tla::MakeLayout<ElementB, LayoutTagB>(k, n);
-    auto layoutC = tla::MakeLayout<ElementC, LayoutTagC>(m, n);
-
-    using TileCopy = Gemm::Tile::PackedTileCopyTla<
-        ArchTag, ElementA, LayoutTagA, ElementB, LayoutTagB, ElementC, LayoutTagC, ElementBias>;
-    using BlockMmad = Gemm::Block::BlockMmadTla<
-        DispatchPolicy, L1TileShape, L0TileShape, ElementA, ElementB, ElementC, ElementBias, TileCopy>;
-    using BlockEpilogue = void;
-    using BlockScheduler = typename Gemm::Block::TailSplitkGemmIdentityBlockSwizzle<3, 0>;
-
-    // Kernel level
-    using MatmulKernel = Gemm::Kernel::TailMultiCoreSplitkMatmulTla<BlockMmad, BlockEpilogue, BlockScheduler>;
-
-    using MatmulAdapter = Gemm::Device::DeviceGemm<MatmulKernel>;
-
-    MatmulKernel::Arguments arguments{options.problemShape, deviceA,   layoutA, deviceB, layoutB, deviceC, layoutC,
-                                      aicCoreNum,           deviceBias};
-    MatmulAdapter matmul_op;
-    matmul_op.CanImplement(arguments);
+    arguments.ptrA = deviceA;
+    arguments.ptrB = deviceB;
+    arguments.ptrC = deviceC;
+    arguments.ptrBias = deviceBias;
 
     uint8_t* deviceWorkspace{nullptr};
     size_t sizeWorkspace = matmul_op.GetWorkspaceSize(arguments);
@@ -170,6 +181,7 @@ static void Run(const Options& options)
     ACL_CHECK(aclrtDestroyStream(stream));
     ACL_CHECK(aclrtResetDevice(options.deviceId));
     ACL_CHECK(aclFinalize());
+    return errorIndices.empty() ? 0 : 1;
 }
 
 int main(int argc, const char** argv)
@@ -178,6 +190,5 @@ int main(int argc, const char** argv)
     if (options.Parse(argc, argv) != 0) {
         return -1;
     }
-    Run(options);
-    return 0;
+    return Run(options);
 }

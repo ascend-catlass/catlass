@@ -29,14 +29,14 @@ pytestmark = pytest.mark.skipif(
 
 
 def test_ascend950_multi_core_splitk_matmul():
-    m, n, k = 256, 512, 1024
+    m, n, k = 256, 512, 2048
     a = torch.randn(m, k, dtype=torch.float32, device="npu")
     b = torch.randn(k, n, dtype=torch.float32, device="npu")
 
     result = torch_catlass.ascend950_multi_core_splitk_matmul(
         a, b, "float32", False, False, False, False
     )
-    expected = torch.matmul(a, b)
+    expected = torch.matmul(a.cpu().double(), b.cpu().double()).float().npu()
 
     assert result.shape == (m, n)
     assert result.dtype == torch.float32

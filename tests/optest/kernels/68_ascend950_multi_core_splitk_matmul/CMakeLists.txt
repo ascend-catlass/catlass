@@ -13,3 +13,16 @@ add_kernel(NAME ascend950_multi_core_splitk_matmul
     KERNEL_TYPE jit
     ${CMAKE_CURRENT_SOURCE_DIR}/multi_core_splitk_matmul.cpp
     TEMPLATE ${CMAKE_CURRENT_SOURCE_DIR}/multi_core_splitk_matmul_impl.cpp)
+
+set(_MULTI_CORE_VERIFY_BASE jit_verify_ascend950_multi_core_splitk_matmul_multi_core_splitk_matmul_impl_3510)
+set(_MULTI_CORE_SCHEDULER 30)
+if(TARGET ${_MULTI_CORE_VERIFY_BASE})
+    target_compile_definitions(${_MULTI_CORE_VERIFY_BASE} PRIVATE
+        CATLASS_JIT_ELEMENT_A=float
+        CATLASS_JIT_ELEMENT_B=float
+        CATLASS_JIT_ELEMENT_C=float
+        CATLASS_JIT_LAYOUT_A=RowMajor
+        CATLASS_JIT_LAYOUT_B=RowMajor
+        CATLASS_JIT_LAYOUT_C=RowMajor
+        CATLASS_JIT_BLOCK_SCHEDULER=${_MULTI_CORE_SCHEDULER})
+endif()

@@ -1,6 +1,6 @@
 /**
  * This program is free software, you can redistribute it and/or modify.
- * Copyright (c) 2025 Huawei Technologies Co., Ltd.
+ * Copyright (c) 2025-2026 Huawei Technologies Co., Ltd.
  * This file is a part of the CANN Open Software.
  * Licensed under CANN Open Software License Agreement Version 2.0 (the "License").
  * Please refer to the License for details. You may not use this file except in compliance with the License.
@@ -36,7 +36,7 @@ using namespace tla;
 
 using Options = GemmOptions;
 
-static void Run(const Options& options)
+static int Run(const Options& options)
 {
     aclrtStream stream{nullptr};
 
@@ -73,32 +73,6 @@ static void Run(const Options& options)
     size_t sizeC = lenC * sizeof(ElementC);
     size_t sizeBias = lenBias * sizeof(ElementBiasType);
 
-    std::vector<ElementA> hostA(lenA);
-    std::vector<ElementB> hostB(lenB);
-    std::vector<ElementBiasType> hostBias(lenBias);
-    golden::FillRandomData<ElementA>(hostA, -5.0f, 5.0f);
-    golden::FillRandomData<ElementB>(hostB, -5.0f, 5.0f);
-    if constexpr (!std::is_void_v<ElementBias>) {
-        golden::FillRandomData<ElementBiasType>(hostBias, -5.0f, 5.0f);
-    }
-
-    uint8_t* deviceA{nullptr};
-    ACL_CHECK(aclrtMalloc(reinterpret_cast<void**>(&deviceA), sizeA, ACL_MEM_MALLOC_HUGE_FIRST));
-    ACL_CHECK(aclrtMemcpy(deviceA, sizeA, hostA.data(), sizeA, ACL_MEMCPY_HOST_TO_DEVICE));
-
-    uint8_t* deviceB{nullptr};
-    ACL_CHECK(aclrtMalloc(reinterpret_cast<void**>(&deviceB), sizeB, ACL_MEM_MALLOC_HUGE_FIRST));
-    ACL_CHECK(aclrtMemcpy(deviceB, sizeB, hostB.data(), sizeB, ACL_MEMCPY_HOST_TO_DEVICE));
-
-    uint8_t* deviceC{nullptr};
-    ACL_CHECK(aclrtMalloc(reinterpret_cast<void**>(&deviceC), sizeC, ACL_MEM_MALLOC_HUGE_FIRST));
-
-    uint8_t* deviceBias{nullptr};
-    if constexpr (!std::is_void_v<ElementBias>) {
-        ACL_CHECK(aclrtMalloc(reinterpret_cast<void**>(&deviceBias), sizeBias, ACL_MEM_MALLOC_HUGE_FIRST));
-        ACL_CHECK(aclrtMemcpy(deviceBias, sizeBias, hostBias.data(), sizeBias, ACL_MEMCPY_HOST_TO_DEVICE));
-    }
-
     // Get the number of cube cores of the current hardware
     auto aicCoreNum = platform_ascendc::PlatformAscendCManager::GetInstance()->GetCoreNumAic();
 
@@ -125,10 +99,47 @@ static void Run(const Options& options)
 
     using MatmulAdapter = Gemm::Device::DeviceGemm<MatmulKernel>;
 
-    MatmulKernel::Arguments arguments{options.problemShape, deviceA,   layoutA, deviceB, layoutB, deviceC, layoutC,
-                                      aicCoreNum,           deviceBias};
+    MatmulKernel::Arguments arguments{
+        options.problemShape, nullptr, layoutA, nullptr, layoutB, nullptr, layoutC, aicCoreNum};
     MatmulAdapter matmul_op;
-    matmul_op.CanImplement(arguments);
+    if (matmul_op.CanImplement(arguments) != Status::kSuccess) {
+        std::cerr << "Require positive M/N, 1025 <= K <= 3072, blocks <= coreNum/2, and valid indexing." << std::endl;
+        ACL_CHECK(aclrtDestroyStream(stream));
+        ACL_CHECK(aclrtResetDevice(options.deviceId));
+        ACL_CHECK(aclFinalize());
+        return 1;
+    }
+
+    std::vector<ElementA> hostA(lenA);
+    std::vector<ElementB> hostB(lenB);
+    std::vector<ElementBiasType> hostBias(lenBias);
+    golden::FillRandomData<ElementA>(hostA, -5.0f, 5.0f);
+    golden::FillRandomData<ElementB>(hostB, -5.0f, 5.0f);
+    if constexpr (!std::is_void_v<ElementBias>) {
+        golden::FillRandomData<ElementBiasType>(hostBias, -5.0f, 5.0f);
+    }
+
+    uint8_t* deviceA{nullptr};
+    ACL_CHECK(aclrtMalloc(reinterpret_cast<void**>(&deviceA), sizeA, ACL_MEM_MALLOC_HUGE_FIRST));
+    ACL_CHECK(aclrtMemcpy(deviceA, sizeA, hostA.data(), sizeA, ACL_MEMCPY_HOST_TO_DEVICE));
+
+    uint8_t* deviceB{nullptr};
+    ACL_CHECK(aclrtMalloc(reinterpret_cast<void**>(&deviceB), sizeB, ACL_MEM_MALLOC_HUGE_FIRST));
+    ACL_CHECK(aclrtMemcpy(deviceB, sizeB, hostB.data(), sizeB, ACL_MEMCPY_HOST_TO_DEVICE));
+
+    uint8_t* deviceC{nullptr};
+    ACL_CHECK(aclrtMalloc(reinterpret_cast<void**>(&deviceC), sizeC, ACL_MEM_MALLOC_HUGE_FIRST));
+
+    uint8_t* deviceBias{nullptr};
+    if constexpr (!std::is_void_v<ElementBias>) {
+        ACL_CHECK(aclrtMalloc(reinterpret_cast<void**>(&deviceBias), sizeBias, ACL_MEM_MALLOC_HUGE_FIRST));
+        ACL_CHECK(aclrtMemcpy(deviceBias, sizeBias, hostBias.data(), sizeBias, ACL_MEMCPY_HOST_TO_DEVICE));
+    }
+
+    arguments.ptrA = deviceA;
+    arguments.ptrB = deviceB;
+    arguments.ptrC = deviceC;
+    arguments.ptrBias = deviceBias;
 
     uint8_t* deviceWorkspace{nullptr};
     size_t sizeWorkspace = matmul_op.GetWorkspaceSize(arguments);
@@ -170,6 +181,7 @@ static void Run(const Options& options)
     ACL_CHECK(aclrtDestroyStream(stream));
     ACL_CHECK(aclrtResetDevice(options.deviceId));
     ACL_CHECK(aclFinalize());
+    return errorIndices.empty() ? 0 : 1;
 }
 
 int main(int argc, const char** argv)
@@ -178,6 +190,5 @@ int main(int argc, const char** argv)
     if (options.Parse(argc, argv) != 0) {
         return -1;
     }
-    Run(options);
-    return 0;
+    return Run(options);
 }

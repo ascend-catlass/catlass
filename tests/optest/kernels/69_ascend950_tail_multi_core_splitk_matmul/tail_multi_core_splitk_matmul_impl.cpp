@@ -13,6 +13,8 @@
 #define K_MAX_SHAPE_DIM 0
 #endif
 
+#include <stdexcept>
+
 #include "catlass/arch/arch.hpp"
 #include "catlass/catlass.hpp"
 #include "catlass/gemm/block/block_mmad.hpp"
@@ -109,6 +111,12 @@ extern "C" void run(uint32_t blockNum, aclrtStream stream, const CatlassKernel::
         params->inputAddr[1], layoutB,
         params->outputAddr[0], layoutC,
         blockNum};
+
+    if (!MatmulKernel::CanImplement(arguments)) {
+        throw std::runtime_error(
+            "tail split-K requires positive M/N, 1025 <= K <= 3072, "
+            "coreNum < blocks < 1.5*coreNum, and valid indexing");
+    }
 
     Catlass::RunKernel<MatmulKernel>(arguments, stream, blockNum);
 }
