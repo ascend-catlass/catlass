@@ -7,7 +7,7 @@ import pytest
 from catlass._mlir import ir as mlir_ir
 
 import catlass.tla as tla
-import catlass.runtime as runtime_mod
+import catlass.runtime as runtime_mod  # noqa: F401
 from catlass.base_dsl import BaseDSL
 
 

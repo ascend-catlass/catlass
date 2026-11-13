@@ -6,7 +6,7 @@ from catlass.tla.runtime import make_fake_tensor
 import pytest
 
 import catlass.tla as tla
-import catlass.runtime as runtime_mod
+import catlass.runtime as runtime_mod  # noqa: F401
 
 
 # --- Frontend IR emission -----------------------------------------------------
@@ -33,12 +33,12 @@ def ptr_extract_kernel(mem_in: tla.Tensor) -> None:
 
 def _host_mem():
     return make_fake_tensor(
-               tla.Float32,
-               (16, 16),
-               (16, 1),
-               origin_shape=(16, 16),
-               layout_tag=tla.arch.RowMajor,
-           )
+        tla.Float32,
+        (16, 16),
+        (16, 1),
+        origin_shape=(16, 16),
+        layout_tag=tla.arch.RowMajor,
+    )
 
 
 def test_ptr_emits_tensor_ptr_and_ptr_add() -> None:

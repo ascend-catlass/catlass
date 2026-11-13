@@ -9,7 +9,7 @@ import pytest
 
 import catlass.tla as tla
 from catlass.execution_lowering import UnsupportedExecutionLowering
-import catlass.runtime as runtime_mod
+import catlass.runtime as runtime_mod  # noqa: F401
 
 
 def _vector_tensor(dtype: type[tla.Numeric] = tla.Float32) -> tla.Tensor:
@@ -147,7 +147,11 @@ def test_vector_unary_missing_operand_is_rejected() -> None:
 @pytest.mark.parametrize(
     "kernel, dtype, match",
     (
-        (unary_float_on_int_kernel, tla.Int32, "tla.exp requires f16 or f32 element type"),
+        (
+            unary_float_on_int_kernel,
+            tla.Int32,
+            "tla.exp requires f16 or f32 element type",
+        ),
         (
             unary_bf16_exp_kernel,
             tla.BFloat16,

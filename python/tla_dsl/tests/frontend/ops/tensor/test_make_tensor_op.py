@@ -6,7 +6,7 @@ from catlass.tla.runtime import make_fake_tensor
 import pytest
 
 import catlass.tla as tla
-import catlass.runtime as runtime_mod
+import catlass.runtime as runtime_mod  # noqa: F401
 from catlass.execution_lowering import TlaLoweringError
 
 
@@ -17,8 +17,7 @@ from catlass.execution_lowering import TlaLoweringError
 def make_tensor_makeptr_kernel() -> None:
     ptr = tla.make_ptr(tla.Float32, 4096, mem_space=tla.AddressSpace.l1)
     local = tla.make_tensor(
-        ptr,
-        tla.make_layout(tla.make_shape(16, 16), tla.make_stride(16, 1))
+        ptr, tla.make_layout(tla.make_shape(16, 16), tla.make_stride(16, 1))
     )
     _ = local
 
@@ -90,17 +89,16 @@ def test_make_tensor_emits_op_with_explicit_coord() -> None:
 
 def test_make_tensor_coord_defaults_to_zero_matching_rank() -> None:
     mem = make_fake_tensor(
-              tla.Float32,
-              (16, 16),
-              (16, 1),
-              origin_shape=(16, 16),
-              layout_tag=tla.arch.RowMajor,
-          )
+        tla.Float32,
+        (16, 16),
+        (16, 1),
+        origin_shape=(16, 16),
+        layout_tag=tla.arch.RowMajor,
+    )
     mlir = make_tensor_default_coord_kernel.dump_mlir(type_args=(mem,))
     assert "tla.make_tensor" in mlir
     # rank-2 layout -> default coord is (0, 0).
     assert "!tla.coord<0,0>" in mlir
-
 
 
 def test_make_tensor_rank1_default_coord_is_single_zero() -> None:
@@ -234,12 +232,3 @@ def test_make_tensor_rank1_dynamic_extent_emits_tlair() -> None:
 
 
 # --- Preconditions ------------------------------------------------------------
-
-
-
-
-
-
-
-
-

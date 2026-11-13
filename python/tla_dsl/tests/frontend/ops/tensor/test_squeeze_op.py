@@ -6,7 +6,7 @@ from catlass.tla.runtime import make_fake_tensor
 
 
 import catlass.tla as tla
-import catlass.runtime as runtime_mod
+import catlass.runtime as runtime_mod  # noqa: F401
 
 
 def _vector_tensor_pair() -> tuple[tla.Tensor, tla.Tensor]:

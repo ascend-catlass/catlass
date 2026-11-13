@@ -6,7 +6,7 @@ from catlass.tla.runtime import make_fake_tensor
 import pytest
 
 import catlass.tla as tla
-import catlass.runtime as runtime_mod
+import catlass.runtime as runtime_mod  # noqa: F401
 from catlass.core_api import MaskSSA
 
 
@@ -51,7 +51,6 @@ def scalar_cmp_i64_kernel(lhs: tla.Tensor) -> None:
         with tla.vec.func(mode="simd"):
             lhs_reg = lhs_tile.load()
             _ = tla.cmp(lhs_reg, 0, "gt")
-
 
 
 @tla.kernel
@@ -205,7 +204,9 @@ def test_cmp_rejects_unsupported_dtype() -> None:
         scalar_cmp_i64_kernel.dump_mlir(type_args=(tensor,))
 
 
-@pytest.mark.parametrize("dtype,shape", [(tla.UInt8, 256), (tla.UInt16, 128), (tla.UInt32, 64)])
+@pytest.mark.parametrize(
+    "dtype,shape", [(tla.UInt8, 256), (tla.UInt16, 128), (tla.UInt32, 64)]
+)
 def test_cmp_accepts_unsigned_element_types(dtype, shape: int) -> None:
     tensor = _vector_tensor(shape=shape, dtype=dtype)
     mlir = cmp_kernel.dump_mlir(type_args=(tensor, tensor))

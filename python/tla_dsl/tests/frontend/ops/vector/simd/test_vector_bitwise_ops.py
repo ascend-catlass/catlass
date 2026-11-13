@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 import catlass.tla as tla
-import catlass.runtime as runtime_mod
+import catlass.runtime as runtime_mod  # noqa: F401
 from catlass._mlir.dialects import tla as tla_ops_gen
 
 _REG_BITWISE_DTYPE: type[tla.Numeric] = tla.Int32
@@ -51,7 +51,9 @@ def _vector_ssa_bitwise_unary_kernel(src: tla.Tensor, dst: tla.Tensor) -> None:
 
 
 @tla.kernel
-def _vector_ssa_bitwise_binary_kernel(src0: tla.Tensor, src1: tla.Tensor, dst: tla.Tensor) -> None:
+def _vector_ssa_bitwise_binary_kernel(
+    src0: tla.Tensor, src1: tla.Tensor, dst: tla.Tensor
+) -> None:
     src0_tile = tla.tile_view(src0, tla.make_shape(64), tla.make_coord(0))
     src1_tile = tla.tile_view(src1, tla.make_shape(64), tla.make_coord(0))
     dst_tile = tla.tile_view(dst, tla.make_shape(64), tla.make_coord(0))
@@ -65,15 +67,18 @@ def _vector_ssa_bitwise_binary_kernel(src0: tla.Tensor, src1: tla.Tensor, dst: t
             dst_tile.store(tla.bitwise_xor(or_reg, reg1), mask=all_mask)
 
 
-def _tensor_args(dtype: type[tla.Numeric] = tla.Float32, count: int = 2) -> tuple[tla.Tensor, ...]:
+def _tensor_args(
+    dtype: type[tla.Numeric] = tla.Float32, count: int = 2
+) -> tuple[tla.Tensor, ...]:
     return tuple(
         make_fake_tensor(
             dtype,
             (64,),
-        (1,),
+            (1,),
             addrspace=tla.AddressSpace.ub,
             origin_shape=(64,),
-            layout_tag=tla.arch.RowMajor)
+            layout_tag=tla.arch.RowMajor,
+        )
         for _ in range(count)
     )
 
@@ -137,9 +142,16 @@ _REGTENSOR_BITWISE_CASES = tuple(
 )
 
 
-@pytest.mark.parametrize(("binding_name", "op_name", "dtype", "kernel", "tensor_count"), _REGTENSOR_BITWISE_CASES)
+@pytest.mark.parametrize(
+    ("binding_name", "op_name", "dtype", "kernel", "tensor_count"),
+    _REGTENSOR_BITWISE_CASES,
+)
 def test_vector_ssa_bitwise_bindings_and_public_ops_emit_mlir(
-    binding_name: str, op_name: str, dtype: type[tla.Numeric], kernel: object, tensor_count: int
+    binding_name: str,
+    op_name: str,
+    dtype: type[tla.Numeric],
+    kernel: object,
+    tensor_count: int,
 ) -> None:
     global _REG_BITWISE_DTYPE
     _REG_BITWISE_DTYPE = dtype
@@ -177,7 +189,9 @@ def _invalid_mask_bitwise_kernel(src: tla.Tensor, dst: tla.Tensor) -> None:
 
 
 def test_vector_ssa_bitwise_rejects_mixed_vector_and_mask() -> None:
-    with pytest.raises(tla.TlaCoreAPIError, match="both be MaskSSA values or both be VectorSSA"):
+    with pytest.raises(
+        tla.TlaCoreAPIError, match="both be MaskSSA values or both be VectorSSA"
+    ):
         _invalid_mixed_bitwise_kernel.dump_mlir(type_args=_tensor_args(tla.Int32, 2))
 
 

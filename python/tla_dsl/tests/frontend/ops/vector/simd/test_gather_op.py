@@ -3,12 +3,10 @@ from __future__ import annotations
 from catlass.tla.runtime import make_fake_tensor
 
 
-from typing import Any
-
 import pytest
 
 import catlass.tla as tla
-import catlass.runtime as runtime_mod
+import catlass.runtime as runtime_mod  # noqa: F401
 
 
 def _ub_tensor(dtype: type[tla.Numeric] = tla.Float32) -> tla.Tensor:
@@ -36,7 +34,9 @@ def gather_vector_kernel(src: tla.Tensor, idx_mem: tla.Tensor, dst: tla.Tensor) 
 
 
 @tla.kernel
-def gather_i64_vector_kernel(src: tla.Tensor, idx_mem: tla.Tensor, dst: tla.Tensor) -> None:
+def gather_i64_vector_kernel(
+    src: tla.Tensor, idx_mem: tla.Tensor, dst: tla.Tensor
+) -> None:
     """Kernel used to reach gather validation with the 32-lane i64 capacity."""
     src_tile = tla.tile_view(src, tla.make_shape(32), tla.make_coord(0))
     idx_tile = tla.tile_view(idx_mem, tla.make_shape(32), tla.make_coord(0))
@@ -65,7 +65,9 @@ def test_gather_op_emits_mlir() -> None:
 @pytest.mark.parametrize("index_dtype", [tla.Int16, tla.Int64])
 def test_gather_rejects_non_i32_indices(index_dtype: type[tla.Numeric]) -> None:
     """tla.gather accepts only i32 index vectors."""
-    kernel = gather_vector_kernel if index_dtype is tla.Int16 else gather_i64_vector_kernel
+    kernel = (
+        gather_vector_kernel if index_dtype is tla.Int16 else gather_i64_vector_kernel
+    )
     lanes = 64 if index_dtype is tla.Int16 else 32
     with pytest.raises(tla.TlaCoreAPIError, match="gather indices must be i32"):
         kernel.dump_mlir(
@@ -98,12 +100,12 @@ def test_gather_rejects_non_ub_src() -> None:
                 dst_tile.store(tla.gather(src_tile, indices))
 
     l0c_mem = make_fake_tensor(
-                  tla.Float32,
-                  (64,),
-                  (1,),
-                  origin_shape=(64,),
-                  layout_tag=tla.arch.RowMajor,
-              )
+        tla.Float32,
+        (64,),
+        (1,),
+        origin_shape=(64,),
+        layout_tag=tla.arch.RowMajor,
+    )
     idx_mem = _ub_tensor(tla.Int32)
     dst = _ub_tensor()
 
