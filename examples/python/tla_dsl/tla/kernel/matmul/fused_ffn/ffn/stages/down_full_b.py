@@ -61,7 +61,9 @@ def stage_down_full_b(
     del l1b1_ptr
 
     m = gm_a.origin_shape[0]
-    n = gm_b.origin_shape[1]
+    # C is always [M,N]. Linear B is GM [N,K] (isTrans); canonical B is [K,N].
+    # Never read N from gm_b.origin_shape[1] — that is K under linear.
+    n = gm_c.origin_shape[1]
     k = gm_a.origin_shape[1]
 
     l0_0_available = tla.flag("dnfb_l0_0_av", tla.arch.CUBE, tla.arch.MTE1)
@@ -125,11 +127,19 @@ def stage_down_full_b(
             tla.set_flag(l0_bias_available)
 
         tla.wait_flag(l1b_available)
-        gm_b_full = gm_l1_tile(gm_b, k, n, c0, c0)
         if tla.const_expr(B_IS_TRANS):
+            # Linear: create_tla_tensor(..., "col") exposes ColumnMajor
+            # logical (K, N) over physical contiguous [N,K]. CPP isTrans
+            # CopyInB1 Nd2Nz uses nValue=N, dValue=K, srcDValue=K —
+            # ColumnMajor→nZ reads get<1>=N, get<0>=K. Tile must be (K,N),
+            # never (N,K) (#0688 mean_rel blow-up).
+            gm_b_full = gm_l1_tile(gm_b, k, n, c0, c0)
             l1_b_full = tla.make_tensor_like(l1b_c, gm_b_full, layoutTag=tla.arch.nZ)
         else:
-            l1_b_full = tla.make_tensor_like(l1b_c, gm_b_full)
+            # Canonical RowMajor [K,N] → zN (CPP Nd2Nz nValue=K,
+            # dstNzC0Stride=Align(K,16)).
+            gm_b_full = gm_l1_tile(gm_b, k, n, c0, c0)
+            l1_b_full = tla.make_tensor_like(l1b_c, gm_b_full, layoutTag=tla.arch.zN)
         tla.copy(l1_b_full, gm_b_full)
         tla.set_flag(l1b_data_ready)
 
@@ -223,16 +233,57 @@ def stage_down_full_b(
                     else:
                         tla.wait_flag(l1_1_data_ready)
 
+                    # CPP DoBFullLoad CopyInA2/B2: fold fractal offsets into
+                    # L1 pointers (mStart=kStart=0). tile_view leaves m/kStart
+                    # nonzero → Load2D L0 OOB (same class as A-full #0031).
+                    # #0688 linear isTrans: L0B must NOT make_tensor_like(L1B)
+                    # — that inherits resident srcStride (l1_tn) as L0 dst and
+                    # writes past L0B; CPP dstStride=mStep from curNL0 only.
+                    l1a_ptr = l1a0_c if (l1_buf_idx == c0) else l1a1_c
+                    # Nd2Nz packs this L1 A tile at Align(curML1, 16). Edge
+                    # tiles are shorter than baseM (silu#0228: M=8192,
+                    # l1_tm=288 → last tile 128). Pitching K-fractals by
+                    # l1_tm reads the wrong K and blows up that M strip.
+                    cur_m = gm_a_l1.origin_shape[0]
+                    ml1_align = (cur_m + 15) // 16 * 16
                     k_l0_count = (cur_tk + l0_tk - 1) // l0_tk
                     for k_l0 in tla.range(c0, k_l0_count, c1):
-                        l1_a_k = tla.tile_view(
-                            l1_a,
-                            tla.make_shape(l1_tm, l0_tk),
-                            tla.make_coord(c0, k_l0),
-                        )
+                        # CPP CopyInB2 uses curNL0/curK0 (rem), not baseN/K.
+                        # #0604: N=257,l0_tn=128 → n_off=256 rem=1; loading
+                        # published l0_tn=128 walks past l1_tn=272 → L1 OOB.
                         n_off = (block_col * n_l0_count + n_i) * l0_tn
-                        k_off = k_l1 * l1_tk + k_l0 * l0_tk
+                        remain_n = n - n_off
+                        cur_n = l0_tn
+                        if remain_n < l0_tn:
+                            cur_n = remain_n
+                        cur_n_align = (cur_n + 15) // 16 * 16
+                        k_rel = k_l0 * l0_tk
+                        k_off = k_l1 * l1_tk + k_rel
+                        remain_k = cur_tk - k_rel
+                        cur_k = l0_tk
+                        if remain_k < l0_tk:
+                            cur_k = remain_k
+                        # CPP !isTrans A: offsetAl1 += ml1Align*baseK;
+                        # srcStride=CeilDiv(curML1,16); m/kStep from curML0/K0.
+                        nz_off_a = ml1_align * k_rel
+                        l1_a_k = tla.make_tensor(
+                            l1a_ptr + nz_off_a,
+                            tla.make_layout(
+                                tla.make_shape(
+                                    (16, l1_tm // 16),
+                                    (16, l0_tk // 16),
+                                ),
+                                tla.make_stride(
+                                    (16, 256),
+                                    (1, ml1_align * 16),
+                                ),
+                                origin_shape=tla.make_shape(cur_m, l0_tk),
+                                layoutTag=tla.arch.zN,
+                            ),
+                        )
                         if tla.const_expr(B_IS_TRANS):
+                            # B-full isTrans: L1 origin N is resident l1_tn;
+                            # rem N only affects L0 dest mStep.
                             nz_off = n_off * c0_elems + k_off * l1_tn
                             l1_b_k = tla.make_tensor(
                                 l1b_c + nz_off,
@@ -245,32 +296,70 @@ def stage_down_full_b(
                                         (1, l1_tn * c0_elems),
                                         (c0_elems, 256),
                                     ),
-                                    origin_shape=tla.make_shape(l0_tk, l0_tn),
+                                    origin_shape=tla.make_shape(l0_tk, l1_tn),
                                     layoutTag=tla.arch.nZ,
                                 ),
                             )
                         else:
+                            # !isTrans: resident zN pitch is kAlign; rem
+                            # kL0/nL0 set L0 mStep/kStep.
                             k_align = (
                                 _tiling.resident_k
                                 if _tiling.resident_k > 0
                                 else ((k + 15) // 16) * 16
                             )
                             nz_off = n_off * k_align + k_off * c0_elems
-                            l1_b_k = tla.make_tensor_like(
+                            l1_b_k = tla.make_tensor(
                                 l1b_c + nz_off,
-                                tla.tile_view(
-                                    gm_b,
-                                    tla.make_shape(l0_tk, l0_tn),
-                                    tla.make_coord(c0, c0),
+                                tla.make_layout(
+                                    tla.make_shape(
+                                        (c0_elems, l0_tk // c0_elems),
+                                        (16, l0_tn // 16),
+                                    ),
+                                    tla.make_stride(
+                                        (c0_elems, 256),
+                                        (1, k_align * c0_elems),
+                                    ),
+                                    origin_shape=tla.make_shape(l0_tk, cur_n_align),
+                                    layoutTag=tla.arch.zN,
                                 ),
                             )
-                        l0_a = tla.make_tensor_like(
+                        # CPP CopyInA2: dstStride=mStep=CeilDiv(curML0,16).
+                        # Same pitch as the L1 tile (ml1_align), not baseM.
+                        cur_m_align = ml1_align
+                        l0_a = tla.make_tensor(
                             l0a0_ptr if (l0_buf_idx == c0) else l0a1_ptr,
-                            l1_a_k,
+                            tla.make_layout(
+                                tla.make_shape(
+                                    (16, l1_tm // 16),
+                                    (16, l0_tk // 16),
+                                ),
+                                tla.make_stride(
+                                    (16, 256),
+                                    (1, cur_m_align * 16),
+                                ),
+                                origin_shape=tla.make_shape(cur_m, cur_k),
+                                layoutTag=tla.arch.zN,
+                            ),
                         )
-                        l0_b = tla.make_tensor_like(
+                        # L0B HW is always nZ; !isTrans CopyInB2 uses
+                        # ifTranspose=true (zN L1 → nZ L0). isTrans also
+                        # builds compact L0 (dstStride=mStep), never inherits
+                        # resident L1 stride.
+                        l0_b = tla.make_tensor(
                             l0b0_ptr if (l0_buf_idx == c0) else l0b1_ptr,
-                            l1_b_k,
+                            tla.make_layout(
+                                tla.make_shape(
+                                    (c0_elems, l0_tk // c0_elems),
+                                    (16, l0_tn // 16),
+                                ),
+                                tla.make_stride(
+                                    (1, cur_n_align * c0_elems),
+                                    (c0_elems, 256),
+                                ),
+                                origin_shape=tla.make_shape(cur_k, cur_n),
+                                layoutTag=tla.arch.nZ,
+                            ),
                         )
                         if l0_buf_idx == c0:
                             tla.wait_flag(l0_0_available)

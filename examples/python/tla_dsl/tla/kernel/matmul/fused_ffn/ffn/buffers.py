@@ -306,6 +306,7 @@ def _clamp_l1_bbox(t: TilingParams, buf: TilingParams) -> TilingParams:
     from dataclasses import replace
 
     # Keep CPP dump/work split: clamp work_l1_tk into new published l1_tk.
+    # Published l0_tk stays capacity-capped baseK (device Min remainK).
     work = int(t.work_l1_tk)
     if work > 0:
         work = min(work, l1_tk)
@@ -357,6 +358,8 @@ def _shrink_stage_tk_for_l1_split(t: TilingParams, buf: TilingParams) -> TilingP
     work = int(t.work_l1_tk)
     if work > 0:
         work = min(work, max_tk)
+    # Capacity-cap only; do not crush published baseK to work-K.
+    l0_tk = _l0_tk_cap(l0_tm, l0_tn, max(max_tk, int(t.l0_tk)), int(t.l0_tk))
     return replace(
         t,
         l1_tm=tm,
@@ -364,7 +367,7 @@ def _shrink_stage_tk_for_l1_split(t: TilingParams, buf: TilingParams) -> TilingP
         l1_tk=max_tk,
         l0_tm=l0_tm,
         l0_tn=l0_tn,
-        l0_tk=_l0_tk_cap(l0_tm, l0_tn, max_tk, int(t.l0_tk)),
+        l0_tk=l0_tk,
         work_l1_tk=work,
     )
 

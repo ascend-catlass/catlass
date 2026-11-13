@@ -44,6 +44,7 @@ def stage_down_full_a(
     l1_bias_data_ready=None,
     l1_bias_available=None,
     l0_bias_available=None,
+    B_IS_TRANS: tla.Constexpr[bool] = True,
 ) -> None:
     """CPP A-full-load: prologue CopyInA1; tile along N; stream B@K.
 
@@ -58,7 +59,8 @@ def stage_down_full_a(
     del l1a1_ptr
 
     m = gm_a.origin_shape[0]
-    n = gm_b.origin_shape[1]
+    # C is always [M,N]. Linear B is GM [N,K]; do not use gm_b.shape[1].
+    n = gm_c.origin_shape[1]
     k = gm_a.origin_shape[1]
 
     l0_0_available = tla.flag("dnfa_l0_0_av", tla.arch.CUBE, tla.arch.MTE1)
@@ -218,13 +220,37 @@ def stage_down_full_a(
                         # CPP DoAFullLoad CopyInB1: GM→L1 at curNL1=work_tn
                         # (N-tail clipped). Absolute N start = block_col*l1_tn
                         # (not block_col*work_tn — tile stride stays published).
-                        gm_b_l1 = gm_l1_abs(
-                            gm_b, l1_tk, work_tn, k_l1 * l1_tk, block_col * l1_tn
-                        )
-                        cur_tk = gm_b_l1.origin_shape[0]
-                        l1_b = tla.make_tensor_like(
-                            l1b0_c if (l1_buf_idx == c0) else l1b1_c, gm_b_l1
-                        )
+                        # Linear ColMajor [N,K] → nZ; canonical RowMajor [K,N] → zN
+                        # (CPP Nd2Nz / CopyInB1 LayoutB).
+                        if tla.const_expr(B_IS_TRANS):
+                            # ColumnMajor logical (K, N) — same as B-full #0688.
+                            gm_b_l1 = gm_l1_abs(
+                                gm_b,
+                                l1_tk,
+                                work_tn,
+                                k_l1 * l1_tk,
+                                block_col * l1_tn,
+                            )
+                            cur_tk = gm_b_l1.origin_shape[0]
+                            l1_b = tla.make_tensor_like(
+                                l1b0_c if (l1_buf_idx == c0) else l1b1_c,
+                                gm_b_l1,
+                                layoutTag=tla.arch.nZ,
+                            )
+                        else:
+                            gm_b_l1 = gm_l1_abs(
+                                gm_b,
+                                l1_tk,
+                                work_tn,
+                                k_l1 * l1_tk,
+                                block_col * l1_tn,
+                            )
+                            cur_tk = gm_b_l1.origin_shape[0]
+                            l1_b = tla.make_tensor_like(
+                                l1b0_c if (l1_buf_idx == c0) else l1b1_c,
+                                gm_b_l1,
+                                layoutTag=tla.arch.zN,
+                            )
                         if l1_buf_idx == c0:
                             tla.wait_flag(l1_0_available)
                         else:
@@ -235,43 +261,119 @@ def stage_down_full_a(
                         else:
                             tla.set_flag(l1_1_data_ready)
 
-                        l1_a_strip = tla.tile_view(
-                            l1_a_full,
-                            tla.make_shape(l0_tm, l1_tk),
-                            tla.make_coord(block_row * m_l0_count + m_i, k_l1),
-                        )
-                        # CopyInB2: L1→L0 strip at curNL0=l0_tn (may be
-                        # L0B-capped < l1_tn). Tile-coord n_i into L1 B.
-                        l1_b_strip = tla.tile_view(
-                            l1_b,
-                            tla.make_shape(l1_tk, l0_tn),
-                            tla.make_coord(c0, n_i),
-                        )
-
+                        # Fold fractal offsets into the L1 pointer so Load2D
+                        # uses mStart=kStart=0; keep resident L1 pitch and set
+                        # origin to cover the L0 tile span.
                         if l1_buf_idx == c0:
                             tla.wait_flag(l1_0_data_ready)
                         else:
                             tla.wait_flag(l1_1_data_ready)
 
+                        l1b_ptr = l1b0_c if (l1_buf_idx == c0) else l1b1_c
+                        nl1_align = (work_tn + 15) // 16 * 16
+                        m_off = (block_row * m_l0_count + m_i) * l0_tm
+                        remain_m = m - m_off
+                        cur_m = l0_tm
+                        if remain_m < l0_tm:
+                            cur_m = remain_m
                         k_l0_count = (cur_tk + l0_tk - 1) // l0_tk
                         for k_l0 in tla.range(c0, k_l0_count, c1):
-                            l1_a_k = tla.tile_view(
-                                l1_a_strip,
-                                tla.make_shape(l0_tm, l0_tk),
-                                tla.make_coord(c0, k_l0),
+                            k_abs = k_l1 * l1_tk + k_l0 * l0_tk
+                            remain_k = cur_tk - k_l0 * l0_tk
+                            cur_k = l0_tk
+                            if remain_k < l0_tk:
+                                cur_k = remain_k
+                            n_off = n_i * l0_tn
+                            remain_n = work_tn - n_off
+                            cur_n = l0_tn
+                            if remain_n < l0_tn:
+                                cur_n = remain_n
+                            # Non-trans zN. ml1Align == l1_tm (Align(M,16)).
+                            nz_off_a = m_off * 16 + l1_tm * k_abs
+                            l1_a_k = tla.make_tensor(
+                                l1a_c + nz_off_a,
+                                tla.make_layout(
+                                    tla.make_shape(
+                                        (16, l0_tm // 16),
+                                        (16, l0_tk // 16),
+                                    ),
+                                    tla.make_stride(
+                                        (16, 256),
+                                        (1, l1_tm * 16),
+                                    ),
+                                    origin_shape=tla.make_shape(l1_tm, l0_tk),
+                                    layoutTag=tla.arch.zN,
+                                ),
                             )
-                            l1_b_k = tla.tile_view(
-                                l1_b_strip,
-                                tla.make_shape(l0_tk, l0_tn),
-                                tla.make_coord(k_l0, c0),
-                            )
-                            l0_a = tla.make_tensor_like(
+                            # L1B→L0B: nZ when B is transposed, else zN; rem
+                            # N/M drive L0 dstStride (not published l0_tm/tn).
+                            cur_n_align = (cur_n + 15) // 16 * 16
+                            cur_m_align = (cur_m + 15) // 16 * 16
+                            kl1_align = (cur_tk + 15) // 16 * 16
+                            if tla.const_expr(B_IS_TRANS):
+                                nz_off_b = n_off * 16 + (k_l0 * l0_tk) * nl1_align
+                                l1_b_k = tla.make_tensor(
+                                    l1b_ptr + nz_off_b,
+                                    tla.make_layout(
+                                        tla.make_shape(
+                                            (16, l0_tk // 16),
+                                            (16, l0_tn // 16),
+                                        ),
+                                        tla.make_stride(
+                                            (1, nl1_align * 16),
+                                            (16, 256),
+                                        ),
+                                        origin_shape=tla.make_shape(l0_tk, nl1_align),
+                                        layoutTag=tla.arch.nZ,
+                                    ),
+                                )
+                            else:
+                                nz_off_b = n_off * kl1_align + (k_l0 * l0_tk) * 16
+                                l1_b_k = tla.make_tensor(
+                                    l1b_ptr + nz_off_b,
+                                    tla.make_layout(
+                                        tla.make_shape(
+                                            (16, l0_tk // 16),
+                                            (16, l0_tn // 16),
+                                        ),
+                                        tla.make_stride(
+                                            (16, 256),
+                                            (1, kl1_align * 16),
+                                        ),
+                                        origin_shape=tla.make_shape(l0_tk, cur_n_align),
+                                        layoutTag=tla.arch.zN,
+                                    ),
+                                )
+                            # L0A dstStride from rem cur_m; published l0_tm
+                            # breaks rem-M strips.
+                            l0_a = tla.make_tensor(
                                 l0a0_ptr if (l0_buf_idx == c0) else l0a1_ptr,
-                                l1_a_k,
+                                tla.make_layout(
+                                    tla.make_shape(
+                                        (16, l0_tm // 16),
+                                        (16, l0_tk // 16),
+                                    ),
+                                    tla.make_stride((16, 256), (1, cur_m_align * 16)),
+                                    origin_shape=tla.make_shape(cur_m, cur_k),
+                                    layoutTag=tla.arch.zN,
+                                ),
                             )
-                            l0_b = tla.make_tensor_like(
+                            # L0B HW is always nZ; !isTrans CopyInB2 uses
+                            # ifTranspose=true (zN L1 → nZ L0).
+                            l0_b = tla.make_tensor(
                                 l0b0_ptr if (l0_buf_idx == c0) else l0b1_ptr,
-                                l1_b_k,
+                                tla.make_layout(
+                                    tla.make_shape(
+                                        (16, l0_tk // 16),
+                                        (16, l0_tn // 16),
+                                    ),
+                                    tla.make_stride(
+                                        (1, cur_n_align * 16),
+                                        (16, 256),
+                                    ),
+                                    origin_shape=tla.make_shape(cur_k, cur_n),
+                                    layoutTag=tla.arch.nZ,
+                                ),
                             )
                             if l0_buf_idx == c0:
                                 tla.wait_flag(l0_0_available)

@@ -985,41 +985,43 @@ def aswt_to_tiling_params(
         l1_tm, l1_tn = tm, tn
         l0_tm, l0_tn = tm, tn
 
-    l0_tk = max(
-        _L0_TK_MIN,
-        min(
-            int(res_out.base_k),
-            l1_tk,
-            _L0_TK_MAX,
-            _l0_tk_for(l0_tm, l0_tn, l1_tk),
-        ),
-    )
-    l0_tk = _align_down(l0_tk, _L0_TK_MIN, _L0_TK_MIN)
+    # Prefer ASWT ``base_k`` (CPP GetBaseK / dump). Shrink only when dual-buf
+    # L0 cannot hold that tile — never soft-cap to 256 (swiglu#0164 512→256).
+    # Do not min with problem-K here; device uses curK=Min(baseK, remainK).
+    from ffn.tiling import _l0_tk_cap, l0_pingpong_fits
+
+    l0_tk = min(int(res_out.base_k), _L0_TK_MAX)
+    # CPP GetBaseK is C0=16-aligned (e.g. 16/48/80/512). Do **not** snap to
+    # ``_L0_TK_MIN=32`` — that crushed down baseK 48→32 / 80→64 vs OP_LOGI.
+    if l0_tk >= _BASIC_16:
+        l0_tk = max(_BASIC_16, _align_down(l0_tk, _BASIC_16, _BASIC_16))
+    else:
+        l0_tk = max(1, l0_tk)
+    if not l0_pingpong_fits(l0_tm, l0_tn, l0_tk):
+        l0_tk = _l0_tk_cap(l0_tm, l0_tn, max(l1_tk, l0_tk), l0_tk)
     # A-full: expand L0 M when capacity allows.
     # B-full: keep baseN as l0_tn; device loads full-N nZ once, then
     # CPP-style ptr+parent-stride L0 strips (resident_cpp).
     if detail is not None and detail.full_load == 1:
         if 2 * l1_tm * l0_tk * db <= _L0A and 2 * l0_tk * l0_tn * db <= _L0A:
             l0_tm = l1_tm
-    # Cap L0 N only (never rewrite l1_tn / CPP baseN). Device A-full does
+    # Cap L0 N only by dual-buf L0A/L0B capacity (never rewrite l1_tn /
+    # CPP baseN). Do **not** clamp to ``_MAX_L1_ASWT``: A-full Down can
+    # publish baseN=544 (swiglu#0164) which fits L0B but was wrongly cut to
+    # 512 → L0 strips miss the last 32 N and AIC-trap. Device A-full does
     # CopyInB1 at l1_tn then L1→L0 strips at l0_tn (CPP DoAFullLoad).
-    # Guard is ``_DB * l0_{m|n} * l0_tk * dtype_bytes``; shrink must use the
-    # same dual-buf formula (old ``L0/(tk*2)`` was single-buf and left A-full
-    # ``l0_tn=304`` overflowing L0B → silent Down corruption).
-    if l0_tn > _MAX_L1_ASWT or not (
-        _DB * l0_tm * l0_tk * db <= _L0A and _DB * l0_tk * l0_tn * db <= _L0A
-    ):
+    if not (_DB * l0_tm * l0_tk * db <= _L0A and _DB * l0_tk * l0_tn * db <= _L0A):
         # Prefer keeping l0_tm; shrink l0_tn to fit dual-buf L0B.
         max_tn = max(
             _BASIC_16,
             _floor_align(_L0A // max(1, _DB * l0_tk * db), _BASIC_16),
         )
-        l0_tn = min(l0_tn, max_tn, _MAX_L1_ASWT)
-        l0_tk = max(
-            _L0_TK_MIN,
-            min(l0_tk, _l0_tk_for(l0_tm, l0_tn, l1_tk)),
-        )
-        l0_tk = _align_down(l0_tk, _L0_TK_MIN, _L0_TK_MIN)
+        l0_tn = min(l0_tn, max_tn)
+        l0_tk = min(l0_tk, _l0_tk_for(l0_tm, l0_tn, l1_tk))
+        if l0_tk >= _L0_TK_MIN:
+            l0_tk = max(_L0_TK_MIN, _align_down(l0_tk, _L0_TK_MIN, _L0_TK_MIN))
+        else:
+            l0_tk = max(1, l0_tk)
     resident_k = 0
     l1_buf_num = 0
     full_load = 0
@@ -1028,6 +1030,10 @@ def aswt_to_tiling_params(
         l1_buf_num = int(detail.l1_buffer_num)
         full_load = int(detail.full_load)
     # CPP GetTilingData may publish kL1 > K; device Min(K, kL1) for MTE2/FH.
+    # NZ / Load2D need C0=16-aligned L1-K capacity. Short/unaligned problem-K
+    # keeps work_l1_tk=K; published l0_tk stays ASWT baseK (CPP dump; device
+    # curK=Min(baseK, remainK) — silu#0018 / short-K).
+    l1_tk = _ceil_align(max(1, int(l1_tk)), _BASIC_16)
     work_l1_tk = min(int(l1_tk), int(k))
     # CPP mixInfo.ubDB = (baseM×baseN×fp32 ≤ ubSize) ? 2 : 1 — published
     # baseMN (res_out / DoAL1), not L0-capped l0_tm×l0_tn.

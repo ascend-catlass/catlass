@@ -78,6 +78,9 @@ _MIXED_TOL_V2 = {
 }
 
 VECTOR_ELE = 256
+# ACLNN Linear / MatMul weight penultimate dim max (EZ1001). Align DSL reject
+# with CPP so ATK shapes >65535 fail host-side instead of device poison.
+_CPP_MAX_AXIS = 65535
 
 
 def _spacing_towards_pos_inf(
@@ -237,6 +240,12 @@ def run_from_tensors(
             )
         h = h_from_w2
     up_n = int(act_pol.up_out_width(h))
+    # CPP ACL rejects weight penultimate / GEMM K dims > 65535 (EZ1001).
+    for _name, _dim in (("K", k), ("H", h), ("N", n), ("up_n", up_n)):
+        if int(_dim) > _CPP_MAX_AXIS:
+            raise ValueError(
+                f"{_name}={_dim} exceeds CPP ACL max {_CPP_MAX_AXIS} (EZ1001)"
+            )
     bias_mode = BIAS_CUBE_BT if use_bias else BIAS_NONE
     if use_bias:
         bias_torch_dtype = b1.dtype
@@ -281,6 +290,21 @@ def run_from_tensors(
         swiglu_mode = resolve_swiglu_mode(tiling_up, force=swiglu_mode_force)
         if layout_id == LAYOUT_CANONICAL:
             raise ValueError("SwiGLU + Canonical is not supported")
+        # CPP gate (ffn_arch35_tiling.cpp): swigluSingle iff
+        #   n==2H && nL1%32==0 && baseN%32==0 && nL1==baseN
+        # else re-tile Up with n=H (dual). No host nL1 snap / no l1_tk C0
+        # extra gate — match that. Single still calls set_swiglu_up_tn so
+        # l0_tn==l1_tn (stage loops L0 over K only).
+        if swiglu_mode == SWIGLU_SINGLE:
+            tiling_up = set_swiglu_up_tn(tiling_up, int(tiling_up.l1_tn))
+            # Keep eligibility as a hard assert of geometry we claim to run;
+            # do not silently fall back (that hid dual bugs).
+            swiglu_b_cpp_eligible(
+                int(tiling_up.l1_tn),
+                int(tiling_up.l1_tk),
+                2 * int(h),
+                use_bias=use_bias,
+            )
         if swiglu_mode == SWIGLU_DUAL:
             up_n = int(h)
             tu, td, down_full = choose_ffn_host_tilings(
@@ -306,14 +330,6 @@ def run_from_tensors(
                 b1_dev = b1[:h].contiguous()
                 b1_up_dev = b1[h:].contiguous()
         else:
-            tiling_up = set_swiglu_up_tn(tiling_up, int(tiling_up.l1_tn))
-            _up_n = int(tiling_up.l1_tn)
-            swiglu_b_cpp_eligible(
-                _up_n,
-                int(tiling_up.l1_tk),
-                2 * int(h),
-                use_bias=use_bias,
-            )
             w1_dev = w1
     else:
         w1_dev = w1
@@ -338,23 +354,23 @@ def run_from_tensors(
         tm, tn = int(tiling_down.l1_tm), int(tiling_down.l1_tn)
         m_run = ((int(m) + tm - 1) // tm) * tm
         n_run = ((int(n) + tn - 1) // tn) * tn
-        if m_run != m or n_run != n:
-            x_pad = torch.zeros(m_run, k, dtype=dtype, device="cpu")
-            x_pad[:m, :].copy_(x)
-            x = x_pad
-            y = torch.zeros(m_run, n_run, dtype=dtype, device="cpu")
-            hidden = torch.zeros(m_run, h, dtype=dtype, device="cpu")
-            if layout_id == LAYOUT_CANONICAL:
-                w2_pad = torch.zeros(h, n_run, dtype=dtype, device="cpu")
-                w2_pad[:, :n].copy_(w2)
-            else:
-                w2_pad = torch.zeros(n_run, h, dtype=dtype, device="cpu")
-                w2_pad[:n, :].copy_(w2)
-            w2 = w2_pad
-            if use_bias:
-                b2_pad = torch.zeros(n_run, dtype=bias_torch_dtype, device="cpu")
-                b2_pad[:n].copy_(b2)
-                b2_dev = b2_pad
+    if m_run != m or n_run != n:
+        x_pad = torch.zeros(m_run, k, dtype=dtype, device="cpu")
+        x_pad[:m, :].copy_(x)
+        x = x_pad
+        y = torch.zeros(m_run, n_run, dtype=dtype, device="cpu")
+        hidden = torch.zeros(m_run, h, dtype=dtype, device="cpu")
+        if layout_id == LAYOUT_CANONICAL:
+            w2_pad = torch.zeros(h, n_run, dtype=dtype, device="cpu")
+            w2_pad[:, :n].copy_(w2)
+        else:
+            w2_pad = torch.zeros(n_run, h, dtype=dtype, device="cpu")
+            w2_pad[:n, :].copy_(w2)
+        w2 = w2_pad
+        if use_bias:
+            b2_pad = torch.zeros(n_run, dtype=bias_torch_dtype, device="cpu")
+            b2_pad[:n].copy_(b2)
+            b2_dev = b2_pad
     if use_sk:
         down_mode = DOWN_STREAMK
     elif down_full == 1:
@@ -588,18 +604,22 @@ def run_from_tensors(
 
     bias_tag = "cube_bt" if use_bias else "none"
     if int(warmup) > 0 or int(iters) > 0:
+        import time as _time
+
         print("FFN_DSL_READY", flush=True)
         for _ in range(int(warmup)):
             _launch()
         torch.npu.synchronize()
+        _t0 = _time.perf_counter()
         for _ in range(int(iters)):
             _launch()
         torch.npu.synchronize()
+        _avg_us = (_time.perf_counter() - _t0) / max(int(iters), 1) * 1e6
         print(
             f"DSL bench done shape=({m},{k},{h},{n}) dtype={dtype_name} "
             f"act={activation} bias={bias_tag} "
             f"down_mode={_down_mode_tag(use_sk, down_full)} "
-            f"warmup={warmup} iters={iters}",
+            f"warmup={warmup} iters={iters} avg_us={_avg_us:.2f}",
             flush=True,
         )
         return y[:m, :n].contiguous()

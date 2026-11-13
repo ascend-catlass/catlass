@@ -561,6 +561,7 @@ def ffn_basic_kernel(
             l1_bias_data_ready,
             l1_bias_available,
             l0_bias_available,
+            B_IS_TRANS=(cfg.layout == LAYOUT_LINEAR),
         )
     elif tla.const_expr(cfg.down_mode == DOWN_FULL_B):
         stage_down_full_b(

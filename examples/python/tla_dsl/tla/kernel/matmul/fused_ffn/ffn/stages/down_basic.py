@@ -194,29 +194,30 @@ def stage_down_basic(
     # Steady MTE2 quantum = full working kL1 (CPP after FH). No permanent half-K.
     l1_tk_step = min(_work_tk, k)
     skinny_down = tla.const_expr(_tiling.l1_tm <= SKINNY_DOWN_L1_TM)
-    # CPP DoBFullLoadOrAswt isFirstLoopKL1Half: dual-L1 ping-pong path only,
-    # isFirstTile && (kL1_/baseK_ >= 2). rest_tk>0 excludes degenerate
-    # CeilAlign(half) that ate the whole kL1. After can_split carve, l1_single
-    # is False iff dual slots exist (same gate as CPP l1BufNum==2).
-    # Env FFN_DOWN_FH=0|off disables (A/B); unset/1 keeps CPP gate.
+    # CPP DoBFullLoadOrAswt isFirstLoopKL1Half: dual-L1, isFirstTile &&
+    # (kL1_/baseK_ >= 2); SoftFlag ID = (l0PingPong_&1)+SIXTH_FLAG.
+    # TLA SoftFlag objects cannot index by runtime ping-pong — only a
+    # SoftFlag-fixed unroll (one L0 per half) is safe. When half/rest >
+    # l0_tk (e.g. work=1024, l0=256 → half=512), the old dynamic
+    # ``if l0_buf_idx`` multi-L0 FH path AIC-timeouts on large M×H
+    # (1024×1024 Down); FFN_DOWN_FH=0 / this gate both recover. Fall
+    # back to full-kL1 MTE2 (correct GEMM; skips FH overlap only).
+    # Env FFN_DOWN_FH=0|off disables entirely; unset/1 keeps safe gate.
     _fh_raw = os.environ.get("FFN_DOWN_FH", "1").strip().lower()
     _fh_off = _fh_raw in ("0", "false", "off", "no")
     enable_first_half = tla.const_expr(
         (not _fh_off)
         and (not l1_single)
+        and (not L0_SINGLE)
         and (_work_tk // _tiling.l0_tk >= 2)
         and (rest_tk > 0)
         and (half_tk > 0)
-    )
-    # FH is always 2 L1 fills. When each half fits one L0 (e.g. work=512,
-    # l0_tk=256), unroll to SoftFlag-fixed straight line — TLA has no
-    # WaitFlag(runtime_id) like CPP ``(l0PingPong_&1)+SIXTH_FLAG``.
-    _fh_l0_one = tla.const_expr(
-        enable_first_half
-        and (not L0_SINGLE)
         and (half_tk <= _tiling.l0_tk)
         and (rest_tk <= _tiling.l0_tk)
     )
+    # enable_first_half already requires one-L0-per-half; keep alias for
+    # cover / unroll call sites.
+    _fh_l0_one = enable_first_half
     # ≤1 MN tile/core: L0C DB unused (CPP still ctor-primes FIX_M(0/1);
     # loop WaitFlag(l0cPingPong_&1) stays on 0). Kill FixPipe SoftFlag if/else.
     # Primary: tiles ≤ BLOCK_DIM. Also allow tiles ≤ 15 (same bound as Up CV
@@ -242,8 +243,10 @@ def stage_down_basic(
     _swizzle_one = tla.const_expr(
         (PROB_M > 0) and (PROB_N > 0) and (_dn_swizzle_count == 1)
     )
-    # FH covers the only kL1 when work ≥ problem K (SwiGLU Down K=H).
+    # FH covers the only kL1 when work ≥ problem K (SwiGLU publishes K).
     # Skip the empty k_l1 for that follows (removes fh_done/k_l1==0 tax).
+    # GELU/SiLU leave PROB_K=0; the second half still has to be FINAL when
+    # k_l1_count==1 (runtime, below) or FixPipe unitFlag=3 waits forever.
     _fh_covers_all = tla.const_expr(
         _fh_l0_one and (PROB_K > 0) and (_work_tk >= PROB_K)
     )
@@ -417,79 +420,79 @@ def stage_down_basic(
             # (HIVM icmp + empty else) and latent miss on 2nd+ tiles when
             # ``_fh_covers_all`` also skips the k_l1 for.
             if tla.const_expr(enable_first_half):
-                if tla.const_expr(_fh_l0_one):
-                    # ---- FH half0 @ L1/L0 slot0 (init_c) ----
-                    gm_a_h0 = gm_l1_tile(gm_a_by_core, work_tm, half_tk, c0, c0)
-                    gm_b_h0 = gm_l1_tile(gm_b_by_core, half_tk, work_tn, c0, c0)
-                    l1_a_h0 = tla.make_tensor_like(l1a0_ptr, gm_a_h0)
-                    l1_b_h0 = tla.make_tensor_like(l1b0_ptr, gm_b_h0)
-                    tla.wait_flag(l1_0_available)
-                    tla.copy(l1_a_h0, gm_a_h0)
-                    if tla.const_expr(USE_BIAS):
-                        tla.copy(l1_bias, gm_bias_by_core)
-                    tla.copy(l1_b_h0, gm_b_h0)
-                    tla.set_flag(l1_0_data_ready)
-                    tla.wait_flag(l1_0_data_ready)
-                    l1_a_h0_l0 = tla.tile_view(
-                        l1_a_h0,
-                        tla.make_shape(work_tm, _tiling.l0_tk),
-                        tla.make_coord(c0, c0),
+                # SoftFlag-fixed unroll only (gate ⇒ one L0 per half).
+                # ---- FH half0 @ L1/L0 slot0 (init_c) ----
+                gm_a_h0 = gm_l1_tile(gm_a_by_core, work_tm, half_tk, c0, c0)
+                gm_b_h0 = gm_l1_tile(gm_b_by_core, half_tk, work_tn, c0, c0)
+                l1_a_h0 = tla.make_tensor_like(l1a0_ptr, gm_a_h0)
+                l1_b_h0 = tla.make_tensor_like(l1b0_ptr, gm_b_h0)
+                tla.wait_flag(l1_0_available)
+                tla.copy(l1_a_h0, gm_a_h0)
+                if tla.const_expr(USE_BIAS):
+                    tla.copy(l1_bias, gm_bias_by_core)
+                tla.copy(l1_b_h0, gm_b_h0)
+                tla.set_flag(l1_0_data_ready)
+                tla.wait_flag(l1_0_data_ready)
+                # CPP: curK = Min(baseK, remainK). get_tile crops.
+                l1_a_h0_l0 = gm_l1_tile(l1_a_h0, work_tm, _tiling.l0_tk, c0, c0)
+                l1_b_h0_l0 = gm_l1_tile(l1_b_h0, _tiling.l0_tk, work_tn, c0, c0)
+                l0_a_h0 = tla.make_tensor_like(l0a0_ptr, l1_a_h0_l0)
+                l0_b_h0 = tla.make_tensor_like(l0b0_ptr, l1_b_h0_l0)
+                tla.wait_flag(l0_0_available)
+                tla.copy(l0_a_h0, l1_a_h0_l0)
+                if tla.const_expr(USE_BIAS):
+                    tla.copy(l0_bias, l1_bias)
+                tla.copy(l0_b_h0, l1_b_h0_l0)
+                tla.set_flag(l0_0_data_ready)
+                tla.wait_flag(l0_0_data_ready)
+                if tla.const_expr(USE_BIAS):
+                    tla.mmad(
+                        l0_c,
+                        l0_a_h0,
+                        l0_b_h0,
+                        init_c=True,
+                        unit_flag=_uf_nf,
+                        bias=l0_bias,
                     )
-                    l1_b_h0_l0 = tla.tile_view(
-                        l1_b_h0,
-                        tla.make_shape(_tiling.l0_tk, work_tn),
-                        tla.make_coord(c0, c0),
+                else:
+                    tla.mmad(l0_c, l0_a_h0, l0_b_h0, init_c=True, unit_flag=_uf_nf)
+                tla.set_flag(l0_0_available)
+                tla.set_flag(l1_0_available)
+                # ---- FH half1 @ L1/L0 slot1 (accum) ----
+                gm_a_h1 = gm_l1_tile(gm_a_by_core, work_tm, half_tk, c0, c1)
+                gm_b_h1 = gm_l1_tile(gm_b_by_core, half_tk, work_tn, c1, c0)
+                l1_a_h1 = tla.make_tensor_like(l1a1_ptr, gm_a_h1)
+                l1_b_h1 = tla.make_tensor_like(l1b1_ptr, gm_b_h1)
+                tla.wait_flag(l1_1_available)
+                tla.copy(l1_a_h1, gm_a_h1)
+                tla.copy(l1_b_h1, gm_b_h1)
+                tla.set_flag(l1_1_data_ready)
+                tla.wait_flag(l1_1_data_ready)
+                # CPP: curK = Min(baseK, remainK). get_tile crops.
+                l1_a_h1_l0 = gm_l1_tile(l1_a_h1, work_tm, _tiling.l0_tk, c0, c0)
+                l1_b_h1_l0 = gm_l1_tile(l1_b_h1, _tiling.l0_tk, work_tn, c0, c0)
+                l0_a_h1 = tla.make_tensor_like(l0a1_ptr, l1_a_h1_l0)
+                l0_b_h1 = tla.make_tensor_like(l0b1_ptr, l1_b_h1_l0)
+                tla.wait_flag(l0_1_available)
+                tla.copy(l0_a_h1, l1_a_h1_l0)
+                tla.copy(l0_b_h1, l1_b_h1_l0)
+                tla.set_flag(l0_1_data_ready)
+                tla.wait_flag(l0_1_data_ready)
+                if tla.const_expr(_fh_covers_all):
+                    tla.mmad(
+                        l0_c,
+                        l0_a_h1,
+                        l0_b_h1,
+                        init_c=False,
+                        unit_flag=_uf_fin,
                     )
-                    l0_a_h0 = tla.make_tensor_like(l0a0_ptr, l1_a_h0_l0)
-                    l0_b_h0 = tla.make_tensor_like(l0b0_ptr, l1_b_h0_l0)
-                    tla.wait_flag(l0_0_available)
-                    tla.copy(l0_a_h0, l1_a_h0_l0)
-                    if tla.const_expr(USE_BIAS):
-                        tla.copy(l0_bias, l1_bias)
-                    tla.copy(l0_b_h0, l1_b_h0_l0)
-                    tla.set_flag(l0_0_data_ready)
-                    tla.wait_flag(l0_0_data_ready)
-                    if tla.const_expr(USE_BIAS):
-                        tla.mmad(
-                            l0_c,
-                            l0_a_h0,
-                            l0_b_h0,
-                            init_c=True,
-                            unit_flag=_uf_nf,
-                            bias=l0_bias,
-                        )
-                    else:
-                        tla.mmad(l0_c, l0_a_h0, l0_b_h0, init_c=True, unit_flag=_uf_nf)
-                    tla.set_flag(l0_0_available)
-                    tla.set_flag(l1_0_available)
-                    # ---- FH half1 @ L1/L0 slot1 (accum) ----
-                    gm_a_h1 = gm_l1_tile(gm_a_by_core, work_tm, half_tk, c0, c1)
-                    gm_b_h1 = gm_l1_tile(gm_b_by_core, half_tk, work_tn, c1, c0)
-                    l1_a_h1 = tla.make_tensor_like(l1a1_ptr, gm_a_h1)
-                    l1_b_h1 = tla.make_tensor_like(l1b1_ptr, gm_b_h1)
-                    tla.wait_flag(l1_1_available)
-                    tla.copy(l1_a_h1, gm_a_h1)
-                    tla.copy(l1_b_h1, gm_b_h1)
-                    tla.set_flag(l1_1_data_ready)
-                    tla.wait_flag(l1_1_data_ready)
-                    l1_a_h1_l0 = tla.tile_view(
-                        l1_a_h1,
-                        tla.make_shape(work_tm, _tiling.l0_tk),
-                        tla.make_coord(c0, c0),
-                    )
-                    l1_b_h1_l0 = tla.tile_view(
-                        l1_b_h1,
-                        tla.make_shape(_tiling.l0_tk, work_tn),
-                        tla.make_coord(c0, c0),
-                    )
-                    l0_a_h1 = tla.make_tensor_like(l0a1_ptr, l1_a_h1_l0)
-                    l0_b_h1 = tla.make_tensor_like(l0b1_ptr, l1_b_h1_l0)
-                    tla.wait_flag(l0_1_available)
-                    tla.copy(l0_a_h1, l1_a_h1_l0)
-                    tla.copy(l0_b_h1, l1_b_h1_l0)
-                    tla.set_flag(l0_1_data_ready)
-                    tla.wait_flag(l0_1_data_ready)
-                    if tla.const_expr(_fh_covers_all):
+                else:
+                    # CPP DoBFullLoadOrAswt: unitFlag=FINAL iff this K slice
+                    # is the last (iter0+1==curKL1Iter && last kL0). FH adds
+                    # one iter and replaces kL1 0, so when k_l1_count==1 the
+                    # second half IS the last mmad. NON_FINAL here leaves
+                    # FixPipe unitFlag=3 waiting (gelu#0052 K=H, l0c_db=1).
+                    if k_l1_count <= c1:
                         tla.mmad(
                             l0_c,
                             l0_a_h1,
@@ -505,132 +508,13 @@ def stage_down_basic(
                             init_c=False,
                             unit_flag=_uf_nf,
                         )
-                    tla.set_flag(l0_1_available)
-                    tla.set_flag(l1_1_available)
-                    # Two toggles land back on slot0 (matches loop FH).
-                    l1_buf_idx = c0
-                    if tla.const_expr(not L0_SINGLE):
-                        l0_buf_idx = c0
-                    fh_done = c1
-                else:
-                    for k_half in tla.range(c0, 2, c1):
-                        gm_a_by_l1 = gm_l1_tile(
-                            gm_a_by_core, work_tm, half_tk, c0, k_half
-                        )
-                        gm_b_by_l1 = gm_l1_tile(
-                            gm_b_by_core, half_tk, work_tn, k_half, c0
-                        )
-                        l1_a = tla.make_tensor_like(
-                            l1a0_ptr if (l1_buf_idx == c0) else l1a1_ptr,
-                            gm_a_by_l1,
-                        )
-                        l1_b = tla.make_tensor_like(
-                            l1b0_ptr if (l1_buf_idx == c0) else l1b1_ptr,
-                            gm_b_by_l1,
-                        )
-                        if l1_buf_idx == c0:
-                            tla.wait_flag(l1_0_available)
-                        else:
-                            tla.wait_flag(l1_1_available)
-                        tla.copy(l1_a, gm_a_by_l1)
-                        # CPP: CopyInC1 on iter0 only, same MTE1_MTE2 credit.
-                        if tla.const_expr(USE_BIAS):
-                            if k_half == c0:
-                                tla.copy(l1_bias, gm_bias_by_core)
-                        tla.copy(l1_b, gm_b_by_l1)
-                        if l1_buf_idx == c0:
-                            tla.set_flag(l1_0_data_ready)
-                        else:
-                            tla.set_flag(l1_1_data_ready)
-                        if l1_buf_idx == c0:
-                            tla.wait_flag(l1_0_data_ready)
-                        else:
-                            tla.wait_flag(l1_1_data_ready)
-                        k_l0_count_h = (
-                            l1_a.origin_shape[1] + _tiling.l0_tk - 1
-                        ) // _tiling.l0_tk
-                        for k_l0 in tla.range(c0, k_l0_count_h, c1):
-                            l1_a_by_l0 = tla.tile_view(
-                                l1_a,
-                                tla.make_shape(work_tm, _tiling.l0_tk),
-                                tla.make_coord(c0, k_l0),
-                            )
-                            l1_b_by_l0 = tla.tile_view(
-                                l1_b,
-                                tla.make_shape(_tiling.l0_tk, work_tn),
-                                tla.make_coord(k_l0, c0),
-                            )
-                            l0_a = tla.make_tensor_like(
-                                l0a0_ptr if (l0_buf_idx == c0) else l0a1_ptr,
-                                l1_a_by_l0,
-                            )
-                            l0_b = tla.make_tensor_like(
-                                l0b0_ptr if (l0_buf_idx == c0) else l0b1_ptr,
-                                l1_b_by_l0,
-                            )
-                            # CPP: Wait M_MTE1 → A2 → C2(NeedBias) → B2 →
-                            # Set/Wait MTE1_M → Mmad (no bias SoftFlag).
-                            if l0_buf_idx == c0:
-                                tla.wait_flag(l0_0_available)
-                            else:
-                                tla.wait_flag(l0_1_available)
-                            tla.copy(l0_a, l1_a_by_l0)
-                            init_c = True if k_half == 0 and k_l0 == 0 else False
-                            if tla.const_expr(USE_BIAS):
-                                if init_c:
-                                    tla.copy(l0_bias, l1_bias)
-                            tla.copy(l0_b, l1_b_by_l0)
-                            if l0_buf_idx == c0:
-                                tla.set_flag(l0_0_data_ready)
-                                tla.wait_flag(l0_0_data_ready)
-                            else:
-                                tla.set_flag(l0_1_data_ready)
-                                tla.wait_flag(l0_1_data_ready)
-                            uf = _uf_nf
-                            if tla.const_expr(_fh_covers_all):
-                                if k_half == c1 and (k_l0 + c1) >= k_l0_count_h:
-                                    uf = _uf_fin
-                            if tla.const_expr(USE_BIAS):
-                                if init_c:
-                                    tla.mmad(
-                                        l0_c,
-                                        l0_a,
-                                        l0_b,
-                                        init_c=init_c,
-                                        unit_flag=uf,
-                                        bias=l0_bias,
-                                    )
-                                else:
-                                    tla.mmad(
-                                        l0_c,
-                                        l0_a,
-                                        l0_b,
-                                        init_c=init_c,
-                                        unit_flag=uf,
-                                    )
-                            else:
-                                tla.mmad(
-                                    l0_c,
-                                    l0_a,
-                                    l0_b,
-                                    init_c=init_c,
-                                    unit_flag=uf,
-                                )
-                            if l0_buf_idx == c0:
-                                tla.set_flag(l0_0_available)
-                            else:
-                                tla.set_flag(l0_1_available)
-                            if tla.const_expr(not L0_SINGLE):
-                                l0_buf_idx = c1 - l0_buf_idx
-                        if l1_buf_idx == c0:
-                            tla.set_flag(l1_0_available)
-                        else:
-                            tla.set_flag(l1_1_available)
-                        l1_buf_idx = c1 - l1_buf_idx
-                        # CPP abL1LoopCnt_++ (each FH half is one L1 iter).
-                        if tla.const_expr(USE_BIAS):
-                            bias_buf_idx = c1 - bias_buf_idx
-                    fh_done = c1
+                tla.set_flag(l0_1_available)
+                tla.set_flag(l1_1_available)
+                # Two toggles land back on slot0 (matches loop FH).
+                l1_buf_idx = c0
+                if tla.const_expr(not L0_SINGLE):
+                    l0_buf_idx = c0
+                fh_done = c1
 
             # When FH already ate the only kL1, skip this for (no fh_done tax).
             if tla.const_expr(not _fh_covers_all):
@@ -684,15 +568,12 @@ def stage_down_basic(
                         k_l0_range = tla.range(c0, k_l0_count, c1)
 
                         for k_l0 in k_l0_range:
-                            l1_a_by_l0 = tla.tile_view(
-                                l1_a,
-                                tla.make_shape(work_tm, _tiling.l0_tk),
-                                tla.make_coord(c0, k_l0),
+                            # CPP: curK = Min(baseK, remainK). get_tile crops.
+                            l1_a_by_l0 = gm_l1_tile(
+                                l1_a, work_tm, _tiling.l0_tk, c0, k_l0
                             )
-                            l1_b_by_l0 = tla.tile_view(
-                                l1_b,
-                                tla.make_shape(_tiling.l0_tk, work_tn),
-                                tla.make_coord(k_l0, c0),
+                            l1_b_by_l0 = gm_l1_tile(
+                                l1_b, _tiling.l0_tk, work_tn, k_l0, c0
                             )
 
                             l0_a = tla.make_tensor_like(

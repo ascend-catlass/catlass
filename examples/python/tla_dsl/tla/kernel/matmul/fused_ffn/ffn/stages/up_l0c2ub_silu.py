@@ -1066,16 +1066,9 @@ def stage_up_l0c2ub_silu(
 
                     if tla.const_expr(_dual_l0):
                         # ---- L0-0 @ slot0 (init_c when first kL1) ----
-                        l1_a_l0_0 = tla.tile_view(
-                            l1_a,
-                            tla.make_shape(work_tm, _tiling.l0_tk),
-                            tla.make_coord(c0, c0),
-                        )
-                        l1_b_l0_0 = tla.tile_view(
-                            l1_b,
-                            tla.make_shape(_tiling.l0_tk, cube_tn),
-                            tla.make_coord(c0, c0),
-                        )
+                        # CPP: curK = Min(baseK, remainK). get_tile crops.
+                        l1_a_l0_0 = gm_l1_tile(l1_a, work_tm, _tiling.l0_tk, c0, c0)
+                        l1_b_l0_0 = gm_l1_tile(l1_b, _tiling.l0_tk, cube_tn, c0, c0)
                         l0_a_0 = tla.make_tensor_like(l0a0_ptr, l1_a_l0_0)
                         l0_b_0 = tla.make_tensor_like(l0b0_ptr, l1_b_l0_0)
                         tla.wait_flag(l0_0_available)
@@ -1105,16 +1098,8 @@ def stage_up_l0c2ub_silu(
                             )
                         tla.set_flag(l0_0_available)
                         # ---- L0-1 @ slot1 (accum; rem K via origin crop) ----
-                        l1_a_l0_1 = tla.tile_view(
-                            l1_a,
-                            tla.make_shape(work_tm, _tiling.l0_tk),
-                            tla.make_coord(c0, c1),
-                        )
-                        l1_b_l0_1 = tla.tile_view(
-                            l1_b,
-                            tla.make_shape(_tiling.l0_tk, cube_tn),
-                            tla.make_coord(c1, c0),
-                        )
+                        l1_a_l0_1 = gm_l1_tile(l1_a, work_tm, _tiling.l0_tk, c0, c1)
+                        l1_b_l0_1 = gm_l1_tile(l1_b, _tiling.l0_tk, cube_tn, c1, c0)
                         l0_a_1 = tla.make_tensor_like(l0a1_ptr, l1_a_l0_1)
                         l0_b_1 = tla.make_tensor_like(l0b1_ptr, l1_b_l0_1)
                         tla.wait_flag(l0_1_available)
@@ -1130,18 +1115,9 @@ def stage_up_l0c2ub_silu(
                             l1_a.origin_shape[1] + _tiling.l0_tk - 1
                         ) // _tiling.l0_tk
                         for k_l0 in tla.range(c0, k_l0_count, c1):
-                            # L0 MN follows work tile (full l1 or last-wave split);
-                            # current FFN tilings keep l0_tm/tn == l1_tm/tn.
-                            l1_a_l0 = tla.tile_view(
-                                l1_a,
-                                tla.make_shape(work_tm, _tiling.l0_tk),
-                                tla.make_coord(c0, k_l0),
-                            )
-                            l1_b_l0 = tla.tile_view(
-                                l1_b,
-                                tla.make_shape(_tiling.l0_tk, cube_tn),
-                                tla.make_coord(k_l0, c0),
-                            )
+                            # CPP: curK = Min(baseK, remainK). get_tile crops.
+                            l1_a_l0 = gm_l1_tile(l1_a, work_tm, _tiling.l0_tk, c0, k_l0)
+                            l1_b_l0 = gm_l1_tile(l1_b, _tiling.l0_tk, cube_tn, k_l0, c0)
 
                             l0_a = tla.make_tensor_like(
                                 l0a0_ptr if (l0_buf_idx == c0) else l0a1_ptr,
@@ -1319,16 +1295,9 @@ def stage_up_l0c2ub_silu(
 
                         if tla.const_expr(_dual_l0):
                             # ---- L0-0 @ slot0 (init_c when first kL1) ----
-                            l1_a_l0_0 = tla.tile_view(
-                                l1_a,
-                                tla.make_shape(work_tm, _tiling.l0_tk),
-                                tla.make_coord(c0, c0),
-                            )
-                            l1_b_l0_0 = tla.tile_view(
-                                l1_b,
-                                tla.make_shape(_tiling.l0_tk, cube_tn),
-                                tla.make_coord(c0, c0),
-                            )
+                            # CPP: curK = Min(baseK, remainK). get_tile crops.
+                            l1_a_l0_0 = gm_l1_tile(l1_a, work_tm, _tiling.l0_tk, c0, c0)
+                            l1_b_l0_0 = gm_l1_tile(l1_b, _tiling.l0_tk, cube_tn, c0, c0)
                             l0_a_0 = tla.make_tensor_like(l0a0_ptr, l1_a_l0_0)
                             l0_b_0 = tla.make_tensor_like(l0b0_ptr, l1_b_l0_0)
                             tla.wait_flag(l0_0_available)
@@ -1358,16 +1327,8 @@ def stage_up_l0c2ub_silu(
                                 )
                             tla.set_flag(l0_0_available)
                             # ---- L0-1 @ slot1 (accum; rem K via origin crop) ----
-                            l1_a_l0_1 = tla.tile_view(
-                                l1_a,
-                                tla.make_shape(work_tm, _tiling.l0_tk),
-                                tla.make_coord(c0, c1),
-                            )
-                            l1_b_l0_1 = tla.tile_view(
-                                l1_b,
-                                tla.make_shape(_tiling.l0_tk, cube_tn),
-                                tla.make_coord(c1, c0),
-                            )
+                            l1_a_l0_1 = gm_l1_tile(l1_a, work_tm, _tiling.l0_tk, c0, c1)
+                            l1_b_l0_1 = gm_l1_tile(l1_b, _tiling.l0_tk, cube_tn, c1, c0)
                             l0_a_1 = tla.make_tensor_like(l0a1_ptr, l1_a_l0_1)
                             l0_b_1 = tla.make_tensor_like(l0b1_ptr, l1_b_l0_1)
                             tla.wait_flag(l0_1_available)
@@ -1383,17 +1344,12 @@ def stage_up_l0c2ub_silu(
                                 l1_a.origin_shape[1] + _tiling.l0_tk - 1
                             ) // _tiling.l0_tk
                             for k_l0 in tla.range(c0, k_l0_count, c1):
-                                # L0 MN follows work tile (full l1 or last-wave split);
-                                # current FFN tilings keep l0_tm/tn == l1_tm/tn.
-                                l1_a_l0 = tla.tile_view(
-                                    l1_a,
-                                    tla.make_shape(work_tm, _tiling.l0_tk),
-                                    tla.make_coord(c0, k_l0),
+                                # CPP: curK = Min(baseK, remainK). get_tile crops.
+                                l1_a_l0 = gm_l1_tile(
+                                    l1_a, work_tm, _tiling.l0_tk, c0, k_l0
                                 )
-                                l1_b_l0 = tla.tile_view(
-                                    l1_b,
-                                    tla.make_shape(_tiling.l0_tk, cube_tn),
-                                    tla.make_coord(k_l0, c0),
+                                l1_b_l0 = gm_l1_tile(
+                                    l1_b, _tiling.l0_tk, cube_tn, k_l0, c0
                                 )
 
                                 l0_a = tla.make_tensor_like(
@@ -1794,10 +1750,25 @@ def stage_up_l0c2ub_silu(
                     out_row_stride = (
                         (aiv_out_n + BYTE_PER_C0 - 1) // BYTE_PER_C0
                     ) * BYTE_PER_C0
+                    # CPP FusionSwiglu: curAivNAlign = Align(N, fp16_C0=16) for
+                    # gate LocalTensor pitch (not out-slot's 32B/elem align).
+                    # Compact dual acc/gate slots are only half_m×l0_tn — a
+                    # stride-96 gate view OOB'd (swiglu#0044 M≥512 H%16≠0).
+                    gate_n_align = (
+                        (aiv_out_n + _FIXPIPE_DST_ALIGN_F16 - 1)
+                        // _FIXPIPE_DST_ALIGN_F16
+                    ) * _FIXPIPE_DST_ALIGN_F16
                     # Row budget from out slot (fallback path); oneshot packs into acc.
                     max_rows = UB_SLOT_ELEMS // out_row_stride
                     if max_rows < 1:
                         max_rows = 1
+                    if tla.const_expr(ACT == ACT_SWIGLU_DUAL):
+                        # Gate + FixPipe-acc share compact ACC_ELEMS — cap rows.
+                        _acc_rows = ACC_ELEMS // max(gate_n_align, ub_pitch, 1)
+                        if _acc_rows < 1:
+                            _acc_rows = 1
+                        if max_rows > _acc_rows:
+                            max_rows = _acc_rows
                     n_epilogue_row_tiles = (aiv_m + max_rows - 1) // max_rows
                     out_contiguous = out_row_stride == aiv_out_n
                     # Strip/2d fallback flat VL needs both acc and out-slot pitches.
@@ -2096,11 +2067,12 @@ def stage_up_l0c2ub_silu(
                                     tla.make_shape(max_rows, aiv_out_n),
                                     tla.make_coord(tile_i, c0),
                                 )
+                                # CPP FusionSwiglu: LocalTensor pitch Align(N,16).
                                 ub_gate_tile = tla.make_tensor(
                                     ub_gate_slot_ptr,
                                     tla.make_layout(
                                         tla.make_shape(tile_rows, tile_cols),
-                                        tla.make_stride(out_row_stride, 1),
+                                        tla.make_stride(gate_n_align, 1),
                                         layoutTag=tla.arch.RowMajor,
                                     ),
                                 )

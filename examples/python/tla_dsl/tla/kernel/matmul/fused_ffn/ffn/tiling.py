@@ -17,10 +17,10 @@ import catlass.tla as tla
 _CUBE = 16
 _MAX_L1 = 256
 _MAX_L0 = 256
-# Minimum L0-K step (cube). Cap = _MAX_L0 so ASWT baseK (CPP often 256 on
-# Down) is published 1:1; do not soft-cap for perf — strict CPP parity first.
+# Minimum L0-K step (cube). Cap must cover CPP GetBaseK (e.g. #0164 baseK=512
+# at 16×32). Capacity is still gated by L0A/L0B ping-pong in ``_l0_tk_for``.
 _L0_TK_MIN = 32
-_L0_TK_MAX = 256
+_L0_TK_MAX = 512
 # Soft cap for L1-K. Was 1024 (fix17 full-K); raised so small-MN stages=1
 # can cut huge-H Down trips (e.g. 64×64 → tk≈2048) without inventing >L1 sizes.
 _L1_TK_MAX = 4096
@@ -53,6 +53,9 @@ def _l0_tk_for(l0_tm: int, l0_tn: int, l1_tk: int, *, stages: int | None = None)
 
     ``stages=2`` (default): ping-pong → 32 KiB/slot. ``stages=1``: full 64 KiB
     per buffer (unlocks ``l0_tk=128`` at ``l0_tm=256`` for MTE1 quantum).
+
+    When ``l1_tk`` / work-K is below ``_L0_TK_MIN`` (e.g. K=2), return that
+    short length — CPP ``mmad.k=curK0`` allows it; forcing 32 would L1→L0 OOB.
     """
     l0_tm = max(1, int(l0_tm))
     l0_tn = max(1, int(l0_tn))
@@ -60,7 +63,11 @@ def _l0_tk_for(l0_tm: int, l0_tn: int, l1_tk: int, *, stages: int | None = None)
     slot = _L0AB_BYTES // stages
     max_by_a = slot // max(1, l0_tm * _L0_DTYPE_BYTES)
     max_by_b = slot // max(1, l0_tn * _L0_DTYPE_BYTES)
-    max_tk = min(_L0_TK_MAX, _MAX_L0, int(l1_tk), max_by_a, max_by_b)
+    # Do not apply ``_MAX_L0`` (MN legacy box) to K — that crushed CPP
+    # baseK=512 → 256 (swiglu#0164).
+    max_tk = min(_L0_TK_MAX, int(l1_tk), max_by_a, max_by_b)
+    if max_tk < _L0_TK_MIN:
+        return max(1, max_tk)
     return max(
         _L0_TK_MIN,
         _align_down(max_tk, _L0_TK_MIN, _L0_TK_MIN),
@@ -73,13 +80,21 @@ def l0_pingpong_fits(l0_tm: int, l0_tn: int, l0_tk: int) -> bool:
     return a <= _L0AB_BYTES and b <= _L0AB_BYTES
 
 
+def _clamp_l0_tk_to_work(l0_tk: int, work_l1_tk: int) -> int:
+    """Ensure L0-K never exceeds published work-K (L1 resid / problem K)."""
+    w = int(work_l1_tk)
+    if w <= 0:
+        return max(1, int(l0_tk))
+    return max(1, min(int(l0_tk), w))
+
+
 def _l0_tk_cap(l0_tm: int, l0_tn: int, l1_tk: int, want_tk: int) -> int:
     """Cap ``want_tk`` to L0 capacity; keep single-buf K when ping-pong cannot fit."""
-    want = max(
-        _L0_TK_MIN,
-        min(int(want_tk), int(l1_tk), _L0_TK_MAX, _MAX_L0),
-    )
-    want = _align_down(want, _L0_TK_MIN, _L0_TK_MIN)
+    # Align to C0=16 so CPP baseK=48/80 is not snapped to 32/64.
+    want = min(int(want_tk), int(l1_tk), _L0_TK_MAX)
+    if want < _CUBE:
+        return max(1, want)
+    want = max(_CUBE, _align_down(want, _CUBE, _CUBE))
     if l0_pingpong_fits(l0_tm, l0_tn, want):
         return want
     return min(want, _l0_tk_for(l0_tm, l0_tn, l1_tk, stages=1))
@@ -239,13 +254,21 @@ def l0_pingpong_bytes(l0_tm: int, l0_tn: int, l0_tk: int) -> tuple[int, int]:
 
 
 def maybe_force_dual_full_l0_tk(tiling_up: TilingParams) -> TilingParams:
-    """SwiGLU dual: one L0-K over full ``l1_tk`` when single-buf L0A/L0B fit.
+    """SwiGLU dual: one L0-K over full work-K when single-buf L0A/L0B fit.
 
     Dual Up aliases SoftFlag slot1→slot0; multi L0-K with those flags can
-    double-apply the last K slice. Prefer ``l0_tk=l1_tk`` when a *single*
-    L0A/L0B of that K fits in 64 KiB; otherwise keep natural l0_tk.
+    double-apply the last K slice. Prefer ``l0_tk=work_l1_tk`` (or ``l1_tk``
+    when work unset) when a *single* L0A/L0B of that K fits in 64 KiB;
+    otherwise keep natural l0_tk.
+
+    Never expand past ``work_l1_tk`` — published ``l1_tk`` may exceed problem
+    K (swiglu#0044: l1=64, work=16 → old force l0=64 L1→L0 OOB / AIC trap).
     """
-    want_l0_tk = int(tiling_up.l1_tk)
+    work = int(tiling_up.work_l1_tk)
+    want_l0_tk = min(int(tiling_up.l1_tk), work) if work > 0 else int(tiling_up.l1_tk)
+    want_l0_tk = max(1, want_l0_tk)
+    if want_l0_tk <= int(tiling_up.l0_tk):
+        return tiling_up
     l0_tm_i, l0_tn_i = int(tiling_up.l0_tm), int(tiling_up.l0_tn)
     # l0_pingpong_bytes is 2×; single-buf size is half.
     l0a_pp, l0b_pp = l0_pingpong_bytes(l0_tm_i, l0_tn_i, want_l0_tk)
@@ -719,11 +742,16 @@ def streamk_down_tiling(
     # Device AIV reduce pads UB width to AIV_REG_N=64 without changing baseN.
     l0_tm = min(_MAX_L0, base_m)
     l0_tn = min(_MAX_L0, base_n)
-    l0_tk = max(
-        _L0_TK_MIN,
-        min(base_k, l1_tk, _L0_TK_MAX, _l0_tk_for(l0_tm, l0_tn, l1_tk)),
-    )
-    l0_tk = _align_down(l0_tk, _L0_TK_MIN, _L0_TK_MIN)
+    # Prefer CPP baseK; capacity via ping-pong. Device Min(baseK, remainK).
+    # Align to cube C0=16 (not _L0_TK_MIN=32) so baseK=48/80 survive.
+    l0_tk = min(base_k, _L0_TK_MAX)
+    if not l0_pingpong_fits(l0_tm, l0_tn, l0_tk):
+        l0_tk = _l0_tk_cap(l0_tm, l0_tn, max(l1_tk, l0_tk), l0_tk)
+    if l0_tk >= _CUBE:
+        l0_tk = max(_CUBE, _align_down(l0_tk, _CUBE, _CUBE))
+    else:
+        l0_tk = max(1, l0_tk)
+    work_l1_tk = min(int(l1_tk), int(k))
     from ffn.tiling_aswt import _DB, _FP32, _L0C, _UB
 
     ub_db = 2 if (int(base_m) * int(base_n) * _FP32) <= _UB else 1
@@ -737,6 +765,7 @@ def streamk_down_tiling(
         l0_tm=l0_tm,
         l0_tn=l0_tn,
         l0_tk=l0_tk,
+        work_l1_tk=work_l1_tk,
         m_base_tail_split_cnt=1,
         n_base_tail_split_cnt=1,
         m_tail_main=0,
