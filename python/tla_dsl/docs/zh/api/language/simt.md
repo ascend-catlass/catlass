@@ -47,6 +47,8 @@ with tla.vector():
   [基础算术](#基础算术)、[比较与选择](#比较与选择)、[类型转换](#类型转换)。
 - `tla.range` 循环与运行期 `if`。
 - `tla.print`：逐线程标量、格式化字符串及 GM／UB 前缀，见 [调试与打印](debug.md)。
+- Warp 查询 `tla.arch.warpsize` / `lane_idx` / `lanemask_eq` / `lanemask_lt` /
+  `lanemask_le` / `lanemask_gt` / `lanemask_ge`——见 [系统变量访问](system.md#系统变量访问)。
 - `tla.arch.thread_idx` / `thread_block_dim` / `sync_threads`，以及 launch 级
   `tla.arch.block_idx` / `block_num`——见 [系统变量访问](system.md#系统变量访问)。
 

@@ -650,6 +650,11 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         [["dsl_tutorials/vector_simt_ops/multi_ops_simt/multi_ops_simt.py", *dev]],
     )
 
+    yield (
+        "simt-warp-lane-masks",
+        [["end_to_end/warp_lane_masks.py", *dev]],
+    )
+
     # --- multi_core_splitk_matmul and tail_multi_core_splitk_matmul ---
     for script in ("multi_core_splitk_matmul.py", "tail_multi_core_splitk_matmul.py"):
         for m, n, k in MMAD_SHAPES + BIG_SHAPES:

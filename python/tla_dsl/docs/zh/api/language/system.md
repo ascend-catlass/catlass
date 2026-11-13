@@ -252,6 +252,166 @@ with tla.vec.func(mode="simt", thread_block_dim=48):
 
 ---
 
+### `tla.arch.lanemask_eq`
+
+**源码：** [`catlass.core_api.arch_lanemask_eq`](../../../../catlass/core_api.py)
+
+功能说明：
+
+返回 `UInt32` 掩码，当 `j == lane_idx()` 时第 `j` 位置位。
+位置范围为 0–31，包含非活跃或未启动的 lane；该查询不执行同步。
+
+函数原型：
+
+```python
+tla.arch.lanemask_eq() -> UInt32
+```
+
+参数说明：
+
+- 无。
+
+约束说明：
+
+- 仅在 `@tla.kernel` 内的 `tla.vec.func(mode="simt")` 中可用。
+
+调用示例：
+
+```python
+with tla.vec.func(mode="simt", thread_block_dim=32):
+    mask = tla.arch.lanemask_eq()
+```
+
+---
+
+### `tla.arch.lanemask_lt`
+
+**源码：** [`catlass.core_api.arch_lanemask_lt`](../../../../catlass/core_api.py)
+
+功能说明：
+
+返回 `UInt32` 掩码，当 `j < lane_idx()` 时第 `j` 位置位。
+位置范围为 0–31，包含非活跃或未启动的 lane；该查询不执行同步。
+
+函数原型：
+
+```python
+tla.arch.lanemask_lt() -> UInt32
+```
+
+参数说明：
+
+- 无。
+
+约束说明：
+
+- 仅在 `@tla.kernel` 内的 `tla.vec.func(mode="simt")` 中可用。
+
+调用示例：
+
+```python
+with tla.vec.func(mode="simt", thread_block_dim=32):
+    mask = tla.arch.lanemask_lt()
+```
+
+---
+
+### `tla.arch.lanemask_le`
+
+**源码：** [`catlass.core_api.arch_lanemask_le`](../../../../catlass/core_api.py)
+
+功能说明：
+
+返回 `UInt32` 掩码，当 `j <= lane_idx()` 时第 `j` 位置位。
+位置范围为 0–31，包含非活跃或未启动的 lane；该查询不执行同步。
+
+函数原型：
+
+```python
+tla.arch.lanemask_le() -> UInt32
+```
+
+参数说明：
+
+- 无。
+
+约束说明：
+
+- 仅在 `@tla.kernel` 内的 `tla.vec.func(mode="simt")` 中可用。
+
+调用示例：
+
+```python
+with tla.vec.func(mode="simt", thread_block_dim=32):
+    mask = tla.arch.lanemask_le()
+```
+
+---
+
+### `tla.arch.lanemask_gt`
+
+**源码：** [`catlass.core_api.arch_lanemask_gt`](../../../../catlass/core_api.py)
+
+功能说明：
+
+返回 `UInt32` 掩码，当 `j > lane_idx()` 时第 `j` 位置位。
+位置范围为 0–31，包含非活跃或未启动的 lane；该查询不执行同步。
+
+函数原型：
+
+```python
+tla.arch.lanemask_gt() -> UInt32
+```
+
+参数说明：
+
+- 无。
+
+约束说明：
+
+- 仅在 `@tla.kernel` 内的 `tla.vec.func(mode="simt")` 中可用。
+
+调用示例：
+
+```python
+with tla.vec.func(mode="simt", thread_block_dim=32):
+    mask = tla.arch.lanemask_gt()
+```
+
+---
+
+### `tla.arch.lanemask_ge`
+
+**源码：** [`catlass.core_api.arch_lanemask_ge`](../../../../catlass/core_api.py)
+
+功能说明：
+
+返回 `UInt32` 掩码，当 `j >= lane_idx()` 时第 `j` 位置位。
+位置范围为 0–31，包含非活跃或未启动的 lane；该查询不执行同步。
+
+函数原型：
+
+```python
+tla.arch.lanemask_ge() -> UInt32
+```
+
+参数说明：
+
+- 无。
+
+约束说明：
+
+- 仅在 `@tla.kernel` 内的 `tla.vec.func(mode="simt")` 中可用。
+
+调用示例：
+
+```python
+with tla.vec.func(mode="simt", thread_block_dim=32):
+    mask = tla.arch.lanemask_ge()
+```
+
+---
+
 ### `tla.arch.thread_idx`
 
 **源码：** [`catlass.core_api.arch_thread_idx`](../../../../catlass/core_api.py)

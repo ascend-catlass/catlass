@@ -70,6 +70,14 @@ def Tla_ArchLaneIdxOp : Tla_Op<"arch.lane_idx", [Pure]> {
   let assemblyFormat = [{ attr-dict `->` type($result) }];
 }
 
+def Tla_ArchLanemaskOp : Tla_Op<"arch.lanemask", [Pure]> {
+  let summary = "SIMT positional lane mask independent of thread activity";
+  let arguments = (ins StrAttr:$mode);
+  let results = (outs I32:$result);
+  let hasVerifier = 1;
+  let assemblyFormat = "$mode attr-dict `:` type($result)";
+}
+
 def Tla_ThreadIdxOp : Tla_Op<"arch.thread_idx", [Pure]> {
   let summary = "SIMT thread index";
   let description = [{

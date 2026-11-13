@@ -1,0 +1,46 @@
+// RUN: sed -n '/^\/\/ BEGIN_OUTSIDE$/,/^\/\/ END_OUTSIDE$/p' %s | sed '1d;$d;s|^// ||' > %t.OUTSIDE.mlir && not %tla_compile %t.OUTSIDE.mlir -o %t 2>&1 | %filecheck %s --check-prefix=OUTSIDE
+// OUTSIDE: error: 'tla.arch.lanemask' op
+// OUTSIDE-SAME: simt
+
+// BEGIN_OUTSIDE
+// module {
+//   func.func @bad_lane() {
+//     %lane = tla.arch.lanemask "eq" : i32
+//     return
+//   }
+// }
+// END_OUTSIDE
+
+// RUN: sed -n '/^\/\/ BEGIN_SIMD$/,/^\/\/ END_SIMD$/p' %s | sed '1d;$d;s|^// ||' > %t.SIMD.mlir && not %tla_compile %t.SIMD.mlir -o %t 2>&1 | %filecheck %s --check-prefix=SIMD
+// SIMD: error: 'tla.arch.lanemask' op
+// SIMD-SAME: simt
+
+// BEGIN_SIMD
+// module {
+//   func.func @bad_lane() {
+//     "tla.vector"() ({
+//       "tla.vec.func"() ({
+//         %lane = tla.arch.lanemask "eq" : i32
+//       }) {mode = "simd"} : () -> ()
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_SIMD
+
+// RUN: sed -n '/^\/\/ BEGIN_BAD_MODE$/,/^\/\/ END_BAD_MODE$/p' %s | sed '1d;$d;s|^// ||' > %t.BAD_MODE.mlir && not %tla_compile %t.BAD_MODE.mlir -o %t 2>&1 | %filecheck %s --check-prefix=BAD_MODE
+// BAD_MODE: error: 'tla.arch.lanemask' op
+// BAD_MODE-SAME: mode
+
+// BEGIN_BAD_MODE
+// module {
+//   func.func @bad_mask() {
+//     "tla.vector"() ({
+//       "tla.vec.func"() ({
+//         %mask = tla.arch.lanemask "invalid" : i32
+//       }) {mode = "simt", thread_block_dim = array<i64: 32, 1, 1>} : () -> ()
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_BAD_MODE

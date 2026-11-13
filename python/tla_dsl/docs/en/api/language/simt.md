@@ -38,6 +38,7 @@ The body is per-thread scalar code. These are available:
 - Scalar arithmetic, comparison, selection and conversion on `Numeric` values, each emitting its per-thread op -- see **Basic Arithmetic**, **Compare and Select** and **Type Conversion** below.
 - `tla.range` loops and runtime `if`.
 - `tla.print` for per-thread scalars, formatted strings, and GM/UB prefixes -- see [Debug and Printing](../language/debug.md).
+- Warp queries `tla.arch.warpsize` / `lane_idx` / `lanemask_eq` / `lanemask_lt` / `lanemask_le` / `lanemask_gt` / `lanemask_ge` -- see **System Variable Access**.
 - `tla.arch.thread_idx` / `thread_block_dim` / `sync_threads`, and the launch-level `tla.arch.block_idx` / `block_num` -- see **System Variable Access**.
 
 These are not, and are rejected when the kernel is compiled:

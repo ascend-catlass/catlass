@@ -247,6 +247,166 @@ with tla.vec.func(mode="simt", thread_block_dim=48):
 
 ---
 
+### `tla.arch.lanemask_eq`
+
+**Source:** [`catlass.core_api.arch_lanemask_eq`](../../../../catlass/core_api.py)
+
+Description:
+
+Return a `UInt32` mask with bit `j` set when `j == lane_idx()`.
+Positions 0–31 include inactive/unlaunched lanes; no synchronization.
+
+Prototype:
+
+```python
+tla.arch.lanemask_eq() -> UInt32
+```
+
+Parameters:
+
+- None.
+
+Constraints:
+
+- Only inside `tla.vec.func(mode="simt")` in a `@tla.kernel`.
+
+Example:
+
+```python
+with tla.vec.func(mode="simt", thread_block_dim=32):
+    mask = tla.arch.lanemask_eq()
+```
+
+---
+
+### `tla.arch.lanemask_lt`
+
+**Source:** [`catlass.core_api.arch_lanemask_lt`](../../../../catlass/core_api.py)
+
+Description:
+
+Return a `UInt32` mask with bit `j` set when `j < lane_idx()`.
+Positions 0–31 include inactive/unlaunched lanes; no synchronization.
+
+Prototype:
+
+```python
+tla.arch.lanemask_lt() -> UInt32
+```
+
+Parameters:
+
+- None.
+
+Constraints:
+
+- Only inside `tla.vec.func(mode="simt")` in a `@tla.kernel`.
+
+Example:
+
+```python
+with tla.vec.func(mode="simt", thread_block_dim=32):
+    mask = tla.arch.lanemask_lt()
+```
+
+---
+
+### `tla.arch.lanemask_le`
+
+**Source:** [`catlass.core_api.arch_lanemask_le`](../../../../catlass/core_api.py)
+
+Description:
+
+Return a `UInt32` mask with bit `j` set when `j <= lane_idx()`.
+Positions 0–31 include inactive/unlaunched lanes; no synchronization.
+
+Prototype:
+
+```python
+tla.arch.lanemask_le() -> UInt32
+```
+
+Parameters:
+
+- None.
+
+Constraints:
+
+- Only inside `tla.vec.func(mode="simt")` in a `@tla.kernel`.
+
+Example:
+
+```python
+with tla.vec.func(mode="simt", thread_block_dim=32):
+    mask = tla.arch.lanemask_le()
+```
+
+---
+
+### `tla.arch.lanemask_gt`
+
+**Source:** [`catlass.core_api.arch_lanemask_gt`](../../../../catlass/core_api.py)
+
+Description:
+
+Return a `UInt32` mask with bit `j` set when `j > lane_idx()`.
+Positions 0–31 include inactive/unlaunched lanes; no synchronization.
+
+Prototype:
+
+```python
+tla.arch.lanemask_gt() -> UInt32
+```
+
+Parameters:
+
+- None.
+
+Constraints:
+
+- Only inside `tla.vec.func(mode="simt")` in a `@tla.kernel`.
+
+Example:
+
+```python
+with tla.vec.func(mode="simt", thread_block_dim=32):
+    mask = tla.arch.lanemask_gt()
+```
+
+---
+
+### `tla.arch.lanemask_ge`
+
+**Source:** [`catlass.core_api.arch_lanemask_ge`](../../../../catlass/core_api.py)
+
+Description:
+
+Return a `UInt32` mask with bit `j` set when `j >= lane_idx()`.
+Positions 0–31 include inactive/unlaunched lanes; no synchronization.
+
+Prototype:
+
+```python
+tla.arch.lanemask_ge() -> UInt32
+```
+
+Parameters:
+
+- None.
+
+Constraints:
+
+- Only inside `tla.vec.func(mode="simt")` in a `@tla.kernel`.
+
+Example:
+
+```python
+with tla.vec.func(mode="simt", thread_block_dim=32):
+    mask = tla.arch.lanemask_ge()
+```
+
+---
+
 ### `tla.arch.thread_idx`
 
 **Source:** [`catlass.core_api.arch_thread_idx`](../../../../catlass/core_api.py)

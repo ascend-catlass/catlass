@@ -124,6 +124,7 @@ from .base_dsl.typing import (
     Int8,
     Int16,
     Int32,
+    UInt32,
     Numeric,
     as_numeric,
 )
@@ -10893,6 +10894,97 @@ def arch_lane_idx(*, loc: mlir_ir.Location | None = None) -> Int32:
     return Int32(_tla_ops_gen.arch_lane_idx(i32, loc=loc))
 
 
+def _emit_arch_lanemask(op_name: str, mode: str, *, loc=None) -> UInt32:
+    _require_arch_warp_region(op_name)
+    i32 = mlir_ir.IntegerType.get_signless(32)
+    return UInt32(_tla_ops_gen.arch_lanemask(i32, mode, loc=loc))
+
+
+@dsl_user_op
+def arch_lanemask_eq(*, loc: mlir_ir.Location | None = None) -> UInt32:
+    """Directory: System Variable Access / Architecture Helpers
+    Description:
+        Return a `UInt32` mask with bit `j` set when `j == lane_idx()`.
+        Positions 0–31 include inactive/unlaunched lanes; no synchronization.
+    Parameters:
+        - None.
+    Constraints:
+        - Only inside `tla.vec.func(mode="simt")` in a `@tla.kernel`.
+    Example:
+        with tla.vec.func(mode="simt", thread_block_dim=32):
+            mask = tla.arch.lanemask_eq()
+    """
+    return _emit_arch_lanemask("arch.lanemask_eq", "eq", loc=loc)
+
+
+@dsl_user_op
+def arch_lanemask_lt(*, loc: mlir_ir.Location | None = None) -> UInt32:
+    """Directory: System Variable Access / Architecture Helpers
+    Description:
+        Return a `UInt32` mask with bit `j` set when `j < lane_idx()`.
+        Positions 0–31 include inactive/unlaunched lanes; no synchronization.
+    Parameters:
+        - None.
+    Constraints:
+        - Only inside `tla.vec.func(mode="simt")` in a `@tla.kernel`.
+    Example:
+        with tla.vec.func(mode="simt", thread_block_dim=32):
+            mask = tla.arch.lanemask_lt()
+    """
+    return _emit_arch_lanemask("arch.lanemask_lt", "lt", loc=loc)
+
+
+@dsl_user_op
+def arch_lanemask_le(*, loc: mlir_ir.Location | None = None) -> UInt32:
+    """Directory: System Variable Access / Architecture Helpers
+    Description:
+        Return a `UInt32` mask with bit `j` set when `j <= lane_idx()`.
+        Positions 0–31 include inactive/unlaunched lanes; no synchronization.
+    Parameters:
+        - None.
+    Constraints:
+        - Only inside `tla.vec.func(mode="simt")` in a `@tla.kernel`.
+    Example:
+        with tla.vec.func(mode="simt", thread_block_dim=32):
+            mask = tla.arch.lanemask_le()
+    """
+    return _emit_arch_lanemask("arch.lanemask_le", "le", loc=loc)
+
+
+@dsl_user_op
+def arch_lanemask_gt(*, loc: mlir_ir.Location | None = None) -> UInt32:
+    """Directory: System Variable Access / Architecture Helpers
+    Description:
+        Return a `UInt32` mask with bit `j` set when `j > lane_idx()`.
+        Positions 0–31 include inactive/unlaunched lanes; no synchronization.
+    Parameters:
+        - None.
+    Constraints:
+        - Only inside `tla.vec.func(mode="simt")` in a `@tla.kernel`.
+    Example:
+        with tla.vec.func(mode="simt", thread_block_dim=32):
+            mask = tla.arch.lanemask_gt()
+    """
+    return _emit_arch_lanemask("arch.lanemask_gt", "gt", loc=loc)
+
+
+@dsl_user_op
+def arch_lanemask_ge(*, loc: mlir_ir.Location | None = None) -> UInt32:
+    """Directory: System Variable Access / Architecture Helpers
+    Description:
+        Return a `UInt32` mask with bit `j` set when `j >= lane_idx()`.
+        Positions 0–31 include inactive/unlaunched lanes; no synchronization.
+    Parameters:
+        - None.
+    Constraints:
+        - Only inside `tla.vec.func(mode="simt")` in a `@tla.kernel`.
+    Example:
+        with tla.vec.func(mode="simt", thread_block_dim=32):
+            mask = tla.arch.lanemask_ge()
+    """
+    return _emit_arch_lanemask("arch.lanemask_ge", "ge", loc=loc)
+
+
 @dsl_user_op
 def arch_thread_idx(
     *, loc: mlir_ir.Location | None = None
@@ -11443,6 +11535,7 @@ _require_generated("arch_block_num")
 _require_generated("arch_thread_block_dim")
 _require_generated("arch_thread_idx")
 _require_generated("arch_lane_idx")
+_require_generated("arch_lanemask")
 _require_generated("simt_add")
 _require_generated("simt_sub")
 _require_generated("simt_mul")
@@ -11465,6 +11558,11 @@ arch._set("thread_block_dim", arch_thread_block_dim)
 arch._set("thread_idx", arch_thread_idx)
 arch._set("warpsize", arch_warpsize)
 arch._set("lane_idx", arch_lane_idx)
+arch._set("lanemask_eq", arch_lanemask_eq)
+arch._set("lanemask_lt", arch_lanemask_lt)
+arch._set("lanemask_le", arch_lanemask_le)
+arch._set("lanemask_gt", arch_lanemask_gt)
+arch._set("lanemask_ge", arch_lanemask_ge)
 arch._set("sync_threads", arch_sync_threads)
 arch._set("get_capacity_in_bytes", arch_get_capacity_in_bytes)
 arch._set("get_dyn_ub", arch_get_dyn_ub)

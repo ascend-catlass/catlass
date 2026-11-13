@@ -29,6 +29,25 @@ Value buildLaneIdx(OpBuilder& b, Location loc, int64_t bx, int64_t by, int64_t b
     }
     return b.createOrFold<arith::AndIOp>(loc, lane, mask);
 }
+
+Value buildLanemask(OpBuilder& b, Location loc, StringRef mode, Value lane)
+{
+    Value one = b.create<arith::ConstantIntOp>(loc, 1, 32);
+    Value bit = b.create<arith::ShLIOp>(loc, one, lane);
+    if (mode == "eq")
+        return bit;
+    Value lt = b.create<arith::SubIOp>(loc, bit, one);
+    if (mode == "lt")
+        return lt;
+    Value all = b.create<arith::ConstantIntOp>(loc, -1, 32);
+    if (mode == "ge")
+        return b.createOrFold<arith::XOrIOp>(loc, lt, all);
+    // Form the inclusive mask without shifting by lane + 1 (32 at lane 31).
+    Value le = b.createOrFold<arith::OrIOp>(loc, bit, lt);
+    if (mode == "le")
+        return le;
+    return b.createOrFold<arith::XOrIOp>(loc, le, all);
+}
 } // namespace
 
 LogicalResult lowerSimtWarpOpsIn(func::FuncOp vf, int64_t bx, int64_t by, int64_t bz)
@@ -37,6 +56,14 @@ LogicalResult lowerSimtWarpOpsIn(func::FuncOp vf, int64_t bx, int64_t by, int64_
         if (!op.getResult().use_empty()) {
             OpBuilder b(op);
             op.getResult().replaceAllUsesWith(buildLaneIdx(b, op.getLoc(), bx, by, bz));
+        }
+        op.erase();
+    });
+    vf.walk([&](ArchLanemaskOp op) {
+        if (!op.getResult().use_empty()) {
+            OpBuilder b(op);
+            Value lane = buildLaneIdx(b, op.getLoc(), bx, by, bz);
+            op.getResult().replaceAllUsesWith(buildLanemask(b, op.getLoc(), op.getMode(), lane));
         }
         op.erase();
     });
