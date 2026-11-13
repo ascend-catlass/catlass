@@ -94,3 +94,18 @@ print(y.shape, y.dtype)
 ```text
 torch.Size([128, 512]) torch.bfloat16
 ```
+
+## 性能调度与写回
+
+kernel 在编译期根据 `m_tiles = ceil(M / 256)`、`v_tiles = ceil(V / 256)` 选择调度，按下表顺序匹配。矩阵乘的 M/N tile 保持为 256，L0 的 K 步长保持为 64；`H` 的 Padding 粒度为 256，与 L1 的 K 块大小 `tile_k` 分开。
+
+| 条件 | `(swizzle_m, swizzle_n)` | `tile_k` |
+| ----- | ----- | ----- |
+| `m_tiles >= 32` 且 `v_tiles >= 256` | `(32, 2)` | 128 |
+| `m_tiles >= 8` 且 `v_tiles >= 128` | `(8, 4)` | 128 |
+| `m_tiles >= 32` | `(2, 8)` | 128 |
+| 其余 | `(2, 8)` | 256 |
+
+`(2, 8)` 的两个维度分别限制为不超过 `m_tiles`、`v_tiles`。分档阈值来自 Ascend 950PR、28 个 Cube Core、`H=2560`、`S=128` 的经验调优，核数通过 `torch.npu.get_device_properties(device).cube_core_num` 查询；迁移到其他 shape 或设备时需重新测量。例如 `M=8192, V=16384, tile_k=128` 的扫描中，使用打包 DMA 写回时，`(2, 8)` 为 1.990 ms，`(32, 2)` 为 2.328 ms。
+
+输出在 SIMD 中完成 RNE（最近偶数舍入），精确转换为 bf16 后通过 `DIST_PACK_B32` 紧凑存入 UB，由 MTE3 批量写回 GM。`mutex_output` 保护 VECTOR 与 MTE3 之间的缓冲区复用，GM 元素偏移使用 64 位整数。矩阵乘结果与最终输出的两次 RNE、重复下标按槽位顺序累加的规则保持不变。

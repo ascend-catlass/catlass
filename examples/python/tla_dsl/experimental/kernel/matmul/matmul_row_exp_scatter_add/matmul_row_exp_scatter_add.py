@@ -58,7 +58,7 @@ that hand a tile over to each other through a single cross-core flag:
     cube half    for each (m, v) tile:  K-blocked matmul into L0C
                                         -> fixpipe copy L0C -> UB (fp32)
     vector half  for each (m, v) tile:  epilogue in place in UB
-                                        -> narrow + store Y to GM
+                                        -> pack bf16 in UB -> DMA Y to GM
 
 Both halves walk the same task list, so they stay in lock step.  Every stage
 holds exactly one tile (one L0C accumulator, one UB staging tile), which gives
@@ -80,15 +80,27 @@ from catlass.tla.runtime import from_dlpack
 # count S is separate and is passed as num_selected.
 TILE_M = 256  # C tile rows; also the M padding granularity
 TILE_N = 256  # C tile columns; also the V padding granularity
-TILE_K = 256  # depth of one K block staged in L1; also the H padding granularity
+TILE_K = 256  # H padding granularity; the L1 K block is selected per shape
 K_STEP = 64  # depth of one L0A/L0B fragment inside a K block
 
-# Super-tile swizzle of the (m, v) tile grid: SWIZZLE_M x SWIZZLE_N tiles per
-# super-tile, walked row-major.  Measured on the target device over the
-# net-00..13 shapes; the original 32x2 mapping left 3/4 of the cores idle at
-# small M.
-SWIZZLE_M = 2
-SWIZZLE_N = 8
+
+# Schedule constants depend on both grid dimensions.  Keep padding independent
+# of the L1 K block so callers can reuse the same padded output contract.
+def _select_schedule(m, v):
+    """Return (swizzle_m, swizzle_n, tile_k) at kernel specialisation time."""
+    m_tiles = (m + TILE_M - 1) // TILE_M
+    v_tiles = (v + TILE_N - 1) // TILE_N
+    # Empirical thresholds on Ascend 950PR (28 Cube Cores), H=2560.
+    # Large M alone does not imply that the 32x2 mapping improves L2 reuse:
+    # V=16384 favours 2x8, V=32768 favours 8x4, and V>=65536 favours 32x2.
+    if m_tiles >= 32 and v_tiles >= 256:
+        return 32, 2, 128
+    if m_tiles >= 8 and v_tiles >= 128:
+        return 8, 4, 128
+    tile_k = 128 if m_tiles >= 32 else 256
+    # Avoid unused super-tile slots when either grid dimension is tiny.
+    return max(1, min(m_tiles, 2)), max(1, min(v_tiles, 8)), tile_k
+
 
 _COMPILE_OPTS = (
     "--npu-arch 3510"
@@ -114,15 +126,14 @@ def matmul_row_exp_scatter_add_kernel(
     num_selected: tla.Constexpr[int],
 ) -> None:
     zero, one = 0, 1
-    tile_m, tile_n, tile_k, k_step = TILE_M, TILE_N, TILE_K, K_STEP
+    tile_m, tile_n, k_step = TILE_M, TILE_N, K_STEP
     # The fixpipe splits the C tile over the two AIVs of the cube core, so each
     # AIV owns half of the rows.
     rows_per_aiv = tile_m // 2
     simd_lanes = 64  # fp32 lanes per SIMD fragment
-    swizzle_m, swizzle_n = SWIZZLE_M, SWIZZLE_N
-
     m = gm_x.origin_shape[0]
     v = gm_out.origin_shape[1]
+    swizzle_m, swizzle_n, tile_k = _select_schedule(m, v)
     m_tiles = (m + tile_m - 1) // tile_m
     v_tiles = (v + tile_n - 1) // tile_n
     k_blocks = (gm_x.origin_shape[1] + tile_k - 1) // tile_k
@@ -148,8 +159,8 @@ def matmul_row_exp_scatter_add_kernel(
     mutex_l0_a1 = tla.mutex("l0_a1", id=6)
     mutex_l0_b1 = tla.mutex("l0_b1", id=7)
     mutex_l0_c = tla.mutex("l0_c", id=8)
-    # Guards the final ``* invT`` pass against a concurrent fixpipe fill.
-    mutex_epilogue = tla.mutex("epilogue", id=10)
+    # Protect packed output between the VECTOR producer and the MTE3 consumer.
+    mutex_output = tla.mutex("output", id=10)
 
     # -------------------------------------------------------------- staging
     # L1 holds two ping-pong slots of the A and B operands, one K block each.
@@ -165,9 +176,12 @@ def matmul_row_exp_scatter_add_kernel(
     # One fp32 accumulator; the fixpipe copies it out whole, so it cannot be
     # double buffered (L0C on this part is exactly one TILE_M x TILE_N tile).
     l0_c_ptr = tla.allocate(tile_m * tile_n, tla.Float32, tla.AddressSpace.l0c, 1024)
-    # UB: the fp32 C tile (one AIV half) plus the per-row epilogue scalars.
+    # UB: one fp32 C half-tile, one packed bf16 output half-tile and row scalars.
     ub_c_ptr = tla.allocate(
         rows_per_aiv * tile_n, tla.Float32, tla.AddressSpace.ub, 256
+    )
+    ub_out_ptr = tla.allocate(
+        rows_per_aiv * tile_n, tla.BFloat16, tla.AddressSpace.ub, 256
     )
     ub_row_logsumexp_ptr = tla.allocate(
         rows_per_aiv, tla.Float32, tla.AddressSpace.ub, 256
@@ -415,6 +429,20 @@ def matmul_row_exp_scatter_add_kernel(
                 tla.make_shape(rows_per_aiv, tile_n), tla.make_stride(tile_n, 1)
             ),
         )
+        ub_out = tla.make_tensor(
+            ub_out_ptr,
+            tla.make_layout(
+                tla.make_shape(rows_per_aiv, tile_n), tla.make_stride(tile_n, 1)
+            ),
+        )
+        out_cast = tla.params.CastParams(
+            reg_slot=tla.params.RegSlot.ZERO,
+            sat_mode=tla.params.SatMode.NOSAT,
+            round_mode=tla.params.RoundMode.CAST_TRUNC,
+        )
+        pack_store = tla.params.NormalStoreParams(
+            store_dist=tla.params.StoreDist.DIST_PACK_B32
+        )
         ub_row_logsumexp = tla.make_tensor(
             ub_row_logsumexp_ptr,
             tla.make_layout(tla.make_shape(rows_per_aiv), tla.make_stride(1)),
@@ -528,12 +556,15 @@ def matmul_row_exp_scatter_add_kernel(
 
                 tla.pipe_barrier(tla.pipes.ALL)
 
-                # Step 4 - Y = bf16_rne(R * invT), in place.  The value is left
-                # as an fp32 number that already sits exactly on the bf16 grid,
-                # so step 5's narrowing cannot round a second time.
-                mutex_epilogue.lock(pipe=tla.arch.VECTOR)
+                # Step 4 - Y = bf16_rne(R * invT).  Round in fp32 first, so the
+                # subsequent TRUNC cast is exact, including halfway inputs.
+                # PACK_B32 compacts the low bf16 half of each register lane.
+                mutex_output.lock(pipe=tla.arch.VECTOR)
                 with tla.vec.func(mode="simd"):
                     out_lanes = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
+                    store_lanes = tla.create_mask(
+                        pattern=tla.mask.ALL, dtype=tla.BFloat16
+                    )
                     out_lsb_one = tla.full(1, dtype=tla.Int32)
                     out_round_bias = tla.full(32767, dtype=tla.Int32)
                     out_bf16_mask = tla.full(-65536, dtype=tla.Int32)
@@ -563,25 +594,33 @@ def matmul_row_exp_scatter_add_kernel(
                             )
                             out_frag = out_frag.bitcast(tla.Float32)
                             tla.tile_view(
-                                ub_c,
+                                ub_out,
                                 tla.make_shape(1, simd_lanes),
                                 tla.make_coord(out_round_row, out_col_block),
-                            ).store(out_frag, mask=out_lanes)
-                mutex_epilogue.unlock(pipe=tla.arch.VECTOR)
+                            ).store(
+                                out_frag.to(tla.BFloat16, out_cast, out_lanes),
+                                pack_store,
+                                mask=store_lanes,
+                            )
+                mutex_output.unlock(pipe=tla.arch.VECTOR)
 
                 tla.pipe_barrier(tla.pipes.ALL)
 
-                # Step 5 - output tile -> GM.  bf16 has no legal UB -> GM cast on
-                # 2.2.0, so the bf16-exact fp32 value is narrowed per lane and
-                # stored scalar.  One thread per column: the tile_n lanes write
-                # one contiguous GM row, so the stores coalesce.
-                with tla.vec.func(mode="simt", thread_block_dim=tile_n):
-                    col_thread, _, _ = tla.arch.thread_idx()
-                    for out_row in tla.range(zero, rows_per_aiv, one):
-                        gm_out[row_base + out_row, col_base + col_thread] = ub_c[
-                            out_row, col_thread
-                        ].to(tla.BFloat16)
-                # Hand UB back once all output values have been read out.
+                # Step 5 - packed bf16 output tile -> GM without conversion.
+                # The output can exceed 2**31 elements; widen before multiplying.
+                gm_out_tile = tla.make_tensor(
+                    gm_out.ptr
+                    + row_base.to(tla.Int64) * tla.Int64(v)
+                    + col_base.to(tla.Int64),
+                    tla.make_layout(
+                        tla.make_shape(rows_per_aiv, tile_n), tla.make_stride(v, 1)
+                    ),
+                )
+                mutex_output.lock(pipe=tla.arch.MTE3)
+                tla.copy(gm_out_tile, ub_out)
+                mutex_output.unlock(pipe=tla.arch.MTE3)
+                # Hand the fp32 staging tile back; mutex_output separately
+                # keeps the next pack from overwriting an in-flight DMA source.
                 tla.pipe_barrier(tla.pipes.ALL)
                 tla.cross_core_set_flag(tile_ready, tla.arch.VECTOR)
 
@@ -714,7 +753,9 @@ def prepare(
     m, h = x.shape
     v = weight.shape[0]
     num_selected = global_col_ids.shape[1]
-    device = x.device.index or torch.npu.current_device()
+    device = (
+        x.device.index if x.device.index is not None else torch.npu.current_device()
+    )
 
     col_start = int(shard_index) * v
     m_pad = _pad_to(m, TILE_M)
