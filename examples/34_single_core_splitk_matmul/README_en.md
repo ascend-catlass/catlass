@@ -19,6 +19,12 @@ The underlying operator prototype is structured as follows:
 
 None.
 
+## Accumulation and K Usage Range
+
+This operator targets performance tuning and retains its implementation that computes K tiles and accumulates them with FP32 atomic additions. K is the input reduction length, `L1TileShape::K` is the number of elements along K per tile, and the tile count is `ceil(K / L1TileShape::K)`. Long FP32 addition chains accumulate rounding error, so the selected usage range for FP16, BF16, and FP32 inputs is `1 <= K <= 8192`.
+
+In the current PyTorch configuration, FP32 uses `L1TileShape::K=256`, so K=8192 corresponds to `8192 / 256 = 32` tiles. FP16 and BF16 use `L1TileShape::K=512`, giving 16 tiles for the same K. K=262145 requires 1025 tiles in the FP32 configuration and is outside this usage range. The upper bound of 8192 is a choice that retains the original algorithm, not a hardware limit, a mathematical error guarantee, or a runtime rejection condition in the kernel. Rounding error still depends on input values, cancellation, and tile configuration; the usage range needs reevaluation when the configuration changes.
+
 ## Code Organization
 
 The sample code is organized as follows:
