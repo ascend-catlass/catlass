@@ -422,6 +422,31 @@ DIRECTORY_SECTIONS: list[tuple[str, str]] = [
         "Callable helpers on `tla.arch`: block / thread indexing, SIMT "
         "`sync_threads`, on-chip capacity, and dynamic UB.",
     ),
+    (
+        "System Variable Access / Warp Functions",
+        "Intra-warp data exchange on `tla.arch`, for SIMT regions only.\n"
+        "\n"
+        "A warp is 32 threads, partitioned out of the thread block in linear "
+        "order. These interfaces move a value between the registers of one "
+        "warp's lanes, so unlike a UB staging tensor plus "
+        "`tla.arch.sync_threads()` they issue no memory traffic and no "
+        "block-wide barrier. What distinguishes them is only which lane each "
+        "one reads from.\n"
+        "\n"
+        "Every interface takes a `width` that splits the warp into contiguous "
+        "groups of that many lanes, so a kernel can run several independent "
+        "reductions per warp. It does not change which threads execute the op. "
+        "Each mode bounds only the one edge its arithmetic can cross, and a "
+        "lane whose source falls outside in that direction keeps its own "
+        "value. `bfly` can cross either edge but is checked against its "
+        "group's last lane only, so a mask of `width` or more reads a "
+        "lower-numbered group instead; keep the index below `width` to confine "
+        "an exchange to one group.\n"
+        "\n"
+        "Supported products: Ascend 950PR&950DT series products. Atlas A2 "
+        "series products and Atlas A3 series products have no warp shuffle "
+        "instruction.",
+    ),
     ("Resource Management", "On-chip scratch allocation via `allocate`."),
     (
         "Debug APIs",

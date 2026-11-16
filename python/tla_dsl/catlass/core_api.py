@@ -124,10 +124,12 @@ from .base_dsl.typing import (
     Int8,
     Int16,
     Int32,
+    Int64,
+    Numeric,
     UInt8,
     UInt16,
     UInt32,
-    Numeric,
+    UInt64,
     as_numeric,
 )
 from .base_dsl.typing import Pointer, TypedPointer
@@ -11247,6 +11249,342 @@ def arch_sync_threads(*, loc: mlir_ir.Location | None = None) -> None:
     _tla_ops_gen.arch_sync_threads(loc=loc)
 
 
+# A shuffle moves a bit pattern between registers without interpreting it, so
+# every integer and float width the intrinsics cover is supported, signed and
+# unsigned alike: inside a SIMT region a Numeric presents its value as a
+# signless integer of its own width, and the Python type is carried through to
+# the result unchanged. `Bool` is the one integer type left out -- it is i1, and
+# there is no 1-bit shuffle to widen it to.
+_WARP_SHUFFLE_TYPES = (
+    Int8,
+    Int16,
+    Int32,
+    Int64,
+    UInt8,
+    UInt16,
+    UInt32,
+    UInt64,
+    Float16,
+    Float32,
+    BFloat16,
+)
+
+_WARP_SHUFFLE_REJECTED_TYPES = (Bool,)
+
+# A warp is this many lanes. It is also the domain of every shuffle index: the
+# hardware keeps the low 5 bits of the control field's index and discards the
+# rest, so 32 is where a value stops meaning what the caller wrote.
+_WARP_SIZE = 32
+
+_SHUFFLE_INDEX_NAME = {
+    "idx": "src_lane",
+    "up": "delta",
+    "down": "delta",
+    "bfly": "lane_mask",
+}
+
+
+@dsl_user_op
+def _emit_arch_shuffle(
+    api_name: str,
+    mode: str,
+    value: Any,
+    index: Any,
+    width: Any,
+    *,
+    loc: mlir_ir.Location | None = None,
+) -> Any:
+    """Emit tla.arch.shuffle; the four public wrappers differ only in `mode`."""
+    _require_arch_warp_region(api_name)
+
+    operand = value if isinstance(value, Numeric) else as_numeric(value)
+    if isinstance(operand, _WARP_SHUFFLE_REJECTED_TYPES):
+        _op_error(
+            api_name,
+            "does not support Bool operands; there is no 1-bit shuffle, so "
+            "shuffle an Int8 or wider value instead",
+        )
+    if not isinstance(operand, _WARP_SHUFFLE_TYPES):
+        _op_error(
+            api_name,
+            f"does not support {type(operand).__name__} values; supported types are "
+            + ", ".join(t.__name__ for t in _WARP_SHUFFLE_TYPES),
+        )
+
+    if not isinstance(width, int) or isinstance(width, bool):
+        _op_error(api_name, f"width must be a Python int constant; got {width!r}")
+    if width < 2 or width > 32 or (width & (width - 1)) != 0:
+        _op_error(api_name, f"width must be a power of two in [2, 32]; got {width}")
+
+    # The index is a lane number, not data: it is always i32, whatever the value
+    # type is.
+    lane = index if isinstance(index, Numeric) else as_numeric(index)
+    if not isinstance(lane, Int32):
+        lane = lane.to(Int32) if isinstance(index, Numeric) else Int32(lane)
+
+    if isinstance(index, int) and not isinstance(index, bool):
+        if index < 0:
+            _op_error(
+                api_name,
+                f"{_SHUFFLE_INDEX_NAME[mode]} must be non-negative; got {index}",
+            )
+        # The hardware carries the index in a 5-bit field, so 32 is where the
+        # value starts being lost: 33 becomes 1 and reads a neighbour instead.
+        # Below 32 nothing is dropped, and a distance or mask that reaches
+        # outside the lane's group is answered by the hardware keeping the
+        # lane's own value, which is a legal request rather than an error.
+        # "idx" is exempt because there the index is a lane number and the
+        # masking is exactly the documented src_lane % width.
+        if mode != "idx" and index >= _WARP_SIZE:
+            _op_error(
+                api_name,
+                f"{_SHUFFLE_INDEX_NAME[mode]} must be less than {_WARP_SIZE}; "
+                f"got {index}",
+            )
+
+    ctx = loc.context if loc is not None else mlir_ir.Context.current
+    value_ir = operand.ir_value(loc=loc)
+    result = mlir_ir.Operation.create(
+        "tla.arch.shuffle",
+        operands=[value_ir, lane.ir_value(loc=loc)],
+        results=[value_ir.type],
+        attributes={
+            "mode": mlir_ir.Attribute.parse(f"#tla.shuffle_mode<{mode}>", context=ctx),
+            "width": mlir_ir.IntegerAttr.get(
+                mlir_ir.IntegerType.get_signless(32, ctx), width
+            ),
+        },
+        loc=loc,
+    ).results[0]
+    return type(operand)(result)
+
+
+@dsl_user_op
+def arch_shuffle_sync(
+    value: Any, src_lane: Any, width: int = 32, *, loc: mlir_ir.Location | None = None
+) -> Any:
+    """Directory: System Variable Access / Warp Functions
+    Description:
+        Return the `value` held by lane `src_lane` of the calling thread's warp.
+
+        The source lane is `src_lane % width` within the group, so pointing
+        every lane at the same source broadcasts one lane's value to the group.
+
+        Parameters:
+        - `value`: the value to publish to the other lanes. Supported types are
+          `Int8`/`Int16`/`Int32`/`Int64`, their unsigned forms, `Float16`,
+          `Float32` and `BFloat16`; the result keeps the type of `value`.
+          `Bool` is not supported -- it is `i1`, and there is no 1-bit shuffle
+          to widen it to.
+        - `src_lane`: `Int32`, the lane to read from, in `[0, 32)`. A negative
+          constant is rejected at compile time. A larger value is a lane number
+          taken modulo `width`, as above, whether it is a constant or a runtime
+          value; a negative runtime value is the caller's responsibility and is
+          masked to its low 5 bits rather than diagnosed.
+        - `width`: a Python `int`, a power of two in `[2, 32]`. Optional,
+          default `32` (the whole warp).
+
+        Returns:
+
+        - the shuffled value, of the same type as `value`.
+
+        Constraints:
+        - Must be called inside a `@tla.kernel`-decorated kernel function.
+        - Only available inside `tla.vec.func(mode="simt")`.
+        - Must be reached by every thread of the warp that participates. A
+          thread held back by a branch does not supply its value, and reading
+          from an inactive lane gives an undefined result.
+
+        Example:
+        ```python
+        with tla.vec.func(mode="simt", thread_block_dim=256):
+            # every lane of the warp ends up with lane 0's value
+            leader = tla.arch.shuffle_sync(my_value, 0)
+        ```
+    """
+    _require_frontend_state("arch.shuffle_sync")
+    return _emit_arch_shuffle(
+        "arch.shuffle_sync", "idx", value, src_lane, width, loc=loc
+    )
+
+
+@dsl_user_op
+def arch_shuffle_sync_up(
+    value: Any, delta: Any, width: int = 32, *, loc: mlir_ir.Location | None = None
+) -> Any:
+    """Directory: System Variable Access / Warp Functions
+    Description:
+        Return the `value` held by the lane `delta` positions below this one.
+
+        The source lane is `laneid - delta`. A lane whose source falls below the
+        start of its group keeps its own value, which is what makes this the
+        right primitive for an inclusive prefix sum.
+
+        Parameters:
+        - `value`: the value to publish to the other lanes. Supported types are
+          `Int8`/`Int16`/`Int32`/`Int64`, their unsigned forms, `Float16`,
+          `Float32` and `BFloat16`; the result keeps the type of `value`.
+          `Bool` is not supported -- it is `i1`, and there is no 1-bit shuffle
+          to widen it to.
+        - `delta`: `Int32`, how many lanes down to reach, in `[0, 32)`. A
+          `delta` that reaches below the start of the lane's group is allowed:
+          that lane keeps its own value. May be a runtime value; a constant outside
+          `[0, 32)` is rejected at compile time, while a runtime value is the
+          caller's responsibility and is masked to its low 5 bits rather than
+          diagnosed, so a runtime `delta` of 33 reads the neighbour at distance
+          1.
+        - `width`: a Python `int`, a power of two in `[2, 32]`. Optional,
+          default `32` (the whole warp).
+
+        Returns:
+
+        - the shuffled value, of the same type as `value`.
+
+        Constraints:
+        - Must be called inside a `@tla.kernel`-decorated kernel function.
+        - Only available inside `tla.vec.func(mode="simt")`.
+        - Must be reached by every thread of the warp that participates. A
+          thread held back by a branch does not supply its value, and reading
+          from an inactive lane gives an undefined result.
+        - `delta` must be in `[0, 32)`. A constant outside that range is
+          rejected at compile time; a runtime value is the caller's
+          responsibility.
+
+        Example:
+        ```python
+        with tla.vec.func(mode="simt", thread_block_dim=256):
+            # Kogge-Stone inclusive scan across the warp
+            lane, _, _ = tla.arch.thread_idx()
+            total = my_value
+            for offset in (1, 2, 4, 8, 16):
+                other = tla.arch.shuffle_sync_up(total, offset)
+                total = tla.where(lane % 32 >= offset, total + other, total)
+        ```
+    """
+    _require_frontend_state("arch.shuffle_sync_up")
+    return _emit_arch_shuffle(
+        "arch.shuffle_sync_up", "up", value, delta, width, loc=loc
+    )
+
+
+@dsl_user_op
+def arch_shuffle_sync_down(
+    value: Any, delta: Any, width: int = 32, *, loc: mlir_ir.Location | None = None
+) -> Any:
+    """Directory: System Variable Access / Warp Functions
+    Description:
+        Return the `value` held by the lane `delta` positions above this one.
+
+        The source lane is `laneid + delta`. A lane whose source falls past the
+        end of its group keeps its own value. Halving `delta` from 16 down to 1
+        leaves the whole-warp reduction in lane 0.
+
+        Parameters:
+        - `value`: the value to publish to the other lanes. Supported types are
+          `Int8`/`Int16`/`Int32`/`Int64`, their unsigned forms, `Float16`,
+          `Float32` and `BFloat16`; the result keeps the type of `value`.
+          `Bool` is not supported -- it is `i1`, and there is no 1-bit shuffle
+          to widen it to.
+        - `delta`: `Int32`, how many lanes up to reach, in `[0, 32)`. A
+          `delta` that reaches past the end of the lane's group is allowed:
+          that lane keeps its own value. May be a runtime value; a constant outside
+          `[0, 32)` is rejected at compile time, while a runtime value is the
+          caller's responsibility and is masked to its low 5 bits rather than
+          diagnosed, so a runtime `delta` of 33 reads the neighbour at distance
+          1.
+        - `width`: a Python `int`, a power of two in `[2, 32]`. Optional,
+          default `32` (the whole warp).
+
+        Returns:
+
+        - the shuffled value, of the same type as `value`.
+
+        Constraints:
+        - Must be called inside a `@tla.kernel`-decorated kernel function.
+        - Only available inside `tla.vec.func(mode="simt")`.
+        - Must be reached by every thread of the warp that participates. A
+          thread held back by a branch does not supply its value, and reading
+          from an inactive lane gives an undefined result.
+        - `delta` must be in `[0, 32)`. A constant outside that range is
+          rejected at compile time; a runtime value is the caller's
+          responsibility.
+
+        Example:
+        ```python
+        with tla.vec.func(mode="simt", thread_block_dim=256):
+            total = my_value
+            for offset in (16, 8, 4, 2, 1):
+                total = total + tla.arch.shuffle_sync_down(total, offset)
+            # lane 0 of each warp now holds the warp's sum
+        ```
+    """
+    _require_frontend_state("arch.shuffle_sync_down")
+    return _emit_arch_shuffle(
+        "arch.shuffle_sync_down", "down", value, delta, width, loc=loc
+    )
+
+
+@dsl_user_op
+def arch_shuffle_sync_bfly(
+    value: Any, lane_mask: Any, width: int = 32, *, loc: mlir_ir.Location | None = None
+) -> Any:
+    """Directory: System Variable Access / Warp Functions
+    Description:
+        Return the `value` held by the lane whose id is this one's XOR
+        `lane_mask`.
+
+        The source lane is `laneid ^ lane_mask`, a butterfly exchange. Unlike
+        the `down` form it leaves the result in every lane, so a reduction built
+        from it needs no follow-up broadcast.
+
+        Parameters:
+        - `value`: the value to publish to the other lanes. Supported types are
+          `Int8`/`Int16`/`Int32`/`Int64`, their unsigned forms, `Float16`,
+          `Float32` and `BFloat16`; the result keeps the type of `value`.
+          `Bool` is not supported -- it is `i1`, and there is no 1-bit shuffle
+          to widen it to.
+        - `lane_mask`: `Int32`, the bits to flip in the lane id, in `[0, 32)`.
+          The group boundary is enforced in one direction only, so a mask larger
+          than `width` is allowed and the two directions differ: a lane whose
+          source falls past the end of its group keeps its own value, while a
+          lane whose source falls in a lower-numbered group reads that lane. A
+          butterfly confined to its group therefore needs `lane_mask < width`,
+          which is the caller's choice rather than a rejected one. May be a
+          runtime value; a constant outside `[0, 32)` is rejected at compile
+          time, while a runtime value is the caller's responsibility and is
+          masked to its low 5 bits rather than diagnosed.
+        - `width`: a Python `int`, a power of two in `[2, 32]`. Optional,
+          default `32` (the whole warp).
+
+        Returns:
+
+        - the shuffled value, of the same type as `value`.
+
+        Constraints:
+        - Must be called inside a `@tla.kernel`-decorated kernel function.
+        - Only available inside `tla.vec.func(mode="simt")`.
+        - Must be reached by every thread of the warp that participates. A
+          thread held back by a branch does not supply its value, and reading
+          from an inactive lane gives an undefined result.
+        - `lane_mask` must be in `[0, 32)`. A constant outside that range is
+          rejected at compile time; a runtime value is the caller's
+          responsibility.
+
+        Example:
+        ```python
+        with tla.vec.func(mode="simt", thread_block_dim=256):
+            total = my_value
+            for mask in (16, 8, 4, 2, 1):
+                total = total + tla.arch.shuffle_sync_bfly(total, mask)
+            # every lane of the warp now holds the warp's sum
+        ```
+    """
+    _require_frontend_state("arch.shuffle_sync_bfly")
+    return _emit_arch_shuffle(
+        "arch.shuffle_sync_bfly", "bfly", value, lane_mask, width, loc=loc
+    )
+
+
 @dsl_user_op
 def arch_block_num(*, loc: mlir_ir.Location | None = None) -> Int32:
     """Directory: System Variable Access / Architecture Helpers
@@ -11739,6 +12077,10 @@ arch._set("lanemask_le", arch_lanemask_le)
 arch._set("lanemask_gt", arch_lanemask_gt)
 arch._set("lanemask_ge", arch_lanemask_ge)
 arch._set("sync_threads", arch_sync_threads)
+arch._set("shuffle_sync", arch_shuffle_sync)
+arch._set("shuffle_sync_up", arch_shuffle_sync_up)
+arch._set("shuffle_sync_down", arch_shuffle_sync_down)
+arch._set("shuffle_sync_bfly", arch_shuffle_sync_bfly)
 arch._set("get_capacity_in_bytes", arch_get_capacity_in_bytes)
 arch._set("get_dyn_ub", arch_get_dyn_ub)
 arch._set("SCALAR", _runtime.pipes.SCALAR)

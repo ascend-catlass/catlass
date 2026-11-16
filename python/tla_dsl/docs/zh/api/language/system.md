@@ -671,3 +671,221 @@ hi = tla.make_tensor(base + HALF, layout)
 ...
 artifact(out, block_num=1, ub=64 * 1024)
 ```
+
+---
+
+## Warp 函数
+
+`tla.arch` 上的 warp 内数据交换，仅适用于 SIMT 区域。
+
+一个 warp 为 32 个线程，由硬件按线性顺序从 thread block 中划分。这些接口在同一
+warp 的 lane 寄存器之间搬运数值，因此与「UB 暂存 tensor 加
+`tla.arch.sync_threads()`」的写法不同，它们不产生访存，也不需要 block 级
+barrier。它们之间的唯一区别是各自读取哪个 lane。
+
+每个接口都接受 `width`：它把 warp 划分为该长度的连续 lane 分组，因此一个 kernel
+可以在同一 warp 内跑多路互不影响的归约。它不改变执行该指令的线程集合。每个 mode
+只校验自身运算可能越过的那一侧边界，源 lane 在该方向上越界时，该 lane 保留自己的
+值；`bfly` 两侧都可能越过，但只按本组末尾校验，因此掩码取 `width` 及以上时会读到
+编号更小的分组。要把交换限制在组内，需由调用方把 index 取在 `width` 以下。
+
+支持的产品：Ascend 950PR&950DT系列产品。Atlas A2系列产品、Atlas A3系列产品没有
+warp shuffle 指令。
+
+### `tla.arch.shuffle_sync`
+
+**源码：** [`catlass.core_api.arch_shuffle_sync`](../../../../catlass/core_api.py)
+
+功能说明：
+
+返回同一 warp 内 lane `src_lane` 所持有的 `value`，类型与 `value` 相同。
+
+源 lane 为组内的 `src_lane % width`，因此让所有 lane 指向同一个源，即可把该
+lane 的值广播到整个组。
+
+函数原型：
+
+```python
+tla.arch.shuffle_sync(value: Any, src_lane: Any, width: int = 32) -> Any
+```
+
+参数说明：
+
+- `value`：要发布给其他 lane 的值。支持 `Int8`/`Int16`/`Int32`/`Int64` 及其
+  无符号形式，以及 `Float16`、`Float32`、`BFloat16`；结果类型与 `value` 相同。
+  不支持 `Bool`：它是 `i1`，没有可供其扩位的 1 bit shuffle。
+- `src_lane`：`Int32`，要读取的 lane，取 `[0, 32)`。常量为负时在编译期报错；
+  更大的取值按上文的 `src_lane % width` 当作 lane 号处理，常量与运行时值皆
+  如此；运行时值为负时由调用方自行保证，硬件只取其低 5 bit，不作诊断。
+- `width`：Python `int`，取 `[2, 32]` 内的 2 的幂。可选，默认 `32`
+  （整个 warp）。
+
+约束说明：
+
+- 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
+- 仅可在 `tla.vec.func(mode="simt")` 内使用。
+- warp 内参与交换的每个线程都必须执行到该指令。被分支挡住的线程不提供自己的
+  值，从非活跃 lane 读取的结果未定义。
+
+调用示例：
+
+```python
+with tla.vec.func(mode="simt", thread_block_dim=256):
+    # warp 内每个 lane 最终都拿到 lane 0 的值
+    leader = tla.arch.shuffle_sync(my_value, 0)
+```
+
+---
+
+### `tla.arch.shuffle_sync_up`
+
+**源码：** [`catlass.core_api.arch_shuffle_sync_up`](../../../../catlass/core_api.py)
+
+功能说明：
+
+返回比当前 lane 低 `delta` 个位置的 lane 所持有的 `value`，类型与 `value` 相同。
+
+源 lane 为 `laneid - delta`。源 lane 落在组起点之前的线程保留自己的值，这使它
+成为实现 inclusive 前缀和的合适原语。
+
+函数原型：
+
+```python
+tla.arch.shuffle_sync_up(value: Any, delta: Any, width: int = 32) -> Any
+```
+
+参数说明：
+
+- `value`：要发布给其他 lane 的值。支持 `Int8`/`Int16`/`Int32`/`Int64` 及其
+  无符号形式，以及 `Float16`、`Float32`、`BFloat16`；结果类型与 `value` 相同。
+  不支持 `Bool`：它是 `i1`，没有可供其扩位的 1 bit shuffle。
+- `delta`：`Int32`，向下跨越的 lane 数，取 `[0, 32)`。源 lane 落到本组起点之前是允许的
+  用法，该 lane 保留自己的值。可以是运行时值；常量超出 `[0, 32)` 时在编译期
+  报错，运行时值由调用方自行保证，硬件只取其低 5 bit，不作诊断，因此运行时
+  `delta` 为 33 时读到的是距离为 1 的相邻 lane。
+- `width`：Python `int`，取 `[2, 32]` 内的 2 的幂。可选，默认 `32`
+  （整个 warp）。
+
+约束说明：
+
+- 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
+- 仅可在 `tla.vec.func(mode="simt")` 内使用。
+- warp 内参与交换的每个线程都必须执行到该指令。被分支挡住的线程不提供自己的
+  值，从非活跃 lane 读取的结果未定义。
+- `delta` 必须取 `[0, 32)`。常量超出该范围时在编译期报错；运行时值由调用方
+  自行保证。
+
+调用示例：
+
+```python
+with tla.vec.func(mode="simt", thread_block_dim=256):
+    # warp 内的 Kogge-Stone inclusive scan
+    lane, _, _ = tla.arch.thread_idx()
+    total = my_value
+    for offset in (1, 2, 4, 8, 16):
+        other = tla.arch.shuffle_sync_up(total, offset)
+        total = tla.where(lane % 32 >= offset, total + other, total)
+```
+
+---
+
+### `tla.arch.shuffle_sync_down`
+
+**源码：** [`catlass.core_api.arch_shuffle_sync_down`](../../../../catlass/core_api.py)
+
+功能说明：
+
+返回比当前 lane 高 `delta` 个位置的 lane 所持有的 `value`，类型与 `value` 相同。
+
+源 lane 为 `laneid + delta`。源 lane 越过组末尾的线程保留自己的值。把 `delta`
+从 16 逐次减半到 1，即可在 lane 0 得到整个 warp 的归约结果。
+
+函数原型：
+
+```python
+tla.arch.shuffle_sync_down(value: Any, delta: Any, width: int = 32) -> Any
+```
+
+参数说明：
+
+- `value`：要发布给其他 lane 的值。支持 `Int8`/`Int16`/`Int32`/`Int64` 及其
+  无符号形式，以及 `Float16`、`Float32`、`BFloat16`；结果类型与 `value` 相同。
+  不支持 `Bool`：它是 `i1`，没有可供其扩位的 1 bit shuffle。
+- `delta`：`Int32`，向上跨越的 lane 数，取 `[0, 32)`。源 lane 越过本组末尾是允许的
+  用法，该 lane 保留自己的值。可以是运行时值；常量超出 `[0, 32)` 时在编译期
+  报错，运行时值由调用方自行保证，硬件只取其低 5 bit，不作诊断，因此运行时
+  `delta` 为 33 时读到的是距离为 1 的相邻 lane。
+- `width`：Python `int`，取 `[2, 32]` 内的 2 的幂。可选，默认 `32`
+  （整个 warp）。
+
+约束说明：
+
+- 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
+- 仅可在 `tla.vec.func(mode="simt")` 内使用。
+- warp 内参与交换的每个线程都必须执行到该指令。被分支挡住的线程不提供自己的
+  值，从非活跃 lane 读取的结果未定义。
+- `delta` 必须取 `[0, 32)`。常量超出该范围时在编译期报错；运行时值由调用方
+  自行保证。
+
+调用示例：
+
+```python
+with tla.vec.func(mode="simt", thread_block_dim=256):
+    total = my_value
+    for offset in (16, 8, 4, 2, 1):
+        total = total + tla.arch.shuffle_sync_down(total, offset)
+    # 此时每个 warp 的 lane 0 持有该 warp 的和
+```
+
+---
+
+### `tla.arch.shuffle_sync_bfly`
+
+**源码：** [`catlass.core_api.arch_shuffle_sync_bfly`](../../../../catlass/core_api.py)
+
+功能说明：
+
+返回 lane id 为当前 lane 异或 `lane_mask` 的那个 lane 所持有的 `value`，类型与
+`value` 相同。
+
+源 lane 为 `laneid ^ lane_mask`，即蝶形交换。与 `down` 形式不同，它让每个 lane
+都得到结果，因此据此构建的归约无需再做一次广播。
+
+函数原型：
+
+```python
+tla.arch.shuffle_sync_bfly(value: Any, lane_mask: Any, width: int = 32) -> Any
+```
+
+参数说明：
+
+- `value`：要发布给其他 lane 的值。支持 `Int8`/`Int16`/`Int32`/`Int64` 及其
+  无符号形式，以及 `Float16`、`Float32`、`BFloat16`；结果类型与 `value` 相同。
+  不支持 `Bool`：它是 `i1`，没有可供其扩位的 1 bit shuffle。
+- `lane_mask`：`Int32`，要在 lane id 上翻转的比特，取 `[0, 32)`。分组边界只在一侧
+  校验，因此掩码大于 `width` 是允许的用法，两个方向的行为并不相同：源 lane 落到
+  本组末尾之后时，该 lane 保留自己的值；源 lane 落入编号更小的分组时，则读取该
+  lane 的值。所以要把蝶形交换限制在组内，需取 `lane_mask < width`，这是调用方的
+  选择，而非被拒绝的用法。可以是运行时值；常量超出 `[0, 32)` 时在编译期报错，
+  运行时值由调用方自行保证，硬件只取其低 5 bit，不作诊断。
+- `width`：Python `int`，取 `[2, 32]` 内的 2 的幂。可选，默认 `32`
+  （整个 warp）。
+
+约束说明：
+
+- 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
+- 仅可在 `tla.vec.func(mode="simt")` 内使用。
+- warp 内参与交换的每个线程都必须执行到该指令。被分支挡住的线程不提供自己的
+  值，从非活跃 lane 读取的结果未定义。
+- `lane_mask` 必须取 `[0, 32)`。常量超出该范围时在编译期报错；运行时值由调用方
+  自行保证。
+
+调用示例：
+
+```python
+with tla.vec.func(mode="simt", thread_block_dim=256):
+    total = my_value
+    for mask in (16, 8, 4, 2, 1):
+        total = total + tla.arch.shuffle_sync_bfly(total, mask)
+    # 此时 warp 内每个 lane 都持有该 warp 的和
+```

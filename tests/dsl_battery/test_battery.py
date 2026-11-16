@@ -1171,6 +1171,24 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
             [[f"dsl_tutorials/structured_arguments/{name}.py", *dev]],
         )
 
+    # --- end_to_end: warp shuffle, one case per lane-selection rule ---
+    # Each case checks every lane's source against the warp geometry. "width16"
+    # is the one that pins the ctrl word's lane-mask field, so keep it.
+    for warp_case in (
+        "modes",
+        "width16",
+        "idxwide",
+        "outgroup",
+        "bflyacross",
+        "allreduce",
+        "int32",
+        "uint8",
+    ):
+        yield (
+            f"simt-warp-shuffle-{warp_case}",
+            [["end_to_end/warp_shuffle_op.py", *dev, "--case", warp_case]],
+        )
+
     # --- end_to_end: one nonzero value and layout per Fill dtype ---
     for dtype, layout in L1_FILL_VARIANTS:
         yield (

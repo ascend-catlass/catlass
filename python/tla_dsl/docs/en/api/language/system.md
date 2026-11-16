@@ -689,3 +689,259 @@ hi = tla.make_tensor(base + HALF, layout)
 ...
 artifact(out, block_num=1, ub=64 * 1024)
 ```
+
+---
+
+## Warp Functions
+
+Intra-warp data exchange on `tla.arch`, for SIMT regions only.
+
+A warp is 32 threads, partitioned out of the thread block in linear order. These interfaces move a value between the registers of one warp's lanes, so unlike a UB staging tensor plus `tla.arch.sync_threads()` they issue no memory traffic and no block-wide barrier. What distinguishes them is only which lane each one reads from.
+
+Every interface takes a `width` that splits the warp into contiguous groups of that many lanes, so a kernel can run several independent reductions per warp. It does not change which threads execute the op. Each mode bounds only the one edge its arithmetic can cross, and a lane whose source falls outside in that direction keeps its own value. `bfly` can cross either edge but is checked against its group's last lane only, so a mask of `width` or more reads a lower-numbered group instead; keep the index below `width` to confine an exchange to one group.
+
+Supported products: Ascend 950PR&950DT series products. Atlas A2 series products and Atlas A3 series products have no warp shuffle instruction.
+
+### `tla.arch.shuffle_sync`
+
+**Source:** [`catlass.core_api.arch_shuffle_sync`](../../../../catlass/core_api.py)
+
+Description:
+
+Return the `value` held by lane `src_lane` of the calling thread's warp.
+
+The source lane is `src_lane % width` within the group, so pointing
+every lane at the same source broadcasts one lane's value to the group.
+
+Prototype:
+
+```python
+tla.arch.shuffle_sync(value: Any, src_lane: Any, width: int = 32) -> Any
+```
+
+Parameters:
+
+- `value`: the value to publish to the other lanes. Supported types are
+  `Int8`/`Int16`/`Int32`/`Int64`, their unsigned forms, `Float16`,
+  `Float32` and `BFloat16`; the result keeps the type of `value`.
+  `Bool` is not supported -- it is `i1`, and there is no 1-bit shuffle
+  to widen it to.
+- `src_lane`: `Int32`, the lane to read from, in `[0, 32)`. A negative
+  constant is rejected at compile time. A larger value is a lane number
+  taken modulo `width`, as above, whether it is a constant or a runtime
+  value; a negative runtime value is the caller's responsibility and is
+  masked to its low 5 bits rather than diagnosed.
+- `width`: a Python `int`, a power of two in `[2, 32]`. Optional,
+  default `32` (the whole warp).
+
+Returns:
+
+- the shuffled value, of the same type as `value`.
+
+Constraints:
+
+- Must be called inside a `@tla.kernel`-decorated kernel function.
+- Only available inside `tla.vec.func(mode="simt")`.
+- Must be reached by every thread of the warp that participates. A
+  thread held back by a branch does not supply its value, and reading
+  from an inactive lane gives an undefined result.
+
+Example:
+
+```python
+with tla.vec.func(mode="simt", thread_block_dim=256):
+    # every lane of the warp ends up with lane 0's value
+    leader = tla.arch.shuffle_sync(my_value, 0)
+```
+
+---
+
+### `tla.arch.shuffle_sync_up`
+
+**Source:** [`catlass.core_api.arch_shuffle_sync_up`](../../../../catlass/core_api.py)
+
+Description:
+
+Return the `value` held by the lane `delta` positions below this one.
+
+The source lane is `laneid - delta`. A lane whose source falls below the
+start of its group keeps its own value, which is what makes this the
+right primitive for an inclusive prefix sum.
+
+Prototype:
+
+```python
+tla.arch.shuffle_sync_up(value: Any, delta: Any, width: int = 32) -> Any
+```
+
+Parameters:
+
+- `value`: the value to publish to the other lanes. Supported types are
+  `Int8`/`Int16`/`Int32`/`Int64`, their unsigned forms, `Float16`,
+  `Float32` and `BFloat16`; the result keeps the type of `value`.
+  `Bool` is not supported -- it is `i1`, and there is no 1-bit shuffle
+  to widen it to.
+- `delta`: `Int32`, how many lanes down to reach, in `[0, 32)`. A
+  `delta` that reaches below the start of the lane's group is allowed:
+  that lane keeps its own value. May be a runtime value; a constant outside
+  `[0, 32)` is rejected at compile time, while a runtime value is the
+  caller's responsibility and is masked to its low 5 bits rather than
+  diagnosed, so a runtime `delta` of 33 reads the neighbour at distance
+  1.
+- `width`: a Python `int`, a power of two in `[2, 32]`. Optional,
+  default `32` (the whole warp).
+
+Returns:
+
+- the shuffled value, of the same type as `value`.
+
+Constraints:
+
+- Must be called inside a `@tla.kernel`-decorated kernel function.
+- Only available inside `tla.vec.func(mode="simt")`.
+- Must be reached by every thread of the warp that participates. A
+  thread held back by a branch does not supply its value, and reading
+  from an inactive lane gives an undefined result.
+- `delta` must be in `[0, 32)`. A constant outside that range is
+  rejected at compile time; a runtime value is the caller's
+  responsibility.
+
+Example:
+
+```python
+with tla.vec.func(mode="simt", thread_block_dim=256):
+    # Kogge-Stone inclusive scan across the warp
+    lane, _, _ = tla.arch.thread_idx()
+    total = my_value
+    for offset in (1, 2, 4, 8, 16):
+        other = tla.arch.shuffle_sync_up(total, offset)
+        total = tla.where(lane % 32 >= offset, total + other, total)
+```
+
+---
+
+### `tla.arch.shuffle_sync_down`
+
+**Source:** [`catlass.core_api.arch_shuffle_sync_down`](../../../../catlass/core_api.py)
+
+Description:
+
+Return the `value` held by the lane `delta` positions above this one.
+
+The source lane is `laneid + delta`. A lane whose source falls past the
+end of its group keeps its own value. Halving `delta` from 16 down to 1
+leaves the whole-warp reduction in lane 0.
+
+Prototype:
+
+```python
+tla.arch.shuffle_sync_down(value: Any, delta: Any, width: int = 32) -> Any
+```
+
+Parameters:
+
+- `value`: the value to publish to the other lanes. Supported types are
+  `Int8`/`Int16`/`Int32`/`Int64`, their unsigned forms, `Float16`,
+  `Float32` and `BFloat16`; the result keeps the type of `value`.
+  `Bool` is not supported -- it is `i1`, and there is no 1-bit shuffle
+  to widen it to.
+- `delta`: `Int32`, how many lanes up to reach, in `[0, 32)`. A
+  `delta` that reaches past the end of the lane's group is allowed:
+  that lane keeps its own value. May be a runtime value; a constant outside
+  `[0, 32)` is rejected at compile time, while a runtime value is the
+  caller's responsibility and is masked to its low 5 bits rather than
+  diagnosed, so a runtime `delta` of 33 reads the neighbour at distance
+  1.
+- `width`: a Python `int`, a power of two in `[2, 32]`. Optional,
+  default `32` (the whole warp).
+
+Returns:
+
+- the shuffled value, of the same type as `value`.
+
+Constraints:
+
+- Must be called inside a `@tla.kernel`-decorated kernel function.
+- Only available inside `tla.vec.func(mode="simt")`.
+- Must be reached by every thread of the warp that participates. A
+  thread held back by a branch does not supply its value, and reading
+  from an inactive lane gives an undefined result.
+- `delta` must be in `[0, 32)`. A constant outside that range is
+  rejected at compile time; a runtime value is the caller's
+  responsibility.
+
+Example:
+
+```python
+with tla.vec.func(mode="simt", thread_block_dim=256):
+    total = my_value
+    for offset in (16, 8, 4, 2, 1):
+        total = total + tla.arch.shuffle_sync_down(total, offset)
+    # lane 0 of each warp now holds the warp's sum
+```
+
+---
+
+### `tla.arch.shuffle_sync_bfly`
+
+**Source:** [`catlass.core_api.arch_shuffle_sync_bfly`](../../../../catlass/core_api.py)
+
+Description:
+
+Return the `value` held by the lane whose id is this one's XOR
+`lane_mask`.
+
+The source lane is `laneid ^ lane_mask`, a butterfly exchange. Unlike
+the `down` form it leaves the result in every lane, so a reduction built
+from it needs no follow-up broadcast.
+
+Prototype:
+
+```python
+tla.arch.shuffle_sync_bfly(value: Any, lane_mask: Any, width: int = 32) -> Any
+```
+
+Parameters:
+
+- `value`: the value to publish to the other lanes. Supported types are
+  `Int8`/`Int16`/`Int32`/`Int64`, their unsigned forms, `Float16`,
+  `Float32` and `BFloat16`; the result keeps the type of `value`.
+  `Bool` is not supported -- it is `i1`, and there is no 1-bit shuffle
+  to widen it to.
+- `lane_mask`: `Int32`, the bits to flip in the lane id, in `[0, 32)`.
+  The group boundary is enforced in one direction only, so a mask larger
+  than `width` is allowed and the two directions differ: a lane whose
+  source falls past the end of its group keeps its own value, while a
+  lane whose source falls in a lower-numbered group reads that lane. A
+  butterfly confined to its group therefore needs `lane_mask < width`,
+  which is the caller's choice rather than a rejected one. May be a
+  runtime value; a constant outside `[0, 32)` is rejected at compile
+  time, while a runtime value is the caller's responsibility and is
+  masked to its low 5 bits rather than diagnosed.
+- `width`: a Python `int`, a power of two in `[2, 32]`. Optional,
+  default `32` (the whole warp).
+
+Returns:
+
+- the shuffled value, of the same type as `value`.
+
+Constraints:
+
+- Must be called inside a `@tla.kernel`-decorated kernel function.
+- Only available inside `tla.vec.func(mode="simt")`.
+- Must be reached by every thread of the warp that participates. A
+  thread held back by a branch does not supply its value, and reading
+  from an inactive lane gives an undefined result.
+- `lane_mask` must be in `[0, 32)`. A constant outside that range is
+  rejected at compile time; a runtime value is the caller's
+  responsibility.
+
+Example:
+
+```python
+with tla.vec.func(mode="simt", thread_block_dim=256):
+    total = my_value
+    for mask in (16, 8, 4, 2, 1):
+        total = total + tla.arch.shuffle_sync_bfly(total, mask)
+    # every lane of the warp now holds the warp's sum
+```

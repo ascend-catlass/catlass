@@ -426,6 +426,99 @@ static void lowerSimtSyncThreadsIn(func::FuncOp vf)
     }
 }
 
+// tla.arch.shuffle reads a register from another lane of the same warp.
+//
+// Every mode and type goes through one 32-bit control word. The field layout is
+// fixed by the hardware and is the same one AscendDPXToHIVMRegbaseIntrins builds
+// for the Triton path:
+//
+//   ctrl[4:0]   source lane / delta / lane mask
+//   ctrl[12:8]  clamp      -- the group's upper lane bound
+//   ctrl[20:16] lane mask  -- the group's lower lane bound, as 32 - width
+//
+// `up` clamps at 0 because it walks towards lane 0 and must stop there; the
+// other three clamp at 0x1f, the top of the warp.
+static Value buildShuffleCtrl(OpBuilder& builder, Location loc, ::ShuffleMode mode, Value index, int64_t width)
+{
+    const int64_t clamp = (mode == ::ShuffleMode::up) ? 0 : 0x1f;
+    const int64_t laneMask = 32 - width;
+    // clamp and laneMask come from the width attribute, so everything but the
+    // index is a compile-time constant and folds into a single immediate.
+    const int64_t constantPart = (clamp << 8) | (laneMask << 16);
+
+    Type i32 = builder.getI32Type();
+    Value masked = builder.create<arith::AndIOp>(
+        loc, index, builder.create<arith::ConstantOp>(loc, builder.getI32IntegerAttr(0x1f)));
+    return builder.create<arith::OrIOp>(
+        loc, masked, builder.create<arith::ConstantOp>(loc, builder.getI32IntegerAttr(constantPart)));
+}
+
+// Create the intrinsic for one mode and one natively supported type.
+template <typename IdxOpTy, typename UpOpTy, typename DownOpTy, typename BflyOpTy>
+static Value buildShuffleIntrinsic(
+    OpBuilder& builder, Location loc, ::ShuffleMode mode, Type type, Value value, Value ctrl)
+{
+    switch (mode) {
+        case ::ShuffleMode::idx:
+            return builder.create<IdxOpTy>(loc, type, value, ctrl).getRes();
+        case ::ShuffleMode::up:
+            return builder.create<UpOpTy>(loc, type, value, ctrl).getRes();
+        case ::ShuffleMode::down:
+            return builder.create<DownOpTy>(loc, type, value, ctrl).getRes();
+        case ::ShuffleMode::bfly:
+            return builder.create<BflyOpTy>(loc, type, value, ctrl).getRes();
+    }
+    llvm_unreachable("unhandled shuffle mode");
+}
+
+// Dispatch on the value type. i32/i64/f32/f16 have their own intrinsic; i8, i16
+// and bf16 do not, so they ride the i32 one. That is exact: a shuffle copies a
+// register between lanes without interpreting it, so widening the bit pattern
+// and narrowing it back cannot change the value.
+static Value buildShuffle(OpBuilder& builder, Location loc, ::ShuffleMode mode, Value value, Value index, int64_t width)
+{
+    namespace rb = hivm_regbaseintrins;
+    Value ctrl = buildShuffleCtrl(builder, loc, mode, index, width);
+    Type type = value.getType();
+
+    if (type.isInteger(32))
+        return buildShuffleIntrinsic<rb::ShflIdxOpI32, rb::ShflUpOpI32, rb::ShflDownOpI32, rb::ShflBflyOpI32>(
+            builder, loc, mode, type, value, ctrl);
+    if (type.isInteger(64))
+        return buildShuffleIntrinsic<rb::ShflIdxOpI64, rb::ShflUpOpI64, rb::ShflDownOpI64, rb::ShflBflyOpI64>(
+            builder, loc, mode, type, value, ctrl);
+    if (type.isF32())
+        return buildShuffleIntrinsic<rb::ShflIdxOpF32, rb::ShflUpOpF32, rb::ShflDownOpF32, rb::ShflBflyOpF32>(
+            builder, loc, mode, type, value, ctrl);
+    if (type.isF16())
+        return buildShuffleIntrinsic<rb::ShflIdxOpF16, rb::ShflUpOpF16, rb::ShflDownOpF16, rb::ShflBflyOpF16>(
+            builder, loc, mode, type, value, ctrl);
+
+    // Narrow types: bitcast anything non-integral to an integer of the same
+    // width first, zero-extend to i32, shuffle, then undo both steps.
+    Type i32 = builder.getI32Type();
+    const unsigned bitWidth = type.getIntOrFloatBitWidth();
+    Type narrowInt = builder.getIntegerType(bitWidth);
+    Value bits = type.isIntOrIndex() ? value : builder.create<arith::BitcastOp>(loc, narrowInt, value).getResult();
+    Value widened = builder.create<arith::ExtUIOp>(loc, i32, bits);
+    Value shuffled = buildShuffleIntrinsic<rb::ShflIdxOpI32, rb::ShflUpOpI32, rb::ShflDownOpI32, rb::ShflBflyOpI32>(
+        builder, loc, mode, i32, widened, ctrl);
+    Value narrowed = builder.create<arith::TruncIOp>(loc, narrowInt, shuffled);
+    return type.isIntOrIndex() ? narrowed : builder.create<arith::BitcastOp>(loc, type, narrowed).getResult();
+}
+
+static void lowerSimtShuffleIn(func::FuncOp vf)
+{
+    SmallVector<::tla::ArchShuffleOp, 4> ops;
+    vf.walk([&](::tla::ArchShuffleOp op) { ops.push_back(op); });
+    for (::tla::ArchShuffleOp op : ops) {
+        OpBuilder builder(op);
+        Value lowered = buildShuffle(builder, op.getLoc(), op.getMode(), op.getValue(), op.getIndex(), op.getWidth());
+        op.getResult().replaceAllUsesWith(lowered);
+        op.erase();
+    }
+}
+
 // Element offset of a descriptor's view within its allocation, or a null Value
 // when the view starts at the allocation's own base.
 //
@@ -801,6 +894,7 @@ public:
         if (failed(lowerSimtWarpOpsIn(vf, blockDimX, blockDimY, blockDimZ)))
             return failure();
         lowerSimtSyncThreadsIn(vf);
+        lowerSimtShuffleIn(vf);
 
         // ---- the launch ----
         SmallVector<Value, 4> launchArgs;

@@ -639,6 +639,9 @@ mlir::LogicalResult FillOp::verify()
 // The lowering packs the product into hivm_regbaseintrins::SIMT_EntryAttr, whose
 // value is a uint32_t, so an unchecked product would also truncate.
 static constexpr int64_t kMaxSimtThreadsPerBlock = 2048;
+// A warp is this many lanes, which is also the width of the shuffle control
+// field's index: the hardware keeps its low 5 bits and discards the rest.
+static constexpr int64_t kWarpSize = 32;
 
 mlir::LogicalResult ArchLaneIdxOp::verify()
 {
@@ -2511,6 +2514,41 @@ mlir::LogicalResult ScalarStoreOp::verify()
 {
     return verifyScalarTensorAccess(
         getOperation(), getDest().getType(), getIndices(), getValue().getType(), "destination !tla.tensor");
+}
+
+mlir::LogicalResult ArchShuffleOp::verify()
+{
+    // The shuffle reads another lane's register, which only exists in a SIMT
+    // region; outside one there is no warp and nothing lowers the op, so an
+    // unchecked shuffle would survive the pipeline unlowered.
+    auto region = getOperation()->getParentOfType<VecFuncOp>();
+    auto regionMode = region ? region->getAttrOfType<mlir::StringAttr>("mode") : mlir::StringAttr{};
+    if (!regionMode || !regionMode.getValue().equals_insensitive("simt"))
+        return emitOpError("must be nested inside a tla.vec.func with mode='simt'");
+
+    const int64_t width = getWidth();
+    // A group must tile the 32-lane warp exactly, so only powers of two divide it
+    // evenly. width == 1 would make every shuffle a no-op read of the lane itself.
+    if (width < 2 || width > 32 || (width & (width - 1)) != 0)
+        return emitOpError() << "width must be a power of two in [2, 32], got " << width;
+
+    // Only a constant index can be checked here; a runtime index is the caller's
+    // responsibility, and the hardware masks it to 5 bits either way.
+    mlir::APInt indexValue;
+    if (!mlir::matchPattern(getIndex(), mlir::m_ConstantInt(&indexValue)))
+        return mlir::success();
+    const int64_t index = indexValue.getSExtValue();
+    if (index < 0)
+        return emitOpError() << "index must be non-negative, got " << index;
+    // The index travels in a 5-bit control field, so 32 and above is where it
+    // wraps: 33 becomes 1 and reads a neighbour. Below 32 nothing is lost, and a
+    // distance or mask that reaches outside the lane's group is answered by the
+    // hardware keeping the lane's own value -- a legal request, not an error.
+    // "idx" is exempt because there the index is a lane number and the masking
+    // is exactly the documented src_lane % width.
+    if (getMode() != ::ShuffleMode::idx && index >= kWarpSize)
+        return emitOpError() << "index must be less than " << kWarpSize << " for this mode, got " << index;
+    return mlir::success();
 }
 
 } // namespace tla

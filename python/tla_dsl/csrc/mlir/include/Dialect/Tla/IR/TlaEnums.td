@@ -466,3 +466,27 @@ def Tla_RegPartAttr : Tla_I32EnumAttr<"reg_part", Tla_RegPartEnum> {
     Selects the low or high half of a register.
   }];
 }
+
+// Which lane a SIMT warp shuffle reads from. The four modes map one-to-one onto
+// the hivm_regbaseintrins shfl intrinsic families; they differ only in how the
+// hardware turns the index operand into a source lane:
+//   idx  -> lane `index` within the group    (asc_shfl)
+//   up   -> lane `laneid - index`            (asc_shfl_up)
+//   down -> lane `laneid + index`            (asc_shfl_down)
+//   bfly -> lane `laneid ^ index`            (asc_shfl_xor)
+def Tla_ShuffleMode_Idx : I32EnumAttrCase<"idx", 0>;
+def Tla_ShuffleMode_Up : I32EnumAttrCase<"up", 1>;
+def Tla_ShuffleMode_Down : I32EnumAttrCase<"down", 2>;
+def Tla_ShuffleMode_Bfly : I32EnumAttrCase<"bfly", 3>;
+def Tla_ShuffleModeEnum : Tla_I32Enum<
+    "ShuffleMode", "Source-lane rule for a SIMT warp shuffle.", [
+      Tla_ShuffleMode_Idx,
+      Tla_ShuffleMode_Up,
+      Tla_ShuffleMode_Down,
+      Tla_ShuffleMode_Bfly
+    ]>;
+def Tla_ShuffleModeAttr : Tla_I32EnumAttr<"shuffle_mode", Tla_ShuffleModeEnum> {
+  let description = [{
+    Source-lane rule for tla.arch.shuffle.
+  }];
+}

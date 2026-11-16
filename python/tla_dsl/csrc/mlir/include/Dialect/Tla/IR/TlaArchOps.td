@@ -119,6 +119,61 @@ def Tla_SyncThreadsOp : Tla_Op<"arch.sync_threads", []> {
   let assemblyFormat = [{ attr-dict }];
 }
 
+// Intra-warp register exchange. SIMT only.
+def Tla_ArchShuffleOp : Tla_Op<"arch.shuffle",
+    [NoMemoryEffect, AllTypesMatch<["value", "result"]>]> {
+  let summary = "SIMT intra-warp register exchange";
+  let description = [{
+    Return the ``value`` held by another thread of the same warp, without going
+    through memory. ``mode`` says which lane is read: ``idx`` reads lane
+    ``index`` of the group, ``up`` reads ``laneid - index``, ``down`` reads
+    ``laneid + index``, and ``bfly`` reads ``laneid ^ index``.
+
+    ``width`` splits the warp into contiguous groups of that many lanes; it must
+    be a power of two in ``[2, 32]``. It does not change the set of threads that
+    execute the op. Each mode bounds only the one edge its arithmetic can cross:
+    ``up`` moves downward and checks the group's first lane, ``down`` moves
+    upward and checks its last, and a lane whose source falls outside in the
+    checked direction keeps its own value. ``bfly`` can cross either edge but is
+    checked against the last lane only, so a mask of ``width`` or more reads a
+    lower-numbered group rather than keeping the lane's own value. Confining a
+    butterfly to one group is the caller's choice of ``index``, not a property
+    this op enforces.
+
+    ``index`` travels in a 5-bit control field, so it is carried exactly up to
+    31 and wraps from 32 -- 33 would become 1 and read a neighbour. For ``up``,
+    ``down`` and ``bfly`` the index is a distance or a mask, so a constant of 32
+    or more is rejected; ``idx`` is exempt, since there it is a lane number and
+    the masking is exactly the ``index % width`` this op documents. An index
+    below 32 that sends a lane outside its group is a legal request, answered by
+    leaving that lane its own value.
+
+    ``value`` is signless because signedness is not a property of a bit pattern
+    being moved: the frontend's unsigned types are shuffled as signless integers
+    of the same width and carry their Python type through to the result.
+
+    Lowers to the ``hivm_regbaseintrins.intr.hivm.shfl.{idx,up,down,bfly}.*``
+    intrinsic for the value type. ``i32``, ``i64``, ``f32`` and ``f16`` have a
+    native intrinsic; narrower integers and ``bf16`` are widened to ``i32`` and
+    truncated back, which is exact because a shuffle moves bit patterns and does
+    not interpret them.
+
+    Deliberately not ``Pure``: the result depends on which threads reach the op,
+    so hoisting it out of a branch or loop would change its meaning.
+  }];
+  let arguments = (ins
+    AnyTypeOf<[I8, I16, I32, I64, F16, F32, BF16]>:$value,
+    I32:$index,
+    Tla_ShuffleModeAttr:$mode,
+    DefaultValuedAttr<I32Attr, "32">:$width
+  );
+  let results = (outs AnyTypeOf<[I8, I16, I32, I64, F16, F32, BF16]>:$result);
+  let hasVerifier = 1;
+  let assemblyFormat = [{
+    $mode $value `,` $index attr-dict `:` type($value)
+  }];
+}
+
 // InitSocState is NOT a user-facing TLA op. ``tla-prologue-epilogue`` injects
 // ``func.call @_mlir_ciface_tla_init_soc_state`` (Scalar BC → AscendC::InitSocState)
 // at every HACC entry (InitSoc only; no extra CTRL[60]/[48]/[56]). No public API.
