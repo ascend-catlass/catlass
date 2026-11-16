@@ -122,3 +122,14 @@ def Tla_SyncThreadsOp : Tla_Op<"arch.sync_threads", []> {
 // InitSocState is NOT a user-facing TLA op. ``tla-prologue-epilogue`` injects
 // ``func.call @_mlir_ciface_tla_init_soc_state`` (Scalar BC → AscendC::InitSocState)
 // at every HACC entry (InitSoc only; no extra CTRL[60]/[48]/[56]). No public API.
+
+// Active-set dependent: leave effects unknown to prevent CSE across divergent
+// control flow as well as speculation. NoMemoryEffect alone would allow CSE.
+def Tla_ArchWarpReduxOp : Tla_Op<"arch.warp_redux",
+    [AllTypesMatch<["value", "result"]>]> {
+  let summary = "SIMT reduction over the active lanes of a warp";
+  let arguments = (ins Tla_ScalarValueType:$value, StrAttr:$kind, UnitAttr:$isUnsigned);
+  let results = (outs Tla_ScalarValueType:$result);
+  let hasVerifier = 1;
+  let assemblyFormat = "$kind $value attr-dict `:` type($result)";
+}

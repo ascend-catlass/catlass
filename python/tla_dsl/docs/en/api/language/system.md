@@ -165,6 +165,42 @@ sid = tla.arch.sub_block_idx()
 
 ---
 
+### `tla.arch.warp_redux_sync`
+
+**Source:** [`catlass.core_api.arch_warp_redux_sync`](../../../../catlass/core_api.py)
+
+Description:
+
+Reduce a scalar over active warp lanes, including partial warps.
+Every participating lane receives the result in the input scalar type.
+
+Prototype:
+
+```python
+tla.arch.warp_redux_sync(value: Numeric | int | float, kind: str = 'add') -> Numeric
+```
+
+Parameters:
+
+- `value`: Int8/16/32, UInt8/16/32, Float16, or Float32 scalar.
+- `kind`: compile-time string `"add"`, `"max"`, or `"min"`.
+
+Constraints:
+
+- Only available in a kernel's `tla.vec.func(mode="simt")`; no cross-warp synchronization.
+- Signed/unsigned narrow integers are sign-/zero-extended to i32, then truncated back.
+- Float16 uses native f16 reduction; floating-point addition order is hardware-defined.
+
+Example:
+
+```python
+with tla.vec.func(mode="simt", thread_block_dim=32):
+    tid, _, _ = tla.arch.thread_idx()
+    gm_out[tid] = tla.arch.warp_redux_sync(gm_in[tid])
+```
+
+---
+
 ### `tla.arch.warpsize`
 
 **Source:** [`catlass.core_api.arch_warpsize`](../../../../catlass/core_api.py)

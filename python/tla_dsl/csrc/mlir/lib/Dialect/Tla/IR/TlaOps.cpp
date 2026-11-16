@@ -661,6 +661,23 @@ mlir::LogicalResult ArchLanemaskOp::verify()
     return mlir::success();
 }
 
+mlir::LogicalResult ArchWarpReduxOp::verify()
+{
+    auto region = getOperation()->getParentOfType<VecFuncOp>();
+    auto mode = region ? region->getAttrOfType<mlir::StringAttr>("mode") : mlir::StringAttr{};
+    if (!mode || !mode.getValue().equals_insensitive("simt"))
+        return emitOpError("must be nested inside a tla.vec.func with mode='simt'");
+    if (getKind() != "add" && getKind() != "max" && getKind() != "min")
+        return emitOpError("kind must be one of add, max, min");
+    auto type = getValue().getType();
+    bool integer = type.isSignlessInteger(8) || type.isSignlessInteger(16) || type.isSignlessInteger(32);
+    if (!integer && !type.isF16() && !type.isF32())
+        return emitOpError("value must be i8, i16, i32, f16, or f32");
+    if (getIsUnsigned() && !integer)
+        return emitOpError("isUnsigned requires an integer value");
+    return mlir::success();
+}
+
 mlir::LogicalResult VecFuncOp::verify()
 {
     if (!hasEnclosingRegion<VectorOp>(getOperation()))

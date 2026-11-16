@@ -1,0 +1,107 @@
+// RUN: sed -n '/^\/\/ BEGIN_OUTSIDE$/,/^\/\/ END_OUTSIDE$/p' %s | sed '1d;$d;s|^// ||' > %t.OUTSIDE.mlir && not %tla_compile %t.OUTSIDE.mlir -o %t 2>&1 | %filecheck %s --check-prefix=OUTSIDE
+// OUTSIDE: error:
+// OUTSIDE-SAME: simt
+// BEGIN_OUTSIDE
+// module {
+//   func.func @bad(%v: i32) {
+//         %r = tla.arch.warp_redux "add" %v : i32
+//     return
+//   }
+// }
+// END_OUTSIDE
+
+// RUN: sed -n '/^\/\/ BEGIN_SIMD$/,/^\/\/ END_SIMD$/p' %s | sed '1d;$d;s|^// ||' > %t.SIMD.mlir && not %tla_compile %t.SIMD.mlir -o %t 2>&1 | %filecheck %s --check-prefix=SIMD
+// SIMD: error:
+// SIMD-SAME: simt
+// BEGIN_SIMD
+// module {
+//   func.func @bad(%v: i32) {
+//     "tla.vector"() ({
+//       "tla.vec.func"() ({
+//         %r = tla.arch.warp_redux "add" %v : i32
+//       }) {mode = "simd"} : () -> ()
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_SIMD
+
+// RUN: sed -n '/^\/\/ BEGIN_KIND$/,/^\/\/ END_KIND$/p' %s | sed '1d;$d;s|^// ||' > %t.KIND.mlir && not %tla_compile %t.KIND.mlir -o %t 2>&1 | %filecheck %s --check-prefix=KIND
+// KIND: error:
+// KIND-SAME: kind must
+// BEGIN_KIND
+// module {
+//   func.func @bad(%v: i32) {
+//     "tla.vector"() ({
+//       "tla.vec.func"() ({
+//         %r = tla.arch.warp_redux "sum" %v : i32
+//       }) {mode = "simt", thread_block_dim = array<i64: 32, 1, 1>} : () -> ()
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_KIND
+
+// RUN: sed -n '/^\/\/ BEGIN_TYPE$/,/^\/\/ END_TYPE$/p' %s | sed '1d;$d;s|^// ||' > %t.TYPE.mlir && not %tla_compile %t.TYPE.mlir -o %t 2>&1 | %filecheck %s --check-prefix=TYPE
+// TYPE: error:
+// TYPE-SAME: value must
+// BEGIN_TYPE
+// module {
+//   func.func @bad(%v: i64) {
+//     "tla.vector"() ({
+//       "tla.vec.func"() ({
+//         %r = tla.arch.warp_redux "add" %v : i64
+//       }) {mode = "simt", thread_block_dim = array<i64: 32, 1, 1>} : () -> ()
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_TYPE
+
+// RUN: sed -n '/^\/\/ BEGIN_BF16$/,/^\/\/ END_BF16$/p' %s | sed '1d;$d;s|^// ||' > %t.BF16.mlir && not %tla_compile %t.BF16.mlir -o %t 2>&1 | %filecheck %s --check-prefix=BF16
+// BF16: error:
+// BF16-SAME: value must
+// BEGIN_BF16
+// module {
+//   func.func @bad(%v: bf16) {
+//     "tla.vector"() ({
+//       "tla.vec.func"() ({
+//         %r = tla.arch.warp_redux "add" %v : bf16
+//       }) {mode = "simt", thread_block_dim = array<i64: 32, 1, 1>} : () -> ()
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_BF16
+
+// RUN: sed -n '/^\/\/ BEGIN_BOOL$/,/^\/\/ END_BOOL$/p' %s | sed '1d;$d;s|^// ||' > %t.BOOL.mlir && not %tla_compile %t.BOOL.mlir -o %t 2>&1 | %filecheck %s --check-prefix=BOOL
+// BOOL: error:
+// BOOL-SAME: value must
+// BEGIN_BOOL
+// module {
+//   func.func @bad(%v: i1) {
+//     "tla.vector"() ({
+//       "tla.vec.func"() ({
+//         %r = tla.arch.warp_redux "add" %v : i1
+//       }) {mode = "simt", thread_block_dim = array<i64: 32, 1, 1>} : () -> ()
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_BOOL
+
+// RUN: sed -n '/^\/\/ BEGIN_UNSIGNED_FLOAT$/,/^\/\/ END_UNSIGNED_FLOAT$/p' %s | sed '1d;$d;s|^// ||' > %t.UNSIGNED_FLOAT.mlir && not %tla_compile %t.UNSIGNED_FLOAT.mlir -o %t 2>&1 | %filecheck %s --check-prefix=UNSIGNED_FLOAT
+// UNSIGNED_FLOAT: error:
+// UNSIGNED_FLOAT-SAME: isUnsigned requires
+// BEGIN_UNSIGNED_FLOAT
+// module {
+//   func.func @bad(%v: f32) {
+//     "tla.vector"() ({
+//       "tla.vec.func"() ({
+//         %r = tla.arch.warp_redux "max" %v {isUnsigned} : f32
+//       }) {mode = "simt", thread_block_dim = array<i64: 32, 1, 1>} : () -> ()
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_UNSIGNED_FLOAT

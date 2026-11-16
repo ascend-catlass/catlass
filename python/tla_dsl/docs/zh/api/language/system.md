@@ -170,6 +170,42 @@ sid = tla.arch.sub_block_idx()
 
 ---
 
+### `tla.arch.warp_redux_sync`
+
+**源码：** [`catlass.core_api.arch_warp_redux_sync`](../../../../catlass/core_api.py)
+
+说明：
+
+对活跃 warp 线程执行标量归约，包括不足 32 个线程的 warp。
+每个参与线程均获得归约结果，结果类型与输入标量的类型相同。
+
+原型：
+
+```python
+tla.arch.warp_redux_sync(value: Numeric | int | float, kind: str = 'add') -> Numeric
+```
+
+参数：
+
+- `value`：Int8/16/32、UInt8/16/32、Float16 或 Float32 标量。
+- `kind`：编译期字符串 `"add"`、`"max"` 或 `"min"`。
+
+约束：
+
+- 只能在 kernel 内的 `tla.vec.func(mode="simt")` 中调用；不提供跨 warp 同步。
+- 有符号/无符号窄整数分别符号扩展/零扩展为 i32，归约后再截断为原始位宽。
+- Float16 使用原生 f16 归约；浮点加法的结合顺序由硬件决定。
+
+示例：
+
+```python
+with tla.vec.func(mode="simt", thread_block_dim=32):
+    tid, _, _ = tla.arch.thread_idx()
+    gm_out[tid] = tla.arch.warp_redux_sync(gm_in[tid])
+```
+
+---
+
 ### `tla.arch.warpsize`
 
 **源码：** [`catlass.core_api.arch_warpsize`](../../../../catlass/core_api.py)

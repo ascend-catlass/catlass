@@ -124,6 +124,8 @@ from .base_dsl.typing import (
     Int8,
     Int16,
     Int32,
+    UInt8,
+    UInt16,
     UInt32,
     Numeric,
     as_numeric,
@@ -10951,6 +10953,56 @@ def _require_arch_warp_region(op_name: str) -> None:
 
 
 @dsl_user_op
+def arch_warp_redux_sync(
+    value: Numeric | int | float,
+    kind: str = "add",
+    *,
+    loc: mlir_ir.Location | None = None,
+) -> Numeric:
+    """Directory: System Variable Access / Architecture Helpers
+    Description:
+        Reduce a scalar over active warp lanes, including partial warps.
+        Every participating lane receives the result in the input scalar type.
+
+        Parameters:
+        - `value`: Int8/16/32, UInt8/16/32, Float16, or Float32 scalar.
+        - `kind`: compile-time string `"add"`, `"max"`, or `"min"`.
+
+        Constraints:
+        - Only available in a kernel's `tla.vec.func(mode="simt")`; no cross-warp synchronization.
+        - Signed/unsigned narrow integers are sign-/zero-extended to i32, then truncated back.
+        - Float16 uses native f16 reduction; floating-point addition order is hardware-defined.
+
+        Example:
+        ```python
+        with tla.vec.func(mode="simt", thread_block_dim=32):
+            tid, _, _ = tla.arch.thread_idx()
+            gm_out[tid] = tla.arch.warp_redux_sync(gm_in[tid])
+        ```
+    """
+    _require_arch_warp_region("arch.warp_redux_sync")
+    if not isinstance(kind, str) or kind not in ("add", "max", "min"):
+        _op_error(
+            "arch.warp_redux_sync",
+            "kind must be a compile-time string: add, max, or min",
+        )
+    num = value if isinstance(value, Numeric) else as_numeric(value)
+    if type(num) not in (Int8, Int16, Int32, UInt8, UInt16, UInt32, Float16, Float32):
+        _op_error(
+            "arch.warp_redux_sync", f"unsupported value type {type(num).__name__}"
+        )
+    operand = num.ir_value(loc=loc)
+    result = _tla_ops_gen.arch_warp_redux(
+        operand.type,
+        operand,
+        kind,
+        is_unsigned=type(num) in (UInt8, UInt16, UInt32),
+        loc=loc,
+    )
+    return type(num)(result)
+
+
+@dsl_user_op
 def arch_warpsize(*, loc: mlir_ir.Location | None = None) -> Int32:
     """Directory: System Variable Access / Architecture Helpers
     Description:
@@ -11657,6 +11709,7 @@ _require_generated("arch_thread_block_dim")
 _require_generated("arch_thread_idx")
 _require_generated("arch_lane_idx")
 _require_generated("arch_lanemask")
+_require_generated("arch_warp_redux")
 _require_generated("simt_add")
 _require_generated("simt_sub")
 _require_generated("simt_mul")
@@ -11679,6 +11732,7 @@ arch._set("thread_block_dim", arch_thread_block_dim)
 arch._set("thread_idx", arch_thread_idx)
 arch._set("warpsize", arch_warpsize)
 arch._set("lane_idx", arch_lane_idx)
+arch._set("warp_redux_sync", arch_warp_redux_sync)
 arch._set("lanemask_eq", arch_lanemask_eq)
 arch._set("lanemask_lt", arch_lanemask_lt)
 arch._set("lanemask_le", arch_lanemask_le)

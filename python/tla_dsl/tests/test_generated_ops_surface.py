@@ -83,6 +83,7 @@ def test_generated_binding_symbols_exist_for_wrapped_ops() -> None:
         "arch_thread_idx",
         "arch_lane_idx",
         "arch_lanemask",
+        "arch_warp_redux",
         "simt_add",
         "simt_sub",
         "simt_mul",

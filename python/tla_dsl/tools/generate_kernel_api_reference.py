@@ -224,6 +224,8 @@ DIRECTORY_SECTIONS: list[tuple[str, str]] = [
         "- `tla.range` loops and runtime `if`.\n"
         "- `tla.print` for per-thread scalars, formatted strings, and GM/UB "
         "prefixes -- see [Debug and Printing](language/debug.md).\n"
+        "- `tla.arch.warp_redux_sync` for add/max/min reductions over the "
+        "active lanes of a warp -- see **System Variable Access**.\n"
         "- Warp queries `tla.arch.warpsize` / `lane_idx` / `lanemask_eq` / "
         "`lanemask_lt` / `lanemask_le` / `lanemask_gt` / `lanemask_ge` -- see "
         "**System Variable Access**.\n"
