@@ -1035,6 +1035,26 @@ def test_normal_2201(build_env, case):
 
 
 @only_on_3510
+def test_89_ascend950_hif8_quant_batch_matmul(build_env):
+    # gen_data args: batch M K N bias x1quantmode x2quantmode
+    # CLI: batch M K N bias x1quantmode x2quantmode [device_id]
+    cases = [
+        "1 128 256 128 0 1 1",
+        "1 128 256 128 128 0 2",
+    ]
+    for case in cases:
+        batch, m, k, n, bias, x1, x2 = case.split()
+        subprocess.run(
+            ["python", os.path.join(CMAKE_EXAMPLES_PATH, "89_ascend950_hif8_quant_batch_matmul", "gen_data", "gen_data.py"),
+             batch, m, k, n, bias, x1, x2],
+            check=True,
+        )
+        ret = run_case(build_env, "89_ascend950_hif8_quant_batch_matmul",
+                       [batch, m, k, n, bias, x1, x2, DEVICE_ID])
+        assert "Compare success" in ret.stdout.decode()
+
+
+@only_on_3510
 @pytest.mark.parametrize("case", normal_cases_3510, ids=lambda c: c.split()[0])
 def test_normal_3510(build_env, case):
     parts = case.split()

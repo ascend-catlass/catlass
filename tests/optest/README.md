@@ -90,7 +90,8 @@ Python API (`torch_catlass.ops.*`)
 - [x] 84_ascend950_syrk (Ascend 950)
 - [x] 87_ascend950_batched_matmul_softmax (Ascend 950)
 - [x] 87_fag_tla
-- [x] 88_ascend950_bmm_broadcast (Ascend 950)
+- [x] 88_ascend950_bmm_broadcast (Ascend950)
+- [x] 89_ascend950_hif8_quant_batch_matmul (Ascend950)
 
 ### 暂未接入
 

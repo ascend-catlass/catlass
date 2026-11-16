@@ -16,6 +16,7 @@
 #include <typeinfo>
 #include <cstdint>
 #include "arg.h"
+#include "ascendc_logger.h"
 
 namespace AscendC {
 
@@ -61,6 +62,9 @@ public:
         result.position_ = position_;
         result.size_ = size_;
         result.addr_ = addr_;
+        const std::vector<Arg> argsT = {Arg::MakeArg<U>()};
+        const std::vector<Arg> args = {Arg::MakeArgWithValue(addr_)};
+        ASCENDC_LOG_CALL_T(ReinterpretCast, argsT, args);
         return result;
     }
 

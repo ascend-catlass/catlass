@@ -29,9 +29,9 @@ struct TileCopyTla<
     tla::Tensor<AscendC::LocalTensor<ElementDst>, LayoutDst, CoordDst, AscendC::TPosition::B2>,
     std::enable_if_t<
         !AscendC::Std::is_one_of_v<
-            ElementSrc, int8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t> &&
+            ElementSrc, int8_t, hifloat8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t> &&
         !AscendC::Std::is_one_of_v<
-            ElementDst, int8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t> &&
+            ElementDst, int8_t, hifloat8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t> &&
         tla::detail::iszN<ElementSrc, LayoutSrc>::value && tla::detail::isnZ<ElementDst, LayoutDst>::value>> {
     static constexpr uint32_t ELE_NUM_PER_C0 = BytesToBits(BYTE_PER_C0) / SizeOfBits<ElementSrc>::value;
     static constexpr uint32_t ELE_NUM_PER_FRACTAL = BytesToBits(BYTE_PER_FRACTAL) / SizeOfBits<ElementSrc>::value;
@@ -46,9 +46,10 @@ struct TileCopyTla<
     {
         static_assert(
             !AscendC::Std::is_one_of_v<
-                typename TensorSrc::Element, int8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t> &&
+                typename TensorSrc::Element, int8_t, hifloat8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t,
+                float4_e1m2x2_t> &&
                 !AscendC::Std::is_one_of_v<
-                    typename TensorDst::Element, int8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t,
+                    typename TensorDst::Element, int8_t, hifloat8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t,
                     float4_e1m2x2_t> &&
                 tla::detail::iszN<typename TensorSrc::Element, typename TensorSrc::Layout>::value &&
                 tla::detail::isnZ<typename TensorDst::Element, typename TensorDst::Layout>::value &&
@@ -82,9 +83,10 @@ struct TileCopyTla<
     {
         static_assert(
             !AscendC::Std::is_one_of_v<
-                typename TensorSrc::Element, int8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t> &&
+                typename TensorSrc::Element, int8_t, hifloat8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t,
+                float4_e1m2x2_t> &&
                 !AscendC::Std::is_one_of_v<
-                    typename TensorDst::Element, int8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t,
+                    typename TensorDst::Element, int8_t, hifloat8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t,
                     float4_e1m2x2_t> &&
                 tla::detail::iszN<typename TensorSrc::Element, typename TensorSrc::Layout>::value &&
                 tla::detail::isnZ<typename TensorDst::Element, typename TensorDst::Layout>::value &&
@@ -125,8 +127,10 @@ struct TileCopyTla<
     Arch::Ascend950, tla::Tensor<AscendC::LocalTensor<ElementSrc>, LayoutSrc, CoordSrc, AscendC::TPosition::A1>,
     tla::Tensor<AscendC::LocalTensor<ElementDst>, LayoutDst, CoordDst, AscendC::TPosition::B2>,
     std::enable_if_t<
-        AscendC::Std::is_one_of_v<ElementSrc, int8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t> &&
-        AscendC::Std::is_one_of_v<ElementDst, int8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t> &&
+        AscendC::Std::is_one_of_v<
+            ElementSrc, int8_t, hifloat8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t> &&
+        AscendC::Std::is_one_of_v<
+            ElementDst, int8_t, hifloat8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t> &&
         tla::detail::iszN<ElementSrc, LayoutSrc>::value && tla::detail::isnZ<ElementDst, LayoutDst>::value>> {
     static constexpr uint32_t ELE_NUM_PER_C0 = BytesToBits(BYTE_PER_C0) / SizeOfBits<ElementSrc>::value;
     static constexpr uint32_t ELE_NUM_PER_FRACTAL = BytesToBits(BYTE_PER_FRACTAL) / SizeOfBits<ElementSrc>::value;
@@ -140,8 +144,9 @@ struct TileCopyTla<
     CATLASS_DEVICE void operator()(TensorDst const& dstTensor, TensorSrc const& srcTensor)
     {
         static_assert(
-            AscendC::Std::is_one_of_v<typename TensorSrc::Element, int8_t, float8_e4m3_t, float8_e5m2_t> &&
-                AscendC::Std::is_one_of_v<typename TensorDst::Element, int8_t, float8_e4m3_t, float8_e5m2_t> &&
+            AscendC::Std::is_one_of_v<typename TensorSrc::Element, int8_t, hifloat8_t, float8_e4m3_t, float8_e5m2_t> &&
+                AscendC::Std::is_one_of_v<
+                    typename TensorDst::Element, int8_t, hifloat8_t, float8_e4m3_t, float8_e5m2_t> &&
                 tla::detail::iszN<typename TensorSrc::Element, typename TensorSrc::Layout>::value &&
                 tla::detail::isnZ<typename TensorDst::Element, typename TensorDst::Layout>::value &&
                 TensorSrc::position == AscendC::TPosition::A1 && TensorDst::position == AscendC::TPosition::B2,
@@ -187,8 +192,9 @@ struct TileCopyTla<
     CATLASS_DEVICE void operator()(TensorDst const& dstTensor, TensorSrc const& srcTensor, uint32_t l0Batch)
     {
         static_assert(
-            AscendC::Std::is_one_of_v<typename TensorSrc::Element, int8_t, float8_e4m3_t, float8_e5m2_t> &&
-                AscendC::Std::is_one_of_v<typename TensorDst::Element, int8_t, float8_e4m3_t, float8_e5m2_t> &&
+            AscendC::Std::is_one_of_v<typename TensorSrc::Element, int8_t, hifloat8_t, float8_e4m3_t, float8_e5m2_t> &&
+                AscendC::Std::is_one_of_v<
+                    typename TensorDst::Element, int8_t, hifloat8_t, float8_e4m3_t, float8_e5m2_t> &&
                 tla::detail::iszN<typename TensorSrc::Element, typename TensorSrc::Layout>::value &&
                 tla::detail::isnZ<typename TensorDst::Element, typename TensorDst::Layout>::value &&
                 TensorSrc::position == AscendC::TPosition::A1 && TensorDst::position == AscendC::TPosition::B2,
@@ -528,8 +534,8 @@ template <class Element>
 struct CopyL1ToL0B<
     Arch::Ascend950, Gemm::GemmType<Element, layout::zZ, AscendC::TPosition::B1>,
     Gemm::GemmType<Element, layout::nZ, AscendC::TPosition::B2>,
-    std::enable_if_t<
-        !AscendC::Std::is_one_of_v<Element, int8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t>>> {
+    std::enable_if_t<!AscendC::Std::is_one_of_v<
+        Element, int8_t, hifloat8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t>>> {
     using LayoutDst = layout::nZ;
     using LayoutSrc = layout::zZ;
 
@@ -573,8 +579,8 @@ struct CopyL1ToL0B<
 template <class Element>
 struct CopyL1ToL0B<
     Arch::Ascend950, Gemm::GemmType<Element, layout::zN, AscendC::TPosition::A1>, void,
-    std::enable_if_t<
-        !AscendC::Std::is_one_of_v<Element, int8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t>>> {
+    std::enable_if_t<!AscendC::Std::is_one_of_v<
+        Element, int8_t, hifloat8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t>>> {
     using LayoutDst = layout::nZ;
     using LayoutSrc = layout::zN;
 
@@ -613,8 +619,8 @@ struct CopyL1ToL0B<
 template <class Element>
 struct CopyL1ToL0B<
     Arch::Ascend950, Gemm::GemmType<Element, layout::zN, AscendC::TPosition::A1>, void,
-    std::enable_if_t<
-        AscendC::Std::is_one_of_v<Element, int8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t>>> {
+    std::enable_if_t<AscendC::Std::is_one_of_v<
+        Element, int8_t, hifloat8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t>>> {
     using LayoutDst = layout::nZ;
     using LayoutSrc = layout::zN;
 
@@ -670,8 +676,8 @@ template <class Element>
 struct CopyL1ToL0B<
     Arch::Ascend950, Gemm::GemmType<Element, layout::zN, AscendC::TPosition::B1>,
     Gemm::GemmType<Element, layout::nZ, AscendC::TPosition::B2>,
-    std::enable_if_t<
-        !AscendC::Std::is_one_of_v<Element, int8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t>>> {
+    std::enable_if_t<!AscendC::Std::is_one_of_v<
+        Element, int8_t, hifloat8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t>>> {
     using LayoutDst = layout::nZ;
     using LayoutSrc = layout::zN;
 
@@ -709,8 +715,8 @@ template <class Element>
 struct CopyL1ToL0B<
     Arch::Ascend950, Gemm::GemmType<Element, layout::zN, AscendC::TPosition::B1>,
     Gemm::GemmType<Element, layout::nZ, AscendC::TPosition::B2>,
-    std::enable_if_t<
-        AscendC::Std::is_one_of_v<Element, int8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t>>> {
+    std::enable_if_t<AscendC::Std::is_one_of_v<
+        Element, int8_t, hifloat8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t>>> {
     using LayoutDst = layout::nZ;
     using LayoutSrc = layout::zN;
 

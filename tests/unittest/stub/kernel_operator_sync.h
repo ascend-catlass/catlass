@@ -11,9 +11,12 @@
 #ifndef ASCENDC_STUB_KERNEL_OPERATOR_SYNC_H
 #define ASCENDC_STUB_KERNEL_OPERATOR_SYNC_H
 
+#include <cstdint>
 #include <cstdio>
+#include <vector>
 #include <string>
 #include "ascendc_logger.h"
+#include "kernel_constants.h"
 
 enum pipe_t
 {
@@ -32,6 +35,24 @@ template <pipe_t pipe>
 inline void PipeBarrier()
 {
     ASCENDC_LOG_CALL_T(PipeBarrier, {Arg::MakeArgWithValue<pipe_t>(pipe)}, {});
+}
+
+template <int8_t startBit, int8_t endBit>
+inline int64_t GetCtrlSpr()
+{
+    const std::vector<Arg> argsT = {Arg::MakeArgWithValue(startBit), Arg::MakeArgWithValue(endBit)};
+    const std::vector<Arg> args = {};
+    ASCENDC_LOG_CALL_T(GetCtrlSpr, argsT, args);
+    return 0;
+}
+
+template <int8_t startBit, int8_t endBit>
+inline void SetCtrlSpr(int64_t value)
+{
+    const std::vector<Arg> argsT = {Arg::MakeArgWithValue(startBit), Arg::MakeArgWithValue(endBit),
+        Arg::MakeArgWithValue(value)};
+    const std::vector<Arg> args = {};
+    ASCENDC_LOG_CALL_T(SetCtrlSpr, argsT, args);
 }
 
 enum class HardEvent

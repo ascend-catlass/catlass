@@ -179,6 +179,7 @@ set(EXAMPLE_ASCEND950
     83_ascend950_hstu_infer
     84_ascend950_syrk
     88_ascend950_bmm_broadcast
+    89_ascend950_hif8_quant_batch_matmul
 )
 
 if(CATLASS_ARCH STREQUAL "2201")

@@ -14,6 +14,9 @@
 #include "catlass/catlass.hpp"
 #include "catlass/gemm/helper.hpp"
 #include "tla/tensor.hpp"
+#if (defined(__NPU_ARCH__) && __NPU_ARCH__ == 3510)
+constexpr int8_t HIF8_CTRL_BIT = 45;
+#endif
 namespace Catlass::Gemm::Tile {
 
 ///////////////////////////////////////////////////////////
@@ -66,7 +69,20 @@ struct TileMmad {
         }
 #endif
 
+#if (defined(__NPU_ARCH__) && __NPU_ARCH__ == 3510)
+        if constexpr (std::is_same_v<ElementA, hifloat8_t> && std::is_same_v<ElementB, hifloat8_t>) {
+            auto l0A8 = l0ATensor.template ReinterpretCast<fp8_e4m3fn_t>();
+            auto l0B8 = l0BTensor.template ReinterpretCast<fp8_e4m3fn_t>();
+            const int64_t hif8CtrlSaved = AscendC::GetCtrlSpr<HIF8_CTRL_BIT, HIF8_CTRL_BIT>();
+            AscendC::SetCtrlSpr<HIF8_CTRL_BIT, HIF8_CTRL_BIT>(1);
+            AscendC::Mmad(l0CTensor, l0A8, l0B8, mmadParams);
+            AscendC::SetCtrlSpr<HIF8_CTRL_BIT, HIF8_CTRL_BIT>(hif8CtrlSaved);
+        } else {
+            AscendC::Mmad(l0CTensor, l0ATensor, l0BTensor, mmadParams);
+        }
+#else
         AscendC::Mmad(l0CTensor, l0ATensor, l0BTensor, mmadParams);
+#endif
 
         const uint32_t PIPE_M_BARRIER_THRESHOLD = 10;
         if ((m / C0_NUM_PER_FRACTAL) * (n / C0_NUM_PER_FRACTAL) < PIPE_M_BARRIER_THRESHOLD) {
@@ -96,7 +112,20 @@ struct TileMmad {
         mmadParams.disableGemv = true;
 #endif
 
+#if (defined(__NPU_ARCH__) && __NPU_ARCH__ == 3510)
+        if constexpr (std::is_same_v<ElementA, hifloat8_t> && std::is_same_v<ElementB, hifloat8_t>) {
+            auto l0A8 = l0ATensor.template ReinterpretCast<fp8_e4m3fn_t>();
+            auto l0B8 = l0BTensor.template ReinterpretCast<fp8_e4m3fn_t>();
+            const int64_t hif8CtrlSaved = AscendC::GetCtrlSpr<HIF8_CTRL_BIT, HIF8_CTRL_BIT>();
+            AscendC::SetCtrlSpr<HIF8_CTRL_BIT, HIF8_CTRL_BIT>(1);
+            AscendC::Mmad(l0CTensor, l0A8, l0B8, l0BiasTensor, mmadParams);
+            AscendC::SetCtrlSpr<HIF8_CTRL_BIT, HIF8_CTRL_BIT>(hif8CtrlSaved);
+        } else {
+            AscendC::Mmad(l0CTensor, l0ATensor, l0BTensor, l0BiasTensor, mmadParams);
+        }
+#else
         AscendC::Mmad(l0CTensor, l0ATensor, l0BTensor, l0BiasTensor, mmadParams);
+#endif
 
         const uint32_t PIPE_M_BARRIER_THRESHOLD = 10;
         if ((m / C0_NUM_PER_FRACTAL) * (n / C0_NUM_PER_FRACTAL) < PIPE_M_BARRIER_THRESHOLD) {
@@ -145,7 +174,22 @@ struct TileMmadTla {
         }
 #endif
 
+#if (defined(__NPU_ARCH__) && __NPU_ARCH__ == 3510)
+        if constexpr (
+            std::is_same_v<typename TensorA::Element, hifloat8_t> &&
+            std::is_same_v<typename TensorB::Element, hifloat8_t>) {
+            auto l0A8 = l0ATensor.data().template ReinterpretCast<fp8_e4m3fn_t>();
+            auto l0B8 = l0BTensor.data().template ReinterpretCast<fp8_e4m3fn_t>();
+            const int64_t hif8CtrlSaved = AscendC::GetCtrlSpr<HIF8_CTRL_BIT, HIF8_CTRL_BIT>();
+            AscendC::SetCtrlSpr<HIF8_CTRL_BIT, HIF8_CTRL_BIT>(1);
+            AscendC::Mmad(l0CTensor.data(), l0A8, l0B8, mmadParams);
+            AscendC::SetCtrlSpr<HIF8_CTRL_BIT, HIF8_CTRL_BIT>(hif8CtrlSaved);
+        } else {
+            AscendC::Mmad(l0CTensor.data(), l0ATensor.data(), l0BTensor.data(), mmadParams);
+        }
+#else
         AscendC::Mmad(l0CTensor.data(), l0ATensor.data(), l0BTensor.data(), mmadParams);
+#endif
 
         const uint32_t PIPE_M_BARRIER_THRESHOLD = 10;
         if ((m / C0_NUM_PER_FRACTAL) * (n / C0_NUM_PER_FRACTAL) < PIPE_M_BARRIER_THRESHOLD) {
@@ -173,7 +217,22 @@ struct TileMmadTla {
         mmadParams.disableGemv = true;
 #endif
 
+#if (defined(__NPU_ARCH__) && __NPU_ARCH__ == 3510)
+        if constexpr (
+            std::is_same_v<typename TensorA::Element, hifloat8_t> &&
+            std::is_same_v<typename TensorB::Element, hifloat8_t>) {
+            auto l0A8 = l0ATensor.data().template ReinterpretCast<fp8_e4m3fn_t>();
+            auto l0B8 = l0BTensor.data().template ReinterpretCast<fp8_e4m3fn_t>();
+            const int64_t hif8CtrlSaved = AscendC::GetCtrlSpr<HIF8_CTRL_BIT, HIF8_CTRL_BIT>();
+            AscendC::SetCtrlSpr<HIF8_CTRL_BIT, HIF8_CTRL_BIT>(1);
+            AscendC::Mmad(l0CTensor.data(), l0A8, l0B8, l0BiasTensor.data(), mmadParams);
+            AscendC::SetCtrlSpr<HIF8_CTRL_BIT, HIF8_CTRL_BIT>(hif8CtrlSaved);
+        } else {
+            AscendC::Mmad(l0CTensor.data(), l0ATensor.data(), l0BTensor.data(), l0BiasTensor.data(), mmadParams);
+        }
+#else
         AscendC::Mmad(l0CTensor.data(), l0ATensor.data(), l0BTensor.data(), l0BiasTensor.data(), mmadParams);
+#endif
 
         const uint32_t PIPE_M_BARRIER_THRESHOLD = 10;
         if ((m / C0_NUM_PER_FRACTAL) * (n / C0_NUM_PER_FRACTAL) < PIPE_M_BARRIER_THRESHOLD) {
@@ -242,7 +301,22 @@ struct TileMmadTla {
         mmadParams.unitFlag = unitFlag;
         mmadParams.cmatrixInitVal = initC;
 
+#if (defined(__NPU_ARCH__) && __NPU_ARCH__ == 3510)
+        if constexpr (
+            std::is_same_v<typename TensorA::Element, hifloat8_t> &&
+            std::is_same_v<typename TensorB::Element, hifloat8_t>) {
+            auto l0A8 = l0ATensor.data().template ReinterpretCast<fp8_e4m3fn_t>();
+            auto l0B8 = l0BTensor.data().template ReinterpretCast<fp8_e4m3fn_t>();
+            const int64_t hif8CtrlSaved = AscendC::GetCtrlSpr<HIF8_CTRL_BIT, HIF8_CTRL_BIT>();
+            AscendC::SetCtrlSpr<HIF8_CTRL_BIT, HIF8_CTRL_BIT>(1);
+            AscendC::Mmad(l0CTensor.data(), l0A8, l0B8, mmadParams);
+            AscendC::SetCtrlSpr<HIF8_CTRL_BIT, HIF8_CTRL_BIT>(hif8CtrlSaved);
+        } else {
+            AscendC::Mmad(l0CTensor.data(), l0ATensor.data(), l0BTensor.data(), mmadParams);
+        }
+#else
         AscendC::Mmad(l0CTensor.data(), l0ATensor.data(), l0BTensor.data(), mmadParams);
+#endif
 
         const uint32_t PIPE_M_BARRIER_THRESHOLD = 10;
         if ((m / C0_NUM_PER_FRACTAL) * (n / C0_NUM_PER_FRACTAL) < PIPE_M_BARRIER_THRESHOLD) {

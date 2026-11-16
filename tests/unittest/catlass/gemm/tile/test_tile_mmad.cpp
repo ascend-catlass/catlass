@@ -503,5 +503,208 @@ TEST_P(TypedTileMmadA950Suite, MmadTestDisableGemv)
     ASSERT_EQ(mmadArg->disableGemv, true);
 }
 
+
+template <class ArchTag>
+class Hif8TileMmadTest : public TileMmadTest, public testing::WithParamInterface<TestCubeMatrixShapeWithUnitflag> {
+protected:
+    void SetUp() override
+    {
+        AscendCTest::SetUp();
+    }
+
+    void setShape()
+    {
+        TileMmadTest::_setShape(GetParam().m, GetParam().n, GetParam().k);
+    }
+
+    void setUnitFlag()
+    {
+        unitFlag = GetParam().unitFlag;
+        initC = GetParam().initC;
+    }
+
+    static int FindLog(const std::vector<AscendCCallLog>& logs, const std::string& name, int from = 0)
+    {
+        for (int i = from; i < (int)logs.size(); ++i) {
+            if (logs[i].name == name) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    static void CheckHif8CtrlSequence(const std::vector<AscendCCallLog>& logs, int mmadIdx)
+    {
+        ASSERT_GE(mmadIdx, 0);
+        int getIdx = FindLog(logs, "GetCtrlSpr");
+        ASSERT_GE(getIdx, 0);
+        ASSERT_LT(getIdx, mmadIdx);
+        ASSERT_EQ(*logs[getIdx].GetArgsTAt(0).template Value<int8_t>(), 45);
+        ASSERT_EQ(*logs[getIdx].GetArgsTAt(1).template Value<int8_t>(), 45);
+        int setIdx = FindLog(logs, "SetCtrlSpr");
+        ASSERT_GE(setIdx, 0);
+        ASSERT_LT(setIdx, mmadIdx);
+        ASSERT_EQ(*logs[setIdx].GetArgsTAt(0).template Value<int8_t>(), 45);
+        ASSERT_EQ(*logs[setIdx].GetArgsTAt(1).template Value<int8_t>(), 45);
+        ASSERT_EQ(*logs[setIdx].GetArgsTAt(2).template Value<int64_t>(), 1);
+        int rstIdx = FindLog(logs, "SetCtrlSpr", mmadIdx + 1);
+        ASSERT_GT(rstIdx, mmadIdx);
+        ASSERT_EQ(*logs[rstIdx].GetArgsTAt(0).template Value<int8_t>(), 45);
+        ASSERT_EQ(*logs[rstIdx].GetArgsTAt(1).template Value<int8_t>(), 45);
+        ASSERT_EQ(*logs[rstIdx].GetArgsTAt(2).template Value<int64_t>(), 0); // stub GetCtrlSpr returns 0
+    }
+
+    static void CheckHif8Alias(const std::vector<AscendCCallLog>& logs, uint32_t addrA, uint32_t addrB)
+    {
+        int first = FindLog(logs, "ReinterpretCast");
+        ASSERT_GE(first, 0);
+        int second = FindLog(logs, "ReinterpretCast", first + 1);
+        ASSERT_GT(second, first);
+        ASSERT_EQ(logs[first].GetArgsTAt(0).Type(), typeid(fp8_e4m3fn_t));
+        ASSERT_EQ(logs[second].GetArgsTAt(0).Type(), typeid(fp8_e4m3fn_t));
+        ASSERT_EQ(*logs[first].GetArgsAt(0).template Value<uint32_t>(), addrA);
+        ASSERT_EQ(*logs[second].GetArgsAt(0).template Value<uint32_t>(), addrB);
+    }
+
+    template <class AType, class BType>
+    auto MakeCall(
+        const AscendC::LocalTensor<float>& l0CTensor, const AscendC::LocalTensor<hifloat8_t>& l0ATensor,
+        const AscendC::LocalTensor<hifloat8_t>& l0BTensor)
+    {
+        TileMmad<ArchTag, AType, BType, void> tileMmad;
+        setShape();
+        setUnitFlag();
+        tileMmad(l0CTensor, l0ATensor, l0BTensor, _m, _n, _k, initC, unitFlag);
+        return AscendCCallLogger::Instance().GetLogs();
+    }
+
+    template <class AType, class BType>
+    auto MakeCallBias(
+        const AscendC::LocalTensor<float>& l0CTensor, const AscendC::LocalTensor<hifloat8_t>& l0ATensor,
+        const AscendC::LocalTensor<hifloat8_t>& l0BTensor, const AscendC::LocalTensor<float>& l0BiasTensor)
+    {
+        TileMmad<ArchTag, AType, BType, float> tileMmad;
+        setShape();
+        setUnitFlag();
+        tileMmad(l0CTensor, l0ATensor, l0BTensor, l0BiasTensor, _m, _n, _k, initC, unitFlag);
+        return AscendCCallLogger::Instance().GetLogs();
+    }
+
+    using CoordZero = tla::Coord<tla::Int<0>, tla::Int<0>>;
+
+    auto MakeTensorC(const AscendC::LocalTensor<float>& t, uint32_t m, uint32_t n)
+    {
+        return tla::Tensor<AscendC::LocalTensor<float>, decltype(tla::MakeLayoutL0C(m, n)), CoordZero,
+            AscendC::TPosition::CO1>(t, tla::MakeLayoutL0C(m, n));
+    }
+    auto MakeTensorAB(const AscendC::LocalTensor<hifloat8_t>& t, uint32_t m, uint32_t n)
+    {
+        return tla::Tensor<AscendC::LocalTensor<hifloat8_t>, decltype(tla::MakeLayoutL0C(m, n)), CoordZero,
+            AscendC::TPosition::A2>(t, tla::MakeLayoutL0C(m, n));
+    }
+
+    auto MakeCallTla(
+        const AscendC::LocalTensor<float>& l0CTensor, const AscendC::LocalTensor<hifloat8_t>& l0ATensor,
+        const AscendC::LocalTensor<hifloat8_t>& l0BTensor)
+    {
+        setShape();
+        setUnitFlag();
+        TileMmadTla<ArchTag, hifloat8_t, layout::zN> tileMmadTla;
+        tileMmadTla(
+            MakeTensorC(l0CTensor, _m, _n), MakeTensorAB(l0ATensor, _m, _k), MakeTensorAB(l0BTensor, _k, _n), _m,
+            _n, _k, initC, unitFlag);
+        return AscendCCallLogger::Instance().GetLogs();
+    }
+
+protected:
+    bool initC = false;
+    uint8_t unitFlag = 0b00;
+};
+
+using Hif8TileMmadA950Suite = Hif8TileMmadTest<Catlass::Arch::Ascend950>;
+
+TEST_P(Hif8TileMmadA950Suite, MmadTestHif8Basic)
+{
+    using AType = Catlass::Gemm::GemmType<hifloat8_t, Catlass::layout::RowMajor>;
+    using BType = Catlass::Gemm::GemmType<hifloat8_t, Catlass::layout::RowMajor>;
+
+    AscendC::LocalTensor<float> l0CTensor;
+    AscendC::LocalTensor<hifloat8_t> l0ATensor(0x100, 64);
+    AscendC::LocalTensor<hifloat8_t> l0BTensor(0x200, 64);
+
+    auto logs = MakeCall<AType, BType>(l0CTensor, l0ATensor, l0BTensor);
+    int mmadIdx = FindLog(logs, "Mmad");
+    ASSERT_GE(mmadIdx, 0);
+    CheckHif8Alias(logs, 0x100, 0x200);
+    CheckHif8CtrlSequence(logs, mmadIdx);
+
+    AscendCCallLog logMmad = logs[mmadIdx];
+    ASSERT_EQ(logMmad.args.size(), 4); // C, A, B, MmadParams
+    ASSERT_EQ(logMmad.GetArgsTAt(0).Type(), typeid(float));
+    ASSERT_EQ(logMmad.GetArgsTAt(1).Type(), typeid(fp8_e4m3fn_t));
+    ASSERT_EQ(logMmad.GetArgsTAt(2).Type(), typeid(fp8_e4m3fn_t));
+
+    const AscendC::MmadParams* mmadArg = logMmad.GetArgsAt(3).Value<AscendC::MmadParams>();
+    ASSERT_EQ(mmadArg->m, _m);
+    ASSERT_EQ(mmadArg->n, _n);
+    ASSERT_EQ(mmadArg->k, _k);
+    ASSERT_EQ(mmadArg->cmatrixInitVal, initC);
+    ASSERT_EQ(mmadArg->unitFlag, unitFlag);
+}
+
+TEST_P(Hif8TileMmadA950Suite, MmadTestHif8Bias)
+{
+    using AType = Catlass::Gemm::GemmType<hifloat8_t, Catlass::layout::RowMajor>;
+    using BType = Catlass::Gemm::GemmType<hifloat8_t, Catlass::layout::RowMajor>;
+
+    AscendC::LocalTensor<float> l0CTensor;
+    AscendC::LocalTensor<hifloat8_t> l0ATensor(0x100, 64);
+    AscendC::LocalTensor<hifloat8_t> l0BTensor(0x200, 64);
+    AscendC::LocalTensor<float> l0BiasTensor;
+
+    auto logs = MakeCallBias<AType, BType>(l0CTensor, l0ATensor, l0BTensor, l0BiasTensor);
+    int mmadIdx = FindLog(logs, "Mmad");
+    ASSERT_GE(mmadIdx, 0);
+    CheckHif8Alias(logs, 0x100, 0x200);
+    CheckHif8CtrlSequence(logs, mmadIdx);
+
+    AscendCCallLog logMmad = logs[mmadIdx];
+    ASSERT_EQ(logMmad.args.size(), 5); // C, A, B, Bias, MmadParams
+    ASSERT_EQ(logMmad.GetArgsTAt(3).Type(), typeid(float));
+
+    const AscendC::MmadParams* mmadArg = logMmad.GetArgsAt(4).Value<AscendC::MmadParams>();
+    ASSERT_EQ(mmadArg->cmatrixInitVal, false);
+    ASSERT_EQ(mmadArg->unitFlag, unitFlag);
+}
+
+TEST_P(Hif8TileMmadA950Suite, MmadTestHif8TlaBasic)
+{
+    AscendC::LocalTensor<float> l0CTensor;
+    AscendC::LocalTensor<hifloat8_t> l0ATensor(0x100, 64);
+    AscendC::LocalTensor<hifloat8_t> l0BTensor(0x200, 64);
+
+    auto logs = MakeCallTla(l0CTensor, l0ATensor, l0BTensor);
+    int mmadIdx = FindLog(logs, "Mmad");
+    ASSERT_GE(mmadIdx, 0);
+    CheckHif8CtrlSequence(logs, mmadIdx);
+
+    AscendCCallLog logMmad = logs[mmadIdx];
+    ASSERT_EQ(logMmad.GetArgsTAt(1).Type(), typeid(fp8_e4m3fn_t));
+    ASSERT_EQ(logMmad.GetArgsTAt(2).Type(), typeid(fp8_e4m3fn_t));
+
+    const AscendC::MmadParams* mmadArg = logMmad.GetArgsAt(3).Value<AscendC::MmadParams>();
+    ASSERT_EQ(mmadArg->m, _m);
+    ASSERT_EQ(mmadArg->n, _n);
+    ASSERT_EQ(mmadArg->k, _k);
+    ASSERT_EQ(mmadArg->cmatrixInitVal, initC);
+}
+
+INSTANTIATE_TEST_SUITE_P(Hif8Ascend950, Hif8TileMmadA950Suite,
+    ::testing::Values(
+        TestCubeMatrixShapeWithUnitflag{128U, 128U, 128U, true, 0b00},
+        TestCubeMatrixShapeWithUnitflag{128U, 128U, 128U, false, 0b10},
+        TestCubeMatrixShapeWithUnitflag{32U, 32U, 32U, true, 0b00},
+        TestCubeMatrixShapeWithUnitflag{32U, 32U, 32U, false, 0b00}));
+
 INSTANTIATE_TILE_MMAD_SUITE(Ascend950, TypedTileMmadA950Suite);
 #endif // CATLASS_ARCH == 3510

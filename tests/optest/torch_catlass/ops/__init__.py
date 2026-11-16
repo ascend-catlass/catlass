@@ -67,6 +67,9 @@ from .matmul_gather_scatter import ascend950_matmul_gather_scatter  # example 79
 from .ascend950_batched_matmul import ascend950_batched_matmul  # example 67
 from .ascend950_basic_matmul_gemv import ascend950_basic_matmul_gemv  # example 50
 from .ascend950_quant_matmul_per_group_per_block_tla import ascend950_quant_matmul_per_group_per_block_tla  # example 51
+from .ascend950_89_ascend950_hif8_quant_batch_matmul import (
+    ascend950_89_ascend950_hif8_quant_batch_matmul,  # example 89
+)
 from .ascend950_fp8_mx_grouped_matmul_slice_m_swiglu_mx_quant import (
     ascend950_fp8_mx_grouped_matmul_slice_m_swiglu_mx_quant,  # example 65
 )
@@ -197,6 +200,7 @@ __all__ = [
     "ascend950_basic_matmul_gemv",  # example 50
     "ascend950_quant_matmul_per_group_per_block_tla",  # example 51
     "ascend950_matmul_full_dequant",  # example 57
+    "ascend950_89_ascend950_hif8_quant_batch_matmul",  # example 89
     "quant_multi_core_splitk_matmul_tla",  # example 52
     "ascend950_fp8_mx_matmul_aswt",  # example 53
     "ascend950_fp4_mx_matmul_aswt",  # example 54
@@ -216,6 +220,7 @@ __all__ = [
     "ascend950_basic_matmul_gemv",        # example 50
     "ascend950_quant_matmul_per_group_per_block_tla",  # example 51
     "ascend950_matmul_full_dequant",  # example 57
+    "ascend950_89_ascend950_hif8_quant_batch_matmul",  # example 89
     "ascend950_fp8_mx_grouped_matmul_slice_m_swiglu_mx_quant",  # example 65
     "ascend950_streamk_matmul",  # example 66
     "ascend950_batched_matmul",  # example 67

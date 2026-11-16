@@ -65,6 +65,7 @@ __all__ = [
     "ascend950_matmul_fixpipe_opti",
     "ascend950_basic_matmul_gemv",
     "ascend950_quant_matmul_per_group_per_block_tla",
+    "ascend950_89_ascend950_hif8_quant_batch_matmul",
     "ascend950_matmul_full_dequant",
     "mla",
     "ascend950_matmul_evg",

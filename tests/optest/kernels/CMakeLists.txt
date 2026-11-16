@@ -337,6 +337,7 @@ add_subdirectory(84_ascend950_syrk)
 add_subdirectory(87_fag_tla)
 add_subdirectory(88_ascend950_bmm_broadcast)
 add_subdirectory(88_ascend950_matmul_permute)
+add_subdirectory(89_ascend950_hif8_quant_batch_matmul)
 
 if(_JIT_KERNEL_ENTRIES)
     set(_JIT_TARGET catlass_kernel_jit)

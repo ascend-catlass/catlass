@@ -151,6 +151,12 @@ template <>
 struct ElementAccumulatorSelector<float4_e1m2x2_t, float4_e2m1x2_t> {
     using ElementAccumulator = float;
 };
+
+template <>
+struct ElementAccumulatorSelector<hifloat8_t, hifloat8_t> {
+    using ElementAccumulator = float;
+};
+
 #endif
 
 template <class Element_, bool isMx = false>

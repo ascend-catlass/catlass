@@ -40,6 +40,7 @@
 #include "template/mx_matmul.h"
 #include "template/mx_grouped_matmul.h"
 #include "template/grouped_fixpipe_dequant_matmul.h"
+#include "template/89_ascend950_hif8_quant_batch_matmul.h"
 #include "template/quant_matmul.h"
 #include "template/quant_per_group_per_block_matmul.h"
 #include "template/sparse_matmul.h"
@@ -506,6 +507,13 @@ REGISTER_TORCH_FUNC(ascend950_basic_syrk);
 using Ascend950SyrkOp = SyrkLike<CatlassKernel::Ascend950Syrk>;
 static auto& ascend950_syrk = Ascend950SyrkOp::Run;
 REGISTER_TORCH_FUNC(ascend950_syrk);
+
+// ── 89_ascend950_hif8_quant_batch_matmul ──
+using Ascend950QuantBatchMatmulFixpipeDequantOp =
+    QuantBatchMatmulFixpipeDequantLike<CatlassKernel::Ascend950QuantBatchMatmulFixpipeDequant>;
+static auto& ascend950_89_ascend950_hif8_quant_batch_matmul =
+    Ascend950QuantBatchMatmulFixpipeDequantOp::Run;
+REGISTER_TORCH_FUNC(ascend950_89_ascend950_hif8_quant_batch_matmul);
 
 using Ascend950SyrkPolynomialOp = SyrkPolynomialLike<CatlassKernel::Ascend950SyrkPolynomial>;
 static auto& ascend950_syrk_polynomial = Ascend950SyrkPolynomialOp::Run;

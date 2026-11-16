@@ -151,9 +151,9 @@ struct TileCopyTla<
     tla::Tensor<AscendC::LocalTensor<ElementDst>, LayoutDst, CoordDst, AscendC::TPosition::A2>,
     std::enable_if_t<
         !AscendC::Std::is_one_of_v<
-            ElementSrc, int8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t> &&
+            ElementSrc, int8_t, hifloat8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t> &&
         !AscendC::Std::is_one_of_v<
-            ElementDst, int8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t> &&
+            ElementDst, int8_t, hifloat8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t> &&
         tla::detail::isnZ<ElementSrc, LayoutSrc>::value && tla::detail::iszN<ElementDst, LayoutDst>::value>> {
     static constexpr uint32_t ELE_NUM_PER_C0 = BytesToBits(BYTE_PER_C0) / SizeOfBits<ElementSrc>::value;
     static constexpr uint32_t ELE_NUM_PER_FRACTAL = BytesToBits(BYTE_PER_FRACTAL) / SizeOfBits<ElementSrc>::value;
@@ -168,9 +168,10 @@ struct TileCopyTla<
     {
         static_assert(
             !AscendC::Std::is_one_of_v<
-                typename TensorSrc::Element, int8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t> &&
+                typename TensorSrc::Element, int8_t, hifloat8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t,
+                float4_e1m2x2_t> &&
                 !AscendC::Std::is_one_of_v<
-                    typename TensorDst::Element, int8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t,
+                    typename TensorDst::Element, int8_t, hifloat8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t,
                     float4_e1m2x2_t> &&
                 tla::detail::isnZ<typename TensorSrc::Element, typename TensorSrc::Layout>::value &&
                 tla::detail::iszN<typename TensorDst::Element, typename TensorDst::Layout>::value &&
@@ -204,9 +205,10 @@ struct TileCopyTla<
     {
         static_assert(
             !AscendC::Std::is_one_of_v<
-                typename TensorSrc::Element, int8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t> &&
+                typename TensorSrc::Element, int8_t, hifloat8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t,
+                float4_e1m2x2_t> &&
                 !AscendC::Std::is_one_of_v<
-                    typename TensorDst::Element, int8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t,
+                    typename TensorDst::Element, int8_t, hifloat8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t,
                     float4_e1m2x2_t> &&
                 tla::detail::isnZ<typename TensorSrc::Element, typename TensorSrc::Layout>::value &&
                 tla::detail::iszN<typename TensorDst::Element, typename TensorDst::Layout>::value &&
@@ -247,8 +249,10 @@ struct TileCopyTla<
     Arch::Ascend950, tla::Tensor<AscendC::LocalTensor<ElementSrc>, LayoutSrc, CoordSrc, AscendC::TPosition::A1>,
     tla::Tensor<AscendC::LocalTensor<ElementDst>, LayoutDst, CoordDst, AscendC::TPosition::A2>,
     std::enable_if_t<
-        AscendC::Std::is_one_of_v<ElementSrc, int8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t> &&
-        AscendC::Std::is_one_of_v<ElementDst, int8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t> &&
+        AscendC::Std::is_one_of_v<
+            ElementSrc, int8_t, hifloat8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t> &&
+        AscendC::Std::is_one_of_v<
+            ElementDst, int8_t, hifloat8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t> &&
         tla::detail::isnZ<ElementSrc, LayoutSrc>::value && tla::detail::iszN<ElementDst, LayoutDst>::value>> {
     static constexpr uint32_t ELE_NUM_PER_C0 = BytesToBits(BYTE_PER_C0) / SizeOfBits<ElementSrc>::value;
     static constexpr uint32_t ELE_NUM_PER_FRACTAL = BytesToBits(BYTE_PER_FRACTAL) / SizeOfBits<ElementSrc>::value;
@@ -263,9 +267,10 @@ struct TileCopyTla<
     {
         static_assert(
             AscendC::Std::is_one_of_v<
-                typename TensorSrc::Element, int8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t> &&
+                typename TensorSrc::Element, int8_t, hifloat8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t,
+                float4_e1m2x2_t> &&
                 AscendC::Std::is_one_of_v<
-                    typename TensorDst::Element, int8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t,
+                    typename TensorDst::Element, int8_t, hifloat8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t,
                     float4_e1m2x2_t> &&
                 tla::detail::isnZ<typename TensorSrc::Element, typename TensorSrc::Layout>::value &&
                 tla::detail::iszN<typename TensorDst::Element, typename TensorDst::Layout>::value &&
@@ -313,9 +318,10 @@ struct TileCopyTla<
     {
         static_assert(
             AscendC::Std::is_one_of_v<
-                typename TensorSrc::Element, int8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t> &&
+                typename TensorSrc::Element, int8_t, hifloat8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t,
+                float4_e1m2x2_t> &&
                 AscendC::Std::is_one_of_v<
-                    typename TensorDst::Element, int8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t,
+                    typename TensorDst::Element, int8_t, hifloat8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t,
                     float4_e1m2x2_t> &&
                 tla::detail::isnZ<typename TensorSrc::Element, typename TensorSrc::Layout>::value &&
                 tla::detail::iszN<typename TensorDst::Element, typename TensorDst::Layout>::value &&
@@ -560,8 +566,8 @@ template <class Element>
 struct CopyL1ToL0A<
     Arch::Ascend950, Gemm::GemmType<Element, layout::nN, AscendC::TPosition::A1>,
     Gemm::GemmType<Element, layout::zN, AscendC::TPosition::A2>,
-    std::enable_if_t<
-        !AscendC::Std::is_one_of_v<Element, int8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t>>> {
+    std::enable_if_t<!AscendC::Std::is_one_of_v<
+        Element, int8_t, hifloat8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t>>> {
     using LayoutDst = layout::zN;
     using LayoutSrc = layout::nN;
 
@@ -605,8 +611,8 @@ struct CopyL1ToL0A<
 template <class Element>
 struct CopyL1ToL0A<
     Arch::Ascend950, Gemm::GemmType<Element, layout::nZ, AscendC::TPosition::A1>, void,
-    std::enable_if_t<
-        !AscendC::Std::is_one_of_v<Element, int8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t>>> {
+    std::enable_if_t<!AscendC::Std::is_one_of_v<
+        Element, int8_t, hifloat8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t>>> {
     using LayoutDst = layout::zN;
     using LayoutSrc = layout::nZ;
 
@@ -645,8 +651,8 @@ struct CopyL1ToL0A<
 template <class Element>
 struct CopyL1ToL0A<
     Arch::Ascend950, Gemm::GemmType<Element, layout::nZ, AscendC::TPosition::A1>, void,
-    std::enable_if_t<
-        AscendC::Std::is_one_of_v<Element, int8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t>>> {
+    std::enable_if_t<AscendC::Std::is_one_of_v<
+        Element, int8_t, hifloat8_t, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t>>> {
     using LayoutDst = layout::zN;
     using LayoutSrc = layout::nZ;
 

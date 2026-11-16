@@ -420,6 +420,12 @@ __attribute__((weak)) void Ascend950GroupedMatmulSliceMPerTensorPerChannelDequan
     const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const GroupedMatmulParams& params);
 
 /**
+ * @brief Reserved JIT interface for example 89_ascend950_hif8_quant_batch_matmul (hif8 fixpipe dequant path).
+ */
+__attribute__((weak)) void Ascend950QuantBatchMatmulFixpipeDequant(
+    const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const MatmulParams& params);
+
+/**
  * @brief Reserved JIT interface for example 50_ascend950_basic_matmul_gemv.
  */
 __attribute__((weak)) void Ascend950BasicMatmulGemv(
