@@ -34,8 +34,20 @@ using namespace Catlass;
 
 using Options = GemmOptions;
 
-static void Run(const Options& options)
+static int Run(const Options& options)
 {
+    using ArchTag = Arch::AtlasA2;
+    using L1TileShape = GemmShape<128, 256, 256>;
+
+    // Reject shapes whose full-load-A tile exceeds L1 before touching any device resource.
+    const uint64_t l1UsedSpace = static_cast<uint64_t>(L1TileShape::M) * options.problemShape.k() * sizeof(fp16_t) +
+                                 static_cast<uint64_t>(L1TileShape::K) * L1TileShape::N * 2 * sizeof(fp16_t);
+    if (l1UsedSpace > ArchTag::L1_SIZE) {
+        std::cout << "Not satisfy the constraints of 25_matmul_full_loadA." << std::endl;
+        std::cout << "MatA tile cannot be full loaded to L1." << std::endl;
+        return -1;
+    }
+
     aclrtStream stream{nullptr};
 
     ACL_CHECK(aclInit(nullptr));
@@ -80,27 +92,14 @@ static void Run(const Options& options)
     // Get the number of cube cores of the current hardware
     auto aicCoreNum = platform_ascendc::PlatformAscendCManager::GetInstance()->GetCoreNumAic();
 
-    using ArchTag = Arch::AtlasA2;
     using AType = Gemm::GemmType<half, LayoutA>;
     using BType = Gemm::GemmType<half, LayoutB>;
     using CType = Gemm::GemmType<half, LayoutC>;
 
-    using L1TileShape = GemmShape<128, 256, 256>;
     using L0TileShape = GemmShape<128, 256, 64>;
 
     std::vector<fp16_t> hostC(lenC);
 
-    uint32_t L1UsedSpace = L1TileShape::M * k * sizeof(fp16_t) + L1TileShape::K * L1TileShape::N * 2 * sizeof(fp16_t);
-
-    // judge whether to use L1 full load strategy
-    if (L1UsedSpace > ArchTag::L1_SIZE) {
-        std::cout << "Not satisfy the constraints of 25_matmul_full_loadA." << std::endl;
-        std::cout << "MatA tile cannot be full loaded to L1." << std::endl;
-        ACL_CHECK(aclrtDestroyStream(stream));
-        ACL_CHECK(aclrtResetDevice(options.deviceId));
-        ACL_CHECK(aclFinalize());
-        return;
-    }
     using DispatchPolicy = Gemm::MmadAtlasA2FullLoadA<true>;
     using BlockMmad = Gemm::Block::BlockMmad<DispatchPolicy, L1TileShape, L0TileShape, AType, BType, CType>;
     using BlockEpilogue = void;
@@ -159,10 +158,12 @@ static void Run(const Options& options)
     golden::ComputeMatmul(options.problemShape, hostA, layoutA, hostB, layoutB, hostGolden, layoutC);
 
     std::vector<uint64_t> errorIndices = golden::CompareData(hostC, hostGolden, k);
+    int ret = 0;
     if (errorIndices.empty()) {
         std::cout << "Compare success." << std::endl;
     } else {
         std::cerr << "Compare failed. Error count: " << errorIndices.size() << std::endl;
+        ret = -1;
     }
 
     ACL_CHECK(aclrtFree(deviceA));
@@ -172,6 +173,7 @@ static void Run(const Options& options)
     ACL_CHECK(aclrtDestroyStream(stream));
     ACL_CHECK(aclrtResetDevice(options.deviceId));
     ACL_CHECK(aclFinalize());
+    return ret;
 }
 
 int main(int argc, const char** argv)
@@ -180,6 +182,5 @@ int main(int argc, const char** argv)
     if (options.Parse(argc, argv) != 0) {
         return -1;
     }
-    Run(options);
-    return 0;
+    return Run(options);
 }
