@@ -1897,7 +1897,11 @@ struct CopyGmToL1<
     {
         AscendC::DataCopyParams intriParams;
         intriParams.blockCount = 1;
-        intriParams.blockLen = layoutDst.shape(0) / ELE_NUM_PER_C0;
+        // Only read what the source actually provides, rounded up to the 32B copy granularity,
+        // and never write more than the destination tile length.
+        uint32_t srcBlockLen = CeilDiv<ELE_NUM_PER_C0>(layoutSrc.shape(0));
+        uint32_t dstBlockLen = layoutDst.shape(0) / ELE_NUM_PER_C0;
+        intriParams.blockLen = srcBlockLen < dstBlockLen ? srcBlockLen : dstBlockLen;
         intriParams.srcStride = 0;
         intriParams.dstStride = 0;
         AscendC::DataCopy(dstTensor, srcTensor, intriParams);
