@@ -1,6 +1,6 @@
 # Sample Contribution Process
 
-This document details the process of contributing complete operator samples to the CATLASS template library. The process includes four stages: design, development, test, and merging. It aims to help developers contribute high-quality operator samples in a standardized manner.
+This document details the process of contributing complete operator samples to CATLASS. The process includes four stages: design, development, test, and merging. It aims to help developers contribute high-quality operator samples in a standardized manner.
 
 ## Design
 
@@ -10,7 +10,7 @@ Before starting the implementation, the following points must be clarified:
 
 - **Operator functionality**: Define the mathematical definition of the operator, input and output formats, supported data types, etc.
 - **Use cases**: Specify the typical use and performance requirements of the operator.
-- **Compatibility**: Confirm the operator's compatibility with the existing template library.
+- **Compatibility**: Confirm the operator's compatibility with the existing CATLASS.
 - **New features**: Identify the unique features of the new operator to ensure it does not completely duplicate existing features in the repository.
 
 ### Solution Design

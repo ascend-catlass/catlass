@@ -2,7 +2,7 @@
 
 ## Block MMAD Overview
 
-Block Matrix Multiply-Add (Block MMAD) is a core component in the CATLASS template library responsible for block matrix multiplication. It resides in the middle layer of the compute architecture. It interfaces with the Kernel layer above and the Tile layer below, efficiently loading data from global memory (GM) into local memory (L1/L0) and scheduling tile matrix multiplication tasks.
+Block Matrix Multiply-Add (Block MMAD) is a core component in CATLASS responsible for block matrix multiplication. It resides in the middle layer of the compute architecture. It interfaces with the Kernel layer above and the Tile layer below, efficiently loading data from global memory (GM) into local memory (L1/L0) and scheduling tile matrix multiplication tasks.
 
 Block MMAD adopts a highly modular and template-based design. It supports multiple scheduling strategies, tile shapes, and data types. This flexibility allows it to adapt to different hardware architectures and computational requirements. This document uses [BlockMmadPingpong](../../../include/catlass/gemm/block/block_mmad_pingpong.hpp) as an example (in the code excerpts below, the construction of some variables can be found in the source code).
 
@@ -322,7 +322,7 @@ The major differences among implementations are:
 
 ## Summary
 
-Block MMAD is a key component in the CATLASS template library that connects the kernel layer and the tile layer. It achieves efficient block-level matrix multiplication through the following designs:
+Block MMAD is a key component in CATLASS that connects the kernel layer and the tile layer. It achieves efficient block-level matrix multiplication through the following designs:
 
 1. **Modular design**: Assembles different functional components through template parameters.
 2. **Multi-stage pipeline**: Uses ping-pong techniques to hide memory access latency.

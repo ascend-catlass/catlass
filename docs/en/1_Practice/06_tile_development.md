@@ -2,7 +2,7 @@
 
 ## Tile Component Overview
 
-Tile components are the lowest-level computation and data operation units in the CATLASS template library. They reside at the end of the entire hierarchy and interact directly with the hardware. Their primary responsibility is to implement basic operations such as matrix multiplication (TileMmad) and data copy (TileCopy), serving as the foundation for building high-performance operators.
+Tile components are the lowest-level computation and data operation units in CATLASS. They reside at the end of the entire hierarchy and interact directly with the hardware. Their primary responsibility is to implement basic operations such as matrix multiplication (TileMmad) and data copy (TileCopy), serving as the foundation for building high-performance operators.
 
 Tile components adopt highly optimized implementations that fully exploit hardware features, including:
 
@@ -223,12 +223,12 @@ The relationship between tile components and other components is as follows:
 - **Underlying APIs**: Tile components directly call Ascend C underlying APIs to fully exploit hardware.
 - **Helper tools**: Tile components use helper tools in the `helper` namespace (e.g., ElementAccumulatorSelector) to perform operations like type selection.
 
-This layered design gives the CATLASS template library good modularity and maintainability.
+This layered design gives CATLASS good modularity and maintainability.
 
 ## Summary
 
-Tile components are the underlying computation and data operation units in the CATLASS template library. They interact directly with hardware. They adopt a template-based design, support multiple data types and layouts, and implement specific optimizations for different architectures.
+Tile components are the underlying computation and data operation units in CATLASS. They interact directly with hardware. They adopt a template-based design, support multiple data types and layouts, and implement specific optimizations for different architectures.
 
 TileMmad, as one of the important components, implements efficient matrix multiplication operations. By properly configuring MmadParams and inserting pipe barriers, it ensures computation correctness and performance. TileCopy is responsible for copying data between different levels of cache. It adopts a compositional design to flexibly handle various data transfer requirements.
 
-The design of tile components fully reflects the core ideas of the CATLASS template library: achieving highly flexible and efficient operator development through template-based and layered design. Understanding how tile components work is crucial for deeply grasping the CATLASS template library and developing high-performance operators.
+The design of tile components fully reflects the core ideas of CATLASS: achieving highly flexible and efficient operator development through template-based and layered design. Understanding how tile components work is crucial for deeply grasping CATLASS and developing high-performance operators.

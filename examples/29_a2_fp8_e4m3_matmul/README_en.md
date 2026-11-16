@@ -29,7 +29,7 @@ This operator supports the input matrices A and B in the FP8 E4M3 format (softwa
 Using the example
 
 - First step: Build.
-- After obtaining the code, build the operator executable file. For details, see [Template Library Quick Start](../../docs/en/1_Practice/01_quick_start.md#build-and-execution).
+- After obtaining the code, build the operator executable file. For details, see [CATLASS Quick Start](../../docs/en/1_Practice/01_quick_start.md#build-and-execution).
 
 ```bash
 # Build a specified test case.

@@ -122,7 +122,7 @@
 
 - 理论模板：[`Common模板`](#理论模板清单)
 - 工程优化：
-- [`流水优化(Multi Buffer)`](#工程优化清单)(全载的A矩阵在L1上不使用多buffer)
+- [`流水优化(Multi Buffer)`](#工程优化清单)(全载的A矩阵在L1上不使用多缓冲)
 - [`读取带宽优化(L1常驻)`](#工程优化清单)
 - 关键交付件
   - host：[25_matmul_full_loadA](../../../../examples/25_matmul_full_loadA/matmul_full_loadA.cpp)
@@ -195,9 +195,9 @@
 
 如图展示一个常规的fp16的矩阵运算（L0C上按照fp32累加），定义相关参数：
 
-- 问题shape：$M$，$N$，$K$
-- 搬入L1Cache时的TileShape：$m_1$，$n_1$，$k_1$
-- 搬入L0A/L0B、搬出L0C时的TileShape：$m_0$，$n_0$，$k_0$
+- 问题shape：$M$、$N$、$K$
+- 搬入L1Cache时的TileShape：$m_1$、$n_1$、$k_1$
+- 搬入L0A/L0B、搬出L0C时的TileShape：$m_0$、$n_0$、$k_0$
 
 采用 $M$、$N$ 方向分核，按照$m_1$、$n_1$切分，产生$\frac{MN}{m_1n_1}$个基本任务块、分配给AIC核完成搬运和计算，每个基本任务块需要搬运$m_1K+Kn_1$的数据、计算得到$m_1n_1$的结果并搬出。由此产生约束：
 
@@ -208,7 +208,7 @@
 - $m_0 = m_1$
 - $n_0 = n_1$
 
-其中$L1Stage_A$、$L1Stage_B$、$L0AStage$、$L0BStage$、$L0CStage$分别为A/B矩阵在L1、L0A、L0B与L0C上的Buffer份数，单Buffer取1、双Buffer取2；`2Byte`与`4Byte`分别为fp16输入元素和fp32累加结果元素的字节数。
+其中$L1Stage_A$、$L1Stage_B$、$L0AStage$、$L0BStage$、$L0CStage$分别为A/B矩阵在L1、L0A、L0B与L0C上的Buffer份数，单Buffer取1、双Buffer取2；2Byte与4Byte分别为fp16输入元素和fp32累加结果元素的字节数。
 
 ### 读取数据量
 
@@ -240,14 +240,14 @@ $2MNK$
 
 如图展示一个常规的fp16的矩阵运算（L0C上按照fp32累加），$MN$方向共切分12个基本任务块，假设有24个AIC物理核，此时负载不均衡，故引入$K$轴切分成2个$k$、产生24个基本任务块，在AIC上负载均衡。定义相关参数：
 
-- 问题shape：$M$，$N$，$K$
-- 搬入L1Cache时的TileShape：$m_1$，$n_1$，$k_1$
-- 搬入L0A/L0B、搬出L0C时的TileShape：$m_0$，$n_0$，$k_0$
+- 问题shape：$M$、$N$、$K$
+- 搬入L1Cache时的TileShape：$m_1$、$n_1$、$k_1$
+- 搬入L0A/L0B、搬出L0C时的TileShape：$m_0$、$n_0$、$k_0$
 - <font color="red">相较Common模板</font>，新增$K$方向切分长度$k$
 
 $k$为每个基本任务块在$K$方向上的长度，切分份数为$\lceil K/k \rceil$。为使$\frac{MNK}{m_1n_1k}$为整数，$k$需整除$K$；切分份数不超过$\lceil K/k_1 \rceil$，即$k$与L1TileShape的$k_1$同量级，并受切分份数上限约束：$K \le 1024$时最多2份，$K \le 2048$时最多4份，$K \le 4096$时最多8份，否则最多16份。切分份数的具体选取见[splitk_matmul.hpp](../../../../include/catlass/gemm/kernel/splitk_matmul.hpp)中的`GetSplitkFactor`。
 
-在$m_1$、$n_1$较大时，可能存在负载不均问题，即M,N方向切分的任务块远少于AIC核数，导致读取带宽不高（核数不够），因此可以在K方向上分核。产生$\frac{MNK}{m_1n_1k}$个基本任务块、分配给AIC核完成搬运和计算，每个基本任务块需要搬运$m_1k+kn_1$的数据、计算得到$m_1n_1$的结果并搬出。硬件上约束与Common相同。
+在$m_1$、$n_1$较大时，可能存在负载不均问题，即M、N方向切分的任务块远少于AIC核数，导致读取带宽不高（核数不够），因此可以在K方向上分核。产生$\frac{MNK}{m_1n_1k}$个基本任务块、分配给AIC核完成搬运和计算，每个基本任务块需要搬运$m_1k+kn_1$的数据、计算得到$m_1n_1$的结果并搬出。硬件上约束与Common相同。
 
 ### 读取数据量
 
@@ -276,9 +276,9 @@ $2Byte * MNK / k$
 
 如图展示一个常规的fp16的矩阵运算（L0C上按照fp32累加），定义相关参数：
 
-- 问题shape：$M$，$N$，$K$
-- 搬入L1Cache时的TileShape：$m_1$，$n_1$，$k_1$
-- 搬入L0A/L0B、搬出L0C时的TileShape：$m_0$，$n_0$，$k_0$
+- 问题shape：$M$、$N$、$K$
+- 搬入L1Cache时的TileShape：$m_1$、$n_1$、$k_1$
+- 搬入L0A/L0B、搬出L0C时的TileShape：$m_0$、$n_0$、$k_0$
 
 相比`Common模板`，为了减少读取数据量，进一步增大抽象上的$m_1$、$n_1$，考虑将$m_1k_1$的tile块直接与对应的所有$k_1n_1$的tile块完成计算（等同于将$n_1$放大到$N$），此时输出$m_0n_0$的tile块无法在$L0C$常驻累加，需要及时搬出，通过[`atomicAdd`](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/920beta2/API/ascendcopapi/docs/zh/api/SIMD-API/basic_api/atomic_operations/atomic_operations_overview.md)在`GM`上累加。硬件上约束如下：
 
@@ -310,13 +310,13 @@ $2Byte * MNK / k_1$
 ## 工程优化清单
 
 <details>
-<summary><strong><font size="4">流水优化（Multi Buffer）</font></strong></summary>
+<summary><strong><font size="4">流水优化(Multi Buffer)</font></strong></summary>
 
 ### 现象分析
 
 如下图构造一个`Common`模板下的简单场景，对于单个AIC处理一个基本任务块C，需要的A/B矩阵Tile块较小，可以直接全部放入L1，且A/B矩阵从L1搬入L0时需要切4次搬入。
 
-<img src="https://raw.gitcode.com/user-images/assets/7801479/a62726da-f3c2-4c37-8a32-711046cfd239/8pingpong0.png" alt="多Buffer优化前Single AIC数据通路图：数据由GM经MTE2搬入L1，再经MTE1搬入L0A/L0B，Cube计算后经FIXPIPE写回GM" width="80%">
+<img src="https://raw.gitcode.com/user-images/assets/7801479/a62726da-f3c2-4c37-8a32-711046cfd239/8pingpong0.png" alt="多缓冲优化前数据通路图" width="80%">
 
 各PIPE的指令流水图示例如下：
 
@@ -326,15 +326,15 @@ $2Byte * MNK / k_1$
 
 ### 优化方案
 
-使用常规优化手段Multi Buffer，即在L1/L0A/L0B/L0C上启用多buffer，使得流水尽可能并行，提升效率，这一优化策略如下图所示：
+使用常规优化手段Multi Buffer，即在L1/L0A/L0B/L0C上启用多缓冲，使得流水尽可能并行，提升效率，这一优化策略如下图所示：
 
-<img src="https://raw.gitcode.com/user-images/assets/7801479/40315511-85cc-44ac-be3f-9efb6b5c0194/8pingpong2.png" alt="多Buffer优化方案数据通路图：GM上A1/A2、B1/B2分块交替搬入L1，L0A、L0B按0/1双缓冲供Cube计算" width="80%">
+<img src="https://raw.gitcode.com/user-images/assets/7801479/40315511-85cc-44ac-be3f-9efb6b5c0194/8pingpong2.png" alt="多缓冲优化方案数据通路图：GM上A1/A2、B1/B2分块交替搬入L1，L0A、L0B按0/1双缓冲供Cube计算" width="80%">
 
 各PIPE的指令流水图示例如下，MTE1上指令的0、1表示pingpong流水：
 
 <img src="https://raw.gitcode.com/user-images/assets/7801479/e5cc2db5-873e-47f0-a425-464957168132/DoubleBuffer.png" alt="双Buffer指令流水图：MTE2、MTE1、CUBE、FIXPIPE按0/1双缓冲交替执行，实现搬运与计算重叠" width="100%">
 
-⚠️ 需要注意的是，与`L1常驻`优化结合时，常驻的A/B矩阵的tile块，不启用多buffer。
+⚠️ 需要注意的是，与`L1常驻`优化结合时，常驻的A/B矩阵的tile块，不启用多缓冲。
 
 ### 特性承载代码
 
@@ -343,7 +343,7 @@ $2Byte * MNK / k_1$
 </details>
 
 <details>
-<summary><strong><font size="4">流水优化（Preload）</font></strong></summary>
+<summary><strong><font size="4">流水优化(Preload)</font></strong></summary>
 
 ### 现象分析
 
@@ -361,13 +361,14 @@ for ... {
     copyGM2L1A
     copyGM2L1B
     preload_count++
-    if (preload_count == PRELOAD_STAGES) {
+    if (preload_count > PRELOAD_STAGES) {
         // 计算前PRELOAD_STAGES轮次的数据
         copyL12L0A
         copyL12L0B
         Mmad
     }
 }
+// 循环结束后需补充收尾计算，处理最后PRELOAD_STAGES轮数据
 ```
 
 如下图构造一个`Common`模板下的简单场景，对于单个AIC处理两个基本任务块C1和C2，需要的A/B矩阵Tile块放入L1需要切分2次，且A/B矩阵L1Tile块从L1搬入L0时需要切分4次（可以先学习前文[流水优化(Multi Buffer)](#工程优化清单)来增强理解）。以下给出`MmadAtlasA2Pingpong`和`MmadAtlasA2Preload`、`MmadAtlasA2PreloadAsync`的指令对比：
@@ -376,7 +377,7 @@ for ... {
 - `MmadAtlasA2Preload`中，两次blockMmad也是分别完成C1和C2的计算，但A3/B3的GmToL1搬运提前到了第一次blockMmad中执行
 - `MmadAtlasA2PreloadAsync`中，调用两次blockMmad和一次收尾的SynchronizeBlock。A2/B2的L1ToL0搬运、tileMmad以及C1的搬出从第一次blockMmad中推迟到第二次blockMmad中；A4/B4的L1ToL0搬运、tileMmad以及C2的搬出从第二次blockMmad中推迟到SynchronizeBlock中
 
-<img src="https://raw.gitcode.com/user-images/assets/7801479/eca1e06a-7c9a-40d6-934b-6843f9229d7c/9preload0.png" alt="MmadAtlasA2Pingpong、MmadAtlasA2Preload、MmadAtlasA2PreloadAsync三种blockMmad的指令序列对比图" width="100%">
+<img src="https://raw.gitcode.com/user-images/assets/7801479/eca1e06a-7c9a-40d6-934b-6843f9229d7c/9preload0.png" alt="三种blockMmad的指令序列对比图" width="100%">
 
 各PIPE的指令流水图示例如下，最终达成了A3、B3块的GmToL1搬运提前，减缓了MTE2上的搬运空泡：
 
@@ -391,13 +392,13 @@ for ... {
 </details>
 
 <details>
-<summary><strong><font size="4">读取带宽优化（Padding）</font></strong></summary>
+<summary><strong><font size="4">读取带宽优化(Padding)</font></strong></summary>
 
 ### 现象分析
 
 当数据读取为主流水时，优化读取带宽能带来性能收益，以fp16的A矩阵为例，目前有以下几种低带宽场景：
 
-- **Stride非512Byte对齐导致的低带宽**。搬运参数srcDValue（详见[昇腾文档：DataCopy-随路转换ND2NZ搬运](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/latest/API/ascendcopapi/docs/zh/api/SIMD-API/basic_api/cube_compute_ISASI/cube_compute_load/DataCopy_GMToL1_ND2NZ.md)）非512Byte对齐时，单次搬运会被拆分为更短的片段并向上取整，有效带宽下降。CANN官方最佳实践[《GM地址尽量512B对齐》](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/920beta2/programug/Ascendcopdevg/docs/zh/guide/operator_practice/simd_operator_optimization/memory_access/gm_address_512b_alignment.md)在Atlas A2系列产品上的实测显示，最差情况下（32B对齐）单核带宽仅为512B对齐的70%，即带宽下降约30%。
+- **Stride非512Byte对齐导致的低带宽**。搬运参数srcDValue（详见[昇腾文档：DataCopy-随路转换ND2NZ搬运](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/latest/API/ascendcopapi/docs/zh/api/SIMD-API/basic_api/cube_compute_ISASI/cube_compute_load/DataCopy_GMToL1_ND2NZ.md)）非512Byte对齐时，单次搬运会被拆分为更短的片段并向上取整，有效带宽下降。CANN官方最佳实践[《GM地址尽量512B对齐》](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/920beta2/programug/Ascendcopdevg/docs/zh/guide/operator_practice/simd_operator_optimization/memory_access/gm_address_512b_alignment.md)在Atlas A2系列产品上的实测显示，最差情况下（32Byte对齐）单核带宽仅为512Byte对齐的70%，即带宽下降约30%。
 - **搬运指令限制导致的低带宽**。ND2NZ的搬运指令，参数srcDValue是uint16类型，最大值65535。当K>65535时，只能通过取ndNum = 1，在m方向循环调用搬运指令，降低了读取带宽。
 - 相比ND2ND不转换排布，**ND2NZ随路转换有带宽损失**。
 
@@ -434,11 +435,11 @@ for ... {
 </details>
 
 <details>
-<summary><strong><font size="4">读取带宽优化（ShuffleK）</font></strong></summary>
+<summary><strong><font size="4">读取带宽优化(ShuffleK)</font></strong></summary>
 
 ### 现象分析
 
-通常，所有AIC核心都从$K$方向的第一个分块开始搬运计算，会存在多个核心同时读取同一片GM上数据的情况，产生数据读取冲突，导致读取带宽降低。
+通常，所有AIC核心都从$K$方向的第一个分块开始搬运计算，会存在多个核心同时读取同一片GM上的数据的情况，产生数据读取冲突，导致读取带宽降低。
 
 ### 优化方案
 
@@ -451,7 +452,7 @@ for ... {
 - $B_{ij}$表示B矩阵第$i$个$n_1$分块下沿$K$轴切分的第$j$个L1Tile基本块，$i$为该基本块在matC中的$N$方向编号，$j$与A矩阵的$j$一致
 - 图中matC基本块分核采用Swizzle<2, 1>，详见[swizzle_explanation](./02_swizzle.md)
 
-如图左原始方案，$Core2$和$Core3$搬运A矩阵时均按照“$A0$->$A1$->$A2$->$A3$”的顺序，产生了数据读取冲突。
+如左图原始方案，$Core2$和$Core3$搬运A矩阵时均按照“$A0$->$A1$->$A2$->$A3$”的顺序，产生了数据读取冲突。
 
 ShuffleK方案如图所示，根据$CoreIdx$来偏移起始搬运序号$j$，$Core2$搬运A矩阵时按照“$A2$->$A3$->$A0$->$A1$”的顺序，对应B矩阵按照“$B_{02}$->$B_{03}$->$B_{00}$->$B_{01}$”的顺序；$Core3$搬运A矩阵按照“$A3$->$A0$->$A1$->$A2$”的顺序，对应B矩阵按照“$B_{13}$->$B_{10}$->$B_{11}$->$B_{12}$”的顺序。从时间上错开，避免同地址访问冲突。
 
@@ -475,7 +476,7 @@ firstTileIdx = startTileIdx % kTileCount;
 </details>
 
 <details>
-<summary><strong><font size="4">读取带宽优化（小M下指令替换）</font></strong></summary>
+<summary><strong><font size="4">读取带宽优化(小M下指令替换)</font></strong></summary>
 
 ### 现象分析
 
@@ -508,7 +509,7 @@ struct TileCopyOpt : public Catlass::Gemm::Tile::TileCopy<ArchTag, AType, BType,
 </details>
 
 <details>
-<summary><strong><font size="4">读取带宽优化（L1常驻）</font></strong></summary>
+<summary><strong><font size="4">读取带宽优化(L1常驻)</font></strong></summary>
 
 ### 现象分析
 
@@ -543,11 +544,11 @@ struct TileCopyOpt : public Catlass::Gemm::Tile::TileCopy<ArchTag, AType, BType,
 - $M$、$N$方向分核数小于实际物理核数，每个AIC物理核最多仅处理一个基本任务块
 - $k_1$ >= $K$，$K$方向无需切分即可从GM搬入L1
 
-此时kernel总耗时较小，scalar开销对性能影响显著。
+此时kernel总耗时较小，Scalar开销对性能影响显著。
 
 ### 优化方案
 
-消减冗余的scalar计算。
+消减冗余的Scalar计算。
 
 - kernel内不使用BlockScheduler来将任务块分配给物理核，手动计算每个物理核对应的任务块
 - kernel内消除基本块循环（每个AIC仅处理1个任务块）
@@ -570,7 +571,7 @@ struct TileCopyOpt : public Catlass::Gemm::Tile::TileCopy<ArchTag, AType, BType,
 
 当数据写出为主流水时，优化写出带宽能够带来性能收益。
 
-- 当写出时`dstStride`未进行512Byte对齐，写出带宽下降。CANN官方最佳实践[《GM地址尽量512B对齐》](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/920beta2/programug/Ascendcopdevg/docs/zh/guide/operator_practice/simd_operator_optimization/memory_access/gm_address_512b_alignment.md)在Atlas A2系列产品上的实测显示，最差情况下（32B对齐）单核带宽仅为512B对齐的70%，即带宽下降约30%
+- 当写出时`dstStride`未进行512Byte对齐，写出带宽下降。CANN官方最佳实践[《GM地址尽量512B对齐》](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/920beta2/programug/Ascendcopdevg/docs/zh/guide/operator_practice/simd_operator_optimization/memory_access/gm_address_512b_alignment.md)在Atlas A2系列产品上的实测显示，最差情况下（32Byte对齐）单核带宽仅为512Byte对齐的70%，即带宽下降约30%。
 - 写出时用NZ2ND随路格式转换，产生带宽损失
 
 ### 优化方案
@@ -584,7 +585,7 @@ struct TileCopyOpt : public Catlass::Gemm::Tile::TileCopy<ArchTag, AType, BType,
 
 （↑）**方式二**：使用全量workSpace，ND写出到GM时512Byte对齐，等全量结果写完后，再启动UB上数据重排，写入到GM上。
 
-<img src="https://raw.gitcode.com/user-images/assets/7801479/13bd80b2-d6ab-4520-839c-cf5e700db0d5/7rmPadding3.png" alt="写出重排方式三：局部workSpace，NZ写出到GM时按512Byte对齐（n0尾部补dummy），按block粒度在UB上重排为ND后写回GM" width="80%">
+<img src="https://raw.gitcode.com/user-images/assets/7801479/13bd80b2-d6ab-4520-839c-cf5e700db0d5/7rmPadding3.png" alt="写出重排方式三示意图" width="80%">
 
 （↑）**方式三**：使用局部workSpace，NZ写出到GM时512Byte对齐，再按block块粒度在UB上重排，ND写出到GM上。
 
@@ -609,7 +610,7 @@ struct TileCopyOpt : public Catlass::Gemm::Tile::TileCopy<ArchTag, AType, BType,
 <details>
 <summary><strong><font size="4">模板选择</font></strong></summary>
 
-先尝试基于[00_basic_matmul](../../../../examples/00_basic_matmul/basic_matmul.cpp)进行TileShape调优并获得**性能基线**，可参考[模板库优化指引](../../1_Practice/11_matmul_optimization.md)
+先尝试基于[00_basic_matmul](../../../../examples/00_basic_matmul/basic_matmul.cpp)进行TileShape调优并获得**性能基线**，可参考[CATLASS优化指引](../../1_Practice/11_matmul_optimization.md)。
 
 依次识别是否满足各模板适合场景，并和性能基线作比较。比较方法为使用[msProf](../../1_Practice/evaluation/performance_tools.md#msprof-single-operator-analysis)分别采集候选模板与基线的Task Duration，在相同shape和数据类型下对比耗时，确认收益后再选定模板：
 

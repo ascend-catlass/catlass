@@ -16,7 +16,7 @@ Each time the operator completes the computation of a basic block, the result da
 
 ## Example
 
-- After obtaining the code, Build the corresponding operator executable file. For details, see [Template Library Quick Start](../../docs/en/1_Practice/01_quick_start.md#build-and-execution). In this example, the operator is an Ascend 950 operator. During compilation, add -DCATLASS_ARCH=3510.
+- After obtaining the code, Build the corresponding operator executable file. For details, see [CATLASS Quick Start](../../docs/en/1_Practice/01_quick_start.md#build-and-execution). In this example, the operator is an Ascend 950 operator. During compilation, add -DCATLASS_ARCH=3510.
 - Execute the operator.
 
 ```bash

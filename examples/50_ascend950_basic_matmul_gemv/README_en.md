@@ -47,7 +47,7 @@ The command line parameters are described as follows:
 
 ### Example
 
-1. Go to the project root directory and compile the sample code to generate the corresponding operator executable file. This example is an Ascend 950 operator, and `-DCATLASS_ARCH=3510` must be added during compilation. For details, see [Template Library Quick Start](../../docs/en/1_Practice/01_quick_start.md#build-and-execution).
+1. Go to the project root directory and compile the sample code to generate the corresponding operator executable file. This example is an Ascend 950 operator, and `-DCATLASS_ARCH=3510` must be added during compilation. For details, see [CATLASS Quick Start](../../docs/en/1_Practice/01_quick_start.md#build-and-execution).
 
     ```bash
     bash scripts/build.sh 50_ascend950_basic_matmul_gemv -DCATLASS_ARCH=3510

@@ -7,7 +7,7 @@ CATLASS FlashAttention Infer is a FlashAttention inference operator optimized fo
 - Tiling calculation;
 - Kernel implementation;
 - Block and Epilogue components in the Kernel that are suitable for FlashAttention inference operations;
-- The Block and Epilogue components used rely on the Tile components provided by the template library.
+- The Block and Epilogue components used rely on the Tile components provided by CATLASS.
 
 This document describes in detail the Kernel implementation of the Flash Attention Infer operator, including key designs such as main process logic, Cube/Vector pipeline, L1/UB memory allocation, as well as the Tiling segmentation strategy.
 

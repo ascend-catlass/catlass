@@ -39,7 +39,7 @@
 
 - [2025/10] [v1.2.0](https://gitcode.com/cann/catlass/releases/v1.2.0) released, adding examples such as [Matmul Operator Generalization](https://gitcode.com/cann/catlass/tree/v1.2.0/examples/102_dynamic_optimized_matmul/README.md).
 
-- [2025/09] The CATLASS template library was officially open sourced.
+- [2025/09] CATLASS was officially open sourced.
 
 </details>
 
@@ -53,7 +53,7 @@ CATLASS (**CA**NN **T**emplates for **L**inear **A**lgebra **S**ubroutine**s**) 
 
 CATLASS templates matrix operator code through layered abstraction. Therefore, it enables white-box assembly of operator compute logic and makes operator code reusable, replaceable, and partially modifiable. It is designed for Ascend hardware characteristics and supports complex pipeline layouts for operators such as `Flash Attention`. In addition, it shares upper-layer code logic while supporting specialization for differences in underlying hardware.
 
-The template library enables fast development for custom scenarios. It provides performance optimization modules for different scenarios, so developers can assemble and customize them. Under custom shapes, its performance can reach 0.98 to 1.2 times the benchmark performance of the corresponding operator.
+CATLASS enables fast development for custom scenarios. It provides performance optimization modules for different scenarios, so developers can assemble and customize them. Under custom shapes, its performance can reach 0.98 to 1.2 times the benchmark performance of the corresponding operator.
 
 <p align="center">
   <img src="docs/assets/images/homepage_perf_mm.png" alt="Matmul Performance Comparison" width="70%">
@@ -69,7 +69,7 @@ This repository is the co-created repository for CATLASS. It combines the streng
 
 To quickly try CATLASS operator development and usage, see the following content.
 
-- [Quick Start](./docs/en/1_Practice/01_quick_start.md): Quickly get started with the template library, and compile and run existing operator examples.
+- [Quick Start](./docs/en/1_Practice/01_quick_start.md): Quickly get started with CATLASS, and compile and run existing operator examples.
 
 - [Basic Development Guide](./docs/en/1_Practice/02_host_example_assembly.md): Uses the basic Matmul operator as an example to introduce CATLASS-based operator development practices.
 

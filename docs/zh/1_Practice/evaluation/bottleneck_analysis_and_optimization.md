@@ -10,7 +10,7 @@
 
 | 项目         | 配置                                    |
 | ------------ | --------------------------------------- |
-| 处理器       | Ascend 910B3（20个AI Core，主频1800MHz） |
+| 处理器       | Ascend 910B3（20个AI Core，主频1.8GHz） |
 | CANN toolkit | 9.2.0-beta.2                            |
 | 性能数据采集 | `msprof op`                             |
 
@@ -20,9 +20,9 @@ CATLASS示例工程适配CANN提供的主流性能调测工具，工具的详细
 
 ### msProf — 单算子性能分析
 
-[msProf](https://www.hiascend.com/document/redirect/CannCommunitymsOpProf)是单算子性能分析工具，对应指令为`msprof op`，支持上板和仿真两种运行模式。使用方式见[msProf&Profiling](./performance_tools.md#msprof-single-operator-analysis)。
+[msProf](https://www.hiascend.com/document/redirect/CannCommunitymsOpProf)是单算子性能分析工具，对应指令为`msprof op`，支持上板和仿真两种运行模式。使用方式见[msProf单算子性能分析](./performance_tools.md#msprof-single-operator-analysis)。
 
-**上板性能采集**
+#### 上板性能采集
 
 直接在NPU上运行算子并采集实际性能数据，是性能调优的第一步。
 
@@ -30,9 +30,12 @@ CATLASS示例工程适配CANN提供的主流性能调测工具，工具的详细
 # 在仓库根目录编译样例，生成 output/bin/00_basic_matmul
 bash scripts/build.sh 00_basic_matmul
 
-# 可执行文件名 | 矩阵m轴 | n轴 | k轴 | Device ID（可选，默认0）
+# 切换到可执行文件所在目录后运行
+cd output/bin
 msprof op --application="./00_basic_matmul 256 512 1024 0"
 ```
+
+其中`./00_basic_matmul`为可执行文件名，`256`、`512`、`1024`分别为矩阵m轴、n轴、k轴的维度，末尾`0`为Device ID（可选，默认0）。
 
 常用参数：
 
@@ -58,7 +61,7 @@ msprof op --application="./00_basic_matmul 256 512 1024 0"
 | `OpBasicInfo.csv`           | 算子基础信息（Block Dim等）                 | 分析多核利用率、算子执行耗时和频率表现 |
 | `ResourceConflictRatio.csv` | UB Bank Group/Bank Conflict占比             | 判断UB访问冲突程度                     |
 
-**性能流水仿真**
+#### 性能流水仿真
 
 当上板Profiling显示存在流水瓶颈后，通过仿真在指令级别进一步定位问题。
 
@@ -72,7 +75,6 @@ export LD_PRELOAD=/usr/local/Ascend/ascend-toolkit/latest/tools/simulator/Ascend
 
 # 切换到可执行文件所在目录后运行
 cd output/bin
-# 可执行文件名 | 矩阵m轴 | n轴 | k轴 | Device ID（可选，默认0）
 msprof op simulator ./00_basic_matmul 256 512 1024 0
 ```
 
@@ -97,7 +99,7 @@ msprof op simulator ./00_basic_matmul 256 512 1024 0
 - 若仿真结果中大量`Vector`操作被映射为`Scalar`操作导致性能异常（`vector_ratio < 10%`），这是编译优化等级造成的，可在`examples/CMakeLists.txt`的开始位置增加以下代码，用于提升优化等级：
 
     ```cmake
-    add_compile_options($<$<COMPILE_LANGUAGE:ASC>:"-Xaicore-start -O3 -Xaicore-end">)
+    add_compile_options("SHELL:$<$<COMPILE_LANGUAGE:ASC>:-Xaicore-start -O3 -Xaicore-end>")
     ```
 
 - 仿真只能在0卡运行，不能指定NPU卡号。
@@ -112,7 +114,6 @@ bash scripts/build.sh 00_basic_matmul
 
 # 切换到可执行文件所在目录后执行
 cd output/bin
-# 可执行文件名 | 矩阵m轴 | n轴 | k轴 | Device ID（可选，默认0）
 msprof ./00_basic_matmul 256 512 1024 0
 ```
 
@@ -120,7 +121,7 @@ msprof ./00_basic_matmul 256 512 1024 0
 
 ### msTuner_CATLASS — Tiling自动寻优
 
-[msTuner_CATLASS](../../../../tools/tuner/README.md)是面向CATLASS模板库算子的Tiling参数自动寻优工具。它支持自定义搜索空间（L0/L1 TileShape、数据类型、内存排布、Swizzle策略等；Swizzle决定AI Core处理基本块的顺序，见[Swizzle设计](../../2_Design/01_kernel_design/02_swizzle.md)），能够实例化搜索空间内的所有算子并批量完成上板性能测试，输出Top N性能最优配置。
+[msTuner_CATLASS](../../../../tools/tuner/README.md)是面向CATLASS算子的Tiling参数自动寻优工具。它支持自定义搜索空间（L0/L1 TileShape、数据类型、内存排布、Swizzle策略等；Swizzle决定AI Core处理基本块的顺序，见[Swizzle设计](../../2_Design/01_kernel_design/02_swizzle.md)），能够实例化搜索空间内的所有算子并批量完成上板性能测试，输出Top N性能最优配置。
 
 ```bash
 # 在仓库根目录编译；-DCATLASS_LIBRARY_KERNELS 过滤参与寻优的算子
@@ -141,9 +142,9 @@ export LD_LIBRARY_PATH=$PWD/output/lib64/:$LD_LIBRARY_PATH
 | `--device` | 0      | 指定运行的单卡ID                     |
 | `--output` | 无     | 性能数据落盘文件路径，不指定时不落盘 |
 
-以上参数均可选，不指定时使用默认值；`--kernels`、`--A/--B/--C`等过滤参数的用法见[msTuner_CATLASS文档](../../../../tools/tuner/README.md)。
+以上参数均可选，不指定时使用默认值；`--kernels`、`--A/--B/--C`等过滤参数的用法见[msTuner_CATLASS](../../../../tools/tuner/README.md)。
 
-输出中逐个case回显`case_id`、`task_duration(us)`、`device_id`、`operation`、`description`、`l0_tile_shape`、`l1_tile_shape`、`swizzle`、`m`、`n`、`k`、`A`、`B`、`C`字段，末尾按`task_duration(us)`汇总Top 10最优配置，汇总列依次为`case_id`、`task_duration(us)`、`device_id`、`operation`、`description`、`m`、`n`、`k`、`A`、`B`、`C`。搜索空间配置支持入门级和高级两种模式，见[msTuner_CATLASS文档](../../../../tools/tuner/README.md)。建议将搜索空间规模控制在5000以内，以避免编译耗时过长。
+输出中逐个case回显`case_id`、`task_duration(us)`、`device_id`、`operation`、`description`、`l0_tile_shape`、`l1_tile_shape`、`swizzle`、`m`、`n`、`k`、`A`、`B`、`C`字段，末尾按`task_duration(us)`汇总Top 10最优配置，汇总列依次为`case_id`、`task_duration(us)`、`device_id`、`operation`、`description`、`m`、`n`、`k`、`A`、`B`、`C`。搜索空间配置支持入门级和高级两种模式，见[msTuner_CATLASS](../../../../tools/tuner/README.md)。建议将搜索空间规模控制在5000以内，以避免编译耗时过长。
 
 ### 工具选型建议
 
@@ -160,7 +161,7 @@ export LD_LIBRARY_PATH=$PWD/output/lib64/:$LD_LIBRARY_PATH
 
 ### 搬运流水理论耗时
 
-搬运相关流水（MTE1/MTE2/MTE3）的理论耗时计算公式为“搬运数据量（Byte）除以理论带宽”。以Atlas A2训练系列产品为例，其片上内存峰值带宽为1600GB/s，见[Atlas 800T A2 训练服务器 用户指南-技术规格](https://support.huawei.com/enterprise/zh/doc/EDOC1100317202/f3dba488)。`float16`类型的4096*4096矩阵搬运理论耗时如下：
+搬运相关流水（MTE1/MTE2/MTE3）的理论耗时计算公式为“搬运数据量（Byte）除以理论带宽”。以Atlas A2训练系列产品为例，其片上内存峰值带宽为1.6TB/s，见[Atlas 800T A2 训练服务器 用户指南-技术规格](https://support.huawei.com/enterprise/zh/doc/EDOC1100317202/f3dba488)。`float16`类型的4096*4096矩阵搬运理论耗时如下：
 
 ```text
 2Byte*4096*4096 / 1.6TB/s ≈ 20.97 μs
@@ -174,10 +175,10 @@ export LD_LIBRARY_PATH=$PWD/output/lib64/:$LD_LIBRARY_PATH
 
 ### 计算流水理论耗时
 
-计算相关流水（Cube/Vector/Scalar）的理论耗时计算公式为“计算数据量（Element）除以理论算力”。以`float16`类型Vector理论峰值算力11.06TFLOPS为例，32768个`float16` Element单指令计算理论耗时如下：
+计算相关流水（Vector/Scalar）的理论耗时按“Element数除以理论算力”计算，Cube流水按“FLOPs（2*m*n*k）除以理论算力”计算。以`float16`类型Vector理论峰值算力11.06TFLOPS为例，32768个`float16` Element单指令计算理论耗时如下：
 
 ```text
-32768 / 11.06TFLOPS ≈ 0.003 μs
+32768 / 11.06TFLOPS ≈ 3 ns
 ```
 
 注意：11.06TFLOPS由Vector单元每拍处理的字节数、Vector核数与主频折算得到，各型号的核数、主频不同，需替换为目标型号的实际规格值，核数可通过`platform_ascendc`的`GetCoreNumAiv`接口查询。
@@ -196,7 +197,7 @@ Cube和Vector/Scalar分开计算后再求和，因为三者可并行执行到一
 
 | 指标                              | 含义                                              |
 | --------------------------------- | ------------------------------------------------- |
-| `aic_mac_ratio`                   | Cube流水利用率，越接近100% 说明计算单元利用越充分 |
+| `aic_mac_ratio`                   | Cube流水利用率，越接近100%说明计算单元利用越充分 |
 | `aic_mte2_ratio`                  | MTE2流水利用率                                    |
 | `aiv_mte2_time` / `aic_mte2_time` | MTE2实际耗时（μs）                                |
 | `aiv_vec_time`                    | Vector指令执行时间（SIMT单指令多线程、SIMD单指令多数据场景均计入） |
@@ -205,7 +206,7 @@ Cube和Vector/Scalar分开计算后再求和，因为三者可并行执行到一
 
 1. 根据算子数据量计算理论搬运耗时和理论计算耗时。
 2. 计算搬运耗时比 `aic_mte2_time` / 理论搬运耗时，按该比值判定：
-   - 不大于1.5：属正常范围。GM地址未512B对齐、搬运指令拆分和ND2NZ随路转换都会带来额外开销；CANN官方最佳实践[《GM地址尽量512B对齐》](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/920beta2/programug/Ascendcopdevg/docs/zh/guide/operator_practice/simd_operator_optimization/memory_access/gm_address_512b_alignment.md)在Atlas A2系列产品上的实测显示，最差情况下（32B对齐）带宽仅为512B对齐的70%，对应耗时约为理论值的1.43倍。
+   - 不大于1.5：属正常范围。GM地址未512字节对齐、搬运指令拆分和ND2NZ随路转换都会带来额外开销；CANN官方最佳实践[《GM地址尽量512B对齐》](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/920beta2/programug/Ascendcopdevg/docs/zh/guide/operator_practice/simd_operator_optimization/memory_access/gm_address_512b_alignment.md)在Atlas A2系列产品上的实测显示，最差情况下（32字节对齐）带宽仅为512字节对齐的70%，对应耗时约为理论值的1.43倍。
    - 大于1.5且不大于2：需检查搬运地址对齐、单次搬运长度（单次16KB以上才能发挥较佳带宽）以及是否启用双缓冲。
    - 大于2：判为数据重复搬运或搬运效率严重偏低。前者指基本块之间无法复用已搬入的数据（如输入数据总量超过L1容量），后者指有效带宽不足理论带宽的一半。
 3. 检查`aic_mac_ratio`，按经验阈值判定计算单元是否充分发挥：
@@ -218,9 +219,9 @@ Cube和Vector/Scalar分开计算后再求和，因为三者可并行执行到一
 | ------------------------ | ------------- | ---------------------- |
 | MTE2耗时与总执行时间持平 | MTE2 bound    | 流水优化 + Tiling优化  |
 | Cube/Vector耗时占主导    | Compute bound | 计算流水优化           |
-| 两者均不接近理论值       | 流水隐藏不足  | 用仿真流水图进一步分析 |
+| 两者均不接近理论值       | 流水掩盖不足  | 用仿真流水图进一步分析 |
 
-示例：MatMul算子shape为 (2048, 12288)*(12288, 6144)，bfloat16类型。按Atlas A2训练系列产品的1600GB/s带宽计算，理论搬运约125.8μs；输入数据总大小超过L1空间（Atlas A2系列产品为512KB，见[NPU架构版本2201](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/920beta2/programug/Ascendcopdevg/docs/zh/guide/programming_guide/advanced_programming/hardware_implementation/architecture_spec/npu_arch_2201.md)），基本块之间无法复用A、B矩阵。实测`aic_mte2_time`约1215μs、Task Duration约1276μs，搬运耗时比约9.7，`aic_mte2_ratio`约0.96，按上述判据属于数据重复搬运，应结合Tiling优化和仿真流水图进一步分析。
+示例：MatMul算子shape为 (2048, 12288)*(12288, 6144)，bfloat16类型。按Atlas A2训练系列产品的1.6TB/s带宽计算，理论搬运约125.8μs；输入数据总大小超过L1空间（Atlas A2系列产品为512KB，见[NPU架构版本2201](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/920beta2/programug/Ascendcopdevg/docs/zh/guide/programming_guide/advanced_programming/hardware_implementation/architecture_spec/npu_arch_2201.md)），基本块之间无法复用A、B矩阵。实测`aic_mte2_time`约1215μs、Task Duration约1276μs，搬运耗时比约9.7，`aic_mte2_ratio`约0.96，按上述判据属于数据重复搬运，应结合Tiling优化和仿真流水图进一步分析。
 
 ### 上板Profiling分析Tiling情况
 
@@ -243,7 +244,7 @@ Cube和Vector/Scalar分开计算后再求和，因为三者可并行执行到一
 
 ### 上板Profiling查看头开销
 
-头开销包含核启动、核取指TLB MISS、同地址访问冲突、变量资源初始化等时延。对于延迟为微秒级的推理算子，头开销占比较高，是值得优化的对象。以Atlas A2训练/推理系列产品为例，满核头开销约20~21μs。
+头开销包含核启动、核取指TLB MISS、同地址访问冲突、变量资源初始化等时延。对于延迟为微秒级的推理算子，头开销占比较高，是值得优化的对象。以Atlas A2训练/推理系列产品为例，满核头开销约20～21μs。
 
 操作步骤如下：
 
@@ -258,7 +259,7 @@ Cube和Vector/Scalar分开计算后再求和，因为三者可并行执行到一
 
 根据瓶颈分析结果选择对应的优化策略。下表为各优化手段的实测收益，采集环境见[测试环境](#测试环境)，输入均为`float16`，数据为Task Duration中位数（5次，Padding前处理组为2次），收益按`(基线−候选)/基线`计算：
 
-| 优化类别                     | 基线              | 候选                       | `m*n*k`         | 基线耗时(μs) | 候选耗时(μs) | 收益  |
+| 优化类别                     | 基线              | 候选                       | `m*n*k`         | 基线耗时（μs） | 候选耗时（μs） | 收益  |
 | ---------------------------- | ----------------- | -------------------------- | --------------- | ------------ | ------------ | ----- |
 | 流水优化（Preload、ShuffleK） | `00_basic_matmul` | `06_optimized_matmul`      | `4096*4096*4096` | 532.39      | 507.69       | 4.6%  |
 | 矩阵全载（A矩阵复用）         | `00_basic_matmul` | `25_matmul_full_loadA`     | `256*4096*1024`  | 21.44       | 18.38        | 14.3% |
@@ -312,8 +313,8 @@ Cube和Vector/Scalar分开计算后再求和，因为三者可并行执行到一
 
 | 工具                                | 用途                   | CATLASS文档                                                                                                                                                       |
 | ----------------------------------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| msProf（`msprof op`）               | 单算子上板性能采集     | [msProf&Profiling](./performance_tools.md#msprof-single-operator-analysis)                                                                                             |
+| msProf（`msprof op`）               | 单算子上板性能采集     | [msProf单算子性能分析](./performance_tools.md#msprof-single-operator-analysis)                                                                                             |
 | msProf仿真（`msprof op simulator`） | 单算子仿真流水图采集   | [性能流水仿真](./performance_tools.md#performance-pipeline-simulation)                                                                                                               |
 | Profiling（`msprof`）               | 整网性能数据采集与分析 | [用Profiling进行整网性能分析](./performance_tools.md#profiling-network-analysis)                                                                                 |
-| msTuner_CATLASS                     | Tiling参数自动寻优     | [msTuner_CATLASS README](../../../../tools/tuner/README.md)                                                                                                       |
+| msTuner_CATLASS                     | Tiling参数自动寻优     | [msTuner_CATLASS](../../../../tools/tuner/README.md)                                                                                                       |
 | MindStudio Insight                  | 性能数据可视化分析     | [MindStudio Insight用户指南](https://www.hiascend.com/document/redirect/MindStudioinsight) |

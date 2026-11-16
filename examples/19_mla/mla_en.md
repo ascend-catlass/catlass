@@ -5,7 +5,7 @@ CATLASS MLA is a Flash-MLA operator optimized for Ascend Atlas A2 hardware, impl
 - Tiling parameter calculation
 - Kernel implementations, featuring two variants: the generic [mla_kernel.cpp](./mla_kernel.cpp) and the specialized [mla_kernel_tp1_spec.cpp](./mla_kernel_tp1_spec.cpp)
 - Block-level components within the Kernel that are optimized for Flash-MLA execution
-- Tile-level components provided by the template library that underpin the Block-level components.
+- Tile-level components provided by CATLASS that underpin the Block-level components.
 
 ## Tiling
 

@@ -1,10 +1,16 @@
-# 模板库快速上手
+# CATLASS快速上手
 
-在学习各类模板库开发知识之前，先参考下面步骤完成基础环境搭建和源码下载，确保已安装NPU驱动和CANN软件（`Ascend-cann-toolkit`和`Ascend-cann-ops`）等，并尝试进行最基础的模板库示例编译和运行。
+在学习各类CATLASS开发知识之前，先参考下面步骤完成基础环境搭建和源码下载，确保已安装NPU驱动和CANN软件（`Ascend-cann-toolkit`和`Ascend-cann-ops`）等，并尝试进行最基础的CATLASS示例编译和运行。
 
 ## 安装CANN
 
+### 方式1：手动安装
+
 请参考[CANN快速安装](https://www.hiascend.com/cann/download)，选择稳定版本（仅支持CANN 8.5.0及后续版本），并根据产品系列、CPU架构、操作系统等下载对应包，最后参考页面提供的命令完成安装。
+
+### 方式2：使用Docker
+
+若需要
 
 ## 安装Python相关依赖
 
@@ -39,6 +45,8 @@ pip install torch-npu==2.9.0.post8 --extra-index-url https://ascend.devcloud.hua
 - **检查CANN版本**
 
     ```bash
+    arch=$(uname -m)
+
     # 查看CANN toolkit包版本信息（默认路径安装）
     cat /usr/local/Ascend/cann/${arch}-linux/ascend_toolkit_install.info
 
@@ -97,7 +105,7 @@ pip install -r requirements.txt
 
 ## 编译执行
 
-> 模板库提供了一套可复用的模板、基础组件，用于矩阵乘法算子开发，算子样例可见[样例目录](../../../examples)。
+> CATLASS提供了一套可复用的模板、基础组件，用于矩阵乘法算子开发，算子样例可见[样例目录](../../../examples)。
 
 - 样例名称里带`ascend950`字样的仅支持Ascend 950PR&950DT系列产品。
 - 其他样例仅支持Atlas A2系列产品、Atlas A3系列产品，代码中架构标签`ArchTag`统一使用`Arch::AtlasA2`。
@@ -124,7 +132,7 @@ bash scripts/build.sh [options] <target>
   - `torch_library`：编译torch扩展，详见[Python调用CATLASS样例](../../../examples/python_extension/README.md)。
   - `mstuner_catlass`：编译msTuner_CATLASS工具，详见[`mstuner_catlass`使用说明](../../../tools/tuner/README.md)。
 
-以[00_basic_matmul](../../../examples/00_basic_matmul/README.md)样例编译过程为例，执行下述指令（若为其他支持Ascend 950PR&950DT系列产品的样例，需要添加`-DCATLASS_ARCH=3510`。）：
+以[00_basic_matmul](../../../examples/00_basic_matmul/README.md)样例编译过程为例，执行下述指令（若为其他支持Ascend 950PR&950DT系列产品的样例，需要添加`-DCATLASS_ARCH=3510`）：
 
 ```bash
 # 编译算子组件
@@ -145,7 +153,7 @@ bash scripts/build.sh 00_basic_matmul
 
 其余失败为CMake配置或编译器报错，回显中包含出错文件与行号，可据此定位头文件缺失、架构标签不匹配等问题。
 
-若编译期报找不到 C++ 标准头文件（如 `fatal error: 'cstdint' file not found`），或链接期报找不到标准库（如 `unable to find library -lstdc++`），通常由系统 C++ 头文件/库搜索路径未注入CANN编译器导致，处理方式见[常见问题（FAQ）](../FAQ.md)。
+若编译期报找不到C++标准头文件（如 `fatal error: 'cstdint' file not found`），或链接期报找不到标准库（如 `unable to find library -lstdc++`），通常由系统C++头文件/库搜索路径未注入CANN编译器导致，处理方式见[常见问题（FAQ）](../FAQ.md)。
 
 ### 执行算子
 
@@ -159,10 +167,10 @@ cd output/bin
 ./00_basic_matmul 256 512 1024 0
 ```
 
-- `256`，`512`，`1024`分别为矩阵乘法在m轴、n轴、k轴的维度（左/右矩阵数据随机生成）。
+- `256`、`512`、`1024`分别为矩阵乘法在m轴、n轴、k轴的维度（左/右矩阵数据随机生成）。
 - `deviceId`可选（默认为0），指定NPU卡的ID号。
 
-执行该算子样例后，如出现下述结果则表明其计算符合精度预期（该样例中Matmul的左、右矩阵使用随机数填充，真值以CPU计算为准。）
+执行该算子样例后，如出现下述结果则表明其计算符合精度预期（该样例中Matmul的左、右矩阵使用随机数填充，真值以CPU计算为准）。
 
 ```text
 Compare success.

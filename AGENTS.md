@@ -2,7 +2,7 @@
 
 > **CA**NN **T**emplates for **L**inear **A**lgebra **S**ubroutine**s**
 
-昇腾算子模板库，提供高性能矩阵乘类算子基础模板与示例。
+CATLASS，提供高性能矩阵乘类算子基础模板与示例。
 
 ## Available Skills
 

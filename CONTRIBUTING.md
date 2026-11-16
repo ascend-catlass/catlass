@@ -33,7 +33,7 @@ pre-commit run               # 仅检查已暂存文件
 
 - 贡献新算子样例
 
-  在使用模板库的过程中，如果对某算子的参考实现有泛化性增强/性能优化思路，或实现了某类新算子并希望将其贡献为参考样例，欢迎进行样例算子贡献。
+  在使用CATLASS的过程中，如果对某算子的参考实现有泛化性增强/性能优化思路，或实现了某类新算子并希望将其贡献为参考样例，欢迎进行样例算子贡献。
 
   可以按照[提交Issue/处理Issue任务](https://gitcode.com/cann/community#提交Issue处理Issue任务)指引新建 `Requirement|需求建议` 类Issue对新的样例算子予以说明，并提供设计方案，
   然后在评论框中输入“/assign”或“/assign @yourself”，认领该Issue进行处理。
@@ -51,9 +51,9 @@ pre-commit run               # 仅检查已暂存文件
 
   其中`README.md`是对该算子的简要说明，应包含“代码组织”、“使用示例”两方面内容（可参考Matmul的[README文档](https://gitcode.com/cann/catlass/blob/master/examples/00_basic_matmul/README.md)），以便开发者理解。
 
-- 贡献模板库代码
+- 贡献CATLASS代码
 
-  如果对模板库代码某一部分有新的特性实现，欢迎在Issue中提出新的想法与设计。
+  如果对CATLASS代码某一部分有新的特性实现，欢迎在Issue中提出新的想法与设计。
 
   可以按照[提交Issue/处理Issue任务](https://gitcode.com/cann/community#提交Issue处理Issue任务)指引新建 `Requirement|需求建议` 类Issue对新的特性设计予以说明，项目成员会进行沟通确认，并在`include/catlass/`下提供合适的位置以贡献特性代码。
 

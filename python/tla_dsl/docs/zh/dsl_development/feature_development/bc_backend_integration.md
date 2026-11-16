@@ -31,7 +31,7 @@ kernel.o
 
 ### C++ 版本已实现这些搬运特化
 
-CATLASS C++ 模板库（仓库根目录 `include/catlass`）本就是为高性能 matmul 类算子打造的，数据搬运是其核心能力之一。以 GM->L1 为例，[copy_gm_to_l1.hpp](../../../../../../include/catlass/gemm/tile/ascend950/copy_gm_to_l1.hpp) 里的 `TileCopyTla` 是一个按 `(Arch, 源 Tensor, 目标 Tensor)` 多维偏特化的模板：
+CATLASS C++ 库（仓库根目录 `include/catlass`）本就是为高性能 matmul 类算子打造的，数据搬运是其核心能力之一。以 GM->L1 为例，[copy_gm_to_l1.hpp](../../../../../../include/catlass/gemm/tile/ascend950/copy_gm_to_l1.hpp) 里的 `TileCopyTla` 是一个按 `(Arch, 源 Tensor, 目标 Tensor)` 多维偏特化的模板：
 
 ```cpp
 // 偏特化 #1：RowMajor 输入 -> zN 输出，走 Nd2Nz
@@ -78,7 +78,7 @@ CATLASS Python 的选择是 **不重新实现，而是复用**。复用的机制
 
 MLIR 侧只需为每种 `(路由, layout, 元素类型)` 起一个确定的 stub 名（如 `copy_gm_RowMajor_to_l1_zN_float`），并按固定布局拼好 payload；至于这个 stub 内部走 Nd2Nz 还是 Fixpipe、C0 stride 怎么算，全交给 C++ 模板。stub 被声明为 `always_inline`，链接后会被内联进调用点--**最终 `kernel.o` 里和"纯 MLIR lowering"产出的 DMA intrinsic 没有本质区别**，但开发成本和正确性保障好得多。
 
-这就是 bc 接入整个后端的根本动机：**用最小的 MLIR 侧契约，复用 C++ 模板库全部的搬运特化能力。** 后文以 `tla.copy` 为线索，把这条链路逐步拆开。
+这就是 bc 接入整个后端的根本动机：**用最小的 MLIR 侧契约，复用 C++ 库全部的搬运特化能力。** 后文以 `tla.copy` 为线索，把这条链路逐步拆开。
 
 ---
 

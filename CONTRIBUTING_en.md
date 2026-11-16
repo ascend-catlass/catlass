@@ -33,7 +33,7 @@ Developer contribution scenarios include:
 
 - Contributing New Operator Examples
 
-  If you have ideas for generalization enhancement/performance optimization for the reference implementation of a certain operator during the use of the template library, or have implemented a certain type of new operator and want to contribute it as a reference example, you are welcome to contribute example operators.
+  If you have ideas for generalization enhancement/performance optimization for the reference implementation of a certain operator during the use of CATLASS, or have implemented a certain type of new operator and want to contribute it as a reference example, you are welcome to contribute example operators.
 
   You can create a `Requirement/Suggestion Issue` to describe the new sample operator and provide your design solution by following the instructions in [Submitting an Issue/Handling an Issue Task](https://gitcode.com/cann/community#Submitting-an-Issue/Handling-an-Issue-Task).
   Enter /assign or /assign @yourself in the comment box to assign the issue to you for processing.
@@ -51,9 +51,9 @@ Developer contribution scenarios include:
 
   The `README.md` file provides a brief description of the operator, including code organization and usage examples (for details, see the [README file](https://gitcode.com/cann/catlass/blob/master/examples/00_basic_matmul/README.md) of Matmul).
 
-- Contributing Template Library Code
+- Contributing CATLASS Code
 
-  If you have new feature implementations for a certain part of the template library code, you are welcome to propose new ideas and designs in an Issue.
+  If you have new feature implementations for a certain part of CATLASS code, you are welcome to propose new ideas and designs in an Issue.
 
   You can create a `Requirement|Suggestion` Issue to describe the new feature design by following the instructions in [Submitting an Issue/Handling an Issue Task](https://gitcode.com/cann/community#Submitting-an-Issue/Handling-an-Issue-Task). Project members will communicate with you to confirm the design and provide a suitable location under `include/catlass/` for you to contribute your feature code.
 

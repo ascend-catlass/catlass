@@ -6,7 +6,7 @@
 
 ### 开发流程
 
-- `01`[快速开始](./1_Practice/01_quick_start.md)：介绍模板库的环境准备，以及算子样例的编译和执行
+- `01`[快速开始](./1_Practice/01_quick_start.md)：介绍CATLASS的环境准备，以及算子样例的编译和执行
 - `02`[Host 侧 Matmul 组装](./1_Practice/02_host_example_assembly.md)：讲解如何在 Host 侧组装 Matmul
 - `03`[Kernel 开发](./1_Practice/03_kernel_development.md)：拆解 Kernel 代码，介绍模板组装机制、Arguments、Params 和关键函数
 - `04`[Block Mmad 开发](./1_Practice/04_block_mmad_development.md)：拆解 Block Mmad 代码，介绍模板组装机制和主要接口
@@ -113,6 +113,6 @@
 
 #### CATLASS 专题课程
 
-- [【码力全开特辑】一站式掌握CATLASS模板库基本概念](https://www.bilibili.com/video/BV1f1BDBMES2)：CATLASS 学习系列课程第一讲，介绍 CATLASS 整体情况、算子快速上手、发展全景和生态共建
+- [【码力全开特辑】一站式掌握CATLASS基本概念](https://www.bilibili.com/video/BV1f1BDBMES2)：CATLASS 学习系列课程第一讲，介绍 CATLASS 整体情况、算子快速上手、发展全景和生态共建
 - [【码力全开特辑】CATLASS算子开发初体验](https://www.bilibili.com/video/BV1DmBhBNEu8)：CATLASS 学习系列课程第二讲，以基础 Matmul 算子为例介绍基于 NPU 的矩阵乘理论建模和代码实现
-- [【码力全开特辑】CATLASS模板库深度优化](https://www.bilibili.com/video/BV1FGi9BrEGH): CATLASS 学习系列课程第三讲，介绍使用 CATLASS 开发算子时的优化技巧
+- [【码力全开特辑】CATLASS深度优化](https://www.bilibili.com/video/BV1FGi9BrEGH): CATLASS 学习系列课程第三讲，介绍使用 CATLASS 开发算子时的优化技巧

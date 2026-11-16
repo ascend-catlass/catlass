@@ -16,7 +16,7 @@ When the A/B matrix is of the int8 type and the scale is bf16, the output result
 
 ## Example
 
-- After obtaining the code, build the operator executable file. For details, see [Template Library Quick Start](../../docs/en/1_Practice/01_quick_start.md#build-and-execution).
+- After obtaining the code, build the operator executable file. For details, see [CATLASS Quick Start](../../docs/en/1_Practice/01_quick_start.md#build-and-execution).
 - Execute the operator.
 
 ```bash

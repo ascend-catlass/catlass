@@ -10,7 +10,7 @@ All measured data and criteria in this document are collected in the following e
 
 | Item | Configuration |
 | --- | --- |
-| Processor | Ascend 910B3 (20 AI Cores, 1800 MHz) |
+| Processor | Ascend 910B3 (20 AI Cores, 1.8 GHz) |
 | CANN toolkit | 9.2.0-beta.2 |
 | Profile data collection | `msprof op` |
 
@@ -20,9 +20,9 @@ CATLASS sample projects adapt to the mainstream performance tuning tools provide
 
 ### msProf — Single-Operator Profiling
 
-[msProf](https://www.hiascend.com/en/document/redirect/CannCommunitymsOpProf) is a single-operator profiling tool. Its command is `msprof op`. It supports both on-board and simulation execution modes. For details, see [msProf & Profiling](./performance_tools.md#single-operator-profiling-using-msprof).
+[msProf](https://www.hiascend.com/en/document/redirect/CannCommunitymsOpProf) is a single-operator profiling tool. Its command is `msprof op`. It supports both on-board and simulation execution modes. For details, see [msProf Single-Operator Profiling](./performance_tools.md#single-operator-profiling-using-msprof).
 
-**On-board Profiling**
+#### On-board Profiling
 
 Run the operator directly on the NPU to collect actual profile data. This is the first step in performance tuning.
 
@@ -30,9 +30,12 @@ Run the operator directly on the NPU to collect actual profile data. This is the
 # Build the example from the repository root; the executable is installed to output/bin/00_basic_matmul
 bash scripts/build.sh 00_basic_matmul
 
-# Executable file name | Matrix M-axis | N-axis | K-axis | Device ID (optional, defaults to 0)
+# Change to the directory of the executable and run
+cd output/bin
 msprof op --application="./00_basic_matmul 256 512 1024 0"
 ```
+
+Here `./00_basic_matmul` is the executable file name, `256`, `512`, and `1024` are the M-, N-, and K-axis dimensions respectively, and the trailing `0` is the Device ID (optional, defaults to 0).
 
 Common options:
 
@@ -58,7 +61,7 @@ Key profile data files generated after collection:
 | `OpBasicInfo.csv` | Basic operator information (such as Block Dim)| Analyze multi-core utilization, operator execution duration, and frequency|
 | `ResourceConflictRatio.csv` | Proportion of UB Bank Group/Bank conflicts| Evaluate UB access conflict severity|
 
-**Profiling Pipeline Simulation**
+#### Profiling Pipeline Simulation
 
 After on-board profiling shows pipeline bottlenecks, use simulation to further locate issues at the instruction level.
 
@@ -72,7 +75,6 @@ export LD_PRELOAD=/usr/local/Ascend/ascend-toolkit/latest/tools/simulator/Ascend
 
 # Change to the directory of the executable and run
 cd output/bin
-# Executable file name | Matrix M-axis | N-axis | K-axis | Device ID (optional, defaults to 0)
 msprof op simulator ./00_basic_matmul 256 512 1024 0
 ```
 
@@ -97,7 +99,7 @@ Notes:
 - If a large number of `Vector` operations in the simulation results are mapped to `Scalar` operations, causing abnormal performance (`vector_ratio < 10%`), this is caused by the compilation optimization level. You can add the following code at the beginning of `examples/CMakeLists.txt` to raise the optimization level:
 
     ```cmake
-    add_compile_options($<$<COMPILE_LANGUAGE:ASC>:"-Xaicore-start -O3 -Xaicore-end">)
+    add_compile_options("SHELL:$<$<COMPILE_LANGUAGE:ASC>:-Xaicore-start -O3 -Xaicore-end>")
     ```
 
 - Simulation can only run on card 0; the NPU ID cannot be specified.
@@ -112,7 +114,6 @@ bash scripts/build.sh 00_basic_matmul
 
 # Change to the directory of the executable and run
 cd output/bin
-# Executable file name | Matrix M-axis | N-axis | K-axis | Device ID (optional, defaults to 0)
 msprof ./00_basic_matmul 256 512 1024 0
 ```
 
@@ -120,7 +121,7 @@ For details, see [Whole-Network Profiling](./performance_tools.md#whole-network-
 
 ### msTuner_CATLASS — Tiling Auto-Tuning
 
-[msTuner_CATLASS](../../../../tools/tuner/README.md) is a tiling parameter auto-tuning tool for CATLASS template library operators. It supports custom search spaces (L0/L1 TileShape, data type, memory layout, Swizzle strategy, etc.; Swizzle determines the order in which AI Cores process basic blocks, see [Swizzle Design](../../2_Design/01_kernel_design/02_swizzle.md)). It can instantiate all operators in the search space and run on-board performance tests in batches, outputting the top N configurations with optimal performance.
+[msTuner_CATLASS](../../../../tools/tuner/README.md) is a tiling parameter auto-tuning tool for CATLASS operators. It supports custom search spaces (L0/L1 TileShape, data type, memory layout, Swizzle strategy, etc.; Swizzle determines the order in which AI Cores process basic blocks, see [Swizzle Design](../../2_Design/01_kernel_design/02_swizzle.md)). It can instantiate all operators in the search space and run on-board performance tests in batches, outputting the top N configurations with optimal performance.
 
 ```bash
 # Build from the repository root; -DCATLASS_LIBRARY_KERNELS filters the operators to tune
@@ -141,7 +142,7 @@ Common options:
 | `--device` | 0       | ID of the device to run on                                     |
 | `--output` | none    | Path of the profile data file; no file is written if omitted   |
 
-All these options are optional and fall back to their defaults when omitted. For filter options such as `--kernels` and `--A/--B/--C`, see the [msTuner_CATLASS documentation](../../../../tools/tuner/README.md).
+All these options are optional and fall back to their defaults when omitted. For filter options such as `--kernels` and `--A/--B/--C`, see the [msTuner_CATLASS](../../../../tools/tuner/README.md).
 
 The output echoes the `case_id`, `task_duration(us)`, `device_id`, `operation`, `description`, `l0_tile_shape`, `l1_tile_shape`, `swizzle`, `m`, `n`, `k`, `A`, `B`, and `C` fields for each case, and ends with a summary of the top 10 optimal configurations sorted by `task_duration(us)`; the summary columns are `case_id`, `task_duration(us)`, `device_id`, `operation`, `description`, `m`, `n`, `k`, `A`, `B`, `C`. The search space configuration supports both entry-level and advanced modes. For details, see [msTuner](../../../../tools/tuner/README.md). It is recommended that the search space be limited to 5000 to avoid excessive build time.
 
@@ -160,7 +161,7 @@ Before analyzing profile data, calculate the theoretical performance values as a
 
 ### Theoretical Execution Time of Movement Pipelines
 
-The theoretical execution time of movement-related pipelines (MTE1/MTE2/MTE3) is calculated as "amount of data moved (bytes) divided by theoretical bandwidth". For Atlas A2 training series products, the on-chip memory peak bandwidth is 1600 GB/s, as described in [Atlas 800T A2 Training Server User Guide - Technical Specifications](https://support.huawei.com/enterprise/zh/doc/EDOC1100317202/f3dba488). The theoretical movement time for a `float16` matrix of size 4096*4096 is:
+The theoretical execution time of movement-related pipelines (MTE1/MTE2/MTE3) is calculated as "amount of data moved (bytes) divided by theoretical bandwidth". For Atlas A2 training series products, the on-chip memory peak bandwidth is 1.6 TB/s, as described in [Atlas 800T A2 Training Server User Guide - Technical Specifications](https://support.huawei.com/enterprise/zh/doc/EDOC1100317202/f3dba488). The theoretical movement time for a `float16` matrix of size 4096*4096 is:
 
 ```bash
 2*4096*4096 / 1.6TB/s ≈ 20.97 μs
@@ -174,10 +175,10 @@ Note the following three points:
 
 ### Theoretical Execution Time of Computation Pipelines
 
-The theoretical execution time of computation-related pipelines (Cube/Vector/Scalar) is calculated as "amount of computation (elements) divided by theoretical compute". Using the Vector theoretical peak compute of 11.06 TFLOPS for `float16` as an example, the theoretical execution time for a single instruction operating on 32768 `float16` elements is:
+The theoretical execution time of computation-related pipelines (Vector/Scalar) is calculated as "amount of computation (elements) divided by theoretical compute"; the Cube pipeline is calculated as "FLOPs (2*m*n*k) divided by theoretical compute". Using the Vector theoretical peak compute of 11.06 TFLOPS for `float16` as an example, the theoretical execution time for a single instruction operating on 32768 `float16` elements is:
 
 ```bash
-32768 / 11.06TFLOPS ≈ 0.003 μs
+32768 / 11.06TFLOPS ≈ 3 ns
 ```
 
 Note: the value 11.06 TFLOPS is derived from the bytes processed per cycle by the Vector Unit, the number of Vector cores, and the core frequency. These parameters differ between models, so replace them with the actual specification values of the target model; the core count can be queried through the `GetCoreNumAiv` interface of `platform_ascendc`.
@@ -220,7 +221,7 @@ The analysis steps are as follows:
 | High Cube/Vector execution time| Compute bound | Computation pipeline|
 | Neither close to theoretical value| Insufficient pipeline overlap| Further analysis using simulation trace|
 
-Example: A matmul operator with shape (2048, 12288)*(12288, 6144) and bfloat16 type. Based on the 1600 GB/s bandwidth of Atlas A2 training series products, the theoretical movement time is approximately 125.8 μs. In this scenario, the total input size exceeds the L1 capacity (512 KB on Atlas A2 series products, see [NPU Architecture Version 2201](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/920beta2/programug/Ascendcopdevg/docs/zh/guide/programming_guide/advanced_programming/hardware_implementation/architecture_spec/npu_arch_2201.md)), and matrices A and B cannot be reused between basic blocks. The measured `aic_mte2_time` is approximately 1215 μs and the Task Duration is approximately 1276 μs, giving a movement time ratio of approximately 9.7, with an `aic_mte2_ratio` of approximately 0.96. This is judged as redundant data movement according to the criteria above. Further analysis should combine tiling optimization and simulation traces.
+Example: A matmul operator with shape (2048, 12288)*(12288, 6144) and bfloat16 type. Based on the 1.6 TB/s bandwidth of Atlas A2 training series products, the theoretical movement time is approximately 125.8 μs. In this scenario, the total input size exceeds the L1 capacity (512 KB on Atlas A2 series products, see [NPU Architecture Version 2201](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/920beta2/programug/Ascendcopdevg/docs/zh/guide/programming_guide/advanced_programming/hardware_implementation/architecture_spec/npu_arch_2201.md)), and matrices A and B cannot be reused between basic blocks. The measured `aic_mte2_time` is approximately 1215 μs and the Task Duration is approximately 1276 μs, giving a movement time ratio of approximately 9.7, with an `aic_mte2_ratio` of approximately 0.96. This is judged as redundant data movement according to the criteria above. Further analysis should combine tiling optimization and simulation traces.
 
 ### On-board Profiling: Tiling Analysis
 
@@ -312,8 +313,8 @@ Main methods:
 
 | Tool| Purpose| CATLASS Documentation|
 | --- | --- | --- |
-| msProf (`msprof op`)| Single-operator on-board profiling| [msProf & Profiling](./performance_tools.md#single-operator-profiling-using-msprof)|
+| msProf (`msprof op`)| Single-operator on-board profiling| [msProf Single-Operator Profiling](./performance_tools.md#single-operator-profiling-using-msprof)|
 | msProf simulation (`msprof op simulator`)| Single-operator simulation trace collection| [Profiling Pipeline Simulation](./performance_tools.md#profile-pipeline-simulation)|
 | Profiling (`msProf`)| Network-wide profile data collection and analysis| [Whole-Network Profiling](./performance_tools.md#whole-network-profiling)|
-| msTuner_CATLASS | Tiling parameter auto-tuning| [msTuner_CATLASS README](../../../../tools/tuner/README.md) |
+| msTuner_CATLASS | Tiling parameter auto-tuning| [msTuner_CATLASS](../../../../tools/tuner/README.md) |
 | MindStudio Insight | Profile data visualization and analysis| [MindStudio Insight User Guide](https://www.hiascend.com/document/detail/en/mindstudio/latest/visualization_tool/MindStudioInsight/docs/en/user_guide/overview.md)|

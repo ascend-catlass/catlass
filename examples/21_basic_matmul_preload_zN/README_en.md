@@ -31,7 +31,7 @@ These parameters describe the current example configuration. Recompile and updat
 
 ## Example
 
-- Compile the operator executable after obtaining the source. For details, see [Template Library Quick Start](../../docs/en/1_Practice/01_quick_start.md#build-and-execution).
+- Compile the operator executable after obtaining the source. For details, see [CATLASS Quick Start](../../docs/en/1_Practice/01_quick_start.md#build-and-execution).
 - Execute the operator:
 
 ```bash

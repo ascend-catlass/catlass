@@ -25,7 +25,7 @@ The CATLASS [44_quant_matmul_full_loadA_tla example](./README.md) operator is an
 
 ## Solution Design
 
-- As shown in the following figure, the key parameter `L1TileShape<M, N, K>` exists in the template library matrix. Matrix C is used to divide basic blocks and cores according to the `L1TileShape::M` and `L1TileShape::N` parameters. Then, the common Matmul template loads the matrix blocks of size `L1TileShape::M * L1TileShape::K` in matrix A to L1, while the full-load template of matrix A directly loads a matrix block of size `L1TileShape::M * K` into L1. For matrix B, both the common template and the full-load template of matrix A load a matrix block of size `L1TileShape::K * L1TileShape::N` into L1.
+- As shown in the following figure, the key parameter `L1TileShape<M, N, K>` exists in CATLASS matrix. Matrix C is used to divide basic blocks and cores according to the `L1TileShape::M` and `L1TileShape::N` parameters. Then, the common Matmul template loads the matrix blocks of size `L1TileShape::M * L1TileShape::K` in matrix A to L1, while the full-load template of matrix A directly loads a matrix block of size `L1TileShape::M * K` into L1. For matrix B, both the common template and the full-load template of matrix A load a matrix block of size `L1TileShape::K * L1TileShape::N` into L1.
 
 ![Full-load matrix A](https://raw.gitcode.com/user-images/assets/7631999/38ccafec-7fd8-4b9f-a4bb-dd57085ffb63/53e318e0feb94c578d888e67365e4c97.png_tplv-a9rns2rl98-image-qvalue.png "53e318e0feb94c578d888e67365e4c97.png~tplv-a9rns2rl98-image-qvalue.png")
 

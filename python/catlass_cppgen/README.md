@@ -68,7 +68,7 @@
 | **基础矩阵乘法** | `BasicMatmulKernel` | • 输入张量 A 和 B 为 2 维<br>• `alpha = 1.0` 且 `beta = 0.0`<br>• 支持可选的 Bias 参数 | 无 |
 | **批处理矩阵乘法** | `BatchedMatmulKernel` | • 输入张量 A 和 B 为 3 维（batchCount, M, K）和（batchCount, K, N）<br>• 所有批次共享相同的矩阵维度<br>• `alpha = 1.0` 且 `beta = 0.0` | 无 |
 | **Strided 批处理矩阵乘法** | `StridedBatchedMatmulKernel` | • layout 直接编码 batch stride<br>• `transA/transB` 支持将物理 batch 轴放到矩阵两维之间<br>• stride 和 leading dimension 由 M/N/K/batchCount 自动推导 | 无 |
-| **EVG Visitor 矩阵乘法** | `BasicMatmulTlaVisitorKernel` | • 支持CATLASS模板库后处理框架 EVG（Epilogue Visitor Graph） | 无 |
+| **EVG Visitor 矩阵乘法** | `BasicMatmulTlaVisitorKernel` | • 支持CATLASS后处理框架 EVG（Epilogue Visitor Graph） | 无 |
 | **多核 Split-K** | `MultiCoreSplitkMatmulKernel` | • 输入张量 A 和 B 为 2 维<br>•  优化动作：沿 K 方向多核切分<br>• 支持可选的 Bias 参数 | K |
 | **尾块多核 Split-K** | `TailMultiCoreSplitkMatmulKernel` | • 输入张量 A 和 B 为 2 维<br>•  多核切K的尾块优化变体<br>• 支持可选的 Bias 参数 | K |
 | **Stream-K** | `StreamkMatmulKernel` | • 输入张量 A 和 B 为 2 维<br>• 优化动作：Stream-K 调度策略<br>• 支持可选的 Bias 参数 | K |

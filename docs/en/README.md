@@ -6,7 +6,7 @@
 
 ### Development Workflow
 
-- `01`[Quick Start](./1_Practice/01_quick_start.md): Prepare the template library environment, then build and run operator examples
+- `01`[Quick Start](./1_Practice/01_quick_start.md): Prepare CATLASS environment, then build and run operator examples
 - `02`[Host-side Matmul Assembly](./1_Practice/02_host_example_assembly.md): Learn how to assemble Matmul on the host side
 - `03`[Kernel Development](./1_Practice/03_kernel_development.md): Explore Kernel code, including template assembly, Arguments, Params, and key functions
 - `04`[Block Mmad Development](./1_Practice/04_block_mmad_development.md): Explore Block Mmad code, template assembly, and major interfaces
@@ -113,6 +113,6 @@ Content covering concepts, troubleshooting, performance optimization, and best p
 
 #### CATLASS Courses
 
-- [Code Power Special: Mastering the Fundamentals of the CATLASS Template Library](https://www.bilibili.com/video/BV1f1BDBMES2): The first CATLASS course, introducing the project, operator quick start, development roadmap, and community collaboration
+- [Code Power Special: Mastering the Fundamentals of CATLASS](https://www.bilibili.com/video/BV1f1BDBMES2): The first CATLASS course, introducing the project, operator quick start, development roadmap, and community collaboration
 - [Code Power Special: Hands-on CATLASS Operator Development](https://www.bilibili.com/video/BV1DmBhBNEu8): The second CATLASS course, using a basic Matmul operator to explain NPU-based matrix multiplication theory and implementation
-- [Code Power Special: Deep Optimization with the CATLASS Template Library](https://www.bilibili.com/video/BV1FGi9BrEGH): The third CATLASS course, introducing optimization techniques for operator development with CATLASS
+- [Code Power Special: Deep Optimization with CATLASS](https://www.bilibili.com/video/BV1FGi9BrEGH): The third CATLASS course, introducing optimization techniques for operator development with CATLASS

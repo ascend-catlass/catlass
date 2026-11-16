@@ -241,14 +241,14 @@
     - `OptimizedMatmul operator`
 - Documentation
   - Added [detailed design document for the INT8 type dequantization GroupedMatmul operator](https://gitcode.com/cann/catlass/tree/v1.3.0/docs/contents/example_design/10_grouped_matmul_slice_m_per_token_dequant.md), introducing the design concept and code breakdown for groupMatmul + epilogue type operators.
-  - Added [matrix multiplication template summary document](https://gitcode.com/cann/catlass/tree/v1.3.0/docs/contents/advanced/matmul_template_summary.md),summarizing existing Matmul template designs in the template library.
+  - Added [matrix multiplication template summary document](https://gitcode.com/cann/catlass/tree/v1.3.0/docs/contents/advanced/matmul_template_summary.md),summarizing existing Matmul template designs in CATLASS.
   - Added [CommonMatmul description document](https://gitcode.com/cann/catlass/tree/v1.3.0/examples/102_dynamic_optimized_matmul/doc/CommonMatmul.md), introducing the basic templates in the generalized Matmul project.
 - Bug Fixes & Optimizations
   - Fixed memory issues introduced when copying masks during softmax in the [Flash Attention inference operator](https://gitcode.com/cann/catlass/tree/v1.3.0/examples/23_flash_attention_infer/README.md).
   - Fixed documentation errors.
     - [catlass_optimize_guidance.md](https://gitcode.com/cann/catlass/tree/v1.3.0/docs/contents/advanced/catlass_optimize_guidance.md)
     - [api.md](https://gitcode.com/cann/catlass/tree/v1.3.0/docs/contents/advanced/api.md)
-    - [Template Library Quick Start.md](https://gitcode.com/cann/catlass/tree/v1.3.0/docs/quickstart.md)
+    - [CATLASS Quick Start.md](https://gitcode.com/cann/catlass/tree/v1.3.0/docs/quickstart.md)
     - [tutorials.md](https://gitcode.com/cann/catlass/tree/v1.3.0/docs/tutorials.md)
   - [Matmul generalization project](https://gitcode.com/cann/catlass/tree/v1.3.0/examples/102_dynamic_optimized_matmul/README.md) updates:
     - Modified `TilingParams` reading method for better readability.
@@ -332,7 +332,7 @@
 
 ### CATLASS 1.0.0
 
-- Official open-source release of the [CATLASS](https://gitcode.com/cann/catlass/) template library
+- Official open-source release of the [CATLASS](https://gitcode.com/cann/catlass/)
 
 - Key Features
   - Provides hierarchical operator development capabilities including Kernel, Block, Tile, and Basic layers.

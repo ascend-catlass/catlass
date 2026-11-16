@@ -1,14 +1,14 @@
 # 创新样例开发流程指南
 
-该文档面向需要在CATLASS模板库中开发创新算子样例的开发者，以[样例44](../../../examples/44_quant_matmul_full_loadA_tla/README.md) `quant_matmul_full_loadA_tla`（量化矩阵乘A矩阵全载）为案例，说明从需求分析、方案设计到组件开发、测试合入的完整流程，帮助开发者快速掌握创新样例的开发方法。
+该文档面向需要在CATLASS中开发创新算子样例的开发者，以[样例44](../../../examples/44_quant_matmul_full_loadA_tla/README.md) `quant_matmul_full_loadA_tla`（量化矩阵乘A矩阵全载）为案例，说明从需求分析、方案设计到组件开发、测试合入的完整流程，帮助开发者快速掌握创新样例的开发方法。
 
 ## 什么是创新样例
 
-CATLASS模板库中的每个样例都是在已有样例基础上的创新和扩展，都带有各自的新特性。开发新样例的核心思路是：**最大化复用已有组件，仅在必要时进行创新开发**。当你的算子需求无法通过现有组件组合完全满足时——例如需要新的数据搬运策略、新的后处理计算逻辑、或新的多核调度方式——就需要在参考已有样例的基础上，开发新的Block层组件或Kernel逻辑。
+CATLASS中的每个样例都是在已有样例基础上的创新和扩展，都带有各自的新特性。开发新样例的核心思路是：**最大化复用已有组件，仅在必要时进行创新开发**。当你的算子需求无法通过现有组件组合完全满足时——例如需要新的数据搬运策略、新的后处理计算逻辑、或新的多核调度方式——就需要在参考已有样例的基础上，开发新的Block层组件或Kernel逻辑。
 
 算子样例可以在[examples](../../../examples/)目录下查询。
 
-以[样例44](../../../examples/44_quant_matmul_full_loadA_tla/README.md)为例，它并非从零开始构建，而是结合了两个已有样例的特性：量化矩阵乘的后处理逻辑（BlockEpilogue）复用了[样例42](../../../examples/42_quant_optimized_matmul_tla/README.md)（`42_quant_optimized_matmul_tla`）的per-token反量化方案，A矩阵全载策略（包括BlockMmad和BlockScheduler）参考了[样例25](../../../examples/25_matmul_full_loadA/README.md)（`25_matmul_full_loadA`）。其BlockMmad组件（`block_mmad_pingpong_full_loadA_tla.hpp`）是在已有全载组件（`block_mmad_pingpong_full_loadA.hpp`）基础上做的TLA（Tensor Layout Abstraction，张量布局抽象，详见[TLA Layout设计](../2_Design/02_tla/01_layout.md)）改写，BlockScheduler（`GemmIdentityBlockSwizzleL1FullLoad`）则直接复用了[样例25](../../../examples/25_matmul_full_loadA/README.md)的全载调度策略。[样例44](../../../examples/44_quant_matmul_full_loadA_tla/README.md)没有从零新增任何组件，所有模块均通过复用或TLA改写已有组件完成。
+以[样例44](../../../examples/44_quant_matmul_full_loadA_tla/README.md)为例，它并非从零开始构建，而是结合了两个已有样例的特性：量化矩阵乘的后处理逻辑（BlockEpilogue）复用了[样例42](../../../examples/42_quant_optimized_matmul_tla/README.md)(`42_quant_optimized_matmul_tla`)的per-token反量化方案，A矩阵全载策略（包括BlockMmad和BlockScheduler）参考了[样例25](../../../examples/25_matmul_full_loadA/README.md)(`25_matmul_full_loadA`)。其BlockMmad组件(`block_mmad_pingpong_full_loadA_tla.hpp`)是在已有全载组件(`block_mmad_pingpong_full_loadA.hpp`)基础上做的TLA（Tensor Layout Abstraction，张量布局抽象，详见[TLA Layout设计](../2_Design/02_tla/01_layout.md)）改写，BlockScheduler(`GemmIdentityBlockSwizzleL1FullLoad`)则直接复用了[样例25](../../../examples/25_matmul_full_loadA/README.md)的全载调度策略。[样例44](../../../examples/44_quant_matmul_full_loadA_tla/README.md)没有从零新增任何组件，所有模块均通过复用或TLA改写已有组件完成。
 
 ## 设计阶段
 
@@ -33,7 +33,7 @@ CATLASS模板库中的每个样例都是在已有样例基础上的创新和扩�
 
 根据需求分析和组件调研结果，设计算子的整体实现方案。样例44的方案设计体现了“最大化复用、最小化创新”的原则：
 
-**（1）模板参数选择**
+#### （1）模板参数选择
 
 确定算子的核心模板参数，包括TileShape、数据类型、Dispatch策略等。样例44的关键参数选择如下：
 
@@ -46,7 +46,7 @@ CATLASS模板库中的每个样例都是在已有样例基础上的创新和扩�
 | ElementD       | bfloat16_t      | 最终输出类型                      |
 | DispatchPolicy | `MmadFullLoadA` | 全载A矩阵的流水策略               |
 
-**（2）组件拆分与复用**
+#### （2）组件拆分与复用
 
 将算子拆分为组件模块，明确每个组件的复用/参考/新增关系：
 
@@ -57,11 +57,11 @@ CATLASS模板库中的每个样例都是在已有样例基础上的创新和扩�
 | BlockScheduler | 多核任务分配，全载场景下的连续分块                   | **直接复用** | 样例25 `25_matmul_full_loadA`                  |
 | Kernel         | 组装上述组件，实现AIC/AIV双核流水                    | **参考改写** | 样例42的TLA Kernel结构                         |
 
-**（3）流水设计**
+#### （3）流水设计
 
 设计数据搬运和计算的流水线。样例44的流水方案如下图所示：
 
-- 在计算开始阶段，通过MTE2将A矩阵的完整数据块（`L1TileShape::M*K`）一次性搬入L1
+- 在计算开始阶段，通过MTE2将A矩阵的完整数据块(`L1TileShape::M*K`)一次性搬入L1
 - 之后进入主循环，pingpong搬运B矩阵的K维分块到L1，同时执行L1→L0的数据搬运和Cube计算
 - A矩阵常驻L1，无需重复搬运，从而减少MTE2带宽压力
 
@@ -72,7 +72,7 @@ CATLASS模板库中的每个样例都是在已有样例基础上的创新和扩�
 在设计阶段就应规划好样例的文档结构。每个创新样例需要包含以下文档：
 
 - **README.md**：算子简要说明、使用方法和快速上手指南
-- **设计文档（`${id}_${op_name}.md`）**：详细说明原型设计、方案设计、组件实现和性能收益
+- **设计文档(`${id}_${op_name}.md`)**：详细说明原型设计、方案设计、组件实现和性能收益
 - **代码注释**：关键接口和复杂逻辑需添加清晰的注释
 
 ## 开发阶段
@@ -92,7 +92,7 @@ include/catlass/gemm/kernel/
 └── quant_matmul_full_loadA_tla.hpp         # Kernel实现
 
 include/catlass/gemm/block/
-├── block_mmad_pingpong_full_loadA_tla.hpp  # TLA改写BlockMmad（基于block_mmad_pingpong_full_loadA.hpp）
+├── block_mmad_pingpong_full_loadA_tla.hpp  # TLA改写BlockMmad(基于block_mmad_pingpong_full_loadA.hpp)
 └── block_swizzle.hpp                       # 复用自样例25的L1FullLoad Swizzle
 
 include/catlass/epilogue/block/
@@ -115,11 +115,11 @@ Ascend 950 样例则追加到 `EXAMPLE_ASCEND950`。目录内 `CMakeLists.txt` �
 
 Host侧代码负责设备初始化、内存分配、组件组装和Kernel调用，详细说明可参考[Host层样例组装](./02_host_example_assembly.md)。开发时主要关注以下几点：
 
-**（1）数据类型与Layout定义**
+#### （1）数据类型与Layout定义
 
 根据算子需求定义所有输入输出张量的数据类型和内存排布。样例44涉及5个张量：int8类型的A/B矩阵、float类型的scale和perTokenScale、bf16类型的输出D矩阵。
 
-**（2）组件模板实例化**
+#### （2）组件模板实例化
 
 按照“DispatchPolicy → BlockMmad → BlockEpilogue → BlockScheduler → Kernel → Adapter”的顺序逐层组装：
 
@@ -129,7 +129,7 @@ Host侧代码负责设备初始化、内存分配、组件组装和Kernel调用�
 4. 再根据M维度是否需要分核，选择合适的BlockScheduler（全载场景用`GemmIdentityBlockSwizzleL1FullLoad`，普通场景用`GemmIdentityBlockSwizzle`）
 5. 最后将BlockMmad、BlockEpilogue、BlockScheduler组装为Kernel，并通过DeviceGemm适配器完成调用
 
-**（3）分核策略选择**
+#### （3）分核策略选择
 
 样例44根据`problemShape.M`与`L1TileShape::M`的大小关系，在Host侧选择不同的BlockScheduler：
 
@@ -140,11 +140,11 @@ Host侧代码负责设备初始化、内存分配、组件组装和Kernel调用�
 
 Kernel层是算子的执行入口，负责调度器初始化、全局张量定义和核心循环控制，详细说明可参考[Kernel代码开发](./03_kernel_development.md)。创新样例的Kernel开发要点如下：
 
-**（1）参数结构设计**
+#### （1）参数结构设计
 
-定义`Arguments`（用户接口层）和`Params`（内核执行层）两层参数结构。样例44的Arguments包含problemShape（问题规模M/N/K）、aicCoreNum（参与计算的AIC核数，用于BlockScheduler划分任务）、输入张量组（A/B）和输出张量组（scale/perTokenScale/D）。
+定义`Arguments`（用户接口层）和`Params`（内核执行层）两层参数结构。样例44的Arguments包含problemShape（问题规模M/N/K）、aicCoreNum（参与计算的AIC核数，用于BlockScheduler划分任务）、输入张量组（A/B/scale/perTokenScale）和输出张量组（D）。
 
-**（2）AIC核实现**
+#### （2）AIC核实现
 
 AIC核负责矩阵乘法计算，核心流程为：
 
@@ -154,7 +154,7 @@ AIC核负责矩阵乘法计算，核心流程为：
 
 Workspace是Host侧根据`GetWorkspaceSize`申请、经`aclrtMalloc`分配的GM内存，用于在AIC与AIV之间传递中间结果。样例44配置`workspaceStages = 2`，即为每个AIC分配两个基本块大小的空间，使AIC写入与AIV读取可以双缓冲流水执行。
 
-**（3）AIV核实现**
+#### （3）AIV核实现
 
 AIV核负责Epilogue后处理，核心流程为：
 
@@ -163,7 +163,7 @@ AIV核负责Epilogue后处理，核心流程为：
 - 执行反量化计算（scale乘法 + perTokenScale乘法 + 类型转换）
 - 将最终结果写回GM
 
-**（4）AIC/AIV同步**
+#### （4）AIC/AIV同步
 
 通过CrossCoreFlag机制实现AIC和AIV核之间的流水同步：AIC核完成一个分块的计算后设置标志，AIV核等待该标志后开始后处理，处理完成后再设置标志通知AIC核复用该Workspace阶段。
 
@@ -173,7 +173,7 @@ Block层是创新样例开发的核心。以下结合样例44说明三类组件�
 
 **（1）BlockMmad — 矩阵乘计算组件**（详见 [BlockMmad代码开发](./04_block_mmad_development.md)）
 
-BlockMmad负责管理L1/L0缓存、执行数据搬运和Cube计算。样例44的`BlockMmadTla`（`block_mmad_pingpong_full_loadA_tla.hpp`）是在已有全载组件`block_mmad_pingpong_full_loadA.hpp`基础上做的TLA改写：
+BlockMmad负责管理L1/L0缓存、执行数据搬运和Cube计算。样例44的`BlockMmadTla`(`block_mmad_pingpong_full_loadA_tla.hpp`)是在已有全载组件`block_mmad_pingpong_full_loadA.hpp`基础上做的TLA改写：
 
 - L1缓存分配：A矩阵占用`L1TileShape::M*K`空间（全载），B矩阵占用`L1TileShape::N*L1TileShape::K*2`空间（双buffer pingpong）
 - 构造函数中完成L1/L0 buffer的分配和事件初始化
@@ -186,7 +186,7 @@ BlockMmad负责管理L1/L0缓存、执行数据搬运和Cube计算。样例44的
 BlockEpilogue负责对矩阵乘结果进行后处理。样例44的`BlockEpilogue`直接复用了样例42的per-token反量化方案：
 
 - UB缓存分配：为C矩阵、scale、perTokenScale、输出D矩阵各分配双buffer空间
-- 计算流程：从GM加载C和scale到UB→执行tileRowBroadcastMul（per-channel乘）→加载perTokenScale→执行tileOneBlkColumnBroadcastMul（per-token乘）→类型转换（int32→bf16）→写回GM
+- 计算流程：从GM加载C和scale到UB→执行TileRowBroadcastMul（per-channel乘）→加载perTokenScale→执行TileOneBlkColumnBroadcastMul（per-token乘）→类型转换(int32→bf16)→写回GM
 - 通过UB双buffer轮转实现计算与搬运的重叠
 
 **（3）BlockScheduler — 多核调度组件**（详见 [BlockScheduler代码开发](./05_block_scheduler_development.md)）
@@ -217,10 +217,10 @@ bash scripts/build.sh 44_quant_matmul_full_loadA_tla
 
 # 切换到可执行文件所在目录
 cd output/bin
-# 可执行文件名 | 矩阵m轴 | n轴 | k轴 | Device ID
-# Device ID 可选，默认为 0；k 轴受 L1 容量约束，不应超过 2048
 ./44_quant_matmul_full_loadA_tla 512 4096 1024 0
 ```
+
+其中`512`、`4096`、`1024`分别为矩阵m轴、n轴、k轴的维度，末尾`0`为Device ID（可选，默认0；k轴受L1容量约束，不应超过2048）。
 
 编译成功时回显`[INFO] Target '44_quant_matmul_full_loadA_tla' built successfully`；运行成功时输出`Compare success.`，表示精度比对通过。
 

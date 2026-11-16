@@ -22,7 +22,7 @@
 
 ## Build Security Statement
 
-- When compiling and running template library examples, some intermediate files will be generated. It is recommended to set appropriate permissions for these intermediate files after compilation to ensure file security.
+- When compiling and running CATLASS examples, some intermediate files will be generated. It is recommended to set appropriate permissions for these intermediate files after compilation to ensure file security.
 
 ## Runtime Security Statement
 
@@ -37,7 +37,7 @@
 
 ## Interface Security Statement
 
-- As an NPU operator template library, CATLASS's core responsibility is to provide high-performance and functionally correct operator template implementations (located in [include](./include)). To pursue optimal NPU performance, the library implementation includes (but is not limited to) the following design trade-offs:
+- CATLASS's core responsibility is to provide high-performance and functionally correct operator template implementations (located in [include](./include)). To pursue optimal NPU performance, the library implementation includes (but is not limited to) the following design trade-offs:
   - No address validation for buffer (e.g., UB/L1/L0) accesses
   - No validation of the representation range for large-to-small type conversions
   - No division-by-zero validation for division operations (e.g., Scalar `/` or Vector `Div`)

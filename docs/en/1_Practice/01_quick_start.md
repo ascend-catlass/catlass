@@ -1,6 +1,6 @@
-# Template Library Quick Start
+# CATLASS Quick Start
 
-Before learning about template library development, complete the basic environment setup and source code download by referring to the following steps. Ensure that the NPU driver and CANN software (`Ascend-cann-toolkit` and `Ascend-cann-ops`) are installed, and then try to build and run a basic template library sample.
+Before learning about CATLASS development, complete the basic environment setup and source code download by referring to the following steps. Ensure that the NPU driver and CANN software (`Ascend-cann-toolkit` and `Ascend-cann-ops`) are installed, and then try to build and run a basic CATLASS sample.
 
 ## Installing CANN
 
@@ -39,6 +39,8 @@ After installing the CANN package, verify that the environment and driver work p
 - **Check the CANN version**
 
     ```bash
+    arch=$(uname -m)
+
     # View the CANN toolkit package version (default installation path).
     cat /usr/local/Ascend/cann/${arch}-linux/ascend_toolkit_install.info
 
@@ -97,7 +99,7 @@ pip install -r requirements.txt
 
 ## Build and Execution
 
-> The template library provides a set of reusable templates and basic components for matrix multiplication operator development. Operator samples can be found [here](../../../examples).
+> CATLASS provides a set of reusable templates and basic components for matrix multiplication operator development. Operator samples can be found [here](../../../examples).
 
 - Samples whose names contain `ascend950` are supported only on Ascend 950PR&950DT series products.
 - Other samples are supported only on Atlas A2 series products and Atlas A3 series products, and the architecture tag `ArchTag` in the code is uniformly `Arch::AtlasA2`.

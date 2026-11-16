@@ -7,7 +7,7 @@ CATLASS FlashAttention Infer是基于CATLASS Gemm API实现的亲和昇腾Ascend
 - Tiling计算；
 - Kernel实现；
 - Kernel中依赖适合FlashAttention推理运算的Block和Epilogue组件；
-- 使用的Block和Epilogue组件依赖模板库提供的Tile组件。
+- 使用的Block和Epilogue组件依赖CATLASS提供的Tile组件。
 
 本文档详细描述 Flash Attention Infer算子的Kernel实现，包括主流程逻辑、Cube/Vector 流水线、L1/UB 内存分配等关键设计，以及Tiling切分策略描述。
 

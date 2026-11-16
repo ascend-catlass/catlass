@@ -31,7 +31,7 @@ kernel.o
 
 ### The C++ version already implements these move specializations
 
-The CATLASS C++ template library (repository root `include/catlass`) was built for high-performance matmul-like operators, and data movement is one of its core capabilities. Taking GM->L1 as an example, `TileCopyTla` in [copy_gm_to_l1.hpp](../../../../../../include/catlass/gemm/tile/ascend950/copy_gm_to_l1.hpp) is a template partially specialized over multiple dimensions `(Arch, source Tensor, destination Tensor)`:
+The CATLASS C++ library (repository root `include/catlass`) was built for high-performance matmul-like operators, and data movement is one of its core capabilities. Taking GM->L1 as an example, `TileCopyTla` in [copy_gm_to_l1.hpp](../../../../../../include/catlass/gemm/tile/ascend950/copy_gm_to_l1.hpp) is a template partially specialized over multiple dimensions `(Arch, source Tensor, destination Tensor)`:
 
 ```cpp
 // Partial specialization #1: RowMajor input -> zN output, via Nd2Nz
@@ -78,7 +78,7 @@ The choice of CATLASS Python is to **reuse rather than reimplement**. The reuse 
 
 On the MLIR side, it only needs to start a well-defined stub name for each `(route, layout, element type)` (such as `copy_gm_RowMajor_to_l1_zN_float`) and assemble the payload in a fixed layout; whether that stub internally uses Nd2Nz or Fixpipe and how the C0 stride is computed are all left to the C++ template. The stub is declared `always_inline` and is inlined into the call site after linking — **the final `kernel.o` is essentially no different from the DMA intrinsic produced by "pure MLIR lowering"**, but the development cost and correctness guarantees are far better.
 
-This is the fundamental motivation for calling bc to integrate the whole backend: **use the smallest MLIR-side contract to reuse the full move-specialization capability of the C++ template library.** The rest of this document uses `tla.copy` as the thread to unpack this chain step by step.
+This is the fundamental motivation for calling bc to integrate the whole backend: **use the smallest MLIR-side contract to reuse the full move-specialization capability of the C++ library.** The rest of this document uses `tla.copy` as the thread to unpack this chain step by step.
 
 ---
 

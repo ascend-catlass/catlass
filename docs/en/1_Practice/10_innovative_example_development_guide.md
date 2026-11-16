@@ -1,10 +1,10 @@
 # Innovative Example Development Process Guide
 
-This document is intended for developers who need to develop innovative operator examples in the CATLASS template library. Using [example 44](../../../examples/44_quant_matmul_full_loadA_tla/README.md) `quant_matmul_full_loadA_tla` (quantized matrix multiplication with the A matrix fully loaded) as a case study, it explains the complete process from requirements analysis and solution design to component development and test integration, helping developers quickly master how to develop innovative examples.
+This document is intended for developers who need to develop innovative operator examples in CATLASS. Using [example 44](../../../examples/44_quant_matmul_full_loadA_tla/README.md) `quant_matmul_full_loadA_tla` (quantized matrix multiplication with the A matrix fully loaded) as a case study, it explains the complete process from requirements analysis and solution design to component development and test integration, helping developers quickly master how to develop innovative examples.
 
 ## What Is an Innovative Example
 
-Every example in the CATLASS template library is an innovation and extension built on existing examples, each carrying its own new features. The core idea of developing a new example is: **maximize reuse of existing components and only innovate where necessary**. When your operator requirements cannot be fully satisfied by combining existing components — for example, when you need a new data transfer strategy, new post-processing computation logic, or a new multi-core scheduling approach — you need to develop new Block-level components or Kernel logic based on existing examples.
+Every example in CATLASS is an innovation and extension built on existing examples, each carrying its own new features. The core idea of developing a new example is: **maximize reuse of existing components and only innovate where necessary**. When your operator requirements cannot be fully satisfied by combining existing components — for example, when you need a new data transfer strategy, new post-processing computation logic, or a new multi-core scheduling approach — you need to develop new Block-level components or Kernel logic based on existing examples.
 
 Operator examples can be found in the [examples](../../../examples/) directory.
 
@@ -33,7 +33,7 @@ Before writing code, you first need to clarify the core requirements of the oper
 
 Based on the requirements analysis and component investigation, design the overall implementation solution of the operator. The solution design of example 44 reflects the principle of "maximize reuse, minimize innovation":
 
-**(1) Selection of template parameters**
+#### (1) Selection of template parameters
 
 Determine the core template parameters of the operator, including TileShape, data types, Dispatch policies, and so on. The key parameter choices of example 44 are as follows:
 
@@ -46,7 +46,7 @@ Determine the core template parameters of the operator, including TileShape, dat
 | ElementD       | bfloat16_t      | final output type                      |
 | DispatchPolicy | `MmadFullLoadA` | pipeline policy for fully loading the A matrix               |
 
-**(2) Component splitting and reuse**
+#### (2) Component splitting and reuse
 
 Split the operator into component modules and clarify the reuse/reference/new relationship of each component:
 
@@ -57,7 +57,7 @@ Split the operator into component modules and clarify the reuse/reference/new re
 | BlockScheduler | multi-core task allocation, contiguous blocking in the full-load scenario                   | **reused directly** | example 25 `25_matmul_full_loadA`                  |
 | Kernel         | assembles the above components, implements the AIC/AIV dual-core pipeline                    | **rewritten by reference** | the TLA Kernel structure of example 42                         |
 
-**(3) Pipeline design**
+#### (3) Pipeline design
 
 Design the pipeline of data transfer and computation. The pipeline scheme of example 44 is shown in the following figure:
 
@@ -115,11 +115,11 @@ For Ascend 950 examples, append to `EXAMPLE_ASCEND950` instead. For the local `C
 
 The Host-side code is responsible for device initialization, memory allocation, component assembly, and kernel invocation; for details, see [Host-layer Example Assembly](./02_host_example_assembly.md). During development, focus mainly on the following points:
 
-**(1) Definition of data types and layouts**
+#### (1) Definition of data types and layouts
 
 Define the data types and memory layouts of all input and output tensors according to the operator requirements. Example 44 involves 5 tensors: the int8 A/B matrices, the float scale and perTokenScale, and the bf16 output D matrix.
 
-**(2) Instantiation of component templates**
+#### (2) Instantiation of component templates
 
 Assemble layer by layer in the order "DispatchPolicy → BlockMmad → BlockEpilogue → BlockScheduler → Kernel → Adapter":
 
@@ -129,7 +129,7 @@ Assemble layer by layer in the order "DispatchPolicy → BlockMmad → BlockEpil
 4. Then select the appropriate BlockScheduler depending on whether the M dimension needs core splitting (use `GemmIdentityBlockSwizzleL1FullLoad` in the full-load scenario and `GemmIdentityBlockSwizzle` in the ordinary scenario)
 5. Finally assemble BlockMmad, BlockEpilogue, and BlockScheduler into a Kernel, and complete the invocation through the DeviceGemm adapter
 
-**(3) Selection of the core-splitting strategy**
+#### (3) Selection of the core-splitting strategy
 
 Depending on the relationship between `problemShape.M` and `L1TileShape::M`, example 44 selects a different BlockScheduler on the Host side:
 
@@ -140,11 +140,11 @@ Depending on the relationship between `problemShape.M` and `L1TileShape::M`, exa
 
 The Kernel layer is the execution entry of the operator, responsible for scheduler initialization, global tensor definition, and core loop control; for details, see [Kernel Code Development](./03_kernel_development.md). The key points of Kernel development for an innovative example are as follows:
 
-**(1) Parameter structure design**
+#### (1) Parameter structure design
 
-Define two levels of parameter structures, `Arguments` (user interface layer) and `Params` (kernel execution layer). The Arguments of example 44 contain problemShape (problem sizes M/N/K), aicCoreNum (the number of AIC cores participating in the computation, used by BlockScheduler to divide tasks), the input tensor group (A/B), and the output tensor group (scale/perTokenScale/D).
+Define two levels of parameter structures, `Arguments` (user interface layer) and `Params` (kernel execution layer). The Arguments of example 44 contain problemShape (problem sizes M/N/K), aicCoreNum (the number of AIC cores participating in the computation, used by BlockScheduler to divide tasks), the input tensor group (A/B/scale/perTokenScale), and the output tensor group (D).
 
-**(2) AIC core implementation**
+#### (2) AIC core implementation
 
 The AIC core is responsible for the matrix multiply computation, and its core flow is:
 
@@ -154,7 +154,7 @@ The AIC core is responsible for the matrix multiply computation, and its core fl
 
 The Workspace is GM memory requested by the host through `GetWorkspaceSize` and allocated with `aclrtMalloc`. It is used to pass intermediate results between the AIC and AIV cores. Example 44 sets `workspaceStages = 2`, which allocates two basic-block-sized buffers per AIC so that AIC writes and AIV reads can overlap in a double-buffered pipeline.
 
-**(3) AIV core implementation**
+#### (3) AIV core implementation
 
 The AIV core is responsible for Epilogue post-processing, and its core flow is:
 
@@ -163,7 +163,7 @@ The AIV core is responsible for Epilogue post-processing, and its core flow is:
 - Perform the dequantization computation (scale multiply + perTokenScale multiply + type conversion)
 - Write the final result back to GM
 
-**(4) AIC/AIV synchronization**
+#### (4) AIC/AIV synchronization
 
 The CrossCoreFlag mechanism implements pipeline synchronization between the AIC and AIV cores: after finishing the computation of a block, the AIC core sets a flag; the AIV core waits for that flag before starting post-processing, and after finishing sets a flag to notify the AIC core that the Workspace stage can be reused.
 
@@ -186,7 +186,7 @@ The core difference from an ordinary pingpong BlockMmad is that the A matrix is 
 BlockEpilogue is responsible for post-processing the matrix multiply result. The `BlockEpilogue` of example 44 directly reuses the per-token dequantization scheme of example 42:
 
 - UB cache allocation: allocate double-buffer space for each of the C matrix, scale, perTokenScale, and the output D matrix
-- Computation flow: load C and scale from GM into UB → execute tileRowBroadcastMul (per-channel multiply) → load perTokenScale → execute tileOneBlkColumnBroadcastMul (per-token multiply) → type conversion (int32→bf16) → write back to GM
+- Computation flow: load C and scale from GM into UB → execute TileRowBroadcastMul (per-channel multiply) → load perTokenScale → execute TileOneBlkColumnBroadcastMul (per-token multiply) → type conversion (int32→bf16) → write back to GM
 - Overlap computation and transfer through UB double-buffer rotation
 
 **(3) BlockScheduler — multi-core scheduling component** (see [BlockScheduler Code Development](./05_block_scheduler_development.md) for details)
@@ -217,10 +217,10 @@ bash scripts/build.sh 44_quant_matmul_full_loadA_tla
 
 # Change to the directory of the executable
 cd output/bin
-# Executable file name | Matrix M-axis | N-axis | K-axis | Device ID (optional, defaults to 0)
-# The K-axis is limited by L1 capacity and must not exceed 2048
 ./44_quant_matmul_full_loadA_tla 512 4096 1024 0
 ```
+
+Here `512`, `4096`, and `1024` are the M-, N-, and K-axis dimensions respectively, and the trailing `0` is the Device ID (optional, defaults to 0; the K-axis is limited by L1 capacity and must not exceed 2048).
 
 On a successful build the log shows `[INFO] Target '44_quant_matmul_full_loadA_tla' built successfully`; on success the program prints `Compare success.`, indicating that the precision check passed.
 

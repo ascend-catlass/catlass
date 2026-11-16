@@ -19,7 +19,7 @@
 
 ## Usage Example
 
-- After obtaining the code, compile the corresponding operator executable. See [Template Library Quick Start](../../docs/en/1_Practice/01_quick_start.md#build-and-execution). This case is an Ascend 950 (3510) operator, so add `-DCATLASS_ARCH=3510` during compilation. The L1 tile is 256*256*448, and L0 is 256*256*128, to meet the 512 KiB L1 and L0 capacity constraints. Do not increase the L1 K dimension arbitrarily; otherwise, `L1TileShape exceeding the L1 space` may occur.
+- After obtaining the code, compile the corresponding operator executable. See [CATLASS Quick Start](../../docs/en/1_Practice/01_quick_start.md#build-and-execution). This case is an Ascend 950 (3510) operator, so add `-DCATLASS_ARCH=3510` during compilation. The L1 tile is 256*256*448, and L0 is 256*256*128, to meet the 512 KiB L1 and L0 capacity constraints. Do not increase the L1 K dimension arbitrarily; otherwise, `L1TileShape exceeding the L1 space` may occur.
 - Run the operator.
 
 ```bash

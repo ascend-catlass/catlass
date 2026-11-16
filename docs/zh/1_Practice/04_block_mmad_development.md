@@ -2,7 +2,7 @@
 
 ## Block MMAD 概述
 
-Block MMAD（Block Matrix Multiply-Add）是CATLASS模板库中负责块级矩阵乘法的核心组件，位于计算架构的中间层。它上接Kernel层，下接Tile层，负责将全局内存（GM）中的数据高效地加载到本地内存（L1/L0），并调度Tile级别的矩阵乘法运算。
+Block MMAD（Block Matrix Multiply-Add）是CATLASS中负责块级矩阵乘法的核心组件，位于计算架构的中间层。它上接Kernel层，下接Tile层，负责将全局内存（GM）中的数据高效地加载到本地内存（L1/L0），并调度Tile级别的矩阵乘法运算。
 
 Block MMAD采用高度模块化和模板化的设计，支持多种调度策略、Tile形状和数据类型，能够灵活适应不同的硬件架构和计算需求，本文将以[BlockMmadPingpong](../../../include/catlass/gemm/block/block_mmad_pingpong.hpp)为例详细讲解（后文截取代码片段中，一些变量的构造方式可以查看源代码）。
 
@@ -322,7 +322,7 @@ CATLASS提供了多种Block MMAD实现，它们具有以下共性：
 
 ## 总结
 
-Block MMAD是CATLASS模板库中连接Kernel层和Tile层的关键组件，它通过以下设计实现了高效的块级矩阵乘法：
+Block MMAD是CATLASS中连接Kernel层和Tile层的关键组件，它通过以下设计实现了高效的块级矩阵乘法：
 
 1. **高度模块化**：通过模板参数组装不同的功能组件
 2. **多阶段流水线**：使用pingpong技术隐藏内存访问延迟

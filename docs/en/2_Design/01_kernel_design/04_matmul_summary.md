@@ -15,7 +15,7 @@ Note that this document only summarizes samples related to matrix multiplication
 | [21_basic_matmul_preload_zN](../../../../examples/21_basic_matmul_preload_zN/basic_matmul_preload_zN.cpp) | Common                                        | Pipeline optimization (Multi-Buffer/Preload), read bandwidth optimization (ShuffleK)                                         | `MmadAtlasA2Preload`           |
 | [22_padding_splitk_matmul](../../../../examples/22_padding_splitk_matmul/padding_splitk_matmul.cpp) | MultiCoreSplitK                               | Pipeline optimization (Multi-Buffer), read bandwidth optimization (Padding) - PaddingMatrixND                                 | `MmadAtlasA2Pingpong`          |
 | [25_matmul_full_loadA](../../../../examples/25_matmul_full_loadA/matmul_full_loadA.cpp) | Common                                        | Pipeline optimization (Multi-Buffer), read bandwidth optimization (L1 resident)                                               | `MmadAtlasA2FullLoadA`         |
-| [31_small_matmul](../../../../examples/31_small_matmul/small_matmul.cpp) | Common                                        | Pipeline optimization (Multi-Buffer), scalar overhead reduction                                                              | `MmadAtlasA2Small`             |
+| [31_small_matmul](../../../../examples/31_small_matmul/small_matmul.cpp) | Common                                        | Pipeline optimization (Multi-Buffer), Scalar overhead reduction                                                              | `MmadAtlasA2Small`             |
 | [34_single_core_splitk_matmul](../../../../examples/34_single_core_splitk_matmul/single_core_splitk.cpp) | SingleCoreSplitK                              | Pipeline optimization (Multi-Buffer), read bandwidth optimization (PaddingMatrixNZ), write bandwidth optimization            | `MmadAtlasA2SingleCoreSplitk`  |
 | [37_streamk_matmul](../../../../examples/37_streamk_matmul/streamk_matmul.cpp) | StreamK scheme of the tail-round multi-core split-K template | Pipeline optimization (Multi-Buffer), read bandwidth optimization (ShuffleK)                                                  | `MmadAtlasA2Streamk`           |
 
@@ -208,7 +208,7 @@ Core distribution is performed along the $M$ and $N$ directions. Tiling is done 
 - $m_0 = m_1$
 - $n_0 = n_1$
 
-Here $L1Stage_A$, $L1Stage_B$, $L0AStage$, $L0BStage$, and $L0CStage$ are the number of buffers for the A/B matrices in L1, L0A, L0B, and L0C, respectively: 1 for single buffering and 2 for double buffering. `2Byte` and `4Byte` are the element sizes of FP16 inputs and FP32 accumulation results, respectively.
+Here $L1Stage_A$, $L1Stage_B$, $L0AStage$, $L0BStage$, and $L0CStage$ are the number of buffers for the A/B matrices in L1, L0A, L0B, and L0C, respectively: 1 for single buffering and 2 for double buffering. 2Byte and 4Byte are the element sizes of FP16 inputs and FP32 accumulation results, respectively.
 
 ### Amount of Data Read
 
@@ -316,7 +316,7 @@ Compared to the `Common` template, the amount of data moved in decreases, the am
 
 The following figure shows a simple scenario under a `Common` template. For a single AIC to process a basic task block C, the required matrix A/B tiles are small and can fit entirely in L1. When moving matrix A/B from L1 to L0, four times of partitioning are required.
 
-<img src="https://raw.gitcode.com/user-images/assets/7801479/a62726da-f3c2-4c37-8a32-711046cfd239/8pingpong0.png" alt="Single AIC data path before multi-buffer optimization: data moves from GM through MTE2 into L1, then through MTE1 into L0A/L0B; the Cube computes and FIXPIPE writes the result back to GM" width="80%">
+<img src="https://raw.gitcode.com/user-images/assets/7801479/a62726da-f3c2-4c37-8a32-711046cfd239/8pingpong0.png" alt="Data path diagram before Multi Buffer optimization" width="80%">
 
 An example of the instruction pipeline diagram for each pipe is as follows:
 
@@ -361,13 +361,14 @@ for ... {
     copyGM2L1A
     copyGM2L1B
     preload_count++
-    for (preload_count == PRELOAD_STAGES) {
+    if (preload_count > PRELOAD_STAGES) {
         // Compute data from the previous PRELOAD_STAGES rounds.
         copyL12L0A
         copyL12L0B
         Mmad
     }
 }
+// After the loop, add the final computation to process the last PRELOAD_STAGES rounds of data
 ```
 
 The following figure shows a simple scenario under the `Common` template. For a single AIC to process two basic task blocks C1 and C2, the required matrix A/B tiles need to be partitioned twice to fit in L1, and the matrix A/B L1 tiles need to be partitioned four times when moving from L1 to L0. (You can refer to the [Pipeline optimization (Multi-Buffer)](#engineering-optimization-list) section above for a better understanding.) Below is a comparison of instructions for `MmadAtlasA2Pingpong`, `MmadAtlasA2Preload`, and `MmadAtlasA2PreloadAsync`:
@@ -376,7 +377,7 @@ The following figure shows a simple scenario under the `Common` template. For a 
 - In `MmadAtlasA2Preload`, two blockMmad calls also complete the computation of C1 and C2 separately, but the GmToL1 movement of A3/B3 is advanced to the first blockMmad call.
 - In `MmadAtlasA2PreloadAsync`, two blockMmad calls and one SynchronizeBlock call are used. The L1ToL0 movement, tileMmad, and C1 movement of A2/B2 are postponed from the first blockMmad call to the second. The L1ToL0 movement, tileMmad, and C2 movement of A4/B4 are postponed from the second blockMmad call to the SynchronizeBlock call.
 
-<img src="https://raw.gitcode.com/user-images/assets/7801479/eca1e06a-7c9a-40d6-934b-6843f9229d7c/9preload0.png" alt="Comparison of instruction sequences of the MmadAtlasA2Pingpong, MmadAtlasA2Preload, and MmadAtlasA2PreloadAsync blockMmad variants" width="100%">
+<img src="https://raw.gitcode.com/user-images/assets/7801479/eca1e06a-7c9a-40d6-934b-6843f9229d7c/9preload0.png" alt="Instruction sequence comparison of three blockMmad variants" width="100%">
 
 An example of the instruction pipeline diagram for each pipe is as follows. Ultimately, the GmToL1 movement of A3/B3 blocks is advanced, reducing the movement bubble on the MTE2 pipeline:
 
@@ -543,11 +544,11 @@ In small-shape scenarios, for example, in the `Common` template:
 - The number of cores in the $M$ and $N$ directions is less than the actual number of physical cores. Each AIC physical core processes a maximum of one basic task block.
 - $k_1$ >= $K$. No partitioning is needed along the $K$ direction when moving from GM to L1.
 
-In this case, the total kernel execution time is relatively small, and scalar overhead has a significant impact on performance.
+In this case, the total kernel execution time is relatively small, and Scalar overhead has a significant impact on performance.
 
 ### Optimization Solution
 
-Reduce redundant scalar computations.
+Reduce redundant Scalar computations.
 
 - Do not use BlockScheduler inside the kernel to assign task blocks to physical cores. Manually calculate the task block corresponding to each physical core.
 - Eliminate the basic block loop inside the kernel (each AIC processes only one task block).
@@ -584,7 +585,7 @@ For the above scenarios, an AIV can be used to rearrange the data format. When t
 
 (↑) **Method 2**: Use a full workspace. Write ND to GM with 512-byte alignment. After the entire result is written, start rearranging data in UB and write it to GM.
 
-<img src="https://raw.gitcode.com/user-images/assets/7801479/13bd80b2-d6ab-4520-839c-cf5e700db0d5/7rmPadding3.png" alt="Write-out rearrangement 3: local workspace, NZ written to GM with 512-byte-aligned n0 (dummy padded at the tail), rearranged to ND on UB at block granularity and written back to GM" width="80%">
+<img src="https://raw.gitcode.com/user-images/assets/7801479/13bd80b2-d6ab-4520-839c-cf5e700db0d5/7rmPadding3.png" alt="Illustration of write-back rearrangement method 3" width="80%">
 
 (↑) **Method 3**: Use a local workspace. Write NZ to GM with 512-byte alignment. Then rearrange data in UB at block granularity before writing ND back to GM.
 
@@ -609,7 +610,7 @@ For details, see the select_kernel policy of [102_dynamic_optimized_matmul](../.
 <details>
 <summary><strong><font size="4">Template Selection</font></strong></summary>
 
-First, try to tune TileShape based on [00_basic_matmul](../../../../examples/00_basic_matmul/basic_matmul.cpp) and obtain a **performance baseline**. For details, see [Template Library Optimization Guide](../../1_Practice/11_matmul_optimization.md).
+First, try to tune TileShape based on [00_basic_matmul](../../../../examples/00_basic_matmul/basic_matmul.cpp) and obtain a **performance baseline**. For details, see [CATLASS Optimization Guide](../../1_Practice/11_matmul_optimization.md).
 
 Then, identify whether the scenario fits each template and compare with the performance baseline. For the comparison, use [msProf](../../1_Practice/evaluation/performance_tools.md#single-operator-profiling-using-msprof) to collect the Task Duration of the candidate template and the baseline under the same shape and data type, and select the template only after confirming the gain:
 

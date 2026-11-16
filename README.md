@@ -39,7 +39,7 @@
 
 - [2025/10] [v1.2.0](https://gitcode.com/cann/catlass/releases/v1.2.0)发布，新增[Matmul算子泛化](https://gitcode.com/cann/catlass/tree/v1.2.0/examples/102_dynamic_optimized_matmul/README.md)等示例
 
-- [2025/09] CATLASS模板库正式开源
+- [2025/09] CATLASS正式开源
 
 </details>
 
@@ -53,7 +53,7 @@ CATLASS(**CA**NN **T**emplates for **L**inear **A**lgebra **S**ubroutine**s**)�
 
 通过抽象分层的方式将矩阵类算子代码模板化，从而实现算子计算逻辑的白盒化组装，让算子代码可复用，可替换，可局部修改。针对昇腾硬件特点进行设计，可以支持复杂场景流水排布，如`Flash Attention`等算子。在上层代码逻辑共享的同时，支持底层硬件差异特化。
 
-模板库针对定制场景启用快速开发能力，提供不同场景下的性能优化模块供开发者组装定制，在定制shape下的性能能达到相应算子标杆性能的0.98~1.2倍。
+CATLASS针对定制场景启用快速开发能力，提供不同场景下的性能优化模块供开发者组装定制，在定制shape下的性能能达到相应算子标杆性能的0.98~1.2倍。
 
 <p align="center">
   <img src="docs/assets/images/homepage_perf_mm.png" alt="Matmul性能对比" width="70%">
@@ -69,7 +69,7 @@ CATLASS(**CA**NN **T**emplates for **L**inear **A**lgebra **S**ubroutine**s**)�
 
 为快速体验CATLASS的算子开发与使用，请参考下述内容。
 
-- [快速入门](./docs/zh/1_Practice/01_quick_start.md)：快速上手模板库使用，编译执行已有的算子样例。
+- [快速入门](./docs/zh/1_Practice/01_quick_start.md)：快速上手CATLASS使用，编译执行已有的算子样例。
 
 - [基础开发指南](./docs/zh/1_Practice/02_host_example_assembly.md)：以基础Matmul算子为例，介绍基于CATLASS的算子开发实践；
 
@@ -83,7 +83,7 @@ CATLASS(**CA**NN **T**emplates for **L**inear **A**lgebra **S**ubroutine**s**)�
 
 - [创新样例开发流程指南](./docs/zh/1_Practice/10_innovative_example_development_guide.md)：从需求分析、方案设计到组件开发、测试合入的完整流程，帮助开发者快速掌握创新样例的开发方法；
 
-- [矩阵乘模板总结](./docs/zh/2_Design/01_kernel_design/04_matmul_summary.md)：介绍模板库的Matmul理论模板和工程优化点，帮助开发者进行Matmul性能调优；
+- [矩阵乘模板总结](./docs/zh/2_Design/01_kernel_design/04_matmul_summary.md)：介绍CATLASS的Matmul理论模板和工程优化点，帮助开发者进行Matmul性能调优；
 
 - [CATLASS设计总结](./docs/zh/README.md#2-模块设计): 汇总CATLASS工程的样例算法设计、swizzle策略、TLA设计等文档。
 

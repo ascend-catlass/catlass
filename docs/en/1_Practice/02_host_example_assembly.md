@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document uses the `BasicMatmul` operator as an example to describe how to assemble host-side code based on the CATLASS template library to implement matrix multiplication. The host-side code is primarily responsible for environment initialization, resource management, data transfer, and operator execution.
+This document uses the `BasicMatmul` operator as an example to describe how to assemble host-side code based on CATLASS to implement matrix multiplication. The host-side code is primarily responsible for environment initialization, resource management, data transfer, and operator execution.
 
 ## Host-Side Code Structure
 

@@ -5,7 +5,7 @@ CATLASS MLA是基于CATLASS Gemm API实现的亲和昇腾Atlas A2硬件的Flash-
 - Tiling计算；
 - Kernel实现，具体有两种实现，通用的[mla_kernel.cpp](./mla_kernel.cpp)以及特化的[mla_kernel_tp1_spec.cpp](./mla_kernel_tp1_spec.cpp)；
 - Kernel中依赖适合Flash-MLA运算的Block组件；
-- 使用的Block组件依赖模板库提供的Tile组件。
+- 使用的Block组件依赖CATLASS提供的Tile组件。
 
 ## Tiling
 

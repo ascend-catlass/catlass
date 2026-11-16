@@ -2,7 +2,7 @@
 
 ## Kernel Code Structure Overview
 
-The GEMM Kernel in the CATLASS template library adopts a highly modular design. It assembles different components through template parameters to implement various matrix multiplication operations. This document uses `BasicMatmul` as an example to break down the core structure and key components of the Kernel code.
+The GEMM Kernel in CATLASS adopts a highly modular design. It assembles different components through template parameters to implement various matrix multiplication operations. This document uses `BasicMatmul` as an example to break down the core structure and key components of the Kernel code.
 
 ## Template Assembly Mechanism
 
@@ -325,4 +325,4 @@ The CATLASS GEMM Kernel adopts a highly modular and template-based design with t
 3. **Unified execution process**: All Kernels follow a similar execution flow, including initialization, scheduling, computation, and synchronization.
 4. **Scalability**: By extending the base structure, developers can easily implement advanced features such as batch processing, quantization, and optimization.
 
-This design allows the CATLASS template library to efficiently support a wide range of GEMM operations while ensuring code maintainability and extensibility.
+This design allows CATLASS to efficiently support a wide range of GEMM operations while ensuring code maintainability and extensibility.

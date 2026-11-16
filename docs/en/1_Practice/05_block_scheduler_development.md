@@ -2,7 +2,7 @@
 
 ## Block Scheduler Overview
 
-Block scheduler is a core component in the CATLASS template library responsible for block-level task scheduling. It resides in the block layer, responsible for managing and distributing matrix multiplication tasks to different compute units. It improves compute resource utilization and cache hit rates by optimizing task distribution order and data access patterns, thereby enhancing overall performance.
+Block scheduler is a core component in CATLASS responsible for block-level task scheduling. It resides in the block layer, responsible for managing and distributing matrix multiplication tasks to different compute units. It improves compute resource utilization and cache hit rates by optimizing task distribution order and data access patterns, thereby enhancing overall performance.
 
 Block scheduler adopts a template-based design and supports multiple scheduling policies and hardware architectures, including:
 
@@ -245,7 +245,7 @@ The typical execution flow of the Block Scheduler is as follows:
 
 ## Summary
 
-Block Scheduler is a core component in the CATLASS template library, responsible for block-level task scheduling. Through policies such as window-based scheduling, snake scanning, and tail block processing, it optimizes the memory access pattern and cache hit rate, thereby improving overall performance.
+Block Scheduler is a core component in CATLASS, responsible for block-level task scheduling. Through policies such as window-based scheduling, snake scanning, and tail block processing, it optimizes the memory access pattern and cache hit rate, thereby improving overall performance.
 
 Block Scheduler adopts a template-based design and supports multiple scheduling policies and hardware architectures, allowing it to flexibly adapt to different computation requirements. It also provides an extended version for dynamic scheduling, allowing parameters to be adjusted at runtime.
 

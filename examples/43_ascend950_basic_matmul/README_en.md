@@ -13,7 +13,7 @@
 
 ## Usage Example
 
-- After obtaining the code, build the corresponding operator executable. See [Template Library Quick Start](../../docs/en/1_Practice/01_quick_start.md#build-and-execution). This case is a 950 operator, and `-DCATLASS_ARCH=3510` must be added during build.
+- After obtaining the code, build the corresponding operator executable. See [CATLASS Quick Start](../../docs/en/1_Practice/01_quick_start.md#build-and-execution). This case is a 950 operator, and `-DCATLASS_ARCH=3510` must be added during build.
 - Run the operator.
 
 ```bash

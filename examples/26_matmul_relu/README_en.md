@@ -23,7 +23,7 @@ Constraint: `m`, `n`, and `k` must all be greater than 0; otherwise the example 
 
 ## Example
 
-- After obtaining the code, compile the operator executable file. For details, see [Template Library Quick Start](../../docs/en/1_Practice/01_quick_start.md#build-and-execution).
+- After obtaining the code, compile the operator executable file. For details, see [CATLASS Quick Start](../../docs/en/1_Practice/01_quick_start.md#build-and-execution).
 - Execute the operator.
 
 ```bash

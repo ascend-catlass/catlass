@@ -18,7 +18,7 @@ Matrix A and Matrix B are of `int8` type, the scale factor is of `fp32` type, an
 
 Due to the large number of configuration parameters for `GroupedMatmul`, this example directly generates the input parameter `groupList` in the host code.
 
-- After obtaining the code, compile the operator executable file. For details, see [Template Library Quick Start](../../docs/en/1_Practice/01_quick_start.md#build-and-execution).
+- After obtaining the code, compile the operator executable file. For details, see [CATLASS Quick Start](../../docs/en/1_Practice/01_quick_start.md#build-and-execution).
 - Execute the operator.
 
 ```bash

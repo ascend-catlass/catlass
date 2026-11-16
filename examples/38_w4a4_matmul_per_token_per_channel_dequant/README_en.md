@@ -65,7 +65,7 @@ The key template parameters involved in this example are as follows:
 
 ## Example
 
-- After obtaining the code, compile the operator executable file. For details, see [Template Library Quick Start](../../docs/en/1_Practice/01_quick_start.md#build-and-execution).
+- After obtaining the code, compile the operator executable file. For details, see [CATLASS Quick Start](../../docs/en/1_Practice/01_quick_start.md#build-and-execution).
 
 - Run `gen_data.py` to generate a test sample.
 

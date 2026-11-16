@@ -1,6 +1,6 @@
 # 矩阵求逆算子（78_matrix_inverse）设计文档
 
-本文档用于说明 `experimental/matmul/78_matrix_inverse` 矩阵求逆算子示例所依赖的 Catlass GEMM 模板库能力、外部接口、分层设计方案。
+本文档用于说明 `experimental/matmul/78_matrix_inverse` 矩阵求逆算子示例所依赖的 CATLASS GEMM 能力、外部接口、分层设计方案。
 
 ## 功能说明
 

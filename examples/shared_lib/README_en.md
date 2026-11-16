@@ -1,6 +1,6 @@
 # Packaging as a Shared Library
 
-Sometimes, we want to add operators from the template library to an existing mature project to achieve computational acceleration without significantly modifying the project's build system. To this end, we can compile the template library operators into a shared library so that they can be easily called within the existing project.
+Sometimes, we want to add operators from CATLASS to an existing mature project to achieve computational acceleration without significantly modifying the project's build system. To this end, we can compile CATLASS operators into a shared library so that they can be easily called within the existing project.
 
 ## Code Structure
 

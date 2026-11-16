@@ -25,7 +25,7 @@ CATLASS [`44_quant_matmul_full_loadA_tla`样例](./README.md)算子是基于CATL
 
 ## 方案设计
 
-- 如下图所示，模板库矩阵有关键参数 `L1TileShape<M, N, K>`，C矩阵按照`L1TileShape::M`和`L1TileShape::N`参数切分基本块并分核，而后普通Matmul模板会将A矩阵中`L1TileShape::M * L1TileShape::K`大小的矩阵块载入L1，而A矩阵全载模板会直接将`L1TileShape::M * K`大小的矩阵块载入L1，而对于B矩阵，普通模板和A矩阵全载模板都是载入`L1TileShape::K * L1TileShape::N`大小的矩阵块L1。
+- 如下图所示，CATLASS矩阵有关键参数 `L1TileShape<M, N, K>`，C矩阵按照`L1TileShape::M`和`L1TileShape::N`参数切分基本块并分核，而后普通Matmul模板会将A矩阵中`L1TileShape::M * L1TileShape::K`大小的矩阵块载入L1，而A矩阵全载模板会直接将`L1TileShape::M * K`大小的矩阵块载入L1，而对于B矩阵，普通模板和A矩阵全载模板都是载入`L1TileShape::K * L1TileShape::N`大小的矩阵块L1。
 
 ![A矩阵全载示意图](https://raw.gitcode.com/user-images/assets/7631999/38ccafec-7fd8-4b9f-a4bb-dd57085ffb63/53e318e0feb94c578d888e67365e4c97.png_tplv-a9rns2rl98-image-qvalue.png "53e318e0feb94c578d888e67365e4c97.png~tplv-a9rns2rl98-image-qvalue.png")
 

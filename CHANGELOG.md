@@ -241,7 +241,7 @@
     - `OptimizedMatmul算子`
 - 文档资料
   - 新增[INT8类型反量化GroupedMatmul算子的详设文档](https://gitcode.com/cann/catlass/tree/v1.3.0/docs/contents/example_design/10_grouped_matmul_slice_m_per_token_dequant.md)，介绍`groupMatmul+后处理`类型的算子的设计思路和代码拆解
-  - 新增[矩阵乘模板总结文档](https://gitcode.com/cann/catlass/tree/v1.3.0/docs/contents/advanced/matmul_template_summary.md)，介绍模板库已有的Matmul模板设计
+  - 新增[矩阵乘模板总结文档](https://gitcode.com/cann/catlass/tree/v1.3.0/docs/contents/advanced/matmul_template_summary.md)，介绍CATLASS已有的Matmul模板设计
   - 新增[CommonMatmul说明文档](https://gitcode.com/cann/catlass/tree/v1.3.0/examples/102_dynamic_optimized_matmul/doc/CommonMatmul.md)，介绍泛化Matmul工程中的基础模板
 - Bugfix&优化
   - 修复[Flash Attention推理算子](https://gitcode.com/cann/catlass/tree/v1.3.0/examples/23_flash_attention_infer/README.md)在softmax拷贝mask时引入的内存问题
@@ -332,7 +332,7 @@
 
 ### CATLASS 1.0.0
 
-- [CATLASS](https://gitcode.com/cann/catlass/)模板库正式开源发布
+- [CATLASS](https://gitcode.com/cann/catlass/)正式开源发布
 
 - 关键特性
   - 提供Kernel、Block、Tile、Basic分层算子开发能力
