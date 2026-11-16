@@ -580,12 +580,16 @@ class _Tensor(TensorABC):
                   | Value | Meaning |
                   |---|---|
                   | `DIST_NORM` | Default contiguous load |
+                  | `DIST_BRC_B8` | Broadcast one b8 element to all 256 lanes |
                   | `DIST_BRC_B32` | Broadcast one b32 element to all lanes |
                   | `DIST_DINTLV_B16` | Load 512 bytes; return two 128-lane b16 registers, even positions first and odd positions second |
                   | `DIST_DINTLV_B32` | f32 deinterleave; dual results |
                   | `DIST_US_B8` / `DIST_US_B16` | 2x up-sample |
+                  | `DIST_DS_B8` / `DIST_DS_B16` | Load 512 bytes and retain every other b8/b16 element into one full vector |
                   | `DIST_BRC_B16` | Broadcast one b16 element |
+                  | `DIST_UNPACK_B8` | Load 128 b8 elements; insert one zero byte after each into a 256-lane vector |
                   | `DIST_UNPACK_B16` | Zero-extend b16 to double width |
+                  | `DIST_UNPACK_B32` | Load 32 b32 elements; insert one zero b32 element after each into a 64-lane vector |
                   | `DIST_UNPACK4_B8` | Load exactly 64 bytes into register byte slots 0,4,...,252; zero the other register bytes |
                   | `DIST_E2B_B16` / `DIST_E2B_B32` | Element-to-DataBlock broadcast |
                   | `DIST_BLK` | One 32-byte DataBlock broadcast to all 8 |
@@ -632,6 +636,15 @@ class _Tensor(TensorABC):
             - `DIST_DINTLV_B16` requires a 32-byte-aligned source address.
             - `DIST_UNPACK4_B8` requires a 1-byte element type and a
               32-byte-aligned source address.
+            - `DIST_BRC_B8` / `DIST_DS_B8` / `DIST_UNPACK_B8` support
+              i8/u8/f8E4M3FN/f8E5M2; `DIST_DS_B16` supports
+              f16/bf16/i16/u16; `DIST_UNPACK_B32` supports f32/i32/u32.
+              These modes preserve the source element type and produce full
+              256-byte vector registers.
+              `DIST_BRC_B8` requires 1-byte source alignment; the other four
+              require 32-byte alignment. `DIST_UNPACK_B8` / `DIST_UNPACK_B32` read 128 bytes;
+              DS reads 512 bytes. The caller must provide the
+              complete valid source range, independently of the tile shape.
             - `BlockLoadParams` requires a 2/4-byte element type
               (f32/f16/bf16/i32/u32/i16/u16); `block_stride` and
               `repeat_stride` must fit in [0, 65535].
@@ -868,6 +881,18 @@ class _Tensor(TensorABC):
             LoadDist.DIST_DINTLV_B16,
             LoadDist.DIST_DINTLV_B32,
         )
+        byte_load_types = ("i8", "u8", "f8e4m3fn", "f8e5m2")
+        extended_load_types = (
+            {
+                LoadDist.DIST_BRC_B8: byte_load_types,
+                LoadDist.DIST_DS_B8: byte_load_types,
+                LoadDist.DIST_UNPACK_B8: byte_load_types,
+                LoadDist.DIST_DS_B16: ("i16", "u16", "f16", "bf16"),
+                LoadDist.DIST_UNPACK_B32: ("i32", "u32", "f32"),
+            }.get(params.load_dist)
+            if isinstance(params, NormalLoadParams)
+            else None
+        )
         is_us_b8 = (
             isinstance(params, NormalLoadParams)
             and params.load_dist == LoadDist.DIST_US_B8
@@ -947,7 +972,15 @@ class _Tensor(TensorABC):
                 context=ctx,
             )
 
-        if is_dintlv:
+        if extended_load_types is not None:
+            elem = str(source_desc.element_type).strip().lower()
+            if elem not in extended_load_types:
+                raise TlaLoweringError(
+                    f"DIST_{params.load_dist.upper()} requires element type in "
+                    f"{extended_load_types}, got {source_desc.element_type}"
+                )
+            result_desc = _full_vector_ssa_descriptor(source_desc.element_type)
+        elif is_dintlv:
             elem = str(source_desc.element_type).strip().lower()
             if params.load_dist == LoadDist.DIST_DINTLV_B16:
                 if dtype_size_bytes(elem) != 2:

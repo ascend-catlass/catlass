@@ -596,7 +596,11 @@ def Tla_LoadOp : Tla_Op<"load", []> {
       Dual-destination ``dintlv_b32`` produces a second result (even/odd b32
       elements), requiring aligned access. The b16 variant, ``dintlv_b16``,
       reads 512 bytes into two 128-lane b16 registers through native ``vldsx2``
-      intrinsics and also requires aligned access. Unaligned path
+      intrinsics and also requires aligned access.
+      ``brc_b8`` / ``ds_b8`` / ``ds_b16`` / ``unpack_b8`` /
+      ``unpack_b32`` produce one full register and lower through the
+      matching ``ave.hir.vload`` pattern.
+      Unaligned path
       lowers to ``ave.hir.vload`` with ``vldas``/``vldus`` via HIVMAVE.
       Optional compile-time ``block_stride`` (i32 attribute) enables strided
       block load (AscendC ``vsldb``): one instruction gathers 8 DataBlocks

@@ -125,6 +125,11 @@ class LoadDist:
     DIST_E2B_B16 = "e2b_b16"
     DIST_E2B_B32 = "e2b_b32"
     DIST_BLK = "blk"
+    DIST_BRC_B8 = "brc_b8"
+    DIST_DS_B8 = "ds_b8"
+    DIST_DS_B16 = "ds_b16"
+    DIST_UNPACK_B32 = "unpack_b32"
+    DIST_UNPACK_B8 = "unpack_b8"
 
 
 class MaskLoadDist:

@@ -151,6 +151,11 @@ def Tla_LoadDist_Blk : I32EnumAttrCase<"blk", 10>;
 def Tla_LoadDist_Ds : I32EnumAttrCase<"ds", 11>;
 def Tla_LoadDist_Unpack4B8 : I32EnumAttrCase<"unpack4_b8", 12>;
 def Tla_LoadDist_DintlvB16 : I32EnumAttrCase<"dintlv_b16", 13>;
+def Tla_LoadDist_BrcB8 : I32EnumAttrCase<"brc_b8", 14>;
+def Tla_LoadDist_DsB8 : I32EnumAttrCase<"ds_b8", 15>;
+def Tla_LoadDist_DsB16 : I32EnumAttrCase<"ds_b16", 16>;
+def Tla_LoadDist_UnpackB32 : I32EnumAttrCase<"unpack_b32", 17>;
+def Tla_LoadDist_UnpackB8 : I32EnumAttrCase<"unpack_b8", 18>;
 def Tla_LoadDistEnum : Tla_I32Enum<"LoadDist", "Load distribution for tla.load.", [
   Tla_LoadDist_Norm,
   Tla_LoadDist_BrcB32,
@@ -165,7 +170,12 @@ def Tla_LoadDistEnum : Tla_I32Enum<"LoadDist", "Load distribution for tla.load."
   Tla_LoadDist_Blk,
   Tla_LoadDist_Ds,
   Tla_LoadDist_Unpack4B8,
-  Tla_LoadDist_DintlvB16
+  Tla_LoadDist_DintlvB16,
+  Tla_LoadDist_BrcB8,
+  Tla_LoadDist_DsB8,
+  Tla_LoadDist_DsB16,
+  Tla_LoadDist_UnpackB32,
+  Tla_LoadDist_UnpackB8
 ]>;
 def Tla_LoadDistAttr : Tla_EnumAttr<"LoadDist", "load_dist"> {
   let parameters = (ins EnumParameter<Tla_LoadDistEnum>:$load_dist);
@@ -178,6 +188,13 @@ def Tla_LoadDistAttr : Tla_EnumAttr<"LoadDist", "load_dist"> {
     32-byte-aligned UB address, producing two full 128-lane registers.
     The transfer is unmasked; the actual read range must stay within usable
     UB address space. ``dintlv_b32`` supports f32 only.
+    ``brc_b8`` broadcasts one b8 element to a full register.
+    ``ds_b8`` / ``ds_b16`` load ``2*VL`` bytes and retain every other
+    b8 / b16 element to produce a full register.
+    ``unpack_b8`` / ``unpack_b32`` load ``VL/2`` bytes and insert a zero
+    b8 / b32 element after each source element. These modes preserve the element type;
+    ``brc_b8`` requires byte alignment and the other four require 32-byte
+    alignment. They require aligned UB access and full-register results.
     ``us_b8`` is single-destination 2x up-sample load (AscendC
     ``LoadDist::DIST_US_B8``): loads ``VL/2`` b8 elements and repeats each
     twice to fill a VL-wide ``b8`` register; b8 element type only.

@@ -1,0 +1,55 @@
+// RUN: sed -n '/^\/\/ BEGIN_EXTRA_SECOND$/,/^\/\/ END_EXTRA_SECOND$/p' %s | sed '1d;$d;s|^// ||' > %t.EXTRA_SECOND.mlir && not %tla_compile %t.EXTRA_SECOND.mlir -o %t 2>&1 | %filecheck %s --check-prefix=EXTRA-SECOND
+// RUN: sed -n '/^\/\/ BEGIN_BLOCK_STRIDE$/,/^\/\/ END_BLOCK_STRIDE$/p' %s | sed '1d;$d;s|^// ||' > %t.BLOCK_STRIDE.mlir && not %tla_compile %t.BLOCK_STRIDE.mlir -o %t 2>&1 | %filecheck %s --check-prefix=BLOCK-STRIDE
+// RUN: sed -n '/^\/\/ BEGIN_MASK$/,/^\/\/ END_MASK$/p' %s | sed '1d;$d;s|^// ||' > %t.MASK.mlir && not %tla_compile %t.MASK.mlir -o %t 2>&1 | %filecheck %s --check-prefix=MASK
+
+// EXTRA-SECOND: second result is only valid as !tla.vector
+// BLOCK-STRIDE: block_stride is mutually exclusive with load_dist
+// MASK: mask load only supports load_dist norm|us|ds
+
+// BEGIN_EXTRA_SECOND
+// !source = !tla.tensor<!tla.layout<!tla.shape<512>, !tla.stride<1>, !tla.shape<512>, RowMajor>, !tla.coord<0>, !tla.ptr<i8, ub, 1>>
+// module {
+//   func.func @invalid_load(%s: memref<512xi8, #hivm.address_space<ub>>) {
+//     %c0 = arith.constant 0 : index
+//     %c1 = arith.constant 1 : index
+//     %c512 = arith.constant 512 : index
+//     %src = tla.tensor_desc %s shape [%c1, %c512, %c1, %c1] stride [%c512, %c1, %c1, %c1] origin_shape [%c1, %c512] coord [%c0, %c0] : memref<512xi8, #hivm.address_space<ub>> -> !source
+//     "tla.vec.func"() ({
+//       %v0, %v1 = tla.load %src {load_dist = #tla.load_dist<brc_b8>} : !source -> !tla.vector<256xi8>, !tla.vector<256xi8>
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_EXTRA_SECOND
+
+// BEGIN_BLOCK_STRIDE
+// !source = !tla.tensor<!tla.layout<!tla.shape<512>, !tla.stride<1>, !tla.shape<512>, RowMajor>, !tla.coord<0>, !tla.ptr<i8, ub, 1>>
+// module {
+//   func.func @invalid_load(%s: memref<512xi8, #hivm.address_space<ub>>) {
+//     %c0 = arith.constant 0 : index
+//     %c1 = arith.constant 1 : index
+//     %c512 = arith.constant 512 : index
+//     %src = tla.tensor_desc %s shape [%c1, %c512, %c1, %c1] stride [%c512, %c1, %c1, %c1] origin_shape [%c1, %c512] coord [%c0, %c0] : memref<512xi8, #hivm.address_space<ub>> -> !source
+//     "tla.vec.func"() ({
+//       %v = tla.load %src {load_dist = #tla.load_dist<brc_b8>, block_stride = 1 : i32} : !source -> !tla.vector<256xi8>
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_BLOCK_STRIDE
+
+// BEGIN_MASK
+// !source = !tla.tensor<!tla.layout<!tla.shape<512>, !tla.stride<1>, !tla.shape<512>, RowMajor>, !tla.coord<0>, !tla.ptr<i8, ub, 1>>
+// module {
+//   func.func @invalid_load(%s: memref<512xi8, #hivm.address_space<ub>>) {
+//     %c0 = arith.constant 0 : index
+//     %c1 = arith.constant 1 : index
+//     %c512 = arith.constant 512 : index
+//     %src = tla.tensor_desc %s shape [%c1, %c512, %c1, %c1] stride [%c512, %c1, %c1, %c1] origin_shape [%c1, %c512] coord [%c0, %c0] : memref<512xi8, #hivm.address_space<ub>> -> !source
+//     "tla.vec.func"() ({
+//       %v = tla.load %src {load_dist = #tla.load_dist<ds_b8>} : !source -> !tla.mask<64>
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_MASK

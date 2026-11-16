@@ -200,7 +200,7 @@ tla.Tensor.load(params: LoadParams | None = None) -> MaskSSA | VectorSSA | tuple
 
 - `params`（`LoadParams | None`）：载入模式。可选，默认 `None`。
   - `None` / `NormalLoadParams` / `UnalignLoadParams` /
-    `BlockLoadParams` → `VectorSSA`（`DIST_DINTLV_B16` / `DIST_DINTLV_B32` 时可为二元组）。
+    `BlockLoadParams` → `VectorSSA`（`DIST_DINTLV_B16` / `DIST_DINTLV_B32` 时为两个向量的二元组）。
   - `MaskLoadParams` → `MaskSSA`。
   - `NormalLoadParams`：
     - `load_dist`（`str`）：`tla.params.LoadDist` token。默认 `DIST_NORM`。
@@ -208,12 +208,16 @@ tla.Tensor.load(params: LoadParams | None = None) -> MaskSSA | VectorSSA | tuple
       | 取值 | 含义 |
       | --- | --- |
       | `DIST_NORM` | 默认连续载入 |
+      | `DIST_BRC_B8` | 单个 b8 元素广播到全部 256 个 lane |
       | `DIST_BRC_B32` | 单个 b32 元素广播到全部 lane |
       | `DIST_DINTLV_B16` | 读取 512 字节；返回两个 128-lane b16 寄存器，依次保存偶数、奇数位置的元素 |
       | `DIST_DINTLV_B32` | f32 解交织；双返回值 |
       | `DIST_US_B8` / `DIST_US_B16` | 2 倍上采样 |
+      | `DIST_DS_B8` / `DIST_DS_B16` | 读取 512 字节，每隔一个 b8/b16 元素保留一个，填充一个完整向量 |
       | `DIST_BRC_B16` | 单个 b16 元素广播 |
+      | `DIST_UNPACK_B8` | 读取 128 个 b8 元素，每个元素后插入一个零字节，填充一个 256-lane 向量 |
       | `DIST_UNPACK_B16` | b16 零扩展到双倍宽度 |
+      | `DIST_UNPACK_B32` | 读取 32 个 b32 元素，每个元素后插入一个全零 b32 元素，填充一个 64-lane 向量 |
       | `DIST_UNPACK4_B8` | 固定读取 64 字节到寄存器字节位置 0、4、…、252，其余寄存器字节置零 |
       | `DIST_E2B_B16` / `DIST_E2B_B32` | 元素到 DataBlock 广播 |
       | `DIST_BLK` | 一个 32 字节 DataBlock 广播到全部 8 个 |
@@ -254,6 +258,13 @@ tla.Tensor.load(params: LoadParams | None = None) -> MaskSSA | VectorSSA | tuple
   要求 f32；`DIST_BLK` 适用于任意元素宽度。
 - `DIST_DINTLV_B16` 的实际读取地址须按 32 字节对齐。
 - `DIST_UNPACK4_B8` 要求 1 字节元素，实际读取地址须按 32 字节对齐。
+- `DIST_BRC_B8` / `DIST_DS_B8` / `DIST_UNPACK_B8` 支持
+  i8/u8/f8E4M3FN/f8E5M2；`DIST_DS_B16` 支持 f16/bf16/i16/u16；
+  `DIST_UNPACK_B32` 支持 f32/i32/u32。这些模式保持源元素类型，返回完整的
+  256 字节向量寄存器。
+  `DIST_BRC_B8` 要求源地址按 1 字节对齐，其余四种模式要求按 32 字节对齐。
+  `DIST_UNPACK_B8` / `DIST_UNPACK_B32` 读取 128 字节，下采样读取 512 字节。
+  调用方须保证完整的源读取范围有效，此范围独立于 tile shape。
 - `BlockLoadParams` 要求 2/4 字节元素类型（f32/f16/bf16/i32/u32/i16/u16）；
   `block_stride` 与 `repeat_stride` 须在 [0, 65535] 范围内。
 - `DIST_US` / `DIST_DS`：UB 元素类型可为任意 b8/b16/b32/b64 标量。
