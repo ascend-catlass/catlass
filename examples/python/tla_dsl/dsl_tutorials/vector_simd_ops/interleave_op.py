@@ -24,7 +24,17 @@ from vector_op_harness import (
 VECTOR_ELE = 512
 VL_ELE = 64
 LOOPS = 8
-ALL_DTYPES = ("i8", "i16", "i32", "f16", "f32", "bf16")
+ALL_DTYPES = (
+    "i8",
+    "i16",
+    "i32",
+    "u8",
+    "u16",
+    "u32",
+    "f16",
+    "f32",
+    "bf16",
+)
 
 _KERNEL_DTYPE = tla.Float32
 _KERNEL_ELEMENT_BYTES = 4
@@ -219,6 +229,19 @@ def _make_inputs(args: Any, dtype_name: str, torch: Any) -> tuple[Any, Any]:
     _, dtype, _ = _set_kernel_config(args.op, dtype_name, args.shape)
     device = "npu"
 
+    if dtype_name in {"u8", "u16", "u32"}:
+        # Cross the signed boundary and include all-ones; generate on CPU
+        # because NPU arange/arithmetic do not support every unsigned dtype.
+        bits = {"u8": 8, "u16": 16, "u32": 32}[dtype_name]
+        values = torch.tensor(
+            [0, 1, (1 << (bits - 1)) - 1, 1 << (bits - 1), (1 << bits) - 1],
+            dtype=torch.int64,
+        )
+        idx = torch.arange(VECTOR_ELE, dtype=torch.int64)
+        a = values[idx % len(values)].to(dtype)
+        b = values[(idx * 3 + 1) % len(values)].to(dtype)
+        return a.to(device), b.to(device)
+
     if dtype_name in {"i8", "i16", "i32"}:
         idx = torch.arange(VECTOR_ELE, dtype=torch.int32, device=device)
         a = ((idx % 97) - 48).to(dtype)
@@ -282,7 +305,7 @@ def _expected_deinterleave(a: Any, b: Any) -> tuple[Any, Any]:
 
 
 def _expected(op_name: str, inputs: tuple[Any, ...]) -> tuple[Any, Any]:
-    a, b = inputs
+    a, b = (value.cpu() for value in inputs)
     if op_name == "interleave":
         return _expected_interleave(a, b)
     if op_name == "deinterleave":

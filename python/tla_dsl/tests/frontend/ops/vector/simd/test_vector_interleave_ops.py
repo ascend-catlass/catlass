@@ -155,3 +155,41 @@ def test_vector_interleave_ops_reject_mismatched_element_types() -> None:
 
         with pytest.raises(mlir_ir.MLIRError, match="same element type"):
             lowered.module.operation.verify()
+
+
+def _reg_extension_kernel(op_name: str, lanes: int):
+    @tla.kernel
+    def kernel(src: tla.Tensor) -> None:
+        tile = tla.tile_view(src, tla.make_shape(lanes), tla.make_coord(0))
+        with tla.vector():
+            with tla.vec.func(mode="simd"):
+                a = tile.load()
+                b = tile.load()
+                if tla.const_expr(op_name == "interleave"):
+                    tla.interleave(a, b)
+                else:
+                    tla.deinterleave(a, b)
+
+    return kernel
+
+
+@pytest.mark.parametrize("op_name", ["interleave", "deinterleave"])
+@pytest.mark.parametrize(
+    ("dtype", "lanes"),
+    [
+        (tla.UInt8, 256),
+        (tla.UInt16, 128),
+        (tla.UInt32, 64),
+    ],
+)
+def test_vector_interleave_ops_accept_reg_extension_types(op_name, dtype, lanes) -> None:
+    kernel = _reg_extension_kernel(op_name, lanes)
+    tensor = _vector_tensor(dtype, size=lanes)
+    lowered = BaseDSL()._lower(
+        kernel.fn,
+        kind=kernel.kind,
+        options=dict(kernel.options),
+        type_args=(tensor,),
+        location=kernel.decorator_location,
+    )
+    assert lowered.module.operation.verify()

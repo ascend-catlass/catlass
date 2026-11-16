@@ -113,6 +113,8 @@ tla.interleave(src0: VectorSSA | MaskSSA, src1: VectorSSA | MaskSSA) -> tuple[Ve
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
 - 须在 `tla.vec.func()` 内调用；输入类型须匹配。MaskSSA 仅支持 `mask<64>`、`mask<128>` 和 `mask<256>`。
+- VectorSSA 支持 i8/i16/i32、u8/u16/u32 和 f16/bf16/f32。
+- 谓词重排使用 MaskSSA。暂不支持 b64 的 RegTraitNumTwo 形式。
 
 调用示例：
 
@@ -148,6 +150,8 @@ tla.deinterleave(src0: VectorSSA | MaskSSA, src1: VectorSSA | MaskSSA) -> tuple[
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
 - 须在 `tla.vec.func()` 内调用；两路 vector 的元素类型与 lane 数须匹配。
 - MaskSSA 的输入和输出类型必须完全一致，仅支持 `mask<64>`、`mask<128>` 和 `mask<256>`；不支持 `mask<32>`/b64。
+- VectorSSA 支持 i8/i16/i32、u8/u16/u32 和 f16/bf16/f32。
+- 谓词重排使用 MaskSSA。暂不支持 b64 的 RegTraitNumTwo 形式。
 
 调用示例：
 

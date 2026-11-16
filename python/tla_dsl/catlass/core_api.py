@@ -9073,6 +9073,9 @@ _INTERLEAVE_ELEMENT_TYPES = frozenset(
         "i16",
         "i32",
         "i64",
+        "u8",
+        "u16",
+        "u32",
         "f16",
         "bf16",
         "f32",
@@ -9257,6 +9260,8 @@ def interleave(
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function.
         - Must be called inside `tla.vec.func()`; inputs must match type. MaskSSA supports only mask<64>, mask<128>, and mask<256>.
+        - VectorSSA supports i8/i16/i32, u8/u16/u32, and f16/bf16/f32.
+        - Use MaskSSA for predicate rearrangement. The b64 RegTraitNumTwo form is unsupported.
 
         Example:
         ```python
@@ -9337,6 +9342,8 @@ def deinterleave(
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function.
         - Must be called inside `tla.vec.func()`; both vectors must match element type and lane count.
+        - VectorSSA supports i8/i16/i32, u8/u16/u32, and f16/bf16/f32.
+        - Use MaskSSA for predicate rearrangement. The b64 RegTraitNumTwo form is unsupported.
         - MaskSSA operands and results have the same type; only mask<64>, mask<128>, and mask<256> are supported. mask<32>/b64 is unsupported.
 
         Example:
