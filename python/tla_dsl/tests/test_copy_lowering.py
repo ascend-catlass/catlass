@@ -1291,12 +1291,12 @@ def test_frontend_rejects_perchannel_quant_tensor_that_is_not_unit_stride() -> N
         )
 
 
-def _u64_tile_kernel(addrspace: object, layout_tag: object):
-    """Build a u64 tile in ``addrspace`` with ``layout_tag``."""
+def _integer64_tile_kernel(addrspace: object, layout_tag: object, dtype=tla.UInt64):
+    """Build an i64/u64 tile in ``addrspace`` with ``layout_tag``."""
 
     @tla.kernel
     def kernel() -> None:
-        ptr = tla.allocate(32, tla.UInt64, addrspace, 512)
+        ptr = tla.allocate(32, dtype, addrspace, 512)
         tla.make_tensor(
             ptr,
             tla.make_layout(
@@ -1308,30 +1308,34 @@ def _u64_tile_kernel(addrspace: object, layout_tag: object):
 
 
 def test_frontend_accepts_u64_l1_vectorlayout_tile() -> None:
-    """The per-channel dequant run is the one u64 tile the frontend admits."""
-    _u64_tile_kernel(tla.AddressSpace.l1, tla.arch.VectorLayout).dump_mlir()
+    """The per-channel dequant run remains an accepted u64 L1 tile."""
+    _integer64_tile_kernel(tla.AddressSpace.l1, tla.arch.VectorLayout).dump_mlir()
+
+
+@pytest.mark.parametrize("dtype,pointee", [(tla.Int64, "i64"), (tla.UInt64, "ui64")])
+def test_frontend_accepts_integer64_ub_tile(dtype, pointee) -> None:
+    mlir = _integer64_tile_kernel(
+        tla.AddressSpace.ub, tla.arch.VectorLayout, dtype
+    ).dump_mlir()
+    assert "tla.make_tensor" in mlir
+    assert f"!tla.ptr<{pointee}, ub," in mlir
 
 
 @pytest.mark.parametrize(
     ("label", "addrspace", "layout_tag"),
     [
-        ("ub", tla.AddressSpace.ub, tla.arch.VectorLayout),
         ("l1-rowmajor", tla.AddressSpace.l1, tla.arch.RowMajor),
     ],
 )
-def test_frontend_rejects_u64_tile_outside_the_dequant_run(
+def test_frontend_rejects_u64_tile_outside_supported_construction(
     label: str, addrspace: object, layout_tag: object
 ) -> None:
-    """u64 has exactly one copy route, so any other tile is refused at build time.
-
-    Admitting u64 globally would let a UB or row-major L1 u64 tile through the
-    frontend, to fail much later in bc where no wrapper exists.
-    """
+    """Allowing UB construction does not admit row-major u64 L1 tiles."""
     with pytest.raises(
         TlaLoweringError,
-        match=r"u64 is only accepted as the L1 VectorLayout tile",
+        match=r"u64 is only accepted in UB.*L1 VectorLayout",
     ):
-        _u64_tile_kernel(addrspace, layout_tag).dump_mlir()
+        _integer64_tile_kernel(addrspace, layout_tag).dump_mlir()
 
 
 def _gm_zn_packed_to_l1_kernel(rows=20, cols=32):

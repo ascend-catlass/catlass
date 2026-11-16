@@ -975,6 +975,16 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         "vector-gather",
         [["dsl_tutorials/vector_simd_ops/gather_op.py", "--run", *dev]],
     )
+    # Each scatter invocation checks a sparse permutation, nonzero UB subview
+    # offsets, full/M3/zero masks, and bit-exact preservation of sentinel bytes.
+    for scatter_dtype in ("f32", "f16", "bf16", "i8", "u8", "i16", "u16", "i32", "u32"):
+        yield (
+            f"vector-scatter-{scatter_dtype}",
+            [[
+                "end_to_end/scatter_op.py",
+                "--run", "--dtype", scatter_dtype, *dev,
+            ]],
+        )
     yield (
         "vector-shift-op",
         [

@@ -82,6 +82,7 @@ nav_order: 5
 | [`tla.cmp`](language/simd/compare_select.md#tlacmp) | 比较向量元素并产生 `MaskSSA`。 | Kernel / Vector / SIMD；SIMT 使用标量比较运算符并产生 `Bool`。 |
 | [`tla.where`](language/simd/compare_select.md#tlawhere) | 按条件选择两个值。 | Kernel / Vector；SIMD 条件为 `MaskSSA`，SIMT 使用逐线程 `Bool`。 |
 | [`tla.full`](language/simd/fill.md#tlafull)、[`tla.arange`](language/simd/fill.md#tlaarange) | 创建常量向量或 lane 索引序列。 | Kernel / Vector / SIMD；SIMT 拒绝这些寄存器向量构造接口。 |
+| [`tla.scatter`](language/simd/discrete_aggregate.md#tlascatter) | 按元素索引将寄存器数据离散写入 UB。 | Kernel / Vector / SIMD；源与目标 dtype 一致，使用原生无符号索引，目标基地址须 32 字节对齐；b8 只取源偶数槽。 |
 | [`tla.VectorSSA.reduce`](language/simd/discrete_aggregate.md#tlavectorssareduce) | 在 mask 下归约为单 lane。 | Kernel / Vector / SIMD；必须提供 mask，可用 `full` 广播该结果。 |
 | [`tla.VectorSSA.to`](language/simd/type_conversion.md#tlavectorssato) | 转换寄存器向量元素类型。 | Kernel / Vector / SIMD；支持类型见完整条目。 |
 | [`tla.Numeric.to`](language/values_types.md#tlanumericto) | 转换标量元素类型。 | Kernel；SIMT 中生成逐线程转换。寄存器向量 `tla.cast` 没有逐线程等价接口。 |

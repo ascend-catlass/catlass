@@ -57,7 +57,7 @@ def kernel_func(...):
 
 - `tla.copy` 涉及的片上源、目的 tensor；
 - `tla.mmad` 的 L0A、L0B 和按 `unit_flag` 规则决定是否纳入的 L0C；
-- 一个 `tla.vec.func` 内 `tla.load`、`tla.store`、`tla.gather`、`tla.scalar_load`、`tla.scalar_store` 访问的 UB tensor；
+- 一个 `tla.vec.func` 内 `tla.load`、`tla.store`、`tla.gather`、`tla.scatter`、`tla.scalar_load`、`tla.scalar_store` 访问的 UB tensor；
 - 同一 `tla.alloc_ptr` 派生出的 recast、offset、tensor 和 tile view 别名；
 - 可静态追踪的运行时条件 buffer 选择。
 
@@ -165,7 +165,7 @@ InstructionPlan = {
 | `tla.copy`，源为 UB | `mte3` | 片上 src、dst |
 | `tla.copy`，源为 L0C | `fix` | 片上 src、dst，以及作为 tensor 传入的 quant scale；`unit_flag=3` 时 L0C 由 unit flag 协议负责，不重复加锁 |
 | `tla.mmad` | `cube` | L0A、L0B；未启用 unit flag 时还包括 L0C accumulator |
-| `tla.vec.func` | `vector` | region 内 load/store/gather/scalar load/store 访问的 UB root，去重后统一加锁 |
+| `tla.vec.func` | `vector` | region 内 load/store/gather/scatter/scalar load/store 访问的 UB root，去重后统一加锁 |
 
 GM operand 会在资源规范化阶段被过滤。单条指令多次访问同一个 root 时只加一次锁。
 

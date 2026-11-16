@@ -625,6 +625,8 @@ static LogicalResult collectInstructionPlans(
                     plan.resources.push_back(resolver.resolve(loadUpdate.getSource()));
                 else if (auto loadUnalignUpdate = dyn_cast<::tla::LoadUnalignUpdateOp>(nested))
                     plan.resources.push_back(resolver.resolve(loadUnalignUpdate.getSource()));
+                else if (auto scatter = dyn_cast<::tla::ScatterOp>(nested))
+                    plan.resources.push_back(resolver.resolve(scatter.getDst()));
                 else if (auto store = dyn_cast<::tla::StoreOp>(nested))
                     plan.resources.push_back(resolver.resolve(store.getDest()));
                 else if (auto storeUpdate = dyn_cast<::tla::StoreUpdateOp>(nested))

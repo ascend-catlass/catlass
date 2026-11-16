@@ -27,7 +27,8 @@ static LogicalResult verifyExternMemorySource(::tla::VecFuncOp vf)
                 return WalkResult::interrupt();
         }
         if (isa<::tla::LoadOp, ::tla::StoreOp, ::tla::LoadUpdateOp, ::tla::StoreUpdateOp, ::tla::LoadUnalignUpdateOp,
-                ::tla::StoreUnalignUpdateOp, ::tla::ScalarLoadOp, ::tla::ScalarStoreOp, ::tla::CopyOp>(nested))
+                ::tla::StoreUnalignUpdateOp, ::tla::ScatterOp, ::tla::ScalarLoadOp, ::tla::ScalarStoreOp,
+                ::tla::CopyOp>(nested))
             return WalkResult::interrupt();
         if (auto gather = dyn_cast<::tla::GatherOp>(nested);
             gather && isa<::tla::TlaTensorType>(gather.getX().getType()))

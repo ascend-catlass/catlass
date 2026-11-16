@@ -73,6 +73,34 @@ def _require_enclosing_region(op_name: str, kind: str) -> None:
         raise TlaCoreAPIError(f"tla.{op_name} must be nested inside tla.{kind}()")
 
 
+def _require_kernel_simd_region(op_name: str) -> None:
+    """Require kernel emission inside a SIMD ``tla.vec.func`` region.
+
+    A frontend state can also belong to an internal eager capture. Inspect the
+    insertion point's ancestors so such a capture cannot stand in for a kernel.
+    """
+    from catlass._mlir import ir as mlir_ir
+
+    state = _current_frontend_state()
+    parent = None
+    if state is not None:
+        try:
+            parent = mlir_ir.InsertionPoint.current.block.owner
+        except ValueError:
+            pass
+    while parent is not None and parent.name != "tla.func":
+        parent = parent.parent
+    if parent is None:
+        raise TlaCoreAPIError(
+            f"tla.{op_name} must be called inside a @tla.kernel-decorated kernel"
+        )
+    _require_enclosing_region(op_name, "vec.func")
+    if not state.vec_func_modes or state.vec_func_modes[-1].lower() != "simd":
+        raise TlaCoreAPIError(
+            f"tla.{op_name} is only supported inside tla.vec.func(mode='simd')"
+        )
+
+
 def _require_enclosing_cube_or_vector(op_name: str) -> None:
     """Require an enclosing tla.cube() or tla.vector() region (either core kind).
 
@@ -443,6 +471,7 @@ _CORE_API_EXPORTS = (
     "unpack",
     "RegPart",
     "gather",
+    "scatter",
     "cmp",
     "make_ptr",
     "allocate",

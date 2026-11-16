@@ -1199,6 +1199,56 @@ mlir::LogicalResult GatherOp::verify()
     return verifyMaskMatchesVector(getOperation(), getMask(), getResult().getType());
 }
 
+mlir::LogicalResult ScatterOp::verify()
+{
+    if (!hasEnclosingRegion<VecFuncOp>(getOperation()))
+        return emitOpError("must be nested inside a tla.vec.func region");
+    if (auto vf = getOperation()->getParentOfType<VecFuncOp>()) {
+        if (auto mode = vf->getAttrOfType<mlir::StringAttr>("mode");
+            mode && !mode.getValue().equals_insensitive("simd"))
+            return emitOpError("requires a SIMD tla.vec.func region");
+    }
+
+    auto dstType = getDst().getType();
+    if (dstType.getPtr().getAddrspace() != ::AddressSpace::ub)
+        return emitOpError("destination must reside in UB");
+    auto srcType = getSrc().getType();
+    mlir::Type element = srcType.getElementType();
+    if (dstType.getPtr().getPointee() != element)
+        return emitOpError("source and destination element types must match");
+    unsigned bits = 0;
+    if (auto integer = mlir::dyn_cast<mlir::IntegerType>(element)) {
+        bits = integer.getWidth();
+        if (bits != 8 && bits != 16 && bits != 32 && bits != 64)
+            return emitOpError("unsupported data element type: ") << element;
+    } else if (element.isF16() || element.isBF16()) {
+        bits = 16;
+    } else if (element.isF32()) {
+        bits = 32;
+    } else {
+        return emitOpError("unsupported data element type: ") << element;
+    }
+    auto indexType = getIndices().getType();
+    auto indexElement = mlir::dyn_cast<mlir::IntegerType>(indexType.getElementType());
+    unsigned indexBits = bits <= 16 ? 16 : 32;
+    if (!indexElement || !indexElement.isUnsigned() ||
+        (indexElement.getWidth() != indexBits && !(bits == 64 && indexElement.getWidth() == 64)))
+        return emitOpError("indices must be unsigned u16 for b8/b16, u32 for b32, or u32/u64 for b64 data");
+    int64_t sourceLanes = srcType.getValidLanes();
+    int64_t indexLanes = indexType.getValidLanes();
+    if (sourceLanes != mlir::ShapedType::kDynamic && indexLanes != mlir::ShapedType::kDynamic) {
+        int64_t required = bits == 8 ? (sourceLanes + 1) / 2 : sourceLanes;
+        if (indexLanes < required)
+            return emitOpError("indices have fewer valid lanes than the source requires");
+    }
+    if (getMask()) {
+        int64_t expected = 2048 / std::max(bits, 16u);
+        if (getMask().getType().getPhysicalLanes() != expected)
+            return emitOpError("mask has incorrect predicate lane count; expected ") << expected;
+    }
+    return mlir::success();
+}
+
 mlir::LogicalResult SqueezeOp::verify()
 {
     if (!hasEnclosingRegion<VecFuncOp>(getOperation()))

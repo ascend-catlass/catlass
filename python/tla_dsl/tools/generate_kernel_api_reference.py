@@ -160,8 +160,8 @@ DIRECTORY_SECTIONS: list[tuple[str, str]] = [
     ),
     (
         "SIMD Vector Compute / Discrete and Aggregate",
-        "Gather elements from a UB tensor by index, and masked reductions "
-        "(`VectorSSA.reduce`).",
+        "Gather elements by index, scatter register values into UB, and perform "
+        "masked reductions (`VectorSSA.reduce`).",
     ),
     (
         "SIMD Vector Compute / Data Rearrange",

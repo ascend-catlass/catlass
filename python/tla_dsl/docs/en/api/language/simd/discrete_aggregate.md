@@ -12,7 +12,7 @@ Do not edit manually. Update docstrings/Examples in catlass/core_api.py
 
 [Language Reference](../index.md) | [API Quick Reference](../../quick_reference.md)
 
-Gather elements from a UB tensor by index, and masked reductions (`VectorSSA.reduce`).
+Gather elements by index, scatter register values into UB, and perform masked reductions (`VectorSSA.reduce`).
 
 ## `tla.VectorSSA.reduce`
 
@@ -125,4 +125,53 @@ Example:
 with tla.vec.func(mode="simd"):
     vals = tla.gather(ub_tile, idx_i32)
     w_brc = tla.gather(w, idx_u16)  # Reg→Reg
+```
+
+---
+
+## `tla.scatter`
+
+**Source:** [`catlass.core_api.scatter`](../../../../../catlass/core_api.py)
+
+Description:
+
+Scatter register values into UB at element offsets relative to `dst`.
+Enabled lane `j` writes `dst[indices[j]] = src[j]`; for 8-bit data,
+it writes `src[2*j]` instead. Offsets are not scaled by the layout.
+
+Prototype:
+
+```python
+tla.scatter(dst: Tensor, src: VectorSSA, indices: VectorSSA, *, mask: MaskSSA | None = None) -> None
+```
+
+Parameters:
+
+- `dst` (`Tensor`): UB destination with the same dtype as `src`.
+- `src` (`VectorSSA`): One register of i8/u8/i16/u16/i32/u32/
+  i64/u64/f16/bf16/f32 values.
+- `indices` (`VectorSSA`): Unsigned element offsets: u16 for 8/16-bit
+  data, u32 for 32-bit data, and u32 or u64 for 64-bit data.
+- `mask` (`MaskSSA | None`): Predicate with 128 lanes for 8/16-bit
+  data, 64 for 32-bit, or 32 for 64-bit. `None` enables all lanes;
+  masked-off destination elements retain their values.
+
+Constraints:
+
+- Call inside `@tla.kernel` and `tla.vec.func(mode="simd")`.
+- The caller must ensure a 32-byte-aligned destination base and unique
+  enabled indices within the destination allocation.
+- Source and indices each occupy one 256-byte register. Indices must
+  cover all valid source lanes, or ceil(valid_lanes / 2) for 8-bit data.
+- For 64-bit data, only the first 32 u32 indices are used; u64 indices
+  use only their low 32 bits.
+- General i64/u64 tensor load/copy is unsupported. Use `tla.extern`
+  for these registers and recast byte views for data transfers.
+
+Example:
+
+```python
+with tla.vector():
+    with tla.vec.func(mode="simd"):
+        tla.scatter(dst_ub, values, indices_u32)
 ```

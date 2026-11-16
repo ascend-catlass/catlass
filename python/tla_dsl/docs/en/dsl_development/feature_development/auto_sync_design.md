@@ -57,7 +57,7 @@ If a kernel cannot satisfy the constraints above, keep `auto_sync=None` and let 
 
 - the on-chip source and destination tensors involved in `tla.copy`;
 - the L0A and L0B of `tla.mmad`, and the L0C whose inclusion is decided by the `unit_flag` rules;
-- the UB tensors accessed by `tla.load`, `tla.store`, `tla.gather`, `tla.scalar_load`, and `tla.scalar_store` within one `tla.vec.func`;
+- the UB tensors accessed by `tla.load`, `tla.store`, `tla.gather`, `tla.scatter`, `tla.scalar_load`, and `tla.scalar_store` within one `tla.vec.func`;
 - recast, offset, tensor, and tile view aliases derived from the same `tla.alloc_ptr`;
 - statically traceable runtime conditional buffer selection.
 
@@ -165,7 +165,7 @@ The resource collection rules are as follows:
 | `tla.copy` with a UB source | `mte3` | the on-chip src and dst |
 | `tla.copy` with an L0C source | `fix` | the on-chip src and dst, plus the quant scale passed as a tensor; when `unit_flag=3` the L0C is handled by the unit flag protocol and is not locked again |
 | `tla.mmad` / `tla.mmad_mx` | `cube` | L0A, L0B, and the bias (when `bias` is supplied); also the L0C accumulator when the unit flag is not enabled |
-| `tla.vec.func` | `vector` | the UB roots accessed by load/store/gather/scalar load/store in the region, locked uniformly after deduplication |
+| `tla.vec.func` | `vector` | the UB roots accessed by load/store/gather/scatter/scalar load/store in the region, locked uniformly after deduplication |
 
 GM operands are filtered out during resource normalization. When one instruction accesses the same root multiple times, it is locked only once.
 

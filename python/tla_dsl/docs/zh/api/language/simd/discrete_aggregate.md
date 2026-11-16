@@ -14,7 +14,7 @@ Do not regenerate this file from a glossary.
 
 [语言参考](../index.md) | [API 速查](../../quick_reference.md)
 
-按索引 gather，以及带 mask 的归约（`VectorSSA.reduce`）。
+按索引 gather、将寄存器数据 scatter 到 UB，以及带 mask 的归约（`VectorSSA.reduce`）。
 
 ## `tla.VectorSSA.reduce`
 
@@ -115,4 +115,51 @@ tla.gather(x: Tensor | VectorSSA, y: VectorSSA, *, mask: MaskSSA | None = None) 
 with tla.vec.func(mode="simd"):
     vals = tla.gather(ub_tile, idx_i32)
     w_brc = tla.gather(w, idx_u16)  # Reg→Reg
+```
+
+---
+
+## `tla.scatter`
+
+**源码：** [`catlass.core_api.scatter`](../../../../../catlass/core_api.py)
+
+功能说明：
+
+将寄存器数据按相对于 `dst` 基地址的元素偏移离散写入 UB。
+有效 lane `j` 写入 `dst[indices[j]] = src[j]`；8 位数据则取 `src[2*j]`。
+目标 layout 不对偏移进行缩放。
+
+函数原型：
+
+```python
+tla.scatter(dst: Tensor, src: VectorSSA, indices: VectorSSA, *, mask: MaskSSA | None = None) -> None
+```
+
+参数说明：
+
+- `dst`（`Tensor`）：UB 目标，与 `src` 的 dtype 一致。
+- `src`（`VectorSSA`）：一个寄存器，元素类型为
+  i8/u8/i16/u16/i32/u32/i64/u64/f16/bf16/f32。
+- `indices`（`VectorSSA`）：无符号元素偏移；8/16 位数据使用 u16，
+  32 位数据使用 u32，64 位数据使用 u32 或 u64。
+- `mask`（`MaskSSA | None`）：8/16 位数据使用 128 lane 谓词，
+  32 位使用 64 lane，64 位使用 32 lane。`None` 表示全部有效；
+  被屏蔽的目标元素保留原值。
+
+约束说明：
+
+- 须在 `@tla.kernel` 及 `tla.vec.func(mode="simd")` 内调用。
+- 调用者须保证目标基地址 32 字节对齐，有效索引唯一且位于目标分配范围内。
+- 源与索引各占用一个 256 字节寄存器。索引数量须覆盖源的全部有效 lane；
+  8 位数据需要 ceil(valid_lanes / 2) 个索引。
+- 64 位数据仅使用前 32 个 u32 索引；u64 索引仅使用低 32 位。
+- 通用 i64/u64 tensor load/copy 尚不支持，使用 `tla.extern` 生成对应寄存器，
+  通过重解释的字节视图搬运数据。
+
+调用示例：
+
+```python
+with tla.vector():
+    with tla.vec.func(mode="simd"):
+        tla.scatter(dst_ub, values, indices_u32)
 ```

@@ -3274,6 +3274,73 @@ static LogicalResult lowerGather(
     return success();
 }
 
+// HIVMAVE's VFScatterOp has no backend implementation. Preserve the native
+// Ascend C type/index/predicate contract through a typed, linked AIV helper.
+static LogicalResult lowerScatter(
+    ::tla::ScatterOp op, OpBuilder& b, ModuleOp module, DenseMap<Value, Value>& valueMap,
+    AutoFullPredicateCache& fullMasks)
+{
+    Location loc = op.getLoc();
+    Value dst = valueMap.lookup(op.getDst());
+    Value src = valueMap.lookup(op.getSrc());
+    Value indices = valueMap.lookup(op.getIndices());
+    if (!dst || !src || !indices)
+        return failure();
+    auto dstType = dyn_cast<MemRefType>(dst.getType());
+    auto srcType = dyn_cast<VectorType>(src.getType());
+    auto indexType = dyn_cast<VectorType>(indices.getType());
+    if (!dstType || dstType.getRank() != 1 || !srcType || !indexType)
+        return failure();
+    Type element = op.getSrc().getType().getElementType();
+    auto nativeSrcType = VectorType::get({2048 / element.getIntOrFloatBitWidth()}, element);
+    if (srcType != nativeSrcType) {
+        src = b.create<UnrealizedConversionCastOp>(loc, nativeSrcType, src).getResult(0);
+        srcType = nativeSrcType;
+    }
+    Type indexElement = op.getIndices().getType().getElementType();
+    auto nativeIndexType = VectorType::get({2048 / indexElement.getIntOrFloatBitWidth()}, indexElement);
+    if (indexType != nativeIndexType) {
+        indices = b.create<UnrealizedConversionCastOp>(loc, nativeIndexType, indices).getResult(0);
+        indexType = nativeIndexType;
+    }
+    // One declaration per native type pair, independent of tile shape/offset.
+    auto layout = StridedLayoutAttr::get(b.getContext(), ShapedType::kDynamic, {ShapedType::kDynamic});
+    auto abiDstType =
+        MemRefType::get({ShapedType::kDynamic}, dstType.getElementType(), layout, dstType.getMemorySpace());
+    if (dstType != abiDstType) {
+        dst = b.create<mlir::memref::CastOp>(loc, abiDstType, dst);
+        dstType = abiDstType;
+    }
+    std::string dataName;
+    if (element.isF32())
+        dataName = "float";
+    else if (element.isF16())
+        dataName = "half";
+    else if (element.isBF16())
+        dataName = "bfloat16_t";
+    else if (auto integer = dyn_cast<IntegerType>(element))
+        dataName = std::string(integer.isUnsigned() ? "uint" : "int") + std::to_string(integer.getWidth()) + "_t";
+    else
+        return op.emitOpError("unsupported scatter element type");
+    unsigned indexBits = indexType.getElementType().getIntOrFloatBitWidth();
+    std::string name = "scatter_" + dataName + "_u" + std::to_string(indexBits);
+    auto pregType = fullPregVecType(b.getContext());
+    int64_t lanes = 2048 / std::max(element.getIntOrFloatBitWidth(), 16u);
+    Value mask = op.getMask() ? valueMap.lookup(op.getMask()) : fullMasks.get(loc, lanes);
+    if (!mask)
+        return failure();
+    mask = castMaskToPregType(b, loc, mask, pregType);
+    auto callee = module.lookupSymbol<func::FuncOp>(name);
+    if (!callee) {
+        OpBuilder moduleBuilder(module.getBodyRegion());
+        auto fnType = FunctionType::get(b.getContext(), {dstType, srcType, indexType, pregType}, {});
+        callee = moduleBuilder.create<func::FuncOp>(loc, name, fnType);
+        annotateAivLibraryCall(callee);
+    }
+    b.create<func::CallOp>(loc, callee, ValueRange{dst, src, indices, mask});
+    return success();
+}
+
 static LogicalResult lowerVectorUnary(
     Operation& op, const VectorUnaryInfo* info, OpBuilder& b, ModuleOp module, DenseMap<Value, Value>& valueMap,
     AutoFullPredicateCache& fullMasks)
@@ -3333,7 +3400,15 @@ static LogicalResult lowerUpdateMask(
     if (failed(opCtx))
         return updateMaskOp.emitError("unsupported tla.update_mask dtype: ") << updateMaskOp.getDtype(), failure();
     auto plt = createPredicatePlt(b, loc, opCtx->maskVecType, opCtx->lanes, trueShape);
-    valueMap[updateMaskOp.getMask()] = plt.getRes();
+    Value mask = plt.getRes();
+    if (opCtx->lanes == 32) {
+        // Ascend C's single-register b64 predicate occupies every eighth bit.
+        // plt.b32 produces every fourth bit; Scatter packs this b64 mask back
+        // to b32 while splitting each source element into two 32-bit stores.
+        Value lower = b.create<arith::ConstantIntOp>(loc, 0, 32);
+        mask = b.create<hivm_regbaseintrins::PunpackInstrOp>(loc, opCtx->maskVecType, mask, lower).getResult();
+    }
+    valueMap[updateMaskOp.getMask()] = mask;
     // new_true_shape = true_shape - lanes, which is exactly what plt computes.
     // We materialize it with index arithmetic rather than consuming plt's second
     // result: that result is i32 in hardware but typed index, so carrying it
@@ -4198,6 +4273,9 @@ static LogicalResult lowerNestedVectorOp(
     if (auto gatherOp = dyn_cast<::tla::GatherOp>(op))
         return lowerGather(gatherOp, b, module, valueMap, fullMasks);
 
+    if (auto scatterOp = dyn_cast<::tla::ScatterOp>(op))
+        return lowerScatter(scatterOp, b, module, valueMap, fullMasks);
+
     if (auto info = getVectorUnaryInfo(&op))
         return lowerVectorUnary(op, &*info, b, module, valueMap, fullMasks);
 
@@ -4211,7 +4289,20 @@ static LogicalResult lowerNestedVectorOp(
         auto opCtx = deriveVecCtxForElement(maskOp.getDtype());
         if (failed(opCtx))
             return maskOp.emitError("unsupported tla.create_mask dtype: ") << maskOp.getDtype(), failure();
-        valueMap[maskOp.getResult()] = createPredicatePge(b, loc, opCtx->maskVecType, opCtx->lanes, *pattern);
+        if (opCtx->lanes == 32) {
+            // PGE has no b64 mode. Select the single-register fraction in b32
+            // first, then expand its low half to the native b64 predicate.
+            if (*pattern == hivmave::PgePattern::H)
+                pattern = hivmave::PgePattern::VL16;
+            else if (*pattern == hivmave::PgePattern::Q)
+                pattern = hivmave::PgePattern::VL8;
+        }
+        Value mask = createPredicatePge(b, loc, opCtx->maskVecType, opCtx->lanes, *pattern);
+        if (opCtx->lanes == 32) {
+            Value lower = b.create<arith::ConstantIntOp>(loc, 0, 32);
+            mask = b.create<hivm_regbaseintrins::PunpackInstrOp>(loc, opCtx->maskVecType, mask, lower).getResult();
+        }
+        valueMap[maskOp.getResult()] = mask;
         return success();
     }
 
@@ -4634,6 +4725,10 @@ static LogicalResult collectVectorHelperOperands(
                 addVectorHelperOperand(gatherOp.getX(), operands, aliases);
             continue;
         }
+        if (auto scatterOp = dyn_cast<::tla::ScatterOp>(op)) {
+            addVectorHelperOperand(scatterOp.getDst(), operands, aliases);
+            continue;
+        }
         // A memref-backed tensor.ptr in an extern argument reads the aligned address.
         if (auto addr = dyn_cast<mlir::memref::ExtractAlignedPointerAsIndexOp>(op)) {
             auto source = getScalarAccessHelperMemref(addr.getSource(), outlinedRegion, callSite, dominanceInfo);
@@ -4891,6 +4986,7 @@ public:
         SmallVector<::tla::ArangeOp, 4> aranges;
         SmallVector<Operation*, 4> computeOps;
         SmallVector<::tla::StoreOp, 2> stores;
+        SmallVector<::tla::ScatterOp, 2> scatters;
         SmallVector<::tla::StoreUpdateOp, 2> storeUpdates;
         SmallVector<Value, 4> unalignLoads;
         int unalignStores = 0;
@@ -4914,6 +5010,8 @@ public:
                 updateMasks.push_back(updateMask);
             } else if (auto arange = dyn_cast<::tla::ArangeOp>(op)) {
                 aranges.push_back(arange);
+            } else if (auto scatter = dyn_cast<::tla::ScatterOp>(op)) {
+                scatters.push_back(scatter);
             } else if (auto store = dyn_cast<::tla::StoreOp>(op)) {
                 stores.push_back(store);
             } else if (auto storeUpdate = dyn_cast<::tla::StoreUpdateOp>(op)) {
@@ -4927,7 +5025,8 @@ public:
         });
         if (hasDebugPrint && module->hasAttr("tla.ub_reserve_released"))
             return vecFuncOp.emitError("VF printing requires the default reserved UB");
-        if (!hasExtern && stores.empty() && storeUpdates.empty() && unalignStores == 0 && !hasDebugPrint) {
+        if (!hasExtern && stores.empty() && scatters.empty() && storeUpdates.empty() && unalignStores == 0 &&
+            !hasDebugPrint) {
             // Scalar-only (or empty) VF cannot be outlined as a BiSheng helper — that
             // path requires tla.store or tla.store_update. If there is also no tile
             // load/compute, inline the body into the parent (same as tla.vector
@@ -5130,6 +5229,12 @@ public:
             }
             for (Value result : computeOp->getResults())
                 producedValues.insert(result);
+        }
+        for (::tla::ScatterOp scatter : scatters) {
+            if (!producedValues.contains(scatter.getSrc()) || !producedValues.contains(scatter.getIndices()))
+                return rewriter.notifyMatchFailure(vecFuncOp, "expected tla.scatter registers from a legal producer");
+            if (scatter.getMask() && !producedValues.contains(scatter.getMask()))
+                return rewriter.notifyMatchFailure(vecFuncOp, "expected tla.scatter mask from a legal mask producer");
         }
         for (::tla::StoreOp store : stores) {
             if (store.getMask() && !producedValues.contains(store.getMask()))

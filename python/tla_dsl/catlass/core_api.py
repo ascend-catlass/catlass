@@ -364,13 +364,10 @@ _MAKE_TENSOR_SUPPORTED_ELEMENT_TYPES = frozenset(
     }
 )
 
-# The only u64 tile the frontend admits, and only through ``make_tensor``: the
-# per-channel fixpipe dequant words, staged in L1 as a flat VectorLayout run (one
-# packed word per output channel). Nothing else has a u64 copy route -- the flat
-# GM -> L1 bc wrapper is the sole registration -- so a u64 tile on UB, GM or L0
-# cannot be moved at all. Keeping u64 out of the global set above means those
-# tiles are refused where they are built, instead of failing much later in bc
-# with no hint about which tensor was wrong.
+# Additional 64-bit tiles admitted only through ``make_tensor``: i64/u64 UB
+# destinations for Scatter, and u64 L1 VectorLayout per-channel fixpipe dequant
+# words. Keep them out of the global set: other copy/load routes remain limited
+# to their existing element types. UB payload can be moved through a recast view.
 _U64_TILE_ADDRSPACE = "l1"
 _U64_TILE_LAYOUT_TAG = "VectorLayout"
 
@@ -5501,15 +5498,18 @@ def make_tensor(
             f"tla.make_tensor cannot derive element type from ptr pointee {ptr_ty.pointee}"
         ) from exc
     if dtype not in _MAKE_TENSOR_SUPPORTED_ELEMENT_TYPES and not (
-        dtype == "u64"
-        and addr == _U64_TILE_ADDRSPACE
-        and layout._layout_tag == _U64_TILE_LAYOUT_TAG
+        (dtype in ("i64", "u64") and addr == "ub")
+        or (
+            dtype == "u64"
+            and addr == _U64_TILE_ADDRSPACE
+            and layout._layout_tag == _U64_TILE_LAYOUT_TAG
+        )
     ):
         raise TlaLoweringError(
             f"tla.make_tensor expects a supported element type, got [{dtype}]"
             + (
-                "; u64 is only accepted as the L1 VectorLayout tile holding the "
-                "per-channel fixpipe dequant words"
+                "; u64 is only accepted in UB for scatter or as the L1 "
+                "VectorLayout tile holding the per-channel fixpipe dequant words"
                 if dtype == "u64"
                 else ""
             )
@@ -10778,6 +10778,120 @@ def gather(
 
 
 @dsl_user_op
+def scatter(
+    dst: Tensor,
+    src: VectorSSA,
+    indices: VectorSSA,
+    *,
+    mask: MaskSSA | None = None,
+    loc: mlir_ir.Location | None = None,
+) -> None:
+    """Directory: SIMD Vector Compute / Discrete and Aggregate
+
+    Description:
+        Scatter register values into UB at element offsets relative to `dst`.
+        Enabled lane `j` writes `dst[indices[j]] = src[j]`; for 8-bit data,
+        it writes `src[2*j]` instead. Offsets are not scaled by the layout.
+
+        Parameters:
+        - `dst` (`Tensor`): UB destination with the same dtype as `src`.
+        - `src` (`VectorSSA`): One register of i8/u8/i16/u16/i32/u32/
+          i64/u64/f16/bf16/f32 values.
+        - `indices` (`VectorSSA`): Unsigned element offsets: u16 for 8/16-bit
+          data, u32 for 32-bit data, and u32 or u64 for 64-bit data.
+        - `mask` (`MaskSSA | None`): Predicate with 128 lanes for 8/16-bit
+          data, 64 for 32-bit, or 32 for 64-bit. `None` enables all lanes;
+          masked-off destination elements retain their values.
+
+        Constraints:
+        - Call inside `@tla.kernel` and `tla.vec.func(mode="simd")`.
+        - The caller must ensure a 32-byte-aligned destination base and unique
+          enabled indices within the destination allocation.
+        - Source and indices each occupy one 256-byte register. Indices must
+          cover all valid source lanes, or ceil(valid_lanes / 2) for 8-bit data.
+        - For 64-bit data, only the first 32 u32 indices are used; u64 indices
+          use only their low 32 bits.
+        - General i64/u64 tensor load/copy is unsupported. Use `tla.extern`
+          for these registers and recast byte views for data transfers.
+
+        Example:
+        ```python
+        with tla.vector():
+            with tla.vec.func(mode="simd"):
+                tla.scatter(dst_ub, values, indices_u32)
+        ```
+    """
+    _runtime._require_kernel_simd_region("scatter")
+    _require_category("scatter", "dst", dst, "tensor", 0)
+    _require_category("scatter", "src", src, "vector_ssa", 1)
+    _require_category("scatter", "indices", indices, "vector_ssa", 2)
+    dst_value = _as_value(dst)
+    src_value = _as_value(src)
+    indices_value = _as_value(indices)
+    dst_desc = _tla_tensor_descriptor_from_type_or_value(dst_value)
+    src_desc = _vector_ssa_type_for_mlir_value(src_value)
+    indices_desc = _vector_ssa_type_for_mlir_value(indices_value)
+    if dst_desc is None:
+        _op_error("scatter", "invalid argument 'dst' (position 0)")
+    if dst_desc.addrspace.lower() != "ub":
+        _op_error(
+            "scatter",
+            f"invalid argument 'dst' (position 0): expected addrspace ub, "
+            f"got {dst_desc.addrspace}",
+        )
+    src_token = src_desc.element_type.lower()
+    supported_types = frozenset(
+        {"i8", "u8", "i16", "u16", "i32", "u32", "i64", "u64", "f16", "bf16", "f32"}
+    )
+    if src_token not in supported_types:
+        _op_error(
+            "scatter",
+            f"unsupported src element type {src_desc.element_type}; expected "
+            f"one of {', '.join(sorted(supported_types))}",
+        )
+    if dst_desc.element_type.lower() != src_token:
+        _op_error(
+            "scatter",
+            f"src and dst element types must match, got {src_desc.element_type} "
+            f"and {dst_desc.element_type}",
+        )
+    element_bytes = dtype_size_bytes(src_token)
+    index_types = {1: ("u16",), 2: ("u16",), 4: ("u32",), 8: ("u32", "u64")}
+    if indices_desc.element_type.lower() not in index_types[element_bytes]:
+        _op_error(
+            "scatter",
+            f"indices must have native unsigned element type "
+            f"{' or '.join(index_types[element_bytes])} for {src_token} data, "
+            f"got {indices_desc.element_type}",
+        )
+    if src_desc.valid_lanes is not None and indices_desc.valid_lanes is not None:
+        scatter_lanes = (
+            (src_desc.valid_lanes + 1) // 2
+            if element_bytes == 1
+            else src_desc.valid_lanes
+        )
+        if indices_desc.valid_lanes < scatter_lanes:
+            _op_error(
+                "scatter",
+                f"indices has {indices_desc.valid_lanes} valid lanes, but src "
+                f"requires at least {scatter_lanes} scatter indices",
+            )
+    mask_value = None
+    if mask is not None:
+        _require_category("scatter", "mask", mask, "mask_ssa", 3)
+        mask_value = _as_value(mask)
+        mask_lanes = _mask_ssa_type_for_mlir_value(mask_value).physical_lanes
+        expected_mask_lanes = 128 if element_bytes == 1 else 256 // element_bytes
+        if mask_lanes != expected_mask_lanes:
+            _op_error(
+                "scatter",
+                f"mask has {mask_lanes} predicate lanes, expected "
+                f"{expected_mask_lanes} for {src_token} scatter",
+            )
+    _tla_ops_gen.scatter(dst_value, src_value, indices_value, mask=mask_value, loc=loc)
+
+
+@dsl_user_op
 def arch_block_idx(*, loc: mlir_ir.Location | None = None) -> Int32:
     """Directory: System Variable Access / Architecture Helpers
     Description:
@@ -12097,6 +12211,7 @@ __all__ = [
     "unpack",
     "RegPart",
     "gather",
+    "scatter",
     "ReductionOp",
     "cmp",
     "make_ptr",

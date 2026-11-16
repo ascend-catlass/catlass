@@ -272,6 +272,29 @@ def Tla_GatherOp : Tla_Op<"gather", [Pure]> {
   let hasVerifier = 1;
 }
 
+def Tla_ScatterOp : Tla_Op<"scatter", []> {
+  let summary = "Scatter a register into UB by element indices";
+  let description = [{
+    Ascend C Reg::Scatter for a single 256-byte source register. The UB
+    destination and source element types must match. Indices are unsigned:
+    u16 for b8/b16 data, u32 for b32, and u32 or u64 for b64.
+    For b8 only src[2*i] participates, using index[i] and a b16 predicate.
+    For b64 with u32 indices only the first 32 indices participate.
+    The optional mask has 128/128/64/32 lanes for b8/b16/b32/b64 respectively.
+    Disabled lanes leave UB untouched. Indices are element offsets relative
+    to the 32-byte-aligned destination base and must be unique and in bounds.
+    Lowering uses AIV bitcode because HIVMAVE scatter lowering is unavailable.
+  }];
+  let arguments = (ins Tla_TensorType:$dst, Tla_VectorSSAType:$src,
+                       Tla_VectorSSAType:$indices, Optional<Tla_MaskSSAType>:$mask);
+  let assemblyFormat = [{
+    $dst `,` $src `,` $indices (`mask` $mask^)? attr-dict `:`
+    type($dst) `,` qualified(type($src)) `,` qualified(type($indices))
+    (`mask` qualified(type($mask))^)?
+  }];
+  let hasVerifier = 1;
+}
+
 def Tla_HistogramsOp : Tla_Op<"histograms", [Pure]> {
   let summary = "Reg FREQUENCY/ACCUMULATE histogram via AIV bc";
   let description = [{
