@@ -562,7 +562,7 @@ def run(args: argparse.Namespace) -> int:
         # against the same-precision CPU result -- whichever passes. The ratios
         # use the per-tensor thresholds, since per-channel dequant accumulates the
         # same way.
-        passed1 = compare(result, host_golden)
+        passed1 = compare(result, host_golden, args.k)
 
         metrics = compute_error_metrics(
             result,

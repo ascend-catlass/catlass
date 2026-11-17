@@ -477,7 +477,7 @@ def run(args: argparse.Namespace) -> int:
         )
         return 0 if passed else 1
     else:
-        passed1 = compare(result, host_golden)
+        passed1 = compare(result, host_golden, args.k)
 
         metrics = compute_error_metrics(
             result,
