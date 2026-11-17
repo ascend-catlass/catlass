@@ -1597,7 +1597,9 @@ def _const_f32(value: float, *, loc: mlir_ir.Location | None = None) -> mlir_ir.
     return op.results[0]
 
 
-_FULL_SUPPORTED_DTYPES = frozenset(("i8", "i16", "i32", "i64", "bf16", "f16", "f32"))
+# i64 is not supported by tla.full: the broadcast crashes device compilation
+# in hivmc-a5 (clang exit 139), for the literal and runtime paths alike.
+_FULL_SUPPORTED_DTYPES = frozenset(("i8", "i16", "i32", "bf16", "f16", "f32"))
 
 _ARANGE_SUPPORTED_DTYPES = frozenset(("i8", "i16", "i32", "i64"))
 _ARANGE_ORDERS = frozenset(("increase", "decrease"))
@@ -8189,16 +8191,18 @@ def full(
         Fill a vector SSA with a scalar, or broadcast a one-lane fragment.
 
         Parameters:
-        - `value` (`bool | int | float | Numeric | VectorSSA`): Fill constant, or a
-          one-lane vector fragment to broadcast. Required.
+        - `value` (`bool | int | float | Numeric | VectorSSA`): Fill constant, a
+          runtime scalar SSA, or a one-lane vector fragment to broadcast. Required.
         - `dtype` (`type[Numeric]`): Vector element type. Required.
         - `mask` (`MaskSSA | None`): Predicates which lanes are written. Optional;
           defaults to writing every lane.
 
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function.
-        - Must be called inside `tla.vec.func()`; `value` must be a Python scalar
-          literal, a host `Numeric`, or a one-lane vector fragment.
+        - Must be called inside `tla.vec.func(mode="simd")`; `value` must be a
+          Python scalar literal, a host `Numeric`, a runtime scalar SSA (e.g. a
+          kernel scalar argument or a tensor element read; its type must match
+          `dtype`), or a one-lane vector fragment.
         - A vector `value` must have exactly one valid lane and its element type
           must match `dtype`.
         - `mask`, when given, must match the result element type.
@@ -8216,6 +8220,8 @@ def full(
     if state is None or not state.active_regions:
         raise TlaCoreAPIError("tla.full is only allowed inside tla.vec.func")
     _runtime._require_enclosing_region("full", "vec.func")
+    if _runtime._in_simt_vec_func():
+        _op_error("full", "is only supported in tla.vec.func(mode='simd')")
     _require_dtype("full", "dtype", dtype, 1)
     mask_value = None
     if mask is not None:
@@ -8272,22 +8278,37 @@ def full(
         )
 
     resolved = _resolve_bound_value(value)
+    # Computed once for both the runtime-scalar and the literal paths below.
+    context = loc.context if loc is not None else mlir_ir.Context.current
     if isinstance(resolved, Numeric):
         if isinstance(resolved.value, mlir_ir.Value):
-            _op_error(
-                "full",
-                "value must be a Python scalar literal, host Numeric, or "
-                "one-lane vector fragment",
+            # A runtime scalar SSA (kernel scalar argument, tensor element
+            # read). The SIMD backend lowers a plain scalar source via AVE
+            # broadcast (lowerFull -> VFBroadcastScalarMaskOp, i.e. vdups.z);
+            # the scalar type must equal the result element type exactly
+            # (lowerFull rejects the mismatch too); catch it here so it
+            # surfaces at trace time.
+            expected = desc.element_mlir_type(context)
+            if resolved.value.type != expected:
+                _op_error(
+                    "full",
+                    f"invalid argument 'value' (position 0): runtime scalar "
+                    f"type {resolved.value.type} does not match result element "
+                    f"type {expected}; cast the scalar first",
+                )
+            return VectorSSA(
+                _tla_ops_gen.full(
+                    _coerce_type(desc), resolved.value, mask=mask_value, loc=loc
+                )
             )
         resolved = resolved.value
     if not isinstance(resolved, (bool, int, float)):
         _op_error(
             "full",
-            "value must be a Python scalar literal, host Numeric, or one-lane "
-            "vector fragment",
+            "value must be a Python scalar literal, host Numeric, a runtime "
+            "scalar SSA, or one-lane vector fragment",
         )
     scalar_value = int(resolved) if isinstance(resolved, bool) else resolved
-    context = loc.context if loc is not None else mlir_ir.Context.current
     scalar = _scalar_constant_for_element_type(
         "full",
         scalar_value,

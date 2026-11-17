@@ -55,13 +55,41 @@ def full_on_lhs(src: tla.Tensor, dst: tla.Tensor) -> None:
 
 
 @tla.kernel
-def full_index_ssa_is_rejected(src: tla.Tensor, dst: tla.Tensor) -> None:
+def full_rejects_runtime_scalar_type_mismatch(src: tla.Tensor, dst: tla.Tensor) -> None:
+    # block_idx() is an i32 scalar SSA; an f32 result requires an f32 scalar.
     idx = tla.arch.block_idx()
     src_tile = tla.tile_view(src, tla.make_shape(64), tla.make_coord(0))
     dst_tile = tla.tile_view(dst, tla.make_shape(64), tla.make_coord(0))
     with tla.vector():
         with tla.vec.func(mode="simd"):
             dst_tile.store(src_tile.load() + tla.full(idx, tla.Float32))
+
+
+@tla.kernel
+def full_rejects_runtime_scalar_i64(src: tla.Tensor, flag: tla.Int64) -> None:
+    # An Int64 kernel scalar argument hits the runtime-scalar path; i64
+    # broadcast crashes device compilation (hivmc-a5 clang 139), so it is
+    # restricted at trace time.
+    with tla.vector():
+        with tla.vec.func(mode="simd"):
+            tla.full(flag, tla.Int64)
+
+
+@tla.kernel
+def full_rejects_simt_mode(src: tla.Tensor) -> None:
+    with tla.vector():
+        with tla.vec.func(mode="simt", thread_block_dim=1):
+            tla.full(0, tla.Int32)
+
+
+@tla.kernel
+def full_accepts_runtime_scalar(src: tla.Tensor, dst: tla.Tensor) -> None:
+    idx = tla.arch.block_idx()
+    src_tile = tla.tile_view(src, tla.make_shape(64), tla.make_coord(0))
+    dst_tile = tla.tile_view(dst, tla.make_shape(64), tla.make_coord(0))
+    with tla.vector():
+        with tla.vec.func(mode="simd"):
+            dst_tile.store(src_tile.load() + tla.full(idx, tla.Int32))
 
 
 @tla.kernel
@@ -96,12 +124,37 @@ def test_full_on_lhs_emits_tlair(compiler_tlair: Any) -> None:
     assert "tla.add" in mlir
 
 
-def test_full_rejects_index_ssa_operand(compiler_tlair: Any) -> None:
-    with pytest.raises(tla.TlaCoreAPIError, match="Python scalar literal"):
+def test_full_rejects_runtime_scalar_type_mismatch(compiler_tlair: Any) -> None:
+    with pytest.raises(tla.TlaCoreAPIError, match="does not match result element type"):
         compiler_tlair(
-            full_index_ssa_is_rejected,
+            full_rejects_runtime_scalar_type_mismatch,
             type_args=(_ub_tensor(), _ub_tensor()),
         )
+
+
+def test_full_rejects_runtime_scalar_i64(compiler_tlair: Any) -> None:
+    # i64 is absent from _FULL_SUPPORTED_DTYPES: the broadcast crashes device
+    # compilation (hivmc-a5 clang 139) for the literal and runtime paths alike.
+    with pytest.raises(tla.TlaCoreAPIError, match="unsupported vector element dtype"):
+        compiler_tlair(
+            full_rejects_runtime_scalar_i64,
+            type_args=(_ub_tensor(tla.Int64), tla.Int64(7)),
+        )
+
+
+def test_full_rejects_simt_mode(compiler_tlair: Any) -> None:
+    with pytest.raises(tla.TlaCoreAPIError, match="only supported in tla.vec.func"):
+        compiler_tlair(full_rejects_simt_mode, type_args=(_ub_tensor(tla.Int32),))
+
+
+def test_full_accepts_runtime_scalar(compiler_tlair: Any) -> None:
+    mlir = compiler_tlair(
+        full_accepts_runtime_scalar,
+        type_args=(_ub_tensor(tla.Int32), _ub_tensor(tla.Int32)),
+    )
+
+    assert "tla.full" in mlir
+    assert "tla.add" in mlir
 
 
 def test_full_rejects_invalid_dtype(compiler_tlair: Any) -> None:

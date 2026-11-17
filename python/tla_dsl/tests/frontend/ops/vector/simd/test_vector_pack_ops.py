@@ -19,7 +19,10 @@ _UNPACK_PAIRS = [
     (tla.Int16, tla.Int32),
     (tla.UInt16, tla.UInt32),
 ]
-_SIGNED_DTYPE = {8: tla.Int8, 16: tla.Int16, 32: tla.Int32, 64: tla.Int64}
+_SIGNED_DTYPE = {8: tla.Int8, 16: tla.Int16, 32: tla.Int32, 64: tla.Int32}
+# 64-bit "storage" falls back to i32: tla.full does not support i64 (device
+# compilation crashes), and an equal-width i32 vector bitcast to the 64-bit
+# source type still exercises the pack rejection path.
 _PACK_CASES = [
     ("mask", tla.Int32, tla.Int16),
     ("mask", tla.Int16, tla.Int8),

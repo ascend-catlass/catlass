@@ -30,8 +30,8 @@ tla.full(value: bool | int | float | Numeric | VectorSSA, dtype: type[Numeric], 
 
 Parameters:
 
-- `value` (`bool | int | float | Numeric | VectorSSA`): Fill constant, or a
-  one-lane vector fragment to broadcast. Required.
+- `value` (`bool | int | float | Numeric | VectorSSA`): Fill constant, a
+  runtime scalar SSA, or a one-lane vector fragment to broadcast. Required.
 - `dtype` (`type[Numeric]`): Vector element type. Required.
 - `mask` (`MaskSSA | None`): Predicates which lanes are written. Optional;
   defaults to writing every lane.
@@ -39,8 +39,10 @@ Parameters:
 Constraints:
 
 - Must be called inside a `@tla.kernel`-decorated kernel function.
-- Must be called inside `tla.vec.func()`; `value` must be a Python scalar
-  literal, a host `Numeric`, or a one-lane vector fragment.
+- Must be called inside `tla.vec.func(mode="simd")`; `value` must be a
+  Python scalar literal, a host `Numeric`, a runtime scalar SSA (e.g. a
+  kernel scalar argument or a tensor element read; its type must match
+  `dtype`), or a one-lane vector fragment.
 - A vector `value` must have exactly one valid lane and its element type
   must match `dtype`.
 - `mask`, when given, must match the result element type.

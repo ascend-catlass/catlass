@@ -919,6 +919,10 @@ mlir::LogicalResult FullOp::verify()
 {
     if (!hasEnclosingRegion<VecFuncOp>(getOperation()))
         return emitOpError("must be nested inside a tla.vec.func region");
+    if (auto region = getOperation()->getParentOfType<VecFuncOp>())
+        if (auto mode = region->getAttrOfType<mlir::StringAttr>("mode"))
+            if (!mode.getValue().equals_insensitive("simd"))
+                return emitOpError("is only supported in tla.vec.func(mode='simd')");
     auto resultType = mlir::dyn_cast<VectorSSAType>(getResult().getType());
     if (!resultType)
         return emitOpError("expected a !tla.vector result");

@@ -526,6 +526,13 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         "host-make-tensor-torch-vadd",
         [["end_to_end/host_make_tensor_torch_vadd.py", *dev, "--block-num", "1"]],
     )
+    # tla.full with a runtime scalar (kernel argument captured into the vector
+    # helper, lowered to ave.hir.broadcast / vdups.z). Kernel is not
+    # block-partitioned, so launch a single vector core.
+    yield (
+        "full-scalar-broadcast",
+        [["end_to_end/full_scalar_broadcast_op.py", *dev, "--block-num", "1"]],
+    )
 
     # basic_mixed fixpipe per-tensor quant: the cube writes L0C into the UB tile
     # of the AIV that owns the block and the vector side stores it out, so the
