@@ -52,6 +52,9 @@ stages:
         container:
           image: swr.cn-north-4.myhuaweicloud.com/ci_cann/ubuntu20.04.05_x86:k8s_v1.1006
       JOB_pre:
+        permissions:
+          repository: read
+          id-token: write
         name: Test_PreBuild
         uses: cann/.gitcode/.gitcode/workflows/pre_action.yml@master
     pre:
@@ -61,24 +64,36 @@ stages:
     name: compile
     jobs:
       JOB_codecheck_action:
+        permissions:
+          repository: read
+          id-token: write
         name: codecheck_action
         uses: .gitcode/workflows/codecheck_action.yml
         with:
           precommit_image_version: ${{ jobs.JOB_image.outputs.precommit }}
           codecheck_image_version: ${{ jobs.JOB_image.outputs.codecheck }}
       JOB_arm_compile:
+        permissions:
+          repository: read
+          id-token: write
         name: arm_compile
         uses: .gitcode/workflows/arm_compile_action.yml
         with:
           task_name: 'arm_compile'
           image_version: ${{ jobs.JOB_image.outputs.Compile_Ascend_ARM }}
       JOB_arm_pre_smoke:
+        permissions:
+          repository: read
+          id-token: write
         name: arm_pre_smoke
         uses: .gitcode/workflows/arm_pre_smoke.yml
         with:
           task_name: 'arm_pre_smoke'
           image_version: ${{ jobs.JOB_image.outputs.PreSmoke }}
       JOB_UT_DSL:
+        permissions:
+          repository: read
+          id-token: write
         name: UT_DSL
         uses: .gitcode/workflows/x86_compile_action.yml
         with:
@@ -86,6 +101,9 @@ stages:
           task_name: 'UT_DSL'
           image_version: ${{ jobs.JOB_image.outputs.UT_dsl }}
       JOB_staticcheck_md_check:
+        permissions:
+          repository: read
+          id-token: write
         name: staticcheck_md_check
         uses: .gitcode/workflows/staticcheck_action.yml
         with:

@@ -23,13 +23,20 @@ jobs:
           allow-unsafe-pr-checkout: true
 
       -
+        name: oidc_auth
+        uses: huaweicloud-oidc-auth
+        with:
+          audience: ${{ secrets.audience }}
+          agency_urn: ${{ secrets.agency_urn }}
+          provider_urn: ${{ secrets.provider_urn }}
+          region: cn-north-4
+          duration: 3600
+      -
         name: download
         uses: obs-download
         with:
           endpoint: "https://obs.cn-north-4.myhuaweicloud.com"
           bucket: "ascend-ci"
-          access-key: ${{ secrets.AK }}
-          secret-key: ${{ secrets.SK }}
           key: |
             ${{ env.obs_path }}/pr_filelist.txt
             ${{ env.obs_path }}/pr_filelist_mod.txt
@@ -44,8 +51,6 @@ jobs:
           # set env
           export repo_name=${{env.repo_name}}
           export pr_id=${{ env.MERGE_ID }}
-          export AK=${{secrets.AK}}
-          export SK=${{secrets.SK}}
           export obs_smoke_path=${{ env.obs_smoke_path_A2 }}
           export obs_path=${{ env.obs_path }}
           export WORKSPACE=${{ steps.process_checkout.outputs.path }}
