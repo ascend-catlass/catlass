@@ -1,9 +1,8 @@
 // RUN: %tla_compile %s -o - | %filecheck %s --check-prefix=FP8
 //
 // fp8 on the fill route: the callee keeps the e4m3fn suffix and the value is
-// the i32 bit pattern. fp8 is 16-bit-or-less on the fill contract, so only the
-// zero pattern is meaningful for it -- the frontend enforces value==0, the
-// lowering itself just forwards the bits.
+// the repeated uint16 storage pattern carried in i32. This zero case retains
+// the original padding behavior alongside the nonzero constant routes.
 
 module {
   tla.func @fill_l1_zn_fp8() {

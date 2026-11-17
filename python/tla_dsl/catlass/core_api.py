@@ -6212,8 +6212,15 @@ def _modify_doc_copy(fn: Callable[..., Any]) -> None:
     )
 
 
-# Packed fp4/fp8 remain zero-only; 16/32-bit types accept scalar bit patterns.
-_FILL_ZERO_ONLY_TYPES = frozenset({"f4e2m1", "f4e1m2", "f8e4m3fn", "f8e5m2"})
+# Width, mantissa bits, exponent bias and largest finite positive encoding.
+# Packed FP4/FP8 constants are converted at trace time into a repeated
+# uint16 pattern, including four identical nibbles for packed fp4.
+_FILL_FLOAT_FORMATS = {
+    "f4e2m1": (4, 1, 1, 0x7),
+    "f4e1m2": (4, 2, 1, 0x7),
+    "f8e4m3fn": (8, 3, 7, 0x7E),
+    "f8e5m2": (8, 2, 15, 0x7B),
+}
 _FILL_INTEGER_TYPES = {
     "i16": (16, True),
     "u16": (16, False),
@@ -6226,7 +6233,10 @@ _FILL_FLOAT_TYPES = {
     "f32": (Float32, 0x7F800000),
 }
 _FILL_SUPPORTED_ELEMENT_TYPES = (
-    _FILL_ZERO_ONLY_TYPES | _FILL_INTEGER_TYPES.keys() | _FILL_FLOAT_TYPES.keys()
+    frozenset(_FILL_FLOAT_FORMATS)
+    | {"f8e8m0"}
+    | _FILL_INTEGER_TYPES.keys()
+    | _FILL_FLOAT_TYPES.keys()
 )
 
 
@@ -6237,12 +6247,6 @@ def _fill_value_bits(op_name: str, element_type: str, value: Any) -> int:
             op_name,
             f"fill value must be a trace-time int or float, got {type(value).__name__}",
         )
-    if element_type in _FILL_ZERO_ONLY_TYPES:
-        if value != 0:
-            _op_error(
-                op_name, f"fill of {element_type} supports only value 0, got {value!r}"
-            )
-        return 0
     if element_type in _FILL_INTEGER_TYPES:
         width, signed = _FILL_INTEGER_TYPES[element_type]
         if not isinstance(value, int):
@@ -6264,6 +6268,66 @@ def _fill_value_bits(op_name: str, element_type: str, value: Any) -> int:
             _op_error(op_name, f"fill value cannot be encoded as {element_type}")
         if math.isfinite(scalar) and (bits & exponent_mask) == exponent_mask:
             _op_error(op_name, f"fill value overflows {element_type}")
+    elif element_type == "f8e8m0":
+        # E8M0 codes 0..254 are 2**(code-127). Check integers before any
+        # float conversion can round an inexact scale to a power of two.
+        if isinstance(value, int):
+            exponent = value.bit_length()
+            is_power_of_two = value > 0 and (value & (value - 1)) == 0
+        else:
+            if not math.isfinite(value):
+                _op_error(op_name, "fill value must be finite")
+            fraction, exponent = math.frexp(value)
+            is_power_of_two = fraction == 0.5
+        if not is_power_of_two or not -126 <= exponent <= 128:
+            _op_error(
+                op_name,
+                "E8M0 fill requires a positive power of two in [2**-127, 2**127]",
+            )
+        return (exponent + 126) * 0x0101
+    elif element_type in _FILL_FLOAT_FORMATS:
+        try:
+            number = _builtins.float(value)
+        except OverflowError:
+            _op_error(
+                op_name, f"fill value is outside the finite range of {element_type}"
+            )
+        if not math.isfinite(number):
+            _op_error(op_name, "fill value must be finite")
+
+        width, mantissa_bits, bias, largest_code = _FILL_FLOAT_FORMATS[element_type]
+        mantissa_unit = 1 << mantissa_bits
+        largest_exp, largest_mantissa = divmod(largest_code, mantissa_unit)
+        largest_value = math.ldexp(
+            1 + largest_mantissa / mantissa_unit, largest_exp - bias
+        )
+        magnitude = _builtins.abs(number)
+        if magnitude > largest_value:
+            _op_error(
+                op_name,
+                f"fill value {value!r} is outside the finite range of {element_type}",
+            )
+        fraction, exponent = math.frexp(magnitude)
+        encoded_exp = exponent - 1 + bias
+        if magnitude == 0:
+            code = 0
+        else:
+            if encoded_exp <= 0:
+                significand = math.ldexp(magnitude, bias - 1 + mantissa_bits)
+                code = 0
+            else:
+                significand = math.ldexp(fraction, mantissa_bits + 1)
+                code = (encoded_exp - 1) << mantissa_bits
+            # Binary scaling is exact; fractional bits would require rounding.
+            if not significand.is_integer():
+                _op_error(
+                    op_name,
+                    f"fill value {value!r} is not exactly representable as {element_type}",
+                )
+            code += _builtins.int(significand)
+        if math.copysign(1.0, number) < 0:
+            code |= 1 << (width - 1)
+        return _builtins.sum(code << shift for shift in _builtins.range(0, 16, width))
     else:
         _op_error(op_name, f"unsupported fill element type {element_type!r}")
     return bits if bits < (1 << 31) else bits - (1 << 32)
@@ -6294,10 +6358,11 @@ def _tensor_fill_impl(
             f"got {dest_desc.addrspace}",
         )
     layout_tag = dest_desc.layout_tag
-    if layout_tag not in ("zN", "nZ"):
+    if layout_tag not in ("zN", "nZ", "zZMxScale", "nNMxScale"):
         _op_error(
             op_name,
-            "invalid argument 'tensor' (position 0): expected layout tag zN or nZ, "
+            "invalid argument 'tensor' (position 0): expected layout tag zN or nZ "
+            "for operands, zZMxScale or nNMxScale for E8M0, "
             f"got {layout_tag!r}",
         )
     element_type = str(dest_desc.element_type).strip().lower()
@@ -6305,8 +6370,14 @@ def _tensor_fill_impl(
         _op_error(
             op_name,
             f"unsupported element type {element_type!r}: fill supports "
-            "i16/u16/f16/bf16/i32/u32/f32 types and packed fp4/fp8 formats "
-            "(zero only for fp4/fp8)",
+            "i16/u16/f16/bf16/i32/u32/f32, packed fp4/fp8 operand formats "
+            "and f8e8m0 scale tiles",
+        )
+    scale_layout = layout_tag in ("zZMxScale", "nNMxScale")
+    if scale_layout != (element_type == "f8e8m0"):
+        _op_error(
+            op_name,
+            "E8M0 fill requires zZMxScale/nNMxScale; operand fill requires zN/nZ",
         )
 
     # The region is the tile itself. bc places the fill relative to the buffer

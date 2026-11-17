@@ -311,8 +311,8 @@ def test_fill_zero_value_bit_pattern_fp8() -> None:
     assert "tla.fill" in mlir
 
 
-def test_fill_rejects_nonzero_for_packed_types() -> None:
-    """Packed fp4/fp8 retain the zero-only contract."""
+def test_fill_accepts_nonzero_for_operand_types() -> None:
+    """Every supported operand format accepts a numeric constant."""
 
     for dtype in (tla.Float8E4M3FN, tla.Float8E5M2, tla.Float4E2M1, tla.Float4E1M2):
 
@@ -326,11 +326,10 @@ def test_fill_rejects_nonzero_for_packed_types() -> None:
 
             return _kernel
 
-        with pytest.raises((TlaLoweringError, tla.TlaCoreAPIError), match="supports only value 0"):
-            _build().dump_mlir()
+        assert "tla.fill" in _build().dump_mlir()
 
 
-def test_fill_fp8_zero_only() -> None:
+def test_fill_fp8_zero_and_nonzero() -> None:
     @tla.kernel
     def _kernel_zero() -> None:
         t = _l1_tensor((32, 64), tla.Float8E4M3FN, tla.arch.zN)
@@ -348,8 +347,7 @@ def test_fill_fp8_zero_only() -> None:
             t.fill(1)
         _ = t
 
-    with pytest.raises((TlaLoweringError, tla.TlaCoreAPIError), match="supports only value 0"):
-        _kernel_nonzero.dump_mlir()
+    assert "tla.fill" in _kernel_nonzero.dump_mlir()
 
 
 def test_fill_rejects_i8() -> None:

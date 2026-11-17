@@ -1083,7 +1083,15 @@ std::string getCopyRouteCallee(
 
 std::string getFillCallee(::LayoutTag dstLayout, Type dstElementType)
 {
-    // fp4 uses byte storage in the ABI and restores its logical width in BC.
+    // Packed fp4 uses byte storage over the ABI; E8M0 scale tiles likewise
+    // travel as uint8_t, with their scale layout selecting the physical route.
+    if (::mlir::isa<::tla::Float8E8M0Type>(dstElementType)) {
+        if (dstLayout == LayoutTag::zZMxScale)
+            return "fill_l1_zZMxScale_uint8_t";
+        if (dstLayout == LayoutTag::nNMxScale)
+            return "fill_l1_nNMxScale_uint8_t";
+        return {};
+    }
     StringRef suffix;
     if (::tla::isPackedFp4Type(dstElementType)) {
         suffix = ::llvm::isa<::tla::Float4E1M2Type>(dstElementType) ? StringRef("float4_e1m2x2_t") :
@@ -1181,8 +1189,9 @@ static bool isAicTemplateRuntimeCall(StringRef name)
     // MX scale GM -> L1 with the reorder done by the DMA.
     if (name.starts_with("copy_gm_") && name.find("MxScale") != StringRef::npos && name.ends_with("_uint8_t"))
         return true;
-    // L1 fill templates (zN/nZ destinations, cube core).
-    if (name.starts_with("fill_l1_zN_") || name.starts_with("fill_l1_nZ_"))
+    // L1 operand and MX scale fill templates execute on the cube core.
+    if (name.starts_with("fill_l1_zN_") || name.starts_with("fill_l1_nZ_") || name.starts_with("fill_l1_zZMxScale_") ||
+        name.starts_with("fill_l1_nNMxScale_"))
         return true;
     if (!(name.starts_with("copy_")))
         return false;

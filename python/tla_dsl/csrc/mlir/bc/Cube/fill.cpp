@@ -23,6 +23,28 @@
 
 namespace {
 
+template <typename FillT>
+CATLASS_DEVICE void fillL1Blocks(
+    uint32_t address, int64_t blockNum, int64_t repeatTimes, int64_t strideBlocks, int32_t valueBits)
+{
+    if (blockNum <= 0 || repeatTimes <= 0 || strideBlocks < blockNum || blockNum > 0xFFFF || repeatTimes > 0x7FFF ||
+        strideBlocks - blockNum > 0xFFFF)
+        return;
+    // Adjacent repeats form one contiguous interval. Coalesce by physical
+    // geometry for every dtype/value, within the hardware block-count field.
+    if (strideBlocks == blockNum && blockNum * repeatTimes <= 0xFFFF) {
+        blockNum *= repeatTimes;
+        repeatTimes = 1;
+        strideBlocks = blockNum;
+    }
+    AscendC::LocalTensor<FillT> dst(
+        AscendC::TPosition::A1, address, static_cast<uint32_t>(blockNum * Catlass::BYTE_PER_C0 / sizeof(FillT)));
+    const AscendC::InitConstValueParams<FillT> params(
+        static_cast<uint16_t>(repeatTimes), static_cast<uint16_t>(blockNum),
+        static_cast<uint16_t>(strideBlocks - blockNum), static_cast<FillT>(static_cast<uint32_t>(valueBits)));
+    AscendC::Fill(dst, params);
+}
+
 template <LayoutTag Tag, typename T>
 CATLASS_DEVICE void fillL1Impl(
     uint32_t baseAddr, const TensorDesc& desc, int64_t crd0, int64_t crd1, int64_t ext0, int64_t ext1,
@@ -33,10 +55,6 @@ CATLASS_DEVICE void fillL1Impl(
     static_assert(elemBits == 4 || elemBits == 8 || elemBits == 16 || elemBits == 32);
     constexpr uint32_t eleNumPerC0 = Catlass::BytesToBits(Catlass::BYTE_PER_C0) / elemBits;
     using FillT = std::conditional_t<(elemBits <= 16), uint16_t, uint32_t>;
-    if constexpr (elemBits < 16) {
-        if (valueBits != 0)
-            return;
-    }
 
     // Region axes after the tag dispatch: "fractal row" is the 16-element
     // fractal-row axis, "C0 column" the C0-packed axis (32-byte columns laid
@@ -66,27 +84,38 @@ CATLASS_DEVICE void fillL1Impl(
     const int64_t c0ColEnd = CEIL_FACTOR(c0ColCrd + c0ColExt, eleNumPerC0);
     const int64_t alignedC0ColExt = c0ColEnd - c0ColStart;
     const int64_t repeatTimes = alignedC0ColExt / eleNumPerC0;
-    if (repeatTimes <= 0 || repeatTimes > 0x7FFF) {
-        // Empty, or beyond the config's 15-bit repeat field.
-        return;
-    }
     const int64_t unitStrideBlocks = unitStride / eleNumPerC0;
-    if (unitStrideBlocks < fractalRowExt) {
-        // Region wider than a C0 unit: would overwrite the next unit's head.
-        return;
-    }
 
     const int64_t elemOffset = fractalRowCrd * eleNumPerC0 + (c0ColStart / eleNumPerC0) * unitStride;
     const int64_t byteOffset = elemOffset * elemBits / 8;
-    AscendC::LocalTensor<FillT> dstTensor(
-        AscendC::TPosition::A1, baseAddr + static_cast<uint32_t>(byteOffset),
-        static_cast<uint32_t>(fractalRowExt * Catlass::BYTE_PER_C0 / sizeof(FillT)));
-    AscendC::InitConstValueParams<FillT> params;
-    params.repeatTimes = static_cast<uint16_t>(repeatTimes);
-    params.blockNum = static_cast<uint16_t>(fractalRowExt);
-    params.dstGap = static_cast<uint16_t>(unitStrideBlocks - fractalRowExt);
-    params.initValue = static_cast<FillT>(static_cast<uint32_t>(valueBits));
-    AscendC::Fill(dstTensor, params);
+    fillL1Blocks<FillT>(
+        baseAddr + static_cast<uint32_t>(byteOffset), fractalRowExt, repeatTimes, unitStrideBlocks, valueBits);
+}
+
+template <LayoutTag Tag>
+CATLASS_DEVICE void fillL1ScaleImpl(
+    uint32_t baseAddr, const TensorDesc& desc, int64_t crd0, int64_t crd1, int64_t ext0, int64_t ext1,
+    int32_t valueBits)
+{
+    static_assert(Tag == LayoutTag::zZMxScale || Tag == LayoutTag::nNMxScale);
+    // Each physical 32-byte scale fractal holds 16 rows by 2 exponents.
+    // The A/B scale layouts exchange the two logical axes.
+    constexpr bool aScale = Tag == LayoutTag::zZMxScale;
+    const int64_t rowCrd = aScale ? crd0 : crd1;
+    const int64_t rowExt = aScale ? ext0 : ext1;
+    const int64_t groupCrd = aScale ? crd1 : crd0;
+    const int64_t groupExt = aScale ? ext1 : ext0;
+    if (rowExt <= 0 || groupExt <= 0)
+        return;
+    const int64_t rowStart = CEIL_FACTOR(rowCrd, 16);
+    const int64_t rowEnd = CEIL_FACTOR(rowCrd + rowExt, 16);
+    const int64_t groupStart = CEIL_FACTOR(groupCrd, 2);
+    const int64_t groupEnd = CEIL_FACTOR(groupCrd + groupExt, 2);
+    const int64_t rowStride = aScale ? desc.stride1 : desc.stride3;
+    const int64_t byteOffset = (rowStart / 16) * rowStride + (groupStart / 2) * Catlass::BYTE_PER_C0;
+    fillL1Blocks<uint16_t>(
+        baseAddr + static_cast<uint32_t>(byteOffset), (groupEnd - groupStart) / 2, (rowEnd - rowStart) / 16,
+        rowStride / Catlass::BYTE_PER_C0, valueBits);
 }
 
 } // namespace
@@ -116,7 +145,7 @@ REGISTER_FILL_L1(nZ, int32_t)
 REGISTER_FILL_L1(nZ, uint32_t)
 REGISTER_FILL_L1(nZ, float)
 
-// Packed fp8 retains zero-only fill.
+// Operand formats use the same physical route for zero and nonzero patterns.
 REGISTER_FILL_L1(zN, fp8_e4m3fn_t)
 REGISTER_FILL_L1(zN, fp8_e5m2_t)
 REGISTER_FILL_L1(nZ, fp8_e4m3fn_t)
@@ -137,6 +166,17 @@ REGISTER_FILL_L1_FP4(zN, float4_e2m1x2_t)
 REGISTER_FILL_L1_FP4(zN, float4_e1m2x2_t)
 REGISTER_FILL_L1_FP4(nZ, float4_e2m1x2_t)
 REGISTER_FILL_L1_FP4(nZ, float4_e1m2x2_t)
+
+#define REGISTER_FILL_L1_SCALE(Layout)                                                                              \
+    [aicore] __attribute__((always_inline)) void _mlir_ciface_fill_l1_##Layout##_uint8_t(                           \
+        memref_t<__cbuf__ uint8_t, 1>* dst, DESC_ABI_PARAMS(dst), int64_t crd0, int64_t crd1, int64_t ext0,         \
+        int64_t ext1, int32_t valueBits)                                                                            \
+    {                                                                                                               \
+        fillL1ScaleImpl<LayoutTag::Layout>(localAddr(dst), TENSOR_DESC_12(dst), crd0, crd1, ext0, ext1, valueBits); \
+    }
+
+REGISTER_FILL_L1_SCALE(zZMxScale)
+REGISTER_FILL_L1_SCALE(nNMxScale)
 
 } // extern "C"
 

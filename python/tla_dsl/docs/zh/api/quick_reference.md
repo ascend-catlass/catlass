@@ -56,7 +56,7 @@ nav_order: 5
 | [`tla.copy`](language/data_movement.md#tlacopy) | 在支持的全局与片上通路间拷贝 tile。 | Kernel / Cube 或 Vector；受通路、layout、dtype、对齐与 origin shape 约束，SIMT 内不可用。 |
 | [`tla.Tensor.load`](language/data_movement.md#tlatensorload) | 将 UB tile 加载为 vector 或 mask SSA。 | Kernel / Vector / SIMD；须在 `tla.vec.func` 内，源为 UB tile。 |
 | [`tla.Tensor.store`](language/data_movement.md#tlatensorstore) | 将 vector 或 mask SSA 存入 UB tile。 | Kernel / Vector / SIMD；须在 `tla.vec.func` 内，目标为 UB tile。 |
-| [`tla.Tensor.fill`](language/data_movement.md#tlatensorfill) | 用零填充 L1 tile。 | Kernel / Cube；目标须为 L1 `zN` 或 `nZ`，元素类型须为受支持的打包 fp4/fp8。 |
+| [`tla.Tensor.fill`](language/data_movement.md#tlatensorfill) | 用数值常量填充 L1 tile。 | Kernel / Cube；16/32 位操作数和 FP4/FP8 使用 `zN`/`nZ`；E8M0 使用 `zZMxScale`/`nNMxScale`，要求能精确表示的正二次幂。 |
 | [`tla.Tensor.__getitem__`](language/data_movement.md#tlatensor__getitem__) | 读取一个元素为标量。 | Kernel；GM 或 UB，`RowMajor` 或 `ColumnMajor`，逻辑秩 1 或 2。UB 访问须在 Vector 内；SIMT 使用逐线程元素访问。 |
 | [`tla.Tensor.__setitem__`](language/data_movement.md#tlatensor__setitem__) | 写入一个标量元素。 | Kernel；tensor 限制同元素读取。`Numeric` 值须与 tensor 元素类型完全一致。 |
 | [`tla.mmad`](language/matrix.md#tlammad) | 矩阵 tile 乘法累加。 | Kernel / Cube；累加器与操作数须为匹配的 L0 tile，dtype 组合受限。 |

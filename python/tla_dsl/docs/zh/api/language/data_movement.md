@@ -398,9 +398,10 @@ with tla.vec.func(mode="simd"):
 ## `tla.Tensor.fill`
 
 **源码：** [`catlass.tla.tensor._Tensor.fill`](../../../../catlass/tla/tensor.py)
+
 功能说明：
 
-用常量填充本 L1 zN/nZ tile。
+用数值常量填充当前 L1 tile。
 
 函数原型：
 
@@ -411,28 +412,36 @@ tla.Tensor.fill(value: int | float) -> None
 参数说明：
 
 - `value`（`int | float`）：trace 期标量，按目标类型编码。整数目标要求取值范围内的
-  `int`；浮点目标接受 `int` 或 `float`，有限值转换时溢出会报错。
+  `int`；f16/bf16/f32 目标接受 `int` 或 `float`，有限值转换时溢出会报错。
+  FP4/FP8 要求目标格式能精确表示的有限值；超出有限值范围或无法精确表示时编译报错，不进行舍入。
+  E8M0 要求能精确表示的正二次幂，范围为 ``[2**-127, 2**127]``；
+  零、负数和非二次幂会报错。
 
 约束说明：
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用，并嵌套在 `tla.cube()` 内。
-- 目的地须为带 ``zN`` 或 ``nZ`` 标签的 L1 tensor。
-- 填充范围为 ``[coord, coord + origin_shape)``。C0 轴（32 字节）的两端均向上对齐。
-  起点处不完整的块保持不动；最后一个块可能包含逻辑范围外的物理 Padding，
-  分配容量必须覆盖该 Padding。
-- 支持的元素类型：``i16/u16/f16/bf16/i32/u32/f32``，以及打包的 fp4/fp8 操作数格式
-  （``f4e2m1``/``f4e1m2``/``f8e4m3fn``/``f8e5m2``，仅支持填零）。
+- 目的地须为 L1 tensor。操作数类型使用 ``zN`` 或 ``nZ``；
+  E8M0 scale 使用 ``zZMxScale`` 或 ``nNMxScale``。
+- 填充范围为 ``[coord, coord + origin_shape)``。操作数 C0 轴两端按 32 字节单元
+  向上对齐。MX scale 的 M/N 轴按 16 对齐，scale-group 轴按 2 对齐；
+  每个 ``16*2`` 分形占用 32 字节。起点处不完整的单元保持不动；
+  最后一个单元可能包含逻辑范围外的物理 Padding，分配容量必须覆盖该 Padding。
+  空区域不执行写入。
+- 支持的元素类型：``i16/u16/f16/bf16/i32/u32/f32``、打包的 fp4/fp8 操作数
+  （``f4e2m1``/``f4e1m2``/``f8e4m3fn``/``f8e5m2``）以及 ``f8e8m0``。
+  不支持 8 位整数目的地。
 
 调用示例：
 
 ```python
-# 将 L1 A tile 的 K-pad 尾部清零：先切 tile，再 fill。
+# 对 L1 A tile 的 K 轴 Padding 尾段填零：先取 tile，再填充。
 pad = tla.get_tile(t_l1a, tla.make_coord(0, k_valid),
                    tla.make_shape(m, k_l0 - k_valid))
 pad.fill(0)
+# 数值 1 的存储编码由目标 dtype 决定。
+t_l1a.fill(1.0)
+t_l1sa.fill(1.0)  # E8M0 scale 的数值 1，编码为 0x7f。
 ```
-
----
 
 ## `tla.Tensor.__getitem__`
 

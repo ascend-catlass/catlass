@@ -1444,25 +1444,34 @@ class _Tensor(TensorABC):
     ) -> None:
         """Directory: Data Movement
         Description:
-            Fill this L1 zN/nZ tile with a constant.
+            Fill this L1 tile with a numeric constant.
 
             Parameters:
             - `value` (`int | float`): Trace-time scalar, encoded in the
               destination type. Integer destinations require an in-range
-              `int`; floating destinations accept `int` or `float` and
-              reject finite overflow.
+              `int`; f16/bf16/f32 destinations accept `int` or `float` and
+              reject finite overflow. FP4/FP8 require finite values exactly
+              representable in the destination format; out-of-range and inexact
+              constants are rejected without rounding. E8M0 requires an exact
+              positive power of two in ``[2**-127, 2**127]``; zero, negative
+              values and non-powers of two are rejected.
 
             Constraints:
             - Must be called inside a `@tla.kernel`-decorated kernel function and
               nested inside `tla.cube()`.
-            - Destination must be an L1 tensor tagged ``zN`` or ``nZ``.
-            - Fill covers ``[coord, coord + origin_shape)``. Both boundaries
-              along the C0 axis (32 bytes) are aligned up. The partial starting
-              block is untouched; the final block may include physical Padding
-              beyond the logical extent, which must fit the allocation.
-            - Supported element types: ``i16/u16/f16/bf16/i32/u32/f32`` and
-              the packed fp4/fp8 operand formats
-              (``f4e2m1``/``f4e1m2``/``f8e4m3fn``/``f8e5m2``, zero only).
+            - Destination must be an L1 tensor. Operand types use ``zN`` or
+              ``nZ``; E8M0 scales use ``zZMxScale`` or ``nNMxScale``.
+            - Fill covers ``[coord, coord + origin_shape)``. Operand C0-axis
+              boundaries are aligned up to 32-byte units. MX scales align
+              the M/N axis to 16 and the scale-group axis to 2; each 16-by-2
+              fractal occupies 32 bytes. A partial leading unit is left
+              untouched; the final unit may include physical Padding beyond
+              the logical extent, which must fit the allocation. Empty
+              regions perform no writes.
+            - Supported element types: ``i16/u16/f16/bf16/i32/u32/f32``,
+              packed fp4/fp8 operands
+              (``f4e2m1``/``f4e1m2``/``f8e4m3fn``/``f8e5m2``), and ``f8e8m0``.
+              8-bit integer destinations are not supported.
 
             Example:
             ```python
@@ -1470,6 +1479,9 @@ class _Tensor(TensorABC):
             pad = tla.get_tile(t_l1a, tla.make_coord(0, k_valid),
                                tla.make_shape(m, k_l0 - k_valid))
             pad.fill(0)
+            # Numeric one is encoded by the destination dtype.
+            t_l1a.fill(1.0)
+            t_l1sa.fill(1.0)  # E8M0 scale one, encoded as 0x7f.
             ```
         """
         from ..core_api import _tensor_fill_impl

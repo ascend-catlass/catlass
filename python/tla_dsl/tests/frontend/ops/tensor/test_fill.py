@@ -120,8 +120,11 @@ def test_fill_emits_encoded_i32(dtype, value, bits, tag):
     assert "tla.fill" in ir
 
 
-@pytest.mark.parametrize("dtype", [tla.UInt8, tla.Float8E8M0])
-def test_unsupported_types(dtype):
+@pytest.mark.parametrize(
+    "dtype,message",
+    [(tla.UInt8, "unsupported element type"), (tla.Float8E8M0, "E8M0 fill requires")],
+)
+def test_unsupported_type_or_layout(dtype, message):
     @tla.kernel
     def kernel():
         ptr = tla.allocate((32, 64), dtype, tla.AddressSpace.l1, 512)
@@ -131,7 +134,7 @@ def test_unsupported_types(dtype):
         with tla.cube():
             tile.fill(0)
 
-    with pytest.raises(Exception, match="supported element type"):
+    with pytest.raises(Exception, match=message):
         kernel.dump_mlir()
 
 

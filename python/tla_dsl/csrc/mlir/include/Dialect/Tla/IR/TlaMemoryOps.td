@@ -145,19 +145,20 @@ def Tla_Img2colOp : Tla_Op<"img2col", []> {
 }
 
 def Tla_FillOp : Tla_Op<"fill", []> {
-  let summary = "Fill a region of an L1 zN/nZ tile with a scalar bit pattern";
+  let summary = "Fill a region of an L1 tile with a bit pattern";
   let description = [{
     Fill ``dst`` with ``value`` over the region ``[coord, coord + shape)``.
-    Cube only: the destination must be an L1 tile tagged ``zN`` or ``nZ``.
-    Supported elements are i16/ui16/f16/bf16/i32/ui32/f32 and packed fp4/fp8.
-    Packed fp4/fp8 require a constant zero bit pattern.
+    Cube only: i16/ui16/f16/bf16/i32/ui32/f32 and packed fp4/fp8 operands
+    use ``zN`` or ``nZ``; E8M0 scale tiles use ``zZMxScale`` or ``nNMxScale``.
 
-    ``value`` carries the target element's bits in i32; 16-bit destinations
-    use its low 16 bits.
-    The device aligns both ends of the layout's C0 axis up to 32-byte
-    boundaries and writes ``[alignUp(start), alignUp(end))``. A partial
-    starting block is untouched; the final block may include physical
-    Padding beyond the logical extent, which must fit the allocation.
+    ``value`` carries an encoded storage pattern in i32. Wider destinations
+    use their low 16 or full 32 bits; packed fp4/fp8 and E8M0 use a repeated
+    uint16 pattern. Numeric conversion belongs to the frontend.
+    The device helper rounds the start and end up to complete physical fill
+    units. Operands use 32-byte C0 columns; scales use 16-by-2 (32-byte)
+    fractals. A partial leading unit is untouched. The final unit may include
+    physical Padding beyond the logical extent, which must fit the allocation.
+    Empty regions are no-ops.
   }];
   let arguments = (ins Tla_TensorType:$dst, I32:$value,
                          Tla_CoordType:$coord, Tla_ShapeType:$shape);

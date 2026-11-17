@@ -622,16 +622,20 @@ mlir::LogicalResult FillOp::verify()
     if (dstTy.getPtr().getAddrspace() != AddressSpace::l1)
         return emitOpError("fill destination must be an l1 tile");
     LayoutTag tag = dstTy.getLayout().getLayoutTag();
-    if (tag != LayoutTag::zN && tag != LayoutTag::nZ)
-        return emitOpError("fill destination must be tagged zN or nZ");
+    bool scaleLayout = tag == LayoutTag::zZMxScale || tag == LayoutTag::nNMxScale;
+    if (tag != LayoutTag::zN && tag != LayoutTag::nZ && !scaleLayout)
+        return emitOpError("fill destination must be tagged zN or nZ, or zZMxScale/nNMxScale for E8M0");
     ::mlir::Type elem = dstTy.getPtr().getPointee();
-    bool zeroOnly = ::tla::isPackedFp4Type(elem) || mlir::isa<mlir::Float8E4M3FNType, mlir::Float8E5M2Type>(elem);
-    if (!zeroOnly && !::tla::isOfficialL1FillElementType(elem))
+    bool scaleElement = mlir::isa<::tla::Float8E8M0Type>(elem);
+    bool packedElement = ::tla::isPackedFp4Type(elem) || mlir::isa<mlir::Float8E4M3FNType, mlir::Float8E5M2Type>(elem);
+    if (!::tla::isOfficialL1FillElementType(elem) && !packedElement && !scaleElement)
         return emitOpError("unsupported L1 fill destination element type");
-    if (zeroOnly) {
+    if (scaleLayout != scaleElement)
+        return emitOpError("E8M0 fill requires zZMxScale/nNMxScale; operand fill requires zN/nZ");
+    if (packedElement || scaleElement) {
         ::llvm::APInt valueBits;
-        if (!mlir::matchPattern(getValue(), mlir::m_ConstantInt(&valueBits)) || !valueBits.isZero())
-            return emitOpError("fp4/fp8 fill requires a constant zero bit pattern");
+        if (mlir::matchPattern(getValue(), mlir::m_ConstantInt(&valueBits)) && !valueBits.isIntN(16))
+            return emitOpError("fill bit pattern must be an unsigned 16-bit value");
     }
     return mlir::success();
 }

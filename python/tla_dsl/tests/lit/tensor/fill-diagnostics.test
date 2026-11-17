@@ -8,7 +8,7 @@
 // U8: unsupported L1 fill destination element type
 // I64: unsupported L1 fill destination element type
 // U64: unsupported L1 fill destination element type
-// E8M0: unsupported L1 fill destination element type
+// E8M0: E8M0 fill requires zZMxScale/nNMxScale
 
 // BEGIN_I8
 // module {
