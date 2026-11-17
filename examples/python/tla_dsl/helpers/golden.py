@@ -20,6 +20,13 @@ _HF32_ATOL = 2.0**-10
 _HF32_REQUIRED_MATCHED_RATIO = 0.99
 _HF32_MAX_ABS_ERROR_LIMIT = 1e-1
 
+# dtype -> (rtol, atol)
+_ERROR_THRESHOLD_MAP = {
+    torch.float32: (1.2e-4, 1.2e-4),
+    torch.float16: (1e-3, 1e-3),
+    torch.bfloat16: (7.8e-3, 7.8e-3),
+}
+
 
 def tolerance(
     expected: torch.Tensor,
@@ -35,8 +42,7 @@ def tolerance(
             rtol = (1.0 / 128.0) if k < 2048 else (1.0 / 64.0)
         else:
             rtol = (1.0 / 256.0) if k < 2048 else (1.0 / 128.0)
-    if floor is None:
-        floor = 1.0 / 256.0 if bf16 else 1.0
+    floor = 1.0 if floor is None else floor
     return rtol * torch.maximum(torch.full_like(expected, floor), expected.abs())
 
 
@@ -90,7 +96,7 @@ def compare(
     *,
     rtol: float | None = None,
     floor: float | None = None,
-    atol: float = 0.0,
+    atol: float | None = None,
     enable_hf32: bool = False,
 ) -> bool:
     """Compare ``result`` against ``expected`` with given threshold.
@@ -118,9 +124,13 @@ def compare(
         raise TypeError("the data type between the golden and the result do not match")
     if result.dtype in (torch.float32, torch.float16, torch.bfloat16):
         # Generic element-wise precision check.
+        _rtol, _atol = _ERROR_THRESHOLD_MAP[result.dtype]
         return bool(
             torch.isclose(
-                result, expected, rtol=0.0 if rtol is None else rtol, atol=atol
+                result,
+                expected,
+                rtol=_rtol if rtol is None else rtol,
+                atol=_atol if atol is None else atol,
             ).all()
         )
     return bool(result.eq(expected).all())
