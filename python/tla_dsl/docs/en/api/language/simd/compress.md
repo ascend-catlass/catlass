@@ -37,6 +37,7 @@ Constraints:
 
 - Must be called inside a `@tla.kernel`-decorated kernel function.
 - Must be called inside `tla.vec.func()`.
+- Supported element types: `f32`, `f16`, `i8`, `i16`, `i32`, `u8`, `u16`, `u32`.
 
 Example:
 

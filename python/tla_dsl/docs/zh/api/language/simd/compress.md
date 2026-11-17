@@ -37,6 +37,7 @@ tla.squeeze(src: VectorSSA, mask: MaskSSA) -> VectorSSA
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
 - 须在 `tla.vec.func()` 内调用。
+- 支持的元素类型：`f32`、`f16`、`i8`、`i16`、`i32`、`u8`、`u16`、`u32`。
 
 调用示例：
 

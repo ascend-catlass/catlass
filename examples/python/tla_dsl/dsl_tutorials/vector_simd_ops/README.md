@@ -650,7 +650,7 @@ first mismatch=None
 
     将 128 个 f32 归约为两个 1 元素结果：tile0（前 64）对齐存储、tile1（后 64）非对齐存储（`UnalignStoreParams`）。
 
-  - **`squeeze_op.py`**（f32, f16, i32）：op `squeeze`，按 `M4` 掩码压缩有效 lane 并紧凑写回。
+  - **`squeeze_op.py`**（f32, f16, i8, i16, i32, u8, u16, u32）：op `squeeze`，按 `M4` 掩码压缩有效 lane 并紧凑写回。
   - **`register_control_flow.py`**（f32）：op `register_carriers`，演示 `VectorSSA`/`MaskSSA` 作为 `scf.for` 的 iter_args/results 跨循环边界携带。
 
 - 约束说明：
@@ -659,11 +659,11 @@ first mismatch=None
     | 文件 | 支持的数据类型 |
     |------|---------------|
     | `reduction_ops.py` | f32 |
-    | `squeeze_op.py` | f32, f16, i32 |
+    | `squeeze_op.py` | f32, f16, i8, i16, i32, u8, u16, u32 |
     | `register_control_flow.py` | f32 |
 
   - `reduction_ops.py`：仅 f32；单 op 模式须 `--run`；`--batch-run` 与位置 op 互斥；默认 `--device 0`。
-  - `squeeze_op.py`：仅单次 VL（`VECTOR_ELE = VL_ELE = 64`）。
+  - `squeeze_op.py`：仅单次分块（默认 `--shape 64`）；`VL_ELE` 随 dtype 变化（i8/u8 为 256，i16/u16/f16 为 128，i32/u32/f32 为 64），超出有效 lane 的部分由尾掩码屏蔽。
   - `register_control_flow.py`：shape 必须恰好一个物理向量寄存器（f32 下为 64 元素）。
 
 - 执行示例：
@@ -679,6 +679,15 @@ first mismatch=None
 
   # 按 M4 掩码压缩有效 lane 并紧凑写回
   python examples/python/tla_dsl/dsl_tutorials/vector_simd_ops/squeeze_op.py squeeze --dtype f32 --device 0
+
+  # 无符号输入（u8 / u16 / u32，取值越过有符号边界）
+  python examples/python/tla_dsl/dsl_tutorials/vector_simd_ops/squeeze_op.py squeeze --dtype u8 --device 0
+  python examples/python/tla_dsl/dsl_tutorials/vector_simd_ops/squeeze_op.py squeeze --dtype u16 --device 0
+  python examples/python/tla_dsl/dsl_tutorials/vector_simd_ops/squeeze_op.py squeeze --dtype u32 --device 0
+
+  # 有符号整型（i8 / i16 / i32）
+  python examples/python/tla_dsl/dsl_tutorials/vector_simd_ops/squeeze_op.py squeeze --dtype i8 --device 0
+  python examples/python/tla_dsl/dsl_tutorials/vector_simd_ops/squeeze_op.py squeeze --dtype i16 --device 0
 
   # VectorSSA/MaskSSA 跨 scf.for 循环边界携带
   python examples/python/tla_dsl/dsl_tutorials/vector_simd_ops/register_control_flow.py register_carriers --dtype f32 --device 0

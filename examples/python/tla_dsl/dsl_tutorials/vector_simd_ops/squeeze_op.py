@@ -24,7 +24,12 @@ from vector_op_harness import (
 VECTOR_ELE = 64
 VL_ELE = 64
 LOOPS = 1
-ALL_DTYPES = ("f32", "f16", "i32")
+ALL_DTYPES = ("f32", "f16", "i8", "i16", "i32", "u8", "u16", "u32")
+_INT_DTYPES = frozenset({"i8", "i16", "i32", "u8", "u16", "u32"})
+_UNSIGNED = frozenset({"u8", "u16", "u32"})
+# Unsigned inputs are shifted above the signed boundary so the full unsigned
+# range is exercised (u8 > 127, u16 > 32767, u32 > 2**31 - 1).
+_UNSIGNED_BIAS = {"u8": 128, "u16": 32768, "u32": 0x80000000}
 
 _KERNEL_DTYPE = tla.Float32
 _KERNEL_ELEMENT_BYTES = 4
@@ -115,9 +120,14 @@ def _set_kernel_config(
 def _make_inputs(args: Any, dtype_name: str, torch: Any) -> tuple[Any, ...]:
     _, dtype, _ = _set_kernel_config(args.op, dtype_name, args.shape)
     device = "npu"
-    if dtype_name == "i32":
-        arange = torch.arange(VECTOR_ELE, dtype=torch.int32, device=device)
-        return (arange + 1,)
+    if dtype_name in _INT_DTYPES:
+        # NPU arange lacks most integer dtypes; build on CPU then move to NPU.
+        idx = torch.arange(VECTOR_ELE, dtype=torch.int64)
+        if dtype_name in _UNSIGNED:
+            vals = (idx % 50) + (_UNSIGNED_BIAS[dtype_name] - 10)
+        else:
+            vals = (idx % 50) - 20
+        return (vals.to(dtype).to(device),)
     idx = torch.arange(VECTOR_ELE, dtype=torch.float32, device=device)
     return ((idx * 0.5 + 1.0).to(dtype),)
 
@@ -126,7 +136,11 @@ def _expected(op_name: str, inputs: tuple[Any, ...]) -> Any:
     del op_name
     import torch
 
-    src = inputs[0]
+    # Compute on CPU (the harness compares in CPU space). Use a strided basic
+    # slice rather than boolean-mask indexing: some CPU torch builds do not
+    # implement advanced "index" for UInt16/UInt32 (e.g. index_cpu for UInt16),
+    # while chunk[::4] is a plain view supported for every dtype.
+    src = inputs[0].detach().cpu()
     out = torch.zeros_like(src)
     for i in range(LOOPS):
         start = i * VL_ELE
@@ -134,11 +148,9 @@ def _expected(op_name: str, inputs: tuple[Any, ...]) -> Any:
             break
         end = min(start + VL_ELE, src.numel())
         chunk = src[start:end]
-        lane = torch.arange(end - start, device=src.device)
-        keep = (lane % 4) == 0
-        packed = chunk[keep]
-        n_packed = int(keep.sum().item())
-        out[start : start + n_packed] = packed
+        # M4 keeps lanes 0, 4, 8, ... == every 4th element.
+        packed = chunk[::4]
+        out[start : start + packed.numel()] = packed
     return out
 
 

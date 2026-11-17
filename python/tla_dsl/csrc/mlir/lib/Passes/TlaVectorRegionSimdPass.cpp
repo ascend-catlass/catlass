@@ -724,9 +724,13 @@ static std::string getSqueezeLibraryCallName(Type elementType)
         return "vsqueeze_float";
     if (elementType.isF16())
         return "vsqueeze_half";
-    if (auto intType = dyn_cast<IntegerType>(elementType))
-        if (intType.getWidth() == 32)
-            return "vsqueeze_int32_t";
+    if (auto intType = dyn_cast<IntegerType>(elementType)) {
+        // vsqz moves whole elements and is sign-agnostic, but every 8/16/32-bit
+        // signedness still needs its own ABI stub (VectorReg<int|uint*_t>).
+        unsigned width = intType.getWidth();
+        if (width == 8 || width == 16 || width == 32)
+            return std::string("vsqueeze_") + (intType.isUnsigned() ? "uint" : "int") + std::to_string(width) + "_t";
+    }
     return {};
 }
 
@@ -2921,9 +2925,12 @@ static LogicalResult lowerSqueeze(
     auto opCtx = deriveVecCtxForElement(srcTy.getElementType());
     if (failed(opCtx))
         return failure();
-    std::string calleeName = getSqueezeLibraryCallName(srcTy.getElementType());
+    // ``srcTy`` is the AVE (signless) vector type; recover the original tla
+    // element type so unsigned 8/16-bit squeeze picks the uint*_t stub.
+    Type tlaElem = tlaElementOr(squeezeOp.getSrc().getType(), srcTy.getElementType());
+    std::string calleeName = getSqueezeLibraryCallName(tlaElem);
     if (calleeName.empty())
-        return squeezeOp.emitError("unsupported element type for tla.squeeze: ") << srcTy.getElementType(), failure();
+        return squeezeOp.emitError("unsupported element type for tla.squeeze: ") << tlaElem, failure();
     VectorType pregVecType = fullPregVecType(b.getContext());
     Value preg = castMaskToPregType(b, loc, mask, pregVecType);
     auto callee = getOrCreateSqueezeLibraryCall(module, loc, opCtx->vecType, pregVecType, calleeName);

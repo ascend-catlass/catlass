@@ -29,7 +29,12 @@ __aiv__ __attribute__((always_inline)) VectorReg<T> pregVsqueeze(VectorReg<T> sr
 extern "C" {
 REGISTE_VSQUEEZE(float);
 REGISTE_VSQUEEZE(half);
+REGISTE_VSQUEEZE(int8_t);
+REGISTE_VSQUEEZE(int16_t);
 REGISTE_VSQUEEZE(int32_t);
+REGISTE_VSQUEEZE(uint8_t);
+REGISTE_VSQUEEZE(uint16_t);
+REGISTE_VSQUEEZE(uint32_t);
 }
 
 #endif
