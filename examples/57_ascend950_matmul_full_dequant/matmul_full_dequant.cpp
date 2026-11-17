@@ -1,12 +1,12 @@
 /**
- * Copyright (c) 2026 Huawei Technologies Co., Ltd.
- * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
- * CANN Open Software License Agreement Version 2.0 (the "License").
- * Please refer to the License for details. You may not use this file except in compliance with the License.
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
- * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
- * See LICENSE in the root of the software repository for the full text of the License.
- */
+ * Copyright (c) 2026 Huawei Technologies Co., Ltd.
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+ * CANN Open Software License Agreement Version 2.0 (the "License").
+ * Please refer to the License for details. You may not use this file except in compliance with the License.
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+ * See LICENSE in the root of the software repository for the full text of the License.
+ */
 
 // By setting the K_MAX_SHAPE_DIM macro, the dimension of the AscendC Tensor's ShapeInfo is configured to 0,
 // optimizing stack space. If you need to use the ShapeInfo of the AscendC Tensor, please undefine this macro.
@@ -14,7 +14,15 @@
 #define K_MAX_SHAPE_DIM 0
 #endif
 
+#include <algorithm>
+#include <cstdint>
 #include <iostream>
+#include <stdexcept>
+#include <string>
+#include <tuple>
+#include <type_traits>
+#include <vector>
+
 #include "catlass/gemm/kernel/matmul_full_dequant.hpp"
 
 #include "catlass/arch/arch.hpp"
@@ -37,17 +45,95 @@
 using namespace Catlass;
 using namespace tla;
 
-using Options = GemmOptions;
-using QuantMode = Epilogue::Block::QuantMode;
+using QuantMode = Epilogue::QuantMode;
 
-struct MatmulShape {
-    uint32_t m;
-    uint32_t n;
-    uint32_t k;
+QuantMode StringToQuantMode(const std::string& s)
+{
+    if (s == "per_tensor") {
+        return QuantMode::PERTENSOR_MODE;
+    } else if (s == "per_channel") {
+        return QuantMode::PERCHANNEL_MODE;
+    } else if (s == "per_token") {
+        return QuantMode::PERTOKEN_MODE;
+    } else if (s == "none" || s == "default") {
+        return QuantMode::NONE;
+    } else {
+        throw std::invalid_argument("Invalid quant mode string: " + s);
+    }
+}
+
+struct DequantGemmOptions : public GemmOptions {
+    const std::string HELPER = "m n k x1_quant_mode x2_quant_mode [has_bias]";
+
+    QuantMode x1QuantMode{QuantMode::PERTOKEN_MODE};
+    QuantMode x2QuantMode{QuantMode::PERCHANNEL_MODE};
+    bool enableBias{false};
+
+    DequantGemmOptions() = default;
+
+    int Parse(int argc, const char** argv)
+    {
+        constexpr static int32_t minArgs = 5;
+        if (argc < minArgs) {
+            std::cerr << TOSTRING(CATLASS_EXAMPLE_NAME) << " " << HELPER << std::endl;
+            return -1;
+        }
+
+        try {
+            problemShape.m() = std::stoi(argv[1]);
+            problemShape.n() = std::stoi(argv[2]);
+            problemShape.k() = std::stoi(argv[3]);
+            if (problemShape.m() == 0 || problemShape.n() == 0 || problemShape.k() == 0) {
+                std::cerr << TOSTRING(CATLASS_EXAMPLE_NAME) << ": m, n and k must be greater than 0" << std::endl;
+                return -1;
+            }
+
+            x1QuantMode = StringToQuantMode(argv[4]);
+            if (argc == minArgs) {
+                std::cerr << "Missing x2 quant mode" << std::endl;
+                return -1;
+            }
+            x2QuantMode = StringToQuantMode(argv[5]);
+
+            if (argc >= 7) {
+                if (std::string(argv[6]) == "has_bias") {
+                    enableBias = true;
+                } else {
+                    std::cerr << "Invalid argument for bias flag: " << argv[6] << std::endl;
+                    return -1;
+                }
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "Error parsing arguments: " << e.what() << std::endl;
+            return -1;
+        }
+        return 0;
+    }
+
+    const bool CanImplement() const
+    {
+        using TupleType = std::tuple<QuantMode, QuantMode, bool>;
+        static const std::vector<TupleType> validPairs = {
+            {QuantMode::PERTOKEN_MODE, QuantMode::PERTENSOR_MODE, false},
+            {QuantMode::PERTOKEN_MODE, QuantMode::PERCHANNEL_MODE, false},
+            {QuantMode::PERTENSOR_MODE, QuantMode::PERCHANNEL_MODE, false},
+            {QuantMode::NONE, QuantMode::PERCHANNEL_MODE, false},
+            {QuantMode::PERTOKEN_MODE, QuantMode::PERTENSOR_MODE, true},
+            {QuantMode::PERTOKEN_MODE, QuantMode::PERCHANNEL_MODE, true},
+            {QuantMode::NONE, QuantMode::PERTENSOR_MODE, true},
+            {QuantMode::NONE, QuantMode::PERCHANNEL_MODE, true}};
+
+        const auto target = std::make_tuple(x1QuantMode, x2QuantMode, enableBias);
+        return std::find(validPairs.begin(), validPairs.end(), target) != validPairs.end();
+    }
 };
 
-static void Run(const Options& options, QuantMode x1QuantMode, QuantMode x2QuantMode, bool hasQuantBias)
+using Options = DequantGemmOptions;
+
+template <QuantMode X1_QUANT_MODE, QuantMode X2_QUANT_MODE, class ElementBias>
+static void Run(const Options& options)
 {
+    constexpr bool hasBias = !std::is_void_v<ElementBias>;
     aclrtStream stream{nullptr};
 
     ACL_CHECK(aclInit(nullptr));
@@ -62,9 +148,8 @@ static void Run(const Options& options, QuantMode x1QuantMode, QuantMode x2Quant
     using ElementB = int8_t;
     using ElementC = int32_t;
     using ElementD = half;
-    using ElementX1 = float;
-    using ElementX2 = float;
-    using ElementBias = float;
+    using ElementX1Scale = float;
+    using ElementX2Scale = float;
 
     using LayoutTagA = layout::RowMajor;
     using LayoutTagB = layout::RowMajor;
@@ -76,12 +161,9 @@ static void Run(const Options& options, QuantMode x1QuantMode, QuantMode x2Quant
     size_t lenA = tagA.Capacity();
     size_t lenB = tagB.Capacity();
     size_t lenC = tagC.Capacity();
-    size_t lenBias = static_cast<size_t>(n);
-
     size_t sizeA = lenA * sizeof(ElementA);
     size_t sizeB = lenB * sizeof(ElementB);
-    size_t sizeC = lenC * sizeof(fp16_t);
-    size_t sizeBias = lenBias * sizeof(ElementBias);
+    size_t sizeC = lenC * sizeof(ElementD);
     size_t goldenSize = lenC * sizeof(float);
     size_t sizeWorkspace = 0;
 
@@ -111,7 +193,7 @@ static void Run(const Options& options, QuantMode x1QuantMode, QuantMode x2Quant
             ACL_CHECK(aclrtFree(quantBiasDevice));
         if (deviceC)
             ACL_CHECK(aclrtFree(deviceC));
-        if (sizeWorkspace > 0 && deviceWorkspace)
+        if (deviceWorkspace)
             ACL_CHECK(aclrtFree(deviceWorkspace));
         if (hostA)
             ACL_CHECK(aclrtFreeHost(hostA));
@@ -147,12 +229,12 @@ static void Run(const Options& options, QuantMode x1QuantMode, QuantMode x2Quant
     ACL_CHECK(aclrtMalloc(reinterpret_cast<void**>(&deviceC), sizeC, ACL_MEM_MALLOC_HUGE_FIRST));
 
     size_t x1ScaleFileSize = 0;
-    if (x1QuantMode == QuantMode::PERTENSOR_MODE) {
+    if constexpr (X1_QUANT_MODE == QuantMode::PERTENSOR_MODE) {
         x1ScaleFileSize = sizeof(float);
-    } else if (x1QuantMode == QuantMode::PERTOKEN_MODE) {
+    } else if constexpr (X1_QUANT_MODE == QuantMode::PERTOKEN_MODE) {
         x1ScaleFileSize = m * sizeof(float);
     }
-    if (x1QuantMode != QuantMode::DEFAULT) {
+    if constexpr (X1_QUANT_MODE != QuantMode::NONE) {
         ACL_CHECK(aclrtMallocHost((void**)(&x1ScaleHost), x1ScaleFileSize));
         ACL_CHECK(aclrtMalloc((void**)&x1ScaleDevice, x1ScaleFileSize, ACL_MEM_MALLOC_HUGE_FIRST));
         if (!ReadFile("./input/x1_scale.bin", x1ScaleHost, x1ScaleFileSize)) {
@@ -163,23 +245,21 @@ static void Run(const Options& options, QuantMode x1QuantMode, QuantMode x2Quant
     }
 
     size_t x2ScaleFileSize = 0;
-    if (x2QuantMode == QuantMode::PERTENSOR_MODE) {
+    if constexpr (X2_QUANT_MODE == QuantMode::PERTENSOR_MODE) {
         x2ScaleFileSize = sizeof(float);
-    } else if (x2QuantMode == QuantMode::PERCHANNEL_MODE) {
+    } else if constexpr (X2_QUANT_MODE == QuantMode::PERCHANNEL_MODE) {
         x2ScaleFileSize = n * sizeof(float);
     }
-    if (x2QuantMode != QuantMode::DEFAULT) {
-        ACL_CHECK(aclrtMallocHost((void**)(&x2ScaleHost), x2ScaleFileSize));
-        ACL_CHECK(aclrtMalloc((void**)&x2ScaleDevice, x2ScaleFileSize, ACL_MEM_MALLOC_HUGE_FIRST));
-        if (!ReadFile("./input/x2_scale.bin", x2ScaleHost, x2ScaleFileSize)) {
-            cleanupAndFinalize();
-            return;
-        }
-        ACL_CHECK(aclrtMemcpy(x2ScaleDevice, x2ScaleFileSize, x2ScaleHost, x2ScaleFileSize, ACL_MEMCPY_HOST_TO_DEVICE));
+    ACL_CHECK(aclrtMallocHost((void**)(&x2ScaleHost), x2ScaleFileSize));
+    ACL_CHECK(aclrtMalloc((void**)&x2ScaleDevice, x2ScaleFileSize, ACL_MEM_MALLOC_HUGE_FIRST));
+    if (!ReadFile("./input/x2_scale.bin", x2ScaleHost, x2ScaleFileSize)) {
+        cleanupAndFinalize();
+        return;
     }
+    ACL_CHECK(aclrtMemcpy(x2ScaleDevice, x2ScaleFileSize, x2ScaleHost, x2ScaleFileSize, ACL_MEMCPY_HOST_TO_DEVICE));
 
-    if (hasQuantBias) {
-        size_t quantBiasFileSize = n * sizeof(float);
+    if constexpr (hasBias) {
+        size_t quantBiasFileSize = n * sizeof(ElementBias);
         ACL_CHECK(aclrtMallocHost((void**)(&quantBiasHost), quantBiasFileSize));
         ACL_CHECK(aclrtMalloc((void**)&quantBiasDevice, quantBiasFileSize, ACL_MEM_MALLOC_HUGE_FIRST));
         if (!ReadFile("./input/bias.bin", quantBiasHost, quantBiasFileSize)) {
@@ -200,47 +280,39 @@ static void Run(const Options& options, QuantMode x1QuantMode, QuantMode x2Quant
     using L1TileShape = Shape<Int<128>, Int<256>, Int<256>>;
     using L0TileShape = Shape<Int<128>, Int<256>, Int<128>>;
 
-    auto layoutA = tla::MakeLayout<ElementA, LayoutTagA>(m, k);
-    auto layoutB = tla::MakeLayout<ElementB, LayoutTagB>(k, n);
-    auto layoutC = tla::MakeLayout<ElementC, LayoutTagC>(m, n);
-
-    using ProblemShape = MatmulShape;
-
-    MatmulShape shape = {m, n, k};
-
+    constexpr uint32_t taskRatio = 2;
     using TileCopy = Gemm::Tile::PackedTileCopyTlaToUB<
         ArchTag, ElementA, LayoutTagA, ElementB, LayoutTagB, ElementC, LayoutTagC, ElementBias,
         Gemm::Tile::CopyL0CToUBMode::SPLIT_M>;
     using BlockMmad = Gemm::Block::BlockMmadTla<
         DispatchPolicy, L1TileShape, L0TileShape, ElementA, ElementB, ElementC, ElementBias, TileCopy>;
-    using EpilogueDispatchPolicy = Epilogue::BlockEpilogueDequant;
+    using EpilogueDispatchPolicy = Epilogue::BlockEpilogueDequant<X1_QUANT_MODE, X2_QUANT_MODE>;
     using BlockEpilogue = Epilogue::Block::BlockEpilogue<
-        EpilogueDispatchPolicy, L0TileShape, ElementD, ElementC, ElementX1, ElementX2, ElementBias>;
+        EpilogueDispatchPolicy, L0TileShape, ElementC, ElementD, ElementBias, ElementX1Scale, ElementX2Scale,
+        std::integral_constant<uint32_t, taskRatio>>;
 
     uint32_t taskNum = CeilDiv(options.problemShape.m(), tla::get<0>(L1TileShape{})) *
                        CeilDiv(options.problemShape.n(), tla::get<1>(L1TileShape{}));
-    uint32_t aicCoreUsed = min(aicCoreNum, taskNum);
+    uint32_t aicCoreUsed = std::min(aicCoreNum, taskNum);
 
     using BlockScheduler = typename Gemm::Block::BlockSchedulerAswt<L1TileShape, L0TileShape>;
 
     // kernel level
-    using MatmulKernel = Gemm::Kernel::GemmUniversal<ProblemShape, BlockMmad, BlockEpilogue, BlockScheduler>;
+    using MatmulKernel =
+        Gemm::Kernel::GemmUniversal<BlockMmad, BlockEpilogue, BlockScheduler, LayoutTagA, LayoutTagB, LayoutTagC>;
 
     using MatmulAdapter = Gemm::Device::DeviceGemm<MatmulKernel>;
 
     using Arguments = typename MatmulKernel::Arguments;
-    Arguments arguments = {
-        shape,
-        {deviceA, deviceB, deviceC},
-        {deviceC,
-         x2ScaleDevice,
-         x1ScaleDevice,
-         quantBiasDevice,
-         {tla::get<0>(L1TileShape{}), tla::get<1>(L1TileShape{}), x1QuantMode, x2QuantMode, AscendC::DT_FLOAT,
-          quantBiasDevice != nullptr}}};
+    Arguments arguments = {options.problemShape, deviceA,       deviceB,        deviceC,
+                           x2ScaleDevice,        x1ScaleDevice, quantBiasDevice};
 
     MatmulAdapter matmulOp;
-    matmulOp.CanImplement(arguments);
+    if (matmulOp.CanImplement(arguments) != Status::kSuccess) {
+        std::cerr << "The arguments are not supported by the kernel." << std::endl;
+        cleanupAndFinalize();
+        return;
+    }
     sizeWorkspace = matmulOp.GetWorkspaceSize(arguments);
     if (sizeWorkspace > 0) {
         ACL_CHECK(aclrtMalloc(reinterpret_cast<void**>(&deviceWorkspace), sizeWorkspace, ACL_MEM_MALLOC_HUGE_FIRST));
@@ -270,97 +342,53 @@ static void Run(const Options& options, QuantMode x1QuantMode, QuantMode x2Quant
     cleanupAndFinalize();
 }
 
-QuantMode StringToQuantMode(const std::string& s)
+void DispatchRun(const Options& options)
 {
-    if (s == "per_tensor") {
-        return QuantMode::PERTENSOR_MODE;
-    } else if (s == "per_channel") {
-        return QuantMode::PERCHANNEL_MODE;
-    } else if (s == "per_token") {
-        return QuantMode::PERTOKEN_MODE;
-    } else if (s == "default") {
-        return QuantMode::DEFAULT;
-    } else {
-        throw std::invalid_argument("Invalid quant mode string: " + s);
-    }
-}
-
-struct ArgsParams {
-    uint32_t m;
-    uint32_t n;
-    uint32_t k;
-    QuantMode x1QuantMode;
-    QuantMode x2QuantMode;
-    bool enableBias = false;
-};
-
-bool IsValidQuantMode(QuantMode x1QuantMode, QuantMode x2QuantMode, bool enableBias)
-{
-    using TupleType = std::tuple<QuantMode, QuantMode, bool>;
-    static const std::vector<TupleType> validPairs = {
-        {QuantMode::PERTOKEN_MODE, QuantMode::PERTENSOR_MODE, false},
-        {QuantMode::PERTOKEN_MODE, QuantMode::PERCHANNEL_MODE, false},
-        {QuantMode::PERTENSOR_MODE, QuantMode::PERCHANNEL_MODE, false},
-        {QuantMode::DEFAULT, QuantMode::PERCHANNEL_MODE, false},
-        {QuantMode::PERTOKEN_MODE, QuantMode::PERTENSOR_MODE, true},
-        {QuantMode::PERTOKEN_MODE, QuantMode::PERCHANNEL_MODE, true},
-        {QuantMode::DEFAULT, QuantMode::PERTENSOR_MODE, true},
-        {QuantMode::DEFAULT, QuantMode::PERCHANNEL_MODE, true}};
-
-    const auto target = std::make_tuple(x1QuantMode, x2QuantMode, enableBias);
-    return std::find(validPairs.begin(), validPairs.end(), target) != validPairs.end();
-}
-
-ArgsParams ParseArguments(int32_t argc, const char* argv[])
-{
-    ArgsParams params;
-    constexpr static int32_t minArgs = 5;
-    if (argc < minArgs) {
-        throw std::invalid_argument("Insufficient arguments provided");
-    }
-
-    try {
-        params.m = std::stoi(argv[1]);
-        params.n = std::stoi(argv[2]);
-        params.k = std::stoi(argv[3]);
-
-        params.x1QuantMode = StringToQuantMode(argv[4]);
-        params.x2QuantMode = StringToQuantMode(argv[5]);
-
-        if (argc >= 7) {
-            if (std::string(argv[6]) == "has_bias") {
-                params.enableBias = true;
-            } else {
-                throw std::invalid_argument("Invalid argument for bias flag: " + std::string(argv[6]));
-            }
+    const QuantMode x1QuantMode = options.x1QuantMode;
+    const QuantMode x2QuantMode = options.x2QuantMode;
+    const bool enableBias = options.enableBias;
+    if (x1QuantMode == QuantMode::PERTOKEN_MODE && x2QuantMode == QuantMode::PERTENSOR_MODE) {
+        if (enableBias) {
+            Run<QuantMode::PERTOKEN_MODE, QuantMode::PERTENSOR_MODE, float>(options);
+        } else {
+            Run<QuantMode::PERTOKEN_MODE, QuantMode::PERTENSOR_MODE, void>(options);
         }
-    } catch (const std::exception& e) {
-        throw std::invalid_argument(std::string("Error parsing arguments: ") + e.what());
+    } else if (x1QuantMode == QuantMode::PERTOKEN_MODE && x2QuantMode == QuantMode::PERCHANNEL_MODE) {
+        if (enableBias) {
+            Run<QuantMode::PERTOKEN_MODE, QuantMode::PERCHANNEL_MODE, float>(options);
+        } else {
+            Run<QuantMode::PERTOKEN_MODE, QuantMode::PERCHANNEL_MODE, void>(options);
+        }
+    } else if (x1QuantMode == QuantMode::PERTENSOR_MODE && x2QuantMode == QuantMode::PERCHANNEL_MODE) {
+        Run<QuantMode::PERTENSOR_MODE, QuantMode::PERCHANNEL_MODE, void>(options);
+    } else if (x1QuantMode == QuantMode::NONE && x2QuantMode == QuantMode::PERTENSOR_MODE) {
+        Run<QuantMode::NONE, QuantMode::PERTENSOR_MODE, float>(options);
+    } else if (x1QuantMode == QuantMode::NONE && x2QuantMode == QuantMode::PERCHANNEL_MODE) {
+        if (enableBias) {
+            Run<QuantMode::NONE, QuantMode::PERCHANNEL_MODE, float>(options);
+        } else {
+            Run<QuantMode::NONE, QuantMode::PERCHANNEL_MODE, void>(options);
+        }
     }
-    return params;
 }
 
 int main(int argc, const char** argv)
 {
-    for (int32_t i = 0; i < argc; i++) {
-        std::cout << "arg[" << i << "]: " << argv[i] << std::endl;
+    Options options;
+    if (options.Parse(argc, argv) != 0) {
+        return -1;
     }
+    std::cout << "m: " << options.problemShape.m() << std::endl
+              << "n: " << options.problemShape.n() << std::endl
+              << "k: " << options.problemShape.k() << std::endl
+              << "x1QuantMode: " << static_cast<int>(options.x1QuantMode) << std::endl
+              << "x2QuantMode: " << static_cast<int>(options.x2QuantMode) << std::endl
+              << "enableBias: " << (options.enableBias ? "true" : "false") << std::endl;
 
-    ArgsParams params = ParseArguments(argc, argv);
-    std::cout << "m: " << params.m << std::endl
-              << "n: " << params.n << std::endl
-              << "k: " << params.k << std::endl
-              << "x1QuantMode: " << static_cast<int>(params.x1QuantMode) << std::endl
-              << "x2QuantMode: " << static_cast<int>(params.x2QuantMode) << std::endl
-              << "enableBias: " << (params.enableBias ? "true" : "false") << std::endl;
-
-    if (!IsValidQuantMode(params.x1QuantMode, params.x2QuantMode, params.enableBias)) {
+    if (!options.CanImplement()) {
         std::cerr << "Invalid combination of quantization modes and bias flag." << std::endl;
         return -1;
     }
-    Options options;
-    options.problemShape = {params.m, params.n, params.k};
-    options.deviceId = 0;
-    Run(options, params.x1QuantMode, params.x2QuantMode, params.enableBias);
+    DispatchRun(options);
     return 0;
 }

@@ -1,19 +1,23 @@
 /**
- * Copyright (c) 2026 Huawei Technologies Co., Ltd.
- * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
- * CANN Open Software License Agreement Version 2.0 (the "License").
- * Please refer to the License for details. You may not use this file except in compliance with the License.
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
- * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
- * See LICENSE in the root of the software repository for the full text of the License.
- */
+ * Copyright (c) 2026 Huawei Technologies Co., Ltd.
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+ * CANN Open Software License Agreement Version 2.0 (the "License").
+ * Please refer to the License for details. You may not use this file except in compliance with the License.
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+ * See LICENSE in the root of the software repository for the full text of the License.
+ */
 
 #ifndef CATLASS_GEMM_KERNEL_MATMUL_FULL_DEQUANT_HPP
 #define CATLASS_GEMM_KERNEL_MATMUL_FULL_DEQUANT_HPP
 
+#include <type_traits>
+
 #include "catlass/catlass.hpp"
 #include "catlass/arch/resource.hpp"
 #include "catlass/arch/cross_core_sync.hpp"
+#include "catlass/detail/tag_to_layout.hpp"
+#include "catlass/epilogue/dispatch_policy.hpp"
 #include "catlass/layout/layout.hpp"
 #include "catlass/gemm_coord.hpp"
 #include "catlass/matrix_coord.hpp"
@@ -23,7 +27,7 @@
 
 namespace Catlass::Gemm::Kernel {
 
-template <class ProblemShape_, class BlockMmad_, class BlockEpilogue_, class BlockScheduler_>
+template <class BlockMmad_, class BlockEpilogue_, class BlockScheduler_, class LayoutA_, class LayoutB_, class LayoutC_>
 class GemmUniversal {
 public:
     CATLASS_DEVICE
@@ -31,56 +35,49 @@ public:
     CATLASS_DEVICE
     ~GemmUniversal() = default;
 
-    using ProblemShape = ProblemShape_;
     using BlockMmad = BlockMmad_;
     using BlockEpilogue = BlockEpilogue_;
     using BlockScheduler = BlockScheduler_;
 
     using ArchTag = typename BlockMmad::ArchTag;
-    using L1TileShape = typename BlockMmad::L1TileShape;
     using ElementA = typename BlockMmad::ElementA;
-    using LayoutA = typename BlockMmad::LayoutA;
     using ElementB = typename BlockMmad::ElementB;
-    using LayoutB = typename BlockMmad::LayoutB;
     using ElementC = typename BlockMmad::ElementC;
-    using LayoutC = typename BlockMmad::LayoutC;
     using ElementBias = typename BlockMmad::ElementBias;
-    using OutputType = typename BlockEpilogue::DataTypeOut;
     using ElementAccumulator = typename BlockMmad::ElementAccumulator;
+    using ElementOut = typename BlockEpilogue::ElementOut;
 
-    static constexpr int64_t l1M = tla::get<0>(L1TileShape{});
-    static constexpr int64_t l1N = tla::get<1>(L1TileShape{});
-    static constexpr int64_t l1K = tla::get<2>(L1TileShape{});
+    static_assert(std::is_same_v<ElementC, typename BlockEpilogue::ElementIn>);
+    static_assert(std::is_same_v<ElementBias, typename BlockEpilogue::ElementBias>);
+    static_assert(std::is_same_v<LayoutA_, layout::RowMajor>, "LayoutA must be RowMajor");
+    static_assert(std::is_same_v<LayoutB_, layout::RowMajor>, "LayoutB must be RowMajor");
+    static_assert(std::is_same_v<LayoutC_, layout::RowMajor>, "LayoutC must be RowMajor");
 
-    using TupleShape = tla::Shape<int64_t, int64_t, int64_t, int64_t>;
-    using BlockShape = tla::Shape<int64_t, int64_t, int64_t, int64_t>;
-    using BlockCoord = tla::Coord<int64_t, int64_t, int64_t, int64_t>;
-
-    using BlockEpilogueArguments = typename BlockEpilogue::Arguments;
-    using BlockEpilogueParams = typename BlockEpilogue::Params;
-
-    // ND layout
-    using NDLayout = tla::Layout<tla::Shape<int64_t, int64_t>, tla::Stride<int64_t, tla::Int<1>>>;
-
-    struct DequantMatmulArguments {
-        GM_ADDR x1;
-        GM_ADDR x2;
-        GM_ADDR y;
-        DequantMatmulArguments() = default;
-    };
+    using LayoutA = Catlass::detail::TagToLayout_t<ElementA, LayoutA_>;
+    using LayoutB = Catlass::detail::TagToLayout_t<ElementB, LayoutB_>;
+    using LayoutC = Catlass::detail::TagToLayout_t<ElementOut, LayoutC_>;
 
     struct Arguments {
-        ProblemShape problemShape;
-        DequantMatmulArguments mmadArgs;
-        BlockEpilogueArguments epilogueArgs;
+        GemmCoord problemShape;
+        GM_ADDR ptrA{nullptr};
+        GM_ADDR ptrB{nullptr};
+        GM_ADDR ptrD{nullptr};
+        GM_ADDR ptrX2Scale{nullptr};
+        GM_ADDR ptrX1Scale{nullptr};
+        GM_ADDR ptrBias{nullptr};
         Arguments() = default;
     };
-
-    using DequantMatmulParams = DequantMatmulArguments;
     struct Params {
-        ProblemShape problemShape;
-        DequantMatmulParams mmadParams;
-        BlockEpilogueParams epilogueParams;
+        GemmCoord problemShape;
+        GM_ADDR ptrA{nullptr};
+        LayoutA layoutA{};
+        GM_ADDR ptrB{nullptr};
+        LayoutB layoutB{};
+        GM_ADDR ptrD{nullptr};
+        LayoutC layoutD{};
+        GM_ADDR ptrX2Scale{nullptr};
+        GM_ADDR ptrX1Scale{nullptr};
+        GM_ADDR ptrBias{nullptr};
         Params() = default;
     };
 
@@ -88,21 +85,14 @@ private:
     using AGlobalTensorType = AscendC::GlobalTensor<ElementA>;
     using BGlobalTensorType = AscendC::GlobalTensor<ElementB>;
     using CLocalTensorType = AscendC::LocalTensor<ElementC>;
-    using OutputTensorType = AscendC::GlobalTensor<OutputType>;
 
-    using AGmTensor = tla::Tensor<AGlobalTensorType, NDLayout, tla::Coord<tla::_0, tla::_0>, AscendC::TPosition::GM>;
-    using BGmTensor = tla::Tensor<BGlobalTensorType, NDLayout, tla::Coord<tla::_0, tla::_0>, AscendC::TPosition::GM>;
-    using CUbTensor =
-        tla::Tensor<CLocalTensorType, NDLayout, tla::Coord<tla::_0, tla::_0>, AscendC::TPosition::VECCALC>;
-    using OutputTensor = tla::Tensor<OutputTensorType, NDLayout, tla::Coord<tla::_0, tla::_0>, AscendC::TPosition::GM>;
+    using AGmTensor = tla::Tensor<AGlobalTensorType, LayoutA, tla::Coord<tla::_0, tla::_0>, AscendC::TPosition::GM>;
+    using BGmTensor = tla::Tensor<BGlobalTensorType, LayoutB, tla::Coord<tla::_0, tla::_0>, AscendC::TPosition::GM>;
     AGlobalTensorType aGm_;
     BGlobalTensorType bGm_;
     CLocalTensorType cUb_;
-    OutputTensorType outputGm_;
     AGmTensor aGmTensor_;
     BGmTensor bGmTensor_;
-    CUbTensor cUbTensor_;
-    OutputTensor outputTensor_;
 
     constexpr static uint16_t AIC_SYNC_AIV_MODE_4 = 4;
     constexpr static int16_t AIV_SYNC_AIC_FLAG = 5;
@@ -111,60 +101,68 @@ private:
     constexpr static int16_t COUNT_ID_MAX = 15;
     constexpr static int16_t COUNT_FLAG = 3;
 
-public:
     CATLASS_DEVICE
     void Init(Params const& params)
     {
-        int64_t m = params.problemShape.m;
-        int64_t n = params.problemShape.n;
-        int64_t k = params.problemShape.k;
+        int64_t m = params.problemShape.m();
+        int64_t n = params.problemShape.n();
+        int64_t k = params.problemShape.k();
 
         AscendC::GlobalTensor<ElementA> tempA;
-        tempA.SetGlobalBuffer(reinterpret_cast<__gm__ ElementA*>(params.mmadParams.x1), m * k);
+        tempA.SetGlobalBuffer(reinterpret_cast<__gm__ ElementA*>(params.ptrA), m * k);
         aGm_.address_ = tempA.address_;
         AscendC::GlobalTensor<ElementB> tempB;
-        tempB.SetGlobalBuffer(reinterpret_cast<__gm__ ElementB*>(params.mmadParams.x2), k * n);
+        tempB.SetGlobalBuffer(reinterpret_cast<__gm__ ElementB*>(params.ptrB), k * n);
         bGm_.address_ = tempB.address_;
-        AscendC::GlobalTensor<OutputType> tempOut;
-        tempOut.SetGlobalBuffer(reinterpret_cast<__gm__ OutputType*>(params.mmadParams.y), m * n);
-        outputGm_.address_ = tempOut.address_;
 
-        NDLayout aLayout = tla::MakeLayout(tla::MakeShape(m, k), tla::MakeStride(k, tla::Int<1>{}));
-        aGmTensor_ = tla::MakeTensor(aGm_, aLayout, Arch::PositionGM{});
-
-        NDLayout bLayout = tla::MakeLayout(tla::MakeShape(k, n), tla::MakeStride(n, tla::Int<1>{}));
-        bGmTensor_ = tla::MakeTensor(bGm_, bLayout, Arch::PositionGM{});
-
-        NDLayout outLayout = tla::MakeLayout(tla::MakeShape(m, n), tla::MakeStride(n, tla::Int<1>{}));
-        outputTensor_ = tla::MakeTensor(outputGm_, outLayout, Arch::PositionGM{});
+        aGmTensor_ = tla::MakeTensor(aGm_, params.layoutA, Arch::PositionGM{});
+        bGmTensor_ = tla::MakeTensor(bGm_, params.layoutB, Arch::PositionGM{});
     }
 
-    CATLASS_HOST_DEVICE
-    static Status CheckShape(ProblemShape const& shape)
-    {
-        return Status::kSuccess;
-    }
-
+public:
     CATLASS_HOST_DEVICE
     static bool CanImplement(Arguments const& args)
     {
-        return true;
+        if (args.problemShape.m() == 0 || args.problemShape.n() == 0 || args.problemShape.k() == 0 ||
+            args.ptrA == nullptr || args.ptrB == nullptr || args.ptrD == nullptr || args.ptrX2Scale == nullptr) {
+            return false;
+        }
+        if constexpr (BlockEpilogue::x1QuantMode != Catlass::Epilogue::QuantMode::NONE) {
+            if (args.ptrX1Scale == nullptr) {
+                return false;
+            }
+        }
+        if constexpr (BlockEpilogue::hasBias) {
+            if (args.ptrBias == nullptr) {
+                return false;
+            }
+        }
+        return BlockEpilogue::CanImplement() == Status::kSuccess;
     }
 
     CATLASS_HOST_DEVICE
     static size_t GetWorkspaceSize(const Arguments& args)
     {
-        return 0;
+        return BlockEpilogue::GetWorkspaceSize();
     }
 
     CATLASS_HOST_DEVICE
     static Params ToUnderlyingArguments(Arguments const& args, GM_ADDR workspace)
     {
-        Params params = {
-            args.problemShape,
-            args.mmadArgs,
-            BlockEpilogue::InitParams(args.epilogueArgs),
-        };
+        LayoutA layoutA = tla::MakeLayout<ElementA, LayoutA_>(args.problemShape.m(), args.problemShape.k());
+        LayoutB layoutB = tla::MakeLayout<ElementB, LayoutB_>(args.problemShape.k(), args.problemShape.n());
+        LayoutC layoutD = tla::MakeLayout<ElementOut, LayoutC_>(args.problemShape.m(), args.problemShape.n());
+        Params params{};
+        params.problemShape = args.problemShape;
+        params.ptrA = args.ptrA;
+        params.layoutA = layoutA;
+        params.ptrB = args.ptrB;
+        params.layoutB = layoutB;
+        params.ptrD = args.ptrD;
+        params.layoutD = layoutD;
+        params.ptrX2Scale = args.ptrX2Scale;
+        params.ptrX1Scale = args.ptrX1Scale;
+        params.ptrBias = args.ptrBias;
         return params;
     }
 
@@ -172,7 +170,6 @@ public:
     {
         Arch::Resource<ArchTag> resource;
         BlockMmad blockMmad(resource);
-        BlockEpilogue epilogue;
 
         int64_t curBlockIdx = AscendC::GetBlockIdx();
         int64_t blockNum = AscendC::GetBlockNum();
@@ -187,12 +184,10 @@ public:
             return;
         }
 
-        GemmCoord ps{params.problemShape.m, params.problemShape.n, params.problemShape.k};
-
         Init(params);
-        int64_t calM = enable2UB ? CeilDiv(l1M, AscendC::GetTaskRation()) : l1M;
-        epilogue.Init(resource, params.epilogueParams, ps);
-        BlockScheduler bs(curBlockIdx, blockNum, ps);
+        BlockEpilogue epilogue(
+            resource, params.ptrD, params.ptrX2Scale, params.ptrX1Scale, params.ptrBias, params.problemShape);
+        BlockScheduler bs(curBlockIdx, blockNum, params.problemShape);
 
         if (bs.endBlockIdx_ + 1 <= blockNum / 2) {
             bs.UpdateTailTile();
@@ -223,7 +218,7 @@ public:
                 break;
             }
 
-            auto ubLocalTemp = epilogue.GetL0c2UbTensor();
+            auto ubLocalTemp = resource.ubBuf.template GetBufferByByte<ElementC>(0);
 
             auto tensorA = tla::MakeTensor(aGm_, aGmTensor_.layout(), Arch::PositionGM{});
             auto tensorB = tla::MakeTensor(bGm_, bGmTensor_.layout(), Arch::PositionGM{});
@@ -250,7 +245,6 @@ public:
                 auto cOutputTlaTensor = GetTile(tensorC, tla::MakeCoord(0, 0), tla::MakeShape(blockM, alignN));
 
                 blockMmad(aInputTlaTensor, bInputTlaTensor, cOutputTlaTensor, actualBlockShape);
-                // Compute block-level mmad with epilogue
                 enableCVSync = true;
                 count++;
                 count_id = count / COUNT_ID_MAX % COUNT_FLAG;

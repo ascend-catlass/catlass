@@ -13,6 +13,8 @@
 #define K_MAX_SHAPE_DIM 0
 #endif
 
+#include <type_traits>
+
 #include "catlass/arch/arch.hpp"
 #include "catlass/catlass.hpp"
 #include "catlass/epilogue/block/block_epilogue.hpp"
@@ -81,17 +83,22 @@ using ElementC = CATLASS_JIT_ELEMENT_C;
 using ElementD = CATLASS_JIT_ELEMENT_D;
 using ElementX1 = CATLASS_JIT_ELEMENT_X1;
 using ElementX2 = CATLASS_JIT_ELEMENT_X2;
+#if CATLASS_JIT_HAS_QUANT_BIAS
 using ElementBias = CATLASS_JIT_ELEMENT_BIAS;
+#else
+using ElementBias = void;
+#endif
 
 using LayoutTagA = layout::CATLASS_JIT_LAYOUT_A;
 using LayoutTagB = layout::CATLASS_JIT_LAYOUT_B;
 using LayoutTagC = layout::CATLASS_JIT_LAYOUT_C;
 
-using QuantMode = Epilogue::Block::QuantMode;
+using QuantMode = Epilogue::QuantMode;
 
 constexpr QuantMode kX1QuantMode = static_cast<QuantMode>(CATLASS_JIT_X1_QUANT_MODE);
 constexpr QuantMode kX2QuantMode = static_cast<QuantMode>(CATLASS_JIT_X2_QUANT_MODE);
 constexpr bool kHasQuantBias = CATLASS_JIT_HAS_QUANT_BIAS;
+constexpr uint32_t kSplitTaskRatio = 2;
 
 using ArchTag = Arch::Ascend950;
 constexpr bool enableUnitFlag = true;
@@ -100,24 +107,20 @@ using DispatchPolicy = Gemm::MmadPingpong<ArchTag, enableUnitFlag>;
 using L1TileShape = Shape<Int<128>, Int<256>, Int<256>>;
 using L0TileShape = Shape<Int<128>, Int<256>, Int<128>>;
 
-struct MatmulShape {
-    uint32_t m;
-    uint32_t n;
-    uint32_t k;
-};
-using ProblemShape = MatmulShape;
-
 using TileCopy = Gemm::Tile::PackedTileCopyTlaToUB<
     ArchTag, ElementA, LayoutTagA, ElementB, LayoutTagB, ElementC, LayoutTagC, ElementBias,
     Gemm::Tile::CopyL0CToUBMode::SPLIT_M>;
 using BlockMmad = Gemm::Block::BlockMmadTla<
     DispatchPolicy, L1TileShape, L0TileShape, ElementA, ElementB, ElementC, ElementBias, TileCopy>;
-using EpilogueDispatchPolicy = Epilogue::BlockEpilogueDequant;
-using BlockEpilogue = Epilogue::Block::BlockEpilogue<EpilogueDispatchPolicy, L0TileShape, ElementD, ElementC, ElementX1, ElementX2, ElementBias>;
+using EpilogueDispatchPolicy = Epilogue::BlockEpilogueDequant<kX1QuantMode, kX2QuantMode>;
+using BlockEpilogue = Epilogue::Block::BlockEpilogue<
+    EpilogueDispatchPolicy, L0TileShape, ElementC, ElementD, ElementBias, ElementX1, ElementX2,
+    std::integral_constant<uint32_t, kSplitTaskRatio>>;
 
 using BlockScheduler = typename Gemm::Block::BlockSchedulerAswt<L1TileShape, L0TileShape>;
 
-using MatmulKernel = Gemm::Kernel::GemmUniversal<ProblemShape, BlockMmad, BlockEpilogue, BlockScheduler>;
+using MatmulKernel = Gemm::Kernel::GemmUniversal<
+    BlockMmad, BlockEpilogue, BlockScheduler, LayoutTagA, LayoutTagB, LayoutTagC>;
 
 extern "C" void run(uint32_t blockNum, aclrtStream stream, const CatlassKernel::MatmulParams* params)
 {
@@ -125,45 +128,29 @@ extern "C" void run(uint32_t blockNum, aclrtStream stream, const CatlassKernel::
     uint32_t n = params->n;
     uint32_t k = params->k;
 
-    auto layoutA = MakeLayout<ElementA, LayoutTagA>(m, k);
-    auto layoutB = MakeLayout<ElementB, LayoutTagB>(k, n);
-    auto layoutC = MakeLayout<ElementC, LayoutTagC>(m, n);
-
-    MatmulShape shape = {m, n, k};
-
     uint8_t* x1ScaleDevice = nullptr;
     uint8_t* x2ScaleDevice = nullptr;
     uint8_t* quantBiasDevice = nullptr;
 
     int inputIdx = 2;
-    if (kX1QuantMode != QuantMode::DEFAULT) {
+    if constexpr (kX1QuantMode != QuantMode::NONE) {
         x1ScaleDevice = params->inputAddr[inputIdx++];
     }
-    if (kX2QuantMode != QuantMode::DEFAULT) {
-        x2ScaleDevice = params->inputAddr[inputIdx++];
-    }
-    if (kHasQuantBias) {
+    x2ScaleDevice = params->inputAddr[inputIdx++];
+    if constexpr (kHasQuantBias) {
         quantBiasDevice = params->inputAddr[inputIdx++];
     }
 
     typename MatmulKernel::Arguments arguments = {
-        shape,
-        {params->inputAddr[0], params->inputAddr[1], params->outputAddr[0]},
-        {
-            params->outputAddr[0], x2ScaleDevice, x1ScaleDevice, quantBiasDevice,
-            {
-                tla::get<0>(L1TileShape{}),
-                tla::get<1>(L1TileShape{}),
-                kX1QuantMode,
-                kX2QuantMode,
-                AscendC::DT_FLOAT,
-                kHasQuantBias
-            }
-        }
-    };
+        GemmCoord{m, n, k},
+        params->inputAddr[0],
+        params->inputAddr[1],
+        params->outputAddr[0],
+        x2ScaleDevice,
+        x1ScaleDevice,
+        quantBiasDevice};
 
-    uint32_t taskNum = CeilDiv(m, tla::get<0>(L1TileShape{})) *
-                       CeilDiv(n, tla::get<1>(L1TileShape{}));
+    uint32_t taskNum = CeilDiv(m, tla::get<0>(L1TileShape{})) * CeilDiv(n, tla::get<1>(L1TileShape{}));
     uint32_t aicCoreUsed = std::min(blockNum, taskNum);
 
     Catlass::RunKernel<MatmulKernel>(arguments, stream, aicCoreUsed);

@@ -21,6 +21,15 @@
 
 namespace Catlass::Epilogue {
 
+// Quantization modes used by the full dequant epilogue.
+enum class QuantMode : uint32_t
+{
+    NONE = 0x0U,
+    PERTENSOR_MODE = 0x1U,
+    PERCHANNEL_MODE = 0x1U << 1,
+    PERTOKEN_MODE = 0x1U << 2,
+};
+
 // For AtlasA2, FA Infer RescaleO without div rowsum
 struct EpilogueAtlasA2RescaleOWithoutDivSum {
     using ArchTag = Arch::AtlasA2;
@@ -217,8 +226,11 @@ struct EpilogueAscend950Fixpipe {
     static constexpr bool SPLIT_M = SPLIT_M_;
 };
 // For Ascend950, full dequant
+template <QuantMode X1_QUANT_MODE_, QuantMode X2_QUANT_MODE_>
 struct BlockEpilogueDequant {
     using ArchTag = Arch::Ascend950;
+    static constexpr QuantMode x1QuantMode = X1_QUANT_MODE_;
+    static constexpr QuantMode x2QuantMode = X2_QUANT_MODE_;
 };
 
 // For Ascend950, dual-level quantization + MX format
