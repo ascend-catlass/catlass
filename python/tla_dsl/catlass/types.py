@@ -582,6 +582,8 @@ _TENSOR_DTYPE_SIZES: dict[str, int] = {
     "f16": 2,
     "bf16": 2,
     "f32": 4,
+    # Storage-only: flat GM->L1 VectorLayout staging (no AVE / cast path).
+    "f64": 8,
     "f8e4m3fn": 1,
     "f8e5m2": 1,
     # An e8m0 shared exponent is one opaque byte.
@@ -801,6 +803,7 @@ from .base_dsl.typing import (
     Float16,
     BFloat16,
     Float32,
+    Float64,
     Float8E4M3FN,
     Float8E5M2,
     Float4E2M1,
@@ -851,6 +854,7 @@ __all__ = [
     "UInt32",
     "UInt64",
     "Float32",
+    "Float64",
     "Float16",
     "BFloat16",
     "Float8E4M3FN",

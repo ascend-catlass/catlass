@@ -1321,6 +1321,44 @@ def test_frontend_accepts_integer64_ub_tile(dtype, pointee) -> None:
     assert f"!tla.ptr<{pointee}, ub," in mlir
 
 
+def test_frontend_accepts_u64_gm_vectorlayout_make_tensor_from_arg() -> None:
+    """GM VectorLayout u64 is admitted when the ptr comes from a kernel arg.
+
+    ``tla.allocate`` cannot target GM, so the source tile is built with
+    ``make_tensor`` on an argument pointer — the same path a real GM→L1
+    staging kernel uses before ``make_tensor_like`` on L1.
+    """
+
+    @tla.kernel
+    def kernel(src: tla.Tensor) -> None:
+        gm = tla.make_tensor(
+            src.ptr,
+            tla.make_layout(
+                tla.make_shape(32),
+                tla.make_stride(1),
+                layoutTag=tla.arch.VectorLayout,
+            ),
+        )
+        l1 = tla.make_tensor_like(
+            tla.allocate(32, tla.UInt64, tla.AddressSpace.l1, 512),
+            gm,
+            tla.arch.VectorLayout,
+        )
+        with tla.cube():
+            tla.copy(l1, gm)
+
+    src = make_fake_tensor(
+        tla.UInt64,
+        (32,),
+        (1,),
+        addrspace=tla.AddressSpace.gm,
+        origin_shape=(32,),
+        layout_tag=tla.arch.VectorLayout,
+    )
+    mlir = kernel.dump_mlir(type_args=(src,))
+    assert "tla.copy" in mlir
+
+
 @pytest.mark.parametrize(
     ("label", "addrspace", "layout_tag"),
     [
@@ -1330,10 +1368,10 @@ def test_frontend_accepts_integer64_ub_tile(dtype, pointee) -> None:
 def test_frontend_rejects_u64_tile_outside_supported_construction(
     label: str, addrspace: object, layout_tag: object
 ) -> None:
-    """Allowing UB construction does not admit row-major u64 L1 tiles."""
+    """Allowing UB / VectorLayout staging does not admit row-major u64 L1 tiles."""
     with pytest.raises(
         TlaLoweringError,
-        match=r"u64 is only accepted in UB.*L1 VectorLayout",
+        match=r"i64/u64 are accepted in UB.*GM/L1 VectorLayout",
     ):
         _integer64_tile_kernel(addrspace, layout_tag).dump_mlir()
 

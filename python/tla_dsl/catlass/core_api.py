@@ -368,12 +368,16 @@ _MAKE_TENSOR_SUPPORTED_ELEMENT_TYPES = frozenset(
     }
 )
 
-# Additional 64-bit tiles admitted only through ``make_tensor``: i64/u64 UB
-# destinations for Scatter, and u64 L1 VectorLayout per-channel fixpipe dequant
-# words. Keep them out of the global set: other copy/load routes remain limited
-# to their existing element types. UB payload can be moved through a recast view.
-_U64_TILE_ADDRSPACE = "l1"
-_U64_TILE_LAYOUT_TAG = "VectorLayout"
+# 64-bit tiles admitted outside the global make_tensor set:
+# - i64/u64 on UB for Scatter destinations;
+# - flat VectorLayout GM -> L1 (and make_tensor_like on L1) for fixpipe
+#   dequant words (u64) and general b64 runs (i64 / f64).
+# Keeping them out of the global set above means other layouts / spaces are
+# refused where they are built. They also stay out of the shared MLIR
+# copyRuntimeElemSuffix map so GM<->UB cannot pick them up accidentally.
+_B64_STAGING_DTYPES = frozenset({"u64", "i64", "f64"})
+_B64_STAGING_ADDRSPACES = frozenset({"gm", "l1"})
+_B64_STAGING_LAYOUT_TAG = "VectorLayout"
 
 
 # An MX shared-exponent scale block nests exactly like the zZ layout, but its C0 is fixed by
@@ -5504,17 +5508,17 @@ def make_tensor(
     if dtype not in _MAKE_TENSOR_SUPPORTED_ELEMENT_TYPES and not (
         (dtype in ("i64", "u64") and addr == "ub")
         or (
-            dtype == "u64"
-            and addr == _U64_TILE_ADDRSPACE
-            and layout._layout_tag == _U64_TILE_LAYOUT_TAG
+            dtype in _B64_STAGING_DTYPES
+            and addr in _B64_STAGING_ADDRSPACES
+            and layout._layout_tag == _B64_STAGING_LAYOUT_TAG
         )
     ):
         raise TlaLoweringError(
             f"tla.make_tensor expects a supported element type, got [{dtype}]"
             + (
-                "; u64 is only accepted in UB for scatter or as the L1 "
-                "VectorLayout tile holding the per-channel fixpipe dequant words"
-                if dtype == "u64"
+                "; i64/u64 are accepted in UB for scatter, and i64/u64/f64 as "
+                "GM/L1 VectorLayout tiles for the flat GM->L1 staging route"
+                if dtype in _B64_STAGING_DTYPES
                 else ""
             )
         )
@@ -5702,11 +5706,28 @@ def make_tensor_like(
             "tla.make_tensor_like cannot derive element type from ptr pointee "
             f"{ptr_ty.pointee}"
         ) from exc
-    if dtype not in _MAKE_TENSOR_SUPPORTED_ELEMENT_TYPES:
+    addr = ptr_ty.addrspace
+    # Resolve the effective layout tag early enough that the b64 VectorLayout
+    # staging gate can run before the generic element-type refusal. When the
+    # caller omits layoutTag, L1 inference keeps VectorLayout as VectorLayout
+    # (see below), so using like_type.layout_tag here matches that path.
+    _like_layout_for_gate = (
+        _name_token(layoutTag) if layoutTag is not None else like_type.layout_tag
+    )
+    if dtype not in _MAKE_TENSOR_SUPPORTED_ELEMENT_TYPES and not (
+        dtype in _B64_STAGING_DTYPES
+        and addr in _B64_STAGING_ADDRSPACES
+        and _like_layout_for_gate == _B64_STAGING_LAYOUT_TAG
+    ):
         raise TlaLoweringError(
             f"tla.make_tensor_like expects a supported element type, got [{dtype}]"
+            + (
+                "; i64/u64/f64 are only accepted as L1 VectorLayout tiles for "
+                "the flat GM->L1 staging route"
+                if dtype in _B64_STAGING_DTYPES
+                else ""
+            )
         )
-    addr = ptr_ty.addrspace
     if addr not in _MAKE_TENSOR_LIKE_ON_CHIP_ADDRSPACES:
         _op_error(
             "make_tensor_like",
@@ -5905,7 +5926,16 @@ _SUPPORTED_CUBE_COPY_ROUTES = {
     ("gm", "RowMajorMxScaleB", "l1", "nNMxScale"): ("f8e8m0",),
     ("gm", "ColMajorMxScaleB", "l1", "nNMxScale"): ("f8e8m0",),
 
-    ("gm", "VectorLayout", "l1", "VectorLayout"): ("f32", "i32", "u64"),
+    ("gm", "VectorLayout", "l1", "VectorLayout"): (
+        "f32",
+        "f16",
+        "bf16",
+        "i32",
+        "i8",
+        "u64",
+        "i64",
+        "f64",
+    ),
     ("l1", "VectorLayout", "biasbuf", "VectorLayout"): ("f32", "i32"),
 
     # L1->L0 — AscendC LoadData 2dv2 accepts u32 but not u16 on dav-3510.
@@ -6657,9 +6687,10 @@ def copy(
             # The fixpipe reads one packed dequant element per output channel, and
             # that element is a u64: an fp32 scale in [31:0], the int8 sign selector
             # in [46], and the 9-bit offset in [45:37]. Anything else would reach
-            # bc as a dma copy of the wrong element width -- and the flat
-            # GM -> L1 route only registers u64 -- so refuse it here, where the
-            # message can name the argument.
+            # bc as a dma copy of the wrong element width -- the flat GM -> L1
+            # VectorLayout route also stages i64/f64, but those are not packed
+            # dequant words -- so refuse it here, where the message can name the
+            # argument.
             quant_desc = _tla_tensor_type_for_mlir_value(quant_tensor)
             quant_dtype = quant_desc.element_type
             if str(quant_dtype).strip().lower() != "u64":
@@ -6676,18 +6707,18 @@ def copy(
             # stride is anything but a static 1, but a tensor bound from the host
             # never goes through it.
             quant_addrspace = str(quant_desc.addrspace).strip().lower()
-            if quant_addrspace != _U64_TILE_ADDRSPACE:
+            if quant_addrspace != "l1":
                 _op_error(
                     "CopyL0C2DstParams",
                     "invalid argument 'quant_tensor' (position 5): the per-channel "
-                    f"dequant elements must be staged in {_U64_TILE_ADDRSPACE}, "
+                    "dequant elements must be staged in l1, "
                     f"got {quant_addrspace}",
                 )
-            if quant_desc.layout_tag != _U64_TILE_LAYOUT_TAG:
+            if quant_desc.layout_tag != _B64_STAGING_LAYOUT_TAG:
                 _op_error(
                     "CopyL0C2DstParams",
                     "invalid argument 'quant_tensor' (position 5): the per-channel "
-                    f"dequant elements must be a flat {_U64_TILE_LAYOUT_TAG} run, "
+                    f"dequant elements must be a flat {_B64_STAGING_LAYOUT_TAG} run, "
                     f"got {quant_desc.layout_tag}",
                 )
             # A rank-1 VectorLayout descriptor is a single stride leaf.

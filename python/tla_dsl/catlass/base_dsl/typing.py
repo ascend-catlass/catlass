@@ -735,6 +735,10 @@ def _mlir_f32() -> mlir_ir.Type:
     return mlir_ir.F32Type.get()
 
 
+def _mlir_f64() -> mlir_ir.Type:
+    return mlir_ir.F64Type.get()
+
+
 def _mlir_f8e4m3fn() -> mlir_ir.Type:
     # OCP E4M3 with finite-only encoding -- the format CANN calls fp8_e4m3fn_t.
     # Deliberately Float8E4M3FNType, not Float8E4M3Type: MLIR carries both, and
@@ -894,12 +898,14 @@ class Numeric(metaclass=NumericMeta, is_abstract=True):
             token = "bf16"
         elif isinstance(ty, mlir_ir.F32Type):
             token = "f32"
+        elif isinstance(ty, mlir_ir.F64Type):
+            # Storage / flat GM->L1 VectorLayout staging only. Cast and AVE paths
+            # still refuse f64; do not treat this as a compute type.
+            token = "f64"
         elif isinstance(ty, mlir_ir.Float8E4M3FNType):
             token = "f8e4m3fn"
         elif isinstance(ty, mlir_ir.Float8E5M2Type):
             token = "f8e5m2"
-        elif isinstance(ty, mlir_ir.F64Type):
-            raise TypeError(f"unsupported element type for Numeric: {ty!r}")
         else:
             # Dialect floats have no mlir_ir class for isinstance dispatch.
             printed = str(ty)
@@ -1040,6 +1046,15 @@ class Numeric(metaclass=NumericMeta, is_abstract=True):
             )
         if dtype is type(self):
             return self
+        # f64 is storage-only (flat GM→L1 VectorLayout staging). Refuse every
+        # Numeric.to convert path; AVE has no f64 ops and tla.cast already omits
+        # f64 from its dst whitelist. Same-type identity above still works.
+        src_ty = type(self)
+        if src_ty.dtype == "f64" or getattr(dtype, "dtype", None) == "f64":
+            raise TypeError(
+                "Numeric.to does not support f64 (storage-only Float64); "
+                f"got {src_ty.__name__} -> {dtype.__name__}"
+            )
         # Host: construct target (Python cast in __init__). SSA: emit arith ops.
         if isinstance(self.value, (bool, int, float)):
             if round_mode is not None and type(self).is_float:
@@ -1054,7 +1069,6 @@ class Numeric(metaclass=NumericMeta, is_abstract=True):
             return dtype(self, loc=loc)
         src = self.ir_value(loc=loc)
         dst_ty = _scalar_mlir_type(dtype)
-        src_ty = type(self)
         if str(src.type) == str(dst_ty):
             return dtype(src)
         if src_ty.is_integer and dtype.is_integer:
@@ -1552,6 +1566,22 @@ class Float32(Float, metaclass=FloatMeta, width=32, dtype="f32", mlir_type=_mlir
     @staticmethod
     def _host_bits(value: float) -> int:
         return struct.unpack("I", struct.pack("f", float(value)))[0]
+
+
+class Float64(Float, metaclass=FloatMeta, width=64, dtype="f64", mlir_type=_mlir_f64):
+    """IEEE-754 binary64 storage type for flat VectorLayout GM→L1 staging.
+
+    Not a compute element: ``Numeric.to`` / AVE / ``tla.cast`` all refuse ``f64``.
+    """
+
+    @staticmethod
+    def _host_bits(value: float) -> int:
+        # Host pointer / IntegerAttr slots are signed int64. Fold the unsigned
+        # IEEE bit pattern into that range (same spelling as unsigned i64 above).
+        bits = struct.unpack("Q", struct.pack("d", float(value)))[0]
+        if bits >= 1 << 63:
+            bits -= 1 << 64
+        return bits
 
 
 class Float8E4M3FN(

@@ -685,8 +685,9 @@ static StringRef copyRuntimeElemSuffix(Type elementType)
     if (elementType.isSignlessInteger(32))
         return "int32_t";
     // Unsigned cube / vector staging routes (see bc/Cube/dma.cpp and
-    // bc/Vector/dma.cpp). u64 is absent on purpose: i64 has no GM<->UB or
-    // GM->L1 route either.
+    // bc/Vector/dma.cpp). 64-bit widths (u64/i64/f64) are absent on purpose:
+    // only the flat VectorLayout GM->L1 branch admits them via a local suffix
+    // map, so GM<->UB cannot pick them up through this shared helper.
     if (elementType.isUnsignedInteger(8))
         return "uint8_t";
     if (elementType.isUnsignedInteger(16))
@@ -924,19 +925,26 @@ std::string getCopyRouteCallee(
     // GM->L1 flat run. A continuous one-dimensional tile is spelled VectorLayout;
     // RowMajor no longer has a route here. This also carries the per-channel
     // fixpipe dequant scale tile, which is one packed uint64 word per output
-    // channel.
+    // channel, plus general b64 staging (i64 / f64).
     //
-    // u64 rides only here. It stays out of copyRuntimeElemSuffix -- which every
-    // route shares -- so widening it cannot quietly admit u64 on GM<->UB, where
-    // no bc wrapper exists: tests/lit/tensor/make-tensor-copy-gm-ub.mlir pins
-    // that rejection. Widening the staging set is a decision, not a side effect
-    // of a width mapping.
+    // 64-bit element types ride only here. They stay out of copyRuntimeElemSuffix
+    // -- which every route shares -- so widening them cannot quietly admit
+    // i64/u64/f64 on GM<->UB, where no bc wrapper exists:
+    // tests/lit/tensor/make-tensor-copy-gm-ub.mlir pins that rejection. Widening
+    // the staging set is a decision, not a side effect of a width mapping.
     if (*srcSpace == hivm::AddressSpace::GM && *dstSpace == hivm::AddressSpace::L1 &&
         srcLayout == LayoutTag::VectorLayout && dstLayout == LayoutTag::VectorLayout) {
         if (srcElementType != dstElem)
             return {};
-        StringRef suffix =
-            srcElementType.isUnsignedInteger(64) ? StringRef("uint64_t") : copyRuntimeElemSuffix(srcElementType);
+        StringRef suffix;
+        if (srcElementType.isUnsignedInteger(64))
+            suffix = "uint64_t";
+        else if (srcElementType.isSignlessInteger(64))
+            suffix = "int64_t";
+        else if (srcElementType.isF64())
+            suffix = "double";
+        else
+            suffix = copyRuntimeElemSuffix(srcElementType);
         if (suffix.empty())
             return {};
         return Twine("copy_gm_VectorLayout_to_l1_VectorLayout_").concat(suffix).str();
@@ -1178,10 +1186,12 @@ static bool isAicTemplateRuntimeCall(StringRef name)
         return true;
     if (!(name.starts_with("copy_")))
         return false;
+    // Flat VectorLayout GM->L1 also stages i64/u64/f64; without these suffixes
+    // BiSheng treats the call as a plain extern and fails at device link.
     if (!(name.ends_with("_float") || name.ends_with("_half") || name.ends_with("_bf16") || name.ends_with("_int8_t") ||
           name.ends_with("_uint8_t") || name.ends_with("_uint16_t") || name.ends_with("_uint32_t") ||
           name.ends_with("_int32_t") || name.ends_with("_fp8_e4m3fn_t") || name.ends_with("_fp8_e5m2_t") ||
-          name.ends_with("_uint64_t")))
+          name.ends_with("_uint64_t") || name.ends_with("_int64_t") || name.ends_with("_double")))
         return false;
 
     return name.starts_with("copy_gm_RowMajor_to_l1_zN_") || name.starts_with("copy_gm_ColumnMajor_to_l1_nZ_") ||

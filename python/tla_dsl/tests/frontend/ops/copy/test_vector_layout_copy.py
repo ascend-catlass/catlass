@@ -68,6 +68,34 @@ def test_gm_vector_to_l1_vector_accepts_int32() -> None:
     assert "tla.copy" in mlir
 
 
+@pytest.mark.parametrize(
+    "dtype",
+    [tla.UInt64, tla.Int64, tla.Float64],
+    ids=["u64", "i64", "f64"],
+)
+def test_gm_vector_to_l1_vector_accepts_b64(dtype) -> None:
+    """Flat VectorLayout GM→L1 stages 64-bit elements (u64/i64/f64)."""
+    src = _gm(dtype, (256,), (1,))
+    dst = _l1(dtype, (256,), (1,))
+    mlir = gm_to_l1_kernel.dump_mlir(type_args=(dst, src))
+    assert "tla.copy" in mlir
+    assert "VectorLayout" in mlir
+
+
+@pytest.mark.parametrize(
+    "dtype",
+    [tla.Int8, tla.Float16, tla.BFloat16],
+    ids=["i8", "f16", "bf16"],
+)
+def test_gm_vector_to_l1_vector_accepts_narrow_continuous(dtype) -> None:
+    """Flat VectorLayout GM→L1 also stages i8 / f16 / bf16 continuous runs."""
+    src = _gm(dtype, (256,), (1,))
+    dst = _l1(dtype, (256,), (1,))
+    mlir = gm_to_l1_kernel.dump_mlir(type_args=(dst, src))
+    assert "tla.copy" in mlir
+    assert "VectorLayout" in mlir
+
+
 def test_gm_vector_to_l1_vector_refuses_two_dimensions() -> None:
     """VectorLayout is one-dimensional by definition.
 

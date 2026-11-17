@@ -112,6 +112,9 @@ L1_FILL_VARIANTS = (
     ("f32", "zn"),
 )
 L1_FILL_CASE_IDS = {f"fill-l1-{dtype}" for dtype, _ in L1_FILL_VARIANTS}
+# Flat VectorLayout GM->L1 continuous-run dtypes (narrow + 64-bit staging).
+VECTOR_LAYOUT_GM_L1_DTYPES = ("i8", "f16", "bf16", "i64", "u64", "f64")
+VECTOR_LAYOUT_GM_L1_CASE_IDS = {f"vector-layout-gm-l1-{dtype}" for dtype in VECTOR_LAYOUT_GM_L1_DTYPES}
 
 EVG_OPS = (
     "add",
@@ -1197,6 +1200,13 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
               "--layout", layout, "--case", "gap"]],
         )
 
+    # --- end_to_end: VectorLayout GM->L1 continuous copy ---
+    for dtype in VECTOR_LAYOUT_GM_L1_DTYPES:
+        yield (
+            f"vector-layout-gm-l1-{dtype}",
+            [["end_to_end/vector_layout_gm_to_l1_copy.py", *dev, "--dtype", dtype]],
+        )
+
     # --- print_tensor, local AIC storage ---
     # Base cases sweep dtypes; repeated entries verify in-process cache reuse.
     local_common = [
@@ -1252,7 +1262,11 @@ def _ids() -> list[str]:
 def test_case(case_id: str, device: int) -> None:
     import example_runner
 
-    if case_id == L1_PRINT_CASE_ID or case_id in L1_FILL_CASE_IDS:
+    if (
+        case_id == L1_PRINT_CASE_ID
+        or case_id in L1_FILL_CASE_IDS
+        or case_id in VECTOR_LAYOUT_GM_L1_CASE_IDS
+    ):
         from catlass.base_dsl.runtime import ascend_debug_fifo
 
         if reason := ascend_debug_fifo._debug_bus_support_error():

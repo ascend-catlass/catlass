@@ -489,10 +489,16 @@ REGISTER_GM_TO_L1(nZ, nZ, float4_e1m2x2_t)
 // copy_gm_to_l1.hpp serves it. RowMajor has no variant here: a flat tile is
 // spelled VectorLayout, and RowMajor stays two-dimensional.
 REGISTER_GM_TO_L1(VectorLayout, VectorLayout, float)
+REGISTER_GM_TO_L1(VectorLayout, VectorLayout, half)
+REGISTER_GM_TO_L1(VectorLayout, VectorLayout, bf16)
 REGISTER_GM_TO_L1(VectorLayout, VectorLayout, int32_t)
+REGISTER_GM_TO_L1(VectorLayout, VectorLayout, int8_t)
 // The per-channel fixpipe dequant scale tile is the same flat run, one u64 word
-// (a packed fp32 scale) per output channel.
+// (a packed fp32 scale) per output channel. i64 / double share the same
+// DataCopyPad VectorLayout path (8-byte elements, exact byte length).
 REGISTER_GM_TO_L1(VectorLayout, VectorLayout, uint64_t)
+REGISTER_GM_TO_L1(VectorLayout, VectorLayout, int64_t)
+REGISTER_GM_TO_L1(VectorLayout, VectorLayout, double)
 
 REGISTER_L1_TO_L0A(zN, float)
 REGISTER_L1_TO_L0A(zN, half)
