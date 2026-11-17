@@ -2,7 +2,7 @@
 
 ## 功能说明
 
-- 算子功能：完成基础矩阵乘计算，采用切尾轮基本块的多核切K调度，通过切分尾轮基本块的`K`，划分出更多的任务块，从而利用更多的核心参与尾轮的基本块计算
+- 算子功能：完成基础矩阵乘计算，采用切尾轮基本块的多核切K调度，通过切分尾轮基本块的`K`，划分出更多的任务块，从而利用更多核心参与尾轮的基本块计算
 - 计算公式：
 
   $$
@@ -19,10 +19,10 @@
 ## 样例参数说明
 
 | 参数 | 属性 | shape | dtype | 说明 |
-| ---- | ---- | ----- | ----- | ---- |
-| `A` | Input | `(m,k)` | `float、float16、bfloat16` | 左矩阵，layout 支持 `RowMajor`（默认）和 `ColumnMajor` |
-| `B` | Input | `(k,n)` | `float、float16、bfloat16` | 右矩阵，layout 支持 `RowMajor`（默认）和 `ColumnMajor`，数据类型与左矩阵一致 |
-| `C` | Output | `(m,n)` | `float、float16、bfloat16` | 矩阵乘结果，layout 支持 `RowMajor`（默认）和 `ColumnMajor` |
+| --- | --- | --- | --- | --- |
+| `A` | Input | `(m,k)` | `fp32` | 左矩阵，layout支持`RowMajor` |
+| `B` | Input | `(k,n)` | `fp32` | 右矩阵，layout支持`RowMajor`，数据类型与左矩阵一致 |
+| `C` | Output | `(m,n)` | `fp32` | 矩阵乘结果，layout支持`RowMajor` |
 
 ## 使用范围说明
 
@@ -30,7 +30,7 @@
 
 推荐范围：
 
-- 约定L1上的分块大小为`m1 n1 k1`，设`blocks = ceil(M/m1)*ceil(N/n1)`，推荐`blocks % C ∈ (0, 0.8C) 且 1024 < K < 122880`（C 为 AI Core 核数），即尾轮有残余块且不足 0.8 倍核数的深 K 场景。
+- 约定L1上的分块大小为`m1 n1 k1`，设`blocks = ceil(M/m1)*ceil(N/n1)`，推荐`blocks % C ∈ (0, 0.8C) 且 1024 < K <= 5120`（C 为 AI Core 核数），即尾轮有残余块且不足 0.8 倍核数的深 K 场景。
 
 ## 使用示例
 
