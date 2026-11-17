@@ -12,6 +12,14 @@ set(CATLASS_EXAMPLES_COMMON_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/common)
 
 add_custom_target(catlass_examples)
 
+# Second build of every example as a shared library, for the example driver.
+# OFF by default: it doubles the example build and nothing but the test harness
+# wants it. See driver/example_driver.cpp for what it buys.
+option(CATLASS_BUILD_EXAMPLE_DRIVER "Also build each example as a driver-loadable library" OFF)
+if(CATLASS_BUILD_EXAMPLE_DRIVER)
+    add_custom_target(catlass_example_libs)
+endif()
+
 add_compile_options($<$<COMPILE_LANGUAGE:ASC>:--npu-arch=dav-${CATLASS_ARCH}>)
 add_compile_definitions(CATLASS_ARCH=${CATLASS_ARCH})
 
@@ -63,6 +71,42 @@ macro(catlass_example_add_executable NAME OPTYPE)
     add_dependencies(catlass_examples ${NAME})
     install(TARGETS ${NAME} DESTINATION ${EXAMPLE_DESTINATION} COMPONENT ${NAME})
     install(TARGETS ${NAME} DESTINATION ${EXAMPLE_DESTINATION} COMPONENT catlass_examples)
+
+    if(CATLASS_BUILD_EXAMPLE_DRIVER)
+        # The same sources again, with main() renamed and the ACL lifecycle
+        # redirected to the driver. The example's own source is untouched, and
+        # the executable above keeps calling ACL directly.
+        add_library(${NAME}_driverlib SHARED ${ARGN})
+        set_target_properties(${NAME}_driverlib PROPERTIES
+            OUTPUT_NAME ${NAME}
+            POSITION_INDEPENDENT_CODE ON
+            LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/example_libs)
+        # The library is the executable's program, so it is compiled and linked
+        # the executable's way. An example configures its own target after this
+        # macro returns -- L2_CACHE_HINT, the MX_GMM_ENABLE_* variant switches,
+        # --cce-auto-sync=on, an extra include directory, libm -- and a copy
+        # taken here would miss all of it and quietly exercise a different
+        # program. $<TARGET_PROPERTY> is read at generate time, once every
+        # example's CMakeLists has been processed, so it carries whatever the
+        # executable ended up with however late it was added.
+        target_compile_definitions(${NAME}_driverlib PRIVATE
+            $<TARGET_PROPERTY:${NAME},COMPILE_DEFINITIONS>)
+        target_compile_options(${NAME}_driverlib PRIVATE
+            $<TARGET_PROPERTY:${NAME},COMPILE_OPTIONS>)
+        target_include_directories(${NAME}_driverlib PRIVATE
+            $<TARGET_PROPERTY:${NAME},INCLUDE_DIRECTORIES>)
+        target_link_libraries(${NAME}_driverlib PRIVATE
+            $<TARGET_PROPERTY:${NAME},LINK_LIBRARIES>)
+        target_link_options(${NAME}_driverlib PRIVATE
+            $<TARGET_PROPERTY:${NAME},LINK_OPTIONS>)
+        # The only two differences, and the reason the library exists.
+        target_compile_definitions(${NAME}_driverlib PRIVATE main=catlass_example_entry)
+        target_compile_options(${NAME}_driverlib PRIVATE
+            "SHELL:-include ${CATLASS_EXAMPLES_COMMON_SOURCE_DIR}/example_driver_shim.h")
+        add_dependencies(catlass_example_libs ${NAME}_driverlib)
+        install(TARGETS ${NAME}_driverlib
+            DESTINATION example_libs COMPONENT catlass_example_libs)
+    endif()
 endmacro()
 
 include_directories(
@@ -201,4 +245,17 @@ if(CATLASS_ARCH STREQUAL "2201")
     else()
         message(WARNING "SOC_VERSION is not defined. basic_matmul_aclnn will not be compiled.")
     endif()
+endif()
+
+if(CATLASS_BUILD_EXAMPLE_DRIVER)
+    # Plain host C++: the ASC language claims .cpp, and this file has no device
+    # code. ENABLE_EXPORTS puts the CatlassDriver* hooks in the executable's
+    # dynamic symbol table, which is how each example library resolves them.
+    set_source_files_properties(driver/example_driver.cpp PROPERTIES LANGUAGE CXX)
+    add_executable(catlass_example_driver driver/example_driver.cpp)
+    set_target_properties(catlass_example_driver PROPERTIES ENABLE_EXPORTS ON)
+    target_include_directories(catlass_example_driver PRIVATE ${ASCEND_HOME_PATH}/include)
+    target_link_libraries(catlass_example_driver PRIVATE ${CMAKE_DL_LIBS})
+    add_dependencies(catlass_example_libs catlass_example_driver)
+    install(TARGETS catlass_example_driver DESTINATION bin COMPONENT catlass_example_libs)
 endif()
