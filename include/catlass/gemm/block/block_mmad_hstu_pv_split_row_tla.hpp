@@ -267,8 +267,8 @@ public:
 
             int64_t offset = layoutPaged(tla::MakeCoord(blockId, localStartVseqIdx, headIdx, 0));
 
-            auto shape = MakeShape(localVSeqlen, headDim);
-            auto strideInPage = MakeStride((int64_t)headDim * headNum, Int<1>{});
+            auto shape = tla::MakeShape(localVSeqlen, headDim);
+            auto strideInPage = tla::MakeStride((int64_t)headDim * headNum, Int<1>{});
             auto layoutInPage = tla::MakeLayout(shape, strideInPage, shape);
             auto tensorGmTile = tla::MakeTensor(tensorPagedGmB.data()[offset], layoutInPage, Arch::PositionGM{});
 
