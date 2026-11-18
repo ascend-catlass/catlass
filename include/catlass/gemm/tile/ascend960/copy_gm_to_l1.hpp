@@ -265,20 +265,16 @@ template <class Element>
 struct CopyGmToL1<
     Arch::Ascend960DT, Gemm::GemmType<Element, layout::ColumnMajor>,
     Gemm::GemmType<Element, layout::nZ, AscendC::TPosition::A1>>
-    : public CopyGmToL1<Arch::Ascend960DT, Gemm::GemmType<Element, layout::ColumnMajor>>
     : CopyGmToL1<
           Arch::Ascend950, Gemm::GemmType<Element, layout::ColumnMajor>,
-          Gemm::GemmType<Element, layout::nZ, AscendC::TPosition::A1>>
-    : public CopyGmToL1<Arch::Ascend950, Gemm::GemmType<Element, layout::ColumnMajor>> {};
+          Gemm::GemmType<Element, layout::nZ, AscendC::TPosition::A1>> {};
 template <class Element>
 struct CopyGmToL1<
     Arch::Ascend960PR, Gemm::GemmType<Element, layout::ColumnMajor>,
     Gemm::GemmType<Element, layout::nZ, AscendC::TPosition::A1>>
-    : public CopyGmToL1<Arch::Ascend960PR, Gemm::GemmType<Element, layout::ColumnMajor>>
     : CopyGmToL1<
           Arch::Ascend950, Gemm::GemmType<Element, layout::ColumnMajor>,
-          Gemm::GemmType<Element, layout::nZ, AscendC::TPosition::A1>>
-    : public CopyGmToL1<Arch::Ascend950, Gemm::GemmType<Element, layout::ColumnMajor>> {};
+          Gemm::GemmType<Element, layout::nZ, AscendC::TPosition::A1>> {};
 
 template <class Element>
 struct CopyGmToL1<Arch::Ascend960DT, Gemm::GemmType<Element, layout::zN>>
@@ -432,25 +428,17 @@ struct CopyGmToL1<
 
 template <class Element>
 struct CopyGmToL1DynamicOptimized<Arch::Ascend960DT, Gemm::GemmType<Element, layout::zN>>
-    : public CopyGmToL1<Arch::Ascend960DT, Gemm::GemmType<Element, layout::zN>>
-    : CopyGmToL1DynamicOptimized<Arch::Ascend950, Gemm::GemmType<Element, layout::zN>>
-    : public CopyGmToL1<Arch::Ascend950, Gemm::GemmType<Element, layout::zN>> {};
+    : CopyGmToL1DynamicOptimized<Arch::Ascend950, Gemm::GemmType<Element, layout::zN>> {};
 template <class Element>
 struct CopyGmToL1DynamicOptimized<Arch::Ascend960PR, Gemm::GemmType<Element, layout::zN>>
-    : public CopyGmToL1<Arch::Ascend960PR, Gemm::GemmType<Element, layout::zN>>
-    : CopyGmToL1DynamicOptimized<Arch::Ascend950, Gemm::GemmType<Element, layout::zN>>
-    : public CopyGmToL1<Arch::Ascend950, Gemm::GemmType<Element, layout::zN>> {};
+    : CopyGmToL1DynamicOptimized<Arch::Ascend950, Gemm::GemmType<Element, layout::zN>> {};
 
 template <class Element>
 struct CopyGmToL1DynamicOptimized<Arch::Ascend960DT, Gemm::GemmType<Element, layout::nZ>>
-    : public CopyGmToL1<Arch::Ascend960DT, Gemm::GemmType<Element, layout::nZ>>
-    : CopyGmToL1DynamicOptimized<Arch::Ascend950, Gemm::GemmType<Element, layout::nZ>>
-    : public CopyGmToL1<Arch::Ascend950, Gemm::GemmType<Element, layout::nZ>> {};
+    : CopyGmToL1DynamicOptimized<Arch::Ascend950, Gemm::GemmType<Element, layout::nZ>> {};
 template <class Element>
 struct CopyGmToL1DynamicOptimized<Arch::Ascend960PR, Gemm::GemmType<Element, layout::nZ>>
-    : public CopyGmToL1<Arch::Ascend960PR, Gemm::GemmType<Element, layout::nZ>>
-    : CopyGmToL1DynamicOptimized<Arch::Ascend950, Gemm::GemmType<Element, layout::nZ>>
-    : public CopyGmToL1<Arch::Ascend950, Gemm::GemmType<Element, layout::nZ>> {};
+    : CopyGmToL1DynamicOptimized<Arch::Ascend950, Gemm::GemmType<Element, layout::nZ>> {};
 
 template <class Element>
 struct CopyGmToL1DynamicOptimized<Arch::Ascend960DT, Gemm::GemmType<Element, layout::RowMajor>>
@@ -468,25 +456,17 @@ struct CopyGmToL1DynamicOptimized<Arch::Ascend960PR, Gemm::GemmType<Element, lay
 
 template <class Element>
 struct CopyGmToL1DynamicOptimized<Arch::Ascend960DT, Gemm::GemmType<Element, layout::PaddingRowMajor>>
-    : public CopyGmToL1<Arch::Ascend960DT, Gemm::GemmType<Element, layout::PaddingRowMajor>>
-    : CopyGmToL1DynamicOptimized<Arch::Ascend950, Gemm::GemmType<Element, layout::PaddingRowMajor>>
-    : public CopyGmToL1<Arch::Ascend950, Gemm::GemmType<Element, layout::PaddingRowMajor>> {};
+    : CopyGmToL1DynamicOptimized<Arch::Ascend950, Gemm::GemmType<Element, layout::PaddingRowMajor>> {};
 template <class Element>
 struct CopyGmToL1DynamicOptimized<Arch::Ascend960PR, Gemm::GemmType<Element, layout::PaddingRowMajor>>
-    : public CopyGmToL1<Arch::Ascend960PR, Gemm::GemmType<Element, layout::PaddingRowMajor>>
-    : CopyGmToL1DynamicOptimized<Arch::Ascend950, Gemm::GemmType<Element, layout::PaddingRowMajor>>
-    : public CopyGmToL1<Arch::Ascend950, Gemm::GemmType<Element, layout::PaddingRowMajor>> {};
+    : CopyGmToL1DynamicOptimized<Arch::Ascend950, Gemm::GemmType<Element, layout::PaddingRowMajor>> {};
 
 template <class Element>
 struct CopyGmToL1DynamicOptimized<Arch::Ascend960DT, Gemm::GemmType<Element, layout::PaddingColumnMajor>>
-    : public CopyGmToL1<Arch::Ascend960DT, Gemm::GemmType<Element, layout::PaddingColumnMajor>>
-    : CopyGmToL1DynamicOptimized<Arch::Ascend950, Gemm::GemmType<Element, layout::PaddingColumnMajor>>
-    : public CopyGmToL1<Arch::Ascend950, Gemm::GemmType<Element, layout::PaddingColumnMajor>> {};
+    : CopyGmToL1DynamicOptimized<Arch::Ascend950, Gemm::GemmType<Element, layout::PaddingColumnMajor>> {};
 template <class Element>
 struct CopyGmToL1DynamicOptimized<Arch::Ascend960PR, Gemm::GemmType<Element, layout::PaddingColumnMajor>>
-    : public CopyGmToL1<Arch::Ascend960PR, Gemm::GemmType<Element, layout::PaddingColumnMajor>>
-    : CopyGmToL1DynamicOptimized<Arch::Ascend950, Gemm::GemmType<Element, layout::PaddingColumnMajor>>
-    : public CopyGmToL1<Arch::Ascend950, Gemm::GemmType<Element, layout::PaddingColumnMajor>> {};
+    : CopyGmToL1DynamicOptimized<Arch::Ascend950, Gemm::GemmType<Element, layout::PaddingColumnMajor>> {};
 
 template <class Element>
 struct CopyGmToL1GMMPTD<Arch::Ascend960DT, Gemm::GemmType<Element, layout::RowMajor>>

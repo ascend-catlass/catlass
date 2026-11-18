@@ -220,20 +220,16 @@ template <class Element>
 struct CopyL1ToL0A<
     Arch::Ascend960DT, Gemm::GemmType<Element, layout::nZ, AscendC::TPosition::A1>,
     Gemm::GemmType<Element, layout::zN, AscendC::TPosition::A2>>
-    : public CopyL1ToL0A<Arch::Ascend960DT, Gemm::GemmType<Element, layout::nZ, AscendC::TPosition::A1>>
     : CopyL1ToL0A<
           Arch::Ascend950, Gemm::GemmType<Element, layout::nZ, AscendC::TPosition::A1>,
-          Gemm::GemmType<Element, layout::zN, AscendC::TPosition::A2>>
-    : public CopyL1ToL0A<Arch::Ascend950, Gemm::GemmType<Element, layout::nZ, AscendC::TPosition::A1>> {};
+          Gemm::GemmType<Element, layout::zN, AscendC::TPosition::A2>> {};
 template <class Element>
 struct CopyL1ToL0A<
     Arch::Ascend960PR, Gemm::GemmType<Element, layout::nZ, AscendC::TPosition::A1>,
     Gemm::GemmType<Element, layout::zN, AscendC::TPosition::A2>>
-    : public CopyL1ToL0A<Arch::Ascend960PR, Gemm::GemmType<Element, layout::nZ, AscendC::TPosition::A1>>
     : CopyL1ToL0A<
           Arch::Ascend950, Gemm::GemmType<Element, layout::nZ, AscendC::TPosition::A1>,
-          Gemm::GemmType<Element, layout::zN, AscendC::TPosition::A2>>
-    : public CopyL1ToL0A<Arch::Ascend950, Gemm::GemmType<Element, layout::nZ, AscendC::TPosition::A1>> {};
+          Gemm::GemmType<Element, layout::zN, AscendC::TPosition::A2>> {};
 
 } // namespace Catlass::Gemm::Tile
 

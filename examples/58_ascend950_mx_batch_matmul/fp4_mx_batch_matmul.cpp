@@ -174,7 +174,13 @@ static void Run(const Options& options)
 
     auto aicCoreNum = platform_ascendc::PlatformAscendCManager::GetInstance()->GetCoreNumAic();
 
+#if defined(CATLASS_ARCH) && CATLASS_ARCH == 9201
+    using ArchTag = Arch::Ascend960DT;
+#elif defined(CATLASS_ARCH) && CATLASS_ARCH == 9202
+    using ArchTag = Arch::Ascend960PR;
+#else
     using ArchTag = Arch::Ascend950;
+#endif
     constexpr bool enableUnitFlag = true;
     using DispatchPolicy = Gemm::MmadMx<ArchTag, enableUnitFlag, 16>;
     // FP4 L1 tile K=512 (FP8 是 256)，因 4-bit 数据单位带宽小，单块元素数翻倍以充分利用 L1

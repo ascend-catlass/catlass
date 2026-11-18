@@ -52,7 +52,8 @@ using Options = GroupedGemmOptions;
 static const std::string kDataRoot = "examples/63_ascend950_dual_level_quant_mx_batch_matmul/data";
 
 template <typename T>
-bool SaveResult(const std::string &filename, const std::vector<T> &data) {
+bool SaveResult(const std::string& filename, const std::vector<T>& data)
+{
     std::ofstream file(filename, std::ios::binary);
     if (!file) {
         return false;
@@ -76,7 +77,7 @@ bool SaveResult(const std::string &filename, const std::vector<T> &data) {
     return true;
 }
 
-static void Run(const Options &options)
+static void Run(const Options& options)
 {
     aclrtStream stream{nullptr};
 
@@ -129,25 +130,33 @@ static void Run(const Options &options)
     std::vector<ElementInput> hostInputB(lenInputB);
 
     // ----- Device pointers -----
-    uint8_t *deviceInputA{nullptr};
-    uint8_t *deviceInputB{nullptr};
-    uint8_t *deviceC{nullptr};
-    uint8_t *deviceScaleA1{nullptr};
-    uint8_t *deviceScaleA2{nullptr};
-    uint8_t *deviceScaleB1{nullptr};
-    uint8_t *deviceScaleB2{nullptr};
-    uint8_t *deviceWorkspace{nullptr};
+    uint8_t* deviceInputA{nullptr};
+    uint8_t* deviceInputB{nullptr};
+    uint8_t* deviceC{nullptr};
+    uint8_t* deviceScaleA1{nullptr};
+    uint8_t* deviceScaleA2{nullptr};
+    uint8_t* deviceScaleB1{nullptr};
+    uint8_t* deviceScaleB2{nullptr};
+    uint8_t* deviceWorkspace{nullptr};
     size_t sizeWorkspace{0};
 
     const auto cleanupAndFinalize = [&]() {
-        if (deviceInputA) ACL_CHECK(aclrtFree(deviceInputA));
-        if (deviceInputB) ACL_CHECK(aclrtFree(deviceInputB));
-        if (deviceC) ACL_CHECK(aclrtFree(deviceC));
-        if (deviceScaleA1) ACL_CHECK(aclrtFree(deviceScaleA1));
-        if (deviceScaleA2) ACL_CHECK(aclrtFree(deviceScaleA2));
-        if (deviceScaleB1) ACL_CHECK(aclrtFree(deviceScaleB1));
-        if (deviceScaleB2) ACL_CHECK(aclrtFree(deviceScaleB2));
-        if (sizeWorkspace > 0 && deviceWorkspace) ACL_CHECK(aclrtFree(deviceWorkspace));
+        if (deviceInputA)
+            ACL_CHECK(aclrtFree(deviceInputA));
+        if (deviceInputB)
+            ACL_CHECK(aclrtFree(deviceInputB));
+        if (deviceC)
+            ACL_CHECK(aclrtFree(deviceC));
+        if (deviceScaleA1)
+            ACL_CHECK(aclrtFree(deviceScaleA1));
+        if (deviceScaleA2)
+            ACL_CHECK(aclrtFree(deviceScaleA2));
+        if (deviceScaleB1)
+            ACL_CHECK(aclrtFree(deviceScaleB1));
+        if (deviceScaleB2)
+            ACL_CHECK(aclrtFree(deviceScaleB2));
+        if (sizeWorkspace > 0 && deviceWorkspace)
+            ACL_CHECK(aclrtFree(deviceWorkspace));
         ACL_CHECK(aclrtDestroyStream(stream));
         ACL_CHECK(aclrtResetDevice(options.deviceId));
         ACL_CHECK(aclFinalize());
@@ -167,22 +176,28 @@ static void Run(const Options &options)
     }
 
     // ----- Allocate device memory -----
-    ACL_CHECK(aclrtMalloc(reinterpret_cast<void **>(&deviceInputA), sizeInputA, ACL_MEM_MALLOC_HUGE_FIRST));
+    ACL_CHECK(aclrtMalloc(reinterpret_cast<void**>(&deviceInputA), sizeInputA, ACL_MEM_MALLOC_HUGE_FIRST));
     ACL_CHECK(aclrtMemcpy(deviceInputA, sizeInputA, hostInputA.data(), sizeInputA, ACL_MEMCPY_HOST_TO_DEVICE));
 
-    ACL_CHECK(aclrtMalloc(reinterpret_cast<void **>(&deviceInputB), sizeInputB, ACL_MEM_MALLOC_HUGE_FIRST));
+    ACL_CHECK(aclrtMalloc(reinterpret_cast<void**>(&deviceInputB), sizeInputB, ACL_MEM_MALLOC_HUGE_FIRST));
     ACL_CHECK(aclrtMemcpy(deviceInputB, sizeInputB, hostInputB.data(), sizeInputB, ACL_MEMCPY_HOST_TO_DEVICE));
 
-    ACL_CHECK(aclrtMalloc(reinterpret_cast<void **>(&deviceC), sizeC, ACL_MEM_MALLOC_HUGE_FIRST));
-    ACL_CHECK(aclrtMalloc(reinterpret_cast<void **>(&deviceScaleA1), sizeScaleA1, ACL_MEM_MALLOC_HUGE_FIRST));
-    ACL_CHECK(aclrtMalloc(reinterpret_cast<void **>(&deviceScaleA2), sizeScaleA2, ACL_MEM_MALLOC_HUGE_FIRST));
-    ACL_CHECK(aclrtMalloc(reinterpret_cast<void **>(&deviceScaleB1), sizeScaleB1, ACL_MEM_MALLOC_HUGE_FIRST));
-    ACL_CHECK(aclrtMalloc(reinterpret_cast<void **>(&deviceScaleB2), sizeScaleB2, ACL_MEM_MALLOC_HUGE_FIRST));
+    ACL_CHECK(aclrtMalloc(reinterpret_cast<void**>(&deviceC), sizeC, ACL_MEM_MALLOC_HUGE_FIRST));
+    ACL_CHECK(aclrtMalloc(reinterpret_cast<void**>(&deviceScaleA1), sizeScaleA1, ACL_MEM_MALLOC_HUGE_FIRST));
+    ACL_CHECK(aclrtMalloc(reinterpret_cast<void**>(&deviceScaleA2), sizeScaleA2, ACL_MEM_MALLOC_HUGE_FIRST));
+    ACL_CHECK(aclrtMalloc(reinterpret_cast<void**>(&deviceScaleB1), sizeScaleB1, ACL_MEM_MALLOC_HUGE_FIRST));
+    ACL_CHECK(aclrtMalloc(reinterpret_cast<void**>(&deviceScaleB2), sizeScaleB2, ACL_MEM_MALLOC_HUGE_FIRST));
 
     // ----- Kernel template composition -----
     auto aicCoreNum = platform_ascendc::PlatformAscendCManager::GetInstance()->GetCoreNumAic();
 
+#if defined(CATLASS_ARCH) && CATLASS_ARCH == 9201
+    using ArchTag = Arch::Ascend960DT;
+#elif defined(CATLASS_ARCH) && CATLASS_ARCH == 9202
+    using ArchTag = Arch::Ascend960PR;
+#else
     using ArchTag = Arch::Ascend950;
+#endif
     constexpr bool enableUnitFlag = true;
     using DispatchPolicy = Gemm::MmadMx<ArchTag, enableUnitFlag, 16>;
     using L1TileShape = Shape<Int<256>, Int<256>, Int<512>>;
@@ -210,13 +225,10 @@ static void Run(const Options &options)
 
     // ----- AIC matmul -----
     using TileCopyMmad = Gemm::Tile::PackedMxTileCopyTla<
-        ArchTag, ElementA, LayoutTagA, ElementB, LayoutTagB,
-        ElementMxScale, decltype(layoutMxScaleA),
-        ElementMxScale, decltype(layoutMxScaleB),
-        ElementC, LayoutTagC, void>;
+        ArchTag, ElementA, LayoutTagA, ElementB, LayoutTagB, ElementMxScale, decltype(layoutMxScaleA), ElementMxScale,
+        decltype(layoutMxScaleB), ElementC, LayoutTagC, void>;
     using BlockMmad = Gemm::Block::BlockMmadTla<
-        DispatchPolicy, L1TileShape, L0TileShape,
-        ElementA, ElementB, ElementC, void, TileCopyMmad>;
+        DispatchPolicy, L1TileShape, L0TileShape, ElementA, ElementB, ElementC, void, TileCopyMmad>;
 
     // ----- AIV BlockQuant -----
     // block 不区分 A/B,只用 4 个 GemmType。
@@ -224,18 +236,16 @@ static void Run(const Options &options)
     using EpilogueDispatchPolicy = Epilogue::EpilogueAscend950DualLevelQuantMx<ubStages>;
     using QuantSubTileShape = MatrixShape<128, 512>;
 
-    using InputType  = Gemm::GemmType<ElementInput,   layout::RowMajor>;
-    using OutputType = Gemm::GemmType<ElementA,       layout::RowMajor>;
-    using Scale1Type = Gemm::GemmType<float,          layout::RowMajor>;
+    using InputType = Gemm::GemmType<ElementInput, layout::RowMajor>;
+    using OutputType = Gemm::GemmType<ElementA, layout::RowMajor>;
+    using Scale1Type = Gemm::GemmType<float, layout::RowMajor>;
     using Scale2Type = Gemm::GemmType<ElementMxScale, layout::RowMajor>;
 
-    using TileCopyQuant = Epilogue::Tile::TileCopyDualLevelQuantMx<
-        ArchTag, InputType, OutputType, Scale1Type, Scale2Type>;
+    using TileCopyQuant =
+        Epilogue::Tile::TileCopyDualLevelQuantMx<ArchTag, InputType, OutputType, Scale1Type, Scale2Type>;
 
     using BlockQuant = Epilogue::Block::BlockQuantDualLevelMx<
-        EpilogueDispatchPolicy, QuantSubTileShape,
-        InputType, OutputType, Scale1Type, Scale2Type,
-        TileCopyQuant>;
+        EpilogueDispatchPolicy, QuantSubTileShape, InputType, OutputType, Scale1Type, Scale2Type, TileCopyQuant>;
 
     // ===== P1-A: launch 核数策略 (NOT min(aicCoreNum, taskNum)) =====
     //
@@ -252,20 +262,17 @@ static void Run(const Options &options)
     // 根据 M vs N 选 BlockSwizzle 方向
     if (m > n) {
         using BlockScheduler = typename Gemm::Block::GemmIdentityBlockSwizzle<3, 0>;
-        using DualLevelQuantKernel = Gemm::Kernel::DualLevelQuantMxBatchedMatmulTla<
-            BlockMmad, BlockQuant, BlockScheduler, ElementInput>;
+        using DualLevelQuantKernel =
+            Gemm::Kernel::DualLevelQuantMxBatchedMatmulTla<BlockMmad, BlockQuant, BlockScheduler, ElementInput>;
         using Adapter = Gemm::Device::DeviceGemm<DualLevelQuantKernel>;
 
         typename DualLevelQuantKernel::Arguments arguments{
-            batchCount, options.problemShape,
-            deviceInputA, layoutInputA, deviceInputB, layoutInputB,
-            deviceC, layoutC,
-            deviceScaleA1, deviceScaleA2, layoutMxScaleA,
-            deviceScaleB1, deviceScaleB2, layoutMxScaleB,
-            layoutOutputA, layoutOutputB,
-            layoutScaleA1, layoutScaleA2, layoutScaleB1, layoutScaleB2,
-            layoutQuantA, layoutQuantB
-        };
+            batchCount,    options.problemShape, deviceInputA,   layoutInputA,
+            deviceInputB,  layoutInputB,         deviceC,        layoutC,
+            deviceScaleA1, deviceScaleA2,        layoutMxScaleA, deviceScaleB1,
+            deviceScaleB2, layoutMxScaleB,       layoutOutputA,  layoutOutputB,
+            layoutScaleA1, layoutScaleA2,        layoutScaleB1,  layoutScaleB2,
+            layoutQuantA,  layoutQuantB};
 
         Adapter op;
         if (op.CanImplement(arguments) != Status::kSuccess) {
@@ -275,27 +282,24 @@ static void Run(const Options &options)
         }
         sizeWorkspace = op.GetWorkspaceSize(arguments);
         if (sizeWorkspace > 0) {
-            ACL_CHECK(aclrtMalloc(reinterpret_cast<void **>(&deviceWorkspace),
-                                  sizeWorkspace, ACL_MEM_MALLOC_HUGE_FIRST));
+            ACL_CHECK(
+                aclrtMalloc(reinterpret_cast<void**>(&deviceWorkspace), sizeWorkspace, ACL_MEM_MALLOC_HUGE_FIRST));
         }
         op.Initialize(arguments, deviceWorkspace);
         op(stream, aicCoreUsed);
     } else {
         using BlockScheduler = typename Gemm::Block::GemmIdentityBlockSwizzle<3, 1>;
-        using DualLevelQuantKernel = Gemm::Kernel::DualLevelQuantMxBatchedMatmulTla<
-            BlockMmad, BlockQuant, BlockScheduler, ElementInput>;
+        using DualLevelQuantKernel =
+            Gemm::Kernel::DualLevelQuantMxBatchedMatmulTla<BlockMmad, BlockQuant, BlockScheduler, ElementInput>;
         using Adapter = Gemm::Device::DeviceGemm<DualLevelQuantKernel>;
 
         typename DualLevelQuantKernel::Arguments arguments{
-            batchCount, options.problemShape,
-            deviceInputA, layoutInputA, deviceInputB, layoutInputB,
-            deviceC, layoutC,
-            deviceScaleA1, deviceScaleA2, layoutMxScaleA,
-            deviceScaleB1, deviceScaleB2, layoutMxScaleB,
-            layoutOutputA, layoutOutputB,
-            layoutScaleA1, layoutScaleA2, layoutScaleB1, layoutScaleB2,
-            layoutQuantA, layoutQuantB
-        };
+            batchCount,    options.problemShape, deviceInputA,   layoutInputA,
+            deviceInputB,  layoutInputB,         deviceC,        layoutC,
+            deviceScaleA1, deviceScaleA2,        layoutMxScaleA, deviceScaleB1,
+            deviceScaleB2, layoutMxScaleB,       layoutOutputA,  layoutOutputB,
+            layoutScaleA1, layoutScaleA2,        layoutScaleB1,  layoutScaleB2,
+            layoutQuantA,  layoutQuantB};
 
         Adapter op;
         if (op.CanImplement(arguments) != Status::kSuccess) {
@@ -305,8 +309,8 @@ static void Run(const Options &options)
         }
         sizeWorkspace = op.GetWorkspaceSize(arguments);
         if (sizeWorkspace > 0) {
-            ACL_CHECK(aclrtMalloc(reinterpret_cast<void **>(&deviceWorkspace),
-                                  sizeWorkspace, ACL_MEM_MALLOC_HUGE_FIRST));
+            ACL_CHECK(
+                aclrtMalloc(reinterpret_cast<void**>(&deviceWorkspace), sizeWorkspace, ACL_MEM_MALLOC_HUGE_FIRST));
         }
         op.Initialize(arguments, deviceWorkspace);
         op(stream, aicCoreUsed);
@@ -330,10 +334,9 @@ static void Run(const Options &options)
     std::vector<uint8_t> hostQuantA(sizeQuantA);
     std::vector<uint8_t> hostQuantB(sizeQuantB);
     if (deviceWorkspace != nullptr && sizeWorkspace >= sizeQuantA + sizeQuantB) {
-        ACL_CHECK(aclrtMemcpy(hostQuantA.data(), sizeQuantA,
-                              deviceWorkspace, sizeQuantA, ACL_MEMCPY_DEVICE_TO_HOST));
-        ACL_CHECK(aclrtMemcpy(hostQuantB.data(), sizeQuantB,
-                              deviceWorkspace + sizeQuantA, sizeQuantB, ACL_MEMCPY_DEVICE_TO_HOST));
+        ACL_CHECK(aclrtMemcpy(hostQuantA.data(), sizeQuantA, deviceWorkspace, sizeQuantA, ACL_MEMCPY_DEVICE_TO_HOST));
+        ACL_CHECK(aclrtMemcpy(
+            hostQuantB.data(), sizeQuantB, deviceWorkspace + sizeQuantA, sizeQuantB, ACL_MEMCPY_DEVICE_TO_HOST));
     }
 
     std::string resultFileName = goldenDir + "/result.bin";
@@ -362,7 +365,7 @@ static void Run(const Options &options)
     cleanupAndFinalize();
 }
 
-int main(int argc, const char **argv)
+int main(int argc, const char** argv)
 {
     Options options;
     if (options.Parse(argc, argv) != 0) {

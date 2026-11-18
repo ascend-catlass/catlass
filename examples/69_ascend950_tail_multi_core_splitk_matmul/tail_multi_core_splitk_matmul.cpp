@@ -73,7 +73,13 @@ static int Run(const Options& options)
     size_t sizeC = lenC * sizeof(ElementC);
     size_t sizeBias = lenBias * sizeof(ElementBiasType);
 
+#if defined(CATLASS_ARCH) && CATLASS_ARCH == 9201
+    using ArchTag = Arch::Ascend960DT;
+#elif defined(CATLASS_ARCH) && CATLASS_ARCH == 9202
+    using ArchTag = Arch::Ascend960PR;
+#else
     using ArchTag = Arch::Ascend950;
+#endif
     constexpr bool enableUnitFlag = true;
     constexpr bool useHF32 = false;
     using DispatchPolicy = Gemm::MmadPingpong<ArchTag, enableUnitFlag, useHF32>;
