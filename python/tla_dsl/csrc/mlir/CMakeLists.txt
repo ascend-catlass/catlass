@@ -6,6 +6,13 @@ endif()
 project(tla LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+  add_compile_options(-fstack-protector-strong)
+  add_link_options(-Wl,-z,relro,-z,now)
+  add_link_options(-Wl,-z,noexecstack)
+  add_link_options(-s)
+endif()
+
 option(ENABLE_CPU_TRACE_INTRINSIC "If enable debug, use cpu compile." OFF)
 message("-- ENABLE_CPU_TRACE_INTRINSIC Value: ${ENABLE_CPU_TRACE_INTRINSIC}")
 
