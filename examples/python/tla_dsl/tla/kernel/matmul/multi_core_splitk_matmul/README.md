@@ -38,6 +38,8 @@ Split-K 将 K 维度的计算切分到多个核上并行执行，各核的计算
 | bf16 | bf16 | bf16 |
 | f32 | f32 | f32 |
 
+- `A`/`B` 均为 `float32` 类型时，建议 `K` 小于 8192 以避免绝对误差超阈值（[阈值标准](https://gitcode.com/Ascend/ATK/blob/master/skill/atk-quality-guard/references/experimental_standard.md#22-%E6%B7%B7%E5%90%88%E5%AE%B9%E5%B7%AE%E9%98%88%E5%80%BC%E8%A1%A8)）上限。
+
 ## 使用示例
 
 要运行本路径下的样例，请参考[快速开始](../../../../../../../python/tla_dsl/docs/zh/quick_start.md)完成部署。

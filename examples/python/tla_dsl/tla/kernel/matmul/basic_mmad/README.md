@@ -100,6 +100,7 @@
 
 说明：
 
+- `A`/`B` 均为 `float32` 类型时，建议 `K` 小于 2048 以避免绝对误差超阈值（[阈值标准](https://gitcode.com/Ascend/ATK/blob/master/skill/atk-quality-guard/references/experimental_standard.md#22-%E6%B7%B7%E5%90%88%E5%AE%B9%E5%B7%AE%E9%98%88%E5%80%BC%E8%A1%A8)）上限。
 - `A`/`B` 为 fp8 时两种编码可以混用（如 `f8e4m3fn × f8e5m2`），输出类型必须为 `f32`。
 - [`atomic_add`](basic_matmul_atomic_add.py) / [`auto_sync`](basic_matmul_auto_sync.py) / [`mutex`](basic_matmul_mutex.py) / [`mutex_with`](basic_matmul_mutex_with.py) 无 i8、f8 通路，输入/输出仅支持 f16/bf16/f32；其中 `atomic_add` 的 `--dtype-c` 仅支持 `f32`。
 - [`basic_matmul_bias`](basic_matmul_bias.py) 的类型支持：

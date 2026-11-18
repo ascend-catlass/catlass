@@ -48,7 +48,7 @@
 推荐场景：
 
 - 矩阵的 M/N/K 轴不超过 122880。
-- `A`/`B` 均为 `float32` 类型时，建议 `K` 小于 3072 以避免绝对误差超上限。
+- `A`/`B` 均为 `float32` 类型时，建议 `K` 小于 2048 以避免绝对误差超阈值（[阈值标准](https://gitcode.com/Ascend/ATK/blob/master/skill/atk-quality-guard/references/experimental_standard.md#22-%E6%B7%B7%E5%90%88%E5%AE%B9%E5%B7%AE%E9%98%88%E5%80%BC%E8%A1%A8)）上限。
 - `quant_matmul_gelu.py` 的 `A`、`B` 为 `int8`。样例输入取 `[-8, 8)`。`K <= 2048` 时，`127 * 127 * K` 小于 `2^31`，int32 累加不溢出。
 
 ## 代码组织
