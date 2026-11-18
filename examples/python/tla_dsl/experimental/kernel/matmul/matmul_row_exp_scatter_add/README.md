@@ -55,11 +55,12 @@ y = matmul_row_exp_scatter_add.run(
 
 | 项目 | 约束 |
 | ----- | -------- |
-| 输入维度 | `M`、`V`、`S` 为非负整数，`H` 为正整数；可非 tile 整数倍，host 侧自动补零 |
+| 输入维度 | `M`、`V`、`S` 为非负整数，`H` 为正整数；可非 tile 整数倍，由 host 分配清零的补齐缓冲区，kernel 内完成有效数据的 Padding 搬运 |
 | dtype | `x` 与 `weight` 必须同为 `bfloat16`，`global_col_ids` 为 `int32`，`row_logsumexp` 与 `values` 为 `float32`；输出固定 `bfloat16` |
+| 输入布局 | `M > 0` 且 `V > 0` 时，所有输入必须连续，非空输入的起始地址必须按 512 字节对齐；不满足时抛出 `ValueError` |
 | 设备 | 所有输入与可选 `out` 位于同一 NPU，执行前将该 NPU 设为当前设备 |
 | 输出缓冲区 | 显式传入的 `out` 必须为连续张量，shape 为 `[M_pad, V_pad]` |
-| 编译 | 每个设备上，按补齐后的 `(M, H, V)` 与 `S` 编译一个 kernel，编译产物按 shape 缓存 |
+| 编译 | 每个设备上，编译产物按原始与补齐后的 `(M, H, V)`、`S` 和 `alias` 开关缓存 |
 
 ## 使用示例
 
@@ -97,7 +98,11 @@ torch.Size([128, 512]) torch.bfloat16
 
 ## 性能调度与写回
 
-kernel 在编译期根据 `m_tiles = ceil(M / 256)`、`v_tiles = ceil(V / 256)` 选择调度，按下表顺序匹配。矩阵乘的 M/N tile 保持为 256，L0 的 K 步长保持为 64；`H` 的 Padding 粒度为 256，与 L1 的 K 块大小 `tile_k` 分开。
+host 缓存补齐缓冲区，首次分配时清零。单次 kernel 启动中，向量前处理阶段完成输入 Padding 搬运、全局列下标本地化及 `values` 的负行和归约；所有核完成前处理后，再执行矩阵乘与 epilogue。缓冲区的补零区域复用首次分配时的初始化结果。
+
+当 `M`、`H`、`V` 均为 256 的整数倍且 `S <= 64` 时，启用 `alias` 开关，直接复用 `x`、`weight`、`row_logsumexp` 和 `values`，前处理只执行下标本地化与行和归约。其他 shape 按各输入是否需要补齐决定是否搬运。
+
+kernel 在编译期根据 `m_tiles = ceil(M / 256)`、`v_tiles = ceil(V / 256)` 选择调度，由 `_select_schedule` 按下表顺序匹配。矩阵乘的 M/N tile 为 256，L0 的 K 步长为 64；`H` 的 Padding 粒度为 256，与 L1 的 K 块大小 `tile_k` 分开。
 
 | 条件 | `(swizzle_m, swizzle_n)` | `tile_k` |
 | ----- | ----- | ----- |
@@ -106,6 +111,6 @@ kernel 在编译期根据 `m_tiles = ceil(M / 256)`、`v_tiles = ceil(V / 256)` 
 | `m_tiles >= 32` | `(2, 8)` | 128 |
 | 其余 | `(2, 8)` | 256 |
 
-`(2, 8)` 的两个维度分别限制为不超过 `m_tiles`、`v_tiles`。分档阈值来自 Ascend 950PR、28 个 Cube Core、`H=2560`、`S=128` 的经验调优，核数通过 `torch.npu.get_device_properties(device).cube_core_num` 查询；迁移到其他 shape 或设备时需重新测量。例如 `M=8192, V=16384, tile_k=128` 的扫描中，使用打包 DMA 写回时，`(2, 8)` 为 1.990 ms，`(32, 2)` 为 2.328 ms。
+`(2, 8)` 的两个维度分别限制为不超过 `m_tiles`、`v_tiles`。启动核数通过 `torch.npu.get_device_properties(device).cube_core_num` 查询。
 
-输出在 SIMD 中完成 RNE（最近偶数舍入），精确转换为 bf16 后通过 `DIST_PACK_B32` 紧凑存入 UB，由 MTE3 批量写回 GM。`mutex_output` 保护 VECTOR 与 MTE3 之间的缓冲区复用，GM 元素偏移使用 64 位整数。矩阵乘结果与最终输出的两次 RNE、重复下标按槽位顺序累加的规则保持不变。
+输出在 SIMD 中完成 RNE（最近偶数舍入），精确转换为 bf16 后通过 `DIST_PACK_B32` 紧凑存入 UB，由 MTE3 批量写回 GM。`mutex_output` 保护 VECTOR 与 MTE3 之间的缓冲区复用，GM 元素偏移使用 64 位整数。矩阵乘结果与最终输出均采用 RNE，重复下标按槽位顺序累加。

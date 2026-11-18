@@ -42,29 +42,48 @@ matmul uses its transpose.  ``run`` returns a view into a padded output buffer,
 which may be noncontiguous.  Optional ``out`` supplies that full
 ``[M_pad, V_pad]`` bf16 buffer.
 
-The host layer dispatches padding, the negative row sum, global-to-local column
-id conversion, compilation (cached per shape/device) and launch.
-``prepare``/``launch`` expose the same work split for benchmarking the main
-fused device kernel without preparation overhead.
+The host layer only allocates (once, zero-initialised) staging buffers,
+compiles (cached per shape/device) and launches.  Padding, global-to-local
+column id conversion and the negative row sum run on device in the V0
+prologue of the same kernel.  ``prepare``/``launch`` expose the same work
+split for benchmarking the fused device kernel without preparation overhead.
 
 The matmul accumulates in fp32 and is rounded to bf16 (ties to even) before
 the fp32 epilogue.  The output is rounded to bf16 again after the final scale.
 
 Kernel structure
 ----------------
-The device code is one fused kernel split into a cube half and a vector half
-that hand a tile over to each other through a single cross-core flag:
+One launch, one kernel, three stages:
+
+    V0 prologue  (all 56 AIVs, vector side only)
+                    x[M,H]      -> x_pad[M_pad,H_pad]
+                    weight[V,H] -> w_pad[V_pad,H_pad]
+                    lse[M]      -> lse_pad[M_pad]
+                    ids[M,S]    -> local ids, out-of-shard/pad rows -> -1
+                    values[M,S] -> values_pad[M_pad,S]
+                    neg_row_sum -> -sum_s values, via the vector reduce
+                 then a mode-4 AIV->AIC arrive, a mode-0 all-AIC barrier and
+                 the existing tile_ready handshake release the cube half.
+
+The V0 prologue is the in-file reuse section: ``pad_rowsum_prepass`` runs in
+the vector half and ``wait_prepass`` gates the cube half.  When the inputs are already tile-aligned and ``S <= 64``, the host
+aliases x/weight/lse/values as their own staging buffers and the ``alias``
+compile-time switch turns the four copies off; V0 then only localises ids and
+reduces the row sums.  Non-aligned shapes keep the full prologue.
 
     cube half    for each (m, v) tile:  K-blocked matmul into L0C
                                         -> fixpipe copy L0C -> UB (fp32)
     vector half  for each (m, v) tile:  epilogue in place in UB
                                         -> pack bf16 in UB -> DMA Y to GM
 
-Both halves walk the same task list, so they stay in lock step.  Every stage
-holds exactly one tile (one L0C accumulator, one UB staging tile), which gives
-a one-matmul lookahead: the vector epilogue of tile ``t-1`` runs while the cube
-executes the MMAD chain of tile ``t``, and the fixpipe copy of tile ``t`` then
-waits for that epilogue to release UB.
+The padded buffers are allocated once on the host and zero-initialized; V0
+rewrites only the valid region, so the column padding of ``x_pad``/``w_pad``
+stays zero and is never re-cleared.  The cube/vector halves walk the same task
+list, so they stay in lock step.  Every stage holds exactly one tile (one L0C
+accumulator, one UB staging tile), which gives a one-matmul lookahead: the
+vector epilogue of tile ``t-1`` runs while the cube executes the MMAD chain of
+tile ``t``, and the fixpipe copy of tile ``t`` then waits for that epilogue to
+release UB.
 """
 
 import torch
@@ -113,6 +132,509 @@ def _pad_to(value, multiple):
     return ((value + multiple - 1) // multiple) * multiple
 
 
+# =============================================================================
+# 复用区：前段模板（pad 搬运 + ids 本地化 + 可选 row_sum 归约）
+#
+# 调用顺序：
+#   1) vector 段先调用 pad_rowsum_prepass(...)：完成 x/weight/lse/values 的
+#      padding（含对齐短路、H 非 16 倍数时的 SIMT 尾部）、ids 本地化
+#      （减 col_start，片外与片尾行置 -1），可选地用硬件 64-lane reduce 求
+#      -sum(values)，最后发 mode-4 到达标志；
+#   2) cube 段开头调用 wait_prepass(...)：等本核两个 AIV 到达（mode 4），
+#      再做全 AIC 的 mode-0 栅栏，通过后发 mode-2 放行/复位。
+#   两段之间以及各自前后均保留 pipe_barrier(ALL)。
+#
+# 对外参数（其余 M/H/V/S 一律从 tensor shape 推导，不暴露）：
+#   col_start            : 本分片的全局列起点，本地 id = id - col_start
+#   tile_m/tile_k/tile_n : 256 对齐粒度，必须与后续 GEMM 的 tile 一致
+#   reduce               : 是否计算 -sum(values) 并写入 gm_neg_sum_pad
+#   alias                : 是否启用对齐短路。仅当 M/H/V 都是 tile 的整数倍、
+#                          S <= 64 且输入连续、base 指针满足 DMA 对齐时置 True；
+#                          此时四个输入直接别名，V0 只做 ids 与 row_sum。
+#                          False 时按维度零拷贝（shape 已对齐则不搬），否则
+#                          落到 host 分配的 staging 缓冲搬运。
+#
+# 复用方式：整文件复制后替换 cube 段 GEMM 与 vector 段 epilogue，
+# 保留本复用区、kernel 骨架与 host 侧 staging/编译/launch。
+# =============================================================================
+
+
+# Internal staging sizes.  They only affect performance, not the result.
+_PREPASS_TILE_R = 16  # rows per MTE staging tile
+_PREPASS_COL_TILE_MAX = 256  # columns per MTE staging tile
+_PREPASS_LSE_CHUNK = 1024  # fp32 elements per lse chunk
+_PREPASS_SIMT_THREADS = 128  # threads per SIMT block
+
+
+@tla.jit
+def pad_rowsum_prepass(
+    gm_x_raw: tla.Tensor,  # [M, H] bf16
+    gm_weight_raw: tla.Tensor,  # [V, H] bf16
+    gm_lse_raw: tla.Tensor,  # [M] fp32
+    gm_x_pad: tla.Tensor,  # [M_pad, H_pad] bf16
+    gm_w_pad: tla.Tensor,  # [V_pad, H_pad] bf16, row-major
+    gm_lse_pad: tla.Tensor,  # [M_pad, 1] fp32 (pointer is enough)
+    gm_neg_sum_pad: tla.Tensor,  # [M_pad, 1] fp32
+    col_start: int,
+    tile_m: int,
+    tile_k: int,
+    tile_n: int,
+    reduce: bool,
+    alias: bool,
+    pad_arrive,
+    gm_ids_raw: tla.Tensor = None,  # [M, S] int32, None when S == 0
+    gm_values_raw: tla.Tensor = None,  # [M, S] fp32, None when S == 0
+    gm_ids_pad: tla.Tensor = None,  # [M_pad, S] int32
+    gm_values_pad: tla.Tensor = None,  # [M_pad, S] fp32
+) -> None:
+    zero, one = 0, 1
+    m_raw = gm_x_raw.origin_shape[0]
+    h_raw = gm_x_raw.origin_shape[1]
+    v_raw = gm_weight_raw.origin_shape[0]
+    m_pad = gm_x_pad.origin_shape[0]
+    h_pad = gm_x_pad.origin_shape[1]
+    v_pad = gm_w_pad.origin_shape[0]
+    num_selected = gm_ids_raw.origin_shape[1] if gm_ids_raw is not None else 0
+
+    # ---- staging constants (all compile-time).
+    h16 = (h_raw // 16) * 16  # BF16 32-byte granularity: 16 elements
+    col_tile = min(_PREPASS_COL_TILE_MAX, h16) if h16 > 0 else 0
+    val_pad = ((num_selected + 63) // 64) * 64
+    val_chunks = val_pad // 64
+    val_rows = 16 if val_pad > 64 else 32
+    # ids staging: at most 4 KiB of int32 per chunk.
+    id_rows = min(128, max(1, 1024 // num_selected)) if num_selected > 0 else 1
+
+    gid = tla.arch.block_idx() * 2 + tla.arch.sub_block_idx()
+    aiv_num = tla.arch.block_num() * 2
+
+    # When alias is set the caller guarantees all four staging buffers *are*
+    # the raw inputs; otherwise a buffer is copied exactly when its shape is
+    # not already padded (the host aliases the same tensors under the same
+    # condition).
+    copy_x = (not alias) and (m_raw != m_pad or h_raw != h_pad)
+    copy_w = (not alias) and (v_raw != v_pad or h_raw != h_pad)
+    copy_lse = (not alias) and (m_raw != m_pad)
+    copy_values = (not alias) and (m_raw != m_pad)
+
+    # ---- UB scratch.
+    ub_pad_ptr = None
+    if tla.const_expr(h16 > 0):
+        ub_pad_ptr = tla.allocate(
+            _PREPASS_TILE_R * col_tile, gm_x_raw.ptr.dtype, tla.AddressSpace.ub, 256
+        )
+    ub_lse_ptr = tla.allocate(_PREPASS_LSE_CHUNK, tla.Float32, tla.AddressSpace.ub, 256)
+    ub_vals_ptr = None
+    ub_red_ptr = None
+    ub_ids_ptr = None
+    if tla.const_expr(num_selected > 0):
+        ub_vals_ptr = tla.allocate(
+            val_rows * val_pad, tla.Float32, tla.AddressSpace.ub, 256
+        )
+        ub_red_ptr = tla.allocate(val_rows * 8, tla.Float32, tla.AddressSpace.ub, 256)
+        if tla.const_expr(num_selected % 8 == 0):
+            ub_ids_ptr = tla.allocate(
+                id_rows * num_selected, tla.Int32, tla.AddressSpace.ub, 256
+            )
+
+    # ---- x[M, H] -> x_pad[M_pad, H_pad].
+    if tla.const_expr(h16 > 0 and copy_x):
+        gm_x_rows = (m_raw + _PREPASS_TILE_R - 1) // _PREPASS_TILE_R
+        col_tiles = (h16 + col_tile - 1) // col_tile
+        x_tiles = gm_x_rows * col_tiles
+        for xt in tla.range(gid, x_tiles, aiv_num):
+            row_tile = xt // col_tiles
+            col_t = xt % col_tiles
+            row0 = row_tile * _PREPASS_TILE_R
+            col0 = col_t * col_tile
+            rows = _PREPASS_TILE_R
+            if m_raw - row0 < _PREPASS_TILE_R:
+                rows = m_raw - row0
+            cols = col_tile
+            if h16 - col0 < col_tile:
+                cols = h16 - col0
+            gm_src = tla.make_tensor(
+                gm_x_raw.ptr
+                + row0.to(tla.Int64) * tla.Int64(h_raw)
+                + col0.to(tla.Int64),
+                tla.make_layout(
+                    tla.make_shape(_PREPASS_TILE_R, col_tile),
+                    tla.make_stride(h_raw, 1),
+                    origin_shape=tla.make_shape(rows, cols),
+                ),
+            )
+            gm_dst = tla.make_tensor(
+                gm_x_pad.ptr
+                + row0.to(tla.Int64) * tla.Int64(h_pad)
+                + col0.to(tla.Int64),
+                tla.make_layout(
+                    tla.make_shape(_PREPASS_TILE_R, col_tile),
+                    tla.make_stride(h_pad, 1),
+                    origin_shape=tla.make_shape(rows, cols),
+                ),
+            )
+            ub_tile = tla.make_tensor(
+                ub_pad_ptr,
+                tla.make_layout(
+                    tla.make_shape(_PREPASS_TILE_R, col_tile),
+                    tla.make_stride(col_tile, 1),
+                    origin_shape=tla.make_shape(rows, cols),
+                ),
+            )
+            tla.copy(ub_tile, gm_src)
+            tla.pipe_barrier(tla.pipes.ALL)
+            tla.copy(gm_dst, ub_tile)
+            tla.pipe_barrier(tla.pipes.ALL)
+
+    # ---- weight[V, H] -> w_pad[V_pad, H_pad], same schedule.
+    if tla.const_expr(h16 > 0 and copy_w):
+        w_col_tiles = (h16 + col_tile - 1) // col_tile
+        gm_w_rows = (v_raw + _PREPASS_TILE_R - 1) // _PREPASS_TILE_R
+        w_tiles = gm_w_rows * w_col_tiles
+        for wt in tla.range(gid, w_tiles, aiv_num):
+            w_row_tile = wt // w_col_tiles
+            w_col_t = wt % w_col_tiles
+            w_row0 = w_row_tile * _PREPASS_TILE_R
+            w_col0 = w_col_t * col_tile
+            w_rows = _PREPASS_TILE_R
+            if v_raw - w_row0 < _PREPASS_TILE_R:
+                w_rows = v_raw - w_row0
+            w_cols = col_tile
+            if h16 - w_col0 < col_tile:
+                w_cols = h16 - w_col0
+            gm_w_src = tla.make_tensor(
+                gm_weight_raw.ptr
+                + w_row0.to(tla.Int64) * tla.Int64(h_raw)
+                + w_col0.to(tla.Int64),
+                tla.make_layout(
+                    tla.make_shape(_PREPASS_TILE_R, col_tile),
+                    tla.make_stride(h_raw, 1),
+                    origin_shape=tla.make_shape(w_rows, w_cols),
+                ),
+            )
+            gm_w_dst = tla.make_tensor(
+                gm_w_pad.ptr
+                + w_row0.to(tla.Int64) * tla.Int64(h_pad)
+                + w_col0.to(tla.Int64),
+                tla.make_layout(
+                    tla.make_shape(_PREPASS_TILE_R, col_tile),
+                    tla.make_stride(h_pad, 1),
+                    origin_shape=tla.make_shape(w_rows, w_cols),
+                ),
+            )
+            ub_w_tile = tla.make_tensor(
+                ub_pad_ptr,
+                tla.make_layout(
+                    tla.make_shape(_PREPASS_TILE_R, col_tile),
+                    tla.make_stride(col_tile, 1),
+                    origin_shape=tla.make_shape(w_rows, w_cols),
+                ),
+            )
+            tla.copy(ub_w_tile, gm_w_src)
+            tla.pipe_barrier(tla.pipes.ALL)
+            tla.copy(gm_w_dst, ub_w_tile)
+            tla.pipe_barrier(tla.pipes.ALL)
+
+    # ---- x tail columns (H % 16): SIMT element-wise fallback.
+    if tla.const_expr(h16 < h_raw):
+        with tla.vec.func(mode="simt", thread_block_dim=_PREPASS_SIMT_THREADS):
+            tid, _, _ = tla.arch.thread_idx()
+            gtid = gid * _PREPASS_SIMT_THREADS + tid
+            gthreads = aiv_num * _PREPASS_SIMT_THREADS
+            for xtr in tla.range(gtid, m_raw, gthreads):
+                for xtc in tla.range(h16, h_raw, one):
+                    gm_x_pad[xtr, xtc] = gm_x_raw[xtr, xtc]
+        tla.pipe_barrier(tla.pipes.ALL)
+
+    # ---- weight tail columns (H % 16): SIMT element-wise fallback.
+    if tla.const_expr(h16 < h_raw):
+        with tla.vec.func(mode="simt", thread_block_dim=_PREPASS_SIMT_THREADS):
+            tid, _, _ = tla.arch.thread_idx()
+            gtid = gid * _PREPASS_SIMT_THREADS + tid
+            gthreads = aiv_num * _PREPASS_SIMT_THREADS
+            for wtr in tla.range(gtid, v_raw, gthreads):
+                for wtc in tla.range(h16, h_raw, one):
+                    gm_w_pad[wtr, wtc] = gm_weight_raw[wtr, wtc]
+        tla.pipe_barrier(tla.pipes.ALL)
+
+    # ---- lse [M] -> lse_pad [M_pad].
+    if tla.const_expr(copy_lse):
+        lse_chunks = (m_raw + _PREPASS_LSE_CHUNK - 1) // _PREPASS_LSE_CHUNK
+        for lt in tla.range(gid, lse_chunks, aiv_num):
+            lse_base = lt * _PREPASS_LSE_CHUNK
+            lse_n = _PREPASS_LSE_CHUNK
+            if m_raw - lse_base < _PREPASS_LSE_CHUNK:
+                lse_n = m_raw - lse_base
+            gm_lse_src = tla.make_tensor(
+                gm_lse_raw.ptr + lse_base,
+                tla.make_layout(
+                    tla.make_shape(_PREPASS_LSE_CHUNK),
+                    tla.make_stride(1),
+                    origin_shape=tla.make_shape(lse_n),
+                ),
+            )
+            gm_lse_dst = tla.make_tensor(
+                gm_lse_pad.ptr + lse_base,
+                tla.make_layout(
+                    tla.make_shape(_PREPASS_LSE_CHUNK),
+                    tla.make_stride(1),
+                    origin_shape=tla.make_shape(lse_n),
+                ),
+            )
+            ub_lse = tla.make_tensor(
+                ub_lse_ptr,
+                tla.make_layout(
+                    tla.make_shape(_PREPASS_LSE_CHUNK),
+                    tla.make_stride(1),
+                    origin_shape=tla.make_shape(lse_n),
+                ),
+            )
+            tla.copy(ub_lse, gm_lse_src)
+            tla.pipe_barrier(tla.pipes.ALL)
+            tla.copy(gm_lse_dst, ub_lse)
+            tla.pipe_barrier(tla.pipes.ALL)
+
+    # ---- ids: global -> shard-local, out-of-shard and pad rows -> -1.
+    if tla.const_expr(num_selected > 0):
+        if tla.const_expr(num_selected % 8 == 0):
+            # Rows are 32-byte aligned: MTE the chunk into UB, rewrite the
+            # ids in place with scalar UB accesses, then MTE it back.
+            ub_ids = tla.make_tensor(
+                ub_ids_ptr,
+                tla.make_layout(
+                    tla.make_shape(id_rows, num_selected),
+                    tla.make_stride(num_selected, 1),
+                ),
+            )
+            id_chunk_count = (m_raw + id_rows - 1) // id_rows
+            for ic in tla.range(gid, id_chunk_count, aiv_num):
+                ir0 = ic * id_rows
+                inn = id_rows
+                if m_raw - ir0 < id_rows:
+                    inn = m_raw - ir0
+                gm_id_src = tla.make_tensor(
+                    gm_ids_raw.ptr + ir0.to(tla.Int64) * tla.Int64(num_selected),
+                    tla.make_layout(
+                        tla.make_shape(id_rows, num_selected),
+                        tla.make_stride(num_selected, 1),
+                        origin_shape=tla.make_shape(inn, num_selected),
+                    ),
+                )
+                ub_id_chunk = tla.make_tensor(
+                    ub_ids_ptr,
+                    tla.make_layout(
+                        tla.make_shape(id_rows, num_selected),
+                        tla.make_stride(num_selected, 1),
+                        origin_shape=tla.make_shape(inn, num_selected),
+                    ),
+                )
+                tla.copy(ub_id_chunk, gm_id_src)
+                tla.pipe_barrier(tla.pipes.ALL)
+                with tla.vec.func(mode="simt", thread_block_dim=_PREPASS_SIMT_THREADS):
+                    tid, _, _ = tla.arch.thread_idx()
+                    # Flatten (row, slot): with a row-per-thread loop only
+                    # ``id_rows`` lanes work (8 for S=128), which is far too
+                    # serial for the rewrite.
+                    id_elems = inn * num_selected
+                    for ii in tla.range(tid, id_elems, _PREPASS_SIMT_THREADS):
+                        id_row = ii // num_selected
+                        id_sel = ii % num_selected
+                        id_val = ub_ids[id_row, id_sel]
+                        loc = id_val - col_start
+                        if loc < 0:
+                            loc = -1
+                        if loc >= v_raw:
+                            loc = -1
+                        ub_ids[id_row, id_sel] = loc
+                tla.pipe_barrier(tla.pipes.ALL)
+                gm_id_dst = tla.make_tensor(
+                    gm_ids_pad.ptr + ir0.to(tla.Int64) * tla.Int64(num_selected),
+                    tla.make_layout(
+                        tla.make_shape(id_rows, num_selected),
+                        tla.make_stride(num_selected, 1),
+                        origin_shape=tla.make_shape(inn, num_selected),
+                    ),
+                )
+                tla.copy(gm_id_dst, ub_id_chunk)
+                tla.pipe_barrier(tla.pipes.ALL)
+        else:
+            with tla.vec.func(mode="simt", thread_block_dim=_PREPASS_SIMT_THREADS):
+                tid, _, _ = tla.arch.thread_idx()
+                gtid = gid * _PREPASS_SIMT_THREADS + tid
+                gthreads = aiv_num * _PREPASS_SIMT_THREADS
+                # Flatten (row, slot) so adjacent threads touch adjacent
+                # elements; the per-row loop is latency bound on GM.
+                id_total = m_raw * num_selected
+                for ii in tla.range(gtid, id_total, gthreads):
+                    id_row = ii // num_selected
+                    id_sel = ii % num_selected
+                    id_val = gm_ids_raw[id_row, id_sel]
+                    loc = id_val - col_start
+                    if loc < 0:
+                        loc = -1
+                    if loc >= v_raw:
+                        loc = -1
+                    gm_ids_pad[id_row, id_sel] = loc
+            tla.pipe_barrier(tla.pipes.ALL)
+        # Pad rows are processed by the full CV segment, so their ids must
+        # never hit a column.
+        with tla.vec.func(mode="simt", thread_block_dim=_PREPASS_SIMT_THREADS):
+            tid, _, _ = tla.arch.thread_idx()
+            gtid = gid * _PREPASS_SIMT_THREADS + tid
+            gthreads = aiv_num * _PREPASS_SIMT_THREADS
+            for pr in tla.range(m_raw + gtid, m_pad, gthreads):
+                for psel in tla.range(0, num_selected, one):
+                    gm_ids_pad[pr, psel] = -1
+        tla.pipe_barrier(tla.pipes.ALL)
+
+        # ---- values: copy to the padded buffer and optionally reduce.
+        ub_vals = tla.make_tensor(
+            ub_vals_ptr,
+            tla.make_layout(
+                tla.make_shape(val_rows, val_pad),
+                tla.make_stride(val_pad, 1),
+            ),
+        )
+        ub_red = tla.make_tensor(
+            ub_red_ptr,
+            tla.make_layout(tla.make_shape(val_rows * 8), tla.make_stride(1)),
+        )
+        val_chunk_count = (m_raw + val_rows - 1) // val_rows
+        for vc in tla.range(gid, val_chunk_count, aiv_num):
+            vr0 = vc * val_rows
+            vn = val_rows
+            if m_raw - vr0 < val_rows:
+                vn = m_raw - vr0
+            if tla.const_expr(num_selected % 8 == 0):
+                # A row of 32-bit elements is 32-byte aligned, so the whole
+                # chunk moves with MTE.  Only the lane padding (when S is not
+                # a multiple of 64) needs SIMT zeroing.
+                gm_val_src = tla.make_tensor(
+                    gm_values_raw.ptr + vr0.to(tla.Int64) * tla.Int64(num_selected),
+                    tla.make_layout(
+                        tla.make_shape(val_rows, val_pad),
+                        tla.make_stride(num_selected, 1),
+                        origin_shape=tla.make_shape(vn, num_selected),
+                    ),
+                )
+                ub_val_dst = tla.make_tensor(
+                    ub_vals_ptr,
+                    tla.make_layout(
+                        tla.make_shape(val_rows, val_pad),
+                        tla.make_stride(val_pad, 1),
+                        origin_shape=tla.make_shape(vn, num_selected),
+                    ),
+                )
+                tla.copy(ub_val_dst, gm_val_src)
+                tla.pipe_barrier(tla.pipes.ALL)
+                if tla.const_expr(num_selected < val_pad):
+                    with tla.vec.func(
+                        mode="simt", thread_block_dim=_PREPASS_SIMT_THREADS
+                    ):
+                        tid, _, _ = tla.arch.thread_idx()
+                        for lr in tla.range(tid, vn, _PREPASS_SIMT_THREADS):
+                            for vz in tla.range(num_selected, val_pad, one):
+                                ub_vals[lr, vz] = 0.0
+                    tla.pipe_barrier(tla.pipes.ALL)
+                if tla.const_expr(copy_values):
+                    gm_val_dst = tla.make_tensor(
+                        gm_values_pad.ptr + vr0.to(tla.Int64) * tla.Int64(num_selected),
+                        tla.make_layout(
+                            tla.make_shape(val_rows, val_pad),
+                            tla.make_stride(num_selected, 1),
+                            origin_shape=tla.make_shape(vn, num_selected),
+                        ),
+                    )
+                    ub_val_src = tla.make_tensor(
+                        ub_vals_ptr,
+                        tla.make_layout(
+                            tla.make_shape(val_rows, val_pad),
+                            tla.make_stride(val_pad, 1),
+                            origin_shape=tla.make_shape(vn, num_selected),
+                        ),
+                    )
+                    tla.copy(gm_val_dst, ub_val_src)
+                    tla.pipe_barrier(tla.pipes.ALL)
+            else:
+                with tla.vec.func(mode="simt", thread_block_dim=_PREPASS_SIMT_THREADS):
+                    tid, _, _ = tla.arch.thread_idx()
+                    for lr in tla.range(tid, vn, _PREPASS_SIMT_THREADS):
+                        for vs in tla.range(0, num_selected, one):
+                            val = gm_values_raw[vr0 + lr, vs]
+                            ub_vals[lr, vs] = val
+                            if tla.const_expr(copy_values):
+                                gm_values_pad[vr0 + lr, vs] = val
+                        for vz in tla.range(num_selected, val_pad, one):
+                            ub_vals[lr, vz] = 0.0
+                tla.pipe_barrier(tla.pipes.ALL)
+
+            if tla.const_expr(reduce):
+                # Hardware reduce over 64 fp32 lanes; chunk sums are combined
+                # lane-wise first, mirroring the NPU torch.sum(-1) order.
+                with tla.vec.func(mode="simd"):
+                    all_lanes = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
+                    for sr in tla.range(vn):
+                        acc = tla.tile_view(
+                            ub_vals,
+                            tla.make_shape(1, 64),
+                            tla.make_coord(sr, 0),
+                        ).load()
+                        for ci in range(1, val_chunks):
+                            nxt = tla.tile_view(
+                                ub_vals,
+                                tla.make_shape(1, 64),
+                                tla.make_coord(sr, ci),
+                            ).load()
+                            acc = tla.add(acc, nxt, mask=all_lanes)
+                        red = acc.reduce(tla.ReductionOp.ADD, mask=all_lanes)
+                        tla.tile_view(
+                            ub_red,
+                            tla.make_shape(1),
+                            tla.make_coord(sr * 8),
+                        ).store(red)
+                tla.pipe_barrier(tla.pipes.ALL)
+
+                with tla.vec.func(mode="simt", thread_block_dim=_PREPASS_SIMT_THREADS):
+                    tid, _, _ = tla.arch.thread_idx()
+                    for nr in tla.range(tid, vn, _PREPASS_SIMT_THREADS):
+                        gm_neg_sum_pad[vr0 + nr, 0] = -ub_red[nr * 8]
+                tla.pipe_barrier(tla.pipes.ALL)
+    elif tla.const_expr(reduce):
+        # No selected columns: the row sum is the empty sum, negated.
+        with tla.vec.func(mode="simt", thread_block_dim=_PREPASS_SIMT_THREADS):
+            tid, _, _ = tla.arch.thread_idx()
+            gtid = gid * _PREPASS_SIMT_THREADS + tid
+            gthreads = aiv_num * _PREPASS_SIMT_THREADS
+            zero_f = tla.as_numeric(0.0)
+            for zr in tla.range(gtid, m_raw, gthreads):
+                gm_neg_sum_pad[zr, 0] = -zero_f
+        tla.pipe_barrier(tla.pipes.ALL)
+
+    # Every AIV has finished its share of the prologue.
+    tla.pipe_barrier(tla.pipes.ALL)
+    if tla.arch.sub_block_idx() == 0:
+        tla.cross_core_set_flag(pad_arrive, tla.arch.MTE3, aiv_id=0)
+    else:
+        tla.cross_core_set_flag(pad_arrive, tla.arch.MTE3, aiv_id=1)
+
+
+@tla.jit
+def wait_prepass(pad_arrive, pad_ffts, pad_release) -> None:
+    """Wait for the prepass on every core, then publish the release.
+
+    Call at the start of ``with tla.cube():``.  ``pad_arrive`` is mode 4 (one
+    token per AIV), ``pad_ffts`` is the mode-0 all-AIC barrier and
+    ``pad_release`` is the mode-2 release/reset flag.
+    """
+    tla.pipe_barrier(tla.pipes.ALL)
+    tla.cross_core_wait_flag(pad_arrive, tla.arch.SCALAR, aiv_id=0)
+    tla.cross_core_wait_flag(pad_arrive, tla.arch.SCALAR, aiv_id=1)
+    tla.cross_core_set_flag(pad_ffts, tla.arch.FIX)
+    tla.cross_core_wait_flag(pad_ffts, tla.arch.SCALAR)
+    # Release/reset: both AIVs of this core may proceed.
+    tla.cross_core_set_flag(pad_release, tla.arch.SCALAR)
+
+
 @tla.kernel
 def matmul_row_exp_scatter_add_kernel(
     gm_x: tla.Tensor,  # [M_pad, H_pad] bf16, row-major; X
@@ -122,7 +644,14 @@ def matmul_row_exp_scatter_add_kernel(
     gm_local_col_ids: tla.Tensor,  # [M_pad, max(S, 1)] int32; local column ids
     gm_values: tla.Tensor,  # [M_pad, max(S, 1)] fp32; values[m, s]
     gm_out: tla.Tensor,  # [M_pad, V_pad] bf16, row-major; Y
+    gm_x_raw: tla.Tensor,  # [M, H] bf16, row-major; unpadded X
+    gm_weight_raw: tla.Tensor,  # [V, H] bf16, row-major; unpadded W
+    gm_lse_raw: tla.Tensor,  # [M] fp32; unpadded row_logsumexp
+    gm_col_ids_raw: tla.Tensor,  # [M, max(S, 1)] int32; global column ids
+    gm_values_raw: tla.Tensor,  # [M, max(S, 1)] fp32; unpadded values
     inv_temperature: float,
+    col_start: int,
+    alias: tla.Constexpr[bool],
     num_selected: tla.Constexpr[int],
 ) -> None:
     zero, one = 0, 1
@@ -131,8 +660,8 @@ def matmul_row_exp_scatter_add_kernel(
     # AIV owns half of the rows.
     rows_per_aiv = tile_m // 2
     simd_lanes = 64  # fp32 lanes per SIMD fragment
-    m = gm_x.origin_shape[0]
-    v = gm_out.origin_shape[1]
+    m = gm_x.origin_shape[0]  # padded M
+    v = gm_out.origin_shape[1]  # padded V
     swizzle_m, swizzle_n, tile_k = _select_schedule(m, v)
     m_tiles = (m + tile_m - 1) // tile_m
     v_tiles = (v + tile_n - 1) // tile_n
@@ -148,6 +677,12 @@ def matmul_row_exp_scatter_add_kernel(
     # once UB holds a fresh fp32 C tile.  The vector half sets it back once
     # the output has been read out of UB, ping-ponging at tile granularity.
     tile_ready = tla.cross_flag("tile_ready")
+    # V0 handshake: each AIV reports to its own AIC (mode 4), the AICs then
+    # rendezvous on an all-core barrier (mode 0) and publish the mode-2
+    # release before the matmul touches the padded buffers.
+    pad_arrive = tla.cross_flag("v0_pad_arrive", mode=4)
+    pad_ffts = tla.cross_flag("v0_pad_ffts", mode=0)
+    pad_release = tla.cross_flag("v0_pad_release", mode=2)
     # Load/compute mutexes, one per staging slot.  Ids are fixed literals; they
     # are hardware resources, not handles.
     mutex_l1_a0 = tla.mutex("l1_a0", id=0)
@@ -189,11 +724,14 @@ def matmul_row_exp_scatter_add_kernel(
     ub_neg_row_sum_ptr = tla.allocate(
         rows_per_aiv, tla.Float32, tla.AddressSpace.ub, 256
     )
-
     # ======================================================================= #
     # Cube half: matmul, then hand the tile over to the vector half.
     # ======================================================================= #
     with tla.cube():
+        # Wait for the prepass on every core (mode 4 + mode 0), then publish
+        # the mode-2 release.  Only then may the matmul read the pads.
+        wait_prepass(pad_arrive, pad_ffts, pad_release)
+
         # Logical views used as layout templates; the fixpipe writes the AIV
         # half of ``ub_c_full`` at offset 0 of its own UB.
         ub_c_full = tla.make_tensor(
@@ -422,6 +960,35 @@ def matmul_row_exp_scatter_add_kernel(
     # Vector half: epilogue in place, then narrow and store the output.
     # ======================================================================= #
     with tla.vector():
+        # V0 comes from the in-file reuse section (see pad_rowsum_prepass).
+        gm_w_pad_rm = tla.make_tensor(
+            gm_weight.ptr,
+            tla.make_layout(
+                tla.make_shape(gm_weight.origin_shape[1], gm_weight.origin_shape[0]),
+                tla.make_stride(gm_weight.origin_shape[0], 1),
+            ),
+        )
+        pad_rowsum_prepass(
+            gm_x_raw,
+            gm_weight_raw,
+            gm_lse_raw,
+            gm_x,
+            gm_w_pad_rm,
+            gm_row_logsumexp,
+            gm_neg_row_sum,
+            col_start,
+            TILE_M,
+            TILE_K,
+            TILE_N,
+            True,
+            alias,
+            pad_arrive,
+            gm_col_ids_raw if num_selected > 0 else None,
+            gm_values_raw if num_selected > 0 else None,
+            gm_local_col_ids if num_selected > 0 else None,
+            gm_values if num_selected > 0 else None,
+        )
+
         aiv = tla.arch.sub_block_idx()
         ub_c = tla.make_tensor(
             ub_c_ptr,
@@ -658,11 +1225,26 @@ class _Prepared:
         "col_ids_pad",
         "values_pad",
         "out_buf",
+        "x_raw",
+        "weight_raw",
+        "lse_raw",
+        "col_ids_raw",
+        "values_raw",
+        "col_start",
+        "v0_mode",
     )
 
 
 _COMPILE_CACHE = {}
 _STAGE_CACHE = {}
+
+# GM addresses consumed by MTE should start on a DMA block boundary.
+_DMA_ALIGN_BYTES = 512
+
+
+def _dma_aligned(t):
+    """True when the tensor base address meets the DMA alignment."""
+    return t.numel() == 0 or int(t.data_ptr()) % _DMA_ALIGN_BYTES == 0
 
 
 def _stage(device, name, shape, dtype):
@@ -675,28 +1257,28 @@ def _stage(device, name, shape, dtype):
     return buf
 
 
-def _copy_padded(dst, src):
-    """Copy ``src`` into the top-left corner and clear the rest of ``dst``."""
-    rows, cols = src.shape
-    dst[:rows, :cols].copy_(src)
-    if dst.shape[0] > rows:
-        dst[rows:].zero_()
-    if dst.dim() == 2 and dst.shape[1] > cols:
-        dst[:rows, cols:].zero_()
-
-
-def _copy_padded_1d(dst, src):
-    n = src.shape[0]
-    dst[:n].copy_(src)
-    if dst.shape[0] > n:
-        dst[n:].zero_()
-
-
-def _compiled_entry(device, m_pad, h_pad, v_pad, num_selected, sample):
-    key = (device, m_pad, h_pad, v_pad, num_selected)
+def _compiled_entry(device, m_pad, h_pad, v_pad, m, h, v, alias, num_selected, sample):
+    # The kernel is specialised on the padded *and* the raw shapes: the V0
+    # tile loops walk M/H/V directly, and the V0 mode is selected from them.
+    # Two raw shapes can share one padded shape, so both must be part of the
+    # key.
+    key = (device, m_pad, h_pad, v_pad, m, h, v, alias, num_selected)
     entry = _COMPILE_CACHE.get(key)
     if entry is None:
-        x_t, weight_t, lse_t, neg_row_sum_t, col_ids_t, values_t, out_t = sample
+        (
+            x_t,
+            weight_t,
+            lse_t,
+            neg_row_sum_t,
+            col_ids_t,
+            values_t,
+            out_t,
+            x_raw_t,
+            weight_raw_t,
+            lse_raw_t,
+            col_ids_raw_t,
+            values_raw_t,
+        ) = sample
         # Only shapes and dtypes are specialised; the scalars below are runtime
         # arguments, so any valid ones compile the same kernel.
         entry = tla.compile(
@@ -708,7 +1290,14 @@ def _compiled_entry(device, m_pad, h_pad, v_pad, num_selected, sample):
             col_ids_t,
             values_t,
             out_t,
+            x_raw_t,
+            weight_raw_t,
+            lse_raw_t,
+            col_ids_raw_t,
+            values_raw_t,
             1.0,
+            0,
+            alias,
             num_selected,
             options=_COMPILE_OPTS,
         )
@@ -717,7 +1306,18 @@ def _compiled_entry(device, m_pad, h_pad, v_pad, num_selected, sample):
 
 
 def _to_tla(
-    x_pad, weight_pad, lse_pad, neg_row_sum_pad, col_ids_pad, values_pad, out_buf
+    x_pad,
+    weight_pad,
+    lse_pad,
+    neg_row_sum_pad,
+    col_ids_pad,
+    values_pad,
+    out_buf,
+    x_raw,
+    weight_raw,
+    lse_raw,
+    col_ids_raw,
+    values_raw,
 ):
     return (
         from_dlpack(x_pad, layout_tag=tla.arch.RowMajor),
@@ -727,6 +1327,11 @@ def _to_tla(
         from_dlpack(col_ids_pad, layout_tag=tla.arch.RowMajor),
         from_dlpack(values_pad, layout_tag=tla.arch.RowMajor),
         from_dlpack(out_buf, layout_tag=tla.arch.RowMajor),
+        from_dlpack(x_raw, layout_tag=tla.arch.RowMajor),
+        from_dlpack(weight_raw, layout_tag=tla.arch.RowMajor),
+        from_dlpack(lse_raw, layout_tag=tla.arch.RowMajor),
+        from_dlpack(col_ids_raw, layout_tag=tla.arch.RowMajor),
+        from_dlpack(values_raw, layout_tag=tla.arch.RowMajor),
     )
 
 
@@ -740,15 +1345,23 @@ def prepare(
     shard_index=0,
     out=None,
 ):
-    """Pad inputs, compute negative row sums and compile the kernel.
+    """Allocate staging buffers and compile the single fused kernel.
 
-    Uses the same input contract as ``run``.  Returns an object whose
-    ``launch()`` runs the main device kernel only, so preparation cost can be
-    excluded from timing.  Optional ``out`` supplies a preallocated
-    ``[M_pad, V_pad]`` bf16 buffer.
+    Uses the same input contract as ``run``.  All padding, id localisation and
+    the negative row sum are done on device by the kernel's V0 prologue; the
+    host only allocates (once, zero-initialised) staging buffers, compiles and
+    launches.  Returns an object whose ``launch()`` runs the device kernel
+    only, so preparation cost can be excluded from timing.  Optional ``out``
+    supplies a preallocated ``[M_pad, V_pad]`` bf16 buffer.
 
     Staging buffers are shared by device, role and padded shape.  A later
     preparation can overwrite inputs held by an earlier prepared object.
+
+    When ``M``/``H``/``V`` are exact tile multiples, ``S <= 64`` and every
+    input base address is DMA-aligned, all four large inputs are read in
+    place; V0 then only localises ids and reduces the row sums.  Otherwise
+    the per-dimension fast path applies.  Inputs whose base address is not
+    DMA-aligned are rejected instead of being copied on the host.
     """
     m, h = x.shape
     v = weight.shape[0]
@@ -762,27 +1375,73 @@ def prepare(
     h_pad = _pad_to(h, TILE_K)
     v_pad = _pad_to(v, TILE_N)
 
-    x_pad = _stage(device, "x", (m_pad, h_pad), torch.bfloat16)
-    _copy_padded(x_pad, x)
-    weight_pad = _stage(device, "w", (v_pad, h_pad), torch.bfloat16)
-    _copy_padded(weight_pad, weight)
-    lse_pad = _stage(device, "lse", (m_pad,), torch.float32)
-    _copy_padded_1d(lse_pad, row_logsumexp)
-    # Global column ids -> this shard's column ids.  Out-of-shard ids become
-    # -1 and skip scatter-add, while their values still enter the row sum.
-    local_col_ids = global_col_ids - col_start
-    local_col_ids.masked_fill_((local_col_ids < 0) | (local_col_ids >= v), -1)
-    # The runtime rejects zero-width RowMajor views.  Keep one dummy staging
-    # column for S = 0; num_selected stays zero, so the kernel never reads it.
+    # V0 reads the inputs through plain pointers, so they must be contiguous.
+    for _name, _t in (
+        ("x", x),
+        ("weight", weight),
+        ("global_col_ids", global_col_ids),
+        ("row_logsumexp", row_logsumexp),
+        ("values", values),
+    ):
+        if not _t.is_contiguous():
+            raise ValueError(f"{_name} must be contiguous")
+
+    # The runtime rejects zero-width RowMajor views.  Keep one dummy column
+    # for S = 0; num_selected stays zero, so the kernel never reads it.
     selected_cols_pad = max(1, num_selected)
+    if num_selected > 0:
+        ids_raw = global_col_ids
+        values_raw = values
+    else:
+        ids_raw = _stage(device, "col_ids_raw_dummy", (m, 1), torch.int32)
+        values_raw = _stage(device, "values_raw_dummy", (m, 1), torch.float32)
+
+    # The prepass reads inputs through plain pointers, so every base address
+    # it may consume directly must meet the DMA alignment.
+    if not (
+        _dma_aligned(x)
+        and _dma_aligned(weight)
+        and _dma_aligned(global_col_ids)
+        and _dma_aligned(row_logsumexp)
+        and (num_selected == 0 or _dma_aligned(values))
+    ):
+        raise ValueError("input base addresses must be DMA-aligned")
+
+    # Aligned short path: M/H/V are exact tile multiples, S is small and every
+    # pointer is usable, so the four large inputs are aliased (no staging).
+    alias = (
+        m % TILE_M == 0 and h % TILE_K == 0 and v % TILE_N == 0 and num_selected <= 64
+    )
+
+    # Padded staging buffers are allocated once, zero-initialized and cached by
+    # shape.  V0 overwrites only the valid region, so the column padding of
+    # x_pad / w_pad stays zero without any per-call clearing.
+    if alias:
+        x_pad = x
+        weight_pad = weight
+        lse_pad = row_logsumexp
+        values_pad = values_raw
+    else:
+        if m_pad == m and h_pad == h:
+            x_pad = x
+        else:
+            x_pad = _stage(device, "x", (m_pad, h_pad), torch.bfloat16)
+        if v_pad == v and h_pad == h:
+            weight_pad = weight
+        else:
+            weight_pad = _stage(device, "w", (v_pad, h_pad), torch.bfloat16)
+        if m_pad == m:
+            lse_pad = row_logsumexp
+        else:
+            lse_pad = _stage(device, "lse", (m_pad,), torch.float32)
+        if num_selected > 0 and m_pad == m:
+            values_pad = values
+        else:
+            values_pad = _stage(
+                device, "values", (m_pad, selected_cols_pad), torch.float32
+            )
     col_ids_pad = _stage(device, "col_ids", (m_pad, selected_cols_pad), torch.int32)
-    _copy_padded(col_ids_pad, local_col_ids)
-    values_pad = _stage(device, "values", (m_pad, selected_cols_pad), torch.float32)
-    _copy_padded(values_pad, values)
-    # Precompute the negative sum over all selected values in each row,
-    # including values whose ids are outside this shard.
     neg_row_sum_pad = _stage(device, "neg_row_sum", (m_pad,), torch.float32)
-    _copy_padded_1d(neg_row_sum_pad, -values.sum(dim=-1))
     if out is None:
         out_buf = torch.empty(
             (m_pad, v_pad), dtype=torch.bfloat16, device=f"npu:{device}"
@@ -799,9 +1458,22 @@ def prepare(
 
     inv_temperature = 1.0 / float(temperature)
     sample = _to_tla(
-        x_pad, weight_pad, lse_pad, neg_row_sum_pad, col_ids_pad, values_pad, out_buf
+        x_pad,
+        weight_pad,
+        lse_pad,
+        neg_row_sum_pad,
+        col_ids_pad,
+        values_pad,
+        out_buf,
+        x,
+        weight,
+        row_logsumexp,
+        ids_raw,
+        values_raw,
     )
-    entry = _compiled_entry(device, m_pad, h_pad, v_pad, num_selected, sample)
+    entry = _compiled_entry(
+        device, m_pad, h_pad, v_pad, m, h, v, alias, num_selected, sample
+    )
     blocks = max(1, int(torch.npu.get_device_properties(device).cube_core_num))
 
     p = _Prepared()
@@ -815,10 +1487,14 @@ def prepare(
         neg_row_sum_pad,
     )
     p.col_ids_pad, p.values_pad, p.out_buf = col_ids_pad, values_pad, out_buf
+    p.x_raw, p.weight_raw, p.lse_raw = x, weight, row_logsumexp
+    p.col_ids_raw, p.values_raw = ids_raw, values_raw
+    p.col_start = col_start
+    p.v0_mode = 1 if alias else 0
 
     def launch():
         entry, sample, inv_t, blocks_ = p.compiled
-        entry(*sample, inv_t, block_num=blocks_)
+        entry(*sample, inv_t, p.col_start, block_num=blocks_)
 
     p.launch = launch
     return p
