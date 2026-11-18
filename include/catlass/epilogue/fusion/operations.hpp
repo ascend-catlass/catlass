@@ -232,7 +232,7 @@ struct AddRelu {
     }
 };
 
-#if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
 // Prelu
 template <typename T>
 struct Prelu {

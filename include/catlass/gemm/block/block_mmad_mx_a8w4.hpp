@@ -24,7 +24,7 @@
 
 namespace Catlass::Gemm::Block {
 
-#if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
 
 template <
     class ArchTag_, bool ENABLE_UNIT_FLAG_, bool ENABLE_L1_RESIDENT_, uint32_t L1_SCALE_FACTOR_K_, uint32_t L0C_STAGES_,
@@ -646,7 +646,7 @@ protected:
     CopyL1ToBT copyL1ToBT;
 };
 
-#endif // (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#endif // (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
 
 } // namespace Catlass::Gemm::Block
 

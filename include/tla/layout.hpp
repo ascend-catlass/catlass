@@ -474,7 +474,7 @@ CATLASS_HOST_DEVICE constexpr auto MakeLayout(T const& rows, U const& cols)
     if constexpr (is_same_v<LayoutTag, Catlass::layout::VectorLayout>) {
         return MakeLayout(MakeShape(cols), MakeStride(Int<1>{}), MakeShape(cols));
     } else if constexpr (is_same_v<LayoutTag, Catlass::layout::RowMajor>) {
-#if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
         if constexpr (is_same_v<Element, float4_e2m1x2_t> || is_same_v<Element, float4_e1m2x2_t>) {
             return MakeLayout(
                 MakeShape(rows, cols), MakeStride((int64_t)RoundUp(cols, 2), Int<1>{}), MakeShape(rows, cols));
@@ -482,7 +482,7 @@ CATLASS_HOST_DEVICE constexpr auto MakeLayout(T const& rows, U const& cols)
 #endif
         return MakeLayout(MakeShape(rows, cols), MakeStride((int64_t)cols, Int<1>{}), MakeShape(rows, cols));
     } else if constexpr (is_same_v<LayoutTag, Catlass::layout::ColumnMajor>) {
-#if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
         if constexpr (is_same_v<Element, float4_e2m1x2_t> || is_same_v<Element, float4_e1m2x2_t>) {
             return MakeLayout(
                 MakeShape(rows, cols), MakeStride(Int<1>{}, (int64_t)RoundUp(rows, 2)), MakeShape(rows, cols));
@@ -543,7 +543,7 @@ CATLASS_HOST_DEVICE constexpr auto MakeLayout(T const& rows, U const& cols)
     }
 }
 
-#if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
 template <class Element, class LayoutTag, bool isMxScaleB, class T, class U>
 CATLASS_HOST_DEVICE constexpr auto MakeMxScaleLayout(T const& rows, U const& cols)
 {
@@ -759,7 +759,7 @@ struct isnZ<
          stride<0, 0>(Layout{}) == 1 && stride<1, 1>(Layout{}) == ELE_NUM_PER_FRACTAL);
 };
 
-#if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
 template <class Element, class Layout, class Enable1 = void, class Enable2 = void>
 struct isMxScaleForRowMajorA {
     static bool const value = false;

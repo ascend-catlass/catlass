@@ -88,7 +88,7 @@ struct TagToLayout<Element, layout::CI1KHKWCOCI0> {
         tla::Shape<uint32_t, uint32_t, uint32_t, uint32_t, uint32_t>>;
 };
 
-#if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
 template <>
 struct TagToLayout<float8_e8m0_t, layout::zZ> {
     static constexpr uint32_t ELE_NUM_PER_C0 = 2;

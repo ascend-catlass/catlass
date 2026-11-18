@@ -16,7 +16,7 @@
 #include "catlass/epilogue/tile/copy_gm_to_ub.hpp"
 #include "catlass/epilogue/tile/copy_ub_to_gm.hpp"
 
-#if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
 
 namespace Catlass::Epilogue::Tile {
 
@@ -46,6 +46,6 @@ struct TileCopyDualLevelQuantMx {
 
 } // namespace Catlass::Epilogue::Tile
 
-#endif // (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#endif // (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
 
 #endif // CATLASS_EPILOGUE_TILE_TILE_COPY_DUAL_LEVEL_QUANT_MX_HPP

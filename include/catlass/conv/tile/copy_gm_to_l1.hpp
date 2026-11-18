@@ -14,7 +14,7 @@
 #if (defined(CATLASS_ARCH) && CATLASS_ARCH == 2201)
 #include "catlass/conv/tile/atlasa2/copy_gm_to_l1.hpp"
 #endif
-#if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
 #include "catlass/conv/tile/ascend950/copy_gm_to_l1.hpp"
 #endif
 

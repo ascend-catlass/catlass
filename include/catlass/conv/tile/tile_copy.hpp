@@ -102,7 +102,7 @@ struct PackedTileCopyTla {
     using CopyL1ToL0A = Conv::Tile::CopyL1ToL0ATla<ElementFmap>;
     using CopyL1ToL0B = Conv::Tile::CopyL1ToL0BTla<ElementFilter>;
 
-#if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
     template <class TensorOut>
     using CopyL0CToDst = Conv::Tile::CopyL0CToGmTla<ArchTag, TensorL0C, TensorOut, DEQUANT_GRANULARITY, ReluEnable>;
 #endif

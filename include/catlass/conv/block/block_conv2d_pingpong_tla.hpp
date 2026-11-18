@@ -179,7 +179,7 @@ public:
         using CopyL0CToGm = typename TileCopy::template CopyL0CToGm<TensorOutput>;
         CopyL0CToGm copyL0CToDst;
 #endif
-#if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
         using CopyL0CToDst = typename TileCopy::template CopyL0CToDst<TensorOutput>;
         CopyL0CToDst copyL0CToDst;
 #endif

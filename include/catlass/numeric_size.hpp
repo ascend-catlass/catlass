@@ -20,7 +20,7 @@
 namespace Catlass {
 
 #if defined(__CCE__)
-#if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
 template <typename T>
 struct SizeOfBits {
     static constexpr size_t value = (std::is_same_v<std::remove_cv_t<T>, std::remove_cv_t<float4_e2m1x2_t>> ||
@@ -41,7 +41,7 @@ struct SizeOfBits {
 
 // Host / non-kernel TU with CATLASS_ARCH 3510: Ascend FP4 typedefs may still use sizeof==1; keep logical 4-bit count.
 #if !defined(__CCE__)
-#if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
 template <>
 struct SizeOfBits<float4_e2m1x2_t> {
     static constexpr size_t value = 4;

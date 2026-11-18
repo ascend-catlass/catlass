@@ -379,7 +379,7 @@ struct PackedTileCopyTla {
     using CopyL1ToBT =
         std::conditional_t<HAS_BIAS, Gemm::Tile::TileCopyTla<ArchTag, TensorL1Bias, TensorL0Bias>, EmptyClass>;
 
-#if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
     template <class TensorC>
     using CopyL0CToDst = Gemm::Tile::CopyL0CToGmTla<ArchTag, TensorL0C, TensorC, DEQUANT_GRANULARITY, ReluEnable>;
 #endif
@@ -444,7 +444,7 @@ struct PaddingPackedTileCopyTla {
 
     using CopyL1ToL0A = Gemm::Tile::TileCopyTla<ArchTag, TensorL1A, TensorL0A>;
     using CopyL1ToL0B = Gemm::Tile::TileCopyTla<ArchTag, TensorL1B, TensorL0B>;
-#if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
     using CopyL0CToDst = Gemm::Tile::CopyL0CToGmTla<ArchTag, TensorL0C, TensorC>;
 #endif
 #if (defined(CATLASS_ARCH) && CATLASS_ARCH == 2201)
@@ -452,7 +452,7 @@ struct PaddingPackedTileCopyTla {
 #endif
 };
 
-#if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
 struct PaddedVectorCopy {
     // Preserve the caller's destination tensor type, including compile-time layouts.
     template <class TensorDst, class TensorSrc>

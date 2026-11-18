@@ -289,7 +289,7 @@ public:
             using CopyL0CToGm = typename TileCopyP::template CopyL0CToGm<TensorC>;
             CopyL0CToGm copyL0CToGm;
             copyL0CToGm(tensorC, tensorL0C_Tile);
-#elif (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#elif (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
             using CopyL0CToDst = typename TileCopyP::template CopyL0CToDst<TensorC>;
             CopyL0CToDst copyL0CToDst;
             copyL0CToDst(tensorC, tensorL0C_Tile);
@@ -300,7 +300,7 @@ public:
             using CopyL0CToGm = typename TileCopyP::template CopyL0CToGm<TensorC>;
             CopyL0CToGm copyL0CToGm;
             copyL0CToGm(tensorC, tensorL0C_Tile, 0b11);
-#elif (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#elif (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
             using CopyL0CToDst = typename TileCopyP::template CopyL0CToDst<TensorC>;
             CopyL0CToDst copyL0CToDst;
             copyL0CToDst(tensorC, tensorL0C_Tile, 0b11);

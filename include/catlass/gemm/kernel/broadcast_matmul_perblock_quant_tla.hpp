@@ -24,7 +24,7 @@
 
 namespace Catlass::Gemm::Kernel {
 
-#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+#if defined(__NPU_ARCH__) && ((__NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9201 || __NPU_ARCH__ == 9202))
 using namespace AscendC::Reg;
 #endif
 

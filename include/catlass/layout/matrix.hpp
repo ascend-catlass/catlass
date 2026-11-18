@@ -56,7 +56,7 @@ public:
     template <class Element>
     CATLASS_HOST_DEVICE static RowMajor MakeLayout(Index rows, Index cols)
     {
-#if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
         if constexpr (std::is_same_v<Element, float4_e2m1x2_t> || std::is_same_v<Element, float4_e1m2x2_t>) {
             return RowMajor(rows, cols, RoundUp<2>(cols));
         }
@@ -195,7 +195,7 @@ public:
     template <class Element>
     CATLASS_HOST_DEVICE static ColumnMajor MakeLayout(Index rows, Index cols)
     {
-#if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
         if constexpr (std::is_same_v<Element, float4_e2m1x2_t> || std::is_same_v<Element, float4_e1m2x2_t>) {
             return ColumnMajor(rows, cols, RoundUp<2>(rows));
         }

@@ -171,7 +171,7 @@ struct BlockMmadFAG {
 #include "catlass/gemm/block/block_mmad_pingpong_per_group_per_block_tla.hpp"
 #include "catlass/gemm/block/block_mmad_mx_tla.hpp"
 #include "catlass/gemm/block/block_mmad_mx_finalize_routing_tla.hpp"
-#if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
 #include "catlass/gemm/block/block_mmad_pingpong_mutex_tla.hpp"
 #include "catlass/gemm/block/block_mmad_fai_pv_mx_tla.hpp"
 #include "catlass/gemm/block/block_mmad_fai_qk_mx_tla.hpp"

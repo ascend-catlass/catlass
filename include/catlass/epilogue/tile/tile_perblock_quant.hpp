@@ -19,7 +19,7 @@
 
 namespace Catlass::Epilogue::Tile {
 
-#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+#if defined(__NPU_ARCH__) && ((__NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9201 || __NPU_ARCH__ == 9202))
 using namespace AscendC::Reg;
 #endif
 
@@ -39,7 +39,7 @@ struct TilePerBlockQuant {
     TilePerBlockQuant()
     {}
 
-#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+#if defined(__NPU_ARCH__) && ((__NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9201 || __NPU_ARCH__ == 9202))
     static constexpr int32_t VL_B16 = static_cast<int32_t>(BYTE_PER_VECTOR_FRACTAL / sizeof(uint16_t));
     static constexpr int32_t VL_B32 = static_cast<int32_t>(BYTE_PER_VECTOR_FRACTAL / sizeof(uint32_t));
     static constexpr float FP8_E4M3FN_MAX = 448;

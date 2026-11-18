@@ -19,7 +19,7 @@
 
 namespace Catlass::Epilogue::Tile {
 
-#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+#if defined(__NPU_ARCH__) && ((__NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9201 || __NPU_ARCH__ == 9202))
 using namespace AscendC::Reg;
 #endif
 template <
@@ -46,7 +46,7 @@ struct TilePerTokenDequant {
     TilePerTokenDequant()
     {}
 
-#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+#if defined(__NPU_ARCH__) && ((__NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9201 || __NPU_ARCH__ == 9202))
     static constexpr int16_t N_BASE_SIZE = static_cast<int16_t>(TileShape::COLUMN);
     static constexpr int16_t FLOAT_REP_SIZE = static_cast<int16_t>(AscendC::GetVecLen() / sizeof(float));
 

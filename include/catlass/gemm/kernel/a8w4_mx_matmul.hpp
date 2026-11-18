@@ -22,7 +22,7 @@
 
 namespace Catlass::Gemm::Kernel {
 
-#if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
 
 // Template for MxMatmul kernel. Compute C = (MxScaleA x A) * (MxScaleB x B) + Bias
 template <class BlockMmad_, class BlockPrologue_, class BlockEpilogue_, class BlockScheduler_>
@@ -279,7 +279,7 @@ public:
         tla::MakeLayout<ElementB, LayoutTagL1B>(tla::Int<L1_TILE_K>{}, tla::Int<L1_TILE_N>{});
 };
 
-#endif // (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#endif // (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
 
 } // namespace Catlass::Gemm::Kernel
 

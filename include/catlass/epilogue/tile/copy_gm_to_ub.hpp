@@ -163,7 +163,8 @@ struct CopyGm2UbAligned<Arch::AtlasA2, Gemm::GemmType<Element, layout::RowMajor>
 };
 
 //////////////////////////// CopyGm2Ub(Ascend950, No TLA) ////////////////////////////
-#if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510) || (defined(__NPU_ARCH__) && __NPU_ARCH__ == 3510)
+#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202)) || \
+    (defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9201 || __NPU_ARCH__ == 9202))
 // Partial specialization for CopyGm2Ub(Ascend950, No TLA), RowMajor in and RowMajor out.
 template <class Element>
 struct CopyGm2Ub<Arch::Ascend950, Gemm::GemmType<Element, layout::RowMajor>> {
@@ -232,7 +233,7 @@ struct CopyGm2Ub<Arch::Ascend960PR, Gemm::GemmType<Element, layout::VectorLayout
     : CopyGm2Ub<Arch::Ascend950, Gemm::GemmType<Element, layout::VectorLayout>> {};
 #endif
 
-#endif // CATLASS_ARCH == 3510 || __NPU_ARCH__ == 3510
+#endif // CATLASS_ARCH == 3510/9201/9202 || __NPU_ARCH__ == 3510/9201/9202
 
 template <class Element>
 struct CopyGm2UbAligned<Arch::Ascend950, Gemm::GemmType<Element, layout::RowMajor>> {
@@ -358,7 +359,8 @@ struct CopyGm2Ub<Arch::AtlasA2, Gemm::GemmType<Element, layout::NC1HWC0>> {
     };
 };
 
-#if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510) || (defined(__NPU_ARCH__) && __NPU_ARCH__ == 3510)
+#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202)) || \
+    (defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9201 || __NPU_ARCH__ == 9202))
 template <typename Element>
 struct CopyGm2Ub<Arch::Ascend950, Gemm::GemmType<Element, layout::NC1HWC0>> {
     using LayoutSrc = layout::NC1HWC0;

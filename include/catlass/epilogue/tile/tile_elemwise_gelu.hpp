@@ -14,7 +14,7 @@
 #include "catlass/catlass.hpp"
 #include "catlass/matrix_coord.hpp"
 
-#if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
 using namespace AscendC::Reg;
 #endif
 
@@ -61,7 +61,7 @@ struct TileElemWiseGelu {
     }
 };
 
-#if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
 template <
     // / Tag indicating architecture
     class ArchTag_,

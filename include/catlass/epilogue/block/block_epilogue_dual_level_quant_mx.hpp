@@ -19,7 +19,7 @@
 #include "catlass/matrix_coord.hpp"
 #include "catlass/layout/matrix.hpp"
 
-#if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
 
 namespace Catlass::Epilogue::Block {
 
@@ -638,6 +638,6 @@ private:
 
 #undef CATLASS_DUAL_LEVEL_QUANT_MX_CAST_TRAIT
 
-#endif // (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#endif // (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
 
 #endif // CATLASS_EPILOGUE_BLOCK_BLOCK_EPILOGUE_DUAL_LEVEL_QUANT_MX_HPP

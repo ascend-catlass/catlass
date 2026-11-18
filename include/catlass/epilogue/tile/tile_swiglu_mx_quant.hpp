@@ -18,7 +18,7 @@
 
 namespace Catlass::Epilogue::Tile {
 
-#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+#if defined(__NPU_ARCH__) && ((__NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9201 || __NPU_ARCH__ == 9202))
 using namespace AscendC::Reg;
 #endif
 template <
@@ -43,7 +43,7 @@ struct TileSwigluAndMxQuant {
     static constexpr uint32_t VF_BLOCK_BYTES = 256;
     static constexpr int64_t OUT_ELE_NUM_ONE_BLK = 64;
 
-#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+#if defined(__NPU_ARCH__) && ((__NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9201 || __NPU_ARCH__ == 9202))
     CATLASS_DEVICE void operator()(
         __ubuf__ int8_t* quantOut, __ubuf__ QuantScaleType* quantScaleOut, __ubuf__ GluResType* gluRes,
         __ubuf__ uint16_t* maxExp, __ubuf__ uint16_t* halfScale, __ubuf__ ActType* actData, __ubuf__ GateType* gateData,

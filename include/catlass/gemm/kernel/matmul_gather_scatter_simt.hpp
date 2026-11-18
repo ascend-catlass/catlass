@@ -11,7 +11,7 @@
 #ifndef CATLASS_GEMM_KERNEL_MATMUL_GATHER_SCATTER_SIMT_HPP
 #define CATLASS_GEMM_KERNEL_MATMUL_GATHER_SCATTER_SIMT_HPP
 
-#if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
 
 #include "catlass/arch/arch.hpp"
 #include "catlass/arch/resource.hpp"
@@ -257,6 +257,6 @@ private:
 
 } // namespace Catlass::Gemm::Kernel
 
-#endif // (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#endif // (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
 
 #endif // CATLASS_GEMM_KERNEL_MATMUL_GATHER_SCATTER_SIMT_HPP

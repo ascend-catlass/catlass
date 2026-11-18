@@ -14,7 +14,7 @@
 #include "catlass/catlass.hpp"
 #include "catlass/gemm/helper.hpp"
 #include "tla/tensor.hpp"
-#if (defined(__NPU_ARCH__) && __NPU_ARCH__ == 3510)
+#if (defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9201 || __NPU_ARCH__ == 9202))
 constexpr int8_t HIF8_CTRL_BIT = 45;
 #endif
 namespace Catlass::Gemm::Tile {
@@ -61,7 +61,7 @@ struct TileMmad {
             mmadParams.kDirectionAlign = true;
         }
 #endif
-#if (defined(__NPU_ARCH__) && __NPU_ARCH__ == 3510)
+#if (defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9201 || __NPU_ARCH__ == 9202))
         if constexpr (std::is_same_v<typename AType_::Layout, layout::VectorLayout>) {
             mmadParams.disableGemv = false;
         } else {
@@ -69,7 +69,7 @@ struct TileMmad {
         }
 #endif
 
-#if (defined(__NPU_ARCH__) && __NPU_ARCH__ == 3510)
+#if (defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9201 || __NPU_ARCH__ == 9202))
         if constexpr (std::is_same_v<ElementA, hifloat8_t> && std::is_same_v<ElementB, hifloat8_t>) {
             auto l0A8 = l0ATensor.template ReinterpretCast<fp8_e4m3fn_t>();
             auto l0B8 = l0BTensor.template ReinterpretCast<fp8_e4m3fn_t>();
@@ -108,11 +108,11 @@ struct TileMmad {
             mmadParams.kDirectionAlign = true;
         }
 #endif
-#if (defined(__NPU_ARCH__) && __NPU_ARCH__ == 3510)
+#if (defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9201 || __NPU_ARCH__ == 9202))
         mmadParams.disableGemv = true;
 #endif
 
-#if (defined(__NPU_ARCH__) && __NPU_ARCH__ == 3510)
+#if (defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9201 || __NPU_ARCH__ == 9202))
         if constexpr (std::is_same_v<ElementA, hifloat8_t> && std::is_same_v<ElementB, hifloat8_t>) {
             auto l0A8 = l0ATensor.template ReinterpretCast<fp8_e4m3fn_t>();
             auto l0B8 = l0BTensor.template ReinterpretCast<fp8_e4m3fn_t>();
@@ -166,7 +166,7 @@ struct TileMmadTla {
             mmadParams.kDirectionAlign = true;
         }
 #endif
-#if (defined(__NPU_ARCH__) && __NPU_ARCH__ == 3510)
+#if (defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9201 || __NPU_ARCH__ == 9202))
         if constexpr (std::is_same_v<LayoutTagL1A, layout::VectorLayout>) {
             mmadParams.disableGemv = false;
         } else {
@@ -174,7 +174,7 @@ struct TileMmadTla {
         }
 #endif
 
-#if (defined(__NPU_ARCH__) && __NPU_ARCH__ == 3510)
+#if (defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9201 || __NPU_ARCH__ == 9202))
         if constexpr (
             std::is_same_v<typename TensorA::Element, hifloat8_t> &&
             std::is_same_v<typename TensorB::Element, hifloat8_t>) {
@@ -213,11 +213,11 @@ struct TileMmadTla {
             mmadParams.kDirectionAlign = true;
         }
 #endif
-#if (defined(__NPU_ARCH__) && __NPU_ARCH__ == 3510)
+#if (defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9201 || __NPU_ARCH__ == 9202))
         mmadParams.disableGemv = true;
 #endif
 
-#if (defined(__NPU_ARCH__) && __NPU_ARCH__ == 3510)
+#if (defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9201 || __NPU_ARCH__ == 9202))
         if constexpr (
             std::is_same_v<typename TensorA::Element, hifloat8_t> &&
             std::is_same_v<typename TensorB::Element, hifloat8_t>) {
@@ -258,7 +258,7 @@ struct TileMmadTla {
         mmadParams.k = k;
         mmadParams.unitFlag = 0;
         mmadParams.cmatrixInitVal = true;
-#if (defined(__NPU_ARCH__) && __NPU_ARCH__ == 3510)
+#if (defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9201 || __NPU_ARCH__ == 9202))
         mmadParams.disableGemv = true;
 #endif
         for (uint32_t l0BatchIdx = 0; l0BatchIdx < l0Batch; l0BatchIdx++) {
@@ -288,7 +288,7 @@ struct TileMmadTla {
                 m = 16; // avoid gemv mode
         }
 #endif
-#if (defined(__NPU_ARCH__) && __NPU_ARCH__ == 3510)
+#if (defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9201 || __NPU_ARCH__ == 9202))
         if constexpr (std::is_same_v<LayoutTagL1A, layout::VectorLayout>) {
             mmadParams.disableGemv = false;
         } else {
@@ -301,7 +301,7 @@ struct TileMmadTla {
         mmadParams.unitFlag = unitFlag;
         mmadParams.cmatrixInitVal = initC;
 
-#if (defined(__NPU_ARCH__) && __NPU_ARCH__ == 3510)
+#if (defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9201 || __NPU_ARCH__ == 9202))
         if constexpr (
             std::is_same_v<typename TensorA::Element, hifloat8_t> &&
             std::is_same_v<typename TensorB::Element, hifloat8_t>) {

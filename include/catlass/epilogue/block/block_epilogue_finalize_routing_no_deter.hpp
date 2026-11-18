@@ -19,7 +19,7 @@
 #include "catlass/epilogue/tile/copy_gm_to_ub.hpp"
 #include "catlass/epilogue/tile/copy_ub_to_gm.hpp"
 
-#if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
 
 namespace Catlass::Epilogue::Block {
 using namespace Catlass::Epilogue::Tile;
@@ -317,6 +317,6 @@ private:
 
 } // namespace Catlass::Epilogue::Block
 
-#endif // (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#endif // (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
 
 #endif // CATLASS_EPILOGUE_BLOCK_BLOCK_EPILOGUE_FINALIZE_ROUTING_NO_DETER_HPP

@@ -22,7 +22,7 @@
 
 namespace Catlass::Gemm::Kernel {
 
-#if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
 
 template <class BlockMmad_, class BlockEpilogue_, class BlockScheduler_>
 class MxBatchedMatmulTla {
@@ -240,7 +240,7 @@ public:
     {}
 };
 
-#endif // (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#endif // (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
 
 } // namespace Catlass::Gemm::Kernel
 

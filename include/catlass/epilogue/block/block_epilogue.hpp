@@ -54,7 +54,7 @@ class BlockEpilogue {
 #include "catlass/epilogue/block/block_epilogue_fag_op.hpp"
 #include "catlass/epilogue/block/block_epilogue_fag_post.hpp"
 #include "catlass/epilogue/block/block_epilogue_fag_deterministic_add.hpp"
-#if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
 #include "catlass/epilogue/block/block_epilogue_fa_softmax_ascend950.hpp"
 #include "catlass/epilogue/block/block_epilogue_fa_rescale_o_ascend950.hpp"
 #include "catlass/epilogue/block/block_epilogue_fixpipe.hpp"

@@ -122,7 +122,8 @@ struct CopyUb2GmAligned<Arch::AtlasA2, Gemm::GemmType<Element, layout::RowMajor>
 
 //////////////////////////// CopyUb2Gm(Ascend950, No TLA) ////////////////////////////
 
-#if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510) || (defined(__NPU_ARCH__) && __NPU_ARCH__ == 3510)
+#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202)) || \
+    (defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9201 || __NPU_ARCH__ == 9202))
 // Partial specialization for CopyUb2Gm(Ascend950, no-tla), RowMajor in and RowMajor out.
 template <typename Element>
 struct CopyUb2Gm<Arch::Ascend950, Gemm::GemmType<Element, layout::RowMajor>> {
@@ -190,7 +191,7 @@ struct CopyUb2Gm<Arch::Ascend960PR, Gemm::GemmType<Element, layout::VectorLayout
     : CopyUb2Gm<Arch::Ascend950, Gemm::GemmType<Element, layout::VectorLayout>> {};
 #endif
 
-#endif // CATLASS_ARCH == 3510 || __NPU_ARCH__ == 3510
+#endif // CATLASS_ARCH == 3510/9201/9202 || __NPU_ARCH__ == 3510/9201/9202
 
 ////////////////////////////////////////////////////////////
 // NC1HWC0 specialized copies for Conv2d epilogue
@@ -262,7 +263,8 @@ struct CopyUb2Gm<Arch::AtlasA2, Gemm::GemmType<Element, layout::NC1HWC0>> {
     };
 };
 
-#if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510) || (defined(__NPU_ARCH__) && __NPU_ARCH__ == 3510)
+#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202)) || \
+    (defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9201 || __NPU_ARCH__ == 9202))
 template <typename Element>
 struct CopyUb2Gm<Arch::Ascend950, Gemm::GemmType<Element, layout::NC1HWC0>> {
     using LayoutDst = layout::NC1HWC0;

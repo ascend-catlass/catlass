@@ -164,7 +164,7 @@ struct CopyUb2L1Tla<
               tla::detail::iszN<ElementDst, LayoutDst>::value>> {};
 #endif
 
-#if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
 /// Partial specialization for Ascend950, zN in and zN out.
 template <class ElementSrc, class ElementDst, class LayoutSrc, class LayoutDst, class CoordSrc, class CoordDst>
 struct CopyUb2L1Tla<

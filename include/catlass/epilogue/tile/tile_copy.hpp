@@ -25,7 +25,7 @@
 #include "catlass/epilogue/tile/copy_ub_to_gm_tla.hpp"
 #include "tla/tensor.hpp"
 
-#if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
 #include "catlass/epilogue/tile/copy_ub_to_l1_tla.hpp"
 #endif
 
@@ -214,7 +214,7 @@ struct TileCopy<ArchTag, Gemm::GemmType<ElementC_, LayoutTagC_, AscendC::TPositi
     using CopyUbToGmD = CopyUb2Gm<ArchTag, DType>;
 };
 
-#if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
 template <
     class ArchTag,
     /// Element for C matrix operand

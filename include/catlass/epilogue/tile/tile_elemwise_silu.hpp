@@ -16,7 +16,7 @@
 #include "tla/tensor.hpp"
 #include "tla/layout.hpp"
 
-#if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
 using namespace AscendC::Reg;
 #endif
 
@@ -54,7 +54,7 @@ struct TileElemWiseSilu {
     }
 };
 
-#if (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510)
+#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
 template <
     // / Tag indicating architecture
     class ArchTag_,
