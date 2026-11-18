@@ -698,6 +698,10 @@ static StringRef copyRuntimeElemSuffix(Type elementType)
         return "fp8_e4m3fn_t";
     if (elementType.isFloat8E5M2())
         return "fp8_e5m2_t";
+    // The MX block scale is one opaque exponent byte and stages like any other
+    // 1-byte element on every route, UB -> UB included.
+    if (::llvm::isa<::tla::Float8E8M0Type>(elementType))
+        return "float8_e8m0_t";
     // fp4 is the packed two-per-byte encoding: the C++ element type is the x2
     // pair, so a route that names it selects the packed wrapper.
     if (::llvm::isa<::tla::Float4E2M1Type>(elementType))
@@ -705,23 +709,6 @@ static StringRef copyRuntimeElemSuffix(Type elementType)
     if (::llvm::isa<::tla::Float4E1M2Type>(elementType))
         return "float4_e1m2x2_t";
     return {};
-}
-
-// Vector staging shares copyRuntimeElemSuffix with the other copy routes.
-// fp8 is registered on GM<->UB and UB->L1 like int8_t; fixpipe remains
-// independently restricted by isLegalFixpipeElementType below. Packed fp4
-// and e8m0 staging use their own registered suffixes.
-static StringRef vectorPathElemSuffix(Type elementType)
-{
-    if (::llvm::isa<::tla::Float4E2M1Type>(elementType))
-        return "float4_e2m1x2_t";
-    if (::llvm::isa<::tla::Float4E1M2Type>(elementType))
-        return "float4_e1m2x2_t";
-    // An e8m0 block scale is one opaque byte and stages like any other, so it
-    // gets a vector suffix here even though it has no cast path.
-    if (::llvm::isa<::tla::Float8E8M0Type>(elementType))
-        return "float8_e8m0_t";
-    return copyRuntimeElemSuffix(elementType);
 }
 
 // Whether fixpipe can carry this L0C element type out to the given destination
@@ -779,7 +766,7 @@ std::string getCopyRouteCallee(
         srcLayout == LayoutTag::RowMajor && dstLayout == LayoutTag::zN) {
         if (srcElementType != dstElem)
             return {};
-        StringRef suffix = vectorPathElemSuffix(srcElementType);
+        StringRef suffix = copyRuntimeElemSuffix(srcElementType);
         if (suffix.empty())
             return {};
         return Twine("copy_ub_RowMajor_to_l1_zN_").concat(suffix).str();
@@ -788,7 +775,7 @@ std::string getCopyRouteCallee(
         (srcLayout == LayoutTag::zN || srcLayout == LayoutTag::zNUnAlign) && dstLayout == LayoutTag::zN) {
         if (srcElementType != dstElem)
             return {};
-        StringRef suffix = vectorPathElemSuffix(srcElementType);
+        StringRef suffix = copyRuntimeElemSuffix(srcElementType);
         if (suffix.empty())
             return {};
         return Twine("copy_ub_zN_to_l1_zN_").concat(suffix).str();
@@ -798,7 +785,7 @@ std::string getCopyRouteCallee(
         srcLayout == LayoutTag::RowMajor && dstLayout == LayoutTag::RowMajor) {
         if (srcElementType != dstElem)
             return {};
-        StringRef suffix = vectorPathElemSuffix(srcElementType);
+        StringRef suffix = copyRuntimeElemSuffix(srcElementType);
         if (suffix.empty())
             return {};
         return Twine("copy_gm_RowMajor_to_ub_RowMajor_").concat(suffix).str();
@@ -833,7 +820,7 @@ std::string getCopyRouteCallee(
         srcLayout == LayoutTag::RowMajor && dstLayout == LayoutTag::RowMajor) {
         if (srcElementType != dstElem)
             return {};
-        StringRef suffix = vectorPathElemSuffix(srcElementType);
+        StringRef suffix = copyRuntimeElemSuffix(srcElementType);
         if (suffix.empty())
             return {};
         return Twine("copy_ub_RowMajor_to_gm_RowMajor_").concat(suffix).str();
@@ -896,7 +883,7 @@ std::string getCopyRouteCallee(
             dst = stringifyLayoutTag(dstLayout);
         }
         if (!src.empty())
-            return (Twine("copy_gm_") + src + "_to_l1_" + dst + "_uint8_t").str();
+            return (Twine("copy_gm_") + src + "_to_l1_" + dst + "_float8_e8m0_t").str();
     }
 
     // MX scale UB -> L1, for a scale produced on the vector unit. No reorder
@@ -907,7 +894,7 @@ std::string getCopyRouteCallee(
         isScaleElem(dstElem) && srcLayout == dstLayout &&
         (dstLayout == LayoutTag::zZMxScale || dstLayout == LayoutTag::nNMxScale)) {
         StringRef tag = stringifyLayoutTag(dstLayout);
-        return (Twine("copy_ub_") + tag + "_to_l1_" + tag + "_uint8_t").str();
+        return (Twine("copy_ub_") + tag + "_to_l1_" + tag + "_float8_e8m0_t").str();
     }
 
     // Element types live in the condition, not a check inside the body -- a body
@@ -1169,11 +1156,11 @@ static bool isAicTemplateRuntimeCall(StringRef name)
     if (name.ends_with("_float") && (name.starts_with("mmad_fp8_e") || name.starts_with("mmad_bias_fp8_e")))
         return true;
     // MX mmad (tla.mmad_mx): one symbol per operand-format pairing, named after
-    // the C++ element type the wrapper instantiates -- mx_fp8_e4m3_t /
-    // mx_fp8_e5m2_t on the microscaled fp8 routes, float4_e2m1x2_t /
-    // float4_e1m2x2_t on fp4 (no `mx` marker there, because the fp4 type has no
-    // non-microscaling counterpart to be confused with). The bias twin inserts
-    // `bias_` after the shared `mmadmx_` prefix.
+    // the C++ element type the wrapper instantiates -- fp8_e4m3fn_t /
+    // fp8_e5m2_t on the microscaled fp8 routes, float4_e2m1x2_t /
+    // float4_e1m2x2_t on fp4. Those are the same real element types as plain
+    // mmad, so only the `mmadmx_` prefix tells the two apart. The bias twin
+    // inserts `bias_` after that prefix.
     if (name.ends_with("_float") && name.starts_with("mmadmx_"))
         return true;
     // L1 -> L0 loads that also attach the e8m0 scale block.
@@ -1186,8 +1173,10 @@ static bool isAicTemplateRuntimeCall(StringRef name)
     // the fp4 encoding rather than by a storage type suffix.
     if (name.starts_with("copy_gm_") && (name.ends_with("_float4_e2m1x2_t") || name.ends_with("_float4_e1m2x2_t")))
         return true;
-    // MX scale GM -> L1 with the reorder done by the DMA.
-    if (name.starts_with("copy_gm_") && name.find("MxScale") != StringRef::npos && name.ends_with("_uint8_t"))
+    // MX scale GM -> L1 with the reorder done by the DMA. The wrapper is
+    // instantiated for float8_e8m0_t: the ABI storage is one byte either way, but
+    // the catlass MxScale copy specialisations key on the e8m0 element type.
+    if (name.starts_with("copy_gm_") && name.find("MxScale") != StringRef::npos && name.ends_with("_float8_e8m0_t"))
         return true;
     // L1 operand and MX scale fill templates execute on the cube core.
     if (name.starts_with("fill_l1_zN_") || name.starts_with("fill_l1_nZ_") || name.starts_with("fill_l1_zZMxScale_") ||
@@ -1198,9 +1187,10 @@ static bool isAicTemplateRuntimeCall(StringRef name)
     // Flat VectorLayout GM->L1 also stages i64/u64/f64; without these suffixes
     // BiSheng treats the call as a plain extern and fails at device link.
     if (!(name.ends_with("_float") || name.ends_with("_half") || name.ends_with("_bf16") || name.ends_with("_int8_t") ||
-          name.ends_with("_uint8_t") || name.ends_with("_uint16_t") || name.ends_with("_uint32_t") ||
-          name.ends_with("_int32_t") || name.ends_with("_fp8_e4m3fn_t") || name.ends_with("_fp8_e5m2_t") ||
-          name.ends_with("_uint64_t") || name.ends_with("_int64_t") || name.ends_with("_double")))
+          name.ends_with("_int16_t") || name.ends_with("_uint8_t") || name.ends_with("_uint16_t") ||
+          name.ends_with("_uint32_t") || name.ends_with("_int32_t") || name.ends_with("_fp8_e4m3fn_t") ||
+          name.ends_with("_fp8_e5m2_t") || name.ends_with("_uint64_t") || name.ends_with("_int64_t") ||
+          name.ends_with("_double")))
         return false;
 
     return name.starts_with("copy_gm_RowMajor_to_l1_zN_") || name.starts_with("copy_gm_ColumnMajor_to_l1_nZ_") ||

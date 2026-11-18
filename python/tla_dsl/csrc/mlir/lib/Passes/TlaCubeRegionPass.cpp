@@ -44,9 +44,10 @@ static StringRef fp4CppType(Type elementType)
 }
 
 // Shared by tla.mmad and tla.mmad_mx: the two ops differ only in whether the
-// L0 operands carry an attached e8m0 scale block, which changes the callee's
-// L0 element types (mx_fp8_*) and therefore selects mad_mx over mad. The
-// operand list, shape contract and descriptor handling are identical.
+// L0 operands carry an attached e8m0 scale block, and that is a property of the
+// route, not of a type -- the callee is `mmad_*` or `mmadmx_*` accordingly, and
+// mmad.cpp maps those prefixes to GemmMmad and GemmMmadMx. The operand list,
+// shape contract and descriptor handling are identical.
 //
 // CTRL[51]/[46]/[47] for compute_order / hf32_mode are owned by
 // TlaInsertImplicitCtrlPass (coalesced against InitSoc defaults); this pattern
@@ -120,8 +121,8 @@ struct LowerTlaMmadPatternImpl : public OpRewritePattern<MmadOpTy> {
         // the same `mad` intrinsic as the float routes.
         bool supportedFp8Route = !isMx && bothFp8;
         // MX fp8 (tla.mmad_mx): the L0 tiles were loaded with their scale block
-        // attached (tla.copy with a scale operand), so the callee instantiates the
-        // mx_fp8_* L0 types and reaches mad_mx.
+        // attached (tla.copy with a scale operand). The operands stay real fp8;
+        // the `mmadmx_` callee prefix is what routes to MmadMx.
         bool isMxFp8 = isMx && bothFp8;
         // MX fp4 tiles state both width and encoding in the element type
         // (!tla.f4e2m1 / !tla.f4e1m2). They use the ordinary zN / nZ layouts like
@@ -306,36 +307,28 @@ struct LowerTlaMmadPatternImpl : public OpRewritePattern<MmadOpTy> {
         if (biasValue)
             operandTypes.push_back((*biasRuntime).getType());
         // FP8 needs a per-operand tag because the two formats can be mixed.
-        // Two spellings, because the two families name their BC symbols
-        // differently and each is forced.
         //
-        // Plain fp8 symbols are named after the C++ element type the wrapper
-        // instantiates -- the CANN builtin fp8_e4m3fn_t / fp8_e5m2_t -- which is a
-        // valid identifier and so can be pasted straight into the symbol.
+        // The tag is the C++ element type the wrapper instantiates -- the CANN
+        // builtin fp8_e4m3fn_t / fp8_e5m2_t -- which is a valid identifier and so
+        // can be pasted straight into the symbol. fp4 uses the same rule via its
+        // own element type (!tla.f4e2m1 / !tla.f4e1m2).
         //
-        // The MX operand types cannot: AscendC::mx_fp8_e4m3_t contains a `::`.
-        // mmad.cpp therefore aliases them, and the alias follows the MLIR element
-        // type lowercased (f8E4M3FN -> f8e4m3fn) with an `mx` prefix, so the MX
-        // symbol is built as "mx" + this tag. fp4 uses the same rule via its own
-        // element type (!tla.f4e2m1 / !tla.f4e1m2).
+        // The microscaled fp8 routes spell their operands the same way; only the
+        // `mmadmx_` prefix distinguishes them, and it is what makes mmad.cpp call
+        // GemmMmadMx instead of GemmMmad.
         //
         // Only the tag is built here. Both families register their wrappers as a
         // pair -- `mmad_` / `mmad_bias_` on the plain routes, `mmadmx_` /
         // `mmadmx_bias_` on the MX ones -- so the prefix and the trailing `_float`
         // follow from the route and the tag is the same string either way.
         auto fp8Tag = [](Type elem) -> StringRef { return elem.isFloat8E4M3FN() ? "fp8_e4m3fn_t" : "fp8_e5m2_t"; };
-        auto mxFp8Tag = [](Type elem) -> StringRef {
-            return elem.isFloat8E4M3FN() ? "mx_fp8_e4m3_t" : "mx_fp8_e5m2_t";
-        };
         const bool isMxRoute = isMxFp8 || isMxFp4;
         std::string fp8OperandTag;
         if (isMxFp4) {
             // Per operand, not once: the two sides carry their own encodings and
             // the bc registers every pairing.
             fp8OperandTag = (fp4CppType(lhsInfo->elementType) + "_" + fp4CppType(rhsInfo->elementType)).str();
-        } else if (isMxFp8) {
-            fp8OperandTag = (mxFp8Tag(lhsInfo->elementType) + "_" + mxFp8Tag(rhsInfo->elementType)).str();
-        } else if (supportedFp8Route) {
+        } else if (isMxFp8 || supportedFp8Route) {
             fp8OperandTag = (fp8Tag(lhsInfo->elementType) + "_" + fp8Tag(rhsInfo->elementType)).str();
         }
         std::string calleeName;
@@ -374,8 +367,8 @@ using LowerTlaMmadPattern = LowerTlaMmadPatternImpl<::tla::MmadOp>;
 using LowerTlaMmadMxPattern = LowerTlaMmadPatternImpl<::tla::MmadMxOp>;
 
 // tla.copy_mx: L1 -> L0A/L0B with the operand's e8m0 scale block attached. The
-// scale is consumed by this load, which is also what selects the mx_fp8_* L0
-// element type and therefore the later mad_mx.
+// scale is consumed by this load; the L0 tile keeps the real fp8 / fp4 element
+// type, and the later tla.mmad_mx picks MmadMx by its route.
 struct LowerTlaCopyMxPattern : public OpRewritePattern<::tla::CopyMxOp> {
     LowerTlaCopyMxPattern(
         MLIRContext* ctx, DenseMap<Value, TensorDescriptor>& tensorDescriptorByValue,
@@ -438,8 +431,8 @@ struct LowerTlaCopyMxPattern : public OpRewritePattern<::tla::CopyMxOp> {
                           (toL0A ? "_to_l0a_zN_" : "_to_l0b_nZ_") + fp4CppType(srcDesc->elementType))
                              .str();
         } else {
-            // The suffix is the *L1* element type the wrapper instantiates; the
-            // mx_fp8_* type appears only on the L0 side of that same wrapper.
+            // The suffix is the element type the wrapper instantiates, L1 and L0
+            // alike: the scale block does not change it.
             StringRef fmt = srcDesc->elementType.isFloat8E4M3FN() ? "fp8_e4m3fn_t" :
                             srcDesc->elementType.isFloat8E5M2()   ? "fp8_e5m2_t" :
                                                                     "";

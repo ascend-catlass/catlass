@@ -72,21 +72,22 @@
 
 // The frontend spells the MX load as tla.copy(scale=...), which lowers to
 // tla.copy_mx, and the matmul as tla.mmad_mx -- both are written by the user;
-// neither is inferred. Compare the FP8 prefix above, whose kernel is identical
-// apart from the loads carrying no scale and the matmul being tla.mmad, and
-// which therefore stays on mad.
+// neither is inferred. The operands are the real fp8 types on L1 and L0 alike,
+// so only the `mmadmx_` prefix separates this from the FP8 case above, whose
+// kernel is identical apart from the loads carrying no scale and the matmul
+// being tla.mmad.
 // MX-DAG: func.func private @copy_mx_l1_zN_to_l0a_zN_fp8_e4m3fn_t(
 // MX-DAG: func.func private @copy_mx_l1_nZ_to_l0b_nZ_fp8_e4m3fn_t(
-// MX-DAG: func.func private @mmadmx_mx_fp8_e4m3_t_mx_fp8_e4m3_t_float(
+// MX-DAG: func.func private @mmadmx_fp8_e4m3fn_t_fp8_e4m3fn_t_float(
 // MX: call @copy_mx_l1_zN_to_l0a_zN_fp8_e4m3fn_t(
 // MX: call @copy_mx_l1_nZ_to_l0b_nZ_fp8_e4m3fn_t(
-// MX: call @mmadmx_mx_fp8_e4m3_t_mx_fp8_e4m3_t_float(
+// MX: call @mmadmx_fp8_e4m3fn_t_fp8_e4m3fn_t_float(
 // MX-NOT: tla.copy_mx
 // MX-NOT: tla.mmad
 
 // The two fp8 formats mix, so the callee name is per-operand.
-// MXMIX-DAG: func.func private @mmadmx_mx_fp8_e5m2_t_mx_fp8_e4m3_t_float(
-// MXMIX: call @mmadmx_mx_fp8_e5m2_t_mx_fp8_e4m3_t_float(
+// MXMIX-DAG: func.func private @mmadmx_fp8_e5m2_t_fp8_e4m3fn_t_float(
+// MXMIX: call @mmadmx_fp8_e5m2_t_fp8_e4m3fn_t_float(
 // MXMIX-NOT: tla.mmad
 
 // Packed fp4: the encoding cannot be read off the element type (the tile is i8

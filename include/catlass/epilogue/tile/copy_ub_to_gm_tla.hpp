@@ -62,7 +62,7 @@ struct CopyUb2GmTla<
     Arch::Ascend950, tla::Tensor<AscendC::LocalTensor<ElementSrc>, LayoutSrc, CoordSrc, AscendC::TPosition::VECCALC>,
     tla::Tensor<AscendC::GlobalTensor<ElementDst>, LayoutDst, CoordDst, AscendC::TPosition::GM>,
     std::enable_if_t<tla::detail::isRowMajor<LayoutSrc>::value && tla::detail::isRowMajor<LayoutDst>::value>> {
-    static constexpr uint32_t ELE_NUM_PER_C0 = BYTE_PER_C0 / sizeof(ElementSrc);
+    static constexpr uint32_t ELE_NUM_PER_BLK = BytesToBits(BYTE_PER_BLK) / SizeOfBits<ElementSrc>::value;
 
     // Methods
 
@@ -79,13 +79,26 @@ struct CopyUb2GmTla<
             "The input parameters do not match. TensorSrc must be UB and RowMajor, "
             "while TensorDst must be GM and RowMajor");
 
+        const uint32_t blockLen = ElementsToBytes<ElementSrc>(tla::get<1>(dstTensor.originShape()));
+        const int64_t dstStride =
+            ElementsToBytes<ElementSrc, int64_t>(tla::get<0>(dstTensor.stride())) - static_cast<int64_t>(blockLen);
+
         AscendC::DataCopyExtParams dataCopyParams(
-            tla::get<0>(dstTensor.originShape()), tla::get<1>(dstTensor.originShape()) * sizeof(ElementSrc),
-            (tla::get<0>(srcTensor.stride()) - tla::get<1>(dstTensor.originShape())) / ELE_NUM_PER_C0,
-            (tla::get<0>(dstTensor.stride()) - tla::get<1>(dstTensor.originShape())) * sizeof(ElementSrc), 0);
+            tla::get<0>(dstTensor.originShape()), blockLen,
+            (tla::get<0>(srcTensor.stride()) - tla::get<1>(dstTensor.originShape())) / ELE_NUM_PER_BLK, dstStride, 0);
+
         auto dstOffset = dstTensor.layout()(dstTensor.coord());
         auto srcOffset = srcTensor.layout()(srcTensor.coord());
-        AscendC::DataCopyPad(dstTensor.data()[dstOffset], srcTensor.data()[srcOffset], dataCopyParams);
+        // UB -> GM has no pad-parameter overload; fp8/fp4 move as bytes through uint8_t.
+        if constexpr (AscendC::Std::is_one_of_v<
+                          ElementSrc, float8_e4m3_t, float8_e5m2_t, float8_e8m0_t, float4_e2m1x2_t, float4_e1m2x2_t>) {
+            // data()[offset] already turns the fp4 element offset into a byte offset before the cast.
+            AscendC::DataCopyPad(
+                dstTensor.data()[dstOffset].template ReinterpretCast<uint8_t>(),
+                srcTensor.data()[srcOffset].template ReinterpretCast<uint8_t>(), dataCopyParams);
+        } else {
+            AscendC::DataCopyPad(dstTensor.data()[dstOffset], srcTensor.data()[srcOffset], dataCopyParams);
+        }
     };
 };
 #if defined(CATLASS_ARCH) && (CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202)

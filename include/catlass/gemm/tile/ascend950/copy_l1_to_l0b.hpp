@@ -249,8 +249,8 @@ struct TileCopyTla<
             AscendC::Std::is_one_of_v<
                 typename TensorSrc::Element, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t> &&
                 AscendC::Std::is_one_of_v<
-                    typename TensorDst::Element, AscendC::mx_fp8_e4m3_t, AscendC::mx_fp8_e5m2_t, float4_e2m1x2_t,
-                    float4_e1m2x2_t> &&
+                    typename TensorDst::Element, float8_e4m3_t, float8_e5m2_t, AscendC::mx_fp8_e4m3_t,
+                    AscendC::mx_fp8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t> &&
                 std::is_same_v<typename TensorMxScale::Element, float8_e8m0_t> &&
                 tla::detail::iszN<typename TensorSrc::Element, typename TensorSrc::Layout>::value &&
                 tla::detail::isnZ<typename TensorDst::Element, typename TensorDst::Layout>::value &&
@@ -406,8 +406,8 @@ struct TileCopyTla<
             AscendC::Std::is_one_of_v<
                 typename TensorSrc::Element, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t> &&
                 AscendC::Std::is_one_of_v<
-                    typename TensorDst::Element, AscendC::mx_fp8_e4m3_t, AscendC::mx_fp8_e5m2_t, float4_e2m1x2_t,
-                    float4_e1m2x2_t> &&
+                    typename TensorDst::Element, float8_e4m3_t, float8_e5m2_t, AscendC::mx_fp8_e4m3_t,
+                    AscendC::mx_fp8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t> &&
                 std::is_same_v<typename TensorMxScale::Element, float8_e8m0_t> &&
                 tla::detail::isnZ<typename TensorSrc::Element, typename TensorSrc::Layout>::value &&
                 tla::detail::isnZ<typename TensorDst::Element, typename TensorDst::Layout>::value &&

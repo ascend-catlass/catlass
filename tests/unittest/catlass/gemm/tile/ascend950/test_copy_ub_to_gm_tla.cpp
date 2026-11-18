@@ -81,6 +81,34 @@ protected:
     uint32_t _dstStride = 128;
 };
 
+class TileCopyUbToGmTlaFp4TestAscend950 : public UBTileCopyTest,
+    public testing::WithParamInterface<TestVectorShapeWithStride> {
+protected:
+    void SetUp() override
+    {
+        AscendCTest::SetUp();
+    }
+
+    void setShape()
+    {
+        _setShape(GetParam().blkLen, GetParam().blkCnt);
+        _setOriginalShape(GetParam().oriBlkLen, GetParam().oriBlkCnt);
+        _srcStride = GetParam().srcStride;
+        _dstStride = GetParam().dstStride;
+    }
+
+    template <class Element>
+    void BaseCheck(const AscendCCallLog& logVecCopy)
+    {
+        ASSERT_EQ(logVecCopy.name, "DataCopyPad");
+        ASSERT_EQ(logVecCopy.args.size(), 3);
+        ASSERT_EQ(logVecCopy.GetArgsTAt(0).Type(), typeid(Element));
+    }
+
+    uint32_t _srcStride = 128;
+    uint32_t _dstStride = 128;
+};
+
 using UbToGmCoordZero = tla::Coord<tla::Int<0>, tla::Int<0>>;
 template <class Element, class LayoutSrc>
 using UbToGmTensorSrc = tla::Tensor<AscendC::LocalTensor<Element>, LayoutSrc, UbToGmCoordZero,
@@ -175,6 +203,55 @@ TEST_P(TileCopyUbToGmTlaNonContiguousTestAscend950, RowMajorToRowMajorTestNonCon
     ASSERT_EQ(dataCopyParams->dstStride, (_dstStride - _oriBlkLen) * sizeof(Element));
 }
 
+// Data-path: RowMajor (UB) → RowMajor (GM)
+// Element-type: fp4 (byte-wise transfer through uint8_t)
+// Speciality: NonContiguous (byte blockLen, dst gap in bytes, src gap in 32B datablocks)
+TEST_P(TileCopyUbToGmTlaFp4TestAscend950, RowMajorToRowMajorTestFp4NonContiguous)
+{
+    using Element = float4_e2m1x2_t;
+    using Layout = detail::TagToLayout_t<Element, layout::RowMajor>;
+    constexpr uint32_t ELE_NUM_PER_BLK_FP4 = BytesToBits(BYTE_PER_BLK) / SizeOfBits<Element>::value;
+
+    AscendC::LocalTensor<Element> ubSrc;
+    AscendC::GlobalTensor<Element> gmDst;
+
+    setShape();
+    if (_srcStride == _oriBlkLen && _dstStride == _oriBlkLen) {
+        GTEST_SKIP();
+    }
+
+    auto layoutSrc = tla::MakeLayout(
+        tla::MakeShape(static_cast<uint32_t>(_blkCnt), _blkLen),
+        tla::MakeStride(static_cast<int64_t>(_srcStride), tla::Int<1>{}),
+        tla::MakeShape(static_cast<uint32_t>(_oriBlkCnt), _oriBlkLen));
+    auto layoutDst = tla::MakeLayout(
+        tla::MakeShape(static_cast<uint32_t>(_blkCnt), _blkLen),
+        tla::MakeStride(static_cast<int64_t>(_dstStride), tla::Int<1>{}),
+        tla::MakeShape(static_cast<uint32_t>(_oriBlkCnt), _oriBlkLen));
+    UbToGmTensorSrc<Element, Layout> tensorUb(ubSrc, layoutSrc);
+    UbToGmTensorDst<Element, Layout> tensorGm(gmDst, layoutDst);
+
+    CopyUb2GmTla<Arch::Ascend950, decltype(tensorUb), decltype(tensorGm)> copyUbToGm;
+    copyUbToGm(tensorGm, tensorUb);
+
+    auto logs = AscendCCallLogger::Instance().GetCopyLogs();
+    ASSERT_EQ(logs.size(), 1);
+
+    const auto& logVecCopy = logs[0];
+    BaseCheck<uint8_t>(logVecCopy);
+    ASSERT_EQ(logVecCopy.GetArgsAt(0).GetInstAddr(), 0);
+    ASSERT_EQ(logVecCopy.GetArgsAt(1).GetInstAddr(), 0);
+
+    // blockLen and dstStride are byte counts; srcStride counts 32B datablocks.
+    const uint32_t blockLen = ElementsToBytes<Element>(_oriBlkLen);
+    const int64_t dstStride = ElementsToBytes<Element, int64_t>(_dstStride) - static_cast<int64_t>(blockLen);
+    const auto* dataCopyParams = logVecCopy.GetArgsAt(2).Value<AscendC::DataCopyExtParams>();
+    ASSERT_EQ(dataCopyParams->blockCount, _oriBlkCnt);
+    ASSERT_EQ(dataCopyParams->blockLen, blockLen);
+    ASSERT_EQ(dataCopyParams->srcStride, (_srcStride - _oriBlkLen) / ELE_NUM_PER_BLK_FP4);
+    ASSERT_EQ(dataCopyParams->dstStride, dstStride);
+}
+
 INSTANTIATE_TEST_SUITE_P(
     CopyUbToGmTlaAscend950,
     TileCopyUbToGmTlaTestAscend950,
@@ -193,6 +270,17 @@ INSTANTIATE_TEST_SUITE_P(
         TestVectorShapeWithStride{64U, 8U, 64U, 8U, 128U, 128U},
         TestVectorShapeWithStride{256U, 2U, 256U, 2U, 512U, 512U},
         TestVectorShapeWithStride{256U, 2U, 192U, 1U, 512U, 512U}
+    )
+);
+
+INSTANTIATE_TEST_SUITE_P(
+    CopyUbToGmTlaFp4Ascend950,
+    TileCopyUbToGmTlaFp4TestAscend950,
+    ::testing::Values(
+        TestVectorShapeWithStride{128U, 4U, 128U, 4U, 256U, 256U},
+        TestVectorShapeWithStride{64U, 8U, 64U, 8U, 128U, 128U},
+        TestVectorShapeWithStride{256U, 2U, 192U, 1U, 512U, 512U},
+        TestVectorShapeWithStride{128U, 4U, 127U, 4U, 128U, 128U}
     )
 );
 

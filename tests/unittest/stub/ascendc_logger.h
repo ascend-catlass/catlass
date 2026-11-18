@@ -108,6 +108,21 @@ public:
     {
         return logs_;
     }
+    /**
+     * @brief 获取数据搬运日志，排除只做类型视图转换的 ReinterpretCast
+     * @return 日志列表
+     */
+    std::vector<AscendCCallLog> GetCopyLogs() const
+    {
+        std::vector<AscendCCallLog> copyLogs;
+        copyLogs.reserve(logs_.size());
+        for (const auto& log : logs_) {
+            if (log.name != "ReinterpretCast") {
+                copyLogs.push_back(log);
+            }
+        }
+        return copyLogs;
+    }
 
 private:
     AscendCCallLogger() = default;

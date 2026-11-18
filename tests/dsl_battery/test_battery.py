@@ -1199,6 +1199,30 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
             [["end_to_end/warp_shuffle_op.py", *dev, "--case", warp_case]],
         )
 
+    # --- end_to_end: single-tile UB -> UB transpose, GM -> UB -> GM ---
+    # One tile goes GM -> UB, through the transposing UB -> UB copy into a
+    # ColumnMajor destination, then UB -> GM; the whole destination buffer is
+    # compared, sentinels included. The rejected case pins the 32-byte block
+    # multiple the frontend enforces on both tile axes.
+    for dtype in ("u32", "u16", "u8", "fp8"):
+        yield (
+            f"ub-transpose-{dtype}",
+            [["end_to_end/ub_transpose.py", "--case", dtype, *dev]],
+        )
+    yield (
+        "ub-transpose-rejected",
+        [["end_to_end/ub_transpose.py", "--case", "rejected", *dev]],
+    )
+
+    # --- end_to_end: MX element types on the vector copy routes ---
+    # Each dtype runs GM -> UB -> UB -> GM with whole-buffer comparison, so a
+    # copy staging packed fp4 as int8 shows up as a byte mismatch.
+    for dtype in ("fp8", "e8m0", "fp4"):
+        yield (
+            f"ub-mx-copy-{dtype}",
+            [["end_to_end/ub_mx_copy.py", "--case", dtype, *dev]],
+        )
+
     # --- end_to_end: one nonzero value and layout per Fill dtype ---
     for dtype, layout in L1_FILL_VARIANTS:
         yield (

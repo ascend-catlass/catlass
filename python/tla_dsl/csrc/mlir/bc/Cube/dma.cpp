@@ -54,134 +54,6 @@ CATLASS_DEVICE void copyL1ToBias(
     Catlass::Gemm::Tile::TileCopyTla<ArchTag, decltype(srcTensor), decltype(dstTensor)>{}(dstTensor, srcTensor);
 }
 
-// The pad fill value travels as an i32 bit pattern, because the op carries it as
-// an attribute and MLIR has no element-typed attribute that spans f16/bf16/f32.
-// Reinterpret, do not convert: 0 is 0 in every one of these formats, and a
-// caller asking for -inf means the bit pattern of -inf.
-template <typename T>
-CATLASS_DEVICE T bitsToPadValue(uint32_t bits)
-{
-    if constexpr (sizeof(T) == 2) {
-        uint16_t narrow = static_cast<uint16_t>(bits);
-        T value;
-        __builtin_memcpy(&value, &narrow, sizeof(T));
-        return value;
-    } else {
-        T value;
-        __builtin_memcpy(&value, &bits, sizeof(T));
-        return value;
-    }
-}
-
-// NC1HWC0 feature map, GM -> L1. Both sides carry the same tree, so this moves
-// one contiguous run per C1 slice rather than re-laying anything out: the C1
-// stride differs between the two (the source's is the whole feature map's h*w,
-// the destination's is the tile's), which is what makes a windowed load along
-// the flattened h*w axis work.
-//
-// A 2-D (hiBlock x wiBlock) window needs a second loop over hi, and the pitch to
-// go with it; that is the next step, not this one. Here the tile is a run of
-// whole feature-map rows.
-template <class ArchTag, typename T>
-CATLASS_DEVICE void copyGMToL1Nc1hwc0(
-    memref_t<__gm__ T, 2>* src, memref_t<__cbuf__ T, 1>* dst, const TensorDesc& srcDesc, const TensorDesc& dstDesc,
-    int64_t gmCachePolicy = kCachePolicyNormal)
-{
-    auto srcTensor = makeGMTensor<LayoutTag::zNUnAlign, T>(src, srcDesc, gmCachePolicy);
-    auto dstTensor = makeL1Tensor<LayoutTag::zNUnAlign, T>(dst, dstDesc);
-
-    // Leaf 0 of the zNUnAlign tree is the (unblocked) row count, leaf 3 the C1
-    // count; the C1 pitch is leaf 3's stride on each side.
-    uint32_t rows = srcDesc.shape0 * srcDesc.shape1;
-    uint32_t cin1 = srcDesc.shape3;
-    uint32_t srcC1Pitch = static_cast<uint32_t>(srcDesc.stride3);
-    uint32_t dstC1Pitch = static_cast<uint32_t>(dstDesc.stride3);
-
-    auto srcOffset = srcTensor.layout()(srcTensor.coord());
-    auto dstOffset = dstTensor.layout()(dstTensor.coord());
-
-    // DataCopy counts GM->L1 in 32-byte blocks, and one C0 is exactly one block.
-    for (uint32_t cin1Idx = 0; cin1Idx < cin1; ++cin1Idx) {
-        AscendC::DataCopy(
-            dstTensor.data()[dstOffset], srcTensor.data()[srcOffset],
-            AscendC::DataCopyParams(
-                1,                           // blockCount
-                static_cast<uint16_t>(rows), // blockLen, in C0 blocks
-                0,                           // srcStride
-                0                            // dstStride
-                ));
-        srcOffset += srcC1Pitch;
-        dstOffset += dstC1Pitch;
-    }
-}
-
-// tla.img2col: L1 NC1HWC0 feature map -> L0A, expanded by the img2col unit.
-//
-// This mirrors Catlass::Conv::Tile::CopyL1ToL0ATla, but takes the feature-map
-// extent and the convolution geometry as arguments instead of reading them off a
-// 5-D tensor: the DSL's L1 tile is the 2x2 zNUnAlign tree, which carries h*w as
-// one flattened axis and so cannot state hi and wi separately.
-//
-// The destination tile supplies both extents and both start points, so tiling
-// the implicit GEMM's M and K is a matter of pointing this at a different window
-// of the same L1 tile.
-template <class ArchTag, typename T>
-CATLASS_DEVICE void img2colL1ToL0A(
-    memref_t<__cbuf__ T, 1>* src, memref_t<__ca__ T, 1>* dst, const TensorDesc& srcDesc, const TensorDesc& dstDesc,
-    uint32_t fmapH, uint32_t fmapW, uint32_t filterH, uint32_t filterW, uint32_t strideH, uint32_t strideW,
-    uint32_t dilationH, uint32_t dilationW, uint32_t padLeft, uint32_t padRight, uint32_t padTop, uint32_t padBottom,
-    uint32_t padValueBits)
-{
-    auto srcTensor = makeL1Tensor<LayoutTag::zNUnAlign, T>(src, srcDesc);
-    auto dstTensor = makeL0ATensor<LayoutTag::zN, T>(dst, dstDesc);
-
-    // M is fractal-blocked on L0A (leaf 0 x leaf 1), K is C0-blocked (leaf 2 x leaf 3).
-    uint32_t mExtension = dstDesc.shape0 * dstDesc.shape1;
-    uint32_t kExtension = dstDesc.shape2 * dstDesc.shape3;
-    // The feature map defines the channel count independently of the K window.
-    // Deriving it from kExtension would change the feature-map interpretation
-    // whenever the destination covers only part of the implicit-GEMM K axis.
-    uint32_t channelSize = srcDesc.shape2 * srcDesc.shape3;
-
-    AscendC::LoadData3DParamsV2<T> loadDataParams;
-    // padList is left, right, top, bottom -- the order Catlass's conv block uses.
-    loadDataParams.padList[0] = static_cast<uint8_t>(padLeft);
-    loadDataParams.padList[1] = static_cast<uint8_t>(padRight);
-    loadDataParams.padList[2] = static_cast<uint8_t>(padTop);
-    loadDataParams.padList[3] = static_cast<uint8_t>(padBottom);
-    loadDataParams.l1H = static_cast<uint16_t>(fmapH);
-    loadDataParams.l1W = static_cast<uint16_t>(fmapW);
-    loadDataParams.channelSize = static_cast<uint16_t>(channelSize);
-    loadDataParams.kExtension = static_cast<uint16_t>(kExtension);
-    loadDataParams.mExtension = static_cast<uint16_t>(mExtension);
-    // The tile coordinate is the window into the img2col matrix, which is exactly
-    // what the hardware's start points mean.
-    loadDataParams.kStartPt = static_cast<uint16_t>(dstDesc.coord1);
-    loadDataParams.mStartPt = static_cast<uint16_t>(dstDesc.coord0);
-    loadDataParams.strideW = static_cast<uint8_t>(strideW);
-    loadDataParams.strideH = static_cast<uint8_t>(strideH);
-    loadDataParams.filterW = static_cast<uint8_t>(filterW);
-    loadDataParams.filterH = static_cast<uint8_t>(filterH);
-    // The 9th bit of each filter extent lives in its own flag, so a filter wider
-    // than 255 is expressible.
-    loadDataParams.filterSizeW = static_cast<bool>(filterW >> 8);
-    loadDataParams.filterSizeH = static_cast<bool>(filterH >> 8);
-    loadDataParams.dilationFilterW = static_cast<uint8_t>(dilationW);
-    loadDataParams.dilationFilterH = static_cast<uint8_t>(dilationH);
-    loadDataParams.enTranspose = false;
-    loadDataParams.enSmallK = false;
-    loadDataParams.padValue = bitsToPadValue<T>(padValueBits);
-
-    // A5 Load3Dv2 takes the destination stride in L3D_RPT; this path does not
-    // transpose, so it is the number of 16-element fractals mExtension covers.
-    uint16_t dstStride = CeilDiv<Catlass::C0_NUM_PER_FRACTAL>(mExtension);
-    AscendC::SetLoadDataRepeatWithStride({0, 1, 0, dstStride});
-
-    auto srcOffset = srcTensor.layout()(srcTensor.coord());
-    auto dstOffset = dstTensor.layout()(dstTensor.coord());
-    AscendC::LoadDataWithStride(dstTensor.data()[dstOffset], srcTensor.data()[srcOffset], loadDataParams);
-}
-
 // L0C holds fp32 MMAD accumulator; ElementDst may be f32/f16/bf16 (Ascend950 fixpipe).
 template <class ArchTag, LayoutTag DstLayout, typename ElementSrc, typename ElementDst, bool ReluEnable = false>
 CATLASS_DEVICE void copyL0CToGM(
@@ -298,117 +170,53 @@ CATLASS_DEVICE void copyL0CToUBQuantPerChannel(
 
 #if ((defined(__NPU_ARCH__) && __NPU_ARCH__ == 3510) || (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510))
 // MX L1 -> L0 loads. The scale rides along with the *load*, not the matmul:
-// the copy templates take a third (e8m0, zZ, L1) tensor, and the L0 element type
-// switches to the mx_* variant, which is what makes the later mad take the
-// mad_mx path.
-// The e8m0 scale block reaches L1 as a flat byte copy: the host emits it already
-// in device order (zZMxScale for A, nNMxScale for B), so no reordering is needed
-// on the way in. Only the L1 -> L0 hop below needs the real MX layouts.
+// the copy templates take a third (e8m0, zZ, L1) tensor.
 //
-// The copy must honour the tile coordinate and the tile's own extent. Reading
-// from the base of the buffer for originShape bytes is only correct for a
-// single tile at coordinate (0, 0); a K-tiled kernel then decodes every chunk
-// with chunk 0's exponents, which looks like a plausible result one power of
-// two out rather than like garbage.
+// The scale reaches L1 through the ordinary GM -> L1 route. Its layout tag
+// (RowMajorMxScaleA / ColMajorMxScaleA / RowMajorMxScaleB / ColMajorMxScaleB)
+// selects the matching Catlass MxScale specialisation in copy_gm_to_l1.hpp,
+// which lays the e8m0 block out as NZ (Dn2Nz for the row-major orientations,
+// Nd2Nz for the column-major ones). Tile coordinate and tile extent travel in
+// the tensor layout/coord, so a K-tiled kernel loads its own chunk of exponents
+// the same way any other tile copy does. Only the L1 -> L0 hop below needs the
+// MX-specific zZ / nN layouts.
 //
-// Tiles must span full rows of the scale buffer (shape1 == stride0), which is
-// how per-chunk zZ / nN blocks are stacked: each block is then contiguous, so
-// one flat run of bytes is exact. A partial-width tile would need a strided
-// copy, and the scale row pitch (K/32 bytes) is not generally a multiple of the
-// 32-byte DMA block, so that case cannot be served here at all. tla.copy
-// rejects it when the row pitch is statically known; under a layout-dynamic
+// One wrapper per side serves both element families. Each names its operand
+// element type directly -- fp8_e* or float4_*x2_t -- and the Catlass layout math
+// reads the matching width, so fp4 needs no byte alias. The scale is
+// float8_e8m0_t either way -- the type the MxScale copy specialisations key on.
+// Spelling it that way does not change the C ABI: a memref descriptor carries no
+// element type.
 
-template <class ArchTag, LayoutTag SrcLayout, typename TSrc, typename TL0>
-CATLASS_DEVICE void copyL1ToL0AMxFp8(
-    memref_t<__cbuf__ TSrc, 1>* src, memref_t<__ca__ TSrc, 1>* dst, memref_t<__cbuf__ uint8_t, 1>* scale,
+// L1 and L0 carry the same element type here: fp8_e* or float4_*x2_t. Nothing
+// on the L0 side is an MX-specific alias -- microscaling is not a property of
+// the copy at all. It is stated once at the MMA call site instead (GemmMmad vs
+// GemmMmadMx in mmad.cpp), because a memref descriptor carries no element type
+// that could pick the intrinsic implicitly.
+template <class ArchTag, LayoutTag SrcLayout, typename Element>
+CATLASS_DEVICE void copyL1ToL0AMx(
+    memref_t<__cbuf__ Element, 1>* src, memref_t<__ca__ Element, 1>* dst, memref_t<__cbuf__ float8_e8m0_t, 1>* scale,
     const TensorDesc& srcDesc, const TensorDesc& dstDesc, const TensorDesc& scaleDesc)
 {
-    auto srcTensor = makeL1Tensor<SrcLayout, TSrc>(src, srcDesc);
-    auto scaleTensor = makeL1MxScaleTensor<LayoutTag::zZMxScale>(scale, scaleDesc);
-    auto dstTensor = makeL0ATensorAs<LayoutTag::zN, TL0>(dst, dstDesc);
-    // The specialization is picked by the *type* arguments, the operator by the
-    // call arguments, and the two want different things of the L0 element.
-    // Catlass's transposing (nZ in) specialization enables itself only for
-    // int8_t / float8_e* / float4_*, which an mx_fp8_* L0 tile is not -- while
-    // its MX operator() asserts the opposite, that the L0 tile *is* mx_fp8_*.
-    // Selecting with a same-width stand-in typed as the L1 element satisfies the
-    // first, and passing the real tile satisfies the second. The stand-in is
-    // never read: only decltype of it is used.
-    auto dstSelector = makeL0ATensorAs<LayoutTag::zN, TSrc>(dst, dstDesc);
-    Catlass::Gemm::Tile::TileCopyTla<ArchTag, decltype(srcTensor), decltype(dstSelector)>{}(
+    auto scaleTensor = makeL1Tensor<LayoutTag::zZMxScale, float8_e8m0_t>(scale, scaleDesc);
+    auto srcTensor = makeL1Tensor<SrcLayout, Element>(src, srcDesc);
+    auto dstTensor = makeL0ATensor<LayoutTag::zN, Element>(dst, dstDesc);
+    Catlass::Gemm::Tile::TileCopyTla<ArchTag, decltype(srcTensor), decltype(dstTensor)>{}(
         dstTensor, srcTensor, scaleTensor);
 }
 
-template <class ArchTag, LayoutTag SrcLayout, typename TSrc, typename TL0>
-CATLASS_DEVICE void copyL1ToL0BMxFp8(
-    memref_t<__cbuf__ TSrc, 1>* src, memref_t<__cb__ TSrc, 1>* dst, memref_t<__cbuf__ uint8_t, 1>* scale,
+template <class ArchTag, LayoutTag SrcLayout, typename Element>
+CATLASS_DEVICE void copyL1ToL0BMx(
+    memref_t<__cbuf__ Element, 1>* src, memref_t<__cb__ Element, 1>* dst, memref_t<__cbuf__ float8_e8m0_t, 1>* scale,
     const TensorDesc& srcDesc, const TensorDesc& dstDesc, const TensorDesc& scaleDesc)
 {
-    auto srcTensor = makeL1Tensor<SrcLayout, TSrc>(src, srcDesc);
-    auto scaleTensor = makeL1MxScaleTensor<LayoutTag::nNMxScale>(scale, scaleDesc);
-    auto dstTensor = makeL0BTensorAs<LayoutTag::nZ, TL0>(dst, dstDesc);
-    // Same stand-in as on the A side: select the specialization with the L1
-    // element type, call it with the real mx_fp8_* tile.
-    auto dstSelector = makeL0BTensorAs<LayoutTag::nZ, TSrc>(dst, dstDesc);
-    Catlass::Gemm::Tile::TileCopyTla<ArchTag, decltype(srcTensor), decltype(dstSelector)>{}(
+    auto scaleTensor = makeL1Tensor<LayoutTag::nNMxScale, float8_e8m0_t>(scale, scaleDesc);
+    auto srcTensor = makeL1Tensor<SrcLayout, Element>(src, srcDesc);
+    auto dstTensor = makeL0BTensor<LayoutTag::nZ, Element>(dst, dstDesc);
+    Catlass::Gemm::Tile::TileCopyTla<ArchTag, decltype(srcTensor), decltype(dstTensor)>{}(
         dstTensor, srcTensor, scaleTensor);
 }
 #endif
-
-// Packed fp4 variants. The operand tiles are int8_t over the ABI and are
-// reinterpreted as float4_*x2_t here, which is what gives the Catlass layout
-// math its 4-bit element width and selects the fp4 copy specialisations.
-template <class ArchTag, typename TFp4, LayoutTag SrcLayout, LayoutTag DstLayout>
-CATLASS_DEVICE void copyGMToL1Fp4(
-    memref_t<__gm__ int8_t, 2>* src, memref_t<__cbuf__ int8_t, 1>* dst, const TensorDesc& srcDesc,
-    const TensorDesc& dstDesc, int64_t gmCachePolicy = kCachePolicyNormal)
-{
-    auto srcTensor = makeGMFp4Tensor<TFp4, SrcLayout>(src, srcDesc, gmCachePolicy);
-    auto dstTensor = makeL1Fp4Tensor<TFp4, DstLayout>(dst, dstDesc);
-    Catlass::Gemm::Tile::TileCopyTla<ArchTag, decltype(srcTensor), decltype(dstTensor)>{}(dstTensor, srcTensor);
-}
-
-template <class ArchTag, typename TFp4, LayoutTag SrcLayout>
-CATLASS_DEVICE void copyL1ToL0AMxFp4(
-    memref_t<__cbuf__ int8_t, 1>* src, memref_t<__ca__ int8_t, 1>* dst, memref_t<__cbuf__ uint8_t, 1>* scale,
-    const TensorDesc& srcDesc, const TensorDesc& dstDesc, const TensorDesc& scaleDesc)
-{
-    auto srcTensor = makeL1Fp4Tensor<TFp4, SrcLayout>(src, srcDesc);
-    auto scaleTensor = makeL1MxScaleTensor<LayoutTag::zZMxScale>(scale, scaleDesc);
-    auto dstTensor = makeL0ATensorAs<LayoutTag::zN, TFp4>(dst, dstDesc);
-    Catlass::Gemm::Tile::TileCopyTla<ArchTag, decltype(srcTensor), decltype(dstTensor)>{}(
-        dstTensor, srcTensor, scaleTensor);
-}
-
-template <class ArchTag, typename TFp4, LayoutTag SrcLayout>
-CATLASS_DEVICE void copyL1ToL0BMxFp4(
-    memref_t<__cbuf__ int8_t, 1>* src, memref_t<__cb__ int8_t, 1>* dst, memref_t<__cbuf__ uint8_t, 1>* scale,
-    const TensorDesc& srcDesc, const TensorDesc& dstDesc, const TensorDesc& scaleDesc)
-{
-    auto srcTensor = makeL1Fp4Tensor<TFp4, SrcLayout>(src, srcDesc);
-    auto scaleTensor = makeL1MxScaleTensor<LayoutTag::nNMxScale>(scale, scaleDesc);
-    auto dstTensor = makeL0BTensorAs<LayoutTag::nZ, TFp4>(dst, dstDesc);
-    Catlass::Gemm::Tile::TileCopyTla<ArchTag, decltype(srcTensor), decltype(dstTensor)>{}(
-        dstTensor, srcTensor, scaleTensor);
-}
-
-// MX scale GM -> L1 with the fractal reorder done by the copy.
-//
-// Catlass already implements this for all four (side, orientation) pairs -- see
-// the MxScale specializations in gemm/tile/ascend950/copy_gm_to_l1.hpp -- so this
-// only has to build tensors whose layouts its predicates recognise and let
-// TileCopyTla dispatch. Doing the DN2NZ by hand instead means reimplementing
-// details it already gets right, such as ceil-dividing the halved extent rather
-// than truncating it.
-template <class ArchTag, LayoutTag SrcLayout, LayoutTag DstLayout>
-CATLASS_DEVICE void copyGMToL1MxScale(
-    memref_t<__gm__ uint8_t, 2>* src, memref_t<__cbuf__ uint8_t, 1>* dst, const TensorDesc& srcDesc,
-    const TensorDesc& dstDesc, int64_t gmCachePolicy = kCachePolicyNormal)
-{
-    auto srcTensor = makeGMMxScaleTensor<SrcLayout>(src, srcDesc, gmCachePolicy);
-    auto dstTensor = makeL1MxScaleTensor<DstLayout>(dst, dstDesc);
-    Catlass::Gemm::Tile::TileCopyTla<ArchTag, decltype(srcTensor), decltype(dstTensor)>{}(dstTensor, srcTensor);
-}
 
 extern "C" {
 #if ((defined(__NPU_ARCH__) && __NPU_ARCH__ == 3510) || (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510))
@@ -451,22 +259,35 @@ REGISTER_GM_TO_L1(RowMajor, zN, float)
 REGISTER_GM_TO_L1(RowMajor, zN, half)
 REGISTER_GM_TO_L1(RowMajor, zN, bf16)
 REGISTER_GM_TO_L1(RowMajor, zN, int8_t)
+REGISTER_GM_TO_L1(RowMajor, zN, int16_t)
+REGISTER_GM_TO_L1(RowMajor, zN, int32_t)
+REGISTER_GM_TO_L1(RowMajor, zN, uint8_t)
 REGISTER_GM_TO_L1(RowMajor, zN, uint16_t)
 REGISTER_GM_TO_L1(RowMajor, zN, uint32_t)
 REGISTER_GM_TO_L1(RowMajor, zN, fp8_e4m3fn_t)
 REGISTER_GM_TO_L1(RowMajor, zN, fp8_e5m2_t)
+REGISTER_GM_TO_L1(RowMajor, zN, float4_e2m1x2_t)
+REGISTER_GM_TO_L1(RowMajor, zN, float4_e1m2x2_t)
 REGISTER_GM_TO_L1(ColumnMajor, nZ, float)
 REGISTER_GM_TO_L1(ColumnMajor, nZ, half)
 REGISTER_GM_TO_L1(ColumnMajor, nZ, bf16)
 REGISTER_GM_TO_L1(ColumnMajor, nZ, int8_t)
+REGISTER_GM_TO_L1(ColumnMajor, nZ, int16_t)
+REGISTER_GM_TO_L1(ColumnMajor, nZ, int32_t)
+REGISTER_GM_TO_L1(ColumnMajor, nZ, uint8_t)
 REGISTER_GM_TO_L1(ColumnMajor, nZ, uint16_t)
 REGISTER_GM_TO_L1(ColumnMajor, nZ, uint32_t)
 REGISTER_GM_TO_L1(ColumnMajor, nZ, fp8_e4m3fn_t)
 REGISTER_GM_TO_L1(ColumnMajor, nZ, fp8_e5m2_t)
+REGISTER_GM_TO_L1(ColumnMajor, nZ, float4_e2m1x2_t)
+REGISTER_GM_TO_L1(ColumnMajor, nZ, float4_e1m2x2_t)
 REGISTER_GM_TO_L1(zN, zN, float)
 REGISTER_GM_TO_L1(zN, zN, half)
 REGISTER_GM_TO_L1(zN, zN, bf16)
 REGISTER_GM_TO_L1(zN, zN, int8_t)
+REGISTER_GM_TO_L1(zN, zN, int16_t)
+REGISTER_GM_TO_L1(zN, zN, int32_t)
+REGISTER_GM_TO_L1(zN, zN, uint8_t)
 REGISTER_GM_TO_L1(zN, zN, uint16_t)
 REGISTER_GM_TO_L1(zN, zN, uint32_t)
 REGISTER_GM_TO_L1(zN, zN, fp8_e4m3fn_t)
@@ -477,6 +298,9 @@ REGISTER_GM_TO_L1(nZ, nZ, float)
 REGISTER_GM_TO_L1(nZ, nZ, half)
 REGISTER_GM_TO_L1(nZ, nZ, bf16)
 REGISTER_GM_TO_L1(nZ, nZ, int8_t)
+REGISTER_GM_TO_L1(nZ, nZ, int16_t)
+REGISTER_GM_TO_L1(nZ, nZ, int32_t)
+REGISTER_GM_TO_L1(nZ, nZ, uint8_t)
 REGISTER_GM_TO_L1(nZ, nZ, uint16_t)
 REGISTER_GM_TO_L1(nZ, nZ, uint32_t)
 REGISTER_GM_TO_L1(nZ, nZ, fp8_e4m3fn_t)
@@ -491,13 +315,17 @@ REGISTER_GM_TO_L1(nZ, nZ, float4_e1m2x2_t)
 REGISTER_GM_TO_L1(VectorLayout, VectorLayout, float)
 REGISTER_GM_TO_L1(VectorLayout, VectorLayout, half)
 REGISTER_GM_TO_L1(VectorLayout, VectorLayout, bf16)
-REGISTER_GM_TO_L1(VectorLayout, VectorLayout, int32_t)
 REGISTER_GM_TO_L1(VectorLayout, VectorLayout, int8_t)
+REGISTER_GM_TO_L1(VectorLayout, VectorLayout, int16_t)
+REGISTER_GM_TO_L1(VectorLayout, VectorLayout, int32_t)
+REGISTER_GM_TO_L1(VectorLayout, VectorLayout, int64_t)
 // The per-channel fixpipe dequant scale tile is the same flat run, one u64 word
 // (a packed fp32 scale) per output channel. i64 / double share the same
 // DataCopyPad VectorLayout path (8-byte elements, exact byte length).
+REGISTER_GM_TO_L1(VectorLayout, VectorLayout, uint8_t)
+REGISTER_GM_TO_L1(VectorLayout, VectorLayout, uint16_t)
+REGISTER_GM_TO_L1(VectorLayout, VectorLayout, uint32_t)
 REGISTER_GM_TO_L1(VectorLayout, VectorLayout, uint64_t)
-REGISTER_GM_TO_L1(VectorLayout, VectorLayout, int64_t)
 REGISTER_GM_TO_L1(VectorLayout, VectorLayout, double)
 
 REGISTER_L1_TO_L0A(zN, float)
@@ -535,126 +363,49 @@ REGISTER_L1_TO_L0B(nZ, fp8_e5m2_t)
 REGISTER_L1_TO_BIAS(float)
 REGISTER_L1_TO_BIAS(int32_t)
 
-#define REGISTER_GM_TO_L1_NC1HWC0(DType)                                                                              \
-    [aicore] __attribute__((always_inline)) void _mlir_ciface_copy_gm_zNUnAlign_to_l1_zNUnAlign_##DType(              \
-        memref_t<__gm__ DType, 2>* src, memref_t<__cbuf__ DType, 1>* dst, DESC_ABI_PARAMS(src), DESC_ABI_PARAMS(dst), \
-        int64_t gmCachePolicy)                                                                                        \
+// MX L1 -> L0. One macro per side covers fp8 and fp4: the element type names the
+// operand as both L1 and L0 hold it, and the scale is always e8m0. Both source
+// layouts are registered for both families.
+#define REGISTER_L1_TO_L0A_MX(LayoutSrc, DType)                                                                       \
+    [aicore] __attribute__((always_inline)) void _mlir_ciface_copy_mx_l1_##LayoutSrc##_to_l0a_zN_##DType(             \
+        memref_t<__cbuf__ DType, 1>* src, memref_t<__ca__ DType, 1>* dst, memref_t<__cbuf__ float8_e8m0_t, 1>* scale, \
+        DESC_ABI_PARAMS(src), DESC_ABI_PARAMS(dst), DESC_ABI_PARAMS(scale))                                           \
     {                                                                                                                 \
-        copyGMToL1Nc1hwc0<Catlass::Arch::Ascend950, DType>(                                                           \
-            src, dst, TENSOR_DESC_12(src), TENSOR_DESC_12(dst), gmCachePolicy);                                       \
+        copyL1ToL0AMx<Catlass::Arch::Ascend950, LayoutTag::LayoutSrc, DType>(                                         \
+            src, dst, scale, TENSOR_DESC_12(src), TENSOR_DESC_12(dst), TENSOR_DESC_12(scale));                        \
     }
 
-#define REGISTER_IMG2COL_L1_TO_L0A(DType)                                                                             \
-    [aicore] __attribute__((always_inline)) void _mlir_ciface_img2col_l1_zNUnAlign_to_l0a_zN_##DType(                 \
-        memref_t<__cbuf__ DType, 1>* src, memref_t<__ca__ DType, 1>* dst, DESC_ABI_PARAMS(src), DESC_ABI_PARAMS(dst), \
-        uint32_t fmapH, uint32_t fmapW, uint32_t filterH, uint32_t filterW, uint32_t strideH, uint32_t strideW,       \
-        uint32_t dilationH, uint32_t dilationW, uint32_t padLeft, uint32_t padRight, uint32_t padTop,                 \
-        uint32_t padBottom, uint32_t padValueBits)                                                                    \
+#define REGISTER_L1_TO_L0B_MX(LayoutSrc, DType)                                                                       \
+    [aicore] __attribute__((always_inline)) void _mlir_ciface_copy_mx_l1_##LayoutSrc##_to_l0b_nZ_##DType(             \
+        memref_t<__cbuf__ DType, 1>* src, memref_t<__cb__ DType, 1>* dst, memref_t<__cbuf__ float8_e8m0_t, 1>* scale, \
+        DESC_ABI_PARAMS(src), DESC_ABI_PARAMS(dst), DESC_ABI_PARAMS(scale))                                           \
     {                                                                                                                 \
-        img2colL1ToL0A<Catlass::Arch::Ascend950, DType>(                                                              \
-            src, dst, TENSOR_DESC_12(src), TENSOR_DESC_12(dst), fmapH, fmapW, filterH, filterW, strideH, strideW,     \
-            dilationH, dilationW, padLeft, padRight, padTop, padBottom, padValueBits);                                \
+        copyL1ToL0BMx<Catlass::Arch::Ascend950, LayoutTag::LayoutSrc, DType>(                                         \
+            src, dst, scale, TENSOR_DESC_12(src), TENSOR_DESC_12(dst), TENSOR_DESC_12(scale));                        \
     }
 
-REGISTER_GM_TO_L1_NC1HWC0(float)
-REGISTER_GM_TO_L1_NC1HWC0(half)
-REGISTER_GM_TO_L1_NC1HWC0(bf16)
+REGISTER_GM_TO_L1(RowMajorMxScaleA, zZMxScale, float8_e8m0_t)
+REGISTER_GM_TO_L1(ColMajorMxScaleA, zZMxScale, float8_e8m0_t)
+REGISTER_GM_TO_L1(RowMajorMxScaleB, nNMxScale, float8_e8m0_t)
+REGISTER_GM_TO_L1(ColMajorMxScaleB, nNMxScale, float8_e8m0_t)
 
-// img2col is instantiated for 2- and 4-byte elements only: that is what the A5
-// path supports, and the op's verifier refuses anything else up front.
-REGISTER_IMG2COL_L1_TO_L0A(float)
-REGISTER_IMG2COL_L1_TO_L0A(half)
-REGISTER_IMG2COL_L1_TO_L0A(bf16)
+REGISTER_L1_TO_L0A_MX(zN, fp8_e4m3fn_t)
+REGISTER_L1_TO_L0A_MX(zN, fp8_e5m2_t)
+REGISTER_L1_TO_L0A_MX(nZ, fp8_e4m3fn_t)
+REGISTER_L1_TO_L0A_MX(nZ, fp8_e5m2_t)
+REGISTER_L1_TO_L0A_MX(zN, float4_e2m1x2_t)
+REGISTER_L1_TO_L0A_MX(zN, float4_e1m2x2_t)
+REGISTER_L1_TO_L0A_MX(nZ, float4_e2m1x2_t)
+REGISTER_L1_TO_L0A_MX(nZ, float4_e1m2x2_t)
 
-#define REGISTER_GM_TO_L1_FP4(NameSrc, NameDst, TFp4)                                                       \
-    [aicore] __attribute__((always_inline)) void _mlir_ciface_copy_gm_##NameSrc##_to_l1_##NameDst##_##TFp4( \
-        memref_t<__gm__ int8_t, 2>* src, memref_t<__cbuf__ int8_t, 1>* dst, DESC_ABI_PARAMS(src),           \
-        DESC_ABI_PARAMS(dst), int64_t gmCachePolicy)                                                        \
-    {                                                                                                       \
-        copyGMToL1Fp4<Catlass::Arch::Ascend950, TFp4, LayoutTag::NameSrc, LayoutTag::NameDst>(              \
-            src, dst, TENSOR_DESC_12(src), TENSOR_DESC_12(dst), gmCachePolicy);                             \
-    }
-
-#define REGISTER_GM_TO_L1_MX_SCALE(SrcLayout, DstLayout)                                                         \
-    [aicore] __attribute__((always_inline)) void _mlir_ciface_copy_gm_##SrcLayout##_to_l1_##DstLayout##_uint8_t( \
-        memref_t<__gm__ uint8_t, 2>* src, memref_t<__cbuf__ uint8_t, 1>* dst, DESC_ABI_PARAMS(src),              \
-        DESC_ABI_PARAMS(dst), int64_t gmCachePolicy)                                                             \
-    {                                                                                                            \
-        copyGMToL1MxScale<Catlass::Arch::Ascend950, LayoutTag::SrcLayout, LayoutTag::DstLayout>(                 \
-            src, dst, TENSOR_DESC_12(src), TENSOR_DESC_12(dst), gmCachePolicy);                                  \
-    }
-
-// Both source layouts per side, as the non-MX REGISTER_L1_TO_L0A/B above take.
-#define REGISTER_L1_TO_L0A_MX_FP8(LayoutSrc, L1Type, L0Type)                                                      \
-    [aicore] __attribute__((always_inline)) void _mlir_ciface_copy_mx_l1_##LayoutSrc##_to_l0a_zN_##L1Type(        \
-        memref_t<__cbuf__ L1Type, 1>* src, memref_t<__ca__ L1Type, 1>* dst, memref_t<__cbuf__ uint8_t, 1>* scale, \
-        DESC_ABI_PARAMS(src), DESC_ABI_PARAMS(dst), DESC_ABI_PARAMS(scale))                                       \
-    {                                                                                                             \
-        copyL1ToL0AMxFp8<Catlass::Arch::Ascend950, LayoutTag::LayoutSrc, L1Type, L0Type>(                         \
-            src, dst, scale, TENSOR_DESC_12(src), TENSOR_DESC_12(dst), TENSOR_DESC_12(scale));                    \
-    }
-
-#define REGISTER_L1_TO_L0B_MX_FP8(LayoutSrc, L1Type, L0Type)                                                      \
-    [aicore] __attribute__((always_inline)) void _mlir_ciface_copy_mx_l1_##LayoutSrc##_to_l0b_nZ_##L1Type(        \
-        memref_t<__cbuf__ L1Type, 1>* src, memref_t<__cb__ L1Type, 1>* dst, memref_t<__cbuf__ uint8_t, 1>* scale, \
-        DESC_ABI_PARAMS(src), DESC_ABI_PARAMS(dst), DESC_ABI_PARAMS(scale))                                       \
-    {                                                                                                             \
-        copyL1ToL0BMxFp8<Catlass::Arch::Ascend950, LayoutTag::LayoutSrc, L1Type, L0Type>(                         \
-            src, dst, scale, TENSOR_DESC_12(src), TENSOR_DESC_12(dst), TENSOR_DESC_12(scale));                    \
-    }
-
-// Both source layouts, unlike the fp8 MX macros above. Catlass's B8/B4 transpose
-// specialization admits ElementDst in int8_t / float8_e* / float4_*x2_t: an fp4
-// L0 tile is float4_*x2_t and qualifies, while an MX fp8 L0 tile is mx_fp8_* and
-// does not, which is why only fp4 gets the transposing pairing.
-#define REGISTER_L1_TO_L0A_MX_FP4(LayoutSrc, TFp4)                                                                \
-    [aicore] __attribute__((always_inline)) void _mlir_ciface_copy_mx_l1_##LayoutSrc##_to_l0a_zN_##TFp4(          \
-        memref_t<__cbuf__ int8_t, 1>* src, memref_t<__ca__ int8_t, 1>* dst, memref_t<__cbuf__ uint8_t, 1>* scale, \
-        DESC_ABI_PARAMS(src), DESC_ABI_PARAMS(dst), DESC_ABI_PARAMS(scale))                                       \
-    {                                                                                                             \
-        copyL1ToL0AMxFp4<Catlass::Arch::Ascend950, TFp4, LayoutTag::LayoutSrc>(                                   \
-            src, dst, scale, TENSOR_DESC_12(src), TENSOR_DESC_12(dst), TENSOR_DESC_12(scale));                    \
-    }
-
-#define REGISTER_L1_TO_L0B_MX_FP4(LayoutSrc, TFp4)                                                                \
-    [aicore] __attribute__((always_inline)) void _mlir_ciface_copy_mx_l1_##LayoutSrc##_to_l0b_nZ_##TFp4(          \
-        memref_t<__cbuf__ int8_t, 1>* src, memref_t<__cb__ int8_t, 1>* dst, memref_t<__cbuf__ uint8_t, 1>* scale, \
-        DESC_ABI_PARAMS(src), DESC_ABI_PARAMS(dst), DESC_ABI_PARAMS(scale))                                       \
-    {                                                                                                             \
-        copyL1ToL0BMxFp4<Catlass::Arch::Ascend950, TFp4, LayoutTag::LayoutSrc>(                                   \
-            src, dst, scale, TENSOR_DESC_12(src), TENSOR_DESC_12(dst), TENSOR_DESC_12(scale));                    \
-    }
-
-// MxMatmul related copy
-REGISTER_GM_TO_L1_FP4(RowMajor, zN, float4_e2m1x2_t)
-REGISTER_GM_TO_L1_FP4(ColumnMajor, nZ, float4_e2m1x2_t)
-REGISTER_GM_TO_L1_FP4(RowMajor, zN, float4_e1m2x2_t)
-REGISTER_GM_TO_L1_FP4(ColumnMajor, nZ, float4_e1m2x2_t)
-
-REGISTER_GM_TO_L1_MX_SCALE(RowMajorMxScaleA, zZMxScale)
-REGISTER_GM_TO_L1_MX_SCALE(ColMajorMxScaleA, zZMxScale)
-REGISTER_GM_TO_L1_MX_SCALE(RowMajorMxScaleB, nNMxScale)
-REGISTER_GM_TO_L1_MX_SCALE(ColMajorMxScaleB, nNMxScale)
-
-REGISTER_L1_TO_L0A_MX_FP8(zN, fp8_e4m3fn_t, mx_fp8_e4m3_t)
-REGISTER_L1_TO_L0A_MX_FP8(zN, fp8_e5m2_t, mx_fp8_e5m2_t)
-REGISTER_L1_TO_L0A_MX_FP8(nZ, fp8_e4m3fn_t, mx_fp8_e4m3_t)
-REGISTER_L1_TO_L0A_MX_FP8(nZ, fp8_e5m2_t, mx_fp8_e5m2_t)
-
-REGISTER_L1_TO_L0B_MX_FP8(zN, fp8_e4m3fn_t, mx_fp8_e4m3_t)
-REGISTER_L1_TO_L0B_MX_FP8(zN, fp8_e5m2_t, mx_fp8_e5m2_t)
-REGISTER_L1_TO_L0B_MX_FP8(nZ, fp8_e4m3fn_t, mx_fp8_e4m3_t)
-REGISTER_L1_TO_L0B_MX_FP8(nZ, fp8_e5m2_t, mx_fp8_e5m2_t)
-
-REGISTER_L1_TO_L0A_MX_FP4(zN, float4_e2m1x2_t)
-REGISTER_L1_TO_L0A_MX_FP4(zN, float4_e1m2x2_t)
-REGISTER_L1_TO_L0A_MX_FP4(nZ, float4_e2m1x2_t)
-REGISTER_L1_TO_L0A_MX_FP4(nZ, float4_e1m2x2_t)
-
-REGISTER_L1_TO_L0B_MX_FP4(zN, float4_e2m1x2_t)
-REGISTER_L1_TO_L0B_MX_FP4(zN, float4_e1m2x2_t)
-REGISTER_L1_TO_L0B_MX_FP4(nZ, float4_e2m1x2_t)
-REGISTER_L1_TO_L0B_MX_FP4(nZ, float4_e1m2x2_t)
+REGISTER_L1_TO_L0B_MX(zN, fp8_e4m3fn_t)
+REGISTER_L1_TO_L0B_MX(zN, fp8_e5m2_t)
+REGISTER_L1_TO_L0B_MX(nZ, fp8_e4m3fn_t)
+REGISTER_L1_TO_L0B_MX(nZ, fp8_e5m2_t)
+REGISTER_L1_TO_L0B_MX(zN, float4_e2m1x2_t)
+REGISTER_L1_TO_L0B_MX(zN, float4_e1m2x2_t)
+REGISTER_L1_TO_L0B_MX(nZ, float4_e2m1x2_t)
+REGISTER_L1_TO_L0B_MX(nZ, float4_e1m2x2_t)
 
 #define REGISTER_L0C_TO_GM_NORELU(LayoutDst, DTypeSrc, DTypeDst)                                                    \
     [aicore] __attribute__((always_inline)) void _mlir_ciface_copy_l0c_to_gm_##LayoutDst##_##DTypeSrc##_##DTypeDst( \

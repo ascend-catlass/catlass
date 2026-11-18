@@ -811,6 +811,127 @@ def test_frontend_copy_ub_to_ub_accepts_ragged_rows_with_padded_pitch() -> None:
     assert "tla.copy" in kernel.dump_mlir(type_args=(mem,))
 
 
+def _ub_to_ub_fp4_kernel(rows, cols, src_pitch, dst_pitch):
+    """A rows x cols fp4 UB->UB copy with explicit row pitches, in elements.
+
+    fp4 has no byte width in the byte table, so these tiles spell their pitch
+    out instead of taking an allocation's.
+    """
+
+    @tla.kernel
+    def kernel(mem_in: tla.Tensor) -> None:
+        src = tla.make_tensor(
+            tla.allocate((rows, src_pitch), tla.Float4E2M1, tla.AddressSpace.ub, 256),
+            tla.make_layout(tla.make_shape(rows, cols), tla.make_stride(src_pitch, 1)),
+        )
+        dst = tla.make_tensor(
+            tla.allocate((rows, dst_pitch), tla.Float4E2M1, tla.AddressSpace.ub, 256),
+            tla.make_layout(tla.make_shape(rows, cols), tla.make_stride(dst_pitch, 1)),
+        )
+        with tla.vector():
+            tla.copy(dst, src)
+
+    return kernel
+
+
+# 64 fp4 elements are exactly one 32-byte block, so a pitch of 128 or 192
+# elements (64 or 96 bytes) is an exact block step.
+@pytest.mark.parametrize("src_pitch", [128, 192])
+def test_frontend_copy_ub_to_ub_accepts_fp4_pitches_of_whole_blocks(
+    src_pitch,
+) -> None:
+    mem = make_fake_tensor(
+        tla.Float4E2M1,
+        (2, 128),
+        (128, 1),
+        origin_shape=(2, 128),
+        layout_tag=tla.arch.RowMajor,
+    )
+    kernel = _ub_to_ub_fp4_kernel(2, 64, src_pitch, 128)
+    assert "tla.copy" in kernel.dump_mlir(type_args=(mem,))
+
+
+# 96 elements is 48 bytes, and the move's rounded 64-byte step would put row 1
+# in the wrong place -- the half-block that fp4 used to slip through.
+def test_frontend_copy_ub_to_ub_rejects_fp4_pitch_short_of_a_block() -> None:
+    mem = make_fake_tensor(
+        tla.Float4E2M1,
+        (2, 128),
+        (128, 1),
+        origin_shape=(2, 128),
+        layout_tag=tla.arch.RowMajor,
+    )
+    kernel = _ub_to_ub_fp4_kernel(2, 64, 96, 128)
+    with pytest.raises(
+        runtime_mod.TlaCoreAPIError,
+        match=r"source row pitch is 48 bytes, which is not a whole number of "
+        r"32-byte blocks",
+    ):
+        kernel.dump_mlir(type_args=(mem,))
+
+
+# The origin rule is the same in bits: 64 fp4 elements are one block, 16 are 8
+# bytes and have no block to start on.
+def test_frontend_copy_ub_to_ub_accepts_fp4_origin_on_a_block() -> None:
+    @tla.kernel
+    def kernel(mem_in: tla.Tensor) -> None:
+        src_root = tla.make_tensor_like(
+            tla.allocate((2, 256), tla.Float4E2M1, tla.AddressSpace.ub, 256),
+            mem_in,
+            tla.arch.RowMajor,
+        )
+        dst_root = tla.make_tensor_like(
+            tla.allocate((2, 256), tla.Float4E2M1, tla.AddressSpace.ub, 256),
+            mem_in,
+            tla.arch.RowMajor,
+        )
+        src = tla.tile_view(src_root, tla.make_shape(2, 64), tla.make_coord(0, 1))
+        dst = tla.tile_view(dst_root, tla.make_shape(2, 64), tla.make_coord(0, 1))
+        with tla.vector():
+            tla.copy(dst, src)
+
+    mem = make_fake_tensor(
+        tla.Float4E2M1,
+        (2, 256),
+        (256, 1),
+        origin_shape=(2, 256),
+        layout_tag=tla.arch.RowMajor,
+    )
+    assert "tla.copy" in kernel.dump_mlir(type_args=(mem,))
+
+
+def test_frontend_copy_ub_to_ub_rejects_fp4_origin_inside_a_block() -> None:
+    @tla.kernel
+    def kernel(mem_in: tla.Tensor) -> None:
+        src_root = tla.make_tensor_like(
+            tla.allocate((2, 256), tla.Float4E2M1, tla.AddressSpace.ub, 256),
+            mem_in,
+            tla.arch.RowMajor,
+        )
+        dst_root = tla.make_tensor_like(
+            tla.allocate((2, 256), tla.Float4E2M1, tla.AddressSpace.ub, 256),
+            mem_in,
+            tla.arch.RowMajor,
+        )
+        src = tla.tile_view(src_root, tla.make_shape(2, 1), tla.make_coord(0, 1))
+        dst = tla.tile_view(dst_root, tla.make_shape(2, 1), tla.make_coord(0, 1))
+        with tla.vector():
+            tla.copy(dst, src)
+
+    mem = make_fake_tensor(
+        tla.Float4E2M1,
+        (2, 256),
+        (256, 1),
+        origin_shape=(2, 256),
+        layout_tag=tla.arch.RowMajor,
+    )
+    with pytest.raises(
+        runtime_mod.TlaCoreAPIError,
+        match=r"source tile starts at bit 4 of its parent",
+    ):
+        kernel.dump_mlir(type_args=(mem,))
+
+
 # UB -> UB with a ColumnMajor destination is a transposing copy: both tiles keep
 # the logical (M, N) shape and the bytes land as (N, M). It is its own route,
 # served by the meta-op's VNCHWCONV, so it reaches a runtime call distinct from
@@ -1266,9 +1387,7 @@ def test_frontend_rejects_perchannel_quant_tensor_outside_the_l1_run(
         _perchannel_quant_kernel().dump_mlir(
             type_args=(
                 gm,
-                _quant_tensor(
-                    tla.UInt64, addrspace=addrspace, layout_tag=layout_tag
-                ),
+                _quant_tensor(tla.UInt64, addrspace=addrspace, layout_tag=layout_tag),
             )
         )
 
@@ -1541,3 +1660,71 @@ def test_prepacked_gm_nz_keeps_its_column_pitch(tmp_path) -> None:
     assert last_group_end == 672
     assert last_group_end > rows * cols
     assert row_groups * padded_cols * c0 == 768  # the padded buffer size
+
+
+def _gm_znunalign_to_l1_kernel(rows=16, cols=16):
+    """The NC1HWC0 prefetch shape: GM zN (unaligned) into an L1 zN tile.
+
+    This is the route ``conv_dma.cpp`` backs -- the feature map is a padded GM
+    buffer that a conv kernel pulls into L1 before ``img2col``. It is a stub of
+    its own, so its ABI is pinned here rather than by the generic GM->L1 test.
+    """
+
+    @tla.kernel
+    def kernel(mem_in: tla.Tensor) -> None:
+        l1_ptr = tla.allocate(rows * cols, tla.Float16, tla.AddressSpace.l1, 512)
+        with tla.cube():
+            gm = tla.make_tensor(
+                mem_in.ptr,
+                tla.make_layout(
+                    tla.make_shape((rows, 1), (cols, 1)),
+                    tla.make_stride((cols, rows * cols), (1, rows * cols)),
+                    origin_shape=tla.make_shape(rows, cols),
+                    layoutTag=tla.arch.zNUnAlign,
+                ),
+            )
+            l1 = tla.make_tensor_like(l1_ptr, gm, tla.arch.zNUnAlign)
+            tla.copy(l1, gm)
+
+    return kernel
+
+
+def test_conv_prefetch_forwards_trailing_cache_policy(tmp_path) -> None:
+    """The conv GM->L1 stub takes gmCachePolicy as its last operand.
+
+    The pass appends the policy to every GM-endpoint stub, but a BC stub that
+    forgets the parameter still links and silently shifts all 24 descriptor
+    operands by one -- the copy then reads a descriptor word as the policy. Pin
+    the arity of this route so the stub and the lowering cannot drift apart.
+    """
+    tla_compile = _require_hivm_tla_compile()
+    rows, cols = 16, 16
+    mem = make_fake_tensor(
+        tla.Float16,
+        (rows, cols),
+        (cols, 1),
+        origin_shape=(rows, cols),
+        layout_tag=tla.arch.RowMajor,
+    )
+    mlir = _gm_znunalign_to_l1_kernel(rows, cols).dump_mlir(type_args=(mem,))
+    input_path = tmp_path / "gm_znunalign_to_l1.mlir"
+    input_path.write_text(mlir)
+    result = subprocess.run(
+        [str(tla_compile), str(input_path), "-o", "-"],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    symbol = "copy_gm_zNUnAlign_to_l1_zNUnAlign_half"
+    call = re.search(rf"call @{symbol}\((.*?)\)", result.stdout)
+    assert call is not None, result.stdout
+    operands = [operand.strip() for operand in call.group(1).split(",")]
+    # 2 memref + 12 src + 12 dst descriptor words + gmCachePolicy.
+    assert len(operands) == 27
+    consts = dict(
+        re.findall(
+            r"(%[0-9A-Za-z_]+) = llvm\.mlir\.constant\((\d+) : i64\)", result.stdout
+        )
+    )
+    assert int(consts[operands[-1]]) == 1  # kCachePolicyNormal

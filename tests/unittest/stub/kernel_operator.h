@@ -19,6 +19,7 @@
 #define __ca__ // mx table
 #define __cb__
 #define __cbuf__
+#define __ubuf__
 
 struct half { uint16_t _; };
 struct bfloat16_t { uint16_t _; };
@@ -32,12 +33,14 @@ struct float8_e5m2_t { uint8_t _; };
 #include "kernel_struct_mm.h"
 #include "kernel_struct_fixpipe.h"
 #include "kernel_struct_unary.h"
+#include "kernel_struct_transpose.h"
 #include "kernel_operator_mm_intf.h"
 #include "kernel_operator_data_copy.h"
 #include "kernel_operator_data_copy_ext.h"
 #include "kernel_operator_fixpipe_intf.h"
 #include "kernel_operator_sync.h"
 #include "kernel_operator_sys_var_intf.h"
+#include "kernel_operator_vec_transpose_intf.h"
 #include "kernel_operator_vec_unary_intf.h"
 #include "kernel_operator_vec_binary_intf.h"
 #include "kernel_operator_vec_vconv_intf.h"

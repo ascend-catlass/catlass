@@ -114,6 +114,9 @@ def test_gm_zn_to_l1_zn_is_accepted() -> None:
         tla.Float16,
         tla.BFloat16,
         tla.Int8,
+        tla.Int16,
+        tla.Int32,
+        tla.UInt8,
         tla.UInt16,
         tla.UInt32,
         tla.Float8E4M3FN,
@@ -132,6 +135,9 @@ def test_gm_zn_to_l1_zn_accepts_every_registered_dtype(dtype) -> None:
         tla.Float16,
         tla.BFloat16,
         tla.Int8,
+        tla.Int16,
+        tla.Int32,
+        tla.UInt8,
         tla.UInt16,
         tla.UInt32,
         tla.Float8E4M3FN,
@@ -153,9 +159,9 @@ def test_gm_unaligned_zn_is_refused_for_every_dtype(dtype) -> None:
 
 
 def test_gm_zn_to_l1_zn_refuses_an_unregistered_dtype() -> None:
-    """i32 has no GM -> L1 zN block move registered, so the frontend says so."""
+    """i64 has no GM -> L1 zN block move registered, so the frontend says so."""
     with pytest.raises(Exception, match="unsupported copy route"):
-        gm_zn_to_l1_zn_kernel.dump_mlir(type_args=(_l1(tla.Int32), _gm(tla.Int32)))
+        gm_zn_to_l1_zn_kernel.dump_mlir(type_args=(_l1(tla.Int64), _gm(tla.Int64)))
 
 
 def test_gm_unaligned_zn_to_l1_zn_refuses_an_unregistered_dtype() -> None:

@@ -5893,6 +5893,9 @@ _SUPPORTED_CUBE_COPY_ROUTES = {
         "f16",
         "bf16",
         "i8",
+        "i16",
+        "i32",
+        "u8",
         "u16",
         "u32",
         "f8e4m3fn",
@@ -5905,6 +5908,9 @@ _SUPPORTED_CUBE_COPY_ROUTES = {
         "f16",
         "bf16",
         "i8",
+        "i16",
+        "i32",
+        "u8",
         "u16",
         "u32",
         "f8e4m3fn",
@@ -5916,10 +5922,38 @@ _SUPPORTED_CUBE_COPY_ROUTES = {
     # destination's zN, and the copy is a plain block move -- no ND -> zN
     # reorder. Only the aligned zN is a GM source here; the tight M-axis packing
     # belongs to the UB -> L1 route.
-    ("gm", "zN", "l1", "zN"): ("f32", "f16", "bf16", "i8", "u16", "u32", "f8e4m3fn", "f8e5m2", "f4e2m1", "f4e1m2"),
+    ("gm", "zN", "l1", "zN"): (
+        "f32",
+        "f16",
+        "bf16",
+        "i8",
+        "i16",
+        "i32",
+        "u8",
+        "u16",
+        "u32",
+        "f8e4m3fn",
+        "f8e5m2",
+        "f4e2m1",
+        "f4e1m2",
+    ),
     # The transposed mirror: a GM tile already packed as nZ (C0-row by 16-column
     # fractals) copied to an L1 nZ tile. nZ has no unaligned variant at all.
-    ("gm", "nZ", "l1", "nZ"): ("f32", "f16", "bf16", "i8", "u16", "u32", "f8e4m3fn", "f8e5m2", "f4e2m1", "f4e1m2"),
+    ("gm", "nZ", "l1", "nZ"): (
+        "f32",
+        "f16",
+        "bf16",
+        "i8",
+        "i16",
+        "i32",
+        "u8",
+        "u16",
+        "u32",
+        "f8e4m3fn",
+        "f8e5m2",
+        "f4e2m1",
+        "f4e1m2",
+    ),
     # NC1HWC0 feature map: the same tree on both sides, so this is a run of
     # contiguous C1 slices rather than a re-layout. It is what feeds tla.experimental.img2col.
     ("gm", "zNUnAlign", "l1", "zNUnAlign"): ("f32", "f16", "bf16"),
@@ -5932,10 +5966,14 @@ _SUPPORTED_CUBE_COPY_ROUTES = {
         "f32",
         "f16",
         "bf16",
-        "i32",
         "i8",
-        "u64",
+        "i16",
+        "i32",
         "i64",
+        "u8",
+        "u16",
+        "u32",
+        "u64",
         "f64",
     ),
     ("l1", "VectorLayout", "biasbuf", "VectorLayout"): ("f32", "i32"),
@@ -5999,15 +6037,59 @@ _SUPPORTED_VECTOR_COPY_ROUTES = {
     ),
     # UB -> UB is DataCopy (MOV.UB.TO.UB) throughout, with a ragged row rounded
     # up to whole 32-byte blocks, so every element width is carried, 1-byte
-    # included. The unsigned widths are absent because the meta-op is not
-    # registered for them; see REGISTER_UB_TO_UB in csrc/mlir/bc/Vector/dma.cpp.
-    ("ub", "RowMajor", "ub", "RowMajor"): ("f32", "f16", "bf16", "i32", "i16", "i8", "f8e4m3fn", "f8e5m2"),
+    # included. The MX types stay in their own denomination: the block scale is
+    # one byte, and packed fp4 keeps 4-bit elements because this route is not
+    # one of _FP4_BYTE_STAGED_ROUTES.
+    ("ub", "RowMajor", "ub", "RowMajor"): (
+        "f32",
+        "f16",
+        "bf16",
+        "i32",
+        "i16",
+        "i8",
+        "u32",
+        "u16",
+        "u8",
+        "f8e4m3fn",
+        "f8e5m2",
+        "f8e8m0",
+        "f4e2m1",
+        "f4e1m2",
+    ),
     # UB -> UB transposing: the destination tile is tagged ColumnMajor, so the
     # same logical (M, N) shape lands as an (N, M) array. VNCHWCONV carries every
-    # UB element width.
-    ("ub", "RowMajor", "ub", "ColumnMajor"): ("f32", "f16", "bf16", "i32", "i16", "i8", "f8e4m3fn", "f8e5m2"),
-    ("ub", "RowMajor", "l1", "zN"): ("f32", "f16", "bf16", "i8", "f8e4m3fn", "f8e5m2", "f4e2m1", "f4e1m2"),
-    ("ub", "zN", "l1", "zN"): ("f32", "f16", "bf16", "i8", "f8e4m3fn", "f8e5m2", "f4e2m1", "f4e1m2"),
+    # UB element width, unsigned ones included.
+    ("ub", "RowMajor", "ub", "ColumnMajor"): ("f32", "f16", "bf16", "i32", "i16", "i8", "u32", "u16", "u8", "f8e4m3fn", "f8e5m2"),
+    ("ub", "RowMajor", "l1", "zN"): (
+        "f32",
+        "f16",
+        "bf16",
+        "i8",
+        "i16",
+        "i32",
+        "u8",
+        "u16",
+        "u32",
+        "f8e4m3fn",
+        "f8e5m2",
+        "f4e2m1",
+        "f4e1m2",
+    ),
+    ("ub", "zN", "l1", "zN"): (
+        "f32",
+        "f16",
+        "bf16",
+        "i8",
+        "i16",
+        "i32",
+        "u8",
+        "u16",
+        "u32",
+        "f8e4m3fn",
+        "f8e5m2",
+        "f4e2m1",
+        "f4e1m2",
+    ),
     # The block scale keeps its own fractal layouts on both sides.
     ("ub", "zZMxScale", "l1", "zZMxScale"): ("f8e8m0",),
     ("ub", "nNMxScale", "l1", "nNMxScale"): ("f8e8m0",),
@@ -6396,6 +6478,11 @@ def _tensor_fill_impl(
 def _ubub_static_geometry(src_desc, dst_desc, src_dtype):
     """Static block geometry of a UB->UB copy, or ``None`` when it is not
     statically known (dynamic or non-2D shapes, or a src/dst shape mismatch).
+
+    Lengths are in bits rather than bytes: a packed fp4 element is half a byte,
+    and the block move counts whole 32-byte blocks of elements, so rounding to
+    bytes first would hide exactly the misalignment this geometry exists to
+    catch.
     """
     try:
         # The extent is the origin shape: it is the tile's valid region, while
@@ -6415,18 +6502,29 @@ def _ubub_static_geometry(src_desc, dst_desc, src_dtype):
         d_base = int(d_coord[-2]) * d_pitch + int(d_coord[-1])
     except (TypeError, ValueError, IndexError, KeyError):
         return None
-    esz = dtype_size_bytes(src_dtype)
-    row_bytes = cols * esz
+    # The move's block is ``BYTE_PER_BLK`` (32) bytes of elements. A width it
+    # cannot split into whole blocks has no copyable geometry at all, so this
+    # fails closed instead of reporting zero-byte lengths that pass every check.
+    bits = dtype_size_bits(src_dtype)
+    block_bits = 256
+    if bits <= 0 or block_bits % bits != 0:
+        _op_error(
+            "copy",
+            f"unsupported UB->UB copy: {src_dtype!r} has no element width the "
+            "MOV.UB.TO.UB block move can split into 32-byte blocks",
+        )
+    row_bits = cols * bits
     return {
         "rows": rows,
         "cols": cols,
-        "esz": esz,
-        "row_bytes": row_bytes,
-        "row_bytes_rounded": -(-row_bytes // 32) * 32,
-        "src_base_bytes": s_base * esz,
-        "dst_base_bytes": d_base * esz,
-        "src_pitch_bytes": s_pitch * esz,
-        "dst_pitch_bytes": d_pitch * esz,
+        "bits": bits,
+        "block_bits": block_bits,
+        "row_bits": row_bits,
+        "row_rounded_bits": -(-row_bits // block_bits) * block_bits,
+        "src_base_bits": s_base * bits,
+        "dst_base_bits": d_base * bits,
+        "src_pitch_bits": s_pitch * bits,
+        "dst_pitch_bits": d_pitch * bits,
     }
 
 
@@ -6448,38 +6546,57 @@ def _ubub_require_metaop_representable(geom) -> None:
 
     A single-row copy needs no pitch at all: the rounded tail lands in the
     buffer's own 32-byte alignment fill.
+
+    Widths are compared in bits so packed fp4 is held to the same rule: 96 fp4
+    elements are 48 bytes, and the move would step rows by the rounded 64.
     """
     if geom is None:
         return
-    row_bytes, row_ru = geom["row_bytes"], geom["row_bytes_rounded"]
-    for base_bytes, side in (
-        (geom["src_base_bytes"], "source"),
-        (geom["dst_base_bytes"], "destination"),
+    block_bits = geom["block_bits"]
+    row_bits, row_ru_bits = geom["row_bits"], geom["row_rounded_bits"]
+    for base_bits, side in (
+        (geom["src_base_bits"], "source"),
+        (geom["dst_base_bits"], "destination"),
     ):
-        if base_bytes % 32 != 0:
+        if base_bits % block_bits != 0:
+            # Keep whole-byte offsets spelled in bytes, half-byte ones in bits.
+            offset = (
+                f"byte {base_bits // 8}" if base_bits % 8 == 0 else f"bit {base_bits}"
+            )
             _op_error(
                 "copy",
-                f"unsupported UB->UB copy: the {side} tile starts at byte "
-                f"{base_bytes} of its parent, which is not a multiple of 32. The "
-                "MOV.UB.TO.UB block move addresses whole 32-byte blocks, so it "
-                "cannot start there. Align the tile's offset (or its width) to 32 "
-                "bytes.",
+                f"unsupported UB->UB copy: the {side} tile starts at {offset} of "
+                "its parent, which is not a multiple of 32. The MOV.UB.TO.UB "
+                "block move addresses whole 32-byte blocks, so it cannot start "
+                "there. Align the tile's offset (or its width) to 32 bytes.",
             )
     if geom["rows"] <= 1:
         return
-    for pitch_bytes, side in (
-        (geom["src_pitch_bytes"], "source"),
-        (geom["dst_pitch_bytes"], "destination"),
+    for pitch_bits, side in (
+        (geom["src_pitch_bits"], "source"),
+        (geom["dst_pitch_bits"], "destination"),
     ):
-        if pitch_bytes < row_ru or (pitch_bytes - row_ru) % 32 != 0:
+        # Same bytes-for-whole-bytes spelling as the offset above.
+        pitch = (
+            f"{pitch_bits // 8} bytes" if pitch_bits % 8 == 0 else f"{pitch_bits} bits"
+        )
+        if pitch_bits < row_ru_bits:
             _op_error(
                 "copy",
-                f"unsupported UB->UB copy: rows of {row_bytes} bytes are rounded "
-                f"up to {row_ru} for the MOV.UB.TO.UB block move, which the "
-                f"{side} row pitch of {pitch_bytes} bytes cannot carry -- the "
-                "rounded row would run into the next one, and the inter-row gap "
-                "is itself counted in whole blocks. Pad the row pitch to a "
-                f"multiple of 32 bytes that is at least {row_ru}.",
+                f"unsupported UB->UB copy: rows of {row_bits} bits are rounded "
+                f"up to {row_ru_bits} for the MOV.UB.TO.UB block move, which the "
+                f"{side} row pitch of {pitch} cannot carry -- the "
+                "rounded row would run into the next one. Pad the row pitch to a "
+                f"multiple of 32 bytes that is at least {row_ru_bits // 8} bytes.",
+            )
+        if pitch_bits % block_bits != 0:
+            _op_error(
+                "copy",
+                f"unsupported UB->UB copy: the {side} row pitch is {pitch}, "
+                "which is not a whole number of 32-byte blocks. The block "
+                "move steps rows in whole blocks, so it would put the next row "
+                "at the rounded-up pitch instead of the layout's. Pad the row "
+                "pitch to a multiple of 32 bytes.",
             )
 
 

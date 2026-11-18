@@ -834,8 +834,11 @@ struct isMxScaleForzZ<
     float8_e8m0_t, Layout, std::enable_if_t<Layout::depth == 2 && Layout::rank == 2>,
     std::enable_if_t<
         rank_v<decltype(shape<0>(Layout{}))> == 2 && rank_v<decltype(shape<1>(Layout{}))> == 2 &&
-        rank_v<decltype(stride<0>(Layout{}))> == 2 && rank_v<decltype(stride<1>(Layout{}))> == 2>> {
-    // TagToLayout zZ for e8m0 uses BYTE_PER_C0 (32) in shape, not MX MakeMxScaleLayout's 2; match by rank only.
+        rank_v<decltype(stride<0>(Layout{}))> == 2 && rank_v<decltype(stride<1>(Layout{}))> == 2 &&
+        // MX scale packs two e8m0 exponents per 32-byte DataBlock (a 16x2 fractal), whereas
+        // ordinary e8m0 zZ/zN data uses a 16x32 fractal.
+        shape<0, 0>(Layout{}) == Catlass::C0_NUM_PER_FRACTAL && shape<1, 0>(Layout{}) == 2 &&
+        stride<0, 0>(Layout{}) == 2 && stride<1, 0>(Layout{}) == 1 && stride<1, 1>(Layout{}) == Catlass::BYTE_PER_C0>> {
     static bool const value = true;
 };
 
@@ -849,7 +852,10 @@ struct isMxScaleFornN<
     float8_e8m0_t, Layout, std::enable_if_t<Layout::depth == 2 && Layout::rank == 2>,
     std::enable_if_t<
         rank_v<decltype(shape<0>(Layout{}))> == 2 && rank_v<decltype(shape<1>(Layout{}))> == 2 &&
-        rank_v<decltype(stride<0>(Layout{}))> == 2 && rank_v<decltype(stride<1>(Layout{}))> == 2>> {
+        rank_v<decltype(stride<0>(Layout{}))> == 2 && rank_v<decltype(stride<1>(Layout{}))> == 2 &&
+        // B-side counterpart of the zZ criterion: a 2x16 scale fractal per 32-byte DataBlock.
+        shape<0, 0>(Layout{}) == 2 && shape<1, 0>(Layout{}) == Catlass::C0_NUM_PER_FRACTAL &&
+        stride<0, 0>(Layout{}) == 1 && stride<0, 1>(Layout{}) == Catlass::BYTE_PER_C0 && stride<1, 0>(Layout{}) == 2>> {
     static bool const value = true;
 };
 #endif

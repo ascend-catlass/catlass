@@ -50,6 +50,11 @@ public:
         return addr_;
     }
 
+    uint64_t GetPhyAddr() const
+    {
+        return static_cast<uint64_t>(addr_);
+    }
+
     void SetAddr(uint32_t addr)
     {
         addr_ = addr;

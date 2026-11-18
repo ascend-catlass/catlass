@@ -107,6 +107,9 @@ def test_gm_nz_to_l1_nz_is_accepted() -> None:
         tla.Float16,
         tla.BFloat16,
         tla.Int8,
+        tla.Int16,
+        tla.Int32,
+        tla.UInt8,
         tla.UInt16,
         tla.UInt32,
         tla.Float8E4M3FN,
@@ -119,9 +122,9 @@ def test_gm_nz_to_l1_nz_accepts_every_registered_dtype(dtype) -> None:
 
 
 def test_gm_nz_to_l1_nz_refuses_an_unregistered_dtype() -> None:
-    """i32 has no GM -> L1 nZ block move registered, so the frontend says so."""
+    """i64 has no GM -> L1 nZ block move registered, so the frontend says so."""
     with pytest.raises(Exception, match="unsupported copy route"):
-        gm_nz_to_l1_nz_kernel.dump_mlir(type_args=(_l1(tla.Int32), _gm(tla.Int32)))
+        gm_nz_to_l1_nz_kernel.dump_mlir(type_args=(_l1(tla.Int64), _gm(tla.Int64)))
 
 
 def test_gm_nz_to_l1_zn_is_refused() -> None:

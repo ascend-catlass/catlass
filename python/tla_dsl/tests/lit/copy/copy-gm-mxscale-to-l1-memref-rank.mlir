@@ -3,7 +3,7 @@
 // GM MxScale -> L1 MxScale: the scale block reaches L1 with its fractal reorder
 // done by the DMA, and the GM side is a ptr-backed fractal tile (the tag is
 // NZFamily, so it has no 2-D physical shape). Its ciface stub takes a rank-2
-// `memref_t<__gm__ uint8_t, 2>*`, so the materialized view must be rank 2 --
+// `memref_t<__gm__ float8_e8m0_t, 2>*`, so the materialized view must be rank 2 --
 // a rank-1 view would describe a different memref descriptor at the C ABI.
 
 module attributes {tla.module_exec_units = "cube"} {
@@ -45,9 +45,9 @@ module attributes {tla.module_exec_units = "cube"} {
   }
 }
 
-// CHECK: func.func private @copy_gm_RowMajorMxScaleA_to_l1_zZMxScale_uint8_t
+// CHECK: func.func private @copy_gm_RowMajorMxScaleA_to_l1_zZMxScale_float8_e8m0_t
 // CHECK-SAME: hivm.func_core_type = #hivm.func_core_type<AIC>
 // CHECK-LABEL: func.func @copy_gm_mxscale_a_to_l1
 // CHECK: hivm.hir.pointer_cast{{.*}} : memref<?x?xi8, #hivm.address_space<gm>>
-// CHECK: call @copy_gm_RowMajorMxScaleA_to_l1_zZMxScale_uint8_t
+// CHECK: call @copy_gm_RowMajorMxScaleA_to_l1_zZMxScale_float8_e8m0_t
 // CHECK-NOT: "tla.copy"
