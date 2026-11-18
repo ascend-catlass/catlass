@@ -37,7 +37,7 @@ def ascend950_basic_syrk(
     including inside diagonal tiles. Output is bit-exactly symmetric for both
     shared and distinct buffers. Both inputs may be
     row-major tensors or transposed views of row-major ``(K, M)`` / ``(B, K, M)``
-    tensors, and must share layout, shape and dtype. ``M`` must be at least 32.
+    tensors, and must share layout, shape and dtype. ``M`` and ``K`` must be positive.
 
     Args:
         matX: Input ``X`` with shape ``(M, K)`` or ``(B, M, K)`` on NPU.

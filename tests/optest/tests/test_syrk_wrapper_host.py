@@ -53,3 +53,11 @@ def test_syrk_polynomial_wrapper_dispatch(wrapper, monkeypatch, dtype):
     assert wrapper.ascend950_syrk_polynomial(x, x, residual, 1.5, -0.25, 2.0, dtype, 64, 2) is marker
     expected_dtype = torch.bfloat16 if dtype == "bfloat16" else torch.float16
     assert calls == [(x, x, residual, expected_dtype, 1.5, -0.25, 2.0, 64, 2)]
+
+
+def test_syrk_keyword_output_dtype(wrapper, monkeypatch):
+    monkeypatch.setattr(torch.ops.catlass, "ascend950_basic_syrk", lambda *args: args, raising=False)
+    x = torch.empty((32, 192), dtype=torch.bfloat16)
+    args = wrapper.ascend950_basic_syrk(x, outDType="float16")
+    assert args[0] is x and args[1] is x
+    assert args[2:] == (torch.float16, 0, 0)

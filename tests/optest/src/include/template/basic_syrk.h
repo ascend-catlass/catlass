@@ -165,8 +165,8 @@ struct BasicSyrkLike {
         TORCH_CHECK(
             outDType == at::kBFloat16 || outDType == at::kHalf || outDType == at::kFloat,
             "ascend950_basic_syrk currently supports bfloat16 / float16 / float32 output");
-        // The L0C-to-GM path needs at least two 16-row blocks.
-        TORCH_CHECK(matX.size(-2) >= 32, "ascend950_basic_syrk requires M >= 32, got ", matX.size(-2));
+        TORCH_CHECK(matX.size(-2) > 0, "ascend950_basic_syrk requires M > 0, got ", matX.size(-2));
+        TORCH_CHECK(matX.size(-1) > 0, "ascend950_basic_syrk requires K > 0, got ", matX.size(-1));
 
         CatlassKernel::TParams tParams;
         CatlassKernel::MatmulParams params;

@@ -22,18 +22,31 @@ def _random_npu(shape, dtype, seed):
 
 @only_on_3510
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16], ids=["bf16", "fp16"])
-@pytest.mark.parametrize("m,k", [(256, 256), (300, 200)])
+@pytest.mark.parametrize(
+    "m,k", [(1, 7), (4, 192), (31, 193), (32, 192), (256, 256), (300, 200)]
+)
 def test_ascend950_basic_syrk(m, k, dtype):
     """Compare CATLASS Ascend950 Basic SYRK against torch.matmul(X, X.T)."""
     x = torch.randn(m, k, dtype=dtype, device="npu")
 
-    result = torch_catlass.ascend950_basic_syrk(x)
+    result = torch_catlass.ascend950_basic_syrk(x, outDType=dtype)
     expected = torch.matmul(x.float(), x.float().T).to(dtype)
 
     assert result.shape == (m, m)
     assert result.dtype == dtype
     assert result.device.type == "npu"
     assert torch.allclose(result.float(), expected.float(), rtol=1e-2, atol=1e-2)
+
+
+@only_on_3510
+@pytest.mark.parametrize(
+    "shape,transposed", [((0, 192), False), ((0, 4), True)], ids=["zero-m", "zero-k"]
+)
+def test_ascend950_basic_syrk_rejects_empty_dimensions(shape, transposed):
+    x = torch.empty(shape, dtype=torch.bfloat16, device="npu")
+    x = x.T if transposed else x
+    with pytest.raises(RuntimeError, match=r"requires [MK] > 0, got 0"):
+        torch_catlass.ascend950_basic_syrk(x, outDType="float16")
 
 
 @only_on_3510
@@ -138,6 +151,7 @@ def test_ascend950_basic_syrk_fp32_preserves_small_products(m, k, tile, splitk):
 @pytest.mark.parametrize(
     "batch,m,k,tile,splitk,transposed",
     [
+        (None, 4, 192, 64, 1, False),  # small-M distinct operands
         (None, 64, 129, 64, 1, False),
         (None, 300, 513, 128, 1, True),  # partial diagonal tile, column-major
         (2, 544, 513, 256, 1, False),  # batched diagonal tails
