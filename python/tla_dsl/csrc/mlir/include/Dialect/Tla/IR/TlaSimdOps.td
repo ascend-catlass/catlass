@@ -637,7 +637,17 @@ def Tla_LoadOp : Tla_Op<"load", []> {
       Dual-destination ``dintlv_b32`` produces a second result (even/odd b32
       elements), requiring aligned access. The b16 variant, ``dintlv_b16``,
       reads 512 bytes into two 128-lane b16 registers through native ``vldsx2``
-      intrinsics and also requires aligned access.
+      intrinsics and also requires aligned access. ``dintlv_b8`` reads
+      512 bytes into two 256-lane b8 registers and requires aligned access.
+      i8/u8 use native ``vldsx2`` intrinsics; f8E4M3FN/f8E5M2/HiFloat8/E8M0
+      and packed Float4E2M1x2/Float4E1M2x2 retain typed Ascend C
+      ``LoadAlign`` helpers. HiFloat8, E8M0 and FP4x2 have i8 IR carriers,
+      distinct from the native f8 vectors used by standard FP8. FP4x2
+      deinterleaves byte-sized pairs without changing either nibble;
+      each result contains 256 packed elements (512 FP4 values).
+      E8M0 preserves raw bytes, including 0xFF; only normal aligned stores
+      can consume its results. Arithmetic and register casts are unsupported.
+      Logical FP4 and Bool are not supported.
       ``brc_b8`` / ``ds_b8`` / ``ds_b16`` / ``unpack_b8`` /
       ``unpack_b32`` produce one full register and lower through the
       matching ``ave.hir.vload`` pattern.

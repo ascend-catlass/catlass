@@ -270,7 +270,7 @@ tla.Tensor.load(params: LoadParams | None = None) -> MaskSSA | VectorSSA | tuple
 
 - `params`（`LoadParams | None`）：载入模式。可选，默认 `None`。
   - `None` / `NormalLoadParams` / `UnalignLoadParams` /
-    `BlockLoadParams` → `VectorSSA`（`DIST_DINTLV_B16` / `DIST_DINTLV_B32` 时为两个向量的二元组）。
+    `BlockLoadParams` → `VectorSSA`（`DIST_DINTLV_B8` / `DIST_DINTLV_B16` / `DIST_DINTLV_B32` 时为两个向量的二元组）。
   - `MaskLoadParams` → `MaskSSA`。
   - `NormalLoadParams`：
     - `load_dist`（`str`）：`tla.params.LoadDist` token。默认 `DIST_NORM`。
@@ -280,6 +280,7 @@ tla.Tensor.load(params: LoadParams | None = None) -> MaskSSA | VectorSSA | tuple
       | `DIST_NORM` | 默认连续载入 |
       | `DIST_BRC_B8` | 单个 b8 元素广播到全部 256 个 lane |
       | `DIST_BRC_B32` | 单个 b32 元素广播到全部 lane |
+      | `DIST_DINTLV_B8` | 读取 512 字节，偶数和奇数下标的 b8 元素分别填充两个 256-lane 向量 |
       | `DIST_DINTLV_B16` | 读取 512 字节；返回两个 128-lane b16 寄存器，依次保存偶数、奇数位置的元素 |
       | `DIST_DINTLV_B32` | f32 解交织；双返回值 |
       | `DIST_US_B8` / `DIST_US_B16` | 2 倍上采样 |
@@ -326,6 +327,16 @@ tla.Tensor.load(params: LoadParams | None = None) -> MaskSSA | VectorSSA | tuple
   （f16/bf16/i16/u16）；`DIST_E2B_B32` 要求 4 字节（f32/i32/u32）；
   `DIST_DINTLV_B16` 要求 2 字节（f16/bf16/i16/u16）；`DIST_DINTLV_B32`
   要求 f32；`DIST_BLK` 适用于任意元素宽度。
+- `DIST_DINTLV_B8` 支持 i8/u8/f8E4M3FN/f8E5M2/HiFloat8/E8M0 和打包类型
+  Float4E2M1x2/Float4E1M2x2。每个寄存器容纳
+  256 个单字节元素，一次载入读取 `2 * 256 = 512` 字节，返回两个保持源元素类型的
+  完整向量，依次保存偶数、奇数位置的元素。例如输入 `[a0, a1, a2, a3, ...]`
+  对应输出 `[a0, a2, ...]` 和 `[a1, a3, ...]`。实际读取地址须按 32 字节
+  对齐，全部 512 字节均须有效，读取范围不取决于 tile shape。对于 FP4x2，
+  每个元素是包含两个 FP4 值的一个字节。载入按这些打包字节解交织，保持字节内两个
+  半字节的顺序；每个结果包含 256 个打包元素，即 512 个 FP4 值。E8M0 按原始字节搬运，包括 0xFF NaN 编码；
+  结果可通过普通对齐 store 写回，不支持算术和寄存器类型转换。该模式不支持
+  逻辑 FP4 和 Bool。
 - `DIST_DINTLV_B16` 的实际读取地址须按 32 字节对齐。
 - `DIST_UNPACK4_B8` 要求 1 字节元素，实际读取地址须按 32 字节对齐。
 - `DIST_BRC_B8` / `DIST_DS_B8` / `DIST_UNPACK_B8` 支持

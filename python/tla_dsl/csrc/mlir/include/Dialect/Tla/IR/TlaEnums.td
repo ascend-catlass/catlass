@@ -156,6 +156,7 @@ def Tla_LoadDist_DsB8 : I32EnumAttrCase<"ds_b8", 15>;
 def Tla_LoadDist_DsB16 : I32EnumAttrCase<"ds_b16", 16>;
 def Tla_LoadDist_UnpackB32 : I32EnumAttrCase<"unpack_b32", 17>;
 def Tla_LoadDist_UnpackB8 : I32EnumAttrCase<"unpack_b8", 18>;
+def Tla_LoadDist_DintlvB8 : I32EnumAttrCase<"dintlv_b8", 19>;
 def Tla_LoadDistEnum : Tla_I32Enum<"LoadDist", "Load distribution for tla.load.", [
   Tla_LoadDist_Norm,
   Tla_LoadDist_BrcB32,
@@ -175,13 +176,17 @@ def Tla_LoadDistEnum : Tla_I32Enum<"LoadDist", "Load distribution for tla.load."
   Tla_LoadDist_DsB8,
   Tla_LoadDist_DsB16,
   Tla_LoadDist_UnpackB32,
-  Tla_LoadDist_UnpackB8
+  Tla_LoadDist_UnpackB8,
+  Tla_LoadDist_DintlvB8
 ]>;
 def Tla_LoadDistAttr : Tla_EnumAttr<"LoadDist", "load_dist"> {
   let parameters = (ins EnumParameter<Tla_LoadDistEnum>:$load_dist);
   let assemblyFormat = "`<` params `>`";
   let description = [{
     Broadcast/load distribution pattern for tla.load.
+    ``dintlv_b8`` reads 512 b8 elements from a 32-byte-aligned UB
+    address and separates even/odd elements into two full 256-lane
+    registers of the source type; requires two matching results.
     ``dintlv_b16`` / ``dintlv_b32`` are dual-destination de-interleave
     loads (even/odd elements into two vector registers); require a second
     result. ``dintlv_b16`` reads 256 b16 elements (512 bytes) from a

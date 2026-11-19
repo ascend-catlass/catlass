@@ -94,8 +94,8 @@ def Tla_IntegerOrIndexType : AnyTypeOf<[AnyInteger, Index],
 // so a shared integer carrier cannot tell them apart and the encoding has to be
 // smuggled alongside on an attribute that nothing verifies against the type.
 //
-// Logical FP4 and E8M0 describe Cube storage. HiF8 also supports explicit
-// SIMD register conversion and transport; arithmetic requires conversion.
+// Logical FP4 describes Cube storage. E8M0 also supports byte-preserving
+// SIMD transport; HiF8 supports register conversion and transport.
 // At the memref boundary these are buffered as i8 -- see storageTypeAndCount.
 //
 // With LLVM 20 the logical FP4 and E8M0 types can use the corresponding

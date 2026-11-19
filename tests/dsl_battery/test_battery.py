@@ -482,6 +482,16 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         [["dsl_tutorials/extern_op/extern_simd_vf_add.py", *dev]],
     )
 
+    # --- DINTLV_B8: integer HIVM loads and typed low-precision SDK helpers ---
+    for dtype in (
+        "Int8", "UInt8", "Float8E4M3FN", "Float8E5M2", "HiFloat8", "Float8E8M0",
+        "Float4E2M1x2", "Float4E1M2x2",
+    ):
+        yield (
+            f"load-dintlv-b8-{dtype}",
+            [["end_to_end/load_dintlv_b8.py", "--dtype", dtype, *dev]],
+        )
+
     # --- L2 cache hint: GM→UB copy with cache_policy=DISABLE ---
     # Script under python/tla_dsl/tests/end_to_end/. Kernel is not
     # block-partitioned, so launch a single vector core.

@@ -1629,6 +1629,22 @@ mlir::LogicalResult LoadOp::verify()
             return emitOpError("repeat_stride must fit the 16-bit vsldb immediate field [0, 65535]");
     }
 
+    if (getLoadDist() && getLoadDist()->getLoadDist() == ::LoadDist::dintlv_b8) {
+        if (getUnalignedUbAccess().value_or(false))
+            return emitOpError("load_dist requires aligned UB access");
+        if (!getResult2())
+            return emitOpError("load_dist dintlv_b8 requires a second !tla.vector result");
+        if (getResult2().getType() != getResult().getType())
+            return emitOpError("load_dist dintlv_b8 requires matching vector result types");
+        auto elementType = sourceType.getPtr().getPointee();
+        if (getByteSizeOfFixedWidthScalarType(elementType) != 1)
+            return emitOpError("dintlv_b8 requires a 1-byte source element type");
+        auto first = mlir::cast<VectorSSAType>(getResult().getType());
+        if (first.getElementType() != elementType || first.getValidLanes() != 256)
+            return emitOpError("dintlv_b8 requires two identical full 256-lane vectors matching the source type");
+        return mlir::success();
+    }
+
     bool isDintlv = false;
     bool isDintlvB16 = false;
     if (auto loadDistAttr = getLoadDist()) {

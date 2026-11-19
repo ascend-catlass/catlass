@@ -297,7 +297,7 @@ Parameters:
 - `params` (`LoadParams | None`): Load mode. Optional, default `None`.
   - `None` / `NormalLoadParams` / `UnalignLoadParams` /
     `BlockLoadParams` → `VectorSSA` (or a pair for
-    `DIST_DINTLV_B16` / `DIST_DINTLV_B32`).
+    `DIST_DINTLV_B8` / `DIST_DINTLV_B16` / `DIST_DINTLV_B32`).
   - `MaskLoadParams` → `MaskSSA`.
   - `NormalLoadParams`:
     - `load_dist` (`str`): `tla.params.LoadDist` token. Default
@@ -308,6 +308,7 @@ Parameters:
       | `DIST_NORM` | Default contiguous load |
       | `DIST_BRC_B8` | Broadcast one b8 element to all 256 lanes |
       | `DIST_BRC_B32` | Broadcast one b32 element to all lanes |
+      | `DIST_DINTLV_B8` | Load 512 bytes; even/odd b8 elements fill two 256-lane vectors |
       | `DIST_DINTLV_B16` | Load 512 bytes; return two 128-lane b16 registers, even positions first and odd positions second |
       | `DIST_DINTLV_B32` | f32 deinterleave; dual results |
       | `DIST_US_B8` / `DIST_US_B16` | 2x up-sample |
@@ -360,6 +361,20 @@ Constraints:
   needs 4-byte (f32/i32/u32); `DIST_DINTLV_B16` needs 2-byte
   (f16/bf16/i16/u16); `DIST_DINTLV_B32` needs f32;
   `DIST_BLK` works for any element size.
+- `DIST_DINTLV_B8` supports i8/u8/f8E4M3FN/f8E5M2/HiFloat8/E8M0 and packed
+  Float4E2M1x2/Float4E1M2x2. Each register
+  holds 256 one-byte elements; one load reads `2 * 256 = 512` bytes
+  and returns two full vectors of the source type, even positions
+  first and odd positions second. For input `[a0, a1, a2, a3, ...]`,
+  the results are `[a0, a2, ...]` and `[a1, a3, ...]`. The source
+  address must be 32-byte aligned and all 512 bytes must be valid,
+  independently of the tile shape. For FP4x2, each element is one byte
+  holding two FP4 values. The load deinterleaves these packed bytes
+  without changing their two nibbles; each result holds 256 packed
+  elements (512 FP4 values). E8M0 is transported as raw bytes, including
+  the 0xFF NaN encoding, and can be written back with a normal aligned
+  store; arithmetic and register casts are unsupported. Logical FP4
+  and Bool are not supported by this distribution.
 - `DIST_DINTLV_B16` requires a 32-byte-aligned source address.
 - `DIST_UNPACK4_B8` requires a 1-byte element type and a
   32-byte-aligned source address.

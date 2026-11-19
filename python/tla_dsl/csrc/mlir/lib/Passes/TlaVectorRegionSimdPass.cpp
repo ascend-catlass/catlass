@@ -5,6 +5,7 @@
 #include "Passes/TlaVectorRegionCommon.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/HIVMAVE/IR/HIVMAVE.h"
+#include "bishengir/Dialect/HIVMRegbaseIntrins/IR/HIVMRegbaseIntrins.h"
 #include "bishengir/Dialect/Utils/Util.h"
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/ADT/TypeSwitch.h"
@@ -246,6 +247,8 @@ static hivmave::LoadDist mapTlaLoadDistToAve(::LoadDist dist)
             return hivmave::LoadDist::UNPK_B8;
         case ::LoadDist::unpack_b32:
             return hivmave::LoadDist::UNPK_B32;
+        case ::LoadDist::dintlv_b8:
+            return hivmave::LoadDist::DINTLV_B8;
         case ::LoadDist::dintlv_b32:
             return hivmave::LoadDist::DINTLV_B32;
         case ::LoadDist::dintlv_b16:
@@ -941,9 +944,9 @@ static std::string getStoreWithStrideLibraryCallName(Type elementType)
     return suffix.empty() ? std::string{} : ("store_with_stride_" + suffix);
 }
 
-// The 8-bit block load/store stubs take the register as int8_t, because the AIV
-// backend has no scalar semantics for fp8 and so no VectorReg<fp8_*>. The move
-// itself is width-and-stride only, so bitcasting the register costs nothing.
+// The local VectorReg shim has no FP8 specializations, so strided block
+// helpers pass those registers as bytes. SDK RegTensor, used by DINTLV_B8,
+// provides native FP8 register types independently of this shim.
 static bool blockStrideUsesByteRegister(Type elementType)
 {
     return isa<Float8E4M3FNType, Float8E5M2Type>(elementType);
@@ -1017,6 +1020,22 @@ static void annotateDataBlockCopyUpdateLibraryCall(func::FuncOp callee)
     MLIRContext* ctx = callee.getContext();
     callee.setPrivate();
     callee->setAttr(hivm::TFuncCoreTypeAttr::name, hivm::TFuncCoreTypeAttr::get(ctx, hivm::TFuncCoreType::AIV));
+}
+
+// CCE LoadAlign supplies both typed registers through an explicit output slot.
+// Use the raw-pointer symbol directly, as with the post-update helpers below.
+static func::FuncOp getOrCreateLoadDintlvB8LibraryCall(ModuleOp module, Location loc, StringRef calleeName)
+{
+    MLIRContext* ctx = module.getContext();
+    if (auto existing = module.lookupSymbol<func::FuncOp>(calleeName)) {
+        annotateDataBlockCopyUpdateLibraryCall(existing);
+        return existing;
+    }
+    OpBuilder moduleBuilder(module.getBodyRegion());
+    auto fnType = FunctionType::get(ctx, {getUbPtrType(ctx), LLVM::LLVMPointerType::get(ctx)}, {});
+    auto callee = moduleBuilder.create<func::FuncOp>(loc, calleeName, fnType);
+    annotateDataBlockCopyUpdateLibraryCall(callee);
+    return callee;
 }
 
 static func::FuncOp getOrCreateLoadUpdateRetptrLibraryCall(
@@ -1270,6 +1289,18 @@ public:
         Value one = b.create<LLVM::ConstantOp>(loc, b.getI32Type(), b.getI32IntegerAttr(1));
         Type slotPtrTy = LLVM::LLVMPointerType::get(b.getContext());
         return b.create<LLVM::AllocaOp>(loc, slotPtrTy, b.getI64Type(), one).getResult();
+    }
+
+    // Keep the 512-byte result slot outside runtime loops and branches.
+    FailureOr<Value> createDintlvResultSlot(OpBuilder& b, Location loc, Type pairType)
+    {
+        if (!entry)
+            return failure();
+        OpBuilder::InsertionGuard guard(b);
+        b.setInsertionPointToStart(entry);
+        Value one = b.create<LLVM::ConstantOp>(loc, b.getI32Type(), b.getI32IntegerAttr(1));
+        Type slotPtrTy = LLVM::LLVMPointerType::get(b.getContext());
+        return b.create<LLVM::AllocaOp>(loc, slotPtrTy, pairType, one, 256).getResult();
     }
 
 private:
@@ -1786,7 +1817,7 @@ struct VecLowerCtx {
 // Signedness for Compare/Cast/Div/Reduce/Max/Min stays on the tla type.
 static Type aveVectorElementType(Type elementType)
 {
-    if (isa<::tla::HiFloat8Type>(elementType) || isFp4PairType(elementType))
+    if (isa<::tla::Float8E8M0Type, ::tla::HiFloat8Type>(elementType) || isFp4PairType(elementType))
         return IntegerType::get(elementType.getContext(), 8);
     if (auto intType = dyn_cast<IntegerType>(elementType))
         if (intType.isUnsigned())
@@ -2463,6 +2494,55 @@ static LogicalResult lowerLoad(
                    "load_dist values require one vector result "
                    "(optional live !tla.ptr is separate)"),
                failure();
+    if (pattern == hivmave::LoadDist::DINTLV_B8) {
+        // Encoded byte types use i8 carriers; select from the original TLA type.
+        Type elementType = cast<::tla::TlaTensorType>(loadOp.getSource().getType()).getPtr().getPointee();
+        auto meta = b.create<mlir::memref::ExtractStridedMetadataOp>(loc, source);
+        Value basePtr = b.create<mlir::memref::ExtractAlignedPointerAsIndexOp>(loc, meta.getBaseBuffer());
+        // Preserve the complete view offset; every supported element is one byte.
+        Value byteAddr = b.create<arith::AddIOp>(loc, basePtr, meta.getOffset());
+        Value ptr = intToUbPtr(b, loc, byteAddr);
+        Type pairType = LLVM::LLVMStructType::getLiteral(b.getContext(), {opCtx->vecType, opCtx->vecType});
+        Value pair;
+        if (elementType.isInteger(8)) {
+            Value constantZero = b.create<arith::ConstantIntOp>(loc, 0, 32);
+            Value distribution = b.create<arith::ConstantIntOp>(loc, static_cast<uint32_t>(pattern), 32);
+            if (elementType.isUnsignedInteger())
+                pair = b.create<hivm_regbaseintrins::Vldsx2V256U8InstrOp>(
+                            loc, pairType, ptr, constantZero, distribution, constantZero)
+                           .getResult();
+            else
+                pair = b.create<hivm_regbaseintrins::Vldsx2V256S8InstrOp>(
+                            loc, pairType, ptr, constantZero, distribution, constantZero)
+                           .getResult();
+        } else {
+            // Retain typed SDK loads for low-precision floating-point elements.
+            std::string suffix;
+            if (isa<Float8E4M3FNType>(elementType))
+                suffix = "fp8_e4m3fn";
+            else if (isa<Float8E5M2Type>(elementType))
+                suffix = "fp8_e5m2";
+            else if (isa<::tla::HiFloat8Type>(elementType))
+                suffix = "hifloat8";
+            else if (isa<::tla::Float8E8M0Type>(elementType))
+                suffix = "fp8_e8m0";
+            else if (isa<::tla::Float4E2M1x2Type>(elementType))
+                suffix = "fp4x2_e2m1";
+            else if (isa<::tla::Float4E1M2x2Type>(elementType))
+                suffix = "fp4x2_e1m2";
+            if (suffix.empty())
+                return loadOp.emitError("unsupported element type for DINTLV_B8 load"), failure();
+            auto callee = getOrCreateLoadDintlvB8LibraryCall(module, loc, "_mlir_ciface_load_dintlv_b8_" + suffix);
+            auto slotOr = fullMasks.createDintlvResultSlot(b, loc, pairType);
+            if (failed(slotOr))
+                return loadOp.emitError("failed to allocate DINTLV_B8 result slot in outlined func entry"), failure();
+            b.create<func::CallOp>(loc, callee, ValueRange{ptr, *slotOr});
+            pair = b.create<LLVM::LoadOp>(loc, pairType, *slotOr);
+        }
+        valueMap[loadOp.getResult()] = b.create<LLVM::ExtractValueOp>(loc, pair, 0);
+        valueMap[r2] = b.create<LLVM::ExtractValueOp>(loc, pair, 1);
+        return success();
+    }
     if (pattern == hivmave::LoadDist::DINTLV_B32 || pattern == hivmave::LoadDist::DINTLV_B16) {
         // NPU-IR's partial AVE conversion can leave this two-result load
         // unconverted when its consumer is a register helper call. Emit the
@@ -4125,6 +4205,22 @@ static LogicalResult lowerNestedVectorOp(
     // Encodings are transported as bytes downstream, but must never silently
     // acquire integer arithmetic semantics. Reinterpret explicitly for bit
     // operations or convert to a native computation dtype first.
+    auto isE8M0Vector = [](Type type) {
+        auto vec = dyn_cast<::tla::VectorSSAType>(type);
+        return vec && isa<::tla::Float8E8M0Type>(vec.getElementType());
+    };
+    if (llvm::any_of(op.getOperandTypes(), isE8M0Vector) || llvm::any_of(op.getResultTypes(), isE8M0Vector)) {
+        if (auto load = dyn_cast<::tla::LoadOp>(op)) {
+            if (!load.getLoadDist() || load.getLoadDist()->getLoadDist() != ::LoadDist::dintlv_b8)
+                return op.emitError("E8M0 vector load requires DIST_DINTLV_B8");
+        } else if (auto store = dyn_cast<::tla::StoreOp>(op)) {
+            if (store.getUnalignedUbAccess() || store.getBlockStride() ||
+                (store.getStoreDist() && store.getStoreDist()->getStoreDist() != ::StoreDist::norm))
+                return op.emitError("E8M0 vector store requires normal aligned access");
+        } else if (!isa<scf::ForOp, scf::IfOp>(op)) {
+            return op.emitError("E8M0 arithmetic and register casts are unsupported; only transport is allowed");
+        }
+    }
     bool hasHiFloat8 = llvm::any_of(
                            op.getOperandTypes(),
                            [](Type type) {

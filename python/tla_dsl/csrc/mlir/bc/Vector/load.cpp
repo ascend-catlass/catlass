@@ -7,7 +7,36 @@
 
 #include <cstdint>
 
+// Raw-pointer ABI: the caller provides one aligned pair of native registers.
+// SDK RegTensor provides low-precision RegType specializations independently of
+// the local VectorReg shim used by the strided block helpers.
+template <typename T>
+struct alignas(256) LoadDintlvB8Result {
+    typename AscendC::Reg::RegTensor<T>::RegType even;
+    typename AscendC::Reg::RegTensor<T>::RegType odd;
+};
+
 extern "C" {
+
+#define REGISTER_LOAD_DINTLV_B8(Dtype, dtype)                                                            \
+    static_assert(sizeof(LoadDintlvB8Result<Dtype>) == 512, "DINTLV_B8 result must hold two registers"); \
+    static_assert(offsetof(LoadDintlvB8Result<Dtype>, odd) == 256, "Unexpected second-register offset"); \
+    __aiv__ __attribute__((always_inline)) void _mlir_ciface_load_dintlv_b8_##dtype(                     \
+        __ubuf__ Dtype* srcAddr, LoadDintlvB8Result<Dtype>* result)                                      \
+    {                                                                                                    \
+        AscendC::Reg::RegTensor<Dtype> even;                                                             \
+        AscendC::Reg::RegTensor<Dtype> odd;                                                              \
+        AscendC::Reg::LoadAlign<Dtype, AscendC::Reg::LoadDist::DIST_DINTLV_B8>(even, odd, srcAddr);      \
+        result->even = even.reg[0];                                                                      \
+        result->odd = odd.reg[0];                                                                        \
+    }
+
+REGISTER_LOAD_DINTLV_B8(fp8_e4m3fn_t, fp8_e4m3fn)
+REGISTER_LOAD_DINTLV_B8(fp8_e5m2_t, fp8_e5m2)
+REGISTER_LOAD_DINTLV_B8(fp8_e8m0_t, fp8_e8m0)
+REGISTER_LOAD_DINTLV_B8(hifloat8_t, hifloat8)
+REGISTER_LOAD_DINTLV_B8(fp4x2_e2m1_t, fp4x2_e2m1)
+REGISTER_LOAD_DINTLV_B8(fp4x2_e1m2_t, fp4x2_e1m2)
 
 // load with block stride (vsldb): one instruction gathers 8 DataBlocks whose
 // heads are blockStride DataBlocks (32B units) apart; blockStride == 0 repeats

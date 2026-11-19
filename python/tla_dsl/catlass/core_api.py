@@ -86,8 +86,8 @@ _CAST_SAME_TYPE_FLOAT_DTYPES = frozenset({"f16", "bf16", "f32"})
 # and valid bit counts; element widths may differ. HiF8 and FP4x2 values retain their
 # formats in TLA IR and use byte registers in native lowering.
 #
-# E8M0 remains storage-only: LLVM 19 has no builtin Float8E8M0FNU, and this
-# interface has no register lowering for !tla.f8e8m0. Logical FP4 types are also
+# E8M0 registers support DINTLV_B8 transport and normal stores only; register
+# bitcasts remain unsupported. Logical FP4 types are also
 # excluded: their 4-bit values differ from byte registers holding two values
 # per lane.
 #

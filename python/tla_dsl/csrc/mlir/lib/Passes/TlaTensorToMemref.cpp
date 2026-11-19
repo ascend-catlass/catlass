@@ -338,7 +338,7 @@ FailureOr<int64_t> getStaticNumElements(ArrayRef<int64_t> shape)
 
 FailureOr<int64_t> getElementByteWidth(Type elementType)
 {
-    if (isa<::tla::HiFloat8Type, ::tla::Float4E2M1x2Type, ::tla::Float4E1M2x2Type>(elementType))
+    if (isa<::tla::Float8E8M0Type, ::tla::HiFloat8Type, ::tla::Float4E2M1x2Type, ::tla::Float4E1M2x2Type>(elementType))
         return 1;
     if (auto intType = dyn_cast<IntegerType>(elementType)) {
         int64_t width = intType.getWidth();

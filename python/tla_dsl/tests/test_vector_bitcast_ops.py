@@ -140,11 +140,7 @@ def _bad(
     ("dst_type", "message"),
     [
         (tla.Bool, "unsupported destination element type"),
-        # f8e8m0 is a TLA dialect type, not a builtin float, so
-        # !tla.vector<Nxf8e8m0> cannot be constructed. It must be refused here
-        # rather than failing deep in the vector-region lowering with an
-        # "Execution-mode lowering failed in tla.vec.func region-body" that
-        # says nothing about the element type the caller actually named.
+        # E8M0 registers support byte-preserving transport, not bitcast.
         (tla.Float8E8M0, "unsupported destination element type"),
     ],
     ids=["bool", "f8e8m0"],

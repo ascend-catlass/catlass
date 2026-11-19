@@ -1,0 +1,278 @@
+// RUN: sed -n '/^\/\/ BEGIN_E8M0_STORE$/,/^\/\/ END_E8M0_STORE$/p' %s | sed '1d;$d;s|^// ||' > %t.E8M0_STORE.mlir && not %tla_compile %t.E8M0_STORE.mlir -o %t 2>&1 | %filecheck %s --check-prefix=E8M0-STORE
+// RUN: sed -n '/^\/\/ BEGIN_E8M0_ARITHMETIC$/,/^\/\/ END_E8M0_ARITHMETIC$/p' %s | sed '1d;$d;s|^// ||' > %t.E8M0_ARITHMETIC.mlir && not %tla_compile %t.E8M0_ARITHMETIC.mlir -o %t 2>&1 | %filecheck %s --check-prefix=E8M0-ARITHMETIC
+// RUN: sed -n '/^\/\/ BEGIN_FP4_E2M1$/,/^\/\/ END_FP4_E2M1$/p' %s | sed '1d;$d;s|^// ||' > %t.FP4_E2M1.mlir && not %tla_compile %t.FP4_E2M1.mlir -o %t 2>&1 | %filecheck %s --check-prefix=FP4-E2M1
+// RUN: sed -n '/^\/\/ BEGIN_FP4_E1M2$/,/^\/\/ END_FP4_E1M2$/p' %s | sed '1d;$d;s|^// ||' > %t.FP4_E1M2.mlir && not %tla_compile %t.FP4_E1M2.mlir -o %t 2>&1 | %filecheck %s --check-prefix=FP4-E1M2
+// RUN: sed -n '/^\/\/ BEGIN_SOURCE_I16$/,/^\/\/ END_SOURCE_I16$/p' %s | sed '1d;$d;s|^// ||' > %t.SOURCE_I16.mlir && not %tla_compile %t.SOURCE_I16.mlir -o %t 2>&1 | %filecheck %s --check-prefix=SOURCE-I16
+// RUN: sed -n '/^\/\/ BEGIN_SOURCE_UI16$/,/^\/\/ END_SOURCE_UI16$/p' %s | sed '1d;$d;s|^// ||' > %t.SOURCE_UI16.mlir && not %tla_compile %t.SOURCE_UI16.mlir -o %t 2>&1 | %filecheck %s --check-prefix=SOURCE-UI16
+// RUN: sed -n '/^\/\/ BEGIN_SOURCE_UI32$/,/^\/\/ END_SOURCE_UI32$/p' %s | sed '1d;$d;s|^// ||' > %t.SOURCE_UI32.mlir && not %tla_compile %t.SOURCE_UI32.mlir -o %t 2>&1 | %filecheck %s --check-prefix=SOURCE-UI32
+// RUN: sed -n '/^\/\/ BEGIN_RESULT_LANES$/,/^\/\/ END_RESULT_LANES$/p' %s | sed '1d;$d;s|^// ||' > %t.RESULT_LANES.mlir && not %tla_compile %t.RESULT_LANES.mlir -o %t 2>&1 | %filecheck %s --check-prefix=RESULT-LANES
+// RUN: sed -n '/^\/\/ BEGIN_RESULT_SOURCE_TYPE$/,/^\/\/ END_RESULT_SOURCE_TYPE$/p' %s | sed '1d;$d;s|^// ||' > %t.RESULT_SOURCE_TYPE.mlir && not %tla_compile %t.RESULT_SOURCE_TYPE.mlir -o %t 2>&1 | %filecheck %s --check-prefix=RESULT-SOURCE-TYPE
+// RUN: sed -n '/^\/\/ BEGIN_MISSING_SECOND$/,/^\/\/ END_MISSING_SECOND$/p' %s | sed '1d;$d;s|^// ||' > %t.MISSING_SECOND.mlir && not %tla_compile %t.MISSING_SECOND.mlir -o %t 2>&1 | %filecheck %s --check-prefix=MISSING-SECOND
+// RUN: sed -n '/^\/\/ BEGIN_SECOND_TYPE$/,/^\/\/ END_SECOND_TYPE$/p' %s | sed '1d;$d;s|^// ||' > %t.SECOND_TYPE.mlir && not %tla_compile %t.SECOND_TYPE.mlir -o %t 2>&1 | %filecheck %s --check-prefix=SECOND-TYPE
+// RUN: sed -n '/^\/\/ BEGIN_EXTRA_SECOND$/,/^\/\/ END_EXTRA_SECOND$/p' %s | sed '1d;$d;s|^// ||' > %t.EXTRA_SECOND.mlir && not %tla_compile %t.EXTRA_SECOND.mlir -o %t 2>&1 | %filecheck %s --check-prefix=EXTRA-SECOND
+// RUN: sed -n '/^\/\/ BEGIN_UNALIGNED$/,/^\/\/ END_UNALIGNED$/p' %s | sed '1d;$d;s|^// ||' > %t.UNALIGNED.mlir && not %tla_compile %t.UNALIGNED.mlir -o %t 2>&1 | %filecheck %s --check-prefix=UNALIGNED
+// RUN: sed -n '/^\/\/ BEGIN_BLOCK_STRIDE$/,/^\/\/ END_BLOCK_STRIDE$/p' %s | sed '1d;$d;s|^// ||' > %t.BLOCK_STRIDE.mlir && not %tla_compile %t.BLOCK_STRIDE.mlir -o %t 2>&1 | %filecheck %s --check-prefix=BLOCK-STRIDE
+// RUN: sed -n '/^\/\/ BEGIN_MASK$/,/^\/\/ END_MASK$/p' %s | sed '1d;$d;s|^// ||' > %t.MASK.mlir && not %tla_compile %t.MASK.mlir -o %t 2>&1 | %filecheck %s --check-prefix=MASK
+
+// MISSING-SECOND: requires a second !tla.vector result
+// SECOND-TYPE: load_dist dintlv_b8 requires matching vector result types
+// EXTRA-SECOND: second result is only valid as !tla.vector
+// UNALIGNED: load_dist requires aligned UB access
+// BLOCK-STRIDE: block_stride is mutually exclusive with load_dist
+// MASK: mask load only supports load_dist norm|us|ds
+
+// BEGIN_MISSING_SECOND
+// !source = !tla.tensor<!tla.layout<!tla.shape<512>, !tla.stride<1>, !tla.shape<512>, RowMajor>, !tla.coord<0>, !tla.ptr<i8, ub, 1>>
+// module {
+//   func.func @invalid_load(%s: memref<512xi8, #hivm.address_space<ub>>) {
+//     %c0 = arith.constant 0 : index
+//     %c1 = arith.constant 1 : index
+//     %c512 = arith.constant 512 : index
+//     %src = tla.tensor_desc %s shape [%c1, %c512, %c1, %c1] stride [%c512, %c1, %c1, %c1] origin_shape [%c1, %c512] coord [%c0, %c0] : memref<512xi8, #hivm.address_space<ub>> -> !source
+//     "tla.vec.func"() ({
+//       %v = tla.load %src {load_dist = #tla.load_dist<dintlv_b8>} : !source -> !tla.vector<256xi8>
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_MISSING_SECOND
+
+// BEGIN_SECOND_TYPE
+// !source = !tla.tensor<!tla.layout<!tla.shape<512>, !tla.stride<1>, !tla.shape<512>, RowMajor>, !tla.coord<0>, !tla.ptr<i8, ub, 1>>
+// module {
+//   func.func @invalid_load(%s: memref<512xi8, #hivm.address_space<ub>>) {
+//     %c0 = arith.constant 0 : index
+//     %c1 = arith.constant 1 : index
+//     %c512 = arith.constant 512 : index
+//     %src = tla.tensor_desc %s shape [%c1, %c512, %c1, %c1] stride [%c512, %c1, %c1, %c1] origin_shape [%c1, %c512] coord [%c0, %c0] : memref<512xi8, #hivm.address_space<ub>> -> !source
+//     "tla.vec.func"() ({
+//       %v0, %v1 = tla.load %src {load_dist = #tla.load_dist<dintlv_b8>} : !source -> !tla.vector<256xi8>, !tla.vector<128xi8>
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_SECOND_TYPE
+
+// BEGIN_EXTRA_SECOND
+// !source = !tla.tensor<!tla.layout<!tla.shape<512>, !tla.stride<1>, !tla.shape<512>, RowMajor>, !tla.coord<0>, !tla.ptr<i8, ub, 1>>
+// module {
+//   func.func @invalid_load(%s: memref<512xi8, #hivm.address_space<ub>>) {
+//     %c0 = arith.constant 0 : index
+//     %c1 = arith.constant 1 : index
+//     %c512 = arith.constant 512 : index
+//     %src = tla.tensor_desc %s shape [%c1, %c512, %c1, %c1] stride [%c512, %c1, %c1, %c1] origin_shape [%c1, %c512] coord [%c0, %c0] : memref<512xi8, #hivm.address_space<ub>> -> !source
+//     "tla.vec.func"() ({
+//       %v0, %v1 = tla.load %src {load_dist = #tla.load_dist<norm>} : !source -> !tla.vector<256xi8>, !tla.vector<256xi8>
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_EXTRA_SECOND
+
+// BEGIN_UNALIGNED
+// !source = !tla.tensor<!tla.layout<!tla.shape<512>, !tla.stride<1>, !tla.shape<512>, RowMajor>, !tla.coord<0>, !tla.ptr<i8, ub, 2>>
+// module {
+//   func.func @invalid_load(%s: memref<512xi8, #hivm.address_space<ub>>) {
+//     %c0 = arith.constant 0 : index
+//     %c1 = arith.constant 1 : index
+//     %c512 = arith.constant 512 : index
+//     %src = tla.tensor_desc %s shape [%c1, %c512, %c1, %c1] stride [%c512, %c1, %c1, %c1] origin_shape [%c1, %c512] coord [%c0, %c0] : memref<512xi8, #hivm.address_space<ub>> -> !source
+//     "tla.vec.func"() ({
+//       %v0, %v1 = tla.load %src {load_dist = #tla.load_dist<dintlv_b8>, unaligned_ub_access} : !source -> !tla.vector<256xi8>, !tla.vector<256xi8>
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_UNALIGNED
+
+// BEGIN_BLOCK_STRIDE
+// !source = !tla.tensor<!tla.layout<!tla.shape<512>, !tla.stride<1>, !tla.shape<512>, RowMajor>, !tla.coord<0>, !tla.ptr<i8, ub, 1>>
+// module {
+//   func.func @invalid_load(%s: memref<512xi8, #hivm.address_space<ub>>) {
+//     %c0 = arith.constant 0 : index
+//     %c1 = arith.constant 1 : index
+//     %c512 = arith.constant 512 : index
+//     %src = tla.tensor_desc %s shape [%c1, %c512, %c1, %c1] stride [%c512, %c1, %c1, %c1] origin_shape [%c1, %c512] coord [%c0, %c0] : memref<512xi8, #hivm.address_space<ub>> -> !source
+//     "tla.vec.func"() ({
+//       %v0, %v1 = tla.load %src {load_dist = #tla.load_dist<dintlv_b8>, block_stride = 1 : i32} : !source -> !tla.vector<256xi8>, !tla.vector<256xi8>
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_BLOCK_STRIDE
+
+// BEGIN_MASK
+// !source = !tla.tensor<!tla.layout<!tla.shape<512>, !tla.stride<1>, !tla.shape<512>, RowMajor>, !tla.coord<0>, !tla.ptr<i8, ub, 1>>
+// module {
+//   func.func @invalid_load(%s: memref<512xi8, #hivm.address_space<ub>>) {
+//     %c0 = arith.constant 0 : index
+//     %c1 = arith.constant 1 : index
+//     %c512 = arith.constant 512 : index
+//     %src = tla.tensor_desc %s shape [%c1, %c512, %c1, %c1] stride [%c512, %c1, %c1, %c1] origin_shape [%c1, %c512] coord [%c0, %c0] : memref<512xi8, #hivm.address_space<ub>> -> !source
+//     "tla.vec.func"() ({
+//       %v = tla.load %src {load_dist = #tla.load_dist<dintlv_b8>} : !source -> !tla.mask<64>
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_MASK
+
+// SOURCE-I16: dintlv_b8 requires a 1-byte source element type
+// SOURCE-UI16: dintlv_b8 requires a 1-byte source element type
+// SOURCE-UI32: dintlv_b8 requires a 1-byte source element type
+// RESULT-LANES: dintlv_b8 requires two identical full 256-lane vectors matching the source type
+// RESULT-SOURCE-TYPE: dintlv_b8 requires two identical full 256-lane vectors matching the source type
+
+// BEGIN_SOURCE_I16
+// !source = !tla.tensor<!tla.layout<!tla.shape<512>, !tla.stride<1>, !tla.shape<512>, RowMajor>, !tla.coord<0>, !tla.ptr<i16, ub, 1>>
+// module {
+//   func.func @invalid_load(%s: memref<512xi16, #hivm.address_space<ub>>) {
+//     %c0 = arith.constant 0 : index
+//     %c1 = arith.constant 1 : index
+//     %c512 = arith.constant 512 : index
+//     %src = tla.tensor_desc %s shape [%c1, %c512, %c1, %c1] stride [%c512, %c1, %c1, %c1] origin_shape [%c1, %c512] coord [%c0, %c0] : memref<512xi16, #hivm.address_space<ub>> -> !source
+//     "tla.vec.func"() ({
+//       %v0, %v1 = tla.load %src {load_dist = #tla.load_dist<dintlv_b8>} : !source -> !tla.vector<128xi16>, !tla.vector<128xi16>
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_SOURCE_I16
+
+// BEGIN_SOURCE_UI16
+// !source = !tla.tensor<!tla.layout<!tla.shape<512>, !tla.stride<1>, !tla.shape<512>, RowMajor>, !tla.coord<0>, !tla.ptr<ui16, ub, 1>>
+// module {
+//   func.func @invalid_load(%s: memref<512xui16, #hivm.address_space<ub>>) {
+//     %c0 = arith.constant 0 : index
+//     %c1 = arith.constant 1 : index
+//     %c512 = arith.constant 512 : index
+//     %src = tla.tensor_desc %s shape [%c1, %c512, %c1, %c1] stride [%c512, %c1, %c1, %c1] origin_shape [%c1, %c512] coord [%c0, %c0] : memref<512xui16, #hivm.address_space<ub>> -> !source
+//     "tla.vec.func"() ({
+//       %v0, %v1 = tla.load %src {load_dist = #tla.load_dist<dintlv_b8>} : !source -> !tla.vector<128xui16>, !tla.vector<128xui16>
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_SOURCE_UI16
+
+// BEGIN_SOURCE_UI32
+// !source = !tla.tensor<!tla.layout<!tla.shape<512>, !tla.stride<1>, !tla.shape<512>, RowMajor>, !tla.coord<0>, !tla.ptr<ui32, ub, 1>>
+// module {
+//   func.func @invalid_load(%s: memref<512xui32, #hivm.address_space<ub>>) {
+//     %c0 = arith.constant 0 : index
+//     %c1 = arith.constant 1 : index
+//     %c512 = arith.constant 512 : index
+//     %src = tla.tensor_desc %s shape [%c1, %c512, %c1, %c1] stride [%c512, %c1, %c1, %c1] origin_shape [%c1, %c512] coord [%c0, %c0] : memref<512xui32, #hivm.address_space<ub>> -> !source
+//     "tla.vec.func"() ({
+//       %v0, %v1 = tla.load %src {load_dist = #tla.load_dist<dintlv_b8>} : !source -> !tla.vector<64xui32>, !tla.vector<64xui32>
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_SOURCE_UI32
+
+// BEGIN_RESULT_LANES
+// !source = !tla.tensor<!tla.layout<!tla.shape<512>, !tla.stride<1>, !tla.shape<512>, RowMajor>, !tla.coord<0>, !tla.ptr<i8, ub, 1>>
+// module {
+//   func.func @invalid_load(%s: memref<512xi8, #hivm.address_space<ub>>) {
+//     %c0 = arith.constant 0 : index
+//     %c1 = arith.constant 1 : index
+//     %c512 = arith.constant 512 : index
+//     %src = tla.tensor_desc %s shape [%c1, %c512, %c1, %c1] stride [%c512, %c1, %c1, %c1] origin_shape [%c1, %c512] coord [%c0, %c0] : memref<512xi8, #hivm.address_space<ub>> -> !source
+//     "tla.vec.func"() ({
+//       %v0, %v1 = tla.load %src {load_dist = #tla.load_dist<dintlv_b8>} : !source -> !tla.vector<128xi8>, !tla.vector<128xi8>
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_RESULT_LANES
+
+// BEGIN_RESULT_SOURCE_TYPE
+// !source = !tla.tensor<!tla.layout<!tla.shape<512>, !tla.stride<1>, !tla.shape<512>, RowMajor>, !tla.coord<0>, !tla.ptr<i8, ub, 1>>
+// module {
+//   func.func @invalid_load(%s: memref<512xi8, #hivm.address_space<ub>>) {
+//     %c0 = arith.constant 0 : index
+//     %c1 = arith.constant 1 : index
+//     %c512 = arith.constant 512 : index
+//     %src = tla.tensor_desc %s shape [%c1, %c512, %c1, %c1] stride [%c512, %c1, %c1, %c1] origin_shape [%c1, %c512] coord [%c0, %c0] : memref<512xi8, #hivm.address_space<ub>> -> !source
+//     "tla.vec.func"() ({
+//       %v0, %v1 = tla.load %src {load_dist = #tla.load_dist<dintlv_b8>} : !source -> !tla.vector<256xui8>, !tla.vector<256xui8>
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_RESULT_SOURCE_TYPE
+
+
+// FP4-E2M1: dintlv_b8 requires a 1-byte source element type
+// BEGIN_FP4_E2M1
+// !source = !tla.tensor<!tla.layout<!tla.shape<512>, !tla.stride<1>, !tla.shape<512>, RowMajor>, !tla.coord<0>, !tla.ptr<!tla.f4e2m1, ub, 1>>
+// module {
+//   func.func @invalid_load(%src: !source) {
+//     "tla.vec.func"() ({
+//       %v0, %v1 = tla.load %src {load_dist = #tla.load_dist<dintlv_b8>} : !source -> !tla.vector<256xi8>, !tla.vector<256xi8>
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_FP4_E2M1
+
+// FP4-E1M2: dintlv_b8 requires a 1-byte source element type
+// BEGIN_FP4_E1M2
+// !source = !tla.tensor<!tla.layout<!tla.shape<512>, !tla.stride<1>, !tla.shape<512>, RowMajor>, !tla.coord<0>, !tla.ptr<!tla.f4e1m2, ub, 1>>
+// module {
+//   func.func @invalid_load(%src: !source) {
+//     "tla.vec.func"() ({
+//       %v0, %v1 = tla.load %src {load_dist = #tla.load_dist<dintlv_b8>} : !source -> !tla.vector<256xi8>, !tla.vector<256xi8>
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_FP4_E1M2
+
+// E8M0-ARITHMETIC: E8M0 arithmetic and register casts are unsupported
+// BEGIN_E8M0_ARITHMETIC
+// !s_f8e8m0 = !tla.tensor<!tla.layout<!tla.shape<512>, !tla.stride<1>, !tla.shape<512>, RowMajor>, !tla.coord<0>, !tla.ptr<!tla.f8e8m0, ub, 1>>
+// !d_f8e8m0 = !tla.tensor<!tla.layout<!tla.shape<256>, !tla.stride<1>, !tla.shape<256>, RowMajor>, !tla.coord<0>, !tla.ptr<!tla.f8e8m0, ub, 1>>
+// module {
+//   func.func @load_dintlv_b8_f8e8m0(%s: memref<512xi8, #hivm.address_space<ub>>, %d0: memref<256xi8, #hivm.address_space<ub>>, %d1: memref<256xi8, #hivm.address_space<ub>>) {
+//     %c0 = arith.constant 0 : index
+//     %c1 = arith.constant 1 : index
+//     %c512 = arith.constant 512 : index
+//     %c256 = arith.constant 256 : index
+//     %src = tla.tensor_desc %s shape [%c1, %c512, %c1, %c1] stride [%c512, %c1, %c1, %c1] origin_shape [%c1, %c512] coord [%c0, %c0] : memref<512xi8, #hivm.address_space<ub>> -> !s_f8e8m0
+//     %dst0 = tla.tensor_desc %d0 shape [%c1, %c256, %c1, %c1] stride [%c256, %c1, %c1, %c1] origin_shape [%c1, %c256] coord [%c0, %c0] : memref<256xi8, #hivm.address_space<ub>> -> !d_f8e8m0
+//     %dst1 = tla.tensor_desc %d1 shape [%c1, %c256, %c1, %c1] stride [%c256, %c1, %c1, %c1] origin_shape [%c1, %c256] coord [%c0, %c0] : memref<256xi8, #hivm.address_space<ub>> -> !d_f8e8m0
+//     "tla.vec.func"() ({
+//       %v0, %v1 = tla.load %src {load_dist = #tla.load_dist<dintlv_b8>} : !s_f8e8m0 -> !tla.vector<256x!tla.f8e8m0>, !tla.vector<256x!tla.f8e8m0>
+//       %sum = "tla.add"(%v0, %v1) : (!tla.vector<256x!tla.f8e8m0>, !tla.vector<256x!tla.f8e8m0>) -> !tla.vector<256x!tla.f8e8m0>
+//       tla.store %dst0, %sum : !d_f8e8m0, !tla.vector<256x!tla.f8e8m0>
+//       tla.store %dst1, %v1 : !d_f8e8m0, !tla.vector<256x!tla.f8e8m0>
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_E8M0_ARITHMETIC
+
+// E8M0-STORE: E8M0 vector store requires normal aligned access
+// BEGIN_E8M0_STORE
+// !s_f8e8m0 = !tla.tensor<!tla.layout<!tla.shape<512>, !tla.stride<1>, !tla.shape<512>, RowMajor>, !tla.coord<0>, !tla.ptr<!tla.f8e8m0, ub, 1>>
+// !d_f8e8m0 = !tla.tensor<!tla.layout<!tla.shape<256>, !tla.stride<1>, !tla.shape<256>, RowMajor>, !tla.coord<0>, !tla.ptr<!tla.f8e8m0, ub, 1>>
+// module {
+//   func.func @load_dintlv_b8_f8e8m0(%s: memref<512xi8, #hivm.address_space<ub>>, %d0: memref<256xi8, #hivm.address_space<ub>>, %d1: memref<256xi8, #hivm.address_space<ub>>) {
+//     %c0 = arith.constant 0 : index
+//     %c1 = arith.constant 1 : index
+//     %c512 = arith.constant 512 : index
+//     %c256 = arith.constant 256 : index
+//     %src = tla.tensor_desc %s shape [%c1, %c512, %c1, %c1] stride [%c512, %c1, %c1, %c1] origin_shape [%c1, %c512] coord [%c0, %c0] : memref<512xi8, #hivm.address_space<ub>> -> !s_f8e8m0
+//     %dst0 = tla.tensor_desc %d0 shape [%c1, %c256, %c1, %c1] stride [%c256, %c1, %c1, %c1] origin_shape [%c1, %c256] coord [%c0, %c0] : memref<256xi8, #hivm.address_space<ub>> -> !d_f8e8m0
+//     %dst1 = tla.tensor_desc %d1 shape [%c1, %c256, %c1, %c1] stride [%c256, %c1, %c1, %c1] origin_shape [%c1, %c256] coord [%c0, %c0] : memref<256xi8, #hivm.address_space<ub>> -> !d_f8e8m0
+//     "tla.vec.func"() ({
+//       %v0, %v1 = tla.load %src {load_dist = #tla.load_dist<dintlv_b8>} : !s_f8e8m0 -> !tla.vector<256x!tla.f8e8m0>, !tla.vector<256x!tla.f8e8m0>
+//       tla.store %dst0, %v0 {store_dist = #tla.store_dist<first_element_b8>} : !d_f8e8m0, !tla.vector<256x!tla.f8e8m0>
+//       tla.store %dst1, %v1 : !d_f8e8m0, !tla.vector<256x!tla.f8e8m0>
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_E8M0_STORE
