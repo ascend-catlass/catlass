@@ -42,6 +42,8 @@
 # examples/python/tla_dsl/tla/kernel/matmul/basic_mmad_epilogue (matmul_add.py, matmul_add_ub.py,
 # matmul_bias.py, matmul_leaky_relu.py, matmul_sigmoid.py, matmul_silu.py, matmul_tanh.py).
 # examples/python/tla_dsl/tla/kernel/attention/flash_attention_infer (flash_attention_infer.py).
+# examples/python/tla_dsl/tla/kernel/attention/flash_mla_with_kvcache (flash_mla_with_kvcache.py:
+# MLA decoding, PA_BBND/PA_NZ paged cache, mask 0/3, paired-token and KV-split paths).
 # examples/python/tla_dsl/dsl_tutorials/lazy_conditions (lazy_conditions.py).
 # examples/python/tla_dsl/dsl_tutorials/constexpr_callable (constexpr_callable_epilogue.py).
 # examples/python/tla_dsl/dsl_tutorials/jit_callable (jit_callable_epilogue.py).
@@ -159,6 +161,7 @@ STREAMK_OPS_REL="tla/kernel/matmul/basic_mmad_streamk/basic_mmad_streamk.py"
 GROUPED_MATMUL_SLICEM_REL="tla/kernel/gmm/grouped_matmul_slice_m/grouped_matmul_slice_m.py"
 BATCHED_MATMUL_REL="tla/kernel/matmul/batched_matmul/batched_matmul.py"
 FLASH_ATTENTION_INFER_REL="tla/kernel/attention/flash_attention_infer/flash_attention_infer.py"
+FLASH_MLA_WITH_KVCACHE_REL="tla/kernel/attention/flash_mla_with_kvcache/flash_mla_with_kvcache.py"
 LAZY_CONDITIONS_REL="dsl_tutorials/lazy_conditions/lazy_conditions.py"
 CONSTEXPR_CALLABLE_REL="dsl_tutorials/constexpr_callable/constexpr_callable_epilogue.py"
 JIT_CALLABLE_REL="dsl_tutorials/jit_callable/jit_callable_epilogue.py"
@@ -260,6 +263,7 @@ Run end-to-end validation for:
     multi-block and multi-call coverage)
   - basic_mmad_epilogue (matmul_add.py, ...: CV fused examples)
   - flash_attention_infer (flash_attention_infer.py)
+  - flash_mla_with_kvcache (flash_mla_with_kvcache.py: MLA decode, PA_BBND/PA_NZ, mask 0/3)
   - lazy_conditions (lazy_conditions.py)
   - constexpr_callable (constexpr_callable_epilogue.py: Constexpr Callable epilogue)
   - jit_callable (jit_callable_epilogue.py: @tla.jit helper as Constexpr epilogue)
@@ -597,6 +601,10 @@ if [[ ! -f "${EXAMPLES_DIR}/${PRINT_TENSOR_REL}" ]]; then
 fi
 if [[ ! -f "${EXAMPLES_DIR}/${FLASH_ATTENTION_INFER_REL}" ]]; then
     echo "error: missing ${FLASH_ATTENTION_INFER_REL} under ${EXAMPLES_DIR}" >&2
+    exit 1
+fi
+if [[ ! -f "${EXAMPLES_DIR}/${FLASH_MLA_WITH_KVCACHE_REL}" ]]; then
+    echo "error: missing ${FLASH_MLA_WITH_KVCACHE_REL} under ${EXAMPLES_DIR}" >&2
     exit 1
 fi
 if [[ ! -f "${EXAMPLES_DIR}/${LAZY_CONDITIONS_REL}" ]]; then

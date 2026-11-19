@@ -644,6 +644,14 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
             "--mask", "none", "--no-paged", "--kvseqlen", "224", *dev,
         ]],
     )
+    # flash_mla_with_kvcache keeps one source kernel for both paged cache
+    # layouts and both mask modes; the boundary suite covers PA_BBND/PA_NZ,
+    # mask 0/3, heads 64/96 and fp16/bf16, and its shapes make the host pick
+    # the two-token pairing, the head-split and the KV-split reduce kernel.
+    yield (
+        "flash-mla-with-kvcache-cases",
+        [["tla/kernel/attention/flash_mla_with_kvcache/flash_mla_with_kvcache.py", "--cases", *dev]],
+    )
     yield (
         "lazy-conditions",
         [["dsl_tutorials/lazy_conditions/lazy_conditions.py", *dev]],
