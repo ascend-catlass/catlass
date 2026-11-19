@@ -40,7 +40,6 @@ def ascend950_fp8_mx_grouped_matmul_slice_m_swiglu_mx_quant(
         mx_scale_a: MX scale for A (float8_e8m0fnu).
         mx_scale_b: MX scale for B (float8_e8m0fnu).
         group_list: Non-cumulative group sizes (int64), shape ``(G,)``.
-        transA: Whether to read ``mat1`` as transposed.
         transB: Whether to read ``mat2`` as transposed (default matches example).
 
     Returns:
