@@ -35,6 +35,10 @@ the reduction scope:
   mirrors the operand shape and element type, except for `ADD`
   on i16/u16 sources, which returns the widened 32-bit result
   (see Constraints).
+- `ReduceMode.PAIR_WISE`: add every two adjacent lanes (only
+  `tla.ReductionOp.ADD`); the pairwise sums are written to the
+  least significant lanes of the returned vector and the upper
+  half lanes are 0. Masked-out source lanes are treated as 0.
 
 Prototype:
 
@@ -44,30 +48,35 @@ tla.VectorSSA.reduce(kind: ReductionOp, *, mode: ReduceMode = ReduceMode.INTER_B
 
 Parameters:
 
-- `kind` (`ReductionOp`): Reduction kind (`ADD`, `MAX`, or `MIN`). Required.
+- `kind` (`ReductionOp`): Reduction kind (`ADD`, `MAX`, or `MIN`).
+  `PAIR_WISE` accepts only `ADD`. Required.
 - `mode` (`ReduceMode`): Reduction scope. Optional, default `ReduceMode.INTER_BLOCK`.
 - `mask` (`MaskSSA`): Predicates which lanes participate. Required.
-- `init_value`: Reserved; only `None` is supported today (`INTER_BLOCK`). Optional, default `None`.
-- `reduction_profile`: Reserved; only `None` is supported today (`INTER_BLOCK`). Optional, default `None`.
+- `init_value`: Reserved; only `None` is supported today. Optional, default `None`.
+- `reduction_profile`: Reserved; only `None` is supported today. Optional, default `None`.
 
 Constraints:
 
 - Must be called inside a `@tla.kernel`-decorated kernel function.
-- Must be called inside `tla.vec.func()`; `INTRA_BLOCK` requires
-  `tla.vec.func(mode="simd")`.
+- Must be called inside `tla.vec.func()`; `INTRA_BLOCK` and
+  `PAIR_WISE` require `tla.vec.func(mode="simd")`.
 - Element type must be one of f16/f32/i16/i32/u16/u32.
-- `INTER_BLOCK`: `init_value` and `reduction_profile` must be omitted or `None`.
-- `INTRA_BLOCK`: `init_value` and `reduction_profile` must be omitted or `None`.
-  A fully masked-off block yields the hardware identity: 0 for
-  `ADD`; for `MAX` the element type's minimum (negative infinity
-  for floating point) and for `MIN` the element type's maximum
-  (positive infinity for floating point).
+  `PAIR_WISE` supports only f16/f32.
+- `init_value` and `reduction_profile` must be omitted or `None`.
+- `INTER_BLOCK`: a fully masked-off block yields the hardware
+  identity: 0 for `ADD`; for `MAX` the element type's minimum
+  (negative infinity for floating point) and for `MIN` the element
+  type's maximum (positive infinity for floating point).
 - `INTRA_BLOCK` `ADD` on i16/u16 sources returns the widened
   32-bit result of the underlying instruction (same as vcadd): the
   result has half the lanes rounded up with i32/u32 element type
   (so a tail's last valid element keeps its widened lane), and no
   cast back to 16 bits is performed. Block sums that exceed the
   source type's range stay exact in the i32/u32 result.
+- `PAIR_WISE`: The reduction mode supports
+  only `ADD`, and the mask merge mode is ZEROING, i.e., the high
+  lanes are 0. With a fully active f16 vector, lanes 0..63 hold
+  the pairwise sums and lanes 64..127 are 0.
 
 Example:
 
@@ -78,6 +87,9 @@ with tla.vec.func(mode="simd"):
     broadcast = tla.full(total, dtype=tla.Float32)
     packed = src_reg.reduce(
         tla.ReductionOp.ADD, mode=tla.ReduceMode.INTRA_BLOCK, mask=m
+    )
+    sums = src_reg.reduce(
+        tla.ReductionOp.ADD, mode=tla.ReduceMode.PAIR_WISE, mask=m
     )
 ```
 

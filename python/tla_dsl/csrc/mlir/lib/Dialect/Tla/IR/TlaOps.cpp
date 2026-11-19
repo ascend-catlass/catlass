@@ -1503,6 +1503,34 @@ mlir::LogicalResult ReduceIntraBlockOp::verify()
     return verifyMaskMatchesVector(getOperation(), getMask(), getOperand().getType());
 }
 
+mlir::LogicalResult PairWiseOp::verify()
+{
+    if (!hasEnclosingRegion<VecFuncOp>(getOperation()))
+        return emitOpError("must be nested inside a tla.vec.func region");
+    auto parent = getOperation()->getParentOfType<VecFuncOp>();
+    if (auto mode = parent->getAttrOfType<mlir::StringAttr>("mode");
+        mode && !mode.getValue().equals_insensitive("simd"))
+        return emitOpError("pair_wise is only supported in SIMD mode");
+
+    if (getKind() != "add")
+        return emitOpError() << "kind must be \"add\" for pair_wise operation, got \"" << getKind() << "\"";
+
+    auto sourceType = mlir::dyn_cast<VectorSSAType>(getOperand().getType());
+    if (!sourceType)
+        return emitOpError("operand must be !tla.vector");
+    auto resultType = mlir::dyn_cast<VectorSSAType>(getResult().getType());
+    if (!resultType)
+        return emitOpError("result must be !tla.vector");
+    if (resultType != sourceType)
+        return emitOpError("result type must match operand type");
+
+    mlir::Type elem = sourceType.getElementType();
+    if (!mlir::isa<mlir::Float16Type, mlir::Float32Type>(elem))
+        return emitOpError() << "unsupported pair_wise element type " << elem << " (supported: f16/f32)";
+
+    return verifyMaskMatchesVector(getOperation(), getMask(), sourceType);
+}
+
 mlir::LogicalResult LoadOp::verify()
 {
     if (!hasEnclosingRegion<VecFuncOp>(getOperation()))

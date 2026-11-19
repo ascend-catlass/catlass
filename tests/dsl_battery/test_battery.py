@@ -802,6 +802,11 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
             for dtype in ("f32", "i16")
         ],
     )
+    # One launch per dtype, with three mask tasks on separate AIV blocks.
+    yield (
+        "vector-pair-wise-op",
+        [["end_to_end/pair_wise_op.py", "--batch-run", *dev]],
+    )
     yield (
         "vector-load-store-scalar-after-reduction",
         [["dsl_tutorials/vector_simd_ops/load_and_store_scalar_after_reduction.py", *dev]],

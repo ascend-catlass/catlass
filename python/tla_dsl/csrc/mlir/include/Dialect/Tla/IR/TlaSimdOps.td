@@ -542,6 +542,24 @@ def Tla_ReduceIntraBlockOp : Tla_Op<"reduce_intra_block", [Pure]> {
   let hasVerifier = 1;
 }
 
+def Tla_PairWiseOp : Tla_Op<"pair_wise", [Pure]> {
+  let summary = "Pair-wise sum reduction on VectorSSA values";
+  let description = [{
+    Add every two adjacent lanes and keep the pairwise sums in the low half.
+    The results are written contiguously to the least significant lanes of the
+    destination register; the upper half of the destination is filled with 0.
+    Masked-out lanes are treated as 0. ``kind`` currently only accepts ``add``.
+  }];
+  let arguments = (ins Tla_VectorSSAType:$operand, Optional<Tla_MaskSSAType>:$mask,
+                       StrAttr:$kind);
+  let results = (outs Tla_VectorSSAType:$result);
+  let assemblyFormat = [{
+    $operand (`mask` $mask^)? attr-dict `:`
+    qualified(type($operand)) (`mask` qualified(type($mask))^)? `->` qualified(type($result))
+  }];
+  let hasVerifier = 1;
+}
+
 def Tla_InterleaveOp : Tla_Op<"interleave", [Pure]> {
   let summary = "Interleave on VectorSSA or MaskSSA values";
   let arguments = (ins AnyTypeOf<[Tla_VectorSSAType, Tla_MaskSSAType]>:$src0,

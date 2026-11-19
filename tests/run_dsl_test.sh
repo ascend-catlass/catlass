@@ -121,6 +121,7 @@ MASKED_BINARY_REL="dsl_tutorials/vector_simd_ops/masked_binary.py"
 BITWISE_OPS_REL="dsl_tutorials/vector_simd_ops/bitwise_ops.py"
 BINARY_OP_REL="dsl_tutorials/vector_simd_ops/binary_op.py"
 REDUCTION_OPS_REL="dsl_tutorials/vector_simd_ops/reduction_ops.py"
+PAIR_WISE_OP_REL="python/tla_dsl/tests/end_to_end/pair_wise_op.py"
 LOAD_STORE_SCALAR_AFTER_REDUCTION_REL="dsl_tutorials/vector_simd_ops/load_and_store_scalar_after_reduction.py"
 COMPARE_MASK_REL="dsl_tutorials/vector_simd_ops/compare_mask.py"
 COMPARE_MASK_OPS=(
@@ -203,6 +204,8 @@ Run end-to-end validation for:
   - masked_binary (masked_binary.py masked_binary --all-dtypes)
   - bitwise_ops (bitwise_ops.py bitwise_ops --all-dtypes)
   - reduction_ops (reduction_ops.py <op> --run for add/max/min)
+  - pair_wise (pair_wise_op.py --batch-run: one launch per dtype
+    AIV blocks; f16/f32; packed adjacent sums and zero-filled upper lanes)
   - load_and_store_scalar_after_reduction (UB scalar load/store in tla.vector and outlined tla.vec.func)
   - compare_mask (compare_mask.py <op> --all-dtypes for each compare-mask op)
   - unary_ops (unary_ops.py <op> --all-dtypes for exp/log/sqrt/abs/neg/masked_unary/masked_abs/masked_neg)
@@ -514,6 +517,10 @@ if [[ ! -f "${EXAMPLES_DIR}/${BINARY_OP_REL}" ]]; then
 fi
 if [[ ! -f "${EXAMPLES_DIR}/${REDUCTION_OPS_REL}" ]]; then
     echo "error: missing ${REDUCTION_OPS_REL} under ${EXAMPLES_DIR}" >&2
+    exit 1
+fi
+if [[ ! -f "${CATDSL_ROOT}/${PAIR_WISE_OP_REL}" ]]; then
+    echo "error: missing ${PAIR_WISE_OP_REL} under ${CATDSL_ROOT}" >&2
     exit 1
 fi
 if [[ ! -f "${EXAMPLES_DIR}/${LOAD_STORE_SCALAR_AFTER_REDUCTION_REL}" ]]; then

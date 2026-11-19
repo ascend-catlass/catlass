@@ -42,7 +42,6 @@ def vector_reduce_i64_kernel(src: tla.Tensor) -> None:
             _ = src_reg.reduce(tla.ReductionOp.ADD, mask=reduce_mask)
 
 
-
 @tla.kernel
 def vector_masked_reduce_kernel(src: tla.Tensor) -> None:
     src_tile = tla.tile_view(src, tla.make_shape(64), tla.make_coord(0))
@@ -113,7 +112,11 @@ def vector_reduce_no_mask_kernel(src: tla.Tensor) -> None:
 
 def test_vector_reduce_public_export_exists() -> None:
     assert [op.value for op in tla.ReductionOp] == ["add", "max", "min"]
-    assert [mode.value for mode in tla.ReduceMode] == ["intra_block", "inter_block"]
+    assert [mode.value for mode in tla.ReduceMode] == [
+        "intra_block",
+        "inter_block",
+        "pair_wise",
+    ]
 
 
 def test_vector_reduce_emits_supported_kinds() -> None:
@@ -431,3 +434,107 @@ def test_reduce_intra_block_requires_explicit_mask() -> None:
 def test_reduce_intra_block_rejects_simt_mode() -> None:
     with pytest.raises(tla.TlaCoreAPIError, match="only supported.*simd"):
         _reduce_intra_block_in_simt.dump_mlir(type_args=(_vector_tensor(),))
+
+
+# --- pair wise (tla.reduce mode=PAIR_WISE) ----------------------------------
+# Adjacent lanes are summed pairwise; the sums occupy the low half of the
+# destination register and the upper half is zero-filled by hardware.
+
+
+@tla.kernel
+def vector_pair_wise_f32_kernel(src: tla.Tensor) -> None:
+    src_tile = tla.tile_view(src, tla.make_shape(64), tla.make_coord(0))
+    with tla.vector():
+        with tla.vec.func(mode="simd"):
+            src_reg = src_tile.load()
+            pair_mask = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
+            _ = src_reg.reduce(
+                tla.ReductionOp.ADD,
+                mode=tla.ReduceMode.PAIR_WISE,
+                mask=pair_mask,
+            )
+
+
+@tla.kernel
+def vector_pair_wise_f16_kernel(src: tla.Tensor) -> None:
+    src_tile = tla.tile_view(src, tla.make_shape(64), tla.make_coord(0))
+    with tla.vector():
+        with tla.vec.func(mode="simd"):
+            src_reg = src_tile.load()
+            pair_mask = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float16)
+            _ = src_reg.reduce(
+                tla.ReductionOp.ADD,
+                mode=tla.ReduceMode.PAIR_WISE,
+                mask=pair_mask,
+            )
+
+
+@tla.kernel
+def vector_pair_wise_i32_kernel(src: tla.Tensor) -> None:
+    src_tile = tla.tile_view(src, tla.make_shape(64), tla.make_coord(0))
+    with tla.vector():
+        with tla.vec.func(mode="simd"):
+            src_reg = src_tile.load()
+            pair_mask = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Int32)
+            _ = src_reg.reduce(
+                tla.ReductionOp.ADD,
+                mode=tla.ReduceMode.PAIR_WISE,
+                mask=pair_mask,
+            )
+
+
+@tla.kernel
+def vector_pair_wise_bad_kind_kernel(src: tla.Tensor) -> None:
+    src_tile = tla.tile_view(src, tla.make_shape(64), tla.make_coord(0))
+    with tla.vector():
+        with tla.vec.func(mode="simd"):
+            src_reg = src_tile.load()
+            pair_mask = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
+            _ = src_reg.reduce(
+                tla.ReductionOp.MAX,
+                mode=tla.ReduceMode.PAIR_WISE,
+                mask=pair_mask,
+            )
+
+
+def test_pair_wise_f32() -> None:
+    mlir = vector_pair_wise_f32_kernel.dump_mlir(type_args=(_vector_tensor(),))
+
+    assert mlir.count("tla.pair_wise") == 1
+    assert "!tla.vector<64xf32>" in mlir
+    assert "!tla.mask<64>" in mlir
+    assert 'kind = "add"' in mlir
+
+
+def test_pair_wise_f16() -> None:
+    # 256 B / 2 B = 128 predicate lanes even though the tile loads 64 f16 lanes.
+    mlir = vector_pair_wise_f16_kernel.dump_mlir(
+        type_args=(_vector_tensor(tla.Float16, 64),)
+    )
+
+    assert "tla.pair_wise" in mlir
+    assert "!tla.vector<64xf16>" in mlir
+    assert "!tla.mask<128>" in mlir
+    assert 'kind = "add"' in mlir
+
+
+def test_pair_wise_rejects_non_add_kind() -> None:
+    with pytest.raises(
+        tla.TlaCoreAPIError,
+        match="PAIR_WISE only supports ReductionOp.ADD",
+    ):
+        vector_pair_wise_bad_kind_kernel.dump_mlir(type_args=(_vector_tensor(),))
+
+
+def test_pair_wise_rejects_unsupported_element_type() -> None:
+    with pytest.raises(
+        tla.TlaCoreAPIError,
+        match=r"VectorSSA.reduce: unsupported pair_wise element type i32",
+    ):
+        vector_pair_wise_i32_kernel.dump_mlir(type_args=(_vector_tensor(tla.Int32),))
+
+
+def test_pair_wise_public_api_is_removed() -> None:
+    assert not hasattr(tla, "pair_wise")
+    assert not hasattr(tla, "PairWiseMode")
+    assert not hasattr(tla, "MaskMergeMode")

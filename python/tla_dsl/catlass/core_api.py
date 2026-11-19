@@ -454,6 +454,22 @@ def _check_reduce_intra_block_element_type_supported(
     )
 
 
+# PairWise (``ReduceMode.PAIR_WISE``) maps to the Vcpadd regbase
+# instruction, which only covers the half and float element types.
+_SUPPORTED_PAIR_WISE_ELEMENT_TYPES = frozenset({"f16", "f32"})
+
+
+def _check_pair_wise_element_type_supported(op_name: str, element_type: str) -> None:
+    if element_type in _SUPPORTED_PAIR_WISE_ELEMENT_TYPES:
+        return
+    supported = ", ".join(sorted(_SUPPORTED_PAIR_WISE_ELEMENT_TYPES))
+    _op_error(
+        op_name,
+        f"unsupported pair_wise element type {element_type}; "
+        f"supported element types are {supported}",
+    )
+
+
 class _Shape:
     """Result of ``make_shape``: Kernel ``!tla.shape`` SSA, or Host int-tree components.
 
@@ -998,31 +1014,40 @@ class VectorSSA(_RegisterSSA):
               mirrors the operand shape and element type, except for `ADD`
               on i16/u16 sources, which returns the widened 32-bit result
               (see Constraints).
+            - `ReduceMode.PAIR_WISE`: add every two adjacent lanes (only
+              `tla.ReductionOp.ADD`); the pairwise sums are written to the
+              least significant lanes of the returned vector and the upper
+              half lanes are 0. Masked-out source lanes are treated as 0.
 
             Parameters:
-            - `kind` (`ReductionOp`): Reduction kind (`ADD`, `MAX`, or `MIN`). Required.
+            - `kind` (`ReductionOp`): Reduction kind (`ADD`, `MAX`, or `MIN`).
+              `PAIR_WISE` accepts only `ADD`. Required.
             - `mode` (`ReduceMode`): Reduction scope. Optional, default `ReduceMode.INTER_BLOCK`.
             - `mask` (`MaskSSA`): Predicates which lanes participate. Required.
-            - `init_value`: Reserved; only `None` is supported today (`INTER_BLOCK`). Optional, default `None`.
-            - `reduction_profile`: Reserved; only `None` is supported today (`INTER_BLOCK`). Optional, default `None`.
+            - `init_value`: Reserved; only `None` is supported today. Optional, default `None`.
+            - `reduction_profile`: Reserved; only `None` is supported today. Optional, default `None`.
 
             Constraints:
             - Must be called inside a `@tla.kernel`-decorated kernel function.
-            - Must be called inside `tla.vec.func()`; `INTRA_BLOCK` requires
-              `tla.vec.func(mode="simd")`.
+            - Must be called inside `tla.vec.func()`; `INTRA_BLOCK` and
+              `PAIR_WISE` require `tla.vec.func(mode="simd")`.
             - Element type must be one of f16/f32/i16/i32/u16/u32.
-            - `INTER_BLOCK`: `init_value` and `reduction_profile` must be omitted or `None`.
-            - `INTRA_BLOCK`: `init_value` and `reduction_profile` must be omitted or `None`.
-              A fully masked-off block yields the hardware identity: 0 for
-              `ADD`; for `MAX` the element type's minimum (negative infinity
-              for floating point) and for `MIN` the element type's maximum
-              (positive infinity for floating point).
+              `PAIR_WISE` supports only f16/f32.
+            - `init_value` and `reduction_profile` must be omitted or `None`.
+            - `INTER_BLOCK`: a fully masked-off block yields the hardware
+              identity: 0 for `ADD`; for `MAX` the element type's minimum
+              (negative infinity for floating point) and for `MIN` the element
+              type's maximum (positive infinity for floating point).
             - `INTRA_BLOCK` `ADD` on i16/u16 sources returns the widened
               32-bit result of the underlying instruction (same as vcadd): the
               result has half the lanes rounded up with i32/u32 element type
               (so a tail's last valid element keeps its widened lane), and no
               cast back to 16 bits is performed. Block sums that exceed the
               source type's range stay exact in the i32/u32 result.
+            - `PAIR_WISE`: The reduction mode supports
+              only `ADD`, and the mask merge mode is ZEROING, i.e., the high
+              lanes are 0. With a fully active f16 vector, lanes 0..63 hold
+              the pairwise sums and lanes 64..127 are 0.
 
             Example:
             ```python
@@ -1032,6 +1057,9 @@ class VectorSSA(_RegisterSSA):
                 broadcast = tla.full(total, dtype=tla.Float32)
                 packed = src_reg.reduce(
                     tla.ReductionOp.ADD, mode=tla.ReduceMode.INTRA_BLOCK, mask=m
+                )
+                sums = src_reg.reduce(
+                    tla.ReductionOp.ADD, mode=tla.ReduceMode.PAIR_WISE, mask=m
                 )
             ```
         """
@@ -10237,8 +10265,24 @@ def _emit_vector_reduce(
     operand_desc = _vector_ssa_type_for_mlir_value(operand_value)
     mask_value = _as_value(mask)
     _require_mask_matches_vector(op_name, mask_value, operand_value)
-    # The two scopes emit different IR ops (the lowering stays separate); only
-    # the frontend dispatch is merged here.
+    # The scopes emit different IR ops (the lowering stays separate); only the
+    # frontend dispatch is merged here.
+    if mode is ReduceMode.PAIR_WISE:
+        if _runtime._in_simt_vec_func():
+            _op_error(
+                op_name, "PAIR_WISE is only supported in tla.vec.func(mode='simd')"
+            )
+        if kind is not ReductionOp.ADD:
+            _op_error(op_name, "PAIR_WISE only supports ReductionOp.ADD")
+        _check_pair_wise_element_type_supported(op_name, operand_desc.element_type)
+        result = _tla_ops_gen.pair_wise(
+            operand_value.type,
+            operand_value,
+            kind.value,
+            mask=mask_value,
+            loc=loc,
+        )
+        return VectorSSA(result)
     if mode is ReduceMode.INTRA_BLOCK:
         if _runtime._in_simt_vec_func():
             _op_error(
@@ -12461,6 +12505,7 @@ _require_generated("bitwise_xor")
 _require_generated("divs")
 _require_generated("reduce")
 _require_generated("reduce_intra_block")
+_require_generated("pair_wise")
 _require_generated("bitcast")
 _require_generated("interleave")
 _require_generated("deinterleave")

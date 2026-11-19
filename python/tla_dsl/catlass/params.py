@@ -90,11 +90,14 @@ class ReduceMode(enum.Enum):
 
     INTER_BLOCK (default) reduces the whole vector across all 32-byte data
     blocks to a one-lane fragment; INTRA_BLOCK reduces each 32-byte block
-    independently and returns the packed per-block results.
+    independently and returns the packed per-block results; PAIR_WISE adds
+    each adjacent pair of lanes and keeps the per-pair sums in the low half of
+    the destination register.
     """
 
     INTRA_BLOCK = "intra_block"
     INTER_BLOCK = "inter_block"
+    PAIR_WISE = "pair_wise"
 
     def __str__(self) -> str:
         return self.value

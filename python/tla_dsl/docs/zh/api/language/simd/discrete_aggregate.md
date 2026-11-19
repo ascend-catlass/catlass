@@ -33,6 +33,9 @@ Do not regenerate this file from a glossary.
   全屏蔽块的结果 lane 为恒等值（见约束说明）。结果除 i16/u16 的
   `ADD` 返回加宽的 32 位结果（见约束说明）外，与操作数的 shape 和
   元素类型一致。
+- `ReduceMode.PAIR_WISE`：将每两个相邻 lane 相加（仅支持
+  `tla.ReductionOp.ADD`）；成对和写入返回 vector 的最低有效 lane，
+  高半部分 lane 置 0。被 mask 屏蔽的源 lane 按 0 处理。
 
 函数原型：
 
@@ -42,27 +45,32 @@ tla.VectorSSA.reduce(kind: ReductionOp, *, mode: ReduceMode = ReduceMode.INTER_B
 
 参数说明：
 
-- `kind`（`ReductionOp`）：归约种类（`ADD`、`MAX` 或 `MIN`）。必填。
+- `kind`（`ReductionOp`）：归约种类（`ADD`、`MAX` 或 `MIN`）。
+  `PAIR_WISE` 仅接受 `ADD`。必填。
 - `mode`（`ReduceMode`）：归约范围。可选，默认 `ReduceMode.INTER_BLOCK`。
 - `mask`（`MaskSSA`）：谓词哪些 lane 参与。必填。
-- `init_value`：预留；当前仅支持 `None`（`INTER_BLOCK`）。可选，默认 `None`。
-- `reduction_profile`：预留；当前仅支持 `None`（`INTER_BLOCK`）。可选，默认 `None`。
+- `init_value`：预留；当前仅支持 `None`。可选，默认 `None`。
+- `reduction_profile`：预留；当前仅支持 `None`。可选，默认 `None`。
 
 约束说明：
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
-- 须在 `tla.vec.func()` 内调用；`INTRA_BLOCK` 须在
+- 须在 `tla.vec.func()` 内调用；`INTRA_BLOCK` 与 `PAIR_WISE` 须在
   `tla.vec.func(mode="simd")` 内调用。
 - 元素类型须为 f16/f32/i16/i32/u16/u32 之一。
-- `INTER_BLOCK`：`init_value` 与 `reduction_profile` 须省略或为 `None`。
-- `INTRA_BLOCK`：`init_value` 与 `reduction_profile` 须省略或为 `None`。
-  完全 mask 掉的块得到硬件恒等值：`ADD` 为 0；`MAX` 为元素类型
-  最小值（浮点为负无穷），`MIN` 为元素类型最大值（浮点为正无穷）。
+  `PAIR_WISE` 仅支持 f16/f32。
+- `init_value` 与 `reduction_profile` 须省略或为 `None`。
+- `INTER_BLOCK`：完全 mask 掉的块得到硬件恒等值：`ADD` 为 0；`MAX`
+  为元素类型最小值（浮点为负无穷），`MIN` 为元素类型最大值（浮点为
+  正无穷）。
 - `INTRA_BLOCK` 的 i16/u16 源 `ADD` 返回底层指令加宽后的 32 位结果
   （与 vcadd 相同）：结果 lane 数按 32 位结果 lane 减半并向上取整
   （尾块最后一个有效元素仍保留其加宽 lane）、元素类型为 i32/u32，
   且不做转回 16 位的 cast。超出源类型范围的块内累加和在 i32/u32
   结果中保持精确。
+- `PAIR_WISE`：该归约模式仅支持 `ADD`，mask
+  合并模式为 ZEROING，即高位 lane 为 0。f16 vector 全有效时，
+  lane 0..63 保存成对和，lane 64..127 为 0。
 
 调用示例：
 
@@ -73,6 +81,9 @@ with tla.vec.func(mode="simd"):
     broadcast = tla.full(total, dtype=tla.Float32)
     packed = src_reg.reduce(
         tla.ReductionOp.ADD, mode=tla.ReduceMode.INTRA_BLOCK, mask=m
+    )
+    sums = src_reg.reduce(
+        tla.ReductionOp.ADD, mode=tla.ReduceMode.PAIR_WISE, mask=m
     )
 ```
 

@@ -658,11 +658,11 @@ static bool isVectorComputeOp(Operation* op)
     return getAnyVectorOperationInfo(op).has_value() || isa_and_nonnull<::tla::CmpOp>(op) ||
            isa_and_nonnull<::tla::WhereOp>(op) || isa_and_nonnull<::tla::SqueezeOp>(op) ||
            isa_and_nonnull<::tla::HistogramsOp>(op) || isa_and_nonnull<::tla::ReduceOp>(op) ||
-           isa_and_nonnull<::tla::ReduceIntraBlockOp>(op) || isa_and_nonnull<::tla::GatherOp>(op) ||
-           isa_and_nonnull<::tla::CastOp>(op) || isa_and_nonnull<::tla::BitCastOp>(op) ||
-           isa_and_nonnull<::tla::ExpSubOp>(op) || isa_and_nonnull<::tla::PackOp>(op) ||
-           isa_and_nonnull<::tla::UnpackOp>(op) || isa_and_nonnull<::tla::InterleaveOp>(op) ||
-           isa_and_nonnull<::tla::DeInterleaveOp>(op);
+           isa_and_nonnull<::tla::ReduceIntraBlockOp>(op) || isa_and_nonnull<::tla::PairWiseOp>(op) ||
+           isa_and_nonnull<::tla::GatherOp>(op) || isa_and_nonnull<::tla::CastOp>(op) ||
+           isa_and_nonnull<::tla::BitCastOp>(op) || isa_and_nonnull<::tla::ExpSubOp>(op) ||
+           isa_and_nonnull<::tla::PackOp>(op) || isa_and_nonnull<::tla::UnpackOp>(op) ||
+           isa_and_nonnull<::tla::InterleaveOp>(op) || isa_and_nonnull<::tla::DeInterleaveOp>(op);
 }
 
 static void annotateAivLibraryCall(func::FuncOp callee)
@@ -3109,6 +3109,40 @@ static LogicalResult lowerReduceIntraBlock(
     return success();
 }
 
+// tla.pair_wise: adjacent-lane pairwise sum
+// lowered straight to the Vcpadd regbase instruction. The destination keeps the
+// full 256-byte container: the pairwise sums occupy its low half and the upper
+// half is zero-filled by hardware. There is no AVE pair-wise op, so the
+// instruction is emitted directly, like the Vcg group reductions above.
+static LogicalResult lowerPairWise(
+    ::tla::PairWiseOp pairOp, OpBuilder& b, ModuleOp module, DenseMap<Value, Value>& valueMap,
+    AutoFullPredicateCache& fullMasks)
+{
+    Location loc = pairOp.getLoc();
+    if (pairOp.getKind() != "add")
+        return pairOp.emitError() << "tla.pair_wise supports only add, got \"" << pairOp.getKind() << "\"", failure();
+    Value operand = valueMap.lookup(pairOp.getOperand());
+    if (!operand)
+        return failure();
+    auto operandTy = dyn_cast<VectorType>(operand.getType());
+    if (!operandTy)
+        return failure();
+    Type tlaElem = tlaElementOr(pairOp.getOperand().getType(), operandTy.getElementType());
+    auto opCtx = deriveVecCtxForElement(tlaElem);
+    if (failed(opCtx))
+        return failure();
+    if (!pairOp.getMask())
+        return pairOp.emitError("tla.pair_wise requires an explicit mask"), failure();
+    Value mask = valueMap.lookup(pairOp.getMask());
+    if (!mask)
+        return failure();
+    VectorType pregVecType = fullPregVecType(b.getContext());
+    Value preg = castMaskToPregType(b, loc, mask, pregVecType);
+    Value result = b.create<hivm_regbaseintrins::VcpaddInstrOp>(loc, opCtx->vecType, operand, preg).getRes();
+    valueMap[pairOp.getResult()] = result;
+    return success();
+}
+
 static LogicalResult lowerPack(::tla::PackOp packOp, OpBuilder& b, ModuleOp module, DenseMap<Value, Value>& valueMap)
 {
     Location loc = packOp.getLoc();
@@ -4380,6 +4414,9 @@ static LogicalResult lowerNestedVectorOp(
     if (auto rdbOp = dyn_cast<::tla::ReduceIntraBlockOp>(op))
         return lowerReduceIntraBlock(rdbOp, b, module, valueMap, fullMasks);
 
+    if (auto pairOp = dyn_cast<::tla::PairWiseOp>(op))
+        return lowerPairWise(pairOp, b, module, valueMap, fullMasks);
+
     if (auto packOp = dyn_cast<::tla::PackOp>(op))
         return lowerPack(packOp, b, module, valueMap);
     if (auto unpackOp = dyn_cast<::tla::UnpackOp>(op))
@@ -5305,6 +5342,13 @@ public:
                 if (!producedValues.contains(reduceDataBlockOp.getOperand()))
                     return rewriter.notifyMatchFailure(
                         vecFuncOp, "expected tla.reduce_intra_block operand from tla.load or prior compute op");
+            } else if (auto pairWiseOp = dyn_cast<::tla::PairWiseOp>(computeOp)) {
+                if (pairWiseOp.getMask() && !producedValues.contains(pairWiseOp.getMask()))
+                    return rewriter.notifyMatchFailure(
+                        vecFuncOp, "expected tla.pair_wise mask from a legal mask producer");
+                if (!producedValues.contains(pairWiseOp.getOperand()))
+                    return rewriter.notifyMatchFailure(
+                        vecFuncOp, "expected tla.pair_wise operand from tla.load or prior compute op");
             } else if (auto packOp = dyn_cast<::tla::PackOp>(computeOp)) {
                 if (!producedValues.contains(packOp.getSrc()))
                     return rewriter.notifyMatchFailure(
