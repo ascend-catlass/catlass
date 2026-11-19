@@ -132,9 +132,12 @@ types are rejected. This operation changes neither byte order nor
 register slot and does not pack sparse values. Use `.to()` for
 numeric conversion and explicit rearrangement for layout changes.
 
-`i64`/`u64` registers can come from extern or bitcast. This adds no
-64-bit Tensor load/store or arithmetic routes; those operations
-must independently support the element type.
+`i64`/`u64` registers can come from UB loads, `tla.extern`, or
+bitcast. Register staging supports aligned, full-width
+`DIST_NORM` loads and aligned `DIST_NORM` stores without an
+explicit mask. Tensor copy support depends on the route; see
+the `tla.copy` route table. Bitcast does not extend these
+movement constraints or enable 64-bit arithmetic.
 
 Prototype:
 

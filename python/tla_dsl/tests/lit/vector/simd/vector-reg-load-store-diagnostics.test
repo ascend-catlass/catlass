@@ -1,0 +1,35 @@
+// RUN: sed -n '/^\/\/ BEGIN_SHORT_STORE$/,/^\/\/ END_SHORT_STORE$/p' %s | sed '1d;$d;s|^// ||' > %t.SHORT_STORE.mlir && not %tla_compile %t.SHORT_STORE.mlir -o %t 2>&1 | %filecheck %s --check-prefix=SHORT-STORE
+// RUN: sed 's/i64/f64/g' %t.SHORT_STORE.mlir | not %tla_compile - -o %t 2>&1 | %filecheck %s --check-prefix=SHORT-STORE
+// RUN: sed -n '/^\/\/ BEGIN_SHORT_LOAD$/,/^\/\/ END_SHORT_LOAD$/p' %s | sed '1d;$d;s|^// ||' > %t.SHORT_LOAD.mlir && not %tla_compile %t.SHORT_LOAD.mlir -o %t 2>&1 | %filecheck %s --check-prefix=SHORT-LOAD
+
+// SHORT-STORE: 64-bit register store requires a full 256-byte vector register (32 lanes)
+
+// BEGIN_SHORT_STORE
+// !tile = !tla.tensor<!tla.layout<!tla.shape<32>, !tla.stride<1>, !tla.shape<32>, RowMajor>, !tla.coord<0>, !tla.ptr<i64, ub, 256>>
+// module {
+//   tla.func @short_store(%tile: !tile, %reg: !tla.vector<16xi64>) {
+//     "tla.vector"() ({
+//       "tla.vec.func"() ({
+//         tla.store %tile, %reg : !tile, !tla.vector<16xi64>
+//       }) {mode = "simd"} : () -> ()
+//     }) : () -> ()
+//     tla.return
+//   }
+// }
+// END_SHORT_STORE
+
+// SHORT-LOAD: f64 register load requires a full 256-byte vector register (32 lanes)
+
+// BEGIN_SHORT_LOAD
+// !tile = !tla.tensor<!tla.layout<!tla.shape<32>, !tla.stride<1>, !tla.shape<32>, RowMajor>, !tla.coord<0>, !tla.ptr<f64, ub, 256>>
+// module {
+//   tla.func @short_load(%tile: !tile) {
+//     "tla.vector"() ({
+//       "tla.vec.func"() ({
+//         %reg = tla.load %tile : !tile -> !tla.vector<16xf64>
+//       }) {mode = "simd"} : () -> ()
+//     }) : () -> ()
+//     tla.return
+//   }
+// }
+// END_SHORT_LOAD

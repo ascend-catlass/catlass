@@ -1131,6 +1131,10 @@ mlir::LogicalResult StoreOp::verify()
     if (!vectorSource)
         return emitOpError("source must be !tla.vector or !tla.mask");
 
+    if ((vectorSource.getElementType().isInteger(64) || vectorSource.getElementType().isF64()) &&
+        vectorSource.getValidLanes() != 32)
+        return emitOpError("64-bit register store requires a full 256-byte vector register (32 lanes)");
+
     bool isUnaligned = getUnalignedUbAccess().value_or(false);
     if (isUnaligned && getBlockStride())
         return emitOpError("unaligned_ub_access and block_stride are mutually exclusive");
@@ -1556,6 +1560,18 @@ mlir::LogicalResult LoadOp::verify()
 
     if (!mlir::isa<VectorSSAType>(getResult().getType()))
         return emitOpError("result must be !tla.vector or !tla.mask");
+
+    auto vectorResult = mlir::cast<VectorSSAType>(getResult().getType());
+    if (vectorResult.getElementType().isF64() && vectorResult.getValidLanes() != 32)
+        return emitOpError("f64 register load requires a full 256-byte vector register (32 lanes)");
+    if (sourceType.getPtr().getPointee().isInteger(64) || sourceType.getPtr().getPointee().isF64() ||
+        vectorResult.getElementType().isInteger(64) || vectorResult.getElementType().isF64()) {
+        if (vectorResult.getElementType() != sourceType.getPtr().getPointee())
+            return emitOpError("64-bit register load requires matching element types");
+        if ((getLoadDist() && getLoadDist()->getLoadDist() != LoadDist::norm) || getBlockStride() ||
+            getUnalignedUbAccess().value_or(false))
+            return emitOpError("64-bit register load requires aligned NORM distribution");
+    }
 
     if (getLoadDist() && getLoadDist()->getLoadDist() == ::LoadDist::unpack4_b8) {
         auto resultType = mlir::cast<VectorSSAType>(getResult().getType());

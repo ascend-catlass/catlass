@@ -138,8 +138,10 @@ with tla.vec.func(mode="simd"):
 不支持 `tla.Bool`、`tla.Float8E8M0` 或逻辑四位 Tensor 类型。该操作不改变字节顺序
 或 register slot，也不压紧稀疏值。数值转换使用 `.to()`，布局变化使用显式重排。
 
-`i64`/`u64` 寄存器可由 extern 返回或通过 bitcast 产生。该操作不会新增 64 位
-Tensor load/store 或算术路径；后续操作须独立支持该元素类型。
+`i64`/`u64` 寄存器可通过 UB load、`tla.extern` 或 bitcast 获得。
+寄存器搬运支持对齐、满宽的 `DIST_NORM` load，以及对齐且不带显式 mask 的
+`DIST_NORM` store。Tensor copy 支持范围取决于搬运通路，见 `tla.copy` 路由表。
+bitcast 不会放宽这些搬运约束，也不会启用 64 位算术运算。
 
 函数原型：
 

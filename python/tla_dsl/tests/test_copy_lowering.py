@@ -1490,7 +1490,7 @@ def test_frontend_rejects_u64_tile_outside_supported_construction(
     """Allowing UB / VectorLayout staging does not admit row-major u64 L1 tiles."""
     with pytest.raises(
         TlaLoweringError,
-        match=r"i64/u64 are accepted in UB.*GM/L1 VectorLayout",
+        match=r"i64/u64/f64 are accepted in UB.*GM/L1 VectorLayout",
     ):
         _integer64_tile_kernel(addrspace, layout_tag).dump_mlir()
 

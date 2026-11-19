@@ -153,8 +153,10 @@ tla.scatter(dst: Tensor, src: VectorSSA, indices: VectorSSA, *, mask: MaskSSA | 
 - 源与索引各占用一个 256 字节寄存器。索引数量须覆盖源的全部有效 lane；
   8 位数据需要 ceil(valid_lanes / 2) 个索引。
 - 64 位数据仅使用前 32 个 u32 索引；u64 索引仅使用低 32 位。
-- 通用 i64/u64 tensor load/copy 尚不支持，使用 `tla.extern` 生成对应寄存器，
-  通过重解释的字节视图搬运数据。
+- `i64`/`u64` 数据可通过对齐、满宽的 `DIST_NORM` load，以及对齐且不带
+  显式 mask 的 `DIST_NORM` store 在 UB 与寄存器之间搬运。GM 与 UB 之间支持
+  双向 `RowMajor` copy，同时支持 GM→UB 的 `VectorLayout` copy。
+  copy 的具体约束见 `tla.copy` 路由表。
 
 调用示例：
 

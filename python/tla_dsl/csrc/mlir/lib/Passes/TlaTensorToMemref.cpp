@@ -684,10 +684,8 @@ static StringRef copyRuntimeElemSuffix(Type elementType)
         return "int16_t";
     if (elementType.isSignlessInteger(32))
         return "int32_t";
-    // Unsigned cube / vector staging routes (see bc/Cube/dma.cpp and
-    // bc/Vector/dma.cpp). 64-bit widths (u64/i64/f64) are absent on purpose:
-    // only the flat VectorLayout GM->L1 branch admits them via a local suffix
-    // map, so GM<->UB cannot pick them up through this shared helper.
+    // Shared unsigned cube/vector routes. The 64-bit registrations are
+    // selected only in the individual routes that provide those wrappers.
     if (elementType.isUnsignedInteger(8))
         return "uint8_t";
     if (elementType.isUnsignedInteger(16))
@@ -709,6 +707,25 @@ static StringRef copyRuntimeElemSuffix(Type elementType)
     if (::llvm::isa<::tla::Float4E1M2Type>(elementType))
         return "float4_e1m2x2_t";
     return {};
+}
+
+// Keep 64-bit symbols local to the routes that register them.
+static StringRef b64CopyElemSuffix(Type elementType)
+{
+    if (elementType.isSignlessInteger(64))
+        return "int64_t";
+    if (elementType.isUnsignedInteger(64))
+        return "uint64_t";
+    if (elementType.isF64())
+        return "double";
+    return {};
+}
+
+static StringRef rowMajorGmUbCopyElemSuffix(Type elementType)
+{
+    if (auto suffix = b64CopyElemSuffix(elementType); !suffix.empty())
+        return suffix;
+    return copyRuntimeElemSuffix(elementType);
 }
 
 // Whether fixpipe can carry this L0C element type out to the given destination
@@ -785,10 +802,19 @@ std::string getCopyRouteCallee(
         srcLayout == LayoutTag::RowMajor && dstLayout == LayoutTag::RowMajor) {
         if (srcElementType != dstElem)
             return {};
-        StringRef suffix = copyRuntimeElemSuffix(srcElementType);
+        StringRef suffix = rowMajorGmUbCopyElemSuffix(srcElementType);
         if (suffix.empty())
             return {};
         return Twine("copy_gm_RowMajor_to_ub_RowMajor_").concat(suffix).str();
+    }
+    if (*srcSpace == hivm::AddressSpace::GM && *dstSpace == hivm::AddressSpace::UB &&
+        srcLayout == LayoutTag::VectorLayout && dstLayout == LayoutTag::VectorLayout) {
+        if (srcElementType != dstElem)
+            return {};
+        StringRef suffix = b64CopyElemSuffix(srcElementType);
+        if (suffix.empty())
+            return {};
+        return Twine("copy_gm_VectorLayout_to_ub_VectorLayout_").concat(suffix).str();
     }
     // UB (row-major) -> UB (row-major): not an MTE transfer at all -- there is no
     // engine with UB on both sides. This meta-op is the block-aligned fast path
@@ -820,7 +846,7 @@ std::string getCopyRouteCallee(
         srcLayout == LayoutTag::RowMajor && dstLayout == LayoutTag::RowMajor) {
         if (srcElementType != dstElem)
             return {};
-        StringRef suffix = copyRuntimeElemSuffix(srcElementType);
+        StringRef suffix = rowMajorGmUbCopyElemSuffix(srcElementType);
         if (suffix.empty())
             return {};
         return Twine("copy_ub_RowMajor_to_gm_RowMajor_").concat(suffix).str();
@@ -914,11 +940,8 @@ std::string getCopyRouteCallee(
     // fixpipe dequant scale tile, which is one packed uint64 word per output
     // channel, plus general b64 staging (i64 / f64).
     //
-    // 64-bit element types ride only here. They stay out of copyRuntimeElemSuffix
-    // -- which every route shares -- so widening them cannot quietly admit
-    // i64/u64/f64 on GM<->UB, where no bc wrapper exists:
-    // tests/lit/tensor/make-tensor-copy-gm-ub.mlir pins that rejection. Widening
-    // the staging set is a decision, not a side effect of a width mapping.
+    // 64-bit types remain outside the shared copy suffix lookup. This L1 route and
+    // the GM/UB staging routes select their registered 64-bit wrappers explicitly.
     if (*srcSpace == hivm::AddressSpace::GM && *dstSpace == hivm::AddressSpace::L1 &&
         srcLayout == LayoutTag::VectorLayout && dstLayout == LayoutTag::VectorLayout) {
         if (srcElementType != dstElem)
@@ -1210,6 +1233,7 @@ static bool isAivTemplateRuntimeCall(StringRef name)
     return name.starts_with("copy_ub_zZMxScale_to_l1_zZMxScale_") ||
            name.starts_with("copy_ub_nNMxScale_to_l1_nNMxScale_") || name.starts_with("copy_ub_RowMajor_to_l1_zN_") ||
            name.starts_with("copy_ub_zN_to_l1_zN_") || name.starts_with("copy_gm_RowMajor_to_ub_RowMajor_") ||
+           name.starts_with("copy_gm_VectorLayout_to_ub_VectorLayout_") ||
            name.starts_with("copy_ub_RowMajor_to_gm_RowMajor_") ||
            name.starts_with("copy_ub_RowMajor_to_ub_RowMajor_") ||
            name.starts_with("copy_ub_RowMajor_to_ub_ColumnMajor_");

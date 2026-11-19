@@ -2373,6 +2373,26 @@ static FailureOr<Value> resolveEffectiveUbPtr(
 // ops; scf control flow and index arithmetic are carried verbatim. Each op
 // derives its own vector/mask width from its operands or result element type,
 // so a single region may mix element widths (e.g. across tla.cast).
+// Reinterpret one register's storage without changing its effective byte address.
+// The carrier always spans a 256-byte register. The tensor descriptor still
+// determines the valid tile extent and any store tail predicate.
+static Value materializeDataMemref(OpBuilder& b, Location loc, Value source, Type elementType)
+{
+    auto type = cast<MemRefType>(source.getType());
+    if (type.getElementType() == elementType)
+        return source;
+    auto meta = b.create<mlir::memref::ExtractStridedMetadataOp>(loc, source);
+    Value base = b.create<mlir::memref::ExtractAlignedPointerAsIndexOp>(loc, meta.getBaseBuffer());
+    Value scale = b.create<arith::ConstantIndexOp>(loc, getByteSizeOfFixedWidthScalarType(type.getElementType()));
+    Value offset = b.create<arith::MulIOp>(loc, meta.getOffset(), scale);
+    Value index = b.create<arith::AddIOp>(loc, base, offset);
+    Value addr = b.create<arith::IndexCastOp>(loc, b.getI64Type(), index);
+    auto layout = StridedLayoutAttr::get(b.getContext(), 0, ArrayRef<int64_t>{1});
+    auto resultType = MemRefType::get(
+        {256 / getByteSizeOfFixedWidthScalarType(elementType)}, elementType, layout, type.getMemorySpace());
+    return b.create<hivm::PointerCastOp>(loc, resultType, addr).getResult();
+}
+
 static LogicalResult lowerLoad(
     ::tla::LoadOp loadOp, OpBuilder& b, ModuleOp module, DenseMap<Value, Value>& valueMap,
     AutoFullPredicateCache& fullMasks)
@@ -2508,6 +2528,19 @@ static LogicalResult lowerLoad(
         if (viaBytes)
             loaded = b.create<mlir::vector::BitCastOp>(loc, opCtx->vecType, loaded).getResult();
         valueMap[loadOp.getResult()] = loaded;
+        return success();
+    }
+
+    // Partial logical loads keep the native b64 path used by Scatter.
+    if ((sourceType.getElementType().isInteger(64) || sourceType.getElementType().isF64()) &&
+        cast<::tla::VectorSSAType>(loadOp.getResult().getType()).getValidLanes() == 32) {
+        if (pattern != hivmave::LoadDist::NORM || loadOp.getBlockStride() ||
+            loadOp.getUnalignedUbAccess().value_or(false))
+            return loadOp.emitError("64-bit register load currently requires aligned NORM distribution"), failure();
+        auto words = VectorType::get({64}, b.getI32Type());
+        source = materializeDataMemref(b, loc, source, b.getI32Type());
+        Value loaded = createVFLoad(b, loc, words, source, zero, hivmave::LoadDist::NORM, false).getRes();
+        valueMap[loadOp.getResult()] = b.create<mlir::vector::BitCastOp>(loc, opCtx->vecType, loaded).getResult();
         return success();
     }
 
@@ -3542,6 +3575,34 @@ static LogicalResult lowerStore(
         b.create<hivmave::VFMaskedStoreOp>(
             loc, hivmave::StoreDist::NORM_B8, *i1MemrefOr, ValueRange{zero}, storePred, storeVal);
         return success();
+    }
+
+    if (auto vectorType = dyn_cast<::tla::VectorSSAType>(storeOp.getSource().getType())) {
+        // Explicit masks use the native b64 path, including predicates
+        // produced for Scatter. Only omitted masks use the i32 carrier.
+        if ((vectorType.getElementType().isInteger(64) || vectorType.getElementType().isF64()) && !storeOp.getMask()) {
+            if (storeOp.getBlockStride() || storeOp.getUnalignedUbAccess().value_or(false) ||
+                (storeOp.getStoreDist() && storeOp.getStoreDist()->getStoreDist() != ::StoreDist::norm))
+                return storeOp.emitError("64-bit register store without a mask requires aligned NORM distribution"),
+                       failure();
+            Value mask;
+            if (isProvablyFullVectorStore(storeOp, 32)) {
+                mask = fullMasks.get(loc, 64);
+            } else {
+                auto count = getTlaTensorValidLaneCount(b, loc, storeOp.getDest(), valueMap);
+                if (failed(count))
+                    return failure();
+                Value two = b.create<arith::ConstantIndexOp>(loc, 2);
+                Value activeWords = b.create<arith::MulIOp>(loc, *count, two);
+                mask = createPredicatePlt(b, loc, fullPregVecType(b.getContext()), 64, activeWords).getRes();
+            }
+            auto words = VectorType::get({64}, b.getI32Type());
+            source = b.create<mlir::vector::BitCastOp>(loc, words, source).getResult();
+            dest = materializeDataMemref(b, loc, dest, b.getI32Type());
+            Value zero = b.create<arith::ConstantIndexOp>(loc, 0);
+            b.create<hivmave::VFMaskedStoreOp>(loc, dest, ValueRange{zero}, mask, source);
+            return success();
+        }
     }
 
     Value zero = b.create<arith::ConstantIndexOp>(loc, 0);

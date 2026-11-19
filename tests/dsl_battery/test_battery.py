@@ -490,6 +490,23 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         [["end_to_end/l2_cache_hint.py", *dev, "--n", "256", "--block-num", "1"]],
     )
 
+    # Both GM → UB layouts, followed by UB ↔ register and RowMajor writeback.
+    for movement_dtype in ("i64", "u64", "f64"):
+        for movement_layout in ("row", "vector"):
+            yield (
+                f"data-movement-roundtrip-{movement_dtype}-{movement_layout}",
+                [
+                    [
+                        "end_to_end/data_movement_roundtrip.py",
+                        "--dtype",
+                        movement_dtype,
+                        "--layout",
+                        movement_layout,
+                        *dev,
+                    ]
+                ],
+            )
+
     # --- basic_mixed ---
     # One test on purpose: the second invocation exercises cache reuse and is
     # only meaningful straight after the one that populates the cache.

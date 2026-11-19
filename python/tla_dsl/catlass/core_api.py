@@ -91,8 +91,9 @@ _CAST_SAME_TYPE_FLOAT_DTYPES = frozenset({"f16", "bf16", "f32"})
 # excluded: their 4-bit values differ from byte registers holding two values
 # per lane.
 #
-# i64/u64 registers can come from extern or bitcast. Tensor load/store and
-# arithmetic routes must independently support the element type.
+# i64/u64 registers can come from supported UB loads, extern, or bitcast.
+# Tensor load/store and copy support depends on the distribution, mask, and
+# route; bitcast does not extend that support or enable 64-bit arithmetic.
 _BITCAST_ELEMENT_TYPES = frozenset(
     {
         "i8",
@@ -369,12 +370,11 @@ _MAKE_TENSOR_SUPPORTED_ELEMENT_TYPES = frozenset(
 )
 
 # 64-bit tiles admitted outside the global make_tensor set:
-# - i64/u64 on UB for Scatter destinations;
+# - i64/u64 on UB for Scatter;
+# - i64/u64/f64 on RowMajor or VectorLayout GM/UB staging;
 # - flat VectorLayout GM -> L1 (and make_tensor_like on L1) for fixpipe
 #   dequant words (u64) and general b64 runs (i64 / f64).
-# Keeping them out of the global set above means other layouts / spaces are
-# refused where they are built. They also stay out of the shared MLIR
-# copyRuntimeElemSuffix map so GM<->UB cannot pick them up accidentally.
+# The copy route table limits each staging combination to registered wrappers.
 _B64_STAGING_DTYPES = frozenset({"u64", "i64", "f64"})
 _B64_STAGING_ADDRSPACES = frozenset({"gm", "l1"})
 _B64_STAGING_LAYOUT_TAG = "VectorLayout"
@@ -1290,9 +1290,12 @@ class VectorSSA(_RegisterSSA):
             register slot and does not pack sparse values. Use `.to()` for
             numeric conversion and explicit rearrangement for layout changes.
 
-            `i64`/`u64` registers can come from extern or bitcast. This adds no
-            64-bit Tensor load/store or arithmetic routes; those operations
-            must independently support the element type.
+            `i64`/`u64` registers can come from UB loads, `tla.extern`, or
+            bitcast. Register staging supports aligned, full-width
+            `DIST_NORM` loads and aligned `DIST_NORM` stores without an
+            explicit mask. Tensor copy support depends on the route; see
+            the `tla.copy` route table. Bitcast does not extend these
+            movement constraints or enable 64-bit arithmetic.
 
             Parameters:
             - `dst_type` (`type[Numeric]`): Element type to reinterpret as. Required.
@@ -5561,7 +5564,12 @@ def make_tensor(
             f"tla.make_tensor cannot derive element type from ptr pointee {ptr_ty.pointee}"
         ) from exc
     if dtype not in _MAKE_TENSOR_SUPPORTED_ELEMENT_TYPES and not (
-        (dtype in ("i64", "u64") and addr == "ub")
+        (dtype in _B64_STAGING_DTYPES and addr == "ub")
+        or (
+            dtype in _B64_STAGING_DTYPES
+            and addr == "gm"
+            and layout._layout_tag == "RowMajor"
+        )
         or (
             dtype in _B64_STAGING_DTYPES
             and addr in _B64_STAGING_ADDRSPACES
@@ -5571,8 +5579,8 @@ def make_tensor(
         raise TlaLoweringError(
             f"tla.make_tensor expects a supported element type, got [{dtype}]"
             + (
-                "; i64/u64 are accepted in UB for scatter, and i64/u64/f64 as "
-                "GM/L1 VectorLayout tiles for the flat GM->L1 staging route"
+                "; i64/u64/f64 are accepted in UB and RowMajor GM tiles, and "
+                "i64/u64/f64 as GM/L1 VectorLayout tiles"
                 if dtype in _B64_STAGING_DTYPES
                 else ""
             )
@@ -5787,15 +5795,17 @@ def make_tensor_like(
         _name_token(layoutTag) if layoutTag is not None else like_type.layout_tag
     )
     if dtype not in _MAKE_TENSOR_SUPPORTED_ELEMENT_TYPES and not (
-        dtype in _B64_STAGING_DTYPES
-        and addr in _B64_STAGING_ADDRSPACES
-        and _like_layout_for_gate == _B64_STAGING_LAYOUT_TAG
+        (dtype in _B64_STAGING_DTYPES and addr == "ub")
+        or (
+            dtype in _B64_STAGING_DTYPES
+            and addr in _B64_STAGING_ADDRSPACES
+            and _like_layout_for_gate == _B64_STAGING_LAYOUT_TAG
+        )
     ):
         raise TlaLoweringError(
             f"tla.make_tensor_like expects a supported element type, got [{dtype}]"
             + (
-                "; i64/u64/f64 are only accepted as L1 VectorLayout tiles for "
-                "the flat GM->L1 staging route"
+                "; i64/u64/f64 are accepted in UB or as L1 VectorLayout tiles"
                 if dtype in _B64_STAGING_DTYPES
                 else ""
             )
@@ -5865,6 +5875,13 @@ def make_tensor_like(
                 "invalid argument 'layoutTag': "
                 f"expected a tla.arch layout sentinel with a token name; got {_type_name(layoutTag)}",
             )
+
+    if (
+        addr == "ub"
+        and dtype in _B64_STAGING_DTYPES
+        and layout not in ("RowMajor", "VectorLayout")
+    ):
+        raise TlaLoweringError("64-bit UB data requires RowMajor or VectorLayout")
 
     ptr_alignment = ptr_ty.alignment
     remapped = _remap_tensor_like_prefix_fields_for_layout_trees(
@@ -6068,6 +6085,9 @@ _SUPPORTED_CUBE_MXFP_WITH_SCALE_COPY_ROUTES = {
 _SUPPORTED_VECTOR_COPY_ROUTES = {
     # (src_addr, src_layout, dst_addr, dst_layout) : dtypes
     ("gm", "RowMajor", "ub", "RowMajor"): (
+        "i64",
+        "u64",
+        "f64",
         "f32",
         "f16",
         "bf16",
@@ -6086,7 +6106,11 @@ _SUPPORTED_VECTOR_COPY_ROUTES = {
         "f4e2m1x2",
         "f4e1m2x2",
     ),
+    ("gm", "VectorLayout", "ub", "VectorLayout"): ("i64", "u64", "f64"),
     ("ub", "RowMajor", "gm", "RowMajor"): (
+        "i64",
+        "u64",
+        "f64",
         "f32",
         "f16",
         "bf16",
@@ -11224,8 +11248,11 @@ def scatter(
           cover all valid source lanes, or ceil(valid_lanes / 2) for 8-bit data.
         - For 64-bit data, only the first 32 u32 indices are used; u64 indices
           use only their low 32 bits.
-        - General i64/u64 tensor load/copy is unsupported. Use `tla.extern`
-          for these registers and recast byte views for data transfers.
+        - `i64`/`u64` data can be staged between UB and registers with aligned,
+          full-width `DIST_NORM` loads and aligned `DIST_NORM` stores without
+          an explicit mask. GM/UB `RowMajor` copies are supported in both
+          directions, as are GM-to-UB `VectorLayout` copies. See the
+          `tla.copy` route table for copy constraints.
 
         Example:
         ```python

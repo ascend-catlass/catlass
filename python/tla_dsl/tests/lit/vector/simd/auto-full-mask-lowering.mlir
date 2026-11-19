@@ -110,10 +110,9 @@ module {
     return
   }
 
-  // The public frontend does not support i64 on-chip vector tensors. Preserve
-  // the historical raw-IR behavior: even a full omitted mask remains PLT.B32
-  // until B64 predicate materialization is specified and supported.
-  func.func @omitted_i64_retains_plt(%dst: memref<32xi64, #hivm.address_space<ub>>) {
+  // A full i64 store with an omitted mask writes 64 i32 words under a
+  // full B32 predicate.
+  func.func @omitted_i64_uses_full_b32_predicate(%dst: memref<32xi64, #hivm.address_space<ub>>) {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
     %c32 = arith.constant 32 : index
@@ -264,9 +263,12 @@ module {
 // CHECK: ave.hir.masked_store
 
 // CHECK-LABEL: func.func private @vector_region_
-// CHECK-NOT: ave.hir.pge
-// CHECK: %[[I64_PLT:.*]], %{{.*}} = ave.hir.plt {{.*}} {functionType = #ave.func_dist_type<pb32>}
-// CHECK: ave.hir.masked_store <NORM_B64> {{.*}}, %[[I64_PLT]],
+// CHECK: %[[I64_ALL:.*]] = ave.hir.pge <ALL> {functionType = #ave.func_dist_type<pb32>}
+// CHECK-NOT: ave.hir.plt
+// CHECK: %[[I64_WORDS:.*]] = vector.bitcast {{.*}} : vector<32xi64> to vector<64xi32>
+// CHECK-NOT: ave.hir.plt
+// CHECK: ave.hir.masked_store <NORM_B32> {{.*}}, %[[I64_ALL]], %[[I64_WORDS]]
+// CHECK-SAME: vector<64xi32>
 
 // CHECK-LABEL: func.func private @vector_region_
 // CHECK: scf.for

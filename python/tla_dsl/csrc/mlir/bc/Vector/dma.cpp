@@ -93,11 +93,15 @@ REGISTER_GM_TO_UB(RowMajor, RowMajor, int8_t)
 // Unsigned staging. A copy does not interpret the element type beyond stride
 // and layout arithmetic, so these are the signed moves at the same widths; they
 // exist as their own symbols because the route resolves by element type.
-// Without them an unsigned tile cannot reach UB for Compare/Cast. u64 is
-// omitted deliberately: i64 has no GM<->UB route either.
 REGISTER_GM_TO_UB(RowMajor, RowMajor, uint8_t)
 REGISTER_GM_TO_UB(RowMajor, RowMajor, uint16_t)
 REGISTER_GM_TO_UB(RowMajor, RowMajor, uint32_t)
+REGISTER_GM_TO_UB(RowMajor, RowMajor, int64_t)
+REGISTER_GM_TO_UB(RowMajor, RowMajor, uint64_t)
+REGISTER_GM_TO_UB(RowMajor, RowMajor, double)
+REGISTER_GM_TO_UB(VectorLayout, VectorLayout, int64_t)
+REGISTER_GM_TO_UB(VectorLayout, VectorLayout, uint64_t)
+REGISTER_GM_TO_UB(VectorLayout, VectorLayout, double)
 REGISTER_GM_TO_UB(RowMajor, RowMajor, fp8_e4m3fn_t)
 REGISTER_GM_TO_UB(RowMajor, RowMajor, fp8_e5m2_t)
 REGISTER_GM_TO_UB(RowMajor, RowMajor, float4_e2m1x2_t)
@@ -113,6 +117,9 @@ REGISTER_UB_TO_GM(RowMajor, RowMajor, int8_t)
 REGISTER_UB_TO_GM(RowMajor, RowMajor, uint8_t)
 REGISTER_UB_TO_GM(RowMajor, RowMajor, uint16_t)
 REGISTER_UB_TO_GM(RowMajor, RowMajor, uint32_t)
+REGISTER_UB_TO_GM(RowMajor, RowMajor, int64_t)
+REGISTER_UB_TO_GM(RowMajor, RowMajor, uint64_t)
+REGISTER_UB_TO_GM(RowMajor, RowMajor, double)
 REGISTER_UB_TO_GM(RowMajor, RowMajor, fp8_e4m3fn_t)
 REGISTER_UB_TO_GM(RowMajor, RowMajor, fp8_e5m2_t)
 REGISTER_UB_TO_GM(RowMajor, RowMajor, float4_e2m1x2_t)

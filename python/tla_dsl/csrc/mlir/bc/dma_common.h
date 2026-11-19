@@ -341,6 +341,9 @@ CATLASS_DEVICE auto makeUBTensor(memref_t<__ubuf__ T, 1>* memref, const TensorDe
     if constexpr (Tag == LayoutTag::RowMajor) {
         return tla::MakeTensor(
             tensor, makeRowMajorTlaLayout<T>(desc), makeTlaTileCoord(desc), Catlass::Arch::PositionUB{});
+    } else if constexpr (Tag == LayoutTag::VectorLayout) {
+        return tla::MakeTensor(
+            tensor, makeVectorTlaLayout(desc), tla::MakeCoord(makeVectorTlaCoord(desc)), Catlass::Arch::PositionUB{});
     } else if constexpr (Tag == LayoutTag::ColumnMajor) {
         return tla::MakeTensor(
             tensor, makeColumnMajorTlaLayout(desc), makeTlaTileCoord(desc), Catlass::Arch::PositionUB{});
@@ -358,8 +361,8 @@ CATLASS_DEVICE auto makeUBTensor(memref_t<__ubuf__ T, 1>* memref, const TensorDe
     } else {
         static_assert(
             Tag == LayoutTag::RowMajor || Tag == LayoutTag::ColumnMajor || Tag == LayoutTag::zN ||
-                Tag == LayoutTag::zNUnAlign,
-            "UB tensor supports RowMajor/ColumnMajor/zN and zZMxScale/nNMxScale for float8_e8m0_t only");
+                Tag == LayoutTag::zNUnAlign || Tag == LayoutTag::VectorLayout,
+            "UB tensor supports RowMajor/ColumnMajor/VectorLayout/zN and zZMxScale/nNMxScale for float8_e8m0_t only");
     }
 }
 

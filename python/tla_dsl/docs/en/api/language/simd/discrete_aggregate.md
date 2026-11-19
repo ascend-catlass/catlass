@@ -165,8 +165,11 @@ Constraints:
   cover all valid source lanes, or ceil(valid_lanes / 2) for 8-bit data.
 - For 64-bit data, only the first 32 u32 indices are used; u64 indices
   use only their low 32 bits.
-- General i64/u64 tensor load/copy is unsupported. Use `tla.extern`
-  for these registers and recast byte views for data transfers.
+- `i64`/`u64` data can be staged between UB and registers with aligned,
+  full-width `DIST_NORM` loads and aligned `DIST_NORM` stores without
+  an explicit mask. GM/UB `RowMajor` copies are supported in both
+  directions, as are GM-to-UB `VectorLayout` copies. See the
+  `tla.copy` route table for copy constraints.
 
 Example:
 
