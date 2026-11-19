@@ -237,6 +237,8 @@ private:
         uint32_t pingpongFlag, uint32_t rowNumCurLoop, uint32_t rowNumCurLoopRound, uint32_t columnNum,
         uint32_t columnNumRound)
     {
+        // The reductions below reuse the mask; do not inherit a preceding softmax's partial mask.
+        AscendC::SetVectorMask<float>(uint64_t{0}, ~uint64_t{0});
         // 1. gm = max(shared_gm, unshared_gm)
         // sharedGmUbLoopTensor [row, 8]
         // unsharedGmUbLoopTensor [row, 1]

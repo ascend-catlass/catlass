@@ -19,6 +19,7 @@
 #include <utility>
 
 #include <torch/torch.h>
+#include <torch_npu/csrc/core/npu/NPUCachingAllocator.h>
 #include <tiling/platform/platform_ascendc.h>
 
 #include "catlass_kernel_prebuilt.h"
@@ -221,14 +222,30 @@ struct XAttentionOp {
             {query.size(0), query.size(1), query.size(2)}, query.scalar_type());
         params.outputAddr = {TensorAddress(output)};
 
-        aclrtStream stream = c10_npu::getCurrentNPUStream().stream(false);
-        // params contains raw addresses. Keep their tensors alive until the queued
-        // launcher has submitted the kernel to the NPU stream.
-        const std::array<at::Tensor, 9> inputs{
+        TORCH_CHECK(CatlassKernel::PrepareXAttention != nullptr && CatlassKernel::XAttention != nullptr,
+            "x_attention kernel and workspace preparation must both be available");
+        CatlassKernel::PrepareXAttention(aicCoreNum, params);
+        TORCH_CHECK(params.workspaceSize > 0 &&
+            params.workspaceSize <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
+            "x_attention workspace size must fit int64_t");
+        TORCH_CHECK(!params.tilingHost.empty(), "x_attention tiling must not be empty");
+
+        auto npuStream = c10_npu::getCurrentNPUStream();
+        auto options = query.options().dtype(at::kByte);
+        auto workspace = at::empty({static_cast<int64_t>(params.workspaceSize)}, options);
+        auto tiling = at::empty({static_cast<int64_t>(params.tilingHost.size())}, options);
+        params.workspaceAddr = TensorAddress(workspace);
+        params.tilingAddr = TensorAddress(tiling);
+        // Allocator stream APIs can drain the submission queue; call them before enqueueing.
+        c10_npu::NPUCachingAllocator::recordStream(workspace.storage().data_ptr(), npuStream);
+        c10_npu::NPUCachingAllocator::recordStream(tiling.storage().data_ptr(), npuStream);
+        aclrtStream stream = npuStream.stream(false);
+        // Capture tensors through kernel submission. torch_npu 2.9's recordStream
+        // tracks even the allocation stream and defers scratch reuse until its event completes.
+        const std::array<at::Tensor, 11> inputs{
             query, shared_key_block, shared_value_block, unshared_key_block,
             unshared_value_block, unshared_block_table, shared_kv_lens,
-            decode_step, shared_block_table};
-        TORCH_CHECK(CatlassKernel::XAttention != nullptr, "x_attention kernel is not available");
+            decode_step, shared_block_table, workspace, tiling};
         at_npu::native::OpCommand::RunOpApiV2(
             "CatlassKernel::XAttention", [inputs, output, aicCoreNum, stream, params]() -> aclError {
                 try {

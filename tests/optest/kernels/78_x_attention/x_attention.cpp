@@ -11,10 +11,10 @@
 
 #include <acl/acl.h>
 #include <cmath>
+#include <cstring>
 #include <stdexcept>
 
 #include "catlass_kernel_prebuilt.h"
-#include "../common/workspace_alloc.h"
 #include "x_attention_device.hpp"
 #include "x_attention_tiling.hpp"
 
@@ -29,36 +29,9 @@ void CheckAcl(aclError status, const char* operation)
     }
 }
 
-uint8_t* AllocateWorkspace(size_t size)
-{
-    if (size == 0) {
-        return nullptr;
-    }
-    if (g_catlassWorkspaceAlloc == nullptr) {
-        throw std::runtime_error("CATLASS workspace allocator is not initialized");
-    }
-    uint8_t* ptr = g_catlassWorkspaceAlloc(size);
-    if (ptr == nullptr) {
-        throw std::runtime_error("Failed to allocate x_attention workspace");
-    }
-    return ptr;
-}
-
-uint8_t* CopyTilingToDevice(const XAttentionTilingData& tilingData)
-{
-    if (g_catlassWorkspaceAllocFromHost == nullptr) {
-        throw std::runtime_error("CATLASS host-to-device workspace allocator is not initialized");
-    }
-    uint8_t* ptr = g_catlassWorkspaceAllocFromHost(&tilingData, sizeof(tilingData));
-    if (ptr == nullptr) {
-        throw std::runtime_error("Failed to copy x_attention tiling data to device");
-    }
-    return ptr;
-}
-
 } // namespace
 
-void XAttention(const uint32_t blockNum, aclrtStream stream, const XAttentionParams& params)
+void PrepareXAttention(const uint32_t blockNum, XAttentionParams& params)
 {
     XAttentionTiling::Context context;
     context.batch = params.batch;
@@ -78,8 +51,21 @@ void XAttention(const uint32_t blockNum, aclrtStream stream, const XAttentionPar
         tilingData.scaleValue = params.scaleValue;
     }
 
-    uint8_t* workspace = AllocateWorkspace(workspaceSize);
-    uint8_t* tiling = CopyTilingToDevice(tilingData);
+    params.workspaceSize = workspaceSize;
+    params.tilingHost.resize(sizeof(tilingData));
+    std::memcpy(params.tilingHost.data(), &tilingData, sizeof(tilingData));
+}
+
+void XAttention(const uint32_t blockNum, aclrtStream stream, const XAttentionParams& params)
+{
+    if (params.workspaceAddr == nullptr || params.tilingAddr == nullptr ||
+        params.tilingHost.size() != sizeof(XAttentionTilingData)) {
+        throw std::invalid_argument("x_attention requires prepared workspace and tiling");
+    }
+    uint8_t* workspace = params.workspaceAddr;
+    uint8_t* tiling = params.tilingAddr;
+    CheckAcl(aclrtMemcpy(tiling, params.tilingHost.size(), params.tilingHost.data(),
+        params.tilingHost.size(), ACL_MEMCPY_HOST_TO_DEVICE), "aclrtMemcpy tiling");
 
     uint64_t hardwareSyncAddr = 0;
     CheckAcl(aclrtGetHardwareSyncAddr(reinterpret_cast<void**>(&hardwareSyncAddr)), "aclrtGetHardwareSyncAddr");

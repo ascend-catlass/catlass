@@ -77,6 +77,10 @@ struct XAttentionParams : public PrebuiltParams {
     bool sharedPaged = true;            ///< True for shared paged + unshared continuous cache.
     float scaleValue = 0.0f;            ///< Attention scale; zero selects 1/sqrt(embeddingSize).
     aclDataType dataType = ACL_FLOAT16; ///< Input/output element type.
+    uint64_t workspaceSize = 0;        ///< Prepared scratch allocation size in bytes.
+    std::vector<uint8_t> tilingHost;    ///< Packed tiling owned through its host-to-device copy.
+    uint8_t* workspaceAddr = nullptr;  ///< Caller-owned device scratch.
+    uint8_t* tilingAddr = nullptr;     ///< Caller-owned device tiling.
 };
 
 /**
@@ -149,6 +153,8 @@ __attribute__((weak)) void FlashAttentionInfer(
 /**
  * @brief Reserved prebuilt interface for example 78_x_attention.
  */
+__attribute__((weak)) void PrepareXAttention(const uint32_t blockNum, XAttentionParams& params);
+
 __attribute__((weak)) void XAttention(
     const uint32_t blockNum, aclrtStream stream, const XAttentionParams& params);
 
