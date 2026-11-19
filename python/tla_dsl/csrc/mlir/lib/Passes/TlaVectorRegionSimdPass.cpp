@@ -660,8 +660,9 @@ static bool isVectorComputeOp(Operation* op)
            isa_and_nonnull<::tla::HistogramsOp>(op) || isa_and_nonnull<::tla::ReduceOp>(op) ||
            isa_and_nonnull<::tla::ReduceIntraBlockOp>(op) || isa_and_nonnull<::tla::GatherOp>(op) ||
            isa_and_nonnull<::tla::CastOp>(op) || isa_and_nonnull<::tla::BitCastOp>(op) ||
-           isa_and_nonnull<::tla::PackOp>(op) || isa_and_nonnull<::tla::UnpackOp>(op) ||
-           isa_and_nonnull<::tla::InterleaveOp>(op) || isa_and_nonnull<::tla::DeInterleaveOp>(op);
+           isa_and_nonnull<::tla::ExpSubOp>(op) || isa_and_nonnull<::tla::PackOp>(op) ||
+           isa_and_nonnull<::tla::UnpackOp>(op) || isa_and_nonnull<::tla::InterleaveOp>(op) ||
+           isa_and_nonnull<::tla::DeInterleaveOp>(op);
 }
 
 static void annotateAivLibraryCall(func::FuncOp callee)
@@ -808,7 +809,7 @@ static std::string getFp4CastLibraryCallName(Type srcElement, Type dstElement, A
     return name + "_slot" + std::to_string(trait[0]);
 }
 
-static func::FuncOp getOrCreateLowpCastLibraryCall(
+static func::FuncOp getOrCreateInlineAivLibraryCall(
     ModuleOp module, Location loc, ArrayRef<Type> inputTypes, VectorType resultType, StringRef name)
 {
     if (auto existing = module.lookupSymbol<func::FuncOp>(name))
@@ -2696,7 +2697,7 @@ static LogicalResult lowerCast(
         SmallVector<Type> inputTypes;
         for (auto arg : args)
             inputTypes.push_back(arg.getType());
-        auto callee = getOrCreateLowpCastLibraryCall(module, loc, inputTypes, dstVecType, name);
+        auto callee = getOrCreateInlineAivLibraryCall(module, loc, inputTypes, dstVecType, name);
         valueMap[castOp.getResult()] = b.create<func::CallOp>(loc, callee, args).getResult(0);
         return success();
     }
@@ -2711,7 +2712,7 @@ static LogicalResult lowerCast(
         SmallVector<Type> inputTypes;
         for (auto arg : args)
             inputTypes.push_back(arg.getType());
-        auto callee = getOrCreateLowpCastLibraryCall(module, loc, inputTypes, dstVecType, name);
+        auto callee = getOrCreateInlineAivLibraryCall(module, loc, inputTypes, dstVecType, name);
         valueMap[castOp.getResult()] = b.create<func::CallOp>(loc, callee, args).getResult(0);
         return success();
     }
@@ -4162,6 +4163,45 @@ static LogicalResult lowerNestedVectorOp(
     if (auto castOp = dyn_cast<::tla::CastOp>(op))
         return lowerCast(castOp, b, module, valueMap, fullMasks);
 
+    if (auto expSubOp = dyn_cast<::tla::ExpSubOp>(op)) {
+        Value lhs = valueMap.lookup(expSubOp.getLhs());
+        Value rhs = valueMap.lookup(expSubOp.getRhs());
+        Value mask = valueMap.lookup(expSubOp.getMask());
+        if (!lhs || !rhs || !mask)
+            return expSubOp.emitError("failed to map ExpSub operands"), failure();
+        auto halfVec = VectorType::get({128}, b.getF16Type());
+        auto floatVec = VectorType::get({64}, b.getF32Type());
+        auto pregVec = fullPregVecType(b.getContext());
+        bool halfInput = lhs.getType() == halfVec;
+        if ((!halfInput && lhs.getType() != floatVec) || rhs.getType() != lhs.getType())
+            return expSubOp.emitError("expected matching vector<128xf16> or vector<64xf32> inputs"), failure();
+        Value preg = castMaskToPregType(b, loc, mask, pregVec);
+        int64_t inputLanes = halfInput ? 128 : 64;
+        int64_t validLanes = inputLanes;
+        for (Value input : {expSubOp.getLhs(), expSubOp.getRhs()}) {
+            int64_t count = cast<::tla::VectorSSAType>(input.getType()).getValidLanes();
+            if (count != ShapedType::kDynamic)
+                validLanes = std::min(validLanes, count);
+        }
+        if (validLanes < inputLanes) {
+            Value count = b.create<arith::ConstantIndexOp>(loc, validLanes);
+            Value prefix = createPredicatePlt(b, loc, pregVec, inputLanes, count).getRes();
+            preg = b.create<hivmave::PregAndOp>(
+                        loc, pregVec, maskWidthAttrForElement(b, cast<VectorType>(lhs.getType()).getElementType()),
+                        preg, prefix, fullMasks.get(loc, inputLanes))
+                       .getRes();
+        }
+        // Both FP32 slots use the same input positions. FP16 selects a BC entry
+        // point with the corresponding compile-time Ascend C RegLayout.
+        StringRef calleeName = "exp_sub_f32";
+        if (halfInput)
+            calleeName = expSubOp.getPart() == 0 ? "exp_sub_f16_even" : "exp_sub_f16_odd";
+        SmallVector<Type> inputTypes{lhs.getType(), rhs.getType(), pregVec};
+        auto callee = getOrCreateInlineAivLibraryCall(module, loc, inputTypes, floatVec, calleeName);
+        valueMap[expSubOp.getResult()] = b.create<func::CallOp>(loc, callee, ValueRange{lhs, rhs, preg}).getResult(0);
+        return success();
+    }
+
     if (auto fullOp = dyn_cast<::tla::FullOp>(op))
         return lowerFull(fullOp, b, module, valueMap, fullMasks);
 
@@ -5244,6 +5284,11 @@ public:
                 if (!producedValues.contains(castOp.getSource()))
                     return rewriter.notifyMatchFailure(
                         vecFuncOp, "expected tla.cast source from tla.load or prior compute op");
+            } else if (auto expSubOp = dyn_cast<::tla::ExpSubOp>(computeOp)) {
+                if (!producedValues.contains(expSubOp.getLhs()) || !producedValues.contains(expSubOp.getRhs()) ||
+                    !producedValues.contains(expSubOp.getMask()))
+                    return rewriter.notifyMatchFailure(
+                        vecFuncOp, "expected mixed ExpSub inputs and half mask from prior vector ops");
             } else {
                 return rewriter.notifyMatchFailure(vecFuncOp, "unexpected tla compute op");
             }

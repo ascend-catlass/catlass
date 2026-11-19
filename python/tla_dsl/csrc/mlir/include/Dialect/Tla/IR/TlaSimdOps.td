@@ -221,6 +221,29 @@ def Tla_SubOp : Tla_VectorBinaryOp<"sub",
     "Vector subtract on VectorSSA values",
     "Element-wise subtract on VectorSSA values.">;
 
+def Tla_ExpSubOp : Tla_Op<"exp_sub", [Pure]> {
+  let summary = "Exp of the difference of f16 or f32 vectors, returning f32";
+  let description = [{
+    Compute exp(float(lhs) - float(rhs)) with native ExpSub and ZEROING:
+    inactive result lanes are positive zero. Both inputs must have the same
+    element type. f16 inputs have 128 physical lanes, with part 0/1 selecting even/odd
+    lanes; f32 inputs have 64 physical lanes and either part computes all
+    64 lanes. The required mask belongs to the input lane domain. Results
+    always have 64 f32 lanes. A known valid-lane count bounds the active input
+    prefix; if both counts are known, use the shorter prefix. Unknown counts
+    add no bound. Lanes outside the bounded prefix are inactive.
+  }];
+  let arguments = (ins Tla_VectorSSAType:$lhs, Tla_VectorSSAType:$rhs,
+                       Tla_MaskSSAType:$mask, I32Attr:$part);
+  let results = (outs Tla_VectorSSAType:$result);
+  let assemblyFormat = [{
+    $lhs `,` $rhs `mask` $mask `part` $part attr-dict `:`
+    qualified(type($lhs)) `,` qualified(type($rhs)) `mask`
+    qualified(type($mask)) `->` qualified(type($result))
+  }];
+  let hasVerifier = 1;
+}
+
 def Tla_MulOp : Tla_VectorBinaryOp<"mul",
     "Vector multiply on VectorSSA values",
     "Element-wise multiply on VectorSSA values.">;

@@ -1,0 +1,130 @@
+// RUN: sed -n '/^\/\/ BEGIN_EMPTY$/,/^\/\/ END_EMPTY$/p' %s | sed '1d;$d;s|^// ||' > %t.EMPTY.mlir && not %tla_compile %t.EMPTY.mlir -o %t 2>&1 | %filecheck %s --check-prefix=EMPTY
+// RUN: sed -n '/^\/\/ BEGIN_FLOAT_OVERSIZE$/,/^\/\/ END_FLOAT_OVERSIZE$/p' %s | sed '1d;$d;s|^// ||' > %t.FLOAT_OVERSIZE.mlir && not %tla_compile %t.FLOAT_OVERSIZE.mlir -o %t 2>&1 | %filecheck %s --check-prefix=FLOAT_OVERSIZE
+// RUN: sed -n '/^\/\/ BEGIN_HALF_OVERSIZE$/,/^\/\/ END_HALF_OVERSIZE$/p' %s | sed '1d;$d;s|^// ||' > %t.HALF_OVERSIZE.mlir && not %tla_compile %t.HALF_OVERSIZE.mlir -o %t 2>&1 | %filecheck %s --check-prefix=HALF_OVERSIZE
+// RUN: sed -n '/^\/\/ BEGIN_FLOAT_MASK$/,/^\/\/ END_FLOAT_MASK$/p' %s | sed '1d;$d;s|^// ||' > %t.FLOAT_MASK.mlir && not %tla_compile %t.FLOAT_MASK.mlir -o %t 2>&1 | %filecheck %s --check-prefix=FLOAT_MASK
+// RUN: sed -n '/^\/\/ BEGIN_BFLOAT$/,/^\/\/ END_BFLOAT$/p' %s | sed '1d;$d;s|^// ||' > %t.BFLOAT.mlir && not %tla_compile %t.BFLOAT.mlir -o %t 2>&1 | %filecheck %s --check-prefix=BFLOAT
+// RUN: sed -n '/^\/\/ BEGIN_RESULT_ELEM$/,/^\/\/ END_RESULT_ELEM$/p' %s | sed '1d;$d;s|^// ||' > %t.RESULT_ELEM.mlir && not %tla_compile %t.RESULT_ELEM.mlir -o %t 2>&1 | %filecheck %s --check-prefix=RESULT_ELEM
+// RUN: sed -n '/^\/\/ BEGIN_INPUT$/,/^\/\/ END_INPUT$/p' %s | sed '1d;$d;s|^// ||' > %t.INPUT.mlir && not %tla_compile %t.INPUT.mlir -o %t 2>&1 | %filecheck %s --check-prefix=INPUT
+// RUN: sed -n '/^\/\/ BEGIN_RESULT$/,/^\/\/ END_RESULT$/p' %s | sed '1d;$d;s|^// ||' > %t.RESULT.mlir && not %tla_compile %t.RESULT.mlir -o %t 2>&1 | %filecheck %s --check-prefix=RESULT
+// RUN: sed -n '/^\/\/ BEGIN_MASK$/,/^\/\/ END_MASK$/p' %s | sed '1d;$d;s|^// ||' > %t.MASK.mlir && not %tla_compile %t.MASK.mlir -o %t 2>&1 | %filecheck %s --check-prefix=MASK
+// RUN: sed -n '/^\/\/ BEGIN_PART$/,/^\/\/ END_PART$/p' %s | sed '1d;$d;s|^// ||' > %t.PART.mlir && not %tla_compile %t.PART.mlir -o %t 2>&1 | %filecheck %s --check-prefix=PART
+
+// INPUT: requires matching f16 or f32 input element types
+// BEGIN_INPUT
+// module {
+//   func.func @invalid(%lhs: !tla.vector<64xf32>, %rhs: !tla.vector<128xf16>, %mask: !tla.mask<128>) {
+//     "tla.vec.func"() ({
+//       %result = tla.exp_sub %lhs, %rhs mask %mask part 0 : !tla.vector<64xf32>, !tla.vector<128xf16> mask !tla.mask<128> -> !tla.vector<64xf32>
+//     }) {mode = "simd"} : () -> ()
+//     return
+//   }
+// }
+// END_INPUT
+
+// RESULT: requires a 64-lane f32 result
+// BEGIN_RESULT
+// module {
+//   func.func @invalid(%lhs: !tla.vector<128xf16>, %rhs: !tla.vector<128xf16>, %mask: !tla.mask<128>) {
+//     "tla.vec.func"() ({
+//       %result = tla.exp_sub %lhs, %rhs mask %mask part 0 : !tla.vector<128xf16>, !tla.vector<128xf16> mask !tla.mask<128> -> !tla.vector<32xf32>
+//     }) {mode = "simd"} : () -> ()
+//     return
+//   }
+// }
+// END_RESULT
+
+// MASK: requires a 128-lane input-domain mask
+// BEGIN_MASK
+// module {
+//   func.func @invalid(%lhs: !tla.vector<128xf16>, %rhs: !tla.vector<128xf16>, %mask: !tla.mask<64>) {
+//     "tla.vec.func"() ({
+//       %result = tla.exp_sub %lhs, %rhs mask %mask part 0 : !tla.vector<128xf16>, !tla.vector<128xf16> mask !tla.mask<64> -> !tla.vector<64xf32>
+//     }) {mode = "simd"} : () -> ()
+//     return
+//   }
+// }
+// END_MASK
+
+// PART: part must be 0 or 1
+// BEGIN_PART
+// module {
+//   func.func @invalid(%lhs: !tla.vector<128xf16>, %rhs: !tla.vector<128xf16>, %mask: !tla.mask<128>) {
+//     "tla.vec.func"() ({
+//       %result = tla.exp_sub %lhs, %rhs mask %mask part 2 : !tla.vector<128xf16>, !tla.vector<128xf16> mask !tla.mask<128> -> !tla.vector<64xf32>
+//     }) {mode = "simd"} : () -> ()
+//     return
+//   }
+// }
+// END_PART
+
+// FLOAT_MASK: requires a 64-lane input-domain mask
+// BEGIN_FLOAT_MASK
+// module {
+//   func.func @invalid(%lhs: !tla.vector<64xf32>, %rhs: !tla.vector<64xf32>, %mask: !tla.mask<128>) {
+//     "tla.vec.func"() ({
+//       %result = tla.exp_sub %lhs, %rhs mask %mask part 0 : !tla.vector<64xf32>, !tla.vector<64xf32> mask !tla.mask<128> -> !tla.vector<64xf32>
+//     }) {mode = "simd"} : () -> ()
+//     return
+//   }
+// }
+// END_FLOAT_MASK
+
+// BFLOAT: requires matching f16 or f32 input element types
+// BEGIN_BFLOAT
+// module {
+//   func.func @invalid(%lhs: !tla.vector<128xbf16>, %rhs: !tla.vector<128xbf16>, %mask: !tla.mask<128>) {
+//     "tla.vec.func"() ({
+//       %result = tla.exp_sub %lhs, %rhs mask %mask part 0 : !tla.vector<128xbf16>, !tla.vector<128xbf16> mask !tla.mask<128> -> !tla.vector<64xf32>
+//     }) {mode = "simd"} : () -> ()
+//     return
+//   }
+// }
+// END_BFLOAT
+
+// RESULT_ELEM: requires a 64-lane f32 result vector
+// BEGIN_RESULT_ELEM
+// module {
+//   func.func @invalid(%lhs: !tla.vector<64xf32>, %rhs: !tla.vector<64xf32>, %mask: !tla.mask<64>) {
+//     "tla.vec.func"() ({
+//       %result = tla.exp_sub %lhs, %rhs mask %mask part 0 : !tla.vector<64xf32>, !tla.vector<64xf32> mask !tla.mask<64> -> !tla.vector<64xf16>
+//     }) {mode = "simd"} : () -> ()
+//     return
+//   }
+// }
+// END_RESULT_ELEM
+
+// HALF_OVERSIZE: tla.vector valid lane count must be in [1, 128]
+// BEGIN_HALF_OVERSIZE
+// module {
+//   func.func @invalid(%lhs: !tla.vector<129xf16>, %mask: !tla.mask<128>) {
+//     "tla.vec.func"() ({
+//       %result = tla.exp_sub %lhs, %lhs mask %mask part 0 : !tla.vector<129xf16>, !tla.vector<129xf16> mask !tla.mask<128> -> !tla.vector<64xf32>
+//     }) {mode = "simd"} : () -> ()
+//     return
+//   }
+// }
+// END_HALF_OVERSIZE
+
+// FLOAT_OVERSIZE: tla.vector valid lane count must be in [1, 64]
+// BEGIN_FLOAT_OVERSIZE
+// module {
+//   func.func @invalid(%lhs: !tla.vector<65xf32>, %mask: !tla.mask<64>) {
+//     "tla.vec.func"() ({
+//       %result = tla.exp_sub %lhs, %lhs mask %mask part 0 : !tla.vector<65xf32>, !tla.vector<65xf32> mask !tla.mask<64> -> !tla.vector<64xf32>
+//     }) {mode = "simd"} : () -> ()
+//     return
+//   }
+// }
+// END_FLOAT_OVERSIZE
+
+// EMPTY: tla.vector valid lane count must be in [1, 128]
+// BEGIN_EMPTY
+// module {
+//   func.func @invalid(%lhs: !tla.vector<0xf16>, %mask: !tla.mask<128>) {
+//     "tla.vec.func"() ({
+//       %result = tla.exp_sub %lhs, %lhs mask %mask part 0 : !tla.vector<0xf16>, !tla.vector<0xf16> mask !tla.mask<128> -> !tla.vector<64xf32>
+//     }) {mode = "simd"} : () -> ()
+//     return
+//   }
+// }
+// END_EMPTY

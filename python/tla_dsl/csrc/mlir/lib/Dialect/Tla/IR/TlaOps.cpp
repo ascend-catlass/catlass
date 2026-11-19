@@ -1001,6 +1001,27 @@ TLA_VERIFY_MASKED_VECTOR_LHS(MinsOp)
 
 #undef TLA_VERIFY_MASKED_VECTOR_LHS
 
+mlir::LogicalResult ExpSubOp::verify()
+{
+    if (!hasEnclosingRegion<VecFuncOp>(getOperation()))
+        return emitOpError("must be nested inside a tla.vec.func region");
+    VectorSSAType lhsType = getLhs().getType();
+    VectorSSAType rhsType = getRhs().getType();
+    VectorSSAType resultType = getResult().getType();
+    MaskSSAType maskType = getMask().getType();
+    auto elem = lhsType.getElementType();
+    if ((!elem.isF16() && !elem.isF32()) || rhsType.getElementType() != elem)
+        return emitOpError("requires matching f16 or f32 input element types");
+    int64_t lanes = elem.isF16() ? 128 : 64;
+    if (!resultType.getElementType().isF32() || resultType.getValidLanes() != 64)
+        return emitOpError("requires a 64-lane f32 result vector");
+    if (maskType.getPhysicalLanes() != lanes)
+        return emitOpError("requires a ") << lanes << "-lane input-domain mask";
+    if (getPart() != 0 && getPart() != 1)
+        return emitOpError("part must be 0 or 1");
+    return mlir::success();
+}
+
 static mlir::LogicalResult verifyShiftSourceAndResult(
     mlir::Operation* op, VectorSSAType sourceType, VectorSSAType resultType, mlir::Value mask)
 {
