@@ -48,6 +48,7 @@ Up 产品路径固定为 L0C→UB。Down 侧按 shape / tiling 自动选择 Basi
 - Up 为 `(M, K) × (K, H)`（或线性布局下等价的 `(H, K)` 权重），Down 为 `(M, H) × (H, N)`。
 - 推荐 `H`、`N` 对 16 对齐，以减少 Cube / Vector 尾块分支；未对齐 shape 仍可运行，由 host tiling 自动裁剪。
 - StreamK / A-full / B-full 由 host 按 shape 自动选择，无需手动指定。
+- 上述约束外，建议按 2 GiB 的工作集估算折半收缩 `M` / `K` / `H` / `N`，避免主机内存溢出。
 
 输入取值（Host 冒烟 / 精度泛化默认）：
 

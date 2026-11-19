@@ -34,6 +34,9 @@ $$
 | bf16 | bf16 | bf16 |
 | f32 | f32 | f32 |
 
+- 分组数 `G` 不超过 `min(M, 256)`，且 `group_list` 长度固定为 `G+1`。
+- 为避免误差累加和计算超时，建议矩阵的 M/N/K 轴不超过 122880，且 GM 总分配不超过 10 GiB（即 `M*K*sizeof(DTYPE_A) + G*K*N*sizeof(DTYPE_B) + M*N*sizeof(DTYPE_C) <= 10 GiB`）。
+
 ## 使用示例
 
 要运行本路径下的样例，请参考[快速开始](../../../../../../../python/tla_dsl/docs/zh/quick_start.md)完成部署。
