@@ -38,8 +38,12 @@ public:
         if ASCEND_IS_AIC {
             AscendC::CrossCoreWaitFlag<AIC_SYNC_AIV_MODE_4, PIPE_FIX>(AIV_SYNC_AIC_FLAG);     // ping
             AscendC::CrossCoreWaitFlag<AIC_SYNC_AIV_MODE_4, PIPE_FIX>(AIV_SYNC_AIC_FLAG + 1); // pong
+#if !defined(__NPU_ARCH__) || (__NPU_ARCH__ != 9201 && __NPU_ARCH__ != 9202)
             AscendC::CrossCoreWaitFlag<AIC_SYNC_AIV_MODE_4, PIPE_FIX>(AIV_SYNC_AIC_FLAG + FLAG_ID_MAX);
+#endif
+#if !defined(__NPU_ARCH__) || (__NPU_ARCH__ != 9201 && __NPU_ARCH__ != 9202)
             AscendC::CrossCoreWaitFlag<AIC_SYNC_AIV_MODE_4, PIPE_FIX>(AIV_SYNC_AIC_FLAG + FLAG_ID_MAX + 1);
+#endif
         }
     }
 
@@ -149,7 +153,11 @@ public:
     CATLASS_DEVICE void Init(const Params& params)
     {
         isPergroup_ = params.epilogueParams.groupSizeM == 1;
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 9201 || __NPU_ARCH__ == 9202)
+        constexpr uint32_t elems = UB_TWO_BANK_ELEMS_B32 * PER_BLOCK_SIZE * 2;
+#else
         constexpr uint32_t elems = UB_TWO_BANK_ELEMS_B32 * PER_BLOCK_SIZE;
+#endif
         mmResUb_ = AscendC::LocalTensor<ElementC>(AscendC::TPosition::VECCALC, 0, elems * UB_SUB_BANK_NUM);
         epilogueOp_.Init(&params.epilogueParams);
 

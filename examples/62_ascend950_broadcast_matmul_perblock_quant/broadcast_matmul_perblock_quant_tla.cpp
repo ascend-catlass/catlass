@@ -179,11 +179,21 @@ static void Run(const Options& options)
     // Get the number of cube cores of the current hardware
     auto aicCoreNum = platform_ascendc::PlatformAscendCManager::GetInstance()->GetCoreNumAic();
 
+#if defined(CATLASS_ARCH) && CATLASS_ARCH == 9201
+    using ArchTag = Arch::Ascend960DT;
+#elif defined(CATLASS_ARCH) && CATLASS_ARCH == 9202
+    using ArchTag = Arch::Ascend960PR;
+#else
     using ArchTag = Arch::Ascend950;
+#endif
     constexpr bool enableUnitFlag = true;
     constexpr bool useHF32 = false;
     constexpr uint32_t l0CStages = 1;
+#if defined(CATLASS_ARCH) && (CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202)
+    constexpr bool enableL1Resident = false;
+#else
     constexpr bool enableL1Resident = true;
+#endif
 
     using DispatchPolicy = Gemm::MmadPingpong<ArchTag, enableUnitFlag, useHF32, l0CStages, enableL1Resident>;
     using L1TileShape = Shape<Int<128>, Int<128>, Int<128>>;

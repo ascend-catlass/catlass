@@ -328,6 +328,7 @@ public:
         AscendC::Reg::RegTensor<int8_t> wShr1;
         AscendC::Reg::RegTensor<int8_t> wSel;
         AscendC::Reg::RegTensor<int8_t> wAnd;
+        AscendC::Reg::RegTensor<int8_t> wSignReg;
 
         AscendC::Reg::MaskReg preg = AscendC::Reg::CreateMask<uint8_t, AscendC::Reg::MaskPattern::ALL>();
         AscendC::Reg::MaskReg pregVsel = AscendC::Reg::CreateMask<uint16_t, AscendC::Reg::MaskPattern::ALL>();
@@ -335,6 +336,10 @@ public:
         AscendC::Reg::Duplicate<int8_t, AscendC::Reg::MaskMergeMode::ZEROING>(wShrReg, E2M1_SHIFT_RIGHT_SIZE, preg);
         AscendC::Reg::Duplicate<int8_t, AscendC::Reg::MaskMergeMode::ZEROING>(wShlReg, SHIFT_LEFT_SIZE, preg);
         AscendC::Reg::Duplicate<int8_t, AscendC::Reg::MaskMergeMode::ZEROING>(wAndReg, E2M1_AND_MASK, preg);
+        if constexpr (std::is_same_v<ArchTag, Arch::Ascend960DT> || std::is_same_v<ArchTag, Arch::Ascend960PR>) {
+            AscendC::Reg::Duplicate<int8_t, AscendC::Reg::MaskMergeMode::ZEROING>(
+                wSignReg, static_cast<int8_t>(E2M1_SIGN_MASK), preg);
+        }
 
         for (uint16_t loopKIdx = 0; loopKIdx < params.loopKNum; ++loopKIdx) {
             for (uint16_t innerLoopIdx = 0; innerLoopIdx < params.innerLoopNum; ++innerLoopIdx) {
@@ -349,6 +354,14 @@ public:
                 AscendC::Reg::ShiftRight(wShr0, wLoad, wShrReg, preg);
                 AscendC::Reg::ShiftLeft(wShl, wLoad, wShlReg, preg);
                 AscendC::Reg::ShiftRight(wShr1, wShl, wShrReg, preg);
+                if constexpr (
+                    std::is_same_v<ArchTag, Arch::Ascend960DT> || std::is_same_v<ArchTag, Arch::Ascend960PR>) {
+                    // 9201 camodel 实测右移丢失符号位，从原始 packed byte 显式恢复。
+                    AscendC::Reg::And(wSel, wLoad, wSignReg, preg);
+                    AscendC::Reg::And(wAnd, wShl, wSignReg, preg);
+                    AscendC::Reg::Or(wShr0, wShr0, wSel, preg);
+                    AscendC::Reg::Or(wShr1, wShr1, wAnd, preg);
+                }
                 AscendC::Reg::Select(wSel, wShr1, wShr0, pregVsel);
                 AscendC::Reg::And(wAnd, wSel, wAndReg, preg);
 
@@ -476,6 +489,7 @@ public:
     static constexpr uint32_t DUP_FLAG_80 = 0x80;
     static constexpr uint32_t E2M1_SHIFT_RIGHT_SIZE = 0x2;
     static constexpr uint32_t E2M1_AND_MASK = 0x9C;
+    static constexpr uint32_t E2M1_SIGN_MASK = 0x80;
     static constexpr uint32_t SHIFT_RIGHT_SIZE = 0x4;
     static constexpr uint32_t SHIFT_LEFT_SIZE = 0x4;
 

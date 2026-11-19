@@ -33,7 +33,10 @@ template <
     class LayoutTag_, class L1TileShape_>
 struct SmoothQuant {
     using ArchTag = ArchTag_;
-    static_assert(std::is_same_v<ArchTag, Arch::Ascend950>, "unsupported ArchTag");
+    static_assert(
+        std::is_same_v<ArchTag, Arch::Ascend950> || std::is_same_v<ArchTag, Arch::Ascend960DT> ||
+            std::is_same_v<ArchTag, Arch::Ascend960PR>,
+        "unsupported ArchTag");
     using ElementIn = ElementIn_;
     using ElementSmoothScale = ElementSmoothScale_;
     using ElementMxScale = ElementMxScale_;
@@ -988,9 +991,13 @@ public:
             // input tensors
             for (uint32_t i = 0; i < STAGES; i++) {
                 eventLists.flagAicFinishMte1[0][i] = static_cast<Arch::FlagID>(i);
+#if !defined(__NPU_ARCH__) || (__NPU_ARCH__ != 9201 && __NPU_ARCH__ != 9202)
                 eventLists.flagAicFinishMte1[1][i] = static_cast<Arch::FlagID>(i + 16);
+#endif
                 eventLists.flagAivFinishMte3[0][i] = static_cast<Arch::FlagID>(i + STAGES);
+#if !defined(__NPU_ARCH__) || (__NPU_ARCH__ != 9201 && __NPU_ARCH__ != 9202)
                 eventLists.flagAivFinishMte3[1][i] = static_cast<Arch::FlagID>(i + STAGES + 16);
+#endif
                 eventLists.ubIn[i] = i;
 
                 tensorLists.l1.l1A[i] = resource.l1Buf.template GetBufferByByte<ElementX>(tileSizes.l1A * i);
@@ -998,7 +1005,9 @@ public:
                 ubBufAddrOffset += tileSizes.x;
 #ifdef __DAV_CUBE__
                 AscendC::CrossCoreSetFlag<0x4, PIPE_MTE1>(eventLists.flagAicFinishMte1[0][i]);
+#if !defined(__NPU_ARCH__) || (__NPU_ARCH__ != 9201 && __NPU_ARCH__ != 9202)
                 AscendC::CrossCoreSetFlag<0x4, PIPE_MTE1>(eventLists.flagAicFinishMte1[1][i]);
+#endif
 #elif defined __DAV_VEC__
                 AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(eventLists.ubIn[i]);
 #endif

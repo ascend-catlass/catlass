@@ -93,7 +93,13 @@ static void Run(const Options& options)
     // Get the number of cube cores of the current hardware
     auto aicCoreNum = platform_ascendc::PlatformAscendCManager::GetInstance()->GetCoreNumAic();
 
+#if defined(CATLASS_ARCH) && CATLASS_ARCH == 9201
+    using ArchTag = Arch::Ascend960DT;
+#elif defined(CATLASS_ARCH) && CATLASS_ARCH == 9202
+    using ArchTag = Arch::Ascend960PR;
+#else
     using ArchTag = Arch::Ascend950;
+#endif
     constexpr bool enableUnitFlag = true;
     constexpr bool useHF32 = false;
     using DispatchPolicy = Gemm::MmadPingpong<ArchTag, enableUnitFlag, useHF32>;
@@ -110,7 +116,11 @@ static void Run(const Options& options)
         typename Gemm::helper::ElementAccumulatorSelector<ElementA, ElementB>::ElementAccumulator;
     constexpr uint32_t ubStages = 2;
     constexpr bool splitM = std::is_same_v<ElementC, ElementAccumulator>;
+#if defined(CATLASS_ARCH) && (CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202)
+    constexpr auto copyMode = Gemm::Tile::CopyL0CToUBMode::NO_SPLIT;
+#else
     constexpr auto copyMode = splitM ? Gemm::Tile::CopyL0CToUBMode::SPLIT_M : Gemm::Tile::CopyL0CToUBMode::NO_SPLIT;
+#endif
 
     using TileCopy = Gemm::Tile::PackedTileCopyTlaToUB<
         ArchTag, ElementA, LayoutTagA, ElementB, LayoutTagB, ElementC, LayoutTagC, void, copyMode>;

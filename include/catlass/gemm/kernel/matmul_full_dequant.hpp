@@ -233,8 +233,10 @@ public:
                     count_id = count / COUNT_ID_MAX % COUNT_FLAG;
                     AscendC::CrossCoreWaitFlag<AIC_SYNC_AIV_MODE_4, PIPE_FIX>(AIV_SYNC_AIC_FLAG + count_id);
                     if constexpr (enable2UB) {
+#if !defined(__NPU_ARCH__) || (__NPU_ARCH__ != 9201 && __NPU_ARCH__ != 9202)
                         AscendC::CrossCoreWaitFlag<AIC_SYNC_AIV_MODE_4, PIPE_FIX>(
                             AIV_SYNC_AIC_FLAG + count_id + FLAG_ID_MAX);
+#endif
                     }
                 }
 
@@ -250,8 +252,10 @@ public:
                 count_id = count / COUNT_ID_MAX % COUNT_FLAG;
                 AscendC::CrossCoreSetFlag<AIC_SYNC_AIV_MODE_4, PIPE_FIX>(AIC_SYNC_AIV_FLAG + count_id);
                 if constexpr (enable2UB) {
+#if !defined(__NPU_ARCH__) || (__NPU_ARCH__ != 9201 && __NPU_ARCH__ != 9202)
                     AscendC::CrossCoreSetFlag<AIC_SYNC_AIV_MODE_4, PIPE_FIX>(
                         AIC_SYNC_AIV_FLAG + count_id + FLAG_ID_MAX);
+#endif
                 }
             }
             // AIV Process
@@ -273,8 +277,10 @@ public:
                 count_id = count / COUNT_ID_MAX % COUNT_FLAG;
                 AscendC::CrossCoreWaitFlag<AIC_SYNC_AIV_MODE_4, PIPE_FIX>(AIV_SYNC_AIC_FLAG + count_id);
                 if constexpr (enable2UB) {
+#if !defined(__NPU_ARCH__) || (__NPU_ARCH__ != 9201 && __NPU_ARCH__ != 9202)
                     AscendC::CrossCoreWaitFlag<AIC_SYNC_AIV_MODE_4, PIPE_FIX>(
                         AIV_SYNC_AIC_FLAG + count_id + FLAG_ID_MAX);
+#endif
                 }
             }
         }

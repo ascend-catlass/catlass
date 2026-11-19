@@ -161,7 +161,13 @@ static void Run(const Options& options)
     auto aicCoreNum = platform_ascendc::PlatformAscendCManager::GetInstance()->GetCoreNumAic();
 
     // archtag uniflag
+#if defined(CATLASS_ARCH) && CATLASS_ARCH == 9201
+    using ArchTag = Arch::Ascend960DT;
+#elif defined(CATLASS_ARCH) && CATLASS_ARCH == 9202
+    using ArchTag = Arch::Ascend960PR;
+#else
     using ArchTag = Arch::Ascend950;
+#endif
     constexpr bool enableUnitFlag = true;
     static constexpr uint32_t L1_SCALE_FACTOR_K = 16;
     static constexpr uint32_t L1A_STAGES = 2;

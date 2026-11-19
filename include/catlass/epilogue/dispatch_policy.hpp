@@ -228,7 +228,13 @@ struct EpilogueAscend950Fixpipe {
 // For Ascend950, full dequant
 template <QuantMode X1_QUANT_MODE_, QuantMode X2_QUANT_MODE_>
 struct BlockEpilogueDequant {
+#if defined(CATLASS_ARCH) && CATLASS_ARCH == 9201
+    using ArchTag = Arch::Ascend960DT;
+#elif defined(CATLASS_ARCH) && CATLASS_ARCH == 9202
+    using ArchTag = Arch::Ascend960PR;
+#else
     using ArchTag = Arch::Ascend950;
+#endif
     static constexpr QuantMode x1QuantMode = X1_QUANT_MODE_;
     static constexpr QuantMode x2QuantMode = X2_QUANT_MODE_;
 };
@@ -236,7 +242,13 @@ struct BlockEpilogueDequant {
 // For Ascend950, dual-level quantization + MX format
 template <uint32_t UB_STAGES_>
 struct EpilogueAscend950DualLevelQuantMx {
+#if defined(CATLASS_ARCH) && CATLASS_ARCH == 9201
+    using ArchTag = Arch::Ascend960DT;
+#elif defined(CATLASS_ARCH) && CATLASS_ARCH == 9202
+    using ArchTag = Arch::Ascend960PR;
+#else
     using ArchTag = Arch::Ascend950;
+#endif
     static constexpr uint32_t UB_STAGES = UB_STAGES_;
     static constexpr uint32_t OPERANDS_NUM = 8;
 };
@@ -244,7 +256,13 @@ struct EpilogueAscend950DualLevelQuantMx {
 // For Ascend950, per block quant tla
 template <uint32_t UB_STAGES_>
 struct EpilogueAscend950PerBlockQuantTla {
+#if defined(CATLASS_ARCH) && CATLASS_ARCH == 9201
+    using ArchTag = Arch::Ascend960DT;
+#elif defined(CATLASS_ARCH) && CATLASS_ARCH == 9202
+    using ArchTag = Arch::Ascend960PR;
+#else
     using ArchTag = Arch::Ascend950;
+#endif
     static constexpr uint32_t UB_STAGES = UB_STAGES_;
 };
 
@@ -259,7 +277,13 @@ struct EpilogueVisitor {
 
 // For Ascend950, SwiGLU activation + MX quant output
 struct BlockEpilogueSwigluMxQuant {
+#if defined(CATLASS_ARCH) && CATLASS_ARCH == 9201
+    using ArchTag = Arch::Ascend960DT;
+#elif defined(CATLASS_ARCH) && CATLASS_ARCH == 9202
+    using ArchTag = Arch::Ascend960PR;
+#else
     using ArchTag = Arch::Ascend950;
+#endif
 };
 
 // For Ascend950, finalize routing epilogue (AIV post-processing)

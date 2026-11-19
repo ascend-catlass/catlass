@@ -399,7 +399,9 @@ public:
 
             // Get the loop nums on L0
             AscendC::CrossCoreWaitFlag<AIC_SYNC_AIV_MODE, PIPE_MTE1>(AIV_SYNC_AIC_FLAG + l1BListId);
-            AscendC::CrossCoreWaitFlag<AIC_SYNC_AIV_MODE, PIPE_MTE1>(AIV_SYNC_AIC_FLAG + FLAG_ID_MAX + l1BListId);
+            if constexpr (!std::is_same_v<ArchTag, Arch::Ascend960DT> && !std::is_same_v<ArchTag, Arch::Ascend960PR>) {
+                AscendC::CrossCoreWaitFlag<AIC_SYNC_AIV_MODE, PIPE_MTE1>(AIV_SYNC_AIC_FLAG + FLAG_ID_MAX + l1BListId);
+            }
 
             AscendC::SetFlag<AscendC::HardEvent::MTE2_MTE1>(l1BEventList[l1BListId]);
 
@@ -510,7 +512,9 @@ public:
             AscendC::SetFlag<AscendC::HardEvent::MTE1_MTE2>(l1BEventList[l1BListId]);
 
             AscendC::CrossCoreSetFlag<AIC_SYNC_AIV_MODE, PIPE_MTE1>(AIC_SYNC_AIV_FLAG + l1BListId);
-            AscendC::CrossCoreSetFlag<AIC_SYNC_AIV_MODE, PIPE_MTE1>(AIC_SYNC_AIV_FLAG + FLAG_ID_MAX + l1BListId);
+            if constexpr (!std::is_same_v<ArchTag, Arch::Ascend960DT> && !std::is_same_v<ArchTag, Arch::Ascend960PR>) {
+                AscendC::CrossCoreSetFlag<AIC_SYNC_AIV_MODE, PIPE_MTE1>(AIC_SYNC_AIV_FLAG + FLAG_ID_MAX + l1BListId);
+            }
 
             l1AListId = (l1AListId + 1 < L1A_STAGES) ? (l1AListId + 1) : 0;
             l1BListId = (l1BListId + 1 < L1B_STAGES) ? (l1BListId + 1) : 0;

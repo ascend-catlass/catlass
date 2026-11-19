@@ -253,7 +253,13 @@ static void Run(const Options& options)
     uint8_t* deviceY{nullptr};
     ACL_CHECK(aclrtMalloc(reinterpret_cast<void**>(&deviceY), sizeY, ACL_MEM_MALLOC_HUGE_FIRST));
 
+#if defined(CATLASS_ARCH) && CATLASS_ARCH == 9201
+    using ArchTag = Arch::Ascend960DT;
+#elif defined(CATLASS_ARCH) && CATLASS_ARCH == 9202
+    using ArchTag = Arch::Ascend960PR;
+#else
     using ArchTag = Arch::Ascend950;
+#endif
     constexpr bool enableUnitFlag = true;
 
     // Mmad1

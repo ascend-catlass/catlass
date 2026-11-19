@@ -48,7 +48,7 @@ using Options = GroupedGemmOptions;
 static const std::string kExampleRoot = "./examples/65_ascend950_fp8_mx_grouped_matmul_slice_m_swiglu_mx_quant";
 static const std::string kDataRoot = kExampleRoot + "/data";
 
-static void Run(const Options &options)
+static void Run(const Options& options)
 {
     aclrtStream stream{nullptr};
 
@@ -104,24 +104,32 @@ static void Run(const Options &options)
     std::vector<int8_t> hostMxScaleA(lenMxScaleA);
     std::vector<int8_t> hostMxScaleB(lenMxScaleB);
 
-    uint8_t *deviceA{nullptr};
-    uint8_t *deviceB{nullptr};
-    uint8_t *deviceMxScaleA{nullptr};
-    uint8_t *deviceMxScaleB{nullptr};
-    uint8_t *deviceQ{nullptr};
-    uint8_t *deviceQScale{nullptr};
-    uint8_t *deviceGroupList{nullptr};
-    uint8_t *deviceWorkspace{nullptr};
+    uint8_t* deviceA{nullptr};
+    uint8_t* deviceB{nullptr};
+    uint8_t* deviceMxScaleA{nullptr};
+    uint8_t* deviceMxScaleB{nullptr};
+    uint8_t* deviceQ{nullptr};
+    uint8_t* deviceQScale{nullptr};
+    uint8_t* deviceGroupList{nullptr};
+    uint8_t* deviceWorkspace{nullptr};
 
     const auto cleanupAndFinalize = [&]() {
-        if (deviceA) ACL_CHECK(aclrtFree(deviceA));
-        if (deviceB) ACL_CHECK(aclrtFree(deviceB));
-        if (deviceMxScaleA) ACL_CHECK(aclrtFree(deviceMxScaleA));
-        if (deviceMxScaleB) ACL_CHECK(aclrtFree(deviceMxScaleB));
-        if (deviceQ) ACL_CHECK(aclrtFree(deviceQ));
-        if (deviceQScale) ACL_CHECK(aclrtFree(deviceQScale));
-        if (deviceGroupList) ACL_CHECK(aclrtFree(deviceGroupList));
-        if (sizeWorkspace > 0 && deviceWorkspace) ACL_CHECK(aclrtFree(deviceWorkspace));
+        if (deviceA)
+            ACL_CHECK(aclrtFree(deviceA));
+        if (deviceB)
+            ACL_CHECK(aclrtFree(deviceB));
+        if (deviceMxScaleA)
+            ACL_CHECK(aclrtFree(deviceMxScaleA));
+        if (deviceMxScaleB)
+            ACL_CHECK(aclrtFree(deviceMxScaleB));
+        if (deviceQ)
+            ACL_CHECK(aclrtFree(deviceQ));
+        if (deviceQScale)
+            ACL_CHECK(aclrtFree(deviceQScale));
+        if (deviceGroupList)
+            ACL_CHECK(aclrtFree(deviceGroupList));
+        if (sizeWorkspace > 0 && deviceWorkspace)
+            ACL_CHECK(aclrtFree(deviceWorkspace));
         ACL_CHECK(aclrtDestroyStream(stream));
         ACL_CHECK(aclrtResetDevice(options.deviceId));
         ACL_CHECK(aclFinalize());
@@ -150,27 +158,33 @@ static void Run(const Options &options)
         return;
     }
 
-    ACL_CHECK(aclrtMalloc(reinterpret_cast<void **>(&deviceGroupList), sizeGroupList, ACL_MEM_MALLOC_HUGE_FIRST));
+    ACL_CHECK(aclrtMalloc(reinterpret_cast<void**>(&deviceGroupList), sizeGroupList, ACL_MEM_MALLOC_HUGE_FIRST));
     ACL_CHECK(aclrtMemcpy(deviceGroupList, sizeGroupList, groupList.data(), sizeGroupList, ACL_MEMCPY_HOST_TO_DEVICE));
 
-    ACL_CHECK(aclrtMalloc(reinterpret_cast<void **>(&deviceA), sizeA, ACL_MEM_MALLOC_HUGE_FIRST));
+    ACL_CHECK(aclrtMalloc(reinterpret_cast<void**>(&deviceA), sizeA, ACL_MEM_MALLOC_HUGE_FIRST));
     ACL_CHECK(aclrtMemcpy(deviceA, sizeA, hostA.data(), sizeA, ACL_MEMCPY_HOST_TO_DEVICE));
 
-    ACL_CHECK(aclrtMalloc(reinterpret_cast<void **>(&deviceB), sizeB, ACL_MEM_MALLOC_HUGE_FIRST));
+    ACL_CHECK(aclrtMalloc(reinterpret_cast<void**>(&deviceB), sizeB, ACL_MEM_MALLOC_HUGE_FIRST));
     ACL_CHECK(aclrtMemcpy(deviceB, sizeB, hostB.data(), sizeB, ACL_MEMCPY_HOST_TO_DEVICE));
 
-    ACL_CHECK(aclrtMalloc(reinterpret_cast<void **>(&deviceMxScaleA), sizeMxScaleA, ACL_MEM_MALLOC_HUGE_FIRST));
+    ACL_CHECK(aclrtMalloc(reinterpret_cast<void**>(&deviceMxScaleA), sizeMxScaleA, ACL_MEM_MALLOC_HUGE_FIRST));
     ACL_CHECK(aclrtMemcpy(deviceMxScaleA, sizeMxScaleA, hostMxScaleA.data(), sizeMxScaleA, ACL_MEMCPY_HOST_TO_DEVICE));
 
-    ACL_CHECK(aclrtMalloc(reinterpret_cast<void **>(&deviceMxScaleB), sizeMxScaleB, ACL_MEM_MALLOC_HUGE_FIRST));
+    ACL_CHECK(aclrtMalloc(reinterpret_cast<void**>(&deviceMxScaleB), sizeMxScaleB, ACL_MEM_MALLOC_HUGE_FIRST));
     ACL_CHECK(aclrtMemcpy(deviceMxScaleB, sizeMxScaleB, hostMxScaleB.data(), sizeMxScaleB, ACL_MEMCPY_HOST_TO_DEVICE));
 
-    ACL_CHECK(aclrtMalloc(reinterpret_cast<void **>(&deviceQ), sizeQ, ACL_MEM_MALLOC_HUGE_FIRST));
-    ACL_CHECK(aclrtMalloc(reinterpret_cast<void **>(&deviceQScale), sizeQScale, ACL_MEM_MALLOC_HUGE_FIRST));
+    ACL_CHECK(aclrtMalloc(reinterpret_cast<void**>(&deviceQ), sizeQ, ACL_MEM_MALLOC_HUGE_FIRST));
+    ACL_CHECK(aclrtMalloc(reinterpret_cast<void**>(&deviceQScale), sizeQScale, ACL_MEM_MALLOC_HUGE_FIRST));
 
     auto aicCoreNum = platform_ascendc::PlatformAscendCManager::GetInstance()->GetCoreNumAic();
 
+#if defined(CATLASS_ARCH) && CATLASS_ARCH == 9201
+    using ArchTag = Arch::Ascend960DT;
+#elif defined(CATLASS_ARCH) && CATLASS_ARCH == 9202
+    using ArchTag = Arch::Ascend960PR;
+#else
     using ArchTag = Arch::Ascend950;
+#endif
     constexpr bool enableUnitFlag = true;
     using MmadDispatchPolicy = Gemm::MmadMx<ArchTag, enableUnitFlag, 16>;
     using EpilogueDispatchPolicy = Epilogue::BlockEpilogueSwigluMxQuant;
@@ -182,13 +196,17 @@ static void Run(const Options &options)
     auto layoutMxScaleA = tla::MakeMxScaleLayout<ElementMxScale, LayoutTagA, false>(m, mxScaleK);
     auto layoutMxScaleB = tla::MakeMxScaleLayout<ElementMxScale, LayoutTagB, true>(mxScaleK, N);
     auto layoutQ = tla::MakeLayout<ElementQ, LayoutTagQ>(m, N_half);
-    auto layoutQScale = tla::MakeMxScaleLayout<ElementQScale, LayoutTagQ, false>(
-        m, CeilDiv<MX_SCALE_GROUP_NUM>(N_half));
+    auto layoutQScale =
+        tla::MakeMxScaleLayout<ElementQScale, LayoutTagQ, false>(m, CeilDiv<MX_SCALE_GROUP_NUM>(N_half));
 
     using TileCopy = Gemm::Tile::PackedMxTileCopyTlaToUB<
-        ArchTag, ElementA, LayoutTagA, ElementB, LayoutTagB, ElementMxScale, decltype(layoutMxScaleA),
-        ElementMxScale, decltype(layoutMxScaleB), ElementC, LayoutTagQ, void,
+        ArchTag, ElementA, LayoutTagA, ElementB, LayoutTagB, ElementMxScale, decltype(layoutMxScaleA), ElementMxScale,
+        decltype(layoutMxScaleB), ElementC, LayoutTagQ, void,
+#if defined(CATLASS_ARCH) && (CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202)
+        Gemm::Tile::CopyL0CToUBMode::NO_SPLIT>;
+#else
         Gemm::Tile::CopyL0CToUBMode::SPLIT_M>;
+#endif
     using BlockMmad = Gemm::Block::BlockMmadTla<
         MmadDispatchPolicy, L1TileShape, L0TileShape, ElementA, ElementB, ElementC, void, TileCopy>;
     using BlockEpilogue = Epilogue::Block::BlockEpilogue<
@@ -205,16 +223,9 @@ static void Run(const Options &options)
     epilogueParams.baseK = k;
 
     typename MatmulKernel::Arguments arguments{
-        options.problemShape, options.problemCount,
-        deviceGroupList,
-        deviceA, layoutA,
-        deviceB, layoutB,
-        deviceMxScaleA, layoutMxScaleA,
-        deviceMxScaleB, layoutMxScaleB,
-        deviceQ, layoutQ,
-        deviceQScale, layoutQScale,
-        epilogueParams
-    };
+        options.problemShape, options.problemCount, deviceGroupList, deviceA,        layoutA, deviceB, layoutB,
+        deviceMxScaleA,       layoutMxScaleA,       deviceMxScaleB,  layoutMxScaleB, deviceQ, layoutQ, deviceQScale,
+        layoutQScale,         epilogueParams};
 
     MatmulAdapter matmulOp;
     if (matmulOp.CanImplement(arguments) != Status::kSuccess) {
@@ -224,7 +235,7 @@ static void Run(const Options &options)
     }
     sizeWorkspace = matmulOp.GetWorkspaceSize(arguments);
     if (sizeWorkspace > 0) {
-        ACL_CHECK(aclrtMalloc(reinterpret_cast<void **>(&deviceWorkspace), sizeWorkspace, ACL_MEM_MALLOC_HUGE_FIRST));
+        ACL_CHECK(aclrtMalloc(reinterpret_cast<void**>(&deviceWorkspace), sizeWorkspace, ACL_MEM_MALLOC_HUGE_FIRST));
     }
     matmulOp.Initialize(arguments, deviceWorkspace);
     matmulOp(stream, aicCoreNum);
@@ -245,11 +256,8 @@ static void Run(const Options &options)
         qsFile.write(reinterpret_cast<const char*>(hostQScale.data()), sizeQScale);
     }
 
-    std::string cmd = "python3 " + kExampleRoot + "/compare.py "
-        + std::to_string(groupCount) + " "
-        + std::to_string(m) + " "
-        + std::to_string(N) + " "
-        + std::to_string(k);
+    std::string cmd = "python3 " + kExampleRoot + "/compare.py " + std::to_string(groupCount) + " " +
+                      std::to_string(m) + " " + std::to_string(N) + " " + std::to_string(k);
     int ret = std::system(cmd.c_str());
     if (ret != 0) {
         std::cerr << "Compare script failed with return code: " << ret << std::endl;
@@ -258,7 +266,7 @@ static void Run(const Options &options)
     cleanupAndFinalize();
 }
 
-int main(int argc, const char **argv)
+int main(int argc, const char** argv)
 {
     Options options;
     if (options.Parse(argc, argv) != 0) {

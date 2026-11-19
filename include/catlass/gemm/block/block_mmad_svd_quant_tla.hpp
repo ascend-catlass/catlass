@@ -40,7 +40,10 @@ public:
         ArchTag_, ENABLE_UNIT_FLAG_, L0C_STAGES_, ENABLE_L1_RESIDENT_, L1A_STAGES_, L1B_STAGES_, L0A_STAGES_,
         L0B_STAGES_>;
     using ArchTag = typename DispatchPolicy::ArchTag;
-    static_assert(std::is_same_v<ArchTag, Arch::Ascend950>, "unsupported ArchTag");
+    static_assert(
+        std::is_same_v<ArchTag, Arch::Ascend950> || std::is_same_v<ArchTag, Arch::Ascend960DT> ||
+            std::is_same_v<ArchTag, Arch::Ascend960PR>,
+        "unsupported ArchTag");
     using TileCopy = TileCopy_;
     using L1TileShape = L1TileShape_;
     using L0TileShape = L0TileShape_;
@@ -357,7 +360,9 @@ public:
                 if (kL0Idx == 0) {
                     AscendC::CrossCoreWaitFlag<0x4, PIPE_MTE1>(flagAivFinishMte3[0][l1AListId]); // vec0
                     if (mL1Actual > 1) {
+#if !defined(__NPU_ARCH__) || (__NPU_ARCH__ != 9201 && __NPU_ARCH__ != 9202)
                         AscendC::CrossCoreWaitFlag<0x4, PIPE_MTE1>(flagAivFinishMte3[1][l1AListId]); // vec1
+#endif
                     }
                 }
 
@@ -367,7 +372,9 @@ public:
                 if (kL0Idx == kL0Loop - 1) {
                     AscendC::CrossCoreSetFlag<0x4, PIPE_MTE1>(flagAicFinishMte1[0][l1AListId]); // vec0
                     if (mL1Actual > 1) {
+#if !defined(__NPU_ARCH__) || (__NPU_ARCH__ != 9201 && __NPU_ARCH__ != 9202)
                         AscendC::CrossCoreSetFlag<0x4, PIPE_MTE1>(flagAicFinishMte1[1][l1AListId]); // vec1
+#endif
                     }
                 }
 
@@ -458,7 +465,10 @@ public:
         ArchTag_, ENABLE_UNIT_FLAG_, L0C_STAGES_, ENABLE_L1_RESIDENT_, L1A_STAGES_, L1B_STAGES_, L0A_STAGES_,
         L0B_STAGES_>;
     using ArchTag = typename DispatchPolicy::ArchTag;
-    static_assert(std::is_same_v<ArchTag, Arch::Ascend950>, "unsupported ArchTag");
+    static_assert(
+        std::is_same_v<ArchTag, Arch::Ascend950> || std::is_same_v<ArchTag, Arch::Ascend960DT> ||
+            std::is_same_v<ArchTag, Arch::Ascend960PR>,
+        "unsupported ArchTag");
     using TileCopy = TileCopy_;
     using L1TileShape = L1TileShape_;
     using L0TileShape = L0TileShape_;
@@ -814,7 +824,10 @@ public:
         ArchTag_, ENABLE_UNIT_FLAG_, L1_SCALE_FACTOR_K_, L0C_STAGES_, ENABLE_L1_RESIDENT_, L1A_STAGES_, L1B_STAGES_,
         L0A_STAGES_, L0B_STAGES_>;
     using ArchTag = typename DispatchPolicy::ArchTag;
-    static_assert(std::is_same_v<ArchTag, Arch::Ascend950>, "unsupported ArchTag");
+    static_assert(
+        std::is_same_v<ArchTag, Arch::Ascend950> || std::is_same_v<ArchTag, Arch::Ascend960DT> ||
+            std::is_same_v<ArchTag, Arch::Ascend960PR>,
+        "unsupported ArchTag");
     using TileCopy = TileCopy_;
     using L1TileShape = L1TileShape_;
     using L0TileShape = L0TileShape_;

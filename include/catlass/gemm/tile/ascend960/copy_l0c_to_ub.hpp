@@ -159,54 +159,5 @@ struct CopyL0CToUBTla<
           CopyL0CToUBMode::NO_SPLIT, ScaleGranularity::PER_CHANNEL, ReluEnable_,
           std::enable_if_t<tla::detail::isColumnMajor<LayoutDst_>::value>> {};
 
-template <class TensorSrc_, class ElementDst_, class LayoutDst_, class CoordDst_, bool ReluEnable_>
-struct CopyL0CToUBTla<
-    Catlass::Arch::Ascend960DT, TensorSrc_,
-    tla::Tensor<AscendC::LocalTensor<ElementDst_>, LayoutDst_, CoordDst_, AscendC::TPosition::VECCALC>,
-    CopyL0CToUBMode::SPLIT_M, ScaleGranularity::NO_QUANT, ReluEnable_,
-    std::enable_if_t<tla::detail::isRowMajor<LayoutDst_>::value>> {
-    static_assert(
-        !std::is_same<TensorSrc_, TensorSrc_>::value && false,
-        "SPLIT_M (dual-destination L0C->UB) is a 1:2-only concept; on Ascend960 (AIC:AIV = 1:1) "
-        "instantiate CopyL0CToUBMode::NO_SPLIT instead (single dst, full tile to the one AIV's UB)");
-};
-
-template <class TensorSrc_, class ElementDst_, class LayoutDst_, class CoordDst_, bool ReluEnable_>
-struct CopyL0CToUBTla<
-    Catlass::Arch::Ascend960PR, TensorSrc_,
-    tla::Tensor<AscendC::LocalTensor<ElementDst_>, LayoutDst_, CoordDst_, AscendC::TPosition::VECCALC>,
-    CopyL0CToUBMode::SPLIT_M, ScaleGranularity::NO_QUANT, ReluEnable_,
-    std::enable_if_t<tla::detail::isRowMajor<LayoutDst_>::value>> {
-    static_assert(
-        !std::is_same<TensorSrc_, TensorSrc_>::value && false,
-        "SPLIT_M (dual-destination L0C->UB) is a 1:2-only concept; on Ascend960 (AIC:AIV = 1:1) "
-        "instantiate CopyL0CToUBMode::NO_SPLIT instead (single dst, full tile to the one AIV's UB)");
-};
-
-template <class TensorSrc_, class ElementDst_, class LayoutDst_, class CoordDst_, bool ReluEnable_>
-struct CopyL0CToUBTla<
-    Catlass::Arch::Ascend960DT, TensorSrc_,
-    tla::Tensor<AscendC::LocalTensor<ElementDst_>, LayoutDst_, CoordDst_, AscendC::TPosition::VECCALC>,
-    CopyL0CToUBMode::SPLIT_N, ScaleGranularity::NO_QUANT, ReluEnable_,
-    std::enable_if_t<tla::detail::isRowMajor<LayoutDst_>::value>> {
-    static_assert(
-        !std::is_same<TensorSrc_, TensorSrc_>::value && false,
-        "SPLIT_N (dual-destination L0C->UB) is a 1:2-only concept; on Ascend960 (AIC:AIV = 1:1) "
-        "instantiate CopyL0CToUBMode::NO_SPLIT instead");
-};
-
-template <class TensorSrc_, class ElementDst_, class LayoutDst_, class CoordDst_, bool ReluEnable_>
-struct CopyL0CToUBTla<
-    Catlass::Arch::Ascend960PR, TensorSrc_,
-    tla::Tensor<AscendC::LocalTensor<ElementDst_>, LayoutDst_, CoordDst_, AscendC::TPosition::VECCALC>,
-    CopyL0CToUBMode::SPLIT_N, ScaleGranularity::NO_QUANT, ReluEnable_,
-    std::enable_if_t<tla::detail::isRowMajor<LayoutDst_>::value>> {
-    static_assert(
-        !std::is_same<TensorSrc_, TensorSrc_>::value && false,
-        "SPLIT_N (dual-destination L0C->UB) is a 1:2-only concept; on Ascend960 (AIC:AIV = 1:1) "
-        "instantiate CopyL0CToUBMode::NO_SPLIT instead");
-};
-
 } // namespace Catlass::Gemm::Tile
-
 #endif

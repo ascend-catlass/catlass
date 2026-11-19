@@ -24,7 +24,7 @@
 
 namespace Catlass::Gemm::Kernel {
 
-#if defined(__NPU_ARCH__) && ((__NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9201 || __NPU_ARCH__ == 9202))
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9201 || __NPU_ARCH__ == 9202)
 using namespace AscendC::Reg;
 #endif
 
@@ -170,7 +170,9 @@ public:
     {
 #ifdef __DAV_CUBE__
         AscendC::CrossCoreWaitFlag<AIC_SYNC_AIV_MODE_4, PIPE_FIX>(AIV_SYNC_AIC_FLAG);
+#if !defined(__NPU_ARCH__) || (__NPU_ARCH__ != 9201 && __NPU_ARCH__ != 9202)
         AscendC::CrossCoreWaitFlag<AIC_SYNC_AIV_MODE_4, PIPE_FIX>(AIV_SYNC_AIC_FLAG + FLAG_ID_MAX);
+#endif
 #endif
     }
 
@@ -197,7 +199,9 @@ public:
         for (uint32_t batchIdx = AscendC::GetBlockIdx(); batchIdx < params.batchCount;
              batchIdx += AscendC::GetBlockNum()) {
             AscendC::CrossCoreWaitFlag<AIC_SYNC_AIV_MODE_4, PIPE_FIX>(AIV_SYNC_AIC_FLAG);
+#if !defined(__NPU_ARCH__) || (__NPU_ARCH__ != 9201 && __NPU_ARCH__ != 9202)
             AscendC::CrossCoreWaitFlag<AIC_SYNC_AIV_MODE_4, PIPE_FIX>(AIV_SYNC_AIC_FLAG + FLAG_ID_MAX);
+#endif
             for (uint32_t loopIdx = 0; loopIdx < coreLoops; loopIdx += 1) {
                 GemmCoord blockCoord = matmulBlockScheduler.GetBlockCoord(loopIdx);
                 GemmCoord actualBlockShape = matmulBlockScheduler.GetActualBlockShape(blockCoord);
@@ -221,7 +225,9 @@ public:
                 blockMmad(tensorBlockA, tensorBlockB, tensorBlockC, actualBlockShape);
             }
             AscendC::CrossCoreSetFlag<AIC_SYNC_AIV_MODE_4, PIPE_FIX>(AIC_SYNC_AIV_FLAG);
+#if !defined(__NPU_ARCH__) || (__NPU_ARCH__ != 9201 && __NPU_ARCH__ != 9202)
             AscendC::CrossCoreSetFlag<AIC_SYNC_AIV_MODE_4, PIPE_FIX>(AIC_SYNC_AIV_FLAG + FLAG_ID_MAX);
+#endif
         }
     }
 
@@ -247,7 +253,7 @@ public:
         ubScale = resource.ubBuf.template GetBufferByByte<ElementScale>(ubOffset);
 
         const uint32_t aiCoreNum = AscendC::GetBlockNum();
-        const uint32_t aiCoreIdx = AscendC::GetBlockIdx() >> 1;
+        const uint32_t aiCoreIdx = AscendC::GetBlockIdx() / AscendC::GetTaskRation();
 
         for (uint32_t batchIdx = aiCoreIdx; batchIdx < params.batchCount; batchIdx += aiCoreNum) {
             AscendC::CrossCoreWaitFlag<AIC_SYNC_AIV_MODE_4, PIPE_V>(AIC_SYNC_AIV_FLAG);

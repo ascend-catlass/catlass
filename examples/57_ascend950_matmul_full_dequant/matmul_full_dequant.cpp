@@ -273,7 +273,13 @@ static void Run(const Options& options)
     // Get the number of cube cores of the current hardware
     auto aicCoreNum = platform_ascendc::PlatformAscendCManager::GetInstance()->GetCoreNumAic();
 
+#if defined(CATLASS_ARCH) && CATLASS_ARCH == 9201
+    using ArchTag = Arch::Ascend960DT;
+#elif defined(CATLASS_ARCH) && CATLASS_ARCH == 9202
+    using ArchTag = Arch::Ascend960PR;
+#else
     using ArchTag = Arch::Ascend950;
+#endif
     constexpr bool enableUnitFlag = true;
     using DispatchPolicy = Gemm::MmadPingpong<ArchTag, enableUnitFlag>;
 
@@ -283,7 +289,11 @@ static void Run(const Options& options)
     constexpr uint32_t taskRatio = 2;
     using TileCopy = Gemm::Tile::PackedTileCopyTlaToUB<
         ArchTag, ElementA, LayoutTagA, ElementB, LayoutTagB, ElementC, LayoutTagC, ElementBias,
+#if defined(CATLASS_ARCH) && (CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202)
+        Gemm::Tile::CopyL0CToUBMode::NO_SPLIT>;
+#else
         Gemm::Tile::CopyL0CToUBMode::SPLIT_M>;
+#endif
     using BlockMmad = Gemm::Block::BlockMmadTla<
         DispatchPolicy, L1TileShape, L0TileShape, ElementA, ElementB, ElementC, ElementBias, TileCopy>;
     using EpilogueDispatchPolicy = Epilogue::BlockEpilogueDequant<X1_QUANT_MODE, X2_QUANT_MODE>;

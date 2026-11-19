@@ -31,8 +31,10 @@ struct TilePerBlockQuant {
     using ElementScale = ElementScale_;
 
     static_assert(
-        std::is_same_v<ArchTag, Arch::Ascend950> && (std::is_same_v<ElementSrc, bfloat16_t>) &&
-            (std::is_same_v<ElementDst, float8_e4m3_t>) && (std::is_same_v<ElementScale, float>),
+        (std::is_same_v<ArchTag, Arch::Ascend950> || std::is_same_v<ArchTag, Arch::Ascend960DT> ||
+         std::is_same_v<ArchTag, Arch::Ascend960PR>) &&
+            (std::is_same_v<ElementSrc, bfloat16_t>) && (std::is_same_v<ElementDst, float8_e4m3_t>) &&
+            (std::is_same_v<ElementScale, float>),
         "The element type template parameters of TilePerBlockQuant are wrong");
 
     CATLASS_DEVICE

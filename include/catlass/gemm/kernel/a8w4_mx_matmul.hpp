@@ -146,7 +146,9 @@ public:
         if ASCEND_IS_AIC {
             for (uint32_t i = 0; i < L1B_STAGES; i++) {
                 AscendC::CrossCoreSetFlag<AIC_SYNC_AIV_MODE, PIPE_MTE1>(AIC_SYNC_AIV_FLAG + i);
+#if !defined(__NPU_ARCH__) || (__NPU_ARCH__ != 9201 && __NPU_ARCH__ != 9202)
                 AscendC::CrossCoreSetFlag<AIC_SYNC_AIV_MODE, PIPE_MTE1>(AIC_SYNC_AIV_FLAG + FLAG_ID_MAX + i);
+#endif
             }
         }
     }

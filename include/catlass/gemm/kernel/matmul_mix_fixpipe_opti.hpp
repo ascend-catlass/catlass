@@ -44,7 +44,9 @@ public:
         if ASCEND_IS_AIC {
             for (uint32_t i = 0; i < UB_STAGES; ++i) {
                 AscendC::CrossCoreWaitFlag<AIC_SYNC_AIV_MODE_4, PIPE_FIX>(AIV_SYNC_AIC_FLAG + i);
-                AscendC::CrossCoreWaitFlag<AIC_SYNC_AIV_MODE_4, PIPE_FIX>(AIV_SYNC_AIC_FLAG + FLAG_ID_MAX + i);
+                if constexpr (USE_DUAL_DST_FLAGS) {
+                    AscendC::CrossCoreWaitFlag<AIC_SYNC_AIV_MODE_4, PIPE_FIX>(AIV_SYNC_AIC_FLAG + FLAG_ID_MAX + i);
+                }
             }
         }
     }
@@ -74,7 +76,14 @@ public:
 
     static constexpr uint32_t UB_STAGES = BlockEpilogue::UB_STAGES;
     constexpr static bool ENABLE_DUAL_DST = AscendC::IsSameType<ElementC, ElementAccumulator>::value;
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 9201 || __NPU_ARCH__ == 9202)
+    // Ascend960 AIC:AIV = 1:1，无 SPLIT_M 双目的端：flags 关闭，UB 行取全宽
+    constexpr static bool USE_DUAL_DST_FLAGS = false;
+    constexpr static uint32_t UB_TILE_ROWS = L1_TILE_M;
+#else
+    constexpr static bool USE_DUAL_DST_FLAGS = ENABLE_DUAL_DST;
     constexpr static uint32_t UB_TILE_ROWS = ENABLE_DUAL_DST ? CeilDiv(L1_TILE_M, 2U) : L1_TILE_M;
+#endif
     constexpr static uint32_t UB_TILE_COL_BYTES = RoundUp(L1_TILE_N * sizeof(ElementC), BYTE_PER_BLK);
     constexpr static uint32_t UB_TILE_SIZE = UB_TILE_ROWS * UB_TILE_COL_BYTES;
 
@@ -164,17 +173,21 @@ public:
             if ASCEND_IS_AIC {
                 // Synchronize with aiv
                 AscendC::CrossCoreWaitFlag<AIC_SYNC_AIV_MODE_4, PIPE_FIX>(AIV_SYNC_AIC_FLAG + (ubListId));
-                if constexpr (ENABLE_DUAL_DST) {
+                if constexpr (USE_DUAL_DST_FLAGS) {
+#if !defined(__NPU_ARCH__) || (__NPU_ARCH__ != 9201 && __NPU_ARCH__ != 9202)
                     AscendC::CrossCoreWaitFlag<AIC_SYNC_AIV_MODE_4, PIPE_FIX>(
                         AIV_SYNC_AIC_FLAG + (ubListId) + FLAG_ID_MAX);
+#endif
                 }
                 // Calulate blockMmad
                 blockMmadOp(aTileTensor, bTileTensor, cLocalTensor, blockShape);
                 // Notify aiv
                 AscendC::CrossCoreSetFlag<AIC_SYNC_AIV_MODE_4, PIPE_FIX>(AIC_SYNC_AIV_FLAG + (ubListId));
-                if constexpr (ENABLE_DUAL_DST) {
+                if constexpr (USE_DUAL_DST_FLAGS) {
+#if !defined(__NPU_ARCH__) || (__NPU_ARCH__ != 9201 && __NPU_ARCH__ != 9202)
                     AscendC::CrossCoreSetFlag<AIC_SYNC_AIV_MODE_4, PIPE_FIX>(
                         AIC_SYNC_AIV_FLAG + (ubListId) + FLAG_ID_MAX);
+#endif
                 }
             }
             if ASCEND_IS_AIV {
