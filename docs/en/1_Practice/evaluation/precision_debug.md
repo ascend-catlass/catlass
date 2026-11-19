@@ -119,7 +119,6 @@ First, a critical distinction: **Most CATLASS samples do not have an independent
 > **Takeaways**
 
 > - **For samples without tiling** (the majority), precision investigation goes directly to component binary search (Section 3.3). No need to consider tiling issues.
-
 > - **For samples with tiling** (FA/MLA/dynamic Matmul), first determine whether the issue is related to tiling or the kernel, and then proceed to component binary search.
 
 ### CATLASS Template-based Layered Architecture

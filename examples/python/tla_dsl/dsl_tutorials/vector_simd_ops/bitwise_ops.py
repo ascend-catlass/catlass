@@ -24,7 +24,8 @@ from vector_op_harness import (
 VECTOR_ELE = 400
 VL_ELE = 64
 LOOPS = (VECTOR_ELE + VL_ELE - 1) // VL_ELE
-ALL_DTYPES = ("f16", "bf16", "f32", "i32", "i16", "i8")
+ALL_DTYPES = ("f16", "bf16", "f32", "i32", "i16", "i8", "u8", "u16", "u32")
+_UNSIGNED_BITS = {"u8": 8, "u16": 16, "u32": 32}
 
 _KERNEL_DTYPE = tla.Int32
 _KERNEL_ELEMENT_BYTES = 4
@@ -152,7 +153,7 @@ def bitwise_ops(
                     m_q = tla.create_mask(pattern=tla.mask.Q, dtype=_KERNEL_DTYPE)
                     m_m4 = tla.create_mask(pattern=tla.mask.M4, dtype=_KERNEL_DTYPE)
 
-                    zero = tla.sub(av, av)
+                    zero = tla.bitwise_xor(av, av)
                     reg_and = tla.bitwise_and(av, bv, mask=tail)
                     reg_or = tla.bitwise_or(av, bv)
                     reg_xor = tla.bitwise_xor(av, bv, mask=tail)
@@ -222,13 +223,43 @@ def _set_kernel_config(
     LOOPS = config.loops
     _KERNEL_DTYPE = config.tla_dtype
     _KERNEL_ELEMENT_BYTES = config.element_bytes
-    _SUPPORTS_REG_NOT = dtype_name != "bf16"
+    # Unsigned and bf16 cases use the fallback path, which does not compute register bitwise NOT.
+    _SUPPORTS_REG_NOT = dtype_name != "bf16" and dtype_name not in _UNSIGNED_BITS
     return config.tla_dtype, config.torch_dtype, config.default_sentinel
+
+
+def _make_unsigned_inputs(torch: Any, dtype_name: str, dtype: Any) -> tuple[Any, Any]:
+    bits = _UNSIGNED_BITS[dtype_name]
+    idx = torch.arange(VECTOR_ELE, dtype=torch.int64)
+
+    # Mask for the most significant bit.
+    msb = 1 << (bits - 1)
+
+    # Modulus used to keep values within the unsigned range.
+    modulus = 1 << bits
+
+    # Generate different base bit patterns.
+    base_a = idx * 13
+    base_b = idx * 7 + 5
+
+    # Flip the highest bit on alternating elements of a.
+    flip_a = (idx % 2) * msb
+
+    # Flip the highest bit on alternating pairs of elements of b.
+    flip_b = ((idx // 2) % 2) * msb
+
+    # Apply the bit flips and constrain values to the target bit width.
+    a = (base_a ^ flip_a) % modulus
+    b = (base_b ^ flip_b) % modulus
+
+    return a.to(dtype).to("npu"), b.to(dtype).to("npu")
 
 
 def _make_inputs(args: Any, dtype_name: str, torch: Any) -> tuple[Any, ...]:
     _, dtype, _ = _set_kernel_config(args.op, dtype_name, args.shape)
     device = "npu"
+    if dtype_name in _UNSIGNED_BITS:
+        return _make_unsigned_inputs(torch, dtype_name, dtype)
     arange = torch.arange(VECTOR_ELE, dtype=torch.int64, device=device)
     if dtype_name in {"f16", "bf16", "f32"}:
         base = (arange % 31).to(torch.float32) / 64.0
@@ -245,10 +276,15 @@ def _select(torch: Any, x: Any, keep: Any) -> Any:
 
 
 def _raw_int_dtype(torch: Any, x: Any) -> Any | None:
+    # PyTorch CPU bitwise ops may not accept unsigned 16/32-bit tensors; use same-width signed views.
+    # Viewing preserves each element's bits; it does not convert the unsigned value numerically.
     return {
         torch.float32: torch.int32,
         torch.float16: torch.int16,
         torch.bfloat16: torch.int16,
+        torch.uint8: torch.int8,
+        torch.uint16: torch.int16,
+        torch.uint32: torch.int32,
     }.get(x.dtype)
 
 
@@ -271,6 +307,26 @@ def _expected(op_name: str, inputs: tuple[Any, ...]) -> tuple[Any, ...]:
     import torch
 
     a, b = inputs
+    # CPU reference operations support unsigned storage through signed bit views.
+    if a.dtype in (torch.uint8, torch.uint16, torch.uint32):
+        a, b = a.cpu(), b.cpu()
+        raw_dtype = _raw_int_dtype(torch, a)
+        a_raw = a.view(raw_dtype)
+        # Build the same H/Q/M4 lane masks as the kernel, then apply them to the raw bit patterns.
+        lane = torch.arange(VECTOR_ELE) % VL_ELE
+        h = lane < (VL_ELE // 2)
+        q = lane < (VL_ELE // 4)
+        m4 = (lane % 4) == 0
+        return (
+            _select(torch, a_raw, ~q).view(a.dtype),
+            _select(torch, a_raw, h & m4).view(a.dtype),
+            _select(torch, a_raw, q | m4).view(a.dtype),
+            _select(torch, a_raw, h ^ m4).view(a.dtype),
+            a,
+            _bitwise_binary(torch, torch.bitwise_and, a, b),
+            _bitwise_binary(torch, torch.bitwise_or, a, b),
+            _bitwise_binary(torch, torch.bitwise_xor, a, b),
+        )
     lane = torch.arange(VECTOR_ELE, device=a.device) % VL_ELE
     h = lane < (VL_ELE // 2)
     q = lane < (VL_ELE // 4)

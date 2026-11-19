@@ -10825,6 +10825,7 @@ def bitwise_and(
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function.
         - Must be called inside `tla.vec.func()`.
+        - Vector source elements must be f16, bf16, f32, i32, i16, i8, u8, u16, u32, f4e2m1x2, or f4e1m2x2.
         - `f4e2m1x2` / `f4e1m2x2` vectors carry one FP4 pair per lane; a `mask` selects whole pairs.
 
         Example:
@@ -10864,6 +10865,7 @@ def bitwise_or(
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function.
         - Must be called inside `tla.vec.func()`.
+        - Vector source elements must be f16, bf16, f32, i32, i16, i8, u8, u16, u32, f4e2m1x2, or f4e1m2x2.
         - `f4e2m1x2` / `f4e1m2x2` vectors carry one FP4 pair per lane; a `mask` selects whole pairs.
 
         Example:
@@ -10903,6 +10905,7 @@ def bitwise_xor(
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function.
         - Must be called inside `tla.vec.func()`.
+        - Vector source elements must be f16, bf16, f32, i32, i16, i8, u8, u16, u32, f4e2m1x2, or f4e1m2x2.
         - `f4e2m1x2` / `f4e1m2x2` vectors carry one FP4 pair per lane; a `mask` selects whole pairs.
 
         Example:

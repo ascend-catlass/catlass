@@ -4,6 +4,7 @@ from catlass.tla.runtime import make_fake_tensor
 
 
 import inspect
+import re
 from pathlib import Path
 
 import pytest
@@ -65,6 +66,34 @@ def _vector_ssa_bitwise_binary_kernel(
             and_reg = tla.bitwise_and(reg0, reg1)
             or_reg = tla.bitwise_or(and_reg, reg0, mask=all_mask)
             dst_tile.store(tla.bitwise_xor(or_reg, reg1), mask=all_mask)
+
+@tla.kernel
+def _unsigned_binary_kernel(src0: tla.Tensor, src1: tla.Tensor, dst: tla.Tensor) -> None:
+    src0_tile = tla.tile_view(src0, tla.make_shape(64), tla.make_coord(0))
+    src1_tile = tla.tile_view(src1, tla.make_shape(64), tla.make_coord(0))
+    dst_tile = tla.tile_view(dst, tla.make_shape(64), tla.make_coord(0))
+    with tla.vector():
+        with tla.vec.func(mode="simd"):
+            lhs = src0_tile.load()
+            rhs = src1_tile.load()
+            mask = tla.create_mask(pattern=tla.mask.ALL, dtype=_REG_BITWISE_DTYPE)
+            result = _UNSIGNED_BITWISE_OP(lhs, rhs, mask=mask)
+            dst_tile.store(result, mask=mask)
+
+
+_UNSIGNED_BITWISE_OP = tla.bitwise_and
+
+
+@tla.kernel
+def _mixed_signed_unsigned_kernel(src0: tla.Tensor, src1: tla.Tensor, dst: tla.Tensor) -> None:
+    src0_tile = tla.tile_view(src0, tla.make_shape(64), tla.make_coord(0))
+    src1_tile = tla.tile_view(src1, tla.make_shape(64), tla.make_coord(0))
+    dst_tile = tla.tile_view(dst, tla.make_shape(64), tla.make_coord(0))
+    with tla.vector():
+        with tla.vec.func(mode="simd"):
+            lhs = src0_tile.load()
+            rhs = src1_tile.load()
+            dst_tile.store(tla.bitwise_and(lhs, rhs))
 
 
 def _tensor_args(
@@ -158,6 +187,39 @@ def test_vector_ssa_bitwise_bindings_and_public_ops_emit_mlir(
     assert hasattr(tla_ops_gen, binding_name)
     assert op_name in kernel.dump_mlir(type_args=_tensor_args(dtype, tensor_count))
 
+@pytest.mark.parametrize(
+    ("dtype", "element_type"),
+    ((tla.UInt8, "ui8"), (tla.UInt16, "ui16"), (tla.UInt32, "ui32")),
+)
+@pytest.mark.parametrize(
+    ("op", "op_name"),
+    ((tla.bitwise_and, "and"), (tla.bitwise_or, "or"), (tla.bitwise_xor, "xor")),
+)
+def test_unsigned_vector_bitwise_binary_emits_typed_mlir(
+    dtype: type[tla.Numeric], element_type: str, op: object, op_name: str
+) -> None:
+    global _REG_BITWISE_DTYPE, _UNSIGNED_BITWISE_OP
+    _REG_BITWISE_DTYPE = dtype
+    _UNSIGNED_BITWISE_OP = op
+    asm = _unsigned_binary_kernel.dump_mlir(type_args=_tensor_args(dtype, 3))
+    vector_type = rf"!tla\.vector<64x{element_type}>"
+    lanes = 256 // (int(element_type[2:]) // 8)
+    assert re.search(
+        rf"tla\.bitwise_{op_name} %\w+, %\w+ mask %\w+ : "
+        rf"{vector_type},\s*{vector_type} mask !tla\.mask<{lanes}> -> {vector_type}",
+        asm,
+    )
+
+
+def test_bitwise_and_rejects_mixed_signed_unsigned_elements() -> None:
+    with pytest.raises(tla.TlaCoreAPIError, match="src1_reg has element type.*expected"):
+        _mixed_signed_unsigned_kernel.dump_mlir(
+            type_args=(
+                *_tensor_args(tla.UInt32, 1),
+                *_tensor_args(tla.Int32, 1),
+                *_tensor_args(tla.UInt32, 1),
+            )
+        )
 
 def test_bitwise_ops_are_in_vector_lowering_info() -> None:
     # The vector lowering is split across TlaVectorRegion*.cpp (driver, common,
