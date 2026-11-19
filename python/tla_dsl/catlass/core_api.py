@@ -11354,7 +11354,7 @@ def _require_arch_warp_region(op_name: str) -> None:
 
 
 @dsl_user_op
-def arch_warp_redux_sync(
+def arch_warp_reduce_sync(
     value: Numeric | int | float,
     kind: str = "add",
     *,
@@ -11378,22 +11378,22 @@ def arch_warp_redux_sync(
         ```python
         with tla.vec.func(mode="simt", thread_block_dim=32):
             tid, _, _ = tla.arch.thread_idx()
-            gm_out[tid] = tla.arch.warp_redux_sync(gm_in[tid])
+            gm_out[tid] = tla.arch.warp_reduce_sync(gm_in[tid])
         ```
     """
-    _require_arch_warp_region("arch.warp_redux_sync")
+    _require_arch_warp_region("arch.warp_reduce_sync")
     if not isinstance(kind, str) or kind not in ("add", "max", "min"):
         _op_error(
-            "arch.warp_redux_sync",
+            "arch.warp_reduce_sync",
             "kind must be a compile-time string: add, max, or min",
         )
     num = value if isinstance(value, Numeric) else as_numeric(value)
     if type(num) not in (Int8, Int16, Int32, UInt8, UInt16, UInt32, Float16, Float32):
         _op_error(
-            "arch.warp_redux_sync", f"unsupported value type {type(num).__name__}"
+            "arch.warp_reduce_sync", f"unsupported value type {type(num).__name__}"
         )
     operand = num.ir_value(loc=loc)
-    result = _tla_ops_gen.arch_warp_redux(
+    result = _tla_ops_gen.arch_warp_reduce(
         operand.type,
         operand,
         kind,
@@ -12446,7 +12446,7 @@ _require_generated("arch_thread_block_dim")
 _require_generated("arch_thread_idx")
 _require_generated("arch_lane_idx")
 _require_generated("arch_lanemask")
-_require_generated("arch_warp_redux")
+_require_generated("arch_warp_reduce")
 _require_generated("simt_add")
 _require_generated("simt_sub")
 _require_generated("simt_mul")
@@ -12469,7 +12469,7 @@ arch._set("thread_block_dim", arch_thread_block_dim)
 arch._set("thread_idx", arch_thread_idx)
 arch._set("warpsize", arch_warpsize)
 arch._set("lane_idx", arch_lane_idx)
-arch._set("warp_redux_sync", arch_warp_redux_sync)
+arch._set("warp_reduce_sync", arch_warp_reduce_sync)
 arch._set("lanemask_eq", arch_lanemask_eq)
 arch._set("lanemask_lt", arch_lanemask_lt)
 arch._set("lanemask_le", arch_lanemask_le)

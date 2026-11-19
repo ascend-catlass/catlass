@@ -170,9 +170,9 @@ sid = tla.arch.sub_block_idx()
 
 ---
 
-### `tla.arch.warp_redux_sync`
+### `tla.arch.warp_reduce_sync`
 
-**源码：** [`catlass.core_api.arch_warp_redux_sync`](../../../../catlass/core_api.py)
+**源码：** [`catlass.core_api.arch_warp_reduce_sync`](../../../../catlass/core_api.py)
 
 说明：
 
@@ -182,7 +182,7 @@ sid = tla.arch.sub_block_idx()
 原型：
 
 ```python
-tla.arch.warp_redux_sync(value: Numeric | int | float, kind: str = 'add') -> Numeric
+tla.arch.warp_reduce_sync(value: Numeric | int | float, kind: str = 'add') -> Numeric
 ```
 
 参数：
@@ -201,7 +201,7 @@ tla.arch.warp_redux_sync(value: Numeric | int | float, kind: str = 'add') -> Num
 ```python
 with tla.vec.func(mode="simt", thread_block_dim=32):
     tid, _, _ = tla.arch.thread_idx()
-    gm_out[tid] = tla.arch.warp_redux_sync(gm_in[tid])
+    gm_out[tid] = tla.arch.warp_reduce_sync(gm_in[tid])
 ```
 
 ---

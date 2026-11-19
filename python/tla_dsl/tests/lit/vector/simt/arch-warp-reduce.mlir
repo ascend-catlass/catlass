@@ -1,5 +1,5 @@
 // RUN: %tla_compile %s --mlir-print-ir-after-all -o %t.cse 2>&1 | %filecheck %s --check-prefix=CONVERGENCE
-// RUN: %tla_compile %s --mlir-print-ir-after=tla-vector-region-simt -o %t 2>&1 | %filecheck %s --implicit-check-not=tla.arch.warp_redux
+// RUN: %tla_compile %s --mlir-print-ir-after=tla-vector-region-simt -o %t 2>&1 | %filecheck %s --implicit-check-not=tla.arch.warp_reduce
 module {
   func.func @i32_s32(%mem: memref<3xi32, #hivm.address_space<gm>>) {
     %c0 = arith.constant 0 : index
@@ -10,21 +10,21 @@ module {
     "tla.vector"() ({
       "tla.vec.func"() ({
         %v = tla.simt_load %out[%c0] : <!tla.layout<!tla.shape<3>, !tla.stride<1>, !tla.shape<3>, RowMajor>, !tla.coord<0>, !tla.ptr<i32, gm, 4>> -> i32
-        %add = tla.arch.warp_redux "add" %v : i32
+        %add = tla.arch.warp_reduce "add" %v : i32
         tla.simt_store %out[%c0], %add : <!tla.layout<!tla.shape<3>, !tla.stride<1>, !tla.shape<3>, RowMajor>, !tla.coord<0>, !tla.ptr<i32, gm, 4>>, i32
-        %max = tla.arch.warp_redux "max" %v : i32
+        %max = tla.arch.warp_reduce "max" %v : i32
         tla.simt_store %out[%c1], %max : <!tla.layout<!tla.shape<3>, !tla.stride<1>, !tla.shape<3>, RowMajor>, !tla.coord<0>, !tla.ptr<i32, gm, 4>>, i32
-        %min = tla.arch.warp_redux "min" %v : i32
+        %min = tla.arch.warp_reduce "min" %v : i32
         tla.simt_store %out[%c2], %min : <!tla.layout<!tla.shape<3>, !tla.stride<1>, !tla.shape<3>, RowMajor>, !tla.coord<0>, !tla.ptr<i32, gm, 4>>, i32
         %tx, %ty, %tz = tla.arch.thread_idx -> i32, i32, i32
         %half = arith.constant 16 : i32
         %active = arith.cmpi slt, %tx, %half : i32
         scf.if %active {
-          %partial = tla.arch.warp_redux "add" %v : i32
+          %partial = tla.arch.warp_reduce "add" %v : i32
           tla.simt_store %out[%c1], %partial : <!tla.layout<!tla.shape<3>, !tla.stride<1>, !tla.shape<3>, RowMajor>, !tla.coord<0>, !tla.ptr<i32, gm, 4>>, i32
         }
         scf.for %i = %c0 to %c2 step %c1 {
-          %loop = tla.arch.warp_redux "max" %v : i32
+          %loop = tla.arch.warp_reduce "max" %v : i32
           tla.simt_store %out[%c2], %loop : <!tla.layout<!tla.shape<3>, !tla.stride<1>, !tla.shape<3>, RowMajor>, !tla.coord<0>, !tla.ptr<i32, gm, 4>>, i32
         }
       }) {mode = "simt", thread_block_dim = array<i64: 48, 1, 1>} : () -> ()
@@ -40,11 +40,11 @@ module {
     "tla.vector"() ({
       "tla.vec.func"() ({
         %v = tla.simt_load %out[%c0] : <!tla.layout<!tla.shape<3>, !tla.stride<1>, !tla.shape<3>, RowMajor>, !tla.coord<0>, !tla.ptr<i32, gm, 4>> -> i32
-        %add = tla.arch.warp_redux "add" %v {isUnsigned} : i32
+        %add = tla.arch.warp_reduce "add" %v {isUnsigned} : i32
         tla.simt_store %out[%c0], %add : <!tla.layout<!tla.shape<3>, !tla.stride<1>, !tla.shape<3>, RowMajor>, !tla.coord<0>, !tla.ptr<i32, gm, 4>>, i32
-        %max = tla.arch.warp_redux "max" %v {isUnsigned} : i32
+        %max = tla.arch.warp_reduce "max" %v {isUnsigned} : i32
         tla.simt_store %out[%c1], %max : <!tla.layout<!tla.shape<3>, !tla.stride<1>, !tla.shape<3>, RowMajor>, !tla.coord<0>, !tla.ptr<i32, gm, 4>>, i32
-        %min = tla.arch.warp_redux "min" %v {isUnsigned} : i32
+        %min = tla.arch.warp_reduce "min" %v {isUnsigned} : i32
         tla.simt_store %out[%c2], %min : <!tla.layout<!tla.shape<3>, !tla.stride<1>, !tla.shape<3>, RowMajor>, !tla.coord<0>, !tla.ptr<i32, gm, 4>>, i32
       }) {mode = "simt", thread_block_dim = array<i64: 48, 1, 1>} : () -> ()
     }) : () -> ()
@@ -59,11 +59,11 @@ module {
     "tla.vector"() ({
       "tla.vec.func"() ({
         %v = tla.simt_load %out[%c0] : <!tla.layout<!tla.shape<3>, !tla.stride<1>, !tla.shape<3>, RowMajor>, !tla.coord<0>, !tla.ptr<f16, gm, 4>> -> f16
-        %add = tla.arch.warp_redux "add" %v : f16
+        %add = tla.arch.warp_reduce "add" %v : f16
         tla.simt_store %out[%c0], %add : <!tla.layout<!tla.shape<3>, !tla.stride<1>, !tla.shape<3>, RowMajor>, !tla.coord<0>, !tla.ptr<f16, gm, 4>>, f16
-        %max = tla.arch.warp_redux "max" %v : f16
+        %max = tla.arch.warp_reduce "max" %v : f16
         tla.simt_store %out[%c1], %max : <!tla.layout<!tla.shape<3>, !tla.stride<1>, !tla.shape<3>, RowMajor>, !tla.coord<0>, !tla.ptr<f16, gm, 4>>, f16
-        %min = tla.arch.warp_redux "min" %v : f16
+        %min = tla.arch.warp_reduce "min" %v : f16
         tla.simt_store %out[%c2], %min : <!tla.layout<!tla.shape<3>, !tla.stride<1>, !tla.shape<3>, RowMajor>, !tla.coord<0>, !tla.ptr<f16, gm, 4>>, f16
       }) {mode = "simt", thread_block_dim = array<i64: 48, 1, 1>} : () -> ()
     }) : () -> ()
@@ -78,11 +78,11 @@ module {
     "tla.vector"() ({
       "tla.vec.func"() ({
         %v = tla.simt_load %out[%c0] : <!tla.layout<!tla.shape<3>, !tla.stride<1>, !tla.shape<3>, RowMajor>, !tla.coord<0>, !tla.ptr<f32, gm, 4>> -> f32
-        %add = tla.arch.warp_redux "add" %v : f32
+        %add = tla.arch.warp_reduce "add" %v : f32
         tla.simt_store %out[%c0], %add : <!tla.layout<!tla.shape<3>, !tla.stride<1>, !tla.shape<3>, RowMajor>, !tla.coord<0>, !tla.ptr<f32, gm, 4>>, f32
-        %max = tla.arch.warp_redux "max" %v : f32
+        %max = tla.arch.warp_reduce "max" %v : f32
         tla.simt_store %out[%c1], %max : <!tla.layout<!tla.shape<3>, !tla.stride<1>, !tla.shape<3>, RowMajor>, !tla.coord<0>, !tla.ptr<f32, gm, 4>>, f32
-        %min = tla.arch.warp_redux "min" %v : f32
+        %min = tla.arch.warp_reduce "min" %v : f32
         tla.simt_store %out[%c2], %min : <!tla.layout<!tla.shape<3>, !tla.stride<1>, !tla.shape<3>, RowMajor>, !tla.coord<0>, !tla.ptr<f32, gm, 4>>, f32
       }) {mode = "simt", thread_block_dim = array<i64: 48, 1, 1>} : () -> ()
     }) : () -> ()
@@ -95,7 +95,7 @@ module {
     "tla.vector"() ({
       "tla.vec.func"() ({
         %v = tla.simt_load %out[%c0] : <!tla.layout<!tla.shape<1>, !tla.stride<1>, !tla.shape<1>, RowMajor>, !tla.coord<0>, !tla.ptr<i8, gm, 4>> -> i8
-        %add = tla.arch.warp_redux "add" %v : i8
+        %add = tla.arch.warp_reduce "add" %v : i8
         tla.simt_store %out[%c0], %add : <!tla.layout<!tla.shape<1>, !tla.stride<1>, !tla.shape<1>, RowMajor>, !tla.coord<0>, !tla.ptr<i8, gm, 4>>, i8
       }) {mode = "simt", thread_block_dim = array<i64: 48, 1, 1>} : () -> ()
     }) : () -> ()
@@ -108,7 +108,7 @@ module {
     "tla.vector"() ({
       "tla.vec.func"() ({
         %v = tla.simt_load %out[%c0] : <!tla.layout<!tla.shape<1>, !tla.stride<1>, !tla.shape<1>, RowMajor>, !tla.coord<0>, !tla.ptr<i8, gm, 4>> -> i8
-        %max = tla.arch.warp_redux "max" %v {isUnsigned} : i8
+        %max = tla.arch.warp_reduce "max" %v {isUnsigned} : i8
         tla.simt_store %out[%c0], %max : <!tla.layout<!tla.shape<1>, !tla.stride<1>, !tla.shape<1>, RowMajor>, !tla.coord<0>, !tla.ptr<i8, gm, 4>>, i8
       }) {mode = "simt", thread_block_dim = array<i64: 48, 1, 1>} : () -> ()
     }) : () -> ()
@@ -121,7 +121,7 @@ module {
     "tla.vector"() ({
       "tla.vec.func"() ({
         %v = tla.simt_load %out[%c0] : <!tla.layout<!tla.shape<1>, !tla.stride<1>, !tla.shape<1>, RowMajor>, !tla.coord<0>, !tla.ptr<i16, gm, 4>> -> i16
-        %min = tla.arch.warp_redux "min" %v : i16
+        %min = tla.arch.warp_reduce "min" %v : i16
         tla.simt_store %out[%c0], %min : <!tla.layout<!tla.shape<1>, !tla.stride<1>, !tla.shape<1>, RowMajor>, !tla.coord<0>, !tla.ptr<i16, gm, 4>>, i16
       }) {mode = "simt", thread_block_dim = array<i64: 48, 1, 1>} : () -> ()
     }) : () -> ()
@@ -134,7 +134,7 @@ module {
     "tla.vector"() ({
       "tla.vec.func"() ({
         %v = tla.simt_load %out[%c0] : <!tla.layout<!tla.shape<1>, !tla.stride<1>, !tla.shape<1>, RowMajor>, !tla.coord<0>, !tla.ptr<i16, gm, 4>> -> i16
-        %add = tla.arch.warp_redux "add" %v {isUnsigned} : i16
+        %add = tla.arch.warp_reduce "add" %v {isUnsigned} : i16
         tla.simt_store %out[%c0], %add : <!tla.layout<!tla.shape<1>, !tla.stride<1>, !tla.shape<1>, RowMajor>, !tla.coord<0>, !tla.ptr<i16, gm, 4>>, i16
       }) {mode = "simt", thread_block_dim = array<i64: 48, 1, 1>} : () -> ()
     }) : () -> ()

@@ -704,7 +704,7 @@ mlir::LogicalResult ArchLanemaskOp::verify()
     return mlir::success();
 }
 
-mlir::LogicalResult ArchWarpReduxOp::verify()
+mlir::LogicalResult ArchWarpReduceOp::verify()
 {
     auto region = getOperation()->getParentOfType<VecFuncOp>();
     auto mode = region ? region->getAttrOfType<mlir::StringAttr>("mode") : mlir::StringAttr{};

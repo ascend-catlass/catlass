@@ -8,7 +8,7 @@ from catlass import tla
 
 
 @tla.kernel
-def warp_redux(
+def warp_reduce(
     src: tla.Tensor,
     dst: tla.Tensor,
     dtype: tla.Constexpr,
@@ -23,41 +23,41 @@ def warp_redux(
             offset = block * (geometry[0] * geometry[1] * geometry[2]) + tid
             lane = tla.arch.lane_idx()
             value = src[offset].to(dtype)
-            dst[16 + offset * 5] = tla.arch.warp_redux_sync(value, kind).to(
+            dst[16 + offset * 5] = tla.arch.warp_reduce_sync(value, kind).to(
                 dst.element_type
             )
             if lane % 2 == 0:
-                dst[17 + offset * 5] = tla.arch.warp_redux_sync(value, kind).to(
+                dst[17 + offset * 5] = tla.arch.warp_reduce_sync(value, kind).to(
                     dst.element_type
                 )
             if lane < 16:
-                dst[18 + offset * 5] = tla.arch.warp_redux_sync(value, kind).to(
+                dst[18 + offset * 5] = tla.arch.warp_reduce_sync(value, kind).to(
                     dst.element_type
                 )
             if lane == 0:
-                dst[19 + offset * 5] = tla.arch.warp_redux_sync(value, kind).to(
+                dst[19 + offset * 5] = tla.arch.warp_reduce_sync(value, kind).to(
                     dst.element_type
                 )
-            dst[20 + offset * 5] = tla.arch.warp_redux_sync(value, kind).to(
+            dst[20 + offset * 5] = tla.arch.warp_reduce_sync(value, kind).to(
                 dst.element_type
             )
         tla.pipe_barrier(tla.pipes.ALL)
 
 
 @tla.kernel
-def constant_redux(dst: tla.Tensor):
+def constant_reduce(dst: tla.Tensor):
     with tla.vector():
         with tla.vec.func(mode="simt", thread_block_dim=32):
             tid, _, _ = tla.arch.thread_idx()
             one = tla.Int32(1)
-            dst[16 + tid] = tla.arch.warp_redux_sync(one)
+            dst[16 + tid] = tla.arch.warp_reduce_sync(one)
             if tid % 2 == 0:
-                dst[48 + tid] = tla.arch.warp_redux_sync(one)
-            dst[80 + tid] = tla.arch.warp_redux_sync(one)
+                dst[48 + tid] = tla.arch.warp_reduce_sync(one)
+            dst[80 + tid] = tla.arch.warp_reduce_sync(one)
         tla.pipe_barrier(tla.pipes.ALL)
 
 
-def check_constant_redux(torch, from_dlpack):
+def check_constant_reduce(torch, from_dlpack):
     import os
     from unittest.mock import patch
 
@@ -86,7 +86,7 @@ def check_constant_redux(torch, from_dlpack):
                 lower_with_cse if use_cse else lower,
             ),
         ):
-            artifact = tla.compile(constant_redux, tensor, options="--npu-arch 3510")
+            artifact = tla.compile(constant_reduce, tensor, options="--npu-arch 3510")
         for _ in range(3):
             output.fill_(-13)
             artifact(tensor, block_num=1)
@@ -94,7 +94,7 @@ def check_constant_redux(torch, from_dlpack):
             torch.testing.assert_close(output.cpu(), expected, rtol=0, atol=0)
         print(
             json.dumps(
-                {"constant_redux": True, "pre_lowering_cse": use_cse, "passed": True}
+                {"constant_reduce": True, "pre_lowering_cse": use_cse, "passed": True}
             ),
             flush=True,
         )
@@ -142,7 +142,7 @@ def main():
     from catlass.tla.runtime import from_dlpack
 
     torch.npu.set_device(args.device)
-    check_constant_redux(torch, from_dlpack)
+    check_constant_reduce(torch, from_dlpack)
     types = (
         tla.Int8,
         tla.Int16,
@@ -176,7 +176,7 @@ def main():
             ]
             for kind in ("add", "max", "min"):
                 artifact = tla.compile(
-                    warp_redux,
+                    warp_reduce,
                     *tensors,
                     dtype,
                     kind,

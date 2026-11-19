@@ -180,7 +180,7 @@ def Tla_ArchShuffleOp : Tla_Op<"arch.shuffle",
 
 // Active-set dependent: leave effects unknown to prevent CSE across divergent
 // control flow as well as speculation. NoMemoryEffect alone would allow CSE.
-def Tla_ArchWarpReduxOp : Tla_Op<"arch.warp_redux",
+def Tla_ArchWarpReduceOp : Tla_Op<"arch.warp_reduce",
     [AllTypesMatch<["value", "result"]>]> {
   let summary = "SIMT reduction over the active lanes of a warp";
   let arguments = (ins Tla_ScalarValueType:$value, StrAttr:$kind, UnitAttr:$isUnsigned);

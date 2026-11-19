@@ -4,7 +4,7 @@
 // BEGIN_OUTSIDE
 // module {
 //   func.func @bad(%v: i32) {
-//         %r = tla.arch.warp_redux "add" %v : i32
+//         %r = tla.arch.warp_reduce "add" %v : i32
 //     return
 //   }
 // }
@@ -18,7 +18,7 @@
 //   func.func @bad(%v: i32) {
 //     "tla.vector"() ({
 //       "tla.vec.func"() ({
-//         %r = tla.arch.warp_redux "add" %v : i32
+//         %r = tla.arch.warp_reduce "add" %v : i32
 //       }) {mode = "simd"} : () -> ()
 //     }) : () -> ()
 //     return
@@ -34,7 +34,7 @@
 //   func.func @bad(%v: i32) {
 //     "tla.vector"() ({
 //       "tla.vec.func"() ({
-//         %r = tla.arch.warp_redux "sum" %v : i32
+//         %r = tla.arch.warp_reduce "sum" %v : i32
 //       }) {mode = "simt", thread_block_dim = array<i64: 32, 1, 1>} : () -> ()
 //     }) : () -> ()
 //     return
@@ -50,7 +50,7 @@
 //   func.func @bad(%v: i64) {
 //     "tla.vector"() ({
 //       "tla.vec.func"() ({
-//         %r = tla.arch.warp_redux "add" %v : i64
+//         %r = tla.arch.warp_reduce "add" %v : i64
 //       }) {mode = "simt", thread_block_dim = array<i64: 32, 1, 1>} : () -> ()
 //     }) : () -> ()
 //     return
@@ -66,7 +66,7 @@
 //   func.func @bad(%v: bf16) {
 //     "tla.vector"() ({
 //       "tla.vec.func"() ({
-//         %r = tla.arch.warp_redux "add" %v : bf16
+//         %r = tla.arch.warp_reduce "add" %v : bf16
 //       }) {mode = "simt", thread_block_dim = array<i64: 32, 1, 1>} : () -> ()
 //     }) : () -> ()
 //     return
@@ -82,7 +82,7 @@
 //   func.func @bad(%v: i1) {
 //     "tla.vector"() ({
 //       "tla.vec.func"() ({
-//         %r = tla.arch.warp_redux "add" %v : i1
+//         %r = tla.arch.warp_reduce "add" %v : i1
 //       }) {mode = "simt", thread_block_dim = array<i64: 32, 1, 1>} : () -> ()
 //     }) : () -> ()
 //     return
@@ -98,7 +98,7 @@
 //   func.func @bad(%v: f32) {
 //     "tla.vector"() ({
 //       "tla.vec.func"() ({
-//         %r = tla.arch.warp_redux "max" %v {isUnsigned} : f32
+//         %r = tla.arch.warp_reduce "max" %v {isUnsigned} : f32
 //       }) {mode = "simt", thread_block_dim = array<i64: 32, 1, 1>} : () -> ()
 //     }) : () -> ()
 //     return

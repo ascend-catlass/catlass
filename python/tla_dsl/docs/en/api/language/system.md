@@ -165,9 +165,9 @@ sid = tla.arch.sub_block_idx()
 
 ---
 
-### `tla.arch.warp_redux_sync`
+### `tla.arch.warp_reduce_sync`
 
-**Source:** [`catlass.core_api.arch_warp_redux_sync`](../../../../catlass/core_api.py)
+**Source:** [`catlass.core_api.arch_warp_reduce_sync`](../../../../catlass/core_api.py)
 
 Description:
 
@@ -177,7 +177,7 @@ Every participating lane receives the result in the input scalar type.
 Prototype:
 
 ```python
-tla.arch.warp_redux_sync(value: Numeric | int | float, kind: str = 'add') -> Numeric
+tla.arch.warp_reduce_sync(value: Numeric | int | float, kind: str = 'add') -> Numeric
 ```
 
 Parameters:
@@ -196,7 +196,7 @@ Example:
 ```python
 with tla.vec.func(mode="simt", thread_block_dim=32):
     tid, _, _ = tla.arch.thread_idx()
-    gm_out[tid] = tla.arch.warp_redux_sync(gm_in[tid])
+    gm_out[tid] = tla.arch.warp_reduce_sync(gm_in[tid])
 ```
 
 ---

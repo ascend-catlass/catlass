@@ -50,7 +50,7 @@ Value buildLanemask(OpBuilder& b, Location loc, StringRef mode, Value lane)
 }
 
 template <typename AddOp, typename MaxOp, typename MinOp>
-Value buildNativeRedux(OpBuilder& b, Location loc, StringRef kind, Value value)
+Value buildNativeReduce(OpBuilder& b, Location loc, StringRef kind, Value value)
 {
     if (kind == "add")
         return b.create<AddOp>(loc, value.getType(), value);
@@ -59,7 +59,7 @@ Value buildNativeRedux(OpBuilder& b, Location loc, StringRef kind, Value value)
     return b.create<MinOp>(loc, value.getType(), value);
 }
 
-Value buildWarpRedux(OpBuilder& b, Location loc, StringRef kind, bool isUnsigned, Value value)
+Value buildWarpReduce(OpBuilder& b, Location loc, StringRef kind, bool isUnsigned, Value value)
 {
     using namespace hivm_regbaseintrins;
     Type type = value.getType();
@@ -69,16 +69,16 @@ Value buildWarpRedux(OpBuilder& b, Location loc, StringRef kind, bool isUnsigned
             wide = b.create<arith::ExtUIOp>(loc, b.getI32Type(), value);
         else
             wide = b.create<arith::ExtSIOp>(loc, b.getI32Type(), value);
-        Value reduced = buildWarpRedux(b, loc, kind, isUnsigned, wide);
+        Value reduced = buildWarpReduce(b, loc, kind, isUnsigned, wide);
         return b.create<arith::TruncIOp>(loc, type, reduced);
     }
     if (type.isF16())
-        return buildNativeRedux<ReduceAddOpF16, ReduceMaxOpF16, ReduceMinOpF16>(b, loc, kind, value);
+        return buildNativeReduce<ReduceAddOpF16, ReduceMaxOpF16, ReduceMinOpF16>(b, loc, kind, value);
     if (type.isF32())
-        return buildNativeRedux<ReduceAddOpF32, ReduceMaxOpF32, ReduceMinOpF32>(b, loc, kind, value);
+        return buildNativeReduce<ReduceAddOpF32, ReduceMaxOpF32, ReduceMinOpF32>(b, loc, kind, value);
     if (isUnsigned)
-        return buildNativeRedux<ReduceAddOpU32, ReduceMaxOpU32, ReduceMinOpU32>(b, loc, kind, value);
-    return buildNativeRedux<ReduceAddOpS32, ReduceMaxOpS32, ReduceMinOpS32>(b, loc, kind, value);
+        return buildNativeReduce<ReduceAddOpU32, ReduceMaxOpU32, ReduceMinOpU32>(b, loc, kind, value);
+    return buildNativeReduce<ReduceAddOpS32, ReduceMaxOpS32, ReduceMinOpS32>(b, loc, kind, value);
 }
 } // namespace
 
@@ -99,10 +99,10 @@ LogicalResult lowerSimtWarpOpsIn(func::FuncOp vf, int64_t bx, int64_t by, int64_
         }
         op.erase();
     });
-    vf.walk([&](ArchWarpReduxOp op) {
+    vf.walk([&](ArchWarpReduceOp op) {
         OpBuilder b(op);
         op.getResult().replaceAllUsesWith(
-            buildWarpRedux(b, op.getLoc(), op.getKind(), op.getIsUnsigned(), op.getValue()));
+            buildWarpReduce(b, op.getLoc(), op.getKind(), op.getIsUnsigned(), op.getValue()));
         op.erase();
     });
     return success();

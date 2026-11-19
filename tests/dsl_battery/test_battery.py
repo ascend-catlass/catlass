@@ -666,8 +666,8 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
     )
 
     yield (
-        "simt-warp-redux",
-        [["end_to_end/warp_redux.py", *dev]],
+        "simt-warp-reduce",
+        [["end_to_end/warp_reduce.py", *dev]],
     )
 
     # --- multi_core_splitk_matmul and tail_multi_core_splitk_matmul ---
