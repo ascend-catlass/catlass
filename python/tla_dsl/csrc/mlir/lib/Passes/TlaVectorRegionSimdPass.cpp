@@ -4043,7 +4043,9 @@ static LogicalResult lowerNestedVectorOp(
                            ::tla::CastOp, ::tla::BitCastOp, ::tla::LoadOp, ::tla::StoreOp, ::tla::WhereOp,
                            ::tla::InterleaveOp, ::tla::DeInterleaveOp, ::tla::GatherOp, scf::ForOp, scf::IfOp>(op))
         return op.emitError("HiFloat8 arithmetic is unsupported; convert or bitcast the register explicitly");
-    // Packed pairs use byte carriers, without acquiring integer arithmetic.
+    // Packed pairs use byte carriers. Bitwise ops act on the whole carrier
+    // without interpreting the two nibbles, so they are explicit byte-level
+    // operations like where/bitcast rather than integer arithmetic.
     auto isFp4Vector = [](Type type) {
         auto vec = dyn_cast<::tla::VectorSSAType>(type);
         return vec && isFp4PairType(vec.getElementType());
@@ -4052,8 +4054,9 @@ static LogicalResult lowerNestedVectorOp(
         llvm::any_of(op.getOperandTypes(), isFp4Vector) || llvm::any_of(op.getResultTypes(), isFp4Vector);
     if (hasFp4Vector && !isa<
                             ::tla::CastOp, ::tla::BitCastOp, ::tla::LoadOp, ::tla::StoreOp, ::tla::WhereOp,
-                            ::tla::InterleaveOp, ::tla::DeInterleaveOp, ::tla::GatherOp, scf::ForOp, scf::IfOp>(op))
-        return op.emitError("FP4x2 arithmetic is unsupported; convert or bitcast the register explicitly");
+                            ::tla::InterleaveOp, ::tla::DeInterleaveOp, ::tla::GatherOp, ::tla::BitwiseNotOp,
+                            ::tla::BitwiseAndOp, ::tla::BitwiseOrOp, ::tla::BitwiseXorOp, scf::ForOp, scf::IfOp>(op))
+        return op.emitError("FP4x2 arithmetic is unsupported; only bitwise, select and layout ops are allowed");
 
     // make_shape / make_coord are dead after tla-lower-tensor-desc (their leaves
     // were folded into tensor_desc operands); skip them. (tla-finalize-memref

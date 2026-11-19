@@ -8962,7 +8962,9 @@ def _emit_vector_shift(
 _FLOAT_UNARY_ELEMENT_TYPES = frozenset({"f16", "f32"})
 _INTEGER_ABS_ELEMENT_TYPES = frozenset({"i8", "i16", "i32"})
 _ABS_ELEMENT_TYPES = _FLOAT_UNARY_ELEMENT_TYPES | _INTEGER_ABS_ELEMENT_TYPES
-_BITWISE_UNARY_TYPES = _ABS_ELEMENT_TYPES
+# Packed FP4 pair carriers are byte-sized, so bitwise ops handle them exactly
+# like the integer carriers: both nibbles of a lane travel together.
+_BITWISE_UNARY_TYPES = _ABS_ELEMENT_TYPES | _FP4_PAIR_DTYPES
 
 
 def _emit_vector_unary(
@@ -9742,6 +9744,7 @@ def bitwise_not(
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function.
         - Must be called inside `tla.vec.func()`.
+        - `f4e2m1x2` / `f4e1m2x2` vectors carry one FP4 pair per lane; a `mask` selects whole pairs.
 
         Example:
         ```python
@@ -10486,8 +10489,8 @@ def _emit_bitwise_unary(
     if element_type not in _BITWISE_UNARY_TYPES:
         _op_error(
             op_name,
-            f"tla.{op_name} requires f16/f32 or i8/i16/i32 element type, "
-            f"got {element_type}",
+            f"tla.{op_name} requires f16/f32, i8/i16/i32 or an FP4 pair "
+            f"(f4e2m1x2/f4e1m2x2) element type, got {element_type}",
         )
     result = emitter(
         operand_value.type,
@@ -10670,6 +10673,7 @@ def bitwise_and(
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function.
         - Must be called inside `tla.vec.func()`.
+        - `f4e2m1x2` / `f4e1m2x2` vectors carry one FP4 pair per lane; a `mask` selects whole pairs.
 
         Example:
         ```python
@@ -10708,6 +10712,7 @@ def bitwise_or(
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function.
         - Must be called inside `tla.vec.func()`.
+        - `f4e2m1x2` / `f4e1m2x2` vectors carry one FP4 pair per lane; a `mask` selects whole pairs.
 
         Example:
         ```python
@@ -10746,6 +10751,7 @@ def bitwise_xor(
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function.
         - Must be called inside `tla.vec.func()`.
+        - `f4e2m1x2` / `f4e1m2x2` vectors carry one FP4 pair per lane; a `mask` selects whole pairs.
 
         Example:
         ```python

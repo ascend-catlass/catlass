@@ -119,6 +119,7 @@ Constraints:
 
 - Must be called inside a `@tla.kernel`-decorated kernel function.
 - Must be called inside `tla.vec.func()`.
+- `f4e2m1x2` / `f4e1m2x2` vectors carry one FP4 pair per lane; a `mask` selects whole pairs.
 
 Example:
 
@@ -153,6 +154,7 @@ Constraints:
 
 - Must be called inside a `@tla.kernel`-decorated kernel function.
 - Must be called inside `tla.vec.func()`.
+- `f4e2m1x2` / `f4e1m2x2` vectors carry one FP4 pair per lane; a `mask` selects whole pairs.
 
 Example:
 
@@ -187,6 +189,7 @@ Constraints:
 
 - Must be called inside a `@tla.kernel`-decorated kernel function.
 - Must be called inside `tla.vec.func()`.
+- `f4e2m1x2` / `f4e1m2x2` vectors carry one FP4 pair per lane; a `mask` selects whole pairs.
 
 Example:
 
@@ -221,6 +224,7 @@ Constraints:
 
 - Must be called inside a `@tla.kernel`-decorated kernel function.
 - Must be called inside `tla.vec.func()`.
+- `f4e2m1x2` / `f4e1m2x2` vectors carry one FP4 pair per lane; a `mask` selects whole pairs.
 
 Example:
 

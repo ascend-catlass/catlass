@@ -117,6 +117,7 @@ tla.bitwise_not(operand: VectorSSA | MaskSSA, *, mask: MaskSSA | None = None) ->
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
 - 须在 `tla.vec.func()` 内调用。
+- `f4e2m1x2` / `f4e1m2x2` 向量每个 lane 为一个字节、携带一对 FP4，`mask` 以数对为单位选择。
 
 调用示例：
 
@@ -151,6 +152,7 @@ tla.bitwise_and(src0_reg: VectorSSA | MaskSSA, src1_reg: VectorSSA | MaskSSA, *,
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
 - 须在 `tla.vec.func()` 内调用。
+- `f4e2m1x2` / `f4e1m2x2` 向量每个 lane 为一个字节、携带一对 FP4，`mask` 以数对为单位选择。
 
 调用示例：
 
@@ -185,6 +187,7 @@ tla.bitwise_or(src0_reg: VectorSSA | MaskSSA, src1_reg: VectorSSA | MaskSSA, *, 
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
 - 须在 `tla.vec.func()` 内调用。
+- `f4e2m1x2` / `f4e1m2x2` 向量每个 lane 为一个字节、携带一对 FP4，`mask` 以数对为单位选择。
 
 调用示例：
 
@@ -219,6 +222,7 @@ tla.bitwise_xor(src0_reg: VectorSSA | MaskSSA, src1_reg: VectorSSA | MaskSSA, *,
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
 - 须在 `tla.vec.func()` 内调用。
+- `f4e2m1x2` / `f4e1m2x2` 向量每个 lane 为一个字节、携带一对 FP4，`mask` 以数对为单位选择。
 
 调用示例：
 

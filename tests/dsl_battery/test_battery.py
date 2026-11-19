@@ -762,6 +762,10 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         [["dsl_tutorials/vector_simd_ops/bitwise_ops.py", "bitwise_ops", "--sweep", "--shapes", "400", *dev]],
     )
     yield (
+        "vector-fp4x2-bitwise-ops",
+        [["end_to_end/fp4x2_bitwise_ops.py", "--batch-run", *dev]],
+    )
+    yield (
         "vector-binary-op",
         [[
             "dsl_tutorials/vector_simd_ops/binary_op.py", "--batch-run",
