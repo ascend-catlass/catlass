@@ -1,0 +1,84 @@
+// RUN: sed -n '/^\/\/ BEGIN_COUNT$/,/^\/\/ END_COUNT$/p' %s | sed '1d;$d;s|^// ||' > %t.COUNT.mlir && not %tla_compile %t.COUNT.mlir -o %t 2>&1 | %filecheck %s --check-prefix=COUNT
+// RUN: sed -n '/^\/\/ BEGIN_STRIDE$/,/^\/\/ END_STRIDE$/p' %s | sed '1d;$d;s|^// ||' > %t.STRIDE.mlir && not %tla_compile %t.STRIDE.mlir -o %t 2>&1 | %filecheck %s --check-prefix=STRIDE
+// RUN: sed -n '/^\/\/ BEGIN_DTYPE$/,/^\/\/ END_DTYPE$/p' %s | sed '1d;$d;s|^// ||' > %t.DTYPE.mlir && not %tla_compile %t.DTYPE.mlir -o %t 2>&1 | %filecheck %s --check-prefix=DTYPE
+
+// COUNT: error:
+// COUNT-SAME: batch count must fit the unsigned 16-bit hardware field
+// BEGIN_COUNT
+// module {
+//   tla.func @kernel() {
+//     %c4096_i64 = arith.constant 4096 : i64
+//     %0 = tla.inttoptr %c4096_i64 : i64 -> !tla.ptr<f8E4M3FN, gm, 1>
+//     %1 = tla.make_shape -> !tla.shape<65536,17,64>
+//     %2 = tla.make_stride -> !tla.stride<4096,64,1>
+//     %3 = tla.make_layout %1, %2 : !tla.shape<65536,17,64>, !tla.stride<4096,64,1> -> !tla.layout<!tla.shape<65536,17,64>, !tla.stride<4096,64,1>, !tla.shape<65536,17,64>, RowMajor>
+//     %4 = tla.make_coord -> !tla.coord<0,0,0>
+//     %5 = tla.make_tensor %0, %3, %4 : !tla.ptr<f8E4M3FN, gm, 1>, !tla.layout<!tla.shape<65536,17,64>, !tla.stride<4096,64,1>, !tla.shape<65536,17,64>, RowMajor>, !tla.coord<0,0,0> -> !tla.tensor<!tla.layout<!tla.shape<65536,17,64>, !tla.stride<4096,64,1>, !tla.shape<65536,17,64>, RowMajor>, !tla.coord<0,0,0>, !tla.ptr<f8E4M3FN, gm, 1>>
+//     %6 = tla.alloc_ptr{size_bytes = 10240} -> !tla.ptr<f8E4M3FN, l1, 512>
+//     %7 = tla.make_shape -> !tla.shape<65536,(16,2),(32,2)>
+//     %8 = tla.make_stride -> !tla.stride<1024,(32,512),(1,5120)>
+//     %9 = tla.make_shape -> !tla.shape<65536,17,64>
+//     %10 = tla.make_layout %7, %8 origin %9 {layoutTag = #tla.layout_tag<zN>} : !tla.shape<65536,(16,2),(32,2)>, !tla.stride<1024,(32,512),(1,5120)> origin !tla.shape<65536,17,64> -> !tla.layout<!tla.shape<65536,(16,2),(32,2)>, !tla.stride<1024,(32,512),(1,5120)>, !tla.shape<65536,17,64>, zN>
+//     %11 = tla.make_coord -> !tla.coord<0,0,0>
+//     %12 = tla.make_tensor %6, %10, %11 : !tla.ptr<f8E4M3FN, l1, 512>, !tla.layout<!tla.shape<65536,(16,2),(32,2)>, !tla.stride<1024,(32,512),(1,5120)>, !tla.shape<65536,17,64>, zN>, !tla.coord<0,0,0> -> !tla.tensor<!tla.layout<!tla.shape<65536,(16,2),(32,2)>, !tla.stride<1024,(32,512),(1,5120)>, !tla.shape<65536,17,64>, zN>, !tla.coord<0,0,0>, !tla.ptr<f8E4M3FN, l1, 512>>
+//     tla.cube {
+//       tla.copy %12, %5 : !tla.tensor<!tla.layout<!tla.shape<65536,(16,2),(32,2)>, !tla.stride<1024,(32,512),(1,5120)>, !tla.shape<65536,17,64>, zN>, !tla.coord<0,0,0>, !tla.ptr<f8E4M3FN, l1, 512>>, !tla.tensor<!tla.layout<!tla.shape<65536,17,64>, !tla.stride<4096,64,1>, !tla.shape<65536,17,64>, RowMajor>, !tla.coord<0,0,0>, !tla.ptr<f8E4M3FN, gm, 1>>
+//     }
+//     tla.return
+//   }
+// }
+// END_COUNT
+
+// STRIDE: error:
+// STRIDE-SAME: destination batch stride must fit the unsigned 16-bit 32-byte-block field
+// BEGIN_STRIDE
+// module {
+//   tla.func @kernel() {
+//     %c4096_i64 = arith.constant 4096 : i64
+//     %0 = tla.inttoptr %c4096_i64 : i64 -> !tla.ptr<f8E4M3FN, gm, 1>
+//     %1 = tla.make_shape -> !tla.shape<3,17,64>
+//     %2 = tla.make_stride -> !tla.stride<4096,64,1>
+//     %3 = tla.make_layout %1, %2 : !tla.shape<3,17,64>, !tla.stride<4096,64,1> -> !tla.layout<!tla.shape<3,17,64>, !tla.stride<4096,64,1>, !tla.shape<3,17,64>, RowMajor>
+//     %4 = tla.make_coord -> !tla.coord<0,0,0>
+//     %5 = tla.make_tensor %0, %3, %4 : !tla.ptr<f8E4M3FN, gm, 1>, !tla.layout<!tla.shape<3,17,64>, !tla.stride<4096,64,1>, !tla.shape<3,17,64>, RowMajor>, !tla.coord<0,0,0> -> !tla.tensor<!tla.layout<!tla.shape<3,17,64>, !tla.stride<4096,64,1>, !tla.shape<3,17,64>, RowMajor>, !tla.coord<0,0,0>, !tla.ptr<f8E4M3FN, gm, 1>>
+//     %6 = tla.alloc_ptr{size_bytes = 10240} -> !tla.ptr<f8E4M3FN, l1, 512>
+//     %7 = tla.make_shape -> !tla.shape<3,(16,2),(32,2)>
+//     %8 = tla.make_stride -> !tla.stride<1000,(32,512),(1,5120)>
+//     %9 = tla.make_shape -> !tla.shape<3,17,64>
+//     %10 = tla.make_layout %7, %8 origin %9 {layoutTag = #tla.layout_tag<zN>} : !tla.shape<3,(16,2),(32,2)>, !tla.stride<1000,(32,512),(1,5120)> origin !tla.shape<3,17,64> -> !tla.layout<!tla.shape<3,(16,2),(32,2)>, !tla.stride<1000,(32,512),(1,5120)>, !tla.shape<3,17,64>, zN>
+//     %11 = tla.make_coord -> !tla.coord<0,0,0>
+//     %12 = tla.make_tensor %6, %10, %11 : !tla.ptr<f8E4M3FN, l1, 512>, !tla.layout<!tla.shape<3,(16,2),(32,2)>, !tla.stride<1000,(32,512),(1,5120)>, !tla.shape<3,17,64>, zN>, !tla.coord<0,0,0> -> !tla.tensor<!tla.layout<!tla.shape<3,(16,2),(32,2)>, !tla.stride<1000,(32,512),(1,5120)>, !tla.shape<3,17,64>, zN>, !tla.coord<0,0,0>, !tla.ptr<f8E4M3FN, l1, 512>>
+//     tla.cube {
+//       tla.copy %12, %5 : !tla.tensor<!tla.layout<!tla.shape<3,(16,2),(32,2)>, !tla.stride<1000,(32,512),(1,5120)>, !tla.shape<3,17,64>, zN>, !tla.coord<0,0,0>, !tla.ptr<f8E4M3FN, l1, 512>>, !tla.tensor<!tla.layout<!tla.shape<3,17,64>, !tla.stride<4096,64,1>, !tla.shape<3,17,64>, RowMajor>, !tla.coord<0,0,0>, !tla.ptr<f8E4M3FN, gm, 1>>
+//     }
+//     tla.return
+//   }
+// }
+// END_STRIDE
+
+// DTYPE: error:
+// DTYPE-SAME: batch-matrix copy supports matching FP8 or E8M0 element types
+// BEGIN_DTYPE
+// module {
+//   tla.func @kernel() {
+//     %c4096_i64 = arith.constant 4096 : i64
+//     %0 = tla.inttoptr %c4096_i64 : i64 -> !tla.ptr<i8, gm, 1>
+//     %1 = tla.make_shape -> !tla.shape<3,17,64>
+//     %2 = tla.make_stride -> !tla.stride<4096,64,1>
+//     %3 = tla.make_layout %1, %2 : !tla.shape<3,17,64>, !tla.stride<4096,64,1> -> !tla.layout<!tla.shape<3,17,64>, !tla.stride<4096,64,1>, !tla.shape<3,17,64>, RowMajor>
+//     %4 = tla.make_coord -> !tla.coord<0,0,0>
+//     %5 = tla.make_tensor %0, %3, %4 : !tla.ptr<i8, gm, 1>, !tla.layout<!tla.shape<3,17,64>, !tla.stride<4096,64,1>, !tla.shape<3,17,64>, RowMajor>, !tla.coord<0,0,0> -> !tla.tensor<!tla.layout<!tla.shape<3,17,64>, !tla.stride<4096,64,1>, !tla.shape<3,17,64>, RowMajor>, !tla.coord<0,0,0>, !tla.ptr<i8, gm, 1>>
+//     %6 = tla.alloc_ptr{size_bytes = 10240} -> !tla.ptr<i8, l1, 512>
+//     %7 = tla.make_shape -> !tla.shape<3,(16,2),(32,2)>
+//     %8 = tla.make_stride -> !tla.stride<1024,(32,512),(1,5120)>
+//     %9 = tla.make_shape -> !tla.shape<3,17,64>
+//     %10 = tla.make_layout %7, %8 origin %9 {layoutTag = #tla.layout_tag<zN>} : !tla.shape<3,(16,2),(32,2)>, !tla.stride<1024,(32,512),(1,5120)> origin !tla.shape<3,17,64> -> !tla.layout<!tla.shape<3,(16,2),(32,2)>, !tla.stride<1024,(32,512),(1,5120)>, !tla.shape<3,17,64>, zN>
+//     %11 = tla.make_coord -> !tla.coord<0,0,0>
+//     %12 = tla.make_tensor %6, %10, %11 : !tla.ptr<i8, l1, 512>, !tla.layout<!tla.shape<3,(16,2),(32,2)>, !tla.stride<1024,(32,512),(1,5120)>, !tla.shape<3,17,64>, zN>, !tla.coord<0,0,0> -> !tla.tensor<!tla.layout<!tla.shape<3,(16,2),(32,2)>, !tla.stride<1024,(32,512),(1,5120)>, !tla.shape<3,17,64>, zN>, !tla.coord<0,0,0>, !tla.ptr<i8, l1, 512>>
+//     tla.cube {
+//       tla.copy %12, %5 : !tla.tensor<!tla.layout<!tla.shape<3,(16,2),(32,2)>, !tla.stride<1024,(32,512),(1,5120)>, !tla.shape<3,17,64>, zN>, !tla.coord<0,0,0>, !tla.ptr<i8, l1, 512>>, !tla.tensor<!tla.layout<!tla.shape<3,17,64>, !tla.stride<4096,64,1>, !tla.shape<3,17,64>, RowMajor>, !tla.coord<0,0,0>, !tla.ptr<i8, gm, 1>>
+//     }
+//     tla.return
+//   }
+// }
+// END_DTYPE

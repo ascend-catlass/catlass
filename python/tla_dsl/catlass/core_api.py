@@ -2410,6 +2410,7 @@ def _materialize_dynamic_gm_root_tensor_descriptor(
         zero,
         zero,
         loc=loc,
+        batch_info=[],
     )
     _register_tla_tensor_type(desc, tensor_ty)
     _register_tla_tensor_metadata(desc, metadata)
@@ -2605,6 +2606,17 @@ def _is_nz_family_2x2_tree(tree: Any) -> bool:
 def _infer_padded_origin_tree_from_nz_family_shape(
     shape_tree: Any, *, for_op: str
 ) -> tuple[Any, Any]:
+    if (
+        isinstance(shape_tree, tuple)
+        and len(shape_tree) == 3
+        and not isinstance(shape_tree[0], tuple)
+    ):
+        return (
+            shape_tree[0],
+            *_infer_padded_origin_tree_from_nz_family_shape(
+                shape_tree[1:], for_op=for_op
+            ),
+        )
     if not _is_nz_family_2x2_tree(shape_tree):
         raise TlaLoweringError(
             f"tla.{for_op} NZFamily layout expects shape as two 2-leaf groups "
@@ -2626,6 +2638,24 @@ def _validate_static_make_tensor_layout(
 ) -> None:
     """Validate static shape/stride leaves using ``tla/layout.hpp`` traits."""
 
+    if isinstance(shape_tree, tuple) and len(shape_tree) == 3:
+        if (
+            not isinstance(stride_tree, tuple)
+            or len(stride_tree) != 3
+            or isinstance(shape_tree[0], tuple)
+            or isinstance(stride_tree[0], tuple)
+        ):
+            raise TlaLoweringError(
+                f"tla.{for_op}: a batch mode must have one scalar shape and stride"
+            )
+        _validate_static_make_tensor_layout(
+            shape_tree[1:],
+            stride_tree[1:],
+            dtype=dtype,
+            layout_tag=layout_tag,
+            for_op=for_op,
+        )
+        return
     shape_const_tree = _components_to_type_tree(shape_tree)
     stride_const_tree = _components_to_type_tree(stride_tree)
 
@@ -2676,10 +2706,12 @@ def _validate_static_make_tensor_layout(
                 (stride01, _MX_SCALE_ELE_NUM_PER_FRACTAL),
             )
         elif layout_tag == "RowMajorMxScaleA":
+            # The first physical mode has extent one, so its stride never
+            # contributes to an address. Accept positive singleton strides as
+            # well as the zero used by MakeMxScaleLayout.
             checks = (
                 (shape00, 1),
                 (shape10, _MX_SCALE_ELE_NUM_PER_C0),
-                (stride00, 0),
                 (stride10, 1),
                 (stride11, _MX_SCALE_ELE_NUM_PER_C0),
             )
@@ -2687,7 +2719,6 @@ def _validate_static_make_tensor_layout(
             checks = (
                 (shape00, 1),
                 (shape10, _MX_SCALE_ELE_NUM_PER_C0),
-                (stride00, 0),
                 (stride01, _MX_SCALE_ELE_NUM_PER_C0),
                 (stride10, 1),
             )
@@ -2696,7 +2727,6 @@ def _validate_static_make_tensor_layout(
                 (shape00, _MX_SCALE_ELE_NUM_PER_C0),
                 (shape10, 1),
                 (stride00, 1),
-                (stride10, 0),
                 (stride11, _MX_SCALE_ELE_NUM_PER_C0),
             )
         elif layout_tag == "ColMajorMxScaleB":
@@ -2705,7 +2735,6 @@ def _validate_static_make_tensor_layout(
                 (shape10, 1),
                 (stride00, 1),
                 (stride01, _MX_SCALE_ELE_NUM_PER_C0),
-                (stride10, 0),
             )
         elif layout_tag == "zZMxScale":
             checks = (
@@ -2799,6 +2828,22 @@ def _round_up_expr(a: Any, m: int) -> Any:
 def _materialize_layout_trees_from_origin(
     origin_shape: Any, dtype: str, layout: str
 ) -> tuple[Any, Any, Any, Any] | None:
+    if isinstance(origin_shape, tuple) and len(origin_shape) == 3:
+        inner = _materialize_layout_trees_from_origin(origin_shape[1:], dtype, layout)
+        if inner is None:
+            return None
+        shape, stride, coord, origin = inner
+        # The default batch pitch covers the padded matrix storage. Explicit
+        # layouts may choose a different pitch, including disjoint NZ interleaving.
+        if layout == "RowMajor":
+            pitch = shape[0] * stride[0]
+        elif layout == "ColumnMajor":
+            pitch = shape[1] * stride[1]
+        else:
+            pitch = 1
+            for leaf in _flatten_tla_tuple(shape):
+                pitch = pitch * leaf
+        return ((origin_shape[0], *shape), (pitch, *stride), (0, *coord), origin_shape)
     if not isinstance(origin_shape, tuple) or len(origin_shape) != 2:
         return None
     rows, cols = origin_shape
@@ -4946,8 +4991,9 @@ def make_layout(
 
         Parameters:
         - `shape` (`_Shape` | int tree): From `tla.make_shape`. Host also accepts a
-          Python int tree. RowMajor / ColumnMajor: 2D `(M, N)`. `zN` / `nZ` /
-          `L0Clayout` / `zNUnAlign`: nested `((m0, m1), (n0, n1))`.
+          Python int tree. RowMajor / ColumnMajor: `(M, N)` or `(B, M, N)`.
+          NZ-family layouts use `((m0, m1), (n0, n1))`, optionally preceded by
+          a scalar batch mode `(B, (m0, m1), (n0, n1))`.
         - `stride` (`_Stride` | int tree): From `tla.make_stride`. Host also accepts
           a Python int tree with the same nesting as `shape`.
         - `origin_shape` (`_Shape` | int tree | None): Logical working shape.
@@ -5086,10 +5132,10 @@ def make_layout_with_tag(
     """Directory: Basic Data Types and Operations
 
     Description:
-        Build an on-chip `!tla.layout` from a flat 2-D shape, element type, and layout tag.
+        Build an on-chip `!tla.layout` from a flat matrix or batched-matrix shape, element type, and layout tag.
 
         Parameters:
-        - `shape` (`tuple`): Flat 2D logical extent `(rows, cols)`. Each leaf is
+        - `shape` (`tuple`): Flat logical extent `(rows, cols)` or `(batch, rows, cols)`. Each leaf is
           an `int` or a runtime `Numeric` (dynamic leaf). Required.
         - `dtype` (`Numeric` subclass): Element type; drives the C0/fractal
           geometry of the remapped physical trees. Required.
@@ -5105,8 +5151,9 @@ def make_layout_with_tag(
           `nZ` weight, say -- which is how `tla.copy`'s GM → L1 route spells such
           a source; it is not for binding ordinary host memory, whose layout
           comes from the host tensor instead.
-        - `shape` must be a flat 2-tuple; nested trees and `None` leaves are
-          rejected — the whole extent is caller-owned.
+        - `shape` must be a flat 2-tuple or 3-tuple; nested trees and `None`
+          leaves are rejected. The batch pitch covers the complete padded
+          matrix storage; explicit layouts can choose independent pitches.
         - The origin shape of the resulting layout equals `shape` (the aligned
           extent); pair with `tla.make_tensor(ptr, layout)` to land it on an
           on-chip pointer.
@@ -5125,12 +5172,12 @@ def make_layout_with_tag(
     _require_frontend_state("make_layout_with_tag")
     if (
         not isinstance(shape, tuple)
-        or len(shape) != 2
+        or len(shape) not in (2, 3)
         or any(isinstance(leaf, (tuple, list)) for leaf in shape)
     ):
         _op_error(
             "make_layout_with_tag",
-            "expected a flat 2D logical shape tuple (rows, cols) with int or "
+            "expected a flat 2D or 3D logical shape tuple with int or "
             f"Numeric leaves; got {shape!r}",
         )
     try:
@@ -5288,14 +5335,14 @@ def get_tile(
     """Directory: Basic Data Types and Operations
 
     Description:
-        Extract a flat 2-D sub-tile of a tensor (shares the source buffer).
+        Extract a flat 2-D or 3-D sub-tile of a tensor (shares the source buffer).
 
         Parameters:
         - `tensor` (`Tensor`): Source `!tla.tensor`. Required.
-        - `coord` (`TlaCoord`): Tile start from `tla.make_coord`, flat 2-D
+        - `coord` (`TlaCoord`): Tile start from `tla.make_coord`, flat 2-D or 3-D
           element offsets relative to the source. Required.
         - `shape` (`TlaShape`): Requested tile extent from `tla.make_shape`,
-          flat 2-D. Required.
+          flat 2-D or 3-D with the same logical rank as the source. Required.
 
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function.
@@ -5329,14 +5376,14 @@ def get_tile(
     coord_components = coord._components
     shape_components = shape._components
     if (
-        len(coord_components) != 2
+        len(coord_components) not in (2, 3)
         or any(isinstance(leaf, (tuple, str)) for leaf in coord_components)
-        or len(shape_components) != 2
+        or len(shape_components) != len(coord_components)
         or any(isinstance(leaf, (tuple, str)) for leaf in shape_components)
     ):
         _op_error(
             op_name,
-            "get_tile expects a flat 2-D coord and shape; got coord="
+            "get_tile expects a flat 2-D or 3-D coord and shape; got coord="
             f"{coord_components}, shape={shape_components}",
         )
 
@@ -5360,13 +5407,13 @@ def get_tile(
             )
     if (
         not isinstance(parent_coord, tuple)
-        or len(parent_coord) != 2
+        or len(parent_coord) != len(coord_components)
         or not isinstance(parent_origin, tuple)
-        or len(parent_origin) != 2
+        or len(parent_origin) != len(coord_components)
     ):
         _op_error(
             op_name,
-            "get_tile source coord and origin_shape must be flat 2-D trees; got "
+            "get_tile source coord and origin_shape must match the requested logical rank; got "
             f"coord={parent_coord}, origin_shape={parent_origin}",
         )
 
@@ -5459,6 +5506,12 @@ def make_tensor(
           `shape` / `stride` are nested 2x2, while logical coord / `origin_shape`
           stay 2D `(M, N)`. If `make_layout` omitted `origin_shape`, the logical
           size is inferred from the physical shape (for example `(m0*m1, n0*n1)`).
+        - Kernel-local batched views prepend a scalar batch mode to the physical
+          shape and stride, with flat `(B, M, N)` origin and coordinates.
+          The batch stride is in elements and may describe disjoint interleaved
+          NZ matrices. Batched views currently support GM-to-L1 `copy` and
+          `get_tile`; host argument binding and other tensor operations retain
+          their existing rank limits.
         - A full Kernel compile requires `ptr` to carry backing storage; an on-chip
           pointer from `allocate` (optionally via `recast_ptr`) is the supported
           form for runnable kernels.
@@ -5540,9 +5593,9 @@ def make_tensor(
     stride_leaf_count = len(_flatten_tla_tuple(stride_tree))
     if layout._layout_tag in _LINEAR_LAYOUT_TOKENS:
         logical_rank = shape_leaf_count
-        if logical_rank not in (1, 2) or stride_leaf_count not in (1, 2):
+        if logical_rank not in (1, 2, 3) or stride_leaf_count != logical_rank:
             raise TlaLoweringError(
-                f"tla.make_tensor supports at most 2-D linear layouts (got shape rank "
+                f"tla.make_tensor supports 1-D, 2-D or 3-D linear layouts with matching strides (got shape rank "
                 f"{shape_leaf_count}, stride rank {stride_leaf_count})"
             )
         if len(_flatten_tla_tuple(origin_tree)) != logical_rank:
@@ -5550,19 +5603,29 @@ def make_tensor(
                 "tla.make_tensor linear origin_shape rank must match layout rank"
             )
     elif layout._layout_tag in _NZ_FAMILY_LAYOUT_TOKENS:
-        if not _is_nz_family_2x2_tree(shape_tree) or not _is_nz_family_2x2_tree(
-            stride_tree
+        batched = (
+            len(origin_tree) == 3
+            and len(shape_tree) == 3
+            and len(stride_tree) == 3
+            and not isinstance(shape_tree[0], tuple)
+            and not isinstance(stride_tree[0], tuple)
+        )
+        matrix_shape = shape_tree[1:] if batched else shape_tree
+        matrix_stride = stride_tree[1:] if batched else stride_tree
+        if not _is_nz_family_2x2_tree(matrix_shape) or not _is_nz_family_2x2_tree(
+            matrix_stride
         ):
             raise TlaLoweringError(
                 f"tla.make_tensor layout {layout._layout_tag!r} expects shape and "
                 "stride as two 2-leaf groups ((m0, m1), (n0, n1))"
             )
-        if not _is_flat_pair(origin_tree):
+        logical_rank = 3 if batched else 2
+        if len(origin_tree) != logical_rank or any(
+            isinstance(x, tuple) for x in origin_tree
+        ):
             raise TlaLoweringError(
-                f"tla.make_tensor layout {layout._layout_tag!r} expects a flat "
-                "logical 2-D origin_shape"
+                "tla.make_tensor expects flat matrix or batch-matrix origin_shape"
             )
-        logical_rank = 2
     else:
         raise TlaLoweringError(
             f"tla.make_tensor does not support layout {layout._layout_tag!r}"
@@ -5591,10 +5654,12 @@ def make_tensor(
             f"tla.make_tensor coord rank must match layout rank (got coord rank "
             f"{coord_rank}, expected {logical_rank})"
         )
-    if layout._layout_tag in _NZ_FAMILY_LAYOUT_TOKENS and not _is_flat_pair(coord_tree):
+    if layout._layout_tag in _NZ_FAMILY_LAYOUT_TOKENS and any(
+        isinstance(x, tuple) for x in coord_tree
+    ):
         raise TlaLoweringError(
             f"tla.make_tensor layout {layout._layout_tag!r} expects a flat "
-            "logical 2-D coord"
+            f"logical {logical_rank}-D coord"
         )
 
     # Type trees spell dynamic leaves as ``None`` (``?`` in the ``!tla.tensor`` type);
@@ -5694,6 +5759,11 @@ def make_tensor_like(
             "tla.make_tensor_like expects ``like`` to carry structured Tla tensor metadata; "
             f"got {str(like_value.type)!r}"
         ) from exc
+    if len(like_type.origin_shape) == 3:
+        _op_error(
+            "make_tensor_like",
+            "batched views currently require make_tensor with an explicit layout",
+        )
     if not PtrType.isinstance(ptr_value.type):
         _op_error(
             "make_tensor_like",
@@ -6433,6 +6503,8 @@ def _tensor_fill_impl(
 
     dest = _as_value(tensor)
     dest_desc = _tla_tensor_type_for_mlir_value(dest)
+    if len(dest_desc.origin_shape) != 2:
+        _op_error(op_name, "fill currently requires a logical rank-2 tile")
     if dest_desc.addrspace.lower() != "l1":
         _op_error(
             op_name,
@@ -6669,6 +6741,21 @@ def copy(
         - Must be called inside a `@tla.kernel`-decorated kernel function.
         - Must be called inside `tla.cube()` or `tla.vector()`.
         - Copy size follows each tile's `origin_shape`.
+        - On Ascend 950, two logical rank-3 views `(B, M, N)` select batched
+          GM-to-L1 layout conversion. FP8 supports RowMajor→zN and
+          ColumnMajor→nZ; E8M0 supports the four GM MX-scale routes below.
+          Batch count is `origin_shape[0]`; source and destination matrix
+          strides are each layout's leading stride, in elements. Inner strides
+          retain their 2-D meaning. Both logical extents must match, including
+          runtime values. Zero batches or zero matrix extents perform no DMA.
+          Other rank-3 layout/dtype combinations fail at compilation instead
+          of falling back to a 2-D copy.
+        - Batched copies require `params=None` and `scale=None`, a batch count
+          in 0..65535, and positive destination batch strides aligned to 32
+          bytes and at most 65535 32-byte blocks. E8M0 source matrix strides
+          must preserve exponent pairs. Runtime geometry must satisfy the same
+          constraints. The caller supplies enough backing storage and disjoint
+          destination matrices; interleaved NZ layouts are permitted.
         - Packed fp4 is staged as bytes on the routes that convert the
           descriptor before copying -- GM->UB, UB->GM and UB->L1 -- so each
           tile's innermost `origin_shape`, its innermost origin coordinate and
@@ -6738,6 +6825,19 @@ def copy(
         l1_unalign = tla.make_tensor_like(l1_ptr, gm_tile, layoutTag=tla.arch.zNUnAlign)
         with tla.cube():
             tla.copy(dst=l1_unalign, src=gm_tile)
+
+        # Batched FP8: both tensor layouts carry the batch geometry.
+        # src_step and dst_step are independent element strides.
+        src3 = tla.make_tensor(src_ptr, tla.make_layout(
+            tla.make_shape(batch_count, valid_rows, 128),
+            tla.make_stride(src_step, 128, 1)))
+        dst3 = tla.make_tensor(dst_ptr, tla.make_layout(
+            tla.make_shape(batch_count, (16, 8), (32, 4)),
+            tla.make_stride(dst_step, (32, 512), (1, 4096)),
+            origin_shape=tla.make_shape(batch_count, valid_rows, 128),
+            layoutTag=tla.arch.zN))
+        with tla.cube():
+            tla.copy(dst3, src3)
 
         # --- 4) Prepacked GM zN: a plain block move, no re-layout ---
         # The host buffer is already zN-packed and padded to ceil(M/16) * 16 rows.
@@ -6810,6 +6910,58 @@ def copy(
     same_dtype = src_dtype == dst_dtype
     src_layout = src_desc.layout_tag
     dst_layout = dst_desc.layout_tag
+
+    src_rank = len(src_desc.origin_shape)
+    dst_rank = len(dst_desc.origin_shape)
+    if src_rank == 3 or dst_rank == 3:
+        if src_rank != 3 or dst_rank != 3:
+            _op_error("copy", "batch-matrix copy requires two logical rank-3 tensors")
+        if _route != ("gm", "l1"):
+            _op_error(
+                "copy",
+                "batch-matrix copy currently supports GM to L1 layout conversion",
+            )
+        if scale is not None or params is not None:
+            _op_error("copy", "GM to L1 batch copy takes its geometry from the layouts")
+        if src_dtype not in ("f8e4m3fn", "f8e5m2", "f8e8m0"):
+            _op_error("copy", "batch-matrix copy currently supports FP8 and E8M0")
+        batch_layouts = (
+            {("RowMajor", "zN"), ("ColumnMajor", "nZ")}
+            if src_dtype in ("f8e4m3fn", "f8e5m2")
+            else {
+                ("RowMajorMxScaleA", "zZMxScale"),
+                ("ColMajorMxScaleA", "zZMxScale"),
+                ("RowMajorMxScaleB", "nNMxScale"),
+                ("ColMajorMxScaleB", "nNMxScale"),
+            }
+        )
+        if (src_layout, dst_layout) not in batch_layouts:
+            _op_error(
+                "copy",
+                f"unsupported batch-matrix copy layout conversion "
+                f"{src_layout} -> {dst_layout} for {src_dtype}",
+            )
+        for a, b in zip(src_desc.origin_shape, dst_desc.origin_shape, strict=True):
+            if a is not None and b is not None and a != b:
+                _op_error(
+                    "copy", "batch-matrix copies require matching logical extents"
+                )
+        count = src_desc.origin_shape[0]
+        if count is not None and not 0 <= count <= 65535:
+            _op_error("copy", "batch count must fit the unsigned 16-bit hardware field")
+        dst_step = dst_desc.stride[0]
+        if dst_step is not None and dst_step % 32:
+            _op_error(
+                "copy", "FP8/E8M0 destination batch stride must be 32-byte aligned"
+            )
+        if dst_step is not None and not 0 < dst_step // 32 <= 65535:
+            _op_error(
+                "copy",
+                "destination batch stride must fit the unsigned 16-bit 32-byte-block field",
+            )
+        src_step = src_desc.stride[0]
+        if src_dtype == "f8e8m0" and src_step is not None and src_step % 2:
+            _op_error("copy", "E8M0 source batch stride must preserve exponent pairs")
 
     if _route[0] == "l0c":
         if params is None:

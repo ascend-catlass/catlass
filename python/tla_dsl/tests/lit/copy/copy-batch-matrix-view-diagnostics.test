@@ -1,0 +1,108 @@
+// RUN: sed -n '/^\/\/ BEGIN_TILE_RESULT$/,/^\/\/ END_TILE_RESULT$/p' %s | sed '1d;$d;s|^// ||' > %t.TILE_RESULT.mlir && not %tla_compile %t.TILE_RESULT.mlir -o %t 2>&1 | %filecheck %s --check-prefix=TILE_RESULT
+// RUN: sed -n '/^\/\/ BEGIN_TILE_SOURCE$/,/^\/\/ END_TILE_SOURCE$/p' %s | sed '1d;$d;s|^// ||' > %t.TILE_SOURCE.mlir && not %tla_compile %t.TILE_SOURCE.mlir -o %t 2>&1 | %filecheck %s --check-prefix=TILE_SOURCE
+// RUN: sed -n '/^\/\/ BEGIN_LIKE_RESULT$/,/^\/\/ END_LIKE_RESULT$/p' %s | sed '1d;$d;s|^// ||' > %t.LIKE_RESULT.mlir && not %tla_compile %t.LIKE_RESULT.mlir -o %t 2>&1 | %filecheck %s --check-prefix=LIKE_RESULT
+// RUN: sed -n '/^\/\/ BEGIN_LIKE_SOURCE$/,/^\/\/ END_LIKE_SOURCE$/p' %s | sed '1d;$d;s|^// ||' > %t.LIKE_SOURCE.mlir && not %tla_compile %t.LIKE_SOURCE.mlir -o %t 2>&1 | %filecheck %s --check-prefix=LIKE_SOURCE
+// RUN: sed -n '/^\/\/ BEGIN_STRIDE_MISSING$/,/^\/\/ END_STRIDE_MISSING$/p' %s | sed '1d;$d;s|^// ||' > %t.STRIDE_MISSING.mlir && not %tla_compile %t.STRIDE_MISSING.mlir -o %t 2>&1 | %filecheck %s --check-prefix=STRIDE_MISSING
+
+// TILE_RESULT: error:
+// TILE_RESULT-SAME: tla.tile_view does not support batched tensors; use tla.get_tile
+// BEGIN_TILE_RESULT
+// module {
+//   tla.func @repro() {
+//     %address = arith.constant 4096 : i64
+//     %ptr = tla.inttoptr %address : i64 -> !tla.ptr<f8E4M3FN, gm, 1>
+//     %s = tla.make_shape -> !tla.shape<2,1,64>
+//     %st = tla.make_stride -> !tla.stride<128,64,1>
+//     %l = tla.make_layout %s, %st : !tla.shape<2,1,64>, !tla.stride<128,64,1> -> !tla.layout<!tla.shape<2,1,64>, !tla.stride<128,64,1>, !tla.shape<2,1,64>, RowMajor>
+//     %c = tla.make_coord -> !tla.coord<0,0,0>
+//     %tensor = tla.make_tensor %ptr, %l, %c : !tla.ptr<f8E4M3FN, gm, 1>, !tla.layout<!tla.shape<2,1,64>, !tla.stride<128,64,1>, !tla.shape<2,1,64>, RowMajor>, !tla.coord<0,0,0> -> !tla.tensor<!tla.layout<!tla.shape<2,1,64>, !tla.stride<128,64,1>, !tla.shape<2,1,64>, RowMajor>, !tla.coord<0,0,0>, !tla.ptr<f8E4M3FN, gm, 1>>
+//     %ts = tla.make_shape -> !tla.shape<1,64>
+//     %tc = tla.make_coord -> !tla.coord<0,0>
+//     %view = tla.tile_view %tensor, %ts, %tc : !tla.tensor<!tla.layout<!tla.shape<2,1,64>, !tla.stride<128,64,1>, !tla.shape<2,1,64>, RowMajor>, !tla.coord<0,0,0>, !tla.ptr<f8E4M3FN, gm, 1>>, !tla.shape<1,64>, !tla.coord<0,0> -> !tla.tensor<!tla.layout<!tla.shape<2,1,64>, !tla.stride<128,64,1>, !tla.shape<2,1,64>, RowMajor>, !tla.coord<0,0,0>, !tla.ptr<f8E4M3FN, gm, 1>>
+//     tla.return
+//   }
+// }
+// END_TILE_RESULT
+
+// TILE_SOURCE: error:
+// TILE_SOURCE-SAME: tla.tile_view does not support batched tensors; use tla.get_tile
+// BEGIN_TILE_SOURCE
+// module {
+//   tla.func @repro() {
+//     %address = arith.constant 4096 : i64
+//     %ptr = tla.inttoptr %address : i64 -> !tla.ptr<f8E4M3FN, gm, 1>
+//     %s = tla.make_shape -> !tla.shape<2,1,64>
+//     %st = tla.make_stride -> !tla.stride<128,64,1>
+//     %l = tla.make_layout %s, %st : !tla.shape<2,1,64>, !tla.stride<128,64,1> -> !tla.layout<!tla.shape<2,1,64>, !tla.stride<128,64,1>, !tla.shape<2,1,64>, RowMajor>
+//     %c = tla.make_coord -> !tla.coord<0,0,0>
+//     %tensor = tla.make_tensor %ptr, %l, %c : !tla.ptr<f8E4M3FN, gm, 1>, !tla.layout<!tla.shape<2,1,64>, !tla.stride<128,64,1>, !tla.shape<2,1,64>, RowMajor>, !tla.coord<0,0,0> -> !tla.tensor<!tla.layout<!tla.shape<2,1,64>, !tla.stride<128,64,1>, !tla.shape<2,1,64>, RowMajor>, !tla.coord<0,0,0>, !tla.ptr<f8E4M3FN, gm, 1>>
+//     %ts = tla.make_shape -> !tla.shape<1,64>
+//     %tc = tla.make_coord -> !tla.coord<0,0>
+//     %view = tla.tile_view %tensor, %ts, %tc : !tla.tensor<!tla.layout<!tla.shape<2,1,64>, !tla.stride<128,64,1>, !tla.shape<2,1,64>, RowMajor>, !tla.coord<0,0,0>, !tla.ptr<f8E4M3FN, gm, 1>>, !tla.shape<1,64>, !tla.coord<0,0> -> !tla.tensor<!tla.layout<!tla.shape<1,64>, !tla.stride<64,1>, !tla.shape<1,64>, RowMajor>, !tla.coord<0,0>, !tla.ptr<f8E4M3FN, gm, 1>>
+//     tla.return
+//   }
+// }
+// END_TILE_SOURCE
+
+// LIKE_RESULT: error:
+// LIKE_RESULT-SAME: tla.make_tensor_like does not support batched tensors; use tla.make_tensor with an explicit layout
+// BEGIN_LIKE_RESULT
+// module {
+//   tla.func @repro() {
+//     %address = arith.constant 4096 : i64
+//     %ptr = tla.inttoptr %address : i64 -> !tla.ptr<f8E4M3FN, gm, 1>
+//     %s = tla.make_shape -> !tla.shape<1,64>
+//     %st = tla.make_stride -> !tla.stride<64,1>
+//     %l = tla.make_layout %s, %st : !tla.shape<1,64>, !tla.stride<64,1> -> !tla.layout<!tla.shape<1,64>, !tla.stride<64,1>, !tla.shape<1,64>, RowMajor>
+//     %c = tla.make_coord -> !tla.coord<0,0>
+//     %tensor = tla.make_tensor %ptr, %l, %c : !tla.ptr<f8E4M3FN, gm, 1>, !tla.layout<!tla.shape<1,64>, !tla.stride<64,1>, !tla.shape<1,64>, RowMajor>, !tla.coord<0,0> -> !tla.tensor<!tla.layout<!tla.shape<1,64>, !tla.stride<64,1>, !tla.shape<1,64>, RowMajor>, !tla.coord<0,0>, !tla.ptr<f8E4M3FN, gm, 1>>
+//     %view = tla.make_tensor_like %ptr like %tensor layoutTag(#tla.layout_tag<RowMajor>) : !tla.ptr<f8E4M3FN, gm, 1>, !tla.tensor<!tla.layout<!tla.shape<1,64>, !tla.stride<64,1>, !tla.shape<1,64>, RowMajor>, !tla.coord<0,0>, !tla.ptr<f8E4M3FN, gm, 1>> -> !tla.tensor<!tla.layout<!tla.shape<2,1,64>, !tla.stride<128,64,1>, !tla.shape<2,1,64>, RowMajor>, !tla.coord<0,0,0>, !tla.ptr<f8E4M3FN, gm, 1>>
+//     tla.return
+//   }
+// }
+// END_LIKE_RESULT
+
+// LIKE_SOURCE: error:
+// LIKE_SOURCE-SAME: tla.make_tensor_like does not support batched tensors; use tla.make_tensor with an explicit layout
+// BEGIN_LIKE_SOURCE
+// module {
+//   tla.func @repro() {
+//     %address = arith.constant 4096 : i64
+//     %ptr = tla.inttoptr %address : i64 -> !tla.ptr<f8E4M3FN, gm, 1>
+//     %s = tla.make_shape -> !tla.shape<2,1,64>
+//     %st = tla.make_stride -> !tla.stride<128,64,1>
+//     %l = tla.make_layout %s, %st : !tla.shape<2,1,64>, !tla.stride<128,64,1> -> !tla.layout<!tla.shape<2,1,64>, !tla.stride<128,64,1>, !tla.shape<2,1,64>, RowMajor>
+//     %c = tla.make_coord -> !tla.coord<0,0,0>
+//     %tensor = tla.make_tensor %ptr, %l, %c : !tla.ptr<f8E4M3FN, gm, 1>, !tla.layout<!tla.shape<2,1,64>, !tla.stride<128,64,1>, !tla.shape<2,1,64>, RowMajor>, !tla.coord<0,0,0> -> !tla.tensor<!tla.layout<!tla.shape<2,1,64>, !tla.stride<128,64,1>, !tla.shape<2,1,64>, RowMajor>, !tla.coord<0,0,0>, !tla.ptr<f8E4M3FN, gm, 1>>
+//     %view = tla.make_tensor_like %ptr like %tensor layoutTag(#tla.layout_tag<RowMajor>) : !tla.ptr<f8E4M3FN, gm, 1>, !tla.tensor<!tla.layout<!tla.shape<2,1,64>, !tla.stride<128,64,1>, !tla.shape<2,1,64>, RowMajor>, !tla.coord<0,0,0>, !tla.ptr<f8E4M3FN, gm, 1>> -> !tla.tensor<!tla.layout<!tla.shape<1,64>, !tla.stride<64,1>, !tla.shape<1,64>, RowMajor>, !tla.coord<0,0>, !tla.ptr<f8E4M3FN, gm, 1>>
+//     tla.return
+//   }
+// }
+// END_LIKE_SOURCE
+
+// STRIDE_MISSING: error:
+// STRIDE_MISSING-SAME: pass explicit leaves via tla.make_stride
+// BEGIN_STRIDE_MISSING
+// module {
+//   tla.func @repro(%extent: index) {
+//     %address = arith.constant 4096 : i64
+//     %ptr = tla.inttoptr %address : i64 -> !tla.ptr<f8E4M3FN, gm, 1>
+//     %s = tla.make_shape %extent -> !tla.shape<2,1,?>
+//     %st = tla.make_stride -> !tla.stride<128,?,1>
+//     %l = tla.make_layout %s, %st : !tla.shape<2,1,?>, !tla.stride<128,?,1> -> !tla.layout<!tla.shape<2,1,?>, !tla.stride<128,?,1>, !tla.shape<2,1,?>, RowMajor>
+//     %c = tla.make_coord -> !tla.coord<0,0,0>
+//     %tensor = tla.make_tensor %ptr, %l, %c : !tla.ptr<f8E4M3FN, gm, 1>, !tla.layout<!tla.shape<2,1,?>, !tla.stride<128,?,1>, !tla.shape<2,1,?>, RowMajor>, !tla.coord<0,0,0> -> !tla.tensor<!tla.layout<!tla.shape<2,1,?>, !tla.stride<128,?,1>, !tla.shape<2,1,?>, RowMajor>, !tla.coord<0,0,0>, !tla.ptr<f8E4M3FN, gm, 1>>
+//     %dp = tla.alloc_ptr {size_bytes = 2048} -> !tla.ptr<f8E4M3FN, l1, 512>
+//     %ds = tla.make_shape -> !tla.shape<2,(16,1),(32,2)>
+//     %dst = tla.make_stride -> !tla.stride<1024,(32,512),(1,512)>
+//     %do = tla.make_shape %extent -> !tla.shape<2,1,?>
+//     %dl = tla.make_layout %ds, %dst origin %do {layoutTag = #tla.layout_tag<zN>} : !tla.shape<2,(16,1),(32,2)>, !tla.stride<1024,(32,512),(1,512)> origin !tla.shape<2,1,?> -> !tla.layout<!tla.shape<2,(16,1),(32,2)>, !tla.stride<1024,(32,512),(1,512)>, !tla.shape<2,1,?>, zN>
+//     %dc = tla.make_coord -> !tla.coord<0,0,0>
+//     %d = tla.make_tensor %dp, %dl, %dc : !tla.ptr<f8E4M3FN, l1, 512>, !tla.layout<!tla.shape<2,(16,1),(32,2)>, !tla.stride<1024,(32,512),(1,512)>, !tla.shape<2,1,?>, zN>, !tla.coord<0,0,0> -> !tla.tensor<!tla.layout<!tla.shape<2,(16,1),(32,2)>, !tla.stride<1024,(32,512),(1,512)>, !tla.shape<2,1,?>, zN>, !tla.coord<0,0,0>, !tla.ptr<f8E4M3FN, l1, 512>>
+//     tla.cube {
+//       tla.copy %d, %tensor : !tla.tensor<!tla.layout<!tla.shape<2,(16,1),(32,2)>, !tla.stride<1024,(32,512),(1,512)>, !tla.shape<2,1,?>, zN>, !tla.coord<0,0,0>, !tla.ptr<f8E4M3FN, l1, 512>>, !tla.tensor<!tla.layout<!tla.shape<2,1,?>, !tla.stride<128,?,1>, !tla.shape<2,1,?>, RowMajor>, !tla.coord<0,0,0>, !tla.ptr<f8E4M3FN, gm, 1>>
+//     }
+//     tla.return
+//   }
+// }
+// END_STRIDE_MISSING

@@ -268,6 +268,17 @@ mlir::LogicalResult TensorDescOp::verify()
         failed(getIndexTreeLeavesForVerify(getOperation(), layout.getOrigin(), originLeaves, "origin shape")) ||
         failed(getIndexTreeLeavesForVerify(getOperation(), tensorType.getCoord(), coordLeaves, "coordinate")))
         return mlir::failure();
+    bool batched = originLeaves.size() == 3;
+    if (getBatchInfo().size() != (batched ? 4u : 0u))
+        return emitOpError("batch metadata requires leading shape, stride, origin and coordinate");
+    if (batched) {
+        if (shapeLeaves.empty() || strideLeaves.empty() || coordLeaves.size() != 3)
+            return emitOpError("malformed batch-matrix metadata");
+        shapeLeaves.erase(shapeLeaves.begin());
+        strideLeaves.erase(strideLeaves.begin());
+        originLeaves.erase(originLeaves.begin());
+        coordLeaves.erase(coordLeaves.begin());
+    }
     if (isLinear) {
         size_t rank = coordLeaves.size();
         if ((rank != 1 && rank != 2) || shapeLeaves.size() != rank || strideLeaves.size() != rank ||
@@ -324,8 +335,27 @@ static bool hasEnclosingRegion(mlir::Operation* op)
     return hasEnclosing<AncestorOp>(op) || isInLoweredFunc(op);
 }
 
+// Batched descriptors are currently consumed only by GM-to-L1 copy. Other
+// tile operations must reject them rather than silently operating on matrix 0.
+static mlir::LogicalResult requireMatrixTiles(mlir::Operation* op)
+{
+    for (mlir::Value value : op->getOperands()) {
+        auto tensor = mlir::dyn_cast<TlaTensorType>(value.getType());
+        if (!tensor)
+            continue;
+        llvm::SmallVector<int64_t, 4> origin;
+        if (mlir::failed(getTlaIndexTreeLeaves(tensor.getLayout().getOrigin().getTree(), origin)))
+            return mlir::failure();
+        if (origin.size() == 3)
+            return op->emitOpError("currently requires individual matrix tiles; batched tensors support GM-to-L1 copy");
+    }
+    return mlir::success();
+}
+
 mlir::LogicalResult MmadOp::verify()
 {
+    if (mlir::failed(requireMatrixTiles(getOperation())))
+        return mlir::failure();
     if (!hasEnclosingRegion<CubeOp>(getOperation()))
         return emitOpError("must be nested inside a tla.cube region");
 
@@ -410,6 +440,8 @@ mlir::LogicalResult CallExternOp::verify()
 
 mlir::LogicalResult MmadMxOp::verify()
 {
+    if (mlir::failed(requireMatrixTiles(getOperation())))
+        return mlir::failure();
     if (!hasEnclosingRegion<CubeOp>(getOperation()))
         return emitOpError("must be nested inside a tla.cube region");
 
@@ -481,6 +513,8 @@ mlir::LogicalResult MmadMxOp::verify()
 
 mlir::LogicalResult CopyMxOp::verify()
 {
+    if (mlir::failed(requireMatrixTiles(getOperation())))
+        return mlir::failure();
     if (!hasEnclosingRegion<CubeOp>(getOperation()))
         return emitOpError("must be nested inside a tla.cube region");
     auto srcTy = mlir::dyn_cast<TlaTensorType>(getSrc().getType());
@@ -613,6 +647,8 @@ mlir::LogicalResult Img2colOp::verify()
 
 mlir::LogicalResult FillOp::verify()
 {
+    if (mlir::failed(requireMatrixTiles(getOperation())))
+        return mlir::failure();
     if (!hasEnclosingRegion<CubeOp>(getOperation()))
         return emitOpError("must be nested inside a tla.cube region");
     auto dstTy = mlir::dyn_cast<TlaTensorType>(getDst().getType());
@@ -1909,6 +1945,35 @@ mlir::LogicalResult CopyOp::verify()
         return mlir::success(); // Operand type verifier handles malformed tensors.
     AddressSpace src = srcTy.getPtr().getAddrspace();
     AddressSpace dst = dstTy.getPtr().getAddrspace();
+    llvm::SmallVector<int64_t, 4> srcOrigin, dstOrigin;
+    if (mlir::failed(::tla::getTlaIndexTreeLeaves(srcTy.getLayout().getOrigin().getTree(), srcOrigin)) ||
+        mlir::failed(::tla::getTlaIndexTreeLeaves(dstTy.getLayout().getOrigin().getTree(), dstOrigin)))
+        return mlir::failure();
+    if (srcOrigin.size() == 3 || dstOrigin.size() == 3) {
+        if (srcOrigin.size() != 3 || dstOrigin.size() != 3 || src != AddressSpace::gm || dst != AddressSpace::l1)
+            return emitOpError("batch-matrix copy currently requires two rank-3 GM/L1 tensors");
+        auto elem = srcTy.getPtr().getPointee();
+        if ((!elem.isFloat8E4M3FN() && !elem.isFloat8E5M2() && !mlir::isa<Float8E8M0Type>(elem)) ||
+            elem != dstTy.getPtr().getPointee())
+            return emitOpError("batch-matrix copy supports matching FP8 or E8M0 element types");
+        if (!isSupportedBatchCopyLayout(srcTy.getLayout().getLayoutTag(), dstTy.getLayout().getLayoutTag(), elem))
+            return emitOpError("unsupported batch-matrix copy layout conversion");
+        if (srcOrigin[0] != mlir::ShapedType::kDynamic && (srcOrigin[0] < 0 || srcOrigin[0] > 65535))
+            return emitOpError("batch count must fit the unsigned 16-bit hardware field");
+        llvm::SmallVector<int64_t, 5> srcStride, dstStride;
+        if (mlir::failed(getTlaIndexTreeLeaves(srcTy.getLayout().getStride().getTree(), srcStride)) ||
+            mlir::failed(getTlaIndexTreeLeaves(dstTy.getLayout().getStride().getTree(), dstStride)))
+            return mlir::failure();
+        if (dstStride[0] != mlir::ShapedType::kDynamic &&
+            (dstStride[0] <= 0 || dstStride[0] % 32 || dstStride[0] / 32 > 65535))
+            return emitOpError("destination batch stride must fit the unsigned 16-bit 32-byte-block field");
+        if (mlir::isa<Float8E8M0Type>(elem) && srcStride[0] != mlir::ShapedType::kDynamic && srcStride[0] % 2)
+            return emitOpError("E8M0 source batch stride must preserve exponent pairs");
+        for (size_t i = 0; i < 3; ++i)
+            if (srcOrigin[i] != mlir::ShapedType::kDynamic && dstOrigin[i] != mlir::ShapedType::kDynamic &&
+                srcOrigin[i] != dstOrigin[i])
+                return emitOpError("batch-matrix copy logical extents must match");
+    }
 
     // Cube data-path copies: GM->L1, L1->L0A, L1->L0B, L0C->GM, L0C->UB, L0C->L1, L1->UB.
     bool cubeRoute =

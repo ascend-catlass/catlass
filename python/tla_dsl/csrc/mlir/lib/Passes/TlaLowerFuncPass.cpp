@@ -205,7 +205,8 @@ static FailureOr<Value> materializeRootTensorDescriptor(
 
     return builder
         .create<::tla::TensorDescOp>(
-            loc, tensorType, base, shape0, shape1, one, one, stride0, stride1, one, one, origin0, origin1, zero, zero)
+            loc, tensorType, base, shape0, shape1, one, one, stride0, stride1, one, one, origin0, origin1, zero, zero,
+            ValueRange{})
         .getResult();
 }
 

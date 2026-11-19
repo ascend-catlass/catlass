@@ -37,7 +37,7 @@ struct TileCopyTla<
 
     template <class TensorDst, class TensorSrc>
     CATLASS_DEVICE void operator()(
-        TensorDst const& dstTensor, TensorSrc const& srcTensor, uint32_t ndNum = 1, uint32_t srcNdMatrixStride = 0,
+        TensorDst const& dstTensor, TensorSrc const& srcTensor, uint32_t ndNum = 1, uint64_t srcNdMatrixStride = 0,
         uint32_t dstNzMatrixStride = 0)
     {
         static_assert(
@@ -139,7 +139,7 @@ struct TileCopyTla<
 
     template <class TensorDst, class TensorSrc>
     CATLASS_DEVICE void operator()(
-        TensorDst const& dstTensor, TensorSrc const& srcTensor, uint32_t ndNum = 1, uint32_t srcNdMatrixStride = 0,
+        TensorDst const& dstTensor, TensorSrc const& srcTensor, uint32_t ndNum = 1, uint64_t srcNdMatrixStride = 0,
         uint32_t dstNzMatrixStride = 0)
     {
         static_assert(
@@ -299,7 +299,9 @@ struct TileCopyTla<
     TileCopyTla() {};
 
     template <class TensorDst, class TensorSrc>
-    CATLASS_DEVICE void operator()(TensorDst const& dstTensor, TensorSrc const& srcTensor)
+    CATLASS_DEVICE void operator()(
+        TensorDst const& dstTensor, TensorSrc const& srcTensor, uint32_t matrixNum = 1, uint64_t srcMatrixStride = 0,
+        uint32_t dstMatrixStride = 0)
     {
         static_assert(
             tla::detail::isMxScaleForRowMajorA<float8_e8m0_t, typename TensorSrc::Layout>::value &&
@@ -315,14 +317,14 @@ struct TileCopyTla<
 
         AscendC::Dn2NzParams intriParams;
 
-        intriParams.dnNum = 1;
+        intriParams.dnNum = matrixNum;
         intriParams.nValue = CeilDiv<MX_SCALE_COPY_GROUP_NUM>(cols);
         intriParams.dValue = rows;
-        intriParams.srcDnMatrixStride = 0;
+        intriParams.srcDnMatrixStride = srcMatrixStride / 2;
         intriParams.srcDValue = CeilDiv<MX_SCALE_COPY_GROUP_NUM>(srcDValue);
         intriParams.dstNzC0Stride = dstOuterStrideRow / BYTE_PER_C0;
         intriParams.dstNzNStride = 1;
-        intriParams.dstNzMatrixStride = 0;
+        intriParams.dstNzMatrixStride = dstMatrixStride / 2;
 
         auto dstOffset = dstTensor.layout()(dstTensor.coord());
         auto srcOffset = srcTensor.layout()(srcTensor.coord());
@@ -346,7 +348,9 @@ struct TileCopyTla<
     TileCopyTla() {};
 
     template <class TensorDst, class TensorSrc>
-    CATLASS_DEVICE void operator()(TensorDst const& dstTensor, TensorSrc const& srcTensor)
+    CATLASS_DEVICE void operator()(
+        TensorDst const& dstTensor, TensorSrc const& srcTensor, uint32_t matrixNum = 1, uint64_t srcMatrixStride = 0,
+        uint32_t dstMatrixStride = 0)
     {
         static_assert(
             tla::detail::isMxScaleForColumnMajorA<float8_e8m0_t, typename TensorSrc::Layout>::value &&
@@ -362,14 +366,14 @@ struct TileCopyTla<
 
         AscendC::Nd2NzParams intriParams;
 
-        intriParams.ndNum = 1;
+        intriParams.ndNum = matrixNum;
         intriParams.nValue = CeilDiv<MX_SCALE_COPY_GROUP_NUM>(cols);
         intriParams.dValue = rows;
-        intriParams.srcNdMatrixStride = 0;
+        intriParams.srcNdMatrixStride = srcMatrixStride / 2;
         intriParams.srcDValue = CeilDiv<MX_SCALE_COPY_GROUP_NUM>(srcDValue);
         intriParams.dstNzC0Stride = dstOuterStrideRow / BYTE_PER_C0;
         intriParams.dstNzNStride = 1;
-        intriParams.dstNzMatrixStride = 0;
+        intriParams.dstNzMatrixStride = dstMatrixStride / 2;
 
         auto dstOffset = dstTensor.layout()(dstTensor.coord());
         auto srcOffset = srcTensor.layout()(srcTensor.coord());
@@ -393,7 +397,9 @@ struct TileCopyTla<
     TileCopyTla() {};
 
     template <class TensorDst, class TensorSrc>
-    CATLASS_DEVICE void operator()(TensorDst const& dstTensor, TensorSrc const& srcTensor)
+    CATLASS_DEVICE void operator()(
+        TensorDst const& dstTensor, TensorSrc const& srcTensor, uint32_t matrixNum = 1, uint64_t srcMatrixStride = 0,
+        uint32_t dstMatrixStride = 0)
     {
         static_assert(
             tla::detail::isMxScaleForRowMajorB<float8_e8m0_t, typename TensorSrc::Layout>::value &&
@@ -409,14 +415,14 @@ struct TileCopyTla<
 
         AscendC::Nd2NzParams intriParams;
 
-        intriParams.ndNum = 1;
+        intriParams.ndNum = matrixNum;
         intriParams.nValue = CeilDiv<MX_SCALE_COPY_GROUP_NUM>(rows);
         intriParams.dValue = cols;
-        intriParams.srcNdMatrixStride = 0;
+        intriParams.srcNdMatrixStride = srcMatrixStride / 2;
         intriParams.srcDValue = CeilDiv<MX_SCALE_COPY_GROUP_NUM>(srcDValue);
         intriParams.dstNzC0Stride = dstOuterStrideCol / BYTE_PER_C0;
         intriParams.dstNzNStride = 1;
-        intriParams.dstNzMatrixStride = 0;
+        intriParams.dstNzMatrixStride = dstMatrixStride / 2;
 
         auto dstOffset = dstTensor.layout()(dstTensor.coord());
         auto srcOffset = srcTensor.layout()(srcTensor.coord());
@@ -440,7 +446,9 @@ struct TileCopyTla<
     TileCopyTla() {};
 
     template <class TensorDst, class TensorSrc>
-    CATLASS_DEVICE void operator()(TensorDst const& dstTensor, TensorSrc const& srcTensor)
+    CATLASS_DEVICE void operator()(
+        TensorDst const& dstTensor, TensorSrc const& srcTensor, uint32_t matrixNum = 1, uint64_t srcMatrixStride = 0,
+        uint32_t dstMatrixStride = 0)
     {
         static_assert(
             tla::detail::isMxScaleForColumnMajorB<float8_e8m0_t, typename TensorSrc::Layout>::value &&
@@ -456,14 +464,14 @@ struct TileCopyTla<
 
         AscendC::Dn2NzParams intriParams;
 
-        intriParams.dnNum = 1;
+        intriParams.dnNum = matrixNum;
         intriParams.nValue = CeilDiv<MX_SCALE_COPY_GROUP_NUM>(rows);
         intriParams.dValue = cols;
-        intriParams.srcDnMatrixStride = 0;
+        intriParams.srcDnMatrixStride = srcMatrixStride / 2;
         intriParams.srcDValue = CeilDiv<MX_SCALE_COPY_GROUP_NUM>(srcDValue);
         intriParams.dstNzC0Stride = dstOuterStrideCol / BYTE_PER_C0;
         intriParams.dstNzNStride = 1;
-        intriParams.dstNzMatrixStride = 0;
+        intriParams.dstNzMatrixStride = dstMatrixStride / 2;
 
         auto dstOffset = dstTensor.layout()(dstTensor.coord());
         auto srcOffset = srcTensor.layout()(srcTensor.coord());

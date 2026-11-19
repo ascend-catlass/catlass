@@ -41,6 +41,8 @@ struct TensorTypeInfo {
     ::AddressSpace tlaAddressSpace = ::AddressSpace::gm;
     ::LayoutTag layoutTag = ::LayoutTag::Unknown;
     int64_t rank = 0;
+    bool hasBatch = false;
+    std::array<int64_t, 4> batchDims{}; // shape, stride, origin, coordinate
 };
 
 mlir::FailureOr<TensorTypeInfo> decodeTensorTypeInfo(mlir::Type tensorType);
@@ -69,6 +71,7 @@ struct TensorDescriptor {
     ::LayoutTag layoutTag = ::LayoutTag::Unknown;
     std::string addrspace;
     mlir::Type elementType;
+    llvm::SmallVector<mlir::Value, 4> batch; // optional leading shape/stride/origin/coordinate
 };
 
 /// Fully dynamic shape/stride form used at structural joins and runtime calls.

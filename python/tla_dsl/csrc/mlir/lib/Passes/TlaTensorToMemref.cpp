@@ -1144,6 +1144,8 @@ void appendGmCachePolicyOperand(
 
 static bool isAicTemplateRuntimeCall(StringRef name)
 {
+    if (name.starts_with("copy_gm_") && name.ends_with("_batch"))
+        return true;
     if (name == "mmad_float_float_float" || name == "mmad_half_half_float" || name == "mmad_bf16_bf16_float" ||
         name == "mmad_int8_int8_int32" || name == "mmad_bias_float_float_float" ||
         name == "mmad_bias_half_half_float" || name == "mmad_bias_bf16_bf16_float" ||

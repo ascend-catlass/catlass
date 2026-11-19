@@ -29,7 +29,7 @@ static Value buildTensorDescOp(OpBuilder& builder, Location loc, Type tensorType
         .create<::tla::TensorDescOp>(
             loc, tensorType, desc.base, desc.shape[0], desc.shape[1], desc.shape[2], desc.shape[3], desc.stride[0],
             desc.stride[1], desc.stride[2], desc.stride[3], desc.originShape[0], desc.originShape[1], desc.coord[0],
-            desc.coord[1])
+            desc.coord[1], desc.batch)
         .getResult();
 }
 
@@ -155,6 +155,7 @@ private:
         fields.append(desc.stride.begin(), desc.stride.end());
         fields.append(desc.originShape.begin(), desc.originShape.end());
         fields.append(desc.coord.begin(), desc.coord.end());
+        fields.append(desc.batch.begin(), desc.batch.end());
         return std::make_pair(std::move(desc), std::move(fields));
     }
 
@@ -221,7 +222,8 @@ private:
         OpBuilder& builder, Location loc, const CarrierExpansion& expansion, ValueRange components,
         Operation* diagnosticOp)
     {
-        if (!expansion.isTensor || components.size() != expansion.count || components.size() != 13) {
+        if (!expansion.isTensor || components.size() != expansion.count ||
+            components.size() != 13 + expansion.prototype.batch.size()) {
             diagnosticOp->emitError("invalid flattened tensor descriptor SCF carrier");
             return failure();
         }
@@ -238,6 +240,9 @@ private:
         desc.stride = {components[5], components[6], components[7], components[8]};
         desc.originShape = {components[9], components[10]};
         desc.coord = {components[11], components[12]};
+        desc.batch.clear();
+        if (components.size() == 17)
+            desc.batch.append(components.begin() + 13, components.end());
         if (isLinearLayout(desc.layoutTag)) {
             // Structural carriers retain all four slots, but the materialized
             // linear descriptor must expose literal unit padding to its verifier.

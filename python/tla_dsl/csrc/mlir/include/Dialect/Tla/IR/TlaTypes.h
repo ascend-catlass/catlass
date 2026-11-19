@@ -34,6 +34,20 @@ inline bool isMxScaleGmLayout(::LayoutTag layoutTag)
            layoutTag == ::LayoutTag::RowMajorMxScaleB || layoutTag == ::LayoutTag::ColMajorMxScaleB;
 }
 
+/// GM-to-L1 layout conversions with a registered batched BC wrapper.
+inline bool isSupportedBatchCopyLayout(::LayoutTag srcLayout, ::LayoutTag dstLayout, ::mlir::Type elementType)
+{
+    if (elementType.isFloat8E4M3FN() || elementType.isFloat8E5M2())
+        return (srcLayout == ::LayoutTag::RowMajor && dstLayout == ::LayoutTag::zN) ||
+               (srcLayout == ::LayoutTag::ColumnMajor && dstLayout == ::LayoutTag::nZ);
+    if (::llvm::isa<::tla::Float8E8M0Type>(elementType))
+        return (dstLayout == ::LayoutTag::zZMxScale &&
+                (srcLayout == ::LayoutTag::RowMajorMxScaleA || srcLayout == ::LayoutTag::ColMajorMxScaleA)) ||
+               (dstLayout == ::LayoutTag::nNMxScale &&
+                (srcLayout == ::LayoutTag::RowMajorMxScaleB || srcLayout == ::LayoutTag::ColMajorMxScaleB));
+    return false;
+}
+
 /// The single source of truth for layouts whose shape and stride each have
 /// four physical leaves in tensor descriptors.
 inline bool isNZFamilyLayout(::LayoutTag layoutTag)

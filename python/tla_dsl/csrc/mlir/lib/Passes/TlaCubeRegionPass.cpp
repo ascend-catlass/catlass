@@ -94,7 +94,8 @@ struct LowerTlaMmadPatternImpl : public OpRewritePattern<MmadOpTy> {
             op.emitError() << "tla.mmad currently requires structured tla.tensor operand types";
             return failure();
         }
-        if (lhsInfo->rank != 2 || rhsInfo->rank != 2 || accInfo->rank != 2) {
+        if (lhsInfo->rank != 2 || rhsInfo->rank != 2 || accInfo->rank != 2 || lhsInfo->hasBatch || rhsInfo->hasBatch ||
+            accInfo->hasBatch) {
             op.emitError() << "tla.mmad currently supports rank-2 tiles only";
             return failure();
         }
@@ -739,6 +740,16 @@ struct LowerTlaCopyPattern : public OpRewritePattern<::tla::CopyOp> {
         std::string calleeName = ::tla::getCopyRouteCallee(
             op.getContext(), srcAddrspace, dstAddrspace, srcDesc.layoutTag, dstDesc.layoutTag, srcDesc.elementType,
             dstDesc.elementType, extraDesc);
+        const bool batched = !srcDesc.batch.empty() || !dstDesc.batch.empty();
+        if (batched) {
+            if (srcDesc.batch.size() != 4 || dstDesc.batch.size() != 4 || srcAddrspace != "gm" || dstAddrspace != "l1")
+                return op.emitError("batch-matrix copy requires two GM/L1 batch descriptors");
+            if (srcDesc.elementType != dstDesc.elementType ||
+                !::tla::isSupportedBatchCopyLayout(srcDesc.layoutTag, dstDesc.layoutTag, srcDesc.elementType) ||
+                calleeName.empty())
+                return op.emitError("unsupported batch-matrix copy route");
+            calleeName += "_batch";
+        }
         if (!calleeName.empty()) {
             FailureOr<Value> dstRuntimeMemref = buildRuntimeMemref(dstDesc);
             FailureOr<Value> srcRuntimeMemref = buildRuntimeMemref(srcDesc);
@@ -751,6 +762,15 @@ struct LowerTlaCopyPattern : public OpRewritePattern<::tla::CopyOp> {
                 operandTypes.push_back(payloadValue.getType());
             SmallVector<Value, 22> operands = {*srcRuntimeMemref, *dstRuntimeMemref};
             operands.append(payload.begin(), payload.end());
+            if (batched) {
+                // Batch shape and both matrix steps come from the tensor layouts.
+                for (Value v :
+                     {srcDesc.batch[2], srcDesc.batch[1], dstDesc.batch[1], srcDesc.batch[3], dstDesc.batch[3]}) {
+                    Value i64 = rewriter.create<arith::IndexCastOp>(op.getLoc(), rewriter.getI64Type(), v);
+                    operandTypes.push_back(rewriter.getI64Type());
+                    operands.push_back(i64);
+                }
+            }
             if (srcAddrspace == "l0c") {
                 auto i8Type = rewriter.getI8Type();
                 auto unitFlagVal = rewriter.create<arith::ConstantIntOp>(op.getLoc(), l0c2DstInfo.unitFlag, 8);

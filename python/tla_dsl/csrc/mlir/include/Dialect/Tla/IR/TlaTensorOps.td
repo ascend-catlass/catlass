@@ -166,13 +166,15 @@ def Tla_TensorDescOp : Tla_Op<"tensor_desc", [Pure]> {
     Index:$shape0, Index:$shape1, Index:$shape2, Index:$shape3,
     Index:$stride0, Index:$stride1, Index:$stride2, Index:$stride3,
     Index:$origin_shape0, Index:$origin_shape1,
-    Index:$coord0, Index:$coord1);
+    Index:$coord0, Index:$coord1,
+    Variadic<Index>:$batch_info);
   let results = (outs Tla_TensorType:$result);
   let assemblyFormat = [{
     $base `shape` `[` $shape0 `,` $shape1 `,` $shape2 `,` $shape3 `]`
     `stride` `[` $stride0 `,` $stride1 `,` $stride2 `,` $stride3 `]`
     `origin_shape` `[` $origin_shape0 `,` $origin_shape1 `]`
     `coord` `[` $coord0 `,` $coord1 `]`
+    (`batch` `[` $batch_info^ `]`)?
     attr-dict `:` qualified(type($base)) `->` qualified(type($result))
   }];
   let hasVerifier = 1;

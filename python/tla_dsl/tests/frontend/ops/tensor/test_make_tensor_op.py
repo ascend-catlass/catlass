@@ -6,7 +6,6 @@ from catlass.tla.runtime import make_fake_tensor
 import pytest
 
 import catlass.tla as tla
-import catlass.runtime as runtime_mod  # noqa: F401
 from catlass.execution_lowering import TlaLoweringError
 
 
@@ -232,3 +231,19 @@ def test_make_tensor_rank1_dynamic_extent_emits_tlair() -> None:
 
 
 # --- Preconditions ------------------------------------------------------------
+
+
+def test_make_tensor_rejects_rank_four_with_supported_ranks() -> None:
+    @tla.kernel
+    def rank_four_kernel() -> None:
+        ptr = tla.make_ptr(tla.Float32, 4096, mem_space=tla.AddressSpace.gm)
+        tla.make_tensor(
+            ptr,
+            tla.make_layout(tla.make_shape(2, 3, 4, 5), tla.make_stride(60, 20, 5, 1)),
+        )
+
+    with pytest.raises(
+        TlaLoweringError,
+        match=r"supports 1-D, 2-D or 3-D linear layouts with matching strides",
+    ):
+        rank_four_kernel.dump_mlir()

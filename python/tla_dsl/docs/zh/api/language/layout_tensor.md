@@ -187,8 +187,9 @@ tla.make_layout(shape: Any, stride: Any, *, origin_shape: Any | None = None, lay
 参数说明：
 
 - `shape`（`_Shape` | int 树）：由 `tla.make_shape` 构造；Host 也可传 Python int 树。
-  RowMajor / ColumnMajor：二维 `(M, N)`。
-  `zN` / `nZ` / `L0Clayout` / `zNUnAlign`：嵌套 `((m0, m1), (n0, n1))`。
+  RowMajor / ColumnMajor：`(M, N)` 或 `(B, M, N)`。
+  NZ 类布局使用 `((m0, m1), (n0, n1))`，也可在前面增加一个标量批次维，
+  写作 `(B, (m0, m1), (n0, n1))`。
 - `stride`（`_Stride` | int 树）：由 `tla.make_stride` 构造；Host 也可传与 `shape` 同嵌套的 int 树。
 - `origin_shape`（`_Shape` | int 树 | None）：逻辑工作尺寸。可选，默认 `None`
   （推断；Host 上省略时等于 `shape`）。
@@ -236,7 +237,7 @@ zn = tla.make_layout(
 
 功能说明：
 
-由平铺 2-D shape、元素类型与 layout tag 构造片上 `!tla.layout`。
+由扁平的矩阵或批矩阵 shape、元素类型与 layout tag 构造片上 `!tla.layout`。
 
 函数原型：
 
@@ -246,7 +247,7 @@ tla.make_layout_with_tag(shape: tuple, dtype: Any, layoutTag: _LayoutTag | None 
 
 参数说明：
 
-- `shape`（`tuple`）：扁平二维逻辑 extent `(rows, cols)`。每个叶子为
+- `shape`（`tuple`）：扁平逻辑 extent `(rows, cols)` 或 `(batch, rows, cols)`。每个叶子为
   `int` 或运行时 `Numeric`（动态叶子）。必填。
 - `dtype`（`Numeric` 子类）：元素类型；决定重映射物理树的 C0/分块几何。必填。
 - `layoutTag`（`_LayoutTag | None`）：布局标签，见 [布局标签](system.md#布局标签)。
@@ -255,10 +256,11 @@ tla.make_layout_with_tag(shape: tuple, dtype: Any, layoutTag: _LayoutTag | None 
 约束说明：
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
-- 仅用于片上 tensor 布局：合成后的 layout 应通过
-  `tla.make_tensor(ptr, layout)` 落到片上指针，而不是绑定 GM Host 内存。
-- `shape` 必须是扁平二元组；嵌套树与 `None` 叶子会被拒绝——整个 extent
-  由调用方拥有。
+- 合成后的 layout 可通过 `tla.make_tensor(ptr, layout)` 用于片上指针，
+  也可用于已按相应 tag 预打包的 GM 缓冲区，例如 `zN` 或 `nZ` 权重。
+  普通 Host 内存的布局来自 Host tensor，不通过本接口绑定。
+- `shape` 必须是扁平二元组或三元组；嵌套树与 `None` 叶子会被拒绝。
+  默认批次间距覆盖填充后的完整矩阵存储；显式布局可指定独立间距。
 - 结果 layout 的 origin shape 等于 `shape`（对齐后的 extent）；配合
   `tla.make_tensor(ptr, layout)` 落到片上指针。
 - 本接口仅支持：`RowMajor`、`ColumnMajor`、`zN`、`nZ`、`zZMxScale`、
@@ -317,7 +319,7 @@ tile = tla.tile_view(
 
 功能说明：
 
-从 tensor 切出平铺 2-D 子 tile（共享源缓冲）。
+从 tensor 提取扁平二维或三维子 tile（共享源缓冲）。
 
 函数原型：
 
@@ -329,9 +331,9 @@ tla.get_tile(tensor: Tensor, coord: TlaCoord, shape: TlaShape) -> TlaTensor
 
 - `tensor`（`Tensor`）：源 `!tla.tensor`。必填。
 - `coord`（`TlaCoord`）：由 `tla.make_coord` 得到的起点，相对源的扁平
-  二维元素偏移。必填。
+  二维或三维元素偏移。必填。
 - `shape`（`TlaShape`）：由 `tla.make_shape` 得到的请求 tile extent，
-  扁平二维。必填。
+  扁平二维或三维，与源的逻辑秩相同。必填。
 
 约束说明：
 
@@ -386,6 +388,10 @@ tla.make_tensor(ptr: Pointer, layout: TlaLayout, coord: CoordLike | None = None)
   对 `zN` / `nZ` / `L0Clayout` / `zNUnAlign`，物理 `shape` / `stride`
   为嵌套 2×2，逻辑 coord / `origin_shape` 仍是二维 `(M, N)`。若 `make_layout`
   省略 `origin_shape`，则从物理 shape 推断逻辑尺寸（例如 `(m0*m1, n0*n1)`）。
+- Kernel 内部的批矩阵视图在物理 shape 和 stride 前增加标量批次维，
+  origin 和坐标为扁平 `(B, M, N)`。批次 stride 以元素为单位，允许描述
+  存储互不重叠的交错 NZ 矩阵。目前批矩阵视图支持 GM→L1 `copy` 和
+  `get_tile`；Host 参数绑定及其他 tensor 操作保留原有的秩限制。
 - 完整 Kernel 编译要求 `ptr` 具备底层存储；可运行 kernel 中片上指针的推荐形式是 `allocate`（可选再经 `recast_ptr`）。
 
 调用示例：

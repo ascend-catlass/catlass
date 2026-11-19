@@ -190,8 +190,9 @@ tla.make_layout(shape: Any, stride: Any, *, origin_shape: Any | None = None, lay
 Parameters:
 
 - `shape` (`_Shape` | int tree): From `tla.make_shape`. Host also accepts a
-  Python int tree. RowMajor / ColumnMajor: 2D `(M, N)`. `zN` / `nZ` /
-  `L0Clayout` / `zNUnAlign`: nested `((m0, m1), (n0, n1))`.
+  Python int tree. RowMajor / ColumnMajor: `(M, N)` or `(B, M, N)`.
+  NZ-family layouts use `((m0, m1), (n0, n1))`, optionally preceded by
+  a scalar batch mode `(B, (m0, m1), (n0, n1))`.
 - `stride` (`_Stride` | int tree): From `tla.make_stride`. Host also accepts
   a Python int tree with the same nesting as `shape`.
 - `origin_shape` (`_Shape` | int tree | None): Logical working shape.
@@ -232,7 +233,7 @@ layout = tla.make_layout(
 
 Description:
 
-Build an on-chip `!tla.layout` from a flat 2-D shape, element type, and layout tag.
+Build an on-chip `!tla.layout` from a flat matrix or batched-matrix shape, element type, and layout tag.
 
 Prototype:
 
@@ -242,7 +243,7 @@ tla.make_layout_with_tag(shape: tuple, dtype: Any, layoutTag: _LayoutTag | None 
 
 Parameters:
 
-- `shape` (`tuple`): Flat 2D logical extent `(rows, cols)`. Each leaf is
+- `shape` (`tuple`): Flat logical extent `(rows, cols)` or `(batch, rows, cols)`. Each leaf is
   an `int` or a runtime `Numeric` (dynamic leaf). Required.
 - `dtype` (`Numeric` subclass): Element type; drives the C0/fractal
   geometry of the remapped physical trees. Required.
@@ -259,8 +260,9 @@ Constraints:
   `nZ` weight, say -- which is how `tla.copy`'s GM → L1 route spells such
   a source; it is not for binding ordinary host memory, whose layout
   comes from the host tensor instead.
-- `shape` must be a flat 2-tuple; nested trees and `None` leaves are
-  rejected — the whole extent is caller-owned.
+- `shape` must be a flat 2-tuple or 3-tuple; nested trees and `None`
+  leaves are rejected. The batch pitch covers the complete padded
+  matrix storage; explicit layouts can choose independent pitches.
 - The origin shape of the resulting layout equals `shape` (the aligned
   extent); pair with `tla.make_tensor(ptr, layout)` to land it on an
   on-chip pointer.
@@ -320,7 +322,7 @@ tile = tla.tile_view(
 
 Description:
 
-Extract a flat 2-D sub-tile of a tensor (shares the source buffer).
+Extract a flat 2-D or 3-D sub-tile of a tensor (shares the source buffer).
 
 Prototype:
 
@@ -331,10 +333,10 @@ tla.get_tile(tensor: Tensor, coord: TlaCoord, shape: TlaShape) -> TlaTensor
 Parameters:
 
 - `tensor` (`Tensor`): Source `!tla.tensor`. Required.
-- `coord` (`TlaCoord`): Tile start from `tla.make_coord`, flat 2-D
+- `coord` (`TlaCoord`): Tile start from `tla.make_coord`, flat 2-D or 3-D
   element offsets relative to the source. Required.
 - `shape` (`TlaShape`): Requested tile extent from `tla.make_shape`,
-  flat 2-D. Required.
+  flat 2-D or 3-D with the same logical rank as the source. Required.
 
 Constraints:
 
@@ -399,6 +401,12 @@ Constraints:
   `shape` / `stride` are nested 2x2, while logical coord / `origin_shape`
   stay 2D `(M, N)`. If `make_layout` omitted `origin_shape`, the logical
   size is inferred from the physical shape (for example `(m0*m1, n0*n1)`).
+- Kernel-local batched views prepend a scalar batch mode to the physical
+  shape and stride, with flat `(B, M, N)` origin and coordinates.
+  The batch stride is in elements and may describe disjoint interleaved
+  NZ matrices. Batched views currently support GM-to-L1 `copy` and
+  `get_tile`; host argument binding and other tensor operations retain
+  their existing rank limits.
 - A full Kernel compile requires `ptr` to carry backing storage; an on-chip
   pointer from `allocate` (optionally via `recast_ptr`) is the supported
   form for runnable kernels.

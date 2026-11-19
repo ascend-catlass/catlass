@@ -38,6 +38,20 @@ mlir::FailureOr<TensorTypeInfo> decodeTensorTypeInfo(mlir::Type tensorType)
         return failure();
 
     info.rank = static_cast<int64_t>(info.coordDims.size());
+    if (info.rank == 3) {
+        const size_t expectedLeaves = isNZFamilyLayout(info.layoutTag) ? 5 : 3;
+        if (info.originShapeDims.size() != 3 || info.shapeDims.size() != expectedLeaves ||
+            info.strideDims.size() != expectedLeaves)
+            return failure();
+        info.hasBatch = true;
+        info.batchDims = {
+            info.shapeDims.front(), info.strideDims.front(), info.originShapeDims.front(), info.coordDims.front()};
+        info.shapeDims.erase(info.shapeDims.begin());
+        info.strideDims.erase(info.strideDims.begin());
+        info.originShapeDims.erase(info.originShapeDims.begin());
+        info.coordDims.erase(info.coordDims.begin());
+        info.rank = 2;
+    }
     if (isLinearLayout(info.layoutTag)) {
         if (info.rank == 1 && info.shapeDims.size() == 1 && info.strideDims.size() == 1 &&
             info.originShapeDims.size() == 1) {
@@ -119,6 +133,12 @@ bool validateTensorDescriptor(mlir::Operation* op, const TensorDescriptor& desc,
     }
     for (Value value : desc.coord) {
         if (!value || !value.getType().isIndex()) {
+            op->emitError() << errorMessage;
+            return false;
+        }
+    }
+    if (!desc.batch.empty()) {
+        if (desc.batch.size() != 4 || llvm::any_of(desc.batch, [](Value v) { return !v || !v.getType().isIndex(); })) {
             op->emitError() << errorMessage;
             return false;
         }
@@ -248,6 +268,7 @@ mlir::FailureOr<TensorDescriptor> descriptorFromTensorDescOp(::tla::TensorDescOp
         return descOp->emitError() << "tla.tensor_desc result is not a structured tla.tensor", failure();
     TensorDescriptor d;
     d.base = descOp.getBase();
+    d.batch.append(descOp.getBatchInfo().begin(), descOp.getBatchInfo().end());
     if (auto memrefType = llvm::dyn_cast<MemRefType>(descOp.getBase().getType())) {
         d.bridgedBaseMemrefType = memrefType;
     } else if (llvm::isa<::tla::PtrType>(descOp.getBase().getType())) {
@@ -259,7 +280,7 @@ mlir::FailureOr<TensorDescriptor> descriptorFromTensorDescOp(::tla::TensorDescOp
         if (auto n = getStaticAllocationElementCount(descOp.getBase()); succeeded(n) && *n > 0) {
             flatElemCount = *n;
         } else if (
-            info->originShapeDims.size() >= 2 && info->originShapeDims[0] != ShapedType::kDynamic &&
+            !info->hasBatch && info->originShapeDims.size() >= 2 && info->originShapeDims[0] != ShapedType::kDynamic &&
             info->originShapeDims[1] != ShapedType::kDynamic && info->originShapeDims[0] > 0 &&
             info->originShapeDims[1] > 0) {
             flatElemCount = info->originShapeDims[0] * info->originShapeDims[1];

@@ -1,0 +1,72 @@
+// RUN: sed -n '/^\/\/ BEGIN_ZN$/,/^\/\/ END_ZN$/p' %s | sed '1d;$d;s|^// ||' > %t.ZN.mlir && not %tla_compile %t.ZN.mlir -o %t 2>&1 | %filecheck %s --check-prefix=ZN
+// RUN: sed -n '/^\/\/ BEGIN_NZ$/,/^\/\/ END_NZ$/p' %s | sed '1d;$d;s|^// ||' > %t.NZ.mlir && not %tla_compile %t.NZ.mlir -o %t 2>&1 | %filecheck %s --check-prefix=NZ
+// RUN: sed -n '/^\/\/ BEGIN_UNALIGN$/,/^\/\/ END_UNALIGN$/p' %s | sed '1d;$d;s|^// ||' > %t.UNALIGN.mlir && not %tla_compile %t.UNALIGN.mlir -o %t 2>&1 | %filecheck %s --check-prefix=UNALIGN
+
+// ZN: error:
+// ZN-SAME: unsupported batch-matrix copy layout conversion
+// BEGIN_ZN
+// module {
+//   tla.func @unsupported_zn() {
+//     %c = arith.constant 4096 : i64
+//     %gp = tla.inttoptr %c : i64 -> !tla.ptr<f8E4M3FN, gm, 1>
+//     %lp = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<f8E4M3FN, l1, 512>
+//     %s = tla.make_shape -> !tla.shape<2,(16,2),(32,2)>
+//     %t = tla.make_stride -> !tla.stride<2048,(32,512),(1,1024)>
+//     %o = tla.make_shape -> !tla.shape<2,32,64>
+//     %l = tla.make_layout %s, %t origin %o {layoutTag = #tla.layout_tag<zN>} : !tla.shape<2,(16,2),(32,2)>, !tla.stride<2048,(32,512),(1,1024)> origin !tla.shape<2,32,64> -> !tla.layout<!tla.shape<2,(16,2),(32,2)>, !tla.stride<2048,(32,512),(1,1024)>, !tla.shape<2,32,64>, zN>
+//     %c0 = tla.make_coord -> !tla.coord<0,0,0>
+//     %src = tla.make_tensor %gp, %l, %c0 : !tla.ptr<f8E4M3FN, gm, 1>, !tla.layout<!tla.shape<2,(16,2),(32,2)>, !tla.stride<2048,(32,512),(1,1024)>, !tla.shape<2,32,64>, zN>, !tla.coord<0,0,0> -> !tla.tensor<!tla.layout<!tla.shape<2,(16,2),(32,2)>, !tla.stride<2048,(32,512),(1,1024)>, !tla.shape<2,32,64>, zN>, !tla.coord<0,0,0>, !tla.ptr<f8E4M3FN, gm, 1>>
+//     %dst = tla.make_tensor %lp, %l, %c0 : !tla.ptr<f8E4M3FN, l1, 512>, !tla.layout<!tla.shape<2,(16,2),(32,2)>, !tla.stride<2048,(32,512),(1,1024)>, !tla.shape<2,32,64>, zN>, !tla.coord<0,0,0> -> !tla.tensor<!tla.layout<!tla.shape<2,(16,2),(32,2)>, !tla.stride<2048,(32,512),(1,1024)>, !tla.shape<2,32,64>, zN>, !tla.coord<0,0,0>, !tla.ptr<f8E4M3FN, l1, 512>>
+//     tla.cube {
+//       tla.copy %dst, %src : !tla.tensor<!tla.layout<!tla.shape<2,(16,2),(32,2)>, !tla.stride<2048,(32,512),(1,1024)>, !tla.shape<2,32,64>, zN>, !tla.coord<0,0,0>, !tla.ptr<f8E4M3FN, l1, 512>>, !tla.tensor<!tla.layout<!tla.shape<2,(16,2),(32,2)>, !tla.stride<2048,(32,512),(1,1024)>, !tla.shape<2,32,64>, zN>, !tla.coord<0,0,0>, !tla.ptr<f8E4M3FN, gm, 1>>
+//     }
+//     tla.return
+//   }
+// }
+// END_ZN
+
+// NZ: error:
+// NZ-SAME: unsupported batch-matrix copy layout conversion
+// BEGIN_NZ
+// module {
+//   tla.func @unsupported_nz() {
+//     %c = arith.constant 4096 : i64
+//     %gp = tla.inttoptr %c : i64 -> !tla.ptr<f8E4M3FN, gm, 1>
+//     %lp = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<f8E4M3FN, l1, 512>
+//     %s = tla.make_shape -> !tla.shape<2,(32,1),(16,4)>
+//     %t = tla.make_stride -> !tla.stride<2048,(1,1024),(32,512)>
+//     %o = tla.make_shape -> !tla.shape<2,32,64>
+//     %l = tla.make_layout %s, %t origin %o {layoutTag = #tla.layout_tag<nZ>} : !tla.shape<2,(32,1),(16,4)>, !tla.stride<2048,(1,1024),(32,512)> origin !tla.shape<2,32,64> -> !tla.layout<!tla.shape<2,(32,1),(16,4)>, !tla.stride<2048,(1,1024),(32,512)>, !tla.shape<2,32,64>, nZ>
+//     %c0 = tla.make_coord -> !tla.coord<0,0,0>
+//     %src = tla.make_tensor %gp, %l, %c0 : !tla.ptr<f8E4M3FN, gm, 1>, !tla.layout<!tla.shape<2,(32,1),(16,4)>, !tla.stride<2048,(1,1024),(32,512)>, !tla.shape<2,32,64>, nZ>, !tla.coord<0,0,0> -> !tla.tensor<!tla.layout<!tla.shape<2,(32,1),(16,4)>, !tla.stride<2048,(1,1024),(32,512)>, !tla.shape<2,32,64>, nZ>, !tla.coord<0,0,0>, !tla.ptr<f8E4M3FN, gm, 1>>
+//     %dst = tla.make_tensor %lp, %l, %c0 : !tla.ptr<f8E4M3FN, l1, 512>, !tla.layout<!tla.shape<2,(32,1),(16,4)>, !tla.stride<2048,(1,1024),(32,512)>, !tla.shape<2,32,64>, nZ>, !tla.coord<0,0,0> -> !tla.tensor<!tla.layout<!tla.shape<2,(32,1),(16,4)>, !tla.stride<2048,(1,1024),(32,512)>, !tla.shape<2,32,64>, nZ>, !tla.coord<0,0,0>, !tla.ptr<f8E4M3FN, l1, 512>>
+//     tla.cube {
+//       tla.copy %dst, %src : !tla.tensor<!tla.layout<!tla.shape<2,(32,1),(16,4)>, !tla.stride<2048,(1,1024),(32,512)>, !tla.shape<2,32,64>, nZ>, !tla.coord<0,0,0>, !tla.ptr<f8E4M3FN, l1, 512>>, !tla.tensor<!tla.layout<!tla.shape<2,(32,1),(16,4)>, !tla.stride<2048,(1,1024),(32,512)>, !tla.shape<2,32,64>, nZ>, !tla.coord<0,0,0>, !tla.ptr<f8E4M3FN, gm, 1>>
+//     }
+//     tla.return
+//   }
+// }
+// END_NZ
+
+// UNALIGN: error:
+// UNALIGN-SAME: unsupported batch-matrix copy layout conversion
+// BEGIN_UNALIGN
+// module {
+//   tla.func @unsupported_unalign() {
+//     %c = arith.constant 4096 : i64
+//     %gp = tla.inttoptr %c : i64 -> !tla.ptr<f8E4M3FN, gm, 1>
+//     %lp = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<f8E4M3FN, l1, 512>
+//     %s = tla.make_shape -> !tla.shape<2,(32,1),(32,2)>
+//     %t = tla.make_stride -> !tla.stride<2048,(32,1024),(1,1024)>
+//     %o = tla.make_shape -> !tla.shape<2,32,64>
+//     %l = tla.make_layout %s, %t origin %o {layoutTag = #tla.layout_tag<zNUnAlign>} : !tla.shape<2,(32,1),(32,2)>, !tla.stride<2048,(32,1024),(1,1024)> origin !tla.shape<2,32,64> -> !tla.layout<!tla.shape<2,(32,1),(32,2)>, !tla.stride<2048,(32,1024),(1,1024)>, !tla.shape<2,32,64>, zNUnAlign>
+//     %c0 = tla.make_coord -> !tla.coord<0,0,0>
+//     %src = tla.make_tensor %gp, %l, %c0 : !tla.ptr<f8E4M3FN, gm, 1>, !tla.layout<!tla.shape<2,(32,1),(32,2)>, !tla.stride<2048,(32,1024),(1,1024)>, !tla.shape<2,32,64>, zNUnAlign>, !tla.coord<0,0,0> -> !tla.tensor<!tla.layout<!tla.shape<2,(32,1),(32,2)>, !tla.stride<2048,(32,1024),(1,1024)>, !tla.shape<2,32,64>, zNUnAlign>, !tla.coord<0,0,0>, !tla.ptr<f8E4M3FN, gm, 1>>
+//     %dst = tla.make_tensor %lp, %l, %c0 : !tla.ptr<f8E4M3FN, l1, 512>, !tla.layout<!tla.shape<2,(32,1),(32,2)>, !tla.stride<2048,(32,1024),(1,1024)>, !tla.shape<2,32,64>, zNUnAlign>, !tla.coord<0,0,0> -> !tla.tensor<!tla.layout<!tla.shape<2,(32,1),(32,2)>, !tla.stride<2048,(32,1024),(1,1024)>, !tla.shape<2,32,64>, zNUnAlign>, !tla.coord<0,0,0>, !tla.ptr<f8E4M3FN, l1, 512>>
+//     tla.cube {
+//       tla.copy %dst, %src : !tla.tensor<!tla.layout<!tla.shape<2,(32,1),(32,2)>, !tla.stride<2048,(32,1024),(1,1024)>, !tla.shape<2,32,64>, zNUnAlign>, !tla.coord<0,0,0>, !tla.ptr<f8E4M3FN, l1, 512>>, !tla.tensor<!tla.layout<!tla.shape<2,(32,1),(32,2)>, !tla.stride<2048,(32,1024),(1,1024)>, !tla.shape<2,32,64>, zNUnAlign>, !tla.coord<0,0,0>, !tla.ptr<f8E4M3FN, gm, 1>>
+//     }
+//     tla.return
+//   }
+// }
+// END_UNALIGN

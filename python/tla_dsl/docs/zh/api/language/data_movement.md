@@ -49,6 +49,16 @@ tla.copy(dst: Tensor, src: Tensor, params: CopyParams | None = None, *, scale: T
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
 - 须在 `tla.cube()` 或 `tla.vector()` 内调用。
 - 拷贝大小按各 tile 的 `origin_shape`。
+- Ascend 950 上，两个逻辑秩为 3 的视图 `(B, M, N)` 启用批量 GM→L1 布局转换。
+  FP8 支持 RowMajor→zN 和 ColumnMajor→nZ；E8M0 支持下表的四条 GM MX scale 通路。
+  批次数取自 `origin_shape[0]`，源、目的矩阵间距分别取各自 layout 的首维 stride，
+  以元素为单位；内部矩阵 stride 保持二维语义。两端逻辑 extent 必须一致，包括运行时值。
+  批次数或矩阵 extent 为零时不发起 DMA。
+  其他三维 layout/dtype 组合在编译期报错，不回退到二维拷贝。
+- 批量拷贝要求 `params=None`、`scale=None`，批次数为 0～65535，目的批次 stride
+  为正、按 32 字节对齐且不超过 65535 个 32 字节块。E8M0 源矩阵间距必须保持指数对。
+  运行时几何参数须满足相同约束。调用方提供足够底层存储，并保证目的矩阵互不重叠；
+  允许交错 NZ 布局。
 - packed fp4 在搬运前转换描述符的通路（GM→UB、UB→GM 与 UB→L1）按字节
   搬运：两个 fp4 元素共用一个字节，因此各 tile 最内层的 `origin_shape`、
   最内层起始坐标，以及转换时被折半的 stride，三者均须为偶数，任一为奇数
@@ -65,6 +75,13 @@ tla.copy(dst: Tensor, src: Tensor, params: CopyParams | None = None, *, scale: T
   整块 16×C0，1 字节类型为 32×32。
 - `GM`→`L1` / `L1`→`biasbuf` 连续平铺用 rank-1 `VectorLayout`；多行 bias
   tile 不可表示，请切出单行。
+- **预打包 `GM` tile：** 已按分形顺序存放的缓冲区可用 `zN` 或转置排布的
+  `nZ` tag 描述，并拷贝到相同布局的 L1 tile，不再重排数据。GM 源 tag 仅使用
+  对齐的 `zN` / `nZ`；M 轴紧凑存储的 `zNUnAlign` 用于 UB→L1，GM 端的
+  `zNUnAlign` 则表示供 `tla.experimental.img2col` 使用的 NC1HWC0 特征图。
+  两端容量均须覆盖 Padding：`zN` 为 `ceil(M/16) * 16` 行，`nZ` 为
+  `ceil(M/C0) * C0` 行、`ceil(N/16) * 16` 列；搬运以完整分形为单位，
+  最后一个行组也会完整搬运。
 - 整 tile DMA 使用 `tla.copy`。寄存器级 UB 非对齐访问请改用
   `tensor.load` / `tensor.store`，并传入 `UnalignLoadParams` /
   `UnalignStoreParams`。
@@ -79,6 +96,8 @@ tla.copy(dst: Tensor, src: Tensor, params: CopyParams | None = None, *, scale: T
 |----------|------------|----------|------------|--------|
 |`gm`|`RowMajor`|`l1`|`zN`|`f32`,`f16`,`bf16`,`i8`,`u16`,`u32`,`f8e4m3fn`,`f8e5m2`,`f4e2m1`,`f4e1m2`|
 |`gm`|`ColumnMajor`|`l1`|`nZ`|`f32`,`f16`,`bf16`,`i8`,`u16`,`u32`,`f8e4m3fn`,`f8e5m2`,`f4e2m1`,`f4e1m2`|
+|`gm`|`zN`|`l1`|`zN`|`f32`,`f16`,`bf16`,`i8`,`u16`,`u32`,`f8e4m3fn`,`f8e5m2`,`f4e2m1`,`f4e1m2`|
+|`gm`|`nZ`|`l1`|`nZ`|`f32`,`f16`,`bf16`,`i8`,`u16`,`u32`,`f8e4m3fn`,`f8e5m2`,`f4e2m1`,`f4e1m2`|
 |`gm`|`zNUnAlign`|`l1`|`zNUnAlign`|`f32`,`f16`,`bf16`|
 |`gm`|`RowMajorMxScaleA`|`l1`|`zZMxScale`|`f8e8m0`|
 |`gm`|`ColMajorMxScaleA`|`l1`|`zZMxScale`|`f8e8m0`|
@@ -161,6 +180,11 @@ Vector 拷贝通路
 # 前：x_gm[i, j] 为 ND 数据；x_ub 为空。origin_shape==(M, N)。
 with tla.vector():
     tla.copy(dst=x_ub, src=x_gm)
+    tla.copy(
+        dst=x_ub,
+        src=x_gm,
+        cache_policy=tla.params.CachePolicy.DISABLE,
+    )  # 可选：对 GM 源设置 L2 Cache 提示
     # 后：对 origin_shape 内所有逻辑 (i, j)，x_ub[i, j] == x_gm[i, j]。
     tla.copy(dst=y_gm, src=y_ub)
 
@@ -173,6 +197,51 @@ with tla.cube():
 l1_unalign = tla.make_tensor_like(l1_ptr, gm_tile, layoutTag=tla.arch.zNUnAlign)
 with tla.cube():
     tla.copy(dst=l1_unalign, src=gm_tile)
+
+# 批量 FP8：两个 tensor 的 layout 携带批次数和间距。
+# src_step 和 dst_step 是独立的元素间距。
+src3 = tla.make_tensor(src_ptr, tla.make_layout(
+    tla.make_shape(batch_count, valid_rows, 128),
+    tla.make_stride(src_step, 128, 1)))
+dst3 = tla.make_tensor(dst_ptr, tla.make_layout(
+    tla.make_shape(batch_count, (16, 8), (32, 4)),
+    tla.make_stride(dst_step, (32, 512), (1, 4096)),
+    origin_shape=tla.make_shape(batch_count, valid_rows, 128),
+    layoutTag=tla.arch.zN))
+with tla.cube():
+    tla.copy(dst3, src3)
+
+# --- 4) 预打包 GM zN：按块搬运，不改变排布 ---
+# Host 缓冲区已按 zN 排布，并补齐到 ceil(M/16) * 16 行。
+# 两端使用相同布局树，搬运不再重排数据。
+gm_zn = tla.make_tensor(
+    gm_ptr, tla.make_layout_with_tag((m_pad16, k), dtype_a, tla.arch.zN)
+)
+l1_zn = tla.make_tensor_like(l1_ptr, gm_zn, tla.arch.zN)
+with tla.cube():
+    tla.copy(dst=l1_zn, src=gm_zn)
+
+# --- 5) 预打包 GM nZ：转置排布的对应搬运 ---
+# nZ 的两轴分别补齐到 ceil(M/C0) * C0 行、ceil(N/16) * 16 列，
+# 搬运按完整 C0 行组进行，两端缓冲区均须覆盖该容量。
+gm_nz = tla.make_tensor(
+    gm_ptr, tla.make_layout_with_tag((m_pad_c0, n_pad16), dtype_a, tla.arch.nZ)
+)
+l1_nz = tla.make_tensor_like(l1_ptr, gm_nz, tla.arch.nZ)
+with tla.cube():
+    tla.copy(dst=l1_nz, src=gm_nz)
+
+# --- 6) 一维连续数据：VectorLayout ---
+# 一行 bias 用一维连续元素表示，不使用 (1, N) tile。搬运两端使用
+# 相同 tag：先从 GM 搬到 L1，
+# 再从 L1 搬到 bias table 缓冲区。
+gm_bias = tla.tile_view(gm_bias_full, tla.make_shape(n), tla.make_coord(0))
+l1_bias = tla.make_tensor_like(l1_bias_ptr, gm_bias, tla.arch.VectorLayout)
+l0_bias = tla.make_tensor_like(l0_bias_ptr, l1_bias, tla.arch.VectorLayout)
+with tla.cube():
+    tla.copy(dst=l1_bias, src=gm_bias)
+    tla.copy(dst=l0_bias, src=l1_bias)
+    tla.mmad(l0_c, l0_a, l0_b, init_c=True, unit_flag=0, bias=l0_bias)
 
 # 相关（寄存器路径，不是 tla.copy）：UB ↔ vector 寄存器非对齐访问
 #   with tla.vec.func(mode="simd"):

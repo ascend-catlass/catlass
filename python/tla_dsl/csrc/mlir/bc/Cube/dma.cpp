@@ -9,10 +9,10 @@
 #include "catlass/gemm/tile/copy_l1_to_l0b.hpp"
 #include "catlass/epilogue/tile/tile_copy.hpp"
 
-template <class ArchTag, LayoutTag SrcLayout, LayoutTag DstLayout, typename T>
+template <class ArchTag, LayoutTag SrcLayout, LayoutTag DstLayout, typename T, typename... BatchArgs>
 CATLASS_DEVICE void copyGMToL1(
     memref_t<__gm__ T, 2>* src, memref_t<__cbuf__ T, 1>* dst, const TensorDesc& srcDesc, const TensorDesc& dstDesc,
-    int64_t gmCachePolicy = kCachePolicyNormal)
+    int64_t gmCachePolicy, BatchArgs... batchArgs)
 {
     // Every route here is served by one TileCopyTla specialization: the tag
     // selects both the layout constructor (makeGMTensor / makeL1Tensor) and the
@@ -21,7 +21,8 @@ CATLASS_DEVICE void copyGMToL1(
     // copy_gm_to_l1.hpp matches.
     auto srcTensor = makeGMTensor<SrcLayout, T>(src, srcDesc, gmCachePolicy);
     auto dstTensor = makeL1Tensor<DstLayout, T>(dst, dstDesc);
-    Catlass::Gemm::Tile::TileCopyTla<ArchTag, decltype(srcTensor), decltype(dstTensor)>{}(dstTensor, srcTensor);
+    Catlass::Gemm::Tile::TileCopyTla<ArchTag, decltype(srcTensor), decltype(dstTensor)>{}(
+        dstTensor, srcTensor, batchArgs...);
 }
 
 template <class ArchTag, LayoutTag SrcLayout, typename T>
@@ -218,6 +219,26 @@ CATLASS_DEVICE void copyL1ToL0BMx(
 }
 #endif
 
+template <LayoutTag SrcLayout, LayoutTag DstLayout, typename T>
+CATLASS_DEVICE void copyGMToL1Batch(
+    memref_t<__gm__ T, 2>* src, memref_t<__cbuf__ T, 1>* dst, const TensorDesc& srcDesc, const TensorDesc& dstDesc,
+    int64_t count, int64_t srcStep, int64_t dstStep, int64_t srcBatchCoord, int64_t dstBatchCoord,
+    int64_t gmCachePolicy)
+{
+    if (count <= 0 || srcDesc.originShape0 == 0 || srcDesc.originShape1 == 0)
+        return;
+    // The GM backing memref can be flat. Its pointer and offset are common
+    // to both ranks, while srcDesc supplies the matrix geometry.
+    memref_t<__gm__ T, 2> source{};
+    source.aligned = src->aligned;
+    source.offset = src->offset + srcBatchCoord * srcStep;
+    auto destination = *dst;
+    destination.offset += dstBatchCoord * dstStep;
+    copyGMToL1<Catlass::Arch::Ascend950, SrcLayout, DstLayout, T>(
+        &source, &destination, srcDesc, dstDesc, gmCachePolicy, static_cast<uint32_t>(count),
+        static_cast<uint64_t>(srcStep), static_cast<uint32_t>(dstStep));
+}
+
 extern "C" {
 #if ((defined(__NPU_ARCH__) && __NPU_ARCH__ == 3510) || (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510))
 
@@ -229,6 +250,25 @@ extern "C" {
         copyGMToL1<Catlass::Arch::Ascend950, LayoutTag::LayoutSrc, LayoutTag::LayoutDst, DType>(                      \
             src, dst, TENSOR_DESC_12(src), TENSOR_DESC_12(dst), gmCachePolicy);                                       \
     }
+
+#define REGISTER_GM_TO_L1_BATCH(Src, Dst, Type)                                                                     \
+    [aicore] __attribute__((always_inline)) void _mlir_ciface_copy_gm_##Src##_to_l1_##Dst##_##Type##_batch(         \
+        memref_t<__gm__ Type, 2>* src, memref_t<__cbuf__ Type, 1>* dst, DESC_ABI_PARAMS(src), DESC_ABI_PARAMS(dst), \
+        int64_t count, int64_t srcStep, int64_t dstStep, int64_t srcCoord, int64_t dstCoord, int64_t gmCachePolicy) \
+    {                                                                                                               \
+        copyGMToL1Batch<LayoutTag::Src, LayoutTag::Dst, Type>(                                                      \
+            src, dst, TENSOR_DESC_12(src), TENSOR_DESC_12(dst), count, srcStep, dstStep, srcCoord, dstCoord,        \
+            gmCachePolicy);                                                                                         \
+    }
+REGISTER_GM_TO_L1_BATCH(RowMajor, zN, fp8_e4m3fn_t)
+REGISTER_GM_TO_L1_BATCH(RowMajor, zN, fp8_e5m2_t)
+REGISTER_GM_TO_L1_BATCH(ColumnMajor, nZ, fp8_e4m3fn_t)
+REGISTER_GM_TO_L1_BATCH(ColumnMajor, nZ, fp8_e5m2_t)
+
+REGISTER_GM_TO_L1_BATCH(RowMajorMxScaleA, zZMxScale, float8_e8m0_t)
+REGISTER_GM_TO_L1_BATCH(ColMajorMxScaleA, zZMxScale, float8_e8m0_t)
+REGISTER_GM_TO_L1_BATCH(RowMajorMxScaleB, nNMxScale, float8_e8m0_t)
+REGISTER_GM_TO_L1_BATCH(ColMajorMxScaleB, nNMxScale, float8_e8m0_t)
 
 #define REGISTER_L1_TO_L0A(LayoutSrc, DType)                                                                          \
     [aicore] __attribute__((always_inline)) void _mlir_ciface_copy_l1_##LayoutSrc##_to_l0a_zN_##DType(                \

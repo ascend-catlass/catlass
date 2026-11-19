@@ -51,6 +51,21 @@ Constraints:
 - Must be called inside a `@tla.kernel`-decorated kernel function.
 - Must be called inside `tla.cube()` or `tla.vector()`.
 - Copy size follows each tile's `origin_shape`.
+- On Ascend 950, two logical rank-3 views `(B, M, N)` select batched
+  GM-to-L1 layout conversion. FP8 supports RowMajor→zN and
+  ColumnMajor→nZ; E8M0 supports the four GM MX-scale routes below.
+  Batch count is `origin_shape[0]`; source and destination matrix
+  strides are each layout's leading stride, in elements. Inner strides
+  retain their 2-D meaning. Both logical extents must match, including
+  runtime values. Zero batches or zero matrix extents perform no DMA.
+  Other rank-3 layout/dtype combinations fail at compilation instead
+  of falling back to a 2-D copy.
+- Batched copies require `params=None` and `scale=None`, a batch count
+  in 0..65535, and positive destination batch strides aligned to 32
+  bytes and at most 65535 32-byte blocks. E8M0 source matrix strides
+  must preserve exponent pairs. Runtime geometry must satisfy the same
+  constraints. The caller supplies enough backing storage and disjoint
+  destination matrices; interleaved NZ layouts are permitted.
 - Packed fp4 is staged as bytes on the routes that convert the
   descriptor before copying -- GM->UB, UB->GM and UB->L1 -- so each
   tile's innermost `origin_shape`, its innermost origin coordinate and
@@ -208,6 +223,19 @@ with tla.cube():
 l1_unalign = tla.make_tensor_like(l1_ptr, gm_tile, layoutTag=tla.arch.zNUnAlign)
 with tla.cube():
     tla.copy(dst=l1_unalign, src=gm_tile)
+
+# Batched FP8: both tensor layouts carry the batch geometry.
+# src_step and dst_step are independent element strides.
+src3 = tla.make_tensor(src_ptr, tla.make_layout(
+    tla.make_shape(batch_count, valid_rows, 128),
+    tla.make_stride(src_step, 128, 1)))
+dst3 = tla.make_tensor(dst_ptr, tla.make_layout(
+    tla.make_shape(batch_count, (16, 8), (32, 4)),
+    tla.make_stride(dst_step, (32, 512), (1, 4096)),
+    origin_shape=tla.make_shape(batch_count, valid_rows, 128),
+    layoutTag=tla.arch.zN))
+with tla.cube():
+    tla.copy(dst3, src3)
 
 # --- 4) Prepacked GM zN: a plain block move, no re-layout ---
 # The host buffer is already zN-packed and padded to ceil(M/16) * 16 rows.

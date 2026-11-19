@@ -551,6 +551,11 @@ mlir::LogicalResult TensorDescriptorDerivation::derive(mlir::func::FuncOp funcOp
                 derivationFailed = true;
                 return;
             }
+            if (resultInfo->hasBatch || !parent.batch.empty()) {
+                op->emitError() << "tla.tile_view does not support batched tensors; use tla.get_tile";
+                derivationFailed = true;
+                return;
+            }
             if (resultInfo->addressSpace != parent.addrspace || resultInfo->elementType != parent.elementType) {
                 op->emitError() << "tla.tile_view result tile metadata must match parent descriptor "
                                    "(element type/addrspace) when source is a tile";
@@ -617,6 +622,12 @@ mlir::LogicalResult TensorDescriptorDerivation::derive(mlir::func::FuncOp funcOp
             if (failed(childInfo)) {
                 op->emitError() << "tla.make_tensor_like currently requires a structured tla.tensor "
                                    "result type";
+                derivationFailed = true;
+                return;
+            }
+            if (childInfo->hasBatch || !parent.batch.empty()) {
+                op->emitError() << "tla.make_tensor_like does not support batched tensors; use tla.make_tensor "
+                                   "with an explicit layout";
                 derivationFailed = true;
                 return;
             }
@@ -1019,7 +1030,14 @@ mlir::LogicalResult TensorDescriptorDerivation::derive(mlir::func::FuncOp funcOp
                 return result;
             };
 
-            auto shapeLeaves = materializeLeaves(makeLayout.getShape(), childInfo->shapeDims, "shape");
+            auto withBatch = [&](ArrayRef<int64_t> leaves, size_t field) {
+                SmallVector<int64_t, 5> result;
+                if (childInfo->hasBatch)
+                    result.push_back(childInfo->batchDims[field]);
+                result.append(leaves.begin(), leaves.end());
+                return result;
+            };
+            auto shapeLeaves = materializeLeaves(makeLayout.getShape(), withBatch(childInfo->shapeDims, 0), "shape");
             if (failed(shapeLeaves)) {
                 derivationFailed = true;
                 return;
@@ -1039,8 +1057,8 @@ mlir::LogicalResult TensorDescriptorDerivation::derive(mlir::func::FuncOp funcOp
                 if (auto makeStride = makeLayout.getStride().getDefiningOp<::tla::MakeStrideOp>())
                     strideDynElems.append(makeStride.getDynElems().begin(), makeStride.getDynElems().end());
 
-                bool needsDerivedLeadingStride = isLinearLayout(childInfo->layoutTag) && strideDynLeafCount > 0 &&
-                                                 strideDynElems.size() < strideDynLeafCount &&
+                bool needsDerivedLeadingStride = !childInfo->hasBatch && isLinearLayout(childInfo->layoutTag) &&
+                                                 strideDynLeafCount > 0 && strideDynElems.size() < strideDynLeafCount &&
                                                  childInfo->shapeDims.size() == 2 &&
                                                  childInfo->strideDims.size() == 2 && childInfo->shapeDims[0] == 1 &&
                                                  childInfo->strideDims[0] == ShapedType::kDynamic;
@@ -1065,14 +1083,22 @@ mlir::LogicalResult TensorDescriptorDerivation::derive(mlir::func::FuncOp funcOp
                     Value leading = builder.create<arith::MulIOp>(op->getLoc(), (*shapeLeaves)[1], elemStride);
                     strideLeaves = SmallVector<Value, 4>{leading, elemStride};
                 } else {
-                    strideLeaves = materializeLeaves(makeLayout.getStride(), childInfo->strideDims, "stride");
+                    strideLeaves =
+                        materializeLeaves(makeLayout.getStride(), withBatch(childInfo->strideDims, 1), "stride");
                 }
             }
 
-            auto coordLeaves = materializeLeaves(coordValue, childInfo->coordDims, "coord");
+            auto coordLeaves = materializeLeaves(coordValue, withBatch(childInfo->coordDims, 3), "coord");
             if (failed(strideLeaves) || failed(coordLeaves)) {
                 derivationFailed = true;
                 return;
+            }
+            SmallVector<Value, 4> batch;
+            if (childInfo->hasBatch) {
+                batch = {(*shapeLeaves)[0], (*strideLeaves)[0], (*shapeLeaves)[0], (*coordLeaves)[0]};
+                shapeLeaves->erase(shapeLeaves->begin());
+                strideLeaves->erase(strideLeaves->begin());
+                coordLeaves->erase(coordLeaves->begin());
             }
             Value coord0 = (*coordLeaves)[0];
             Value coord1 = (*coordLeaves)[1];
@@ -1080,10 +1106,14 @@ mlir::LogicalResult TensorDescriptorDerivation::derive(mlir::func::FuncOp funcOp
             Value origin0;
             Value origin1;
             if (Value originOperand = makeLayout.getOriginShape()) {
-                auto originLeaves = materializeLeaves(originOperand, childInfo->originShapeDims, "shape");
+                auto originLeaves = materializeLeaves(originOperand, withBatch(childInfo->originShapeDims, 2), "shape");
                 if (failed(originLeaves)) {
                     derivationFailed = true;
                     return;
+                }
+                if (childInfo->hasBatch) {
+                    batch[2] = (*originLeaves)[0];
+                    originLeaves->erase(originLeaves->begin());
                 }
                 origin0 = (*originLeaves)[0];
                 origin1 = (*originLeaves)[1];
@@ -1110,6 +1140,7 @@ mlir::LogicalResult TensorDescriptorDerivation::derive(mlir::func::FuncOp funcOp
                 stride = {(*strideLeaves)[0], (*strideLeaves)[1], one, one};
             }
             TensorDescriptor desc;
+            desc.batch = std::move(batch);
             desc.base = typedBuffer;
             desc.bridgedBaseMemrefType = *bridgedBaseType;
             desc.shape = shape;
