@@ -417,7 +417,7 @@ def register_gemm_00_basic_matmul_operation(manifest):
 
 ################## 02_grouped_matmul_slice_m ##################
 @OperationRegistry.register('02_grouped_matmul_slice_m')
-def register_gemm_08_grouped_matmul_operation(manifest):
+def register_gemm_02_grouped_matmul_slice_m_operation(manifest):
 
     layouts = [
         [library.LayoutType.ColumnMajor, library.LayoutType.RowMajor, library.LayoutType.RowMajor],

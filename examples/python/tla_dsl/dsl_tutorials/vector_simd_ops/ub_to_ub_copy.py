@@ -49,7 +49,6 @@ import builtins as _builtins
 
 import catlass.tla as tla
 import torch
-import torch_npu
 from catlass.tla.runtime import from_dlpack
 
 _DTYPES = {
@@ -318,12 +317,6 @@ def _make_inputs(rows, sc, dc, dtype_key):
         y = torch.full((rows, dc), SENTINEL, dtype=torch_dt, device="npu")
         args = [from_dlpack(t, layout_tag=tla.arch.RowMajor) for t in (x, y)]
     return x, y, args
-
-
-def _bits(t):
-    return (
-        t.view(torch.int8) if t.dtype in (torch.float8_e4m3fn, torch.float8_e5m2) else t
-    )
 
 
 def run_offset_case(name, pr, sc, dc, vr, vc, src_tile, dst_tile, dtype_key) -> bool:
