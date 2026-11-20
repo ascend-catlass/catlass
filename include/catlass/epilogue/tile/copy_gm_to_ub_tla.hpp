@@ -31,6 +31,7 @@ namespace Catlass::Epilogue::Tile {
 ///   UB dst 32B-aligned.
 /// - Ascend950 RowMajor mx fp8/fp4 path reinterprets as ``uint8_t``; ExtParams
 ///   flags are forwarded, ``paddingValue`` is forced to 0 on that path.
+/// - HiFloat8 uses the same uint8 reinterpret on the two-arg RowMajor path only.
 
 template <class ArchTag, class TensorSrc, class TensorDst, class Enable = void>
 struct CopyGm2UbTla {
@@ -213,7 +214,8 @@ struct CopyGm2UbTla<
         auto dstOffset = dstTensor.layout()(dstTensor.coord());
         auto srcOffset = srcTensor.layout()(srcTensor.coord());
         if constexpr (AscendC::Std::is_one_of_v<
-                          ElementSrc, float8_e4m3_t, float8_e5m2_t, float8_e8m0_t, float4_e2m1x2_t, float4_e1m2x2_t>) {
+                          ElementSrc, float8_e4m3_t, float8_e5m2_t, float8_e8m0_t, hifloat8_t, float4_e2m1x2_t,
+                          float4_e1m2x2_t>) {
             AscendC::DataCopyPadExtParams<uint8_t> padParams(false, 0, 0, 0);
             // for float4_e2m1x2_t/float4_e1m2x2_t
             // in tensor.data()[offset], will auto convert fp4 offset to byte offset

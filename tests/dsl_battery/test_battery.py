@@ -517,6 +517,12 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
                 ],
             )
 
+    # HiFloat8 GM↔UB RowMajor: typed hifloat8_t BC (tile uint8 DataCopyPad).
+    yield (
+        "hifp8-gm-ub-copy",
+        [["end_to_end/hifp8_gm_ub_copy.py", *dev]],
+    )
+
     # --- basic_mixed ---
     # One test on purpose: the second invocation exercises cache reuse and is
     # only meaningful straight after the one that populates the cache.

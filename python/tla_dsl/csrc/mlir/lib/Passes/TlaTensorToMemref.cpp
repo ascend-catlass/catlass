@@ -670,7 +670,8 @@ static mlir::FailureOr<hivm::AddressSpace> resolveHivmAddressSpace(MLIRContext* 
 
 static StringRef copyRuntimeElemSuffix(Type elementType)
 {
-    if (isa<::tla::HiFloat8Type, ::tla::Float4E2M1x2Type, ::tla::Float4E1M2x2Type>(elementType))
+    // Packed fp4 x2 IR types that still stage under the int8_t symbol.
+    if (isa<::tla::Float4E2M1x2Type, ::tla::Float4E1M2x2Type>(elementType))
         return "int8_t";
     if (elementType.isF32())
         return "float";
@@ -700,6 +701,10 @@ static StringRef copyRuntimeElemSuffix(Type elementType)
     // 1-byte element on every route, UB -> UB included.
     if (::llvm::isa<::tla::Float8E8M0Type>(elementType))
         return "float8_e8m0_t";
+    // HiFloat8 is a custom 1-byte float (memref boundary is i8). GM↔UB resolves
+    // to the typed hifloat8_t BC wrappers (tile uint8 DataCopyPad path).
+    if (::llvm::isa<::tla::HiFloat8Type>(elementType))
+        return "hifloat8_t";
     // fp4 is the packed two-per-byte encoding: the C++ element type is the x2
     // pair, so a route that names it selects the packed wrapper.
     if (::llvm::isa<::tla::Float4E2M1Type>(elementType))

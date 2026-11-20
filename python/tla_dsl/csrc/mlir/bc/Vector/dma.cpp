@@ -107,6 +107,8 @@ REGISTER_GM_TO_UB(RowMajor, RowMajor, fp8_e5m2_t)
 REGISTER_GM_TO_UB(RowMajor, RowMajor, float4_e2m1x2_t)
 REGISTER_GM_TO_UB(RowMajor, RowMajor, float4_e1m2x2_t)
 REGISTER_GM_TO_UB(RowMajor, RowMajor, float8_e8m0_t)
+// HiFloat8: IR tla.hif8 / memref i8; tile Copy*Tla reinterprets as uint8 DataCopyPad.
+REGISTER_GM_TO_UB(RowMajor, RowMajor, hifloat8_t)
 
 REGISTER_UB_TO_GM(RowMajor, RowMajor, float)
 REGISTER_UB_TO_GM(RowMajor, RowMajor, half)
@@ -125,6 +127,7 @@ REGISTER_UB_TO_GM(RowMajor, RowMajor, fp8_e5m2_t)
 REGISTER_UB_TO_GM(RowMajor, RowMajor, float4_e2m1x2_t)
 REGISTER_UB_TO_GM(RowMajor, RowMajor, float4_e1m2x2_t)
 REGISTER_UB_TO_GM(RowMajor, RowMajor, float8_e8m0_t)
+REGISTER_UB_TO_GM(RowMajor, RowMajor, hifloat8_t)
 
 REGISTER_UB_TO_UB(RowMajor, RowMajor, float)
 REGISTER_UB_TO_UB(RowMajor, RowMajor, half)
