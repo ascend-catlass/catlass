@@ -42,8 +42,8 @@ def hif8_decode(b: int) -> float:
         mag = (1 << (d - 1)) + stored
         e = -mag if se else mag
     sg = -1.0 if s else 1.0
-    if d == 4 and mag == 15 and m == 1:
-        return sg * 32768.0
+    if d == 4 and e == 15 and m == 1:
+        return sg * float("inf")
     return sg * (1.0 + m / (1 << w)) * _pow2(e)
 
 
