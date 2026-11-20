@@ -203,14 +203,14 @@ module {
   }
 }
 
-// CHECK-DAG: func.func private @vsqueeze_float
-// CHECK-DAG: func.func private @vsqueeze_half
-// CHECK-DAG: func.func private @vsqueeze_int8_t
-// CHECK-DAG: func.func private @vsqueeze_int16_t
-// CHECK-DAG: func.func private @vsqueeze_int32_t
-// CHECK-DAG: func.func private @vsqueeze_uint8_t
-// CHECK-DAG: func.func private @vsqueeze_uint16_t
-// CHECK-DAG: func.func private @vsqueeze_uint32_t
+// CHECK-DAG: func.func private @vsqueeze_float({{.*}}hivm.func_core_type = #hivm.func_core_type<AIV>
+// CHECK-DAG: func.func private @vsqueeze_half({{.*}}hivm.func_core_type = #hivm.func_core_type<AIV>
+// CHECK-DAG: func.func private @vsqueeze_int8_t({{.*}}hivm.func_core_type = #hivm.func_core_type<AIV>
+// CHECK-DAG: func.func private @vsqueeze_int16_t({{.*}}hivm.func_core_type = #hivm.func_core_type<AIV>
+// CHECK-DAG: func.func private @vsqueeze_int32_t({{.*}}hivm.func_core_type = #hivm.func_core_type<AIV>
+// CHECK-DAG: func.func private @vsqueeze_uint8_t({{.*}}hivm.func_core_type = #hivm.func_core_type<AIV>
+// CHECK-DAG: func.func private @vsqueeze_uint16_t({{.*}}hivm.func_core_type = #hivm.func_core_type<AIV>
+// CHECK-DAG: func.func private @vsqueeze_uint32_t({{.*}}hivm.func_core_type = #hivm.func_core_type<AIV>
 // CHECK-DAG: call @vsqueeze_float
 // CHECK-DAG: call @vsqueeze_half
 // CHECK-DAG: call @vsqueeze_int8_t

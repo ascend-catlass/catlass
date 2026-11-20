@@ -863,13 +863,14 @@ static std::string getHistogramsLibraryCallName(HistogramsBin mode, HistogramsTy
 static func::FuncOp getOrCreateSqueezeLibraryCall(
     ModuleOp module, Location loc, VectorType vecType, VectorType pregType, StringRef calleeName)
 {
-    if (auto existing = module.lookupSymbol<func::FuncOp>(calleeName))
+    if (auto existing = module.lookupSymbol<func::FuncOp>(calleeName)) {
+        annotateAivLibraryCall(existing);
         return existing;
+    }
     OpBuilder moduleBuilder(module.getBodyRegion());
     auto fnType = FunctionType::get(module.getContext(), {vecType, pregType}, {vecType});
     auto callee = moduleBuilder.create<func::FuncOp>(loc, calleeName, fnType);
-    callee.setPrivate();
-    callee->setAttr("llvm.emit_c_interface", UnitAttr::get(module.getContext()));
+    annotateAivLibraryCall(callee);
     return callee;
 }
 
@@ -893,26 +894,28 @@ static func::FuncOp getOrCreateHistogramsLibraryCall(
     ModuleOp module, Location loc, VectorType srcVecType, VectorType dstVecType, VectorType pregType,
     StringRef calleeName)
 {
-    if (auto existing = module.lookupSymbol<func::FuncOp>(calleeName))
+    if (auto existing = module.lookupSymbol<func::FuncOp>(calleeName)) {
+        annotateAivLibraryCall(existing);
         return existing;
+    }
     OpBuilder moduleBuilder(module.getBodyRegion());
     auto fnType = FunctionType::get(module.getContext(), {srcVecType, dstVecType, pregType}, {dstVecType});
     auto callee = moduleBuilder.create<func::FuncOp>(loc, calleeName, fnType);
-    callee.setPrivate();
-    callee->setAttr("llvm.emit_c_interface", UnitAttr::get(module.getContext()));
+    annotateAivLibraryCall(callee);
     return callee;
 }
 
 static func::FuncOp getOrCreateMaskSelectLibraryCall(ModuleOp module, Location loc, VectorType pregType)
 {
     constexpr llvm::StringLiteral calleeName = "tla_mask_select";
-    if (auto existing = module.lookupSymbol<func::FuncOp>(calleeName))
+    if (auto existing = module.lookupSymbol<func::FuncOp>(calleeName)) {
+        annotateAivLibraryCall(existing);
         return existing;
+    }
     OpBuilder moduleBuilder(module.getBodyRegion());
     auto fnType = FunctionType::get(module.getContext(), {pregType, pregType, pregType}, {pregType});
     auto callee = moduleBuilder.create<func::FuncOp>(loc, calleeName, fnType);
-    callee.setPrivate();
-    callee->setAttr("llvm.emit_c_interface", UnitAttr::get(module.getContext()));
+    annotateAivLibraryCall(callee);
     return callee;
 }
 

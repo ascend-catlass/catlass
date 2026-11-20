@@ -39,10 +39,10 @@ module {
   }
 }
 
-// CHECK-DAG: func.func private @histograms_accumulate_bin0_u8
-// CHECK-DAG: func.func private @histograms_accumulate_bin1_u8
-// CHECK-DAG: func.func private @histograms_frequency_bin0_u8
-// CHECK-DAG: func.func private @histograms_frequency_bin1_u8
+// CHECK-DAG: func.func private @histograms_accumulate_bin0_u8({{.*}}hivm.func_core_type = #hivm.func_core_type<AIV>
+// CHECK-DAG: func.func private @histograms_accumulate_bin1_u8({{.*}}hivm.func_core_type = #hivm.func_core_type<AIV>
+// CHECK-DAG: func.func private @histograms_frequency_bin0_u8({{.*}}hivm.func_core_type = #hivm.func_core_type<AIV>
+// CHECK-DAG: func.func private @histograms_frequency_bin1_u8({{.*}}hivm.func_core_type = #hivm.func_core_type<AIV>
 // CHECK: call @histograms_accumulate_bin0_u8
 // CHECK: call @histograms_accumulate_bin1_u8
 // CHECK: call @histograms_frequency_bin0_u8
