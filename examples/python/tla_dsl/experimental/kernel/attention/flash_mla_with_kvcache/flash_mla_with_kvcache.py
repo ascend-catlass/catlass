@@ -55,7 +55,7 @@ import torch
 import torch_npu  # noqa: F401  -- registers torch.npu
 from catlass.tla.runtime import from_dlpack
 
-from examples.python.tla_dsl.tla.kernel.attention.flash_mla_with_kvcache.constants import (
+from examples.python.tla_dsl.experimental.kernel.attention.flash_mla_with_kvcache.constants import (
     CACHE_LAYOUT_BBND,
     CACHE_LAYOUT_NZ,
     CACHE_LAYOUTS,
@@ -74,10 +74,10 @@ from examples.python.tla_dsl.tla.kernel.attention.flash_mla_with_kvcache.constan
     PAGE_SIZE,
     Q_BLOCK,
 )
-from examples.python.tla_dsl.tla.kernel.attention.flash_mla_with_kvcache.golden import (
+from examples.python.tla_dsl.experimental.kernel.attention.flash_mla_with_kvcache.golden import (
     flash_mla_with_kvcache_golden,
 )
-from examples.python.tla_dsl.tla.kernel.attention.flash_mla_with_kvcache.kernel import (
+from examples.python.tla_dsl.experimental.kernel.attention.flash_mla_with_kvcache.kernel import (
     flash_mla_kvsplit_reduce_kernel,
     flash_mla_with_kvcache_kernel,
 )

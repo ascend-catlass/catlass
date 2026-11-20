@@ -1,5 +1,8 @@
 # FlashMlaWithKvcache Example Readme
 
+> 本样例位于 `experimental`，实现尚不稳定，**未接入** `tests/dsl_battery` / `tests/run_dsl_test.sh` 批量回归；仅供本地试用。
+
+
 ## 功能说明
 
 - 算子功能：基于CATLASS Python的 Flash MLA（Multi-head Latent Attention）解码/短序列预填充注意力，KV cache 以单个 576 维 latent 头共享（`KV_HEAD_NUM=1`），支持两类 paged KV cache 物理布局、因果与非因果掩码、变长（TND）输入与批量解码。
@@ -158,13 +161,13 @@ flash_mla_with_kvcache.py [-h] [--device DEVICE] [--batch BATCH]
 
     ```bash
     # 默认：b1 t512 kv1024 h64 fp16 PA_BBND mask=0（device 0）
-    python examples/python/tla_dsl/tla/kernel/attention/flash_mla_with_kvcache/flash_mla_with_kvcache.py
+    python examples/python/tla_dsl/experimental/kernel/attention/flash_mla_with_kvcache/flash_mla_with_kvcache.py
 
     # 内置边界用例全套（两种布局 × 两种掩码 × 两档头数 × fp16/bf16）
-    python examples/python/tla_dsl/tla/kernel/attention/flash_mla_with_kvcache/flash_mla_with_kvcache.py --cases
+    python examples/python/tla_dsl/experimental/kernel/attention/flash_mla_with_kvcache/flash_mla_with_kvcache.py --cases
 
     # 指定形状与布局：h96 + PA_NZ + causal，kv 留 383 的尾页
-    python examples/python/tla_dsl/tla/kernel/attention/flash_mla_with_kvcache/flash_mla_with_kvcache.py \
+    python examples/python/tla_dsl/experimental/kernel/attention/flash_mla_with_kvcache/flash_mla_with_kvcache.py \
       --device 1 --batch 2 --total-q 130 --kv-len 383 --heads 96 --dtype bfloat16 \
       --layout PA_NZ --mask 3
     ```
