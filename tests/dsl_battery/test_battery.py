@@ -492,6 +492,36 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
             [["end_to_end/load_dintlv_b8.py", "--dtype", dtype, *dev]],
         )
 
+    # --- Sort / TopK: radix-sort operator and the TopK built on it ---
+    #
+    # Sort covers both supported dtypes in both directions. The two dtypes take
+    # different twiddle paths (u8 is a pass-through, i8 XORs the sign bit), so a
+    # sign-handling regression only shows up when both are run.
+    for dtype in ("u8", "i8"):
+        for desc in ("0", "1"):
+            yield (
+                f"sort-{dtype}-{'desc' if desc == '1' else 'asc'}",
+                [[
+                    "dsl_tutorials/advanced_impl/sort_topk/sort.py",
+                    "--dtype", dtype, "--desc", desc, *dev,
+                ]],
+            )
+
+    # TopK keeps the first k of a descending sort. k spans the Int8 constant
+    # boundary (127 -> 128) that the k bit-pattern construction has to survive,
+    # plus both ends of the accepted range.
+    for k in ("1", "8", "127", "128", "200", "256"):
+        yield (
+            f"topk-k{k}",
+            [[
+                "dsl_tutorials/advanced_impl/sort_topk/topk.py", "--k", k, *dev,
+            ]],
+        )
+    yield (
+        "topk-k8-smallest",
+        [["dsl_tutorials/advanced_impl/sort_topk/topk.py", "--k", "8", "--smallest", "1", *dev]],
+    )
+
     # --- L2 cache hint: GM→UB copy with cache_policy=DISABLE ---
     # Script under python/tla_dsl/tests/end_to_end/. Kernel is not
     # block-partitioned, so launch a single vector core.

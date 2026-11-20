@@ -49,6 +49,12 @@
 | [`debug_print/`](debug_print/README.md) | `tla.print` 的标量打印，含格式化与混合核场景。 |
 | [`print_tensor/`](print_tensor/README.md) | 以 `tla.print` 打印 tensor 在不同存储层级（GM / UB / L1 / L0C）的内容。 |
 
+## 进阶算法算子
+
+| 目录 | 概述 |
+|------|------|
+| [`advanced_impl/`](advanced_impl/README.md) | 进阶算法算子：完整算子的实现，含多阶段数据通路、缓冲分配与数值域映射。当前收录基数排序与 TopK。 |
+
 ## 复用已有实现
 
 | 目录 | 概述 |
