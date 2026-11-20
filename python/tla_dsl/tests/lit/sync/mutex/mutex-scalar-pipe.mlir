@@ -27,8 +27,8 @@ module {
 }
 
 // Both functions reach the same declaration, so the pass stamps it AIC_OR_AIV.
-// CHECK-DAG: func.func private @get_buf_s(i8) attributes {hivm.func_core_type = #hivm.func_core_type<AIC_OR_AIV>}
-// CHECK-DAG: func.func private @rls_buf_s(i8) attributes {hivm.func_core_type = #hivm.func_core_type<AIC_OR_AIV>}
+// CHECK-DAG: func.func private @get_buf_s(i8) attributes {hacc.always_inline, hivm.func_core_type = #hivm.func_core_type<AIC_OR_AIV>}
+// CHECK-DAG: func.func private @rls_buf_s(i8) attributes {hacc.always_inline, hivm.func_core_type = #hivm.func_core_type<AIC_OR_AIV>}
 // CHECK-LABEL: func.func @mutex_scalar_pipe_cube()
 // CHECK-DAG: [[CUBE_ID:%.*]] = llvm.mlir.constant(2 : i8) : i8
 // CHECK: call @get_buf_s([[CUBE_ID]])

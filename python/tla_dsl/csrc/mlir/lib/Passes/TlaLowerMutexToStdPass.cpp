@@ -151,6 +151,7 @@ struct LowerMutexAccessPattern : public OpConversionPattern<MutexOpT> {
 
         SmallVector<Type, 1> operandTypes = {rewriter.getI8Type()};
         auto callee = getOrCreateRuntimeCall(module, calleePrefix + "_" + *pipeSuffix, operandTypes, op.getOperation());
+        callee->setAttr("hacc.always_inline", rewriter.getUnitAttr());
         rewriter.create<func::CallOp>(op.getLoc(), callee, ValueRange{mutexId});
         rewriter.eraseOp(op);
         return success();
