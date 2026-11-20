@@ -1,13 +1,16 @@
 // Exercise the verifier directly, without Python frontend validation.
-// RUN: sed 's/(16,18)/(16,17)/g' %S/img2col-l1-to-l0a-half.mlir > %t.extent.mlir
+// A K extent that is not a whole number of C0 blocks: the C0 leaf itself is 24.
+// RUN: sed 's/(16,18)/(24,12)/g' %S/img2col-l1-to-l0a-half.mlir > %t.extent.mlir
 // RUN: not %tla_compile %t.extent.mlir -o - 2>&1 | %filecheck %s --check-prefix=EXTENT
-// EXTENT: destination K extent must span whole C1 slices
+// EXTENT: destination K extent must be static, C0-aligned and within 1..65535
 // RUN: sed 's/arith.constant 3 : index/arith.constant 0 : index/g' %S/img2col-l1-to-l0a-half.mlir > %t.filter.mlir
 // RUN: not %tla_compile %t.filter.mlir -o - 2>&1 | %filecheck %s --check-prefix=FILTER
 // FILTER: filter_hw entries must be in 1..511
-// RUN: sed 's/!tla.coord<0,0>/!tla.coord<0,16>/g' %S/img2col-l1-to-l0a-half.mlir > %t.coord.mlir
+// A K start that is not a multiple of C0. C0-aligned starts inside a C1 slice
+// are legal (see img2col-sub-slice-k.mlir); 8 is not one.
+// RUN: sed 's/!tla.coord<0,0>/!tla.coord<0,8>/g' %S/img2col-l1-to-l0a-half.mlir > %t.coord.mlir
 // RUN: not %tla_compile %t.coord.mlir -o - 2>&1 | %filecheck %s --check-prefix=COORD
-// COORD: destination K coordinate must be static, within 0..65535 and on a whole C1 slice
+// COORD: destination K coordinate must be static, within 0..65535 and C0-aligned
 // RUN: sed 's/arith.constant 3 : index/arith.addi %c8, %c8 : index/g' %S/img2col-l1-to-l0a-half.mlir > %t.dynamic.mlir
 // RUN: not %tla_compile %t.dynamic.mlir -o - 2>&1 | %filecheck %s --check-prefix=DYNAMIC
 // DYNAMIC: filter_hw must be compile-time constants for K-window validation

@@ -136,10 +136,12 @@ Constraints:
 - Source channels come from the NC1HWC0 source shape, independently of
   the destination K window. Source C0/C1 and destination K extent and
   K coordinate must be static. `filter_hw` must be compile-time integers.
-- The destination K extent and starting coordinate must cover whole
-  C1 slices (`kh * kw * C0` elements), within the source's full K axis.
-  Source channels and destination K extent must fit in 1..65535;
-  the destination K coordinate must fit in 0..65535.
+- The destination K extent and starting coordinate are C0-aligned: a
+  window may start and end inside one C1 slice (`kh * kw * C0`
+  elements) and may straddle a slice boundary, as long as it stays
+  within the source's full K axis. Source channels and destination K
+  extent must fit in 1..65535; the destination K coordinate must fit
+  in 0..65535.
 - `fmap_hw` entries must be in 1..65535, stride and dilation entries
   in 1..255, and each padding entry in 0..255. Compile-time constants
   outside these ranges are rejected. For runtime values, satisfying

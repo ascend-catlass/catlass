@@ -1280,6 +1280,22 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
             [["end_to_end/vector_layout_gm_to_l1_copy.py", *dev, "--dtype", dtype]],
         )
 
+    # --- end_to_end: img2col destination K windows at C0 granularity ---
+    # The implicit-GEMM K axis is tiled at C0 granularity, so a window may lie
+    # inside one C1 slice or straddle two. Only a device run compares the result
+    # against conv2d; the frontend and lit tests cover acceptance and lowering
+    # alone. The control pass rotates the packed filter by one C0 block and
+    # requires every window to disagree, which is what shows the comparison is
+    # sensitive to the K mapping under test.
+    yield (
+        "img2col-k-windows",
+        [["end_to_end/img2col_k_window_conv.py", *dev]],
+    )
+    yield (
+        "img2col-k-windows-control",
+        [["end_to_end/img2col_k_window_conv.py", *dev, "--control-shift"]],
+    )
+
     # --- print_tensor, local AIC storage ---
     # Base cases sweep dtypes; repeated entries verify in-process cache reuse.
     local_common = [

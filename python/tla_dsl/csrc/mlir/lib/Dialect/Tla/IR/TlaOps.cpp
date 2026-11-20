@@ -634,11 +634,8 @@ mlir::LogicalResult Img2colOp::verify()
     if (dstShape[2] != c0 || dstShape[3] < 1 || dstShape[3] > 65535 / c0)
         return emitOpError("destination K extent must be static, C0-aligned and within 1..65535");
     int64_t kExtent = c0 * dstShape[3];
-    int64_t sliceK = filterExtents[0] * filterExtents[1] * c0;
-    if (kExtent % sliceK != 0)
-        return emitOpError("destination K extent must span whole C1 slices (filter_h * filter_w * C0)");
-    if (dstCoord[1] < 0 || dstCoord[1] > 65535 || dstCoord[1] % sliceK != 0)
-        return emitOpError("destination K coordinate must be static, within 0..65535 and on a whole C1 slice");
+    if (dstCoord[1] < 0 || dstCoord[1] > 65535 || dstCoord[1] % c0 != 0)
+        return emitOpError("destination K coordinate must be static, within 0..65535 and C0-aligned");
     int64_t fullK = channels * filterExtents[0] * filterExtents[1];
     if (dstCoord[1] + kExtent > fullK)
         return emitOpError("destination K window exceeds the source channel/filter extent");

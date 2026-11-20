@@ -120,8 +120,9 @@ def Tla_Img2colOp : Tla_Op<"img2col", []> {
     Geometry operands are ``index``. Filter extents must be constants in
     1..511; source channels and destination K extent/coordinate must be static.
     The source descriptor supplies channelSize independently of the K window.
-    K extents and coordinates span whole C1 slices (filter_h * filter_w * C0)
-    and must stay within the source channel/filter extent. Channel count and
+    K extents and coordinates are C0-aligned: a window may start and end inside
+    one C1 slice (filter_h * filter_w * C0 elements) and may straddle a slice
+    boundary. It must stay within the source channel/filter extent. Channel count and
     K extent fit in 1..65535, and the K coordinate in 0..65535. Feature-map
     extent, padding, stride and dilation may be runtime values.
   }];

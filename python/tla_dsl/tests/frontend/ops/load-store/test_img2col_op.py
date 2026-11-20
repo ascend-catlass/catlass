@@ -334,8 +334,7 @@ def _img2col_k_window(k_extent: int, k_start: int = 0, filter_h: int = 3):
 @pytest.mark.parametrize(
     "k_extent,k_start,filter_h,message",
     [
-        (272, 0, 3, "K extent must span whole C1 slices"),
-        (144, 16, 3, "K coordinate must be static"),
+        (144, 8, 3, "K coordinate must be static, within 0..65535 and C0-aligned"),
         (432, 0, 3, "K window exceeds"),
         (288, 0, 0, "filter_hw must contain"),
         (288, 0, 512, "filter_hw must contain"),
@@ -346,6 +345,22 @@ def test_img2col_rejects_invalid_k_window(k_extent, k_start, filter_h, message):
         _img2col_k_window(k_extent, k_start, filter_h).dump_mlir(type_args=(_gm_tensor(),))
 
 
-def test_img2col_accepts_one_c1_k_window(compiler_tlair):
-    mlir = compiler_tlair(_img2col_k_window(144), type_args=(_gm_tensor(),))
+@pytest.mark.parametrize(
+    "k_extent,k_start",
+    [
+        (144, 0),  # one whole C1 slice -- the only window the old rule allowed
+        (144, 144),
+        (48, 48),  # inside one C1 slice
+        (96, 96),  # straddles the boundary between two C1 slices
+        (288, 0),  # two whole slices
+        (16, 16),  # the C0 minimum
+    ],
+)
+def test_img2col_accepts_c0_aligned_k_window(compiler_tlair, k_extent, k_start):
+    # The K window only has to be C0-aligned: Load3Dv2 takes kStartPt/kExtension
+    # from the destination tile and channelSize from the source, so a window
+    # inside or across a C1 slice still describes the same feature map.
+    mlir = compiler_tlair(
+        _img2col_k_window(k_extent, k_start), type_args=(_gm_tensor(),)
+    )
     assert "tla.img2col" in mlir

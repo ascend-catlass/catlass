@@ -188,8 +188,8 @@ class Img2colParams:
     Feature-map extent, stride, dilation and padding accept runtime values.
     Compile-time values are checked against the documented ranges. For
     runtime values, callers must satisfy those ranges; violating them is
-    undefined behavior. The filter shape is static so K windows can be
-    validated against whole C1 slices before the load.
+    undefined behavior. The filter shape is static so the K axis extent can be
+    validated before the load.
     """
 
     fmap_hw: tuple[IndexLike, IndexLike]
@@ -239,10 +239,12 @@ def img2col(
         - Source channels come from the NC1HWC0 source shape, independently of
           the destination K window. Source C0/C1 and destination K extent and
           K coordinate must be static. `filter_hw` must be compile-time integers.
-        - The destination K extent and starting coordinate must cover whole
-          C1 slices (`kh * kw * C0` elements), within the source's full K axis.
-          Source channels and destination K extent must fit in 1..65535;
-          the destination K coordinate must fit in 0..65535.
+        - The destination K extent and starting coordinate are C0-aligned: a
+          window may start and end inside one C1 slice (`kh * kw * C0`
+          elements) and may straddle a slice boundary, as long as it stays
+          within the source's full K axis. Source channels and destination K
+          extent must fit in 1..65535; the destination K coordinate must fit
+          in 0..65535.
         - `fmap_hw` entries must be in 1..65535, stride and dilation entries
           in 1..255, and each padding entry in 0..255. Compile-time constants
           outside these ranges are rejected. For runtime values, satisfying
@@ -331,17 +333,11 @@ def img2col(
             "destination K extent must be static, C0-aligned and within 1..65535",
         )
     k_extent = c0 * dst_shape[3]
-    slice_k = filter_hw[0] * filter_hw[1] * c0
-    if k_extent % slice_k:
-        _op_error(
-            "img2col",
-            "destination K extent must span whole C1 slices (filter_h * filter_w * C0)",
-        )
     k_start = dst_coord[1]
-    if not isinstance(k_start, int) or not 0 <= k_start <= 65535 or k_start % slice_k:
+    if not isinstance(k_start, int) or not 0 <= k_start <= 65535 or k_start % c0:
         _op_error(
             "img2col",
-            "destination K coordinate must be static, within 0..65535 and on a whole C1 slice",
+            "destination K coordinate must be static, within 0..65535 and C0-aligned",
         )
     if k_start + k_extent > src_shape[2] * src_shape[3] * filter_hw[0] * filter_hw[1]:
         _op_error(
