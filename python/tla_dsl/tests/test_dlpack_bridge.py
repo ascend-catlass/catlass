@@ -18,7 +18,7 @@ from catlass.base_dsl.runtime.dlpack_types import (
     DLManagedTensor,
     DLManagedTensorDeleter,
 )
-from catlass.tla.runtime import from_dlpack
+from catlass.tla.runtime import _BIND_METADATA_MEMO, from_dlpack
 from catlass.types import RuntimeTensorError
 
 np = pytest.importorskip("numpy")
@@ -28,8 +28,12 @@ np = pytest.importorskip("numpy")
 # conversion would incref/decref it and free it a second time.
 _CAPSULE_DESTRUCTOR = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
 
-ctypes.pythonapi.PyCapsule_GetName.restype = ctypes.c_char_p
-ctypes.pythonapi.PyCapsule_GetName.argtypes = [ctypes.c_void_p]
+# Taken by subscript, not by attribute: an attribute lookup on
+# ``ctypes.pythonapi`` hands out one shared function object per name, so a
+# signature set here would also be seen by the binding under test.
+_PyCapsule_GetName = ctypes.pythonapi["PyCapsule_GetName"]
+_PyCapsule_GetName.restype = ctypes.c_char_p
+_PyCapsule_GetName.argtypes = [ctypes.c_void_p]
 
 # ctypes trampolines and the structs the capsules point at must outlive the
 # producer object: the deleter runs when the *consumer* drops the tensor, which
@@ -114,7 +118,7 @@ class _ManagedExport:
         def _destroy(capsule_ptr: int) -> None:
             # A conforming destructor releases only an unconsumed capsule; a
             # consumer that took ownership renames it to 'used_dltensor'.
-            if ctypes.pythonapi.PyCapsule_GetName(capsule_ptr) == b"dltensor":
+            if _PyCapsule_GetName(capsule_ptr) == b"dltensor":
                 _DELETER_CALLS[producer_id] += 1
 
         destructor = _CAPSULE_DESTRUCTOR(_destroy)
@@ -377,3 +381,239 @@ def test_from_dlpack_accepts_an_empty_view_with_any_stride() -> None:
     )
 
     assert (tensor.shape, tensor.stride) == ((0,), (1,))
+
+
+def test_from_dlpack_gives_two_buffers_of_one_geometry_independent_tensors() -> None:
+    """Derived metadata is shared between binds; the tensors must not be.
+
+    ``from_dlpack`` derives a buffer's tile metadata once per distinct geometry
+    and reuses it, so two buffers of the same shape are described by the same
+    trees. Each bind still owns its own tensor, address and coordinate -- sharing
+    the tensor instead would make a second operand silently address the first.
+    """
+    first = _ManagedExport(shape=(4, 8), strides=(8, 1))
+    second = _ManagedExport(shape=(4, 8), strides=(8, 1))
+
+    one = from_dlpack(first, layout_tag=tla.arch.RowMajor)
+    two = from_dlpack(second, layout_tag=tla.arch.RowMajor)
+
+    assert one is not two
+    assert one.data_ptr != two.data_ptr
+    assert one.shape == two.shape
+    assert one.origin_shape == two.origin_shape
+
+    one.coord = (1, 1)
+    assert two.coord == (0, 0)
+
+
+def test_from_dlpack_keeps_rejecting_a_strided_buffer_after_a_dense_one() -> None:
+    """A reused derivation must not become a reused verdict.
+
+    The dense buffer's metadata is derived and kept; the strided buffer below has
+    the same logical shape, so a derivation keyed on shape alone would hand it
+    the dense tile's unit stride and bind it. The strides are part of what the
+    buffer is judged on, so it is still refused.
+    """
+    dense = _ManagedExport(shape=(32,), strides=(1,))
+    assert from_dlpack(dense, layout_tag=tla.arch.RowMajor).stride == (1,)
+
+    strided = _ManagedExport(shape=(32,), strides=(2,))
+    with pytest.raises(RuntimeTensorError, match="contiguous run"):
+        from_dlpack(strided, layout_tag=tla.arch.RowMajor)
+
+    # Still refused on a repeat: a rejection is never cached as a verdict.
+    again = _ManagedExport(shape=(32,), strides=(2,))
+    with pytest.raises(RuntimeTensorError, match="contiguous run"):
+        from_dlpack(again, layout_tag=tla.arch.RowMajor)
+
+
+def test_from_dlpack_derives_each_geometry_from_its_own_buffer() -> None:
+    """A second shape, layout or origin is not served the first one's metadata."""
+    wide = from_dlpack(
+        _ManagedExport(shape=(4, 8), strides=(8, 1)), layout_tag=tla.arch.RowMajor
+    )
+    tall = from_dlpack(
+        _ManagedExport(shape=(8, 4), strides=(4, 1)), layout_tag=tla.arch.RowMajor
+    )
+    assert (wide.origin_shape, tall.origin_shape) == ((4, 8), (8, 4))
+
+    # The same physical buffer under ColumnMajor is a different logical tile.
+    column = from_dlpack(
+        _ManagedExport(shape=(4, 8), strides=(8, 1)), layout_tag=tla.arch.ColumnMajor
+    )
+    assert column.origin_shape == (8, 4)
+
+    # And the same buffer flattened by a rank-1 origin is a different tile again.
+    flat = from_dlpack(
+        _ManagedExport(shape=(1, 8), strides=(8, 1)),
+        layout_tag=tla.arch.RowMajor,
+        origin_shape=8,
+    )
+    assert (flat.origin_shape, flat.stride) == ((8,), (1,))
+
+    # Re-binding the first geometry still describes the first geometry.
+    assert from_dlpack(
+        _ManagedExport(shape=(4, 8), strides=(8, 1)), layout_tag=tla.arch.RowMajor
+    ).origin_shape == (4, 8)
+
+
+def test_from_dlpack_separates_two_geometries_that_differ_only_in_shape() -> None:
+    """The physical shape alone decides a tile, with the strides held equal.
+
+    Both buffers below are compact with strides ``(8, 1)``, so the shape is the
+    only field between them: a derivation keyed without it would describe the
+    second buffer with the first one's row count.
+    """
+    four_rows = from_dlpack(
+        _ManagedExport(shape=(4, 8), strides=(8, 1)), layout_tag=tla.arch.RowMajor
+    )
+    three_rows = from_dlpack(
+        _ManagedExport(shape=(3, 8), strides=(8, 1)), layout_tag=tla.arch.RowMajor
+    )
+
+    assert (four_rows.origin_shape, four_rows.shape) == ((4, 8), (4, 8))
+    assert (three_rows.origin_shape, three_rows.shape) == ((3, 8), (3, 8))
+
+
+def test_from_dlpack_separates_two_origins_over_one_physical_geometry() -> None:
+    """The caller's origin alone decides a tile, with the buffer held equal.
+
+    One physical ``(1, 8)`` buffer is bound twice, as itself and as a flat
+    rank-1 tile: the origin is the only field between them, so a derivation
+    keyed without it would hand the second bind the rank-2 tile's metadata.
+    """
+    kept = from_dlpack(
+        _ManagedExport(shape=(1, 8), strides=(8, 1)), layout_tag=tla.arch.RowMajor
+    )
+    flattened = from_dlpack(
+        _ManagedExport(shape=(1, 8), strides=(8, 1)),
+        layout_tag=tla.arch.RowMajor,
+        origin_shape=8,
+    )
+
+    assert (kept.origin_shape, kept.shape, kept.stride) == ((1, 8), (1, 8), (8, 1))
+    assert (flattened.origin_shape, flattened.shape, flattened.stride) == (
+        (8,),
+        (8,),
+        (1,),
+    )
+
+
+def test_from_dlpack_rejects_a_boolean_origin_extent_either_way_round() -> None:
+    """``True`` is not an extent, and it cannot be mistaken for the extent 1.
+
+    Python compares ``True`` equal to ``1`` and hashes them alike, so an origin
+    kept in the caller's own spelling would let a rejected ``True`` bind and a
+    valid ``1`` bind collide on one memo entry — in whichever order they arrive.
+    """
+    for origin in (True, (True, 8)):
+        with pytest.raises(TypeError, match="int tree / tuple"):
+            from_dlpack(
+                _ManagedExport(shape=(1, 8), strides=(8, 1)),
+                layout_tag=tla.arch.RowMajor,
+                origin_shape=origin,
+            )
+
+    # The integer spelling of the same geometry still binds, after the rejection.
+    bound = from_dlpack(
+        _ManagedExport(shape=(1, 8), strides=(8, 1)),
+        layout_tag=tla.arch.RowMajor,
+        origin_shape=1,
+    )
+    assert bound.origin_shape == (1,)
+
+    # And is not itself what makes a later boolean acceptable.
+    with pytest.raises(TypeError, match="int tree / tuple"):
+        from_dlpack(
+            _ManagedExport(shape=(1, 8), strides=(8, 1)),
+            layout_tag=tla.arch.RowMajor,
+            origin_shape=True,
+        )
+
+
+def test_from_dlpack_rejects_a_float_origin_extent_after_the_integer_one() -> None:
+    """``8.0`` is no index, and a bound ``8`` of the same geometry does not make it one."""
+    bound = from_dlpack(
+        _ManagedExport(shape=(1, 8), strides=(8, 1)),
+        layout_tag=tla.arch.RowMajor,
+        origin_shape=8,
+    )
+    assert bound.origin_shape == (8,)
+
+    with pytest.raises(TypeError, match="int tree / tuple"):
+        from_dlpack(
+            _ManagedExport(shape=(1, 8), strides=(8, 1)),
+            layout_tag=tla.arch.RowMajor,
+            origin_shape=8.0,
+        )
+
+
+def test_capsule_entry_points_are_private_to_the_binding() -> None:
+    """A signature another DLPack reader sets must not reach the binding.
+
+    ``ctypes.pythonapi.PyCapsule_GetPointer`` is one shared object per process,
+    so a consumer that declares its own return type on it would otherwise hand
+    ``_parse_capsule`` a ctypes pointer where it reads an integer address.
+    """
+    from catlass.tla import runtime as tla_runtime
+
+    shared = ctypes.pythonapi.PyCapsule_GetPointer
+    assert tla_runtime._PyCapsule_GetPointer is not shared
+    assert tla_runtime._PyCapsule_IsValid is not ctypes.pythonapi.PyCapsule_IsValid
+    assert tla_runtime._PyCapsule_SetName is not ctypes.pythonapi.PyCapsule_SetName
+
+    restore = shared.restype
+    shared.restype = ctypes.POINTER(DLManagedTensor)
+    try:
+        bound = from_dlpack(
+            _ManagedExport(shape=(4, 8), strides=(8, 1)), layout_tag=tla.arch.RowMajor
+        )
+    finally:
+        shared.restype = restore
+    assert bound.origin_shape == (4, 8)
+
+
+def test_from_dlpack_binds_a_dynamic_origin_extent() -> None:
+    """``None`` is an extent known only at run time, and binds as one.
+
+    It is the leaf a Tla index tree carries for a dynamic extent, so a
+    compile-only caller can spell the dynamic tile directly in the origin and
+    get the descriptor ``mark_compact_shape_dynamic`` produces.
+    """
+    dynamic = from_dlpack(
+        _ManagedExport(shape=(1, 64), strides=(64, 1)),
+        layout_tag=tla.arch.RowMajor,
+        origin_shape=(None,),
+    )
+    assert (dynamic.shape, dynamic.stride, dynamic.origin_shape) == (
+        (None,),
+        (1,),
+        (None,),
+    )
+    assert dynamic._layout_shape_components() == (None,)
+
+    marked = from_dlpack(
+        _ManagedExport(shape=(1, 64), strides=(64, 1)),
+        layout_tag=tla.arch.RowMajor,
+        origin_shape=64,
+    ).mark_compact_shape_dynamic(0)
+    assert marked._layout_shape_components() == dynamic._layout_shape_components()
+
+
+def test_from_dlpack_refuses_a_negative_origin_extent_without_keying_it() -> None:
+    """A negative extent is no extent, and a refusal is never kept.
+
+    Every leaf is judged before the derivation is keyed on it, so a tree the
+    tensor would reject leaves nothing behind for a later bind to be served.
+    """
+    before = len(_BIND_METADATA_MEMO)
+
+    for origin in (-1, (4, -8)):
+        with pytest.raises(ValueError, match="non-negative"):
+            from_dlpack(
+                _ManagedExport(shape=(1, 8), strides=(8, 1)),
+                layout_tag=tla.arch.RowMajor,
+                origin_shape=origin,
+            )
+
+    assert len(_BIND_METADATA_MEMO) == before

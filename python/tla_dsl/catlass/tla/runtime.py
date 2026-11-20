@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ctypes
 import weakref
+from collections import namedtuple
 from typing import Any, Iterable, Iterator
 
 from catlass._mlir import ir as mlir_ir  # type: ignore[assignment]
@@ -11,6 +12,7 @@ from catlass._mlir import ir as mlir_ir  # type: ignore[assignment]
 from ..address_space import AddressSpace
 from ..base_dsl.runtime.dlpack_types import (
     ASCEND_DEVICE_TYPES,
+    DLDataTypeCode,
     DLDeviceType,
     DLManagedTensor,
 )
@@ -151,6 +153,31 @@ def export_dlpack_capsule(tensor: Any, *, stream: int | None = -1) -> Any:
     return tensor.__dlpack__()  # type: ignore[attr-defined]
 
 
+# ``restype`` / ``argtypes`` describe the C signature, which never changes, so
+# they are declared once here rather than re-assigned on every capsule the
+# binding path touches: a model binds one capsule per operand per launch, and
+# that assignment is pure per-call overhead (see _parse_capsule).
+#
+# Each entry point is taken by subscript rather than by attribute: attribute
+# access on ``ctypes.pythonapi`` caches one function object per name and hands
+# the same object to every library in the process, so a signature set on it is
+# shared with any other DLPack consumer and theirs with us. A subscript builds a
+# private object, which keeps the signatures below ours alone.
+_PyCapsule_IsValid = ctypes.pythonapi["PyCapsule_IsValid"]
+_PyCapsule_IsValid.restype = ctypes.c_int
+_PyCapsule_IsValid.argtypes = [ctypes.py_object, ctypes.c_char_p]
+
+_PyCapsule_GetPointer = ctypes.pythonapi["PyCapsule_GetPointer"]
+_PyCapsule_GetPointer.restype = ctypes.c_void_p
+_PyCapsule_GetPointer.argtypes = [ctypes.py_object, ctypes.c_char_p]
+
+_PyCapsule_SetName = ctypes.pythonapi["PyCapsule_SetName"]
+_PyCapsule_SetName.restype = ctypes.c_int
+_PyCapsule_SetName.argtypes = [ctypes.py_object, ctypes.c_char_p]
+
+_DLTENSOR_NAME = b"dltensor"
+
+
 def _consume_capsule(capsule: Any) -> None:
     """Take ownership of a ``dltensor`` capsule by renaming it to ``used_dltensor``.
 
@@ -161,12 +188,9 @@ def _consume_capsule(capsule: Any) -> None:
     (see :func:`_release_managed_tensor`); producers key their capsule destructor
     on the old name, so it becomes a no-op.
     """
-    set_name = ctypes.pythonapi.PyCapsule_SetName
-    set_name.restype = ctypes.c_int
-    set_name.argtypes = [ctypes.py_object, ctypes.c_char_p]
     # The name is borrowed by the capsule, so it must outlive it: keep the bytes
     # object alive in a module-level constant rather than a temporary.
-    if set_name(capsule, _USED_DLTENSOR_NAME) != 0:
+    if _PyCapsule_SetName(capsule, _USED_DLTENSOR_NAME) != 0:
         raise DlpackBridgeError("failed to rename DLPack capsule to 'used_dltensor'")
 
 
@@ -180,11 +204,11 @@ def _release_managed_tensor(managed_ptr: int) -> None:
     Registered through :func:`weakref.finalize` on the owning tensor, so it must
     not close over that tensor (a strong reference would keep it alive forever).
     """
-    managed = ctypes.cast(ctypes.c_void_p(managed_ptr), ctypes.POINTER(DLManagedTensor))
-    deleter = managed.contents.deleter
+    managed = DLManagedTensor.from_address(managed_ptr)
+    deleter = managed.deleter
     # A NULL deleter means the producer has nothing to release (DLPack allows it).
     if deleter:
-        deleter(managed)
+        deleter(ctypes.byref(managed))
 
 
 class _Tensor(TensorABC):
@@ -197,37 +221,31 @@ class _Tensor(TensorABC):
     @staticmethod
     def _parse_capsule(capsule: Any) -> dict[str, Any]:
         """Read a ``dltensor`` capsule's fields; does not consume it (see :func:`_consume_capsule`)."""
-        is_valid = ctypes.pythonapi.PyCapsule_IsValid
-        is_valid.restype = ctypes.c_int
-        is_valid.argtypes = [ctypes.py_object, ctypes.c_char_p]
         # Check the name before reading it: PyCapsule_GetPointer on a renamed
         # capsule returns NULL *and* sets the error indicator, which would
         # otherwise surface later at an unrelated call site.
-        if not is_valid(capsule, b"dltensor"):
+        if not _PyCapsule_IsValid(capsule, _DLTENSOR_NAME):
             raise DlpackBridgeError(
                 "not a fresh 'dltensor' capsule; a DLPack capsule can only be "
                 "consumed once (an already-consumed capsule is renamed to "
                 "'used_dltensor')"
             )
-        ctypes.pythonapi.PyCapsule_GetPointer.restype = ctypes.c_void_p
-        ctypes.pythonapi.PyCapsule_GetPointer.argtypes = [
-            ctypes.py_object,
-            ctypes.c_char_p,
-        ]
         # Capsule holds DLManagedTensor*; dl_tensor is its first member (dlpack.h).
-        managed_ptr = ctypes.pythonapi.PyCapsule_GetPointer(capsule, b"dltensor")
-        dl = ctypes.cast(
-            managed_ptr, ctypes.POINTER(DLManagedTensor)
-        ).contents.dl_tensor
+        managed_ptr = _PyCapsule_GetPointer(capsule, _DLTENSOR_NAME)
+        # from_address reads the struct in place; casting through a pointer type
+        # would allocate two ctypes objects per capsule for the same fields.
+        dl = DLManagedTensor.from_address(managed_ptr).dl_tensor
         ndim = int(dl.ndim)
-        shape = tuple(int(dl.shape[i]) for i in range(ndim))
+        # Slicing a ctypes int64 pointer reads the whole run in one call, where
+        # an index-by-index generator pays Python's indexing cost per mode.
+        shape = tuple(dl.shape[:ndim])
         if not dl.strides:
             raise DlpackBridgeError(
                 "DLPack tensor has null strides; explicit per-dimension strides are "
                 "required (e.g. torch_npu / PyTorch export). NumPy C-contiguous "
                 "buffers are not supported."
             )
-        strides = tuple(int(dl.strides[i]) for i in range(ndim))
+        strides = tuple(dl.strides[:ndim])
         data_ptr = int(dl.data or 0) + int(dl.byte_offset)
         return {
             "managed_ptr": int(managed_ptr),
@@ -346,10 +364,15 @@ class _Tensor(TensorABC):
         data_ptr: int,
         layout_tag: Any,
         assumed_align: int | None = None,
+        flat_shape: tuple[int, ...] | None = None,
+        flat_stride: tuple[int, ...] | None = None,
     ) -> "_Tensor":
         """Fast Host bind: trust already-normalized make_ptr/make_layout trees.
 
         Skips ``__init__`` remap / re-validation used by the general constructor.
+        ``flat_shape`` / ``flat_stride`` are the flattened int leaves of the two
+        trees; pass them when a caller already holds them (the layout remap
+        returns them), and they are flattened here when it does not.
         """
         self = object.__new__(cls)
         self._external_binding = data_ptr != 0
@@ -367,8 +390,16 @@ class _Tensor(TensorABC):
         self._stride = stride_tree
         self.origin_shape = origin_tree
         self.coord = coord_tree
-        self._flat_shape = tuple(_flatten_int_leaves_tree(shape_tree))
-        self._flat_stride = tuple(_flatten_int_leaves_tree(stride_tree))
+        self._flat_shape = (
+            tuple(_flatten_int_leaves_tree(shape_tree))
+            if flat_shape is None
+            else flat_shape
+        )
+        self._flat_stride = (
+            tuple(_flatten_int_leaves_tree(stride_tree))
+            if flat_stride is None
+            else flat_stride
+        )
         self._cache_key_memo: tuple[Any, ...] | None = None
         return self
 
@@ -805,6 +836,311 @@ class _Tensor(TensorABC):
         return TensorABC
 
 
+_BindMetadata = namedtuple("_BindMetadata", "dtype layout_token remapped")
+
+# Keyed on everything the derivation reads, and on nothing else: the buffer's
+# address is deliberately absent, so an entry describes a *shape* rather than a
+# buffer. A model therefore fills this with one entry per distinct operand
+# geometry -- it cannot grow with the number of buffers bound, it retains no
+# buffer and pins nothing in device memory, and an entry cannot go stale because
+# the metadata it holds is a pure function of the key.
+_BIND_METADATA_MEMO: dict[tuple[Any, ...], _BindMetadata] = {}
+
+# A model's distinct operand geometries number in the dozens; a cap three orders
+# of magnitude above that only bounds a caller that binds unique shapes forever,
+# and clearing is the honest response to that -- an LRU would quietly keep
+# paying the eviction cost to serve a workload the memo cannot help.
+_BIND_METADATA_MEMO_LIMIT = 4096
+
+# Built on first use: ``base_dsl.typing`` is not importable at module scope here.
+_DLPACK_DTYPE_MAP: dict[tuple[int, int], type] | None = None
+
+
+def _dlpack_dtype_map() -> dict[tuple[int, int], type]:
+    """The DLPack ``(code, bits)`` to TLA element-type table, built once.
+
+    DLPack bool is byte-sized storage (kDLBool, bits=8), matching torch.bool /
+    NumPy bool_. It maps to TLA Bool (MLIR i1); tensor element size is still 1
+    byte.
+    """
+    global _DLPACK_DTYPE_MAP
+    if _DLPACK_DTYPE_MAP is None:
+        from ..base_dsl.typing import (
+            BFloat16,
+            Bool,
+            Float16,
+            Float32,
+            Int8,
+            Int16,
+            Int32,
+            Int64,
+            UInt8,
+            UInt16,
+            UInt32,
+            UInt64,
+        )
+
+        _DLPACK_DTYPE_MAP = {
+            (DLDataTypeCode.kDLInt, 8): Int8,
+            (DLDataTypeCode.kDLInt, 16): Int16,
+            (DLDataTypeCode.kDLInt, 32): Int32,
+            (DLDataTypeCode.kDLInt, 64): Int64,
+            (DLDataTypeCode.kDLUInt, 8): UInt8,
+            (DLDataTypeCode.kDLUInt, 16): UInt16,
+            (DLDataTypeCode.kDLUInt, 32): UInt32,
+            (DLDataTypeCode.kDLUInt, 64): UInt64,
+            (DLDataTypeCode.kDLFloat, 16): Float16,
+            (DLDataTypeCode.kDLFloat, 32): Float32,
+            (DLDataTypeCode.kDLBfloat, 16): BFloat16,
+            (DLDataTypeCode.kDLBool, 8): Bool,
+        }
+    return _DLPACK_DTYPE_MAP
+
+
+def _canonical_origin_shape(origin_shape: Any) -> Any:
+    """Normalize a ``from_dlpack origin_shape=...`` to a canonical index tree.
+
+    The memo is keyed on the origin, and Python compares ``True`` equal to ``1``
+    and ``8.0`` equal to ``8``, so a key built from the caller's own object would
+    let one spelling of an extent be served the metadata derived for another.
+    Settling the leaves here, ahead of the key, makes the value the memo stores
+    and the value it is looked up by the same validated tree.
+
+    An omitted origin (``None`` rather than a tree) is the caller asking for one
+    to be derived from the buffer, and is passed through as such.
+    """
+    if origin_shape is None:
+        return None
+    if isinstance(origin_shape, tuple):
+        return tuple(_canonical_origin_shape_leaf(x) for x in origin_shape)
+    return (_canonical_origin_shape_leaf(origin_shape),)
+
+
+def _canonical_origin_shape_leaf(value: Any) -> Any:
+    """One ``origin_shape`` leaf: a nested tree, a non-negative extent, or ``None``.
+
+    These are the leaves a Tla index tree is made of, so the rule is
+    :func:`catlass.types._normalize_index_tree_leaf`'s: ``None`` stands for an
+    extent known only at run time, a static extent is a non-negative ``int``,
+    and ``bool`` is not an index at all. Applying it here rather than leaving it
+    to the tensor means a leaf the tree would reject is never keyed on, and the
+    diagnostic names ``from_dlpack``'s own argument.
+    """
+    if isinstance(value, tuple):
+        return tuple(_canonical_origin_shape_leaf(x) for x in value)
+    if value is None:
+        return None
+    # bool is an int subclass, so it must be excluded before the int test.
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(
+            "from_dlpack origin_shape=... must be an int tree / tuple "
+            "(Kernel tla.make_shape is not a Host API)"
+        )
+    if value < 0:
+        raise ValueError(
+            "from_dlpack origin_shape=... leaves must be non-negative integers "
+            f"or None for a dynamic extent; got {value}"
+        )
+    return int(value)
+
+
+def _derive_bind_metadata(
+    layout_tag: Any,
+    phys_shape: tuple[int, ...],
+    phys_strides: tuple[int, ...],
+    dtype_code: int,
+    dtype_bits: int,
+    element_type: type | None,
+    origin_shape: Any,
+) -> _BindMetadata:
+    """Validate a DLPack buffer's geometry and derive the tile metadata for it.
+
+    Reads only its arguments, so :func:`from_dlpack` can memoise the result: both
+    the checks and the derivation are pure, and every rejection below depends on
+    the same geometry the memo is keyed on.
+    """
+    from ..core_api import (
+        _MX_SCALE_GM_LAYOUT_TOKENS,
+        _remap_tensor_like_prefix_fields_for_layout_trees,
+        _resolve_arch_layout_tag,
+    )
+
+    dtype = _dlpack_dtype_map().get((dtype_code, dtype_bits))
+    if dtype is None:
+        raise RuntimeTensorError(
+            f"unsupported DLPack dtype code={dtype_code} bits={dtype_bits} lanes=1"
+        )
+
+    if element_type is not None:
+        # Read the widths directly rather than through a defaulted getattr: a
+        # missing `width` would make both sides compare equal and turn the check
+        # below into a no-op, which is exactly when it is most needed.
+        try:
+            exported_width = int(dtype.width)
+            override_width = int(element_type.width)
+        except (AttributeError, TypeError) as exc:
+            raise RuntimeTensorError(
+                "from_dlpack element_type override requires both the exported dtype and the "
+                f"override to declare a storage width; got {dtype!r} and {element_type!r}"
+            ) from exc
+        # Narrowing to a sub-byte element that tiles the exported width is the
+        # one width change that is well defined: the host has no 4-bit dtype, so
+        # a packed fp4 buffer can only be exported as bytes, and the override is
+        # what says how many elements each byte holds. origin_shape carries the
+        # true element count. Anything else -- f32 read as i32, say -- is a
+        # reinterpretation the caller almost never means.
+        packs_into_exported = (
+            override_width < exported_width and exported_width % override_width == 0
+        )
+        if override_width != exported_width and not packs_into_exported:
+            raise RuntimeTensorError(
+                f"from_dlpack element_type override {element_type.__name__} is "
+                f"{override_width}-bit but the exported buffer is {exported_width}-bit; "
+                "an override may narrow to a sub-byte element that tiles the "
+                "exported width, but must not otherwise change it"
+            )
+        dtype = element_type
+
+    dtype_token = str(getattr(dtype, "dtype", "")).strip().lower()
+    layout_token = _resolve_arch_layout_tag(layout_tag, for_op="from_dlpack")
+    if layout_token in _MX_SCALE_GM_LAYOUT_TOKENS and dtype_token != "f8e8m0":
+        # The GM MxScale tags describe an e8m0 shared-exponent block; carrying
+        # any other element type under them would be a silent reinterpretation
+        # downstream, where the bc layer hands the buffer to e8m0-typed copies.
+        raise RuntimeTensorError(
+            f"from_dlpack layout_tag={layout_token!r} requires element_type "
+            f"tla.Float8E8M0, got {dtype_token!r}"
+        )
+    # A flat one-dimensional layout is unit-stride by definition, but the DLPack
+    # strides are the only place a strided view shows up: ``make_tensor`` never
+    # sees them, and the remap below would otherwise replace the real stride
+    # with 1. Reject before any metadata is derived, and judge by the rank the
+    # tile is projected to -- a (1, N) physical slice with a rank-1 origin is
+    # flattened just the same.
+    if origin_shape is None:
+        # A physically contiguous buffer is passed here (stride = (shape[1], 1)).
+        # A size-1 extent is exempt: torch is free to leave its stride at 1,
+        # which would otherwise make a transposed one-row buffer look non-compact.
+
+        compact = (
+            len(phys_shape) == 2
+            and (phys_shape[1] == 1 or phys_strides[1] == 1)
+            and (phys_shape[0] == 1 or phys_strides[0] == phys_shape[1])
+        )
+        if (
+            len(phys_shape) == 2
+            and layout_token in ("RowMajor", "ColumnMajor")
+            and not compact
+        ):
+            torch_hint = (
+                "tensor.contiguous()"
+                if layout_token == "RowMajor"
+                else "tensor.permute(1, 0).contiguous()"
+            )
+            raise RuntimeTensorError(
+                f"from_dlpack layout_tag={layout_token!r} requires a buffer prepared as "
+                f"{torch_hint}; got shape={phys_shape}, strides={phys_strides}"
+            )
+        logical_origin = (
+            (phys_shape[1], phys_shape[0])
+            if len(phys_shape) == 2 and layout_token == "ColumnMajor"
+            else phys_shape
+        )
+    else:
+        # Already a canonical int tuple tree: _canonical_origin_shape normalizes
+        # and validates it before the memo is keyed on it.
+        logical_origin = origin_shape
+    # Now that the logical origin fixes the projected rank, check the buffer.
+    _require_flat_1d_binding(
+        layout_token,
+        phys_shape,
+        phys_strides,
+        projects_to_rank_one=(
+            isinstance(logical_origin, tuple)
+            and len(logical_origin) == 1
+            and not isinstance(logical_origin[0], (tuple, list))
+        ),
+    )
+    # A stride counts elements between physically adjacent rows, and rows sit
+    # at byte addresses: for a sub-byte element the leading linear stride must
+    # land on a whole byte, i.e. round up to whole element slots. A packed fp4
+    # row of ceil(cols/2) bytes carries round_up(cols, 2) slots -- without the
+    # rounding an odd cols yields a half-byte stride, and every GM tile whose
+    # base sits past row 0 is addressed one byte off per row. Byte-width (and
+    # wider) elements keep the exact stride: round_up(cols, 1) is cols.
+    element_bits = int(getattr(dtype, "width", 8))
+    linear_stride_alignment_bytes = 1 if 0 < element_bits < 8 else None
+    remapped = _remap_tensor_like_prefix_fields_for_layout_trees(
+        logical_origin,
+        dtype_token,
+        layout_token,
+        linear_stride_alignment_bytes=linear_stride_alignment_bytes,
+    )
+    if remapped is None:
+        raise RuntimeTensorError(
+            f"from_dlpack cannot derive layout metadata for origin_shape={logical_origin!r} "
+            f"layout={layout_tag!r}"
+        )
+    return _BindMetadata(dtype, layout_token, remapped)
+
+
+def _bind_metadata(
+    layout_tag: Any,
+    phys_shape: tuple[int, ...],
+    phys_strides: tuple[int, ...],
+    dtype_code: int,
+    dtype_bits: int,
+    element_type: type | None,
+    origin_shape: Any,
+) -> _BindMetadata:
+    """:func:`_derive_bind_metadata` with its result memoised on its arguments.
+
+    A rejected geometry is never stored, so a caller that keeps binding a buffer
+    the layout cannot describe keeps being told so; only the derivation is made
+    cheap the second time, never a check.
+    """
+    origin_shape = _canonical_origin_shape(origin_shape)
+    key = (
+        layout_tag,
+        phys_shape,
+        phys_strides,
+        dtype_code,
+        dtype_bits,
+        element_type,
+        origin_shape,
+    )
+    try:
+        hit = _BIND_METADATA_MEMO.get(key)
+    except TypeError:
+        # A layout tag that is not hashable cannot be keyed; derive it every
+        # time rather than refuse it here, since the derivation is what decides
+        # whether it is legal at all.
+        return _derive_bind_metadata(
+            layout_tag,
+            phys_shape,
+            phys_strides,
+            dtype_code,
+            dtype_bits,
+            element_type,
+            origin_shape,
+        )
+    if hit is not None:
+        return hit
+    derived = _derive_bind_metadata(
+        layout_tag,
+        phys_shape,
+        phys_strides,
+        dtype_code,
+        dtype_bits,
+        element_type,
+        origin_shape,
+    )
+    if len(_BIND_METADATA_MEMO) >= _BIND_METADATA_MEMO_LIMIT:
+        _BIND_METADATA_MEMO.clear()
+    _BIND_METADATA_MEMO[key] = derived
+    return derived
+
+
 def from_dlpack(
     tensor_dlpack: object,
     *,
@@ -869,27 +1205,6 @@ def from_dlpack(
         )
         ```
     """
-    from ..base_dsl.runtime.dlpack_types import DLDataTypeCode
-    from ..base_dsl.typing import (
-        BFloat16,
-        Bool,
-        Float16,
-        Float32,
-        Int16,
-        Int32,
-        Int64,
-        Int8,
-        UInt8,
-        UInt16,
-        UInt32,
-        UInt64,
-    )
-    from ..core_api import (
-        _MX_SCALE_GM_LAYOUT_TOKENS,
-        _remap_tensor_like_prefix_fields_for_layout_trees,
-        _resolve_arch_layout_tag,
-    )
-
     try:
         dlpack_data = export_dlpack_capsule(tensor_dlpack, stream=stream)
     except DlpackBridgeError as exc:
@@ -900,12 +1215,8 @@ def from_dlpack(
     except DlpackBridgeError as exc:
         raise RuntimeTensorError(str(exc)) from exc
 
-    phys_shape = parsed["shape"]
-    phys_strides = parsed["strides"]
     data_ptr = int(parsed["data_ptr"])
-
     device_type = int(parsed["device_type"])
-    device_id = int(parsed["device_id"])
     # A host buffer describes shape, stride, dtype and layout exactly as well as
     # a device one; the only thing it cannot supply is an address the kernel
     # could be launched against. Bind it metadata-only (``data_ptr == 0``) so a
@@ -913,6 +1224,7 @@ def from_dlpack(
     # of restating the shapes beside it, and leave launching to _require_bound.
     host_resident = device_type == DLDeviceType.kDLCPU
     if not host_resident and device_type not in ASCEND_DEVICE_TYPES:
+        device_id = int(parsed["device_id"])
         raise RuntimeTensorError(
             f"DLPack device_type={device_type} device_id={device_id} is not "
             f"an Ascend/NPU device; from_dlpack requires a device-resident buffer "
@@ -925,165 +1237,43 @@ def from_dlpack(
     lanes = int(parsed["dtype_lanes"])
     if lanes != 1:
         raise RuntimeTensorError(f"unsupported DLPack dtype lanes={lanes}")
-    dtype_code = int(parsed["dtype_code"])
-    dtype_bits = int(parsed["dtype_bits"])
-    # DLPack bool is byte-sized storage (kDLBool, bits=8), matching torch.bool /
-    # NumPy bool_. Map to TLA Bool (MLIR i1); tensor element size is still 1 byte.
-    dtype_mapping: dict[tuple[int, int], type] = {
-        (DLDataTypeCode.kDLInt, 8): Int8,
-        (DLDataTypeCode.kDLInt, 16): Int16,
-        (DLDataTypeCode.kDLInt, 32): Int32,
-        (DLDataTypeCode.kDLInt, 64): Int64,
-        (DLDataTypeCode.kDLUInt, 8): UInt8,
-        (DLDataTypeCode.kDLUInt, 16): UInt16,
-        (DLDataTypeCode.kDLUInt, 32): UInt32,
-        (DLDataTypeCode.kDLUInt, 64): UInt64,
-        (DLDataTypeCode.kDLFloat, 16): Float16,
-        (DLDataTypeCode.kDLFloat, 32): Float32,
-        (DLDataTypeCode.kDLBfloat, 16): BFloat16,
-        (DLDataTypeCode.kDLBool, 8): Bool,
-    }
-    dtype = dtype_mapping.get((dtype_code, dtype_bits))
-    if dtype is None:
-        raise RuntimeTensorError(
-            f"unsupported DLPack dtype code={dtype_code} bits={dtype_bits} lanes={lanes}"
-        )
-
-    if element_type is not None:
-        # Read the widths directly rather than through a defaulted getattr: a
-        # missing `width` would make both sides compare equal and turn the check
-        # below into a no-op, which is exactly when it is most needed.
-        try:
-            exported_width = int(dtype.width)
-            override_width = int(element_type.width)
-        except (AttributeError, TypeError) as exc:
-            raise RuntimeTensorError(
-                "from_dlpack element_type override requires both the exported dtype and the "
-                f"override to declare a storage width; got {dtype!r} and {element_type!r}"
-            ) from exc
-        # Narrowing to a sub-byte element that tiles the exported width is the
-        # one width change that is well defined: the host has no 4-bit dtype, so
-        # a packed fp4 buffer can only be exported as bytes, and the override is
-        # what says how many elements each byte holds. origin_shape carries the
-        # true element count. Anything else -- f32 read as i32, say -- is a
-        # reinterpretation the caller almost never means.
-        packs_into_exported = (
-            override_width < exported_width and exported_width % override_width == 0
-        )
-        if override_width != exported_width and not packs_into_exported:
-            raise RuntimeTensorError(
-                f"from_dlpack element_type override {element_type.__name__} is "
-                f"{override_width}-bit but the exported buffer is {exported_width}-bit; "
-                "an override may narrow to a sub-byte element that tiles the "
-                "exported width, but must not otherwise change it"
-            )
-        dtype = element_type
 
     if layout_tag is None:
         raise RuntimeTensorError(
             "from_dlpack requires layout_tag (e.g. tla.arch.RowMajor or "
             "tla.arch.ColumnMajor)"
         )
-    resolved_layout = layout_tag
-    dtype_token = str(getattr(dtype, "dtype", "")).strip().lower()
-    layout_token = _resolve_arch_layout_tag(resolved_layout, for_op="from_dlpack")
-    if layout_token in _MX_SCALE_GM_LAYOUT_TOKENS and dtype_token != "f8e8m0":
-        # The GM MxScale tags describe an e8m0 shared-exponent block; carrying
-        # any other element type under them would be a silent reinterpretation
-        # downstream, where the bc layer hands the buffer to e8m0-typed copies.
-        raise RuntimeTensorError(
-            f"from_dlpack layout_tag={layout_token!r} requires element_type "
-            f"tla.Float8E8M0, got {dtype_token!r}"
-        )
-    # A flat one-dimensional layout is unit-stride by definition, but the DLPack
-    # strides are the only place a strided view shows up: ``make_tensor`` never
-    # sees them, and the remap below would otherwise replace the real stride
-    # with 1. Reject before any metadata is derived, and judge by the rank the
-    # tile is projected to -- a (1, N) physical slice with a rank-1 origin is
-    # flattened just the same.
-    if origin_shape is None:
-        # A physically contiguous buffer is passed here (stride = (shape[1], 1)).
-        # A size-1 extent is exempt: torch is free to leave its stride at 1,
-        # which would otherwise make a transposed one-row buffer look non-compact.
 
-        compact = (
-            len(phys_shape) == 2
-            and (phys_shape[1] == 1 or phys_strides[1] == 1)
-            and (phys_shape[0] == 1 or phys_strides[0] == phys_shape[1])
-        )
-        if (
-            len(phys_shape) == 2
-            and layout_token in ("RowMajor", "ColumnMajor")
-            and not compact
-        ):
-            torch_hint = (
-                "tensor.contiguous()"
-                if layout_token == "RowMajor"
-                else "tensor.permute(1, 0).contiguous()"
-            )
-            raise RuntimeTensorError(
-                f"from_dlpack layout_tag={layout_token!r} requires a buffer prepared as "
-                f"{torch_hint}; got shape={phys_shape}, strides={phys_strides}"
-            )
-        logical_origin = (
-            (phys_shape[1], phys_shape[0])
-            if len(phys_shape) == 2 and layout_token == "ColumnMajor"
-            else phys_shape
-        )
-    else:
-        if isinstance(origin_shape, tuple):
-            logical_origin = origin_shape
-        elif isinstance(origin_shape, int):
-            logical_origin = (origin_shape,)
-        else:
-            raise TypeError(
-                "from_dlpack origin_shape=... must be an int tree / tuple "
-                "(Kernel tla.make_shape is not a Host API)"
-            )
-    # Now that the logical origin fixes the projected rank, check the buffer.
-    _require_flat_1d_binding(
-        layout_token,
-        phys_shape,
-        phys_strides,
-        projects_to_rank_one=(
-            isinstance(logical_origin, tuple)
-            and len(logical_origin) == 1
-            and not isinstance(logical_origin[0], (tuple, list))
-        ),
+    # Everything from here to the tensor's metadata is a function of the
+    # buffer's geometry, not of its address, so it is derived once per distinct
+    # geometry and reused: binding the same resident weight for the four
+    # hundredth time re-validates nothing and re-derives nothing.
+    dtype, layout_token, remapped = _bind_metadata(
+        layout_tag,
+        parsed["shape"],
+        parsed["strides"],
+        int(parsed["dtype_code"]),
+        int(parsed["dtype_bits"]),
+        element_type,
+        origin_shape,
     )
-    # A stride counts elements between physically adjacent rows, and rows sit
-    # at byte addresses: for a sub-byte element the leading linear stride must
-    # land on a whole byte, i.e. round up to whole element slots. A packed fp4
-    # row of ceil(cols/2) bytes carries round_up(cols, 2) slots -- without the
-    # rounding an odd cols yields a half-byte stride, and every GM tile whose
-    # base sits past row 0 is addressed one byte off per row. Byte-width (and
-    # wider) elements keep the exact stride: round_up(cols, 1) is cols.
-    element_bits = int(getattr(dtype, "width", 8))
-    linear_stride_alignment_bytes = 1 if 0 < element_bits < 8 else None
-    remapped = _remap_tensor_like_prefix_fields_for_layout_trees(
-        logical_origin,
-        dtype_token,
-        layout_token,
-        linear_stride_alignment_bytes=linear_stride_alignment_bytes,
-    )
-    if remapped is None:
-        raise RuntimeTensorError(
-            f"from_dlpack cannot derive layout metadata for origin_shape={logical_origin!r} "
-            f"layout={resolved_layout!r}"
-        )
-    tensor = _Tensor(
-        remapped.shape,
-        dtype,
-        origin_shape=remapped.origin_shape,
-        coord=remapped.coord,
-        stride=remapped.stride,
-        layout_tag=resolved_layout,
+
+    # The trees come from the remap, which is where they are normalized, so the
+    # general constructor's re-derivation and re-validation of them would only
+    # recompute what is already in hand.
+    tensor = _Tensor._from_host_binding(
+        shape_tree=remapped.shape,
+        stride_tree=remapped.stride,
+        origin_tree=remapped.origin_shape,
+        coord_tree=remapped.coord,
+        dtype=dtype,
+        addrspace=AddressSpace.gm,
         data_ptr=data_ptr,
+        layout_tag=layout_token,
+        assumed_align=assumed_align,
         flat_shape=remapped.flat_shape,
         flat_stride=remapped.flat_stride,
     )
-    if assumed_align is not None:
-        tensor._assumed_align = int(assumed_align)
     tensor._external_binding = not host_resident
 
     # Take ownership of the buffer the tensor is about to point at. Everything
