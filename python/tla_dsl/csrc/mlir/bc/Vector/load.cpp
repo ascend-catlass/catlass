@@ -65,6 +65,7 @@ REGISTER_VSLDB(uint32_t, uint32)
 REGISTER_VSLDB(int16_t, int16)
 REGISTER_VSLDB(uint16_t, uint16)
 REGISTER_VSLDB(int8_t, int8)
+REGISTER_VSLDB(uint8_t, uint8)
 
 // 8-bit block load, same reasoning as the store side: the fp8 symbol keeps the
 // fp8 memref parameter the route resolves to and returns the register as
@@ -123,6 +124,7 @@ REGISTER_VSLDB_POST_UPDATE_RETPTR(uint32_t, uint32)
 REGISTER_VSLDB_POST_UPDATE_RETPTR(int16_t, int16)
 REGISTER_VSLDB_POST_UPDATE_RETPTR(uint16_t, uint16)
 REGISTER_VSLDB_POST_UPDATE_RETPTR(int8_t, int8)
+REGISTER_VSLDB_POST_UPDATE_RETPTR(uint8_t, uint8)
 REGISTER_VSLDB_POST_UPDATE_RETPTR_AS_BYTES(fp8_e4m3fn_t, fp8_e4m3fn)
 REGISTER_VSLDB_POST_UPDATE_RETPTR_AS_BYTES(fp8_e5m2_t, fp8_e5m2)
 }

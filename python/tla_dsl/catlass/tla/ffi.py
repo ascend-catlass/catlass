@@ -23,8 +23,10 @@ ExternArgType: TypeAlias = TypedPointer | type[Numeric] | TlaVectorSSATypeDescri
 _IncludeDir: TypeAlias = str | os.PathLike[str]
 
 
-def _extern_register_type(element_type: str) -> TlaVectorSSATypeDescriptor:
-    if element_type not in (
+# Full 256B VectorSSA dtypes, including Bool (i1, AscendC b8 / 1 byte/lane).
+_FULL_REGISTER_DTYPES = frozenset(
+    {
+        "i1",
         "f16",
         "bf16",
         "f32",
@@ -36,14 +38,31 @@ def _extern_register_type(element_type: str) -> TlaVectorSSATypeDescriptor:
         "u16",
         "u32",
         "u64",
-    ):
+    }
+)
+# Extern register ABI excludes Bool: move-only load/store, no C vector ABI.
+_EXTERN_REGISTER_DTYPES = _FULL_REGISTER_DTYPES - {"i1"}
+
+
+def _full_register_type(element_type: str) -> TlaVectorSSATypeDescriptor:
+    """Describe a full 256-byte VectorSSA of ``element_type`` (includes Bool)."""
+    if element_type not in _FULL_REGISTER_DTYPES:
         raise TypeError(
-            "extern VectorSSA annotations support Float16, BFloat16, Float32 "
-            "and Int/UInt8/16/32/64"
+            "VectorSSA annotations support Bool, Float16, BFloat16, "
+            "Float32 and Int/UInt8/16/32/64"
         )
-    return TlaVectorSSATypeDescriptor(
-        256 // dtype_size_bytes(element_type), element_type
-    )
+    elem_bytes = dtype_size_bytes(element_type)
+    return TlaVectorSSATypeDescriptor(256 // elem_bytes, element_type)
+
+
+def _extern_register_type(element_type: str) -> TlaVectorSSATypeDescriptor:
+    """Like :func:`_full_register_type`, but rejects Bool (not an extern ABI)."""
+    if element_type not in _EXTERN_REGISTER_DTYPES:
+        raise TypeError(
+            "extern VectorSSA annotations support Float16, BFloat16, "
+            "Float32 and Int/UInt8/16/32/64"
+        )
+    return _full_register_type(element_type)
 
 
 @dataclass(frozen=True)

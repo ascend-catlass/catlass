@@ -338,21 +338,11 @@ FailureOr<int64_t> getStaticNumElements(ArrayRef<int64_t> shape)
 
 FailureOr<int64_t> getElementByteWidth(Type elementType)
 {
-    if (isa<::tla::Float8E8M0Type, ::tla::HiFloat8Type, ::tla::Float4E2M1x2Type, ::tla::Float4E1M2x2Type>(elementType))
-        return 1;
-    if (auto intType = dyn_cast<IntegerType>(elementType)) {
-        int64_t width = intType.getWidth();
-        if (width <= 0 || width % 8 != 0)
-            return failure();
-        return width / 8;
-    }
-    if (auto floatType = dyn_cast<FloatType>(elementType)) {
-        int64_t width = floatType.getWidth();
-        if (width <= 0 || width % 8 != 0)
-            return failure();
-        return width / 8;
-    }
-    return failure();
+    // Single SoT with elementStorageBytes (Bool i1 → 1; rejects true sub-byte).
+    int64_t bytes = elementStorageBytes(elementType);
+    if (bytes <= 0)
+        return failure();
+    return bytes;
 }
 
 FailureOr<int64_t> getVectorLaneCount(Type elementType)
@@ -679,6 +669,10 @@ static StringRef copyRuntimeElemSuffix(Type elementType)
         return "half";
     if (elementType.isBF16())
         return "bf16";
+    // AscendC bool is b8 storage (1 byte/lane). IR keeps i1; BC stubs stage as
+    // ``bool`` (see bc/Vector|Cube/dma.cpp REGISTER_*(..., bool)).
+    if (elementType.isInteger(1))
+        return "bool";
     if (elementType.isSignlessInteger(8))
         return "int8_t";
     if (elementType.isSignlessInteger(16))
@@ -1216,11 +1210,12 @@ static bool isAicTemplateRuntimeCall(StringRef name)
         return false;
     // Flat VectorLayout GM->L1 also stages i64/u64/f64; without these suffixes
     // BiSheng treats the call as a plain extern and fails at device link.
+    // ``_bool`` is the typed BC suffix for IR i1 / AscendC bool (b8).
     if (!(name.ends_with("_float") || name.ends_with("_half") || name.ends_with("_bf16") || name.ends_with("_int8_t") ||
           name.ends_with("_int16_t") || name.ends_with("_uint8_t") || name.ends_with("_uint16_t") ||
           name.ends_with("_uint32_t") || name.ends_with("_int32_t") || name.ends_with("_fp8_e4m3fn_t") ||
           name.ends_with("_fp8_e5m2_t") || name.ends_with("_uint64_t") || name.ends_with("_int64_t") ||
-          name.ends_with("_double")))
+          name.ends_with("_double") || name.ends_with("_bool")))
         return false;
 
     return name.starts_with("copy_gm_RowMajor_to_l1_zN_") || name.starts_with("copy_gm_ColumnMajor_to_l1_nZ_") ||

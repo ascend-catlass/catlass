@@ -273,7 +273,8 @@ struct LowerPtrAddPattern : public OpConversionPattern<::tla::PtrAddOp> {
         auto ptrType = dyn_cast<::tla::PtrType>(op.getPtr().getType());
         if (!ptrType)
             return rewriter.notifyMatchFailure(op, "source is not !tla.ptr");
-        int64_t elementBytes = getByteSizeOfFixedWidthScalarType(ptrType.getPointee());
+        // Bool (i1) is AscendC b8 storage (1 byte/lane); use elementStorageBytes.
+        int64_t elementBytes = elementStorageBytes(ptrType.getPointee());
         if (elementBytes <= 0)
             return rewriter.notifyMatchFailure(op, "pointee has no fixed byte width");
 

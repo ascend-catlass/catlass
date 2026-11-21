@@ -960,6 +960,12 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         "vector-load-store-mask",
         [["dsl_tutorials/vector_simd_ops/load_store_mask.py", "load_store_mask", "--all-dtypes", *dev]],
     )
+    # NumOne Bool VectorSSA move-only: GM↔UB i1 copy + load/store with Bool mask.
+    # Script under python/tla_dsl/tests/end_to_end/ (battery-only, not examples/).
+    yield (
+        "vector-bool-move-only",
+        [["end_to_end/bool_move_only.py", "both", *dev]],
+    )
     yield (
         "vector-store-pack",
         [["dsl_tutorials/vector_simd_ops/store_pack.py", "store_pack", "--all-dtypes", *dev]],

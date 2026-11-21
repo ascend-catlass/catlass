@@ -324,13 +324,13 @@ LogicalResult VectorSSAType::verify(function_ref<InFlightDiagnostic()> emitError
     return emitError() << "tla.vector element type must be an integer or float, got "
                        << elementType;
 
-  unsigned bitWidth = getBitSizeOfFixedWidthScalarType(elementType);
-  if (bitWidth == 0 || bitWidth % 8 != 0)
+  constexpr int64_t kVectorRegisterBytes = 256;
+  // elementStorageBytes maps i1 → 1 byte/lane (AscendC TypeGet<bool> → vector_s8).
+  int64_t elementBytes = elementStorageBytes(elementType);
+  if (elementBytes <= 0 || kVectorRegisterBytes % elementBytes != 0)
     return emitError() << "tla.vector element type must have a byte-aligned width, got "
                        << elementType;
-
-  constexpr int64_t kVectorRegisterBytes = 256;
-  int64_t capacity = kVectorRegisterBytes / static_cast<int64_t>(bitWidth / 8);
+  int64_t capacity = kVectorRegisterBytes / elementBytes;
   if (capacity <= 0)
     return emitError() << "tla.vector element type is wider than the 256-byte register";
   if (validLanes != ShapedType::kDynamic &&

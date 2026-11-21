@@ -336,8 +336,10 @@ class TlaVectorSSATypeDescriptor:
             raise ValueError(
                 "TlaVectorSSATypeDescriptor element_type must be non-empty"
             )
+        # dtype_size_bytes("i1")==1 matches AscendC TypeGet<bool> → vector_s8
+        # (1 byte/lane); VectorSSA capacity is VL_bytes / element_bytes.
         element_bytes = dtype_size_bytes(element_type)
-        if element_type == "i1" or element_bytes <= 0 or 256 % element_bytes != 0:
+        if element_bytes <= 0 or 256 % element_bytes != 0:
             raise ValueError(f"unsupported VectorSSA element type {element_type!r}")
         capacity = 256 // element_bytes
         if lanes is not None and lanes > capacity:
@@ -610,7 +612,9 @@ def dtype_size_bits(dtype: str) -> int:
 
     Unlike :func:`dtype_size_bytes` this can express the sub-byte types (``i4``),
     which is what lets a packed fp4 tile derive its C0 geometry from the element
-    type. Unknown names return ``0``.
+    type. For Bool (``i1``) this is **8** (AscendC b8 storage), matching
+    ``elementStorageBits`` — not the logical IR width of 1. Unknown names
+    return ``0``.
     """
     return int(_TENSOR_DTYPE_BITS.get(dtype.strip().lower(), 0))
 
@@ -618,10 +622,23 @@ def dtype_size_bits(dtype: str) -> int:
 def dtype_size_bytes(dtype: str) -> int:
     """Storage size in bytes for a Tla element type token (e.g. ``f16``, ``i32``).
 
-    Spelling is normalized with :func:`str.strip` / :func:`str.lower`. Unknown names
-    return ``0`` (same table as :class:`Tensor` host storage sizing).
+    Spelling is normalized with :func:`str.strip` / :func:`str.lower`. Bool
+    (``i1``) is **1** (AscendC ``sizeof(bool)`` / b8). Unknown names return
+    ``0`` (same table as :class:`Tensor` host storage sizing).
     """
     return int(_TENSOR_DTYPE_SIZES.get(dtype.strip().lower(), 0))
+
+
+def is_bool_element_type(dtype: Any) -> bool:
+    """True for IR Bool tokens (``i1`` / ``bool``), matching C++ ``isBoolElementType``."""
+    e = str(dtype).strip().lower()
+    return e in ("i1", "bool")
+
+
+def normalize_element_type_token(dtype: Any) -> str:
+    """Normalize an element-type token; Bool spellings collapse to ``i1``."""
+    e = str(dtype).strip().lower()
+    return "i1" if e in ("i1", "bool") else e
 
 
 def _flatten_int_leaves_tree(tree: Any) -> list[int]:

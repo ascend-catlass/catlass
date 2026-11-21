@@ -47,7 +47,8 @@ tla.create_mask(*, pattern: _MaskPattern | str | None = None, dtype: DTypeLike =
   | `Q` | 最低四分之一元素有效 |
 
 - `dtype`（`DTypeLike`）：与掩码关联的元素类型（也决定一条 vector 能放多少元素：
-  256 字节 / 元素大小）。可选，默认 `Float32`。
+  256 字节 / 元素大小）。`Bool` 按 b8 宽计 → `!tla.mask<256>`。
+  可选，默认 `Float32`。
 
 约束说明：
 
@@ -55,6 +56,7 @@ tla.create_mask(*, pattern: _MaskPattern | str | None = None, dtype: DTypeLike =
 - 须在 `tla.vec.func()` 内调用；`pattern` 必填。
 - 接受 `mask=` 的接口需要 `create_mask` / `update_mask` 得到的 `MaskSSA`，
   不能直接传 `tla.mask.*` token。
+- `VectorSSA[tla.Bool]` 为单 VL、仅搬运（load/store）；不可用于算术 / cast。
 
 调用示例：
 
@@ -63,6 +65,7 @@ with tla.vec.func(mode="simd"):
     # 用 pattern token 构建 mask：
     m_all = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float16)
     m_tail = tla.create_mask(pattern=tla.mask.VL8, dtype=tla.Float16)
+    m_bool = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Bool)  # mask<256>
     # 前：x_reg / y_reg 为整 vector；只让最低 8 个元素做加法。
     z = tla.add(x_reg, y_reg, mask=m_tail)
     # 后：有效元素为 x+y；被 mask 掉的元素不参与。

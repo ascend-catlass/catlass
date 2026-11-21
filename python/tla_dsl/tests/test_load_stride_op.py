@@ -48,7 +48,7 @@ _POSITIVE_CASES = [
     ("boundary-65535", 0xFFFF, 0xFFFF, True),
 ]
 
-# vsldb stubs cover 2/4-byte lanes; VL is 256 bytes worth of elements.
+# VL is 256 bytes worth of elements (b16/b32 cases; b8 covered separately).
 _DTYPES = [
     (tla.Int16, "i16", 128),
     (tla.Int32, "i32", 64),
@@ -95,9 +95,8 @@ def test_load_stride_emits_tlair(
     assert f"!tla.vector<{vl_ele}x{ir_dtype}>" in load_lines[0]
 
 
-# vsldb packs each stride into a 16-bit immediate field and has no b8 shim:
-# out-of-range strides and 1-byte element types are rejected at the frontend
-# before any IR is emitted.
+# vsldb packs each stride into a 16-bit immediate field: out-of-range
+# strides are rejected at the frontend before any IR is emitted.
 @pytest.mark.parametrize(
     ("block_stride", "repeat_stride"),
     [
@@ -127,16 +126,40 @@ def test_load_stride_rejects_out_of_range_strides(
         )
 
 
-@pytest.mark.parametrize("dtype", [tla.Int8, tla.UInt8])
-def test_load_stride_rejects_1byte_elements(
-    compiler_tlair: Any,
-    dtype: type[tla.Numeric],
+@pytest.mark.parametrize(
+    ("dtype", "ir_dtype"),
+    [
+        (tla.Int8, "i8"),
+        (tla.UInt8, "ui8"),
+    ],
+)
+def test_load_stride_emits_tlair_b8(
+    compiler_tlair: Any, dtype: type[tla.Numeric], ir_dtype: str
 ) -> None:
-    with pytest.raises(TlaLoweringError, match="2/4-byte element type"):
-        compiler_tlair(
-            _make_stride_kernel(BlockLoadParams(block_stride=4), 256),
-            type_args=(
-                _ub_tensor(dtype=dtype, extent=256),
-                _ub_tensor(dtype=dtype, extent=256),
-            ),
-        )
+    """AscendC DATA_BLOCK_COPY b8 includes Int8 and UInt8."""
+    mlir = compiler_tlair(
+        _make_stride_kernel(BlockLoadParams(block_stride=4), 256),
+        type_args=(
+            _ub_tensor(dtype=dtype, extent=256),
+            _ub_tensor(dtype=dtype, extent=256),
+        ),
+    )
+    load_lines = [line for line in mlir.splitlines() if "tla.load" in line]
+    assert len(load_lines) == 1
+    assert "block_stride = 4 : i32" in load_lines[0]
+    assert f"!tla.vector<256x{ir_dtype}>" in load_lines[0]
+
+
+def test_load_stride_emits_tlair_bool(compiler_tlair: Any) -> None:
+    """AscendC DATA_BLOCK_COPY accepts bool via b8."""
+    mlir = compiler_tlair(
+        _make_stride_kernel(BlockLoadParams(block_stride=4), 256),
+        type_args=(
+            _ub_tensor(dtype=tla.Bool, extent=256),
+            _ub_tensor(dtype=tla.Bool, extent=256),
+        ),
+    )
+    load_lines = [line for line in mlir.splitlines() if "tla.load" in line]
+    assert len(load_lines) == 1
+    assert "block_stride = 4 : i32" in load_lines[0]
+    assert "!tla.vector<256xi1>" in load_lines[0]

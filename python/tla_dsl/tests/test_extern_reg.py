@@ -74,10 +74,20 @@ def test_register_annotations_and_return_value() -> None:
     assert "tla.add" in ir
 
 
-@pytest.mark.parametrize("dtype", [tla.Bool, tla.Float8E4M3FN, tla.Float8E5M2, tla.Numeric])
+@pytest.mark.parametrize("dtype", [tla.Float8E4M3FN, tla.Float8E5M2, tla.Numeric])
 def test_unsupported_register_annotation(dtype) -> None:
     with pytest.raises(TypeError, match="annotations support"):
         tla.VectorSSA[dtype]
+
+
+def test_extern_rejects_bool_register_annotation() -> None:
+    # VectorSSA[Bool] is valid for move-only typing; tla.extern must still refuse it.
+    assert tla.VectorSSA[tla.Bool].element_type == "i1"
+
+    def bool_extern(x: tla.VectorSSA[tla.Bool]) -> tla.VectorSSA[tla.Bool]: ...
+
+    with pytest.raises(TypeError, match="Float16, BFloat16"):
+        tla.extern(source=SOURCE)(bool_extern)
 
 
 @pytest.mark.parametrize("dtype,lanes", [

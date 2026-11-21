@@ -289,17 +289,19 @@ static mlir::FailureOr<TensorDescriptor> buildTileViewResultDescriptorFromParent
 // geometry reads its width from.
 static std::pair<mlir::Type, int64_t> storageTypeAndCount(mlir::Type elementType, int64_t elementCount)
 {
-    int64_t bits = getBitSizeOfFixedWidthScalarType(elementType);
     mlir::Type storage = mlir::IntegerType::get(elementType.getContext(), 8);
-    // The dialect's own cube element formats (f4e2m1 / f4e1m2 / f8e8m0) exist
-    // only to carry the format; they have no LLVM lowering, so a memref must
-    // never be built over one. A byte-wide one (e8m0) is simply i8; a sub-byte
-    // one additionally packs, below.
-    if (isTlaCustomElementType(elementType) && bits % 8 == 0)
-        return {storage, elementCount};
-    // An unknown type answers 0 bits, which this catches too: a memref over it
-    // keeps whatever element type it already had.
-    if (bits % 8 == 0)
+    // Prefer storage-byte width so Bool (IR i1, AscendC b8) is not treated as a
+    // 1-bit packed buffer (getBitSize(i1)==1 would pack count/8 into i8).
+    int64_t storageBytes = elementStorageBytes(elementType);
+    if (storageBytes > 0) {
+        // Dialect cube formats have no LLVM lowering; buffer as i8.
+        if (isTlaCustomElementType(elementType))
+            return {storage, elementCount};
+        return {elementType, elementCount};
+    }
+    int64_t bits = getBitSizeOfFixedWidthScalarType(elementType);
+    // True sub-byte (packed fp4): pack into i8 with fewer elements.
+    if (bits <= 0 || bits % 8 == 0)
         return {elementType, elementCount};
     const int64_t perByte = 8 / bits;
     if (elementCount == mlir::ShapedType::kDynamic)
@@ -821,13 +823,13 @@ mlir::LogicalResult TensorDescriptorDerivation::derive(mlir::func::FuncOp funcOp
                 // Counted in bits, not bytes: a sub-byte element still tiles the
                 // 32-byte stride quantum, it just takes more of them -- fp4 puts
                 // 64 elements in it where int8 puts 32.
-                // getByteSizeOfFixedWidthScalarType answers 0 for a sub-byte type
-                // and would reject it here.
+                // Prefer storage bits so Bool (IR i1, AscendC b8) aligns as 8-bit
+                // lanes; fall back to logical bits for true packed sub-byte types
+                // (f4e2m1 / f4e1m2 → 4), matching AscendC DataCopy GM↔UB fp4.
                 constexpr int64_t linearStrideAlignmentBits = 32 * 8;
-                int64_t elementBits = getBitSizeOfFixedWidthScalarType(childInfo->elementType);
-                // i1 is addressed as a byte, not as a bit.
-                if (childInfo->elementType.isInteger(1))
-                    elementBits = 8;
+                int64_t elementBits = elementStorageBits(childInfo->elementType);
+                if (elementBits <= 0)
+                    elementBits = getBitSizeOfFixedWidthScalarType(childInfo->elementType);
                 if (elementBits <= 0 || linearStrideAlignmentBits % elementBits != 0) {
                     op->emitError() << "tla.make_tensor_like cannot derive a 32-byte-aligned stride for element type "
                                     << childInfo->elementType;

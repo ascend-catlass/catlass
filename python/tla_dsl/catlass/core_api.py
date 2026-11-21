@@ -165,6 +165,7 @@ from .types import (
     TlaTensor,
     dtype_size_bytes,
     dtype_size_bits,
+    is_bool_element_type,
     _replace_flat_leaves_in_tree,
 )
 from .params import (
@@ -956,12 +957,17 @@ class VectorSSA(_RegisterSSA):
 
     @classmethod
     def __class_getitem__(cls, dtype: type[Numeric]) -> TlaVectorSSATypeDescriptor:
-        """Describe a full register of the given dtype in an extern signature."""
-        from .tla.ffi import _extern_register_type
+        """Describe a full 256-byte register of the given dtype.
+
+        Used for typing (including Bool move-only) and as the basis for
+        ``tla.extern`` register annotations. Extern validation separately
+        rejects Bool via :func:`catlass.tla.ffi._extern_register_type`.
+        """
+        from .tla.ffi import _full_register_type
 
         if not isinstance(dtype, type) or not issubclass(dtype, Numeric):
             raise TypeError("VectorSSA[dtype] requires a concrete TLA numeric type")
-        return _extern_register_type(dtype.dtype)
+        return _full_register_type(dtype.dtype)
 
     @classmethod
     def _matches_register_type(cls, value_type: mlir_ir.Type) -> bool:
@@ -1201,6 +1207,11 @@ class VectorSSA(_RegisterSSA):
         src_desc = _vector_ssa_type_for_mlir_value(operand_value)
         dst_token = _dtype_to_str(dst_type)
         src_token = src_desc.element_type
+        if is_bool_element_type(src_token):
+            _op_error(
+                "cast",
+                "Bool VectorSSA is move-only (load/store); cast is not supported",
+            )
         if params.round_mode is RoundMode.CAST_HYBRID and (src_token, dst_token) != (
             "f32",
             "hif8",
@@ -1359,6 +1370,11 @@ class VectorSSA(_RegisterSSA):
         src_desc = _vector_ssa_type_for_mlir_value(operand_value)
         src_token = src_desc.element_type
         dst_token = _dtype_to_str(dst_type)
+        if is_bool_element_type(src_token) or is_bool_element_type(dst_token):
+            _op_error(
+                "bitcast",
+                "Bool VectorSSA is move-only (load/store); bitcast is not supported",
+            )
         for role, token in (("source", src_token), ("destination", dst_token)):
             if token not in _BITCAST_ELEMENT_TYPES:
                 _op_error(
@@ -2047,16 +2063,15 @@ def _mask_ssa_type_for_element_type(
     element_type: str,
 ) -> TlaMaskSSATypeDescriptor:
     token = str(element_type).strip().lower()
+    # dtype_size_bytes("i1")==1 matches AscendC CreateMask<bool> (sizeof==1 → pset_b8)
+    # → 256 predicate lanes for a 256B VL.
     element_bytes = dtype_size_bytes(token)
-    if (
-        token == "i1"
-        or element_bytes <= 0
-        or _VECTOR_REGISTER_BYTES % element_bytes != 0
-    ):
+    if element_bytes <= 0 or _VECTOR_REGISTER_BYTES % element_bytes != 0:
         _op_error(
             "mask",
             f"unsupported predicate element type {token!r}; expected a "
-            "byte-aligned type that fits a 256-byte vector register",
+            "byte-aligned type that fits a 256-byte vector register "
+            "(Bool is accepted as b8-width)",
         )
     return TlaMaskSSATypeDescriptor(physical_lanes=_vector_lane_count(element_bytes))
 
@@ -6008,6 +6023,8 @@ _SUPPORTED_CUBE_COPY_ROUTES = {
         "f16",
         "bf16",
         "i8",
+        # AscendC bool is b8; TileCopyTla accepts bool (SizeOfBits==8).
+        "i1",
         "i16",
         "i32",
         "u8",
@@ -6023,6 +6040,7 @@ _SUPPORTED_CUBE_COPY_ROUTES = {
         "f16",
         "bf16",
         "i8",
+        "i1",
         "i16",
         "i32",
         "u8",
@@ -6082,6 +6100,8 @@ _SUPPORTED_CUBE_COPY_ROUTES = {
         "f16",
         "bf16",
         "i8",
+        # AscendC bool is b8; TileCopyTla VectorLayout path accepts bool.
+        "i1",
         "i16",
         "i32",
         "i64",
@@ -6122,6 +6142,8 @@ _SUPPORTED_VECTOR_COPY_ROUTES = {
         "i32",
         "i16",
         "i8",
+        # AscendC bool is b8 storage (1 byte/lane); GM↔UB stages like i8.
+        "i1",
         "u32",
         "u16",
         "u8",
@@ -6145,6 +6167,7 @@ _SUPPORTED_VECTOR_COPY_ROUTES = {
         "i32",
         "i16",
         "i8",
+        "i1",
         "u32",
         "u16",
         "u8",
@@ -6169,6 +6192,7 @@ _SUPPORTED_VECTOR_COPY_ROUTES = {
         "i32",
         "i16",
         "i8",
+        "i1",
         "u32",
         "u16",
         "u8",
@@ -6181,12 +6205,26 @@ _SUPPORTED_VECTOR_COPY_ROUTES = {
     # UB -> UB transposing: the destination tile is tagged ColumnMajor, so the
     # same logical (M, N) shape lands as an (N, M) array. VNCHWCONV carries every
     # UB element width, unsigned ones included.
-    ("ub", "RowMajor", "ub", "ColumnMajor"): ("f32", "f16", "bf16", "i32", "i16", "i8", "u32", "u16", "u8", "f8e4m3fn", "f8e5m2"),
+    ("ub", "RowMajor", "ub", "ColumnMajor"): (
+        "f32",
+        "f16",
+        "bf16",
+        "i32",
+        "i16",
+        "i8",
+        "i1",
+        "u32",
+        "u16",
+        "u8",
+        "f8e4m3fn",
+        "f8e5m2",
+    ),
     ("ub", "RowMajor", "l1", "zN"): (
         "f32",
         "f16",
         "bf16",
         "i8",
+        "i1",
         "i16",
         "i32",
         "u8",
@@ -6202,6 +6240,7 @@ _SUPPORTED_VECTOR_COPY_ROUTES = {
         "f16",
         "bf16",
         "i8",
+        "i1",
         "i16",
         "i32",
         "u8",
@@ -8712,9 +8751,11 @@ def full(
 
 
 def _full_vector_ssa_descriptor(dtype_token: str) -> TlaVectorSSATypeDescriptor:
-    element_bytes = dtype_size_bytes(dtype_token)
+    token = str(dtype_token).strip().lower()
+    # dtype_size_bytes("i1")==1 matches AscendC TypeGet<bool> → vector_s8 (b8 / 256 lanes).
+    element_bytes = dtype_size_bytes(token)
     lanes = _vector_lane_count(element_bytes)
-    return TlaVectorSSATypeDescriptor(lanes, dtype_token)
+    return TlaVectorSSATypeDescriptor(lanes, token)
 
 
 @dsl_user_op
@@ -8844,6 +8885,11 @@ def _emit_vector_binary(
     mask_value = _as_value(mask) if mask is not None else None
     lhs_desc = _vector_ssa_type_for_mlir_value(lhs_value)
     rhs_desc = _vector_ssa_type_for_mlir_value(rhs_value)
+    if is_bool_element_type(lhs_desc.element_type):
+        _op_error(
+            op_name,
+            "Bool VectorSSA is move-only (load/store); arithmetic is not supported",
+        )
     if lhs_desc.element_type == "hif8":
         _op_error(
             op_name,
@@ -9007,6 +9053,11 @@ def _emit_vector_scalar_binary(
     _runtime._require_enclosing_region(op_name, "vec.func")
     lhs_value = _as_value(lhs)
     lhs_desc = _vector_ssa_type_for_mlir_value(lhs_value)
+    if is_bool_element_type(lhs_desc.element_type):
+        _op_error(
+            op_name,
+            "Bool VectorSSA is move-only (load/store); arithmetic is not supported",
+        )
     rhs_value = _numeric_ir_value_for_element_type(
         op_name, rhs_num, lhs_desc.element_mlir_type(lhs_value.type.context), loc=loc
     )
@@ -9186,6 +9237,11 @@ def _emit_vector_unary(
     _runtime._require_enclosing_region(op_name, "vec.func")
     operand_value = _as_value(operand)
     element_type = _vector_ssa_type_for_mlir_value(operand_value).element_type
+    if is_bool_element_type(element_type):
+        _op_error(
+            op_name,
+            "Bool VectorSSA is move-only (load/store); arithmetic is not supported",
+        )
     if op_name in {"exp", "log", "sqrt"}:
         if element_type not in _FLOAT_UNARY_ELEMENT_TYPES:
             _op_error(
@@ -10409,6 +10465,11 @@ def _vector_where(
             "where",
             f"y has element type {y_desc.element_type}, expected {x_desc.element_type}",
         )
+    if is_bool_element_type(x_desc.element_type):
+        _op_error(
+            "where",
+            "Bool VectorSSA is move-only (load/store); where/select is not supported",
+        )
     _require_mask_matches_vector("where", mask_value, x_value)
     result = _tla_ops_gen.where(
         x_value.type,
@@ -10706,6 +10767,11 @@ def _emit_bitwise_unary(
 
     result_desc = _vector_ssa_type_for_mlir_value(operand_value)
     element_type = str(result_desc.element_type)
+    if is_bool_element_type(element_type):
+        _op_error(
+            op_name,
+            "Bool VectorSSA is move-only (load/store); arithmetic is not supported",
+        )
     if element_type not in _BITWISE_UNARY_TYPES:
         _op_error(
             op_name,
@@ -10757,6 +10823,11 @@ def _emit_bitwise_binary(
     else:
         src0_desc = _vector_ssa_type_for_mlir_value(src0_value)
         src1_desc = _vector_ssa_type_for_mlir_value(src1_value)
+        if is_bool_element_type(src0_desc.element_type):
+            _op_error(
+                op_name,
+                "Bool VectorSSA is move-only (load/store); arithmetic is not supported",
+            )
         if src1_desc.element_type != src0_desc.element_type:
             _op_error(
                 op_name,
@@ -11203,10 +11274,15 @@ def gather(
             f"invalid argument 'x' (position 0): expected addrspace ub, got {x_desc.addrspace}",
         )
 
-    # validate x element type
+    # validate x element type. Bool (i1) is move-only load/store; UB→Reg
+    # gather has no i8-carrier path and fails device compile.
+    if is_bool_element_type(x_desc.element_type):
+        _op_error(
+            "gather",
+            "Bool VectorSSA is move-only (load/store); gather is not supported",
+        )
     _GATHER_SUPPORTED_X_ELEM_TYPES = frozenset(
         {
-            "i1",
             "i8",
             "u8",
             "i16",
@@ -11324,6 +11400,11 @@ def scatter(
             f"got {dst_desc.addrspace}",
         )
     src_token = src_desc.element_type.lower()
+    if is_bool_element_type(src_token) or is_bool_element_type(dst_desc.element_type):
+        _op_error(
+            "scatter",
+            "Bool VectorSSA is move-only (load/store); scatter is not supported",
+        )
     supported_types = frozenset(
         {"i8", "u8", "i16", "u16", "i32", "u32", "i64", "u64", "f16", "bf16", "f32"}
     )
@@ -12670,14 +12751,16 @@ def create_mask(
           | `Q` | Lowest quarter of the elements are valid |
 
         - `dtype` (`DTypeLike`): Element type associated with the mask (also decides
-          how many elements fit in one vector: 256 bytes / element size). Optional,
-          default `Float32`.
+          how many elements fit in one vector: 256 bytes / element size). `Bool`
+          is b8-width → `!tla.mask<256>`. Optional, default `Float32`.
 
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function.
         - Must be called inside `tla.vec.func()`; `pattern` is required.
         - Ops that take `mask=` need a `MaskSSA` from `create_mask` /
           `update_mask`, not a raw `tla.mask.*` token.
+        - `VectorSSA[tla.Bool]` is single-VL and move-only (load/store); it
+          cannot be used for arithmetic / cast.
 
         Example:
         ```python
@@ -12685,6 +12768,7 @@ def create_mask(
             # Build masks from pattern tokens:
             m_all = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float16)
             m_tail = tla.create_mask(pattern=tla.mask.VL8, dtype=tla.Float16)
+            m_bool = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Bool)  # mask<256>
             # Before: x_reg / y_reg are full vectors; only the lowest 8 elements add.
             z = tla.add(x_reg, y_reg, mask=m_tail)
             # After: valid elements hold x+y; masked-out elements stay inactive.

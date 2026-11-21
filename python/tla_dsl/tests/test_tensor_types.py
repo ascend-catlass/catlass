@@ -163,14 +163,15 @@ def test_vector_ssa_type_enforces_register_capacity(
                 mlir_ir.Type.parse(type_text)
 
 
-def test_vector_ssa_type_rejects_i1_elements() -> None:
-    with pytest.raises(ValueError, match="unsupported VectorSSA element type"):
-        tla.types.TlaVectorSSATypeDescriptor(1, "i1")
-
+def test_vector_ssa_type_allows_bool_as_b8_capacity() -> None:
+    # AscendC RegTensor<bool> is b8-width (256 lanes); IR keeps i1 identity.
+    desc = tla.types.TlaVectorSSATypeDescriptor(256, "i1")
+    assert desc.valid_lanes == 256
     with mlir_ir.Context() as ctx:
         _tla_type_bridge.load_tla_dialect(ctx)
-        with pytest.raises(mlir_ir.MLIRError, match="byte-aligned width"):
-            mlir_ir.Type.parse("!tla.vector<1xi1>")
+        assert str(mlir_ir.Type.parse("!tla.vector<256xi1>")) == "!tla.vector<256xi1>"
+        with pytest.raises(mlir_ir.MLIRError, match="valid lane count"):
+            mlir_ir.Type.parse("!tla.vector<257xi1>")
 
 
 def test_legacy_tla_value_type_and_python_marker_are_removed() -> None:

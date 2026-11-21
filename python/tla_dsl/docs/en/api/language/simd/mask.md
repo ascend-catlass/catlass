@@ -46,8 +46,8 @@ Parameters:
   | `Q` | Lowest quarter of the elements are valid |
 
 - `dtype` (`DTypeLike`): Element type associated with the mask (also decides
-  how many elements fit in one vector: 256 bytes / element size). Optional,
-  default `Float32`.
+  how many elements fit in one vector: 256 bytes / element size). `Bool`
+  is b8-width → `!tla.mask<256>`. Optional, default `Float32`.
 
 Constraints:
 
@@ -55,6 +55,8 @@ Constraints:
 - Must be called inside `tla.vec.func()`; `pattern` is required.
 - Ops that take `mask=` need a `MaskSSA` from `create_mask` /
   `update_mask`, not a raw `tla.mask.*` token.
+- `VectorSSA[tla.Bool]` is single-VL and move-only (load/store); it
+  cannot be used for arithmetic / cast.
 
 Example:
 
@@ -63,6 +65,7 @@ with tla.vec.func(mode="simd"):
     # Build masks from pattern tokens:
     m_all = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float16)
     m_tail = tla.create_mask(pattern=tla.mask.VL8, dtype=tla.Float16)
+    m_bool = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Bool)  # mask<256>
     # Before: x_reg / y_reg are full vectors; only the lowest 8 elements add.
     z = tla.add(x_reg, y_reg, mask=m_tail)
     # After: valid elements hold x+y; masked-out elements stay inactive.

@@ -1,5 +1,6 @@
 // RUN: %tla_compile %s -o - | %filecheck %s
 // RUN: sed 's/f32/ui8/g' %s | %tla_compile - -o - | %filecheck %s --check-prefix=UNSIGNED
+// RUN: sed 's/f32/i1/g' %s | %tla_compile - -o - | %filecheck %s --check-prefix=BOOL
 // RUN: sed 's/f32/i64/g' %s | %tla_compile - -o - | %filecheck %s --check-prefix=SIGNED64
 // RUN: sed 's/f32/ui64/g' %s | %tla_compile - -o - | %filecheck %s --check-prefix=UNSIGNED64
 // RUN: sed 's/f32/f64/g' %s | %tla_compile - -o - | %filecheck %s --check-prefix=FLOAT64
@@ -38,6 +39,11 @@ module {
 // so the symbol has to exist or an unsigned tile cannot reach UB at all.
 // UNSIGNED: func.func private @copy_ub_RowMajor_to_gm_RowMajor_uint8_t
 // UNSIGNED: call @copy_ub_RowMajor_to_gm_RowMajor_uint8_t
+
+// Bool / i1 stages as AscendC b8 under the ``bool`` BC symbol
+// (copyRuntimeElemSuffix → "bool"; Vector/dma.cpp REGISTER_*(..., bool)).
+// BOOL-DAG: call @copy_ub_RowMajor_to_gm_RowMajor_bool
+// BOOL-DAG: call @copy_gm_RowMajor_to_ub_RowMajor_bool
 
 // SIGNED64-DAG: call @copy_ub_RowMajor_to_gm_RowMajor_int64_t
 // SIGNED64-DAG: call @copy_gm_RowMajor_to_ub_RowMajor_int64_t

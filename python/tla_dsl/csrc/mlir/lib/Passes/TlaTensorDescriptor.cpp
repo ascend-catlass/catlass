@@ -250,9 +250,13 @@ FailureOr<int64_t> getStaticAllocationElementCount(Value ptr)
     if (!ptrType || !intToPtr)
         return failure();
     auto sizeBytes = inferStaticAllocationSizeBytes(intToPtr.getAddr(), {});
-    // In bits, so a sub-byte pointee (packed fp4's i4) yields its true element
-    // count rather than being rejected for having no whole-byte width.
-    int64_t elementBits = getBitSizeOfFixedWidthScalarType(ptrType.getPointee());
+    // Prefer storage width so Bool (IR i1, AscendC b8) yields size_bytes / 1,
+    // not size_bits / 1. Fall back to logical bits for true sub-byte pointees
+    // (packed fp4) that have no whole-byte storage width.
+    Type pointee = ptrType.getPointee();
+    int64_t elementBits = elementStorageBits(pointee);
+    if (elementBits <= 0)
+        elementBits = getBitSizeOfFixedWidthScalarType(pointee);
     if (failed(sizeBytes) || *sizeBytes < 0 || elementBits <= 0)
         return failure();
     int64_t sizeBits = *sizeBytes * 8;

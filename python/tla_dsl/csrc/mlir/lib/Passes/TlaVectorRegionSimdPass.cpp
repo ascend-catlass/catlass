@@ -45,7 +45,7 @@ static Value intToUbPtr(OpBuilder& b, Location loc, Value addrI64)
 /// AscendC ``vlds/vsts`` POST stride is elements; HIVM ``.post`` offset is bytes.
 static Value strideElemsToByteOffI32(OpBuilder& b, Location loc, Value strideElems, Type elemType)
 {
-    int64_t elemBytes = getByteSizeOfFixedWidthScalarType(elemType);
+    int64_t elemBytes = elementStorageBytes(elemType);
     Value s = ::tla::castToI32(b, loc, strideElems);
     if (elemBytes == 1)
         return s;
@@ -312,6 +312,12 @@ static bool isDualDestStoreDist(hivmave::StoreDist pattern)
            pattern == hivmave::StoreDist::INTLV_B32;
 }
 
+/// Shared Bool predicate (SoT: ``tla::isBoolElementType``).
+static bool isBoolVectorElement(Type elementType)
+{
+    return isBoolElementType(elementType);
+}
+
 static hivmave::VFLoadOp createVFLoad(
     OpBuilder& b, Location loc, VectorType vecType, Value memref, Value index, hivmave::LoadDist pattern,
     bool unaligned)
@@ -331,6 +337,26 @@ static hivmave::VFLoadOp createVFLoad(
     return load;
 }
 
+/// Byte address of a memref view: base + offset×elementStorageBytes.
+static FailureOr<Value> memrefByteAddrI64(OpBuilder& b, Location loc, Value ubMemref)
+{
+    auto srcTy = dyn_cast<MemRefType>(ubMemref.getType());
+    if (!srcTy)
+        return failure();
+    int64_t elemBytes = elementStorageBytes(srcTy.getElementType());
+    if (elemBytes <= 0)
+        return failure();
+    auto meta = b.create<mlir::memref::ExtractStridedMetadataOp>(loc, ubMemref);
+    Value basePtr = b.create<mlir::memref::ExtractAlignedPointerAsIndexOp>(loc, meta.getBaseBuffer());
+    Value byteOffset = meta.getOffset();
+    if (elemBytes != 1) {
+        Value scale = b.create<arith::ConstantIndexOp>(loc, elemBytes);
+        byteOffset = b.create<arith::MulIOp>(loc, byteOffset, scale);
+    }
+    Value byteAddr = b.create<arith::AddIOp>(loc, basePtr, byteOffset);
+    return b.create<arith::IndexCastOp>(loc, b.getI64Type(), byteAddr).getResult();
+}
+
 // Map a 1/2/4-byte MaskSSA UB tile memref onto an i1 view of ``lanes``
 // predicate bits at the same byte address (AscendC MaskDist::DIST_NORM /
 // plds/psts.b8). UB element width types the pointer; the hardware transfer
@@ -342,26 +368,63 @@ static FailureOr<Value> materializeI1MaskMemrefFromUb(OpBuilder& b, Location loc
     auto srcTy = dyn_cast<MemRefType>(ubMemref.getType());
     if (!srcTy)
         return failure();
-    int64_t elemBytes = getByteSizeOfFixedWidthScalarType(srcTy.getElementType());
+    int64_t elemBytes = elementStorageBytes(srcTy.getElementType());
     if (elemBytes != 1 && elemBytes != 2 && elemBytes != 4)
         return failure();
-
-    auto meta = b.create<mlir::memref::ExtractStridedMetadataOp>(loc, ubMemref);
-    Value basePtr = b.create<mlir::memref::ExtractAlignedPointerAsIndexOp>(loc, meta.getBaseBuffer());
-    // ExtractStridedMetadata offset is in elements; convert to byte offset.
-    Value elemOffset = meta.getOffset();
-    Value byteOffset = elemOffset;
-    if (elemBytes != 1) {
-        Value scale = b.create<arith::ConstantIndexOp>(loc, elemBytes);
-        byteOffset = b.create<arith::MulIOp>(loc, elemOffset, scale);
-    }
-    Value byteAddr = b.create<arith::AddIOp>(loc, basePtr, byteOffset);
-    Value addrI64 = b.create<arith::IndexCastOp>(loc, b.getI64Type(), byteAddr);
-
+    auto addrOr = memrefByteAddrI64(b, loc, ubMemref);
+    if (failed(addrOr))
+        return failure();
     auto i1Ty = IntegerType::get(b.getContext(), 1);
     auto layout = StridedLayoutAttr::get(b.getContext(), /*offset=*/0, ArrayRef<int64_t>{1});
     auto i1MemrefTy = MemRefType::get({lanes}, i1Ty, layout, srcTy.getMemorySpace());
-    return b.create<hivm::PointerCastOp>(loc, i1MemrefTy, addrI64).getResult();
+    return b.create<hivm::PointerCastOp>(loc, i1MemrefTy, *addrOr).getResult();
+}
+
+// Reinterpret UB storage at the same byte address into a fixed VL-wide view.
+// Uses elementStorageBytes so Bool (i1, AscendC b8) scales as 1 byte/lane.
+static FailureOr<Value> materializeDataMemref(OpBuilder& b, Location loc, Value source, Type elementType)
+{
+    auto type = dyn_cast<MemRefType>(source.getType());
+    if (!type)
+        return failure();
+    int64_t dstBytes = elementStorageBytes(elementType);
+    if (dstBytes <= 0 || 256 % dstBytes != 0)
+        return failure();
+    auto layout = StridedLayoutAttr::get(b.getContext(), 0, ArrayRef<int64_t>{1});
+    auto resultType = MemRefType::get({256 / dstBytes}, elementType, layout, type.getMemorySpace());
+    if (type == resultType)
+        return source;
+    if (type.getElementType() == elementType && type.getShape() == resultType.getShape())
+        return source;
+    auto addrOr = memrefByteAddrI64(b, loc, source);
+    if (failed(addrOr))
+        return failure();
+    return b.create<hivm::PointerCastOp>(loc, resultType, *addrOr).getResult();
+}
+
+/// Same-shape signed/signless ``i8`` view for shared b8 ABI (MaskLoad US/DS,
+/// DATA_BLOCK_COPY ``*_int8``, Bool AVE load/store). Pass signed/signless i8
+/// through; cast Bool ``i1`` / ``ui8`` (and other non-i8 1-byte carriers) while
+/// preserving shape/layout/memory space so mixed Bool+Int8 regions share one
+/// memref signature. Never force ``memref<256xi8, strided<[1]>>`` — that
+/// static-offset reshape crashes BiShengLIR and conflicts with Int8 tiles.
+///
+/// Callers must already hold a 1-byte-storage MemRef (Bool / ui8 / i8 tile).
+static Value materializeSameShapeI8Memref(OpBuilder& b, Location loc, Value ubMemref)
+{
+    auto srcTy = cast<MemRefType>(ubMemref.getType());
+    auto elem = srcTy.getElementType();
+    // Signed / signless i8 only — unsigned must cast (shared stub is i8).
+    if (auto it = dyn_cast<IntegerType>(elem)) {
+        if (it.getWidth() == 8 && !it.isUnsigned())
+            return ubMemref;
+    }
+    auto i8Ty = IntegerType::get(b.getContext(), 8);
+    auto resultType = MemRefType::get(srcTy.getShape(), i8Ty, srcTy.getLayout(), srcTy.getMemorySpace());
+    if (srcTy == resultType)
+        return ubMemref;
+    // 1-byte MemRef: memrefByteAddrI64 always succeeds under the caller contract.
+    return b.create<hivm::PointerCastOp>(loc, resultType, *memrefByteAddrI64(b, loc, ubMemref)).getResult();
 }
 
 static std::string buildUniqueVectorHelperName(ModuleOp module, int& nextVectorRegionId)
@@ -702,7 +765,8 @@ static func::FuncOp getOrCreateMaskLoadUsDsLibraryCall(
     auto memrefTy = dyn_cast<MemRefType>(memRefType);
     if (!memrefTy)
         return {};
-    int64_t elemBytes = getByteSizeOfFixedWidthScalarType(memrefTy.getElementType());
+    // Bool/i1 → 1 (b8), matching AscendC SupportBytes / sizeof(bool).
+    int64_t elemBytes = elementStorageBytes(memrefTy.getElementType());
     if (elemBytes != 1 && elemBytes != 2 && elemBytes != 4 && elemBytes != 8)
         return {};
     if (pattern != hivmave::LoadDist::US && pattern != hivmave::LoadDist::DS)
@@ -710,6 +774,10 @@ static func::FuncOp getOrCreateMaskLoadUsDsLibraryCall(
     StringRef calleeName = maskLoadUsDsCalleeName(elemBytes, pattern);
     if (calleeName.empty())
         return {};
+    // b8: callers must pass signed/signless i8 memref (Bool/ui8 cast at the
+    // call site, preserving tile shape). Do not rewrite the arg to a forced
+    // 256-lane carrier — that PointerCast path crashes BiShengLIR for MaskLoad
+    // i8.
     if (auto existing = module.lookupSymbol<func::FuncOp>(calleeName)) {
         annotateAivLibraryCall(existing);
         return existing;
@@ -920,8 +988,17 @@ static func::FuncOp getOrCreateMaskSelectLibraryCall(ModuleOp module, Location l
 }
 
 /// Shared bc type suffix for DATA_BLOCK_COPY helpers in ``bc/Vector/{load,store}.cpp``.
+/// AscendC ``DATA_BLOCK_COPY`` supports b8/b16/b32. Stub selection uses the TLA
+/// element (so Bool / UInt8 stay distinct), but types whose AVE carrier is i8
+/// (``aveVectorElementType`` → i8) share the ``int8`` vsldb/vsstb stubs — same
+/// as master when suffix was taken from the already-lowered vector type.
 static std::string dataBlockCopyElementSuffix(Type elementType)
 {
+    if (isBoolElementType(elementType))
+        return "int8";
+    // Logical TLA types that AVE already carries as i8 (not FP8E4/E5 AS_BYTES).
+    if (isa<::tla::HiFloat8Type, ::tla::Float8E8M0Type>(elementType) || isFp4PairType(elementType))
+        return "int8";
     if (elementType.isF32())
         return "float";
     if (elementType.isF16())
@@ -936,8 +1013,8 @@ static std::string dataBlockCopyElementSuffix(Type elementType)
         return "fp8_e4m3fn";
     if (isa<Float8E5M2Type>(elementType))
         return "fp8_e5m2";
-    if (elementType.isInteger(8) && !elementType.isUnsignedInteger())
-        return "int8";
+    if (elementType.isInteger(8))
+        return elementType.isUnsignedInteger() ? "uint8" : "int8";
     return {};
 }
 
@@ -1457,7 +1534,7 @@ static bool isSupportedCastElementType(Type t)
     if (auto f = dyn_cast<FloatType>(t))
         return f.getWidth() == 16 || f.getWidth() == 32 || isAveFloat8Type(t);
     if (auto i = dyn_cast<IntegerType>(t)) {
-        if (i.getWidth() == 1) // bool
+        if (isBoolElementType(i))
             return false;
         unsigned w = i.getWidth();
         return w == 8 || w == 16 || w == 32 || w == 64;
@@ -1818,13 +1895,16 @@ struct VecLowerCtx {
 
 // AVE rejects ui*; map unsigned tla elements to signless of the same width.
 // Signedness for Compare/Cast/Div/Reduce/Max/Min stays on the tla type.
+// AscendC TypeGet<bool> → vector_s8: Bool VectorSSA lowers as i8 carriers.
 static Type aveVectorElementType(Type elementType)
 {
-    if (isa<::tla::Float8E8M0Type, ::tla::HiFloat8Type>(elementType) || isFp4PairType(elementType))
+    if (isa<::tla::Float8E8M0Type, ::tla::HiFloat8Type>(elementType) || isFp4PairType(elementType) ||
+        isBoolElementType(elementType))
         return IntegerType::get(elementType.getContext(), 8);
-    if (auto intType = dyn_cast<IntegerType>(elementType))
+    if (auto intType = dyn_cast<IntegerType>(elementType)) {
         if (intType.isUnsigned())
             return IntegerType::get(elementType.getContext(), intType.getWidth());
+    }
     return elementType;
 }
 
@@ -2388,7 +2468,8 @@ static FailureOr<Value> resolveEffectiveUbPtr(
             Value basePtr = b.create<mlir::memref::ExtractAlignedPointerAsIndexOp>(loc, meta.getBaseBuffer());
             Value elemOffset = meta.getOffset();
             auto mt = cast<MemRefType>(mapped.getType());
-            int64_t elemBytes = getByteSizeOfFixedWidthScalarType(mt.getElementType());
+            // SoT: Bool i1 is b8 (1), not getByteSize(i1)==0.
+            int64_t elemBytes = elementStorageBytes(mt.getElementType());
             Value byteOffset = elemOffset;
             if (elemBytes > 1) {
                 Value scale = b.create<arith::ConstantIndexOp>(loc, elemBytes);
@@ -2407,26 +2488,6 @@ static FailureOr<Value> resolveEffectiveUbPtr(
 // ops; scf control flow and index arithmetic are carried verbatim. Each op
 // derives its own vector/mask width from its operands or result element type,
 // so a single region may mix element widths (e.g. across tla.cast).
-// Reinterpret one register's storage without changing its effective byte address.
-// The carrier always spans a 256-byte register. The tensor descriptor still
-// determines the valid tile extent and any store tail predicate.
-static Value materializeDataMemref(OpBuilder& b, Location loc, Value source, Type elementType)
-{
-    auto type = cast<MemRefType>(source.getType());
-    if (type.getElementType() == elementType)
-        return source;
-    auto meta = b.create<mlir::memref::ExtractStridedMetadataOp>(loc, source);
-    Value base = b.create<mlir::memref::ExtractAlignedPointerAsIndexOp>(loc, meta.getBaseBuffer());
-    Value scale = b.create<arith::ConstantIndexOp>(loc, getByteSizeOfFixedWidthScalarType(type.getElementType()));
-    Value offset = b.create<arith::MulIOp>(loc, meta.getOffset(), scale);
-    Value index = b.create<arith::AddIOp>(loc, base, offset);
-    Value addr = b.create<arith::IndexCastOp>(loc, b.getI64Type(), index);
-    auto layout = StridedLayoutAttr::get(b.getContext(), 0, ArrayRef<int64_t>{1});
-    auto resultType = MemRefType::get(
-        {256 / getByteSizeOfFixedWidthScalarType(elementType)}, elementType, layout, type.getMemorySpace());
-    return b.create<hivm::PointerCastOp>(loc, resultType, addr).getResult();
-}
-
 static LogicalResult lowerLoad(
     ::tla::LoadOp loadOp, OpBuilder& b, ModuleOp module, DenseMap<Value, Value>& valueMap,
     AutoFullPredicateCache& fullMasks)
@@ -2450,13 +2511,20 @@ static LogicalResult lowerLoad(
 
         if (pattern == hivmave::LoadDist::US || pattern == hivmave::LoadDist::DS) {
             ModuleOp module = loadOp->getParentOfType<ModuleOp>();
-            auto callee = getOrCreateMaskLoadUsDsLibraryCall(module, loc, source.getType(), pattern);
+            auto srcMemTy = dyn_cast<MemRefType>(source.getType());
+            if (!srcMemTy)
+                return failure();
+            int64_t elemBytes = elementStorageBytes(srcMemTy.getElementType());
+            Value callArg = source;
+            if (elemBytes == 1)
+                callArg = materializeSameShapeI8Memref(b, loc, source);
+            auto callee = getOrCreateMaskLoadUsDsLibraryCall(module, loc, callArg.getType(), pattern);
             if (!callee)
                 return loadOp.emitError(
                            "MaskLoadDist US/DS requires a b8/b16/b32/b64 "
                            "scalar UB (AscendC LoadAlign<T, MaskDist>)"),
                        failure();
-            auto call = b.create<func::CallOp>(loc, callee, ValueRange{source});
+            auto call = b.create<func::CallOp>(loc, callee, ValueRange{callArg});
             Value loaded = castMaskToPregType(b, loc, call.getResult(0), fullPregVecType(b.getContext()));
             (void)lanes;
             valueMap[loadOp.getResult()] = loaded;
@@ -2497,6 +2565,13 @@ static LogicalResult lowerLoad(
                    "load_dist values require one vector result "
                    "(optional live !tla.ptr is separate)"),
                failure();
+    // Bool: AscendC DATA_BLOCK_COPY accepts bool via b8; keep non-NORM LoadDist
+    // rejected (those dists are not DATA_BLOCK_COPY).
+    bool isBoolLoad = isBoolVectorElement(sourceType.getElementType()) ||
+                      (isa<::tla::VectorSSAType>(loadOp.getResult().getType()) &&
+                       isBoolVectorElement(cast<::tla::VectorSSAType>(loadOp.getResult().getType()).getElementType()));
+    if (isBoolLoad && pattern != hivmave::LoadDist::NORM)
+        return loadOp.emitError("Bool VectorSSA is move-only; non-NORM load_dist is unsupported"), failure();
     if (pattern == hivmave::LoadDist::DINTLV_B8) {
         // Encoded byte types use i8 carriers; select from the original TLA type.
         Type elementType = cast<::tla::TlaTensorType>(loadOp.getSource().getType()).getPtr().getPointee();
@@ -2592,21 +2667,26 @@ static LogicalResult lowerLoad(
         Value blockStrideVal = b.create<arith::ConstantIntOp>(loc, blockStrideAttr.getInt(), 32);
         int64_t repeatStrideImm = loadOp.getRepeatStrideAttr() ? loadOp.getRepeatStrideAttr().getInt() : 0;
         Value repeatStrideVal = b.create<arith::ConstantIntOp>(loc, repeatStrideImm, 32);
-        std::string calleeName = getLoadWithStrideLibraryCallName(sourceType.getElementType());
+        Type tlaElem = sourceType.getElementType();
+        if (auto tlaTensor = dyn_cast<::tla::TlaTensorType>(loadOp.getSource().getType()))
+            tlaElem = tlaTensor.getPtr().getPointee();
+        std::string calleeName = getLoadWithStrideLibraryCallName(tlaElem);
         if (calleeName.empty())
-            return loadOp.emitError("unsupported element type for tla.load with block_stride: ")
-                       << sourceType.getElementType(),
-                   failure();
-        bool viaBytes = blockStrideUsesByteRegister(sourceType.getElementType());
+            return loadOp.emitError("unsupported element type for tla.load with block_stride: ") << tlaElem, failure();
+        Value loadSrc = source;
+        if (isBoolElementType(tlaElem))
+            // Bool rides load_with_stride_int8; same-shape i8 view matches Int8 ABI.
+            loadSrc = materializeSameShapeI8Memref(b, loc, source);
+        bool viaBytes = blockStrideUsesByteRegister(tlaElem);
         Type resultVecType = viaBytes ? byteRegisterTypeFor(opCtx->vecType) : Type(opCtx->vecType);
-        auto callee = getOrCreateLoadWithStrideLibraryCall(module, loc, resultVecType, source.getType(), calleeName);
+        auto callee = getOrCreateLoadWithStrideLibraryCall(module, loc, resultVecType, loadSrc.getType(), calleeName);
         if (!callee)
             return failure();
         // The gather reads all 8 DataBlocks, so the predicate is all-true;
         // build it via PgePattern::ALL like the other no-mask lowerings
         // (a dense<true> arith constant is not selectable in bisheng).
         Value allTrue = allTrueMaskFor(fullMasks, loc, opCtx->vecType, loadOp.getResult().getType());
-        auto call = b.create<func::CallOp>(loc, callee, ValueRange{source, blockStrideVal, repeatStrideVal, allTrue});
+        auto call = b.create<func::CallOp>(loc, callee, ValueRange{loadSrc, blockStrideVal, repeatStrideVal, allTrue});
         Value loaded = call.getResult(0);
         if (viaBytes)
             loaded = b.create<mlir::vector::BitCastOp>(loc, opCtx->vecType, loaded).getResult();
@@ -2621,7 +2701,10 @@ static LogicalResult lowerLoad(
             loadOp.getUnalignedUbAccess().value_or(false))
             return loadOp.emitError("64-bit register load currently requires aligned NORM distribution"), failure();
         auto words = VectorType::get({64}, b.getI32Type());
-        source = materializeDataMemref(b, loc, source, b.getI32Type());
+        auto wordsMemOr = materializeDataMemref(b, loc, source, b.getI32Type());
+        if (failed(wordsMemOr))
+            return loadOp.emitError("failed to materialize i32 memref view for 64-bit VectorSSA load"), failure();
+        source = *wordsMemOr;
         Value loaded = createVFLoad(b, loc, words, source, zero, hivmave::LoadDist::NORM, false).getRes();
         valueMap[loadOp.getResult()] = b.create<mlir::vector::BitCastOp>(loc, opCtx->vecType, loaded).getResult();
         return success();
@@ -2630,8 +2713,12 @@ static LogicalResult lowerLoad(
     // DINTLV_* still takes a VL-wide tile view (same as AVE ProcessVsstb /
     // HIVM2VLLoadOpLowering): the distribution pattern reads 2*VL from that
     // base address. Do not widen the memref to 2*VL — that breaks hivmc ABI.
+    Value loadMemref = source;
+    if (isBoolLoad)
+        // RegTensor<bool> → vector_s8: same-shape i8 UB view at bc/AVE.
+        loadMemref = materializeSameShapeI8Memref(b, loc, source);
     auto vfLoad =
-        createVFLoad(b, loc, opCtx->vecType, source, zero, pattern, loadOp.getUnalignedUbAccess().value_or(false));
+        createVFLoad(b, loc, opCtx->vecType, loadMemref, zero, pattern, loadOp.getUnalignedUbAccess().value_or(false));
     valueMap[loadOp.getResult()] = vfLoad.getRes();
     if (dual)
         valueMap[r2] = vfLoad.getRes1();
@@ -2667,7 +2754,18 @@ static LogicalResult lowerLoadUpdate(
     auto sourceType = dyn_cast<MemRefType>(source.getType());
     if (!sourceType)
         return loadOp.emitError("load_update source map is not a memref in vector helper"), failure();
-    auto opCtx = deriveVecCtxForElement(sourceType.getElementType());
+    Type tlaSrcElem = sourceType.getElementType();
+    if (auto tlaTensor = dyn_cast<::tla::TlaTensorType>(loadOp.getSource().getType()))
+        tlaSrcElem = tlaTensor.getPtr().getPointee();
+    Type tlaResultElem = tlaSrcElem;
+    if (auto tlaVec = dyn_cast<::tla::VectorSSAType>(loadOp.getResult().getType()))
+        tlaResultElem = tlaVec.getElementType();
+    if (tlaSrcElem != tlaResultElem)
+        return loadOp.emitError("load_update source and result element types must match"), failure();
+    // Align/Unalign UPDATE stay move-only for Bool; DATA_BLOCK_COPY matches AscendC.
+    if ((isBoolVectorElement(tlaSrcElem) || isBoolVectorElement(tlaResultElem)) && !loadOp.getBlockStride())
+        return loadOp.emitError("Bool VectorSSA is move-only; load_update is unsupported"), failure();
+    auto opCtx = deriveVecCtxForElement(tlaSrcElem);
     if (failed(opCtx))
         return loadOp.emitError("unsupported element type for load_update vector helper"), failure();
     auto ptrOr = resolveEffectiveUbPtr(loadOp.getSource(), b, loc, valueMap);
@@ -2684,12 +2782,11 @@ static LogicalResult lowerLoadUpdate(
         if (failed(materializeBlockStrides(
                 loadOp, blockStrideVal, loadOp.getPostUpdateStride(), b, valueMap, blockStride, repeatStride)))
             return failure();
-        std::string suffix = dataBlockCopyElementSuffix(sourceType.getElementType());
+        std::string suffix = dataBlockCopyElementSuffix(tlaSrcElem);
         if (suffix.empty())
-            return loadOp.emitError("unsupported element type for DATA_BLOCK_COPY load_update: ")
-                       << sourceType.getElementType(),
+            return loadOp.emitError("unsupported element type for DATA_BLOCK_COPY load_update: ") << tlaSrcElem,
                    failure();
-        bool viaBytes = blockStrideUsesByteRegister(sourceType.getElementType());
+        bool viaBytes = blockStrideUsesByteRegister(tlaSrcElem);
         Type resultVecType = viaBytes ? byteRegisterTypeFor(opCtx->vecType) : Type(opCtx->vecType);
         auto callee = getOrCreateLoadUpdateRetptrLibraryCall(
             module, loc, resultVecType, ("_mlir_ciface_load_with_stride_post_update_retptr_" + suffix));
@@ -2760,13 +2857,20 @@ static LogicalResult lowerLoadUnalignUpdate(
 static LogicalResult lowerBitCast(::tla::BitCastOp bitCastOp, OpBuilder& b, DenseMap<Value, Value>& valueMap)
 {
     Location loc = bitCastOp.getLoc();
+    Type tlaSrcElem = bitCastOp.getSource().getType().getElementType();
+    Type tlaDstElem = bitCastOp.getResult().getType().getElementType();
+    if (isBoolVectorElement(tlaSrcElem) || isBoolVectorElement(tlaDstElem))
+        return bitCastOp.emitError(
+                   "Bool VectorSSA is move-only (load/store); "
+                   "bitcast is not supported"),
+               failure();
     Value src = valueMap.lookup(bitCastOp.getSource());
     if (!src)
         return failure();
     auto srcVecType = dyn_cast<VectorType>(src.getType());
     if (!srcVecType)
         return bitCastOp.emitError("tla.bitcast source is not a vector value"), failure();
-    Type dstElementType = aveVectorElementType(bitCastOp.getResult().getType().getElementType());
+    Type dstElementType = aveVectorElementType(tlaDstElem);
     // Values stay signless; signedness lives in the !tla.vector type only.
     if (auto intType = dyn_cast<IntegerType>(dstElementType))
         if (!intType.isSignless())
@@ -2802,6 +2906,11 @@ static LogicalResult lowerCast(
         return castOp.emitError("unsupported tla.cast destination element type"), failure();
     Type tlaSrcElem = cast<::tla::VectorSSAType>(castOp.getSource().getType()).getElementType();
     Type tlaDstElem = dstType.getElementType();
+    if (isBoolVectorElement(tlaSrcElem) || isBoolVectorElement(tlaDstElem))
+        return castOp.emitError(
+                   "Bool VectorSSA is move-only (load/store); "
+                   "cast is not supported"),
+               failure();
     auto dstVecType = VectorType::get({*dstLanesOr}, aveVectorElementType(tlaDstElem));
     if (isa<::tla::HiFloat8Type>(tlaSrcElem) || isa<::tla::HiFloat8Type>(tlaDstElem)) {
         std::string name = getHiFloat8CastLibraryCallName(tlaSrcElem, castOp.getTrait());
@@ -2960,6 +3069,12 @@ static LogicalResult lowerVectorBinary(
     if (op.getNumResults() != 1)
         return failure();
     TlaBinaryOperands operands = info->operands;
+    if (auto tlaVec = dyn_cast<::tla::VectorSSAType>(operands.lhs.getType());
+        tlaVec && isBoolVectorElement(tlaVec.getElementType()))
+        return op.emitError(
+                   "Bool VectorSSA is move-only (load/store); "
+                   "arithmetic is not supported"),
+               failure();
     Value lhs = valueMap.lookup(operands.lhs);
     if (!lhs)
         return failure();
@@ -2996,6 +3111,12 @@ static LogicalResult lowerVectorScalarBinary(
     if (op.getNumResults() != 1)
         return failure();
     TlaBinaryOperands operands = info->operands;
+    if (auto tlaVec = dyn_cast<::tla::VectorSSAType>(operands.lhs.getType());
+        tlaVec && isBoolVectorElement(tlaVec.getElementType()))
+        return op.emitError(
+                   "Bool VectorSSA is move-only (load/store); "
+                   "arithmetic is not supported"),
+               failure();
     Value lhs = valueMap.lookup(operands.lhs);
     if (!lhs)
         return failure();
@@ -3422,6 +3543,15 @@ static LogicalResult lowerGather(
     auto baseType = dyn_cast<MemRefType>(src.getType());
     if (!baseType || baseType.getRank() != 1)
         return failure();
+    // Bool is move-only load/store; gather has no i8-carrier path and fails
+    // LLVM translation for i1 AVE vgather.
+    if (isBoolVectorElement(baseType.getElementType()) ||
+        (isa<::tla::VectorSSAType>(gatherOp.getResult().getType()) &&
+         isBoolVectorElement(cast<::tla::VectorSSAType>(gatherOp.getResult().getType()).getElementType())))
+        return gatherOp.emitError(
+                   "Bool VectorSSA is move-only (load/store); "
+                   "gather is not supported"),
+               failure();
     auto elemByteWidth = getElementByteWidth(baseType.getElementType());
     if (failed(elemByteWidth))
         return failure();
@@ -3460,6 +3590,10 @@ static LogicalResult lowerScatter(
     if (!dstType || dstType.getRank() != 1 || !srcType || !indexType)
         return failure();
     Type element = op.getSrc().getType().getElementType();
+    // Defense in depth: verifier already rejects i1; do not use bit-width math
+    // on Bool (would inflate 2048/1 and silently treat as i8 carrier).
+    if (isBoolVectorElement(element) || isBoolVectorElement(dstType.getElementType()))
+        return op.emitError("Bool VectorSSA is move-only (load/store); scatter is not supported"), failure();
     auto nativeSrcType = VectorType::get({2048 / element.getIntOrFloatBitWidth()}, element);
     if (srcType != nativeSrcType) {
         src = b.create<UnrealizedConversionCastOp>(loc, nativeSrcType, src).getResult(0);
@@ -3517,6 +3651,13 @@ static LogicalResult lowerVectorUnary(
     if (op.getNumResults() != 1)
         return failure();
     TlaUnaryOperands operands = info->operands;
+    Type tlaOperandType = operands.operand.getType();
+    if (auto tlaVec = dyn_cast<::tla::VectorSSAType>(tlaOperandType);
+        tlaVec && isBoolVectorElement(tlaVec.getElementType()))
+        return op.emitError(
+                   "Bool VectorSSA is move-only (load/store); "
+                   "arithmetic is not supported"),
+               failure();
     Value operand = valueMap.lookup(operands.operand);
     if (!operand)
         return failure();
@@ -3524,7 +3665,8 @@ static LogicalResult lowerVectorUnary(
     if (!operandVecType)
         return failure();
 
-    Type tlaOperandType = operands.operand.getType();
+    // Validate the AVE carrier width. Bool is rejected above via
+    // isBoolVectorElement before it can be mistaken for an i8 carrier.
     if (isa<::tla::VectorSSAType>(tlaOperandType)) {
         if (failed(validateVectorUnaryElementType(&op, *info, operandVecType.getElementType())))
             return failure();
@@ -3715,7 +3857,10 @@ static LogicalResult lowerStore(
             }
             auto words = VectorType::get({64}, b.getI32Type());
             source = b.create<mlir::vector::BitCastOp>(loc, words, source).getResult();
-            dest = materializeDataMemref(b, loc, dest, b.getI32Type());
+            auto wordsMemOr = materializeDataMemref(b, loc, dest, b.getI32Type());
+            if (failed(wordsMemOr))
+                return storeOp.emitError("failed to materialize i32 memref view for 64-bit VectorSSA store"), failure();
+            dest = *wordsMemOr;
             Value zero = b.create<arith::ConstantIndexOp>(loc, 0);
             b.create<hivmave::VFMaskedStoreOp>(loc, dest, ValueRange{zero}, mask, source);
             return success();
@@ -3727,9 +3872,36 @@ static LogicalResult lowerStore(
     auto sourceTy = dyn_cast<VectorType>(source.getType());
     if (!sourceTy)
         return failure();
-    auto opCtx = deriveVecCtxForElement(sourceTy.getElementType());
+    // Prefer the TLA VectorSSA element (Bool=i1) over the already-lowered AVE
+    // carrier (i8) so Bool stores keep AscendC move-only semantics.
+    Type tlaStoreElem = sourceTy.getElementType();
+    if (auto tlaVec = dyn_cast<::tla::VectorSSAType>(storeOp.getSource().getType()))
+        tlaStoreElem = tlaVec.getElementType();
+    Type tlaDestElem = tlaStoreElem;
+    if (auto tlaTensor = dyn_cast<::tla::TlaTensorType>(storeOp.getDest().getType()))
+        tlaDestElem = tlaTensor.getPtr().getPointee();
+    else if (auto destMem = dyn_cast<MemRefType>(dest.getType()))
+        tlaDestElem = destMem.getElementType();
+    // Pack / first_element dists intentionally remap widths (verified upstream).
+    // Only Bool cross-stores need an exact-match gate (i8 carrier must not sneak
+    // a Bool↔Int8 move-only bypass). Non-Bool mismatches stay historically open.
+    bool remapsElementWidth = false;
+    if (auto storeDist = storeOp.getStoreDist()) {
+        ::StoreDist dist = storeDist->getStoreDist();
+        remapsElementWidth = dist == ::StoreDist::pack_b16 || dist == ::StoreDist::pack_b32 ||
+                             dist == ::StoreDist::pack4_b32 || dist == ::StoreDist::first_element_b8 ||
+                             dist == ::StoreDist::first_element_b16 || dist == ::StoreDist::first_element_b32;
+    }
+    if (!remapsElementWidth && tlaStoreElem != tlaDestElem &&
+        (isBoolVectorElement(tlaStoreElem) || isBoolVectorElement(tlaDestElem)))
+        return storeOp.emitError("store source and destination element types must match"), failure();
+    auto opCtx = deriveVecCtxForElement(tlaStoreElem);
     if (failed(opCtx))
         return failure();
+    Value storeDest = dest;
+    // Same-shape i8 view only when both sides are Bool (TypeGet<bool> → vector_s8).
+    if (isBoolVectorElement(tlaStoreElem) && isBoolVectorElement(tlaDestElem))
+        storeDest = materializeSameShapeI8Memref(b, loc, dest);
     if (storeOp.getMask()) {
         mask = valueMap.lookup(storeOp.getMask());
         if (!mask)
@@ -3742,7 +3914,7 @@ static LogicalResult lowerStore(
     }
     if (storeOp.getUnalignedUbAccess().value_or(false)) {
         // store_unalign (NORMAL): mark AVE masked-store as unaligned UB access.
-        auto store = b.create<hivmave::VFMaskedStoreOp>(loc, dest, ValueRange{zero}, mask, source);
+        auto store = b.create<hivmave::VFMaskedStoreOp>(loc, storeDest, ValueRange{zero}, mask, source);
         store->setAttr(hivmave::UnalignedAttr::name, hivmave::UnalignedAttr::get(b.getContext()));
     } else if (storeOp.getBlockStride()) {
         Value blockStrideVal = lookupOrCloneScalarValue(b, storeOp.getBlockStride(), valueMap);
@@ -3750,34 +3922,36 @@ static LogicalResult lowerStore(
             return failure();
         if (!isa<IntegerType>(blockStrideVal.getType()))
             blockStrideVal = b.create<arith::IndexCastOp>(loc, b.getI32Type(), blockStrideVal);
-        std::string calleeName = getStoreWithStrideLibraryCallName(sourceTy.getElementType());
+        std::string calleeName = getStoreWithStrideLibraryCallName(tlaStoreElem);
         if (calleeName.empty())
-            return storeOp.emitError("unsupported element type for tla.store with BlockStoreParams: ")
-                       << sourceTy.getElementType(),
+            return storeOp.emitError("unsupported element type for tla.store with BlockStoreParams: ") << tlaStoreElem,
                    failure();
         Value storeSrc = source;
-        if (blockStrideUsesByteRegister(sourceTy.getElementType())) {
+        if (blockStrideUsesByteRegister(tlaStoreElem)) {
             storeSrc = b.create<mlir::vector::BitCastOp>(loc, byteRegisterTypeFor(sourceTy), source).getResult();
         }
+        // Bool uses the i8 UB view (storeDest); other types keep dest == storeDest.
         auto callee =
-            getOrCreateStoreWithStrideLibraryCall(module, loc, storeSrc.getType(), dest.getType(), calleeName);
+            getOrCreateStoreWithStrideLibraryCall(module, loc, storeSrc.getType(), storeDest.getType(), calleeName);
         if (!callee)
             return failure();
         VectorType pregVecType = fullPregVecType(b.getContext());
         Value pregMask = castMaskToPregType(b, loc, mask, pregVecType);
-        b.create<func::CallOp>(loc, callee, ValueRange{storeSrc, dest, blockStrideVal, pregMask});
+        b.create<func::CallOp>(loc, callee, ValueRange{storeSrc, storeDest, blockStrideVal, pregMask});
     } else {
         auto storeDistAttr = storeOp.getStoreDist();
         if (storeDistAttr && storeDistAttr->getStoreDist() != ::StoreDist::norm) {
+            if (isBoolVectorElement(tlaStoreElem))
+                return storeOp.emitError("Bool VectorSSA is move-only; non-NORM store_dist is unsupported"), failure();
             hivmave::StoreDist pattern = mapTlaStoreDistToAve(storeDistAttr->getStoreDist());
             bool isDual = isDualDestStoreDist(pattern);
             if (isDual) {
                 return storeOp.emitError("dual mode not implemented.");
             }
-            b.create<hivmave::VFMaskedStoreOp>(loc, pattern, dest, ValueRange{zero}, mask, source);
+            b.create<hivmave::VFMaskedStoreOp>(loc, pattern, storeDest, ValueRange{zero}, mask, source);
         } else {
-            // NORM mode
-            b.create<hivmave::VFMaskedStoreOp>(loc, dest, ValueRange{zero}, mask, source);
+            // NORM mode (Bool uses i8 view of byte-addressed UB).
+            b.create<hivmave::VFMaskedStoreOp>(loc, storeDest, ValueRange{zero}, mask, source);
         }
     }
     return success();
@@ -3795,8 +3969,23 @@ static LogicalResult lowerStoreUpdate(
     auto sourceTy = dyn_cast<VectorType>(source.getType());
     if (!sourceTy)
         return failure();
+    // Prefer TLA VectorSSA element (Bool=i1) over the AVE i8 carrier so UPDATE
+    // cannot bypass the NORMAL-path block_stride move-only gate.
+    Type tlaStoreElem = sourceTy.getElementType();
+    if (auto tlaVec = dyn_cast<::tla::VectorSSAType>(storeOp.getSource().getType()))
+        tlaStoreElem = tlaVec.getElementType();
+    Type tlaDestElem = tlaStoreElem;
+    if (auto tlaTensor = dyn_cast<::tla::TlaTensorType>(storeOp.getDest().getType()))
+        tlaDestElem = tlaTensor.getPtr().getPointee();
+    else if (auto destMem = dyn_cast<MemRefType>(dest.getType()))
+        tlaDestElem = destMem.getElementType();
+    if (tlaStoreElem != tlaDestElem)
+        return storeOp.emitError("store_update source and destination element types must match"), failure();
+    // Align/Unalign UPDATE stay move-only for Bool; DATA_BLOCK_COPY matches AscendC.
+    if (isBoolVectorElement(tlaStoreElem) && !storeOp.getBlockStride())
+        return storeOp.emitError("Bool VectorSSA is move-only; store_update is unsupported"), failure();
     Value mask;
-    auto opCtx = deriveVecCtxForElement(sourceTy.getElementType());
+    auto opCtx = deriveVecCtxForElement(tlaStoreElem);
     if (failed(opCtx))
         return failure();
     if (storeOp.getMask()) {
@@ -3833,13 +4022,12 @@ static LogicalResult lowerStoreUpdate(
         if (failed(materializeBlockStrides(
                 storeOp, blockStrideVal, storeOp.getPostUpdateStride(), b, valueMap, blockStride, repeatStride)))
             return failure();
-        std::string suffix = dataBlockCopyElementSuffix(sourceTy.getElementType());
+        std::string suffix = dataBlockCopyElementSuffix(tlaStoreElem);
         if (suffix.empty())
-            return storeOp.emitError("unsupported element type for DATA_BLOCK_COPY store_update: ")
-                       << sourceTy.getElementType(),
+            return storeOp.emitError("unsupported element type for DATA_BLOCK_COPY store_update: ") << tlaStoreElem,
                    failure();
         Value storeSrc = source;
-        if (blockStrideUsesByteRegister(sourceTy.getElementType()))
+        if (blockStrideUsesByteRegister(tlaStoreElem))
             storeSrc = b.create<mlir::vector::BitCastOp>(loc, byteRegisterTypeFor(sourceTy), source).getResult();
         auto callee = getOrCreateStoreUpdateRetptrLibraryCall(
             module, loc, storeSrc.getType(), ("_mlir_ciface_store_with_stride_post_update_retptr_" + suffix));
@@ -4417,6 +4605,15 @@ static LogicalResult lowerNestedVectorOp(
         Value y = valueMap.lookup(whereOp.getY());
         if (!mask || !x || !y)
             return failure();
+
+        // Bool VectorSSA is move-only; vsel on the i8 carrier would silently
+        // accept lane select beyond the supported surface.
+        if (auto xVec = dyn_cast<::tla::VectorSSAType>(whereOp.getX().getType());
+            xVec && isBoolVectorElement(xVec.getElementType()))
+            return whereOp.emitError(
+                       "Bool VectorSSA is move-only (load/store); "
+                       "where/select is not supported"),
+                   failure();
 
         // After type conversion all MaskSSA values use vector<256xi1>, so the
         // original TLA operand type determines whether this is predicate select.

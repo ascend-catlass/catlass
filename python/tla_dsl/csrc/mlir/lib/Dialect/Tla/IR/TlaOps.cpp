@@ -917,7 +917,7 @@ mlir::LogicalResult DeInterleaveOp::verify()
 static mlir::FailureOr<int64_t> getPhysicalVectorLanes(VectorSSAType vectorType)
 {
     constexpr int64_t kVectorRegisterBytes = 256;
-    int64_t elementBytes = getByteSizeOfFixedWidthScalarType(vectorType.getElementType());
+    int64_t elementBytes = elementStorageBytes(vectorType.getElementType());
     if (elementBytes <= 0 || kVectorRegisterBytes % elementBytes != 0)
         return mlir::failure();
     return kVectorRegisterBytes / elementBytes;
@@ -1116,7 +1116,9 @@ mlir::LogicalResult StoreOp::verify()
             return emitOpError("predicate mask is not supported when storing !tla.mask");
         if (getUnalignedUbAccess())
             return emitOpError("unaligned_ub_access is not supported when storing !tla.mask");
-        int64_t destElemBytes = getByteSizeOfFixedWidthScalarType(destType.getPtr().getPointee());
+        // AscendC StoreAlign<__ubuf__ T*, MaskReg>: SupportBytes<T,1,2,4,8>;
+        // Bool (i1) is b8 storage (elementStorageBytes → 1).
+        int64_t destElemBytes = elementStorageBytes(destType.getPtr().getPointee());
         if (destElemBytes != 1 && destElemBytes != 2 && destElemBytes != 4)
             return emitOpError(
                 "dest !tla.tensor element type must be a 1/2/4-byte scalar "
@@ -1136,11 +1138,14 @@ mlir::LogicalResult StoreOp::verify()
     if (isUnaligned && getBlockStride())
         return emitOpError("unaligned_ub_access and block_stride are mutually exclusive");
 
+    auto destElementType = destType.getPtr().getPointee();
     if (auto storeDist = getStoreDist()) {
         ::StoreDist dist = storeDist->getStoreDist();
         bool isNormal = dist == ::StoreDist::norm;
         bool isFirstElement = dist == ::StoreDist::first_element_b8 || dist == ::StoreDist::first_element_b16 ||
                               dist == ::StoreDist::first_element_b32;
+        bool remapsElementWidth = dist == ::StoreDist::pack_b16 || dist == ::StoreDist::pack_b32 ||
+                                  dist == ::StoreDist::pack4_b32 || isFirstElement;
         if (!isNormal && isUnaligned)
             return emitOpError("non-normal store_dist is incompatible with unaligned_ub_access");
         if (!isNormal && getBlockStride())
@@ -1148,7 +1153,6 @@ mlir::LogicalResult StoreOp::verify()
         if (isFirstElement && getMask())
             return emitOpError("predicate mask is not supported with first_element store_dist");
 
-        auto destElementType = destType.getPtr().getPointee();
         // Explicit masks retain their historical behavior: their predicate
         // geometry is defined by the user and verified below against the
         // source vector. Omitted masks and mask-ignoring first-element stores
@@ -1164,14 +1168,25 @@ mlir::LogicalResult StoreOp::verify()
                                     "pack4_b32 {8,16,32}->8, first_element_b8 8->8, first_element_b16 16->16, "
                                     "and first_element_b32 32->32";
         }
+        // NORM / non-remapping: only Bool mismatches are rejected here so pack /
+        // first_element remaps and historical same-width signedness differences
+        // (e.g. ui32→i32, i16→u16 histograms) keep working. Frontend matches.
+        if (!remapsElementWidth && vectorSource.getElementType() != destElementType &&
+            (isBoolElementType(vectorSource.getElementType()) || isBoolElementType(destElementType)))
+            return emitOpError("store source and destination element types must match");
+    } else if (
+        vectorSource.getElementType() != destElementType &&
+        (isBoolElementType(vectorSource.getElementType()) || isBoolElementType(destElementType))) {
+        return emitOpError("store source and destination element types must match");
     }
     return verifyMaskMatchesVector(getOperation(), getMask(), vectorSource);
 }
 
 static mlir::LogicalResult verifyMaskProducerType(mlir::Operation* op, MaskSSAType maskType, mlir::Type elementType)
 {
-    int64_t elementBytes = getByteSizeOfFixedWidthScalarType(elementType);
     constexpr int64_t kVectorRegisterBytes = 256;
+    // Bool (i1) uses elementStorageBytes → 1B/lane (AscendC CreateMask<bool>/pset_b8).
+    int64_t elementBytes = elementStorageBytes(elementType);
     if (elementBytes <= 0 || kVectorRegisterBytes % elementBytes != 0)
         return op->emitOpError() << "unsupported predicate dtype " << elementType;
     int64_t expectedPhysicalLanes = kVectorRegisterBytes / elementBytes;
@@ -1220,8 +1235,12 @@ mlir::LogicalResult WhereOp::verify()
     if (xIsVector != yIsVector || xIsVector != resultIsVector)
         return emitOpError("requires x, y, and result to all be VectorSSA or all be MaskSSA");
 
-    if (xIsVector)
-        return verifyMaskMatchesVector(getOperation(), getMask(), mlir::cast<VectorSSAType>(getX().getType()));
+    if (xIsVector) {
+        auto xVec = mlir::cast<VectorSSAType>(getX().getType());
+        if (isBoolElementType(xVec.getElementType()))
+            return emitOpError("Bool VectorSSA is move-only (load/store); where/select is not supported");
+        return verifyMaskMatchesVector(getOperation(), getMask(), xVec);
+    }
 
     return verifyMaskSelectTypes(
         getOperation(), getMask().getType(), getX().getType(), getY().getType(), getResult().getType());
@@ -1247,6 +1266,8 @@ mlir::LogicalResult GatherOp::verify()
             return emitOpError("result type must match src vector type");
 
         mlir::Type srcElem = srcTy.getElementType();
+        if (isBoolElementType(srcElem) || isBoolElementType(resultTy.getElementType()))
+            return emitOpError("Bool VectorSSA is move-only (load/store); gather is not supported");
         unsigned srcBytes = 0;
         if (auto intTy = mlir::dyn_cast<mlir::IntegerType>(srcElem)) {
             if (intTy.getWidth() != 8 && intTy.getWidth() != 16 && intTy.getWidth() != 32)
@@ -1278,6 +1299,10 @@ mlir::LogicalResult GatherOp::verify()
     if (!mlir::isa<TlaTensorType>(getX().getType()))
         return emitOpError("gather source must be a UB tensor or !tla.vector");
 
+    if (isBoolElementType(resultTy.getElementType()) ||
+        isBoolElementType(mlir::cast<TlaTensorType>(getX().getType()).getPtr().getPointee()))
+        return emitOpError("Bool VectorSSA is move-only (load/store); gather is not supported");
+
     auto indexElementType = indexType.getElementType();
     auto integerType = mlir::dyn_cast<mlir::IntegerType>(indexElementType);
     if (!integerType || !integerType.isSignless() || integerType.getWidth() != 32)
@@ -1302,6 +1327,8 @@ mlir::LogicalResult ScatterOp::verify()
     mlir::Type element = srcType.getElementType();
     if (dstType.getPtr().getPointee() != element)
         return emitOpError("source and destination element types must match");
+    if (isBoolElementType(element) || isBoolElementType(dstType.getPtr().getPointee()))
+        return emitOpError("Bool VectorSSA is move-only (load/store); scatter is not supported");
     unsigned bits = 0;
     if (auto integer = mlir::dyn_cast<mlir::IntegerType>(element)) {
         bits = integer.getWidth();
@@ -1427,6 +1454,10 @@ mlir::LogicalResult BitCastOp::verify()
 
     VectorSSAType sourceType = getSource().getType();
     VectorSSAType resultType = getResult().getType();
+    // Bool keeps an i1 IR identity but is move-only; do not treat i1 as a 1-bit
+    // register lane for bitcast width math (AscendC storage is b8 / 1 byte).
+    if (isBoolElementType(sourceType.getElementType()) || isBoolElementType(resultType.getElementType()))
+        return emitOpError("Bool VectorSSA is move-only (load/store); bitcast is not supported");
     int64_t sourceBits = getBitSizeOfFixedWidthScalarType(sourceType.getElementType());
     int64_t resultBits = getBitSizeOfFixedWidthScalarType(resultType.getElementType());
     if (sourceBits <= 0 || resultBits <= 0)
@@ -1549,8 +1580,9 @@ mlir::LogicalResult LoadOp::verify()
                     "mask load only supports load_dist norm|us|ds "
                     "(AscendC MaskDist NORM/US/DS)");
             if (dist == LoadDist::us || dist == LoadDist::ds) {
-                // AscendC LoadAlign<T, MaskDist>: SupportBytes<T, 1, 2, 4, 8>.
-                int64_t sourceElemBytes = getByteSizeOfFixedWidthScalarType(sourceType.getPtr().getPointee());
+                // AscendC LoadAlign<T, MaskDist>: SupportBytes<T, 1, 2, 4, 8>
+                // (Bool/i1 → 1 via elementStorageBytes / sizeof(bool)).
+                int64_t sourceElemBytes = elementStorageBytes(sourceType.getPtr().getPointee());
                 if (sourceElemBytes != 1 && sourceElemBytes != 2 && sourceElemBytes != 4 && sourceElemBytes != 8)
                     return emitOpError(
                         "MaskLoadDist US/DS requires a b8/b16/b32/b64 scalar UB "
@@ -1561,7 +1593,7 @@ mlir::LogicalResult LoadOp::verify()
             return emitOpError("block_stride/repeat_stride is not supported when loading !tla.mask");
         if (getUnalignedUbAccess())
             return emitOpError("unaligned_ub_access is not supported when loading !tla.mask");
-        int64_t sourceElemBytes = getByteSizeOfFixedWidthScalarType(sourceType.getPtr().getPointee());
+        int64_t sourceElemBytes = elementStorageBytes(sourceType.getPtr().getPointee());
         bool usOrDs = false;
         if (getLoadDist()) {
             auto dist = getLoadDist()->getLoadDist();
@@ -1699,7 +1731,8 @@ static mlir::LogicalResult verifyUnalignUpdateStride(mlir::Operation* op, mlir::
     auto intAttr = mlir::dyn_cast<mlir::IntegerAttr>(constantOp.getValue());
     if (!intAttr)
         return mlir::success();
-    int64_t elemBytes = getByteSizeOfFixedWidthScalarType(elemType);
+    // SoT: Bool i1 is b8 (1), not getByteSize(i1)==0.
+    int64_t elemBytes = elementStorageBytes(elemType);
     if (elemBytes <= 0)
         return mlir::success();
     constexpr int64_t kVectorRegisterBytes = 256;
@@ -1758,8 +1791,15 @@ mlir::LogicalResult LoadUpdateOp::verify()
         return emitOpError("source must be !tla.tensor");
     if (sourceType.getPtr().getAddrspace() != AddressSpace::ub)
         return emitOpError("source !tla.tensor must be in ub address space");
-    if (!mlir::isa<VectorSSAType>(getResult().getType()))
+    auto resultVec = mlir::dyn_cast<VectorSSAType>(getResult().getType());
+    if (!resultVec)
         return emitOpError("result must be !tla.vector");
+    mlir::Type srcElem = sourceType.getPtr().getPointee();
+    if (resultVec.getElementType() != srcElem)
+        return emitOpError("load_update source and result element types must match");
+    // Align UPDATE stays move-only for Bool; DATA_BLOCK_COPY matches AscendC.
+    if ((isBoolElementType(srcElem) || isBoolElementType(resultVec.getElementType())) && !getBlockStride())
+        return emitOpError("Bool VectorSSA is move-only; load_update is unsupported");
     if (failed(verifyOptionalBlockStride(getOperation(), getBlockStride())))
         return mlir::failure();
     if (getBlockStride()) {
@@ -1768,7 +1808,7 @@ mlir::LogicalResult LoadUpdateOp::verify()
     } else if (failed(verifyUpdateStride(getOperation(), getPostUpdateStride()))) {
         return mlir::failure();
     }
-    return verifyUpdatePtr(getOperation(), getNextPtr(), sourceType.getPtr().getPointee());
+    return verifyUpdatePtr(getOperation(), getNextPtr(), srcElem);
 }
 
 mlir::LogicalResult StoreUpdateOp::verify()
@@ -1780,8 +1820,15 @@ mlir::LogicalResult StoreUpdateOp::verify()
         return emitOpError("dest must be !tla.tensor");
     if (destType.getPtr().getAddrspace() != AddressSpace::ub)
         return emitOpError("dest !tla.tensor must be in ub address space");
-    if (!mlir::isa<VectorSSAType>(getSource().getType()))
+    auto sourceVec = mlir::dyn_cast<VectorSSAType>(getSource().getType());
+    if (!sourceVec)
         return emitOpError("source must be !tla.vector");
+    mlir::Type destElem = destType.getPtr().getPointee();
+    if (sourceVec.getElementType() != destElem)
+        return emitOpError("store_update source and destination element types must match");
+    // Align UPDATE stays move-only for Bool; DATA_BLOCK_COPY matches AscendC.
+    if ((isBoolElementType(sourceVec.getElementType()) || isBoolElementType(destElem)) && !getBlockStride())
+        return emitOpError("Bool VectorSSA is move-only; store_update is unsupported");
     if (failed(verifyOptionalBlockStride(getOperation(), getBlockStride())))
         return mlir::failure();
     if (getBlockStride()) {
@@ -1790,7 +1837,7 @@ mlir::LogicalResult StoreUpdateOp::verify()
     } else if (failed(verifyUpdateStride(getOperation(), getPostUpdateStride()))) {
         return mlir::failure();
     }
-    if (failed(verifyUpdatePtr(getOperation(), getNextPtr(), destType.getPtr().getPointee())))
+    if (failed(verifyUpdatePtr(getOperation(), getNextPtr(), destElem)))
         return mlir::failure();
     return verifyMaskMatchesVector(getOperation(), getMask(), getSource().getType());
 }
@@ -1811,10 +1858,15 @@ mlir::LogicalResult LoadUnalignUpdateOp::verify()
 {
     if (failed(verifyUnalignUbTensor(getOperation(), getSource(), "source")))
         return mlir::failure();
-    if (!mlir::isa<VectorSSAType>(getResult().getType()))
+    auto resultVec = mlir::dyn_cast<VectorSSAType>(getResult().getType());
+    if (!resultVec)
         return emitOpError("result must be !tla.vector");
     auto sourceType = mlir::cast<TlaTensorType>(getSource().getType());
     mlir::Type elemType = sourceType.getPtr().getPointee();
+    if (resultVec.getElementType() != elemType)
+        return emitOpError("load_unalign_update source and result element types must match");
+    if (isBoolElementType(elemType) || isBoolElementType(resultVec.getElementType()))
+        return emitOpError("Bool VectorSSA is move-only; load_update is unsupported");
     if (failed(verifyUnalignUpdateStride(getOperation(), getPostUpdateStride(), elemType)))
         return mlir::failure();
     return verifyUpdatePtr(getOperation(), getNextPtr(), elemType);
@@ -1824,10 +1876,15 @@ mlir::LogicalResult StoreUnalignUpdateOp::verify()
 {
     if (failed(verifyUnalignUbTensor(getOperation(), getDest(), "dest")))
         return mlir::failure();
-    if (!mlir::isa<VectorSSAType>(getSource().getType()))
+    auto sourceVec = mlir::dyn_cast<VectorSSAType>(getSource().getType());
+    if (!sourceVec)
         return emitOpError("source must be !tla.vector");
     auto destType = mlir::cast<TlaTensorType>(getDest().getType());
     mlir::Type elemType = destType.getPtr().getPointee();
+    if (sourceVec.getElementType() != elemType)
+        return emitOpError("store_unalign_update source and destination element types must match");
+    if (isBoolElementType(sourceVec.getElementType()) || isBoolElementType(elemType))
+        return emitOpError("Bool VectorSSA is move-only; store_update is unsupported");
     if (failed(verifyUnalignUpdateStride(getOperation(), getPostUpdateStride(), elemType)))
         return mlir::failure();
     return verifyUpdatePtr(getOperation(), getNextPtr(), elemType);

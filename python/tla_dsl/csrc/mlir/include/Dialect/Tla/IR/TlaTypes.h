@@ -107,13 +107,46 @@ inline int64_t getByteSizeOfFixedWidthScalarType(::mlir::Type type)
     return 0;
 }
 
-/// Width of a scalar element in *bits*.
+/// True for IR Bool (`i1`). Logical identity only — physical storage is b8
+/// (`elementStorageBytes` → 1); AscendC `TypeGet<bool>` → `vector_s8`.
+inline bool isBoolElementType(::mlir::Type type)
+{
+    if (auto intTy = ::llvm::dyn_cast<::mlir::IntegerType>(type))
+        return intTy.getWidth() == 1;
+    return false;
+}
+
+/// Byte width used for VectorSSA / MaskSSA lane capacity, pointer scaling, and
+/// allocation element counts (VL = 256B / bytes).
 ///
-/// The primitive width. getByteSizeOfFixedWidthScalarType above cannot express a
-/// sub-byte element and answers 0 for one, which is the right answer for every
-/// byte-denominated caller (pointer arithmetic, vector lanes) -- those genuinely
-/// cannot address half a byte and should refuse. Callers that convert between an
-/// element count and a byte size need this one instead.
+/// AscendC `TypeGet<bool>` → `vector_s8` and `CreateMask<bool>` take the
+/// `sizeof(T)==1` / `pset_b8` path, so Bool occupies **1 byte per lane** even
+/// though IR keeps an `i1` element identity. `getByteSizeOfFixedWidthScalarType`
+/// returns 0 for i1 (not byte-aligned); this helper maps i1 → 1 and otherwise
+/// forwards to that helper. **Prefer this over `getBitSize…` for any
+/// byte-denominated math.**
+inline int64_t elementStorageBytes(::mlir::Type type)
+{
+    if (isBoolElementType(type))
+        return 1;
+    return getByteSizeOfFixedWidthScalarType(type);
+}
+
+/// Storage width in bits (`elementStorageBytes * 8`). Use for stride alignment
+/// quanta; do not confuse with `getBitSizeOfFixedWidthScalarType` (logical bits,
+/// where Bool is 1).
+inline int64_t elementStorageBits(::mlir::Type type)
+{
+    int64_t bytes = elementStorageBytes(type);
+    return bytes > 0 ? bytes * 8 : 0;
+}
+
+/// Logical width of a scalar element in *bits* (Bool → 1, packed fp4 → 4).
+///
+/// Not for capacity / pointer arithmetic — those use `elementStorageBytes` /
+/// `elementStorageBits`. `getByteSizeOfFixedWidthScalarType` answers 0 for
+/// sub-byte types; callers that convert element counts to byte sizes of true
+/// packed formats need this one instead.
 inline int64_t getBitSizeOfFixedWidthScalarType(::mlir::Type type)
 {
     if (auto intTy = ::llvm::dyn_cast<::mlir::IntegerType>(type))

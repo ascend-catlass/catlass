@@ -109,6 +109,9 @@ REGISTER_GM_TO_UB(RowMajor, RowMajor, float4_e1m2x2_t)
 REGISTER_GM_TO_UB(RowMajor, RowMajor, float8_e8m0_t)
 // HiFloat8: IR tla.hif8 / memref i8; tile Copy*Tla reinterprets as uint8 DataCopyPad.
 REGISTER_GM_TO_UB(RowMajor, RowMajor, hifloat8_t)
+// Bool / i1: AscendC b8 (sizeof==1, SizeOfBits==8); Tile Copy*Tla accepts bool
+// like int8_t. Symbol suffix is ``bool`` (copyRuntimeElemSuffix).
+REGISTER_GM_TO_UB(RowMajor, RowMajor, bool)
 
 REGISTER_UB_TO_GM(RowMajor, RowMajor, float)
 REGISTER_UB_TO_GM(RowMajor, RowMajor, half)
@@ -128,6 +131,7 @@ REGISTER_UB_TO_GM(RowMajor, RowMajor, float4_e2m1x2_t)
 REGISTER_UB_TO_GM(RowMajor, RowMajor, float4_e1m2x2_t)
 REGISTER_UB_TO_GM(RowMajor, RowMajor, float8_e8m0_t)
 REGISTER_UB_TO_GM(RowMajor, RowMajor, hifloat8_t)
+REGISTER_UB_TO_GM(RowMajor, RowMajor, bool)
 
 REGISTER_UB_TO_UB(RowMajor, RowMajor, float)
 REGISTER_UB_TO_UB(RowMajor, RowMajor, half)
@@ -140,6 +144,7 @@ REGISTER_UB_TO_UB(RowMajor, RowMajor, uint16_t)
 REGISTER_UB_TO_UB(RowMajor, RowMajor, uint8_t)
 REGISTER_UB_TO_UB(RowMajor, RowMajor, fp8_e4m3fn_t)
 REGISTER_UB_TO_UB(RowMajor, RowMajor, fp8_e5m2_t)
+REGISTER_UB_TO_UB(RowMajor, RowMajor, bool)
 // MX types keep their own denomination here: the block scale is one byte and
 // packed fp4 counts 4-bit elements in the template, so neither is a byte move.
 REGISTER_UB_TO_UB(RowMajor, RowMajor, float8_e8m0_t)
@@ -162,6 +167,8 @@ REGISTER_UB_TO_UB(RowMajor, ColumnMajor, uint16_t)
 REGISTER_UB_TO_UB(RowMajor, ColumnMajor, uint8_t)
 REGISTER_UB_TO_UB(RowMajor, ColumnMajor, fp8_e4m3fn_t)
 REGISTER_UB_TO_UB(RowMajor, ColumnMajor, fp8_e5m2_t)
+// Bool transpose: CopyUb2UbTla VNCHWCONV b8 path (SizeOfBits==8).
+REGISTER_UB_TO_UB(RowMajor, ColumnMajor, bool)
 
 REGISTER_UB_TO_L1(RowMajor, zN, float)
 REGISTER_UB_TO_L1(RowMajor, zN, half)
@@ -176,6 +183,7 @@ REGISTER_UB_TO_L1(RowMajor, zN, fp8_e4m3fn_t)
 REGISTER_UB_TO_L1(RowMajor, zN, fp8_e5m2_t)
 REGISTER_UB_TO_L1(RowMajor, zN, float4_e2m1x2_t)
 REGISTER_UB_TO_L1(RowMajor, zN, float4_e1m2x2_t)
+REGISTER_UB_TO_L1(RowMajor, zN, bool)
 REGISTER_UB_TO_L1(zN, zN, float)
 REGISTER_UB_TO_L1(zN, zN, half)
 REGISTER_UB_TO_L1(zN, zN, bf16)
@@ -189,6 +197,7 @@ REGISTER_UB_TO_L1(zN, zN, fp8_e4m3fn_t)
 REGISTER_UB_TO_L1(zN, zN, fp8_e5m2_t)
 REGISTER_UB_TO_L1(zN, zN, float4_e2m1x2_t)
 REGISTER_UB_TO_L1(zN, zN, float4_e1m2x2_t)
+REGISTER_UB_TO_L1(zN, zN, bool)
 // The MX block scale is an e8m0 exponent byte on both sides, so it rides the
 // typed UB -> L1 route like fp8: the specialization that lands the scale block
 // the L1 -> L0 load reads is chosen by layout order, not by element type.

@@ -660,9 +660,9 @@ class _Tensor(TensorABC):
               require 32-byte alignment. `DIST_UNPACK_B8` / `DIST_UNPACK_B32` read 128 bytes;
               DS reads 512 bytes. The caller must provide the
               complete valid source range, independently of the tile shape.
-            - `BlockLoadParams` requires a 2/4-byte element type
-              (f32/f16/bf16/i32/u32/i16/u16); `block_stride` and
-              `repeat_stride` must fit in [0, 65535].
+            - `BlockLoadParams` follows AscendC ``DATA_BLOCK_COPY``
+              (b8/b16/b32; b8 includes i8/u8, Bool as b8);
+              `block_stride` and `repeat_stride` must fit in [0, 65535].
             - ``DIST_US`` / ``DIST_DS``: UB element type may be any
               b8/b16/b32/b64 scalar. The element type only types the UB
               address; the mask bit layout does not depend on element width.
@@ -753,6 +753,8 @@ class _Tensor(TensorABC):
                     f"expected one of {allowed}"
                 )
             elem = str(source_desc.element_type).strip().lower()
+            # AscendC LoadAlign<T, MaskDist> uses T only for address typing;
+            # SupportBytes<T,1,2,4,8> admits bool via sizeof(bool)==1 (b8).
             elem_bytes = dtype_size_bytes(elem)
             is_us_ds = params.load_dist in (
                 MaskLoadDist.DIST_US,
@@ -955,16 +957,6 @@ class _Tensor(TensorABC):
                         "(16-bit immediate field), got "
                         f"{stride_value}"
                     )
-            # vsldb stubs cover 2/4-byte lanes (f32/f16/bf16/i32/u32/i16/u16);
-            # b8 has no VectorReg shim yet.
-            elem = str(source_desc.element_type).strip().lower()
-            if dtype_size_bytes(elem) not in (2, 4):
-                raise TlaLoweringError(
-                    "BlockLoadParams requires a 2/4-byte element type "
-                    "(f32/f16/bf16/i32/u32/i16/u16), got "
-                    f"{source_desc.element_type}"
-                )
-
         load_kwargs: dict[str, Any] = {"loc": loc}
         if isinstance(params, UnalignLoadParams):
             load_kwargs["unaligned_ub_access"] = True
@@ -1262,7 +1254,11 @@ class _Tensor(TensorABC):
             StoreDist,
             UnalignStoreParams,
         )
-        from ..types import dtype_size_bytes
+        from ..types import (
+            dtype_size_bytes,
+            is_bool_element_type,
+            normalize_element_type_token,
+        )
 
         loc = _normalize_user_loc(loc)
         _require_frontend_state("store")
@@ -1291,6 +1287,8 @@ class _Tensor(TensorABC):
                 )
             _require_category("store", "value", value, "mask_ssa", 1)
             elem = str(dest_desc.element_type).strip().lower()
+            # AscendC StoreAlign<__ubuf__ T*, MaskReg>: T is address typing;
+            # sizeof(bool)==1 admits Bool as the b8 MaskReg spill path.
             if dtype_size_bytes(elem) not in _MASK_UB_ELEM_BYTES:
                 _op_error(
                     "store",
@@ -1374,10 +1372,19 @@ class _Tensor(TensorABC):
             if not is_block:
                 _require_update_unit_stride(window)
             dest = _as_value(window)
-            if not is_block:
-                _require_update_supported_dtype(
-                    _tla_tensor_type_for_mlir_value(dest).element_type
+            dest_desc = _tla_tensor_type_for_mlir_value(dest)
+            src_elem = normalize_element_type_token(
+                _vector_ssa_type_for_mlir_value(value_val).element_type
+            )
+            dst_elem = normalize_element_type_token(dest_desc.element_type)
+            if src_elem != dst_elem:
+                _op_error(
+                    "store",
+                    "source and destination element types must match "
+                    f"(got source {src_elem}, dest {dst_elem})",
                 )
+            if not is_block:
+                _require_update_supported_dtype(dest_desc.element_type)
             ptr_type = _tla_type_bridge.tensor_ptr_type_get(dest.type)
             store_kwargs: dict[str, Any] = {"mask": mask_val, "loc": loc}
             if is_block:
@@ -1461,9 +1468,49 @@ class _Tensor(TensorABC):
         if isinstance(params, UnalignStoreParams):
             store_kwargs["unaligned_ub_access"] = True
         if isinstance(params, BlockStoreParams):
+            # AscendC DATA_BLOCK_COPY accepts bool via b8 (vsstb int8 stub).
             block_stride_value = _as_value(params.block_stride)
         else:
             block_stride_value = None
+        if (
+            isinstance(params, NormalStoreParams)
+            and params.store_dist != StoreDist.DIST_NORM
+            and is_bool_element_type(dest_desc.element_type)
+        ):
+            _op_error(
+                "store",
+                "Bool VectorSSA is move-only; non-NORM store_dist is unsupported",
+            )
+        # Align with TlaOps verify: only Bool (i1) mismatches are rejected for
+        # non-remapping stores. Pack / first_element remaps widths; same-width
+        # signedness differences (e.g. i16→u16 histograms) stay allowed.
+        _remapping_store_dists = (
+            StoreDist.DIST_PACK_B16,
+            StoreDist.DIST_PACK_B32,
+            StoreDist.DIST_PACK4_B32,
+            StoreDist.DIST_FIRST_ELEMENT_B8,
+            StoreDist.DIST_FIRST_ELEMENT_B16,
+            StoreDist.DIST_FIRST_ELEMENT_B32,
+        )
+        remaps = (
+            isinstance(params, NormalStoreParams)
+            and params.store_dist in _remapping_store_dists
+        )
+        if not remaps:
+            from ..types import is_bool_element_type
+
+            src_elem = normalize_element_type_token(
+                _vector_ssa_type_for_mlir_value(value_val).element_type
+            )
+            dst_elem = normalize_element_type_token(dest_desc.element_type)
+            if src_elem != dst_elem and (
+                is_bool_element_type(src_elem) or is_bool_element_type(dst_elem)
+            ):
+                _op_error(
+                    "store",
+                    "source and destination element types must match "
+                    f"(got source {src_elem}, dest {dst_elem})",
+                )
         _tla_ops_gen.store(
             dest,
             value_val,

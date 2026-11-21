@@ -1,8 +1,10 @@
-// Flat VectorLayout GM->L1 for narrow continuous element types (i8 / f16 / bf16).
+// Flat VectorLayout GM->L1 for narrow continuous element types (i8 / i1 / f16 / bf16).
 // These resolve through copyRuntimeElemSuffix (unlike b64 special-cases).
 
 // RUN: split-file %s %t
 // RUN: %tla_compile %t/i8.mlir -o - 2>&1 | %filecheck %s --check-prefix=I8
+// RUN: %tla_compile %t/i1.mlir -o - 2>&1 | %filecheck %s --check-prefix=BOOL
+// RUN: %tla_compile %t/i1.mlir --mlir-print-ir-after=tla-cube-region -o %t/i1.out 2>&1 | %filecheck %s --check-prefix=BOOL-CAP
 // RUN: %tla_compile %t/f16.mlir -o - 2>&1 | %filecheck %s --check-prefix=F16
 // RUN: %tla_compile %t/bf16.mlir -o - 2>&1 | %filecheck %s --check-prefix=BF16
 
@@ -25,6 +27,30 @@ module {
 
 // I8-DAG: func.func private @copy_gm_VectorLayout_to_l1_VectorLayout_int8_t
 // I8: call @copy_gm_VectorLayout_to_l1_VectorLayout_int8_t
+
+//--- i1.mlir
+
+!gm = !tla.tensor<!tla.layout<!tla.shape<256>, !tla.stride<1>, !tla.shape<256>, VectorLayout>, !tla.coord<0>, !tla.ptr<i1, gm, 1>>
+!l1 = !tla.tensor<!tla.layout<!tla.shape<256>, !tla.stride<1>, !tla.shape<256>, VectorLayout>, !tla.coord<0>, !tla.ptr<i1, l1, 512>>
+
+module {
+  "tla.func"() ({
+  ^bb0(%arg0: !gm):
+    %0 = "tla.alloc_ptr"() {size_bytes = 256 : i64} : () -> !tla.ptr<i1, l1, 512>
+    %1 = "tla.make_tensor_like"(%0, %arg0) {layoutTag = #tla.layout_tag<VectorLayout>} : (!tla.ptr<i1, l1, 512>, !gm) -> !l1
+    "tla.cube"() ({
+      "tla.copy"(%1, %arg0) : (!l1, !gm) -> ()
+    }) : () -> ()
+    "tla.return"() : () -> ()
+  }) {function_type = (!gm) -> (), sym_name = "vector_flat_i1"} : () -> ()
+}
+
+// BOOL-DAG: func.func private @copy_gm_VectorLayout_to_l1_VectorLayout_bool
+// BOOL-DAG: attributes {{{.*}}llvm.emit_c_interface{{.*}}}
+// BOOL: call @copy_gm_VectorLayout_to_l1_VectorLayout_bool
+// Bool i1 is AscendC b8: size_bytes=256 → memref<256xi1>, not 2048xi1.
+// BOOL-CAP: memref<256xi1
+// BOOL-CAP-NOT: memref<2048xi1
 
 //--- f16.mlir
 

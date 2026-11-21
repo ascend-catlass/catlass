@@ -139,7 +139,9 @@ def _bad(
 @pytest.mark.parametrize(
     ("dst_type", "message"),
     [
-        (tla.Bool, "unsupported destination element type"),
+        # Bool is a register type but move-only; bitcast is refused before the
+        # generic unsupported-destination path.
+        (tla.Bool, "Bool VectorSSA is move-only"),
         # E8M0 registers support byte-preserving transport, not bitcast.
         (tla.Float8E8M0, "unsupported destination element type"),
     ],
