@@ -74,6 +74,7 @@ Supported mmad dtypes
 | `f8e4m3fn` | `f8e5m2` | `f32` |
 | `f8e5m2` | `f8e4m3fn` | `f32` |
 | `f8e5m2` | `f8e5m2` | `f32` |
+| `hif8` | `hif8` | `f32` |
 | `i8` | `i8` | `i32` |
 
 Example:

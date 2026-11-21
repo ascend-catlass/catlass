@@ -1,3 +1,19 @@
+// RUN: %python %S/Inputs/generate_mmad_ir.py hif8 | %tla_compile - -o - | %filecheck %s --check-prefix=HIF8
+// RUN: %python %S/Inputs/generate_mmad_ir.py hif8-bias | %tla_compile - -o - | %filecheck %s --check-prefix=HIF8BIAS
+
+// HIF8-COUNT-1: func.func private @mmad_hifloat8_t_hifloat8_t_float(
+// HIF8-LABEL: func.func @_kernel(
+// HIF8: call @mmad_hifloat8_t_hifloat8_t_float(
+// HIF8-NOT: call @mmad_fp8_e4m3fn_t_fp8_e4m3fn_t_float(
+
+// HIF8BIAS-COUNT-1: func.func private @mmad_bias_hifloat8_t_hifloat8_t_float(
+// HIF8BIAS-SAME: hacc.always_inline
+// HIF8BIAS-SAME: hivm.func_core_type = #hivm.func_core_type<AIC>
+// HIF8BIAS-SAME: llvm.emit_c_interface
+// HIF8BIAS-LABEL: func.func @_kernel(
+// HIF8BIAS: call @mmad_bias_hifloat8_t_hifloat8_t_float({{%.*}}, {{%.*}}, {{%.*}}, {{%.*}}, {{%.*}}, {{%.*}}, {{%.*}}, {{%.*}}, {{%.*}})
+// HIF8BIAS-NOT: call @mmad_hifloat8_t_hifloat8_t_float(
+
 // Every input in this test is emitted by a legal Python @tla.kernel. Do not add
 // hand-written IR that bypasses frontend validation.
 // RUN: %python %S/Inputs/generate_mmad_ir.py f16 | %tla_compile - -o - | %filecheck %s --check-prefix=F16

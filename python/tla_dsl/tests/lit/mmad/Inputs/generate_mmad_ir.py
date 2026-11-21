@@ -495,6 +495,85 @@ def _fp8_mmad_kernel(elem_a, elem_b):
     return _kernel
 
 
+def _hif8_mmad_kernel():
+    """Build a cube kernel using the semantic HiFloat8 DSL type."""
+
+    @tla.kernel
+    def _kernel() -> None:
+        lhs_parent = tla.make_tensor(
+            tla.allocate((128, 64), tla.HiFloat8, tla.AddressSpace.l1, 512),
+            tla.make_layout(tla.make_shape(128, 64), tla.make_stride(64, 1)),
+        )
+        rhs_parent = tla.make_tensor(
+            tla.allocate((64, 128), tla.HiFloat8, tla.AddressSpace.l1, 512),
+            tla.make_layout(tla.make_shape(64, 128), tla.make_stride(128, 1)),
+        )
+        acc_parent = tla.make_tensor(
+            tla.allocate((128, 128), tla.Float32, tla.AddressSpace.l1, 512),
+            tla.make_layout(tla.make_shape(128, 128), tla.make_stride(128, 1)),
+        )
+        lhs = tla.make_tensor_like(
+            tla.allocate((128, 64), tla.HiFloat8, tla.AddressSpace.l0a, 512),
+            lhs_parent,
+            tla.arch.zN,
+        )
+        rhs = tla.make_tensor_like(
+            tla.allocate((64, 128), tla.HiFloat8, tla.AddressSpace.l0b, 512),
+            rhs_parent,
+            tla.arch.nZ,
+        )
+        acc = tla.make_tensor_like(
+            tla.allocate((128, 128), tla.Float32, tla.AddressSpace.l0c, 1024),
+            acc_parent,
+            tla.arch.L0Clayout,
+        )
+        with tla.cube():
+            tla.mmad(acc, lhs, rhs, init_c=True, unit_flag=3)
+
+    return _kernel
+
+
+def _hif8_mmad_bias_kernel():
+    """The same HiFloat8 matmul with a bias operand: the bias route selects the
+    dedicated mmad_bias_hifloat8_t_hifloat8_t_float BC symbol."""
+
+    @tla.kernel
+    def _kernel() -> None:
+        lhs_parent = tla.make_tensor(
+            tla.allocate((128, 64), tla.HiFloat8, tla.AddressSpace.l1, 512),
+            tla.make_layout(tla.make_shape(128, 64), tla.make_stride(64, 1)),
+        )
+        rhs_parent = tla.make_tensor(
+            tla.allocate((64, 128), tla.HiFloat8, tla.AddressSpace.l1, 512),
+            tla.make_layout(tla.make_shape(64, 128), tla.make_stride(128, 1)),
+        )
+        acc_parent = tla.make_tensor(
+            tla.allocate((128, 128), tla.Float32, tla.AddressSpace.l1, 512),
+            tla.make_layout(tla.make_shape(128, 128), tla.make_stride(128, 1)),
+        )
+        bias = tla.make_tensor_like(
+            tla.allocate((128,), tla.Float32, tla.AddressSpace.biasbuf, 512),
+            tla.make_tensor(
+                tla.allocate((128,), tla.Float32, tla.AddressSpace.l1, 512),
+                tla.make_layout(tla.make_shape(128), tla.make_stride(1)),
+            ),
+            tla.arch.VectorLayout,
+        )
+        lhs = tla.make_tensor_like(
+            tla.allocate((128, 64), tla.HiFloat8, tla.AddressSpace.l0a, 512), lhs_parent, tla.arch.zN
+        )
+        rhs = tla.make_tensor_like(
+            tla.allocate((64, 128), tla.HiFloat8, tla.AddressSpace.l0b, 512), rhs_parent, tla.arch.nZ
+        )
+        acc = tla.make_tensor_like(
+            tla.allocate((128, 128), tla.Float32, tla.AddressSpace.l0c, 1024), acc_parent, tla.arch.L0Clayout
+        )
+        with tla.cube():
+            tla.mmad(acc, lhs, rhs, init_c=True, unit_flag=3, bias=bias)
+
+    return _kernel
+
+
 @tla.kernel
 def _fp8_vector_copy_kernel(mem_a: tla.Tensor) -> None:
     """fp8 staged through UB on the vector path.
@@ -581,6 +660,8 @@ def main() -> None:
             "i8-fixpipe",
             "fp8",
             "fp8-mixed",
+            "hif8",
+            "hif8-bias",
             "fp8-vector-copy",
             "mx",
             "mx-mixed",
@@ -611,6 +692,10 @@ def main() -> None:
         kernel, type_args = _fp8_mmad_kernel(tla.Float8E4M3FN, tla.Float8E4M3FN), ()
     elif case == "fp8-mixed":
         kernel, type_args = _fp8_mmad_kernel(tla.Float8E4M3FN, tla.Float8E5M2), ()
+    elif case == "hif8":
+        kernel, type_args = _hif8_mmad_kernel(), ()
+    elif case == "hif8-bias":
+        kernel, type_args = _hif8_mmad_bias_kernel(), ()
     elif case == "fp8-vector-copy":
         kernel, type_args = _fp8_vector_copy_kernel, _fp8_vector_copy_args()
     elif case == "mx":

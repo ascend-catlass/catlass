@@ -117,8 +117,8 @@ Supported cube copy routes without scale, `tla.copy(dst, src, scale=None)`
 
 |`src_addr`|`src_layout`|`dst_addr`|`dst_layout`|`dtypes`|
 |----------|------------|----------|------------|--------|
-|`gm`|`RowMajor`|`l1`|`zN`|`f32`,`f16`,`bf16`,`i8`,`i1`,`i16`,`i32`,`u8`,`u16`,`u32`,`f8e4m3fn`,`f8e5m2`,`f4e2m1`,`f4e1m2`|
-|`gm`|`ColumnMajor`|`l1`|`nZ`|`f32`,`f16`,`bf16`,`i8`,`i1`,`i16`,`i32`,`u8`,`u16`,`u32`,`f8e4m3fn`,`f8e5m2`,`f4e2m1`,`f4e1m2`|
+|`gm`|`RowMajor`|`l1`|`zN`|`f32`,`f16`,`bf16`,`i8`,`i1`,`i16`,`i32`,`u8`,`u16`,`u32`,`f8e4m3fn`,`f8e5m2`,`hif8`,`f4e2m1`,`f4e1m2`|
+|`gm`|`ColumnMajor`|`l1`|`nZ`|`f32`,`f16`,`bf16`,`i8`,`i1`,`i16`,`i32`,`u8`,`u16`,`u32`,`f8e4m3fn`,`f8e5m2`,`hif8`,`f4e2m1`,`f4e1m2`|
 |`gm`|`zN`|`l1`|`zN`|`f32`,`f16`,`bf16`,`i8`,`i16`,`i32`,`u8`,`u16`,`u32`,`f8e4m3fn`,`f8e5m2`,`f4e2m1`,`f4e1m2`|
 |`gm`|`nZ`|`l1`|`nZ`|`f32`,`f16`,`bf16`,`i8`,`i16`,`i32`,`u8`,`u16`,`u32`,`f8e4m3fn`,`f8e5m2`,`f4e2m1`,`f4e1m2`|
 |`gm`|`zNUnAlign`|`l1`|`zNUnAlign`|`f32`,`f16`,`bf16`|
@@ -128,10 +128,10 @@ Supported cube copy routes without scale, `tla.copy(dst, src, scale=None)`
 |`gm`|`ColMajorMxScaleB`|`l1`|`nNMxScale`|`f8e8m0`|
 |`gm`|`VectorLayout`|`l1`|`VectorLayout`|`f32`,`f16`,`bf16`,`i8`,`i1`,`i16`,`i32`,`i64`,`u8`,`u16`,`u32`,`u64`,`f64`|
 |`l1`|`VectorLayout`|`biasbuf`|`VectorLayout`|`f32`,`i32`|
-|`l1`|`zN`|`l0a`|`zN`|`f32`,`f16`,`bf16`,`i8`,`u32`,`f8e4m3fn`,`f8e5m2`|
-|`l1`|`nZ`|`l0a`|`zN`|`f32`,`f16`,`bf16`,`i8`,`u32`,`f8e4m3fn`,`f8e5m2`|
-|`l1`|`zN`|`l0b`|`nZ`|`f32`,`f16`,`bf16`,`i8`,`u32`,`f8e4m3fn`,`f8e5m2`|
-|`l1`|`nZ`|`l0b`|`nZ`|`f32`,`f16`,`bf16`,`i8`,`u32`,`f8e4m3fn`,`f8e5m2`|
+|`l1`|`zN`|`l0a`|`zN`|`f32`,`f16`,`bf16`,`i8`,`u32`,`f8e4m3fn`,`f8e5m2`,`hif8`|
+|`l1`|`nZ`|`l0a`|`zN`|`f32`,`f16`,`bf16`,`i8`,`u32`,`f8e4m3fn`,`f8e5m2`,`hif8`|
+|`l1`|`zN`|`l0b`|`nZ`|`f32`,`f16`,`bf16`,`i8`,`u32`,`f8e4m3fn`,`f8e5m2`,`hif8`|
+|`l1`|`nZ`|`l0b`|`nZ`|`f32`,`f16`,`bf16`,`i8`,`u32`,`f8e4m3fn`,`f8e5m2`,`hif8`|
 
 
 Supported cube copy routes carrying a scale (tla.mmad_mx),

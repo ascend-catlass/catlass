@@ -68,7 +68,6 @@ def basic_mmad_kernel(
     l0b0_available = tla.flag("l0b0_available", tla.arch.CUBE, tla.arch.MTE1)
     l0b1_available = tla.flag("l0b1_available", tla.arch.CUBE, tla.arch.MTE1)
     l0_ab_data_ready = tla.flag("l0_ab_data_ready", tla.arch.MTE1, tla.arch.CUBE)
-    l0c_available = tla.flag("l0c_available", tla.arch.FIX, tla.arch.CUBE)
 
     l1a0_ptr = tla.allocate(
         _tiling.l1_tm * _tiling.l1_tk, dtype_a, tla.AddressSpace.l1, 512
@@ -115,7 +114,6 @@ def basic_mmad_kernel(
         tla.set_flag(l0a1_available)
         tla.set_flag(l0b0_available)
         tla.set_flag(l0b1_available)
-        tla.set_flag(l0c_available)
 
         runtime_zero = tla.as_numeric(0)
         l1_buf_idx = runtime_zero
@@ -320,7 +318,6 @@ def basic_mmad_kernel(
         tla.wait_flag(l0a1_available)
         tla.wait_flag(l0b0_available)
         tla.wait_flag(l0b1_available)
-        tla.wait_flag(l0c_available)
 
 
 # torch cannot export fp8 over DLPack, so fp8 buffers go through
@@ -328,7 +325,52 @@ def basic_mmad_kernel(
 _FP8_TLA_TYPES = {
     "f8e4m3fn": tla.Float8E4M3FN,
     "f8e5m2": tla.Float8E5M2,
+    "hif8": tla.HiFloat8,
 }
+
+
+def _decode_hif8(codes: torch.Tensor) -> torch.Tensor:
+    """Decode HiF8 byte codes to float64 values.
+
+    The wide-dynamic region (dot >= 2) follows the dense-region rules; 0x00 is
+    +0, 0x80 is NaN, and the dot-4 code with mantissa 1 decodes to inf.
+    """
+
+    codes = codes.to(torch.int64)
+    bits = codes & 0x7F
+
+    # Wide-dynamic subnormals 1..7 and the 8..15 dense codes.
+    out = torch.zeros(codes.shape, dtype=torch.float64)
+    low = (bits >= 1) & (bits < 8)
+    out = torch.where(low, torch.pow(2.0, (bits - 23).to(torch.float64)), out)
+    mid = (bits >= 8) & (bits < 16)
+    out = torch.where(mid, 1.0 + (bits & 7).to(torch.float64) / 8.0, out)
+
+    # Codes 16..127: one of four dot groups sharing the dense formula.
+    dense = bits >= 16
+    dot = torch.where(
+        bits < 32, 1, torch.where(bits < 64, 2, torch.where(bits < 96, 3, 4))
+    )
+    mantissa_bits = torch.where(dot <= 2, 3, 5 - dot)
+    exponent_bits = torch.bitwise_right_shift(bits, mantissa_bits) & (
+        torch.pow(2, dot) - 1
+    )
+    magnitude = torch.pow(2, dot - 1) | (exponent_bits & (torch.pow(2, dot - 1) - 1))
+    exponent = torch.where(
+        exponent_bits & torch.pow(2, dot - 1) != 0, -magnitude, magnitude
+    )
+    mantissa = bits & (torch.pow(2, mantissa_bits) - 1)
+    value = torch.pow(2.0, exponent.to(torch.float64)) * (
+        1.0
+        + mantissa.to(torch.float64) / torch.pow(2.0, mantissa_bits.to(torch.float64))
+    )
+    value = torch.where((exponent == 15) & (mantissa == 1), torch.inf, value)
+    out = torch.where(dense, value, out)
+
+    sign = torch.where(codes & 0x80 != 0, -1.0, 1.0)
+    out = sign * out
+    # 0x80 carries the sign with a zero payload and decodes to NaN.
+    return torch.where((bits == 0) & (codes & 0x80 != 0), torch.nan, out)
 
 
 def run(args: argparse.Namespace) -> int:
@@ -355,6 +397,7 @@ def run(args: argparse.Namespace) -> int:
         "i32": torch.int32,
         "f8e4m3fn": torch.float8_e4m3fn,
         "f8e5m2": torch.float8_e5m2,
+        "hif8": torch.uint8,
     }
     dtype_a = dtypes[args.dtype_a]
     dtype_b = dtypes[args.dtype_b]
@@ -368,6 +411,7 @@ def run(args: argparse.Namespace) -> int:
     # i8,i8 -> i32 is the integer MMAD route; the accumulator in L0C is i32.
     # It is exact and never takes the hf32 path, which is fp32-only.
     is_int_route = args.dtype_a == "i8"
+    is_hif8_route = args.dtype_a == "hif8"
     # hf32 is an fp32-only rounding mode; every other route leaves it off.
     enable_hf32 = False
     is_fp8_route = args.dtype_a in ("f8e4m3fn", "f8e5m2")
@@ -381,6 +425,21 @@ def run(args: argparse.Namespace) -> int:
         c = torch.zeros(args.m, args.n, dtype=dtype_c, device="cpu")
         # Small magnitudes keep the exact int32 product inside float64.
         ref = (a.double() @ b.double()).to(torch.int32)
+    elif is_hif8_route:
+        if args.dtype_b != "hif8" or args.dtype_c != "f32":
+            raise SystemExit("the HF8 route requires hif8 operands and --dtype-c f32")
+        a = (
+            (torch.arange(args.m * args.k, dtype=torch.int64) % 8 + 8)
+            .reshape(args.m, args.k)
+            .to(torch.uint8)
+        )
+        b = (
+            (torch.arange(args.k * args.n, dtype=torch.int64) % 8 + 8)
+            .reshape(args.k, args.n)
+            .to(torch.uint8)
+        )
+        c = torch.zeros(args.m, args.n, dtype=dtype_c, device="cpu")
+        ref = (_decode_hif8(a) @ _decode_hif8(b)).float()
     elif is_fp8_route:
         if args.dtype_b not in ("f8e4m3fn", "f8e5m2") or args.dtype_c != "f32":
             raise SystemExit(
@@ -419,6 +478,8 @@ def run(args: argparse.Namespace) -> int:
     # otherwise only derives metadata.
     fp8_a = _FP8_TLA_TYPES.get(args.dtype_a)
     fp8_b = _FP8_TLA_TYPES.get(args.dtype_b)
+    if is_hif8_route:
+        fp8_a = fp8_b = tla.HiFloat8
     shape_a = (args.m, args.k)
     shape_b = (args.k, args.n)
     if args.layout_a == "zN":
@@ -443,14 +504,21 @@ def run(args: argparse.Namespace) -> int:
     if args.layout_c == "col":
         c = c.permute(1, 0)
     c = c.contiguous().npu()
-    c_tensor = create_tla_tensor(c, args.layout_c, _FP8_TLA_TYPES.get(args.dtype_c))
+    c_tensor = create_tla_tensor(c, args.layout_c, None)
 
     artifact = tla.compile(
         basic_mmad_kernel,
         a_tensor,
         b_tensor,
         c_tensor,
-        TilingParams(),  # default tiling: L1: (256, 256, 128); L0: (256, 256, 32)
+        TilingParams(
+            l1_tm=32 if is_hif8_route else 256,
+            l1_tn=32 if is_hif8_route else 256,
+            l1_tk=128,
+            l0_tm=32 if is_hif8_route else 256,
+            l0_tn=32 if is_hif8_route else 256,
+            l0_tk=32,
+        ),  # HF8 keeps a 32x32 output tile; other routes use the default tiling.
         swizzle,
         hf32_mode,
         is_int_route,
@@ -472,6 +540,10 @@ def run(args: argparse.Namespace) -> int:
         passed = compare(result, ref)
     elif enable_hf32:
         passed = compare(result, ref, enable_hf32=True)
+    elif is_hif8_route:
+        # Same f32 bound the rest of the examples use; the fixed dense codes
+        # keep the golden around 1e3, well above the atol floor.
+        passed = compare(result, ref, rtol=1.2e-4, atol=1.2e-4)
     else:
         passed = compare(result, ref, args.k)
     print(f"passed={passed} cache_key={artifact.cache_key}")
@@ -489,7 +561,7 @@ def main() -> int:
     parser.add_argument("--layout-b", choices=("row", "col", "nZ"), default="row")
     # `col` sends the L0C -> GM store through the transposing (nz2dn) fixpipe.
     parser.add_argument("--layout-c", choices=("row", "col"), default="row")
-    dtypes_ab = ("f16", "bf16", "f32", "i8", "f8e4m3fn", "f8e5m2")
+    dtypes_ab = ("f16", "bf16", "f32", "i8", "f8e4m3fn", "f8e5m2", "hif8")
     parser.add_argument("--dtype-a", choices=dtypes_ab, default="f16")
     parser.add_argument("--dtype-b", choices=dtypes_ab, default="f16")
     parser.add_argument(

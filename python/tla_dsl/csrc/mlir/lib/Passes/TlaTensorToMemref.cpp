@@ -1171,7 +1171,8 @@ static bool isAicTemplateRuntimeCall(StringRef name)
     if (name == "mmad_float_float_float" || name == "mmad_half_half_float" || name == "mmad_bf16_bf16_float" ||
         name == "mmad_int8_int8_int32" || name == "mmad_bias_float_float_float" ||
         name == "mmad_bias_half_half_float" || name == "mmad_bias_bf16_bf16_float" ||
-        name == "mmad_bias_int8_int8_int32" || name == "tla_print_tensor_l1_f32")
+        name == "mmad_bias_int8_int8_int32" || name == "mmad_hifloat8_t_hifloat8_t_float" ||
+        name == "mmad_bias_hifloat8_t_hifloat8_t_float" || name == "tla_print_tensor_l1_f32")
         return true;
     // FP8 MMAD: one symbol per operand-format pairing (the two formats can mix).
     // The BC symbols are named after the C++ element type the wrapper
@@ -1214,8 +1215,8 @@ static bool isAicTemplateRuntimeCall(StringRef name)
     if (!(name.ends_with("_float") || name.ends_with("_half") || name.ends_with("_bf16") || name.ends_with("_int8_t") ||
           name.ends_with("_int16_t") || name.ends_with("_uint8_t") || name.ends_with("_uint16_t") ||
           name.ends_with("_uint32_t") || name.ends_with("_int32_t") || name.ends_with("_fp8_e4m3fn_t") ||
-          name.ends_with("_fp8_e5m2_t") || name.ends_with("_uint64_t") || name.ends_with("_int64_t") ||
-          name.ends_with("_double") || name.ends_with("_bool")))
+          name.ends_with("_fp8_e5m2_t") || name.ends_with("_hifloat8_t") || name.ends_with("_uint64_t") ||
+          name.ends_with("_int64_t") || name.ends_with("_double") || name.ends_with("_bool")))
         return false;
 
     return name.starts_with("copy_gm_RowMajor_to_l1_zN_") || name.starts_with("copy_gm_ColumnMajor_to_l1_nZ_") ||

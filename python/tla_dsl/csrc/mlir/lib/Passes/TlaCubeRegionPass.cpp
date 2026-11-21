@@ -112,6 +112,11 @@ struct LowerTlaMmadPatternImpl : public OpRewritePattern<MmadOpTy> {
         // Integer route: unlike the float routes, the L0C accumulator is i32.
         bool supportedI8Route = lhsInfo->elementType.isSignlessInteger(8) &&
                                 rhsInfo->elementType.isSignlessInteger(8) && accInfo->elementType.isSignlessInteger(32);
+        // HiFloat8 has byte-sized storage like fp8, but its Cube decode mode is
+        // selected by a dedicated BC route rather than by the fp8 route.
+        bool supportedHiF8Route = !kIsMx && ::llvm::isa<::tla::HiFloat8Type>(lhsInfo->elementType) &&
+                                  ::llvm::isa<::tla::HiFloat8Type>(rhsInfo->elementType) &&
+                                  accInfo->elementType.isF32();
         // fp8 routes support both MLIR f8E4M3FN and f8E5M2 types. The two formats
         // mix freely on the cube, so all four operand pairings are legal; each
         // accumulates into fp32.
@@ -137,7 +142,7 @@ struct LowerTlaMmadPatternImpl : public OpRewritePattern<MmadOpTy> {
             return failure();
         }
         if (!isMx && !supportedF16Route && !supportedBf16Route && !supportedF32Route && !supportedI8Route &&
-            !supportedFp8Route) {
+            !supportedHiF8Route && !supportedFp8Route) {
             // A packed fp4 tile reaching a plain tla.mmad means it was loaded
             // without a scale: there is no non-microscaling fp4 route on the cube,
             // so say that rather than listing the element types it is not.
@@ -147,8 +152,8 @@ struct LowerTlaMmadPatternImpl : public OpRewritePattern<MmadOpTy> {
                 return failure();
             }
             op.emitError() << "unsupported tla.mmad element types; expected f16,f16 -> f32, bf16,bf16 "
-                              "-> f32, f32,f32 -> f32, any f8E4M3FN/f8E5M2 pair -> f32 (fp32 L0C "
-                              "accumulator), or i8,i8 -> i32 (i32 L0C accumulator)";
+                              "-> f32, f32,f32 -> f32, HiFloat8,HiFloat8 -> f32, any f8E4M3FN/f8E5M2 "
+                              "pair -> f32 (fp32 L0C accumulator), or i8,i8 -> i32 (i32 L0C accumulator)";
             return failure();
         }
 
@@ -337,6 +342,7 @@ struct LowerTlaMmadPatternImpl : public OpRewritePattern<MmadOpTy> {
             calleeName = supportedF16Route  ? "mmad_bias_half_half_float" :
                          supportedBf16Route ? "mmad_bias_bf16_bf16_float" :
                          supportedI8Route   ? "mmad_bias_int8_int8_int32" :
+                         supportedHiF8Route ? "mmad_bias_hifloat8_t_hifloat8_t_float" :
                          isMxRoute          ? "mmadmx_bias_" + fp8OperandTag + "_float" :
                          supportedFp8Route  ? "mmad_bias_" + fp8OperandTag + "_float" :
                                               "mmad_bias_float_float_float";
@@ -344,6 +350,7 @@ struct LowerTlaMmadPatternImpl : public OpRewritePattern<MmadOpTy> {
             calleeName = supportedF16Route  ? "mmad_half_half_float" :
                          supportedBf16Route ? "mmad_bf16_bf16_float" :
                          supportedI8Route   ? "mmad_int8_int8_int32" :
+                         supportedHiF8Route ? "mmad_hifloat8_t_hifloat8_t_float" :
                          isMxRoute          ? "mmadmx_" + fp8OperandTag + "_float" :
                          supportedFp8Route  ? "mmad_" + fp8OperandTag + "_float" :
                                               "mmad_float_float_float";

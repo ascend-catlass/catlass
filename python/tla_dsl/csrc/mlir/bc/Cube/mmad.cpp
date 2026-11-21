@@ -6,6 +6,7 @@
 // issue: TileMmad calls AscendC::Mmad, TileMmadMx calls AscendC::MmadMx. Every
 // route states which one it means at registration time instead of letting the
 // L0 element type pick it implicitly.
+
 template <class ElementA, class ElementB, class ElementAccumulator>
 class TileMmad {
 public:
@@ -182,6 +183,10 @@ REGISTER_MMAD(bf16, bf16, float)
 REGISTER_MMAD(int8, int8, int32)
 
 #if ((defined(__NPU_ARCH__) && __NPU_ARCH__ == 3510) || (defined(CATLASS_ARCH) && CATLASS_ARCH == 3510))
+// HF8 takes the plain route: the semantic CANN type drives the intrinsic, so it
+// needs no dedicated wrapper and no CTRL[45] bookkeeping of its own.
+REGISTER_MMAD(hifloat8_t, hifloat8_t, float)
+
 // The PLAIN fp8 routes: tla.mmad with real fp8 operands. MmadCal only diverts
 // to the mad_mx path for the microscaled operand variants, so these land on the
 // same `mad` intrinsic as the f16/bf16/f32 routes and need no MX scale setup. A

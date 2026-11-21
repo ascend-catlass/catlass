@@ -6032,6 +6032,7 @@ _SUPPORTED_CUBE_COPY_ROUTES = {
         "u32",
         "f8e4m3fn",
         "f8e5m2",
+        "hif8",
         "f4e2m1",
         "f4e1m2",
     ),
@@ -6048,6 +6049,7 @@ _SUPPORTED_CUBE_COPY_ROUTES = {
         "u32",
         "f8e4m3fn",
         "f8e5m2",
+        "hif8",
         "f4e2m1",
         "f4e1m2",
     ),
@@ -6114,10 +6116,10 @@ _SUPPORTED_CUBE_COPY_ROUTES = {
     ("l1", "VectorLayout", "biasbuf", "VectorLayout"): ("f32", "i32"),
 
     # L1->L0 — AscendC LoadData 2dv2 accepts u32 but not u16 on dav-3510.
-    ("l1", "zN", "l0a", "zN"): ("f32", "f16", "bf16", "i8", "u32", "f8e4m3fn", "f8e5m2"),
-    ("l1", "nZ", "l0a", "zN"): ("f32", "f16", "bf16", "i8", "u32", "f8e4m3fn", "f8e5m2"),
-    ("l1", "zN", "l0b", "nZ"): ("f32", "f16", "bf16", "i8", "u32", "f8e4m3fn", "f8e5m2"),
-    ("l1", "nZ", "l0b", "nZ"): ("f32", "f16", "bf16", "i8", "u32", "f8e4m3fn", "f8e5m2"),
+    ("l1", "zN", "l0a", "zN"): ("f32", "f16", "bf16", "i8", "u32", "f8e4m3fn", "f8e5m2", "hif8"),
+    ("l1", "nZ", "l0a", "zN"): ("f32", "f16", "bf16", "i8", "u32", "f8e4m3fn", "f8e5m2", "hif8"),
+    ("l1", "zN", "l0b", "nZ"): ("f32", "f16", "bf16", "i8", "u32", "f8e4m3fn", "f8e5m2", "hif8"),
+    ("l1", "nZ", "l0b", "nZ"): ("f32", "f16", "bf16", "i8", "u32", "f8e4m3fn", "f8e5m2", "hif8"),
 }
 
 # Cube copy that carries a scale
@@ -8240,6 +8242,7 @@ _SUPPORTED_MMAD = frozenset(
         ("f8e5m2", "f8e5m2", "f32"),
         ("f8e4m3fn", "f8e5m2", "f32"),
         ("f8e5m2", "f8e4m3fn", "f32"),
+        ("hif8", "hif8", "f32"),
         ("i8", "i8", "i32"),
     }
 )

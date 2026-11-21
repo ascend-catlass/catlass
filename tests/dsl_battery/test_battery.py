@@ -224,6 +224,27 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         device,
     )
 
+    # --- HF8 MMAD on the existing basic_mmad examples ---
+    yield (
+        "mmad-hif8",
+        [[
+            "tla/kernel/matmul/basic_mmad/basic_matmul.py",
+            "--m", "96", "--n", "128", "--k", "641",
+            "--dtype-a", "hif8", "--dtype-b", "hif8", "--dtype-c", "f32",
+            "--layout-a", "row", "--layout-b", "row", "--layout-c", "row",
+            "--block-num", "4", "--device", str(device),
+        ]],
+    )
+    yield (
+        "mmad-hif8-bias",
+        [[
+            "tla/kernel/matmul/basic_mmad/basic_matmul_bias.py",
+            "--m", "96", "--n", "128", "--k", "641",
+            "--dtype-a", "hif8", "--dtype-b", "hif8",
+            "--block-num", "4", "--device", str(device),
+        ]],
+    )
+
     # --- basic_mmad with prepacked operands: the `zN` / `nZ` source tags ---
     prepacked_dev = ["--device", str(device)]
     mmad_script = "tla/kernel/matmul/basic_mmad/basic_matmul.py"

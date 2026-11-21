@@ -74,7 +74,6 @@ def basic_mmad_bias_kernel(
     l0b0_available = tla.flag("l0b0_available", tla.arch.CUBE, tla.arch.MTE1)
     l0b1_available = tla.flag("l0b1_available", tla.arch.CUBE, tla.arch.MTE1)
     l0_ab_data_ready = tla.flag("l0_ab_data_ready", tla.arch.MTE1, tla.arch.CUBE)
-    l0c_available = tla.flag("l0c_available", tla.arch.FIX, tla.arch.CUBE)
     # Bias pipeline: GM -> L1 (MTE2), L1 -> biasbuf (MTE1), biasbuf consumed by CUBE.
     l1_bias_data_ready = tla.flag("l1_bias_data_ready", tla.arch.MTE2, tla.arch.MTE1)
     l1_bias_available = tla.flag("l1_bias_available", tla.arch.MTE1, tla.arch.MTE2)
@@ -130,7 +129,6 @@ def basic_mmad_bias_kernel(
         tla.set_flag(l0a1_available)
         tla.set_flag(l0b0_available)
         tla.set_flag(l0b1_available)
-        tla.set_flag(l0c_available)
         tla.set_flag(l1_bias_available)
         tla.set_flag(l0_bias_available)
 
@@ -326,7 +324,6 @@ def basic_mmad_bias_kernel(
         tla.wait_flag(l0a1_available)
         tla.wait_flag(l0b0_available)
         tla.wait_flag(l0b1_available)
-        tla.wait_flag(l0c_available)
         tla.wait_flag(l1_bias_available)
         tla.wait_flag(l0_bias_available)
 
@@ -336,7 +333,53 @@ def basic_mmad_bias_kernel(
 _FP8_TLA_TYPES = {
     "f8e4m3fn": tla.Float8E4M3FN,
     "f8e5m2": tla.Float8E5M2,
+    "hif8": tla.HiFloat8,
 }
+
+
+def _decode_hif8(codes: torch.Tensor) -> torch.Tensor:
+    """Decode HiF8 byte codes to float64 values.
+
+    The wide-dynamic region (dot >= 2) follows the dense-region rules; 0x00 is
+    +0, 0x80 is NaN, and the dot-4 code with mantissa 1 decodes to inf.
+    """
+
+    codes = codes.to(torch.int64)
+    bits = codes & 0x7F
+
+    # Wide-dynamic subnormals 1..7 and the 8..15 dense codes.
+    out = torch.zeros(codes.shape, dtype=torch.float64)
+    low = (bits >= 1) & (bits < 8)
+    out = torch.where(low, torch.pow(2.0, (bits - 23).to(torch.float64)), out)
+    mid = (bits >= 8) & (bits < 16)
+    out = torch.where(mid, 1.0 + (bits & 7).to(torch.float64) / 8.0, out)
+
+    # Codes 16..127: one of four dot groups sharing the dense formula.
+    dense = bits >= 16
+    dot = torch.where(
+        bits < 32, 1, torch.where(bits < 64, 2, torch.where(bits < 96, 3, 4))
+    )
+    mantissa_bits = torch.where(dot <= 2, 3, 5 - dot)
+    exponent_bits = torch.bitwise_right_shift(bits, mantissa_bits) & (
+        torch.pow(2, dot) - 1
+    )
+    magnitude = torch.pow(2, dot - 1) | (exponent_bits & (torch.pow(2, dot - 1) - 1))
+    exponent = torch.where(
+        exponent_bits & torch.pow(2, dot - 1) != 0, -magnitude, magnitude
+    )
+    mantissa = bits & (torch.pow(2, mantissa_bits) - 1)
+    value = torch.pow(2.0, exponent.to(torch.float64)) * (
+        1.0
+        + mantissa.to(torch.float64) / torch.pow(2.0, mantissa_bits.to(torch.float64))
+    )
+    value = torch.where((exponent == 15) & (mantissa == 1), torch.inf, value)
+    out = torch.where(dense, value, out)
+
+    sign = torch.where(codes & 0x80 != 0, -1.0, 1.0)
+    out = sign * out
+    # 0x80 carries the sign with a zero payload and decodes to NaN.
+    return torch.where((bits == 0) & (codes & 0x80 != 0), torch.nan, out)
+
 
 # Operand dtypes, the same set basic_matmul.py accepts.
 _TORCH_DTYPES = {
@@ -346,8 +389,9 @@ _TORCH_DTYPES = {
     "i8": torch.int8,
     "f8e4m3fn": torch.float8_e4m3fn,
     "f8e5m2": torch.float8_e5m2,
+    "hif8": torch.uint8,
 }
-_DTYPE_CHOICES = ("f16", "bf16", "f32", "i8", "f8e4m3fn", "f8e5m2")
+_DTYPE_CHOICES = ("f16", "bf16", "f32", "i8", "f8e4m3fn", "f8e5m2", "hif8")
 
 
 def run(args: argparse.Namespace) -> int:
@@ -366,7 +410,8 @@ def run(args: argparse.Namespace) -> int:
     dtype_b = _TORCH_DTYPES[args.dtype_b]
 
     is_int_route = args.dtype_a == "i8"
-    is_fp8_route = args.dtype_a in _FP8_TLA_TYPES
+    is_hif8_route = args.dtype_a == "hif8"
+    is_fp8_route = args.dtype_a in ("f8e4m3fn", "f8e5m2")
     # i8 x i8 is the integer MMAD route and lands in i32; every other route
     # keeps the fp32 accumulator and writes fp32.
     out_dtype = torch.int32 if is_int_route else torch.float32
@@ -381,8 +426,26 @@ def run(args: argparse.Namespace) -> int:
         bias = torch.randint(-8, 8, (args.n,), dtype=torch.int32, device="cpu")
         # Small magnitudes keep the exact int32 product inside float64.
         ref = a.to(torch.int32) @ b.to(torch.int32) + bias
+    elif is_hif8_route:
+        if args.dtype_b != "hif8":
+            raise SystemExit("the HF8 route requires --dtype-a hif8 --dtype-b hif8")
+        # Fixed dense codes 8..15 (1.0..1.875) keep every product positive and
+        # the golden around 1e3; the fixed non-zero bias stays a measurable
+        # signal at the shared f32 tolerance, so a missing bias fold fails.
+        a = (
+            (torch.arange(args.m * args.k, dtype=torch.int64) % 8 + 8)
+            .reshape(args.m, args.k)
+            .to(torch.uint8)
+        )
+        b = (
+            (torch.arange(args.k * args.n, dtype=torch.int64) % 8 + 8)
+            .reshape(args.k, args.n)
+            .to(torch.uint8)
+        )
+        bias = torch.linspace(0.5, 5.0, args.n)
+        ref = (_decode_hif8(a) @ _decode_hif8(b)).float() + bias
     elif is_fp8_route:
-        if args.dtype_b not in _FP8_TLA_TYPES:
+        if args.dtype_b not in ("f8e4m3fn", "f8e5m2"):
             raise SystemExit(
                 "the fp8 mmad route requires f8e4m3fn/f8e5m2 on both sides"
             )
@@ -415,8 +478,13 @@ def run(args: argparse.Namespace) -> int:
     bias = bias.contiguous().npu()
     # fp8 cannot cross DLPack as itself, so those buffers go over as bytes with
     # create_tla_tensor's element_type telling the kernel what they hold.
-    a_tensor = create_tla_tensor(a, "row", _FP8_TLA_TYPES.get(args.dtype_a))
-    b_tensor = create_tla_tensor(b, "row", _FP8_TLA_TYPES.get(args.dtype_b))
+    hif8_element_type = tla.HiFloat8 if is_hif8_route else None
+    a_tensor = create_tla_tensor(
+        a, "row", hif8_element_type or _FP8_TLA_TYPES.get(args.dtype_a)
+    )
+    b_tensor = create_tla_tensor(
+        b, "row", hif8_element_type or _FP8_TLA_TYPES.get(args.dtype_b)
+    )
     bias_tensor = create_tla_tensor(bias, "vector")
     c_tensor = create_tla_tensor(c, "row")
 
@@ -426,7 +494,14 @@ def run(args: argparse.Namespace) -> int:
         b_tensor,
         bias_tensor,
         c_tensor,
-        TilingParams(l1_tm=128, l0_tm=128),
+        TilingParams(
+            l1_tm=32 if is_hif8_route else 128,
+            l1_tn=32 if is_hif8_route else 256,
+            l1_tk=128,
+            l0_tm=32 if is_hif8_route else 128,
+            l0_tn=32 if is_hif8_route else 256,
+            l0_tk=32,
+        ),
         is_int_route,
         options="--npu-arch 3510",
     )
@@ -439,6 +514,10 @@ def run(args: argparse.Namespace) -> int:
         # Integer MMAD is exact, so no tolerance: compare() falls back to
         # element-wise equality for integer dtypes.
         passed = compare(result, ref)
+    elif is_hif8_route:
+        # Same f32 bound as the no-bias example; the bias floor (0.5) stays far
+        # above it, so a missing bias fold still fails.
+        passed = compare(result, ref, rtol=1.2e-4, atol=1.2e-4)
     else:
         passed = compare(result, ref, args.k)
     print(f"passed={passed} cache_key={artifact.cache_key}")

@@ -48,7 +48,7 @@ tla.mmad(acc: Tensor, lhs: Tensor, rhs: Tensor, init_c: bool | Bool | None = Non
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
 - 须在 `tla.cube()` 内调用；`acc`/`lhs`/`rhs` 须为匹配的 L0 tile。
-- 支持的元素类型通路包括 `f16`/`bf16`/`f32`，以及任意 `f8e4m3fn` / `f8e5m2` 操作数配对，累加到 L0C 上的 fp32。
+- 支持的元素类型通路包括 `f16`/`bf16`/`f32`、`hif8`/`hif8` 配对，以及任意 `f8e4m3fn` / `f8e5m2` 操作数配对，累加到 L0C 上的 fp32。
 - `init_c` 仅接受 Python `bool` 或 `i1` SSA 值。
 - 若设置 `bias`：tile 须在 `biasbuf`、rank-1 `VectorLayout`、元素类型与 `acc` 一致、
   长度 `N` 与 `acc` 的 N 匹配；经 `GM`→`L1`→`biasbuf` 的 `tla.copy` 搬入（见 `copy`）。
