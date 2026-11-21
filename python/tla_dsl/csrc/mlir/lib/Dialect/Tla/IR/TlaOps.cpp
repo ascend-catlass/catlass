@@ -2152,6 +2152,20 @@ mlir::LogicalResult CopyOp::verify()
     if (getDstCachePolicyAttr() && dst != AddressSpace::gm)
         return emitOpError("dst_cache_policy requires dst to be in GM address space");
 
+    // Optional params is either L0C fixpipe knobs or GM→UB pad bundle.
+    if (mlir::Value params = getParams()) {
+        mlir::Type paramsTy = params.getType();
+        if (mlir::isa<CopyPadParamsType>(paramsTy)) {
+            if (!(src == AddressSpace::gm && dst == AddressSpace::ub))
+                return emitOpError("copy_pad_params require GM→UB copy route");
+            if (!params.getDefiningOp<CopyPadParamsOp>())
+                return emitOpError("copy_pad_params must be produced by tla.CopyPadParams");
+        } else if (mlir::isa<CopyL0C2DstParamsType>(paramsTy)) {
+            if (src != AddressSpace::l0c)
+                return emitOpError("copy_l0c2dst_params require an L0C source");
+        }
+    }
+
     return mlir::success();
 }
 

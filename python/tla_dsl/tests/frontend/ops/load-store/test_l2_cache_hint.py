@@ -148,13 +148,15 @@ def _last_call_cache_policy_const(lowered: str, *, callee: str) -> int:
     match = re.search(rf"call @{re.escape(callee)}\(([^)]*)\)", lowered)
     assert match is not None, lowered
     operands = [op.strip() for op in match.group(1).split(",")]
-    assert len(operands) == 27  # 2 memref + 24 desc + gmCachePolicy
-    last = operands[-1]
+    # 2 memref + 24 desc + gmCachePolicy + padEnable + left + right + valueBits
+    assert len(operands) == 31, (len(operands), lowered)
+    # gmCachePolicy is immediately before the 4 pad trailing args.
+    policy_ssa = operands[-5]
     const = re.search(
-        rf"{re.escape(last)}\s*=\s*llvm\.mlir\.constant\((-?\d+)\s*:\s*i64\)",
+        rf"{re.escape(policy_ssa)}\s*=\s*llvm\.mlir\.constant\((-?\d+)\s*:\s*i64\)",
         lowered,
     )
-    assert const is not None, (last, lowered)
+    assert const is not None, (policy_ssa, lowered)
     return int(const.group(1))
 
 

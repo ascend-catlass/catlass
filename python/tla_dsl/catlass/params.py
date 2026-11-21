@@ -326,6 +326,64 @@ class CopyUbToGmParams(CopyParams):
 
 
 @dataclass
+class CopyPadParams(CopyParams):
+    """AscendC DataCopyPadExtParams fields for ``tla.copy``.
+
+    Presence of this bag means pad is enabled (BC sets ``isPad=true``).
+    Exact-byte copy remains ``params=None``. There is no public ``is_pad``.
+
+    Route support is enforced by ``tla.copy`` (currently GM→UB RowMajor only).
+    ``left_padding`` / ``right_padding`` / ``padding_value`` may be compile-time
+    ints or runtime integer/index SSA (``Numeric`` / MLIR values). When a side
+    count is a static non-negative int, ``tla.copy`` checks pad bytes ≤ 32B and
+    (if extents are static) dst innermost ≥ src + left + right. Float
+    ``padding_value`` constants encode as IEEE bits; runtime ``padding_value``
+    is an ``i64`` bit pattern (integer SSA). 8B elements require static
+    ``padding_value == 0``.
+    """
+
+    padding_value: Any = 0
+    left_padding: Any = 0
+    right_padding: Any = 0
+
+    def _validate(self, *, elem_nbytes: int | None = None):
+        cls_name = type(self).__name__
+        for name, value in (
+            ("left_padding", self.left_padding),
+            ("right_padding", self.right_padding),
+        ):
+            if isinstance(value, bool):
+                raise ValueError(f"{cls_name}.{name} must not be bool")
+            if isinstance(value, int) and value < 0:
+                raise ValueError(f"{cls_name}.{name} must be >= 0")
+        if elem_nbytes is not None:
+            if elem_nbytes <= 0:
+                raise ValueError(f"{cls_name}: invalid elem_nbytes={elem_nbytes}")
+            for name, value in (
+                ("left_padding", self.left_padding),
+                ("right_padding", self.right_padding),
+            ):
+                if isinstance(value, int) and not isinstance(value, bool):
+                    if value * elem_nbytes > 32:
+                        raise ValueError(
+                            f"{cls_name}.{name}*{elem_nbytes}B exceeds AscendC "
+                            f"per-side pad limit of 32B (got {value} elements)"
+                        )
+            if elem_nbytes == 8:
+                if isinstance(self.padding_value, bool):
+                    raise ValueError(
+                        f"{cls_name}.padding_value must be 0 when element width is 8B"
+                    )
+                if (
+                    isinstance(self.padding_value, (int, float))
+                    and self.padding_value != 0
+                ):
+                    raise ValueError(
+                        f"{cls_name}.padding_value must be 0 when element width is 8B"
+                    )
+
+
+@dataclass
 class CopyL0C2DstParams(CopyParams):
     unit_flag: int = 0
     relu_enable: bool = False

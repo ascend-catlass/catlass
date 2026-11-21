@@ -34,7 +34,8 @@ Parameters:
 - `dst` (`Tensor`): Destination tile. Required.
 - `src` (`Tensor`): Source tile. Required.
 - `params` (`CopyParams | None`): Path-specific params:
-  `CopyL0C2DstParams`, `CopyUbToGmParams`. Default `None`.
+  `CopyL0C2DstParams`, `CopyUbToGmParams`, `CopyPadParams` (GM→UB
+  DataCopyPad). Default `None`.
 - `scale` (`Tensor | None`): L1 OCP `e8m0` shared-exponent tile for
   L1→L0A/L0B MX load. Stored as `i8`/`u8`; destination tag is
   `tla.arch.zZMxScale` (L0A) or `tla.arch.nNMxScale` (L0B).
@@ -51,6 +52,11 @@ Constraints:
 - Must be called inside a `@tla.kernel`-decorated kernel function.
 - Must be called inside `tla.cube()` or `tla.vector()`.
 - Copy size follows each tile's `origin_shape`.
+- `CopyPadParams` is GM→UB RowMajor only (f32/f16/bf16/i32/u32/i16/u16/
+  i8/u8). `left_padding` / `right_padding` / `padding_value` may be
+  runtime integer/index SSA. When a side count is a static int, pad
+  bytes must be ≤ 32B; when extents are also static, dst innermost
+  origin must be ≥ src + left_padding + right_padding.
 - On Ascend 950, two logical rank-3 views `(B, M, N)` select batched
   GM-to-L1 layout conversion. FP8 supports RowMajor→zN and
   ColumnMajor→nZ; E8M0 supports the four GM MX-scale routes below.

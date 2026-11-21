@@ -574,6 +574,13 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         [["end_to_end/hifp8_gm_ub_copy.py", *dev]],
     )
 
+    # GM→UB CopyPadParams (right_padding=1) then aligned UB→GM writeback.
+    yield (
+        "gm-ub-copy-pad",
+        [["end_to_end/gm_ub_copy_pad.py", *dev]],
+    )
+
+
     # --- basic_mixed ---
     # One test on purpose: the second invocation exercises cache reuse and is
     # only meaningful straight after the one that populates the cache.

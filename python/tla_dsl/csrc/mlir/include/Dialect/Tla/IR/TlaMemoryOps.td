@@ -24,6 +24,26 @@ def Tla_CopyL0C2DstParamsOp : Tla_Op<"CopyL0C2DstParams", [Pure, AttrSizedOperan
   let results = (outs Tla_CopyL0C2DstParamsType:$params);
 }
 
+// Same pattern as CopyL0C2DstParams: a typed params SSA produced by a dedicated
+// op, then attached as tla.copy's single optional $params. left/right/value_bits
+// are required i64 so residual pad can be runtime SSA without putting Optional
+// operands on tla.copy itself (avoids AttrSizedOperandSegments on copy).
+def Tla_CopyPadParamsOp : Tla_Op<"CopyPadParams", [Pure]> {
+  let summary = "GM→UB DataCopyPad params op";
+  let description = [{
+    Bundles AscendC ``DataCopyPadExtParams`` fields for a GM→UB ``tla.copy``.
+    Presence of this value as ``tla.copy``'s ``params`` means pad is enabled;
+    ``params`` absent keeps the exact-byte two-arg path. ``left`` / ``right`` /
+    ``value_bits`` are always supplied (constants or SSA).
+  }];
+  let arguments = (ins I64:$left, I64:$right, I64:$value_bits);
+  let results = (outs Tla_CopyPadParamsType:$params);
+  let assemblyFormat = [{
+    $left `,` $right `,` $value_bits attr-dict `:`
+    type($left) `,` type($right) `,` type($value_bits)
+  }];
+}
+
 def Tla_CopyOp : Tla_Op<"copy", []> {
   let summary = "Copy";
   let description = [{
@@ -39,6 +59,11 @@ def Tla_CopyOp : Tla_Op<"copy", []> {
     ``tla.copy(..., cache_policy=)``; both attrs lower to a trailing ``i64``
     on the GM-side BC stub.
 
+    Optional ``params`` is either ``!tla.copy_l0c2dst_params`` (L0C→dst fixpipe
+    knobs) or ``!tla.copy_pad_params`` (GM→UB DataCopyPad). The two are mutually
+    exclusive by route. Pad lowering appends
+    ``pad_enable,left,right,value_bits`` after ``gmCachePolicy`` on GM→UB stubs.
+
     A microscaling (MX) L1->L0A/L0B load is ``tla.copy_mx``, which carries the
     operand's e8m0 scale block. The frontend spells that as ``tla.copy`` with a
     ``scale=`` argument, mirroring AscendC's five-argument ``LoadData``, but it
@@ -46,12 +71,13 @@ def Tla_CopyOp : Tla_Op<"copy", []> {
   }];
   let arguments = (ins
     Tla_TensorType:$dst, Tla_TensorType:$src,
-    Optional<AnyTypeOf<[Tla_CopyL0C2DstParamsType]>>:$params,
+    Optional<AnyTypeOf<[Tla_CopyL0C2DstParamsType, Tla_CopyPadParamsType]>>:$params,
     OptionalAttr<Tla_AtomicModeAttr>:$atomic_mode,
     OptionalAttr<Tla_CachePolicyAttr>:$src_cache_policy,
     OptionalAttr<Tla_CachePolicyAttr>:$dst_cache_policy);
   let assemblyFormat = [{
-    $dst `,` $src (`,` $params^)? attr-dict `:` qualified(type($dst)) `,` qualified(type($src)) (`,` qualified(type($params))^)?
+    $dst `,` $src (`,` $params^)? attr-dict `:`
+    qualified(type($dst)) `,` qualified(type($src)) (`,` qualified(type($params))^)?
   }];
   let hasVerifier = 1;
 }

@@ -35,7 +35,7 @@ tla.copy(dst: Tensor, src: Tensor, params: CopyParams | None = None, *, scale: T
 - `dst`（`Tensor`）：目的 tile。必填。
 - `src`（`Tensor`）：源 tile。必填。
 - `params`（`CopyParams | None`）：通路参数：`CopyL0C2DstParams`、
-  `CopyUbToGmParams`。默认 `None`。
+  `CopyUbToGmParams`、`CopyPadParams`（GM→UB DataCopyPad）。默认 `None`。
 - `scale`（`Tensor | None`）：L1 上的 OCP `e8m0` 共享指数 tile，用于
   L1→L0A/L0B 的 MX load。以 `i8`/`u8` 存储；目的为 L0A 时 tag
   `tla.arch.zZMxScale`，为 L0B 时 tag `tla.arch.nNMxScale`。默认 `None`。
@@ -49,6 +49,11 @@ tla.copy(dst: Tensor, src: Tensor, params: CopyParams | None = None, *, scale: T
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
 - 须在 `tla.cube()` 或 `tla.vector()` 内调用。
 - 拷贝大小按各 tile 的 `origin_shape`。
+- `CopyPadParams` 仅支持 GM→UB RowMajor（f32/f16/bf16/i32/u32/i16/u16/
+  i8/u8）。`left_padding` / `right_padding` / `padding_value` 可为运行时
+  整型/index SSA。某一侧为静态 int 时，该侧 pad 字节数须 ≤32B；两端
+  extent 亦为静态时，目的最内维 `origin` 须 ≥ src + left_padding +
+  right_padding。
 - Ascend 950 上，两个逻辑秩为 3 的视图 `(B, M, N)` 启用批量 GM→L1 布局转换。
   FP8 支持 RowMajor→zN 和 ColumnMajor→nZ；E8M0 支持下表的四条 GM MX scale 通路。
   批次数取自 `origin_shape[0]`，源、目的矩阵间距分别取各自 layout 的首维 stride，
@@ -75,6 +80,11 @@ tla.copy(dst: Tensor, src: Tensor, params: CopyParams | None = None, *, scale: T
   整块 16×C0，1 字节类型为 32×32。
 - `GM`→`L1` / `L1`→`biasbuf` 连续平铺用 rank-1 `VectorLayout`；多行 bias
   tile 不可表示，请切出单行。
+- PER_CHANNEL 反量化参数（`CopyL0C2DstParams.quant_tensor`）为位于 `L1`
+  地址空间的 rank-1 `VectorLayout` tile，元素类型 `u64`、单位 stride。
+  每个元素携带一个输出通道内全部元素共享的反量化参数，因此长度须与目的
+  tile 通道数精确一致（`tile_view` 裁剪后的 `originShape[1]`）。两侧长度
+  均为静态时不相等即编译报错。
 - **预打包 `GM` tile：** 已按分形顺序存放的缓冲区可用 `zN` 或转置排布的
   `nZ` tag 描述，并拷贝到相同布局的 L1 tile，不再重排数据。GM 源 tag 仅使用
   对齐的 `zN` / `nZ`；M 轴紧凑存储的 `zNUnAlign` 用于 UB→L1，GM 端的
@@ -87,23 +97,22 @@ tla.copy(dst: Tensor, src: Tensor, params: CopyParams | None = None, *, scale: T
   `UnalignStoreParams`。
 - **尺寸未按 32 字节对齐时：** C0 为 32 字节。ND GM↔UB 时，优先让主导维的
   字节数是 32 的倍数。否则保持 `origin_shape` 为真实尺寸并放大物理
-  layout，或改用非对齐 load/store。zN 在 `M` 不是 16 的整数倍时，用
-  `tla.arch.zNUnAlign`。
+  layout，或改用非对齐 load/store。
 
 无 scale 的 Cube 拷贝通路，`tla.copy(dst, src, scale=None)`
 
 |`src_addr`|`src_layout`|`dst_addr`|`dst_layout`|`dtypes`|
 |----------|------------|----------|------------|--------|
-|`gm`|`RowMajor`|`l1`|`zN`|`f32`,`f16`,`bf16`,`i8`,`i1`,`u16`,`u32`,`f8e4m3fn`,`f8e5m2`,`hif8`,`f4e2m1`,`f4e1m2`|
-|`gm`|`ColumnMajor`|`l1`|`nZ`|`f32`,`f16`,`bf16`,`i8`,`i1`,`u16`,`u32`,`f8e4m3fn`,`f8e5m2`,`hif8`,`f4e2m1`,`f4e1m2`|
-|`gm`|`zN`|`l1`|`zN`|`f32`,`f16`,`bf16`,`i8`,`u16`,`u32`,`f8e4m3fn`,`f8e5m2`,`f4e2m1`,`f4e1m2`|
-|`gm`|`nZ`|`l1`|`nZ`|`f32`,`f16`,`bf16`,`i8`,`u16`,`u32`,`f8e4m3fn`,`f8e5m2`,`f4e2m1`,`f4e1m2`|
+|`gm`|`RowMajor`|`l1`|`zN`|`f32`,`f16`,`bf16`,`i8`,`i1`,`i16`,`i32`,`u8`,`u16`,`u32`,`f8e4m3fn`,`f8e5m2`,`hif8`,`f4e2m1`,`f4e1m2`|
+|`gm`|`ColumnMajor`|`l1`|`nZ`|`f32`,`f16`,`bf16`,`i8`,`i1`,`i16`,`i32`,`u8`,`u16`,`u32`,`f8e4m3fn`,`f8e5m2`,`hif8`,`f4e2m1`,`f4e1m2`|
+|`gm`|`zN`|`l1`|`zN`|`f32`,`f16`,`bf16`,`i8`,`i16`,`i32`,`u8`,`u16`,`u32`,`f8e4m3fn`,`f8e5m2`,`f4e2m1`,`f4e1m2`|
+|`gm`|`nZ`|`l1`|`nZ`|`f32`,`f16`,`bf16`,`i8`,`i16`,`i32`,`u8`,`u16`,`u32`,`f8e4m3fn`,`f8e5m2`,`f4e2m1`,`f4e1m2`|
 |`gm`|`zNUnAlign`|`l1`|`zNUnAlign`|`f32`,`f16`,`bf16`|
 |`gm`|`RowMajorMxScaleA`|`l1`|`zZMxScale`|`f8e8m0`|
 |`gm`|`ColMajorMxScaleA`|`l1`|`zZMxScale`|`f8e8m0`|
 |`gm`|`RowMajorMxScaleB`|`l1`|`nNMxScale`|`f8e8m0`|
 |`gm`|`ColMajorMxScaleB`|`l1`|`nNMxScale`|`f8e8m0`|
-|`gm`|`VectorLayout`|`l1`|`VectorLayout`|`f32`,`f16`,`bf16`,`i32`,`i8`,`i1`,`u64`,`i64`,`f64`|
+|`gm`|`VectorLayout`|`l1`|`VectorLayout`|`f32`,`f16`,`bf16`,`i8`,`i1`,`i16`,`i32`,`i64`,`u8`,`u16`,`u32`,`u64`,`f64`|
 |`l1`|`VectorLayout`|`biasbuf`|`VectorLayout`|`f32`,`i32`|
 |`l1`|`zN`|`l0a`|`zN`|`f32`,`f16`,`bf16`,`i8`,`u32`,`f8e4m3fn`,`f8e5m2`,`hif8`|
 |`l1`|`nZ`|`l0a`|`zN`|`f32`,`f16`,`bf16`,`i8`,`u32`,`f8e4m3fn`,`f8e5m2`,`hif8`|
@@ -127,10 +136,6 @@ fixpipe 支持随路 quant 与 relu；quant 模式支持 `NO_QUANT`、`PER_TENSO
 
 - 链路为 (l0c acc) → quant（可选）→ relu（可选）→ 写出到 dst。
 - `NO_QUANT` 含纯数据类型转换，如 `f32`→`f16`、`f32`→`bf16`。
-- PER_CHANNEL 的反量化参数（`quant_tensor`）为 rank-1 `VectorLayout`，位于 L1，
-  `u64` 元素、stride 1。每通道一个元素，通道内全部元素共享该反量化参数；长度
-  须与目标 tile 的通道数精确一致（`tile_view` 裁剪后的 `originShape[1]`），两侧
-  长度均为编译期常量时不相等即编译报错。元素类型、地址空间与布局由前端校验。
 - 目的为 UB 时额外有 `split_mode`：nosplit（`NO_SPLIT_VEC_0`、`NO_SPLIT_VEC_1`）与
   split（`SPLIT_M`、`SPLIT_N`）。
 - 目的为 `(ub, ColumnMajor)` 时仅支持 `nosplit`。
@@ -154,10 +159,18 @@ fixpipe 支持随路 quant 与 relu；quant 模式支持 `NO_QUANT`、`PER_TENSO
 |`gm`|`RowMajor`|`-`|`PER_TENSOR`|`True`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
 |`gm`|`ColumnMajor`|`-`|`PER_TENSOR`|`False`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
 |`gm`|`ColumnMajor`|`-`|`PER_TENSOR`|`True`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
+|`ub`|`RowMajor`|`nosplit`|`PER_TENSOR`|`False`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `f16`,`bf16`|
+|`ub`|`RowMajor`|`nosplit`|`PER_TENSOR`|`True`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `f16`,`bf16`|
+|`ub`|`ColumnMajor`|`nosplit`|`PER_TENSOR`|`False`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `f16`,`bf16`|
+|`ub`|`ColumnMajor`|`nosplit`|`PER_TENSOR`|`True`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `f16`,`bf16`|
 |`gm`|`RowMajor`|`-`|`PER_CHANNEL`|`False`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
 |`gm`|`RowMajor`|`-`|`PER_CHANNEL`|`True`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
 |`gm`|`ColumnMajor`|`-`|`PER_CHANNEL`|`False`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
 |`gm`|`ColumnMajor`|`-`|`PER_CHANNEL`|`True`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
+|`ub`|`RowMajor`|`nosplit`|`PER_CHANNEL`|`False`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `f16`,`bf16`|
+|`ub`|`RowMajor`|`nosplit`|`PER_CHANNEL`|`True`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `f16`,`bf16`|
+|`ub`|`ColumnMajor`|`nosplit`|`PER_CHANNEL`|`False`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `f16`,`bf16`|
+|`ub`|`ColumnMajor`|`nosplit`|`PER_CHANNEL`|`True`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `f16`,`bf16`|
 
 Vector 拷贝通路
 
@@ -168,8 +181,8 @@ Vector 拷贝通路
 |`ub`|`RowMajor`|`gm`|`RowMajor`|`i64`,`u64`,`f64`,`f32`,`f16`,`bf16`,`i32`,`i16`,`i8`,`i1`,`u32`,`u16`,`u8`,`f8e4m3fn`,`f8e5m2`,`f8e8m0`,`f4e2m1`,`f4e1m2`,`hif8`,`f4e2m1x2`,`f4e1m2x2`|
 |`ub`|`RowMajor`|`ub`|`RowMajor`|`f32`,`f16`,`bf16`,`i32`,`i16`,`i8`,`i1`,`u32`,`u16`,`u8`,`f8e4m3fn`,`f8e5m2`,`f8e8m0`,`f4e2m1`,`f4e1m2`|
 |`ub`|`RowMajor`|`ub`|`ColumnMajor`|`f32`,`f16`,`bf16`,`i32`,`i16`,`i8`,`i1`,`u32`,`u16`,`u8`,`f8e4m3fn`,`f8e5m2`|
-|`ub`|`RowMajor`|`l1`|`zN`|`f32`,`f16`,`bf16`,`i8`,`i1`,`f8e4m3fn`,`f8e5m2`,`f4e2m1`,`f4e1m2`|
-|`ub`|`zN`|`l1`|`zN`|`f32`,`f16`,`bf16`,`i8`,`i1`,`f8e4m3fn`,`f8e5m2`,`f4e2m1`,`f4e1m2`|
+|`ub`|`RowMajor`|`l1`|`zN`|`f32`,`f16`,`bf16`,`i8`,`i1`,`i16`,`i32`,`u8`,`u16`,`u32`,`f8e4m3fn`,`f8e5m2`,`f4e2m1`,`f4e1m2`|
+|`ub`|`zN`|`l1`|`zN`|`f32`,`f16`,`bf16`,`i8`,`i1`,`i16`,`i32`,`u8`,`u16`,`u32`,`f8e4m3fn`,`f8e5m2`,`f4e2m1`,`f4e1m2`|
 |`ub`|`zZMxScale`|`l1`|`zZMxScale`|`f8e8m0`|
 |`ub`|`nNMxScale`|`l1`|`nNMxScale`|`f8e8m0`|
 |`ub`|`zNUnAlign`|`l1`|`zN`|`f32`,`f16`,`bf16`,`i8`,`f8e4m3fn`,`f8e5m2`|

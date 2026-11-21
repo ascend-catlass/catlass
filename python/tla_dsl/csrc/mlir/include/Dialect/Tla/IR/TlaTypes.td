@@ -178,3 +178,9 @@ def Tla_CopyL0C2DstParamsType : TypeDef<TlaDialect, "CopyL0C2DstParams", []> {
   let summary = "CopyL0C2DstParams for tla.copy.";
   let assemblyFormat = "";
 }
+
+def Tla_CopyPadParamsType : TypeDef<TlaDialect, "CopyPadParams", []> {
+  let mnemonic = "copy_pad_params";
+  let summary = "GM→UB DataCopyPad params bundle for tla.copy.";
+  let assemblyFormat = "";
+}

@@ -1164,6 +1164,42 @@ void appendGmCachePolicyOperand(
     operands.push_back(builder.create<arith::ConstantIntOp>(loc, policyVal, 64));
 }
 
+void appendGmToUbPadOperands(
+    OpBuilder& builder, Location loc, ::tla::CopyOp copyOp, StringRef srcAddrspace, StringRef dstAddrspace,
+    SmallVectorImpl<Type>& operandTypes, SmallVectorImpl<Value>& operands)
+{
+    if (srcAddrspace != "gm" || dstAddrspace != "ub")
+        return;
+    Type i64Ty = builder.getI64Type();
+    auto constI64 = [&](int64_t val) -> Value { return builder.create<arith::ConstantIntOp>(loc, val, 64); };
+    auto widenToI64 = [&](Value v) -> Value {
+        if (v.getType() == i64Ty)
+            return v;
+        return castValueToI64(builder, loc, v);
+    };
+
+    int64_t padEnable = 0;
+    Value left;
+    Value right;
+    Value valueBits;
+    if (Value params = copyOp.getParams()) {
+        if (auto padOp = params.getDefiningOp<::tla::CopyPadParamsOp>()) {
+            padEnable = 1;
+            left = padOp.getLeft();
+            right = padOp.getRight();
+            valueBits = padOp.getValueBits();
+        }
+    }
+    operandTypes.push_back(i64Ty);
+    operands.push_back(constI64(padEnable));
+    operandTypes.push_back(i64Ty);
+    operands.push_back(left ? widenToI64(left) : constI64(0));
+    operandTypes.push_back(i64Ty);
+    operands.push_back(right ? widenToI64(right) : constI64(0));
+    operandTypes.push_back(i64Ty);
+    operands.push_back(valueBits ? widenToI64(valueBits) : constI64(0));
+}
+
 static bool isAicTemplateRuntimeCall(StringRef name)
 {
     if (name.starts_with("copy_gm_") && name.ends_with("_batch"))

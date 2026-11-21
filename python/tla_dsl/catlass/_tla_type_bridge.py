@@ -215,6 +215,10 @@ def copy_l0c2dst_params_type_get(context: mlir_ir.Context) -> mlir_ir.Type:
     return _load_bridge_extension().copy_l0c2dst_params_type_get(context)
 
 
+def copy_pad_params_type_get(context: mlir_ir.Context) -> mlir_ir.Type:
+    return _load_bridge_extension().copy_pad_params_type_get(context)
+
+
 def load_tla_dialect(context: mlir_ir.Context) -> None:
     _load_bridge_extension().load_tla_dialect(context)
 
@@ -265,6 +269,10 @@ def type_is_mutex(type_like: mlir_ir.Type) -> bool:
 
 def type_is_copy_l0c2dst_params(type_like: mlir_ir.Type) -> bool:
     return bool(_load_bridge_extension().type_is_copy_l0c2dst_params(type_like))
+
+
+def type_is_copy_pad_params(type_like: mlir_ir.Type) -> bool:
+    return bool(_load_bridge_extension().type_is_copy_pad_params(type_like))
 
 
 def tla_type_category(type_like: mlir_ir.Type) -> str | None:

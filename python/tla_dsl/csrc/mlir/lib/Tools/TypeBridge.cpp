@@ -438,6 +438,12 @@ MlirType copyL0C2DstParamsTypeGet(MlirContext context)
     return toMlirType(::tla::CopyL0C2DstParamsType::get(ctx), "tla.CopyL0C2DstParams");
 }
 
+MlirType copyPadParamsTypeGet(MlirContext context)
+{
+    MLIRContext* ctx = bridgeContext(context);
+    return toMlirType(::tla::CopyPadParamsType::get(ctx), "tla.CopyPadParams");
+}
+
 MlirType tensorTypeGet(
     MlirContext context, const std::vector<int64_t>& shapeTree, const std::vector<int64_t>& strideTree,
     const std::vector<int64_t>& coordTree, const std::vector<int64_t>& originShapeTree, MlirType elementType,
@@ -507,6 +513,8 @@ std::optional<std::string> tlaTypeCategory(MlirType type)
         return "mutex";
     if (isa<::tla::CopyL0C2DstParamsType>(unwrapped))
         return "CopyL0C2DstParams";
+    if (isa<::tla::CopyPadParamsType>(unwrapped))
+        return "CopyPadParams";
     return std::nullopt;
 }
 
@@ -1126,6 +1134,7 @@ PYBIND11_MODULE(_tla_type_bridge_native, m)
     m.def("float4_e2m1x2_type_get", &float4E2M1x2TypeGet, py::arg("context"));
     m.def("float4_e1m2x2_type_get", &float4E1M2x2TypeGet, py::arg("context"));
     m.def("copy_l0c2dst_params_type_get", &copyL0C2DstParamsTypeGet, py::arg("context"));
+    m.def("copy_pad_params_type_get", &copyPadParamsTypeGet, py::arg("context"));
 
     m.def("type_is_ptr", &typeIs<::tla::PtrType>, py::arg("type"));
     m.def("type_is_tensor", &typeIs<::tla::TlaTensorType>, py::arg("type"));
@@ -1139,6 +1148,7 @@ PYBIND11_MODULE(_tla_type_bridge_native, m)
     m.def("type_is_cross_flag", &typeIs<::tla::CrossFlagType>, py::arg("type"));
     m.def("type_is_mutex", &typeIs<::tla::MutexType>, py::arg("type"));
     m.def("type_is_copy_l0c2dst_params", &typeIs<::tla::CopyL0C2DstParamsType>, py::arg("type"));
+    m.def("type_is_copy_pad_params", &typeIs<::tla::CopyPadParamsType>, py::arg("type"));
     m.def("tla_type_category", &tlaTypeCategory, py::arg("type"));
 
     m.def("ptr_pointee_type_get", &ptrPointeeTypeGet, py::arg("ptr_type"));

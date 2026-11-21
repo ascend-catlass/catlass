@@ -65,6 +65,14 @@ void appendGmCachePolicyOperand(
     llvm::StringRef dstAddrspace, llvm::SmallVectorImpl<mlir::Type>& operandTypes,
     llvm::SmallVectorImpl<mlir::Value>& operands);
 
+/// Append GM→UB DataCopyPad trailing ABI:
+/// ``padEnable, leftPadding, rightPadding, paddingValueBits`` (all ``i64``).
+/// No-op unless ``src=gm`` and ``dst=ub``. Defaults to all zeros (exact-byte).
+void appendGmToUbPadOperands(
+    mlir::OpBuilder& builder, mlir::Location loc, ::tla::CopyOp copyOp, llvm::StringRef srcAddrspace,
+    llvm::StringRef dstAddrspace, llvm::SmallVectorImpl<mlir::Type>& operandTypes,
+    llvm::SmallVectorImpl<mlir::Value>& operands);
+
 /// Declare (once) the private runtime template `name`, core-annotating it (AIC or
 /// AIV, always-inline, C-interface) by symbol so the backend inlines it on the
 /// right core. Returns the existing decl if already present.

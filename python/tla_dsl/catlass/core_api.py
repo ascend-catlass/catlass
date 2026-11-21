@@ -6,6 +6,7 @@ import builtins as _builtins
 import inspect
 import math
 import os
+import struct
 import sys
 
 import numpy as np
@@ -176,6 +177,7 @@ from .params import (
     HF32Mode,
     ComputeOrder,
     CopyL0C2DstParams,
+    CopyPadParams,
     CopyParams,
     HistogramsBinType,
     HistogramsParams,
@@ -1736,6 +1738,128 @@ def _as_i64_value(value: Any, *, loc: mlir_ir.Location | None = None) -> mlir_ir
     raise TlaLoweringError(f"Expected i64-like operand, got {type(value).__name__}")
 
 
+def _is_bool_like_pad_operand(value: Any) -> bool:
+    """True for Python bool, ``tla.Bool``, or ``i1`` SSA (not integer 0/1)."""
+    if isinstance(value, bool):
+        return True
+    if isinstance(value, Bool) or (
+        isinstance(value, Numeric) and type(value).dtype.lower() in ("i1", "bool")
+    ):
+        return True
+    resolved = _resolve_bound_value(value)
+    if isinstance(resolved, bool):
+        return True
+    if isinstance(resolved, Bool) or (
+        isinstance(resolved, Numeric) and type(resolved).dtype.lower() in ("i1", "bool")
+    ):
+        return True
+    if isinstance(resolved, mlir_ir.Value) and mlir_ir.IntegerType.isinstance(
+        resolved.type
+    ):
+        return mlir_ir.IntegerType(resolved.type).width == 1
+    return False
+
+
+def _as_i64_copy_pad_operand(
+    value: Any, *, what: str, loc: mlir_ir.Location | None = None
+) -> mlir_ir.Value:
+    """Widen CopyPadParams left/right/value SSA to signless ``i64``.
+
+    Rejects ``bool`` / ``tla.Bool`` / ``i1``. Unsigned integers go uiN→iN via
+    ``builtin.unrealized_conversion_cast`` then ``arith.extui`` (or identity at
+    width 64), not the signed ``arith.extsi`` path used by ``_as_i64_value``.
+    """
+    if _is_bool_like_pad_operand(value):
+        raise TypeError(
+            f"CopyPadParams.{what} must not be bool/tla.Bool/i1; "
+            "use a non-boolean integer (e.g. Int32/Int64)"
+        )
+    resolved = _resolve_bound_value(value)
+    i64_type = mlir_ir.IntegerType.get_signless(64)
+    if isinstance(resolved, Numeric):
+        dtype = type(resolved).dtype.lower()
+        host = resolved.value
+        # Whole-number float hosts on Int*/UInt* (e.g. Int32(9.0), UInt32(1.0))
+        # must lower as signless i64 constants — same as int hosts — so static
+        # checks and IR emission stay aligned and uiN constants are not emitted.
+        if isinstance(host, float) and not isinstance(host, bool):
+            if (dtype.startswith("i") or dtype.startswith("u")) and dtype[1:].isdigit():
+                if not host.is_integer():
+                    raise TypeError(
+                        f"CopyPadParams.{what} integer Numeric host must be a "
+                        f"whole number (got {host!r} on {type(resolved).__name__})"
+                    )
+                host = int(host)
+        if isinstance(host, (bool, int)):
+            if isinstance(host, bool) or dtype in ("i1", "bool"):
+                raise TypeError(
+                    f"CopyPadParams.{what} must not be bool/tla.Bool/i1; "
+                    "use a non-boolean integer (e.g. Int32/Int64)"
+                )
+            if dtype.startswith("u") and dtype[1:].isdigit():
+                width = int(dtype[1:])
+                return _const_i64(int(host) & ((1 << width) - 1), loc=loc)
+            if dtype.startswith("i") and dtype[1:].isdigit():
+                return _const_i64(int(host), loc=loc)
+            raise TypeError(
+                f"CopyPadParams.{what} expected integer Numeric, "
+                f"got {type(resolved).__name__}"
+            )
+        resolved = resolved.ir_value(loc=loc)
+    if isinstance(resolved, mlir_ir.Value):
+        if isinstance(resolved.type, mlir_ir.IndexType):
+            return mlir_ir.Operation.create(
+                "arith.index_cast",
+                operands=[resolved],
+                results=[i64_type],
+                loc=loc,
+            ).results[0]
+        if mlir_ir.IntegerType.isinstance(resolved.type):
+            int_type = mlir_ir.IntegerType(resolved.type)
+            if int_type.width == 1:
+                raise TypeError(
+                    f"CopyPadParams.{what} must not be bool/tla.Bool/i1; "
+                    "use a non-boolean integer (e.g. Int32/Int64)"
+                )
+            if int_type.is_unsigned:
+                # arith.* only accepts signless ints; uiN → iN via
+                # unrealized_conversion_cast (same pattern as debug print).
+                signless_n = mlir_ir.IntegerType.get_signless(int_type.width)
+                as_signless = mlir_ir.Operation.create(
+                    "builtin.unrealized_conversion_cast",
+                    operands=[resolved],
+                    results=[signless_n],
+                    loc=loc,
+                ).results[0]
+                if int_type.width == 64:
+                    return as_signless
+                if int_type.width < 64:
+                    return mlir_ir.Operation.create(
+                        "arith.extui",
+                        operands=[as_signless],
+                        results=[i64_type],
+                        loc=loc,
+                    ).results[0]
+                raise TypeError(
+                    f"CopyPadParams.{what} unsigned width {int_type.width} "
+                    "cannot widen to i64"
+                )
+            if int_type.width == 64:
+                return resolved
+            cast_name = "arith.extsi" if int_type.width < 64 else "arith.trunci"
+            return mlir_ir.Operation.create(
+                cast_name,
+                operands=[resolved],
+                results=[i64_type],
+                loc=loc,
+            ).results[0]
+    if isinstance(resolved, int) and not isinstance(resolved, bool):
+        return _const_i64(resolved, loc=loc)
+    raise TypeError(
+        f"CopyPadParams.{what} expected i64-like integer, got {type(value).__name__}"
+    )
+
+
 def _coerce_inttoptr_address(
     addr_token: str,
     value: int | mlir_ir.Value | Numeric,
@@ -1976,7 +2100,10 @@ def _const_int_value(value: Any) -> int | None:
         return resolved
     if isinstance(resolved, Numeric) and isinstance(resolved.value, (bool, int)):
         dtype = type(resolved).dtype.lower()
-        if dtype.startswith("i"):
+        # Shared helper: signed Int* only. CopyPad unsigned / whole-float hosts
+        # use ``_const_pad_count_value`` so arange and other callers keep their
+        # pre-existing acceptance rules (do not widen this helper for Pad).
+        if dtype.startswith("i") and dtype[1:].isdigit():
             return int(resolved.value)
     if isinstance(resolved, mlir_ir.Value):
         owner = getattr(resolved, "owner", None)
@@ -1987,6 +2114,53 @@ def _const_int_value(value: Any) -> int | None:
                 if isinstance(attr, mlir_ir.IntegerAttr):
                     return int(attr.value)
     return None
+
+
+def _pad_count_host_int(value: Any) -> int | None:
+    """Host integer for CopyPad left/right counts, or None if not static.
+
+    Accepts Python ``int``, signed/unsigned integer ``Numeric`` with an ``int``
+    host, and integer ``Numeric`` whose host is a whole-number ``float``
+    (``Int32(9.0)`` → ``9``). Fractional floats raise ``TypeError``. Bool /
+    ``tla.Bool`` return ``None`` (caller rejects separately).
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    resolved = _resolve_bound_value(value)
+    if isinstance(resolved, bool):
+        return None
+    if isinstance(resolved, int):
+        return resolved
+    if isinstance(resolved, Numeric):
+        dtype = type(resolved).dtype.lower()
+        if not (
+            (dtype.startswith("i") or dtype.startswith("u")) and dtype[1:].isdigit()
+        ):
+            return None
+        host = resolved.value
+        if isinstance(host, bool):
+            return None
+        if isinstance(host, float):
+            if not host.is_integer():
+                raise TypeError(
+                    f"CopyPadParams pad count Numeric host must be a whole number "
+                    f"(got {host!r} on {type(resolved).__name__})"
+                )
+            host = int(host)
+        if not isinstance(host, int):
+            return None
+        if dtype.startswith("u"):
+            width = int(dtype[1:])
+            return int(host) & ((1 << width) - 1)
+        return int(host)
+    return None
+
+
+def _const_pad_count_value(value: Any) -> int | None:
+    """Static pad-count extraction for CopyPad capacity / 32B checks only."""
+    return _pad_count_host_int(value)
 
 
 def _vector_ssa_type_for_mlir_value(
@@ -6799,6 +6973,186 @@ def _validate_ubub_transpose_shape(src_desc, dst_desc, src_dtype) -> None:
         )
 
 
+# ExtParams-safe GM→UB pad dtypes (must stay aligned with Vector/dma.cpp).
+_COPY_PAD_SAFE_DTYPES = frozenset(
+    {"f32", "f16", "bf16", "i32", "u32", "i16", "u16", "i8", "u8"}
+)
+_COPY_PAD_FLOAT_DTYPES = frozenset({"f32", "f16", "bf16", "f64"})
+
+
+_COPY_PAD_FLOAT_HOST_BITS = {
+    "f16": (Float16, 0x7C00),
+    "bf16": (BFloat16, 0x7F80),
+    "f32": (Float32, 0x7F800000),
+}
+
+
+def _padding_value_host_scalar(value: Any) -> int | float:
+    """Host scalar for static ``padding_value`` encoding (keeps Numeric wrapper)."""
+    if isinstance(value, Numeric):
+        host = value.value
+        if isinstance(host, bool):
+            raise TypeError("padding_value must not be bool")
+        if not isinstance(host, (int, float)):
+            raise TypeError(
+                f"padding_value Numeric host must be int/float "
+                f"(got {type(host).__name__})"
+            )
+        return host
+    if isinstance(value, bool):
+        raise TypeError("padding_value must not be bool")
+    if isinstance(value, (int, float)):
+        return value
+    raise TypeError(
+        f"padding_value must be int/float/Numeric (got {type(value).__name__})"
+    )
+
+
+def _padding_value_to_i64_bits(value: Any, dtype: str, elem_nbytes: int) -> int:
+    """Pack ``CopyPadParams.padding_value`` into ABI ``paddingValueBits``."""
+    if elem_nbytes <= 0 or elem_nbytes > 8:
+        raise ValueError(f"unsupported pad element width {elem_nbytes}B for {dtype}")
+    bit_width = elem_nbytes * 8
+    mask = (1 << bit_width) - 1
+    if isinstance(value, bool):
+        raise TypeError("padding_value must not be bool")
+    # Integer element dtypes: only accept integer bit/value patterns.
+    # Dispatch on Numeric.dtype (not bare host type) so Float32(1) is rejected
+    # on i32 tiles while Int32(1.0) whole-float hosts stay accepted.
+    if dtype not in _COPY_PAD_FLOAT_DTYPES:
+        if isinstance(value, Numeric):
+            nd = type(value).dtype.lower()
+            if nd in ("i1", "bool"):
+                raise TypeError("padding_value must not be bool")
+            if not ((nd.startswith("i") or nd.startswith("u")) and nd[1:].isdigit()):
+                raise TypeError(
+                    f"padding_value for integer dtype {dtype} must be an int "
+                    f"(got {type(value).__name__})"
+                )
+            host = value.value
+            if isinstance(host, bool):
+                raise TypeError("padding_value must not be bool")
+            if isinstance(host, float):
+                if not host.is_integer():
+                    raise TypeError(
+                        f"padding_value for integer dtype {dtype} must be an int "
+                        f"(got float {host!r})"
+                    )
+                host = int(host)
+            if not isinstance(host, int):
+                raise TypeError(
+                    f"padding_value for integer dtype {dtype} must be an int "
+                    f"(got {type(host).__name__})"
+                )
+            return int(host) & mask
+        if isinstance(value, float):
+            raise TypeError(
+                f"padding_value for integer dtype {dtype} must be an int "
+                f"(got float {value!r})"
+            )
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise TypeError(
+                f"padding_value for integer dtype {dtype} must be an int "
+                f"(got {type(value).__name__})"
+            )
+        return int(value) & mask
+
+    # Float element dtypes: int means the numeric value (1 → 1.0).
+    try:
+        scalar = float(_padding_value_host_scalar(value))
+    except (OverflowError, ValueError, TypeError) as exc:
+        raise ValueError(
+            f"padding_value {value!r} cannot be encoded for dtype {dtype}: {exc}"
+        ) from exc
+    host = _COPY_PAD_FLOAT_HOST_BITS.get(dtype)
+    try:
+        if host is not None:
+            dtype_cls, exponent_mask = host
+            with np.errstate(over="ignore", invalid="ignore"):
+                bits = int(dtype_cls._host_bits(scalar)) & mask
+            if math.isfinite(scalar) and (bits & exponent_mask) == exponent_mask:
+                raise ValueError(
+                    f"padding_value {value!r} overflows finite range of {dtype}"
+                )
+            return bits
+        if elem_nbytes == 8 or dtype == "f64":
+            return struct.unpack("<Q", struct.pack("<d", scalar))[0]
+        if elem_nbytes == 1:
+            raise TypeError(
+                f"padding_value for 1-byte dtype {dtype} must be an int bit pattern"
+            )
+    except (OverflowError, struct.error, ValueError) as exc:
+        raise ValueError(
+            f"padding_value {value!r} cannot be encoded for dtype {dtype}: {exc}"
+        ) from exc
+    raise TypeError(f"cannot encode padding_value for dtype {dtype}")
+
+
+def _padding_value_as_i64_ssa(
+    value: Any,
+    dtype: str,
+    elem_nbytes: int,
+    *,
+    loc: mlir_ir.Location | None = None,
+) -> mlir_ir.Value:
+    """Encode ``padding_value`` as the BC ``paddingValueBits`` ``i64`` SSA.
+
+    Compile-time Python / Numeric constants use ``_padding_value_to_i64_bits``
+    (float ints mean numeric value). Runtime values must already be an
+    integer/index bit pattern (``_as_i64_copy_pad_operand``).
+    """
+    if _is_bool_like_pad_operand(value):
+        raise TypeError("CopyPadParams.padding_value must not be bool/tla.Bool/i1")
+    # Prefer static encoding so float constants keep numeric semantics.
+    # Pass Numeric through without unwrapping so dtype checks see Float32 vs Int32.
+    if isinstance(value, (int, float)) or (
+        isinstance(value, Numeric) and isinstance(value.value, (bool, int, float))
+    ):
+        bits = _padding_value_to_i64_bits(value, dtype, elem_nbytes)
+        return _const_i64(bits, loc=loc)
+    # Runtime SSA / dynamic Numeric: treat as bit pattern.
+    return _as_i64_copy_pad_operand(value, what="padding_value", loc=loc)
+
+
+def _copy_pad_innermost_extent(desc) -> int | None:
+    """Return static innermost origin extent, or None if dynamic/unavailable."""
+    try:
+        origin = desc.origin_shape
+        if not origin:
+            return None
+        return _const_int_value(origin[-1])
+    except (TypeError, ValueError, IndexError, KeyError):
+        return None
+
+
+def _copy_pad_static_rows(desc) -> int | None:
+    """Return static row count (origin_shape[0]) for Rank-2 tiles."""
+    try:
+        origin = desc.origin_shape
+        if not origin or len(origin) < 2:
+            return None
+        return _const_int_value(origin[0])
+    except (TypeError, ValueError, IndexError, KeyError):
+        return None
+
+
+def _copy_pad_static_row_stride(desc) -> int | None:
+    """Return static RowMajor row stride (stride[0]), or None if dynamic."""
+    try:
+        stride = desc.stride
+        if not stride:
+            return None
+        return _const_int_value(stride[0])
+    except (TypeError, ValueError, IndexError, KeyError):
+        return None
+
+
+def _copy_pad_align_up(value: int, align: int) -> int:
+    if align <= 0:
+        return value
+    return ((value + align - 1) // align) * align
+
+
 @dsl_user_op
 def copy(
     dst: Tensor,
@@ -6818,7 +7172,8 @@ def copy(
         - `dst` (`Tensor`): Destination tile. Required.
         - `src` (`Tensor`): Source tile. Required.
         - `params` (`CopyParams | None`): Path-specific params:
-          `CopyL0C2DstParams`, `CopyUbToGmParams`. Default `None`.
+          `CopyL0C2DstParams`, `CopyUbToGmParams`, `CopyPadParams` (GM→UB
+          DataCopyPad). Default `None`.
         - `scale` (`Tensor | None`): L1 OCP `e8m0` shared-exponent tile for
           L1→L0A/L0B MX load. Stored as `i8`/`u8`; destination tag is
           `tla.arch.zZMxScale` (L0A) or `tla.arch.nNMxScale` (L0B).
@@ -6834,6 +7189,11 @@ def copy(
         - Must be called inside a `@tla.kernel`-decorated kernel function.
         - Must be called inside `tla.cube()` or `tla.vector()`.
         - Copy size follows each tile's `origin_shape`.
+        - `CopyPadParams` is GM→UB RowMajor only (f32/f16/bf16/i32/u32/i16/u16/
+          i8/u8). `left_padding` / `right_padding` / `padding_value` may be
+          runtime integer/index SSA. When a side count is a static int, pad
+          bytes must be ≤ 32B; when extents are also static, dst innermost
+          origin must be ≥ src + left_padding + right_padding.
         - On Ascend 950, two logical rank-3 views `(B, M, N)` select batched
           GM-to-L1 layout conversion. FP8 supports RowMajor→zN and
           ColumnMajor→nZ; E8M0 supports the four GM MX-scale routes below.
@@ -7266,9 +7626,142 @@ def copy(
                         )
         params_value = None
 
+    if isinstance(params, CopyPadParams):
+        if _route != ("gm", "ub"):
+            _op_error(
+                "copy",
+                "CopyPadParams is only supported on GM→UB routes, "
+                f"got {_route[0]}→{_route[1]}",
+            )
+        if src_layout != "RowMajor" or dst_layout != "RowMajor":
+            _op_error(
+                "copy",
+                "CopyPadParams currently requires RowMajor→RowMajor GM→UB "
+                f"(got {src_layout}→{dst_layout})",
+            )
+        if src_dtype not in _COPY_PAD_SAFE_DTYPES:
+            _op_error(
+                "copy",
+                "CopyPadParams is not supported for dtype "
+                f"{src_dtype}; supported: {sorted(_COPY_PAD_SAFE_DTYPES)}",
+            )
+        elem_nbytes = dtype_size_bytes(src_dtype)
+        if elem_nbytes <= 0:
+            _op_error(
+                "copy",
+                f"CopyPadParams cannot size-check unknown dtype {src_dtype}",
+            )
+        try:
+            params._validate(elem_nbytes=elem_nbytes)
+        except (TypeError, ValueError) as exc:
+            _op_error("copy", str(exc))
+
+        # Pad-only static extract (unsigned + whole-float Int*/UInt* hosts).
+        # Do not use shared ``_const_int_value`` here — that would change arange.
+        try:
+            left_static = _const_pad_count_value(params.left_padding)
+            right_static = _const_pad_count_value(params.right_padding)
+        except TypeError as exc:
+            _op_error("copy", str(exc))
+        # Reject Python bool and tla.Bool/i1 for pad counts (bool→0/1 is wrong).
+        if _is_bool_like_pad_operand(params.left_padding) or _is_bool_like_pad_operand(
+            params.right_padding
+        ):
+            _op_error(
+                "copy",
+                "CopyPadParams left/right_padding must not be bool/tla.Bool/i1",
+            )
+        if left_static is not None and left_static < 0:
+            _op_error("copy", "CopyPadParams.left_padding must be >= 0")
+        if right_static is not None and right_static < 0:
+            _op_error("copy", "CopyPadParams.right_padding must be >= 0")
+        if left_static is not None and left_static * elem_nbytes > 32:
+            _op_error(
+                "copy",
+                f"CopyPadParams.left_padding*{elem_nbytes}B exceeds AscendC "
+                f"per-side pad limit of 32B (got {left_static} elements)",
+            )
+        if right_static is not None and right_static * elem_nbytes > 32:
+            _op_error(
+                "copy",
+                f"CopyPadParams.right_padding*{elem_nbytes}B exceeds AscendC "
+                f"per-side pad limit of 32B (got {right_static} elements)",
+            )
+
+        src_inner = _copy_pad_innermost_extent(src_desc)
+        dst_inner = _copy_pad_innermost_extent(dst_desc)
+        ele_per_blk = 32 // elem_nbytes if elem_nbytes > 0 else 0
+        if (
+            src_inner is not None
+            and dst_inner is not None
+            and left_static is not None
+            and right_static is not None
+        ):
+            need = src_inner + left_static + right_static
+            if dst_inner < need:
+                _op_error(
+                    "copy",
+                    "CopyPadParams requires dst innermost origin extent >= "
+                    f"src + left_padding + right_padding "
+                    f"(need {need}, got dst={dst_inner}, src={src_inner})",
+                )
+            # Multi-row: AscendC Normal mode AlignUp(blockLen+pads, 32B) per row,
+            # then adds (dstGapElems / ELE_NUM_PER_BLK) * 32B (integer truncate).
+            # Stride must cover AlignUp(need) and be a multiple of ELE_NUM_PER_BLK
+            # so BC gap truncation cannot skew rows vs the declared layout.
+            rows = _copy_pad_static_rows(dst_desc) or _copy_pad_static_rows(src_desc)
+            dst_row_stride = _copy_pad_static_row_stride(dst_desc)
+            if (
+                rows is not None
+                and rows > 1
+                and dst_row_stride is not None
+                and ele_per_blk > 0
+            ):
+                aligned_need = _copy_pad_align_up(need, ele_per_blk)
+                if dst_row_stride < aligned_need or dst_row_stride % ele_per_blk != 0:
+                    _op_error(
+                        "copy",
+                        "CopyPadParams multi-row dst row stride must be >= "
+                        f"AlignUp(src+left+right, {ele_per_blk}) and a multiple "
+                        f"of {ele_per_blk} "
+                        f"(need {aligned_need}, got stride0={dst_row_stride}, "
+                        f"src={src_inner}, left={left_static}, right={right_static})",
+                    )
+
+        try:
+            pad_left_value = _as_i64_copy_pad_operand(
+                params.left_padding, what="left_padding", loc=loc
+            )
+            pad_right_value = _as_i64_copy_pad_operand(
+                params.right_padding, what="right_padding", loc=loc
+            )
+            pad_value_bits_value = _padding_value_as_i64_ssa(
+                params.padding_value, src_dtype, elem_nbytes, loc=loc
+            )
+        except (TypeError, ValueError, TlaLoweringError) as exc:
+            _op_error("copy", str(exc))
+        pad_ctx = loc.context if loc is not None else mlir_ir.Context.current
+        # Same pattern as CopyL0C2DstParams: typed params SSA, then copy(params=).
+        params_value = _tla_ops_gen.CopyPadParams(
+            _tla_type_bridge.copy_pad_params_type_get(pad_ctx),
+            pad_left_value,
+            pad_right_value,
+            pad_value_bits_value,
+            loc=loc,
+        )
+    elif params is not None and not isinstance(params, CopyL0C2DstParams):
+        # CopyUbToGmParams (atomic) and future bags: duck-typed below.
+        # Reject unknown CopyParams subclasses early when they lack atomic_mode.
+        if not hasattr(params, "atomic_mode") and _route[0] != "l0c":
+            _op_error(
+                "copy",
+                f"unsupported params type {type(params).__name__} for route "
+                f"{_route[0]}→{_route[1]}",
+            )
+
     # Check if atomic mode enabled and acquire lowered atomic_mode_attr
     atomic_mode_attr = None
-    atomic_mode = params.atomic_mode if params is not None else None
+    atomic_mode = getattr(params, "atomic_mode", None) if params is not None else None
     if atomic_mode is not None and atomic_mode != AtomicMode.NONE:
         if atomic_mode != AtomicMode.ADD:
             raise NotImplementedError(

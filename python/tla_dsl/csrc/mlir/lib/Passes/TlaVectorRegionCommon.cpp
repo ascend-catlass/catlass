@@ -115,8 +115,11 @@ public:
 
     LogicalResult matchAndRewrite(::tla::CopyOp copyOp, PatternRewriter& rewriter) const override
     {
-        if (copyOp->getNumOperands() != 2 || copyOp->getNumResults() != 0)
-            return rewriter.notifyMatchFailure(copyOp, "expected tla.copy with 2 operands and 0 results");
+        // Operands: dst, src, optional params (L0C knobs or CopyPadParams).
+        if (copyOp->getNumResults() != 0)
+            return rewriter.notifyMatchFailure(copyOp, "expected tla.copy with 0 results");
+        if (!copyOp.getDst() || !copyOp.getSrc())
+            return rewriter.notifyMatchFailure(copyOp, "expected tla.copy dst and src operands");
 
         Value dstTile = copyOp.getDst();
         Value srcTile = copyOp.getSrc();
@@ -160,6 +163,8 @@ public:
         SmallVector<Value, 22> operands = {*srcRuntimeMemref, *dstRuntimeMemref};
         operands.append(payload.begin(), payload.end());
         ::tla::appendGmCachePolicyOperand(
+            rewriter, copyOp.getLoc(), copyOp, srcDesc.addrspace, dstDesc.addrspace, operandTypes, operands);
+        ::tla::appendGmToUbPadOperands(
             rewriter, copyOp.getLoc(), copyOp, srcDesc.addrspace, dstDesc.addrspace, operandTypes, operands);
         auto callee = ::tla::getOrCreateRuntimeCall(copyOp->getParentOfType<ModuleOp>(), calleeName, operandTypes);
 
