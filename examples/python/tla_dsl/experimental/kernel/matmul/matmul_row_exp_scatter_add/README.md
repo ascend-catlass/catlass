@@ -2,7 +2,7 @@
 
 ## 功能说明
 
-- 算子功能：对 `x @ weightᵀ` 的结果执行逐行指数变换和梯度缩放，再累加选中列的梯度；基于 CATLASS DSL 实现的 AIC/AIV mixed kernel。
+- 算子功能：对 `x @ weightᵀ` 的结果执行逐行指数变换和梯度缩放，再累加选中列的梯度；基于 CATLASS DSL 实现的 AIC/AIV mixed kernel，入口为 `matmul_row_exp_scatter_add` 模块的 `run` 函数。
 - 计算公式：
 
   $$
@@ -16,17 +16,8 @@
   \end{aligned}
   $$
 
-  其中 `X` 为 `[M, H]`、`W` 为 `[V, H]`，分别对应 `x` 和 `weight`；`M` 为行数，`H` 为内积维度，`V` 为当前列分片宽度，`S` 为每行选中槽位数。`I`、`U`、`LSE` 分别对应 `global_col_ids`、`values`、`row_logsumexp`，`invT = 1 / temperature`，`col_start = shard_index * V`。
-
-  `row_logsumexp` 由调用方提供。片外列跳过 scatter-add，但对应的 `values` 仍参与行求和；重复下标按槽位顺序依次累加。
-
-- 支持产品型号：Ascend 950PR&950DT系列产品
-
-## 代码组织
-
-| 文件 | 概述 |
-| ----- | ----- |
-| [matmul_row_exp_scatter_add.py](matmul_row_exp_scatter_add.py) | 矩阵乘、逐行指数变换与选中列梯度累加的融合实现。 |
+  其中 `X` 为 `[M, H]`、`W` 为 `[V, H]`，分别对应 `x` 和 `weight`；`invT = 1 / temperature`，`col_start = shard_index * V`。`row_logsumexp` 由调用方提供。片外列跳过 scatter-add，但对应的 `values` 仍参与行求和；重复下标按槽位顺序依次累加。
+- 支持产品型号：Ascend 950PR&950DT 系列产品。
 
 ## 参数说明
 
@@ -37,6 +28,8 @@ y = matmul_row_exp_scatter_add.run(
 )
 ```
 
+`M` 为行数，`H` 为内积维度，`V` 为当前列分片宽度，`S` 为每行选中槽位数；`I`、`U`、`LSE` 分别对应 `global_col_ids`、`values`、`row_logsumexp`。`M_pad`、`V_pad` 分别为 `M`、`V` 向上补齐到 256 的结果。
+
 | 参数 | 属性 | shape | dtype | 说明 |
 | ----- | ----- | ----- | ----- | ----- |
 | `x` | Input | `[M, H]` | `bfloat16` | 左操作数 |
@@ -45,11 +38,9 @@ y = matmul_row_exp_scatter_add.run(
 | `row_logsumexp` | Input | `[M]` | `float32` | 与温度缩放后矩阵乘结果对应的逐行对数归一化偏移 |
 | `values` | Input | `[M, S]` | `float32` | 选中槽位的梯度值，所有槽位均参与行求和 |
 | `temperature` | Input | 标量 | `float` | 结果缩放温度，必须为正数 |
-| `shard_index` | Input | 标量 | `int` | 当前列分片编号，默认为 `0`，必须为非负整数 |
-| `out` | Output | `[M_pad, V_pad]` | `bfloat16` | 可选输出缓冲区，默认为 `None`，由 host 分配 |
+| `shard_index` | Input | 标量 | `int` | 当前列分片编号，默认 `0`，必须为非负整数 |
+| `out` | Output | `[M_pad, V_pad]` | `bfloat16` | 可选输出缓冲区，默认 `None`，由 host 分配 |
 | `y` | Output | `[M, V]` | `bfloat16` | 输出缓冲区的有效区域视图，可能不连续 |
-
-`M_pad`、`V_pad` 分别为 `M`、`V` 向上补齐到 256 的结果。
 
 ## 约束说明
 
@@ -58,19 +49,22 @@ y = matmul_row_exp_scatter_add.run(
 | 输入维度 | `M`、`V`、`S` 为非负整数，`H` 为正整数；可非 tile 整数倍，由 host 分配清零的补齐缓冲区，kernel 内完成有效数据的 Padding 搬运 |
 | dtype | `x` 与 `weight` 必须同为 `bfloat16`，`global_col_ids` 为 `int32`，`row_logsumexp` 与 `values` 为 `float32`；输出固定 `bfloat16` |
 | 输入布局 | `M > 0` 且 `V > 0` 时，所有输入必须连续，非空输入的起始地址必须按 512 字节对齐；不满足时抛出 `ValueError` |
-| 设备 | 所有输入与可选 `out` 位于同一 NPU，执行前将该 NPU 设为当前设备 |
 | 输出缓冲区 | 显式传入的 `out` 必须为连续张量，shape 为 `[M_pad, V_pad]` |
+| 设备 | 所有输入与可选 `out` 位于同一 NPU，执行前将该 NPU 设为当前设备 |
 | 编译 | 每个设备上，编译产物按原始与补齐后的 `(M, H, V)`、`S` 和 `alias` 开关缓存 |
 
 ## 使用示例
 
-准备好 CANN、PyTorch、torch_npu 与 CATLASS DSL 环境，导入样例模块后调用 `run`。脚本根据输入编译 kernel、执行 NPU 计算并返回结果：
+导入样例模块后调用 `run`，脚本根据输入编译 kernel、执行 NPU 计算并返回结果：
 
-```python
+以下命令在 CATLASS 仓库根目录执行：
+
+```bash
+PYTHONPATH=examples/python/tla_dsl/experimental/kernel/matmul:$PYTHONPATH python - <<'PY'
 import torch
 import torch_npu  # noqa: F401
 
-import matmul_row_exp_scatter_add
+from matmul_row_exp_scatter_add.matmul_row_exp_scatter_add import run
 
 torch.npu.set_device(0)
 torch.manual_seed(0)
@@ -84,10 +78,9 @@ values = torch.randn(m, s, dtype=torch.float32, device="npu:0")
 # 单分片示例：调用方预先计算归一化偏移。
 logits = (x.float() @ weight.float().T).bfloat16().float()
 row_logsumexp = torch.logsumexp(logits / temperature, dim=-1)
-y = matmul_row_exp_scatter_add.run(
-    x, weight, global_col_ids, row_logsumexp, values, temperature,
-)
+y = run(x, weight, global_col_ids, row_logsumexp, values, temperature)
 print(y.shape, y.dtype)
+PY
 ```
 
 执行结果如下，说明样例执行成功：
@@ -95,22 +88,3 @@ print(y.shape, y.dtype)
 ```text
 torch.Size([128, 512]) torch.bfloat16
 ```
-
-## 性能调度与写回
-
-host 缓存补齐缓冲区，首次分配时清零。单次 kernel 启动中，向量前处理阶段完成输入 Padding 搬运、全局列下标本地化及 `values` 的负行和归约；所有核完成前处理后，再执行矩阵乘与 epilogue。缓冲区的补零区域复用首次分配时的初始化结果。
-
-当 `M`、`H`、`V` 均为 256 的整数倍且 `S <= 64` 时，启用 `alias` 开关，直接复用 `x`、`weight`、`row_logsumexp` 和 `values`，前处理只执行下标本地化与行和归约。其他 shape 按各输入是否需要补齐决定是否搬运。
-
-kernel 在编译期根据 `m_tiles = ceil(M / 256)`、`v_tiles = ceil(V / 256)` 选择调度，由 `_select_schedule` 按下表顺序匹配。矩阵乘的 M/N tile 为 256，L0 的 K 步长为 64；`H` 的 Padding 粒度为 256，与 L1 的 K 块大小 `tile_k` 分开。
-
-| 条件 | `(swizzle_m, swizzle_n)` | `tile_k` |
-| ----- | ----- | ----- |
-| `m_tiles >= 32` 且 `v_tiles >= 256` | `(32, 2)` | 128 |
-| `m_tiles >= 8` 且 `v_tiles >= 128` | `(8, 4)` | 128 |
-| `m_tiles >= 32` | `(2, 8)` | 128 |
-| 其余 | `(2, 8)` | 256 |
-
-`(2, 8)` 的两个维度分别限制为不超过 `m_tiles`、`v_tiles`。启动核数通过 `torch.npu.get_device_properties(device).cube_core_num` 查询。
-
-输出在 SIMD 中完成 RNE（最近偶数舍入），精确转换为 bf16 后通过 `DIST_PACK_B32` 紧凑存入 UB，由 MTE3 批量写回 GM。`mutex_output` 保护 VECTOR 与 MTE3 之间的缓冲区复用，GM 元素偏移使用 64 位整数。矩阵乘结果与最终输出均采用 RNE，重复下标按槽位顺序累加。

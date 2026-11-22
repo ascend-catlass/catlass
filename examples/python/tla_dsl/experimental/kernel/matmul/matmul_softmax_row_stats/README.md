@@ -2,7 +2,7 @@
 
 ## 功能说明
 
-- 算子功能：对 `x @ wᵀ` 的结果直接完成逐行 softmax 统计，只把每行的最大值与 `exp` 求和写回 GM，不落 `[M, V]` 的中间结果；基于 CATLASS DSL 实现的 AIC/AIV mixed kernel。
+- 算子功能：对 `x @ wᵀ` 的结果直接完成逐行 softmax 统计，只把每行的最大值与 `exp` 求和写回 GM，不落 `[M, V]` 的中间结果；基于 CATLASS DSL 实现的 AIC/AIV mixed kernel，入口为 `matmul_softmax_row_stats` 模块的 `run` 函数。
 - 计算公式：记矩阵乘结果为
 
   $$
@@ -17,14 +17,15 @@
   $$
 
   其中 $X$ 为 `[M, H]`、$W$ 为 `[V, H]`，分别对应入参 `x` 与 `w`。kernel 按 V tile 在线维护分段 max / sum，再由归并 kernel 合并为最终统计量。
-
-- 支持产品型号：Ascend 950PR&950DT系列产品
+- 支持产品型号：Ascend 950PR&950DT 系列产品。
 
 ## 参数说明
 
 ```python
 row_max, row_sum = matmul_softmax_row_stats.run(x, w, temperature)
 ```
+
+`M` 为行数，`H` 为内积维度，`V` 为 `w` 的行数（即逻辑输出列数）。
 
 | 参数 | 属性 | shape | dtype | 说明 |
 | ----- | ----- | ----- | ----- | ----- |
@@ -46,20 +47,24 @@ row_max, row_sum = matmul_softmax_row_stats.run(x, w, temperature)
 
 ## 使用示例
 
-准备好 CANN、PyTorch、torch_npu 与 catlass DSL 环境，导入样例模块后调用 `run`。脚本根据输入编译 kernel、执行 NPU 计算并返回两个统计量：
+导入样例模块后调用 `run`，脚本根据输入编译 kernel、执行 NPU 计算并返回两个统计量：
 
-```python
+以下命令在 CATLASS 仓库根目录执行：
+
+```bash
+PYTHONPATH=examples/python/tla_dsl/experimental/kernel/matmul:$PYTHONPATH python - <<'PY'
 import torch
 import torch_npu  # noqa: F401
 
-import matmul_softmax_row_stats
+from matmul_softmax_row_stats.matmul_softmax_row_stats import run
 
 m, h, v = 1024, 1024, 4096
 x = torch.randn(m, h, dtype=torch.bfloat16, device="npu:0")
 w = torch.randn(v, h, dtype=torch.bfloat16, device="npu:0")
 
-row_max, row_sum = matmul_softmax_row_stats.run(x, w, temperature=1.0)
+row_max, row_sum = run(x, w, temperature=1.0)
 print(row_max.shape, row_sum.shape, row_max.dtype)
+PY
 ```
 
 执行结果如下，说明样例执行成功：

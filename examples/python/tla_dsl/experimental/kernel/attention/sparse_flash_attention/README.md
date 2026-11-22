@@ -2,32 +2,32 @@
 
 ## 功能说明
 
-- 算子功能：MLA-absorb 稀疏注意力前向。单个 `@tla.kernel` 的 AIC/AIV mixed kernel 完成
-  QK（NoPE 512 维 + 可选 RoPE 64 维）、带 sinks 的 online softmax、P 按输入 dtype 舍入后的
-  PV，并可写回 online softmax 的 max / sum。支持 token 级稀疏索引、分页 KV cache、
-  right-down causal 掩码与 BSND / TND 两种布局。
-- 计算公式：对每个 query row `r` 与 head `h`，按 `sparse_indices` 选出该行的有效 token 集合
-  `j`（遇 `-1` 终止、越界跳过、重复不去重）：
+- 算子功能：MLA-absorb 稀疏注意力前向，入口为 `sparse_flash_attention` 模块的 `run`
+  函数。单个 `@tla.kernel` 的 AIC/AIV mixed kernel 完成 QK（NoPE 512 维 + 可选 RoPE
+  64 维）、带 sinks 的 online softmax、P 按输入 dtype 舍入后的 PV，并可写回 softmax
+  的 max / sum。支持 token 级稀疏索引、分页 KV cache、right-down causal 掩码与 BSND / TND 布局。
+- 计算公式：对每个 query row `r` 与 head `h`，按 `sparse_indices` 选出该行的有效
+  token 集合 `j`（遇 `-1` 终止、越界跳过、重复不去重）：
 
   $$
   \begin{aligned}
   s_j &= scale \cdot \left(q[r,h,:] \cdot k_j + q_{rope}[r,h,:] \cdot k_{rope,j}\right) \\
   m &= \max_j s_j \quad (\text{有 sinks 时 } m = \max(m,\ sink_h)) \\
   p_j &= e^{s_j - m} \\
-  O[r,h,:] &= \frac{\sum_j \operatorname{round}_{io}(p_j)\, k_j}{\sum_j p_j + [\text{有 sinks}]\,e^{sink_h - m}}
+  O[r,h,:] &= \frac{\sum_j \operatorname{round}_{io}(p_j)\, k_j}
+                   {\sum_j p_j + [\text{有 sinks}]\,e^{sink_h - m}}
   \end{aligned}
   $$
 
-  其中 `value` 与 `key` 是同一份字节（MLA-absorb，V ≡ K），`value` 只做参数校验、不参与计算；
-  sinks 只进入 max 与分母，不参与加权（无 sinks 时分母不含 sink 项）。稀疏阈值：`sparse_mode=0` 为 `kv_len`，
-  `sparse_mode=3` 为 `kv_len - q_len + row + 1`。空行输出 0。
-
-- 支持产品型号：Ascend 950PR / 950DT（`--npu-arch 3510`）
+  其中 `value` 与 `key` 是同一份字节（MLA-absorb，V ≡ K），`value` 只做参数校验、不参与
+  计算；sinks 只进入 max 与分母，不参与加权（无 sinks 时分母不含 sink 项）。稀疏阈值：
+  `sparse_mode=0` 为 `kv_len`，`sparse_mode=3` 为 `kv_len - q_len + row + 1`。空行输出 0。
+- 支持产品型号：Ascend 950PR&950DT 系列产品。
 
 ## 参数说明
 
 ```python
-attention_out, softmax_max, softmax_sum = sparse_flash_attention.run(
+attention_out, softmax_max, softmax_sum = run(
     query, key, value, sparse_indices,
     block_table=None, query_rope=None, key_rope=None, sinks=None,
     cu_seqlens_q=None, cu_seqlens_kv=None, seqused_q=None, seqused_kv=None,
@@ -38,8 +38,7 @@ attention_out, softmax_max, softmax_sum = sparse_flash_attention.run(
 )
 ```
 
-记 `B` 为 batch，`S1` / `T1` 为 query 行数，`S2` / `T2` 为 KV token 数，`N1` 为 query head 数，
-`K` 为每行稀疏索引宽度，`P` 为分页页大小。
+记 `B` 为 batch，`S1` / `T1` 为 query 行数，`S2` / `T2` 为 KV token 数，`N1` 为 query head 数，`K` 为每行稀疏索引宽度，`P` 为分页页大小。
 
 | 参数 | 属性 | shape | dtype | 说明 |
 | --- | --- | --- | --- | --- |
@@ -83,14 +82,14 @@ attention_out, softmax_max, softmax_sum = sparse_flash_attention.run(
 
 ## 使用示例
 
-准备好 CANN、PyTorch、torch_npu 与 catlass DSL 环境，导入样例模块后调用 `run`。下面的
-BSND 稠密示例在 950PR 上编译并执行单个稀疏注意力 kernel：
+以下命令在 CATLASS 仓库根目录执行：
 
-```python
+```bash
+PYTHONPATH=examples/python/tla_dsl/experimental/kernel/attention:$PYTHONPATH python - <<'PY'
 import torch
 import torch_npu  # noqa: F401  -- registers torch.npu
 
-import sparse_flash_attention
+from sparse_flash_attention.sparse_flash_attention import run
 
 B, S1, S2, N1, D, K = 1, 128, 1024, 32, 512, 64
 device = "npu:0"
@@ -100,28 +99,16 @@ value = key.clone()
 sparse_indices = torch.arange(K, dtype=torch.int32, device=device)
 sparse_indices = sparse_indices.view(1, 1, 1, K).expand(B, S1, 1, K).contiguous()
 
-attention_out, _, _ = sparse_flash_attention.run(
+attention_out, _, _ = run(
     query, key, value, sparse_indices,
     scale_value=D ** -0.5,
 )
 print(attention_out.shape, attention_out.dtype)
+PY
 ```
 
-执行结果如下，说明样例执行成功：
+预期输出：
 
 ```text
 torch.Size([1, 128, 32, 512]) torch.bfloat16
-```
-
-其他形态只需替换参数组合：`sparse_mode=3` 打开 right-down causal；给出
-`query_rope` / `key_rope` 启用 RoPE；给出 `sinks` 启用 sink 路径；`layout_kv="PA_BSND"`
-配合 `block_table` / `seqused_kv` 走分页 KV；`return_softmax_lse=True` 时按上表 shape
-返回 `softmax_max` / `softmax_sum`。
-
-## 文件组织
-
-```text
-sparse_flash_attention/
-├── sparse_flash_attention.py   # device kernel + host run()（单文件）
-└── README.md
 ```
