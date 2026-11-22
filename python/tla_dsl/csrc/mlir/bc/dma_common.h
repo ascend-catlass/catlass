@@ -407,9 +407,17 @@ CATLASS_DEVICE auto makeL1Tensor(memref_t<__cbuf__ T, 1>* memref, const TensorDe
 template <LayoutTag Tag, typename T>
 CATLASS_DEVICE auto makeL0ATensor(memref_t<__ca__ T, 1>* memref, const TensorDesc& desc)
 {
-    static_assert(Tag == LayoutTag::zN, "L0A tensor supports zN only");
+    static_assert(
+        Tag == LayoutTag::zN || Tag == LayoutTag::VectorLayout, "L0A tensor supports zN and VectorLayout only");
     AscendC::LocalTensor<T> tensor(AscendC::TPosition::A2, localAddr(memref), elementCount(memref));
-    return tla::MakeTensor(tensor, makezNTlaLayout<T>(desc), makeTlaTileCoord(desc), Catlass::Arch::PositionL0A{});
+    if constexpr (Tag == LayoutTag::VectorLayout) {
+        // The gemv A operand: one flat run of K elements, the same rank-1 shape
+        // it has on L1, so the L1 -> L0A copy is a plain flat-to-flat move.
+        return tla::MakeTensor(
+            tensor, makeVectorTlaLayout(desc), tla::MakeCoord(makeVectorTlaCoord(desc)), Catlass::Arch::PositionL0A{});
+    } else {
+        return tla::MakeTensor(tensor, makezNTlaLayout<T>(desc), makeTlaTileCoord(desc), Catlass::Arch::PositionL0A{});
+    }
 }
 
 template <LayoutTag Tag, typename T>

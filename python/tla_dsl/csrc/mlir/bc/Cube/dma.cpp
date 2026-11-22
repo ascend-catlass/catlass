@@ -18,19 +18,23 @@ CATLASS_DEVICE void copyGMToL1(
     // selects both the layout constructor (makeGMTensor / makeL1Tensor) and the
     // copy. VectorLayout is the flat case -- both endpoints come out rank-1
     // (VectorLayout), which is exactly what the VectorLayout specialization in
-    // copy_gm_to_l1.hpp matches.
+    // copy_gm_to_l1.hpp matches. The gemv A operand is that same flat route.
     auto srcTensor = makeGMTensor<SrcLayout, T>(src, srcDesc, gmCachePolicy);
     auto dstTensor = makeL1Tensor<DstLayout, T>(dst, dstDesc);
     Catlass::Gemm::Tile::TileCopyTla<ArchTag, decltype(srcTensor), decltype(dstTensor)>{}(
         dstTensor, srcTensor, batchArgs...);
 }
 
-template <class ArchTag, LayoutTag SrcLayout, typename T>
+template <class ArchTag, LayoutTag SrcLayout, LayoutTag DstLayout, typename T>
 CATLASS_DEVICE void copyL1ToL0A(
     memref_t<__cbuf__ T, 1>* src, memref_t<__ca__ T, 1>* dst, const TensorDesc& srcDesc, const TensorDesc& dstDesc)
 {
+    // Both endpoints are selected by tag, which is what lets the zN/nZ matrix
+    // forms and the flat VectorLayout gemv form share one helper: makeL1Tensor /
+    // makeL0ATensor build the tensors, and copy_l1_to_l0a.hpp matches on their
+    // shapes.
     auto srcTensor = makeL1Tensor<SrcLayout, T>(src, srcDesc);
-    auto dstTensor = makeL0ATensor<LayoutTag::zN, T>(dst, dstDesc);
+    auto dstTensor = makeL0ATensor<DstLayout, T>(dst, dstDesc);
     Catlass::Gemm::Tile::TileCopyTla<ArchTag, decltype(srcTensor), decltype(dstTensor)>{}(dstTensor, srcTensor);
 }
 
@@ -270,11 +274,11 @@ REGISTER_GM_TO_L1_BATCH(ColMajorMxScaleA, zZMxScale, float8_e8m0_t)
 REGISTER_GM_TO_L1_BATCH(RowMajorMxScaleB, nNMxScale, float8_e8m0_t)
 REGISTER_GM_TO_L1_BATCH(ColMajorMxScaleB, nNMxScale, float8_e8m0_t)
 
-#define REGISTER_L1_TO_L0A(LayoutSrc, DType)                                                                          \
-    [aicore] __attribute__((always_inline)) void _mlir_ciface_copy_l1_##LayoutSrc##_to_l0a_zN_##DType(                \
+#define REGISTER_L1_TO_L0A(LayoutSrc, LayoutDst, DType)                                                               \
+    [aicore] __attribute__((always_inline)) void _mlir_ciface_copy_l1_##LayoutSrc##_to_l0a_##LayoutDst##_##DType(     \
         memref_t<__cbuf__ DType, 1>* src, memref_t<__ca__ DType, 1>* dst, DESC_ABI_PARAMS(src), DESC_ABI_PARAMS(dst)) \
     {                                                                                                                 \
-        copyL1ToL0A<Catlass::Arch::Ascend950, LayoutTag::LayoutSrc, DType>(                                           \
+        copyL1ToL0A<Catlass::Arch::Ascend950, LayoutTag::LayoutSrc, LayoutTag::LayoutDst, DType>(                     \
             src, dst, TENSOR_DESC_12(src), TENSOR_DESC_12(dst));                                                      \
     }
 
@@ -373,25 +377,35 @@ REGISTER_GM_TO_L1(VectorLayout, VectorLayout, uint32_t)
 REGISTER_GM_TO_L1(VectorLayout, VectorLayout, uint64_t)
 REGISTER_GM_TO_L1(VectorLayout, VectorLayout, double)
 REGISTER_GM_TO_L1(VectorLayout, VectorLayout, bool)
+REGISTER_GM_TO_L1(VectorLayout, VectorLayout, fp8_e4m3fn_t)
+REGISTER_GM_TO_L1(VectorLayout, VectorLayout, fp8_e5m2_t)
+REGISTER_GM_TO_L1(VectorLayout, VectorLayout, hifloat8_t)
 
-REGISTER_L1_TO_L0A(zN, float)
-REGISTER_L1_TO_L0A(zN, half)
-REGISTER_L1_TO_L0A(zN, bf16)
-REGISTER_L1_TO_L0A(zN, int8_t)
+REGISTER_L1_TO_L0A(zN, zN, float)
+REGISTER_L1_TO_L0A(zN, zN, half)
+REGISTER_L1_TO_L0A(zN, zN, bf16)
+REGISTER_L1_TO_L0A(zN, zN, int8_t)
 // uint16_t is not in AscendC LoadData 2dv2's supported set on dav-3510
 // (uint8/uint32 yes; uint16 no). Keep GM→L1 for u16; L1→L0 only for u32.
-REGISTER_L1_TO_L0A(zN, uint32_t)
-REGISTER_L1_TO_L0A(zN, fp8_e4m3fn_t)
-REGISTER_L1_TO_L0A(zN, fp8_e5m2_t)
-REGISTER_L1_TO_L0A(zN, hifloat8_t)
-REGISTER_L1_TO_L0A(nZ, float)
-REGISTER_L1_TO_L0A(nZ, half)
-REGISTER_L1_TO_L0A(nZ, bf16)
-REGISTER_L1_TO_L0A(nZ, int8_t)
-REGISTER_L1_TO_L0A(nZ, uint32_t)
-REGISTER_L1_TO_L0A(nZ, fp8_e4m3fn_t)
-REGISTER_L1_TO_L0A(nZ, fp8_e5m2_t)
-REGISTER_L1_TO_L0A(nZ, hifloat8_t)
+REGISTER_L1_TO_L0A(zN, zN, uint32_t)
+REGISTER_L1_TO_L0A(zN, zN, fp8_e4m3fn_t)
+REGISTER_L1_TO_L0A(zN, zN, fp8_e5m2_t)
+REGISTER_L1_TO_L0A(zN, zN, hifloat8_t)
+REGISTER_L1_TO_L0A(nZ, zN, float)
+REGISTER_L1_TO_L0A(nZ, zN, half)
+REGISTER_L1_TO_L0A(nZ, zN, bf16)
+REGISTER_L1_TO_L0A(nZ, zN, int8_t)
+REGISTER_L1_TO_L0A(nZ, zN, uint32_t)
+REGISTER_L1_TO_L0A(nZ, zN, fp8_e4m3fn_t)
+REGISTER_L1_TO_L0A(nZ, zN, fp8_e5m2_t)
+REGISTER_L1_TO_L0A(nZ, zN, hifloat8_t)
+REGISTER_L1_TO_L0A(VectorLayout, VectorLayout, float)
+REGISTER_L1_TO_L0A(VectorLayout, VectorLayout, half)
+REGISTER_L1_TO_L0A(VectorLayout, VectorLayout, bf16)
+REGISTER_L1_TO_L0A(VectorLayout, VectorLayout, int8_t)
+REGISTER_L1_TO_L0A(VectorLayout, VectorLayout, fp8_e4m3fn_t)
+REGISTER_L1_TO_L0A(VectorLayout, VectorLayout, fp8_e5m2_t)
+REGISTER_L1_TO_L0A(VectorLayout, VectorLayout, hifloat8_t)
 
 REGISTER_L1_TO_L0B(zN, float)
 REGISTER_L1_TO_L0B(zN, half)

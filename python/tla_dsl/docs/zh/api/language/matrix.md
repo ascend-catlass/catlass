@@ -33,7 +33,8 @@ tla.mmad(acc: Tensor, lhs: Tensor, rhs: Tensor, init_c: bool | Bool | None = Non
 参数说明：
 
 - `acc`（`Tensor`）：累加器 / 输出 tile。必填。
-- `lhs`（`Tensor`）：左矩阵 tile。必填。
+- `lhs`（`Tensor`）：左矩阵 tile。layout 决定模式：`zN` 为矩阵形式，
+  rank-1 `VectorLayout` 行向量为 GEMV 形式。必填。
 - `rhs`（`Tensor`）：右矩阵 tile。必填。
 - `init_c`（`bool | Bool | None`）：是否先清零累加器；省略时默认为 `False`。
   若提供 `bias`，则由 bias 决定累加起点，`init_c` 对该条指令无效。可选，默认 `None`。
@@ -50,6 +51,8 @@ tla.mmad(acc: Tensor, lhs: Tensor, rhs: Tensor, init_c: bool | Bool | None = Non
 - 须在 `tla.cube()` 内调用；`acc`/`lhs`/`rhs` 须为匹配的 L0 tile。
 - 支持的元素类型通路包括 `f16`/`bf16`/`f32`、`hif8`/`hif8` 配对，以及任意 `f8e4m3fn` / `f8e5m2` 操作数配对，累加到 L0C 上的 fp32。
 - `init_c` 仅接受 Python `bool` 或 `i1` SSA 值。
+- GEMV 形式：`lhs` 为携带单行 K 个元素的一维 `VectorLayout` tile，`rhs` 仍为 `nZ`，
+  `acc` 仍为 `L0Clayout` 且 M = 1。
 - 若设置 `bias`：tile 须在 `biasbuf`、rank-1 `VectorLayout`、元素类型与 `acc` 一致、
   长度 `N` 与 `acc` 的 N 匹配；经 `GM`→`L1`→`biasbuf` 的 `tla.copy` 搬入（见 `copy`）。
   此时忽略 `init_c`。
@@ -63,6 +66,8 @@ with tla.cube():
     tla.mmad(l0c, l0a, l0b, init_c=True, unit_flag=0b11)
     # 带 bias（l0_bias 已由 copy 搬到 biasbuf）：
     # tla.mmad(l0c, l0a, l0b, bias=l0_bias)
+    # GEMV 形式：l0a_row 为 K 个元素的一维 VectorLayout tile。
+    # tla.mmad(l0c, l0a_row, l0b, init_c=True, unit_flag=0b11)
     # 后：l0c 累加 lhs@rhs（init_c=True 时先清零）。
 ```
 

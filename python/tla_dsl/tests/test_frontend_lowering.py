@@ -249,6 +249,44 @@ def mmad_bad_hf32_mode_kernel(
     with tla.cube():
         tla.mmad(acc, lhs, rhs, init_c=True, hf32_mode="nearest_zero")
 
+def _gemv_lhs(k: int):
+    """A rank-1 VectorLayout L0A tile: the K elements of the gemv row."""
+    return make_fake_tensor(
+        tla.Float32,
+        (k,),
+        (1,),
+        addrspace=tla.AddressSpace.l0a,
+        origin_shape=(k,),
+        layout_tag=tla.arch.VectorLayout,
+    )
+
+def _gemv_rhs(k: int, n: int, layout_tag=tla.arch.nZ):
+    return make_fake_tensor(
+        tla.Float32,
+        ((16, k // 16), (16, n // 16)),
+        ((1, 2048), (16, 256)),
+        addrspace=tla.AddressSpace.l0b,
+        origin_shape=(k, n),
+        layout_tag=layout_tag,
+        coord=(0, 0),
+    )
+
+def _gemv_acc(m: int, n: int):
+    return make_fake_tensor(
+        tla.Float32,
+        ((16, max(m // 16, 1)), (16, n // 16)),
+        ((16, 256), (1, 2048)),
+        addrspace=tla.AddressSpace.l0c,
+        origin_shape=(m, n),
+        layout_tag=tla.arch.L0Clayout,
+        coord=(0, 0),
+    )
+
+@tla.kernel
+def gemv_mmad_kernel(lhs: tla.Tensor, rhs: tla.Tensor, acc: tla.Tensor) -> None:
+    with tla.cube():
+        tla.mmad(acc, lhs, rhs, init_c=True)
+
 @tla.kernel
 def make_shape_index_arg_ok(dim: "index") -> None:
     tla.make_shape(dim, 16)
@@ -326,6 +364,43 @@ def dynamic_nested_tile_view_kernel(mem_a: tla.Tensor, tile_idx: "index") -> Non
     _ = tla.tile_view(root, tla.make_shape(8, 4), tla.make_coord(tile_idx, 1))
 
 @tla.kernel
+def rank1_tile_view_fixed_width_kernel(
+    mem_a: tla.Tensor, mem_b: tla.Tensor, tile_idx: "index"
+) -> None:
+    src = tla.tile_view(mem_a, tla.make_shape(64), tla.make_coord(tile_idx))
+    dst = tla.tile_view(mem_b, tla.make_shape(64), tla.make_coord(tile_idx))
+    with tla.vector():
+        with tla.vec.func(mode="simd"):
+            dst.store(src.load())
+
+@tla.kernel
+def rank1_tile_view_tail_block_kernel(
+    mem_a: tla.Tensor, mem_b: tla.Tensor, tile_idx: "index"
+) -> None:
+    src = tla.tile_view(mem_a, tla.make_shape(128), tla.make_coord(tile_idx))
+    dst = tla.tile_view(mem_b, tla.make_shape(128), tla.make_coord(tile_idx))
+    with tla.vector():
+        with tla.vec.func(mode="simd"):
+            dst.store(src.load())
+
+@tla.kernel
+def dynamic_rank1_view_kernel(
+    src: tla.Tensor, dst: tla.Tensor, n: "index"
+) -> None:
+    layout = tla.make_layout(
+        tla.make_shape(128),
+        tla.make_stride(1),
+        origin_shape=tla.make_shape(n),
+        layoutTag=tla.arch.VectorLayout,
+    )
+    view = tla.make_tensor(src.ptr, layout)
+    with tla.vector():
+        with tla.vec.func(mode="simd"):
+            mask, _ = tla.update_mask(n, dtype=tla.Float32)
+            values = view.load()
+            dst.store(values, mask=mask)
+
+@tla.kernel
 def root_tile_view_kernel(mem_a: tla.Tensor) -> None:
     _ = tla.tile_view(mem_a, tla.make_shape(16, 16), tla.make_coord(2, 3))
 
@@ -385,6 +460,18 @@ def make_tensor_like_addrspace_kernel(mem_a: tla.Tensor) -> None:
     root = tla.tile_view(mem_a, tla.make_shape(16, 16), tla.make_coord(0, 0))
     l0a_ptr = tla.allocate((16, 16), tla.Float16, tla.AddressSpace.l0a, 512)
     _ = tla.make_tensor_like(l0a_ptr, root, tla.arch.zN)
+
+@tla.kernel
+def make_tensor_like_inferred_layout_kernel(
+    row_a: tla.Tensor, mat_b: tla.Tensor
+) -> None:
+    row = tla.tile_view(row_a, tla.make_shape(64), tla.make_coord(0))
+    row_ptr = tla.allocate(16 * 64, tla.Float32, tla.AddressSpace.l0a, 512)
+    _ = tla.make_tensor_like(row_ptr, row)
+
+    tile = tla.tile_view(mat_b, tla.make_shape(16, 64), tla.make_coord(0, 0))
+    mat_ptr = tla.allocate(16 * 64, tla.Float32, tla.AddressSpace.l0a, 512)
+    _ = tla.make_tensor_like(mat_ptr, tile)
 
 @tla.kernel
 def tile_view_shape_metadata_kernel(mem_a: tla.Tensor) -> None:
@@ -531,6 +618,54 @@ def test_rejects_invalid_hf32_mode() -> None:
     with pytest.raises(TlaLoweringError):
         _ = mmad_bad_hf32_mode_kernel.dump_mlir(type_args=(ta, tb, tc))
 
+def test_mmad_matrix_lhs_stays_out_of_gemv() -> None:
+    """The zN lhs of the matrix form does not select the gemv route."""
+    ta, tb, tc = _mmad_tensor_args()
+    mlir = gemv_mmad_kernel.dump_mlir(type_args=(ta, tb, tc))
+    assert "tla.mmad" in mlir
+    assert "VectorLayout" not in mlir
+
+def test_mmad_gemv_rejects_row_beyond_one() -> None:
+    with pytest.raises(TlaLoweringError, match="puts the row on one M"):
+        _ = gemv_mmad_kernel.dump_mlir(
+            type_args=(_gemv_lhs(64), _gemv_rhs(64, 128), _gemv_acc(2, 128))
+        )
+
+def test_mmad_gemv_rejects_k_mismatch() -> None:
+    with pytest.raises(TlaLoweringError, match="lhs K = 32, rhs K = 64"):
+        _ = gemv_mmad_kernel.dump_mlir(
+            type_args=(_gemv_lhs(32), _gemv_rhs(64, 128), _gemv_acc(1, 128))
+        )
+
+def test_mmad_gemv_rejects_n_mismatch() -> None:
+    with pytest.raises(TlaLoweringError, match="rhs N = 128, acc N = 256"):
+        _ = gemv_mmad_kernel.dump_mlir(
+            type_args=(_gemv_lhs(64), _gemv_rhs(64, 128), _gemv_acc(1, 256))
+        )
+
+def test_mmad_gemv_rejects_two_dim_vector_lhs() -> None:
+    """VectorLayout has no 2-D form, so a matrix-shaped gemv lhs never gets built."""
+    with pytest.raises(Exception, match="coord|cannot derive"):
+        make_fake_tensor(
+            tla.Float32,
+            (1, 64),
+            (64, 1),
+            addrspace=tla.AddressSpace.l0a,
+            origin_shape=(1, 64),
+            layout_tag=tla.arch.VectorLayout,
+        )
+
+def test_mmad_gemv_rejects_zN_rhs() -> None:
+    """Gemv keeps the matrix-form rhs layout: nZ, never zN."""
+    with pytest.raises(TlaLoweringError, match="operand layout"):
+        _ = gemv_mmad_kernel.dump_mlir(
+            type_args=(
+                _gemv_lhs(64),
+                _gemv_rhs(64, 128, layout_tag=tla.arch.zN),
+                _gemv_acc(1, 128),
+            )
+        )
+
 def test_make_shape_accepts_index_typed_components() -> None:
     """Lowering emits tla.make_shape with a dynamic dim when the component is a kernel parameter."""
     mlir = make_shape_index_arg_ok.dump_mlir(type_args=(4,))
@@ -668,6 +803,61 @@ def test_tile_view_emits_index_multiply_for_dynamic_nested_coords() -> None:
     assert "arith.muli" in mlir
     assert "!tla.coord<?,4>" in mlir
 
+def test_rank1_tile_view_fixed_width_keeps_static_lane_count() -> None:
+    mem = make_fake_tensor(
+              tla.Float32,
+              (256,),
+              (1,),
+              addrspace=tla.AddressSpace.ub,
+              origin_shape=(256,),
+              layout_tag=tla.arch.RowMajor,
+          )
+    mlir = rank1_tile_view_fixed_width_kernel.dump_mlir(type_args=(mem, mem, 4))
+    # A fixed-width slice into a static parent: the loop offset must not widen the
+    # register to the parent extent, so ``load`` keeps the tile width.
+    assert "!tla.shape<64>" in mlir
+    assert "!tla.vector<64xf32>" in mlir
+
+def test_dynamic_rank1_view_keeps_dynamic_lane_count() -> None:
+    src = make_fake_tensor(
+              tla.Float32,
+              (128,),
+              (1,),
+              addrspace=tla.AddressSpace.ub,
+              origin_shape=(128,),
+              layout_tag=tla.arch.VectorLayout,
+          )
+    dst = make_fake_tensor(
+              tla.Float32,
+              (64,),
+              (1,),
+              addrspace=tla.AddressSpace.ub,
+              origin_shape=(64,),
+              layout_tag=tla.arch.VectorLayout,
+          )
+    mlir = dynamic_rank1_view_kernel.dump_mlir(type_args=(src, dst, 32))
+    # An ordinary dynamic view knows its physical extent (128) but not its valid
+    # lanes; the mask carries that, so ``load`` must stay dynamically sized.
+    assert "!tla.shape<?>" in mlir
+    assert "!tla.vector<?xf32>" in mlir
+
+def test_rank1_tile_view_tail_block_keeps_dynamic_lane_count() -> None:
+    mem = make_fake_tensor(
+              tla.Float32,
+              (160,),
+              (1,),
+              addrspace=tla.AddressSpace.ub,
+              origin_shape=(160,),
+              layout_tag=tla.arch.VectorLayout,
+          )
+    mlir = rank1_tile_view_tail_block_kernel.dump_mlir(type_args=(mem, mem, 4))
+    # The parent extent is not a whole multiple of the tile width, so a slice at a
+    # loop offset may be the 32-element tail: the valid length cannot be the tile
+    # width and must stay dynamic.
+    assert "!tla.shape<?>" in mlir
+    assert "!tla.vector<?xf32>" in mlir
+    assert "!tla.vector<128xf32>" not in mlir
+
 def test_range_alias_lowers_to_tla_for() -> None:
     mem = make_fake_tensor(
               tla.Float16,
@@ -786,6 +976,33 @@ def test_make_tensor_like_maps_l0_pointer_to_tensor_addrspace() -> None:
           )
     mlir = make_tensor_like_addrspace_kernel.dump_mlir(type_args=(mem,))
     assert "!tla.ptr<f16, l0a, 512>" in mlir
+
+def test_make_tensor_like_infers_l0a_layout_from_source() -> None:
+    """L0A keeps a flat VectorLayout source, and stays zN for every other source."""
+    row = make_fake_tensor(
+        tla.Float32,
+        (64,),
+        (1,),
+        origin_shape=(64,),
+        addrspace=tla.AddressSpace.gm,
+        layout_tag=tla.arch.VectorLayout,
+    )
+    mat = make_fake_tensor(
+        tla.Float32,
+        (16, 64),
+        (64, 1),
+        origin_shape=(16, 64),
+        addrspace=tla.AddressSpace.gm,
+        layout_tag=tla.arch.RowMajor,
+    )
+    mlir = make_tensor_like_inferred_layout_kernel.dump_mlir(type_args=(row, mat))
+    calls = [line for line in mlir.splitlines() if "tla.make_tensor_like" in line]
+    assert len(calls) == 2
+    results = [line.split(" -> ", 1)[1] for line in calls]
+    assert "VectorLayout>" in results[0] and "zN>" not in results[0]
+    assert "l0a" in results[0]
+    assert "zN>" in results[1] and "VectorLayout" not in results[1]
+    assert "l0a" in results[1]
 
 def test_tile_view_result_exposes_static_shape_metadata() -> None:
     mem = make_fake_tensor(

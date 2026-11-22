@@ -1,0 +1,156 @@
+// The lhs layout alone selects the mmad mode: a 1-D VectorLayout row is the
+// gemv form, a zN tile the matrix form. There is no separate flag to keep in
+// sync. Both forms still require an nZ rhs block, which is what this test pins.
+// The accepted gemv form is covered end to end by mmad-gemv.mlir.
+
+// RUN: sed -n '/BEGIN-VEC-ZN-RHS$/,/END-VEC-ZN-RHS$/p' %s | not %tla_compile - -o - 2>&1 | %filecheck %s --check-prefix=VEC-ZN-RHS
+
+// VEC-ZN-RHS: 'tla.mmad' op mmad requires an nZ rhs tile, got zN
+
+// BEGIN-VEC-ZN-RHS
+module {
+  tla.func @gemv_with_zn_rhs() {
+    %l0a = tla.alloc_ptr{size_bytes = 512} -> !tla.ptr<f32, l0a, 512>
+    %vec_shape = tla.make_shape -> !tla.shape<32>
+    %vec_stride = tla.make_stride -> !tla.stride<1>
+    %vec_origin = tla.make_shape -> !tla.shape<32>
+    %vec_layout = tla.make_layout %vec_shape, %vec_stride origin %vec_origin {layoutTag = #tla.layout_tag<VectorLayout>} :
+      !tla.shape<32>, !tla.stride<1> origin !tla.shape<32> ->
+      !tla.layout<!tla.shape<32>, !tla.stride<1>, !tla.shape<32>, VectorLayout>
+    %vec_coord = tla.make_coord -> !tla.coord<0>
+    %a = tla.make_tensor %l0a, %vec_layout, %vec_coord :
+      !tla.ptr<f32, l0a, 512>,
+      !tla.layout<!tla.shape<32>, !tla.stride<1>, !tla.shape<32>, VectorLayout>,
+      !tla.coord<0> ->
+      !tla.tensor<!tla.layout<!tla.shape<32>, !tla.stride<1>, !tla.shape<32>, VectorLayout>, !tla.coord<0>, !tla.ptr<f32, l0a, 512>>
+    %l1 = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<f32, l1, 512>
+    %row_shape = tla.make_shape -> !tla.shape<32,32>
+    %row_stride = tla.make_stride -> !tla.stride<32,1>
+    %row_layout = tla.make_layout %row_shape, %row_stride :
+      !tla.shape<32,32>, !tla.stride<32,1> ->
+      !tla.layout<!tla.shape<32,32>, !tla.stride<32,1>, !tla.shape<32,32>, RowMajor>
+    %row_coord = tla.make_coord -> !tla.coord<0,0>
+    %row = tla.make_tensor %l1, %row_layout, %row_coord :
+      !tla.ptr<f32, l1, 512>,
+      !tla.layout<!tla.shape<32,32>, !tla.stride<32,1>, !tla.shape<32,32>, RowMajor>,
+      !tla.coord<0,0> ->
+      !tla.tensor<!tla.layout<!tla.shape<32,32>, !tla.stride<32,1>, !tla.shape<32,32>, RowMajor>, !tla.coord<0,0>, !tla.ptr<f32, l1, 512>>
+    %l0b = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<f32, l0b, 512>
+    %b = tla.make_tensor_like %l0b like %row layoutTag(#tla.layout_tag<zN>) :
+      !tla.ptr<f32, l0b, 512>,
+      !tla.tensor<!tla.layout<!tla.shape<32,32>, !tla.stride<32,1>, !tla.shape<32,32>, RowMajor>, !tla.coord<0,0>, !tla.ptr<f32, l1, 512>> ->
+      !tla.tensor<!tla.layout<!tla.shape<(16,2),(8,4)>, !tla.stride<(8,128),(1,256)>, !tla.shape<32,32>, zN>, !tla.coord<0,0>, !tla.ptr<f32, l0b, 512>>
+    %l0c = tla.alloc_ptr{size_bytes = 1024} -> !tla.ptr<f32, l0c, 1024>
+    %c = tla.make_tensor_like %l0c like %row layoutTag(#tla.layout_tag<L0Clayout>) :
+      !tla.ptr<f32, l0c, 1024>,
+      !tla.tensor<!tla.layout<!tla.shape<32,32>, !tla.stride<32,1>, !tla.shape<32,32>, RowMajor>, !tla.coord<0,0>, !tla.ptr<f32, l1, 512>> ->
+      !tla.tensor<!tla.layout<!tla.shape<(16,1),(16,2)>, !tla.stride<(16,256),(1,256)>, !tla.shape<1,32>, L0Clayout>, !tla.coord<0,0>, !tla.ptr<f32, l0c, 1024>>
+    tla.cube {
+      %init = arith.constant true
+      %unit_flag = arith.constant 3 : i64
+      tla.mmad %c, %a, %b, %init, %unit_flag {compute_order = #tla.compute_order<M_FIRST>, hf32_mode = #tla.hf32_mode<HF32_DISABLE>} :
+        !tla.tensor<!tla.layout<!tla.shape<(16,1),(16,2)>, !tla.stride<(16,256),(1,256)>, !tla.shape<1,32>, L0Clayout>, !tla.coord<0,0>, !tla.ptr<f32, l0c, 1024>>,
+        !tla.tensor<!tla.layout<!tla.shape<32>, !tla.stride<1>, !tla.shape<32>, VectorLayout>, !tla.coord<0>, !tla.ptr<f32, l0a, 512>>,
+        !tla.tensor<!tla.layout<!tla.shape<(16,2),(8,4)>, !tla.stride<(8,128),(1,256)>, !tla.shape<32,32>, zN>, !tla.coord<0,0>, !tla.ptr<f32, l0b, 512>>,
+        i1, i64
+    }
+    tla.return
+  }
+}
+// END-VEC-ZN-RHS
+
+// RUN: sed -n '/BEGIN-ACC-NOT-L0C$/,/END-ACC-NOT-L0C$/p' %s | not %tla_compile - -o - 2>&1 | %filecheck %s --check-prefix=ACC-NOT-L0C
+
+// ACC-NOT-L0C: 'tla.mmad' op acc must be tagged L0Clayout, got zN
+
+// BEGIN-ACC-NOT-L0C
+module {
+  tla.func @gemv_flag_on_zn_lhs() {
+    %l1 = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<f32, l1, 512>
+    %row_shape = tla.make_shape -> !tla.shape<32,32>
+    %row_stride = tla.make_stride -> !tla.stride<32,1>
+    %row_layout = tla.make_layout %row_shape, %row_stride :
+      !tla.shape<32,32>, !tla.stride<32,1> ->
+      !tla.layout<!tla.shape<32,32>, !tla.stride<32,1>, !tla.shape<32,32>, RowMajor>
+    %row_coord = tla.make_coord -> !tla.coord<0,0>
+    %row = tla.make_tensor %l1, %row_layout, %row_coord :
+      !tla.ptr<f32, l1, 512>,
+      !tla.layout<!tla.shape<32,32>, !tla.stride<32,1>, !tla.shape<32,32>, RowMajor>,
+      !tla.coord<0,0> ->
+      !tla.tensor<!tla.layout<!tla.shape<32,32>, !tla.stride<32,1>, !tla.shape<32,32>, RowMajor>, !tla.coord<0,0>, !tla.ptr<f32, l1, 512>>
+    %l0a = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<f32, l0a, 512>
+    %a = tla.make_tensor_like %l0a like %row layoutTag(#tla.layout_tag<zN>) :
+      !tla.ptr<f32, l0a, 512>,
+      !tla.tensor<!tla.layout<!tla.shape<32,32>, !tla.stride<32,1>, !tla.shape<32,32>, RowMajor>, !tla.coord<0,0>, !tla.ptr<f32, l1, 512>> ->
+      !tla.tensor<!tla.layout<!tla.shape<(16,2),(8,4)>, !tla.stride<(8,128),(1,256)>, !tla.shape<32,32>, zN>, !tla.coord<0,0>, !tla.ptr<f32, l0a, 512>>
+    %l0b = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<f32, l0b, 512>
+    %b = tla.make_tensor_like %l0b like %row layoutTag(#tla.layout_tag<nZ>) :
+      !tla.ptr<f32, l0b, 512>,
+      !tla.tensor<!tla.layout<!tla.shape<32,32>, !tla.stride<32,1>, !tla.shape<32,32>, RowMajor>, !tla.coord<0,0>, !tla.ptr<f32, l1, 512>> ->
+      !tla.tensor<!tla.layout<!tla.shape<(8,4),(16,2)>, !tla.stride<(1,256),(8,128)>, !tla.shape<32,32>, nZ>, !tla.coord<0,0>, !tla.ptr<f32, l0b, 512>>
+    %l0c = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<f32, l0c, 1024>
+    %c = tla.make_tensor_like %l0c like %row layoutTag(#tla.layout_tag<zN>) :
+      !tla.ptr<f32, l0c, 1024>,
+      !tla.tensor<!tla.layout<!tla.shape<32,32>, !tla.stride<32,1>, !tla.shape<32,32>, RowMajor>, !tla.coord<0,0>, !tla.ptr<f32, l1, 512>> ->
+      !tla.tensor<!tla.layout<!tla.shape<(16,2),(8,4)>, !tla.stride<(8,128),(1,256)>, !tla.shape<32,32>, zN>, !tla.coord<0,0>, !tla.ptr<f32, l0c, 1024>>
+    tla.cube {
+      %init = arith.constant true
+      %unit_flag = arith.constant 3 : i64
+      tla.mmad %c, %a, %b, %init, %unit_flag {compute_order = #tla.compute_order<M_FIRST>, hf32_mode = #tla.hf32_mode<HF32_DISABLE>} :
+        !tla.tensor<!tla.layout<!tla.shape<(16,2),(8,4)>, !tla.stride<(8,128),(1,256)>, !tla.shape<32,32>, zN>, !tla.coord<0,0>, !tla.ptr<f32, l0c, 1024>>,
+        !tla.tensor<!tla.layout<!tla.shape<(16,2),(8,4)>, !tla.stride<(8,128),(1,256)>, !tla.shape<32,32>, zN>, !tla.coord<0,0>, !tla.ptr<f32, l0a, 512>>,
+        !tla.tensor<!tla.layout<!tla.shape<(8,4),(16,2)>, !tla.stride<(1,256),(8,128)>, !tla.shape<32,32>, nZ>, !tla.coord<0,0>, !tla.ptr<f32, l0b, 512>>,
+        i1, i64
+    }
+    tla.return
+  }
+}
+// END-ACC-NOT-L0C
+
+// RUN: sed -n '/BEGIN-LHS-TAG$/,/END-LHS-TAG$/p' %s | not %tla_compile - -o - 2>&1 | %filecheck %s --check-prefix=LHS-TAG
+
+// LHS-TAG: 'tla.mmad' op lhs must be tagged zN (matrix form) or VectorLayout (gemv form), got RowMajor
+
+// BEGIN-LHS-TAG
+module {
+  tla.func @gemv_flag_on_zn_lhs() {
+    %l1 = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<f32, l1, 512>
+    %row_shape = tla.make_shape -> !tla.shape<32,32>
+    %row_stride = tla.make_stride -> !tla.stride<32,1>
+    %row_layout = tla.make_layout %row_shape, %row_stride :
+      !tla.shape<32,32>, !tla.stride<32,1> ->
+      !tla.layout<!tla.shape<32,32>, !tla.stride<32,1>, !tla.shape<32,32>, RowMajor>
+    %row_coord = tla.make_coord -> !tla.coord<0,0>
+    %row = tla.make_tensor %l1, %row_layout, %row_coord :
+      !tla.ptr<f32, l1, 512>,
+      !tla.layout<!tla.shape<32,32>, !tla.stride<32,1>, !tla.shape<32,32>, RowMajor>,
+      !tla.coord<0,0> ->
+      !tla.tensor<!tla.layout<!tla.shape<32,32>, !tla.stride<32,1>, !tla.shape<32,32>, RowMajor>, !tla.coord<0,0>, !tla.ptr<f32, l1, 512>>
+    %l0a = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<f32, l0a, 512>
+    %a = tla.make_tensor_like %l0a like %row layoutTag(#tla.layout_tag<RowMajor>) :
+      !tla.ptr<f32, l0a, 512>,
+      !tla.tensor<!tla.layout<!tla.shape<32,32>, !tla.stride<32,1>, !tla.shape<32,32>, RowMajor>, !tla.coord<0,0>, !tla.ptr<f32, l1, 512>> ->
+      !tla.tensor<!tla.layout<!tla.shape<32,32>, !tla.stride<32,1>, !tla.shape<32,32>, RowMajor>, !tla.coord<0,0>, !tla.ptr<f32, l0a, 512>>
+    %l0b = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<f32, l0b, 512>
+    %b = tla.make_tensor_like %l0b like %row layoutTag(#tla.layout_tag<nZ>) :
+      !tla.ptr<f32, l0b, 512>,
+      !tla.tensor<!tla.layout<!tla.shape<32,32>, !tla.stride<32,1>, !tla.shape<32,32>, RowMajor>, !tla.coord<0,0>, !tla.ptr<f32, l1, 512>> ->
+      !tla.tensor<!tla.layout<!tla.shape<(8,4),(16,2)>, !tla.stride<(1,256),(8,128)>, !tla.shape<32,32>, nZ>, !tla.coord<0,0>, !tla.ptr<f32, l0b, 512>>
+    %l0c = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<f32, l0c, 1024>
+    %c = tla.make_tensor_like %l0c like %row layoutTag(#tla.layout_tag<L0Clayout>) :
+      !tla.ptr<f32, l0c, 1024>,
+      !tla.tensor<!tla.layout<!tla.shape<32,32>, !tla.stride<32,1>, !tla.shape<32,32>, RowMajor>, !tla.coord<0,0>, !tla.ptr<f32, l1, 512>> ->
+      !tla.tensor<!tla.layout<!tla.shape<(16,2),(16,2)>, !tla.stride<(16,256),(1,512)>, !tla.shape<32,32>, L0Clayout>, !tla.coord<0,0>, !tla.ptr<f32, l0c, 1024>>
+    tla.cube {
+      %init = arith.constant true
+      %unit_flag = arith.constant 3 : i64
+      tla.mmad %c, %a, %b, %init, %unit_flag {compute_order = #tla.compute_order<M_FIRST>, hf32_mode = #tla.hf32_mode<HF32_DISABLE>} :
+        !tla.tensor<!tla.layout<!tla.shape<(16,2),(16,2)>, !tla.stride<(16,256),(1,512)>, !tla.shape<32,32>, L0Clayout>, !tla.coord<0,0>, !tla.ptr<f32, l0c, 1024>>,
+        !tla.tensor<!tla.layout<!tla.shape<32,32>, !tla.stride<32,1>, !tla.shape<32,32>, RowMajor>, !tla.coord<0,0>, !tla.ptr<f32, l0a, 512>>,
+        !tla.tensor<!tla.layout<!tla.shape<(8,4),(16,2)>, !tla.stride<(1,256),(8,128)>, !tla.shape<32,32>, nZ>, !tla.coord<0,0>, !tla.ptr<f32, l0b, 512>>,
+        i1, i64
+    }
+    tla.return
+  }
+}
+// END-LHS-TAG

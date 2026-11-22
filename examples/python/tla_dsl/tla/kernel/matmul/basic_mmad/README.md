@@ -30,6 +30,7 @@
 ├── basic_matmul_bias.py
 ├── basic_matmul_fixpipe_per_channel.py
 ├── basic_matmul_fixpipe_per_tensor.py
+├── basic_matmul_gemv.py
 ├── basic_matmul_l0c2l1.py
 ├── basic_matmul_mutex.py
 ├── basic_matmul_mutex_with.py
@@ -45,6 +46,7 @@
 | [**`basic_matmul_bias.py`**](basic_matmul_bias.py) | 带偏置项的矩阵乘示例，bias 经 `L1 → biasbuf` 通道加载，bias 类型与 Cube 累加类型一致，为 i32 或 f32。 |
 | [**`basic_matmul_fixpipe_per_channel.py`**](basic_matmul_fixpipe_per_channel.py) | 带随路量化的矩阵乘（`per-channel`）量化示例，按输出通道应用 `u64` 量化参数，支持随路 ReLU。 |
 | [**`basic_matmul_fixpipe_per_tensor.py`**](basic_matmul_fixpipe_per_tensor.py) | 带随路量化的矩阵乘（`per-tensor`）量化示例，使用标量 `quant_scale`/`quant_offset`，支持随路 ReLU。 |
+| [**`basic_matmul_gemv.py`**](basic_matmul_gemv.py) | GEMV 示例（`m = 1`）：`tla.mmad` 按 `lhs` 的 layout 选择模式，rank-1 `VectorLayout` 的 A 走 `GM → L1 → L0A` 扁平搬运，B 的 L0B 仍为 `nZ`，结果按 `RowMajor` 写出。 |
 | [**`basic_matmul_l0c2l1.py`**](basic_matmul_l0c2l1.py) | L0C→L1 回搬示例，连续计算 `E = (A × B) × D`，固定 f32 静态场景。 |
 | [**`basic_matmul_mutex.py`**](basic_matmul_mutex.py) | 使用 `Mutex` 原语的矩阵乘示例，不同于 `set`/`wait` 原语，`Mutex` 原语同步不再区分源和目的指令。 |
 | [**`basic_matmul_mutex_with.py`**](basic_matmul_mutex_with.py) | 同样为利用 `Mutex` 原语的矩阵乘示例，使用 `with tla.mutex_guard(...)` 表达。 |
@@ -121,6 +123,7 @@
    | i8          | i8          | f16/bf16/i8/u8 | per-channel：`u64`<br> per-tensor：`f32`（scale）+ `i32`（offset） |
 
    per-channel 的 `u64` 量化参数由样例内部构造。
+- [`basic_matmul_gemv`](basic_matmul_gemv.py) 固定 `m = 1`，`--n` 与 `--k` 取任意正整数。A/B 的元素类型由 `--dtype-ab {f32,f16,i8,f8e5m2}` 指定；结果类型随 `--dtype-ab` 推导，`i8` 输入为 `i32`，其余为 `f32`。
 
 ## 使用示例
 
@@ -397,6 +400,34 @@ tla.copy(gm_e, l0c_e)
 ```
 
 该样例中矩阵尺寸固定为 `M/N/K = 50/60/64`（L1/L0 tile 取 64）。
+
+### basic_matmul_gemv
+
+**文件**：[`basic_matmul_gemv.py`](./basic_matmul_gemv.py)
+
+演示 `m = 1` 的 GEMV。`tla.mmad` 不新增接口，而是按 `lhs` 的 layout 选择模式：`zN` 为普通矩阵形式，rank-1 `VectorLayout` 为 GEMV 形式。GEMV 下 `lhs` 承载单行的 K 个元素，`rhs` 仍为 `nZ`，累加器仍为 `L0Clayout` 并按行写出。
+
+```python
+# gm_a 是 1-D：GEMV 的 lhs 承载单行的 K 个元素
+gm_a_by_l1 = tla.tile_view(
+    gm_a, tla.make_shape(_tiling.l1_tk), tla.make_coord(k_l1),
+)
+l1_a = tla.make_tensor_like(l1a_ptr, gm_a_by_l1)  # 不打 tag，L1 沿用 VectorLayout
+tla.copy(l1_a, gm_a_by_l1)
+
+l1_a_by_l0 = tla.tile_view(
+    l1_a, tla.make_shape(_tiling.l0_tk), tla.make_coord(k_l0),
+)
+# L0A 从扁平 VectorLayout 源推导出 VectorLayout（矩阵形式的 zN 源仍得 zN）
+l0_a = tla.make_tensor_like(l0a_ptr, l1_a_by_l0)
+
+# ... B 通路省略：l1_b_by_l0 由 l1_b 切出，仍是 zN 视图
+l0_b = tla.make_tensor_like(l0b_ptr, l1_b_by_l0)  # L0B 推导固定 nZ
+
+tla.mmad(l0_c, l0_a, l0_b, init_c=init_c, unit_flag=unit_flag)
+```
+
+A 通路是 `GM → L1 → L0A` 的 `VectorLayout → VectorLayout` 扁平搬运，B 通路在 L0B 上仍是 `nZ` layout。
 
 ### basic_mmad_ptr
 

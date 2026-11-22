@@ -10,8 +10,8 @@
 # -----------------------------------------------------------------------------------------------------------
 #
 # End-to-end validation for examples/python/tla_dsl/tla/kernel/matmul/basic_mmad (basic_matmul*.py, basic_mmad_ptr.py,
-# basic_matmul_l0c2l1.py, basic_matmul_bias.py; basic_matmul.py additionally runs --layout-a zN /
-# --layout-b nZ, the prepacked GM -> L1 block-move routes, alone and mixed with row/col),
+# basic_matmul_l0c2l1.py, basic_matmul_bias.py, basic_matmul_gemv.py; basic_matmul.py additionally runs
+# --layout-a zN / --layout-b nZ, the prepacked GM -> L1 block-move routes, alone and mixed with row/col),
 # examples/python/tla_dsl/tla/kernel/matmul/basic_syrk (basic_syrk.py).
 # examples/python/tla_dsl/tla/kernel/vec/basic_vadd (basic_vadd.py),
 # examples/python/tla_dsl/dsl_tutorials/extern_op (extern_vecadd.py, extern_dual_core.py),
@@ -102,6 +102,7 @@ BASIC_MMAD_AUTO_SYNC_REL="tla/kernel/matmul/basic_mmad/basic_matmul_auto_sync.py
 BASIC_MMAD_PTR_REL="tla/kernel/matmul/basic_mmad/basic_mmad_ptr.py"
 BASIC_MMAD_L0C2L1_REL="tla/kernel/matmul/basic_mmad/basic_matmul_l0c2l1.py"
 BASIC_MMAD_BIAS_REL="tla/kernel/matmul/basic_mmad/basic_matmul_bias.py"
+BASIC_MMAD_GEMV_REL="tla/kernel/matmul/basic_mmad/basic_matmul_gemv.py"
 MX_MMAD_BIAS_REL="tla/kernel/matmul/mx_mmad/mx_matmul_bias.py"
 BASIC_MMAD_FIXPIPE_PER_TENSOR_REL="tla/kernel/matmul/basic_mmad/basic_matmul_fixpipe_per_tensor.py"
 BASIC_MMAD_FIXPIPE_PER_CHANNEL_REL="tla/kernel/matmul/basic_mmad/basic_matmul_fixpipe_per_channel.py"
@@ -185,7 +186,8 @@ Run end-to-end validation for:
     --layout-a zN / --layout-b nZ, alone and mixed with the ND2NZ layouts, across
     f16/bf16/f32/i8/fp8; representative manual and automatic mutex cases; atomic-add coverage
     for each supported input dtype; bias (1 x N) via L1 -> biasbuf for the fp16 x fp16 -> fp16
-    and i8 x i8 -> i32 routes)
+    and i8 x i8 -> i32 routes; gemv (m = 1 with a rank-1 VectorLayout lhs) across f32/f16/i8/fp8,
+    plus a K tail inside one L0 tile and an N tail across the block grid)
   - basic_mmad_ptr (basic_mmad_ptr.py)
   - basic_mmad_l0c2l1 (basic_matmul_l0c2l1.py: cube-only E=(A@B)@D with L0C->L1 staging)
   - basic_syrk (fp16/bf16 input, fp32 output, aligned/tail shapes, K<=4096,
@@ -441,6 +443,10 @@ if [[ ! -f "${EXAMPLES_DIR}/${BASIC_MMAD_L0C2L1_REL}" ]]; then
 fi
 if [[ ! -f "${EXAMPLES_DIR}/${BASIC_MMAD_BIAS_REL}" ]]; then
     echo "error: missing ${BASIC_MMAD_BIAS_REL} under ${EXAMPLES_DIR}" >&2
+    exit 1
+fi
+if [[ ! -f "${EXAMPLES_DIR}/${BASIC_MMAD_GEMV_REL}" ]]; then
+    echo "error: missing ${BASIC_MMAD_GEMV_REL} under ${EXAMPLES_DIR}" >&2
     exit 1
 fi
 if [[ ! -f "${EXAMPLES_DIR}/${MX_MMAD_BIAS_REL}" ]]; then

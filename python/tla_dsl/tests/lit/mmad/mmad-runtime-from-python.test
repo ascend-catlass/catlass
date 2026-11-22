@@ -40,7 +40,7 @@
 // F16-DAG: [[UNIT:%.*]] = llvm.mlir.constant(3 : i8) : i8
 // F16-DAG: [[M:%.*]] = llvm.mlir.constant(128 : i64) : i64
 // F16-DAG: [[K:%.*]] = llvm.mlir.constant(64 : i64) : i64
-// F16: call @mmad_half_half_float({{%.*}}, {{%.*}}, {{%.*}}, [[M]], [[M]], [[K]], [[INIT]], [[UNIT]])
+// F16: call @mmad_half_half_float({{%.*}}, {{%.*}}, {{%.*}}, [[M]], [[M]], [[K]], [[INIT]], [[UNIT]], {{%.*}})
 // F16-NOT: tla.mmad
 
 // BF16-COUNT-1: func.func private @mmad_bf16_bf16_float(
@@ -49,7 +49,7 @@
 // BF16-DAG: [[UNIT:%.*]] = llvm.mlir.constant(3 : i8) : i8
 // BF16-DAG: [[M:%.*]] = llvm.mlir.constant(128 : i64) : i64
 // BF16-DAG: [[K:%.*]] = llvm.mlir.constant(64 : i64) : i64
-// BF16: call @mmad_bf16_bf16_float({{%.*}}, {{%.*}}, {{%.*}}, [[M]], [[M]], [[K]], [[INIT]], [[UNIT]])
+// BF16: call @mmad_bf16_bf16_float({{%.*}}, {{%.*}}, {{%.*}}, [[M]], [[M]], [[K]], [[INIT]], [[UNIT]], {{%.*}})
 // BF16-NOT: tla.mmad
 
 // F32-COUNT-1: func.func private @mmad_float_float_float(
@@ -58,7 +58,7 @@
 // F32-DAG: [[UNIT:%.*]] = llvm.mlir.constant(3 : i8) : i8
 // F32-DAG: [[MN:%.*]] = llvm.mlir.constant(32 : i64) : i64
 // F32-COUNT-1: call @_mlir_ciface_tla_init_soc_state_aic()
-// F32: call @mmad_float_float_float({{%.*}}, {{%.*}}, {{%.*}}, [[MN]], [[MN]], [[MN]], [[INIT]], [[UNIT]])
+// F32: call @mmad_float_float_float({{%.*}}, {{%.*}}, {{%.*}}, [[MN]], [[MN]], [[MN]], [[INIT]], [[UNIT]], {{%.*}})
 // F32-NOT: tla.mmad
 
 // I8-COUNT-1: func.func private @mmad_int8_int8_int32(
@@ -70,7 +70,7 @@
 // I8-DAG: [[UNIT:%.*]] = llvm.mlir.constant(3 : i8) : i8
 // I8-DAG: [[M:%.*]] = llvm.mlir.constant(128 : i64) : i64
 // I8-DAG: [[K:%.*]] = llvm.mlir.constant(64 : i64) : i64
-// I8: call @mmad_int8_int8_int32({{%.*}}, {{%.*}}, {{%.*}}, [[M]], [[M]], [[K]], [[INIT]], [[UNIT]])
+// I8: call @mmad_int8_int8_int32({{%.*}}, {{%.*}}, {{%.*}}, [[M]], [[M]], [[K]], [[INIT]], [[UNIT]], {{%.*}})
 // I8-NOT: tla.mmad
 
 // Every way out of an i32 accumulator. An i32 L0C has no narrowing path, so each
@@ -121,17 +121,17 @@
 
 // DYN-INIT-COUNT-1: func.func private @mmad_float_float_float(
 // DYN-INIT-LABEL: func.func @_dynamic_init_mmad_kernel(
-// DYN-INIT: call @mmad_float_float_float({{%.*}}, {{%.*}}, {{%.*}}, {{%.*}}, {{%.*}}, {{%.*}}, {{%.*}}, {{%.*}})
+// DYN-INIT: call @mmad_float_float_float({{%.*}}, {{%.*}}, {{%.*}}, {{%.*}}, {{%.*}}, {{%.*}}, {{%.*}}, {{%.*}}, {{%.*}})
 // DYN-INIT-NOT: tla.mmad
 
 // DYN-UNIT-COUNT-1: func.func private @mmad_float_float_float(
 // DYN-UNIT-LABEL: func.func @_dynamic_unit_mmad_kernel(
-// DYN-UNIT: call @mmad_float_float_float({{%.*}}, {{%.*}}, {{%.*}}, {{%.*}}, {{%.*}}, {{%.*}}, {{%.*}}, {{%.*}})
+// DYN-UNIT: call @mmad_float_float_float({{%.*}}, {{%.*}}, {{%.*}}, {{%.*}}, {{%.*}}, {{%.*}}, {{%.*}}, {{%.*}}, {{%.*}})
 // DYN-UNIT-NOT: tla.mmad
 
 // DYN-BOTH-COUNT-1: func.func private @mmad_float_float_float(
 // DYN-BOTH-LABEL: func.func @_dynamic_init_unit_mmad_kernel(
-// DYN-BOTH: call @mmad_float_float_float({{%.*}}, {{%.*}}, {{%.*}}, {{%.*}}, {{%.*}}, {{%.*}}, {{%.*}}, {{%.*}})
+// DYN-BOTH: call @mmad_float_float_float({{%.*}}, {{%.*}}, {{%.*}}, {{%.*}}, {{%.*}}, {{%.*}}, {{%.*}}, {{%.*}}, {{%.*}})
 // DYN-BOTH-NOT: tla.mmad
 
 // FP8-COUNT-1: func.func private @mmad_fp8_e4m3fn_t_fp8_e4m3fn_t_float(

@@ -359,6 +359,24 @@ mlir::LogicalResult MmadOp::verify()
     if (!hasEnclosingRegion<CubeOp>(getOperation()))
         return emitOpError("must be nested inside a tla.cube region");
 
+    // The ODS operand constraints already guarantee TlaTensorType here.
+    auto accTy = mlir::cast<TlaTensorType>(getAcc().getType());
+    auto lhsTy = mlir::cast<TlaTensorType>(getLhs().getType());
+    auto rhsTy = mlir::cast<TlaTensorType>(getRhs().getType());
+
+    LayoutTag accTag = accTy.getLayout().getLayoutTag();
+    if (accTag != LayoutTag::L0Clayout)
+        return emitOpError() << "acc must be tagged L0Clayout, got " << stringifyLayoutTag(accTag);
+
+    LayoutTag rhsTag = rhsTy.getLayout().getLayoutTag();
+    if (rhsTag != LayoutTag::nZ)
+        return emitOpError() << "mmad requires an nZ rhs tile, got " << stringifyLayoutTag(rhsTag);
+
+    LayoutTag lhsTag = lhsTy.getLayout().getLayoutTag();
+    if (lhsTag != LayoutTag::zN && lhsTag != LayoutTag::VectorLayout)
+        return emitOpError() << "lhs must be tagged zN (matrix form) or VectorLayout (gemv form), got "
+                             << stringifyLayoutTag(lhsTag);
+
     // HF32 rounding only applies to f32 L0A/L0B operands; requesting it for any
     // other source element type (f16/bf16/...) is meaningless and must be rejected.
     HF32Mode mode = getHf32Mode().getValue();
@@ -372,9 +390,9 @@ mlir::LogicalResult MmadOp::verify()
             return mlir::success();
         };
 
-        if (failed(checkF32SourceOperand(getLhs().getType(), "lhs")))
+        if (failed(checkF32SourceOperand(lhsTy, "lhs")))
             return mlir::failure();
-        if (failed(checkF32SourceOperand(getRhs().getType(), "rhs")))
+        if (failed(checkF32SourceOperand(rhsTy, "rhs")))
             return mlir::failure();
     }
 

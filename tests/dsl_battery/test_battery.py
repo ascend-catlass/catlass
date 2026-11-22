@@ -406,6 +406,36 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
             ]],
         )
 
+    # --- basic_matmul_gemv: m = 1, and the lhs layout alone selects the mode.
+    # A rank-1 VectorLayout lhs keeps A flat through GM -> L1 -> L0A and reaches
+    # the gemv MMAD; B stays nZ and C stays L0Clayout, as in the matrix form.
+    # The default shape walks every L1 N tile and sixteen L0 K tiles, so the
+    # dtype sweep runs on it rather than on a single tile. The tail cases pin
+    # the K remainder inside one L0 tile (100 = 64 + 36) and an N remainder
+    # across the block grid (300 = 128 + 128 + 44).
+    for dtype in ("f32", "f16", "i8", "f8e5m2"):
+        yield (
+            f"mmad-gemv-{dtype}",
+            [[
+                "tla/kernel/matmul/basic_mmad/basic_matmul_gemv.py",
+                "--dtype-ab", dtype, *dev,
+            ]],
+        )
+    yield (
+        "mmad-gemv-tail-k",
+        [[
+            "tla/kernel/matmul/basic_mmad/basic_matmul_gemv.py",
+            "--n", "128", "--k", "100", "--dtype-ab", "f32", "--block-num", "1", *dev,
+        ]],
+    )
+    yield (
+        "mmad-gemv-tail-n",
+        [[
+            "tla/kernel/matmul/basic_mmad/basic_matmul_gemv.py",
+            "--n", "300", "--k", "64", "--dtype-ab", "f16", *dev,
+        ]],
+    )
+
     yield ("mmad-ptr", [["tla/kernel/matmul/basic_mmad/basic_mmad_ptr.py", *dev]])
 
     # basic_mmad_l0c2l1: cube-only E=(A@B)@D, L0C->L1 (fixpipe) staging reused

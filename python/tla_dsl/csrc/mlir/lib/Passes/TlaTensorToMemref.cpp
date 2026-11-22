@@ -1003,6 +1003,18 @@ std::string getCopyRouteCallee(
             return {};
         return Twine("copy_l1_nZ_to_l0a_zN_").concat(suffix).str();
     }
+    // gemv A: the L1 row and the L0A row are the same flat run, so no layout
+    // change happens on the way down. VectorLayout on both sides is what the
+    // DataCopy wrapper in copy_l1_to_l0a.hpp matches.
+    if (*srcSpace == hivm::AddressSpace::L1 && *dstSpace == hivm::AddressSpace::L0A &&
+        srcLayout == LayoutTag::VectorLayout && dstLayout == LayoutTag::VectorLayout) {
+        if (srcElementType != dstElem)
+            return {};
+        StringRef suffix = copyRuntimeElemSuffix(srcElementType);
+        if (suffix.empty())
+            return {};
+        return Twine("copy_l1_VectorLayout_to_l0a_VectorLayout_").concat(suffix).str();
+    }
     if (*srcSpace == hivm::AddressSpace::L1 && *dstSpace == hivm::AddressSpace::L0B && srcLayout == LayoutTag::zN &&
         dstLayout == LayoutTag::nZ) {
         if (srcElementType != dstElem)
@@ -1262,7 +1274,8 @@ static bool isAicTemplateRuntimeCall(StringRef name)
            name.starts_with("copy_l0c_to_ub_RowMajor_") || name.starts_with("copy_l0c_to_gm_RowMajor_") ||
            name.starts_with("copy_l0c_to_gm_ColumnMajor_") || name.starts_with("copy_l0c_to_ub_ColumnMajor_") ||
            name.starts_with("copy_l0c_to_l1_zN_") || name.starts_with("copy_gm_VectorLayout_to_l1_VectorLayout_") ||
-           name.starts_with("copy_l1_VectorLayout_to_biasbuf_VectorLayout_");
+           name.starts_with("copy_l1_VectorLayout_to_biasbuf_VectorLayout_") ||
+           name.starts_with("copy_l1_VectorLayout_to_l0a_VectorLayout_");
 }
 
 static bool isAivTemplateRuntimeCall(StringRef name)

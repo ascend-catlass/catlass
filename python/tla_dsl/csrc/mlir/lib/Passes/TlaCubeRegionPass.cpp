@@ -99,6 +99,12 @@ struct LowerTlaMmadPatternImpl : public OpRewritePattern<MmadOpTy> {
             op.emitError() << "tla.mmad currently supports rank-2 tiles only";
             return failure();
         }
+
+        // A 1-D VectorLayout lhs selects the gemv form, so the layout tag alone
+        // carries the mode; the bc wrapper's disableGemv is derived from it here.
+        // mmad_mx has no gemv form.
+        const bool lhsIsVectorLayout = lhsInfo->layoutTag == LayoutTag::VectorLayout;
+        const bool isGemv = !kIsMx && lhsIsVectorLayout;
         if (lhsInfo->addressSpace != "l0a" || rhsInfo->addressSpace != "l0b" || accInfo->addressSpace != "l0c") {
             op.emitError() << "unsupported tla.mmad tile addrspaces; expected acc in l0c, lhs in l0a, rhs in l0b";
             return failure();
@@ -174,9 +180,13 @@ struct LowerTlaMmadPatternImpl : public OpRewritePattern<MmadOpTy> {
                 lhsInfo->originShapeDims[0], lhsInfo->originShapeDims[1], rhsInfo->originShapeDims[0],
                 rhsInfo->originShapeDims[1], accInfo->originShapeDims[0], accInfo->originShapeDims[1])))
             return failure();
-        if (accInfo->layoutTag != LayoutTag::L0Clayout || lhsInfo->layoutTag != LayoutTag::zN ||
-            rhsInfo->layoutTag != LayoutTag::nZ) {
-            op.emitError() << "unsupported tla.mmad operand layout; expected acc L0Clayout, lhs zN, rhs nZ";
+        // lhs is zN in the matrix form and VectorLayout in the gemv form; acc and
+        // rhs keep their layouts in both.
+        bool lhsLayoutOk = lhsIsVectorLayout || lhsInfo->layoutTag == LayoutTag::zN;
+        bool rhsLayoutOk = rhsInfo->layoutTag == LayoutTag::nZ;
+        if (accInfo->layoutTag != LayoutTag::L0Clayout || !lhsLayoutOk || !rhsLayoutOk) {
+            op.emitError() << "unsupported tla.mmad operand layout; expected acc L0Clayout, rhs nZ, and lhs "
+                              "either zN (matrix form) or VectorLayout (gemv form)";
             return failure();
         }
 
@@ -310,6 +320,8 @@ struct LowerTlaMmadPatternImpl : public OpRewritePattern<MmadOpTy> {
                                              i64Type,
                                              i1Type,
                                              i8Type};
+        if constexpr (!kIsMx)
+            operandTypes.push_back(i1Type);
         if (biasValue)
             operandTypes.push_back((*biasRuntime).getType());
         // FP8 needs a per-operand tag because the two formats can be mixed.
@@ -358,6 +370,8 @@ struct LowerTlaMmadPatternImpl : public OpRewritePattern<MmadOpTy> {
         auto callee = ::tla::getOrCreateRuntimeCall(op->template getParentOfType<ModuleOp>(), calleeName, operandTypes);
         SmallVector<Value, 9> operands = {*lhsRuntime, *rhsRuntime, *accRuntime, mI64,
                                           nI64,        kI64,        initCVal,    unitFlagVal};
+        if constexpr (!kIsMx)
+            operands.push_back(rewriter.create<arith::ConstantOp>(op.getLoc(), rewriter.getBoolAttr(isGemv)));
         if (biasValue)
             operands.push_back(*biasRuntime);
         rewriter.create<func::CallOp>(op.getLoc(), callee, operands);

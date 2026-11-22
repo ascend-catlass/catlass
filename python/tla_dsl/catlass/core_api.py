@@ -2277,20 +2277,32 @@ def _require_mask_matches_vector(
     _require_mask_matches_element_type(op_name, mask_value, vector_desc.element_type)
 
 
+def _static_lane_count_or_none(tree: Any) -> int | None:
+    lanes = 1
+    for dim in _flatten_tla_tuple(tree):
+        if dim is None:
+            return None
+        if isinstance(dim, bool) or not isinstance(dim, int):
+            raise TlaLoweringError(
+                "VectorSSA load requires static integer or dynamic shape leaves"
+            )
+        lanes *= dim
+    return lanes
+
+
 def _vector_ssa_type_from_tensor_descriptor(
     tensor_type: TlaTensorTypeDescriptor,
 ) -> TlaVectorSSATypeDescriptor:
-    valid_lanes = 1
-    for dim in _flatten_tla_tuple(tensor_type.origin_shape):
-        if dim is None:
-            valid_lanes = None
-            break
-        if isinstance(dim, bool) or not isinstance(dim, int):
-            raise TlaLoweringError(
-                "VectorSSA load requires static integer or dynamic origin_shape leaves"
-            )
-        valid_lanes *= dim
-    return TlaVectorSSATypeDescriptor(valid_lanes, tensor_type.element_type)
+    # The register width comes from the statically folded origin window. A tile_view
+    # whose origin is dynamic keeps the width dynamic: a plain dynamic view does not
+    # know how many lanes are valid, so the mask on ``load`` carries that information
+    # and inferring the width from the physical shape would read past the view. Fixed
+    # width slices into a static parent get a static origin from
+    # :func:`_crop_origin_shape_type_tree` instead.
+    return TlaVectorSSATypeDescriptor(
+        _static_lane_count_or_none(tensor_type.origin_shape),
+        tensor_type.element_type,
+    )
 
 
 def _register_tla_tensor_type(
@@ -3474,6 +3486,26 @@ def _remap_tensor_like_prefix_fields_for_layout_trees(
     return None
 
 
+_RANK1_MISS = object()
+
+
+def _flat_rank1_leaf_from_tree(tree: Any) -> Any:
+    """Return a rank-1 tree's single ``int``/``None`` leaf, else ``_RANK1_MISS``.
+
+    ``tla.tile_view`` on a rank-1 ``VectorLayout`` tensor keeps a one-leaf tree
+    (``shape=(N,)``, ``coord=(offset,)``), which :func:`_flat_dim_pair_from_tree`
+    correctly reports as unusable. Callers that only do leaf-wise arithmetic on
+    rank-1 trees use this helper instead; the miss stays distinct from a dynamic
+    leaf (``None``) so a dynamic one-d leaf is never mistaken for a rank mismatch.
+    """
+    if not isinstance(tree, tuple) or len(tree) != 1:
+        return _RANK1_MISS
+    leaf = tree[0]
+    if leaf is None or isinstance(leaf, int):
+        return leaf
+    return _RANK1_MISS
+
+
 def _flat_dim_pair_from_tree(tree: Any) -> tuple[int | None, int | None]:
     if not isinstance(tree, tuple) or len(tree) != 2:
         return (None, None)
@@ -3498,7 +3530,11 @@ def _remap_tensor_like_trees_for_layout(
     )
 
 
-def _flat_pair_sum_type_tree(a: Any, b: Any) -> tuple[int | None, int | None] | None:
+def _flat_pair_sum_type_tree(a: Any, b: Any) -> Any | None:
+    a_leaf = _flat_rank1_leaf_from_tree(a)
+    b_leaf = _flat_rank1_leaf_from_tree(b)
+    if a_leaf is not _RANK1_MISS and b_leaf is not _RANK1_MISS:
+        return (None if a_leaf is None or b_leaf is None else a_leaf + b_leaf,)
     a_pair = _flat_dim_pair_from_tree(a)
     b_pair = _flat_dim_pair_from_tree(b)
     if a_pair == (None, None) and a != (None, None):
@@ -3517,9 +3553,52 @@ def _tree_contains_dynamic(tree: Any) -> bool:
     return tree is None
 
 
+def _crop_origin_shape_leaf(
+    dim: int, origin: int | None, shape: int | None, coord: int | None
+) -> int | None:
+    if origin is None or shape is None or coord is None:
+        return None
+    if coord < 0:
+        raise TlaLoweringError(
+            f"tile_view: element offset along dimension {dim} is negative ({coord}); "
+            "parent origin_shape requires non-negative offsets"
+        )
+    if coord >= origin:
+        raise TlaLoweringError(
+            f"tile_view: element offset along dimension {dim} ({coord}) is out of range "
+            "for parent origin_shape; each offset must be strictly less than the "
+            "corresponding logical extent"
+        )
+    return shape if origin - coord >= shape else origin - coord
+
+
 def _crop_origin_shape_type_tree(
     parent_origin: Any, tile_shape: Any, tile_coord: Any
 ) -> Any | None:
+    origin_leaf = _flat_rank1_leaf_from_tree(parent_origin)
+    shape_leaf = _flat_rank1_leaf_from_tree(tile_shape)
+    coord_leaf = _flat_rank1_leaf_from_tree(tile_coord)
+    if (
+        origin_leaf is not _RANK1_MISS
+        and shape_leaf is not _RANK1_MISS
+        and coord_leaf is not _RANK1_MISS
+    ):
+        if coord_leaf is None and origin_leaf is not None and shape_leaf is not None:
+            # A slice whose offset is a loop induction variable: ``min(shape, origin -
+            # coord)`` cannot be folded without the offset. Only keep the tile width
+            # static when every legal offset still yields a full tile -- the parent
+            # extent is a whole multiple of the tile width, so a tail block never
+            # exists. Otherwise the valid length is unknown and must stay dynamic;
+            # pinning it to ``shape`` over-reports a short tail block (a 160-element
+            # run sliced by 128 would claim 128 valid lanes where only 32 remain).
+            if (
+                shape_leaf > 0
+                and origin_leaf >= shape_leaf
+                and origin_leaf % shape_leaf == 0
+            ):
+                return (shape_leaf,)
+            return (None,)
+        return (_crop_origin_shape_leaf(1, origin_leaf, shape_leaf, coord_leaf),)
     origin_pair = _flat_dim_pair_from_tree(parent_origin)
     shape_pair = _flat_dim_pair_from_tree(tile_shape)
     coord_pair = _flat_dim_pair_from_tree(tile_coord)
@@ -3533,21 +3612,7 @@ def _crop_origin_shape_type_tree(
     for dim, (origin, shape, coord) in enumerate(
         zip(origin_pair, shape_pair, coord_pair, strict=True), start=1
     ):
-        if origin is None or shape is None or coord is None:
-            out.append(None)
-        else:
-            if coord < 0:
-                raise TlaLoweringError(
-                    f"tile_view: element offset along dimension {dim} is negative ({coord}); "
-                    "parent origin_shape requires non-negative offsets"
-                )
-            if coord >= origin:
-                raise TlaLoweringError(
-                    f"tile_view: element offset along dimension {dim} ({coord}) is out of range "
-                    "for parent origin_shape; each offset must be strictly less than the "
-                    "corresponding logical extent"
-                )
-            out.append(shape if origin - coord >= shape else origin - coord)
+        out.append(_crop_origin_shape_leaf(dim, origin, shape, coord))
     return (out[0], out[1])
 
 
@@ -6038,7 +6103,10 @@ def make_tensor_like(
     # Infer layout if not provided
     if layoutTag is None:
         if addr == "l0a":
-            layout = "zN"
+            # A flat VectorLayout source (the gemv A row) keeps that form on
+            # L0A, matching the l1 inference above; every other source is the
+            # fractal zN operand mmad reads.
+            layout = "VectorLayout" if like_type.layout_tag == "VectorLayout" else "zN"
         elif addr == "l0b":
             layout = "nZ"
         elif addr == "l0c":
@@ -6286,12 +6354,17 @@ _SUPPORTED_CUBE_COPY_ROUTES = {
         "u32",
         "u64",
         "f64",
+        "f8e4m3fn",
+        "f8e5m2",
+        "hif8",
     ),
     ("l1", "VectorLayout", "biasbuf", "VectorLayout"): ("f32", "i32"),
 
     # L1->L0 — AscendC LoadData 2dv2 accepts u32 but not u16 on dav-3510.
     ("l1", "zN", "l0a", "zN"): ("f32", "f16", "bf16", "i8", "u32", "f8e4m3fn", "f8e5m2", "hif8"),
     ("l1", "nZ", "l0a", "zN"): ("f32", "f16", "bf16", "i8", "u32", "f8e4m3fn", "f8e5m2", "hif8"),
+    # gemv A operand: a flat L1 row moved into a flat L0A row.
+    ("l1", "VectorLayout", "l0a", "VectorLayout"): ("f32", "f16", "bf16", "i8", "f8e4m3fn", "f8e5m2", "hif8"),
     ("l1", "zN", "l0b", "nZ"): ("f32", "f16", "bf16", "i8", "u32", "f8e4m3fn", "f8e5m2", "hif8"),
     ("l1", "nZ", "l0b", "nZ"): ("f32", "f16", "bf16", "i8", "u32", "f8e4m3fn", "f8e5m2", "hif8"),
 }
@@ -8789,6 +8862,7 @@ def _validate_mmad_contract(
     is_mx: bool,
     bias: mlir_ir.Value | None = None,
 ) -> None:
+    """Check one matmul's operands; the lhs layout carries the gemv mode."""
     acc_desc = _tla_tensor_type_for_mlir_value(acc)
     lhs_desc = _tla_tensor_type_for_mlir_value(lhs)
     rhs_desc = _tla_tensor_type_for_mlir_value(rhs)
@@ -8817,7 +8891,37 @@ def _validate_mmad_contract(
     lhs_m, lhs_k = _flat_dim_pair_from_tree(lhs_desc.origin_shape)
     rhs_k, rhs_n = _flat_dim_pair_from_tree(rhs_desc.origin_shape)
     acc_m, acc_n = _flat_dim_pair_from_tree(acc_desc.origin_shape)
-    if None not in (lhs_m, lhs_k, rhs_k, rhs_n, acc_m, acc_n) and (
+
+    # GEMV is not a separate op: it is what a 1-D VectorLayout lhs means. The
+    # tile then carries K alone, with the row implied to be one, while rhs and
+    # acc keep their matrix layouts. Read as a rank-2 tree the lhs yields
+    # (None, None), so the matrix-form check below would skip every comparison
+    # and let a mismatched K or N through; the gemv branch spells them out.
+    is_gemv = not is_mx and lhs_desc.layout_tag == "VectorLayout"
+    if is_gemv:
+        lhs_origin = lhs_desc.origin_shape
+        if not isinstance(lhs_origin, tuple) or len(lhs_origin) != 1:
+            raise TlaLoweringError(
+                "unsupported tla.mmad gemv lhs shape; a VectorLayout tile is "
+                f"rank-1, got origin shape {lhs_origin!r}"
+            )
+        (lhs_k,) = lhs_origin
+        if acc_m is not None and acc_m != 1:
+            raise TlaLoweringError(
+                "unsupported tla.mmad gemv shape contract; a VectorLayout lhs "
+                f"puts the row on one M, got acc M = {acc_m}"
+            )
+        if isinstance(lhs_k, int) and isinstance(rhs_k, int) and lhs_k != rhs_k:
+            raise TlaLoweringError(
+                "unsupported tla.mmad gemv shape contract; expected lhs(K), rhs(KxN), "
+                f"acc(1xN), got lhs K = {lhs_k}, rhs K = {rhs_k}"
+            )
+        if isinstance(rhs_n, int) and isinstance(acc_n, int) and rhs_n != acc_n:
+            raise TlaLoweringError(
+                "unsupported tla.mmad gemv shape contract; expected rhs N matching acc "
+                f"N, got rhs N = {rhs_n}, acc N = {acc_n}"
+            )
+    elif None not in (lhs_m, lhs_k, rhs_k, rhs_n, acc_m, acc_n) and (
         lhs_k != rhs_k or lhs_m != acc_m or rhs_n != acc_n
     ):
         raise TlaLoweringError(
@@ -8859,14 +8963,15 @@ def _validate_mmad_contract(
 
     expected_layouts = (
         (acc, "L0Clayout"),
-        (lhs, "zN"),
+        (lhs, "VectorLayout" if is_gemv else "zN"),
         (rhs, "nZ"),
     )
     for operand, expected in expected_layouts:
         layout = _tla_tensor_type_for_mlir_value(operand).layout_tag
         if layout != expected:
             raise TlaLoweringError(
-                "unsupported tla.mmad operand layout; expected acc L0Clayout, lhs zN, rhs nZ"
+                "unsupported tla.mmad operand layout; expected acc L0Clayout, rhs nZ,"
+                "lhs zN (matrix form) or VectorLayout (gemv form)"
             )
 
 
@@ -8889,7 +8994,8 @@ def mmad(
 
         Parameters:
         - `acc` (`Tensor`): Accumulator / output tile. Required.
-        - `lhs` (`Tensor`): Left-hand matrix tile. Required.
+        - `lhs` (`Tensor`): Left-hand matrix tile. Its layout selects the mode:
+          `zN` is the matrix form, a rank-1 `VectorLayout` row the GEMV form. Required.
         - `rhs` (`Tensor`): Right-hand matrix tile. Required.
         - `init_c` (`bool | Bool | None`): Whether to clear the accumulator first;
           defaults to `False` when omitted. Ignored when `bias` is provided, since
@@ -8915,6 +9021,8 @@ def mmad(
         - The `f8e4m3fn` and `f8e5m2` matmul both support non-MxScale matmul and MxScale matmul,
           in the tla.mmad op scale is unsupported.
         - `init_c` accepts only a Python `bool` or an `i1` SSA value.
+        - GEMV form: `lhs` is a 1-D `VectorLayout` tile carrying the K elements of
+          a single row, `rhs` stays `nZ`, and `acc` stays `L0Clayout` with M = 1;
         - When `bias` is set: tile must live in `biasbuf` with rank-1 `VectorLayout`,
           element type matching `acc`, and length `N` matching `acc`'s N; stage it
           with `GM`→`L1`→`biasbuf` `tla.copy` (see `copy`). `init_c` is ignored.
@@ -8927,6 +9035,8 @@ def mmad(
             tla.mmad(l0c, l0a, l0b, init_c=True, unit_flag=0b11)
             # With bias (l0_bias already on biasbuf via copy):
             # tla.mmad(l0c, l0a, l0b, bias=l0_bias)
+            # GEMV form: l0a_row is a 1-D VectorLayout tile of K elements.
+            # tla.mmad(l0c, l0a_row, l0b, init_c=True, unit_flag=0b11)
             # After: l0c accumulates lhs@rhs (cleared first when init_c=True).
         ```
     """
@@ -8957,6 +9067,9 @@ def mmad(
     else:
         bias_value = None
 
+    # The layout of lhs is the mode switch: a rank-1 VectorLayout row means the
+    # gemv form, a zN tile the matrix form. The op does not spell the mode out;
+    # the pass derives disableGemv from the layout at the bc boundary.
     _validate_mmad_contract(
         acc_value, lhs_value, rhs_value, is_mx=False, bias=bias_value
     )

@@ -31,7 +31,8 @@ tla.mmad(acc: Tensor, lhs: Tensor, rhs: Tensor, init_c: bool | Bool | None = Non
 Parameters:
 
 - `acc` (`Tensor`): Accumulator / output tile. Required.
-- `lhs` (`Tensor`): Left-hand matrix tile. Required.
+- `lhs` (`Tensor`): Left-hand matrix tile. Its layout selects the mode:
+  `zN` is the matrix form, a rank-1 `VectorLayout` row the GEMV form. Required.
 - `rhs` (`Tensor`): Right-hand matrix tile. Required.
 - `init_c` (`bool | Bool | None`): Whether to clear the accumulator first;
   defaults to `False` when omitted. Ignored when `bias` is provided, since
@@ -58,6 +59,8 @@ Constraints:
 - The `f8e4m3fn` and `f8e5m2` matmul both support non-MxScale matmul and MxScale matmul,
   in the tla.mmad op scale is unsupported.
 - `init_c` accepts only a Python `bool` or an `i1` SSA value.
+- GEMV form: `lhs` is a 1-D `VectorLayout` tile carrying the K elements of
+  a single row, `rhs` stays `nZ`, and `acc` stays `L0Clayout` with M = 1;
 - When `bias` is set: tile must live in `biasbuf` with rank-1 `VectorLayout`,
   element type matching `acc`, and length `N` matching `acc`'s N; stage it
   with `GM`→`L1`→`biasbuf` `tla.copy` (see `copy`). `init_c` is ignored.
@@ -85,6 +88,8 @@ with tla.cube():
     tla.mmad(l0c, l0a, l0b, init_c=True, unit_flag=0b11)
     # With bias (l0_bias already on biasbuf via copy):
     # tla.mmad(l0c, l0a, l0b, bias=l0_bias)
+    # GEMV form: l0a_row is a 1-D VectorLayout tile of K elements.
+    # tla.mmad(l0c, l0a_row, l0b, init_c=True, unit_flag=0b11)
     # After: l0c accumulates lhs@rhs (cleared first when init_c=True).
 ```
 

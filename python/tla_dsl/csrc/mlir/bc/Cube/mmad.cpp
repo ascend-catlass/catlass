@@ -12,7 +12,7 @@ class TileMmad {
 public:
     CATLASS_DEVICE void operator()(
         __ca__ ElementA* a, __cb__ ElementB* b, __cc__ ElementAccumulator* c, uint32_t m, uint32_t n, uint32_t k,
-        bool initC = true, uint8_t unitFlag = 0) const
+        bool initC = true, uint8_t unitFlag = 0, bool isGemv = false) const
     {
         AscendC::LocalTensor<ElementA> l0a{
             AscendC::TPosition::A2, (uint32_t) reinterpret_cast<int64_t>(a), (uint32_t)(m * k)};
@@ -27,7 +27,7 @@ public:
         mmadParams.k = k;
         mmadParams.unitFlag = unitFlag;
         mmadParams.cmatrixInitVal = initC;
-        mmadParams.disableGemv = true;
+        mmadParams.disableGemv = !isGemv;
 
         AscendC::Mmad(l0c, l0a, l0b, mmadParams);
 
@@ -40,7 +40,7 @@ public:
     // with bias
     CATLASS_DEVICE void operator()(
         __ca__ ElementA* a, __cb__ ElementB* b, __cc__ ElementAccumulator* c, __biasbuf__ ElementAccumulator* bias,
-        uint32_t m, uint32_t n, uint32_t k, bool initC, uint8_t unitFlag) const
+        uint32_t m, uint32_t n, uint32_t k, bool initC, uint8_t unitFlag, bool isGemv = false) const
     {
         AscendC::LocalTensor<ElementA> l0a{
             AscendC::TPosition::A2, (uint32_t) reinterpret_cast<int64_t>(a), (uint32_t)(m * k)};
@@ -57,7 +57,7 @@ public:
         mmadParams.k = k;
         mmadParams.unitFlag = unitFlag;
         mmadParams.cmatrixInitVal = false;
-        mmadParams.disableGemv = true;
+        mmadParams.disableGemv = !isGemv;
 
         AscendC::Mmad(l0c, l0a, l0b, l0bias, mmadParams);
 
@@ -156,21 +156,21 @@ using int32 = int32_t;
 // Plain routes: f32, f16, bf16, i8 and the two fp8 formats. The bias element
 // type follows the accumulator, so TypeAcc fills both roles -- f32 on the
 // fp32-L0C routes, int32 on i8 x i8 -> i32.
-#define REGISTER_MMAD(TypeA, TypeB, TypeAcc)                                                                         \
-    __aicore__ __attribute__((always_inline)) void _mlir_ciface_mmad_##TypeA##_##TypeB##_##TypeAcc(                  \
-        memref_t<__ca__ TypeA, 1>* a, memref_t<__cb__ TypeB, 1>* b, memref_t<__cc__ TypeAcc, 1>* c, int64_t m,       \
-        int64_t n, int64_t k, bool initC = true, uint8_t unitFlag = 0)                                               \
-    {                                                                                                                \
-        TileMmad<TypeA, TypeB, TypeAcc>{}(                                                                           \
-            a->aligned + a->offset, b->aligned + b->offset, c->aligned + c->offset, m, n, k, initC, unitFlag);       \
-    }                                                                                                                \
-    __aicore__ __attribute__((always_inline)) void _mlir_ciface_mmad_bias_##TypeA##_##TypeB##_##TypeAcc(             \
-        memref_t<__ca__ TypeA, 1>* a, memref_t<__cb__ TypeB, 1>* b, memref_t<__cc__ TypeAcc, 1>* c, int64_t m,       \
-        int64_t n, int64_t k, bool initC, uint8_t unitFlag, memref_t<__biasbuf__ TypeAcc, 1>* bias)                  \
-    {                                                                                                                \
-        TileMmad<TypeA, TypeB, TypeAcc>{}(                                                                           \
-            a->aligned + a->offset, b->aligned + b->offset, c->aligned + c->offset, bias->aligned + bias->offset, m, \
-            n, k, initC, unitFlag);                                                                                  \
+#define REGISTER_MMAD(TypeA, TypeB, TypeAcc)                                                                           \
+    __aicore__ __attribute__((always_inline)) void _mlir_ciface_mmad_##TypeA##_##TypeB##_##TypeAcc(                    \
+        memref_t<__ca__ TypeA, 1>* a, memref_t<__cb__ TypeB, 1>* b, memref_t<__cc__ TypeAcc, 1>* c, int64_t m,         \
+        int64_t n, int64_t k, bool initC, uint8_t unitFlag, bool isGemv)                                               \
+    {                                                                                                                  \
+        TileMmad<TypeA, TypeB, TypeAcc>{}(                                                                             \
+            a->aligned + a->offset, b->aligned + b->offset, c->aligned + c->offset, m, n, k, initC, unitFlag, isGemv); \
+    }                                                                                                                  \
+    __aicore__ __attribute__((always_inline)) void _mlir_ciface_mmad_bias_##TypeA##_##TypeB##_##TypeAcc(               \
+        memref_t<__ca__ TypeA, 1>* a, memref_t<__cb__ TypeB, 1>* b, memref_t<__cc__ TypeAcc, 1>* c, int64_t m,         \
+        int64_t n, int64_t k, bool initC, uint8_t unitFlag, bool isGemv, memref_t<__biasbuf__ TypeAcc, 1>* bias)       \
+    {                                                                                                                  \
+        TileMmad<TypeA, TypeB, TypeAcc>{}(                                                                             \
+            a->aligned + a->offset, b->aligned + b->offset, c->aligned + c->offset, bias->aligned + bias->offset, m,   \
+            n, k, initC, unitFlag, isGemv);                                                                            \
     }
 
 REGISTER_MMAD(float, float, float)

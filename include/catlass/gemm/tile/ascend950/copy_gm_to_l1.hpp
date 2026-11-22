@@ -257,10 +257,17 @@ struct TileCopyTla<
 
         auto dstOffset = dstTensor.layout()(dstTensor.coord());
         auto srcOffset = srcTensor.layout()(srcTensor.coord());
-        AscendC::DataCopyExtParams intriParams(1, tla::get<0>(srcTensor.originShape()) * sizeof(ElementSrc), 0, 0, 0);
-        // Same default Pad args as CopyGm2UbTla VectorLayout: exact bytes, no fill.
-        AscendC::DataCopyPadExtParams<ElementSrc> padParams(false, 0, 0, static_cast<ElementSrc>(0));
-        AscendC::DataCopyPad(dstTensor.data()[dstOffset], srcTensor.data()[srcOffset], intriParams, padParams);
+        AscendC::DataCopyExtParams intriParams(
+            1, ElementsToBytes<ElementSrc>(tla::get<0>(srcTensor.originShape())), 0, 0, 0);
+        if constexpr (AscendC::Std::is_one_of_v<ElementSrc, float8_e4m3_t, float8_e5m2_t, hifloat8_t>) {
+            AscendC::DataCopyPadExtParams<uint8_t> padParams(false, 0, 0, 0);
+            AscendC::DataCopyPad(
+                dstTensor.data()[dstOffset].template ReinterpretCast<uint8_t>(),
+                srcTensor.data()[srcOffset].template ReinterpretCast<uint8_t>(), intriParams, padParams);
+        } else {
+            AscendC::DataCopyPadExtParams<ElementSrc> padParams(false, 0, 0, static_cast<ElementSrc>(0));
+            AscendC::DataCopyPad(dstTensor.data()[dstOffset], srcTensor.data()[srcOffset], intriParams, padParams);
+        }
     }
 
     // Explicit opt-in that fills the L1 C0 tail with padValue.

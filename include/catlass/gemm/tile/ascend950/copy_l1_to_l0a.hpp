@@ -459,11 +459,12 @@ struct TileCopyTla<
     }
 };
 
+/// Partial specialization for CopyL1ToL0A, Ascend950, VectorLayout in and zN out.
 template <class ElementSrc, class ElementDst, class LayoutSrc, class LayoutDst, class CoordSrc, class CoordDst>
 struct TileCopyTla<
     Arch::Ascend950, tla::Tensor<AscendC::LocalTensor<ElementSrc>, LayoutSrc, CoordSrc, AscendC::TPosition::A1>,
     tla::Tensor<AscendC::LocalTensor<ElementDst>, LayoutDst, CoordDst, AscendC::TPosition::A2>,
-    std::enable_if_t<tla::detail::isVector<LayoutSrc>::value>> {
+    std::enable_if_t<tla::detail::isVector<LayoutSrc>::value && tla::detail::iszN<ElementDst, LayoutDst>::value>> {
     static constexpr uint32_t ELE_NUM_PER_C0 = BytesToBits(BYTE_PER_C0) / SizeOfBits<ElementSrc>::value;
     static constexpr uint32_t ELE_NUM_PER_FRACTAL = BytesToBits(BYTE_PER_FRACTAL) / SizeOfBits<ElementSrc>::value;
 
@@ -488,6 +489,47 @@ struct TileCopyTla<
         loadDataParams.ifTranspose = false;
         auto srcOffset = srcTensor.layout()(srcTensor.coord());
         AscendC::LoadData(dstTensor.data(), srcTensor.data()[srcOffset], loadDataParams);
+    }
+};
+
+/// Partial specialization for CopyL1ToL0A, Ascend950, VectorLayout in and VectorLayout out.
+/// The gemv mmad holds a VectorLayout tensor on L0A.
+template <class ElementSrc, class ElementDst, class LayoutSrc, class LayoutDst, class CoordSrc, class CoordDst>
+struct TileCopyTla<
+    Arch::Ascend950, tla::Tensor<AscendC::LocalTensor<ElementSrc>, LayoutSrc, CoordSrc, AscendC::TPosition::A1>,
+    tla::Tensor<AscendC::LocalTensor<ElementDst>, LayoutDst, CoordDst, AscendC::TPosition::A2>,
+    std::enable_if_t<tla::detail::isVector<LayoutSrc>::value && tla::detail::isVector<LayoutDst>::value>> {
+    static constexpr uint32_t ELE_NUM_PER_C0 = BytesToBits(BYTE_PER_C0) / SizeOfBits<ElementSrc>::value;
+
+    CATLASS_DEVICE
+    TileCopyTla() {};
+
+    template <class TensorDst, class TensorSrc>
+    CATLASS_DEVICE void operator()(TensorDst const& dstTensor, TensorSrc const& srcTensor)
+    {
+        static_assert(
+            tla::detail::isVector<typename TensorSrc::Layout>::value &&
+                tla::detail::isVector<typename TensorDst::Layout>::value &&
+                TensorSrc::position == AscendC::TPosition::A1 && TensorDst::position == AscendC::TPosition::A2,
+            "The input parameters do not match. TensorSrc must be L1 and Vector, "
+            "while TensorDst must be L0A and Vector");
+
+        // VectorLayout is continous, can be viewed as a blockLen*32B fractal
+        uint32_t blockLen = CeilDiv<ELE_NUM_PER_C0>(tla::get<0>(srcTensor.originShape()));
+
+        AscendC::LoadData2DParamsV2 loadDataParams;
+        loadDataParams.mStartPosition = 0;
+        loadDataParams.kStartPosition = 0;
+        loadDataParams.mStep = CeilDiv<C0_NUM_PER_FRACTAL>(blockLen);
+        loadDataParams.kStep = 1;
+        loadDataParams.srcStride = 0;
+        loadDataParams.dstStride = 0;
+        loadDataParams.ifTranspose = false;
+
+        auto dstOffset = dstTensor.layout()(dstTensor.coord());
+        auto srcOffset = srcTensor.layout()(srcTensor.coord());
+
+        AscendC::LoadData(dstTensor.data()[dstOffset], srcTensor.data()[srcOffset], loadDataParams);
     }
 };
 

@@ -66,7 +66,8 @@ module {
 // The bias the matmul receives starts at element 512 of the 1024-element
 // buffer, so it is a subview of it rather than the whole allocation.
 // CHECK: %[[BIAS:.*]] = memref.subview %{{.*}}[%{{.*}}] [%{{.*}}] [%{{.*}}] : memref<1024xf32, #hivm.address_space<biasbuf>> to memref<?xf32, strided<[?], offset: ?>, #hivm.address_space<biasbuf>>
-// CHECK: call @mmad_bias_float_float_float({{.*}}, %[[BIAS]]) : ({{.*}}, memref<?xf32, strided<[?], offset: ?>, #hivm.address_space<biasbuf>>) -> ()
+// The gemv flag keeps its place right after unit_flag, and the bias stays last.
+// CHECK: call @mmad_bias_float_float_float({{.*}}, %[[GEMV:.*]], %[[BIAS]]) : ({{.*}}, i1, i8, i1, memref<?xf32, strided<[?], offset: ?>, #hivm.address_space<biasbuf>>) -> ()
 
 //--- zero.mlir
 

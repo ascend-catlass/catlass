@@ -16,6 +16,11 @@ def Tla_MmadOp : Tla_Op<"mmad", []> {
     ``CTRL[51]`` (``M_FIRST``/``N_FIRST``) and ``CTRL[46]``/``CTRL[47]``
     (HF32 enable / rounding select). Requirements that already match the
     InitSoc defaults are registered but do not insert.
+
+    The ``lhs`` layout selects the form of the same instruction: a 1-D
+    ``VectorLayout`` row is the GEMV form, a ``zN`` matrix tile the normal 2-D
+    form. In both cases the accumulator stays ``L0Clayout`` and ``rhs`` stays
+    ``nZ``.
   }];
   let arguments = (ins Tla_TensorType:$acc, Tla_TensorType:$lhs, Tla_TensorType:$rhs,
                        I1:$init_c, I64:$unit_flag, Optional<Tla_TensorType>:$bias,
