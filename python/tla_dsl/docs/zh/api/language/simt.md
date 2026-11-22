@@ -50,7 +50,7 @@ with tla.vector():
 - `tla.arch.warp_reduce_sync`：对 Warp 内的活跃线程执行 add/max/min 归约——见
   [系统变量访问](system.md#系统变量访问)。
 - Warp 查询 `tla.arch.warpsize` / `lane_idx` / `lanemask_eq` / `lanemask_lt` /
-  `lanemask_le` / `lanemask_gt` / `lanemask_ge`——见 [系统变量访问](system.md#系统变量访问)。
+  `lanemask_le` / `lanemask_gt` / `lanemask_ge` / `activemask`——见 [系统变量访问](system.md#系统变量访问)。
 - `tla.arch.thread_idx` / `thread_block_dim` / `sync_threads`，以及 launch 级
   `tla.arch.block_idx` / `block_num`——见 [系统变量访问](system.md#系统变量访问)。
 

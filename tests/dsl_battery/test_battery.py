@@ -752,6 +752,10 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
     )
 
     yield (
+        "simt-warp-activemask",
+        [["end_to_end/warp_activemask.py", *dev]],
+    )
+    yield (
         "simt-warp-lane-masks",
         [["end_to_end/warp_lane_masks.py", *dev]],
     )

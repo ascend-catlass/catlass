@@ -283,6 +283,51 @@ with tla.vec.func(mode="simt", thread_block_dim=48):
 
 ---
 
+### `tla.arch.activemask`
+
+**Source:** [`catlass.core_api.arch_activemask`](../../../../catlass/core_api.py)
+
+Description:
+
+Return the currently active lanes in this SIMT warp as `UInt32`.
+Bit `j` is set exactly when lane `j` executes this instruction.
+Unlaunched lanes in a partial warp contribute zero. Divergent branches
+observe their own active set. Unlike `lanemask_*`, the result depends
+on activity at the call site.
+
+Prototype:
+
+```python
+tla.arch.activemask() -> UInt32
+```
+
+Parameters:
+
+- None.
+
+Returns:
+
+- `UInt32`: The current active lane mask.
+
+Constraints:
+
+- Only inside `tla.vec.func(mode="simt")` in a `@tla.kernel`.
+- Supported on Ascend 950 only; no explicit member mask.
+- Does not provide cross-warp synchronization. The compiler omits unused queries.
+- Reports actual instruction activity, not source-predicate membership:
+  the backend may reconverge identical branch bodies. Do not use this
+  snapshot as a synchronization guarantee or a persistent member mask.
+
+Example:
+
+```python
+with tla.vec.func(mode="simt", thread_block_dim=(48, 1, 1)):
+    tid, _, _ = tla.arch.thread_idx()
+    gm_out[tid] = tla.arch.activemask()
+```
+
+---
+
 ### `tla.arch.lanemask_eq`
 
 **Source:** [`catlass.core_api.arch_lanemask_eq`](../../../../catlass/core_api.py)

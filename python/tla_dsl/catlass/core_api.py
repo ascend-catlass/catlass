@@ -12119,6 +12119,38 @@ def arch_lane_idx(*, loc: mlir_ir.Location | None = None) -> Int32:
     return Int32(_tla_ops_gen.arch_lane_idx(i32, loc=loc))
 
 
+@dsl_user_op
+def arch_activemask(*, loc: mlir_ir.Location | None = None) -> UInt32:
+    """Directory: System Variable Access / Architecture Helpers
+    Description:
+        Return the currently active lanes in this SIMT warp as `UInt32`.
+        Bit `j` is set exactly when lane `j` executes this instruction.
+        Unlaunched lanes in a partial warp contribute zero. Divergent branches
+        observe their own active set. Unlike `lanemask_*`, the result depends
+        on activity at the call site.
+        Parameters:
+        - None.
+
+        Returns:
+
+        - `UInt32`: The current active lane mask.
+    Constraints:
+        - Only inside `tla.vec.func(mode="simt")` in a `@tla.kernel`.
+        - Supported on Ascend 950 only; no explicit member mask.
+        - Does not provide cross-warp synchronization. The compiler omits unused queries.
+        - Reports actual instruction activity, not source-predicate membership:
+          the backend may reconverge identical branch bodies. Do not use this
+          snapshot as a synchronization guarantee or a persistent member mask.
+    Example:
+        with tla.vec.func(mode="simt", thread_block_dim=(48, 1, 1)):
+            tid, _, _ = tla.arch.thread_idx()
+            gm_out[tid] = tla.arch.activemask()
+    """
+    _require_arch_warp_region("arch.activemask")
+    i32 = mlir_ir.IntegerType.get_signless(32)
+    return UInt32(_tla_ops_gen.arch_activemask(i32, loc=loc))
+
+
 def _emit_arch_lanemask(op_name: str, mode: str, *, loc=None) -> UInt32:
     _require_arch_warp_region(op_name)
     i32 = mlir_ir.IntegerType.get_signless(32)
@@ -13097,6 +13129,7 @@ _require_generated("arch_block_num")
 _require_generated("arch_thread_block_dim")
 _require_generated("arch_thread_idx")
 _require_generated("arch_lane_idx")
+_require_generated("arch_activemask")
 _require_generated("arch_lanemask")
 _require_generated("arch_warp_reduce")
 _require_generated("simt_add")
@@ -13122,6 +13155,7 @@ arch._set("thread_idx", arch_thread_idx)
 arch._set("warpsize", arch_warpsize)
 arch._set("lane_idx", arch_lane_idx)
 arch._set("warp_reduce_sync", arch_warp_reduce_sync)
+arch._set("activemask", arch_activemask)
 arch._set("lanemask_eq", arch_lanemask_eq)
 arch._set("lanemask_lt", arch_lanemask_lt)
 arch._set("lanemask_le", arch_lanemask_le)

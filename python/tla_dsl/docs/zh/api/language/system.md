@@ -288,6 +288,46 @@ with tla.vec.func(mode="simt", thread_block_dim=48):
 
 ---
 
+### `tla.arch.activemask`
+
+**源码：** [`catlass.core_api.arch_activemask`](../../../../catlass/core_api.py)
+
+功能说明：
+
+查询当前 Warp 中执行到此指令的活跃 Lane。不足 32 个线程的末尾 Warp 只包含
+实际启动的线程。发散分支各自观察其活跃集合。
+
+函数原型：
+
+```python
+tla.arch.activemask() -> UInt32
+```
+
+参数说明：
+
+- 无。
+
+返回值：
+
+- `UInt32` 掩码。Lane `j` 活跃时，第 `j` 位为 1。
+
+约束：
+
+- 仅在 Ascend 950 的 `tla.vec.func(mode="simt")` 中可用。
+- 不接受显式成员掩码，不提供跨 Warp 同步。编译器省略未使用的查询。
+- 返回值反映执行该指令时的活跃状态。后端可能将相同的分支体汇合。
+  不要将此快照作为同步保证或持久成员掩码。
+
+调用示例：
+
+```python
+with tla.vec.func(mode="simt", thread_block_dim=(48, 1, 1)):
+    tid, _, _ = tla.arch.thread_idx()
+    gm_out[tid] = tla.arch.activemask()
+```
+
+---
+
 ### `tla.arch.lanemask_eq`
 
 **源码：** [`catlass.core_api.arch_lanemask_eq`](../../../../catlass/core_api.py)

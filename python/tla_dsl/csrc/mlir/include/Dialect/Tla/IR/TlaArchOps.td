@@ -78,6 +78,20 @@ def Tla_ArchLanemaskOp : Tla_Op<"arch.lanemask", [Pure]> {
   let assemblyFormat = "$mode attr-dict `:` type($result)";
 }
 
+// Activity-dependent: unknown effects also prevent CSE across active sets.
+// NoMemoryEffect alone would permit a dominating query to replace a branch query.
+def Tla_ArchActivemaskOp : Tla_Op<"arch.activemask", []> {
+  let summary = "Mask of lanes active at this SIMT instruction";
+  let description = [{
+    Return a bit for each currently active lane in the calling warp. Inactive
+    lanes, including unlaunched lanes of a partial warp, contribute no bits.
+    This query is convergent and must remain at its original control-flow site.
+  }];
+  let results = (outs I32:$result);
+  let hasVerifier = 1;
+  let assemblyFormat = [{ attr-dict `->` type($result) }];
+}
+
 def Tla_ThreadIdxOp : Tla_Op<"arch.thread_idx", [Pure]> {
   let summary = "SIMT thread index";
   let description = [{

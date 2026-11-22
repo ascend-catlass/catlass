@@ -4,6 +4,8 @@
 #include "bishengir/Dialect/HIVMRegbaseIntrins/IR/HIVMRegbaseIntrins.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/IR/Builders.h"
+#include "mlir/IR/PatternMatch.h"
+#include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
 using namespace mlir;
 
@@ -80,6 +82,32 @@ Value buildWarpReduce(OpBuilder& b, Location loc, StringRef kind, bool isUnsigne
         return buildNativeReduce<ReduceAddOpU32, ReduceMaxOpU32, ReduceMinOpU32>(b, loc, kind, value);
     return buildNativeReduce<ReduceAddOpS32, ReduceMaxOpS32, ReduceMinOpS32>(b, loc, kind, value);
 }
+class LowerArchActivemaskPattern : public OpRewritePattern<ArchActivemaskOp> {
+public:
+    LowerArchActivemaskPattern(MLIRContext* context, int64_t bx, int64_t by, int64_t bz)
+        : OpRewritePattern<ArchActivemaskOp>(context), bx(bx), by(by), bz(bz)
+    {}
+
+    LogicalResult matchAndRewrite(ArchActivemaskOp op, PatternRewriter& rewriter) const override
+    {
+        if (op->use_empty()) {
+            rewriter.eraseOp(op);
+            return success();
+        }
+        Location loc = op.getLoc();
+        Value lane = buildLaneIdx(rewriter, loc, bx, by, bz);
+        Value one = rewriter.create<arith::ConstantIntOp>(loc, 1, 32);
+        Value bit = rewriter.create<arith::ShLIOp>(loc, one, lane);
+        // Distinct lane bits make unsigned addition equivalent to bitwise OR.
+        // Emit at the query site so only the current active lanes participate.
+        Value mask = rewriter.create<hivm_regbaseintrins::ReduceAddOpU32>(loc, rewriter.getI32Type(), bit);
+        rewriter.replaceOp(op, mask);
+        return success();
+    }
+
+private:
+    int64_t bx, by, bz;
+};
 } // namespace
 
 LogicalResult lowerSimtWarpOpsIn(func::FuncOp vf, int64_t bx, int64_t by, int64_t bz)
@@ -105,6 +133,15 @@ LogicalResult lowerSimtWarpOpsIn(func::FuncOp vf, int64_t bx, int64_t by, int64_
             buildWarpReduce(b, op.getLoc(), op.getKind(), op.getIsUnsigned(), op.getValue()));
         op.erase();
     });
-    return success();
+    RewritePatternSet patterns(vf.getContext());
+    patterns.add<LowerArchActivemaskPattern>(vf.getContext(), bx, by, bz);
+    // The outlined function is outside the original function's greedy driver.
+    // Apply only the lowering here, leaving folding and control-flow cleanup to
+    // the surrounding pipeline.
+    GreedyRewriteConfig config;
+    config.fold = false;
+    config.cseConstants = false;
+    config.enableRegionSimplification = GreedySimplifyRegionLevel::Disabled;
+    return applyPatternsGreedily(vf, std::move(patterns), config);
 }
 } // namespace tla

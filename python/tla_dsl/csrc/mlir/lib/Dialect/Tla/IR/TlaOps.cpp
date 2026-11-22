@@ -689,6 +689,15 @@ mlir::LogicalResult ArchLaneIdxOp::verify()
     return mlir::success();
 }
 
+mlir::LogicalResult ArchActivemaskOp::verify()
+{
+    auto region = getOperation()->getParentOfType<VecFuncOp>();
+    auto mode = region ? region->getAttrOfType<mlir::StringAttr>("mode") : mlir::StringAttr{};
+    if (!mode || !mode.getValue().equals_insensitive("simt"))
+        return emitOpError("must be nested inside a tla.vec.func with mode='simt'");
+    return mlir::success();
+}
+
 mlir::LogicalResult ArchLanemaskOp::verify()
 {
     auto region = getOperation()->getParentOfType<VecFuncOp>();

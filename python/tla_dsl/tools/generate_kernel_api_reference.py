@@ -227,7 +227,7 @@ DIRECTORY_SECTIONS: list[tuple[str, str]] = [
         "- `tla.arch.warp_reduce_sync` for add/max/min reductions over the "
         "active lanes of a warp -- see **System Variable Access**.\n"
         "- Warp queries `tla.arch.warpsize` / `lane_idx` / `lanemask_eq` / "
-        "`lanemask_lt` / `lanemask_le` / `lanemask_gt` / `lanemask_ge` -- see "
+        "`lanemask_lt` / `lanemask_le` / `lanemask_gt` / `lanemask_ge` / `activemask` -- see "
         "**System Variable Access**.\n"
         "- `tla.arch.thread_idx` / `thread_block_dim` / `sync_threads`, and "
         "the launch-level `tla.arch.block_idx` / `block_num` -- see "
