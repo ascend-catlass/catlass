@@ -695,8 +695,8 @@ static StringRef copyRuntimeElemSuffix(Type elementType)
     // 1-byte element on every route, UB -> UB included.
     if (::llvm::isa<::tla::Float8E8M0Type>(elementType))
         return "float8_e8m0_t";
-    // HiFloat8 is a custom 1-byte float (memref boundary is i8). GM↔UB resolves
-    // to the typed hifloat8_t BC wrappers (tile uint8 DataCopyPad path).
+    // HiFloat8 is a custom 1-byte float (memref boundary is i8). All copy routes
+    // use typed hifloat8_t BC (GM↔UB Vector + GM→L1 Cube); tile may uint8-pad.
     if (::llvm::isa<::tla::HiFloat8Type>(elementType))
         return "hifloat8_t";
     // fp4 is the packed two-per-byte encoding: the C++ element type is the x2
@@ -725,6 +725,16 @@ static StringRef rowMajorGmUbCopyElemSuffix(Type elementType)
     if (auto suffix = b64CopyElemSuffix(elementType); !suffix.empty())
         return suffix;
     return copyRuntimeElemSuffix(elementType);
+}
+
+// GM/UB VectorLayout→VectorLayout: only b64 (legacy) plus AscendC bool.
+// Do NOT reuse rowMajorGmUbCopyElemSuffix — that would legalize i32/f16/etc.
+// without REGISTER_GM_TO_UB(VectorLayout, ...) and break lit ROUTE-ERR.
+static StringRef vectorLayoutGmUbCopyElemSuffix(Type elementType)
+{
+    if (elementType.isInteger(1))
+        return "bool";
+    return b64CopyElemSuffix(elementType);
 }
 
 // Whether fixpipe can carry this L0C element type out to the given destination
@@ -810,7 +820,7 @@ std::string getCopyRouteCallee(
         srcLayout == LayoutTag::VectorLayout && dstLayout == LayoutTag::VectorLayout) {
         if (srcElementType != dstElem)
             return {};
-        StringRef suffix = b64CopyElemSuffix(srcElementType);
+        StringRef suffix = vectorLayoutGmUbCopyElemSuffix(srcElementType);
         if (suffix.empty())
             return {};
         return Twine("copy_gm_VectorLayout_to_ub_VectorLayout_").concat(suffix).str();

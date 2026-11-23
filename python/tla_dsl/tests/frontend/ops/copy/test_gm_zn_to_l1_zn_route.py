@@ -26,13 +26,21 @@ from __future__ import annotations
 
 import pytest
 
-import catlass.tla as tla
+from catlass import tla
 from catlass.tla.runtime import make_fake_tensor
+from catlass.types import dtype_size_bytes
+
+
+def _c0_elems(dtype) -> int:
+    """Fractal C0 element count from storage width (Bool i1 is 1 byte)."""
+    nbytes = dtype_size_bytes(dtype.dtype)
+    assert nbytes > 0 and 32 % nbytes == 0
+    return 32 // nbytes
 
 
 def _zn_tensor(dtype, addrspace, rows: int = 32, cols: int = 32):
     """A tightly packed zN tile of ``rows`` x ``cols`` logical elements."""
-    c0 = 32 // (dtype.width // 8)
+    c0 = _c0_elems(dtype)
     c0_per_fractal = 16
     shape = (
         (c0_per_fractal, rows // c0_per_fractal),
@@ -54,7 +62,7 @@ def _zn_tensor(dtype, addrspace, rows: int = 32, cols: int = 32):
 
 def _gm_unaligned(dtype, rows: int, cols: int = 32):
     """A tight zNUnAlign GM tile: row pitch ``rows * C0``, no fractal padding."""
-    c0 = 32 // (dtype.width // 8)
+    c0 = _c0_elems(dtype)
     return make_fake_tensor(
         dtype,
         ((rows, 1), (c0, cols // c0)),
@@ -119,6 +127,8 @@ def test_gm_zn_to_l1_zn_is_accepted() -> None:
         tla.UInt8,
         tla.UInt16,
         tla.UInt32,
+        tla.Bool,
+        tla.HiFloat8,
         tla.Float8E4M3FN,
         tla.Float8E5M2,
     ),

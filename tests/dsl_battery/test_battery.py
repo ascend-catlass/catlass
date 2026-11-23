@@ -115,6 +115,14 @@ L1_FILL_CASE_IDS = {f"fill-l1-{dtype}" for dtype, _ in L1_FILL_VARIANTS}
 # Flat VectorLayout GM->L1 continuous-run dtypes (narrow + 64-bit staging).
 VECTOR_LAYOUT_GM_L1_DTYPES = ("i8", "f16", "bf16", "i64", "u64", "f64")
 VECTOR_LAYOUT_GM_L1_CASE_IDS = {f"vector-layout-gm-l1-{dtype}" for dtype in VECTOR_LAYOUT_GM_L1_DTYPES}
+GM_L1_BOOL_HIF8_CASES = (
+    "vector-bool",
+    "vector-hif8",
+    "nd2nz-bool",
+    "nd2nz-hif8",
+    "nd2nz-i8",
+)
+GM_L1_BOOL_HIF8_CASE_IDS = {f"gm-l1-bool-hif8-{case}" for case in GM_L1_BOOL_HIF8_CASES}
 
 EVG_OPS = (
     "add",
@@ -1394,6 +1402,18 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         [["end_to_end/img2col_k_window_conv.py", *dev, "--control-shift"]],
     )
 
+    # --- end_to_end: GM↔UB bool + GM→L1 bool/hif8 (needs L1 debug readback) ---
+    yield (
+        "gm-ub-bool-copy",
+        [["end_to_end/gm_ub_bool_copy.py", *dev]],
+    )
+    for case in GM_L1_BOOL_HIF8_CASES:
+        yield (
+            f"gm-l1-bool-hif8-{case}",
+            [["end_to_end/gm_l1_bool_hif8_copy.py", *dev, "--case", case]],
+        )
+
+
     # --- print_tensor, local AIC storage ---
     # Base cases sweep dtypes; repeated entries verify in-process cache reuse.
     local_common = [
@@ -1453,6 +1473,7 @@ def test_case(case_id: str, device: int) -> None:
         case_id == L1_PRINT_CASE_ID
         or case_id in L1_FILL_CASE_IDS
         or case_id in VECTOR_LAYOUT_GM_L1_CASE_IDS
+        or case_id in GM_L1_BOOL_HIF8_CASE_IDS
     ):
         from catlass.base_dsl.runtime import ascend_debug_fifo
 

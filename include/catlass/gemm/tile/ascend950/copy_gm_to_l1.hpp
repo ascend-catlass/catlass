@@ -73,7 +73,14 @@ struct TileCopyTla<
         auto dstOffset = dstTensor.layout()(dstTensor.coord());
         auto srcOffset = srcTensor.layout()(srcTensor.coord());
 
-        AscendC::DataCopy(dstTensor.data()[dstOffset], srcTensor.data()[srcOffset], intriParams);
+        // HiFloat8: AscendC Nd2Nz DataCopy does not take hifloat8_t; byte-move as int8.
+        if constexpr (std::is_same_v<ElementSrc, hifloat8_t>) {
+            AscendC::DataCopy(
+                dstTensor.data()[dstOffset].template ReinterpretCast<int8_t>(),
+                srcTensor.data()[srcOffset].template ReinterpretCast<int8_t>(), intriParams);
+        } else {
+            AscendC::DataCopy(dstTensor.data()[dstOffset], srcTensor.data()[srcOffset], intriParams);
+        }
     }
 };
 
@@ -110,7 +117,7 @@ struct TileCopyTla<
             static_cast<int64_t>(tla::get<1, 1>(srcTensor.stride()) / ELE_NUM_PER_C0 - blockLen) * BYTE_PER_C0,
             static_cast<int64_t>(tla::get<1, 1>(dstTensor.stride()) / ELE_NUM_PER_C0 - blockLen), 0);
         if constexpr (AscendC::Std::is_one_of_v<
-                          ElementSrc, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t>) {
+                          ElementSrc, float8_e4m3_t, float8_e5m2_t, hifloat8_t, float4_e2m1x2_t, float4_e1m2x2_t>) {
             AscendC::DataCopyPadExtParams<uint8_t> padParams(false, 0, 0, 0);
             // for float4_e2m1x2_t/float4_e1m2x2_t
             // in tensor.data()[offset], will auto convert fp4 offset to byte offset
@@ -175,7 +182,14 @@ struct TileCopyTla<
         auto dstOffset = dstTensor.layout()(dstTensor.coord());
         auto srcOffset = srcTensor.layout()(srcTensor.coord());
 
-        AscendC::DataCopy(dstTensor.data()[dstOffset], srcTensor.data()[srcOffset], intriParams);
+        // HiFloat8: AscendC Nd2Nz DataCopy does not take hifloat8_t; byte-move as int8.
+        if constexpr (std::is_same_v<ElementSrc, hifloat8_t>) {
+            AscendC::DataCopy(
+                dstTensor.data()[dstOffset].template ReinterpretCast<int8_t>(),
+                srcTensor.data()[srcOffset].template ReinterpretCast<int8_t>(), intriParams);
+        } else {
+            AscendC::DataCopy(dstTensor.data()[dstOffset], srcTensor.data()[srcOffset], intriParams);
+        }
     }
 };
 
@@ -213,7 +227,7 @@ struct TileCopyTla<
             static_cast<int64_t>(tla::get<0, 1>(srcTensor.stride()) / ELE_NUM_PER_C0 - blockLen) * BYTE_PER_C0,
             static_cast<int64_t>(tla::get<0, 1>(dstTensor.stride()) / ELE_NUM_PER_C0 - blockLen), 0);
         if constexpr (AscendC::Std::is_one_of_v<
-                          ElementSrc, float8_e4m3_t, float8_e5m2_t, float4_e2m1x2_t, float4_e1m2x2_t>) {
+                          ElementSrc, float8_e4m3_t, float8_e5m2_t, hifloat8_t, float4_e2m1x2_t, float4_e1m2x2_t>) {
             AscendC::DataCopyPadExtParams<uint8_t> padParams(false, 0, 0, 0);
             // for float4_e2m1x2_t/float4_e1m2x2_t
             // in tensor.data()[offset], will auto convert fp4 offset to byte offset

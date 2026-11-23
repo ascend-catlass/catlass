@@ -123,6 +123,52 @@ TYPED_TEST(TileCopyGmToL1Test, RowMajorTozNTestBasic)
     }
 }
 
+// Ascend950: bool is a 1-byte AscendC element (C0=32). Smoke Nd2Nz params.
+TYPED_TEST(TileCopyGmToL1Test, RowMajorTozNTestBool)
+{
+    using ArchTag = TypeParam;
+    if constexpr (kEnableAscend950 && std::is_same_v<ArchTag, Catlass::Arch::Ascend950>) {
+        using Element = bool;
+        using LayoutSrc = layout::RowMajor;
+        using LayoutDst = layout::zN;
+
+        using GmType = Gemm::GemmType<Element, LayoutSrc>;
+        constexpr uint32_t ELE_NUM_PER_C0 = GetEleNumPerC0<Element>();
+        ASSERT_EQ(ELE_NUM_PER_C0, 32U);
+
+        CopyGmToL1<ArchTag, GmType> copyGmToL1;
+
+        AscendC::GlobalTensor<Element> gmTensor;
+        AscendC::LocalTensor<Element> l1Tensor;
+
+        LayoutSrc layoutSrc;
+        LayoutDst layoutDst;
+        this->template setShape<Element>();
+        setLayout<Element>(this->_row, this->_col, layoutSrc, layoutDst);
+
+        ASSERT_TRUE(isContiguous(layoutSrc));
+        ASSERT_TRUE(isContiguous(layoutDst));
+
+        copyGmToL1(l1Tensor, gmTensor, layoutDst, layoutSrc);
+
+        AscendCCallLogger& logger = AscendCCallLogger::Instance();
+        auto logs = logger.GetLogs();
+        ASSERT_EQ(logs.size(), 1U);
+        AscendCCallLog logTileCopy = logs[0];
+        this->template BaseCheck<Element>(logTileCopy);
+
+        const AscendC::Nd2NzParams* nd2nzArg = logTileCopy.GetArgsAt(2).Value<AscendC::Nd2NzParams>();
+        ASSERT_EQ(nd2nzArg->ndNum, _1);
+        ASSERT_EQ(nd2nzArg->nValue, this->_row);
+        ASSERT_EQ(nd2nzArg->dValue, this->_col);
+        ASSERT_EQ(nd2nzArg->srcNdMatrixStride, _0);
+        ASSERT_EQ(nd2nzArg->srcDValue, this->_col);
+        ASSERT_EQ(nd2nzArg->dstNzC0Stride, this->_row_round);
+        ASSERT_EQ(nd2nzArg->dstNzNStride, _1);
+        ASSERT_EQ(nd2nzArg->dstNzMatrixStride, _0);
+    }
+}
+
 // ColumnMajorTonZTestBasic (#2): ColumnMajor→nZ Nd2Nz
 TYPED_TEST(TileCopyGmToL1Test, ColumnMajorTonZTestBasic)
 {

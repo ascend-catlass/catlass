@@ -549,6 +549,64 @@ using TypedGmToL1TlaA950Suite = TypedTileCopyGmToL1TlaTest<Catlass::Arch::Ascend
 
 DEFINE_GMTOL1TLA_TESTS(TypedGmToL1TlaA950Suite)
 
+// Ascend950 bool uses TileCopyTla (same path as bc/Cube/dma.cpp), not CopyGmToL1.
+TEST_P(TypedGmToL1TlaA950Suite, RowMajorTozNTestBoolTileCopyTla)
+{
+    using Element = bool;
+    using LayoutSrcTag = layout::RowMajor;
+    using LayoutDstTag = layout::zN;
+
+    auto logs = MakeCall<Element, LayoutSrcTag, LayoutDstTag>();
+
+    ASSERT_EQ(logs.size(), 1);
+    AscendCCallLog logTileCopy = logs[0];
+    BaseCheck<Element>(logTileCopy);
+
+    uint32_t srcOffset = _row_coord * _col + _col_coord;
+    ASSERT_EQ(logTileCopy.GetArgsAt(0).GetInstAddr(), 0);
+    ASSERT_EQ(logTileCopy.GetArgsAt(1).GetInstAddr(), srcOffset * sizeof(Element));
+
+    const AscendC::Nd2NzParams* nd2nzArg = logTileCopy.GetArgsAt(2).Value<AscendC::Nd2NzParams>();
+    ASSERT_EQ(nd2nzArg->ndNum, _1);
+    ASSERT_EQ(nd2nzArg->nValue, _row_residue);
+    ASSERT_EQ(nd2nzArg->dValue, _col_residue);
+    ASSERT_EQ(nd2nzArg->srcNdMatrixStride, _0);
+    ASSERT_EQ(nd2nzArg->srcDValue, _col);
+    ASSERT_EQ(nd2nzArg->dstNzC0Stride, _dst_row_round);
+    ASSERT_EQ(nd2nzArg->dstNzNStride, _1);
+    ASSERT_EQ(nd2nzArg->dstNzMatrixStride, _0);
+}
+
+// Typed hifloat8_t GM→L1: TileCopyTla Nd2Nz byte-moves via int8 ReinterpretCast.
+TEST_P(TypedGmToL1TlaA950Suite, RowMajorTozNTestHiFloat8TileCopyTla)
+{
+    using Element = hifloat8_t;
+    using LayoutSrcTag = layout::RowMajor;
+    using LayoutDstTag = layout::zN;
+
+    MakeCall<Element, LayoutSrcTag, LayoutDstTag>();
+    // Exclude ReinterpretCast view logs (same helper as GM→UB fp4/hif8 pad tests).
+    auto logs = AscendCCallLogger::Instance().GetCopyLogs();
+
+    ASSERT_EQ(logs.size(), 1);
+    AscendCCallLog logTileCopy = logs[0];
+    BaseCheck<int8_t>(logTileCopy);
+
+    uint32_t srcOffset = _row_coord * _col + _col_coord;
+    ASSERT_EQ(logTileCopy.GetArgsAt(0).GetInstAddr(), 0);
+    ASSERT_EQ(logTileCopy.GetArgsAt(1).GetInstAddr(), srcOffset * sizeof(Element));
+
+    const AscendC::Nd2NzParams* nd2nzArg = logTileCopy.GetArgsAt(2).Value<AscendC::Nd2NzParams>();
+    ASSERT_EQ(nd2nzArg->ndNum, _1);
+    ASSERT_EQ(nd2nzArg->nValue, _row_residue);
+    ASSERT_EQ(nd2nzArg->dValue, _col_residue);
+    ASSERT_EQ(nd2nzArg->srcNdMatrixStride, _0);
+    ASSERT_EQ(nd2nzArg->srcDValue, _col);
+    ASSERT_EQ(nd2nzArg->dstNzC0Stride, _dst_row_round);
+    ASSERT_EQ(nd2nzArg->dstNzNStride, _1);
+    ASSERT_EQ(nd2nzArg->dstNzMatrixStride, _0);
+}
+
 INSTANTIATE_TEST_SUITE_P(Ascend950, TypedGmToL1TlaA950Suite,
     ::testing::Values(
         TestMatrixShapeWithCoord{128U, 256U, 16U, 32U, 67U, 128U},
