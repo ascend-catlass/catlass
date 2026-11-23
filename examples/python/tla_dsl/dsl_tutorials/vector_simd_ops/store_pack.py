@@ -14,7 +14,14 @@ from pathlib import Path
 from typing import Any
 
 import catlass.tla as tla
-from catlass.params import StoreDist, NormalStoreParams
+from catlass.params import (
+    CastParams,
+    RegSlot,
+    RoundMode,
+    SatMode,
+    StoreDist,
+    NormalStoreParams,
+)
 
 from vector_op_harness import (
     DirectVectorOpConfig,
@@ -27,39 +34,32 @@ VL_ELE = 64
 LOOPS = (VECTOR_ELE + VL_ELE - 1) // VL_ELE
 ALL_DTYPES = ("i32", "i16")
 OUTPUT_DTYPES = ("i16", "i8")
+# AscendC Pack is same-type DistVST. Narrowing is a prior cast; PACK then
+# densifies the unpacked slots (MulCast / GenStoreL2 style).
 PACK_CONFIGS = {
     "i32": ("i16", StoreDist.DIST_PACK_B32),
     "i16": ("i8", StoreDist.DIST_PACK_B16),
 }
 
-# StoreDist selects the compact layout corresponding to the source alignment:
-# DIST_PACK_B32 extracts the low 16 bits from each i32 lane, while
-# DIST_PACK_B16 extracts the low 8 bits from each i16 lane. The source register
-# must retain its input dtype; the PACK mode itself performs the compaction.
+# int↔int casts truncate; RegSlot.ZERO selects the even/low part for 2x narrow.
+_CAST_NARROW = CastParams(
+    reg_slot=RegSlot.ZERO,
+    sat_mode=SatMode.NOSAT,
+    round_mode=RoundMode.CAST_TRUNC,
+)
+
 _KERNEL_DTYPE = tla.Int32
 _KERNEL_TORCH_DTYPE = None
-_KERNEL_ELEMENT_BYTES = 4
 _KERNEL_SENTINEL = -7
 _OUTPUT_DTYPE = tla.Int16
 
-_ELEMENT_BYTES_MAP = {
-    tla.Int32: 4,
-    tla.Int16: 2,
-    tla.Int8: 1,
-}
 _OUTPUT_TORCH_DTYPE = None
-_OUTPUT_ELEMENT_BYTES = 2
 _STORE_DIST = StoreDist.DIST_PACK_B32
 _KERNEL_SHAPE = (VECTOR_ELE,)
 
 
-def _make_ub_tensor(
-    like_tensor: Any,
-    dtype: type[Any],
-    element_bytes: int,
-) -> Any:
-    alignment = 512 if element_bytes == 8 else 256
-    ptr = tla.allocate(VECTOR_ELE, dtype, tla.AddressSpace.ub, alignment)
+def _make_ub_tensor(like_tensor: Any, dtype: type[Any]) -> Any:
+    ptr = tla.allocate(VECTOR_ELE, dtype, tla.AddressSpace.ub, 256)
     return tla.make_tensor_like(ptr, like_tensor, tla.arch.RowMajor)
 
 
@@ -72,9 +72,8 @@ def store_pack(
     vec_done = tla.flag("vec_done", tla.arch.VECTOR, tla.arch.MTE3)
 
     a_gm = tla.tile_view(mem_a, tla.make_shape(VECTOR_ELE), tla.make_coord(0))
-    # The shared harness binds mem_out with the input dtype. Reinterpret only
-    # its backing pointer so the kernel's GM/UB output tensors use the true
-    # narrowed dtype and PACK stores advance contiguously in output elements.
+    # Harness binds mem_out with the input dtype. Recast the pointer so GM/UB
+    # output tensors use the narrowed dtype; PACK densifies into that layout.
     out_gm = tla.make_tensor(
         tla.recast_ptr(mem_out.ptr, dtype=_OUTPUT_DTYPE),
         tla.make_layout(
@@ -83,8 +82,8 @@ def store_pack(
         ),
     )
 
-    a_ub = _make_ub_tensor(a_gm, _KERNEL_DTYPE, _ELEMENT_BYTES_MAP[_KERNEL_DTYPE])
-    out_ub = _make_ub_tensor(out_gm, _OUTPUT_DTYPE, _ELEMENT_BYTES_MAP[_OUTPUT_DTYPE])
+    a_ub = _make_ub_tensor(a_gm, _KERNEL_DTYPE)
+    out_ub = _make_ub_tensor(out_gm, _OUTPUT_DTYPE)
 
     with tla.vector():
         tla.copy(a_ub, a_gm)
@@ -99,7 +98,9 @@ def store_pack(
                 )
 
                 a_reg = a_tile.load()
-                out_tile.store(a_reg, NormalStoreParams(store_dist=_STORE_DIST))
+                # Same-type Pack: cast first (unpacked narrow lanes), then densify.
+                narrow_reg = a_reg.to(_OUTPUT_DTYPE, _CAST_NARROW)
+                out_tile.store(narrow_reg, NormalStoreParams(store_dist=_STORE_DIST))
 
         tla.set_flag(vec_done)
         tla.wait_flag(vec_done)
@@ -120,15 +121,8 @@ def _set_kernel_config(
     dtype_name: str,
     shape: tuple[int, ...] | None = None,
 ) -> tuple[type[Any], Any, float | int]:
-    global \
-        VL_ELE, \
-        LOOPS, \
-        VECTOR_ELE, \
-        _KERNEL_DTYPE, \
-        _KERNEL_TORCH_DTYPE, \
-        _KERNEL_ELEMENT_BYTES
-    global _KERNEL_SENTINEL
-    global _OUTPUT_DTYPE, _OUTPUT_TORCH_DTYPE, _OUTPUT_ELEMENT_BYTES, _STORE_DIST
+    global VL_ELE, LOOPS, VECTOR_ELE, _KERNEL_DTYPE, _KERNEL_TORCH_DTYPE
+    global _KERNEL_SENTINEL, _OUTPUT_DTYPE, _OUTPUT_TORCH_DTYPE, _STORE_DIST
     global _KERNEL_SHAPE
     specs = _operator_specs()
     if op_name not in specs:
@@ -141,7 +135,6 @@ def _set_kernel_config(
     LOOPS = config.loops
     _KERNEL_DTYPE = config.tla_dtype
     _KERNEL_TORCH_DTYPE = config.torch_dtype
-    _KERNEL_ELEMENT_BYTES = config.element_bytes
     _KERNEL_SENTINEL = config.default_sentinel
     output_dtype_name, _STORE_DIST = PACK_CONFIGS[dtype_name]
     output_config = vector_kernel_config(
@@ -149,13 +142,12 @@ def _set_kernel_config(
     )
     _OUTPUT_DTYPE = output_config.tla_dtype
     _OUTPUT_TORCH_DTYPE = output_config.torch_dtype
-    _OUTPUT_ELEMENT_BYTES = output_config.element_bytes
     return config.tla_dtype, config.torch_dtype, config.default_sentinel
 
 
 def _make_inputs(args: Any, dtype_name: str, torch: Any) -> tuple[Any, ...]:
     """Fill input data with common and corner testcases"""
-    _, _, _ = _set_kernel_config(args.op, dtype_name, args.shape)
+    _, torch_dtype, _ = _set_kernel_config(args.op, dtype_name, args.shape)
     if dtype_name == "i32":
         values = (
             0,
@@ -184,27 +176,25 @@ def _make_inputs(args: Any, dtype_name: str, torch: Any) -> tuple[Any, ...]:
             32767,
             -32768,
         )
-    pattern = torch.tensor(values, dtype=_KERNEL_TORCH_DTYPE, device="npu")
+    pattern = torch.tensor(values, dtype=torch_dtype, device="npu")
     repeats = (VECTOR_ELE + len(values) - 1) // len(values)
     a = pattern.repeat(repeats)[:VECTOR_ELE].contiguous()
     return (a,)
 
 
 def _expected(_op_name: str, inputs: tuple[Any, ...]) -> Any:
-    """Execute pack strategy.
+    """Host reference for cast-then-PACK densify.
 
-    Example for PACK layout for i32 → i16 (``DIST_PACK_B32``):
+    AscendC path: narrow with trunc cast (unpacked slots), then same-type PACK
+    writes contiguous narrow elements. The harness buffer is input-dtype sized;
+    little-endian reinterpret packs consecutive narrow values into wide slots::
 
         input  (i32):  a[2k]        a[2k+1]
                        +-----------+-----------+
-                       | low16 | 0 | low16 | 0 |   <- each i32, payload = low 16 bits
+                       | cast16    | cast16    |
                        +-----------+-----------+
-                            \        /
-        output (i32 slot):  low16(a[2k]) : low16(a[2k+1])<<16
-                       +-------------------+
-                       | a[2k+1] << 16(low) | a[2k](high) |
-                       +-------------------+
-                           result[k] (i32)
+                            \\        /
+        output (i32 slot):  cast(a[2k]) | cast(a[2k+1])<<16
     """
     import torch
 
@@ -214,7 +204,8 @@ def _expected(_op_name: str, inputs: tuple[Any, ...]) -> Any:
     narrowed = a.to(dtype=_OUTPUT_TORCH_DTYPE)
     payload = torch.bitwise_and(narrowed.to(dtype=torch.int32), output_mask)
 
-    # The harness owns an input-dtype output buffer. The kernel reinterprets its
+    # Harness owns an input-dtype output buffer; dense narrow store fills the
+    # leading half (as wide words) and leaves the rest as sentinel.
     result = torch.full_like(a, _KERNEL_SENTINEL)
     pair_count = VECTOR_ELE // 2
     packed = torch.bitwise_or(
@@ -231,8 +222,8 @@ def _expected(_op_name: str, inputs: tuple[Any, ...]) -> Any:
 HARNESS = DirectVectorOpHarness(
     DirectVectorOpConfig(
         description=(
-            "Compile and run compact vector stores: i32->i16/DIST_PACK_B32 "
-            "and i16->i8/DIST_PACK_B16."
+            "Cast-then-PACK densify: i32->i16/DIST_PACK_B32 and "
+            "i16->i8/DIST_PACK_B16 (AscendC same-type StoreAlign)."
         ),
         kernel=store_pack,
         all_dtypes=ALL_DTYPES,

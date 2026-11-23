@@ -40,10 +40,30 @@ DTYPES: dict[str, DTypeSpec] = {
     "i8": DTypeSpec("i8", tla.Int8, "int8", -101, 1),
     "i16": DTypeSpec("i16", tla.Int16, "int16", -7, 2),
     "i32": DTypeSpec("i32", tla.Int32, "int32", -7, 4),
+    "i64": DTypeSpec("i64", tla.Int64, "int64", -7, 8),
     "u8": DTypeSpec("u8", tla.UInt8, "uint8", 0, 1),
     "u16": DTypeSpec("u16", tla.UInt16, "uint16", 0, 2),
     "u32": DTypeSpec("u32", tla.UInt32, "uint32", 0, 4),
+    "u64": DTypeSpec("u64", tla.UInt64, "uint64", 0, 8),
+    # Host storage is uint8: torch cannot DLPack-export float8; from_dlpack
+    # takes element_type= to retype the byte buffer (see make_tla_tensor).
+    "f8e4m3fn": DTypeSpec("f8e4m3fn", tla.Float8E4M3FN, "uint8", 0, 1),
+    "f8e5m2": DTypeSpec("f8e5m2", tla.Float8E5M2, "uint8", 0, 1),
+    "f8e8m0": DTypeSpec("f8e8m0", tla.Float8E8M0, "uint8", 0, 1),
+    "f4e2m1x2": DTypeSpec("f4e2m1x2", tla.Float4E2M1x2, "uint8", 0, 1),
+    "f4e1m2x2": DTypeSpec("f4e1m2x2", tla.Float4E1M2x2, "uint8", 0, 1),
 }
+
+# Element types that must be bound via from_dlpack(..., element_type=...).
+_DLPACK_ELEMENT_TYPE_OVERRIDE: frozenset[Any] = frozenset(
+    {
+        tla.Float8E4M3FN,
+        tla.Float8E5M2,
+        tla.Float8E8M0,
+        tla.Float4E2M1x2,
+        tla.Float4E1M2x2,
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -186,11 +206,13 @@ def make_tla_tensor(
 ) -> Any:
     from catlass.tla.runtime import from_dlpack
 
-    return from_dlpack(
-        dev_buf.contiguous(),
-        layout_tag=tla.arch.RowMajor,
-        origin_shape=kernel_shape,
-    )
+    kwargs: dict[str, Any] = {
+        "layout_tag": tla.arch.RowMajor,
+        "origin_shape": kernel_shape,
+    }
+    if tla_dtype in _DLPACK_ELEMENT_TYPE_OVERRIDE:
+        kwargs["element_type"] = tla_dtype
+    return from_dlpack(dev_buf.contiguous(), **kwargs)
 
 
 def require_torch_npu(device_id: int, script_name: str) -> Any:

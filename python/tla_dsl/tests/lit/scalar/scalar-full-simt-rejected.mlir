@@ -25,7 +25,7 @@ module {
         %zero = arith.constant 0 : i32
         %full = "tla.full"(%zero) : (i32) -> !tla.vector<64xi32>
         %out = "tla.add"(%reg, %full) : (!tla.vector<64xi32>, !tla.vector<64xi32>) -> !tla.vector<64xi32>
-        "tla.store"(%dst_tile, %out) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!t, !tla.vector<64xi32>) -> ()
+        "tla.store"(%dst_tile, %out) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!t, !tla.vector<64xi32>) -> ()
       }) {mode = "simt", thread_block_dim = array<i64: 1, 1, 1>} : () -> ()
     }) : () -> ()
     return

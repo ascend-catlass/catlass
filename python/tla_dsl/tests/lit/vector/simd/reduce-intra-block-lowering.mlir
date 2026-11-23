@@ -32,7 +32,7 @@ module {
         %mask = "tla.create_mask"() {pattern = "ALL", dtype = i32} : () -> !tla.mask<64>
         %v = "tla.load"(%src_tile) : (!t_i32) -> !tla.vector<64xi32>
         %r = "tla.reduce_intra_block"(%v, %mask) {kind = "add"} : (!tla.vector<64xi32>, !tla.mask<64>) -> !tla.vector<64xi32>
-        "tla.store"(%dst_tile, %r) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!t_i32, !tla.vector<64xi32>) -> ()
+        "tla.store"(%dst_tile, %r) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!t_i32, !tla.vector<64xi32>) -> ()
       }) {mode = "simd"} : () -> ()
     }) : () -> ()
     return
@@ -63,7 +63,7 @@ module {
         %mask = "tla.create_mask"() {pattern = "ALL", dtype = ui16} : () -> !tla.mask<128>
         %v = "tla.load"(%src_tile) : (!t_ui16) -> !tla.vector<128xui16>
         %r = "tla.reduce_intra_block"(%v, %mask) {kind = "add"} : (!tla.vector<128xui16>, !tla.mask<128>) -> !tla.vector<64xui32>
-        "tla.store"(%dst_tile, %r) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!t_dst_i32, !tla.vector<64xui32>) -> ()
+        "tla.store"(%dst_tile, %r) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!t_dst_i32, !tla.vector<64xui32>) -> ()
       }) {mode = "simd"} : () -> ()
     }) : () -> ()
     return
@@ -89,8 +89,8 @@ module {
         %v = "tla.load"(%src_tile) : (!t_f16) -> !tla.vector<128xf16>
         %max_r = "tla.reduce_intra_block"(%v, %mask) {kind = "max"} : (!tla.vector<128xf16>, !tla.mask<128>) -> !tla.vector<128xf16>
         %min_r = "tla.reduce_intra_block"(%v, %mask) {kind = "min"} : (!tla.vector<128xf16>, !tla.mask<128>) -> !tla.vector<128xf16>
-        "tla.store"(%dst_tile, %max_r) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!t_f16, !tla.vector<128xf16>) -> ()
-        "tla.store"(%dst_tile, %min_r) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!t_f16, !tla.vector<128xf16>) -> ()
+        "tla.store"(%dst_tile, %max_r) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!t_f16, !tla.vector<128xf16>) -> ()
+        "tla.store"(%dst_tile, %min_r) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!t_f16, !tla.vector<128xf16>) -> ()
       }) {mode = "simd"} : () -> ()
     }) : () -> ()
     return

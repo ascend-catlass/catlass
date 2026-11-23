@@ -27,10 +27,15 @@ from catlass.params import (
 from catlass.tla.runtime import make_fake_tensor
 
 _BYTE_TYPES = (
+    (tla.Bool, "i1"),
     (tla.Int8, "i8"),
     (tla.UInt8, "ui8"),
     (tla.Float8E4M3FN, "f8E4M3FN"),
     (tla.Float8E5M2, "f8E5M2"),
+    (tla.HiFloat8, "!tla.hif8"),
+    (tla.Float8E8M0, "!tla.f8e8m0"),
+    (tla.Float4E2M1x2, "!tla.f4e2m1x2"),
+    (tla.Float4E1M2x2, "!tla.f4e1m2x2"),
 )
 _HALFWORD_TYPES = (
     (tla.Int16, "i16"),
@@ -45,6 +50,11 @@ _WORD_TYPES = (
 )
 _MODES = (
     (LoadDist.DIST_BRC_B8, _BYTE_TYPES, 1, 256),
+    (LoadDist.DIST_BRC_B16, _HALFWORD_TYPES, 1, 128),
+    (LoadDist.DIST_BRC_B32, _WORD_TYPES, 1, 64),
+    (LoadDist.DIST_US_B8, _BYTE_TYPES, 128, 256),
+    (LoadDist.DIST_US_B16, _HALFWORD_TYPES, 64, 128),
+    (LoadDist.DIST_UNPACK4_B8, _BYTE_TYPES, 64, 256),
     (LoadDist.DIST_DS_B8, _BYTE_TYPES, 512, 256),
     (LoadDist.DIST_DS_B16, _HALFWORD_TYPES, 256, 128),
     (LoadDist.DIST_UNPACK_B32, _WORD_TYPES, 32, 64),
@@ -113,7 +123,7 @@ def test_load_align_result_is_full_register(
     [
         pytest.param(mode, dtype, id=f"{mode}-{dtype.__name__}")
         for mode, types, _, _ in _MODES
-        for dtype in (tla.Bool, tla.Float8E8M0, tla.Int8, tla.Int16, tla.Float32)
+        for dtype in (tla.Float16, tla.Int8, tla.Int16, tla.Float32)
         if dtype not in tuple(candidate for candidate, _ in types)
     ],
 )

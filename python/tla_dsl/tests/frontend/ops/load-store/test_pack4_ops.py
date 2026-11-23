@@ -45,6 +45,7 @@ def _pack(src: tla.Tensor, dst: tla.Tensor):
 @pytest.mark.parametrize(
     "dtype, token",
     [
+        (tla.Bool, "i1"),
         (tla.Int8, "i8"),
         (tla.UInt8, "ui8"),
         (tla.Float8E4M3FN, "f8E4M3FN"),

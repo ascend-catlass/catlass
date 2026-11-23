@@ -54,7 +54,10 @@ module {
 // CHECK: %[[P:.*]], {{.*}} = ave.hir.plt
 // CHECK: %[[TM:.*]] = "hivm_regbaseintrins.intr.hivm.punpack"(%[[P]]
 // CHECK: %[[SELECT:.*]] = call @tla_mask_select
-// CHECK: ave.hir.masked_store{{.*}}%[[SELECT]]
+// CHECK: %[[PACK:.*]] = "hivm_regbaseintrins.intr.hivm.ppack.z"(%[[SELECT]]
+// CHECK: %[[PAIR:.*]] = "hivm_regbaseintrins.intr.hivm.pintlv.b32"(%[[PACK]], %[[PACK]])
+// CHECK: %[[WORDS:.*]] = llvm.extractvalue %[[PAIR]][0]
+// CHECK: ave.hir.masked_store <NORM_B32>{{.*}}%[[WORDS]]
 // CHECK: call @scatter_int64_t_u32
 // CHECK: call @scatter_int64_t_u32({{.*}}, %[[VM]])
 // CHECK: call @scatter_int64_t_u64({{.*}}, %[[HM]])

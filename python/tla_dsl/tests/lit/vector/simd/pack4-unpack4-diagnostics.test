@@ -4,9 +4,9 @@
 // RUN: not %tla_compile %t/unpack-lanes.mlir -o - 2>&1 | %filecheck %s --check-prefix=LANES
 // RUN: not %tla_compile %t/pack-width-masked.mlir -o - 2>&1 | %filecheck %s --check-prefix=PACK
 
-// WIDTH: unpack4_b8 requires 1-byte source and result element types
-// ALIGN: unpack4_b8 requires aligned UB access
-// LANES: unpack4_b8 produces a full 256-byte register
+// WIDTH: unpack4_b8 requires a 1-byte source element type
+// ALIGN: load_dist unpack4_b8 requires aligned UB access
+// LANES: unpack4_b8 requires a full 256-lane vector
 // PACK: unsupported pack4_b32 source/destination element widths: source 32 bits, destination 16 bits
 
 //--- unpack-width.mlir
@@ -47,7 +47,7 @@ module {
 module {
   func.func @bad(%d: !d, %v: !tla.vector<64xi32>, %p: !tla.mask<64>) {
     "tla.vec.func"() ({
-      "tla.store"(%d, %v, %p) {store_dist = #tla.store_dist<pack4_b32>, operandSegmentSizes = array<i32: 1, 1, 1, 0>} : (!d, !tla.vector<64xi32>, !tla.mask<64>) -> ()
+      "tla.store"(%d, %v, %p) {store_dist = #tla.store_dist<pack4_b32>, operandSegmentSizes = array<i32: 1, 1, 0, 1, 0>} : (!d, !tla.vector<64xi32>, !tla.mask<64>) -> ()
     }) : () -> ()
     return
   }

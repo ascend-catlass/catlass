@@ -35,8 +35,8 @@ module {
         // trait = [reg_slot, sat_mode=SAT, round_mode]
         %o0 = "tla.cast"(%r) <{trait = array<i32: 0, 1, 5>}> : (!tla.vector<64xf32>) -> !tla.vector<256xf8E4M3FN>
         %o1 = "tla.cast"(%r) <{trait = array<i32: 0, 1, 5>}> : (!tla.vector<64xf32>) -> !tla.vector<256xf8E4M3FN>
-        "tla.store"(%dt, %o0) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!d_e4m3, !tla.vector<256xf8E4M3FN>) -> ()
-        "tla.store"(%dt, %o1) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!d_e4m3, !tla.vector<256xf8E4M3FN>) -> ()
+        "tla.store"(%dt, %o0) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!d_e4m3, !tla.vector<256xf8E4M3FN>) -> ()
+        "tla.store"(%dt, %o1) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!d_e4m3, !tla.vector<256xf8E4M3FN>) -> ()
       }) {mode = "simd"} : () -> ()
     }) : () -> ()
     return
@@ -67,7 +67,7 @@ module {
         %r = "tla.load"(%st) : (!s_f32) -> !tla.vector<64xf32>
         // trait sat_mode=NOSAT
         %o = "tla.cast"(%r) <{trait = array<i32: 0, 2, 5>}> : (!tla.vector<64xf32>) -> !tla.vector<256xf8E4M3FN>
-        "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!d_e4m3, !tla.vector<256xf8E4M3FN>) -> ()
+        "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!d_e4m3, !tla.vector<256xf8E4M3FN>) -> ()
       }) {mode = "simd"} : () -> ()
     }) : () -> ()
     return
@@ -99,7 +99,7 @@ module {
           %dt = "tla.tile_view"(%d, %ds, %co) : (!d_e4m3, !tla.shape<256>, !tla.coord<0>) -> !d_e4m3
           %r = "tla.load"(%st) : (!s_f32) -> !tla.vector<64xf32>
           %o = "tla.cast"(%r) <{trait = array<i32: 0, 1, 5>}> : (!tla.vector<64xf32>) -> !tla.vector<256xf8E4M3FN>
-          "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!d_e4m3, !tla.vector<256xf8E4M3FN>) -> ()
+          "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!d_e4m3, !tla.vector<256xf8E4M3FN>) -> ()
         }
       }) {mode = "simd"} : () -> ()
     }) : () -> ()

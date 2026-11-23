@@ -21,7 +21,7 @@ module {
       %dst_tile = "tla.tile_view"(%dst, %shape, %coord) : (!bvec, !tla.shape<256>, !tla.coord<0>) -> !bvec
       %bs = arith.constant 1 : i32
       %loaded = tla.load %src_tile {block_stride = 1 : i32} : !bvec -> !tla.vector<256xi1>
-      "tla.store"(%dst_tile, %loaded, %bs) <{operandSegmentSizes = array<i32: 1, 1, 0, 1>}> : (!bvec, !tla.vector<256xi1>, i32) -> ()
+      "tla.store"(%dst_tile, %loaded, %bs) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 1>}> : (!bvec, !tla.vector<256xi1>, i32) -> ()
     }) : () -> ()
     return
   }
@@ -49,8 +49,8 @@ module {
       %bs = arith.constant 1 : i32
       %vb = tla.load %sb_tile {block_stride = 1 : i32} : !bvec -> !tla.vector<256xi1>
       %vi = tla.load %si_tile {block_stride = 1 : i32} : !i8vec -> !tla.vector<256xi8>
-      "tla.store"(%db_tile, %vb, %bs) <{operandSegmentSizes = array<i32: 1, 1, 0, 1>}> : (!bvec, !tla.vector<256xi1>, i32) -> ()
-      "tla.store"(%di_tile, %vi, %bs) <{operandSegmentSizes = array<i32: 1, 1, 0, 1>}> : (!i8vec, !tla.vector<256xi8>, i32) -> ()
+      "tla.store"(%db_tile, %vb, %bs) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 1>}> : (!bvec, !tla.vector<256xi1>, i32) -> ()
+      "tla.store"(%di_tile, %vi, %bs) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 1>}> : (!i8vec, !tla.vector<256xi8>, i32) -> ()
     }) : () -> ()
     return
   }

@@ -126,6 +126,24 @@ def load_store_mask_roundtrip_i32_ub(
 
 
 @tla.kernel
+def load_store_mask_roundtrip_i64_ub(
+    mask_ub: tla.Tensor, data: tla.Tensor, dst: tla.Tensor
+) -> None:
+    # AscendC Mask NORM: b64 UB → mask<32> (address typing only).
+    mask_tile = tla.tile_view(mask_ub, tla.make_shape(1), tla.make_coord(0))
+    data_tile = tla.tile_view(data, tla.make_shape(32), tla.make_coord(0))
+    dst_tile = tla.tile_view(dst, tla.make_shape(32), tla.make_coord(0))
+    with tla.vector():
+        with tla.vec.func(mode="simd"):
+            pattern = tla.create_mask(pattern=tla.mask.H, dtype=tla.Int64)
+            mask_tile.store(pattern, MaskStoreParams())
+            loaded = mask_tile.load(MaskLoadParams())
+            assert isinstance(loaded, MaskSSA)
+            v = data_tile.load()
+            dst_tile.store(v, mask=loaded)
+
+
+@tla.kernel
 def load_store_mask_fa_like_oversized_tile(
     mask_ub: tla.Tensor, data: tla.Tensor, dst: tla.Tensor
 ) -> None:
@@ -183,6 +201,8 @@ def load_mask_outside_vec_func(mask_ub: tla.Tensor) -> None:
         (load_store_mask_roundtrip_i8, tla.Int8, tla.Int8, 32, 256, 256),
         (load_store_mask_roundtrip_i32_ub, tla.Int32, tla.Float32, 2, 64, 64),
         (load_store_mask_roundtrip_i32_ub, tla.UInt32, tla.Float32, 2, 64, 64),
+        (load_store_mask_roundtrip_i64_ub, tla.Int64, tla.Int64, 1, 32, 32),
+        (load_store_mask_roundtrip_i64_ub, tla.UInt64, tla.UInt64, 1, 32, 32),
     ),
 )
 def test_load_store_mask_emits_tlair(
@@ -232,11 +252,12 @@ def test_store_mask_rejects_mismatched_ub_width() -> None:
         store_mask_mismatched_ub.dump_mlir(type_args=(mask_ub,))
 
 
-def test_load_mask_rejects_unsupported_elem_width() -> None:
-    # i64 is 8 bytes → not a 1/2/4-byte Mask UB element.
-    mask_ub = _ub_tensor(tla.Int64, 8)
-    with pytest.raises(TlaCoreAPIError, match="1/2/4-byte"):
-        load_mask_wrong_elem.dump_mlir(type_args=(mask_ub,))
+def test_load_mask_accepts_b64_ub(compiler_tlair: Any) -> None:
+    # AscendC Mask NORM: SupportBytes includes 8 (i64/u64 address typing).
+    mask_ub = _ub_tensor(tla.Int64, 1)
+    mlir = compiler_tlair(load_mask_wrong_elem, type_args=(mask_ub,))
+    assert "tla.load" in mlir
+    assert "!tla.mask<32>" in mlir
 
 
 def test_load_mask_rejects_gm() -> None:

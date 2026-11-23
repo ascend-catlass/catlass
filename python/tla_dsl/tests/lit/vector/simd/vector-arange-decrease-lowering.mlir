@@ -19,7 +19,7 @@ func.func @vector_arange_decrease_lowering(
         %dst_tile = "tla.tile_view"(%dst, %shape, %coord) : (!t, !tla.shape<64>, !tla.coord<0>) -> !t
         %start = arith.constant 10 : i32
         %idx = "tla.arange"(%start) {order = "decrease"} : (i32) -> !tla.vector<64xi32>
-        "tla.store"(%dst_tile, %idx) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!t, !tla.vector<64xi32>) -> ()
+        "tla.store"(%dst_tile, %idx) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!t, !tla.vector<64xi32>) -> ()
     }) {mode = "simd"} : () -> ()
     }) : () -> ()
     return

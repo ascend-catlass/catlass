@@ -1193,9 +1193,31 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
                 ]
             ],
         )
+    # Align UPDATE e2e: one shape (400). ``add`` covers arith dtypes;
+    # ``copy`` covers f8e4/e5/e8m0/fp4x2 (move-only; host uint8 + element_type).
+    # b64/hif8: no GM↔UB route — frontend UT only.
     yield (
         "vector-load-store-update",
-        [["dsl_tutorials/vector_simd_ops/load_store_update.py", "add", "--shape", "400", *dev]],
+        [[
+            "dsl_tutorials/vector_simd_ops/load_store_update.py",
+            "add",
+            "--all-dtypes",
+            "--shape",
+            "400",
+            *dev,
+        ]],
+    )
+    # shape=400 exercises the b8 VL tail (144) via update_mask, including e8m0.
+    yield (
+        "vector-load-store-update-copy-f8",
+        [[
+            "dsl_tutorials/vector_simd_ops/load_store_update.py",
+            "copy",
+            "--all-dtypes",
+            "--shape",
+            "400",
+            *dev,
+        ]],
     )
     yield (
         "vector-load-store-block-update",

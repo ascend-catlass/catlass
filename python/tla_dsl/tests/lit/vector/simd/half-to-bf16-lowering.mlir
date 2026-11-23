@@ -25,7 +25,7 @@ module {
         %dt = "tla.tile_view"(%d, %shape, %coord) : (!dst, !tla.shape<128>, !tla.coord<0>) -> !dst
         %r = "tla.load"(%st) : (!src) -> !tla.vector<128xf16>
         %o = "tla.cast"(%r) <{trait = array<i32: 0, 0, 0>}> : (!tla.vector<128xf16>) -> !tla.vector<128xbf16>
-        "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!dst, !tla.vector<128xbf16>) -> ()
+        "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!dst, !tla.vector<128xbf16>) -> ()
       }) {mode = "simd"} : () -> ()
     }) : () -> ()
     return
@@ -51,7 +51,7 @@ module {
         %r = "tla.load"(%st) : (!src) -> !tla.vector<128xf16>
         %mask = "tla.create_mask"() {pattern = "M4", dtype = f16} : () -> !tla.mask<128>
         %o = "tla.cast"(%r, %mask) <{trait = array<i32: 1, 0, 1>}> : (!tla.vector<128xf16>, !tla.mask<128>) -> !tla.vector<128xbf16>
-        "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!dst, !tla.vector<128xbf16>) -> ()
+        "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!dst, !tla.vector<128xbf16>) -> ()
       }) {mode = "simd"} : () -> ()
     }) : () -> ()
     return
@@ -76,7 +76,7 @@ module {
         %dt = "tla.tile_view"(%d, %shape, %coord) : (!dst, !tla.shape<128>, !tla.coord<0>) -> !dst
         %r = "tla.load"(%st) : (!src) -> !tla.vector<128xf16>
         %o = "tla.cast"(%r) <{trait = array<i32: 0, 0, 2>}> : (!tla.vector<128xf16>) -> !tla.vector<128xbf16>
-        "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!dst, !tla.vector<128xbf16>) -> ()
+        "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!dst, !tla.vector<128xbf16>) -> ()
       }) {mode = "simd"} : () -> ()
     }) : () -> ()
     return
@@ -102,7 +102,7 @@ module {
         %r = "tla.load"(%st) : (!src) -> !tla.vector<128xf16>
         %mask = "tla.create_mask"() {pattern = "M4", dtype = f16} : () -> !tla.mask<128>
         %o = "tla.cast"(%r, %mask) <{trait = array<i32: 1, 0, 3>}> : (!tla.vector<128xf16>, !tla.mask<128>) -> !tla.vector<128xbf16>
-        "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!dst, !tla.vector<128xbf16>) -> ()
+        "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!dst, !tla.vector<128xbf16>) -> ()
       }) {mode = "simd"} : () -> ()
     }) : () -> ()
     return

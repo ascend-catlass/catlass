@@ -53,14 +53,31 @@ static Value strideElemsToByteOffI32(OpBuilder& b, Location loc, Value strideEle
     return b.create<arith::MulIOp>(loc, s, scale);
 }
 
-/// HIVM store Dist for elem type: f32→2 (NORM_B32), f16/bf16→1 (NORM_B16).
-static int32_t hivmStoreDistForElem(Type elemType)
+/// Align b64 UPDATE follows AscendC RegTraitNumOne: reinterpret as
+/// ``uint32_t``, ``postUpdateStride * 2`` in u32 elems (= same byte off as
+/// ``stride * 8``), DistVST ``NORM_B32``. ``TypeGet<double>`` → ``vector_u64``,
+/// same ActualT==8 path as i64/u64.
+static bool isAlignB64Elem(Type elemType)
 {
-    if (elemType.isF32())
-        return 2;
-    if (elemType.isF16() || elemType.isBF16())
-        return 1;
-    return 0;
+    return elemType.isInteger(64) || elemType.isF64();
+}
+
+/// Align UPDATE has no ``vldsx1.post.v256f8*`` / f4 / e8m0 / Bool post; these
+/// move as s8 bits (AscendC ``SupportBytes<1>()`` / ``TypeGet<bool>`` →
+/// ``vector_s8`` → ``uint8_t``/``int8_t`` vlds/vsts).
+static bool isAlignPostByteAliasElem(Type elemType)
+{
+    return isBoolElementType(elemType) ||
+           isa<Float8E4M3FNType, Float8E5M2Type, ::tla::HiFloat8Type, ::tla::Float8E8M0Type, ::tla::Float4E2M1x2Type,
+               ::tla::Float4E1M2x2Type>(elemType);
+}
+
+/// True when the integer element should take the unsigned HIVM load/store
+/// variant; signed and signless share the signed variant.
+static bool isUnsignedHivmElem(Type elemType)
+{
+    auto intTy = dyn_cast<IntegerType>(elemType);
+    return intTy && intTy.isUnsigned();
 }
 
 /// Cast ``newPtr`` to the live UB pointer type without UnrealizedConversionCast
@@ -86,16 +103,56 @@ static FailureOr<std::pair<Value, Value>> emitVldsx1Post(
     Type ubPtrTy = getUbPtrType(b.getContext());
     Type structTy = LLVM::LLVMStructType::getLiteral(b.getContext(), {vecTy, ubPtrTy});
     Operation* op = nullptr;
+    Value vec;
+    Value newPtr;
+    if (isAlignPostByteAliasElem(elemType)) {
+        // No Align ``.post.v256f8*``; HIVM only exposes s8/u8 post for b8.
+        Type i8VecTy = VectorType::get({256}, IntegerType::get(b.getContext(), 8));
+        Type s8StructTy = LLVM::LLVMStructType::getLiteral(b.getContext(), {i8VecTy, ubPtrTy});
+        op = b.create<hivm_regbaseintrins::Vldsx1PostV256S8InstrOp>(loc, s8StructTy, ptr, byteOff, dist, postEn);
+        Value i8Vec = b.create<LLVM::ExtractValueOp>(loc, op->getResult(0), 0);
+        newPtr = castToLiveUbPtr(b, loc, b.create<LLVM::ExtractValueOp>(loc, op->getResult(0), 1), ubPtrTy);
+        vec = (vecTy == i8VecTy) ? i8Vec : b.create<mlir::vector::BitCastOp>(loc, vecTy, i8Vec).getResult();
+        return std::make_pair(vec, newPtr);
+    }
     if (elemType.isF32())
         op = b.create<hivm_regbaseintrins::Vldsx1PostV64F32InstrOp>(loc, structTy, ptr, byteOff, dist, postEn);
     else if (elemType.isF16())
         op = b.create<hivm_regbaseintrins::Vldsx1PostV128F16InstrOp>(loc, structTy, ptr, byteOff, dist, postEn);
     else if (elemType.isBF16())
         op = b.create<hivm_regbaseintrins::Vldsx1PostV128BF16InstrOp>(loc, structTy, ptr, byteOff, dist, postEn);
-    else
+    else if (elemType.isInteger(8)) {
+        if (isUnsignedHivmElem(elemType))
+            op = b.create<hivm_regbaseintrins::Vldsx1PostV256U8InstrOp>(loc, structTy, ptr, byteOff, dist, postEn);
+        else
+            op = b.create<hivm_regbaseintrins::Vldsx1PostV256S8InstrOp>(loc, structTy, ptr, byteOff, dist, postEn);
+    } else if (elemType.isInteger(16)) {
+        if (isUnsignedHivmElem(elemType))
+            op = b.create<hivm_regbaseintrins::Vldsx1PostV128U16InstrOp>(loc, structTy, ptr, byteOff, dist, postEn);
+        else
+            op = b.create<hivm_regbaseintrins::Vldsx1PostV128S16InstrOp>(loc, structTy, ptr, byteOff, dist, postEn);
+    } else if (elemType.isInteger(32)) {
+        if (isUnsignedHivmElem(elemType))
+            op = b.create<hivm_regbaseintrins::Vldsx1PostV64U32InstrOp>(loc, structTy, ptr, byteOff, dist, postEn);
+        else
+            op = b.create<hivm_regbaseintrins::Vldsx1PostV64S32InstrOp>(loc, structTy, ptr, byteOff, dist, postEn);
+    } else if (isAlignB64Elem(elemType)) {
+        // AscendC: vlds((RegTensor<uint32_t>&)dst, uint32_t*&, stride*2, …).
+        // byteOff stays stride_elems×8 (equivalent to (stride×2)×sizeof(u32)).
+        // LLVM dialect structs require signless element types — use i32 carrier
+        // (still the U32 intrinsic) then bitcast back to the semantic vecTy.
+        Type i32 = IntegerType::get(b.getContext(), 32);
+        Type i32VecTy = VectorType::get({64}, i32);
+        Type i32StructTy = LLVM::LLVMStructType::getLiteral(b.getContext(), {i32VecTy, ubPtrTy});
+        op = b.create<hivm_regbaseintrins::Vldsx1PostV64U32InstrOp>(loc, i32StructTy, ptr, byteOff, dist, postEn);
+        Value i32Vec = b.create<LLVM::ExtractValueOp>(loc, op->getResult(0), 0);
+        newPtr = castToLiveUbPtr(b, loc, b.create<LLVM::ExtractValueOp>(loc, op->getResult(0), 1), ubPtrTy);
+        vec = (vecTy == i32VecTy) ? i32Vec : b.create<mlir::vector::BitCastOp>(loc, vecTy, i32Vec).getResult();
+        return std::make_pair(vec, newPtr);
+    } else
         return failure();
-    Value vec = b.create<LLVM::ExtractValueOp>(loc, op->getResult(0), 0);
-    Value newPtr = b.create<LLVM::ExtractValueOp>(loc, op->getResult(0), 1);
+    vec = b.create<LLVM::ExtractValueOp>(loc, op->getResult(0), 0);
+    newPtr = b.create<LLVM::ExtractValueOp>(loc, op->getResult(0), 1);
     newPtr = castToLiveUbPtr(b, loc, newPtr, ubPtrTy);
     return std::make_pair(vec, newPtr);
 }
@@ -105,10 +162,21 @@ static FailureOr<Value> emitVstsx1Post(
     OpBuilder& b, Location loc, Value src, Value ptr, Value strideElems, Value preg, Type elemType)
 {
     Value byteOff = strideElemsToByteOffI32(b, loc, strideElems, elemType);
-    Value dist = b.create<arith::ConstantIntOp>(loc, hivmStoreDistForElem(elemType), /*width=*/32);
+    // DistVST NORM_B8/B16/B32 encodes 0/1/2; b64 uses the b32 carrier.
+    const int64_t elemBytes = elementStorageBytes(elemType);
+    const int64_t normDist = elemBytes == 1 ? 0 : elemBytes == 2 ? 1 : 2;
+    Value dist = b.create<arith::ConstantIntOp>(loc, normDist, /*width=*/32);
     Value postEn = b.create<arith::ConstantIntOp>(loc, /*value=*/1, /*width=*/32);
     Type ubPtrTy = getUbPtrType(b.getContext());
     Operation* op = nullptr;
+    if (isAlignPostByteAliasElem(elemType)) {
+        Type i8VecTy = VectorType::get({256}, IntegerType::get(b.getContext(), 8));
+        Value srcI8 =
+            (src.getType() == i8VecTy) ? src : b.create<mlir::vector::BitCastOp>(loc, i8VecTy, src).getResult();
+        op = b.create<hivm_regbaseintrins::Vstsx1PostV256S8InstrOp>(
+            loc, ubPtrTy, srcI8, ptr, byteOff, dist, postEn, preg);
+        return castToLiveUbPtr(b, loc, op->getResult(0), ubPtrTy);
+    }
     if (elemType.isF32())
         op =
             b.create<hivm_regbaseintrins::Vstsx1PostV64F32InstrOp>(loc, ubPtrTy, src, ptr, byteOff, dist, postEn, preg);
@@ -118,7 +186,39 @@ static FailureOr<Value> emitVstsx1Post(
     else if (elemType.isBF16())
         op = b.create<hivm_regbaseintrins::Vstsx1PostV128BF16InstrOp>(
             loc, ubPtrTy, src, ptr, byteOff, dist, postEn, preg);
-    else
+    else if (elemType.isInteger(8)) {
+        if (isUnsignedHivmElem(elemType))
+            op = b.create<hivm_regbaseintrins::Vstsx1PostV256U8InstrOp>(
+                loc, ubPtrTy, src, ptr, byteOff, dist, postEn, preg);
+        else
+            op = b.create<hivm_regbaseintrins::Vstsx1PostV256S8InstrOp>(
+                loc, ubPtrTy, src, ptr, byteOff, dist, postEn, preg);
+    } else if (elemType.isInteger(16)) {
+        if (isUnsignedHivmElem(elemType))
+            op = b.create<hivm_regbaseintrins::Vstsx1PostV128U16InstrOp>(
+                loc, ubPtrTy, src, ptr, byteOff, dist, postEn, preg);
+        else
+            op = b.create<hivm_regbaseintrins::Vstsx1PostV128S16InstrOp>(
+                loc, ubPtrTy, src, ptr, byteOff, dist, postEn, preg);
+    } else if (elemType.isInteger(32)) {
+        if (isUnsignedHivmElem(elemType))
+            op = b.create<hivm_regbaseintrins::Vstsx1PostV64U32InstrOp>(
+                loc, ubPtrTy, src, ptr, byteOff, dist, postEn, preg);
+        else
+            op = b.create<hivm_regbaseintrins::Vstsx1PostV64S32InstrOp>(
+                loc, ubPtrTy, src, ptr, byteOff, dist, postEn, preg);
+    } else if (isAlignB64Elem(elemType)) {
+        // AscendC: vsts((RegTensor<uint32_t>&)src, uint32_t*&, stride*2,
+        //               DIST_NORM_B32, expandedMask, POST). Caller must pass
+        //               the ppack+pintlv_b32 expanded preg (see lowerStoreUpdate).
+        // Signless i32 carrier for LLVM dialect; U32 intrinsic encodes unsigned.
+        Type i32 = IntegerType::get(b.getContext(), 32);
+        Type i32VecTy = VectorType::get({64}, i32);
+        Value srcI32 =
+            (src.getType() == i32VecTy) ? src : b.create<mlir::vector::BitCastOp>(loc, i32VecTy, src).getResult();
+        op = b.create<hivm_regbaseintrins::Vstsx1PostV64U32InstrOp>(
+            loc, ubPtrTy, srcI32, ptr, byteOff, dist, postEn, preg);
+    } else
         return failure();
     return castToLiveUbPtr(b, loc, op->getResult(0), ubPtrTy);
 }
@@ -136,6 +236,28 @@ static Type dataVectorType(OpBuilder& b, Type elemType)
         return VectorType::get({128}, b.getF16Type());
     if (elemType.isBF16())
         return VectorType::get({128}, b.getBF16Type());
+    // AscendC ``TypeGet<double>`` → ``vector_u64``; AVE keeps f64, UnAlign post uses s64 bits.
+    if (elemType.isF64())
+        return VectorType::get({32}, b.getF64Type());
+    // UnAlign has native ``vldus/vstus.post.f8e*``; AVE keeps the fp8 element.
+    if (isa<Float8E4M3FNType>(elemType))
+        return VectorType::get({256}, Float8E4M3FNType::get(b.getContext()));
+    if (isa<Float8E5M2Type>(elemType))
+        return VectorType::get({256}, Float8E5M2Type::get(b.getContext()));
+    // Bool / HiFloat8 / e8m0 / fp4x2: no HIVM unalign mover for the IR type;
+    // AVE payload is i8 (AscendC UnAlign UPDATE casts these to ``uint8_t`` /
+    // ``int8_t``; ``TypeGet<bool>`` → ``vector_s8``).
+    if (isBoolElementType(elemType) ||
+        isa<::tla::HiFloat8Type, ::tla::Float8E8M0Type, ::tla::Float4E2M1x2Type, ::tla::Float4E1M2x2Type>(elemType))
+        return VectorType::get({256}, IntegerType::get(b.getContext(), 8));
+    if (auto intTy = dyn_cast<IntegerType>(elemType)) {
+        unsigned width = intTy.getWidth();
+        if (width != 8 && width != 16 && width != 32 && width != 64)
+            return {};
+        // AVE rejects ui*; carry unsigned as signless of the same width.
+        Type aveElem = intTy.isUnsigned() ? IntegerType::get(b.getContext(), width) : Type(intTy);
+        return VectorType::get({static_cast<int64_t>(256 / (width / 8))}, aveElem);
+    }
     return {};
 }
 
@@ -177,6 +299,45 @@ static FailureOr<std::tuple<Value, Value, Value>> emitVldusPost(
         op = b.create<hivm_regbaseintrins::VldusPostF16InstrOp>(loc, structTy, ptr, ureg, countBytes);
     else if (elemType.isBF16())
         op = b.create<hivm_regbaseintrins::VldusPostBF16InstrOp>(loc, structTy, ptr, ureg, countBytes);
+    else if (elemType.isInteger(8)) {
+        if (isUnsignedHivmElem(elemType))
+            op = b.create<hivm_regbaseintrins::VldusPostU8InstrOp>(loc, structTy, ptr, ureg, countBytes);
+        else
+            op = b.create<hivm_regbaseintrins::VldusPostS8InstrOp>(loc, structTy, ptr, ureg, countBytes);
+    } else if (elemType.isInteger(16)) {
+        if (isUnsignedHivmElem(elemType))
+            op = b.create<hivm_regbaseintrins::VldusPostU16InstrOp>(loc, structTy, ptr, ureg, countBytes);
+        else
+            op = b.create<hivm_regbaseintrins::VldusPostS16InstrOp>(loc, structTy, ptr, ureg, countBytes);
+    } else if (elemType.isInteger(32)) {
+        if (isUnsignedHivmElem(elemType))
+            op = b.create<hivm_regbaseintrins::VldusPostU32InstrOp>(loc, structTy, ptr, ureg, countBytes);
+        else
+            op = b.create<hivm_regbaseintrins::VldusPostS32InstrOp>(loc, structTy, ptr, ureg, countBytes);
+    } else if (elemType.isInteger(64))
+        // HIVM exposes only the s64 post form; u64 bits share that path.
+        op = b.create<hivm_regbaseintrins::VldusPostS64InstrOp>(loc, structTy, ptr, ureg, countBytes);
+    else if (elemType.isF64()) {
+        // No ``vldus.post.f64``; AscendC → ``vector_u64``, HIVM s64 post + bitcast.
+        Type i64VecTy = VectorType::get({32}, IntegerType::get(b.getContext(), 64));
+        Type s64StructTy = LLVM::LLVMStructType::getLiteral(
+            b.getContext(), {i64VecTy, uregVectorType(b), getUbPtrType(b.getContext())});
+        op = b.create<hivm_regbaseintrins::VldusPostS64InstrOp>(loc, s64StructTy, ptr, ureg, countBytes);
+        Value i64Vec = b.create<LLVM::ExtractValueOp>(loc, op->getResult(0), 0);
+        Value newUreg = b.create<LLVM::ExtractValueOp>(loc, op->getResult(0), 1);
+        Value newPtr = castToLiveUbPtr(
+            b, loc, b.create<LLVM::ExtractValueOp>(loc, op->getResult(0), 2), getUbPtrType(b.getContext()));
+        Value f64Vec = b.create<mlir::vector::BitCastOp>(loc, vecTy, i64Vec).getResult();
+        return std::make_tuple(f64Vec, newUreg, newPtr);
+    } else if (isa<Float8E4M3FNType>(elemType))
+        op = b.create<hivm_regbaseintrins::VldusPostF8E4InstrOp>(loc, structTy, ptr, ureg, countBytes);
+    else if (isa<Float8E5M2Type>(elemType))
+        op = b.create<hivm_regbaseintrins::VldusPostF8E5InstrOp>(loc, structTy, ptr, ureg, countBytes);
+    else if (
+        isBoolElementType(elemType) ||
+        isa<::tla::HiFloat8Type, ::tla::Float8E8M0Type, ::tla::Float4E2M1x2Type, ::tla::Float4E1M2x2Type>(elemType))
+        // No ``vldus.post`` for Bool/hif8/e8m0/fp4x2; AscendC → int8_t/uint8_t.
+        op = b.create<hivm_regbaseintrins::VldusPostS8InstrOp>(loc, structTy, ptr, ureg, countBytes);
     else
         return failure();
     Value vec = b.create<LLVM::ExtractValueOp>(loc, op->getResult(0), 0);
@@ -200,6 +361,36 @@ static FailureOr<std::pair<Value, Value>> emitVstusPost(
         op = b.create<hivm_regbaseintrins::VstusPostF16InstrOp>(loc, structTy, src, ptr, countBytes, ureg);
     else if (elemType.isBF16())
         op = b.create<hivm_regbaseintrins::VstusPostBF16InstrOp>(loc, structTy, src, ptr, countBytes, ureg);
+    else if (elemType.isInteger(8)) {
+        if (isUnsignedHivmElem(elemType))
+            op = b.create<hivm_regbaseintrins::VstusPostU8InstrOp>(loc, structTy, src, ptr, countBytes, ureg);
+        else
+            op = b.create<hivm_regbaseintrins::VstusPostS8InstrOp>(loc, structTy, src, ptr, countBytes, ureg);
+    } else if (elemType.isInteger(16)) {
+        if (isUnsignedHivmElem(elemType))
+            op = b.create<hivm_regbaseintrins::VstusPostU16InstrOp>(loc, structTy, src, ptr, countBytes, ureg);
+        else
+            op = b.create<hivm_regbaseintrins::VstusPostS16InstrOp>(loc, structTy, src, ptr, countBytes, ureg);
+    } else if (elemType.isInteger(32)) {
+        if (isUnsignedHivmElem(elemType))
+            op = b.create<hivm_regbaseintrins::VstusPostU32InstrOp>(loc, structTy, src, ptr, countBytes, ureg);
+        else
+            op = b.create<hivm_regbaseintrins::VstusPostS32InstrOp>(loc, structTy, src, ptr, countBytes, ureg);
+    } else if (elemType.isInteger(64) || elemType.isF64()) {
+        // HIVM s64 post; f64 AVE carrier may still be f64 — bitcast to s64 bits.
+        Type i64VecTy = VectorType::get({32}, IntegerType::get(b.getContext(), 64));
+        Value srcI64 =
+            (src.getType() == i64VecTy) ? src : b.create<mlir::vector::BitCastOp>(loc, i64VecTy, src).getResult();
+        op = b.create<hivm_regbaseintrins::VstusPostS64InstrOp>(loc, structTy, srcI64, ptr, countBytes, ureg);
+    } else if (isa<Float8E4M3FNType>(elemType))
+        op = b.create<hivm_regbaseintrins::VstusPostF8E4InstrOp>(loc, structTy, src, ptr, countBytes, ureg);
+    else if (isa<Float8E5M2Type>(elemType))
+        op = b.create<hivm_regbaseintrins::VstusPostF8E5InstrOp>(loc, structTy, src, ptr, countBytes, ureg);
+    else if (
+        isBoolElementType(elemType) ||
+        isa<::tla::HiFloat8Type, ::tla::Float8E8M0Type, ::tla::Float4E2M1x2Type, ::tla::Float4E1M2x2Type>(elemType))
+        // No ``vstus.post`` for Bool/hif8/e8m0/fp4x2; AscendC → int8_t/uint8_t.
+        op = b.create<hivm_regbaseintrins::VstusPostS8InstrOp>(loc, structTy, src, ptr, countBytes, ureg);
     else
         return failure();
     Value newUreg = b.create<LLVM::ExtractValueOp>(loc, op->getResult(0), 0);
@@ -286,6 +477,8 @@ static hivmave::StoreDist mapTlaStoreDistToAve(::StoreDist dist)
             return hivmave::StoreDist::PK_B32;
         case ::StoreDist::pack_b16:
             return hivmave::StoreDist::PK_B16;
+        case ::StoreDist::pack_b64:
+            return hivmave::StoreDist::PK_B64;
         case ::StoreDist::pack4_b32:
             return hivmave::StoreDist::PK4_B32;
         case ::StoreDist::first_element_b8:
@@ -294,6 +487,12 @@ static hivmave::StoreDist mapTlaStoreDistToAve(::StoreDist dist)
             return hivmave::StoreDist::ONEPT_B16;
         case ::StoreDist::first_element_b32:
             return hivmave::StoreDist::ONEPT_B32;
+        case ::StoreDist::intlv_b8:
+            return hivmave::StoreDist::INTLV_B8;
+        case ::StoreDist::intlv_b16:
+            return hivmave::StoreDist::INTLV_B16;
+        case ::StoreDist::intlv_b32:
+            return hivmave::StoreDist::INTLV_B32;
         // If other StoreDist added, complete here
         default:
             return hivmave::StoreDist::NORM_B8;
@@ -306,7 +505,7 @@ static bool isDualDestLoadDist(hivmave::LoadDist pattern)
            pattern == hivmave::LoadDist::DINTLV_B32;
 }
 
-static bool isDualDestStoreDist(hivmave::StoreDist pattern)
+static bool isDualSourceStoreDist(hivmave::StoreDist pattern)
 {
     return pattern == hivmave::StoreDist::INTLV_B8 || pattern == hivmave::StoreDist::INTLV_B16 ||
            pattern == hivmave::StoreDist::INTLV_B32;
@@ -357,7 +556,7 @@ static FailureOr<Value> memrefByteAddrI64(OpBuilder& b, Location loc, Value ubMe
     return b.create<arith::IndexCastOp>(loc, b.getI64Type(), byteAddr).getResult();
 }
 
-// Map a 1/2/4-byte MaskSSA UB tile memref onto an i1 view of ``lanes``
+// Map a 1/2/4/8-byte MaskSSA UB tile memref onto an i1 view of ``lanes``
 // predicate bits at the same byte address (AscendC MaskDist::DIST_NORM /
 // plds/psts.b8). UB element width types the pointer; the hardware transfer
 // is always the bit-level plds/psts.b8 path.
@@ -369,7 +568,7 @@ static FailureOr<Value> materializeI1MaskMemrefFromUb(OpBuilder& b, Location loc
     if (!srcTy)
         return failure();
     int64_t elemBytes = elementStorageBytes(srcTy.getElementType());
-    if (elemBytes != 1 && elemBytes != 2 && elemBytes != 4)
+    if (elemBytes != 1 && elemBytes != 2 && elemBytes != 4 && elemBytes != 8)
         return failure();
     auto addrOr = memrefByteAddrI64(b, loc, ubMemref);
     if (failed(addrOr))
@@ -1116,6 +1315,60 @@ static func::FuncOp getOrCreateLoadDintlvB8LibraryCall(ModuleOp module, Location
     auto callee = moduleBuilder.create<func::FuncOp>(loc, calleeName, fnType);
     annotateDataBlockCopyUpdateLibraryCall(callee);
     return callee;
+}
+
+// Dual-source INTLV store mirrors Load DINTLV: emit HIVM ``vstsx2`` with the
+// AVE StoreDist enum as ``dist`` (no AIV bc). Carriers are signless integer
+// vectors of the Dist width — same bit-move model as AscendC's typed
+// StoreAlign<DIST_INTLV_*> after TypeGet aliasing.
+static Value bitcastToIntlvCarrier(OpBuilder& b, Location loc, Value src, int64_t elemBytes)
+{
+    auto srcTy = dyn_cast<VectorType>(src.getType());
+    if (!srcTy)
+        return nullptr;
+    Type carrierElem = IntegerType::get(b.getContext(), elemBytes * 8);
+    auto carrierTy = VectorType::get({srcTy.getNumElements()}, carrierElem);
+    if (srcTy == carrierTy)
+        return src;
+    return b.create<mlir::vector::BitCastOp>(loc, carrierTy, src).getResult();
+}
+
+static LogicalResult emitVstsx2Intlv(
+    OpBuilder& b, Location loc, hivmave::StoreDist pattern, Value data0, Value data1, Value ubPtr, Value mask)
+{
+    Value constantZero = b.create<arith::ConstantIntOp>(loc, 0, 32);
+    Value distribution = b.create<arith::ConstantIntOp>(loc, static_cast<uint32_t>(pattern), 32);
+    switch (pattern) {
+        case hivmave::StoreDist::INTLV_B8:
+            b.create<hivm_regbaseintrins::Vstsx2V256B8InstrOp>(
+                loc, data0, data1, ubPtr, constantZero, distribution, constantZero, mask);
+            return success();
+        case hivmave::StoreDist::INTLV_B16:
+            b.create<hivm_regbaseintrins::Vstsx2V128B16InstrOp>(
+                loc, data0, data1, ubPtr, constantZero, distribution, constantZero, mask);
+            return success();
+        case hivmave::StoreDist::INTLV_B32:
+            b.create<hivm_regbaseintrins::Vstsx2V64B32InstrOp>(
+                loc, data0, data1, ubPtr, constantZero, distribution, constantZero, mask);
+            return success();
+        default:
+            return failure();
+    }
+}
+
+// PACK_B64: AscendC ``vsts(src, dst, 0, PK_B64, mask)``. AVE→bc has no
+// ``masked_store_PK_B64_*`` stub, so emit HIVM ``vstsx1.v32{s,u}64`` with
+// DistVST ``PK_B64`` (=10, same ordinal as AVE StoreDist::PK_B64).
+static void emitVstsx1PackB64(OpBuilder& b, Location loc, Value data, Value ubPtr, Value mask)
+{
+    Value constantZero = b.create<arith::ConstantIntOp>(loc, 0, 32);
+    Value distribution = b.create<arith::ConstantIntOp>(loc, static_cast<uint32_t>(hivmave::StoreDist::PK_B64), 32);
+    Type i64 = IntegerType::get(b.getContext(), 64);
+    auto i64VecTy = VectorType::get({32}, i64);
+    Value srcI64 =
+        (data.getType() == i64VecTy) ? data : b.create<mlir::vector::BitCastOp>(loc, i64VecTy, data).getResult();
+    b.create<hivm_regbaseintrins::Vstsx1V32S64InstrOp>(
+        loc, srcI64, ubPtr, constantZero, distribution, constantZero, mask);
 }
 
 static func::FuncOp getOrCreateLoadUpdateRetptrLibraryCall(
@@ -2200,10 +2453,8 @@ static FailureOr<Value> createImplicitVectorStoreMask(
         return storeOp.emitError("unsupported packed-store predicate geometry"), failure();
     int64_t destLaneMultiplier = *destLaneMultiplierOr;
 
-    // The supported vector frontend has no 64-bit on-chip element type. Raw
-    // i64 IR historically used a B32 PLT predicate for omitted masks; keep that
-    // behavior instead of introducing an unproven B32 PGE encoding for B64
-    // stores. Proper B64 predicate support is separate work.
+    // PACK_B64 builds its implicit mask through PLT.b32 before
+    // converting it to the hardware b64 predicate layout.
     bool supportsImplicitAll = getBitSizeOfFixedWidthScalarType(opCtx.elementType) <= 32;
 
     // FIRST_ELEMENT modes ignore predicate bits in the backend. Supplying a
@@ -2438,10 +2689,9 @@ static LogicalResult materializeTensorDescSubview(
     return success();
 }
 
-/// Effective UB pointer for a tile: same address ordinary load/store and
-/// UPDATE `.post` use. Prefer the live ``tensor_desc(inttoptr(i64))`` address
-/// so UPDATE next windows that share a storage-identity seed memref still
-/// advance. Fall back to the mapped memref view when no live ptr is reachable.
+/// UB pointer for an UPDATE window at the origin. Prefer the live
+/// ``tensor_desc(inttoptr(i64))`` address so UPDATE next windows that share
+/// a storage-identity seed memref still advance.
 static FailureOr<Value> resolveEffectiveUbPtr(
     Value tensor, OpBuilder& b, Location loc, DenseMap<Value, Value>& valueMap)
 {
@@ -2498,7 +2748,7 @@ static LogicalResult lowerLoad(
     if (!source)
         return failure();
 
-    // MaskSSA result: 1/2/4-byte UB → predicate.
+    // MaskSSA result: 1/2/4/8-byte UB → predicate.
     // DIST_US / DIST_DS: AscendC MaskDist via linked bc (plds dist=1/2).
     // IR i1→plds hardcodes dist=0, so US/DS must not go through VFLoad.
     if (auto maskType = dyn_cast<::tla::MaskSSAType>(loadOp.getResult().getType())) {
@@ -2510,7 +2760,6 @@ static LogicalResult lowerLoad(
             return loadOp.emitError("mask load_dist must be norm|us|ds"), failure();
 
         if (pattern == hivmave::LoadDist::US || pattern == hivmave::LoadDist::DS) {
-            ModuleOp module = loadOp->getParentOfType<ModuleOp>();
             auto srcMemTy = dyn_cast<MemRefType>(source.getType());
             if (!srcMemTy)
                 return failure();
@@ -2526,7 +2775,6 @@ static LogicalResult lowerLoad(
                        failure();
             auto call = b.create<func::CallOp>(loc, callee, ValueRange{callArg});
             Value loaded = castMaskToPregType(b, loc, call.getResult(0), fullPregVecType(b.getContext()));
-            (void)lanes;
             valueMap[loadOp.getResult()] = loaded;
             return success();
         }
@@ -2565,13 +2813,11 @@ static LogicalResult lowerLoad(
                    "load_dist values require one vector result "
                    "(optional live !tla.ptr is separate)"),
                failure();
-    // Bool: AscendC DATA_BLOCK_COPY accepts bool via b8; keep non-NORM LoadDist
-    // rejected (those dists are not DATA_BLOCK_COPY).
+    // Bool is b8 move-only transport (TypeGet<bool>→vector_s8); allowed on NORM
+    // and b8 Dist / DINTLV_B8 / BlockLoad the same as other SupportBytes<1> types.
     bool isBoolLoad = isBoolVectorElement(sourceType.getElementType()) ||
                       (isa<::tla::VectorSSAType>(loadOp.getResult().getType()) &&
                        isBoolVectorElement(cast<::tla::VectorSSAType>(loadOp.getResult().getType()).getElementType()));
-    if (isBoolLoad && pattern != hivmave::LoadDist::NORM)
-        return loadOp.emitError("Bool VectorSSA is move-only; non-NORM load_dist is unsupported"), failure();
     if (pattern == hivmave::LoadDist::DINTLV_B8) {
         // Encoded byte types use i8 carriers; select from the original TLA type.
         Type elementType = cast<::tla::TlaTensorType>(loadOp.getSource().getType()).getPtr().getPointee();
@@ -2582,10 +2828,11 @@ static LogicalResult lowerLoad(
         Value ptr = intToUbPtr(b, loc, byteAddr);
         Type pairType = LLVM::LLVMStructType::getLiteral(b.getContext(), {opCtx->vecType, opCtx->vecType});
         Value pair;
-        if (elementType.isInteger(8)) {
+        // Bool (i1) and signed/signless i8 share the s8 dual load; u8 uses u8.
+        if (elementType.isInteger(8) || isBoolElementType(elementType)) {
             Value constantZero = b.create<arith::ConstantIntOp>(loc, 0, 32);
             Value distribution = b.create<arith::ConstantIntOp>(loc, static_cast<uint32_t>(pattern), 32);
-            if (elementType.isUnsignedInteger())
+            if (elementType.isInteger(8) && elementType.isUnsignedInteger())
                 pair = b.create<hivm_regbaseintrins::Vldsx2V256U8InstrOp>(
                             loc, pairType, ptr, constantZero, distribution, constantZero)
                            .getResult();
@@ -2637,21 +2884,26 @@ static LogicalResult lowerLoad(
         Value distribution = b.create<arith::ConstantIntOp>(loc, static_cast<uint32_t>(pattern), 32);
         auto pairType = LLVM::LLVMStructType::getLiteral(b.getContext(), {opCtx->vecType, opCtx->vecType});
         Value pair;
-        if (sourceType.getElementType().isF32()) {
+        Type elemTy = sourceType.getElementType();
+        if (elemTy.isF32()) {
             pair = b.create<hivm_regbaseintrins::Vldsx2V64F32InstrOp>(
                         loc, pairType, pointer, constantZero, distribution, constantZero)
                        .getResult();
-        } else if (sourceType.getElementType().isBF16()) {
+        } else if (elemTy.isInteger(32)) {
+            // AscendC DINTLV_B32: b32 deinterleave (i32/u32 share u32 mover).
+            pair = b.create<hivm_regbaseintrins::Vldsx2V64U32InstrOp>(
+                        loc, pairType, pointer, constantZero, distribution, constantZero)
+                       .getResult();
+        } else if (elemTy.isBF16()) {
             pair = b.create<hivm_regbaseintrins::Vldsx2V128BF16InstrOp>(
                         loc, pairType, pointer, constantZero, distribution, constantZero)
                        .getResult();
-        } else if (sourceType.getElementType().isF16()) {
+        } else if (elemTy.isF16()) {
             pair = b.create<hivm_regbaseintrins::Vldsx2V128F16InstrOp>(
                         loc, pairType, pointer, constantZero, distribution, constantZero)
                        .getResult();
         } else {
-            // Integer loads preserve bits; signed and unsigned b16 share
-            // the same native byte transfer and signless register carrier.
+            // Integer b16 loads preserve bits; signed/unsigned share u16 mover.
             pair = b.create<hivm_regbaseintrins::Vldsx2V128U16InstrOp>(
                         loc, pairType, pointer, constantZero, distribution, constantZero)
                        .getResult();
@@ -2694,34 +2946,44 @@ static LogicalResult lowerLoad(
         return success();
     }
 
-    // Partial logical loads keep the native b64 path used by Scatter.
-    if ((sourceType.getElementType().isInteger(64) || sourceType.getElementType().isF64()) &&
+    bool unaligned = loadOp.getUnalignedUbAccess().value_or(false);
+    if (isAlignB64Elem(sourceType.getElementType()) &&
         cast<::tla::VectorSSAType>(loadOp.getResult().getType()).getValidLanes() == 32) {
-        if (pattern != hivmave::LoadDist::NORM || loadOp.getBlockStride() ||
-            loadOp.getUnalignedUbAccess().value_or(false))
-            return loadOp.emitError("64-bit register load currently requires aligned NORM distribution"), failure();
-        auto words = VectorType::get({64}, b.getI32Type());
-        auto wordsMemOr = materializeDataMemref(b, loc, source, b.getI32Type());
-        if (failed(wordsMemOr))
-            return loadOp.emitError("failed to materialize i32 memref view for 64-bit VectorSSA load"), failure();
-        source = *wordsMemOr;
-        Value loaded = createVFLoad(b, loc, words, source, zero, hivmave::LoadDist::NORM, false).getRes();
+        Value loaded;
+        if (unaligned) {
+            auto addr = memrefByteAddrI64(b, loc, source);
+            if (failed(addr))
+                return loadOp.emitError("64-bit unaligned load requires an effective UB address"), failure();
+            Value ptr = intToUbPtr(b, loc, *addr);
+            auto ureg = emitVldas(b, loc, ptr);
+            Value bytes = b.create<arith::ConstantIntOp>(loc, 256, 32);
+            auto result = emitVldusPost(b, loc, ptr, *ureg, bytes, b.getI32Type());
+            if (failed(result))
+                return failure();
+            loaded = std::get<0>(*result);
+        } else {
+            auto words = VectorType::get({64}, b.getI32Type());
+            auto wordsMem = materializeDataMemref(b, loc, source, b.getI32Type());
+            if (failed(wordsMem))
+                return loadOp.emitError("failed to materialize i32 memref view for 64-bit VectorSSA load"), failure();
+            loaded = createVFLoad(b, loc, words, *wordsMem, zero, pattern, false).getRes();
+        }
         valueMap[loadOp.getResult()] = b.create<mlir::vector::BitCastOp>(loc, opCtx->vecType, loaded).getResult();
         return success();
     }
 
-    // DINTLV_* still takes a VL-wide tile view (same as AVE ProcessVsstb /
-    // HIVM2VLLoadOpLowering): the distribution pattern reads 2*VL from that
-    // base address. Do not widen the memref to 2*VL — that breaks hivmc ABI.
     Value loadMemref = source;
-    if (isBoolLoad)
-        // RegTensor<bool> → vector_s8: same-shape i8 UB view at bc/AVE.
+    if (isBoolLoad) {
         loadMemref = materializeSameShapeI8Memref(b, loc, source);
-    auto vfLoad =
-        createVFLoad(b, loc, opCtx->vecType, loadMemref, zero, pattern, loadOp.getUnalignedUbAccess().value_or(false));
+    } else if (unaligned && sourceType.getElementType().isUnsignedInteger()) {
+        // The AVE unaligned load creates an LLVM struct and needs signless lanes.
+        auto carrier = materializeDataMemref(b, loc, source, opCtx->vecType.getElementType());
+        if (failed(carrier))
+            return failure();
+        loadMemref = *carrier;
+    }
+    auto vfLoad = createVFLoad(b, loc, opCtx->vecType, loadMemref, zero, pattern, unaligned);
     valueMap[loadOp.getResult()] = vfLoad.getRes();
-    if (dual)
-        valueMap[r2] = vfLoad.getRes1();
     return success();
 }
 
@@ -2762,9 +3024,7 @@ static LogicalResult lowerLoadUpdate(
         tlaResultElem = tlaVec.getElementType();
     if (tlaSrcElem != tlaResultElem)
         return loadOp.emitError("load_update source and result element types must match"), failure();
-    // Align/Unalign UPDATE stay move-only for Bool; DATA_BLOCK_COPY matches AscendC.
-    if ((isBoolVectorElement(tlaSrcElem) || isBoolVectorElement(tlaResultElem)) && !loadOp.getBlockStride())
-        return loadOp.emitError("Bool VectorSSA is move-only; load_update is unsupported"), failure();
+    // Bool Align UPDATE: AscendC move-only b8 (emitted as s8 post alias).
     auto opCtx = deriveVecCtxForElement(tlaSrcElem);
     if (failed(opCtx))
         return loadOp.emitError("unsupported element type for load_update vector helper"), failure();
@@ -3805,6 +4065,33 @@ static LogicalResult lowerCmp(
     return success();
 }
 
+/// AscendC StoreAlign b64 (RegTraitNumOne):
+/// ``ppack(tmp, mask, LOWEST); pintlv_b32(dst0, dst1, tmp, tmp);`` then
+/// ``vsts(uint32_t, …, dst0)``. Expands each logical b64 enable into two
+/// consecutive b32 DistVST slots. ``mask`` must already be in AscendC's
+/// single-register b64 layout (every eighth bit) — ``create_mask`` /
+/// ``update_mask`` apply ``Punpack`` for lanes==32; generated plt/pge masks
+/// need that Punpack first.
+static Value expandB64MaskForU32AlignStore(OpBuilder& b, Location loc, Value mask)
+{
+    VectorType pregType = fullPregVecType(b.getContext());
+    Value preg = castMaskToPregType(b, loc, mask, pregType);
+    // HighLowPart::LOWEST == 0 (same encoding AscendC passes to ppack).
+    Value lowest = b.create<arith::ConstantIntOp>(loc, /*value=*/0, /*width=*/32);
+    Value packed = b.create<hivm_regbaseintrins::PpackInstrOp>(loc, pregType, preg, lowest).getResult();
+    auto pairType = LLVM::LLVMStructType::getLiteral(b.getContext(), {pregType, pregType});
+    auto pintlv = b.create<hivm_regbaseintrins::PintlvB32InstrOp>(loc, pairType, packed, packed);
+    return b.create<LLVM::ExtractValueOp>(loc, pintlv.getResult(), 0);
+}
+
+static Value unpackB64Mask(OpBuilder& b, Location loc, Value mask)
+{
+    VectorType pregType = fullPregVecType(b.getContext());
+    Value lower = b.create<arith::ConstantIntOp>(loc, 0, 32);
+    return b.create<hivm_regbaseintrins::PunpackInstrOp>(
+        loc, pregType, castMaskToPregType(b, loc, mask, pregType), lower);
+}
+
 static LogicalResult lowerStore(
     ::tla::StoreOp storeOp, OpBuilder& b, ModuleOp module, DenseMap<Value, Value>& valueMap,
     AutoFullPredicateCache& fullMasks)
@@ -3815,7 +4102,7 @@ static LogicalResult lowerStore(
     if (!dest || !source)
         return failure();
 
-    // MaskSSA source: 1/2/4-byte UB ← i1 memref view ← masked_store <NORM_B8>.
+    // MaskSSA source: 1/2/4/8-byte UB ← i1 memref view ← masked_store <NORM_B8>.
     if (isa<::tla::MaskSSAType>(storeOp.getSource().getType())) {
         auto maskType = cast<::tla::MaskSSAType>(storeOp.getSource().getType());
         int64_t lanes = maskType.getPhysicalLanes();
@@ -3836,87 +4123,113 @@ static LogicalResult lowerStore(
         return success();
     }
 
-    if (auto vectorType = dyn_cast<::tla::VectorSSAType>(storeOp.getSource().getType())) {
-        // Explicit masks use the native b64 path, including predicates
-        // produced for Scatter. Only omitted masks use the i32 carrier.
-        if ((vectorType.getElementType().isInteger(64) || vectorType.getElementType().isF64()) && !storeOp.getMask()) {
-            if (storeOp.getBlockStride() || storeOp.getUnalignedUbAccess().value_or(false) ||
-                (storeOp.getStoreDist() && storeOp.getStoreDist()->getStoreDist() != ::StoreDist::norm))
-                return storeOp.emitError("64-bit register store without a mask requires aligned NORM distribution"),
-                       failure();
-            Value mask;
-            if (isProvablyFullVectorStore(storeOp, 32)) {
-                mask = fullMasks.get(loc, 64);
-            } else {
-                auto count = getTlaTensorValidLaneCount(b, loc, storeOp.getDest(), valueMap);
-                if (failed(count))
-                    return failure();
-                Value two = b.create<arith::ConstantIndexOp>(loc, 2);
-                Value activeWords = b.create<arith::MulIOp>(loc, *count, two);
-                mask = createPredicatePlt(b, loc, fullPregVecType(b.getContext()), 64, activeWords).getRes();
-            }
-            auto words = VectorType::get({64}, b.getI32Type());
+    Type tlaStoreElem = cast<::tla::VectorSSAType>(storeOp.getSource().getType()).getElementType();
+    auto opCtx = deriveVecCtxForElement(tlaStoreElem);
+    if (failed(opCtx))
+        return failure();
+    bool isB64 = isAlignB64Elem(tlaStoreElem);
+    if (storeOp.getUnalignedUbAccess().value_or(false)) {
+        auto count = getTlaTensorValidLaneCount(b, loc, storeOp.getDest(), valueMap);
+        if (failed(count))
+            return failure();
+        // The mapped view includes both the live UPDATE base and the tile offset.
+        auto addr = memrefByteAddrI64(b, loc, dest);
+        if (failed(addr))
+            return storeOp.emitError("unaligned store requires an effective UB address"), failure();
+        Value ptr = intToUbPtr(b, loc, *addr);
+        Value zero = b.create<arith::ConstantIndexOp>(loc, 0);
+        Value full = b.create<arith::ConstantIndexOp>(loc, opCtx->lanes);
+        Value nonnegative = b.create<arith::MaxSIOp>(loc, *count, zero);
+        Value lanes = b.create<arith::MinSIOp>(loc, nonnegative, full);
+        Value bytes = strideElemsToByteOffI32(b, loc, lanes, tlaStoreElem);
+        Type carrier = tlaStoreElem;
+        if (isB64) {
+            carrier = b.getI32Type();
+            auto words = VectorType::get({64}, carrier);
             source = b.create<mlir::vector::BitCastOp>(loc, words, source).getResult();
-            auto wordsMemOr = materializeDataMemref(b, loc, dest, b.getI32Type());
-            if (failed(wordsMemOr))
-                return storeOp.emitError("failed to materialize i32 memref view for 64-bit VectorSSA store"), failure();
-            dest = *wordsMemOr;
-            Value zero = b.create<arith::ConstantIndexOp>(loc, 0);
-            b.create<hivmave::VFMaskedStoreOp>(loc, dest, ValueRange{zero}, mask, source);
+        }
+        Value ureg = emitEmptyStoreUreg(b, loc);
+        auto result = emitVstusPost(b, loc, source, ptr, ureg, bytes, carrier);
+        if (failed(result))
+            return storeOp.emitError("unsupported element type for unaligned store: ") << tlaStoreElem, failure();
+        return emitVstas(b, loc, result->first, result->second);
+    }
+
+    Value mask = storeOp.getMask() ? valueMap.lookup(storeOp.getMask()) : Value{};
+    if (storeOp.getMask() && !mask)
+        return failure();
+
+    auto dist = storeOp.getStoreDist() ? storeOp.getStoreDist()->getStoreDist() : ::StoreDist::norm;
+    if (isB64 && dist == ::StoreDist::norm) {
+        auto words = VectorType::get({64}, b.getI32Type());
+        source = b.create<mlir::vector::BitCastOp>(loc, words, source).getResult();
+        if (mask) {
+            mask = expandB64MaskForU32AlignStore(b, loc, mask);
+        } else if (isProvablyFullVectorStore(storeOp, 32)) {
+            mask = fullMasks.get(loc, 64);
+        } else {
+            auto count = getTlaTensorValidLaneCount(b, loc, storeOp.getDest(), valueMap);
+            if (failed(count))
+                return failure();
+            Value two = b.create<arith::ConstantIndexOp>(loc, 2);
+            Value activeWords = b.create<arith::MulIOp>(loc, *count, two);
+            mask = createPredicatePlt(b, loc, fullPregVecType(b.getContext()), 64, activeWords).getRes();
+        }
+        auto wordsMemOr = materializeDataMemref(b, loc, dest, b.getI32Type());
+        if (failed(wordsMemOr))
+            return storeOp.emitError("failed to materialize i32 memref view for 64-bit VectorSSA store"), failure();
+        Value zero = b.create<arith::ConstantIndexOp>(loc, 0);
+        b.create<hivmave::VFMaskedStoreOp>(loc, *wordsMemOr, ValueRange{zero}, mask, source);
+        return success();
+    }
+
+    auto sourceTy = dyn_cast<VectorType>(source.getType());
+    if (!sourceTy)
+        return failure();
+    Type tlaDestElem = cast<::tla::TlaTensorType>(storeOp.getDest().getType()).getPtr().getPointee();
+    Value storeDest = dest;
+    // Same-shape i8 view only when both sides are Bool (TypeGet<bool> → vector_s8).
+    if (isBoolVectorElement(tlaStoreElem) && isBoolVectorElement(tlaDestElem))
+        storeDest = materializeSameShapeI8Memref(b, loc, dest);
+
+    // Dual-source INTLV: same shape as Load DINTLV — HIVM vstsx2 + StoreDist.
+    // AscendC asc_storealign_intlv ignores the predicate; pass all-true preg.
+    if (auto storeDistAttr = storeOp.getStoreDist()) {
+        hivmave::StoreDist pattern = mapTlaStoreDistToAve(storeDistAttr->getStoreDist());
+        if (isDualSourceStoreDist(pattern)) {
+            if (!storeOp.getSource2())
+                return storeOp.emitError("intlv store_dist requires a second source"), failure();
+            Value source2Val = valueMap.lookup(storeOp.getSource2());
+            if (!source2Val)
+                return failure();
+            int64_t elemBytes = elementStorageBytes(tlaStoreElem);
+            if (elemBytes != 1 && elemBytes != 2 && elemBytes != 4)
+                return storeOp.emitError("unsupported element type for intlv store"), failure();
+            Value data0 = bitcastToIntlvCarrier(b, loc, source, elemBytes);
+            Value data1 = bitcastToIntlvCarrier(b, loc, source2Val, elemBytes);
+            if (!data0 || !data1)
+                return storeOp.emitError("intlv store sources are not vectors"), failure();
+            auto metadata = b.create<mlir::memref::ExtractStridedMetadataOp>(loc, storeDest);
+            Value base = b.create<mlir::memref::ExtractAlignedPointerAsIndexOp>(loc, metadata.getBaseBuffer());
+            Value elementBytes = b.create<arith::ConstantIndexOp>(loc, elemBytes);
+            Value offset = b.create<arith::MulIOp>(loc, metadata.getOffset(), elementBytes);
+            Value address = b.create<arith::AddIOp>(loc, base, offset);
+            Value pointer = intToUbPtr(b, loc, ::tla::castValueToI64(b, loc, address));
+            Value mask = fullMasks.get(loc, opCtx->lanes);
+            if (failed(emitVstsx2Intlv(b, loc, pattern, data0, data1, pointer, mask)))
+                return storeOp.emitError("unexpected dual store_dist"), failure();
             return success();
         }
     }
 
     Value zero = b.create<arith::ConstantIndexOp>(loc, 0);
-    Value mask;
-    auto sourceTy = dyn_cast<VectorType>(source.getType());
-    if (!sourceTy)
-        return failure();
-    // Prefer the TLA VectorSSA element (Bool=i1) over the already-lowered AVE
-    // carrier (i8) so Bool stores keep AscendC move-only semantics.
-    Type tlaStoreElem = sourceTy.getElementType();
-    if (auto tlaVec = dyn_cast<::tla::VectorSSAType>(storeOp.getSource().getType()))
-        tlaStoreElem = tlaVec.getElementType();
-    Type tlaDestElem = tlaStoreElem;
-    if (auto tlaTensor = dyn_cast<::tla::TlaTensorType>(storeOp.getDest().getType()))
-        tlaDestElem = tlaTensor.getPtr().getPointee();
-    else if (auto destMem = dyn_cast<MemRefType>(dest.getType()))
-        tlaDestElem = destMem.getElementType();
-    // Pack / first_element dists intentionally remap widths (verified upstream).
-    // Only Bool cross-stores need an exact-match gate (i8 carrier must not sneak
-    // a Bool↔Int8 move-only bypass). Non-Bool mismatches stay historically open.
-    bool remapsElementWidth = false;
-    if (auto storeDist = storeOp.getStoreDist()) {
-        ::StoreDist dist = storeDist->getStoreDist();
-        remapsElementWidth = dist == ::StoreDist::pack_b16 || dist == ::StoreDist::pack_b32 ||
-                             dist == ::StoreDist::pack4_b32 || dist == ::StoreDist::first_element_b8 ||
-                             dist == ::StoreDist::first_element_b16 || dist == ::StoreDist::first_element_b32;
-    }
-    if (!remapsElementWidth && tlaStoreElem != tlaDestElem &&
-        (isBoolVectorElement(tlaStoreElem) || isBoolVectorElement(tlaDestElem)))
-        return storeOp.emitError("store source and destination element types must match"), failure();
-    auto opCtx = deriveVecCtxForElement(tlaStoreElem);
-    if (failed(opCtx))
-        return failure();
-    Value storeDest = dest;
-    // Same-shape i8 view only when both sides are Bool (TypeGet<bool> → vector_s8).
-    if (isBoolVectorElement(tlaStoreElem) && isBoolVectorElement(tlaDestElem))
-        storeDest = materializeSameShapeI8Memref(b, loc, dest);
-    if (storeOp.getMask()) {
-        mask = valueMap.lookup(storeOp.getMask());
-        if (!mask)
-            return failure();
-    } else {
+    if (!mask) {
         auto implicitMask = createImplicitVectorStoreMask(b, loc, storeOp, *opCtx, valueMap, fullMasks);
         if (failed(implicitMask))
             return storeOp.emitError("failed to determine omitted tla.store active lanes"), failure();
         mask = *implicitMask;
     }
-    if (storeOp.getUnalignedUbAccess().value_or(false)) {
-        // store_unalign (NORMAL): mark AVE masked-store as unaligned UB access.
-        auto store = b.create<hivmave::VFMaskedStoreOp>(loc, storeDest, ValueRange{zero}, mask, source);
-        store->setAttr(hivmave::UnalignedAttr::name, hivmave::UnalignedAttr::get(b.getContext()));
-    } else if (storeOp.getBlockStride()) {
+    if (storeOp.getBlockStride()) {
         Value blockStrideVal = lookupOrCloneScalarValue(b, storeOp.getBlockStride(), valueMap);
         if (!blockStrideVal)
             return failure();
@@ -3940,14 +4253,20 @@ static LogicalResult lowerStore(
         b.create<func::CallOp>(loc, callee, ValueRange{storeSrc, storeDest, blockStrideVal, pregMask});
     } else {
         auto storeDistAttr = storeOp.getStoreDist();
-        if (storeDistAttr && storeDistAttr->getStoreDist() != ::StoreDist::norm) {
-            if (isBoolVectorElement(tlaStoreElem))
-                return storeOp.emitError("Bool VectorSSA is move-only; non-NORM store_dist is unsupported"), failure();
+        if (storeDistAttr && storeDistAttr->getStoreDist() == ::StoreDist::pack_b64) {
+            // No AIV ``masked_store_PK_B64_*``; emit HIVM vstsx1 with DistVST PK_B64.
+            auto metadata = b.create<mlir::memref::ExtractStridedMetadataOp>(loc, storeDest);
+            Value base = b.create<mlir::memref::ExtractAlignedPointerAsIndexOp>(loc, metadata.getBaseBuffer());
+            Value elementBytes = b.create<arith::ConstantIndexOp>(loc, elementStorageBytes(tlaDestElem));
+            Value offset = b.create<arith::MulIOp>(loc, metadata.getOffset(), elementBytes);
+            Value address = b.create<arith::AddIOp>(loc, base, offset);
+            Value pointer = intToUbPtr(b, loc, ::tla::castValueToI64(b, loc, address));
+            Value pregMask = storeOp.getMask() ? castMaskToPregType(b, loc, mask, fullPregVecType(b.getContext())) :
+                                                 unpackB64Mask(b, loc, mask);
+            emitVstsx1PackB64(b, loc, source, pointer, pregMask);
+        } else if (storeDistAttr && storeDistAttr->getStoreDist() != ::StoreDist::norm) {
+            // Bool uses the i8 UB view (storeDest) for b8 Dist / FIRST_ELEMENT.
             hivmave::StoreDist pattern = mapTlaStoreDistToAve(storeDistAttr->getStoreDist());
-            bool isDual = isDualDestStoreDist(pattern);
-            if (isDual) {
-                return storeOp.emitError("dual mode not implemented.");
-            }
             b.create<hivmave::VFMaskedStoreOp>(loc, pattern, storeDest, ValueRange{zero}, mask, source);
         } else {
             // NORM mode (Bool uses i8 view of byte-addressed UB).
@@ -3981,13 +4300,12 @@ static LogicalResult lowerStoreUpdate(
         tlaDestElem = destMem.getElementType();
     if (tlaStoreElem != tlaDestElem)
         return storeOp.emitError("store_update source and destination element types must match"), failure();
-    // Align/Unalign UPDATE stay move-only for Bool; DATA_BLOCK_COPY matches AscendC.
-    if (isBoolVectorElement(tlaStoreElem) && !storeOp.getBlockStride())
-        return storeOp.emitError("Bool VectorSSA is move-only; store_update is unsupported"), failure();
+    // Bool Align UPDATE: AscendC move-only b8 (AVE i8 carrier → s8 post).
     Value mask;
     auto opCtx = deriveVecCtxForElement(tlaStoreElem);
     if (failed(opCtx))
         return failure();
+    bool generatedMaskNeedsB64Punpack = false;
     if (storeOp.getMask()) {
         mask = valueMap.lookup(storeOp.getMask());
         if (!mask)
@@ -4000,14 +4318,24 @@ static LogicalResult lowerStoreUpdate(
             Value active = b.create<arith::ConstantIndexOp>(loc, activeLanes);
             mask = createPredicatePlt(b, loc, opCtx->maskVecType, opCtx->lanes, active).getRes();
         }
+        generatedMaskNeedsB64Punpack = isAlignB64Elem(sourceTy.getElementType());
     } else {
         auto destLanes = getTlaTensorValidLaneCount(b, loc, storeOp.getDest(), valueMap);
         if (failed(destLanes))
             return failure();
         mask = createPredicatePlt(b, loc, opCtx->maskVecType, opCtx->lanes, *destLanes).getRes();
+        generatedMaskNeedsB64Punpack = isAlignB64Elem(sourceTy.getElementType());
     }
     VectorType pregVecType = fullPregVecType(b.getContext());
-    Value pregMask = castMaskToPregType(b, loc, mask, pregVecType);
+    Value pregMask;
+    if (isAlignB64Elem(sourceTy.getElementType())) {
+        // Match AscendC: b64 MaskReg → ppack+pintlv → u32 DistVST store preg.
+        if (generatedMaskNeedsB64Punpack)
+            mask = unpackB64Mask(b, loc, mask);
+        pregMask = expandB64MaskForU32AlignStore(b, loc, mask);
+    } else {
+        pregMask = castMaskToPregType(b, loc, mask, pregVecType);
+    }
     auto ptrOr = resolveEffectiveUbPtr(storeOp.getDest(), b, loc, valueMap);
     if (failed(ptrOr))
         return storeOp.emitError(
@@ -4043,10 +4371,9 @@ static LogicalResult lowerStoreUpdate(
         stride = lookupOrCloneScalarValue(b, storeOp.getPostUpdateStride(), valueMap);
     if (!stride)
         return storeOp.emitError("failed to materialize post_update_stride in vector helper"), failure();
-    FailureOr<Value> newPtrOr = emitVstsx1Post(b, loc, source, *ptrOr, stride, pregMask, sourceTy.getElementType());
+    FailureOr<Value> newPtrOr = emitVstsx1Post(b, loc, source, *ptrOr, stride, pregMask, tlaStoreElem);
     if (failed(newPtrOr))
-        return storeOp.emitError("unsupported element type for tla.store_update: ") << sourceTy.getElementType(),
-               failure();
+        return storeOp.emitError("unsupported element type for tla.store_update: ") << tlaStoreElem, failure();
     mapUpdateNextPtrI64(storeOp.getNextPtr(), b.create<LLVM::PtrToIntOp>(loc, b.getI64Type(), *newPtrOr), valueMap);
     return success();
 }
@@ -4070,12 +4397,22 @@ static LogicalResult lowerStoreUnalignUpdate(
     auto srcTy = dyn_cast<VectorType>(src.getType());
     if (!srcTy)
         return failure();
-    Type elemType = srcTy.getElementType();
-    Value countBytes = strideElemsToByteOffI32(b, loc, postUpdateStride, elemType);
+    // Prefer TLA VectorSSA / tensor element (Bool=i1) over the AVE i8 carrier.
+    Type tlaStoreElem = srcTy.getElementType();
+    if (auto tlaVec = dyn_cast<::tla::VectorSSAType>(op.getSource().getType()))
+        tlaStoreElem = tlaVec.getElementType();
+    Type tlaDestElem = tlaStoreElem;
+    if (auto destTensor = dyn_cast<::tla::TlaTensorType>(op.getDest().getType()))
+        tlaDestElem = destTensor.getPtr().getPointee();
+    if (tlaStoreElem != tlaDestElem)
+        return op.emitError("store_unalign_update source and destination element types must match"), failure();
+    // Stride bytes follow storage width (Bool i1 → 1B); emit uses TLA elem so
+    // Bool hits the s8 alias path rather than mistaking the i8 carrier alone.
+    Value countBytes = strideElemsToByteOffI32(b, loc, postUpdateStride, tlaDestElem);
     Value uregIn = valueMap.lookup(op.getUregIn());
     if (!uregIn)
         return op.emitError("store_unalign_update ureg_in not mapped in vector helper"), failure();
-    FailureOr<std::pair<Value, Value>> emitted = emitVstusPost(b, loc, src, *ptrOr, uregIn, countBytes, elemType);
+    FailureOr<std::pair<Value, Value>> emitted = emitVstusPost(b, loc, src, *ptrOr, uregIn, countBytes, tlaDestElem);
     if (failed(emitted))
         return op.emitError("unsupported element type for tla.store_unalign_update"), failure();
     valueMap[op.getUregOut()] = emitted->first;
@@ -4401,14 +4738,11 @@ static LogicalResult lowerNestedVectorOp(
         return vec && isa<::tla::Float8E8M0Type>(vec.getElementType());
     };
     if (llvm::any_of(op.getOperandTypes(), isE8M0Vector) || llvm::any_of(op.getResultTypes(), isE8M0Vector)) {
-        if (auto load = dyn_cast<::tla::LoadOp>(op)) {
-            if (!load.getLoadDist() || load.getLoadDist()->getLoadDist() != ::LoadDist::dintlv_b8)
-                return op.emitError("E8M0 vector load requires DIST_DINTLV_B8");
-        } else if (auto store = dyn_cast<::tla::StoreOp>(op)) {
-            if (store.getUnalignedUbAccess() || store.getBlockStride() ||
-                (store.getStoreDist() && store.getStoreDist()->getStoreDist() != ::StoreDist::norm))
-                return op.emitError("E8M0 vector store requires normal aligned access");
-        } else if (!isa<scf::ForOp, scf::IfOp>(op)) {
+        // AscendC b8 transport (SupportBytes<1>→uint8_t): NORM / byte Dist /
+        // DINTLV_B8 / Block / UnAlign / UPDATE. Reject non-transport ops below.
+        if (!isa<
+                ::tla::LoadOp, ::tla::StoreOp, ::tla::LoadUpdateOp, ::tla::StoreUpdateOp, ::tla::LoadUnalignUpdateOp,
+                ::tla::StoreUnalignUpdateOp, scf::ForOp, scf::IfOp>(op)) {
             return op.emitError("E8M0 arithmetic and register casts are unsupported; only transport is allowed");
         }
     }
@@ -4422,9 +4756,14 @@ static LogicalResult lowerNestedVectorOp(
                            auto vec = dyn_cast<::tla::VectorSSAType>(type);
                            return vec && isa<::tla::HiFloat8Type>(vec.getElementType());
                        });
-    if (hasHiFloat8 && !isa<
-                           ::tla::CastOp, ::tla::BitCastOp, ::tla::LoadOp, ::tla::StoreOp, ::tla::WhereOp,
-                           ::tla::InterleaveOp, ::tla::DeInterleaveOp, ::tla::GatherOp, scf::ForOp, scf::IfOp>(op))
+    auto isMoveOnlyEncodingOp = [](Operation& candidate) {
+        return isa<
+            ::tla::CastOp, ::tla::BitCastOp, ::tla::LoadOp, ::tla::StoreOp, ::tla::LoadUpdateOp, ::tla::StoreUpdateOp,
+            ::tla::LoadUnalignUpdateOp, ::tla::StoreUnalignUpdateOp, ::tla::LoadUnalignPreOp, ::tla::CreateUregOp,
+            ::tla::StoreUnalignPostOp, ::tla::WhereOp, ::tla::InterleaveOp, ::tla::DeInterleaveOp, ::tla::GatherOp,
+            scf::ForOp, scf::IfOp>(candidate);
+    };
+    if (hasHiFloat8 && !isMoveOnlyEncodingOp(op))
         return op.emitError("HiFloat8 arithmetic is unsupported; convert or bitcast the register explicitly");
     // Packed pairs use byte carriers. Bitwise ops act on the whole carrier
     // without interpreting the two nibbles, so they are explicit byte-level
@@ -4435,10 +4774,13 @@ static LogicalResult lowerNestedVectorOp(
     };
     bool hasFp4Vector =
         llvm::any_of(op.getOperandTypes(), isFp4Vector) || llvm::any_of(op.getResultTypes(), isFp4Vector);
-    if (hasFp4Vector && !isa<
-                            ::tla::CastOp, ::tla::BitCastOp, ::tla::LoadOp, ::tla::StoreOp, ::tla::WhereOp,
-                            ::tla::InterleaveOp, ::tla::DeInterleaveOp, ::tla::GatherOp, ::tla::BitwiseNotOp,
-                            ::tla::BitwiseAndOp, ::tla::BitwiseOrOp, ::tla::BitwiseXorOp, scf::ForOp, scf::IfOp>(op))
+    if (hasFp4Vector &&
+        !isa<
+            ::tla::CastOp, ::tla::BitCastOp, ::tla::LoadOp, ::tla::StoreOp, ::tla::LoadUpdateOp, ::tla::StoreUpdateOp,
+            ::tla::LoadUnalignUpdateOp, ::tla::StoreUnalignUpdateOp, ::tla::LoadUnalignPreOp, ::tla::CreateUregOp,
+            ::tla::StoreUnalignPostOp, ::tla::WhereOp, ::tla::InterleaveOp, ::tla::DeInterleaveOp, ::tla::GatherOp,
+            ::tla::BitwiseNotOp, ::tla::BitwiseAndOp, ::tla::BitwiseOrOp, ::tla::BitwiseXorOp, scf::ForOp, scf::IfOp>(
+            op))
         return op.emitError("FP4x2 arithmetic is unsupported; only bitwise, select and layout ops are allowed");
 
     // make_shape / make_coord are dead after tla-lower-tensor-desc (their leaves

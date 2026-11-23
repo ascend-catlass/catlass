@@ -1,7 +1,7 @@
 // RUN: %tla_compile %s --mlir-print-ir-after=tla-vector-region-simd -o %t 2>&1 | %filecheck %s
 
-// Explicit predicates preserve the pre-existing packed-store contract. The
-// omitted-mask geometry rules must not reject or replace them.
+// Explicit predicates preserve the packed-store contract. AscendC PACK_B16 is
+// same-type (f16→f16). Omitted-mask geometry must not reject or replace the mask.
 
 !ub_f16 = !tla.tensor<!tla.layout<!tla.shape<128>, !tla.stride<1>, !tla.shape<128>, RowMajor>, !tla.coord<0>, !tla.ptr<f16, ub, 2>>
 

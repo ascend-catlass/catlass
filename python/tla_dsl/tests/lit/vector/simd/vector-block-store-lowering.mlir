@@ -27,7 +27,7 @@ module {
         %dst_tile = "tla.tile_view"(%dst, %shape, %coord) : (!fvec, !tla.shape<64>, !tla.coord<0>) -> !fvec
         %loaded = tla.load %src_tile : !fvec -> !tla.vector<64xf32>
         %c32 = arith.constant 32 : i32
-        "tla.store"(%dst_tile, %loaded, %c32) <{operandSegmentSizes = array<i32: 1, 1, 0, 1>}> : (!fvec, !tla.vector<64xf32>, i32) -> ()
+        "tla.store"(%dst_tile, %loaded, %c32) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 1>}> : (!fvec, !tla.vector<64xf32>, i32) -> ()
       }) {mode = "simd"} : () -> ()
     }) : () -> ()
     return
@@ -49,7 +49,7 @@ module {
         %dst_tile = "tla.tile_view"(%dst, %shape, %coord) : (!hvec, !tla.shape<128>, !tla.coord<0>) -> !hvec
         %loaded = tla.load %src_tile : !hvec -> !tla.vector<128xf16>
         %c32 = arith.constant 32 : i32
-        "tla.store"(%dst_tile, %loaded, %c32) <{operandSegmentSizes = array<i32: 1, 1, 0, 1>}> : (!hvec, !tla.vector<128xf16>, i32) -> ()
+        "tla.store"(%dst_tile, %loaded, %c32) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 1>}> : (!hvec, !tla.vector<128xf16>, i32) -> ()
       }) {mode = "simd"} : () -> ()
     }) : () -> ()
     return
@@ -74,7 +74,7 @@ module {
         %dst_tile = "tla.tile_view"(%dst, %shape, %coord) : (!fvec, !tla.shape<64>, !tla.coord<0>) -> !fvec
         %loaded = tla.load %src_tile : !fvec -> !tla.vector<64xf32>
         %c32 = arith.constant 32 : i32
-        "tla.store"(%dst_tile, %loaded, %c32) <{operandSegmentSizes = array<i32: 1, 1, 0, 1>}> : (!fvec, !tla.vector<64xf32>, i32) -> ()
+        "tla.store"(%dst_tile, %loaded, %c32) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 1>}> : (!fvec, !tla.vector<64xf32>, i32) -> ()
       }) {mode = "simd"} : () -> ()
     }) : () -> ()
     return

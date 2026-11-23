@@ -243,6 +243,10 @@ def Tla_StoreDist_FirstElementB8 : I32EnumAttrCase<"first_element_b8", 3>;
 def Tla_StoreDist_FirstElementB16 : I32EnumAttrCase<"first_element_b16", 4>;
 def Tla_StoreDist_FirstElementB32 : I32EnumAttrCase<"first_element_b32", 5>;
 def Tla_StoreDist_Pack4B32 : I32EnumAttrCase<"pack4_b32", 6>;
+def Tla_StoreDist_PackB64 : I32EnumAttrCase<"pack_b64", 7>;
+def Tla_StoreDist_IntlvB8 : I32EnumAttrCase<"intlv_b8", 8>;
+def Tla_StoreDist_IntlvB16 : I32EnumAttrCase<"intlv_b16", 9>;
+def Tla_StoreDist_IntlvB32 : I32EnumAttrCase<"intlv_b32", 10>;
 def Tla_StoreDistEnum : Tla_I32Enum<"StoreDist", "Store distribution for tla.store.", [
   Tla_StoreDist_Norm,
   Tla_StoreDist_PackB32,
@@ -250,7 +254,11 @@ def Tla_StoreDistEnum : Tla_I32Enum<"StoreDist", "Store distribution for tla.sto
   Tla_StoreDist_FirstElementB8,
   Tla_StoreDist_FirstElementB16,
   Tla_StoreDist_FirstElementB32,
-  Tla_StoreDist_Pack4B32
+  Tla_StoreDist_Pack4B32,
+  Tla_StoreDist_PackB64,
+  Tla_StoreDist_IntlvB8,
+  Tla_StoreDist_IntlvB16,
+  Tla_StoreDist_IntlvB32
 ]>;
 def Tla_StoreDistAttr : Tla_EnumAttr<"StoreDist", "store_dist"> {
   let parameters = (ins EnumParameter<Tla_StoreDistEnum>:$store_dist);
@@ -260,6 +268,9 @@ def Tla_StoreDistAttr : Tla_EnumAttr<"StoreDist", "store_dist"> {
      - DIST_NORM: Normal mode, support b8/b16/b32, with a fixed datacopy VL, should be aligned with 32B.
      - DIST_PACK_B16: Compact mode, store the low half data (b16) to dst, should be aligned with 32B, or VL/2.
      - DIST_PACK_B32: Compact mode, store the low half data (b32) to dst.
+     - DIST_PACK_B64: Store the low 32 bits of each active source lane in
+       consecutive 32-bit slots. The register and UB destination must have
+       the same element type (i64, u64, or f64).
      - DIST_PACK4_B32: Store the low byte of each 32-bit register slot to
        consecutive b8 destination elements at a 32-byte-aligned address.
        Supports b8/b16/b32 sources; the predicate is in the source lane
@@ -271,6 +282,10 @@ def Tla_StoreDistAttr : Tla_EnumAttr<"StoreDist", "store_dist"> {
        (AscendC ``asc_storealign_1st``). The ``_b8``/``_b16``/``_b32`` suffix
        fixes the stored element width in bytes and must match both the source
        and the dst element type; the dst base must stay 32B-aligned.
+     - DIST_INTLV_B8/B16/B32 (AscendC ``DIST_INTLV_*`` / HIVMAVE ``INTLV_B*``):
+       dual-source interleave store (``asc_storealign_intlv``). Requires a
+       second ``!tla.vector`` source matching the first; writes even/odd lanes
+       from the two registers into consecutive destination elements.
   }];
 }
 

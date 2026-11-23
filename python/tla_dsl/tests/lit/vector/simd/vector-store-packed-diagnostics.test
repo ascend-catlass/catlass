@@ -1,46 +1,48 @@
 // RUN: split-file %s %t
-// RUN: not %tla_compile %t/pk-b32-dest-i8.mlir -o - 2>&1 | %filecheck %s --check-prefix=PKB32-DEST-I8
-// RUN: not %tla_compile %t/pk-b32-source-i8.mlir -o - 2>&1 | %filecheck %s --check-prefix=PKB32-SOURCE-I8
-// RUN: not %tla_compile %t/pk-b16-source-i8.mlir -o - 2>&1 | %filecheck %s --check-prefix=PKB16-SOURCE-I8
+// RUN: not %tla_compile %t/pk-b32-cross-width.mlir -o - 2>&1 | %filecheck %s --check-prefix=PKB32-CROSS
+// RUN: not %tla_compile %t/pk-b16-cross-width.mlir -o - 2>&1 | %filecheck %s --check-prefix=PKB16-CROSS
+// RUN: not %tla_compile %t/pk-b64-masked-i32.mlir -o - 2>&1 | %filecheck %s --check-prefix=PKB64-MASKED
 
-// PKB32-DEST-I8: error:
-// PKB32-DEST-I8-SAME: 'tla.store' op unsupported pack_b32 source/destination element widths: source 16 bits, destination 8 bits
-// PKB32-SOURCE-I8: error:
-// PKB32-SOURCE-I8-SAME: 'tla.store' op unsupported pack_b32 source/destination element widths: source 8 bits, destination 16 bits
-// PKB16-SOURCE-I8: error:
-// PKB16-SOURCE-I8-SAME: 'tla.store' op unsupported pack_b16 source/destination element widths: source 8 bits, destination 8 bits
+// AscendC pack is same-type; cross-width pairs are rejected (also with explicit mask).
+// PKB32-CROSS: error:
+// PKB32-CROSS-SAME: 'tla.store' op unsupported pack_b32 source/destination element widths: source 32 bits, destination 16 bits
+// PKB16-CROSS: error:
+// PKB16-CROSS-SAME: 'tla.store' op unsupported pack_b16 source/destination element widths: source 16 bits, destination 8 bits
+// PKB64-MASKED: error:
+// PKB64-MASKED-SAME: 'tla.store' op unsupported pack_b64 source/destination element widths: source 32 bits, destination 32 bits
 
-//--- pk-b32-dest-i8.mlir
-!dst_i8 = !tla.tensor<!tla.layout<!tla.shape<128>, !tla.stride<1>, !tla.shape<128>, RowMajor>, !tla.coord<0>, !tla.ptr<i8, ub, 1>>
-
-module {
-  func.func @bad_pk_b32_dest_i8(%dst: !dst_i8, %source: !tla.vector<128xi16>) {
-    "tla.vec.func"() ({
-      tla.store %dst, %source {store_dist = #tla.store_dist<pack_b32>} : !dst_i8, !tla.vector<128xi16>
-    }) : () -> ()
-    return
-  }
-}
-
-//--- pk-b32-source-i8.mlir
+//--- pk-b32-cross-width.mlir
 !dst_f16 = !tla.tensor<!tla.layout<!tla.shape<64>, !tla.stride<1>, !tla.shape<64>, RowMajor>, !tla.coord<0>, !tla.ptr<f16, ub, 2>>
 
 module {
-  func.func @bad_pk_b32_source_i8(%dst: !dst_f16, %source: !tla.vector<256xi8>) {
+  func.func @bad_pk_b32_cross(%dst: !dst_f16, %source: !tla.vector<64xf32>) {
     "tla.vec.func"() ({
-      tla.store %dst, %source {store_dist = #tla.store_dist<pack_b32>} : !dst_f16, !tla.vector<256xi8>
+      tla.store %dst, %source {store_dist = #tla.store_dist<pack_b32>} : !dst_f16, !tla.vector<64xf32>
     }) : () -> ()
     return
   }
 }
 
-//--- pk-b16-source-i8.mlir
+//--- pk-b16-cross-width.mlir
 !dst_i8 = !tla.tensor<!tla.layout<!tla.shape<128>, !tla.stride<1>, !tla.shape<128>, RowMajor>, !tla.coord<0>, !tla.ptr<i8, ub, 1>>
 
 module {
-  func.func @bad_pk_b16_source_i8(%dst: !dst_i8, %source: !tla.vector<256xi8>) {
+  func.func @bad_pk_b16_cross(%dst: !dst_i8, %source: !tla.vector<128xi16>) {
     "tla.vec.func"() ({
-      tla.store %dst, %source {store_dist = #tla.store_dist<pack_b16>} : !dst_i8, !tla.vector<256xi8>
+      tla.store %dst, %source {store_dist = #tla.store_dist<pack_b16>} : !dst_i8, !tla.vector<128xi16>
+    }) : () -> ()
+    return
+  }
+}
+
+//--- pk-b64-masked-i32.mlir
+!dst_i32 = !tla.tensor<!tla.layout<!tla.shape<64>, !tla.stride<1>, !tla.shape<64>, RowMajor>, !tla.coord<0>, !tla.ptr<i32, ub, 4>>
+
+module {
+  func.func @bad_pk_b64_masked_i32(%dst: !dst_i32, %source: !tla.vector<64xi32>) {
+    "tla.vec.func"() ({
+      %mask = "tla.create_mask"() {pattern = "ALL", dtype = i32} : () -> !tla.mask<64>
+      tla.store %dst, %source mask %mask {store_dist = #tla.store_dist<pack_b64>} : !dst_i32, !tla.vector<64xi32> mask !tla.mask<64>
     }) : () -> ()
     return
   }

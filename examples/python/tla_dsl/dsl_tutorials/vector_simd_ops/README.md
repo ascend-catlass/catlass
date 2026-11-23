@@ -124,10 +124,10 @@ def vector_op(mem_in: tla.Tensor, mem_out: tla.Tensor) -> None:
 | [**`load_store_mask.py`**](load_store_mask.py) | 掩码搬运往返示例，掩码 UB 与伴随向量同 dtype；另含 u8 GM↔UB（含 128..255）。 |
 | [**`pack_op.py`**](pack_op.py) | `tla.pack` 示例，覆盖 MaskSSA 宽度扩展，并验证低半/高半结果。 |
 | [**`mask_select_op.py`**](mask_select_op.py) | MaskSSA 选择示例，使用 `H` 在 `Q` 和 `M4` 两个 predicate 之间逐 bit 选择。 |
-| [**`load_store_update.py`**](load_store_update.py) | 对齐 `PostMode.UPDATE`：`tile.load` / `tile.store`（`add`，可选 `--dynamic-extent`）。 |
+| [**`load_store_update.py`**](load_store_update.py) | 对齐 `PostMode.UPDATE`：`tile.load` / `tile.store`（`add`；b8/b16/b32 + f16/bf16/f32；b64 仅 frontend UT；可选 `--dynamic-extent`）。 |
 | [**`load_store_block_update.py`**](load_store_block_update.py) | Block `PostMode.UPDATE`：`BlockLoadParams` / `BlockStoreParams` 滑动窗口（`add`，`block_stride=1`）。 |
 | [**`load_store_unalign.py`**](load_store_unalign.py) | 非对齐 PostMode UPDATE：`tile_extent` / 有效步长 `(0, VL]` 的 `post_update_stride`；`tla-unalign-ureg` 在干净 `tla.range` 上消除环内 Pre/Post（`Unalign*Params(post_mode=update)`，`add`；支持 `--tile-extent 1`）。 |
-| [**`store_pack.py`**](store_pack.py) | 压缩存储示例，取得低半有效数位做紧凑存储。 |
+| [**`store_pack.py`**](store_pack.py) | 压缩存储示例：先 cast 再同类型 PACK 紧凑落盘。 |
 | [**`reduction_ops.py`**](reduction_ops.py) | `tla.reduce` 归约示例，支持 `add`/`max`/`min` 三种模式，覆盖对齐与非对齐场景。 |
 | [**`histograms_op.py`**](histograms_op.py) | `tla.histograms` 独立上板样例：FREQUENCY/ACCUMULATE*BIN0/BIN1（`full(0)` 清零 / 跨调用累加 / 全零 CDF）。 |
 | [**`squeeze_op.py`**](squeeze_op.py) | `tla.squeeze` 示例，按掩码（M4）压缩有效 lane 并紧凑写回。 |
@@ -591,10 +591,10 @@ first mismatch=None
 - 功能说明：
   - **`load_dintlv_op.py`**（f32）：op `dintlv_b32`，按 `2*i*VL` 偏移读 `2*VL`，拆出偶数/奇数两路寄存器。
   - **`load_us_b8_op.py`**（i8）：op `us_b8`，每 loop 读 `VL/2` 个 b8 并上采样为 VL 寄存器。
-  - **`load_store_update.py`**（f32）：`add`，`tile.load` / `tile.store` 的 `post_mode=update` 滑动窗口；`--dynamic-extent` 测动态 tile extent。循环 `yield` 的是按指针造好的 tile。
+  - **`load_store_update.py`**（i8/u8/i16/u16/f16/bf16/i32/u32/f32）：`add`，`tile.load` / `tile.store` 的 `post_mode=update` 滑动窗口；VL=`256B/sizeof(T)`；默认 `post_update_stride=0` 按 tile extent(=VL) 前进；`--dynamic-extent` / `--stride-geoms` 仍以 f32 覆盖动态 extent 与 stride≠VL。循环 `yield` 的是按指针造好的 tile。i64/u64 Align UPDATE 由 frontend UT 覆盖（本 e2e 路径的 `make_tensor_like`/GM↔UB 暂不收 b64）。
   - **`load_store_block_update.py`**（f32 / f16）：`add`，`Block*Params(post_mode=update, block_stride=1)` 滑动窗口；`repeat_stride` 以 32B DataBlock 计（一整 VL = 8）。
   - **`load_store_unalign.py`**（f32 / f16 / bf16）：`add`，环内 `Unalign*Params(post_mode=update)`（默认 `post_update_stride=0`→`tile_extent`；有效步长须在 `(0, VL]`）；干净 for 上 Pre/Post 在环外；`--offset 1` 起点非 32 字节对齐；`--mode once` 只走一圈 UPDATE。
-  - **`store_pack.py`**（输入 i32/i16）：op `store_pack`，i32→i16（`DIST_PACK_B32`）、i16→i8（`DIST_PACK_B16`），抽取低半有效数位做紧凑存储。
+  - **`store_pack.py`**（输入 i32/i16）：op `store_pack`，先 trunc cast 再同类型 PACK（AscendC MulCast/GenStoreL2）：i32→i16 + `DIST_PACK_B32`、i16→i8 + `DIST_PACK_B16`，将 unpacked 窄类型 lane 紧凑写入。
 
 - 约束说明：
   - 支持的数据类型：
@@ -603,15 +603,15 @@ first mismatch=None
     |------|---------------|
     | `load_dintlv_op.py` | f32 |
     | `load_us_b8_op.py` | i8 |
-    | `load_store_update.py` | f16, bf16, f32 |
+    | `load_store_update.py` | i8, u8, i16, u16, f16, bf16, i32, u32, f32（i64/u64：frontend UT） |
     | `load_store_block_update.py` | f16, f32 |
     | `store_pack.py` | i32, i16 |
 
   - `load_dintlv_op.py`：仅 f32（i32/u32 不支持）；`VECTOR_ELE` 须为 `2*VL` 的倍数；仅写 `LOOPS*VL` lane，其余保留 sentinel。
   - `load_us_b8_op.py`：仅 i8；仅写 `LOOPS*VL` lane，其余保留 sentinel。
-  - `load_store_update.py`：`post_mode=update` 要求元素类型为 `f16`/`bf16`/`f32`、rank-1 tile、`DIST_NORM`、`post_update_stride > 0`；`unalign` 的 `--unalign-offset` 须 `N*sizeof(T)%32==0`。
+  - `load_store_update.py`：`post_mode=update` 要求元素类型为 b8/b16/b32/b64（整数 i/u 与 f16/bf16/f32）、rank-1 origin 窗口、`DIST_NORM`；默认 `post_update_stride=0`（前进 tile extent）；显式 stride 须 `> 0`。
   - `load_store_block_update.py`：`post_mode=update` 要求 origin 窗口（`coord=0`）、`repeat_stride > 0`（DataBlock 单位）、`block_stride` 在 `[0, 65535]`。
-  - `store_pack.py`：输入 i32/i16，输出对应 i16/i8；固定 256 元素。
+  - `store_pack.py`：输入 i32/i16，cast 到 i16/i8 后同宽 PACK；固定 256 元素。
 
 - 执行示例：
 
@@ -624,13 +624,15 @@ first mismatch=None
   # b8 元素上采样加载（仅 i8）
   python examples/python/tla_dsl/dsl_tutorials/vector_simd_ops/load_us_b8_op.py us_b8 --dtype i8 --device 0
 
-  # aligned PostMode.UPDATE
+  # aligned PostMode.UPDATE（默认 f32；可换 b8/b16/b32）
   python examples/python/tla_dsl/dsl_tutorials/vector_simd_ops/load_store_update.py add --shape 400 --device 0
+  python examples/python/tla_dsl/dsl_tutorials/vector_simd_ops/load_store_update.py add --dtype i8 --shape 400 --device 0
+  python examples/python/tla_dsl/dsl_tutorials/vector_simd_ops/load_store_update.py add --dtype i32 --shape 400 --device 0
 
   # Block PostMode.UPDATE
   python examples/python/tla_dsl/dsl_tutorials/vector_simd_ops/load_store_block_update.py add --shape 400 --device 0
 
-  # 紧凑 PACK 存储（i32->i16，取低半有效数位）
+  # 紧凑 PACK 存储（i32 cast→i16 再 DIST_PACK_B32）
   python examples/python/tla_dsl/dsl_tutorials/vector_simd_ops/store_pack.py store_pack --dtype i32 --device 0
   ```
 

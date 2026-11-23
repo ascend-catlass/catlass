@@ -37,8 +37,8 @@ module {
         %and = "tla.bitwise_and"(%lhs, %rhs) : (!tla.vector<256x!tla.f4e2m1x2>, !tla.vector<256x!tla.f4e2m1x2>) -> !tla.vector<256x!tla.f4e2m1x2>
         %or = "tla.bitwise_or"(%and, %rhs, %all) : (!tla.vector<256x!tla.f4e2m1x2>, !tla.vector<256x!tla.f4e2m1x2>, !tla.mask<256>) -> !tla.vector<256x!tla.f4e2m1x2>
         %xor = "tla.bitwise_xor"(%or, %not) : (!tla.vector<256x!tla.f4e2m1x2>, !tla.vector<256x!tla.f4e2m1x2>) -> !tla.vector<256x!tla.f4e2m1x2>
-        "tla.store"(%dst, %xor) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!vec, !tla.vector<256x!tla.f4e2m1x2>) -> ()
-        "tla.store"(%dst, %or, %all) <{operandSegmentSizes = array<i32: 1, 1, 1, 0>}> : (!vec, !tla.vector<256x!tla.f4e2m1x2>, !tla.mask<256>) -> ()
+        "tla.store"(%dst, %xor) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!vec, !tla.vector<256x!tla.f4e2m1x2>) -> ()
+        "tla.store"(%dst, %or, %all) <{operandSegmentSizes = array<i32: 1, 1, 0, 1, 0>}> : (!vec, !tla.vector<256x!tla.f4e2m1x2>, !tla.mask<256>) -> ()
       }) {mode = "simd"} : () -> ()
     }) : () -> ()
     return

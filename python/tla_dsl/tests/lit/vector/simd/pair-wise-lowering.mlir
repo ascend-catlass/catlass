@@ -27,7 +27,7 @@ module {
         %mask = "tla.create_mask"() {pattern = "ALL", dtype = f32} : () -> !tla.mask<64>
         %v = "tla.load"(%src_tile) : (!t_f32) -> !tla.vector<64xf32>
         %r = "tla.pair_wise"(%v, %mask) {kind = "add"} : (!tla.vector<64xf32>, !tla.mask<64>) -> !tla.vector<64xf32>
-        "tla.store"(%dst_tile, %r) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!t_f32, !tla.vector<64xf32>) -> ()
+        "tla.store"(%dst_tile, %r) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!t_f32, !tla.vector<64xf32>) -> ()
       }) {mode = "simd"} : () -> ()
     }) : () -> ()
     return
@@ -50,7 +50,7 @@ module {
         %mask = "tla.create_mask"() {pattern = "ALL", dtype = f16} : () -> !tla.mask<128>
         %v = "tla.load"(%src_tile) : (!t_f16) -> !tla.vector<128xf16>
         %r = "tla.pair_wise"(%v, %mask) {kind = "add"} : (!tla.vector<128xf16>, !tla.mask<128>) -> !tla.vector<128xf16>
-        "tla.store"(%dst_tile, %r) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!t_f16, !tla.vector<128xf16>) -> ()
+        "tla.store"(%dst_tile, %r) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!t_f16, !tla.vector<128xf16>) -> ()
       }) {mode = "simd"} : () -> ()
     }) : () -> ()
     return

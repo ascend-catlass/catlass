@@ -30,7 +30,6 @@ def _mask_sf_first(
                 pregFull = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
                 preg_all_b16 = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float16)
                 pregTailN, _ = tla.update_mask(tailN, dtype=tla.Float32)
-                one_mask, _ = tla.update_mask(1, dtype=tla.Float32)
                 cast_trait_zero = tla.params.CastParams(
                     reg_slot=tla.params.RegSlot.ZERO,
                     sat_mode=tla.params.SatMode.SAT,
@@ -70,9 +69,7 @@ def _mask_sf_first(
                     ub_s_i1.store(ub_s_reg1, mask=pregFull)
                     max_tmp_reg = tla.max(ub_s_reg0, ub_s_reg1, mask=pregFull)
                     max_reg = max_tmp_reg.reduce(tla.ReductionOp.MAX, mask=pregFull)
-                    ub_last_max_i.store(
-                        max_reg, tla.params.UnalignStoreParams(), mask=one_mask
-                    )
+                    ub_last_max_i.store(max_reg, tla.params.UnalignStoreParams())
                 tla.local_mem_bar(
                     tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD
                 )
@@ -110,9 +107,7 @@ def _mask_sf_first(
                     )
                     exp_sum_reg = tla.add(exp_odd_reg0, exp_even_reg1, mask=pregFull)
                     exp_sum_reg = exp_sum_reg.reduce(tla.ReductionOp.ADD, mask=pregFull)
-                    ub_last_sum_iDe.store(
-                        exp_sum_reg, tla.params.UnalignStoreParams(), mask=one_mask
-                    )
+                    ub_last_sum_iDe.store(exp_sum_reg, tla.params.UnalignStoreParams())
                     exp_dst_reg0 = exp_even_reg1.to(
                         ctx.DTYPE_P, cast_trait_one, mask=pregFull
                     )
@@ -132,7 +127,6 @@ def _mask_sf_first(
                 pregFull = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
                 preg_all_b16 = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float16)
                 pregTailN, _ = tla.update_mask(tailN, dtype=tla.Float32)
-                one_mask, _ = tla.update_mask(1, dtype=tla.Float32)
                 cast_trait_zero = tla.params.CastParams(
                     reg_slot=tla.params.RegSlot.ZERO,
                     sat_mode=tla.params.SatMode.SAT,
@@ -163,9 +157,7 @@ def _mask_sf_first(
                     ub_s_i1.store(ub_s_reg1, mask=pregFull)
                     max_tmp_reg = tla.max(ub_s_reg0, ub_s_reg1, mask=pregFull)
                     max_reg = max_tmp_reg.reduce(tla.ReductionOp.MAX, mask=pregFull)
-                    ub_last_max_i.store(
-                        max_reg, tla.params.UnalignStoreParams(), mask=one_mask
-                    )
+                    ub_last_max_i.store(max_reg, tla.params.UnalignStoreParams())
                 tla.local_mem_bar(
                     tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD
                 )
@@ -200,9 +192,7 @@ def _mask_sf_first(
                     )
                     exp_sum_reg = tla.add(exp_odd_reg0, exp_even_reg1, mask=pregFull)
                     exp_sum_reg = exp_sum_reg.reduce(tla.ReductionOp.ADD, mask=pregFull)
-                    ub_last_sum_iDe.store(
-                        exp_sum_reg, tla.params.UnalignStoreParams(), mask=one_mask
-                    )
+                    ub_last_sum_iDe.store(exp_sum_reg, tla.params.UnalignStoreParams())
                     exp_dst_reg0 = exp_even_reg1.to(
                         ctx.DTYPE_P, cast_trait_one, mask=pregFull
                     )
@@ -223,7 +213,6 @@ def _mask_sf_first(
                 pregFull = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
                 preg_all_b16 = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float16)
                 pregTailN, _ = tla.update_mask(tailN, dtype=tla.Float32)
-                one_mask, _ = tla.update_mask(1, dtype=tla.Float32)
                 cast_trait_zero = tla.params.CastParams(
                     reg_slot=tla.params.RegSlot.ZERO,
                     sat_mode=tla.params.SatMode.SAT,
@@ -251,9 +240,7 @@ def _mask_sf_first(
                     ub_s_reg0 = tla.where(mask_reg00, ub_s_reg0, minVreg)
                     ub_s_i0.store(ub_s_reg0, mask=pregFull)
                     max_reg = ub_s_reg0.reduce(tla.ReductionOp.MAX, mask=pregFull)
-                    ub_last_max_i.store(
-                        max_reg, tla.params.UnalignStoreParams(), mask=one_mask
-                    )
+                    ub_last_max_i.store(max_reg, tla.params.UnalignStoreParams())
                 tla.local_mem_bar(
                     tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD
                 )
@@ -280,9 +267,7 @@ def _mask_sf_first(
                         tla.sub(ub_s_reg0De, max_regDe, mask=pregFull), mask=pregFull
                     )
                     exp_sum_reg = exp_reg0.reduce(tla.ReductionOp.ADD, mask=pregFull)
-                    ub_last_sum_iDe.store(
-                        exp_sum_reg, tla.params.UnalignStoreParams(), mask=one_mask
-                    )
+                    ub_last_sum_iDe.store(exp_sum_reg, tla.params.UnalignStoreParams())
                     exp_dst_reg0 = exp_reg0.to(
                         ctx.DTYPE_P, cast_trait_zero, mask=pregFull
                     )
@@ -297,7 +282,6 @@ def _mask_sf_first(
                 pregFull = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
                 preg_all_b16 = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float16)
                 pregTailN, _ = tla.update_mask(tailN, dtype=tla.Float32)
-                one_mask, _ = tla.update_mask(1, dtype=tla.Float32)
                 cast_trait_zero = tla.params.CastParams(
                     reg_slot=tla.params.RegSlot.ZERO,
                     sat_mode=tla.params.SatMode.SAT,
@@ -321,9 +305,7 @@ def _mask_sf_first(
                     ub_s_reg0 = tla.where(pregTailN, ub_s_reg0, minVreg)
                     ub_s_i0.store(ub_s_reg0, mask=pregFull)
                     max_reg = ub_s_reg0.reduce(tla.ReductionOp.MAX, mask=pregFull)
-                    ub_last_max_i.store(
-                        max_reg, tla.params.UnalignStoreParams(), mask=one_mask
-                    )
+                    ub_last_max_i.store(max_reg, tla.params.UnalignStoreParams())
                 tla.local_mem_bar(
                     tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD
                 )
@@ -350,9 +332,7 @@ def _mask_sf_first(
                         tla.sub(ub_s_reg0De, max_regDe, mask=pregFull), mask=pregFull
                     )
                     exp_sum_reg = exp_reg0.reduce(tla.ReductionOp.ADD, mask=pregFull)
-                    ub_last_sum_iDe.store(
-                        exp_sum_reg, tla.params.UnalignStoreParams(), mask=one_mask
-                    )
+                    ub_last_sum_iDe.store(exp_sum_reg, tla.params.UnalignStoreParams())
                     exp_dst_reg0 = exp_reg0.to(
                         ctx.DTYPE_P, cast_trait_zero, mask=pregFull
                     )
@@ -387,7 +367,6 @@ def _mask_sf_mid_n64(
             pregFull = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
             preg_all_b16 = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float16)
             pregTailN, _ = tla.update_mask(tailN, dtype=tla.Float32)
-            one_mask, _ = tla.update_mask(1, dtype=tla.Float32)
             cast_trait_zero = tla.params.CastParams(
                 reg_slot=tla.params.RegSlot.ZERO,
                 sat_mode=tla.params.SatMode.SAT,
@@ -427,9 +406,7 @@ def _mask_sf_mid_n64(
                 ub_s_i1.store(ub_s_reg1, mask=pregFull)
                 max_tmp_reg = tla.max(ub_s_reg0, ub_s_reg1, mask=pregFull)
                 max_reg = max_tmp_reg.reduce(tla.ReductionOp.MAX, mask=pregFull)
-                ub_now_max_i.store(
-                    max_reg, tla.params.UnalignStoreParams(), mask=one_mask
-                )
+                ub_now_max_i.store(max_reg, tla.params.UnalignStoreParams())
             tla.local_mem_bar(tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD)
             ub_last_max_i_de = tla.tile_view(
                 lastMaxAddr, tla.make_shape(VL_F32), tla.make_coord(0)
@@ -489,9 +466,7 @@ def _mask_sf_mid_n64(
                 )
                 exp_sum_reg = tla.add(exp_odd_reg0, exp_even_reg1, mask=pregFull)
                 exp_sum_reg = exp_sum_reg.reduce(tla.ReductionOp.ADD, mask=pregFull)
-                ub_now_sum_iDe.store(
-                    exp_sum_reg, tla.params.UnalignStoreParams(), mask=one_mask
-                )
+                ub_now_sum_iDe.store(exp_sum_reg, tla.params.UnalignStoreParams())
                 exp_dst_reg0 = exp_even_reg1.to(
                     ctx.DTYPE_P, cast_trait_one, mask=pregFull
                 )
@@ -518,7 +493,6 @@ def _mask_sf_mid_n64(
             pregFull = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
             preg_all_b16 = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float16)
             pregTailN, _ = tla.update_mask(tailN, dtype=tla.Float32)
-            one_mask, _ = tla.update_mask(1, dtype=tla.Float32)
             cast_trait_zero = tla.params.CastParams(
                 reg_slot=tla.params.RegSlot.ZERO,
                 sat_mode=tla.params.SatMode.SAT,
@@ -549,9 +523,7 @@ def _mask_sf_mid_n64(
                 ub_s_i1.store(ub_s_reg1, mask=pregFull)
                 max_tmp_reg = tla.max(ub_s_reg0, ub_s_reg1, mask=pregFull)
                 max_reg = max_tmp_reg.reduce(tla.ReductionOp.MAX, mask=pregFull)
-                ub_now_max_i.store(
-                    max_reg, tla.params.UnalignStoreParams(), mask=one_mask
-                )
+                ub_now_max_i.store(max_reg, tla.params.UnalignStoreParams())
             tla.local_mem_bar(tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD)
             ub_last_max_i_de = tla.tile_view(
                 lastMaxAddr, tla.make_shape(VL_F32), tla.make_coord(0)
@@ -608,9 +580,7 @@ def _mask_sf_mid_n64(
                 )
                 exp_sum_reg = tla.add(exp_odd_reg0, exp_even_reg1, mask=pregFull)
                 exp_sum_reg = exp_sum_reg.reduce(tla.ReductionOp.ADD, mask=pregFull)
-                ub_now_sum_iDe.store(
-                    exp_sum_reg, tla.params.UnalignStoreParams(), mask=one_mask
-                )
+                ub_now_sum_iDe.store(exp_sum_reg, tla.params.UnalignStoreParams())
                 exp_dst_reg0 = exp_even_reg1.to(
                     ctx.DTYPE_P, cast_trait_one, mask=pregFull
                 )
@@ -657,7 +627,6 @@ def _mask_sf_mid_nlt64(
             pregFull = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
             preg_all_b16 = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float16)
             pregTailN, _ = tla.update_mask(tailN, dtype=tla.Float32)
-            one_mask, _ = tla.update_mask(1, dtype=tla.Float32)
             cast_trait_zero = tla.params.CastParams(
                 reg_slot=tla.params.RegSlot.ZERO,
                 sat_mode=tla.params.SatMode.SAT,
@@ -680,9 +649,7 @@ def _mask_sf_mid_nlt64(
                 ub_s_reg0 = tla.where(mask_reg00, ub_s_reg0, minVreg)
                 ub_s_i0.store(ub_s_reg0, mask=pregFull)
                 max_reg = ub_s_reg0.reduce(tla.ReductionOp.MAX, mask=pregFull)
-                ub_now_max_i.store(
-                    max_reg, tla.params.UnalignStoreParams(), mask=one_mask
-                )
+                ub_now_max_i.store(max_reg, tla.params.UnalignStoreParams())
             tla.local_mem_bar(tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD)
             ub_last_max_i_de = tla.tile_view(
                 lastMaxAddr, tla.make_shape(VL_F32), tla.make_coord(0)
@@ -731,9 +698,7 @@ def _mask_sf_mid_nlt64(
                     tla.sub(ub_s_reg0De, max_regDe, mask=pregFull), mask=pregFull
                 )
                 exp_sum_reg = exp_reg0.reduce(tla.ReductionOp.ADD, mask=pregFull)
-                ub_now_sum_iDe.store(
-                    exp_sum_reg, tla.params.UnalignStoreParams(), mask=one_mask
-                )
+                ub_now_sum_iDe.store(exp_sum_reg, tla.params.UnalignStoreParams())
                 exp_dst_reg0 = exp_reg0.to(ctx.DTYPE_P, cast_trait_zero, mask=pregFull)
                 exp_dst_reg, zero_reg = tla.deinterleave(exp_dst_reg0, exp_dst_reg0)
                 ub_p_zN_f16_i.store(
@@ -753,7 +718,6 @@ def _mask_sf_mid_nlt64(
             pregFull = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
             preg_all_b16 = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float16)
             pregTailN, _ = tla.update_mask(tailN, dtype=tla.Float32)
-            one_mask, _ = tla.update_mask(1, dtype=tla.Float32)
             cast_trait_zero = tla.params.CastParams(
                 reg_slot=tla.params.RegSlot.ZERO,
                 sat_mode=tla.params.SatMode.SAT,
@@ -772,9 +736,7 @@ def _mask_sf_mid_nlt64(
                 ub_s_reg0 = tla.where(pregTailN, ub_s_reg0, minVreg)
                 ub_s_i0.store(ub_s_reg0, mask=pregFull)
                 max_reg = ub_s_reg0.reduce(tla.ReductionOp.MAX, mask=pregFull)
-                ub_now_max_i.store(
-                    max_reg, tla.params.UnalignStoreParams(), mask=one_mask
-                )
+                ub_now_max_i.store(max_reg, tla.params.UnalignStoreParams())
             tla.local_mem_bar(tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD)
             ub_last_max_i_de = tla.tile_view(
                 lastMaxAddr, tla.make_shape(VL_F32), tla.make_coord(0)
@@ -823,9 +785,7 @@ def _mask_sf_mid_nlt64(
                     tla.sub(ub_s_reg0De, max_regDe, mask=pregFull), mask=pregFull
                 )
                 exp_sum_reg = exp_reg0.reduce(tla.ReductionOp.ADD, mask=pregFull)
-                ub_now_sum_iDe.store(
-                    exp_sum_reg, tla.params.UnalignStoreParams(), mask=one_mask
-                )
+                ub_now_sum_iDe.store(exp_sum_reg, tla.params.UnalignStoreParams())
                 exp_dst_reg0 = exp_reg0.to(ctx.DTYPE_P, cast_trait_zero, mask=pregFull)
                 exp_dst_reg, zero_reg = tla.deinterleave(exp_dst_reg0, exp_dst_reg0)
                 ub_p_zN_f16_i.store(
@@ -852,7 +812,6 @@ def _sf_first(ctx, n, tailN, m, ub_s, lastMaxAddr, lastSumAddr, ub_p_zN):
             pregFull = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
             preg_all_b16 = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float16)
             pregTailN, _ = tla.update_mask(tailN, dtype=tla.Float32)
-            one_mask, _ = tla.update_mask(1, dtype=tla.Float32)
             cast_trait_zero = tla.params.CastParams(
                 reg_slot=tla.params.RegSlot.ZERO,
                 sat_mode=tla.params.SatMode.SAT,
@@ -883,9 +842,7 @@ def _sf_first(ctx, n, tailN, m, ub_s, lastMaxAddr, lastSumAddr, ub_p_zN):
                 ub_s_i1.store(ub_s_reg1, mask=pregFull)
                 max_tmp_reg = tla.max(ub_s_reg0, ub_s_reg1, mask=pregFull)
                 max_reg = max_tmp_reg.reduce(tla.ReductionOp.MAX, mask=pregFull)
-                ub_last_max_i.store(
-                    max_reg, tla.params.UnalignStoreParams(), mask=one_mask
-                )
+                ub_last_max_i.store(max_reg, tla.params.UnalignStoreParams())
             tla.local_mem_bar(tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD)
             for j in tla.range(m):
                 ub_last_max_iDe = tla.tile_view(
@@ -918,9 +875,7 @@ def _sf_first(ctx, n, tailN, m, ub_s, lastMaxAddr, lastSumAddr, ub_p_zN):
                 )
                 exp_sum_reg = tla.add(exp_odd_reg0, exp_even_reg1, mask=pregFull)
                 exp_sum_reg = exp_sum_reg.reduce(tla.ReductionOp.ADD, mask=pregFull)
-                ub_last_sum_iDe.store(
-                    exp_sum_reg, tla.params.UnalignStoreParams(), mask=one_mask
-                )
+                ub_last_sum_iDe.store(exp_sum_reg, tla.params.UnalignStoreParams())
                 exp_dst_reg0 = exp_even_reg1.to(
                     ctx.DTYPE_P, cast_trait_one, mask=pregFull
                 )
@@ -940,7 +895,6 @@ def _sf_first(ctx, n, tailN, m, ub_s, lastMaxAddr, lastSumAddr, ub_p_zN):
             pregFull = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
             preg_all_b16 = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float16)
             pregTailN, _ = tla.update_mask(tailN, dtype=tla.Float32)
-            one_mask, _ = tla.update_mask(1, dtype=tla.Float32)
             cast_trait_zero = tla.params.CastParams(
                 reg_slot=tla.params.RegSlot.ZERO,
                 sat_mode=tla.params.SatMode.SAT,
@@ -964,9 +918,7 @@ def _sf_first(ctx, n, tailN, m, ub_s, lastMaxAddr, lastSumAddr, ub_p_zN):
                 ub_s_reg0 = tla.where(pregTailN, ub_s_reg0, minVreg)
                 ub_s_i0.store(ub_s_reg0, mask=pregFull)
                 max_reg = ub_s_reg0.reduce(tla.ReductionOp.MAX, mask=pregFull)
-                ub_last_max_i.store(
-                    max_reg, tla.params.UnalignStoreParams(), mask=one_mask
-                )
+                ub_last_max_i.store(max_reg, tla.params.UnalignStoreParams())
             tla.local_mem_bar(tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD)
             for j in tla.range(m):
                 ub_last_max_iDe = tla.tile_view(
@@ -991,9 +943,7 @@ def _sf_first(ctx, n, tailN, m, ub_s, lastMaxAddr, lastSumAddr, ub_p_zN):
                     tla.sub(ub_s_reg0De, max_regDe, mask=pregFull), mask=pregFull
                 )
                 exp_sum_reg = exp_reg0.reduce(tla.ReductionOp.ADD, mask=pregFull)
-                ub_last_sum_iDe.store(
-                    exp_sum_reg, tla.params.UnalignStoreParams(), mask=one_mask
-                )
+                ub_last_sum_iDe.store(exp_sum_reg, tla.params.UnalignStoreParams())
                 exp_dst_reg0 = exp_reg0.to(ctx.DTYPE_P, cast_trait_zero, mask=pregFull)
                 exp_dst_reg, zero_reg = tla.deinterleave(exp_dst_reg0, exp_dst_reg0)
                 ub_p_zN_f16_i.store(
@@ -1023,7 +973,6 @@ def _sf_mid_n64(
         pregFull = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
         preg_all_b16 = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float16)
         pregTailN, _ = tla.update_mask(tailN, dtype=tla.Float32)
-        one_mask, _ = tla.update_mask(1, dtype=tla.Float32)
         cast_trait_zero = tla.params.CastParams(
             reg_slot=tla.params.RegSlot.ZERO,
             sat_mode=tla.params.SatMode.SAT,
@@ -1054,7 +1003,7 @@ def _sf_mid_n64(
             ub_s_i1.store(ub_s_reg1, mask=pregFull)
             max_tmp_reg = tla.max(ub_s_reg0, ub_s_reg1, mask=pregFull)
             max_reg = max_tmp_reg.reduce(tla.ReductionOp.MAX, mask=pregFull)
-            ub_now_max_i.store(max_reg, tla.params.UnalignStoreParams(), mask=one_mask)
+            ub_now_max_i.store(max_reg, tla.params.UnalignStoreParams())
         tla.local_mem_bar(tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD)
         ub_last_max_i_de = tla.tile_view(
             lastMaxAddr, tla.make_shape(VL_F32), tla.make_coord(0)
@@ -1111,9 +1060,7 @@ def _sf_mid_n64(
             )
             exp_sum_reg = tla.add(exp_odd_reg0, exp_even_reg1, mask=pregFull)
             exp_sum_reg = exp_sum_reg.reduce(tla.ReductionOp.ADD, mask=pregFull)
-            ub_now_sum_iDe.store(
-                exp_sum_reg, tla.params.UnalignStoreParams(), mask=one_mask
-            )
+            ub_now_sum_iDe.store(exp_sum_reg, tla.params.UnalignStoreParams())
             exp_dst_reg0 = exp_even_reg1.to(ctx.DTYPE_P, cast_trait_one, mask=pregFull)
             exp_dst_reg1 = exp_odd_reg0.to(ctx.DTYPE_P, cast_trait_zero, mask=pregFull)
             exp_dst_reg = tla.bitwise_or(exp_dst_reg0, exp_dst_reg1, mask=preg_all_b16)
@@ -1150,7 +1097,6 @@ def _sf_mid_nlt64(
         pregFull = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
         preg_all_b16 = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float16)
         pregTailN, _ = tla.update_mask(tailN, dtype=tla.Float32)
-        one_mask, _ = tla.update_mask(1, dtype=tla.Float32)
         cast_trait_zero = tla.params.CastParams(
             reg_slot=tla.params.RegSlot.ZERO,
             sat_mode=tla.params.SatMode.SAT,
@@ -1169,7 +1115,7 @@ def _sf_mid_nlt64(
             ub_s_reg0 = tla.where(pregTailN, ub_s_reg0, minVreg)
             ub_s_i0.store(ub_s_reg0, mask=pregFull)
             max_reg = ub_s_reg0.reduce(tla.ReductionOp.MAX, mask=pregFull)
-            ub_now_max_i.store(max_reg, tla.params.UnalignStoreParams(), mask=one_mask)
+            ub_now_max_i.store(max_reg, tla.params.UnalignStoreParams())
         tla.local_mem_bar(tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD)
         ub_last_max_i_de = tla.tile_view(
             lastMaxAddr, tla.make_shape(VL_F32), tla.make_coord(0)
@@ -1218,9 +1164,7 @@ def _sf_mid_nlt64(
                 tla.sub(ub_s_reg0De, max_regDe, mask=pregFull), mask=pregFull
             )
             exp_sum_reg = exp_reg0.reduce(tla.ReductionOp.ADD, mask=pregFull)
-            ub_now_sum_iDe.store(
-                exp_sum_reg, tla.params.UnalignStoreParams(), mask=one_mask
-            )
+            ub_now_sum_iDe.store(exp_sum_reg, tla.params.UnalignStoreParams())
             exp_dst_reg0 = exp_reg0.to(ctx.DTYPE_P, cast_trait_zero, mask=pregFull)
             exp_dst_reg, zero_reg = tla.deinterleave(exp_dst_reg0, exp_dst_reg0)
             ub_p_zN_f16_i.store(

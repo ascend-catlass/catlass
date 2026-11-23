@@ -693,12 +693,16 @@ def Tla_StoreOp : Tla_Op<"store", [AttrSizedOperandSegments]> {
     Store vector or mask SSA into a UB tensor tile. Dispatch is by source type:
 
     * ``!tla.vector`` — data store. Optional predicate ``mask`` controls which
-      lanes are written. Optional ``unaligned_ub_access`` lowers to unaligned
-      UB store (``vstas``/``vstus`` via HIVMAVE). ``block_stride`` selects
+      lanes are written for supported aligned stores. ``unaligned_ub_access``
+      uses the destination's valid length and lowers to ``vstus``/``vstas``.
+      ``block_stride`` selects
       DATA_BLOCK_COPY BlockStore. PostMode UPDATE is ``tla.store_update``.
+      Dual-source ``intlv_b8`` / ``intlv_b16`` / ``intlv_b32`` take a second
+      ``!tla.vector`` (``source2``) and interleave even/odd lanes into the
+      destination (AscendC ``StoreAlign`` / ``DIST_INTLV_*``).
     * ``!tla.mask`` — continuous-aligned MaskReg store (AscendC
       ``StoreAlign(..., MaskReg&)`` / ``DIST_NORM`` / ``psts``). Destination
-      UB element type must be a 1/2/4-byte scalar (int or float). Spill size
+      UB element type must be a b8/b16/b32/b64 scalar (int or float). Spill size
       is ``N/8`` from the ``MaskSSA`` source; the UB tile supplies the
       address. Predicate ``mask`` and ``unaligned_ub_access`` are not
       allowed. Lowers via ``ave.hir.masked_store <NORM_B8>`` on an ``i1``
@@ -708,15 +712,17 @@ def Tla_StoreOp : Tla_Op<"store", [AttrSizedOperandSegments]> {
   }];
   let arguments = (ins Tla_TensorType:$dest,
                        AnyTypeOf<[Tla_VectorSSAType, Tla_MaskSSAType]>:$source,
+                       Optional<Tla_VectorSSAType>:$source2,
                        Optional<Tla_MaskSSAType>:$mask,
                        Optional<Tla_IntegerOrIndexType>:$block_stride,
                        OptionalAttr<Tla_StoreDistAttr>:$store_dist,
                        OptionalAttr<UnitAttr>:$unaligned_ub_access);
   let results = (outs);
   let assemblyFormat = [{
-    $dest `,` $source (`mask` $mask^)? (`stride` $block_stride^)?
+    $dest `,` $source (`,` $source2^)? (`mask` $mask^)? (`stride` $block_stride^)?
     attr-dict `:`
-    type($dest) `,` qualified(type($source)) (`mask` qualified(type($mask))^)?
+    type($dest) `,` qualified(type($source)) (`,` qualified(type($source2))^)?
+    (`mask` qualified(type($mask))^)?
     (`block_stride` qualified(type($block_stride))^)?
   }];
   let hasVerifier = 1;

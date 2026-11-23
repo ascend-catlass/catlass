@@ -28,12 +28,10 @@ def _dynamic_metadata_values(type_tree: Any, metadata_tree: Any) -> list[Any]:
     return [metadata_tree] if type_tree is None else []
 
 
-# MaskSSA load/store UB: any 1/2/4-byte scalar (int or float).
-# ``N = 256 / sizeof(UB elem)``; hardware path is still plds/psts.b8.
-_MASK_UB_ELEM_BYTES = frozenset((1, 2, 4))
-# AscendC ``LoadAlign<T, MaskDist>``: ``SupportBytes<T, 1, 2, 4, 8>`` (b8/b16/b32/b64).
-# ``T`` is address typing only; ``plds`` always takes ``uint32_t*``.
-_MASK_DIST_US_DS_ELEM_BYTES = frozenset((1, 2, 4, 8))
+# AscendC ``LoadAlign/StoreAlign<__ubuf__ T*, MaskReg>``:
+# ``SupportBytes<T, 1, 2, 4, 8>`` (b8/b16/b32/b64). ``T`` is address typing
+# only; hardware path is still plds/psts.b8.
+_MASK_UB_ELEM_BYTES = frozenset((1, 2, 4, 8))
 # AscendC MaskReg width after plds (VL bits). Used when tile shape cannot hint N.
 _MASK_DIST_US_DS_DEFAULT_LANES = 256
 
@@ -272,20 +270,68 @@ def _make_update_tile_from_ptr(
     return make_tensor(ptr, layout, make_coord(as_numeric(0), loc=loc), loc=loc)
 
 
-# Align PostMode UPDATE emit path today only wires HIVM
-# ``vldsx1.post`` / ``vstsx1.post`` for these element types.
-_UPDATE_SUPPORTED_DTYPES = frozenset({"f16", "bf16", "f32"})
+# Align / UnAlign PostMode UPDATE: b8/b16/b32/b64 widths (signed/unsigned
+# integers, Bool/i1, fp8/hif8/e8m0/fp4x2 on b8, f16/bf16/f32, and f64). Align
+# byte encodings UPDATE as s8 bits (no ``vldsx1.post.v256f8*``); UnAlign f8e4/e5
+# keep native ``…post.f8e*``, while Bool/e8m0/fp4x2/hif8 also alias s8 (AscendC →
+# int8_t/uint8_t). Bool/f64 are move-only (no arithmetic on the register).
+# AscendC ``TypeGet<double>`` → ``vector_u64`` (same b64 u32+stride*2 path as i64).
+_UPDATE_SUPPORTED_DTYPES = frozenset(
+    {
+        "i1",
+        "i8",
+        "u8",
+        "f8e4m3fn",
+        "f8e5m2",
+        "hif8",
+        "f8e8m0",
+        "f4e2m1x2",
+        "f4e1m2x2",
+        "i16",
+        "u16",
+        "f16",
+        "bf16",
+        "i32",
+        "u32",
+        "f32",
+        "i64",
+        "u64",
+        "f64",
+    }
+)
 
 
 def _require_update_supported_dtype(element_type: Any) -> None:
-    """Reject UPDATE tiles whose element type is not yet wired in emit."""
+    """Reject UPDATE tiles whose element type is not wired for `.post` emit."""
     from ..execution_lowering import TlaLoweringError
+    from ..types import normalize_element_type_token
 
-    dtype = str(element_type).strip().lower()
+    dtype = normalize_element_type_token(element_type)
     if dtype not in _UPDATE_SUPPORTED_DTYPES:
         raise TlaLoweringError(
             "post_mode=update currently supports element types "
-            f"f16/bf16/f32 only, got {element_type}"
+            "b8/b16/b32/b64 (Bool/i1, i/u integers, f8e4m3fn/f8e5m2/hif8/"
+            "f8e8m0/f4e2m1x2/f4e1m2x2, f16/bf16/f32, and f64) only, "
+            f"got {element_type}"
+        )
+
+
+def _require_update_store_matching_dtype(
+    value_val: Any, dest_element_type: Any
+) -> None:
+    """Check the register type against the UB element type before emitting UPDATE."""
+    from ..core_api import _vector_ssa_type_for_mlir_value
+    from ..execution_lowering import TlaLoweringError
+    from ..types import normalize_element_type_token
+
+    src_elem = normalize_element_type_token(
+        _vector_ssa_type_for_mlir_value(value_val).element_type
+    )
+    dst_elem = normalize_element_type_token(dest_element_type)
+    if src_elem != dst_elem:
+        raise TlaLoweringError(
+            "post_mode=update store source and destination element types must match "
+            f"(got source {src_elem}, dest {dst_elem})"
         )
 
 
@@ -584,7 +630,7 @@ class _Tensor(TensorABC):
                   | `DIST_BRC_B32` | Broadcast one b32 element to all lanes |
                   | `DIST_DINTLV_B8` | Load 512 bytes; even/odd b8 elements fill two 256-lane vectors |
                   | `DIST_DINTLV_B16` | Load 512 bytes; return two 128-lane b16 registers, even positions first and odd positions second |
-                  | `DIST_DINTLV_B32` | f32 deinterleave; dual results |
+                  | `DIST_DINTLV_B32` | b32 deinterleave (f32/i32/u32); dual results |
                   | `DIST_US_B8` / `DIST_US_B16` | 2x up-sample |
                   | `DIST_DS_B8` / `DIST_DS_B16` | Load 512 bytes and retain every other b8/b16 element into one full vector |
                   | `DIST_BRC_B16` | Broadcast one b16 element |
@@ -627,13 +673,11 @@ class _Tensor(TensorABC):
             - Must be called inside a `@tla.kernel`-decorated kernel function.
             - Must be called inside `tla.vec.func(mode="simd")`; source tile must be UB.
             - The actual read range must stay within the usable UB address space.
-            - Mask load ``DIST_NORM`` requires a 1/2/4-byte scalar UB element type.
-            - Distribution modes fix the element width: `DIST_US_B8` needs
-              i8/u8; `DIST_BRC_B16` / `DIST_US_B16` / `DIST_UNPACK_B16` /
-              `DIST_E2B_B16` need 2-byte (f16/bf16/i16/u16); `DIST_E2B_B32`
-              needs 4-byte (f32/i32/u32); `DIST_DINTLV_B16` needs 2-byte
-              (f16/bf16/i16/u16); `DIST_DINTLV_B32` needs f32;
-              `DIST_BLK` works for any element size.
+            - Mask load ``DIST_NORM`` requires a b8/b16/b32/b64 scalar UB element type.
+            - Each width-suffixed distribution requires the corresponding
+              element storage width. b8 includes Bool and byte encodings.
+              `DIST_BLK` supports b8/b16/b32. For b64, use `DIST_NORM`
+              or a full 32-lane `UnalignLoadParams` load.
             - `DIST_DINTLV_B8` supports i8/u8/f8E4M3FN/f8E5M2/HiFloat8/E8M0 and packed
               Float4E2M1x2/Float4E1M2x2. Each register
               holds 256 one-byte elements; one load reads `2 * 256 = 512` bytes
@@ -646,13 +690,14 @@ class _Tensor(TensorABC):
               without changing their two nibbles; each result holds 256 packed
               elements (512 FP4 values). E8M0 is transported as raw bytes, including
               the 0xFF NaN encoding, and can be written back with a normal aligned
-              store; arithmetic and register casts are unsupported. Logical FP4
-              and Bool are not supported by this distribution.
+              store; arithmetic and register casts are unsupported. Logical
+              (unpacked) FP4 is not supported. Bool is supported as b8
+              move-only transport (same as i8).
             - `DIST_DINTLV_B16` requires a 32-byte-aligned source address.
             - `DIST_UNPACK4_B8` requires a 1-byte element type and a
               32-byte-aligned source address.
             - `DIST_BRC_B8` / `DIST_DS_B8` / `DIST_UNPACK_B8` support
-              i8/u8/f8E4M3FN/f8E5M2; `DIST_DS_B16` supports
+              Bool/i8/u8/f8E4M3FN/f8E5M2/hif8/f8e8m0/fp4x2; `DIST_DS_B16` supports
               f16/bf16/i16/u16; `DIST_UNPACK_B32` supports f32/i32/u32.
               These modes preserve the source element type and produce full
               256-byte vector registers.
@@ -673,7 +718,9 @@ class _Tensor(TensorABC):
               ``DIST_US`` → ``VL/16``; ``DIST_DS`` → ``min(32, VL/4)``.
               On VL=256 this is 32B / 16B / 32B.
             - `POST_MODE_UPDATE` requires a rank-1 contiguous tile,
-              `DIST_NORM`, and element type in `{f16, bf16, f32}`. Returns
+              `DIST_NORM`, and element type of width b8/b16/b32/b64
+              (Bool, i/u integers, FP8, HiFloat8, E8M0, FP4x2, f16, bf16,
+              f32 and f64). Returns
               `(vector, next_tile)`. Inside `tla.vec.func`, assign
               `next_tile` back with `tla.range` (`while` is not supported
               nested in `vec.func`). The window must already be an origin
@@ -760,23 +807,12 @@ class _Tensor(TensorABC):
                 MaskLoadDist.DIST_US,
                 MaskLoadDist.DIST_DS,
             )
-            # AscendC MaskDist: T ∈ b8/b16/b32/b64. DIST_NORM keeps the
-            # existing 1/2/4-byte MaskSSA carrier rule.
-            allowed_bytes = (
-                _MASK_DIST_US_DS_ELEM_BYTES if is_us_ds else _MASK_UB_ELEM_BYTES
-            )
-            if elem_bytes not in allowed_bytes:
-                if is_us_ds:
-                    raise NotImplementedError(
-                        f"MaskLoadDist {params.load_dist!r} requires a "
-                        f"b8/b16/b32/b64 scalar UB (AscendC "
-                        f"LoadAlign<T, MaskDist>), got "
-                        f"{source_desc.element_type}"
-                    )
+            # AscendC MaskDist: T ∈ b8/b16/b32/b64 for NORM/US/DS.
+            if elem_bytes not in _MASK_UB_ELEM_BYTES:
                 _op_error(
                     "load",
-                    f"invalid argument 'source': expected 1/2/4-byte scalar "
-                    f"element type for MaskSSA load, got "
+                    f"invalid argument 'source': expected b8/b16/b32/b64 "
+                    f"scalar UB (AscendC LoadAlign<T, MaskDist>), got "
                     f"{source_desc.element_type}",
                 )
             # DIST_US / DIST_DS: ``T`` does not set predicate width (AscendC
@@ -899,49 +935,28 @@ class _Tensor(TensorABC):
             LoadDist.DIST_DINTLV_B16,
             LoadDist.DIST_DINTLV_B32,
         )
-        byte_load_types = ("i8", "u8", "f8e4m3fn", "f8e5m2")
-        extended_load_types = (
+        dist_bytes = (
             {
-                LoadDist.DIST_BRC_B8: byte_load_types,
-                LoadDist.DIST_DS_B8: byte_load_types,
-                LoadDist.DIST_UNPACK_B8: byte_load_types,
-                LoadDist.DIST_DS_B16: ("i16", "u16", "f16", "bf16"),
-                LoadDist.DIST_UNPACK_B32: ("i32", "u32", "f32"),
+                LoadDist.DIST_BRC_B8: (1,),
+                LoadDist.DIST_BRC_B16: (2,),
+                LoadDist.DIST_BRC_B32: (4,),
+                LoadDist.DIST_US_B8: (1,),
+                LoadDist.DIST_US_B16: (2,),
+                LoadDist.DIST_DS_B8: (1,),
+                LoadDist.DIST_DS_B16: (2,),
+                LoadDist.DIST_UNPACK_B8: (1,),
+                LoadDist.DIST_UNPACK_B16: (2,),
+                LoadDist.DIST_UNPACK_B32: (4,),
+                LoadDist.DIST_UNPACK4_B8: (1,),
+                LoadDist.DIST_E2B_B16: (2,),
+                LoadDist.DIST_E2B_B32: (4,),
+                LoadDist.DIST_DINTLV_B8: (1,),
+                LoadDist.DIST_DINTLV_B16: (2,),
+                LoadDist.DIST_DINTLV_B32: (4,),
+                LoadDist.DIST_BLK: (1, 2, 4),
             }.get(params.load_dist)
             if isinstance(params, NormalLoadParams)
             else None
-        )
-        is_us_b8 = (
-            isinstance(params, NormalLoadParams)
-            and params.load_dist == LoadDist.DIST_US_B8
-        )
-        is_brc_b16 = (
-            isinstance(params, NormalLoadParams)
-            and params.load_dist == LoadDist.DIST_BRC_B16
-        )
-        is_us_b16 = (
-            isinstance(params, NormalLoadParams)
-            and params.load_dist == LoadDist.DIST_US_B16
-        )
-        is_unpack_b16 = (
-            isinstance(params, NormalLoadParams)
-            and params.load_dist == LoadDist.DIST_UNPACK_B16
-        )
-        is_unpack4_b8 = (
-            isinstance(params, NormalLoadParams)
-            and params.load_dist == LoadDist.DIST_UNPACK4_B8
-        )
-        is_e2b_b16 = (
-            isinstance(params, NormalLoadParams)
-            and params.load_dist == LoadDist.DIST_E2B_B16
-        )
-        is_e2b_b32 = (
-            isinstance(params, NormalLoadParams)
-            and params.load_dist == LoadDist.DIST_E2B_B32
-        )
-        is_blk = (
-            isinstance(params, NormalLoadParams)
-            and params.load_dist == LoadDist.DIST_BLK
         )
         is_block_load = isinstance(params, BlockLoadParams)
         if is_block_load:
@@ -980,138 +995,19 @@ class _Tensor(TensorABC):
                 context=ctx,
             )
 
-        if extended_load_types is not None:
-            elem = str(source_desc.element_type).strip().lower()
-            if elem not in extended_load_types:
+        if dist_bytes is not None:
+            elem = source_desc.element_type
+            if dtype_size_bytes(elem) not in dist_bytes:
+                widths = "/".join(map(str, dist_bytes))
                 raise TlaLoweringError(
-                    f"DIST_{params.load_dist.upper()} requires element type in "
-                    f"{extended_load_types}, got {source_desc.element_type}"
+                    f"DIST_{params.load_dist.upper()} requires a {widths}-byte "
+                    f"element type (got {elem})"
                 )
-            result_desc = _full_vector_ssa_descriptor(source_desc.element_type)
-        elif is_dintlv:
-            elem = str(source_desc.element_type).strip().lower()
-            if params.load_dist == LoadDist.DIST_DINTLV_B8:
-                if elem not in (
-                    "i8",
-                    "u8",
-                    "f8e4m3fn",
-                    "f8e5m2",
-                    "hif8",
-                    "f8e8m0",
-                    "f4e2m1x2",
-                    "f4e1m2x2",
-                ):
-                    raise TlaLoweringError(
-                        "DIST_DINTLV_B8 requires i8/u8/f8E4M3FN/f8E5M2/hif8/f8e8m0/"
-                        "f4e2m1x2/f4e1m2x2 "
-                        f"element type (got {source_desc.element_type})"
-                    )
-            elif params.load_dist == LoadDist.DIST_DINTLV_B16:
-                if dtype_size_bytes(elem) != 2:
-                    raise TlaLoweringError(
-                        "DIST_DINTLV_B16 requires a 2-byte "
-                        "(f16/bf16/i16/u16) element type "
-                        f"(got {source_desc.element_type})"
-                    )
-            elif elem != "f32":
-                raise TlaLoweringError(
-                    "DIST_DINTLV_B32 currently requires f32 element type "
-                    f"(got {source_desc.element_type})"
-                )
-            # Dual-destination load writes two full VL registers (even/odd).
-            # Source tile is typically 2*VL elements; do not derive result
-            # VectorSSA lanes from the source origin_shape.
-            result_desc = _full_vector_ssa_descriptor(source_desc.element_type)
-        elif (
-            isinstance(params, NormalLoadParams)
-            and params.load_dist == LoadDist.DIST_BRC_B32
-        ):
-            result_desc = _full_vector_ssa_descriptor(source_desc.element_type)
-        elif is_us_b8:
-            # AscendC LoadDist::DIST_US_B8: 2x up-sample of b8 elements. The
-            # transfer reads VL/2 b8 elements and repeats each twice to fill a
-            # VL-wide b8 register, so the result is a full VL vector (i8/u8 ->
-            # 256 lanes) regardless of the source origin_shape.
-            elem = str(source_desc.element_type).strip().lower()
-            if dtype_size_bytes(elem) != 1:
-                raise TlaLoweringError(
-                    "DIST_US_B8 requires a 1-byte (b8: i8/u8) element type "
-                    f"(got {source_desc.element_type})"
-                )
-            result_desc = _full_vector_ssa_descriptor(source_desc.element_type)
-        elif is_brc_b16 or is_us_b16:
-            # AscendC LoadDist::DIST_BRC_B16 / DIST_US_B16: b16-only modes.
-            # BRC_B16 reads one b16 element and replicates it across all lanes;
-            # US_B16 reads VL/2 b16 elements and repeats each twice. Either way
-            # the result is a full VL register (f16/bf16/i16/u16 -> 128 lanes)
-            # regardless of the source origin_shape.
-            elem = str(source_desc.element_type).strip().lower()
-            if dtype_size_bytes(elem) != 2:
-                mode = "DIST_BRC_B16" if is_brc_b16 else "DIST_US_B16"
-                raise TlaLoweringError(
-                    f"{mode} requires a 2-byte (b16: f16/bf16/i16/u16) "
-                    f"element type (got {source_desc.element_type})"
-                )
-            result_desc = _full_vector_ssa_descriptor(source_desc.element_type)
-        elif is_unpack_b16:
-            # AscendC LoadDist::DIST_UNPACK_B16 (HIVMAVE UNPK_B16): b16-only
-            # unpack. The transfer reads VL/2 b16 elements and inserts one
-            # zero b16 element after each to fill a VL-wide b16 register, so
-            # the result is a full VL vector regardless of the source
-            # origin_shape.
-            elem = str(source_desc.element_type).strip().lower()
-            if dtype_size_bytes(elem) != 2:
-                raise TlaLoweringError(
-                    "DIST_UNPACK_B16 requires a 2-byte (b16: f16/bf16/i16/u16) "
-                    f"element type (got {source_desc.element_type})"
-                )
-            result_desc = _full_vector_ssa_descriptor(source_desc.element_type)
-        elif is_unpack4_b8:
-            if dtype_size_bytes(source_desc.element_type) != 1:
-                raise TlaLoweringError(
-                    "DIST_UNPACK4_B8 requires a 1-byte element type "
-                    f"(got {source_desc.element_type})"
-                )
-            result_desc = _full_vector_ssa_descriptor(source_desc.element_type)
-        elif is_e2b_b16 or is_e2b_b32:
-            # AscendC LoadDist::DIST_E2B_B16 / DIST_E2B_B32 (HIVMAVE E2B_B16 /
-            # E2B_B32): element-to-DataBlock broadcast. The transfer reads
-            # VL/DB = 8 source elements (DB = 32-byte DataBlock) and
-            # replicates each element across all lanes of its destination
-            # DataBlock, so the result is a full VL register (b16 -> 128
-            # lanes / b32 -> 64 lanes) regardless of the source origin_shape.
-            elem = str(source_desc.element_type).strip().lower()
-            mode = "DIST_E2B_B16" if is_e2b_b16 else "DIST_E2B_B32"
-            want_bytes = 2 if is_e2b_b16 else 4
-            if dtype_size_bytes(elem) != want_bytes:
-                raise TlaLoweringError(
-                    f"{mode} requires a {want_bytes}-byte element type "
-                    "(b16: f16/bf16/i16/u16; b32: f32/i32/u32; "
-                    f"got {source_desc.element_type})"
-                )
-            result_desc = _full_vector_ssa_descriptor(source_desc.element_type)
-        elif is_blk:
-            # AscendC LoadDist::DIST_BLK (HIVMAVE BLK): DataBlock broadcast.
-            # The transfer reads one 32-byte DataBlock worth of elements
-            # (b8: 32, b16: 16, b32: 8) from the tile view base and
-            # replicates it across all VL/DB (= 8) DataBlocks to fill a
-            # VL-wide register. Unlike the suffixed modes, ``blk`` works for
-            # any element size, so there is no dtype check here; the result
-            # is a full VL vector regardless of the source origin_shape.
-            result_desc = _full_vector_ssa_descriptor(source_desc.element_type)
+            result_desc = _full_vector_ssa_descriptor(elem)
         elif is_block_load:
-            # AscendC vsldb strided block load: one instruction gathers 8
-            # DataBlocks (256B) into a full VL register regardless of the
-            # source origin_shape; the tile view only supplies the address.
             result_desc = _full_vector_ssa_descriptor(source_desc.element_type)
         else:
             result_desc = _vector_ssa_type_from_tensor_descriptor(source_desc)
-
-        if str(source_desc.element_type).strip().lower() == "f8e8m0" and not (
-            isinstance(params, NormalLoadParams)
-            and params.load_dist == LoadDist.DIST_DINTLV_B8
-        ):
-            raise TlaLoweringError("E8M0 vector load requires DIST_DINTLV_B8")
 
         result_type = _coerce_type(result_desc)
         if is_dintlv:
@@ -1139,7 +1035,7 @@ class _Tensor(TensorABC):
     @dsl_user_op
     def store(
         self,
-        value: VectorSSA | MaskSSA,
+        value: VectorSSA | MaskSSA | tuple[VectorSSA, VectorSSA],
         params: StoreParams | None = None,
         *,
         mask: MaskSSA | None = None,
@@ -1150,8 +1046,10 @@ class _Tensor(TensorABC):
             Store vector or mask SSA into this UB tensor tile (`tile.store`).
 
             Parameters:
-            - `value` (`VectorSSA | MaskSSA`): `VectorSSA` or `MaskSSA` to store.
-              Required.
+            - `value` (`VectorSSA | MaskSSA | tuple[VectorSSA, VectorSSA]`):
+              `VectorSSA` or `MaskSSA` to store. For `DIST_INTLV_B8` /
+              `DIST_INTLV_B16` / `DIST_INTLV_B32`, pass a two-vector tuple
+              `(even, odd)` (same types / full VL). Required.
             - `params` (`StoreParams | None`): Store mode. Optional, default
               `None`.
               - `None` / `NormalStoreParams` / `UnalignStoreParams` /
@@ -1164,7 +1062,13 @@ class _Tensor(TensorABC):
                   | Value | Meaning |
                   |---|---|
                   | `DIST_NORM` | Default contiguous store |
+                  | `DIST_PACK_B16` | AscendC same-type PK_B16 (b16→b16, or b8→b8 after prior cast) |
+                  | `DIST_PACK_B32` | AscendC same-type PK_B32 (b32→b32, or b16→b16 after prior cast) |
+                  | `DIST_PACK_B64` | Pack the low 32 bits of i64, u64 or f64 lanes |
                   | `DIST_PACK4_B32` | Store register byte slots 0,4,...,252 to UB byte slots 0,1,...,63, subject to the mask |
+                  | `DIST_INTLV_B8` | Interleave two b8 registers into consecutive dst elements |
+                  | `DIST_INTLV_B16` | Interleave two b16 registers |
+                  | `DIST_INTLV_B32` | Interleave two b32 registers |
                   | `DIST_FIRST_ELEMENT_B8` | Write only lane 0 (1-byte) |
                   | `DIST_FIRST_ELEMENT_B16` | Write only lane 0 (2-byte) |
                   | `DIST_FIRST_ELEMENT_B32` | Write only lane 0 (4-byte) |
@@ -1190,8 +1094,8 @@ class _Tensor(TensorABC):
                 - `store_dist` (`str`): `tla.params.MaskStoreDist` token.
                   Default `DIST_NORM`.
             - `mask` (`MaskSSA | None`): Optional predicate for vector stores;
-              rejected by `MaskStoreParams` and first-element modes. Default
-              `None`. For `DIST_PACK4_B32`, masks use source lanes:
+              rejected by `UnalignStoreParams`, `MaskStoreParams`, first-element
+              and interleaved modes. Default `None`. For `DIST_PACK4_B32`, masks use source lanes:
               4/2/1 lanes per destination byte for 1/2/4-byte sources.
               An omitted mask follows the destination's valid length;
               an explicit mask is not clipped to that length. Masked-out
@@ -1200,17 +1104,29 @@ class _Tensor(TensorABC):
             Constraints:
             - Must be called inside a `@tla.kernel`-decorated kernel function.
             - Must be called inside `tla.vec.func(mode="simd")`; destination tile must be UB.
-            - `DIST_PACK4_B32` requires 1/2/4-byte source elements,
-              1-byte destination elements and a 32-byte-aligned destination address.
-              It stores at most 64 bytes, subject to the mask, without numeric
-              conversion or FP4 nibble packing. For FP32→FP8 results, use
-              `RegSlot.ZERO` to place the values in byte slots 0,4,...,252.
+            - `DIST_PACK4_B32` supports matching 4-byte element types.
+              It also supports 1/2/4-byte source elements with a 1-byte
+              destination. It writes at most 64 bytes to a 32-byte-aligned
+              address. For FP32→FP8, use `RegSlot.ZERO` to place the
+              converted values in byte slots 0,4,...,252 before storing.
+            - `DIST_PACK_B16` / `DIST_PACK_B32` / `DIST_PACK_B64` require
+              matching source and destination element types. B16 accepts
+              1- or 2-byte elements, B32 accepts 2- or 4-byte elements, and
+              B64 accepts 8-byte elements. Each destination element has room
+              for two active source lanes.
+            - `DIST_INTLV_B8` / `DIST_INTLV_B16` / `DIST_INTLV_B32` require a
+              two-vector `value` tuple of identical full-VL registers matching
+              the dest element type (b8: Bool/i8/u8/f8*/hif8/e8m0/fp4x2, b16:
+              f16/bf16/i16/u16; b32: f32/i32/u32). Predicate masks are rejected.
             - First-element modes require the stored value and the dest tile to
               use the suffix-matching element width (b8 → 1-byte, b16 → 2-byte,
               b32 → 4-byte); passing a predicate mask raises an error.
-            - `POST_MODE_UPDATE` requires a rank-1 contiguous tile,
-              `DIST_NORM`, and element type in `{f16, bf16, f32}`; returns the
-              next tile. Inside `tla.vec.func`, assign it back with
+            - `UnalignStoreParams` in NORMAL mode writes up to one vector of
+              elements using the destination's valid length. In UPDATE mode,
+              the effective stride sets both the write length and pointer advance.
+            - `POST_MODE_UPDATE` requires a rank-1 contiguous tile, `DIST_NORM`
+              and matching source and destination element types of width
+              b8/b16/b32/b64. It returns the next tile. Inside `tla.vec.func`, assign it back with
               `tla.range`. Same origin window (`coord=0`) contract as UPDATE
               `load`. `NormalStoreParams`: default `post_update_stride=0`
               advances by `tile_extent` (`origin_shape`); an explicit stride is
@@ -1264,6 +1180,9 @@ class _Tensor(TensorABC):
         _require_frontend_state("store")
         _runtime._require_enclosing_region("store", "vec.func")
 
+        if isinstance(params, UnalignStoreParams) and mask is not None:
+            raise TlaLoweringError("UnalignStoreParams does not accept mask=")
+
         dest = _as_value(self)
         dest_desc = _tla_tensor_type_for_mlir_value(dest)
         if dest_desc.addrspace.lower() != "ub":
@@ -1272,10 +1191,28 @@ class _Tensor(TensorABC):
                 "invalid argument 'dest' (position 0): expected addrspace ub, "
                 f"got {dest_desc.addrspace}",
             )
-        value_val = _as_value(value)
+
+        # Dual-source INTLV: ``tile.store((v0, v1), NormalStoreParams(...))``.
+        value2_val = None
+        if isinstance(value, (tuple, list)):
+            if len(value) != 2:
+                raise TlaLoweringError(
+                    "intlv store expects a 2-tuple of VectorSSA values "
+                    f"(got length {len(value)})"
+                )
+            _require_category("store", "value[0]", value[0], "vector_ssa", 1)
+            _require_category("store", "value[1]", value[1], "vector_ssa", 1)
+            value_val = _as_value(value[0])
+            value2_val = _as_value(value[1])
+        else:
+            value_val = _as_value(value)
 
         # MaskSSA path: selected by MaskStoreParams.
         if isinstance(params, MaskStoreParams):
+            if value2_val is not None:
+                raise TlaLoweringError(
+                    "store(..., MaskStoreParams) does not accept a dual-source tuple"
+                )
             if mask is not None:
                 raise TlaLoweringError(
                     "store(..., MaskStoreParams) does not accept predicate mask="
@@ -1292,8 +1229,8 @@ class _Tensor(TensorABC):
             if dtype_size_bytes(elem) not in _MASK_UB_ELEM_BYTES:
                 _op_error(
                     "store",
-                    f"invalid argument 'dest': expected 1/2/4-byte scalar "
-                    f"element type for MaskSSA store, got "
+                    f"invalid argument 'dest': expected b8/b16/b32/b64 "
+                    f"scalar element type for MaskSSA store, got "
                     f"{dest_desc.element_type}",
                 )
             mask_desc = _mask_ssa_type_for_mlir_value(value_val)
@@ -1309,14 +1246,15 @@ class _Tensor(TensorABC):
             _tla_ops_gen.store(dest, value_val, loc=loc)
             return None
 
-        if _tla_type_bridge.type_is_mask_ssa(value_val.type):
+        if value2_val is None and _tla_type_bridge.type_is_mask_ssa(value_val.type):
             raise TlaLoweringError(
                 "storing MaskSSA requires MaskStoreParams "
                 "(got "
                 f"{type(params).__name__ if params is not None else 'None'})"
             )
 
-        _require_category("store", "value", value, "vector_ssa", 1)
+        if value2_val is None:
+            _require_category("store", "value", value, "vector_ssa", 1)
         if mask is not None:
             _require_category("store", "mask", mask, "mask_ssa", 2)
         if params is None:
@@ -1328,18 +1266,30 @@ class _Tensor(TensorABC):
                 "store params must be NormalStoreParams, UnalignStoreParams, or "
                 f"MaskStoreParams, got {type(params).__name__}"
             )
+        is_intlv = isinstance(params, NormalStoreParams) and params.store_dist in (
+            StoreDist.DIST_INTLV_B8,
+            StoreDist.DIST_INTLV_B16,
+            StoreDist.DIST_INTLV_B32,
+        )
+        if is_intlv and value2_val is None:
+            raise TlaLoweringError(
+                f"{params.store_dist} requires a 2-tuple of VectorSSA values "
+                "(got a single value)"
+            )
+        if value2_val is not None and not is_intlv:
+            raise TlaLoweringError(
+                "dual-source store tuple is only valid with "
+                "DIST_INTLV_B8/DIST_INTLV_B16/DIST_INTLV_B32"
+            )
         if _validate_post_update_params(params):
             if isinstance(params, UnalignStoreParams):
                 # UPDATE only; ``tla-unalign-ureg`` inserts create_ureg/Post.
-                if mask is not None:
-                    raise TlaLoweringError(
-                        "UnalignStoreParams(post_mode=update) does not accept mask="
-                    )
                 window = _require_update_origin_window(self, loc=loc)
                 _require_update_unit_stride(window)
                 dest = _as_value(window)
                 elem_ty = _tla_tensor_type_for_mlir_value(dest).element_type
                 _require_update_supported_dtype(elem_ty)
+                _require_update_store_matching_dtype(value_val, elem_ty)
                 ptr_type = _tla_type_bridge.tensor_ptr_type_get(dest.type)
                 stride_val = _unalign_update_stride_value(
                     params, window, element_type=elem_ty
@@ -1411,14 +1361,76 @@ class _Tensor(TensorABC):
             isinstance(params, NormalStoreParams)
             and params.store_dist == StoreDist.DIST_PACK4_B32
         ):
-            src_elem = _vector_ssa_type_for_mlir_value(value_val).element_type
-            if (
-                dtype_size_bytes(src_elem) not in (1, 2, 4)
-                or dtype_size_bytes(dest_desc.element_type) != 1
+            src_elem = normalize_element_type_token(
+                _vector_ssa_type_for_mlir_value(value_val).element_type
+            )
+            dst_elem = normalize_element_type_token(dest_desc.element_type)
+            source_bytes = dtype_size_bytes(src_elem)
+            if not (
+                (source_bytes in (1, 2, 4) and dtype_size_bytes(dst_elem) == 1)
+                or (source_bytes == 4 and src_elem == dst_elem)
             ):
                 raise TlaLoweringError(
                     "DIST_PACK4_B32 requires a 1/2/4-byte source and a "
-                    "1-byte destination element type"
+                    "1-byte destination, or matching 4-byte element types"
+                )
+        if isinstance(params, NormalStoreParams) and params.store_dist in (
+            StoreDist.DIST_PACK_B16,
+            StoreDist.DIST_PACK_B32,
+            StoreDist.DIST_PACK_B64,
+        ):
+            src_elem = normalize_element_type_token(
+                _vector_ssa_type_for_mlir_value(value_val).element_type
+            )
+            dst_elem = normalize_element_type_token(dest_desc.element_type)
+            sizes = {
+                StoreDist.DIST_PACK_B16: (1, 2),
+                StoreDist.DIST_PACK_B32: (2, 4),
+                StoreDist.DIST_PACK_B64: (8,),
+            }[params.store_dist]
+            if src_elem != dst_elem or dtype_size_bytes(src_elem) not in sizes:
+                widths = "/".join(map(str, sizes))
+                raise TlaLoweringError(
+                    f"DIST_{params.store_dist.upper()} requires matching "
+                    f"{widths}-byte source and destination element types "
+                    f"(got source {src_elem}, dest {dst_elem})"
+                )
+        if is_intlv:
+            if mask_val is not None:
+                raise TlaLoweringError(
+                    f"{params.store_dist} does not accept a predicate mask"
+                )
+            src0 = _vector_ssa_type_for_mlir_value(value_val)
+            src1 = _vector_ssa_type_for_mlir_value(value2_val)
+            src_elem = normalize_element_type_token(src0.element_type)
+            dst_elem = normalize_element_type_token(dest_desc.element_type)
+            if (
+                src0.element_type != src1.element_type
+                or src0.valid_lanes != src1.valid_lanes
+            ):
+                raise TlaLoweringError(
+                    f"{params.store_dist} requires two identical VectorSSA sources"
+                )
+            if src_elem != dst_elem:
+                raise TlaLoweringError(
+                    f"{params.store_dist} requires matching source/dest element "
+                    f"types (got source {src_elem}, dest {dst_elem})"
+                )
+            width = {
+                StoreDist.DIST_INTLV_B8: 1,
+                StoreDist.DIST_INTLV_B16: 2,
+                StoreDist.DIST_INTLV_B32: 4,
+            }[params.store_dist]
+            if dtype_size_bytes(src_elem) != width:
+                raise TlaLoweringError(
+                    f"DIST_{params.store_dist.upper()} requires a {width}-byte "
+                    f"element type (got {src_elem})"
+                )
+            expected_lanes = 256 // width
+            if src0.valid_lanes != expected_lanes:
+                raise TlaLoweringError(
+                    f"{params.store_dist} requires two full {expected_lanes}-lane "
+                    f"vectors (got {src0.valid_lanes})"
                 )
         if isinstance(params, NormalStoreParams) and params.store_dist in (
             StoreDist.DIST_FIRST_ELEMENT_B8,
@@ -1472,31 +1484,8 @@ class _Tensor(TensorABC):
             block_stride_value = _as_value(params.block_stride)
         else:
             block_stride_value = None
-        if (
-            isinstance(params, NormalStoreParams)
-            and params.store_dist != StoreDist.DIST_NORM
-            and is_bool_element_type(dest_desc.element_type)
-        ):
-            _op_error(
-                "store",
-                "Bool VectorSSA is move-only; non-NORM store_dist is unsupported",
-            )
-        # Align with TlaOps verify: only Bool (i1) mismatches are rejected for
-        # non-remapping stores. Pack / first_element remaps widths; same-width
-        # signedness differences (e.g. i16→u16 histograms) stay allowed.
-        _remapping_store_dists = (
-            StoreDist.DIST_PACK_B16,
-            StoreDist.DIST_PACK_B32,
-            StoreDist.DIST_PACK4_B32,
-            StoreDist.DIST_FIRST_ELEMENT_B8,
-            StoreDist.DIST_FIRST_ELEMENT_B16,
-            StoreDist.DIST_FIRST_ELEMENT_B32,
-        )
-        remaps = (
-            isinstance(params, NormalStoreParams)
-            and params.store_dist in _remapping_store_dists
-        )
-        if not remaps:
+        # Keep Bool storage canonical across byte-distribution stores.
+        if not is_intlv:
             from ..types import is_bool_element_type
 
             src_elem = normalize_element_type_token(
@@ -1514,6 +1503,7 @@ class _Tensor(TensorABC):
         _tla_ops_gen.store(
             dest,
             value_val,
+            source2=value2_val,
             mask=mask_val,
             block_stride=block_stride_value,
             **store_kwargs,

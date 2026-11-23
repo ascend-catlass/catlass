@@ -9,7 +9,8 @@ from typing import Any
 
 import pytest
 import catlass.tla as tla
-from catlass.params import NormalStoreParams, UnalignStoreParams
+from catlass.params import NormalStoreParams, PostMode, UnalignStoreParams
+from catlass.execution_lowering import TlaLoweringError
 import catlass.runtime as runtime_mod  # noqa: F401
 
 
@@ -90,6 +91,26 @@ def test_store_unalign_using_params_emits_tlair(compiler_tlair: Any) -> None:
 
     assert "tla.store" in mlir
     assert "unaligned_ub_access" in mlir
+
+
+@pytest.mark.parametrize(
+    "post_mode", [PostMode.POST_MODE_NORMAL, PostMode.POST_MODE_UPDATE]
+)
+def test_store_unalign_rejects_predicate(compiler_tlair: Any, post_mode: str) -> None:
+    @tla.kernel
+    def store_unalign_masked(dst: tla.Tensor) -> None:
+        dst_tile = tla.tile_view(dst, tla.make_shape(64), tla.make_coord(0))
+        with tla.vector():
+            with tla.vec.func(mode="simd"):
+                mask, _ = tla.update_mask(1, dtype=tla.Float32)
+                dst_tile.store(
+                    tla.full(1.0, tla.Float32),
+                    UnalignStoreParams(post_mode=post_mode),
+                    mask=mask,
+                )
+
+    with pytest.raises(TlaLoweringError, match="UnalignStoreParams does not accept mask="):
+        compiler_tlair(store_unalign_masked, type_args=(_ub_tensor(),))
 
 
 def test_store_normal_using_params_emits_tlair(compiler_tlair: Any) -> None:

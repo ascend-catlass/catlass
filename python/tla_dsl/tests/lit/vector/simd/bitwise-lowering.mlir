@@ -116,14 +116,14 @@ module {
         %reg_bitwise_or = "tla.bitwise_or"(%reg_bitwise_or_all, %reg1, %all) : (!tla.vector<64xi32>, !tla.vector<64xi32>, !tla.mask<64>) -> !tla.vector<64xi32>
         %reg_bitwise_xor_all = "tla.bitwise_xor"(%reg0, %reg1) : (!tla.vector<64xi32>, !tla.vector<64xi32>) -> !tla.vector<64xi32>
         %reg_bitwise_xor = "tla.bitwise_xor"(%reg_bitwise_xor_all, %reg1, %all) : (!tla.vector<64xi32>, !tla.vector<64xi32>, !tla.mask<64>) -> !tla.vector<64xi32>
-        "tla.store"(%dst_mask_not_tile, %out_mask_not) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!vec, !tla.vector<64xi32>) -> ()
-        "tla.store"(%dst_mask_and_tile, %out_mask_and) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!vec, !tla.vector<64xi32>) -> ()
-        "tla.store"(%dst_mask_or_tile, %out_mask_or) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!vec, !tla.vector<64xi32>) -> ()
-        "tla.store"(%dst_mask_xor_tile, %out_mask_xor) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!vec, !tla.vector<64xi32>) -> ()
-        "tla.store"(%dst_reg_not_tile, %reg_bitwise_not) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!vec, !tla.vector<64xi32>) -> ()
-        "tla.store"(%dst_reg_and_tile, %reg_bitwise_and) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!vec, !tla.vector<64xi32>) -> ()
-        "tla.store"(%dst_reg_or_tile, %reg_bitwise_or) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!vec, !tla.vector<64xi32>) -> ()
-        "tla.store"(%dst_reg_xor_tile, %reg_bitwise_xor) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!vec, !tla.vector<64xi32>) -> ()
+        "tla.store"(%dst_mask_not_tile, %out_mask_not) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!vec, !tla.vector<64xi32>) -> ()
+        "tla.store"(%dst_mask_and_tile, %out_mask_and) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!vec, !tla.vector<64xi32>) -> ()
+        "tla.store"(%dst_mask_or_tile, %out_mask_or) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!vec, !tla.vector<64xi32>) -> ()
+        "tla.store"(%dst_mask_xor_tile, %out_mask_xor) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!vec, !tla.vector<64xi32>) -> ()
+        "tla.store"(%dst_reg_not_tile, %reg_bitwise_not) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!vec, !tla.vector<64xi32>) -> ()
+        "tla.store"(%dst_reg_and_tile, %reg_bitwise_and) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!vec, !tla.vector<64xi32>) -> ()
+        "tla.store"(%dst_reg_or_tile, %reg_bitwise_or) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!vec, !tla.vector<64xi32>) -> ()
+        "tla.store"(%dst_reg_xor_tile, %reg_bitwise_xor) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!vec, !tla.vector<64xi32>) -> ()
       }) {mode = "simd"} : () -> ()
     }) : () -> ()
     return

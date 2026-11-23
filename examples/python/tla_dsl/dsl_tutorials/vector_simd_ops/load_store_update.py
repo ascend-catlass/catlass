@@ -8,18 +8,22 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 # -----------------------------------------------------------------------------------------------------------
 
-"""PostMode UPDATE e2e: aligned ``tile.load`` / ``tile.store`` (``vldsx1.post`` / ``vstsx1.post``).
+"""PostMode UPDATE e2e: aligned ``tile.load`` / ``tile.store``.
 
-``add`` — full trips unmasked; when ``VECTOR_ELE % VL != 0``, one epilogue
-``update_mask(tail)``. ``--dynamic-extent`` — tile extent is a kernel ``index``.
-``--stride-geoms`` — Align decoupling: overlap (``stride < VL``) and hole
-(``stride > VL``); expects VL-fill with ``post_update_stride`` advance.
+* ``add`` — arithmetic dtypes with GM↔UB (b8/b16/b32 + f16/bf16/f32).
+* ``copy`` — byte encodings that UPDATE can move but not ``add``
+  (f8e4m3fn/f8e5m2/f8e8m0/fp4x2); host buffers are uint8 + ``element_type``.
+
+b64 (i64/u64) and ``hif8`` stay frontend UT: no GM↔UB route for those types.
+Default ``post_update_stride=0`` advances by the tile extent (= VL);
+tail uses ``update_mask``. Also ``--dynamic-extent`` / ``--stride-geoms`` (f32).
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -40,9 +44,30 @@ VL_ELE = 64
 STRIDE_ELE = 64
 GEOM_LOOPS = 3
 LOOPS = (VECTOR_ELE + VL_ELE - 1) // VL_ELE
-ALL_DTYPES = ("f32",)
+# Arithmetic UPDATE e2e (GM↔UB + add).
+ADD_DTYPES = (
+    "i8",
+    "u8",
+    "i16",
+    "u16",
+    "f16",
+    "bf16",
+    "i32",
+    "u32",
+    "f32",
+)
+# Move-only UPDATE e2e (GM↔UB as bytes + load/store UPDATE, no add).
+# hif8 omitted: dma.cpp has no GM↔UB registration for it.
+COPY_DTYPES = (
+    "f8e4m3fn",
+    "f8e5m2",
+    "f8e8m0",
+    "f4e2m1x2",
+    "f4e1m2x2",
+)
+ALL_DTYPES = ADD_DTYPES + COPY_DTYPES
+FLOAT_DTYPES = frozenset({"f16", "bf16", "f32"})
 SENTINEL = -7.0
-
 _KERNEL_DTYPE = tla.Float32
 _KERNEL_ELEMENT_BYTES = 4
 _KERNEL_SHAPE = (VECTOR_ELE,)
@@ -186,8 +211,53 @@ def load_store_update_stride_geom_op(
         tla.pipe_barrier(tla.pipes.ALL)
 
 
+@tla.kernel
+def load_store_update_copy_op(mem_x: tla.Tensor, mem_z: tla.Tensor) -> None:
+    """UPDATE load/store memcpy for move-only encodings (no arithmetic)."""
+    ub_loaded = tla.flag("ub_loaded", tla.arch.MTE2, tla.arch.VECTOR)
+    vec_done = tla.flag("vec_done", tla.arch.VECTOR, tla.arch.MTE3)
+
+    x_gm = tla.tile_view(mem_x, tla.make_shape(VECTOR_ELE), tla.make_coord(0))
+    z_gm = tla.tile_view(mem_z, tla.make_shape(VECTOR_ELE), tla.make_coord(0))
+
+    x_ub = tla.make_tensor_like(
+        tla.allocate(VECTOR_ELE, _KERNEL_DTYPE, tla.AddressSpace.ub, 256),
+        x_gm,
+        tla.arch.RowMajor,
+    )
+    z_ub = tla.make_tensor_like(
+        tla.allocate(VECTOR_ELE, _KERNEL_DTYPE, tla.AddressSpace.ub, 256),
+        z_gm,
+        tla.arch.RowMajor,
+    )
+
+    with tla.vector():
+        tla.copy(x_ub, x_gm)
+        tla.set_flag(ub_loaded)
+        tla.wait_flag(ub_loaded)
+        with tla.vec.func(mode="simd"):
+            full_loops = VECTOR_ELE // VL_ELE
+            tail_elems = VECTOR_ELE % VL_ELE
+            x_tile = tla.tile_view(x_ub, tla.make_shape(VL_ELE), tla.make_coord(0))
+            z_tile = tla.tile_view(z_ub, tla.make_shape(VL_ELE), tla.make_coord(0))
+            for _ in tla.range(full_loops):
+                x_reg, x_tile = x_tile.load(_LOAD_U)
+                z_tile = z_tile.store(x_reg, _STORE_U)
+            if tail_elems != 0:
+                x_tail, x_tile = x_tile.load(_LOAD_U)
+                tail, _ = tla.update_mask(tail_elems, dtype=_KERNEL_DTYPE)
+                z_tile = z_tile.store(x_tail, _STORE_U, mask=tail)
+        tla.set_flag(vec_done)
+        tla.wait_flag(vec_done)
+        tla.copy(z_gm, z_ub)
+        tla.pipe_barrier(tla.pipes.ALL)
+
+
 def _operator_specs() -> dict[str, dict[str, Any]]:
-    return {"add": {"op": "add", "dtypes": ALL_DTYPES, "default_atol": 1e-4}}
+    return {
+        "add": {"op": "add", "dtypes": ADD_DTYPES, "default_atol": 1e-4},
+        "copy": {"op": "copy", "dtypes": COPY_DTYPES, "default_atol": 0.0},
+    }
 
 
 def _set_kernel_config(
@@ -235,22 +305,75 @@ def _expected_stride_geom(x: Any, y: Any, z_sentinel: Any) -> Any:
     return z
 
 
-def _make_inputs(args: Any, dtype_name: str, torch: Any) -> tuple[Any, Any]:
-    _set_kernel_config("add", dtype_name, args.shape)
-    dtype = vector_kernel_config(dtype_name, args.shape, ALL_DTYPES).torch_dtype
-    x = torch.arange(VECTOR_ELE, dtype=dtype, device="npu") + 1
-    y = (torch.arange(VECTOR_ELE, dtype=dtype, device="npu") * 0.5) + 2
+def _make_inputs(args: Any, dtype_name: str, torch: Any) -> tuple[Any, ...]:
+    op = getattr(args, "op", "add")
+    _, dtype, _ = _set_kernel_config(op, dtype_name, args.shape)
+    if dtype is None:
+        raise RuntimeError(
+            f"torch dtype unavailable for op={op!r} dtype={dtype_name!r}"
+        )
+    if op == "copy" or dtype_name in COPY_DTYPES:
+        # CPU uint8 then .to(npu): NPU arange/zeros reject uint8.
+        x = ((torch.arange(VECTOR_ELE) % 17) + 1).to(torch.uint8).to("npu")
+        return (x,)
+    # Keep integer add inside a small range so b8/u8 cannot wrap.
+    # Arithmetic before .to(dtype): torch_npu lacks aclnnAdds for uint32
+    # (DT_UINT32 / 161002) — casting first then ``+ 1`` never reaches the kernel.
+    x = ((torch.arange(VECTOR_ELE, device="npu") % 17) + 1).to(dtype)
+    if dtype_name in FLOAT_DTYPES:
+        y = (torch.arange(VECTOR_ELE, device="npu").to(torch.float32) * 0.5 + 2).to(
+            dtype
+        )
+    else:
+        y = ((torch.arange(VECTOR_ELE, device="npu") % 13) + 2).to(dtype)
     return x, y
 
 
 def _expected(_op_name: str, inputs: tuple[Any, ...]) -> Any:
+    if _op_name == "copy":
+        return inputs[0].clone()
     x, y = inputs
+    # torch / torch_npu lack unsigned elementwise add for several dtypes
+    # (e.g. uint16 on CPU, uint32 on NPU). Promote via int64; example values
+    # stay small enough that wraparound is not in play.
+    import torch
+
+    if x.dtype in (torch.uint8, torch.uint16, torch.uint32, torch.uint64):
+        return (x.to(torch.int64) + y.to(torch.int64)).to(dtype=x.dtype)
     return x + y
 
 
-HARNESS = DirectVectorOpHarness(
+def _unsupported_case(op_name: str, dtype_name: str) -> bool:
+    if op_name == "add":
+        return dtype_name in COPY_DTYPES
+    if op_name == "copy":
+        return dtype_name not in COPY_DTYPES
+    return True
+
+
+class _UpdateHarness(DirectVectorOpHarness):
+    """Swap kernel / input_count for ``add`` vs move-only ``copy``."""
+
+    def _run_single_case(self, args: Any, dtype_name: str, torch: Any) -> int:
+        saved = self.config
+        if args.op == "copy":
+            self.config = replace(
+                saved, kernel=load_store_update_copy_op, input_count=1
+            )
+        else:
+            self.config = replace(saved, kernel=load_store_update_op, input_count=2)
+        try:
+            return super()._run_single_case(args, dtype_name, torch)
+        finally:
+            self.config = saved
+
+
+HARNESS = _UpdateHarness(
     DirectVectorOpConfig(
-        description="PostMode UPDATE load/store sliding-window add E2E",
+        description=(
+            "PostMode UPDATE e2e: add (arith dtypes) / copy (f8/e8m0/fp4x2); "
+            "b64/hif8 via frontend UT"
+        ),
         kernel=load_store_update_op,
         all_dtypes=ALL_DTYPES,
         operator_specs=_operator_specs,
@@ -259,10 +382,10 @@ HARNESS = DirectVectorOpHarness(
         get_kernel_shape=lambda: _KERNEL_SHAPE,
         make_inputs=_make_inputs,
         expected=_expected,
-        unsupported_case=lambda _o, _d: False,
+        unsupported_case=_unsupported_case,
         print_skip=lambda o, d, s: print(f"skip op={o} dtype={d} shape={s}"),
         script_path=Path(__file__).resolve(),
-        float_dtypes=frozenset({"f32"}),
+        float_dtypes=FLOAT_DTYPES,
         input_count=2,
     )
 )

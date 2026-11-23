@@ -31,9 +31,9 @@ module {
       %h1 = "tla.histograms"(%v0, %acc1, %mask) <{mode = #tla.histograms_bin<bin1>, histType = #tla.histograms_type<accumulate>}> : (!tla.vector<256xi8>, !tla.vector<128xi16>, !tla.mask<256>) -> !tla.vector<128xi16>
       %h2 = "tla.histograms"(%v0, %acc2, %mask) <{mode = #tla.histograms_bin<bin0>, histType = #tla.histograms_type<frequency>}> : (!tla.vector<256xi8>, !tla.vector<128xi16>, !tla.mask<256>) -> !tla.vector<128xi16>
       %h3 = "tla.histograms"(%v0, %h2, %mask) <{mode = #tla.histograms_bin<bin1>, histType = #tla.histograms_type<frequency>}> : (!tla.vector<256xi8>, !tla.vector<128xi16>, !tla.mask<256>) -> !tla.vector<128xi16>
-      "tla.store"(%dst_tile, %h0) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!i16vec, !tla.vector<128xi16>) -> ()
-      "tla.store"(%dst_tile, %h1) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!i16vec, !tla.vector<128xi16>) -> ()
-      "tla.store"(%dst_tile, %h3) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!i16vec, !tla.vector<128xi16>) -> ()
+      "tla.store"(%dst_tile, %h0) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!i16vec, !tla.vector<128xi16>) -> ()
+      "tla.store"(%dst_tile, %h1) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!i16vec, !tla.vector<128xi16>) -> ()
+      "tla.store"(%dst_tile, %h3) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!i16vec, !tla.vector<128xi16>) -> ()
     }) {mode = "simd"} : () -> ()
     return
   }

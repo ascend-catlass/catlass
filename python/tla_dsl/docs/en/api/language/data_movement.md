@@ -317,7 +317,7 @@ Parameters:
       | `DIST_BRC_B32` | Broadcast one b32 element to all lanes |
       | `DIST_DINTLV_B8` | Load 512 bytes; even/odd b8 elements fill two 256-lane vectors |
       | `DIST_DINTLV_B16` | Load 512 bytes; return two 128-lane b16 registers, even positions first and odd positions second |
-      | `DIST_DINTLV_B32` | f32 deinterleave; dual results |
+      | `DIST_DINTLV_B32` | b32 deinterleave (f32/i32/u32); dual results |
       | `DIST_US_B8` / `DIST_US_B16` | 2x up-sample |
       | `DIST_DS_B8` / `DIST_DS_B16` | Load 512 bytes and retain every other b8/b16 element into one full vector |
       | `DIST_BRC_B16` | Broadcast one b16 element |
@@ -361,13 +361,11 @@ Constraints:
 - Must be called inside a `@tla.kernel`-decorated kernel function.
 - Must be called inside `tla.vec.func(mode="simd")`; source tile must be UB.
 - The actual read range must stay within the usable UB address space.
-- Mask load ``DIST_NORM`` requires a 1/2/4-byte scalar UB element type.
-- Distribution modes fix the element width: `DIST_US_B8` needs
-  i8/u8; `DIST_BRC_B16` / `DIST_US_B16` / `DIST_UNPACK_B16` /
-  `DIST_E2B_B16` need 2-byte (f16/bf16/i16/u16); `DIST_E2B_B32`
-  needs 4-byte (f32/i32/u32); `DIST_DINTLV_B16` needs 2-byte
-  (f16/bf16/i16/u16); `DIST_DINTLV_B32` needs f32;
-  `DIST_BLK` works for any element size.
+- Mask load ``DIST_NORM`` requires a b8/b16/b32/b64 scalar UB element type.
+- Each width-suffixed distribution requires the corresponding
+  element storage width. b8 includes Bool and byte encodings.
+  `DIST_BLK` supports b8/b16/b32. For b64, use `DIST_NORM`
+  or a full 32-lane `UnalignLoadParams` load.
 - `DIST_DINTLV_B8` supports i8/u8/f8E4M3FN/f8E5M2/HiFloat8/E8M0 and packed
   Float4E2M1x2/Float4E1M2x2. Each register
   holds 256 one-byte elements; one load reads `2 * 256 = 512` bytes
@@ -380,13 +378,14 @@ Constraints:
   without changing their two nibbles; each result holds 256 packed
   elements (512 FP4 values). E8M0 is transported as raw bytes, including
   the 0xFF NaN encoding, and can be written back with a normal aligned
-  store; arithmetic and register casts are unsupported. Logical FP4
-  and Bool are not supported by this distribution.
+  store; arithmetic and register casts are unsupported. Logical
+  (unpacked) FP4 is not supported. Bool is supported as b8
+  move-only transport (same as i8).
 - `DIST_DINTLV_B16` requires a 32-byte-aligned source address.
 - `DIST_UNPACK4_B8` requires a 1-byte element type and a
   32-byte-aligned source address.
 - `DIST_BRC_B8` / `DIST_DS_B8` / `DIST_UNPACK_B8` support
-  i8/u8/f8E4M3FN/f8E5M2; `DIST_DS_B16` supports
+  Bool/i8/u8/f8E4M3FN/f8E5M2/hif8/f8e8m0/fp4x2; `DIST_DS_B16` supports
   f16/bf16/i16/u16; `DIST_UNPACK_B32` supports f32/i32/u32.
   These modes preserve the source element type and produce full
   256-byte vector registers.
@@ -407,7 +406,9 @@ Constraints:
   ``DIST_US`` → ``VL/16``; ``DIST_DS`` → ``min(32, VL/4)``.
   On VL=256 this is 32B / 16B / 32B.
 - `POST_MODE_UPDATE` requires a rank-1 contiguous tile,
-  `DIST_NORM`, and element type in `{f16, bf16, f32}`. Returns
+  `DIST_NORM`, and element type of width b8/b16/b32/b64
+  (Bool, i/u integers, FP8, HiFloat8, E8M0, FP4x2, f16, bf16,
+  f32 and f64). Returns
   `(vector, next_tile)`. Inside `tla.vec.func`, assign
   `next_tile` back with `tla.range` (`while` is not supported
   nested in `vec.func`). The window must already be an origin
@@ -452,13 +453,15 @@ Store vector or mask SSA into this UB tensor tile (`tile.store`).
 Prototype:
 
 ```python
-tla.Tensor.store(value: VectorSSA | MaskSSA, params: StoreParams | None = None, *, mask: MaskSSA | None = None) -> _Tensor | None
+tla.Tensor.store(value: VectorSSA | MaskSSA | tuple[VectorSSA, VectorSSA], params: StoreParams | None = None, *, mask: MaskSSA | None = None) -> _Tensor | None
 ```
 
 Parameters:
 
-- `value` (`VectorSSA | MaskSSA`): `VectorSSA` or `MaskSSA` to store.
-  Required.
+- `value` (`VectorSSA | MaskSSA | tuple[VectorSSA, VectorSSA]`):
+  `VectorSSA` or `MaskSSA` to store. For `DIST_INTLV_B8` /
+  `DIST_INTLV_B16` / `DIST_INTLV_B32`, pass a two-vector tuple
+  `(even, odd)` (same types / full VL). Required.
 - `params` (`StoreParams | None`): Store mode. Optional, default
   `None`.
   - `None` / `NormalStoreParams` / `UnalignStoreParams` /
@@ -471,7 +474,13 @@ Parameters:
       | Value | Meaning |
       |---|---|
       | `DIST_NORM` | Default contiguous store |
+      | `DIST_PACK_B16` | AscendC same-type PK_B16 (b16→b16, or b8→b8 after prior cast) |
+      | `DIST_PACK_B32` | AscendC same-type PK_B32 (b32→b32, or b16→b16 after prior cast) |
+      | `DIST_PACK_B64` | Pack the low 32 bits of i64, u64 or f64 lanes |
       | `DIST_PACK4_B32` | Store register byte slots 0,4,...,252 to UB byte slots 0,1,...,63, subject to the mask |
+      | `DIST_INTLV_B8` | Interleave two b8 registers into consecutive dst elements |
+      | `DIST_INTLV_B16` | Interleave two b16 registers |
+      | `DIST_INTLV_B32` | Interleave two b32 registers |
       | `DIST_FIRST_ELEMENT_B8` | Write only lane 0 (1-byte) |
       | `DIST_FIRST_ELEMENT_B16` | Write only lane 0 (2-byte) |
       | `DIST_FIRST_ELEMENT_B32` | Write only lane 0 (4-byte) |
@@ -497,8 +506,8 @@ Parameters:
     - `store_dist` (`str`): `tla.params.MaskStoreDist` token.
       Default `DIST_NORM`.
 - `mask` (`MaskSSA | None`): Optional predicate for vector stores;
-  rejected by `MaskStoreParams` and first-element modes. Default
-  `None`. For `DIST_PACK4_B32`, masks use source lanes:
+  rejected by `UnalignStoreParams`, `MaskStoreParams`, first-element
+  and interleaved modes. Default `None`. For `DIST_PACK4_B32`, masks use source lanes:
   4/2/1 lanes per destination byte for 1/2/4-byte sources.
   An omitted mask follows the destination's valid length;
   an explicit mask is not clipped to that length. Masked-out
@@ -508,17 +517,29 @@ Constraints:
 
 - Must be called inside a `@tla.kernel`-decorated kernel function.
 - Must be called inside `tla.vec.func(mode="simd")`; destination tile must be UB.
-- `DIST_PACK4_B32` requires 1/2/4-byte source elements,
-  1-byte destination elements and a 32-byte-aligned destination address.
-  It stores at most 64 bytes, subject to the mask, without numeric
-  conversion or FP4 nibble packing. For FP32→FP8 results, use
-  `RegSlot.ZERO` to place the values in byte slots 0,4,...,252.
+- `DIST_PACK4_B32` supports matching 4-byte element types.
+  It also supports 1/2/4-byte source elements with a 1-byte
+  destination. It writes at most 64 bytes to a 32-byte-aligned
+  address. For FP32→FP8, use `RegSlot.ZERO` to place the
+  converted values in byte slots 0,4,...,252 before storing.
+- `DIST_PACK_B16` / `DIST_PACK_B32` / `DIST_PACK_B64` require
+  matching source and destination element types. B16 accepts
+  1- or 2-byte elements, B32 accepts 2- or 4-byte elements, and
+  B64 accepts 8-byte elements. Each destination element has room
+  for two active source lanes.
+- `DIST_INTLV_B8` / `DIST_INTLV_B16` / `DIST_INTLV_B32` require a
+  two-vector `value` tuple of identical full-VL registers matching
+  the dest element type (b8: Bool/i8/u8/f8*/hif8/e8m0/fp4x2, b16:
+  f16/bf16/i16/u16; b32: f32/i32/u32). Predicate masks are rejected.
 - First-element modes require the stored value and the dest tile to
   use the suffix-matching element width (b8 → 1-byte, b16 → 2-byte,
   b32 → 4-byte); passing a predicate mask raises an error.
-- `POST_MODE_UPDATE` requires a rank-1 contiguous tile,
-  `DIST_NORM`, and element type in `{f16, bf16, f32}`; returns the
-  next tile. Inside `tla.vec.func`, assign it back with
+- `UnalignStoreParams` in NORMAL mode writes up to one vector of
+  elements using the destination's valid length. In UPDATE mode,
+  the effective stride sets both the write length and pointer advance.
+- `POST_MODE_UPDATE` requires a rank-1 contiguous tile, `DIST_NORM`
+  and matching source and destination element types of width
+  b8/b16/b32/b64. It returns the next tile. Inside `tla.vec.func`, assign it back with
   `tla.range`. Same origin window (`coord=0`) contract as UPDATE
   `load`. `NormalStoreParams`: default `post_update_stride=0`
   advances by `tile_extent` (`origin_shape`); an explicit stride is

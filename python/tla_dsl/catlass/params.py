@@ -157,9 +157,13 @@ class StoreDist:
     DIST_PACK_B32 = "pack_b32"
     DIST_PACK_B16 = "pack_b16"
     DIST_PACK4_B32 = "pack4_b32"
+    DIST_PACK_B64 = "pack_b64"
     DIST_FIRST_ELEMENT_B8 = "first_element_b8"
     DIST_FIRST_ELEMENT_B16 = "first_element_b16"
     DIST_FIRST_ELEMENT_B32 = "first_element_b32"
+    DIST_INTLV_B8 = "intlv_b8"
+    DIST_INTLV_B16 = "intlv_b16"
+    DIST_INTLV_B32 = "intlv_b32"
 
 
 class MaskStoreDist:
@@ -192,9 +196,12 @@ class NormalStoreParams(StoreParams):
 class UnalignStoreParams(StoreParams):
     """Unaligned UB vector store (lowers with ``unaligned_ub_access``).
 
+    Predicate masks are unsupported. In NORMAL mode, the destination's valid
+    length selects the number of elements to write, up to one vector.
+
     With ``post_mode=update``, ``post_update_stride=0`` (default) advances by
     ``tile_extent`` (``origin_shape``). The effective stride (default or
-    explicit) is used as HIVM ``$eleSize`` / pointer advance and must be in
+    explicit) selects the write length and pointer advance and must be in
     ``(0, VL]`` (element count for the dtype); overlapping / dirty writes are
     the caller's responsibility.
     Returns the next-window tile (from the HW post-update pointer).
@@ -289,7 +296,7 @@ class BlockLoadParams(LoadParams):
 class MaskLoadParams(LoadParams):
     """Continuous-aligned MaskSSA load via ``tile.load``.
 
-    - ``DIST_NORM``: UB element is a 1/2/4-byte scalar; predicate width
+    - ``DIST_NORM``: UB element is a 1/2/4/8-byte scalar; predicate width
       ``!tla.mask<N>`` is ``N = 256 / sizeof(T)`` (same rule as
       ``create_mask``).
     - ``DIST_US`` / ``DIST_DS``: UB element type may be any b8/b16/b32/b64

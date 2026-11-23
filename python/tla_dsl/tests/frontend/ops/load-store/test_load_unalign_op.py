@@ -214,17 +214,6 @@ def load_dintlv_b32_wrong_dtype_kernel(src: tla.Tensor, dst: tla.Tensor) -> None
             dst_tile.store(v0)
 
 
-def test_load_dintlv_b32_rejects_non_f32(compiler_tlair: Any) -> None:
-    with pytest.raises(Exception, match="f32|DIST_DINTLV_B32"):
-        compiler_tlair(
-            load_dintlv_b32_wrong_dtype_kernel,
-            type_args=(
-                _ub_tensor(dtype=tla.Float16, extent=256),
-                _ub_tensor(dtype=tla.Float16, extent=128),
-            ),
-        )
-
-
 @tla.kernel
 def load_dintlv_b32_i32_kernel(
     src: tla.Tensor,
@@ -241,14 +230,26 @@ def load_dintlv_b32_i32_kernel(
             dst1_tile.store(v1)
 
 
-def test_load_dintlv_b32_rejects_i32(compiler_tlair: Any) -> None:
-    with pytest.raises(Exception, match="f32|DIST_DINTLV_B32"):
+def test_load_dintlv_b32_supports_i32(compiler_tlair: Any) -> None:
+    """AscendC DINTLV_B32 is b32-width; i32/u32 share the u32 mover with f32."""
+    mlir = compiler_tlair(
+        load_dintlv_b32_i32_kernel,
+        type_args=(
+            _ub_tensor(dtype=tla.Int32, extent=128),
+            _ub_tensor(dtype=tla.Int32, extent=64),
+            _ub_tensor(dtype=tla.Int32, extent=64),
+        ),
+    )
+    assert "#tla.load_dist<dintlv_b32>" in mlir
+
+
+def test_load_dintlv_b32_rejects_non_b32(compiler_tlair: Any) -> None:
+    with pytest.raises(Exception, match="f32/i32/u32|DIST_DINTLV_B32"):
         compiler_tlair(
-            load_dintlv_b32_i32_kernel,
+            load_dintlv_b32_wrong_dtype_kernel,
             type_args=(
-                _ub_tensor(dtype=tla.Int32, extent=128),
-                _ub_tensor(dtype=tla.Int32, extent=64),
-                _ub_tensor(dtype=tla.Int32, extent=64),
+                _ub_tensor(dtype=tla.Float16, extent=256),
+                _ub_tensor(dtype=tla.Float16, extent=128),
             ),
         )
 

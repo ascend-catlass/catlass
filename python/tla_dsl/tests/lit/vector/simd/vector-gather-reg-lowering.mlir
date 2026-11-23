@@ -29,7 +29,7 @@ module {
       %v0 = "tla.load"(%src_tile) <{operandSegmentSizes = array<i32: 1, 0, 0>}> : (!hvec) -> !tla.vector<128xf16>
       %v1 = "tla.load"(%idx_tile) <{operandSegmentSizes = array<i32: 1, 0, 0>}> : (!i16vec) -> !tla.vector<128xi16>
       %v2 = "tla.gather"(%v0, %v1) : (!tla.vector<128xf16>, !tla.vector<128xi16>) -> !tla.vector<128xf16>
-      "tla.store"(%dst_tile, %v2) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!hvec, !tla.vector<128xf16>) -> ()
+      "tla.store"(%dst_tile, %v2) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!hvec, !tla.vector<128xf16>) -> ()
     }) {mode = "simd"} : () -> ()
     return
   }
@@ -53,7 +53,7 @@ module {
       %v0 = "tla.load"(%src_tile) <{operandSegmentSizes = array<i32: 1, 0, 0>}> : (!fvec) -> !tla.vector<64xf32>
       %v1 = "tla.load"(%idx_tile) <{operandSegmentSizes = array<i32: 1, 0, 0>}> : (!i32vec) -> !tla.vector<64xi32>
       %v2 = "tla.gather"(%v0, %v1) : (!tla.vector<64xf32>, !tla.vector<64xi32>) -> !tla.vector<64xf32>
-      "tla.store"(%dst_tile, %v2) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!fvec, !tla.vector<64xf32>) -> ()
+      "tla.store"(%dst_tile, %v2) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!fvec, !tla.vector<64xf32>) -> ()
     }) {mode = "simd"} : () -> ()
     return
   }

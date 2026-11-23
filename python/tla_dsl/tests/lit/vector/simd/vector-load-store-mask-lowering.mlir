@@ -5,6 +5,8 @@
 !mask_b32 = !tla.tensor<!tla.layout<!tla.shape<2>, !tla.stride<1>, !tla.shape<2>, RowMajor>, !tla.coord<0>, !tla.ptr<i32, ub, 4>>
 !fvec = !tla.tensor<!tla.layout<!tla.shape<64>, !tla.stride<1>, !tla.shape<64>, RowMajor>, !tla.coord<0>, !tla.ptr<f32, ub, 4>>
 
+!mask_b64 = !tla.tensor<!tla.layout<!tla.shape<4>, !tla.stride<1>, !tla.shape<4>, RowMajor>, !tla.coord<0>, !tla.ptr<i64, ub, 8>>
+
 module {
   func.func @load_store_mask_b8(
       %mask_memref: memref<8xi8, #hivm.address_space<ub>>,
@@ -104,6 +106,18 @@ module {
     }) : () -> ()
     return
   }
+  func.func @load_store_mask_b64(%buffer: memref<4xi64, #hivm.address_space<ub>>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c4 = arith.constant 4 : index
+    %tile = tla.tensor_desc %buffer shape [%c1, %c4, %c1, %c1] stride [%c4, %c1, %c1, %c1] origin_shape [%c1, %c4] coord [%c0, %c0] : memref<4xi64, #hivm.address_space<ub>> -> !mask_b64
+    "tla.vec.func"() ({
+      %loaded = tla.load %tile : !mask_b64 -> !tla.mask<32>
+      tla.store %tile, %loaded : !mask_b64, !tla.mask<32>
+    }) : () -> ()
+    return
+  }
+
 }
 
 // CHECK-LABEL: func.func @load_store_mask_b8
@@ -130,3 +144,11 @@ module {
 // CHECK-SAME: memref<64xi1
 // CHECK: ave.hir.vload <NORM>
 // CHECK-SAME: memref<64xi1
+
+// CHECK-LABEL: func.func @load_store_mask_b64
+// CHECK-LABEL: func.func private @vector_region_
+// CHECK: hivm.hir.pointer_cast
+// CHECK: ave.hir.vload
+// CHECK-SAME: vector<32xi1>
+// CHECK: ave.hir.masked_store
+// CHECK-SAME: vector<32xi1>

@@ -26,8 +26,8 @@ module {
     return
   }
 
-  // The source has 10 valid lanes and the destination has 20. An omitted
-  // unaligned-store mask is destination-defined, so it must use 20 lanes.
+  // The source has 10 valid lanes and the destination has 20. The unaligned
+  // store uses the destination extent of 20 lanes.
   func.func @vector_store_unalign_source_dest_tail(
       %src_memref: memref<64xf32, #hivm.address_space<ub>>,
       %dst_memref: memref<64xf32, #hivm.address_space<ub>>) {
@@ -52,13 +52,11 @@ module {
 
 // CHECK-LABEL: func.func private @vector_region_
 // CHECK: ave.hir.vload
-// CHECK: ave.hir.plt
-// CHECK: ave.hir.masked_store
-// CHECK: ave.unaligned_ub_access
+// CHECK: "hivm_regbaseintrins.intr.hivm.init.vector.align.data"
+// CHECK: "hivm_regbaseintrins.intr.hivm.vstus.post.f32"
+// CHECK: "hivm_regbaseintrins.intr.hivm.vstas"
 // CHECK-NOT: tla.store
 
 // CHECK-LABEL: func.func private @vector_region_
 // CHECK: arith.constant 20 : index
-// CHECK: %[[DEST_TAIL:.*]], %{{.*}} = ave.hir.plt {{.*}} : vector<256xi1>
-// CHECK: ave.hir.masked_store {{.*}}, %[[DEST_TAIL]],
-// CHECK: ave.unaligned_ub_access
+// CHECK: "hivm_regbaseintrins.intr.hivm.vstus.post.f32"

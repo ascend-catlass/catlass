@@ -18,7 +18,14 @@ import pytest
 
 import catlass.tla as tla
 from catlass.execution_lowering import TlaLoweringError, UnsupportedExecutionLowering
-from catlass.params import NormalLoadParams, NormalStoreParams, PostMode
+from catlass.params import (
+    NormalLoadParams,
+    NormalStoreParams,
+    PostMode,
+    UnalignLoadParams,
+    UnalignStoreParams,
+)
+from catlass.runtime import TlaCoreAPIError
 from catlass.tla.runtime import make_fake_tensor
 
 _LOAD_UPD = NormalLoadParams(post_mode=PostMode.POST_MODE_UPDATE)
@@ -58,15 +65,11 @@ def load_post_update_stride_kernel(src: tla.Tensor, dst: tla.Tensor) -> None:
     dst_tile = tla.tile_view(dst, tla.make_shape(64), tla.make_coord(0))
     with tla.vector():
         with tla.vec.func(mode="simd"):
-            dst_tile.store(
-                src_tile.load(NormalLoadParams(post_update_stride=4))
-            )
+            dst_tile.store(src_tile.load(NormalLoadParams(post_update_stride=4)))
 
 
 @tla.kernel
-def load_post_mode_update_outside_loop_kernel(
-    src: tla.Tensor, dst: tla.Tensor
-) -> None:
+def load_post_mode_update_outside_loop_kernel(src: tla.Tensor, dst: tla.Tensor) -> None:
     src_tile = tla.tile_view(src, tla.make_shape(64), tla.make_coord(0))
     dst_tile = tla.tile_view(dst, tla.make_shape(64), tla.make_coord(0))
     with tla.vector():
@@ -87,9 +90,7 @@ def load_post_mode_update_ok_kernel(src: tla.Tensor, dst: tla.Tensor) -> None:
 
 
 @tla.kernel
-def load_post_mode_update_local_params_kernel(
-    src: tla.Tensor, dst: tla.Tensor
-) -> None:
+def load_post_mode_update_local_params_kernel(src: tla.Tensor, dst: tla.Tensor) -> None:
     with tla.vector():
         with tla.vec.func(mode="simd"):
             src_tile = tla.tile_view(src, tla.make_shape(64), tla.make_coord(0))
@@ -129,9 +130,7 @@ def load_post_mode_update_nonzero_coord_outside_loop_kernel(
 
 
 @tla.kernel
-def load_update_then_ordinary_load_kernel(
-    src: tla.Tensor, dst: tla.Tensor
-) -> None:
+def load_update_then_ordinary_load_kernel(src: tla.Tensor, dst: tla.Tensor) -> None:
     with tla.vector():
         with tla.vec.func(mode="simd"):
             tile = tla.tile_view(src, tla.make_shape(64), tla.make_coord(0))
@@ -197,7 +196,9 @@ def load_update_tail_mask_epilogue_kernel(src: tla.Tensor, dst: tla.Tensor) -> N
 
 @tla.kernel
 def load_post_mode_update_dynamic_stride_kernel(
-    src: tla.Tensor, dst: tla.Tensor, stride: "index"  # noqa: F821
+    src: tla.Tensor,
+    dst: tla.Tensor,
+    stride: "index",  # noqa: F821
 ) -> None:
     with tla.vector():
         with tla.vec.func(mode="simd"):
@@ -312,17 +313,172 @@ def test_load_store_post_mode_update_nonunit_stride_rejected(
         )
 
 
+@pytest.mark.parametrize(
+    "dtype",
+    [
+        tla.Int8,
+        tla.UInt8,
+        tla.Float8E4M3FN,
+        tla.Float8E5M2,
+        tla.HiFloat8,
+        tla.Float8E8M0,
+        tla.Float4E2M1x2,
+        tla.Float4E1M2x2,
+        tla.Int16,
+        tla.UInt16,
+        tla.Float16,
+        tla.BFloat16,
+        tla.Int32,
+        tla.UInt32,
+        tla.Float32,
+    ],
+)
+def test_load_store_post_mode_update_supports_b8_b16_b32(
+    compiler_tlair: Any, dtype: Any
+) -> None:
+    """Align update accepts b8/b16/b32 widths (existing kernel tile=64)."""
+    mlir = compiler_tlair(
+        load_post_mode_update_ok_kernel,
+        type_args=(
+            _ub_tensor(dtype=dtype, extent=128),
+            _ub_tensor(dtype=dtype, extent=128),
+        ),
+    )
+    assert "tla.load_update" in mlir
+    assert "tla.store_update" in mlir
+
+
+@tla.kernel
+def load_post_mode_update_b64_kernel(src: tla.Tensor, dst: tla.Tensor) -> None:
+    """b64 VL is 32 elements; keep the update tile within one register."""
+    with tla.vector():
+        with tla.vec.func(mode="simd"):
+            src_tile = tla.tile_view(src, tla.make_shape(32), tla.make_coord(0))
+            dst_tile = tla.tile_view(dst, tla.make_shape(32), tla.make_coord(0))
+            for _ in tla.range(2):
+                x_reg, src_tile = src_tile.load(_LOAD_UPD)
+                dst_tile = dst_tile.store(x_reg, _STORE_UPD)
+
+
+@pytest.mark.parametrize("dtype", [tla.Int64, tla.UInt64, tla.Float64])
+def test_load_store_post_mode_update_supports_b64(
+    compiler_tlair: Any, dtype: Any
+) -> None:
+    """b64 UPDATE: i64/u64/f64 (AscendC TypeGet<double>→vector_u64, u32 path)."""
+    mlir = compiler_tlair(
+        load_post_mode_update_b64_kernel,
+        type_args=(
+            _ub_tensor(dtype=dtype, extent=64),
+            _ub_tensor(dtype=dtype, extent=64),
+        ),
+    )
+    assert "tla.load_update" in mlir
+    assert "tla.store_update" in mlir
+
+
 def test_load_store_post_mode_update_rejects_unsupported_dtype(
     compiler_tlair: Any,
 ) -> None:
-    with pytest.raises(TlaLoweringError, match="f16/bf16/f32 only"):
+    # Unpacked fp4 (not fp4x2) is outside UPDATE's AscendC TypeGet set for VF move.
+    with pytest.raises(TlaLoweringError, match="b8/b16/b32/b64"):
         compiler_tlair(
             load_post_mode_update_ok_kernel,
             type_args=(
-                _ub_tensor(dtype=tla.Int32, extent=256),
-                _ub_tensor(dtype=tla.Int32, extent=256),
+                _ub_tensor(dtype=tla.Float4E2M1, extent=128),
+                _ub_tensor(dtype=tla.Float4E2M1, extent=128),
             ),
         )
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        (
+            NormalLoadParams(post_mode=PostMode.POST_MODE_UPDATE),
+            NormalStoreParams(post_mode=PostMode.POST_MODE_UPDATE),
+        ),
+        (
+            UnalignLoadParams(post_mode=PostMode.POST_MODE_UPDATE),
+            UnalignStoreParams(post_mode=PostMode.POST_MODE_UPDATE),
+        ),
+    ],
+    ids=["align", "unalign"],
+)
+def test_load_store_post_mode_update_rejects_mismatched_elem_width(
+    compiler_tlair: Any, params: tuple[Any, Any]
+) -> None:
+    """UPDATE store must not accept i32 register into a u8 window (stride/instr width)."""
+    load_p, store_p = params
+
+    @tla.kernel
+    def mismatched(src: tla.Tensor, dst: tla.Tensor) -> None:
+        with tla.vector():
+            with tla.vec.func(mode="simd"):
+                src_tile = tla.tile_view(src, tla.make_shape(32), tla.make_coord(0))
+                dst_tile = tla.tile_view(dst, tla.make_shape(32), tla.make_coord(0))
+                x_reg, src_tile = src_tile.load(load_p)
+                dst_tile = dst_tile.store(x_reg, store_p)
+
+    with pytest.raises((TlaLoweringError, TlaCoreAPIError), match="element types must match"):
+        compiler_tlair(
+            mismatched,
+            type_args=(
+                _ub_tensor(dtype=tla.Int32, extent=64),
+                _ub_tensor(dtype=tla.UInt8, extent=32),
+            ),
+        )
+
+
+@pytest.mark.parametrize(
+    "params,load_op,store_op",
+    [
+        (
+            (
+                NormalLoadParams(post_mode=PostMode.POST_MODE_UPDATE),
+                NormalStoreParams(post_mode=PostMode.POST_MODE_UPDATE),
+            ),
+            "tla.load_update",
+            "tla.store_update",
+        ),
+        (
+            (
+                UnalignLoadParams(post_mode=PostMode.POST_MODE_UPDATE),
+                UnalignStoreParams(post_mode=PostMode.POST_MODE_UPDATE),
+            ),
+            "tla.load_unalign_update",
+            "tla.store_unalign_update",
+        ),
+    ],
+    ids=["align", "unalign"],
+)
+def test_load_store_post_mode_update_supports_bool(
+    compiler_tlair: Any,
+    params: tuple[Any, Any],
+    load_op: str,
+    store_op: str,
+) -> None:
+    """Bool is AscendC b8 move-only UPDATE (Align + UnAlign → int8_t/uint8_t)."""
+    load_p, store_p = params
+
+    @tla.kernel
+    def bool_update(src: tla.Tensor, dst: tla.Tensor) -> None:
+        with tla.vector():
+            with tla.vec.func(mode="simd"):
+                src_tile = tla.tile_view(src, tla.make_shape(256), tla.make_coord(0))
+                dst_tile = tla.tile_view(dst, tla.make_shape(256), tla.make_coord(0))
+                for _ in tla.range(2):
+                    x_reg, src_tile = src_tile.load(load_p)
+                    dst_tile = dst_tile.store(x_reg, store_p)
+
+    mlir = compiler_tlair(
+        bool_update,
+        type_args=(
+            _ub_tensor(dtype=tla.Bool, extent=512),
+            _ub_tensor(dtype=tla.Bool, extent=512),
+        ),
+    )
+    assert load_op in mlir
+    assert store_op in mlir
 
 
 def test_load_update_then_ordinary_load_uses_next_window_tile(

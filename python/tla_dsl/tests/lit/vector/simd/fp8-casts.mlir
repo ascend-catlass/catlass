@@ -72,7 +72,7 @@ module {
         %r = "tla.load"(%st) : (!s_e4m3_to_f32) -> !tla.vector<256xf8E4M3FN>
         // trait = [reg_slot, sat_mode, round_mode]
         %o = "tla.cast"(%r) <{trait = array<i32: 0, 0, 0>}> : (!tla.vector<256xf8E4M3FN>) -> !tla.vector<64xf32>
-        "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!d_e4m3_to_f32, !tla.vector<64xf32>) -> ()
+        "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!d_e4m3_to_f32, !tla.vector<64xf32>) -> ()
       }) {mode = "simd"} : () -> ()
     }) : () -> ()
     return
@@ -100,7 +100,7 @@ module {
         %r = "tla.load"(%st) : (!s_f32_to_e4m3) -> !tla.vector<64xf32>
         // trait = [reg_slot, sat_mode, round_mode]
         %o = "tla.cast"(%r) <{trait = array<i32: 0, 0, 0>}> : (!tla.vector<64xf32>) -> !tla.vector<256xf8E4M3FN>
-        "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!d_f32_to_e4m3, !tla.vector<256xf8E4M3FN>) -> ()
+        "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!d_f32_to_e4m3, !tla.vector<256xf8E4M3FN>) -> ()
       }) {mode = "simd"} : () -> ()
     }) : () -> ()
     return
@@ -134,7 +134,7 @@ module {
         %r = "tla.load"(%st) : (!s_e4m3_to_f16) -> !tla.vector<256xf8E4M3FN>
         // trait = [reg_slot, sat_mode, round_mode]
         %o = "tla.cast"(%r) <{trait = array<i32: 0, 0, 0>}> : (!tla.vector<256xf8E4M3FN>) -> !tla.vector<128xf16>
-        "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!d_e4m3_to_f16, !tla.vector<128xf16>) -> ()
+        "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!d_e4m3_to_f16, !tla.vector<128xf16>) -> ()
       }) {mode = "simd"} : () -> ()
     }) : () -> ()
     return
@@ -169,7 +169,7 @@ module {
         %r = "tla.load"(%st) : (!s_f16_to_e4m3) -> !tla.vector<128xf16>
         // trait = [reg_slot, sat_mode, round_mode]
         %o = "tla.cast"(%r) <{trait = array<i32: 0, 0, 0>}> : (!tla.vector<128xf16>) -> !tla.vector<256xf8E4M3FN>
-        "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!d_f16_to_e4m3, !tla.vector<256xf8E4M3FN>) -> ()
+        "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!d_f16_to_e4m3, !tla.vector<256xf8E4M3FN>) -> ()
       }) {mode = "simd"} : () -> ()
     }) : () -> ()
     return
@@ -203,7 +203,7 @@ module {
         %r = "tla.load"(%st) : (!s_e4m3_to_bf16) -> !tla.vector<256xf8E4M3FN>
         // trait = [reg_slot, sat_mode, round_mode]
         %o = "tla.cast"(%r) <{trait = array<i32: 0, 0, 0>}> : (!tla.vector<256xf8E4M3FN>) -> !tla.vector<128xbf16>
-        "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!d_e4m3_to_bf16, !tla.vector<128xbf16>) -> ()
+        "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!d_e4m3_to_bf16, !tla.vector<128xbf16>) -> ()
       }) {mode = "simd"} : () -> ()
     }) : () -> ()
     return
@@ -238,7 +238,7 @@ module {
         %r = "tla.load"(%st) : (!s_bf16_to_e4m3) -> !tla.vector<128xbf16>
         // trait = [reg_slot, sat_mode, round_mode]
         %o = "tla.cast"(%r) <{trait = array<i32: 0, 0, 0>}> : (!tla.vector<128xbf16>) -> !tla.vector<256xf8E4M3FN>
-        "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!d_bf16_to_e4m3, !tla.vector<256xf8E4M3FN>) -> ()
+        "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!d_bf16_to_e4m3, !tla.vector<256xf8E4M3FN>) -> ()
       }) {mode = "simd"} : () -> ()
     }) : () -> ()
     return
@@ -266,7 +266,7 @@ module {
         %r = "tla.load"(%st) : (!s_e5m2_to_f32) -> !tla.vector<256xf8E5M2>
         // trait = [reg_slot, sat_mode, round_mode]
         %o = "tla.cast"(%r) <{trait = array<i32: 0, 0, 0>}> : (!tla.vector<256xf8E5M2>) -> !tla.vector<64xf32>
-        "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!d_e5m2_to_f32, !tla.vector<64xf32>) -> ()
+        "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!d_e5m2_to_f32, !tla.vector<64xf32>) -> ()
       }) {mode = "simd"} : () -> ()
     }) : () -> ()
     return
@@ -294,7 +294,7 @@ module {
         %r = "tla.load"(%st) : (!s_f32_to_e5m2) -> !tla.vector<64xf32>
         // trait = [reg_slot, sat_mode, round_mode]
         %o = "tla.cast"(%r) <{trait = array<i32: 0, 0, 0>}> : (!tla.vector<64xf32>) -> !tla.vector<256xf8E5M2>
-        "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!d_f32_to_e5m2, !tla.vector<256xf8E5M2>) -> ()
+        "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!d_f32_to_e5m2, !tla.vector<256xf8E5M2>) -> ()
       }) {mode = "simd"} : () -> ()
     }) : () -> ()
     return
@@ -327,7 +327,7 @@ module {
         %r = "tla.load"(%st) : (!s_e5m2_to_f16) -> !tla.vector<256xf8E5M2>
         // trait = [reg_slot, sat_mode, round_mode]
         %o = "tla.cast"(%r) <{trait = array<i32: 0, 0, 0>}> : (!tla.vector<256xf8E5M2>) -> !tla.vector<128xf16>
-        "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!d_e5m2_to_f16, !tla.vector<128xf16>) -> ()
+        "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!d_e5m2_to_f16, !tla.vector<128xf16>) -> ()
       }) {mode = "simd"} : () -> ()
     }) : () -> ()
     return
@@ -362,7 +362,7 @@ module {
         %r = "tla.load"(%st) : (!s_f16_to_e5m2) -> !tla.vector<128xf16>
         // trait = [reg_slot, sat_mode, round_mode]
         %o = "tla.cast"(%r) <{trait = array<i32: 0, 0, 0>}> : (!tla.vector<128xf16>) -> !tla.vector<256xf8E5M2>
-        "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!d_f16_to_e5m2, !tla.vector<256xf8E5M2>) -> ()
+        "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!d_f16_to_e5m2, !tla.vector<256xf8E5M2>) -> ()
       }) {mode = "simd"} : () -> ()
     }) : () -> ()
     return
@@ -396,7 +396,7 @@ module {
         %r = "tla.load"(%st) : (!s_e5m2_to_bf16) -> !tla.vector<256xf8E5M2>
         // trait = [reg_slot, sat_mode, round_mode]
         %o = "tla.cast"(%r) <{trait = array<i32: 0, 0, 0>}> : (!tla.vector<256xf8E5M2>) -> !tla.vector<128xbf16>
-        "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!d_e5m2_to_bf16, !tla.vector<128xbf16>) -> ()
+        "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!d_e5m2_to_bf16, !tla.vector<128xbf16>) -> ()
       }) {mode = "simd"} : () -> ()
     }) : () -> ()
     return
@@ -431,7 +431,7 @@ module {
         %r = "tla.load"(%st) : (!s_bf16_to_e5m2) -> !tla.vector<128xbf16>
         // trait = [reg_slot, sat_mode, round_mode]
         %o = "tla.cast"(%r) <{trait = array<i32: 0, 0, 0>}> : (!tla.vector<128xbf16>) -> !tla.vector<256xf8E5M2>
-        "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0>}> : (!d_bf16_to_e5m2, !tla.vector<256xf8E5M2>) -> ()
+        "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!d_bf16_to_e5m2, !tla.vector<256xf8E5M2>) -> ()
       }) {mode = "simd"} : () -> ()
     }) : () -> ()
     return

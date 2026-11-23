@@ -99,6 +99,7 @@ def _load_dintlv_b8(source_view: int):
 @pytest.mark.parametrize(
     ("dtype", "element"),
     [
+        (tla.Bool, "i1"),
         (tla.Int8, "i8"),
         (tla.UInt8, "ui8"),
         (tla.Float8E4M3FN, "f8E4M3FN"),
@@ -130,7 +131,6 @@ def test_load_dintlv_b8_returns_two_full_vectors(
 @pytest.mark.parametrize(
     "dtype",
     [
-        tla.Bool,
         tla.Float4E2M1,
         tla.Float4E1M2,
         tla.Int16,
@@ -153,17 +153,17 @@ def test_load_dintlv_b8_rejects_unsupported_types(
         )
 
 
-def test_e8m0_vector_load_requires_dintlv_b8(compiler_tlair: Any):
+def test_e8m0_vector_norm_load_emits(compiler_tlair: Any):
+    """E8M0 is AscendC b8 move-only; DIST_NORM (and DINTLV_B8) are both transport."""
+
     @tla.kernel
     def ordinary(source: tla.Tensor):
         with tla.vector():  # noqa: SIM117 - vector regions require nested syntax.
             with tla.vec.func(mode="simd"):
                 source.load()
 
-    with pytest.raises(
-        TlaLoweringError, match="E8M0 vector load requires DIST_DINTLV_B8"
-    ):
-        compiler_tlair(ordinary, type_args=(_ub_tensor(tla.Float8E8M0, 256),))
+    mlir = compiler_tlair(ordinary, type_args=(_ub_tensor(tla.Float8E8M0, 256),))
+    assert '"tla.load"' in mlir
 
 
 def test_load_dintlv_b8_requires_ub(compiler_tlair: Any):

@@ -44,6 +44,7 @@ def store_first_element_kernel(src: tla.Tensor, dst: tla.Tensor, dist: tla.Const
         (StoreDist.DIST_FIRST_ELEMENT_B16, tla.Float16),
         (StoreDist.DIST_FIRST_ELEMENT_B16, tla.Int16),
         (StoreDist.DIST_FIRST_ELEMENT_B8, tla.Int8),
+        (StoreDist.DIST_FIRST_ELEMENT_B8, tla.Bool),
     ),
 )
 def test_store_first_element_emits_tlair(
