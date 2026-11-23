@@ -202,3 +202,10 @@ def Tla_ArchWarpReduceOp : Tla_Op<"arch.warp_reduce",
   let hasVerifier = 1;
   let assemblyFormat = "$kind $value attr-dict `:` type($result)";
 }
+
+def Tla_ArchDcachePrefetchOp : Tla_Op<"arch.dcache_prefetch", [MemoryEffects<[MemRead, MemWrite]>]> {
+  let summary = "Request one GM data-cache line on the issuing scalar core";
+  let arguments = (ins Tla_PtrType:$address, I64:$byte_offset);
+  let hasVerifier = 1;
+  let assemblyFormat = "$address `,` $byte_offset attr-dict `:` qualified(type($address))";
+}

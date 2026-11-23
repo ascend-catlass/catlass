@@ -264,6 +264,28 @@ struct LowerRecastPtrPattern : public OpConversionPattern<::tla::RecastPtrOp> {
     }
 };
 
+struct LowerPrefetchPattern : public OpConversionPattern<ArchDcachePrefetchOp> {
+    using OpConversionPattern::OpConversionPattern;
+    LogicalResult matchAndRewrite(
+        ArchDcachePrefetchOp op, OpAdaptor adaptor, ConversionPatternRewriter& b) const override
+    {
+        bool aiv = static_cast<bool>(op->getParentOfType<VectorOp>());
+        StringRef name = aiv ? "_mlir_ciface_tla_dcache_prefetch_aiv" : "_mlir_ciface_tla_dcache_prefetch_aic";
+        auto callee = getOrCreateRuntimeCall(op->getParentOfType<ModuleOp>(), name, {b.getI64Type(), b.getI64Type()});
+        if (!callee.isDeclaration() ||
+            callee.getFunctionType() != b.getFunctionType({b.getI64Type(), b.getI64Type()}, {})) {
+            op.emitOpError("incompatible prefetch helper declaration");
+            return failure();
+        }
+        callee->setAttr(
+            hivm::TFuncCoreTypeAttr::name,
+            hivm::TFuncCoreTypeAttr::get(b.getContext(), aiv ? hivm::TFuncCoreType::AIV : hivm::TFuncCoreType::AIC));
+        callee->setAttr(hacc::stringifyEnum(hacc::HACCToLLVMIRTranslateAttr::ALWAYS_INLINE), b.getUnitAttr());
+        b.replaceOpWithNewOp<func::CallOp>(op, callee, adaptor.getOperands());
+        return success();
+    }
+};
+
 struct LowerPtrAddPattern : public OpConversionPattern<::tla::PtrAddOp> {
     using OpConversionPattern::OpConversionPattern;
 
@@ -454,8 +476,9 @@ public:
         ConversionTarget target(*context);
         patterns.add<LowerAllocPtrPattern>(converter, context, allocationPlan->offsetByAllocResult, ubScratch);
         patterns.add<LowerDynamicUbBasePattern>(converter, context, *ubBytes);
-        patterns.add<LowerIntToPtrPattern, LowerRecastPtrPattern, LowerPtrAddPattern, LowerExternOperandsPattern>(
-            converter, context);
+        patterns.add<
+            LowerIntToPtrPattern, LowerRecastPtrPattern, LowerPtrAddPattern, LowerPrefetchPattern,
+            LowerExternOperandsPattern>(converter, context);
         scf::populateSCFStructuralTypeConversionsAndLegality(converter, patterns, target);
         populateFunctionOpInterfaceTypeConversionPattern<func::FuncOp>(patterns, converter);
         populateCallOpTypeConversionPattern(patterns, converter);
@@ -465,7 +488,8 @@ public:
         target.addLegalOp<ModuleOp>();
         target
             .addLegalDialect<arith::ArithDialect, LLVM::LLVMDialect, mlir::memref::MemRefDialect, ::tla::TlaDialect>();
-        target.addIllegalOp<::tla::AllocPtrOp, ::tla::DynamicUbBaseOp, ::tla::RecastPtrOp, ::tla::PtrAddOp>();
+        target.addIllegalOp<
+            ArchDcachePrefetchOp, ::tla::AllocPtrOp, ::tla::DynamicUbBaseOp, ::tla::RecastPtrOp, ::tla::PtrAddOp>();
         target.addDynamicallyLegalOp<::tla::TensorPtrOp>([](::tla::TensorPtrOp op) { return op.use_empty(); });
         target.addDynamicallyLegalOp<::tla::IntToPtrOp>(isPointerConsumerBoundary);
         target.addDynamicallyLegalOp<::tla::CallExternOp>(

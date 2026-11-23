@@ -799,6 +799,7 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         [["dsl_tutorials/vector_simt_ops/multi_ops_simt/multi_ops_simt.py", *dev]],
     )
 
+    yield "dcache-prefetch", [["end_to_end/dcache_prefetch.py", *dev]]
     yield (
         "simt-warp-activemask",
         [["end_to_end/warp_activemask.py", *dev]],

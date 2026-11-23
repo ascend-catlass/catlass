@@ -206,6 +206,22 @@ with tla.vec.func(mode="simt", thread_block_dim=32):
 
 ---
 
+### `tla.arch.dcache_prefetch`
+
+**源码：** [`catlass.core_api.arch_dcache_prefetch`](../../../../catlass/core_api.py)
+
+在 Ascend 950 的标量 AIV 或 AIC 上，请求包含目标 GM 地址的一条数据缓存行。
+`address` 为带类型的 GM 指针，`byte_offset` 为有符号字节偏移，默认为 0，
+接受 Python 整数、`Int16` 或 `Int64`。调用者须确保最终地址有效。该提示不提供同步保证。分块视图提供底层指针。请在字节偏移中计入分块起点。
+
+```python
+with tla.vector():
+    view = tla.tile_view(src, tla.make_shape(16), tla.make_coord(2))  # contiguous Int32
+    tla.arch.dcache_prefetch(view.ptr, byte_offset=128)
+```
+
+---
+
 ### `tla.arch.warpsize`
 
 **源码：** [`catlass.core_api.arch_warpsize`](../../../../catlass/core_api.py)

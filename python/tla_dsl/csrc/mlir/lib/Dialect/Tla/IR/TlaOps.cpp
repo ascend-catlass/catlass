@@ -698,6 +698,16 @@ static constexpr int64_t kMaxSimtThreadsPerBlock = 2048;
 // field's index: the hardware keeps its low 5 bits and discards the rest.
 static constexpr int64_t kWarpSize = 32;
 
+mlir::LogicalResult ArchDcachePrefetchOp::verify()
+{
+    if (mlir::cast<PtrType>(getAddress().getType()).getAddrspace() != AddressSpace::gm)
+        return emitOpError("requires a GM pointer");
+    if ((*this)->getParentOfType<VecFuncOp>() ||
+        (!(*this)->getParentOfType<VectorOp>() && !(*this)->getParentOfType<CubeOp>()))
+        return emitOpError("requires a scalar tla.vector or tla.cube region");
+    return mlir::success();
+}
+
 mlir::LogicalResult ArchLaneIdxOp::verify()
 {
     auto region = getOperation()->getParentOfType<VecFuncOp>();

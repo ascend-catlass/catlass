@@ -12175,6 +12175,54 @@ def arch_warp_reduce_sync(
 
 
 @dsl_user_op
+def arch_dcache_prefetch(
+    address: Pointer, byte_offset: int | Int16 | Int64 = 0, *, loc=None
+) -> None:
+    """Directory: System Variable Access / Architecture Helpers
+    Description:
+        Request the data-cache line containing the effective GM address plus
+        `byte_offset` bytes on the issuing Ascend 950 scalar core.
+    Parameters:
+        - `address`: a typed GM pointer.
+        - `byte_offset`: a signed Python integer, Int16 or Int64. Defaults to zero.
+    Constraints:
+        Use inside a scalar vector or cube region. The effective address must be valid.
+        The hint returns no value and provides no synchronization.
+        A tile view exposes its backing pointer. Include the tile displacement in bytes.
+    Example:
+        ```python
+        with tla.vector():
+            view = tla.tile_view(src, tla.make_shape(16), tla.make_coord(2))  # contiguous Int32
+            tla.arch.dcache_prefetch(view.ptr, byte_offset=128)
+        ```
+    """
+    name = "arch.dcache_prefetch"
+    _require_frontend_state(name)
+    if _runtime._has_enclosing_region("vec.func") or not (
+        _runtime._has_enclosing_region("vector")
+        or _runtime._has_enclosing_region("cube")
+    ):
+        _op_error(name, "requires a scalar tla.vector() or tla.cube() region")
+    if (
+        not isinstance(address, _Pointer)
+        or address.value is None
+        or address.memspace != AddressSpace.gm
+    ):
+        _op_error(name, "address must be a typed GM pointer")
+    if isinstance(byte_offset, int) and not isinstance(byte_offset, bool):
+        if not -(1 << 63) <= byte_offset < (1 << 63):
+            _op_error(name, "byte_offset must fit signed i64")
+        byte_offset = Int64(byte_offset)
+    elif isinstance(byte_offset, Int16):
+        byte_offset = byte_offset.to(Int64)
+    elif not isinstance(byte_offset, Int64):
+        _op_error(name, "byte_offset must be a Python integer, Int16 or Int64")
+    _tla_ops_gen.arch_dcache_prefetch(
+        address.value, byte_offset.ir_value(loc=loc), loc=loc
+    )
+
+
+@dsl_user_op
 def arch_warpsize(*, loc: mlir_ir.Location | None = None) -> Int32:
     """Directory: System Variable Access / Architecture Helpers
     Description:
@@ -13267,6 +13315,7 @@ _require_generated("inttoptr")
 _require_generated("recast_ptr")
 
 arch = _Namespace()
+arch._set("dcache_prefetch", arch_dcache_prefetch)
 arch._set("block_idx", arch_block_idx)
 arch._set("sub_block_idx", arch_sub_block_idx)
 arch._set("block_num", arch_block_num)

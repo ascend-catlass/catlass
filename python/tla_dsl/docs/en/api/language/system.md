@@ -201,6 +201,42 @@ with tla.vec.func(mode="simt", thread_block_dim=32):
 
 ---
 
+### `tla.arch.dcache_prefetch`
+
+**Source:** [`catlass.core_api.arch_dcache_prefetch`](../../../../catlass/core_api.py)
+
+Description:
+
+Request the data-cache line containing the effective GM address plus
+`byte_offset` bytes on the issuing Ascend 950 scalar core.
+
+Prototype:
+
+```python
+tla.arch.dcache_prefetch(address: Pointer, byte_offset: int | Int16 | Int64 = 0) -> None
+```
+
+Parameters:
+
+- `address`: a typed GM pointer.
+- `byte_offset`: a signed Python integer, Int16 or Int64. Defaults to zero.
+
+Constraints:
+
+Use inside a scalar vector or cube region. The effective address must be valid.
+The hint returns no value and provides no synchronization.
+A tile view exposes its backing pointer. Include the tile displacement in bytes.
+
+Example:
+
+```python
+with tla.vector():
+    view = tla.tile_view(src, tla.make_shape(16), tla.make_coord(2))  # contiguous Int32
+    tla.arch.dcache_prefetch(view.ptr, byte_offset=128)
+```
+
+---
+
 ### `tla.arch.warpsize`
 
 **Source:** [`catlass.core_api.arch_warpsize`](../../../../catlass/core_api.py)
