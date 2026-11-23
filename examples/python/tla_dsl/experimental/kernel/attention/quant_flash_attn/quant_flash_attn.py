@@ -118,7 +118,6 @@ def _sf_fused(ub_s, ub_p_zN, m, n, tail_n, max_out, sum_out):
     with tla.vec.func(mode="simd"):
         full_f32 = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
         preg_tail, _ = tla.update_mask(tail_n, dtype=tla.Float32)
-        one_mask, _ = tla.update_mask(1, dtype=tla.Float32)
         minv = tla.full(-3.0e38, tla.Float32)
         if n == 128:
             for i in tla.range(m):
@@ -136,7 +135,7 @@ def _sf_fused(ub_s, ub_p_zN, m, n, tail_n, max_out, sum_out):
                     mx = tla.max(s0, s1, mask=full_f32)
                 mxr = mx.reduce(tla.ReductionOp.MAX, mask=full_f32)
                 tla.tile_view(max_out_t, tla.make_shape(1), tla.make_coord(i)).store(
-                    mxr, tla.params.UnalignStoreParams(), mask=one_mask
+                    mxr, tla.params.UnalignStoreParams()
                 )
                 tla.local_mem_bar(
                     tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD
@@ -160,7 +159,7 @@ def _sf_fused(ub_s, ub_p_zN, m, n, tail_n, max_out, sum_out):
                     )
                     _p_store64(p1, ub_p_zN, i, c1)
                 tla.tile_view(sum_out_t, tla.make_shape(1), tla.make_coord(i)).store(
-                    sum_reg, tla.params.UnalignStoreParams(), mask=one_mask
+                    sum_reg, tla.params.UnalignStoreParams()
                 )
         else:
             for zr in range(56):
@@ -187,7 +186,7 @@ def _sf_fused(ub_s, ub_p_zN, m, n, tail_n, max_out, sum_out):
                     mx = s0
                 mxr = mx.reduce(tla.ReductionOp.MAX, mask=full_f32)
                 tla.tile_view(max_out_t, tla.make_shape(1), tla.make_coord(i2)).store(
-                    mxr, tla.params.UnalignStoreParams(), mask=one_mask
+                    mxr, tla.params.UnalignStoreParams()
                 )
                 tla.local_mem_bar(
                     tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD
@@ -211,7 +210,7 @@ def _sf_fused(ub_s, ub_p_zN, m, n, tail_n, max_out, sum_out):
                     )
                     _p_store64(p1, ub_p_zN, i2, c1)
                 tla.tile_view(sum_out_t, tla.make_shape(1), tla.make_coord(i2)).store(
-                    sum_reg, tla.params.UnalignStoreParams(), mask=one_mask
+                    sum_reg, tla.params.UnalignStoreParams()
                 )
         tla.local_mem_bar(tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD)
 
@@ -239,7 +238,6 @@ def _sf_mid(ub_s, ub_p_zN, m, n, tail_n, tile_max, last_max, last_sum, exp_max):
     with tla.vec.func(mode="simd"):
         full_f32 = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
         preg_tail, _ = tla.update_mask(tail_n, dtype=tla.Float32)
-        one_mask, _ = tla.update_mask(1, dtype=tla.Float32)
         minv = tla.full(-3.0e38, tla.Float32)
         if n == 128:
             for i in tla.range(m):
@@ -264,7 +262,7 @@ def _sf_mid(ub_s, ub_p_zN, m, n, tail_n, tile_max, last_max, last_sum, exp_max):
                     )
                 )
                 tla.tile_view(dm_t, tla.make_shape(1), tla.make_coord(i)).store(
-                    mxr, tla.params.UnalignStoreParams(), mask=one_mask
+                    mxr, tla.params.UnalignStoreParams()
                 )
                 tla.local_mem_bar(
                     tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD
@@ -297,13 +295,13 @@ def _sf_mid(ub_s, ub_p_zN, m, n, tail_n, tile_max, last_max, last_sum, exp_max):
                     sum_reg, tla.mul(ls, dm, mask=full_f32), mask=full_f32
                 )
                 tla.tile_view(lm_t, tla.make_shape(1), tla.make_coord(i)).store(
-                    new_max, tla.params.UnalignStoreParams(), mask=one_mask
+                    new_max, tla.params.UnalignStoreParams()
                 )
                 tla.tile_view(ls_t, tla.make_shape(1), tla.make_coord(i)).store(
-                    new_sum, tla.params.UnalignStoreParams(), mask=one_mask
+                    new_sum, tla.params.UnalignStoreParams()
                 )
                 tla.tile_view(dm_t, tla.make_shape(1), tla.make_coord(i)).store(
-                    dm, tla.params.UnalignStoreParams(), mask=one_mask
+                    dm, tla.params.UnalignStoreParams()
                 )
         else:
             for zr in range(56):
@@ -334,7 +332,7 @@ def _sf_mid(ub_s, ub_p_zN, m, n, tail_n, tile_max, last_max, last_sum, exp_max):
                     )
                 )
                 tla.tile_view(dm_t, tla.make_shape(1), tla.make_coord(i2)).store(
-                    mxr, tla.params.UnalignStoreParams(), mask=one_mask
+                    mxr, tla.params.UnalignStoreParams()
                 )
                 tla.local_mem_bar(
                     tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD
@@ -369,13 +367,13 @@ def _sf_mid(ub_s, ub_p_zN, m, n, tail_n, tile_max, last_max, last_sum, exp_max):
                     sum_reg, tla.mul(ls, dm, mask=full_f32), mask=full_f32
                 )
                 tla.tile_view(lm_t, tla.make_shape(1), tla.make_coord(i2)).store(
-                    new_max, tla.params.UnalignStoreParams(), mask=one_mask
+                    new_max, tla.params.UnalignStoreParams()
                 )
                 tla.tile_view(ls_t, tla.make_shape(1), tla.make_coord(i2)).store(
-                    new_sum, tla.params.UnalignStoreParams(), mask=one_mask
+                    new_sum, tla.params.UnalignStoreParams()
                 )
                 tla.tile_view(dm_t, tla.make_shape(1), tla.make_coord(i2)).store(
-                    dm, tla.params.UnalignStoreParams(), mask=one_mask
+                    dm, tla.params.UnalignStoreParams()
                 )
 
         tla.local_mem_bar(tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD)
@@ -1187,7 +1185,6 @@ def attn_fused_kernel(
                     with tla.vec.func(mode="simd"):
                         zero_reg = tla.full(0.0, tla.Float32)
                         minv_reg = tla.full(-3.0e38, tla.Float32)
-                        one_mask, _ = tla.update_mask(1, dtype=tla.Float32)
                         acc_z = tla.make_tensor(
                             ub_acc,
                             tla.make_layout(
@@ -1211,17 +1208,12 @@ def attn_fused_kernel(
                                 ).store(zero_reg)
                             tla.tile_view(
                                 lm_z, tla.make_shape(1), tla.make_coord(zi)
-                            ).store(
-                                minv_reg, tla.params.UnalignStoreParams(), mask=one_mask
-                            )
+                            ).store(minv_reg, tla.params.UnalignStoreParams())
                             tla.tile_view(
                                 ls_z, tla.make_shape(1), tla.make_coord(zi)
-                            ).store(
-                                zero_reg, tla.params.UnalignStoreParams(), mask=one_mask
-                            )
+                            ).store(zero_reg, tla.params.UnalignStoreParams())
                 # m/l 写入 acc 暂存的 256/257 列，再一次 MTE 拷贝（行宽 264）
                 with tla.vec.func(mode="simd"):
-                    one_mask_e, _ = tla.update_mask(1, dtype=tla.Float32)
                     lm_w = tla.make_tensor(
                         last_max,
                         tla.make_layout(tla.make_shape(56), tla.make_stride(1)),
@@ -1253,10 +1245,10 @@ def attn_fused_kernel(
                         )
                         tla.tile_view(
                             acc_ml, tla.make_shape(1, 1), tla.make_coord(wi, 256)
-                        ).store(m_val, tla.params.UnalignStoreParams(), mask=one_mask_e)
+                        ).store(m_val, tla.params.UnalignStoreParams())
                         tla.tile_view(
                             acc_ml, tla.make_shape(1, 1), tla.make_coord(wi, 257)
-                        ).store(l_val, tla.params.UnalignStoreParams(), mask=one_mask_e)
+                        ).store(l_val, tla.params.UnalignStoreParams())
                 base_row = (m_blk * splits + split) * M_BLOCK + sub_e * m_half_e
                 gm_po = tla.make_tensor(
                     part_o.ptr + base_row * 264,
@@ -1367,7 +1359,6 @@ def _combine_rows(
             # ---- 相位 0：acc 清零 + ws 初值 ----
             with tla.vec.func(mode="simd"):
                 full_0 = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
-                one_0, _ = tla.update_mask(1, dtype=tla.Float32)
                 for zc in range(GROUP):
                     for zcc in range(4):
                         tla.tile_view(
@@ -1377,17 +1368,11 @@ def _combine_rows(
                     tla.tile_view(
                         ws_v, tla.make_shape(1), tla.make_coord(zi * 64)
                     ).store(
-                        tla.full(-3.0e38, tla.Float32),
-                        tla.params.UnalignStoreParams(),
-                        mask=one_0,
+                        tla.full(-3.0e38, tla.Float32), tla.params.UnalignStoreParams()
                     )
                     tla.tile_view(
                         ws_v, tla.make_shape(1), tla.make_coord(zi * 64 + 16)
-                    ).store(
-                        tla.full(0.0, tla.Float32),
-                        tla.params.UnalignStoreParams(),
-                        mask=one_0,
-                    )
+                    ).store(tla.full(0.0, tla.Float32), tla.params.UnalignStoreParams())
                 tla.local_mem_bar(
                     tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD
                 )
@@ -1481,7 +1466,6 @@ def _combine_rows(
                         full_s = tla.create_mask(
                             pattern=tla.mask.ALL, dtype=tla.Float32
                         )
-                        one_s, _ = tla.update_mask(1, dtype=tla.Float32)
                         m_0 = tla.tile_view(
                             buf_v,
                             tla.make_shape(1),
@@ -1503,7 +1487,7 @@ def _combine_rows(
                         den_r = l_0
                         tla.tile_view(
                             ws_v, tla.make_shape(1), tla.make_coord(i * 64 + 16)
-                        ).store(den_r, tla.params.UnalignStoreParams(), mask=one_s)
+                        ).store(den_r, tla.params.UnalignStoreParams())
                         for pc in range(4):
                             po_0 = tla.tile_view(
                                 buf2_v,
@@ -1523,7 +1507,6 @@ def _combine_rows(
                         full_s = tla.create_mask(
                             pattern=tla.mask.ALL, dtype=tla.Float32
                         )
-                        one_s, _ = tla.update_mask(1, dtype=tla.Float32)
                         m_0 = tla.tile_view(
                             buf_v,
                             tla.make_shape(1),
@@ -1569,7 +1552,7 @@ def _combine_rows(
                         )
                         tla.tile_view(
                             ws_v, tla.make_shape(1), tla.make_coord(i * 64 + 16)
-                        ).store(den_r, tla.params.UnalignStoreParams(), mask=one_s)
+                        ).store(den_r, tla.params.UnalignStoreParams())
                         for pc in range(4):
                             po_0 = tla.tile_view(
                                 buf2_v,
@@ -1597,7 +1580,6 @@ def _combine_rows(
                         full_s = tla.create_mask(
                             pattern=tla.mask.ALL, dtype=tla.Float32
                         )
-                        one_s, _ = tla.update_mask(1, dtype=tla.Float32)
                         m_0 = tla.tile_view(
                             buf_v,
                             tla.make_shape(1),
@@ -1689,7 +1671,7 @@ def _combine_rows(
                         )
                         tla.tile_view(
                             ws_v, tla.make_shape(1), tla.make_coord(i * 64 + 16)
-                        ).store(den_r, tla.params.UnalignStoreParams(), mask=one_s)
+                        ).store(den_r, tla.params.UnalignStoreParams())
                         for pc in range(4):
                             po_0 = tla.tile_view(
                                 buf2_v,
@@ -1735,7 +1717,6 @@ def _combine_rows(
                             full_a = tla.create_mask(
                                 pattern=tla.mask.ALL, dtype=tla.Float32
                             )
-                            one_a, _ = tla.update_mask(1, dtype=tla.Float32)
                             m_a = tla.tile_view(
                                 buf_v,
                                 tla.make_shape(1),
@@ -1772,26 +1753,21 @@ def _combine_rows(
                                 ws_v,
                                 tla.make_shape(1),
                                 tla.make_coord(i1 * 64 + 24 + sp1),
-                            ).store(m_a, tla.params.UnalignStoreParams(), mask=one_a)
+                            ).store(m_a, tla.params.UnalignStoreParams())
                             tla.tile_view(
                                 ws_v,
                                 tla.make_shape(1),
                                 tla.make_coord(i1 * 64 + 40 + sp1),
-                            ).store(l_a, tla.params.UnalignStoreParams(), mask=one_a)
+                            ).store(l_a, tla.params.UnalignStoreParams())
                             tla.tile_view(
                                 ws_v, tla.make_shape(1), tla.make_coord(i1 * 64)
                             ).store(
                                 tla.max(m_a, ms_a, mask=full_a),
                                 tla.params.UnalignStoreParams(),
-                                mask=one_a,
                             )
                             tla.tile_view(
                                 ws_v, tla.make_shape(1), tla.make_coord(i1 * 64 + 16)
-                            ).store(
-                                den_a,
-                                tla.params.UnalignStoreParams(),
-                                mask=one_a,
-                            )
+                            ).store(den_a, tla.params.UnalignStoreParams())
                             tla.local_mem_bar(
                                 tla.params.MemType.VEC_STORE,
                                 tla.params.MemType.VEC_LOAD,
@@ -1803,7 +1779,6 @@ def _combine_rows(
                             full_b = tla.create_mask(
                                 pattern=tla.mask.ALL, dtype=tla.Float32
                             )
-                            one_b, _ = tla.update_mask(1, dtype=tla.Float32)
                             m_b = tla.tile_view(
                                 ws_v,
                                 tla.make_shape(1),
@@ -1842,11 +1817,7 @@ def _combine_rows(
                             )
                             tla.tile_view(
                                 ws_v, tla.make_shape(1), tla.make_coord(i2 * 64 + 16)
-                            ).store(
-                                den_new,
-                                tla.params.UnalignStoreParams(),
-                                mask=one_b,
-                            )
+                            ).store(den_new, tla.params.UnalignStoreParams())
                             for pc in range(4):
                                 po_r = tla.tile_view(
                                     buf2_v,

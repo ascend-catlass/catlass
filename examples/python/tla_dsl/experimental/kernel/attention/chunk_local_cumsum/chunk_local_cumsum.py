@@ -43,9 +43,7 @@ _ensure_bisheng_path()
 @tla.kernel
 def chunk_local_cumsum_kernel(mem_g: tla.Tensor, mem_o: tla.Tensor) -> None:
     """Accumulate the 64 lanes of each packed task in fp32 in CATLASS."""
-    ub_loaded = tla.flag("clc_ub_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    vec_done = tla.flag("clc_vec_done", tla.arch.VECTOR, tla.arch.MTE3)
-    ub_free = tla.flag("clc_ub_free", tla.arch.MTE3, tla.arch.MTE2)
+    mtx_ub = tla.mutex("clc_ub", id=0)
 
     g_ptr = tla.recast_ptr(
         _allocate_bytes(INPUT_TASK_ELEMS * INPUT_BYTES, 256, tla.AddressSpace.ub),
@@ -61,7 +59,6 @@ def chunk_local_cumsum_kernel(mem_g: tla.Tensor, mem_o: tla.Tensor) -> None:
     )
 
     with tla.vector():
-        tla.set_flag(ub_free)
         for task_id in tla.range(tla.arch.block_idx(), TASKS, tla.arch.block_num()):
             input_base = task_id * INPUT_TASK_ELEMS
             output_base = task_id * OUTPUT_TASK_ELEMS
@@ -76,10 +73,10 @@ def chunk_local_cumsum_kernel(mem_g: tla.Tensor, mem_o: tla.Tensor) -> None:
             acc_gm = tla.make_tensor(mem_o.ptr + output_base, _flat_layout(DIM))
             acc_ub = tla.make_tensor_like(acc_ptr, acc_gm, tla.arch.RowMajor)
 
-            tla.wait_flag(ub_free)
+            mtx_ub.lock(pipe=tla.arch.MTE2)
             tla.copy(g_ub, g_gm)
-            tla.set_flag(ub_loaded)
-            tla.wait_flag(ub_loaded)
+            mtx_ub.unlock(pipe=tla.arch.MTE2)
+            mtx_ub.lock(pipe=tla.arch.VECTOR)
             # BT=128 uses two vector functions sharing the UB accumulator.
             for row_base in tla.range_constexpr(0, CHUNK, 64):
                 with tla.vec.func(mode="simd"):
@@ -97,12 +94,12 @@ def chunk_local_cumsum_kernel(mem_g: tla.Tensor, mem_o: tla.Tensor) -> None:
                         )
                         acc_ub.store(prefix)
                         out_row.store(prefix * SCALE_VALUE if HAS_SCALE else prefix)
-            tla.set_flag(vec_done)
-            tla.wait_flag(vec_done)
+            mtx_ub.unlock(pipe=tla.arch.VECTOR)
+            mtx_ub.lock(pipe=tla.arch.MTE3)
             tla.copy(out_gm, out_ub)
-            tla.set_flag(ub_free)
+            mtx_ub.unlock(pipe=tla.arch.MTE3)
 
-        tla.wait_flag(ub_free)
+        mtx_ub.lock(pipe=tla.arch.MTE2)
         tla.pipe_barrier(tla.pipes.ALL)
 
 

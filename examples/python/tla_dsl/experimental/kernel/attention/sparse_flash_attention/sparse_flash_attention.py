@@ -1036,7 +1036,7 @@ class _SparseMatmul:
         self.mtx_kv = tla.mutex("l1_kv", id=2)
         # 同一块 KV L1 有两个读侧：QK 取 k^T、PV 取 v。两侧各用一把 mutex
         # （QK 用 id=12 的 mtx_kt），保证每把 mutex 只有一个生产段和一个消费段，
-        # 不会因为两个读者交替 lock/unlock 把 flag 配对错位。
+        # 不会因为两个读者交替 lock/unlock 把 mutex 配对错位。
         # mtx_kr 保留自己的 id 号段；RoPE 块与 NoPE 块在同一段 MTE2 里一起
         # 发布（mtx_kt），不再单独握手。
         self.mtx_kr = tla.mutex("l1_kr", id=3)
@@ -1049,19 +1049,13 @@ class _SparseMatmul:
             tla.mutex("l0a2", id=14),
         ]
         self.mtx_l0b = [tla.mutex("l0b0", id=6), tla.mutex("l0b1", id=7)]
-        # l0c 双槽：FixPipe 读完该槽后才把它归还给写侧。这里用一对核内 flag
+        # l0c 双槽：FixPipe 读完该槽后才把它归还给写侧。这里用一对核内 mutex
         # 实现这条握手：
-        #   写侧  wait(l0c_free[s]) -> mmad 链 -> set(l0c_ready[s])
-        #   FixPipe wait(l0c_ready[s]) -> copy -> set(l0c_free[s])
+        #   写侧  lock(CUBE) -> mmad 链 -> unlock(CUBE)
+        #   FixPipe lock(FIX) -> copy -> unlock(FIX)
         # 不带 unit flag 时 `matmul_add_ub` 的 ENABLE_UNIT_FLAG=False 分支就是
-        # 这条形态（CUBE→FIX 显式 set/wait + SPLIT_M copy）。
-        self.l0c_ready = []
-        self.l0c_free = []
-        for i in range(2):
-            self.l0c_ready.append(
-                tla.flag(f"l0c_ready{i}", tla.arch.CUBE, tla.arch.FIX)
-            )
-            self.l0c_free.append(tla.flag(f"l0c_free{i}", tla.arch.FIX, tla.arch.CUBE))
+        # 这条形态（CUBE→FIX 显式 mutex + SPLIT_M copy）。
+        self.mtx_l0c = [tla.mutex("l0c0", id=19), tla.mutex("l0c1", id=20)]
 
     @tla.jit
     def _pick2(self, items, slot):
@@ -1072,20 +1066,36 @@ class _SparseMatmul:
         return out
 
     @tla.jit
-    def _l0c_acquire(self, flags, slot):
+    def _l0c_wait_free(self, slot):
         """写侧等该 L0C 槽空闲（FIX 已读完上一任）。"""
         if slot == 0:
-            tla.wait_flag(flags[0])
+            self.mtx_l0c[0].lock(pipe=tla.arch.CUBE)
         else:
-            tla.wait_flag(flags[1])
+            self.mtx_l0c[1].lock(pipe=tla.arch.CUBE)
 
     @tla.jit
-    def _l0c_release(self, flags, slot):
+    def _l0c_signal_ready(self, slot):
         """写侧交棒：该 L0C 槽已写完。"""
         if slot == 0:
-            tla.set_flag(flags[0])
+            self.mtx_l0c[0].unlock(pipe=tla.arch.CUBE)
         else:
-            tla.set_flag(flags[1])
+            self.mtx_l0c[1].unlock(pipe=tla.arch.CUBE)
+
+    @tla.jit
+    def _l0c_wait_ready(self, slot):
+        """FixPipe 侧等该 L0C 槽写完。"""
+        if slot == 0:
+            self.mtx_l0c[0].lock(pipe=tla.arch.FIX)
+        else:
+            self.mtx_l0c[1].lock(pipe=tla.arch.FIX)
+
+    @tla.jit
+    def _l0c_signal_free(self, slot):
+        """FixPipe 侧交棒：该 L0C 槽已读完。"""
+        if slot == 0:
+            self.mtx_l0c[0].unlock(pipe=tla.arch.FIX)
+        else:
+            self.mtx_l0c[1].unlock(pipe=tla.arch.FIX)
 
     @tla.jit
     def _pick3(self, items, slot):
@@ -1187,8 +1197,8 @@ class _SparseMatmul:
         """Accumulate four NoPE chunks and an optional 64-feature RoPE tail."""
         m = self.group_size
         # 先取到一块空闲 L0C 槽：显式等该槽上一任被 FixPipe 读完。
-        # 空槽令牌在 tick 循环前预置。
-        self._l0c_acquire(self.l0c_free, slot)
+        # mutex 初值自带空槽令牌，无需在 tick 循环前预置。
+        self._l0c_wait_free(slot)
         score = _bounded_local(self.l0c_tile(slot), (m, valid_n), (m, TILE_S2))
         # L1 retains the TILE_S2 pitch when valid_n is smaller.
         # Q 的 L1 缓冲在一个 Query 的 4 段里被反复读，段与段之间如果解锁，
@@ -1290,7 +1300,7 @@ class _SparseMatmul:
             tla.mmad(score, a, b, init_c=False, unit_flag=0b00)
             self.mtx_l0b[0].unlock(pipe=tla.arch.CUBE)
             self.mtx_l0a[0].unlock(pipe=tla.arch.CUBE)
-        self._l0c_release(self.l0c_ready, slot)
+        self._l0c_signal_ready(slot)
 
     # compute_pv：P @ V 的 4 段累加
     def compute_pv(self, right_slot, p_l1, valid_n, slot):
@@ -1311,7 +1321,7 @@ class _SparseMatmul:
         a_buf = 2
         l0b_phase = 1 if self.has_rope else 0
         a = _bounded_local(self.l0a_tile(a_buf), (m, k_dim), (m, TILE_S2))
-        self._l0c_acquire(self.l0c_free, slot)
+        self._l0c_wait_free(slot)
         self.mtx_l0a[a_buf].lock(pipe=tla.arch.MTE1)
         tla.copy(a, p)
         self.mtx_l0a[a_buf].unlock(pipe=tla.arch.MTE1)
@@ -1351,7 +1361,7 @@ class _SparseMatmul:
             self.mtx_l0b[buf].unlock(pipe=tla.arch.CUBE)
         self.mtx_kv.unlock(pipe=tla.arch.MTE1)
         self.mtx_l0a[a_buf].unlock(pipe=tla.arch.CUBE)
-        self._l0c_release(self.l0c_ready, slot)
+        self._l0c_signal_ready(slot)
 
     # store_score：L0C 分数按 AIV 拆分落 UB
     @tla.jit
@@ -1374,9 +1384,9 @@ class _SparseMatmul:
         score_params = tla.params.CopyL0C2DstParams(
             l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M
         )
-        self._l0c_acquire(self.l0c_ready, slot)
+        self._l0c_wait_ready(slot)
         tla.copy(dst, src, score_params)
-        self._l0c_release(self.l0c_free, slot)
+        self._l0c_signal_free(slot)
 
     # store_pv：L0C PV 结果整体搬出到 UB
     def store_pv(self, pv_ub_base, slot=0):
@@ -1392,7 +1402,7 @@ class _SparseMatmul:
         (vec_m, DIM_NOPE) 行主序一致。
         """
         params = tla.params.CopyL0C2DstParams(l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M)
-        self._l0c_acquire(self.l0c_ready, slot)
+        self._l0c_wait_ready(slot)
         dst = tla.make_tensor(
             pv_ub_base,
             tla.make_layout(
@@ -1401,7 +1411,7 @@ class _SparseMatmul:
             ),
         )
         tla.copy(dst, self.l0c_tile(slot), params)
-        self._l0c_release(self.l0c_free, slot)
+        self._l0c_signal_free(slot)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -3909,9 +3919,6 @@ class _SparseFlashAttentionKernel:
         # 再抽干，使每个 cross flag 的 set/wait 计数严格相等（计数不为零时
         # 硬件报 "The set and wait instructions do not match"）。
         with tla.cube():
-            # 两块 L0C 槽初始为空闲：写侧第一次 acquire 才有令牌可取。
-            tla.set_flag(self.matmul.l0c_free[0])
-            tla.set_flag(self.matmul.l0c_free[1])
             tla.cross_core_set_flag(self.ws_free[0], tla.arch.MTE2)
             tla.cross_core_set_flag(self.ws_free[1], tla.arch.MTE2)
             tla.cross_core_set_flag(self.ws_free[2], tla.arch.MTE2)

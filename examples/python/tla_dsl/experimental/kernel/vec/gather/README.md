@@ -45,7 +45,7 @@ out = gather.run(x, index)
 以下命令在 CATLASS 仓库根目录执行：
 
 ```bash
-PYTHONPATH=examples/python/tla_dsl/experimental/kernel/indexer:$PYTHONPATH python - <<'PY'
+PYTHONPATH=examples/python/tla_dsl/experimental/kernel/vec:$PYTHONPATH python - <<'PY'
 import torch
 import torch_npu  # noqa: F401
 

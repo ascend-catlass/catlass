@@ -109,21 +109,15 @@ def block_sparse_attention_backward_kernel(
     dq_out_ready = tla.cross_flag("dq_out_ready", mode=4)
     dq_out_free = tla.cross_flag("dq_out_free", mode=4)
 
-    ab_free = tla.flag("ab_free", tla.arch.CUBE, tla.arch.MTE1)
-    ab_ready = tla.flag("ab_ready", tla.arch.MTE1, tla.arch.CUBE)
-    aux_ab_free = tla.flag("aux_ab_free", tla.arch.CUBE, tla.arch.MTE1)
-    aux_ab_ready = tla.flag("aux_ab_ready", tla.arch.MTE1, tla.arch.CUBE)
-    l1_ready = tla.flag("l1_ready", tla.arch.MTE2, tla.arch.MTE1)
-    qdo_l1_free = tla.flag("qdo_l1_free", tla.arch.MTE1, tla.arch.MTE2)
-    qdo_l1_ready = tla.flag("qdo_l1_ready", tla.arch.MTE2, tla.arch.MTE1)
-    k_l1_free = tla.flag("k_l1_free", tla.arch.MTE1, tla.arch.MTE2)
-    v_l1_free = tla.flag("v_l1_free", tla.arch.MTE1, tla.arch.MTE2)
-    c_free = tla.flag("c_free", tla.arch.FIX, tla.arch.CUBE)
-    c_ready = tla.flag("c_ready", tla.arch.CUBE, tla.arch.FIX)
-    aux_c_free = tla.flag("aux_c_free", tla.arch.FIX, tla.arch.CUBE)
-    aux_c_ready = tla.flag("aux_c_ready", tla.arch.CUBE, tla.arch.FIX)
-    dq_c_free = tla.flag("dq_c_free", tla.arch.FIX, tla.arch.CUBE)
-    dq_c_ready = tla.flag("dq_c_ready", tla.arch.CUBE, tla.arch.FIX)
+    mtx_ab = tla.mutex("bsa_bwd_l0_ab", id=0)
+    mtx_aux_ab = tla.mutex("bsa_bwd_l0_ab_aux", id=1)
+    mtx_c = tla.mutex("bsa_bwd_l0c", id=2)
+    mtx_aux_c = tla.mutex("bsa_bwd_l0c_aux", id=3)
+    mtx_dq_c = tla.mutex("bsa_bwd_l0c_dq", id=4)
+    mtx_qdo = tla.mutex("bsa_bwd_l1_qdo", id=5)
+    mtx_k = tla.mutex("bsa_bwd_l1_k", id=6)
+    mtx_v = tla.mutex("bsa_bwd_l1_v", id=7)
+    mtx_p = tla.mutex("bsa_bwd_l1_p", id=8)
 
     l0a_ptr = tla.allocate(
         q_block * head_dim, io_dtype, tla.AddressSpace.l0a, alignment
@@ -209,14 +203,6 @@ def block_sparse_attention_backward_kernel(
     )
 
     with tla.cube():
-        tla.set_flag(ab_free)
-        tla.set_flag(aux_ab_free)
-        tla.set_flag(c_free)
-        tla.set_flag(aux_c_free)
-        tla.set_flag(dq_c_free)
-        tla.set_flag(qdo_l1_free)
-        tla.set_flag(k_l1_free)
-        tla.set_flag(v_l1_free)
         if tla.const_expr(direct_pds == 0):
             tla.cross_core_set_flag(pds_free_0, tla.arch.MTE2, aiv_id=0)
             tla.cross_core_set_flag(pds_free_1, tla.arch.MTE2, aiv_id=0)
@@ -395,11 +381,11 @@ def block_sparse_attention_backward_kernel(
             l1_q = tla.make_tensor_like(l1_q_ptr, l1_q_ref, tla.arch.zN)
             l1_do = tla.make_tensor_like(l1_do_ptr, l1_do_ref, tla.arch.zN)
             with tla.cube():
-                tla.wait_flag(qdo_l1_free)
+                mtx_qdo.lock(pipe=tla.arch.MTE2)
                 tla.copy(l1_q, q_gm)
                 tla.copy(l1_do, do_gm)
-                tla.set_flag(qdo_l1_ready)
-                tla.wait_flag(qdo_l1_ready)
+                mtx_qdo.unlock(pipe=tla.arch.MTE2)
+                mtx_qdo.lock(pipe=tla.arch.MTE1)
 
             with tla.vector():
                 vec_idx = tla.arch.sub_block_idx()
@@ -475,7 +461,6 @@ def block_sparse_attention_backward_kernel(
                     f32_mask = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
                     compute_mask = tla.create_mask(pattern=tla.mask.ALL, dtype=io_dtype)
                     io_mask = tla.create_mask(pattern=tla.mask.ALL, dtype=io_dtype)
-                    one_mask = tla.update_mask(c1, dtype=tla.Float32)[0]
                     d_cache_ub = tla.make_tensor(
                         d_ptr,
                         tla.make_layout(tla.make_shape(q_sub), tla.make_stride(c1)),
@@ -514,11 +499,7 @@ def block_sparse_attention_backward_kernel(
                             d_cache_ub,
                             tla.make_shape(c1),
                             tla.make_coord(cache_row),
-                        ).store(
-                            dot,
-                            params=tla.params.UnalignStoreParams(),
-                            mask=one_mask,
-                        )
+                        ).store(dot, params=tla.params.UnalignStoreParams())
                     tla.local_mem_bar(
                         tla.params.MemType.VEC_STORE,
                         tla.params.MemType.VEC_LOAD,
@@ -601,9 +582,9 @@ def block_sparse_attention_backward_kernel(
                         l1_k_col = tla.make_tensor_like(
                             l1_k_ptr, l1_k_col_ref, tla.arch.nZ
                         )
-                        tla.wait_flag(k_l1_free)
+                        mtx_k.lock(pipe=tla.arch.MTE2)
                         tla.copy(l1_k_col, k_cols_gm)
-                        tla.set_flag(l1_ready)
+                        mtx_k.unlock(pipe=tla.arch.MTE2)
                         l1_v_col_ref = tla.make_tensor(
                             l1_v_ptr,
                             tla.make_layout(
@@ -615,10 +596,10 @@ def block_sparse_attention_backward_kernel(
                         l1_v_col = tla.make_tensor_like(
                             l1_v_ptr, l1_v_col_ref, tla.arch.nZ
                         )
-                        tla.wait_flag(v_l1_free)
+                        mtx_v.lock(pipe=tla.arch.MTE2)
                         tla.copy(l1_v_col, v_cols_gm)
-                        tla.set_flag(qdo_l1_ready)
-                        tla.wait_flag(l1_ready)
+                        mtx_v.unlock(pipe=tla.arch.MTE2)
+                        mtx_k.lock(pipe=tla.arch.MTE1)
                         l0_q = tla.make_tensor_like(l0a_ptr, l1_q, tla.arch.zN)
                         l0_kt = tla.make_tensor_like(l0b_ptr, l1_k_col, tla.arch.nZ)
                         score_ref = tla.make_tensor(
@@ -631,17 +612,17 @@ def block_sparse_attention_backward_kernel(
                         l0_score = tla.make_tensor_like(
                             l0c_tmp_ptr, score_ref, tla.arch.L0Clayout
                         )
-                        tla.wait_flag(ab_free)
+                        mtx_ab.lock(pipe=tla.arch.MTE1)
                         tla.copy(l0_q, l1_q)
                         tla.copy(l0_kt, l1_k_col)
-                        tla.set_flag(k_l1_free)
-                        tla.set_flag(ab_ready)
-                        tla.wait_flag(ab_ready)
-                        tla.wait_flag(c_free)
+                        mtx_k.unlock(pipe=tla.arch.MTE1)
+                        mtx_ab.unlock(pipe=tla.arch.MTE1)
+                        mtx_ab.lock(pipe=tla.arch.CUBE)
+                        mtx_c.lock(pipe=tla.arch.CUBE)
                         tla.mmad(l0_score, l0_q, l0_kt, init_c=True)
-                        tla.set_flag(ab_free)
-                        tla.set_flag(c_ready)
-                        tla.wait_flag(c_ready)
+                        mtx_ab.unlock(pipe=tla.arch.CUBE)
+                        mtx_c.unlock(pipe=tla.arch.CUBE)
+                        mtx_c.lock(pipe=tla.arch.FIX)
                         if cv_slot == c0:
                             tla.cross_core_wait_flag(cv_free_0, tla.arch.FIX, aiv_id=0)
                         else:
@@ -664,7 +645,7 @@ def block_sparse_attention_backward_kernel(
                                 l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M
                             ),
                         )
-                        tla.set_flag(c_free)
+                        mtx_c.unlock(pipe=tla.arch.FIX)
 
                     with tla.cube():
                         l1_v_col_ref = tla.make_tensor(
@@ -678,7 +659,7 @@ def block_sparse_attention_backward_kernel(
                         l1_v_col = tla.make_tensor_like(
                             l1_v_ptr, l1_v_col_ref, tla.arch.nZ
                         )
-                        tla.wait_flag(qdo_l1_ready)
+                        mtx_v.lock(pipe=tla.arch.MTE1)
                         l0_do = tla.make_tensor_like(l0a_aux_ptr, l1_do, tla.arch.zN)
                         l0_vt = tla.make_tensor_like(l0b_aux_ptr, l1_v_col, tla.arch.nZ)
                         dp_ref = tla.make_tensor(
@@ -691,17 +672,17 @@ def block_sparse_attention_backward_kernel(
                         l0_dp = tla.make_tensor_like(
                             l0c_aux_ptr, dp_ref, tla.arch.L0Clayout
                         )
-                        tla.wait_flag(aux_ab_free)
+                        mtx_aux_ab.lock(pipe=tla.arch.MTE1)
                         tla.copy(l0_do, l1_do)
                         tla.copy(l0_vt, l1_v_col)
-                        tla.set_flag(v_l1_free)
-                        tla.set_flag(aux_ab_ready)
-                        tla.wait_flag(aux_ab_ready)
-                        tla.wait_flag(aux_c_free)
+                        mtx_v.unlock(pipe=tla.arch.MTE1)
+                        mtx_aux_ab.unlock(pipe=tla.arch.MTE1)
+                        mtx_aux_ab.lock(pipe=tla.arch.CUBE)
+                        mtx_aux_c.lock(pipe=tla.arch.CUBE)
                         tla.mmad(l0_dp, l0_do, l0_vt, init_c=True)
-                        tla.set_flag(aux_ab_free)
-                        tla.set_flag(aux_c_ready)
-                        tla.wait_flag(aux_c_ready)
+                        mtx_aux_ab.unlock(pipe=tla.arch.CUBE)
+                        mtx_aux_c.unlock(pipe=tla.arch.CUBE)
+                        mtx_aux_c.lock(pipe=tla.arch.FIX)
                         dp_ub = tla.make_tensor(
                             cv_dp_ptr,
                             tla.make_layout(
@@ -716,7 +697,7 @@ def block_sparse_attention_backward_kernel(
                                 l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M
                             ),
                         )
-                        tla.set_flag(aux_c_free)
+                        mtx_aux_c.unlock(pipe=tla.arch.FIX)
                         if cv_slot == c0:
                             tla.cross_core_set_flag(cv_ready_0, tla.arch.FIX, aiv_id=0)
                         else:
@@ -909,7 +890,6 @@ def block_sparse_attention_backward_kernel(
                                     k_size // 2, dtype=tla.Float32
                                 )[0]
                                 inline_zero = tla.full(0.0, dtype=tla.Float32)
-                            one_mask = tla.update_mask(c1, dtype=tla.Float32)[0]
                             if tla.const_expr(inline_tail == 0):
                                 dp_pad_tail = (k_size - c1) % fp32_lanes + c1
                                 dp_pad_tail_mask = tla.update_mask(
@@ -952,7 +932,8 @@ def block_sparse_attention_backward_kernel(
                                                 tla.make_coord(dp_pad_row_pad, c1),
                                             )
                                             dp_pad_p_second.store(
-                                                dp_pad_zero_reg, mask=f32_mask
+                                                dp_pad_zero_reg,
+                                                mask=f32_mask,
                                             )
                                     tla.local_mem_bar(
                                         tla.params.MemType.VEC_STORE,
@@ -1065,7 +1046,6 @@ def block_sparse_attention_backward_kernel(
                                         d_row.store(
                                             tla.add(old_d, dot, mask=f32_mask),
                                             params=tla.params.UnalignStoreParams(),
-                                            mask=one_mask,
                                         )
                                     else:
                                         d_value = tla.tile_view(
@@ -1229,7 +1209,6 @@ def block_sparse_attention_backward_kernel(
                                     tail_d_row.store(
                                         tla.add(tail_old_d, tail_dot, mask=f32_mask),
                                         params=tla.params.UnalignStoreParams(),
-                                        mask=one_mask,
                                     )
                                 else:
                                     tail_d_value = tla.tile_view(
@@ -1546,10 +1525,10 @@ def block_sparse_attention_backward_kernel(
                             l1_k_row = tla.make_tensor_like(
                                 l1_k_ptr, l1_k_row_ref, tla.arch.zN
                             )
-                            tla.wait_flag(k_l1_free)
+                            mtx_k.lock(pipe=tla.arch.MTE2)
                             tla.copy(l1_k_row, previous_k_rows_gm)
-                            tla.set_flag(l1_ready)
-                            tla.wait_flag(l1_ready)
+                            mtx_k.unlock(pipe=tla.arch.MTE2)
+                            mtx_k.lock(pipe=tla.arch.MTE1)
                             l0_ds_ref = tla.make_tensor(
                                 l0a_ptr,
                                 tla.make_layout(
@@ -1562,20 +1541,20 @@ def block_sparse_attention_backward_kernel(
                             )
                             l0_k = tla.make_tensor_like(l0b_ptr, l1_k_row, tla.arch.nZ)
                             if sparse_idx == c1:
-                                tla.wait_flag(dq_c_free)
-                            tla.wait_flag(ab_free)
+                                mtx_dq_c.lock(pipe=tla.arch.CUBE)
+                            mtx_ab.lock(pipe=tla.arch.MTE1)
                             tla.copy(l0_ds, l1_ds)
                             tla.copy(l0_k, l1_k_row)
-                            tla.set_flag(ab_ready)
-                            tla.wait_flag(ab_ready)
+                            mtx_ab.unlock(pipe=tla.arch.MTE1)
+                            mtx_ab.lock(pipe=tla.arch.CUBE)
                             tla.mmad(
                                 l0_dq_tile,
                                 l0_ds,
                                 l0_k,
                                 init_c=(previous_sparse_idx == c0),
                             )
-                            tla.set_flag(ab_free)
-                            tla.set_flag(k_l1_free)
+                            mtx_ab.unlock(pipe=tla.arch.CUBE)
+                            mtx_k.unlock(pipe=tla.arch.MTE1)
 
                         with tla.cube():
                             if tla.const_expr(direct_pds == 0):
@@ -1624,21 +1603,21 @@ def block_sparse_attention_backward_kernel(
                             l0_dk = tla.make_tensor_like(
                                 l0c_tmp_ptr, dk_ref, tla.arch.L0Clayout
                             )
-                            tla.wait_flag(aux_ab_free)
+                            mtx_aux_ab.lock(pipe=tla.arch.MTE1)
                             tla.copy(l0_dst, l1_dst)
                             tla.copy(l0_q_b, l1_q)
-                            tla.set_flag(aux_ab_ready)
-                            tla.wait_flag(aux_ab_ready)
-                            tla.wait_flag(c_free)
+                            mtx_aux_ab.unlock(pipe=tla.arch.MTE1)
+                            mtx_aux_ab.lock(pipe=tla.arch.CUBE)
+                            mtx_c.lock(pipe=tla.arch.CUBE)
                             tla.mmad(
                                 l0_dk,
                                 l0_dst,
                                 l0_q_b,
                                 init_c=True,
                             )
-                            tla.set_flag(aux_ab_free)
-                            tla.set_flag(c_ready)
-                            tla.wait_flag(c_ready)
+                            mtx_aux_ab.unlock(pipe=tla.arch.CUBE)
+                            mtx_c.unlock(pipe=tla.arch.CUBE)
+                            mtx_c.lock(pipe=tla.arch.FIX)
                             dk_acc_gm = tla.make_tensor(
                                 mem_dk_acc.ptr
                                 + k_base
@@ -1655,9 +1634,10 @@ def block_sparse_attention_backward_kernel(
                                     atomic_mode=tla.params.AtomicMode.ADD
                                 ),
                             )
-                            tla.set_flag(c_free)
+                            mtx_c.unlock(pipe=tla.arch.FIX)
 
                         with tla.cube():
+                            mtx_p.lock(pipe=tla.arch.MTE2)
                             if tla.const_expr(direct_pds == 0):
                                 scratch_offset = (
                                     tla.arch.block_idx() * q_block * kv_block
@@ -1705,8 +1685,8 @@ def block_sparse_attention_backward_kernel(
                                     tla.make_shape(previous_k_size, q_size),
                                     tla.make_coord(c0, c0),
                                 )
-                            tla.set_flag(l1_ready)
-                            tla.wait_flag(l1_ready)
+                            mtx_p.unlock(pipe=tla.arch.MTE2)
+                            mtx_p.lock(pipe=tla.arch.MTE1)
                             l0_pt = tla.make_tensor_like(l0a_ptr, l1_pt)
                             l0_do_b = tla.make_tensor_like(l0b_ptr, l1_do, tla.arch.nZ)
                             dv_ref = tla.make_tensor(
@@ -1719,8 +1699,9 @@ def block_sparse_attention_backward_kernel(
                             l0_dv = tla.make_tensor_like(
                                 l0c_aux_ptr, dv_ref, tla.arch.L0Clayout
                             )
-                            tla.wait_flag(ab_free)
+                            mtx_ab.lock(pipe=tla.arch.MTE1)
                             tla.copy(l0_pt, l1_pt)
+                            mtx_p.unlock(pipe=tla.arch.MTE1)
                             tla.copy(l0_do_b, l1_do)
                             if tla.const_expr(direct_pds != 0):
                                 if consume_slot == c0:
@@ -1739,20 +1720,20 @@ def block_sparse_attention_backward_kernel(
                                     tla.cross_core_set_flag(
                                         pds_free_1, tla.arch.MTE1, aiv_id=1
                                     )
-                            tla.set_flag(ab_ready)
-                            tla.wait_flag(ab_ready)
-                            tla.wait_flag(aux_c_free)
+                            mtx_ab.unlock(pipe=tla.arch.MTE1)
+                            mtx_ab.lock(pipe=tla.arch.CUBE)
+                            mtx_aux_c.lock(pipe=tla.arch.CUBE)
                             tla.mmad(
                                 l0_dv,
                                 l0_pt,
                                 l0_do_b,
                                 init_c=True,
                             )
-                            tla.set_flag(ab_free)
+                            mtx_ab.unlock(pipe=tla.arch.CUBE)
                             if sparse_idx == selected_count:
-                                tla.set_flag(qdo_l1_free)
-                            tla.set_flag(aux_c_ready)
-                            tla.wait_flag(aux_c_ready)
+                                mtx_qdo.unlock(pipe=tla.arch.MTE1)
+                            mtx_aux_c.unlock(pipe=tla.arch.CUBE)
+                            mtx_aux_c.lock(pipe=tla.arch.FIX)
                             dv_acc_gm = tla.make_tensor(
                                 mem_dv_acc.ptr
                                 + k_base
@@ -1769,7 +1750,7 @@ def block_sparse_attention_backward_kernel(
                                     atomic_mode=tla.params.AtomicMode.ADD
                                 ),
                             )
-                            tla.set_flag(aux_c_free)
+                            mtx_aux_c.unlock(pipe=tla.arch.FIX)
 
             # The flush iteration produces one duplicate P/dS tile.  Drain
             # its readiness tokens and return the single scratch slot before
@@ -1811,8 +1792,8 @@ def block_sparse_attention_backward_kernel(
                         tla.cross_core_set_flag(pds_free_1, tla.arch.MTE1, aiv_id=1)
 
             with tla.cube():
-                tla.set_flag(dq_c_ready)
-                tla.wait_flag(dq_c_ready)
+                mtx_dq_c.unlock(pipe=tla.arch.CUBE)
+                mtx_dq_c.lock(pipe=tla.arch.FIX)
                 tla.cross_core_wait_flag(dq_out_free, tla.arch.FIX, aiv_id=0)
                 tla.cross_core_wait_flag(dq_out_free, tla.arch.FIX, aiv_id=1)
                 dq_out_ub = tla.make_tensor(
@@ -1829,7 +1810,7 @@ def block_sparse_attention_backward_kernel(
                         l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M
                     ),
                 )
-                tla.set_flag(dq_c_free)
+                mtx_dq_c.unlock(pipe=tla.arch.FIX)
                 tla.cross_core_set_flag(dq_out_ready, tla.arch.FIX, aiv_id=0)
                 tla.cross_core_set_flag(dq_out_ready, tla.arch.FIX, aiv_id=1)
 
@@ -1913,14 +1894,14 @@ def block_sparse_attention_backward_kernel(
                     tla.cross_core_set_flag(dq_out_free, tla.arch.VECTOR, aiv_id=1)
 
     with tla.cube():
-        tla.wait_flag(ab_free)
-        tla.wait_flag(aux_ab_free)
-        tla.wait_flag(c_free)
-        tla.wait_flag(aux_c_free)
-        tla.wait_flag(dq_c_free)
-        tla.wait_flag(qdo_l1_free)
-        tla.wait_flag(k_l1_free)
-        tla.wait_flag(v_l1_free)
+        mtx_ab.lock(pipe=tla.arch.MTE1)
+        mtx_aux_ab.lock(pipe=tla.arch.MTE1)
+        mtx_c.lock(pipe=tla.arch.CUBE)
+        mtx_aux_c.lock(pipe=tla.arch.CUBE)
+        mtx_dq_c.lock(pipe=tla.arch.CUBE)
+        mtx_qdo.lock(pipe=tla.arch.MTE2)
+        mtx_k.lock(pipe=tla.arch.MTE2)
+        mtx_v.lock(pipe=tla.arch.MTE2)
         tla.cross_core_wait_flag(cv_free_0, tla.arch.FIX, aiv_id=0)
         tla.cross_core_wait_flag(cv_free_1, tla.arch.FIX, aiv_id=0)
         tla.cross_core_wait_flag(cv_free_0, tla.arch.FIX, aiv_id=1)

@@ -795,7 +795,6 @@ def sage_attention_kernel(
                     if want_lse:
                         m_out.lock(pipe=tla.arch.VECTOR)
                         with tla.vec.func(mode="simd"):
-                            lse_one = tla.update_mask(1, dtype=tla.Float32)[0]
                             for lr in tla.range(valid):
                                 m = tla.tile_view(
                                     maxima, tla.make_shape(1), tla.make_coord(lr)
@@ -806,7 +805,7 @@ def sage_attention_kernel(
                                 e = (m + tla.log(psum)) * 1.4426950408889634
                                 tla.tile_view(
                                     elu, tla.make_shape(1), tla.make_coord(lr)
-                                ).store(e, mask=lse_one, params=us)
+                                ).store(e, params=us)
                         m_out.unlock(pipe=tla.arch.VECTOR)
                         egm = tla.make_tensor(
                             lse.ptr + (b * hq + h) * nq + qb * bm + sub * half,

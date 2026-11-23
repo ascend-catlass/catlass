@@ -21,18 +21,19 @@ BH = 128
 SK = 64
 ROWS_PER_SUB = BM // 2  # one AIV owns half of the L0C rows (SPLIT_M)
 VL = 64  # fp32 vector register lanes
+NORM_ROWS = 64  # rows per normalize task
 
 # Finite stand-in for -inf: exp(MIN_F - max) underflows to 0 without producing NaN.
 MIN_F = -3.4028234663852886e38
 
 
 @tla.kernel
-def msrs_main_kernel(
+def ms_main_kernel(
     x: tla.Tensor,  # [M, H] bf16 RowMajor
     w: tla.Tensor,  # [H, V] bf16 RowMajor (host pre-transposes [V, H])
+    logits: tla.Tensor,  # [M_pad, V_pad] fp32 raw GEMM result
     tile_max: tla.Tensor,  # [M, NV] fp32 per V-segment partial max
     tile_sum: tla.Tensor,  # [M, NV] fp32 per V-segment partial exp-sum
-    inv_temperature: float,
     m_real: int,
     v_real: int,
     NV: tla.Constexpr[int],
@@ -43,6 +44,7 @@ def msrs_main_kernel(
     m = x.origin_shape[0]
     h = x.origin_shape[1]
     v = w.origin_shape[1]
+    v_pad = logits.origin_shape[1]
 
     grid_m = (m + BM - 1) // BM
     h_tiles = (h + BH - 1) // BH
@@ -55,6 +57,10 @@ def msrs_main_kernel(
 
     # C/V crossing: one cross flag handed back and forth (VECTOR -> FIX -> VECTOR).
     exchange = tla.cross_flag("exchange")
+    # ub_z has one writer (FIX, ordered by the exchange flag) and two readers
+    # (the fp32 logits DMA on MTE3 and the statistics pass on VECTOR); this
+    # mutex carries the hand-off between them.
+    mutex_z = tla.mutex("softmax_z", id=9)
     # Same-core buffers are shared by their producer and consumer pipes.
     mutex_l1a0 = tla.mutex("l1a0", id=0)
     mutex_l1b0 = tla.mutex("l1b0", id=1)
@@ -350,7 +356,28 @@ def msrs_main_kernel(
                     ncols = tla.as_numeric(v_real - v0)
                     if ncols > BN:
                         ncols = tla.as_numeric(BN)
+                    # Take the mutex before the cross-core wait and release it
+                    # right after, so both ub_z readers below are ordered after
+                    # the fixpipe tile is complete.
+                    mutex_z.lock(pipe=tla.arch.VECTOR)
                     tla.cross_core_wait_flag(exchange, tla.arch.VECTOR)
+                    mutex_z.unlock(pipe=tla.arch.VECTOR)
+
+                    # Persist the raw fp32 GEMM tile for the normalize pass.  The
+                    # DMA only reads ub_z, so it overlaps the statistics pass, and
+                    # the barrier below keeps it drained before the fixpipe is
+                    # allowed to overwrite ub_z with the next tile.
+                    gm_z_tile = tla.make_tensor(
+                        logits.ptr
+                        + sub_row0.to(tla.Int64) * tla.Int64(v_pad)
+                        + (vt * BN).to(tla.Int64),
+                        tla.make_layout(
+                            tla.make_shape(ROWS_PER_SUB, BN),
+                            tla.make_stride(v_pad, 1),
+                        ),
+                    )
+                    with tla.mutex_guard(mutex_z):
+                        tla.copy(gm_z_tile, ub_z)
 
                     # Online update per row: tile max first, then the rescale factor
                     # and the exp-sum, all from the registers loaded for this tile.
@@ -387,27 +414,23 @@ def msrs_main_kernel(
                         pm4, _ = tla.update_mask(lane4, dtype=tla.Float32)
 
                         for r1 in tla.range(ROWS_PER_SUB):
-                            # One scale + mask per chunk; the four registers feed both
-                            # the max pass and the exp pass.
+                            # One mask per chunk; the four registers feed both the
+                            # max pass and the exp pass.
                             ra0 = tla.tile_view(
                                 ub_z, tla.make_shape(1, VL), tla.make_coord(r1, 0)
                             ).load()
-                            ra0 = tla.mul(ra0, inv_temperature, mask=preg_all)
                             ra0 = tla.where(pm1, ra0, minv)
                             ra1 = tla.tile_view(
                                 ub_z, tla.make_shape(1, VL), tla.make_coord(r1, 1)
                             ).load()
-                            ra1 = tla.mul(ra1, inv_temperature, mask=preg_all)
                             ra1 = tla.where(pm2, ra1, minv)
                             ra2 = tla.tile_view(
                                 ub_z, tla.make_shape(1, VL), tla.make_coord(r1, 2)
                             ).load()
-                            ra2 = tla.mul(ra2, inv_temperature, mask=preg_all)
                             ra2 = tla.where(pm3, ra2, minv)
                             ra3 = tla.tile_view(
                                 ub_z, tla.make_shape(1, VL), tla.make_coord(r1, 3)
                             ).load()
-                            ra3 = tla.mul(ra3, inv_temperature, mask=preg_all)
                             ra3 = tla.where(pm4, ra3, minv)
 
                             mxv = tla.max(ra0, ra1, mask=preg_all)
@@ -420,9 +443,7 @@ def msrs_main_kernel(
                             new_max = tla.max(old_max, tmax, mask=preg_all)
                             tla.tile_view(
                                 ub_rmax, tla.make_shape(1), tla.make_coord(r1)
-                            ).store(
-                                new_max, tla.params.UnalignStoreParams(), mask=one_mask
-                            )
+                            ).store(new_max, tla.params.UnalignStoreParams())
                             tla.local_mem_bar(
                                 tla.params.MemType.VEC_STORE,
                                 tla.params.MemType.VEC_LOAD,
@@ -472,9 +493,7 @@ def msrs_main_kernel(
                             )
                             tla.tile_view(
                                 ub_rsum, tla.make_shape(1), tla.make_coord(r1)
-                            ).store(
-                                new_sum, tla.params.UnalignStoreParams(), mask=one_mask
-                            )
+                            ).store(new_sum, tla.params.UnalignStoreParams())
 
                     tla.pipe_barrier(tla.pipes.ALL)
                     tla.cross_core_set_flag(exchange, tla.arch.VECTOR)
@@ -491,7 +510,7 @@ def msrs_main_kernel(
 
 
 @tla.kernel
-def msrs_merge_kernel(
+def ms_merge_kernel(
     tile_max: tla.Tensor,  # [M, NV] fp32
     tile_sum: tla.Tensor,  # [M, NV] fp32
     row_max: tla.Tensor,  # [M] fp32
@@ -526,6 +545,134 @@ def msrs_merge_kernel(
                         )
                 row_max[mr] = mx
                 row_sum[mr] = total
+
+
+@tla.kernel
+def ms_norm_kernel(
+    logits: tla.Tensor,  # [M_pad, V_pad] fp32 raw GEMM result
+    row_max: tla.Tensor,  # [M] fp32
+    row_sum: tla.Tensor,  # [M] fp32
+    y: tla.Tensor,  # [M_pad, V_pad] bf16 output
+    m_real: int,
+) -> None:
+    c0 = 0
+    c1 = 1
+
+    m_pad = logits.origin_shape[0]
+    v_pad = logits.origin_shape[1]
+    row_tiles = m_pad // NORM_ROWS
+    col_tiles = v_pad // BN
+    total_tasks = row_tiles * col_tiles
+
+    ubz_ptr = tla.allocate(NORM_ROWS * BN, tla.Float32, tla.AddressSpace.ub, 256)
+    uby_ptr = tla.allocate(NORM_ROWS * BN, tla.BFloat16, tla.AddressSpace.ub, 256)
+    ub_rmax_ptr = tla.allocate(NORM_ROWS, tla.Float32, tla.AddressSpace.ub, 256)
+    ub_rsum_ptr = tla.allocate(NORM_ROWS, tla.Float32, tla.AddressSpace.ub, 256)
+
+    # ub_z is written by MTE2 and read by VECTOR; ub_y is written by VECTOR and
+    # read by MTE3.  One mutex per staging buffer serialises each producer /
+    # consumer pair and also orders the reuse of both buffers across tasks.
+    mutex_z = tla.mutex("softmax_z", id=0)
+    mutex_y = tla.mutex("softmax_y", id=1)
+
+    with tla.vector():
+        ub_z = tla.make_tensor(
+            ubz_ptr,
+            tla.make_layout(tla.make_shape(NORM_ROWS, BN), tla.make_stride(BN, 1)),
+        )
+        ub_y = tla.make_tensor(
+            uby_ptr,
+            tla.make_layout(tla.make_shape(NORM_ROWS, BN), tla.make_stride(BN, 1)),
+        )
+        ub_rmax = tla.make_tensor(
+            ub_rmax_ptr, tla.make_layout(tla.make_shape(NORM_ROWS), tla.make_stride(1))
+        )
+        ub_rsum = tla.make_tensor(
+            ub_rsum_ptr, tla.make_layout(tla.make_shape(NORM_ROWS), tla.make_stride(1))
+        )
+
+        # FP32 -> BF16 keeps the fp32 exponent range; SAT is not needed because
+        # every softmax entry lies in [0, 1].
+        out_cast = tla.params.CastParams(
+            reg_slot=tla.params.RegSlot.ZERO,
+            sat_mode=tla.params.SatMode.NOSAT,
+            round_mode=tla.params.RoundMode.CAST_RINT,
+        )
+        # A f32->bf16 cast leaves the value in the low half of each B32 slot;
+        # PACK_B32 packs those halves densely on the way to UB.
+        pack_store = tla.params.NormalStoreParams(
+            store_dist=tla.params.StoreDist.DIST_PACK_B32
+        )
+        brc = tla.params.NormalLoadParams(load_dist=tla.params.LoadDist.DIST_BRC_B32)
+
+        for task in tla.range(tla.arch.block_idx(), total_tasks, tla.arch.block_num()):
+            mt = task // col_tiles
+            vt = task - mt * col_tiles
+            row0 = mt * NORM_ROWS
+            col0 = vt * BN
+
+            gm_z_tile = tla.make_tensor(
+                logits.ptr + row0.to(tla.Int64) * tla.Int64(v_pad) + col0.to(tla.Int64),
+                tla.make_layout(
+                    tla.make_shape(NORM_ROWS, BN), tla.make_stride(v_pad, 1)
+                ),
+            )
+            with tla.mutex_guard(mutex_z):
+                tla.copy(ub_z, gm_z_tile)
+
+            # One thread per row; rows past the real row count get a neutral
+            # (max=0, sum=1) pair so the padded rows never produce NaN.
+            with tla.vec.func(mode="simt", thread_block_dim=NORM_ROWS):
+                rtid, _, _ = tla.arch.thread_idx()
+                grow = row0 + rtid
+                if grow < m_real:
+                    ub_rmax[rtid] = row_max[grow]
+                    ub_rsum[rtid] = row_sum[grow]
+                else:
+                    ub_rmax[rtid] = tla.as_numeric(0.0)
+                    ub_rsum[rtid] = tla.as_numeric(1.0)
+
+            tla.pipe_barrier(tla.pipes.ALL)
+
+            # y = exp(z - row_max) / row_sum, one VL-wide chunk at a time.
+            with tla.mutex_guard(mutex_z, mutex_y):
+                with tla.vec.func(mode="simd"):
+                    preg_all = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
+                    store_all = tla.create_mask(
+                        pattern=tla.mask.ALL, dtype=tla.BFloat16
+                    )
+                    for r1 in tla.range(NORM_ROWS):
+                        rmax = tla.tile_view(
+                            ub_rmax, tla.make_shape(1), tla.make_coord(r1)
+                        ).load(params=brc)
+                        rsum = tla.tile_view(
+                            ub_rsum, tla.make_shape(1), tla.make_coord(r1)
+                        ).load(params=brc)
+                        for cb in tla.range(c0, BN // VL, c1):
+                            zv = tla.tile_view(
+                                ub_z, tla.make_shape(1, VL), tla.make_coord(r1, cb)
+                            ).load()
+                            zv = tla.sub(zv, rmax, mask=preg_all)
+                            zv = tla.exp(zv, mask=preg_all)
+                            zv = tla.div(zv, rsum, mask=preg_all)
+                            tla.tile_view(
+                                ub_y, tla.make_shape(1, VL), tla.make_coord(r1, cb)
+                            ).store(
+                                zv.to(tla.BFloat16, out_cast, preg_all),
+                                pack_store,
+                                mask=store_all,
+                            )
+
+            gm_y_tile = tla.make_tensor(
+                y.ptr + row0.to(tla.Int64) * tla.Int64(v_pad) + col0.to(tla.Int64),
+                tla.make_layout(
+                    tla.make_shape(NORM_ROWS, BN), tla.make_stride(v_pad, 1)
+                ),
+            )
+            with tla.mutex_guard(mutex_y):
+                tla.copy(gm_y_tile, ub_y)
+
+        tla.pipe_barrier(tla.pipes.ALL)
 
 
 # ======================================================================================
@@ -586,25 +733,22 @@ def _tla_tensor(buffer, layout_tag):
     return from_dlpack(buffer, layout_tag=layout_tag)
 
 
-def run(x, w, temperature):
-    """Return ``(row_max, row_sum)``; see README.md for semantics."""
+def run(x, w):
+    """Return ``softmax(x @ w.T)``; see README.md for semantics."""
     import torch
 
     m, h = x.shape
     v = w.shape[0]
     device = x.device
 
-    row_max = torch.empty(m, dtype=torch.float32, device=device)
-    row_sum = torch.empty(m, dtype=torch.float32, device=device)
-    if m == 0:
-        return row_max, row_sum
+    if m == 0 or v == 0:
+        return torch.empty((m, v), dtype=torch.bfloat16, device=device)
 
     bm, bn = BM, BN
 
-    inv_temperature = 1.0 / float(temperature)
-
     grid_m = (m + bm - 1) // bm
-    nv_tiles = (v + bn - 1) // bn
+    v_pad = v_pad_target(w, bn)
+    nv_tiles = v_pad // bn
     device_index = int(str(x.device).split(":")[-1]) if ":" in str(x.device) else 0
     cube_cores, vector_cores = _core_counts(device_index)
     # Wave quantization: grid = grid_m * nv blocks must land on a core-count
@@ -624,6 +768,13 @@ def run(x, w, temperature):
             best_waste = waste
         cand = cand + 1
 
+    # The raw GEMM result is materialised once so the normalize pass does not
+    # have to redo the matrix multiply.
+    m_pad = grid_m * bm
+    logits = torch.empty((m_pad, v_pad), dtype=torch.float32, device=device)
+    y_buf = torch.empty((m_pad, v_pad), dtype=torch.bfloat16, device=device)
+    row_max = torch.empty(m, dtype=torch.float32, device=device)
+    row_sum = torch.empty(m, dtype=torch.float32, device=device)
     tile_max = torch.empty((m, nv), dtype=torch.float32, device=device)
     tile_sum = torch.empty_like(tile_max)
 
@@ -631,7 +782,6 @@ def run(x, w, temperature):
     # zero-padded up to whole tiles.  Zero padding is exact for M (rows beyond the
     # row count are dropped by the m_real guard) and for H (extra K terms
     # contribute 0); the padded V columns are masked out by v_real.
-    m_pad = ((m + bm - 1) // bm) * bm
     h_pad = ((h + BH - 1) // BH) * BH
     if m_pad != m or h_pad != h:
         x_pad = torch.zeros((m_pad, h_pad), dtype=x.dtype, device=device)
@@ -645,30 +795,32 @@ def run(x, w, temperature):
     # README.md).  A partial (V % BN != 0) rhs tile also has no working GM->L1
     # route, so the operand is zero-padded up to a BN multiple; the padded columns
     # are excluded from max/exp-sum by the kernel mask (v_real below).
-    w_hv = _w_hv(w, v_pad_target(w, bn), h_pad)
+    w_hv = _w_hv(w, v_pad, h_pad)
     w_t = _tla_tensor(w_hv, tla.arch.RowMajor)
+    logits_t = _tla_tensor(logits, tla.arch.RowMajor)
     tmax_t = _tla_tensor(tile_max, tla.arch.RowMajor)
     tsum_t = _tla_tensor(tile_sum, tla.arch.RowMajor)
     rmax_t = _tla_tensor(row_max, tla.arch.RowMajor)
     rsum_t = _tla_tensor(row_sum, tla.arch.RowMajor)
+    y_t = _tla_tensor(y_buf, tla.arch.RowMajor)
 
     key = (m, h, v, nv)
     entry = _COMPILED.get(key)
     if entry is None:
-        stats_artifact = tla.compile(
-            msrs_main_kernel,
+        main_artifact = tla.compile(
+            ms_main_kernel,
             x_t,
             w_t,
+            logits_t,
             tmax_t,
             tsum_t,
-            inv_temperature,
             m,
             v,
             nv,
             options="--npu-arch 3510",
         )
         merge_artifact = tla.compile(
-            msrs_merge_kernel,
+            ms_merge_kernel,
             tmax_t,
             tsum_t,
             rmax_t,
@@ -677,16 +829,31 @@ def run(x, w, temperature):
             nv,
             options="--npu-arch 3510",
         )
-        entry = (stats_artifact, merge_artifact, cube_cores, vector_cores)
+        norm_artifact = tla.compile(
+            ms_norm_kernel,
+            logits_t,
+            rmax_t,
+            rsum_t,
+            y_t,
+            m,
+            options="--npu-arch 3510",
+        )
+        entry = (
+            main_artifact,
+            merge_artifact,
+            norm_artifact,
+            cube_cores,
+            vector_cores,
+        )
         _COMPILED[key] = entry
-    stats_artifact, merge_artifact, cube_cores, vector_cores = entry
+    main_artifact, merge_artifact, norm_artifact, cube_cores, vector_cores = entry
 
-    stats_artifact(
+    main_artifact(
         x_t,
         w_t,
+        logits_t,
         tmax_t,
         tsum_t,
-        inv_temperature,
         m,
         v,
         block_num=cube_cores,
@@ -699,4 +866,12 @@ def run(x, w, temperature):
         nv_tiles,
         block_num=vector_cores,
     )
-    return row_max, row_sum
+    norm_artifact(
+        logits_t,
+        rmax_t,
+        rsum_t,
+        y_t,
+        m,
+        block_num=vector_cores,
+    )
+    return y_buf[:m, :v]

@@ -150,10 +150,8 @@ def gmm_swiglu_mx_quant_kernel(
     t_l0c_act = tla.make_tensor_like(l0c_act, c_ref, tla.arch.L0Clayout)
     t_l0c_gate = tla.make_tensor_like(l0c_gate, c_ref, tla.arch.L0Clayout)
 
-    ab_ready = tla.flag("ab_ready", tla.arch.MTE2, tla.arch.MTE1)
-    l0_ready = tla.flag("l0_ready", tla.arch.MTE1, tla.arch.CUBE)
-    l1_avail = tla.flag("l1_avail", tla.arch.MTE1, tla.arch.MTE2)
-    l0_avail = tla.flag("l0_avail", tla.arch.CUBE, tla.arch.MTE1)
+    mtx_l1 = tla.mutex("l1_ab", id=1)
+    mtx_l0 = tla.mutex("l0_ab", id=2)
     ub_ready = tla.cross_flag("ub_ready")
     ub_free = tla.cross_flag("ub_free")
     mtx_ub_out = tla.mutex(resource="ub_out", id=0)
@@ -275,8 +273,6 @@ def gmm_swiglu_mx_quant_kernel(
                     k_tiles = (gm_a_t.origin_shape[1] + tk - 1) // tk
 
                     mtx_l0c.lock(pipe=tla.arch.CUBE)
-                    tla.set_flag(l1_avail)
-                    tla.set_flag(l0_avail)
                     for kk in tla.range(c0, k_tiles, c1):
                         gm_a_k = tla.tile_view(
                             gm_a_t, tla.make_shape(tm, tk), tla.make_coord(c0, kk)
@@ -345,7 +341,7 @@ def gmm_swiglu_mx_quant_kernel(
                             l1sb_gate, tla.make_layout_with_tag((sk, tn), tla.Float8E8M0, tla.arch.nNMxScale)
                         )
 
-                        tla.wait_flag(l1_avail)
+                        mtx_l1.lock(pipe=tla.arch.MTE2)
                         if not tla.const_expr(_decodeA):
                             tla.copy(
                                 tla.tile_view(t_l1a, tla.make_shape(m_valid, k_valid), tla.make_coord(0, 0)),
@@ -391,32 +387,34 @@ def gmm_swiglu_mx_quant_kernel(
                                     tla.make_shape(tk - k_valid, n_valid),
                                 ).fill(0)
                             tla.pipe_barrier(tla.pipes.ALL)
-                        tla.set_flag(ab_ready)
-                        tla.wait_flag(ab_ready)
+                        mtx_l1.unlock(pipe=tla.arch.MTE2)
+                        mtx_l1.lock(pipe=tla.arch.MTE1)
 
                         t_l0a = tla.make_tensor_like(l0a, t_l1a, tla.arch.zN)
                         t_l0b_act = tla.make_tensor_like(l0b_act, t_l1b_act, tla.arch.nZ)
                         t_l0b_gate = tla.make_tensor_like(l0b_gate, t_l1b_gate, tla.arch.nZ)
 
-                        tla.wait_flag(l0_avail)
+                        mtx_l0.lock(pipe=tla.arch.MTE1)
                         tla.copy(t_l0a, t_l1a, scale=t_l1sa)
                         tla.copy(t_l0b_act, t_l1b_act, scale=t_l1sb_act)
                         tla.copy(t_l0b_gate, t_l1b_gate, scale=t_l1sb_gate)
-                        tla.set_flag(l1_avail)
+                        mtx_l1.unlock(pipe=tla.arch.MTE1)
                         if tla.const_expr(_decodeA):
                             tla.cross_core_set_flag(a_free, tla.arch.MTE1, aiv_id=0)
                         if tla.const_expr(_decodeB):
                             tla.cross_core_set_flag(b_free, tla.arch.MTE1, aiv_id=0)
-                        tla.set_flag(l0_ready)
-                        tla.wait_flag(l0_ready)
+                        mtx_l0.unlock(pipe=tla.arch.MTE1)
 
                         init_c = True if kk == 0 else False
+                        mtx_l0.lock(pipe=tla.arch.CUBE)
                         tla.mmad_mx(t_l0c_act, t_l0a, t_l0b_act, init_c=init_c)
                         tla.mmad_mx(t_l0c_gate, t_l0a, t_l0b_gate, init_c=init_c)
-                        tla.set_flag(l0_avail)
+                        mtx_l0.unlock(pipe=tla.arch.CUBE)
 
-                    tla.wait_flag(l1_avail)
-                    tla.wait_flag(l0_avail)
+                    mtx_l1.lock(pipe=tla.arch.MTE2)
+                    mtx_l1.unlock(pipe=tla.arch.MTE2)
+                    mtx_l0.lock(pipe=tla.arch.MTE1)
+                    mtx_l0.unlock(pipe=tla.arch.MTE1)
                     mtx_l0c.unlock(pipe=tla.arch.CUBE)
 
                     ub_act_cube = tla.make_tensor_like(ub_act, t_l0c_act, tla.arch.RowMajor)

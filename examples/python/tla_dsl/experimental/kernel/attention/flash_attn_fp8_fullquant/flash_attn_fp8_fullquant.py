@@ -94,7 +94,6 @@ def _sf_tile(
     CHUNK = 64
     with tla.vec.func(mode="simd"):
         full = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
-        one, _ = tla.update_mask(1, dtype=tla.Float32)
         minv = tla.full(-3.0e38, tla.Float32)
         zero = tla.full(0.0, tla.Float32)
         k0 = tla.tile_view(ub_ks, tla.make_shape(1, 64), tla.make_coord(0, 0)).load()
@@ -130,7 +129,7 @@ def _sf_tile(
             mx = tla.max(s0, s1, mask=full)
             mxr = mx.reduce(tla.ReductionOp.MAX, mask=full)
             tla.tile_view(dm_buf, tla.make_shape(1), tla.make_coord(i)).store(
-                mxr, tla.params.UnalignStoreParams(), mask=one
+                mxr, tla.params.UnalignStoreParams()
             )
             tla.local_mem_bar(tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD)
             tm_brc = tla.tile_view(dm_buf, tla.make_shape(1), tla.make_coord(i)).load(
@@ -169,13 +168,13 @@ def _sf_tile(
             if first == 0:
                 new_sum = tla.add(row_sum, tla.mul(ls, dmr, mask=full), mask=full)
             tla.tile_view(last_max, tla.make_shape(1), tla.make_coord(i)).store(
-                new_max, tla.params.UnalignStoreParams(), mask=one
+                new_max, tla.params.UnalignStoreParams()
             )
             tla.tile_view(last_sum, tla.make_shape(1), tla.make_coord(i)).store(
-                new_sum, tla.params.UnalignStoreParams(), mask=one
+                new_sum, tla.params.UnalignStoreParams()
             )
             tla.tile_view(dm_buf, tla.make_shape(1), tla.make_coord(i)).store(
-                dmr, tla.params.UnalignStoreParams(), mask=one
+                dmr, tla.params.UnalignStoreParams()
             )
             _p_store64(tla.mul(p0, p_scale, mask=full), ub_p, i, 0)
             _p_store64(tla.mul(p1, p_scale, mask=full), ub_p, i, 1)
@@ -232,25 +231,16 @@ def fafq_kernel(
     ub_dm = tla.allocate(HALF, tla.Float32, tla.AddressSpace.ub, 256)
     ub_out = tla.allocate(HALF * D, tla.Float16, tla.AddressSpace.ub, 256)
 
-    q_l0a_ready = tla.flag("q_l0a_ready", tla.arch.MTE1, tla.arch.MTE2)
-    q_l1_ready = tla.flag("q_l1_ready", tla.arch.MTE2, tla.arch.MTE1)
-    k_l0b_ready = tla.flag("k_l0b_ready", tla.arch.MTE1, tla.arch.MTE2)
-    k_l1_ready = tla.flag("k_l1_ready", tla.arch.MTE2, tla.arch.MTE1)
-    v_l0b_ready = tla.flag("v_l0b_ready", tla.arch.MTE1, tla.arch.MTE2)
-    v_l1_ready = tla.flag("v_l1_ready", tla.arch.MTE2, tla.arch.MTE1)
-    l0a_avail = tla.flag("l0a_avail", tla.arch.CUBE, tla.arch.MTE1)
-    l0a_ready = tla.flag("l0a_ready", tla.arch.MTE1, tla.arch.CUBE)
-    l0b_avail = tla.flag("l0b_avail", tla.arch.CUBE, tla.arch.MTE1)
-    l0b_ready = tla.flag("l0b_ready", tla.arch.MTE1, tla.arch.CUBE)
-    l0cs_avail = tla.flag("l0cs_avail", tla.arch.FIX, tla.arch.CUBE)
-    l0cs_ready = tla.flag("l0cs_ready", tla.arch.CUBE, tla.arch.FIX)
-    l0co_avail = tla.flag("l0co_avail", tla.arch.FIX, tla.arch.CUBE)
-    l0co_ready = tla.flag("l0co_ready", tla.arch.CUBE, tla.arch.FIX)
-    ub_p_avail = tla.flag("ub_p_avail", tla.arch.MTE3, tla.arch.VECTOR)
-    ub_p_ready = tla.flag("ub_p_ready", tla.arch.VECTOR, tla.arch.MTE3)
-    sc_ready = tla.flag("sc_ready", tla.arch.MTE2, tla.arch.VECTOR)
-    sc_free = tla.flag("sc_free", tla.arch.VECTOR, tla.arch.MTE2)
-    out_ready = tla.flag("out_ready", tla.arch.VECTOR, tla.arch.MTE3)
+    mtx_q = tla.mutex("fa_q", id=0)
+    mtx_k = tla.mutex("fa_k", id=1)
+    mtx_v = tla.mutex("fa_v", id=2)
+    mtx_l0a = tla.mutex("fa_l0a", id=3)
+    mtx_l0b = tla.mutex("fa_l0b", id=4)
+    mtx_l0cs = tla.mutex("fa_l0cs", id=5)
+    mtx_l0co = tla.mutex("fa_l0co", id=6)
+    mtx_ubp = tla.mutex("fa_ubp", id=7)
+    mtx_sc = tla.mutex("fa_sc", id=8)
+    mtx_out = tla.mutex("fa_out", id=9)
     s_cross = tla.cross_flag("s_cross")
     p_cross = tla.cross_flag("p_cross")
     o_cross = tla.cross_flag("o_cross")
@@ -258,18 +248,9 @@ def fafq_kernel(
     task_v_done = tla.cross_flag("task_v_done")
 
     with tla.cube():
-        tla.set_flag(q_l0a_ready)
-        tla.set_flag(k_l0b_ready)
-        tla.set_flag(v_l0b_ready)
-        tla.set_flag(l0a_avail)
-        tla.set_flag(l0b_avail)
-        tla.set_flag(l0cs_avail)
-        tla.set_flag(l0co_avail)
         tla.cross_core_set_flag(p_cross, tla.arch.MTE1)
         tla.cross_core_set_flag(task_c_done, tla.arch.CUBE)
     with tla.vector():
-        tla.set_flag(ub_p_avail)
-        tla.set_flag(sc_free)
         tla.cross_core_set_flag(s_cross, tla.arch.VECTOR)
         tla.cross_core_set_flag(o_cross, tla.arch.VECTOR)
         tla.cross_core_set_flag(task_v_done, tla.arch.VECTOR)
@@ -333,20 +314,19 @@ def fafq_kernel(
                     )
                     with tla.vec.func(mode="simd"):
                         full0 = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
-                        one0, _ = tla.update_mask(1, dtype=tla.Float32)
                         minv0 = tla.full(-3.0e38, tla.Float32)
                         zero0 = tla.full(0.0, tla.Float32)
                         onef0 = tla.full(1.0, tla.Float32)
                         for j in tla.range(m_sub0):
                             tla.tile_view(
                                 lm0, tla.make_shape(1), tla.make_coord(j)
-                            ).store(minv0, tla.params.UnalignStoreParams(), mask=one0)
+                            ).store(minv0, tla.params.UnalignStoreParams())
                             tla.tile_view(
                                 ls0, tla.make_shape(1), tla.make_coord(j)
-                            ).store(zero0, tla.params.UnalignStoreParams(), mask=one0)
+                            ).store(zero0, tla.params.UnalignStoreParams())
                             tla.tile_view(
                                 dm0, tla.make_shape(1), tla.make_coord(j)
-                            ).store(onef0, tla.params.UnalignStoreParams(), mask=one0)
+                            ).store(onef0, tla.params.UnalignStoreParams())
                             tla.tile_view(
                                 acc0,
                                 tla.make_shape(1, 64),
@@ -365,15 +345,15 @@ def fafq_kernel(
                 kv_off = (phys * PAGE) * hkv * D + kv_head * D
                 # ---- QK: Q x K^T -> S (FP8 MMAD, FP32 accumulate) ----
                 with tla.cube():
-                    tla.wait_flag(q_l0a_ready)
+                    mtx_q.lock(pipe=tla.arch.MTE2)
                     l1_q_t2 = tla.make_tensor_like(l1_q, gm_q_t, tla.arch.zN)
                     tla.copy(l1_q_t2, gm_q_t)
-                    tla.set_flag(q_l1_ready)
-                    tla.wait_flag(q_l1_ready)
+                    mtx_q.unlock(pipe=tla.arch.MTE2)
+                    mtx_q.lock(pipe=tla.arch.MTE1)
                     l0a_q = tla.make_tensor_like(l0a, l1_q_t2, tla.arch.zN)
-                    tla.wait_flag(l0a_avail)
+                    mtx_l0a.lock(pipe=tla.arch.MTE1)
                     tla.copy(l0a_q, l1_q_t2)
-                    tla.set_flag(l0a_ready)
+                    mtx_l0a.unlock(pipe=tla.arch.MTE1)
                     gm_k_t = tla.make_tensor(
                         gm_k.ptr + kv_off,
                         tla.make_layout(
@@ -383,15 +363,15 @@ def fafq_kernel(
                         ),
                     )
                     l1_k_t = tla.make_tensor_like(l1_k, gm_k_t, tla.arch.nZ)
-                    tla.wait_flag(k_l0b_ready)
+                    mtx_k.lock(pipe=tla.arch.MTE2)
                     tla.copy(l1_k_t, gm_k_t)
-                    tla.set_flag(k_l1_ready)
+                    mtx_k.unlock(pipe=tla.arch.MTE2)
                     l0b_k = tla.make_tensor_like(l0b, l1_k_t)
-                    tla.wait_flag(l0b_avail)
-                    tla.wait_flag(k_l1_ready)
+                    mtx_l0b.lock(pipe=tla.arch.MTE1)
+                    mtx_k.lock(pipe=tla.arch.MTE1)
                     tla.copy(l0b_k, l1_k_t)
-                    tla.set_flag(l0b_ready)
-                    tla.set_flag(k_l0b_ready)
+                    mtx_l0b.unlock(pipe=tla.arch.MTE1)
+                    mtx_k.unlock(pipe=tla.arch.MTE1)
                     ub_s_full = tla.make_tensor(
                         ub_s,
                         tla.make_layout(
@@ -400,16 +380,16 @@ def fafq_kernel(
                         ),
                     )
                     l0c_s_t = tla.make_tensor_like(l0c_s, ub_s_full, tla.arch.L0Clayout)
-                    tla.wait_flag(l0a_ready)
-                    tla.wait_flag(l0b_ready)
-                    tla.wait_flag(l0cs_avail)
+                    mtx_l0a.lock(pipe=tla.arch.CUBE)
+                    mtx_l0b.lock(pipe=tla.arch.CUBE)
+                    mtx_l0cs.lock(pipe=tla.arch.CUBE)
                     tla.mmad(l0c_s_t, l0a_q, l0b_k, init_c=True)
-                    tla.set_flag(l0a_avail)
-                    tla.set_flag(l0b_avail)
-                    tla.set_flag(q_l0a_ready)
+                    mtx_l0a.unlock(pipe=tla.arch.CUBE)
+                    mtx_l0b.unlock(pipe=tla.arch.CUBE)
+                    mtx_q.unlock(pipe=tla.arch.MTE1)
                     tla.cross_core_wait_flag(s_cross, tla.arch.FIX)
-                    tla.set_flag(l0cs_ready)
-                    tla.wait_flag(l0cs_ready)
+                    mtx_l0cs.unlock(pipe=tla.arch.CUBE)
+                    mtx_l0cs.lock(pipe=tla.arch.FIX)
                     ub_s_view = tla.make_tensor(
                         ub_s,
                         tla.make_layout(
@@ -423,7 +403,7 @@ def fafq_kernel(
                             l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M
                         ),
                     )
-                    tla.set_flag(l0cs_avail)
+                    mtx_l0cs.unlock(pipe=tla.arch.FIX)
                     tla.cross_core_set_flag(s_cross, tla.arch.FIX)
 
                 # ---- online softmax + P quantize (AIV halves rows) ----
@@ -433,8 +413,8 @@ def fafq_kernel(
                     m_sub = m_half if sub == 0 else pipe_rows - m_half
                     if m_sub > 0:
                         tla.cross_core_wait_flag(s_cross, tla.arch.VECTOR)
-                        tla.wait_flag(ub_p_avail)
-                        tla.wait_flag(sc_free)
+                        mtx_ubp.lock(pipe=tla.arch.VECTOR)
+                        mtx_sc.lock(pipe=tla.arch.MTE2)
                         gm_qs = tla.make_tensor(
                             gm_qscale.ptr + q_start + sub * m_half,
                             tla.make_layout(tla.make_shape(m_sub), tla.make_stride(1)),
@@ -459,8 +439,8 @@ def fafq_kernel(
                         )
                         tla.copy(ub_qs_t, gm_qs)
                         tla.copy(ub_ks_t, gm_ks)
-                        tla.set_flag(sc_ready)
-                        tla.wait_flag(sc_ready)
+                        mtx_sc.unlock(pipe=tla.arch.MTE2)
+                        mtx_sc.lock(pipe=tla.arch.VECTOR)
                         ub_s_sub = tla.make_tensor(
                             ub_s,
                             tla.make_layout(
@@ -506,10 +486,10 @@ def fafq_kernel(
                             full_vis,
                             first,
                         )
-                        tla.set_flag(sc_free)
+                        mtx_sc.unlock(pipe=tla.arch.VECTOR)
                         tla.cross_core_set_flag(s_cross, tla.arch.VECTOR)
-                        tla.set_flag(ub_p_ready)
-                        tla.wait_flag(ub_p_ready)
+                        mtx_ubp.unlock(pipe=tla.arch.VECTOR)
+                        mtx_ubp.lock(pipe=tla.arch.MTE3)
                         l1_p_ref = tla.make_tensor(
                             ub_s,
                             tla.make_layout(
@@ -530,7 +510,7 @@ def fafq_kernel(
                         )
                         tla.cross_core_wait_flag(p_cross, tla.arch.MTE3)
                         tla.copy(l1_p_tile, ub_p_send)
-                        tla.set_flag(ub_p_avail)
+                        mtx_ubp.unlock(pipe=tla.arch.MTE3)
                         tla.cross_core_set_flag(p_cross, tla.arch.MTE3)
                     else:
                         tla.cross_core_wait_flag(s_cross, tla.arch.VECTOR)
@@ -546,15 +526,15 @@ def fafq_kernel(
                         ),
                     )
                     l1_v_t = tla.make_tensor_like(l1_v, gm_v_t, tla.arch.zN)
-                    tla.wait_flag(v_l0b_ready)
+                    mtx_v.lock(pipe=tla.arch.MTE2)
                     tla.copy(l1_v_t, gm_v_t)
-                    tla.set_flag(v_l1_ready)
+                    mtx_v.unlock(pipe=tla.arch.MTE2)
                     l0b_v = tla.make_tensor_like(l0b, l1_v_t, tla.arch.nZ)
-                    tla.wait_flag(l0b_avail)
-                    tla.wait_flag(v_l1_ready)
+                    mtx_l0b.lock(pipe=tla.arch.MTE1)
+                    mtx_v.lock(pipe=tla.arch.MTE1)
                     tla.copy(l0b_v, l1_v_t)
-                    tla.set_flag(l0b_ready)
-                    tla.set_flag(v_l0b_ready)
+                    mtx_l0b.unlock(pipe=tla.arch.MTE1)
+                    mtx_v.unlock(pipe=tla.arch.MTE1)
                     tla.cross_core_wait_flag(p_cross, tla.arch.MTE1)
                     l1_p_ref2 = tla.make_tensor(
                         ub_s,
@@ -565,9 +545,9 @@ def fafq_kernel(
                     )
                     l1_p_full2 = tla.make_tensor_like(l1_p, l1_p_ref2, tla.arch.zN)
                     l0a_p = tla.make_tensor_like(l0a, l1_p_full2, tla.arch.zN)
-                    tla.wait_flag(l0a_avail)
+                    mtx_l0a.lock(pipe=tla.arch.MTE1)
                     tla.copy(l0a_p, l1_p_full2)
-                    tla.set_flag(l0a_ready)
+                    mtx_l0a.unlock(pipe=tla.arch.MTE1)
                     tla.cross_core_set_flag(p_cross, tla.arch.MTE1)
                     ub_o_full = tla.make_tensor(
                         ub_o,
@@ -576,15 +556,15 @@ def fafq_kernel(
                         ),
                     )
                     l0c_o_t = tla.make_tensor_like(l0c_o, ub_o_full, tla.arch.L0Clayout)
-                    tla.wait_flag(l0a_ready)
-                    tla.wait_flag(l0b_ready)
-                    tla.wait_flag(l0co_avail)
+                    mtx_l0a.lock(pipe=tla.arch.CUBE)
+                    mtx_l0b.lock(pipe=tla.arch.CUBE)
+                    mtx_l0co.lock(pipe=tla.arch.CUBE)
                     tla.mmad(l0c_o_t, l0a_p, l0b_v, init_c=True)
-                    tla.set_flag(l0a_avail)
-                    tla.set_flag(l0b_avail)
+                    mtx_l0a.unlock(pipe=tla.arch.CUBE)
+                    mtx_l0b.unlock(pipe=tla.arch.CUBE)
                     tla.cross_core_wait_flag(o_cross, tla.arch.FIX)
-                    tla.set_flag(l0co_ready)
-                    tla.wait_flag(l0co_ready)
+                    mtx_l0co.unlock(pipe=tla.arch.CUBE)
+                    mtx_l0co.lock(pipe=tla.arch.FIX)
                     ub_o_view = tla.make_tensor(
                         ub_o,
                         tla.make_layout(
@@ -598,7 +578,7 @@ def fafq_kernel(
                             l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M
                         ),
                     )
-                    tla.set_flag(l0co_avail)
+                    mtx_l0co.unlock(pipe=tla.arch.FIX)
                     tla.cross_core_set_flag(o_cross, tla.arch.FIX)
 
                 # ---- rescale: acc = acc*dm + O ----
@@ -707,6 +687,7 @@ def fafq_kernel(
                 m_half_f = (rows + 1) // 2
                 m_sub_f = m_half_f if sub_f == 0 else rows - m_half_f
                 if m_sub_f > 0:
+                    mtx_out.lock(pipe=tla.arch.VECTOR)
                     ub_acc_f = tla.make_tensor(
                         ub_acc,
                         tla.make_layout(tla.make_shape(HALF, D), tla.make_stride(D, 1)),
@@ -787,8 +768,8 @@ def fafq_kernel(
                             tla.params.MemType.VEC_STORE,
                             tla.params.MemType.VEC_LOAD,
                         )
-                    tla.set_flag(out_ready)
-                    tla.wait_flag(out_ready)
+                    mtx_out.unlock(pipe=tla.arch.VECTOR)
+                    mtx_out.lock(pipe=tla.arch.MTE3)
                     gm_o = tla.make_tensor(
                         gm_out.ptr + (h * out_tokens + q_start + sub_f * m_half_f) * D,
                         tla.make_layout(
@@ -803,24 +784,25 @@ def fafq_kernel(
                         ),
                     )
                     tla.copy(gm_o, ub_out_g)
+                    mtx_out.unlock(pipe=tla.arch.MTE3)
             with tla.vector():
                 tla.cross_core_set_flag(task_v_done, tla.arch.VECTOR)
 
     with tla.cube():
-        tla.wait_flag(q_l0a_ready)
-        tla.wait_flag(k_l0b_ready)
-        tla.wait_flag(v_l0b_ready)
-        tla.wait_flag(l0a_avail)
-        tla.wait_flag(l0b_avail)
-        tla.wait_flag(l0cs_avail)
-        tla.wait_flag(l0co_avail)
+        mtx_q.lock(pipe=tla.arch.MTE2)
+        mtx_k.lock(pipe=tla.arch.MTE2)
+        mtx_v.lock(pipe=tla.arch.MTE2)
+        mtx_l0a.lock(pipe=tla.arch.MTE1)
+        mtx_l0b.lock(pipe=tla.arch.MTE1)
+        mtx_l0cs.lock(pipe=tla.arch.CUBE)
+        mtx_l0co.lock(pipe=tla.arch.CUBE)
         tla.cross_core_wait_flag(s_cross, tla.arch.FIX)
         tla.cross_core_wait_flag(o_cross, tla.arch.FIX)
         tla.cross_core_wait_flag(task_v_done, tla.arch.CUBE)
         tla.pipe_barrier(tla.pipes.ALL)
     with tla.vector():
-        tla.wait_flag(ub_p_avail)
-        tla.wait_flag(sc_free)
+        mtx_ubp.lock(pipe=tla.arch.VECTOR)
+        mtx_sc.lock(pipe=tla.arch.MTE2)
         tla.cross_core_wait_flag(p_cross, tla.arch.MTE3)
         tla.cross_core_wait_flag(task_c_done, tla.arch.VECTOR)
         tla.pipe_barrier(tla.pipes.ALL)

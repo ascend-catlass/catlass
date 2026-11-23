@@ -489,7 +489,6 @@ def qwen_sparse_attention_kernel(
                 mutex_ub_idx.lock(pipe=tla.arch.VECTOR)
                 with tla.vec.func(mode="simd"):
                     pregFull = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
-                    one_mask = tla.update_mask(1, dtype=tla.Float32)[0]
                     mask_n0 = tla.update_mask(n0, dtype=tla.Float32)[0]
                     mask_n1 = tla.update_mask(n1, dtype=tla.Float32)[0]
                     min_reg = tla.full(min_value, dtype=tla.Float32)
@@ -530,9 +529,7 @@ def qwen_sparse_attention_kernel(
                             ub_last_max, tla.make_shape(1), tla.make_coord(i0)
                         )
                         ub_last_max_i.store(
-                            row_max_reg,
-                            params=tla.params.UnalignStoreParams(),
-                            mask=one_mask,
+                            row_max_reg, params=tla.params.UnalignStoreParams()
                         )
                     tla.local_mem_bar(
                         tla.params.MemType.VEC_STORE,
@@ -585,7 +582,6 @@ def qwen_sparse_attention_kernel(
                 with tla.vec.func(mode="simd"):
                     pregFull3 = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
                     preg_all_b16 = tla.create_mask(pattern=tla.mask.ALL, dtype=io_dtype)
-                    one_mask3 = tla.update_mask(1, dtype=tla.Float32)[0]
                     for i2 in tla.range(rows_here):
                         ub_now_max_i = tla.tile_view(
                             ub_now_max, tla.make_shape(1), tla.make_coord(i2)
@@ -619,9 +615,7 @@ def qwen_sparse_attention_kernel(
                             ub_blk_sum, tla.make_shape(1), tla.make_coord(i2)
                         )
                         ub_blk_sum_i.store(
-                            block_sum,
-                            params=tla.params.UnalignStoreParams(),
-                            mask=one_mask3,
+                            block_sum, params=tla.params.UnalignStoreParams()
                         )
                         p_even = exp_even.to(io_dtype, cast_one, mask=pregFull3)
                         p_odd = exp_odd.to(io_dtype, cast_zero, mask=pregFull3)
