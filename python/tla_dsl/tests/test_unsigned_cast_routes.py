@@ -214,14 +214,8 @@ def test_signed_integer_routes_are_unchanged() -> None:
         _compile(src, dst, _DEFAULT)
 
 
-# tla.shift_right is an arithmetic shift, and on an unsigned vector a right
-# shift ought to be logical. That coupling is resolved by the verifier rather
-# than by this branch: verifyShiftSourceAndResult requires a *signless*
-# i8/i16/i32 source, so an unsigned vector cannot reach the shift at all and
-# there is no silently-arithmetic shift on u32 to fix. This pins that, so the
-# shifts cannot quietly start accepting unsigned sources with signed semantics.
 @pytest.mark.parametrize("dtype", (tla.UInt8, tla.UInt16, tla.UInt32))
-def test_shift_right_still_refuses_an_unsigned_vector(dtype) -> None:
+def test_shift_right_rejects_unsigned_shift_amounts(dtype) -> None:
     lanes = _LANES[dtype]
 
     @tla.kernel
@@ -233,5 +227,5 @@ def test_shift_right_still_refuses_an_unsigned_vector(dtype) -> None:
                 reg = src_t.load()
                 dst_t.store(tla.shift_right(reg, reg))
 
-    with pytest.raises(Exception):
+    with pytest.raises(tla.TlaCoreAPIError, match="shift vector has element type"):
         k.dump_mlir(type_args=(_ub(dtype), _ub(dtype)))

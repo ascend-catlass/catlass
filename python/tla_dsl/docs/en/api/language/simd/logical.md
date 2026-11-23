@@ -41,8 +41,8 @@ Constraints:
 
 - Must be called inside a `@tla.kernel`-decorated kernel function.
 - Must be called inside `tla.vec.func()`.
-- Source elements must be signed 8/16/32-bit integers (i8/i16/i32);
-  64-bit and unsigned shifts are not supported.
+- Source elements may be signed or unsigned 8/16/32/64-bit integers.
+  Each 64-bit vector operand must fill one 256-byte register (32 lanes).
 - Shift amounts must be non-negative.
 
 Example:
@@ -62,7 +62,8 @@ Description:
 
 Element-wise right shift of a vector by per-lane or scalar shift amounts.
 
-Signed source vectors use arithmetic right shift.
+Signed source vectors use arithmetic right shift. Unsigned source vectors
+use logical right shift.
 
 Prototype:
 
@@ -83,8 +84,8 @@ Constraints:
 
 - Must be called inside a `@tla.kernel`-decorated kernel function.
 - Must be called inside `tla.vec.func()`.
-- Source elements must be signed 8/16/32-bit integers (i8/i16/i32);
-  64-bit and unsigned shifts are not supported.
+- Source elements may be signed or unsigned 8/16/32/64-bit integers.
+  Each 64-bit vector operand must fill one 256-byte register (32 lanes).
 - Shift amounts must be non-negative.
 
 Example:

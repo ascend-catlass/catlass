@@ -42,7 +42,7 @@ tla.shift_left(source: VectorSSA, shift: Any, *, mask: MaskSSA | None = None) ->
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
 - 须在 `tla.vec.func()` 内调用。
-- 源元素须为有符号 8/16/32 位整数（i8/i16/i32）；不支持 64 位与无符号移位。
+- 源元素可为有符号或无符号的 8/16/32/64 位整数。每个 64 位 vector 操作数须占满一个 256 字节寄存器（32 lanes）。
 - 移位量须为非负。
 
 调用示例：
@@ -62,7 +62,7 @@ with tla.vec.func(mode="simd"):
 
 按 lane 或标量移位量，对 vector 做逐元素右移。
 
-有符号源 vector 使用算术右移。
+有符号源 vector 使用算术右移，无符号源 vector 使用逻辑右移。
 
 函数原型：
 
@@ -82,7 +82,7 @@ tla.shift_right(source: VectorSSA, shift: Any, *, mask: MaskSSA | None = None) -
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
 - 须在 `tla.vec.func()` 内调用。
-- 源元素须为有符号 8/16/32 位整数（i8/i16/i32）；不支持 64 位与无符号移位。
+- 源元素可为有符号或无符号的 8/16/32/64 位整数。每个 64 位 vector 操作数须占满一个 256 字节寄存器（32 lanes）。
 - 移位量须为非负。
 
 调用示例：

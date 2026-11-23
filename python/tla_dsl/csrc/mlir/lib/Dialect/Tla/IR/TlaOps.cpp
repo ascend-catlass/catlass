@@ -1060,9 +1060,12 @@ static mlir::LogicalResult verifyShiftSourceAndResult(
     mlir::Operation* op, VectorSSAType sourceType, VectorSSAType resultType, mlir::Value mask)
 {
     auto sourceElement = mlir::dyn_cast<mlir::IntegerType>(sourceType.getElementType());
-    if (!sourceElement || !sourceElement.isSignless() ||
-        (sourceElement.getWidth() != 8 && sourceElement.getWidth() != 16 && sourceElement.getWidth() != 32))
-        return op->emitOpError("requires a signed i8/i16/i32 source vector");
+    if (!sourceElement || sourceElement.isSigned() ||
+        (sourceElement.getWidth() != 8 && sourceElement.getWidth() != 16 && sourceElement.getWidth() != 32 &&
+         sourceElement.getWidth() != 64))
+        return op->emitOpError("requires an i8/i16/i32/i64 or ui8/ui16/ui32/ui64 source vector");
+    if (sourceElement.getWidth() == 64 && sourceType.getValidLanes() != 32)
+        return op->emitOpError("64-bit shifts require a full 256-byte register (32 lanes)");
     if (sourceType != resultType)
         return op->emitOpError("requires source and result to have identical VectorSSA types");
     return verifyMaskMatchesVector(op, mask, sourceType);

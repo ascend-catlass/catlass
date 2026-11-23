@@ -9864,11 +9864,15 @@ def _emit_vector_binary_or_scalar(
     _op_error(op_name, "expected vector-vector or vector-scalar operands")
 
 
-_SHIFT_SUPPORTED_DTYPES = frozenset({"i8", "i16", "i32"})
 _SIGNED_SHIFT_ELEMENT_TYPE = {
     "i8": "i8",
     "i16": "i16",
     "i32": "i32",
+    "i64": "i64",
+    "u8": "i8",
+    "u16": "i16",
+    "u32": "i32",
+    "u64": "i64",
 }
 
 
@@ -9906,12 +9910,15 @@ def _emit_vector_shift(
     source_value = _as_value(source)
     source_desc = _vector_ssa_type_for_mlir_value(source_value)
     source_element = str(source_desc.element_type).lower()
-    if source_element not in _SHIFT_SUPPORTED_DTYPES:
+    if source_element not in _SIGNED_SHIFT_ELEMENT_TYPE:
         _op_error(
             op_name,
             f"unsupported source element type {source_desc.element_type}; "
-            f"supported types are {', '.join(sorted(_SHIFT_SUPPORTED_DTYPES))}",
+            f"supported types are {', '.join(sorted(_SIGNED_SHIFT_ELEMENT_TYPE))}",
         )
+
+    if source_element in ("i64", "u64") and source_desc.valid_lanes != 32:
+        _op_error(op_name, "64-bit shifts require a full 256-byte register (32 lanes)")
 
     if mask is None:
         mask_value = _materialize_full_shift_mask(source_desc, loc=loc)
@@ -10693,8 +10700,8 @@ def shift_left(
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function.
         - Must be called inside `tla.vec.func()`.
-        - Source elements must be signed 8/16/32-bit integers (i8/i16/i32);
-          64-bit and unsigned shifts are not supported.
+        - Source elements may be signed or unsigned 8/16/32/64-bit integers.
+          Each 64-bit vector operand must fill one 256-byte register (32 lanes).
         - Shift amounts must be non-negative.
 
         Example:
@@ -10718,7 +10725,8 @@ def shift_right(
     Description:
         Element-wise right shift of a vector by per-lane or scalar shift amounts.
 
-        Signed source vectors use arithmetic right shift.
+        Signed source vectors use arithmetic right shift. Unsigned source vectors
+        use logical right shift.
 
         Parameters:
         - `source` (`VectorSSA`): Source vector to shift. Required.
@@ -10731,8 +10739,8 @@ def shift_right(
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function.
         - Must be called inside `tla.vec.func()`.
-        - Source elements must be signed 8/16/32-bit integers (i8/i16/i32);
-          64-bit and unsigned shifts are not supported.
+        - Source elements may be signed or unsigned 8/16/32/64-bit integers.
+          Each 64-bit vector operand must fill one 256-byte register (32 lanes).
         - Shift amounts must be non-negative.
 
         Example:

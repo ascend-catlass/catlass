@@ -1166,6 +1166,23 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
             for shift_op in ("shift_left", "shift_right", "shift_lefts", "shift_rights")
         ],
     )
+    yield (
+        "vector-shift-vv64-pipeline",
+        [
+            [
+                "dsl_tutorials/vector_simd_ops/shift_op.py",
+                op,
+                "--dtype",
+                dtype,
+                "--shape",
+                str(elements),
+                *dev,
+            ]
+            for op in ("shift_left", "shift_right")
+            for dtype in ("i64", "u64")
+            for elements in (3072, 4096, 8192, 11264, 32769)
+        ],
+    )
     # AscendC LoadAlign<T, MaskDist> address typing (copy-capable: i8/i16/i32).
     for mask_dt in ("i8", "i16", "i32"):
         yield (

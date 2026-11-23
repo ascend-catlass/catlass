@@ -359,10 +359,12 @@ first mismatch=None
     | 文件 | 支持的数据类型 |
     |------|---------------|
     | `bitwise_ops.py` | f16, bf16, f32, i32, i16, i8 |
-    | `shift_op.py` | i8, i16, i32 |
+    | `shift_op.py` | i8, u8, i16, u16, i32, u32, i64, u64 |
 
   - `bitwise_ops.py`：全部列出的 dtype 均支持；`bf16` 下寄存器 `not` 路径退化（`_SUPPORTS_REG_NOT=False`）。
-  - `shift_op.py`：源为 signed `i8`/`i16`/`i32`；移位量须非负；右移为算术右移。
+  - `shift_op.py`：支持有符号和无符号 8/16/32/64 位整数；有符号源使用算术右移，无符号源使用逻辑右移。
+  - vv 移位量须为与源同位宽、同 lane 数的有符号向量；vs 移位量为可表示的非负 i16 标量。所有移位量须非负。
+  - i64/u64 向量操作数须占满一个 256 字节寄存器（32 lanes），使用对齐 NORM load 和省略显式 mask 的 NORM store。
 
 - 执行示例：
 

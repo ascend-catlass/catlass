@@ -1524,14 +1524,14 @@ static Value createVectorBinaryResult(
             return nullptr;
         case VectorBinaryKind::ShiftLeft:
         case VectorBinaryKind::ShiftRight: {
-            // The verifier restricts shift sources to signed (signless)
-            // i8/i16/i32 and the shift vector to the same signless width.
-            // Hence the signed intrinsics are the only valid lowering.
-            if (!dyn_cast<IntegerType>(elementType))
+            if (!isa<IntegerType>(elementType) || elementType.isInteger(64))
                 return nullptr;
             if (kind == VectorBinaryKind::ShiftLeft)
-                return b.create<hivm_regbaseintrins::VshlSXInstrOp>(loc, vecType, lhs, rhs, mask).getRes();
-            return b.create<hivm_regbaseintrins::VshrSXInstrOp>(loc, vecType, lhs, rhs, mask).getRes();
+                return isUnsigned ?
+                           b.create<hivm_regbaseintrins::VshlUXInstrOp>(loc, vecType, lhs, rhs, mask).getRes() :
+                           b.create<hivm_regbaseintrins::VshlSXInstrOp>(loc, vecType, lhs, rhs, mask).getRes();
+            return isUnsigned ? b.create<hivm_regbaseintrins::VshrUXInstrOp>(loc, vecType, lhs, rhs, mask).getRes() :
+                                b.create<hivm_regbaseintrins::VshrSXInstrOp>(loc, vecType, lhs, rhs, mask).getRes();
         }
     }
     return nullptr;
@@ -2518,11 +2518,16 @@ static FailureOr<Value> createVectorScalarBinaryResult(
     OpBuilder& b, Location loc, VectorOpInfo info, VecLowerCtx& ctx, Value lhs, Value scalar, Value mask)
 {
     if (info.kind == VectorBinaryKind::ShiftLeft || info.kind == VectorBinaryKind::ShiftRight) {
-        if (!isa<IntegerType>(ctx.elementType) || !scalar.getType().isInteger(16))
+        if (!isa<IntegerType>(ctx.elementType) || ctx.elementType.isInteger(64) || !scalar.getType().isInteger(16))
             return failure();
+        const bool isUnsigned = isUnsignedInt(ctx.elementType);
         if (info.kind == VectorBinaryKind::ShiftLeft)
-            return b.create<hivm_regbaseintrins::VshlsSXInstrOp>(loc, ctx.vecType, lhs, scalar, mask).getRes();
-        return b.create<hivm_regbaseintrins::VshrsSXInstrOp>(loc, ctx.vecType, lhs, scalar, mask).getRes();
+            return isUnsigned ?
+                       b.create<hivm_regbaseintrins::VshlsUXInstrOp>(loc, ctx.vecType, lhs, scalar, mask).getRes() :
+                       b.create<hivm_regbaseintrins::VshlsSXInstrOp>(loc, ctx.vecType, lhs, scalar, mask).getRes();
+        return isUnsigned ?
+                   b.create<hivm_regbaseintrins::VshrsUXInstrOp>(loc, ctx.vecType, lhs, scalar, mask).getRes() :
+                   b.create<hivm_regbaseintrins::VshrsSXInstrOp>(loc, ctx.vecType, lhs, scalar, mask).getRes();
     }
 
     if (info.kind == VectorBinaryKind::Add || info.kind == VectorBinaryKind::Mul ||
@@ -3321,6 +3326,28 @@ static LogicalResult lowerArange(
     return success();
 }
 
+static bool isShift(VectorBinaryKind kind)
+{
+    return kind == VectorBinaryKind::ShiftLeft || kind == VectorBinaryKind::ShiftRight;
+}
+
+static Value lowerShift64(
+    OpBuilder& b, Location loc, ModuleOp module, const VectorOpInfo& info, Value lhs, Value amount, Value mask)
+{
+    const bool isUnsigned = isUnsignedInt(cast<::tla::VectorSSAType>(info.operands.lhs.getType()).getElementType());
+    std::string name = (Twine(info.mnemonic) + (isUnsigned ? "_uint64_t" : "_int64_t")).str();
+    VectorType pregType = fullPregVecType(b.getContext());
+    Value preg = castMaskToPregType(b, loc, mask, pregType);
+    auto callee = module.lookupSymbol<func::FuncOp>(name);
+    if (!callee) {
+        OpBuilder moduleBuilder(module.getBodyRegion());
+        auto type = FunctionType::get(b.getContext(), {lhs.getType(), amount.getType(), pregType}, {lhs.getType()});
+        callee = moduleBuilder.create<func::FuncOp>(loc, name, type);
+        annotateAivLibraryCall(callee);
+    }
+    return b.create<func::CallOp>(loc, callee, ValueRange{lhs, amount, preg}).getResult(0);
+}
+
 static LogicalResult lowerVectorBinary(
     Operation& op, const VectorOpInfo* info, OpBuilder& b, ModuleOp module, DenseMap<Value, Value>& valueMap,
     AutoFullPredicateCache& fullMasks)
@@ -3355,8 +3382,11 @@ static LogicalResult lowerVectorBinary(
         mask = allTrueMaskFor(fullMasks, loc, opVecType, operands.lhs.getType());
     }
     // createVectorBinaryResult peels unsigned from the tla lhs type.
-    Value result = createVectorBinaryResult(
-        b, loc, info->kind, operands.lhs.getType(), opVecType.getElementType(), opVecType, lhs, rhs, mask);
+    Value result =
+        isShift(info->kind) && opVecType.getElementType().isInteger(64) ?
+            lowerShift64(b, loc, module, *info, lhs, rhs, mask) :
+            createVectorBinaryResult(
+                b, loc, info->kind, operands.lhs.getType(), opVecType.getElementType(), opVecType, lhs, rhs, mask);
     if (!result)
         return failure();
     valueMap[op.getResult(0)] = result;
@@ -3397,6 +3427,10 @@ static LogicalResult lowerVectorScalarBinary(
             return failure();
     } else {
         mask = fullMasks.get(loc, opCtx->lanes);
+    }
+    if (isShift(info->kind) && opCtx->elementType.isInteger(64)) {
+        valueMap[op.getResult(0)] = lowerShift64(b, loc, module, *info, lhs, *scalarOr, mask);
+        return success();
     }
     auto result = createVectorScalarBinaryResult(b, loc, *info, *opCtx, lhs, *scalarOr, mask);
     if (failed(result))

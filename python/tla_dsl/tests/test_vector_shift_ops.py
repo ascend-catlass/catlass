@@ -75,8 +75,8 @@ def _invalid_shift_lanes_kernel(source: tla.Tensor, amounts: tla.Tensor) -> None
 
 
 @tla.kernel
-def _unsupported_i64_shift_kernel(source: tla.Tensor) -> None:
-    source_tile = tla.tile_view(source, tla.make_shape(32), tla.make_coord(0))
+def _short_i64_shift_kernel(source: tla.Tensor) -> None:
+    source_tile = tla.tile_view(source, tla.make_shape(16), tla.make_coord(0))
     with tla.vector():
         with tla.vec.func(mode="simd"):
             source_reg = source_tile.load()
@@ -147,11 +147,35 @@ def test_shift_rejects_amount_vector_with_different_valid_lanes() -> None:
         _invalid_shift_lanes_kernel.dump_mlir(type_args=(source, amounts))
 
 
-def test_shift_rejects_64_bit_source() -> None:
-    with pytest.raises(
-        tla.TlaCoreAPIError,
-        match="unsupported source element type i64",
-    ):
-        _unsupported_i64_shift_kernel.dump_mlir(
-            type_args=(_ub_tensor(tla.Int64, 32),)
-        )
+def test_shift_rejects_short_64_bit_register() -> None:
+    with pytest.raises(tla.TlaCoreAPIError, match="require a full 256-byte register"):
+        _short_i64_shift_kernel.dump_mlir(type_args=(_ub_tensor(tla.Int64, 16),))
+
+
+@pytest.mark.parametrize(
+    ("dtype", "count_dtype", "lanes"),
+    [
+        (tla.UInt8, tla.Int8, 256),
+        (tla.UInt16, tla.Int16, 128),
+        (tla.UInt32, tla.Int32, 64),
+        (tla.UInt64, tla.Int64, 32),
+        (tla.Int64, tla.Int64, 32),
+    ],
+)
+def test_shift_accepts_extended_integer_types(dtype, count_dtype, lanes) -> None:
+    @tla.kernel
+    def kernel(src: tla.Tensor, amounts: tla.Tensor) -> None:
+        x = tla.tile_view(src, tla.make_shape(lanes), tla.make_coord(0))
+        y = tla.tile_view(amounts, tla.make_shape(lanes), tla.make_coord(0))
+        with tla.vector():
+            with tla.vec.func(mode="simd"):
+                lhs = x.load()
+                rhs = y.load()
+                tla.shift_left(lhs, rhs)
+                tla.shift_right(lhs, rhs)
+                tla.shift_left(lhs, 3)
+                tla.shift_right(lhs, 4)
+
+    ir = kernel.dump_mlir(type_args=(_ub_tensor(dtype, lanes), _ub_tensor(count_dtype, lanes)))
+    for name in ("shift_left", "shift_right", "shift_lefts", "shift_rights"):
+        assert f"tla.{name} " in ir
