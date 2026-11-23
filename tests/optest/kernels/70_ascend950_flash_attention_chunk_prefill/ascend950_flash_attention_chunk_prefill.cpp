@@ -60,7 +60,7 @@ template <
     class EpilogueRescaleO,
     Format qFormat,
     Format kvFormat,
-    CacheMode kvcacheType,
+    FlashAttentionChunkPrefill::CacheMode kvcacheType,
     PageShape kvcacheShape,
     MaskCategory maskCategory,
     CacheLayout cacheLayout,
@@ -300,7 +300,7 @@ public:
                 blockMmadQK.loadQGM(gmQTensorTla, actualBlockShapeQ);
             }
             uint32_t kShapeRow = 0;
-            if constexpr (kvcacheType == CacheMode::pagedCache) {
+            if constexpr (kvcacheType == FlashAttentionChunkPrefill::CacheMode::pagedCache) {
                 kShapeRow = numBlocks_ * blockSize_ * kvHeads_;
             } else {
                 kShapeRow = kvSeqlen;
@@ -646,7 +646,7 @@ private:
 
 template <class InDtype, class SMDtype, 
         Format qFormat, Format kvFormat, 
-        CacheMode kvcacheType, PageShape kvcacheShape, 
+        FlashAttentionChunkPrefill::CacheMode kvcacheType, PageShape kvcacheShape, 
         MaskCategory maskCategory, CacheLayout cacheLayout>
 CATLASS_GLOBAL void FAInfer(
     GM_ADDR q, GM_ADDR k, GM_ADDR v, GM_ADDR mask, GM_ADDR blockTables,
@@ -725,7 +725,7 @@ CATLASS_GLOBAL void FAInfer(
 
 template <class InDtype, class SMDtype, 
         Format qFormat, Format kvFormat, 
-        CacheMode kvcacheType, PageShape kvcacheShape, 
+        FlashAttentionChunkPrefill::CacheMode kvcacheType, PageShape kvcacheShape, 
         MaskCategory maskCategory, CacheLayout cacheLayout>
 CATLASS_GLOBAL void FAInferDn(
     GM_ADDR q, GM_ADDR k, GM_ADDR v, GM_ADDR mask, GM_ADDR blockTables,
@@ -984,21 +984,21 @@ void PFAmpl(const uint32_t blockNum, aclrtStream stream, const FlashAttentionChu
 
     if (cacheLayout == "nd") {
         if (dataType == ACL_FLOAT16) {
-            FAInfer<half, float, Format::TND, Format::TND, CacheMode::pagedCache, PageShape::BnNBsD, MaskCategory::MASK_CAUSAL, CacheLayout::nd><<<blockDim, nullptr, stream>>>(
+            FAInfer<half, float, Format::TND, Format::TND, FlashAttentionChunkPrefill::CacheMode::pagedCache, PageShape::BnNBsD, MaskCategory::MASK_CAUSAL, CacheLayout::nd><<<blockDim, nullptr, stream>>>(
                 qDevice, kDevice, vDevice, maskDevice, blockTableDevice, oDevice, lseDevice,
                 qSeqDevice, kvSeqDevice, workspaceDevice, tilingDevice);
         } else if (dataType == ACL_BF16) {
-            FAInfer<bfloat16_t, float, Format::TND, Format::TND, CacheMode::pagedCache, PageShape::BnNBsD, MaskCategory::MASK_CAUSAL, CacheLayout::nd><<<blockDim, nullptr, stream>>>(
+            FAInfer<bfloat16_t, float, Format::TND, Format::TND, FlashAttentionChunkPrefill::CacheMode::pagedCache, PageShape::BnNBsD, MaskCategory::MASK_CAUSAL, CacheLayout::nd><<<blockDim, nullptr, stream>>>(
                 qDevice, kDevice, vDevice, maskDevice, blockTableDevice, oDevice, lseDevice,
                 qSeqDevice, kvSeqDevice, workspaceDevice, tilingDevice);
         }
     } else { // cacheLayout == "nz"
         if (dataType == ACL_FLOAT16) {
-            FAInfer<half, float, Format::TND, Format::TND, CacheMode::pagedCache, PageShape::BnNBsD, MaskCategory::MASK_CAUSAL, CacheLayout::nz><<<blockDim, nullptr, stream>>>(
+            FAInfer<half, float, Format::TND, Format::TND, FlashAttentionChunkPrefill::CacheMode::pagedCache, PageShape::BnNBsD, MaskCategory::MASK_CAUSAL, CacheLayout::nz><<<blockDim, nullptr, stream>>>(
                 qDevice, kDevice, vDevice, maskDevice, blockTableDevice, oDevice, lseDevice,
                 qSeqDevice, kvSeqDevice, workspaceDevice, tilingDevice);
         } else if (dataType == ACL_BF16) {
-            FAInfer<bfloat16_t, float, Format::TND, Format::TND, CacheMode::pagedCache, PageShape::BnNBsD, MaskCategory::MASK_CAUSAL, CacheLayout::nz><<<blockDim, nullptr, stream>>>(
+            FAInfer<bfloat16_t, float, Format::TND, Format::TND, FlashAttentionChunkPrefill::CacheMode::pagedCache, PageShape::BnNBsD, MaskCategory::MASK_CAUSAL, CacheLayout::nz><<<blockDim, nullptr, stream>>>(
                 qDevice, kDevice, vDevice, maskDevice, blockTableDevice, oDevice, lseDevice,
                 qSeqDevice, kvSeqDevice, workspaceDevice, tilingDevice);
         }

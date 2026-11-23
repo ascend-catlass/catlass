@@ -384,28 +384,28 @@ static void Run(const Options& options)
         if (cacheLayout == "nd") {
             if (dataType == "half") {
                 FAInfer<
-                    half, float, Format::TND, Format::TND, CacheMode::pagedCache, PageShape::BnNBsD,
-                    MaskCategory::MASK_CAUSAL, CacheLayout::nd><<<blockDim, nullptr, stream>>>(
+                    half, float, Format::TND, Format::TND, FlashAttentionChunkPrefill::CacheMode::pagedCache,
+                    PageShape::BnNBsD, MaskCategory::MASK_CAUSAL, CacheLayout::nd><<<blockDim, nullptr, stream>>>(
                     qDevice, kDevice, vDevice, maskDevice, blockTableDevice, oDevice, lseDevice, qSeqDevice,
                     kvSeqDevice, workspaceDevice, tilingDevice);
             } else if (dataType == "bf16") {
                 FAInfer<
-                    bfloat16_t, float, Format::TND, Format::TND, CacheMode::pagedCache, PageShape::BnNBsD,
-                    MaskCategory::MASK_CAUSAL, CacheLayout::nd><<<blockDim, nullptr, stream>>>(
+                    bfloat16_t, float, Format::TND, Format::TND, FlashAttentionChunkPrefill::CacheMode::pagedCache,
+                    PageShape::BnNBsD, MaskCategory::MASK_CAUSAL, CacheLayout::nd><<<blockDim, nullptr, stream>>>(
                     qDevice, kDevice, vDevice, maskDevice, blockTableDevice, oDevice, lseDevice, qSeqDevice,
                     kvSeqDevice, workspaceDevice, tilingDevice);
             }
         } else { // cacheLayout == "nz"
             if (dataType == "half") {
                 FAInfer<
-                    half, float, Format::TND, Format::TND, CacheMode::pagedCache, PageShape::BnNBsD,
-                    MaskCategory::MASK_CAUSAL, CacheLayout::nz><<<blockDim, nullptr, stream>>>(
+                    half, float, Format::TND, Format::TND, FlashAttentionChunkPrefill::CacheMode::pagedCache,
+                    PageShape::BnNBsD, MaskCategory::MASK_CAUSAL, CacheLayout::nz><<<blockDim, nullptr, stream>>>(
                     qDevice, kDevice, vDevice, maskDevice, blockTableDevice, oDevice, lseDevice, qSeqDevice,
                     kvSeqDevice, workspaceDevice, tilingDevice);
             } else if (dataType == "bf16") {
                 FAInfer<
-                    bfloat16_t, float, Format::TND, Format::TND, CacheMode::pagedCache, PageShape::BnNBsD,
-                    MaskCategory::MASK_CAUSAL, CacheLayout::nz><<<blockDim, nullptr, stream>>>(
+                    bfloat16_t, float, Format::TND, Format::TND, FlashAttentionChunkPrefill::CacheMode::pagedCache,
+                    PageShape::BnNBsD, MaskCategory::MASK_CAUSAL, CacheLayout::nz><<<blockDim, nullptr, stream>>>(
                     qDevice, kDevice, vDevice, maskDevice, blockTableDevice, oDevice, lseDevice, qSeqDevice,
                     kvSeqDevice, workspaceDevice, tilingDevice);
             }

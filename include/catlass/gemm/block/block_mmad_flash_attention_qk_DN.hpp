@@ -83,11 +83,13 @@ enum class Format
     BSND = 1
 };
 
+namespace FlashAttentionChunkPrefill {
 enum class CacheMode
 {
     normalCache = 0,
     pagedCache = 1,
 };
+}
 
 enum class PageShape
 {

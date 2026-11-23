@@ -37,8 +37,8 @@ static constexpr uint32_t UB_S_BUF_STAGES = 2;
 
 template <
     class BlockMmadQK, class EpilogueOnlineSoftmax, class BlockMmadPV, class EpilogueRescaleO, Format qFormat,
-    Format kvFormat, CacheMode kvcacheType, PageShape kvcacheShape, MaskCategory maskCategory, CacheLayout cacheLayout,
-    bool enableDN>
+    Format kvFormat, FlashAttentionChunkPrefill::CacheMode kvcacheType, PageShape kvcacheShape,
+    MaskCategory maskCategory, CacheLayout cacheLayout, bool enableDN>
 class FAIKernel950 {
 public:
     using ArchTag = typename BlockMmadQK::ArchTag;
@@ -270,7 +270,7 @@ public:
                 blockMmadQK.loadQGM(gmQTensorTla, actualBlockShapeQ);
             }
             uint32_t kShapeRow = 0;
-            if constexpr (kvcacheType == CacheMode::pagedCache) {
+            if constexpr (kvcacheType == FlashAttentionChunkPrefill::CacheMode::pagedCache) {
                 kShapeRow = numBlocks_ * blockSize_ * kvHeads_;
             } else {
                 kShapeRow = kvSeqlen;
@@ -568,8 +568,8 @@ private:
 };
 
 template <
-    class InDtype, class SMDtype, Format qFormat, Format kvFormat, CacheMode kvcacheType, PageShape kvcacheShape,
-    MaskCategory maskCategory, CacheLayout cacheLayout>
+    class InDtype, class SMDtype, Format qFormat, Format kvFormat, FlashAttentionChunkPrefill::CacheMode kvcacheType,
+    PageShape kvcacheShape, MaskCategory maskCategory, CacheLayout cacheLayout>
 CATLASS_GLOBAL void FAInfer(
     GM_ADDR q, GM_ADDR k, GM_ADDR v, GM_ADDR mask, GM_ADDR blockTables, GM_ADDR o, GM_ADDR lse, GM_ADDR actualQseqlen,
     GM_ADDR actualKvseqlen, GM_ADDR workspace, GM_ADDR tiling)
@@ -646,8 +646,8 @@ CATLASS_GLOBAL void FAInfer(
 }
 
 template <
-    class InDtype, class SMDtype, Format qFormat, Format kvFormat, CacheMode kvcacheType, PageShape kvcacheShape,
-    MaskCategory maskCategory, CacheLayout cacheLayout>
+    class InDtype, class SMDtype, Format qFormat, Format kvFormat, FlashAttentionChunkPrefill::CacheMode kvcacheType,
+    PageShape kvcacheShape, MaskCategory maskCategory, CacheLayout cacheLayout>
 CATLASS_GLOBAL void FAInferDn(
     GM_ADDR q, GM_ADDR k, GM_ADDR v, GM_ADDR mask, GM_ADDR blockTables, GM_ADDR o, GM_ADDR lse, GM_ADDR actualQseqlen,
     GM_ADDR actualKvseqlen, GM_ADDR workspace, GM_ADDR tiling)
