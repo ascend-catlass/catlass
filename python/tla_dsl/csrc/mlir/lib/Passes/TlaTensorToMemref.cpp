@@ -658,35 +658,43 @@ static mlir::FailureOr<hivm::AddressSpace> resolveHivmAddressSpace(MLIRContext* 
     return memorySpaceAttr.getAddressSpace();
 }
 
-static StringRef copyRuntimeElemSuffix(Type elementType)
+// b8/b16/b32 ExtParams-safe scalars shared by copyRuntime and VectorLayout
+// GM→UB. Intentionally excludes bool/b64/fp8/hif8/fp4 so VectorLayout can
+// call this without legalizing unregistered VL symbols.
+static StringRef scalarB8B16B32CopyElemSuffix(Type elementType)
 {
-    // Packed fp4 x2 IR types that still stage under the int8_t symbol.
-    if (isa<::tla::Float4E2M1x2Type, ::tla::Float4E1M2x2Type>(elementType))
-        return "int8_t";
     if (elementType.isF32())
         return "float";
     if (elementType.isF16())
         return "half";
     if (elementType.isBF16())
         return "bf16";
-    // AscendC bool is b8 storage (1 byte/lane). IR keeps i1; BC stubs stage as
-    // ``bool`` (see bc/Vector|Cube/dma.cpp REGISTER_*(..., bool)).
-    if (elementType.isInteger(1))
-        return "bool";
     if (elementType.isSignlessInteger(8))
         return "int8_t";
     if (elementType.isSignlessInteger(16))
         return "int16_t";
     if (elementType.isSignlessInteger(32))
         return "int32_t";
-    // Shared unsigned cube/vector routes. The 64-bit registrations are
-    // selected only in the individual routes that provide those wrappers.
     if (elementType.isUnsignedInteger(8))
         return "uint8_t";
     if (elementType.isUnsignedInteger(16))
         return "uint16_t";
     if (elementType.isUnsignedInteger(32))
         return "uint32_t";
+    return {};
+}
+
+static StringRef copyRuntimeElemSuffix(Type elementType)
+{
+    // Packed fp4 x2 IR types that still stage under the int8_t symbol.
+    if (isa<::tla::Float4E2M1x2Type, ::tla::Float4E1M2x2Type>(elementType))
+        return "int8_t";
+    if (auto suffix = scalarB8B16B32CopyElemSuffix(elementType); !suffix.empty())
+        return suffix;
+    // AscendC bool is b8 storage (1 byte/lane). IR keeps i1; BC stubs stage as
+    // ``bool`` (see bc/Vector|Cube/dma.cpp REGISTER_*(..., bool)).
+    if (elementType.isInteger(1))
+        return "bool";
     if (elementType.isFloat8E4M3FN())
         return "fp8_e4m3fn_t";
     if (elementType.isFloat8E5M2())
@@ -727,14 +735,16 @@ static StringRef rowMajorGmUbCopyElemSuffix(Type elementType)
     return copyRuntimeElemSuffix(elementType);
 }
 
-// GM/UB VectorLayout→VectorLayout: only b64 (legacy) plus AscendC bool.
-// Do NOT reuse rowMajorGmUbCopyElemSuffix — that would legalize i32/f16/etc.
-// without REGISTER_GM_TO_UB(VectorLayout, ...) and break lit ROUTE-ERR.
+// GM/UB VectorLayout→VectorLayout: b64 + bool + ExtParams-safe scalars.
+// Do NOT call rowMajorGmUbCopyElemSuffix / full copyRuntimeElemSuffix — those
+// would legalize fp8/hif8/fp4 without matching REGISTER_GM_TO_UB(VectorLayout).
 static StringRef vectorLayoutGmUbCopyElemSuffix(Type elementType)
 {
     if (elementType.isInteger(1))
         return "bool";
-    return b64CopyElemSuffix(elementType);
+    if (auto suffix = b64CopyElemSuffix(elementType); !suffix.empty())
+        return suffix;
+    return scalarB8B16B32CopyElemSuffix(elementType);
 }
 
 // Whether fixpipe can carry this L0C element type out to the given destination

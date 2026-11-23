@@ -332,6 +332,27 @@ class CopyUbToGmParams(CopyParams):
             )
 
 
+def _copy_pad_static_nonzero_padding_value(value: Any) -> bool:
+    """True when ``padding_value`` is a known static non-zero fill.
+
+    Runtime MLIR / index SSA values are not inspected (no runtime value gate).
+    """
+    if isinstance(value, bool):
+        return True
+    if isinstance(value, (int, float)):
+        return value != 0
+    # Lazy import: avoid pulling Numeric into params module import graph.
+    from .base_dsl.typing import Numeric
+
+    if isinstance(value, Numeric):
+        host = value.value
+        if isinstance(host, bool):
+            return True
+        if isinstance(host, (int, float)):
+            return host != 0
+    return False
+
+
 @dataclass
 class CopyPadParams(CopyParams):
     """AscendC DataCopyPadExtParams fields for ``tla.copy``.
@@ -339,14 +360,37 @@ class CopyPadParams(CopyParams):
     Presence of this bag means pad is enabled (BC sets ``isPad=true``).
     Exact-byte copy remains ``params=None``. There is no public ``is_pad``.
 
-    Route support is enforced by ``tla.copy`` (currently GM→UB RowMajor only).
-    ``left_padding`` / ``right_padding`` / ``padding_value`` may be compile-time
-    ints or runtime integer/index SSA (``Numeric`` / MLIR values). When a side
-    count is a static non-negative int, ``tla.copy`` checks pad bytes ≤ 32B and
-    (if extents are static) dst innermost ≥ src + left + right. Float
-    ``padding_value`` constants encode as IEEE bits; runtime ``padding_value``
-    is an ``i64`` bit pattern (integer SSA). 8B elements require static
-    ``padding_value == 0``.
+    Route / dtype (enforced by ``tla.copy``):
+    - GM→UB only, layouts ``RowMajor→RowMajor`` or ``VectorLayout→VectorLayout``.
+    - Element dtypes: ``f32``/``f16``/``bf16``/``i32``/``u32``/``i16``/``u16``/
+      ``i8``/``u8``/``i1``/``i64``/``u64``/``f64`` (not fp8/hif8/fp4).
+
+    Parameters:
+    - ``left_padding`` / ``right_padding``: elements padded on each side of the
+      innermost axis. Static non-negative ``int`` (or integer ``Numeric`` /
+      runtime integer/index SSA). **Must not** be ``bool``/``tla.Bool``/``i1``.
+      When a side count is a static int, ``count * sizeof(T)`` must be ≤ 32B;
+      when extents are also static, dst innermost ≥ src + left + right.
+    - ``padding_value``: fill value written into padded elements. Type must
+      **match** the source element dtype:
+      - ``i1`` tiles: Python ``bool`` or ``tla.Bool`` (preferred). Bare ``int``
+        ``0`` is accepted as the dataclass default zero-fill; non-zero bare
+        ``int`` is rejected.
+      - integer tiles: bare ``int`` or a ``Numeric`` whose ``dtype`` equals the
+        tile (e.g. ``tla.Int32(1)`` on ``i32``); cross-width Numerics rejected.
+      - float tiles: bare ``float`` or a matching float ``Numeric`` (e.g.
+        ``tla.Float32(1.0)`` on ``f32``); non-zero bare ``int`` and cross-dtype
+        Numerics rejected. Bare ``int`` ``0`` is accepted as zero-fill
+        (dataclass default). Constants encode as IEEE bits for the tile width.
+      Runtime non-``i1`` ``padding_value`` is an ``i64`` bit pattern (integer
+      SSA); runtime ``i1`` SSA is not supported (use a static bool).
+
+    For 8B element types (``i64`` / ``u64`` / ``f64``): only a **static** zero
+    ``padding_value`` is guaranteed. The frontend rejects static non-zero
+    values (plain ``int``/``float`` and foldable ``Numeric`` hosts). Runtime
+    ``padding_value`` is **not** value-checked; the BC pad path always fills
+    8B pads with zero and ignores non-zero bits, so callers must not rely on a
+    non-zero runtime fill.
     """
 
     padding_value: Any = 0
@@ -377,14 +421,7 @@ class CopyPadParams(CopyParams):
                             f"per-side pad limit of 32B (got {value} elements)"
                         )
             if elem_nbytes == 8:
-                if isinstance(self.padding_value, bool):
-                    raise ValueError(
-                        f"{cls_name}.padding_value must be 0 when element width is 8B"
-                    )
-                if (
-                    isinstance(self.padding_value, (int, float))
-                    and self.padding_value != 0
-                ):
+                if _copy_pad_static_nonzero_padding_value(self.padding_value):
                     raise ValueError(
                         f"{cls_name}.padding_value must be 0 when element width is 8B"
                     )

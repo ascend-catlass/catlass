@@ -119,13 +119,9 @@ def test_gm_vector_to_ub_accepts_bool(compiler_tlair: Any) -> None:
     assert "tla.copy" in mlir
 
 
-@pytest.mark.parametrize("dtype", [tla.Float32, tla.HiFloat8, tla.Int32, tla.Float16])
-def test_gm_vector_to_ub_rejects_non_b64_non_bool(dtype, compiler_tlair: Any) -> None:
-    """VL GM→UB is only b64 + bool; must not reuse RowMajor GM↔UB dtype set.
-
-    Guards ``vectorLayoutGmUbCopyElemSuffix`` / frontend route table: if those
-    accidentally widen to i32/f16/hif8/f32, this fails instead of staying green.
-    """
+@pytest.mark.parametrize("dtype", [tla.HiFloat8])
+def test_gm_vector_to_ub_rejects_hif8(dtype, compiler_tlair: Any) -> None:
+    """VL GM→UB admits b64 + bool + ExtParams-safe scalars; not hif8/fp8."""
     with pytest.raises(TlaCoreAPIError, match="unsupported copy route"):
         gm_to_ub_kernel.dump_mlir(
             type_args=(
@@ -135,22 +131,70 @@ def test_gm_vector_to_ub_rejects_non_b64_non_bool(dtype, compiler_tlair: Any) ->
         )
 
 
-def test_gm_to_ub_bool_rejects_copy_pad_params(compiler_tlair: Any) -> None:
-    """Pad for bool is out of T25 scope; frontend must keep rejecting it."""
-    CopyPadParams = getattr(tla.params, "CopyPadParams", None)
-    if CopyPadParams is None:
-        pytest.skip("CopyPadParams not on this tip yet")
-    with pytest.raises(TlaCoreAPIError, match="CopyPadParams|not supported|dtype"):
-        gm_to_ub_with_pad.dump_mlir(type_args=(_ub_rm(), _gm_rm()))
+def test_gm_to_ub_bool_accepts_copy_pad_params(compiler_tlair: Any) -> None:
+    """Bool element + CopyPadParams is in scope (pad counts still reject bool)."""
+    # Multi-row pad needs AlignUp(src+left+right, 32) dst stride (1B elem → 64).
+    mlir = gm_to_ub_with_pad.dump_mlir(
+        type_args=(
+            _ub_rm(shape=(_ROWS, 64)),
+            _gm_rm(shape=(_ROWS, _COLS)),
+        )
+    )
+    assert "tla.CopyPadParams" in mlir
+    assert "!tla.copy_pad_params" in mlir
+    # False → paddingValueBits 0
+    assert "arith.constant 0 : i64" in mlir
+
+
+def test_gm_to_ub_bool_pad_true_encodes_one(compiler_tlair: Any) -> None:
+    mlir = gm_to_ub_with_pad_true.dump_mlir(
+        type_args=(
+            _ub_rm(shape=(_ROWS, 64)),
+            _gm_rm(shape=(_ROWS, _COLS)),
+        )
+    )
+    assert "tla.CopyPadParams" in mlir
+    assert "arith.constant 1 : i64" in mlir
+
+
+def test_gm_to_ub_bool_pad_rejects_int_fill(compiler_tlair: Any) -> None:
+    with pytest.raises(TlaCoreAPIError, match="bool/tla.Bool|i1"):
+        gm_to_ub_with_pad_int_fill_rejected.dump_mlir(
+            type_args=(
+                _ub_rm(shape=(_ROWS, 64)),
+                _gm_rm(shape=(_ROWS, _COLS)),
+            ),
+        )
 
 
 @tla.kernel
 def gm_to_ub_with_pad(dst: tla.Tensor, src: tla.Tensor) -> None:
-    # Defined only for the Pad negative test; skipped when CopyPadParams absent.
     from catlass.params import CopyPadParams
 
     with tla.vector():
-        tla.copy(dst, src, params=CopyPadParams(right_padding=1))
+        # i1 tiles require bool/tla.Bool fill (bare int is rejected).
+        tla.copy(
+            dst, src, params=CopyPadParams(right_padding=1, padding_value=False)
+        )
+
+
+@tla.kernel
+def gm_to_ub_with_pad_true(dst: tla.Tensor, src: tla.Tensor) -> None:
+    from catlass.params import CopyPadParams
+
+    with tla.vector():
+        tla.copy(
+            dst, src, params=CopyPadParams(right_padding=1, padding_value=True)
+        )
+
+
+@tla.kernel
+def gm_to_ub_with_pad_int_fill_rejected(dst: tla.Tensor, src: tla.Tensor) -> None:
+    from catlass.params import CopyPadParams
+
+    with tla.vector():
+        # Non-zero bare int is rejected on i1 (0 remains the dataclass default).
+        tla.copy(dst, src, params=CopyPadParams(right_padding=1, padding_value=1))
 
 
 def test_lowering_gm_to_ub_bool_callee(tmp_path: pathlib.Path) -> None:

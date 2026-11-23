@@ -34,8 +34,15 @@ Parameters:
 - `dst` (`Tensor`): Destination tile. Required.
 - `src` (`Tensor`): Source tile. Required.
 - `params` (`CopyParams | None`): Path-specific params:
-  `CopyL0C2DstParams`, `CopyUbToGmParams`, `CopyPadParams` (GM→UB
-  DataCopyPad). Default `None`.
+  `CopyL0C2DstParams`, `CopyUbToGmParams`, or `CopyPadParams`.
+  Default `None`.
+  - `CopyPadParams`: enables GM→UB DataCopyPad (`isPad=true`). See
+    Constraints for supported routes/dtypes and fill rules.
+  - `left_padding` / `right_padding`: elements padded on each side of
+    the innermost axis (compile-time int or runtime integer/index SSA).
+  - `padding_value`: fill value for padded elements (compile-time
+    literal/Numeric, or runtime integer bit pattern). Default `0`
+    means zero-fill.
 - `scale` (`Tensor | None`): L1 OCP `e8m0` shared-exponent tile for
   L1→L0A/L0B MX load. Stored as `i8`/`u8`; destination tag is
   `tla.arch.zZMxScale` (L0A) or `tla.arch.nNMxScale` (L0B).
@@ -52,11 +59,19 @@ Constraints:
 - Must be called inside a `@tla.kernel`-decorated kernel function.
 - Must be called inside `tla.cube()` or `tla.vector()`.
 - Copy size follows each tile's `origin_shape`.
-- `CopyPadParams` is GM→UB RowMajor only (f32/f16/bf16/i32/u32/i16/u16/
-  i8/u8). `left_padding` / `right_padding` / `padding_value` may be
-  runtime integer/index SSA. When a side count is a static int, pad
-  bytes must be ≤ 32B; when extents are also static, dst innermost
-  origin must be ≥ src + left_padding + right_padding.
+- When `params` is `CopyPadParams`: GM→UB only, layouts
+  RowMajor→RowMajor or VectorLayout→VectorLayout; element dtypes
+  f32/f16/bf16/i32/u32/i16/u16/i8/u8/i1/i64/u64/f64 (not
+  fp8/hif8/fp4). Side counts must not be bool/tla.Bool/i1; a static
+  side count must satisfy pad bytes ≤ 32B; with static extents, dst
+  innermost ≥ src + left + right.
+- `CopyPadParams.padding_value` must match the source element dtype
+  (i1: bool/tla.Bool; integer: bare int or same-dtype Numeric; float:
+  bare float or matching float Numeric; bare int 0 is the dataclass
+  default zero-fill). Runtime non-i1 is an i64 bit pattern; runtime
+  i1 SSA is unsupported. For 8B (`i64`/`u64`/`f64`), only a static
+  zero fill is guaranteed; runtime is not value-checked and the BC
+  always zero-fills.
 - On Ascend 950, two logical rank-3 views `(B, M, N)` select batched
   GM-to-L1 layout conversion. FP8 supports RowMajor→zN and
   ColumnMajor→nZ; E8M0 supports the four GM MX-scale routes below.
@@ -198,7 +213,7 @@ Supported vector copy routes
 |`src_addr`|`src_layout`|`dst_addr`|`dst_layout`|`dtypes`|
 |----------|------------|----------|------------|--------|
 |`gm`|`RowMajor`|`ub`|`RowMajor`|`i64`,`u64`,`f64`,`f32`,`f16`,`bf16`,`i32`,`i16`,`i8`,`i1`,`u32`,`u16`,`u8`,`f8e4m3fn`,`f8e5m2`,`f8e8m0`,`f4e2m1`,`f4e1m2`,`hif8`,`f4e2m1x2`,`f4e1m2x2`|
-|`gm`|`VectorLayout`|`ub`|`VectorLayout`|`i64`,`u64`,`f64`,`i1`|
+|`gm`|`VectorLayout`|`ub`|`VectorLayout`|`i64`,`u64`,`f64`,`i1`,`f32`,`f16`,`bf16`,`i32`,`i16`,`i8`,`u32`,`u16`,`u8`|
 |`ub`|`RowMajor`|`gm`|`RowMajor`|`i64`,`u64`,`f64`,`f32`,`f16`,`bf16`,`i32`,`i16`,`i8`,`i1`,`u32`,`u16`,`u8`,`f8e4m3fn`,`f8e5m2`,`f8e8m0`,`f4e2m1`,`f4e1m2`,`hif8`,`f4e2m1x2`,`f4e1m2x2`|
 |`ub`|`RowMajor`|`ub`|`RowMajor`|`f32`,`f16`,`bf16`,`i32`,`i16`,`i8`,`i1`,`u32`,`u16`,`u8`,`f8e4m3fn`,`f8e5m2`,`f8e8m0`,`f4e2m1`,`f4e1m2`|
 |`ub`|`RowMajor`|`ub`|`ColumnMajor`|`f32`,`f16`,`bf16`,`i32`,`i16`,`i8`,`i1`,`u32`,`u16`,`u8`,`f8e4m3fn`,`f8e5m2`|

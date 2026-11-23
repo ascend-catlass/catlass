@@ -150,31 +150,47 @@ def test_gm2ub_pad_rejects_unsafe_dtype(compiler_tlair: Any) -> None:
         )
 
 
-def test_gm2ub_pad_int_padding_value_encodes_as_float_bits(
+def test_gm2ub_pad_float_padding_value_encodes_as_float_bits(
     compiler_tlair: Any,
 ) -> None:
-    """f32 padding_value=1 means 1.0f, not raw bit pattern 1."""
-    mlir = gm2ub_pad_value_int_as_float.dump_mlir(
+    """f32 padding_value=1.0 encodes IEEE 1.0f bits (bare int on f32 rejected)."""
+    mlir = gm2ub_pad_value_float_literal.dump_mlir(
         type_args=(_gm_tensor(), _ub_tensor()),
     )
     # IEEE-754 f32 1.0 bit pattern as decimal i64 constant in IR.
     assert "1065353216" in mlir
 
 
-def test_padding_value_to_i64_bits_float_int_numeric() -> None:
+def test_padding_value_to_i64_bits_strict_dtype() -> None:
     from catlass.core_api import _padding_value_to_i64_bits
 
-    assert _padding_value_to_i64_bits(1, "f32", 4) == 0x3F800000
+    assert _padding_value_to_i64_bits(1.0, "f32", 4) == 0x3F800000
     assert _padding_value_to_i64_bits(1, "i32", 4) == 1
-    # Numeric keeps dtype shell: Int32(1.0) ok on i32; Float32(1) rejected.
+    assert _padding_value_to_i64_bits(False, "i1", 1) == 0
+    assert _padding_value_to_i64_bits(True, "i1", 1) == 1
+    assert _padding_value_to_i64_bits(tla.Bool(True), "i1", 1) == 1
+    # Numeric must match tile dtype exactly.
     assert _padding_value_to_i64_bits(tla.Int32(1.0), "i32", 4) == 1
     assert _padding_value_to_i64_bits(tla.Float32(1), "f32", 4) == 0x3F800000
     # bf16 uses round-to-nearest-even (_host_bits), not truncating >> 16.
     assert _padding_value_to_i64_bits(0.1, "bf16", 2) == tla.BFloat16._host_bits(0.1)
+    # Bare int 0 is the dataclass default: universal zero-fill.
+    assert _padding_value_to_i64_bits(0, "f32", 4) == 0
+    assert _padding_value_to_i64_bits(0, "i1", 1) == 0
+    with pytest.raises(TypeError, match="bare int|must be float"):
+        _padding_value_to_i64_bits(1, "f32", 4)
     with pytest.raises(TypeError, match="integer dtype"):
         _padding_value_to_i64_bits(1.0, "i32", 4)
-    with pytest.raises(TypeError, match="integer dtype"):
+    with pytest.raises(TypeError, match="does not match"):
         _padding_value_to_i64_bits(tla.Float32(1), "i32", 4)
+    with pytest.raises(TypeError, match="does not match"):
+        _padding_value_to_i64_bits(tla.Float16(1), "f32", 4)
+    with pytest.raises(TypeError, match="does not match"):
+        _padding_value_to_i64_bits(tla.Int16(1), "i32", 4)
+    with pytest.raises(TypeError, match="bool/tla.Bool"):
+        _padding_value_to_i64_bits(1, "i1", 1)
+    with pytest.raises(TypeError, match="must not be bool"):
+        _padding_value_to_i64_bits(True, "f32", 4)
     with pytest.raises(ValueError, match="overflows"):
         _padding_value_to_i64_bits(1e5, "f16", 2)
 
@@ -190,13 +206,27 @@ def test_gm2ub_pad_rejects_float_padding_on_int_dtype(compiler_tlair: Any) -> No
 
 
 def test_gm2ub_pad_rejects_float32_numeric_on_int_dtype(compiler_tlair: Any) -> None:
-    """Float32(1) must not pass via host int unwrap on integer tiles."""
-    with pytest.raises(TlaCoreAPIError, match="integer dtype"):
+    """Float32(1) must not pass via host unwrap on integer tiles."""
+    with pytest.raises(TlaCoreAPIError, match="does not match"):
         gm2ub_pad_int_float32_numeric.dump_mlir(
             type_args=(
                 _gm_tensor(dtype=tla.Int32, shape=(8, 7)),
                 _ub_tensor(dtype=tla.Int32, shape=(8, 8)),
             ),
+        )
+
+
+def test_gm2ub_pad_rejects_bare_int_on_float_dtype(compiler_tlair: Any) -> None:
+    with pytest.raises(TlaCoreAPIError, match="bare int|must be float"):
+        gm2ub_pad_value_bare_int_on_float.dump_mlir(
+            type_args=(_gm_tensor(), _ub_tensor()),
+        )
+
+
+def test_gm2ub_pad_rejects_cross_width_float_numeric(compiler_tlair: Any) -> None:
+    with pytest.raises(TlaCoreAPIError, match="does not match"):
+        gm2ub_pad_float16_on_f32.dump_mlir(
+            type_args=(_gm_tensor(), _ub_tensor()),
         )
 
 
@@ -450,13 +480,41 @@ def gm2ub_pad_fp8_rejected(gm_tensor: tla.Tensor, ub_tensor: tla.Tensor) -> None
 
 
 @tla.kernel
-def gm2ub_pad_value_int_as_float(gm_tensor: tla.Tensor, ub_tensor: tla.Tensor) -> None:
+def gm2ub_pad_value_float_literal(gm_tensor: tla.Tensor, ub_tensor: tla.Tensor) -> None:
+    with tla.vector():
+        tla.copy(
+            ub_tensor,
+            gm_tensor,
+            params=tla.params.CopyPadParams(
+                padding_value=1.0,
+                right_padding=1,
+            ),
+        )
+
+
+@tla.kernel
+def gm2ub_pad_value_bare_int_on_float(
+    gm_tensor: tla.Tensor, ub_tensor: tla.Tensor
+) -> None:
     with tla.vector():
         tla.copy(
             ub_tensor,
             gm_tensor,
             params=tla.params.CopyPadParams(
                 padding_value=1,
+                right_padding=1,
+            ),
+        )
+
+
+@tla.kernel
+def gm2ub_pad_float16_on_f32(gm_tensor: tla.Tensor, ub_tensor: tla.Tensor) -> None:
+    with tla.vector():
+        tla.copy(
+            ub_tensor,
+            gm_tensor,
+            params=tla.params.CopyPadParams(
+                padding_value=tla.Float16(1),
                 right_padding=1,
             ),
         )
@@ -703,3 +761,289 @@ def test_lowering_runtime_right_not_folded(tmp_path: pathlib.Path) -> None:
     )
     assert enable_const and left_const and value_const
     assert right_const is None, result.stdout
+
+
+def _gm_vector(
+    dtype: type[tla.Numeric] = tla.Float32,
+    length: int = 7,
+) -> tla.Tensor:
+    return make_fake_tensor(
+        dtype,
+        (length,),
+        (1,),
+        origin_shape=(length,),
+        layout_tag=tla.arch.VectorLayout,
+    )
+
+
+def _ub_vector(
+    dtype: type[tla.Numeric] = tla.Float32,
+    length: int = 8,
+) -> tla.Tensor:
+    return make_fake_tensor(
+        dtype,
+        (length,),
+        (1,),
+        addrspace=tla.AddressSpace.ub,
+        origin_shape=(length,),
+        layout_tag=tla.arch.VectorLayout,
+    )
+
+
+@tla.kernel
+def gm2ub_vector_no_pad(gm_tensor: tla.Tensor, ub_tensor: tla.Tensor) -> None:
+    with tla.vector():
+        tla.copy(ub_tensor, gm_tensor)
+
+
+@tla.kernel
+def gm2ub_vector_with_right_pad(gm_tensor: tla.Tensor, ub_tensor: tla.Tensor) -> None:
+    with tla.vector():
+        tla.copy(
+            ub_tensor,
+            gm_tensor,
+            params=tla.params.CopyPadParams(right_padding=1),
+        )
+
+
+@tla.kernel
+def gm2ub_vector_pad_alloc(gm_tensor: tla.Tensor) -> None:
+    ub_ptr = tla.allocate(64, tla.Float32, tla.AddressSpace.ub, 256)
+    ub = tla.make_tensor(
+        ub_ptr,
+        tla.make_layout(
+            tla.make_shape(8),
+            tla.make_stride(1),
+            origin_shape=tla.make_shape(8),
+            layoutTag=tla.arch.VectorLayout,
+        ),
+        tla.make_coord(0),
+    )
+    with tla.vector():
+        tla.copy(
+            ub,
+            gm_tensor,
+            params=tla.params.CopyPadParams(right_padding=1),
+        )
+
+
+@tla.kernel
+def gm2ub_vector_runtime_right_alloc(
+    gm_tensor: tla.Tensor,
+    right: tla.Int32,
+) -> None:
+    ub_ptr = tla.allocate(64, tla.Float32, tla.AddressSpace.ub, 256)
+    ub = tla.make_tensor(
+        ub_ptr,
+        tla.make_layout(
+            tla.make_shape(8),
+            tla.make_stride(1),
+            origin_shape=tla.make_shape(8),
+            layoutTag=tla.arch.VectorLayout,
+        ),
+        tla.make_coord(0),
+    )
+    with tla.vector():
+        tla.copy(
+            ub,
+            gm_tensor,
+            params=tla.params.CopyPadParams(right_padding=right),
+        )
+
+
+@tla.kernel
+def gm2ub_vector_bool_pad_alloc(gm_tensor: tla.Tensor) -> None:
+    ub_ptr = tla.allocate(32, tla.Bool, tla.AddressSpace.ub, 256)
+    ub = tla.make_tensor(
+        ub_ptr,
+        tla.make_layout(
+            tla.make_shape(32),
+            tla.make_stride(1),
+            origin_shape=tla.make_shape(32),
+            layoutTag=tla.arch.VectorLayout,
+        ),
+        tla.make_coord(0),
+    )
+    with tla.vector():
+        tla.copy(
+            ub,
+            gm_tensor,
+            params=tla.params.CopyPadParams(
+                right_padding=1, padding_value=False
+            ),
+        )
+
+
+def test_gm2ub_vector_two_arg_emits_route(compiler_tlair: Any) -> None:
+    mlir = gm2ub_vector_no_pad.dump_mlir(
+        type_args=(_gm_vector(), _ub_vector()),
+    )
+    assert "VectorLayout" in mlir
+    assert "tla.copy" in mlir
+    assert "tla.CopyPadParams" not in mlir
+    assert "copy_pad_params" not in mlir
+
+
+def test_gm2ub_vector_pad_emits_copy_pad_params(compiler_tlair: Any) -> None:
+    mlir = gm2ub_vector_with_right_pad.dump_mlir(
+        type_args=(_gm_vector(), _ub_vector()),
+    )
+    assert "tla.CopyPadParams" in mlir
+    assert "!tla.copy_pad_params" in mlir
+    assert re.search(r"tla\.copy\b[^\n]*,\s*%[^\n]+", mlir)
+    assert "pad_enable" not in mlir
+
+
+def test_gm2ub_vector_bool_pad_emits_copy_pad_params(compiler_tlair: Any) -> None:
+    mlir = gm2ub_vector_with_right_pad.dump_mlir(
+        type_args=(
+            _gm_vector(dtype=tla.Bool, length=31),
+            _ub_vector(dtype=tla.Bool, length=32),
+        ),
+    )
+    assert "tla.CopyPadParams" in mlir
+    assert "!tla.copy_pad_params" in mlir
+
+
+def test_lowering_vector_pad_enable_and_right(tmp_path: pathlib.Path) -> None:
+    tla_compile = _require_tla_compile()
+    mlir = gm2ub_vector_pad_alloc.dump_mlir(type_args=(_gm_vector(),))
+    path = tmp_path / "gm2ub_vector_pad.mlir"
+    path.write_text(mlir)
+    result = subprocess.run(
+        [str(tla_compile), str(path), "-o", "-"],
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "copy_gm_VectorLayout_to_ub_VectorLayout_float" in result.stdout
+    pad_enable, left, right, value_bits = _call_trailing_i64s(
+        result.stdout, callee="copy_gm_VectorLayout_to_ub_VectorLayout_float"
+    )
+    assert (pad_enable, left, right, value_bits) == (1, 0, 1, 0)
+
+
+def test_lowering_vector_bool_pad_enable_and_right(tmp_path: pathlib.Path) -> None:
+    tla_compile = _require_tla_compile()
+    gm = _gm_vector(dtype=tla.Bool, length=31)
+    mlir = gm2ub_vector_bool_pad_alloc.dump_mlir(type_args=(gm,))
+    path = tmp_path / "gm2ub_vector_bool_pad.mlir"
+    path.write_text(mlir)
+    result = subprocess.run(
+        [str(tla_compile), str(path), "-o", "-"],
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "copy_gm_VectorLayout_to_ub_VectorLayout_bool" in result.stdout
+    pad_enable, left, right, value_bits = _call_trailing_i64s(
+        result.stdout, callee="copy_gm_VectorLayout_to_ub_VectorLayout_bool"
+    )
+    assert (pad_enable, left, right, value_bits) == (1, 0, 1, 0)
+
+
+def test_lowering_vector_runtime_right_not_folded(tmp_path: pathlib.Path) -> None:
+    tla_compile = _require_tla_compile()
+    mlir = gm2ub_vector_runtime_right_alloc.dump_mlir(
+        type_args=(_gm_vector(), tla.Int32(1)),
+    )
+    path = tmp_path / "gm2ub_vector_runtime_pad.mlir"
+    path.write_text(mlir)
+    result = subprocess.run(
+        [str(tla_compile), str(path), "-o", "-"],
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr
+    pad_enable_ssa, left_ssa, right_ssa, value_ssa = _call_trailing_ssa(
+        result.stdout, callee="copy_gm_VectorLayout_to_ub_VectorLayout_float"
+    )
+    enable_const = re.search(
+        rf"{re.escape(pad_enable_ssa)}\s*=\s*llvm\.mlir\.constant\(1\s*:\s*i64\)",
+        result.stdout,
+    )
+    right_const = re.search(
+        rf"{re.escape(right_ssa)}\s*=\s*llvm\.mlir\.constant\((-?\d+)\s*:\s*i64\)",
+        result.stdout,
+    )
+    assert enable_const
+    assert right_const is None, result.stdout
+
+
+def test_gm2ub_b64_pad_accepts_zero_value(compiler_tlair: Any) -> None:
+    mlir = gm2ub_with_right_pad.dump_mlir(
+        type_args=(
+            _gm_tensor(dtype=tla.Float64, shape=(8, 3)),
+            _ub_tensor(dtype=tla.Float64, shape=(8, 4)),
+        ),
+    )
+    assert "tla.CopyPadParams" in mlir
+
+
+def test_gm2ub_b64_pad_accepts_numeric_zero_value(compiler_tlair: Any) -> None:
+    @tla.kernel
+    def gm2ub_b64_numeric_zero(gm_tensor: tla.Tensor, ub_tensor: tla.Tensor) -> None:
+        with tla.vector():
+            tla.copy(
+                ub_tensor,
+                gm_tensor,
+                params=CopyPadParams(right_padding=1, padding_value=tla.Int64(0)),
+            )
+
+    mlir = gm2ub_b64_numeric_zero.dump_mlir(
+        type_args=(
+            _gm_tensor(dtype=tla.Int64, shape=(8, 3)),
+            _ub_tensor(dtype=tla.Int64, shape=(8, 4)),
+        ),
+    )
+    assert "tla.CopyPadParams" in mlir
+
+
+def test_gm2ub_b64_pad_requires_zero_value(compiler_tlair: Any) -> None:
+    with pytest.raises(TlaCoreAPIError, match="padding_value|8B|must be 0"):
+        gm2ub_with_pad_value.dump_mlir(
+            type_args=(
+                _gm_tensor(dtype=tla.Int64, shape=(8, 3)),
+                _ub_tensor(dtype=tla.Int64, shape=(8, 4)),
+            )
+        )
+
+
+def test_gm2ub_b64_pad_rejects_nonzero_numeric_value(compiler_tlair: Any) -> None:
+    @tla.kernel
+    def gm2ub_b64_numeric_nonzero(gm_tensor: tla.Tensor, ub_tensor: tla.Tensor) -> None:
+        with tla.vector():
+            tla.copy(
+                ub_tensor,
+                gm_tensor,
+                params=CopyPadParams(right_padding=1, padding_value=tla.Int64(1)),
+            )
+
+    with pytest.raises(TlaCoreAPIError, match="padding_value|8B|must be 0"):
+        gm2ub_b64_numeric_nonzero.dump_mlir(
+            type_args=(
+                _gm_tensor(dtype=tla.Int64, shape=(8, 3)),
+                _ub_tensor(dtype=tla.Int64, shape=(8, 4)),
+            )
+        )
+
+
+def test_gm2ub_b64_pad_rejects_nonzero_float_numeric_value(
+    compiler_tlair: Any,
+) -> None:
+    @tla.kernel
+    def gm2ub_b64_f64_nonzero(gm_tensor: tla.Tensor, ub_tensor: tla.Tensor) -> None:
+        with tla.vector():
+            tla.copy(
+                ub_tensor,
+                gm_tensor,
+                params=CopyPadParams(right_padding=1, padding_value=tla.Float64(0.5)),
+            )
+
+    with pytest.raises(TlaCoreAPIError, match="padding_value|8B|must be 0"):
+        gm2ub_b64_f64_nonzero.dump_mlir(
+            type_args=(
+                _gm_tensor(dtype=tla.Float64, shape=(8, 3)),
+                _ub_tensor(dtype=tla.Float64, shape=(8, 4)),
+            )
+        )

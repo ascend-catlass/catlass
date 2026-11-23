@@ -35,7 +35,13 @@ tla.copy(dst: Tensor, src: Tensor, params: CopyParams | None = None, *, scale: T
 - `dst`（`Tensor`）：目的 tile。必填。
 - `src`（`Tensor`）：源 tile。必填。
 - `params`（`CopyParams | None`）：通路参数：`CopyL0C2DstParams`、
-  `CopyUbToGmParams`、`CopyPadParams`（GM→UB DataCopyPad）。默认 `None`。
+  `CopyUbToGmParams` 或 `CopyPadParams`。默认 `None`。
+  - `CopyPadParams`：开启 GM→UB DataCopyPad（`isPad=true`）。支持的通路、
+    dtype 与填充规则见下方约束说明。
+  - `left_padding` / `right_padding`：最内维每侧填充的**元素个数**（编译期
+    int，或运行期整型/index SSA）。
+  - `padding_value`：填充区写入值（编译期字面量/Numeric，或运行期整型 bit
+    pattern）。默认 `0` 表示零填充。
 - `scale`（`Tensor | None`）：L1 上的 OCP `e8m0` 共享指数 tile，用于
   L1→L0A/L0B 的 MX load。以 `i8`/`u8` 存储；目的为 L0A 时 tag
   `tla.arch.zZMxScale`，为 L0B 时 tag `tla.arch.nNMxScale`。默认 `None`。
@@ -49,11 +55,16 @@ tla.copy(dst: Tensor, src: Tensor, params: CopyParams | None = None, *, scale: T
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
 - 须在 `tla.cube()` 或 `tla.vector()` 内调用。
 - 拷贝大小按各 tile 的 `origin_shape`。
-- `CopyPadParams` 仅支持 GM→UB RowMajor（f32/f16/bf16/i32/u32/i16/u16/
-  i8/u8）。`left_padding` / `right_padding` / `padding_value` 可为运行时
-  整型/index SSA。某一侧为静态 int 时，该侧 pad 字节数须 ≤32B；两端
-  extent 亦为静态时，目的最内维 `origin` 须 ≥ src + left_padding +
-  right_padding。
+- 当 `params` 为 `CopyPadParams`：仅 GM→UB，layout 为 RowMajor→RowMajor 或
+  VectorLayout→VectorLayout；元素 dtype 为
+  f32/f16/bf16/i32/u32/i16/u16/i8/u8/i1/i64/u64/f64（不含 fp8/hif8/fp4）。
+  侧边计数不得为 bool/`tla.Bool`/i1；静态侧边须满足 pad 字节 ≤32B；两端
+  extent 亦为静态时，目的最内维 ≥ src + left + right。
+- `CopyPadParams.padding_value` 须与源元素 dtype 一致（i1：bool/`tla.Bool`；
+  整型：裸 int 或同 dtype Numeric；浮点：裸 float 或同 dtype 浮点 Numeric；
+  裸 int `0` 为 dataclass 默认零填充）。运行期非 i1 按 i64 bit pattern；
+  运行期 i1 SSA 不支持。对 8B（`i64`/`u64`/`f64`）仅保证静态零填充；运行期
+  不做数值拦截，BC 恒填 0。
 - Ascend 950 上，两个逻辑秩为 3 的视图 `(B, M, N)` 启用批量 GM→L1 布局转换。
   FP8 支持 RowMajor→zN 和 ColumnMajor→nZ；E8M0 支持下表的四条 GM MX scale 通路。
   批次数取自 `origin_shape[0]`，源、目的矩阵间距分别取各自 layout 的首维 stride，
@@ -178,7 +189,7 @@ Vector 拷贝通路
 |`src_addr`|`src_layout`|`dst_addr`|`dst_layout`|`dtypes`|
 |----------|------------|----------|------------|--------|
 |`gm`|`RowMajor`|`ub`|`RowMajor`|`i64`,`u64`,`f64`,`f32`,`f16`,`bf16`,`i32`,`i16`,`i8`,`i1`,`u32`,`u16`,`u8`,`f8e4m3fn`,`f8e5m2`,`f8e8m0`,`f4e2m1`,`f4e1m2`,`hif8`,`f4e2m1x2`,`f4e1m2x2`|
-|`gm`|`VectorLayout`|`ub`|`VectorLayout`|`i64`,`u64`,`f64`,`i1`|
+|`gm`|`VectorLayout`|`ub`|`VectorLayout`|`i64`,`u64`,`f64`,`i1`,`f32`,`f16`,`bf16`,`i32`,`i16`,`i8`,`u32`,`u16`,`u8`|
 |`ub`|`RowMajor`|`gm`|`RowMajor`|`i64`,`u64`,`f64`,`f32`,`f16`,`bf16`,`i32`,`i16`,`i8`,`i1`,`u32`,`u16`,`u8`,`f8e4m3fn`,`f8e5m2`,`f8e8m0`,`f4e2m1`,`f4e1m2`,`hif8`,`f4e2m1x2`,`f4e1m2x2`|
 |`ub`|`RowMajor`|`ub`|`RowMajor`|`f32`,`f16`,`bf16`,`i32`,`i16`,`i8`,`i1`,`u32`,`u16`,`u8`,`f8e4m3fn`,`f8e5m2`,`f8e8m0`,`f4e2m1`,`f4e1m2`|
 |`ub`|`RowMajor`|`ub`|`ColumnMajor`|`f32`,`f16`,`bf16`,`i32`,`i16`,`i8`,`i1`,`u32`,`u16`,`u8`,`f8e4m3fn`,`f8e5m2`|

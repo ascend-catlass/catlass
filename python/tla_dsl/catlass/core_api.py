@@ -6412,7 +6412,22 @@ _SUPPORTED_VECTOR_COPY_ROUTES = {
         "f4e2m1x2",
         "f4e1m2x2",
     ),
-    ("gm", "VectorLayout", "ub", "VectorLayout"): ("i64", "u64", "f64", "i1"),
+    # Flat VectorLayout GM→UB: b64 + bool (two-arg) + ExtParams-safe scalars.
+    ("gm", "VectorLayout", "ub", "VectorLayout"): (
+        "i64",
+        "u64",
+        "f64",
+        "i1",
+        "f32",
+        "f16",
+        "bf16",
+        "i32",
+        "i16",
+        "i8",
+        "u32",
+        "u16",
+        "u8",
+    ),
     ("ub", "RowMajor", "gm", "RowMajor"): (
         "i64",
         "u64",
@@ -7054,10 +7069,27 @@ def _validate_ubub_transpose_shape(src_desc, dst_desc, src_dtype) -> None:
 
 
 # ExtParams-safe GM→UB pad dtypes (must stay aligned with Vector/dma.cpp).
+# 8B: static zero padding_value enforced in CopyPadParams._validate; runtime
+# padding_value is not value-gated (BC always zero-fills 8B pads).
 _COPY_PAD_SAFE_DTYPES = frozenset(
-    {"f32", "f16", "bf16", "i32", "u32", "i16", "u16", "i8", "u8"}
+    {
+        "f32",
+        "f16",
+        "bf16",
+        "i32",
+        "u32",
+        "i16",
+        "u16",
+        "i8",
+        "u8",
+        "i1",
+        "i64",
+        "u64",
+        "f64",
+    }
 )
 _COPY_PAD_FLOAT_DTYPES = frozenset({"f32", "f16", "bf16", "f64"})
+_COPY_PAD_INT_DTYPES = frozenset({"i8", "u8", "i16", "u16", "i32", "u32", "i64", "u64"})
 
 
 _COPY_PAD_FLOAT_HOST_BITS = {
@@ -7067,51 +7099,118 @@ _COPY_PAD_FLOAT_HOST_BITS = {
 }
 
 
-def _padding_value_host_scalar(value: Any) -> int | float:
-    """Host scalar for static ``padding_value`` encoding (keeps Numeric wrapper)."""
+def _normalize_copy_pad_dtype_token(dtype: str) -> str:
+    """Map ``bool`` → ``i1``; otherwise lower-case dtype token."""
+    token = dtype.lower()
+    return "i1" if token == "bool" else token
+
+
+def _padding_value_float_scalar(value: Any, dtype: str) -> float:
+    """Host float for encoding ``padding_value`` on a float tile dtype."""
     if isinstance(value, Numeric):
         host = value.value
         if isinstance(host, bool):
-            raise TypeError("padding_value must not be bool")
+            raise TypeError(
+                f"padding_value for dtype {dtype} must match element type "
+                f"(got bool host on {type(value).__name__})"
+            )
         if not isinstance(host, (int, float)):
             raise TypeError(
                 f"padding_value Numeric host must be int/float "
                 f"(got {type(host).__name__})"
             )
-        return host
+        return float(host)
     if isinstance(value, bool):
-        raise TypeError("padding_value must not be bool")
-    if isinstance(value, (int, float)):
+        raise TypeError(
+            f"padding_value for dtype {dtype} must be float or matching "
+            f"Numeric (got bool)"
+        )
+    if isinstance(value, float):
         return value
     raise TypeError(
-        f"padding_value must be int/float/Numeric (got {type(value).__name__})"
+        f"padding_value for dtype {dtype} must be float or matching Numeric "
+        f"(got {type(value).__name__})"
     )
 
 
+def _encode_float_padding_bits(scalar: float, dtype: str, mask: int) -> int:
+    """Pack a Python float into ``paddingValueBits`` for ``dtype``."""
+    host = _COPY_PAD_FLOAT_HOST_BITS.get(dtype)
+    try:
+        if host is not None:
+            dtype_cls, exponent_mask = host
+            with np.errstate(over="ignore", invalid="ignore"):
+                bits = int(dtype_cls._host_bits(scalar)) & mask
+            if math.isfinite(scalar) and (bits & exponent_mask) == exponent_mask:
+                raise ValueError(
+                    f"padding_value {scalar!r} overflows finite range of {dtype}"
+                )
+            return bits
+        if dtype == "f64":
+            return struct.unpack("<Q", struct.pack("<d", scalar))[0]
+    except (OverflowError, struct.error, ValueError) as exc:
+        raise ValueError(
+            f"padding_value {scalar!r} cannot be encoded for dtype {dtype}: {exc}"
+        ) from exc
+    raise TypeError(f"cannot encode padding_value for dtype {dtype}")
+
+
 def _padding_value_to_i64_bits(value: Any, dtype: str, elem_nbytes: int) -> int:
-    """Pack ``CopyPadParams.padding_value`` into ABI ``paddingValueBits``."""
+    """Pack ``CopyPadParams.padding_value`` into ABI ``paddingValueBits``.
+
+    Static values must **match** the tile element dtype:
+    - ``i1``: Python ``bool`` / ``tla.Bool`` only (encoded as 0/1 bits).
+    - integer tiles: bare ``int`` or Numeric whose ``dtype`` equals the tile.
+    - float tiles: bare ``float`` or Numeric whose ``dtype`` equals the tile.
+    Cross-width / cross-family Numerics and bare ``int`` on float tiles are
+    rejected.
+    """
+    dtype = _normalize_copy_pad_dtype_token(dtype)
     if elem_nbytes <= 0 or elem_nbytes > 8:
         raise ValueError(f"unsupported pad element width {elem_nbytes}B for {dtype}")
     bit_width = elem_nbytes * 8
     mask = (1 << bit_width) - 1
-    if isinstance(value, bool):
-        raise TypeError("padding_value must not be bool")
-    # Integer element dtypes: only accept integer bit/value patterns.
-    # Dispatch on Numeric.dtype (not bare host type) so Float32(1) is rejected
-    # on i32 tiles while Int32(1.0) whole-float hosts stay accepted.
-    if dtype not in _COPY_PAD_FLOAT_DTYPES:
+
+    # --- i1 / bool tile: fill must be bool-typed (bare int 0 = default zero) ---
+    if dtype == "i1":
+        if isinstance(value, bool):
+            return 1 if value else 0
+        # Dataclass default ``padding_value=0``: accept as False / zero-fill only.
+        if isinstance(value, int) and not isinstance(value, bool) and value == 0:
+            return 0
         if isinstance(value, Numeric):
-            nd = type(value).dtype.lower()
-            if nd in ("i1", "bool"):
-                raise TypeError("padding_value must not be bool")
-            if not ((nd.startswith("i") or nd.startswith("u")) and nd[1:].isdigit()):
+            nd = _normalize_copy_pad_dtype_token(type(value).dtype)
+            if nd != "i1":
                 raise TypeError(
-                    f"padding_value for integer dtype {dtype} must be an int "
-                    f"(got {type(value).__name__})"
+                    f"padding_value dtype {nd} does not match element dtype i1"
                 )
             host = value.value
             if isinstance(host, bool):
-                raise TypeError("padding_value must not be bool")
+                return 1 if host else 0
+            if isinstance(host, int) and not isinstance(host, bool):
+                return 1 if host != 0 else 0
+            raise TypeError(
+                f"padding_value for i1 must be bool/tla.Bool "
+                f"(got host {type(host).__name__})"
+            )
+        raise TypeError(
+            f"padding_value for i1 must be bool/tla.Bool "
+            f"(got {type(value).__name__}; non-zero bare int is rejected)"
+        )
+
+    # --- Typed Numeric: dtype token must equal the tile ---
+    if isinstance(value, Numeric):
+        nd = _normalize_copy_pad_dtype_token(type(value).dtype)
+        if nd != dtype:
+            raise TypeError(
+                f"padding_value dtype {nd} does not match element dtype {dtype}"
+            )
+        if dtype in _COPY_PAD_INT_DTYPES:
+            host = value.value
+            if isinstance(host, bool):
+                raise TypeError(
+                    f"padding_value for integer dtype {dtype} must be an int (got bool)"
+                )
             if isinstance(host, float):
                 if not host.is_integer():
                     raise TypeError(
@@ -7125,47 +7224,41 @@ def _padding_value_to_i64_bits(value: Any, dtype: str, elem_nbytes: int) -> int:
                     f"(got {type(host).__name__})"
                 )
             return int(host) & mask
-        if isinstance(value, float):
+        if dtype in _COPY_PAD_FLOAT_DTYPES:
+            try:
+                scalar = _padding_value_float_scalar(value, dtype)
+            except TypeError as exc:
+                raise TypeError(str(exc)) from exc
+            return _encode_float_padding_bits(scalar, dtype, mask)
+        raise TypeError(f"cannot encode padding_value for dtype {dtype}")
+
+    # --- Untyped Python literals ---
+    if isinstance(value, bool):
+        raise TypeError(
+            f"padding_value for dtype {dtype} must not be bool "
+            f"(bool fill is only valid for i1 tiles)"
+        )
+    if isinstance(value, int):
+        # Dataclass default is ``0``. Accept bare int 0 as universal zero-fill
+        # (0 bits / False / +0.0). Non-zero bare int remains integer-tile only.
+        if value == 0:
+            return 0
+        if dtype not in _COPY_PAD_INT_DTYPES:
+            raise TypeError(
+                f"padding_value for dtype {dtype} must be float or a Numeric "
+                f"whose dtype matches {dtype} (got bare int {value!r})"
+            )
+        return int(value) & mask
+    if isinstance(value, float):
+        if dtype not in _COPY_PAD_FLOAT_DTYPES:
             raise TypeError(
                 f"padding_value for integer dtype {dtype} must be an int "
                 f"(got float {value!r})"
             )
-        if not isinstance(value, int) or isinstance(value, bool):
-            raise TypeError(
-                f"padding_value for integer dtype {dtype} must be an int "
-                f"(got {type(value).__name__})"
-            )
-        return int(value) & mask
-
-    # Float element dtypes: int means the numeric value (1 → 1.0).
-    try:
-        scalar = float(_padding_value_host_scalar(value))
-    except (OverflowError, ValueError, TypeError) as exc:
-        raise ValueError(
-            f"padding_value {value!r} cannot be encoded for dtype {dtype}: {exc}"
-        ) from exc
-    host = _COPY_PAD_FLOAT_HOST_BITS.get(dtype)
-    try:
-        if host is not None:
-            dtype_cls, exponent_mask = host
-            with np.errstate(over="ignore", invalid="ignore"):
-                bits = int(dtype_cls._host_bits(scalar)) & mask
-            if math.isfinite(scalar) and (bits & exponent_mask) == exponent_mask:
-                raise ValueError(
-                    f"padding_value {value!r} overflows finite range of {dtype}"
-                )
-            return bits
-        if elem_nbytes == 8 or dtype == "f64":
-            return struct.unpack("<Q", struct.pack("<d", scalar))[0]
-        if elem_nbytes == 1:
-            raise TypeError(
-                f"padding_value for 1-byte dtype {dtype} must be an int bit pattern"
-            )
-    except (OverflowError, struct.error, ValueError) as exc:
-        raise ValueError(
-            f"padding_value {value!r} cannot be encoded for dtype {dtype}: {exc}"
-        ) from exc
-    raise TypeError(f"cannot encode padding_value for dtype {dtype}")
+        return _encode_float_padding_bits(value, dtype, mask)
+    raise TypeError(
+        f"padding_value must be bool/int/float/Numeric (got {type(value).__name__})"
+    )
 
 
 def _padding_value_as_i64_ssa(
@@ -7178,19 +7271,48 @@ def _padding_value_as_i64_ssa(
     """Encode ``padding_value`` as the BC ``paddingValueBits`` ``i64`` SSA.
 
     Compile-time Python / Numeric constants use ``_padding_value_to_i64_bits``
-    (float ints mean numeric value). Runtime values must already be an
-    integer/index bit pattern (``_as_i64_copy_pad_operand``).
+    with strict dtype matching. For ``i1`` tiles, static ``bool`` / ``tla.Bool``
+    encode as 0/1. Runtime non-i1 values must already be an integer/index bit
+    pattern (``_as_i64_copy_pad_operand``); runtime i1 SSA is rejected (use a
+    static bool fill).
     """
+    dtype = _normalize_copy_pad_dtype_token(dtype)
+    # i1: bool/tla.Bool, or bare int 0 (dataclass default zero-fill).
+    if dtype == "i1":
+        if (
+            _is_bool_like_pad_operand(value)
+            or (isinstance(value, int) and not isinstance(value, bool) and value == 0)
+            or (
+                isinstance(value, Numeric)
+                and _normalize_copy_pad_dtype_token(type(value).dtype) == "i1"
+                and isinstance(value.value, (bool, int))
+            )
+        ):
+            # Runtime i1 SSA cannot be widened via the integer pad helper.
+            resolved = _resolve_bound_value(value)
+            if isinstance(resolved, mlir_ir.Value):
+                raise TypeError(
+                    "CopyPadParams.padding_value for i1 tiles must be a static "
+                    "bool/tla.Bool (runtime i1 SSA is not supported)"
+                )
+            bits = _padding_value_to_i64_bits(value, dtype, elem_nbytes)
+            return _const_i64(bits, loc=loc)
+        raise TypeError(
+            "CopyPadParams.padding_value for i1 tiles must be bool/tla.Bool "
+            f"(got {type(value).__name__}; non-zero bare int is rejected)"
+        )
     if _is_bool_like_pad_operand(value):
-        raise TypeError("CopyPadParams.padding_value must not be bool/tla.Bool/i1")
-    # Prefer static encoding so float constants keep numeric semantics.
-    # Pass Numeric through without unwrapping so dtype checks see Float32 vs Int32.
+        raise TypeError(
+            "CopyPadParams.padding_value must not be bool/tla.Bool/i1 unless "
+            "the element dtype is i1"
+        )
+    # Prefer static encoding so dtype checks see Float32 vs Int32 wrappers.
     if isinstance(value, (int, float)) or (
         isinstance(value, Numeric) and isinstance(value.value, (bool, int, float))
     ):
         bits = _padding_value_to_i64_bits(value, dtype, elem_nbytes)
         return _const_i64(bits, loc=loc)
-    # Runtime SSA / dynamic Numeric: treat as bit pattern.
+    # Runtime SSA / dynamic Numeric: treat as bit pattern (non-i1 only).
     return _as_i64_copy_pad_operand(value, what="padding_value", loc=loc)
 
 
@@ -7252,8 +7374,15 @@ def copy(
         - `dst` (`Tensor`): Destination tile. Required.
         - `src` (`Tensor`): Source tile. Required.
         - `params` (`CopyParams | None`): Path-specific params:
-          `CopyL0C2DstParams`, `CopyUbToGmParams`, `CopyPadParams` (GM→UB
-          DataCopyPad). Default `None`.
+          `CopyL0C2DstParams`, `CopyUbToGmParams`, or `CopyPadParams`.
+          Default `None`.
+          - `CopyPadParams`: enables GM→UB DataCopyPad (`isPad=true`). See
+            Constraints for supported routes/dtypes and fill rules.
+          - `left_padding` / `right_padding`: elements padded on each side of
+            the innermost axis (compile-time int or runtime integer/index SSA).
+          - `padding_value`: fill value for padded elements (compile-time
+            literal/Numeric, or runtime integer bit pattern). Default `0`
+            means zero-fill.
         - `scale` (`Tensor | None`): L1 OCP `e8m0` shared-exponent tile for
           L1→L0A/L0B MX load. Stored as `i8`/`u8`; destination tag is
           `tla.arch.zZMxScale` (L0A) or `tla.arch.nNMxScale` (L0B).
@@ -7269,11 +7398,19 @@ def copy(
         - Must be called inside a `@tla.kernel`-decorated kernel function.
         - Must be called inside `tla.cube()` or `tla.vector()`.
         - Copy size follows each tile's `origin_shape`.
-        - `CopyPadParams` is GM→UB RowMajor only (f32/f16/bf16/i32/u32/i16/u16/
-          i8/u8). `left_padding` / `right_padding` / `padding_value` may be
-          runtime integer/index SSA. When a side count is a static int, pad
-          bytes must be ≤ 32B; when extents are also static, dst innermost
-          origin must be ≥ src + left_padding + right_padding.
+        - When `params` is `CopyPadParams`: GM→UB only, layouts
+          RowMajor→RowMajor or VectorLayout→VectorLayout; element dtypes
+          f32/f16/bf16/i32/u32/i16/u16/i8/u8/i1/i64/u64/f64 (not
+          fp8/hif8/fp4). Side counts must not be bool/tla.Bool/i1; a static
+          side count must satisfy pad bytes ≤ 32B; with static extents, dst
+          innermost ≥ src + left + right.
+        - `CopyPadParams.padding_value` must match the source element dtype
+          (i1: bool/tla.Bool; integer: bare int or same-dtype Numeric; float:
+          bare float or matching float Numeric; bare int 0 is the dataclass
+          default zero-fill). Runtime non-i1 is an i64 bit pattern; runtime
+          i1 SSA is unsupported. For 8B (`i64`/`u64`/`f64`), only a static
+          zero fill is guaranteed; runtime is not value-checked and the BC
+          always zero-fills.
         - On Ascend 950, two logical rank-3 views `(B, M, N)` select batched
           GM-to-L1 layout conversion. FP8 supports RowMajor→zN and
           ColumnMajor→nZ; E8M0 supports the four GM MX-scale routes below.
@@ -7713,10 +7850,15 @@ def copy(
                 "CopyPadParams is only supported on GM→UB routes, "
                 f"got {_route[0]}→{_route[1]}",
             )
-        if src_layout != "RowMajor" or dst_layout != "RowMajor":
+        _pad_layouts_ok = (src_layout, dst_layout) in {
+            ("RowMajor", "RowMajor"),
+            ("VectorLayout", "VectorLayout"),
+        }
+        if not _pad_layouts_ok:
             _op_error(
                 "copy",
-                "CopyPadParams currently requires RowMajor→RowMajor GM→UB "
+                "CopyPadParams currently requires RowMajor→RowMajor or "
+                "VectorLayout→VectorLayout GM→UB "
                 f"(got {src_layout}→{dst_layout})",
             )
         if src_dtype not in _COPY_PAD_SAFE_DTYPES:

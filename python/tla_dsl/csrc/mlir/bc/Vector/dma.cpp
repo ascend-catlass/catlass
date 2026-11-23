@@ -19,12 +19,17 @@ CATLASS_DEVICE void copyGMToUB(
         return;
     }
     // Pad path: only instantiate ExtParams for types known safe under ccec.
+    // Keep aligned with core_api._COPY_PAD_SAFE_DTYPES (frontend rejects others).
     if constexpr (
         __is_same(T, float) || __is_same(T, half) || __is_same(T, bfloat16_t) || __is_same(T, int32_t) ||
         __is_same(T, uint32_t) || __is_same(T, int16_t) || __is_same(T, uint16_t) || __is_same(T, int8_t) ||
-        __is_same(T, uint8_t)) {
+        __is_same(T, uint8_t) || __is_same(T, bool) || __is_same(T, int64_t) || __is_same(T, uint64_t) ||
+        __is_same(T, double)) {
         T padValue{};
-        if constexpr (sizeof(T) == 1) {
+        if constexpr (__is_same(T, bool)) {
+            // Keep bool as 0/1; do not bit-cast arbitrary byte patterns into bool.
+            padValue = static_cast<bool>(paddingValueBits != 0);
+        } else if constexpr (sizeof(T) == 1) {
             uint8_t v = static_cast<uint8_t>(paddingValueBits);
             padValue = *reinterpret_cast<T*>(&v);
         } else if constexpr (sizeof(T) == 2) {
@@ -142,6 +147,15 @@ REGISTER_GM_TO_UB(VectorLayout, VectorLayout, int64_t)
 REGISTER_GM_TO_UB(VectorLayout, VectorLayout, uint64_t)
 REGISTER_GM_TO_UB(VectorLayout, VectorLayout, double)
 REGISTER_GM_TO_UB(VectorLayout, VectorLayout, bool)
+REGISTER_GM_TO_UB(VectorLayout, VectorLayout, float)
+REGISTER_GM_TO_UB(VectorLayout, VectorLayout, half)
+REGISTER_GM_TO_UB(VectorLayout, VectorLayout, bf16)
+REGISTER_GM_TO_UB(VectorLayout, VectorLayout, int32_t)
+REGISTER_GM_TO_UB(VectorLayout, VectorLayout, int16_t)
+REGISTER_GM_TO_UB(VectorLayout, VectorLayout, int8_t)
+REGISTER_GM_TO_UB(VectorLayout, VectorLayout, uint8_t)
+REGISTER_GM_TO_UB(VectorLayout, VectorLayout, uint16_t)
+REGISTER_GM_TO_UB(VectorLayout, VectorLayout, uint32_t)
 REGISTER_GM_TO_UB(RowMajor, RowMajor, fp8_e4m3fn_t)
 REGISTER_GM_TO_UB(RowMajor, RowMajor, fp8_e5m2_t)
 REGISTER_GM_TO_UB(RowMajor, RowMajor, float4_e2m1x2_t)
