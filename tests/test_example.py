@@ -692,6 +692,56 @@ def test_41_sparse_matmul_tla(build_env):
     assert ret.returncode == 0
 
 
+@only_on_2201
+def test_23_flash_attention_infer(build_env):
+    # README example: gen_data.py 1 177 512 1 1 128 0 1 bf16 1 (Paged KV cache, causal)
+    case_py = [str(i) for i in [1, 177, 512, 1, 1, 128, 0, 1]] + ["bf16", "1"]
+    _ = _run(
+        [
+            "python",
+            os.path.join(CMAKE_EXAMPLES_PATH, "23_flash_attention_infer", "gen_data.py"),
+        ]
+        + case_py,
+        check=False,
+    )
+    # example args: batch, qSeqlen, kvSeqlen, numHeads, kvHeads, headSize, isVariedLen, maskType,
+    #               --dtype bf16 --datapath ... --device DEVICE_ID
+    case_cpp = [str(i) for i in [1, 177, 512, 1, 1, 128, 0, 1]] + [
+        "--dtype",
+        "bf16",
+        "--datapath",
+        os.path.join(CMAKE_EXAMPLES_PATH, "23_flash_attention_infer", "data"),
+        "--device",
+        DEVICE_ID,
+    ]
+    run_case(build_env, "23_flash_attention_infer", case_cpp)
+
+
+@only_on_2201
+def test_40_flash_attention_infer_tla(build_env):
+    # README example: gen_data.py 1 177 512 1 1 128 0 1 bf16 1 (Paged KV cache, causal)
+    case_py = [str(i) for i in [1, 177, 512, 1, 1, 128, 0, 1]] + ["bf16", "1"]
+    _ = _run(
+        [
+            "python",
+            os.path.join(CMAKE_EXAMPLES_PATH, "40_flash_attention_infer_tla", "gen_data.py"),
+        ]
+        + case_py,
+        check=False,
+    )
+    # example args: batch, qSeqlen, kvSeqlen, numHeads, kvHeads, headSize, isVariedLen, maskType,
+    #               --dtype bf16 --datapath ... --device DEVICE_ID
+    case_cpp = [str(i) for i in [1, 177, 512, 1, 1, 128, 0, 1]] + [
+        "--dtype",
+        "bf16",
+        "--datapath",
+        os.path.join(CMAKE_EXAMPLES_PATH, "40_flash_attention_infer_tla", "data"),
+        "--device",
+        DEVICE_ID,
+    ]
+    run_case(build_env, "40_flash_attention_infer_tla", case_cpp)
+
+
 @only_on_3510
 def test_49_ascend950_flash_attention_infer(build_env):
     case_py = [str(i) for i in [1, 138, 100, 4, 2, 128, 0, 0, 0]] + ["half"]
@@ -1056,6 +1106,23 @@ def test_59_ascend950_a8w4_mx_matmul(build_env):
     # example args: m, n, k, device_id
     case_cpp = [str(i) for i in [256, 128, 128]] + [DEVICE_ID]
     run_case(build_env, "59_ascend950_a8w4_mx_matmul", case_cpp)
+
+
+@only_on_3510
+def test_61_ascend950_svd_quant_matmul(build_env):
+    # README example: gen_data.py 256 256 512 32, then <exe> 256 256 512 32 0
+    case_py = [str(i) for i in [256, 256, 512, 32]]
+    _ = _run(
+        [
+            "python",
+            os.path.join(CMAKE_EXAMPLES_PATH, "61_ascend950_svd_quant_matmul", "gen_data.py"),
+        ]
+        + case_py,
+        check=False,
+    )
+    # example args: m, n, k, r, device_id; it reads "./examples/61_.../data", so run from repo root
+    case_cpp = case_py + [DEVICE_ID]
+    run_case(build_env, "61_ascend950_svd_quant_matmul", case_cpp, cwd=CMAKE_SOURCE_DIR)
 
 
 @only_on_3510
@@ -1424,8 +1491,11 @@ normal_cases_3510 = [
     "64_ascend950_matmul_evg_tanh 256 512 1024 0",
     "64_ascend950_matmul_evg_bias 256 512 1024 0",
     "64_ascend950_matmul_evg_add_ub 256 512 1024 0",
+    "66_ascend950_streamk_matmul 256 512 1024 0",
+    "67_ascend950_batched_matmul 5 256 512 1024 0",
     "68_ascend950_multi_core_splitk_matmul 256 512 2048 0",
     "69_ascend950_tail_multi_core_splitk_matmul 1280 2048 2048 0",
+    "73_ascend950_matmul_full_loadA 256 512 256 0",
     "82_ascend950_basic_syrk 1024 1024 0",
     "84_ascend950_syrk 1024 1024 1 1.0 1.0 0",
     "88_ascend950_bmm_broadcast 3 3 1 67 131 145 0",
