@@ -708,6 +708,15 @@ mlir::LogicalResult ArchDcachePrefetchOp::verify()
     return mlir::success();
 }
 
+mlir::LogicalResult ArchDcciCachelinesOp::verify()
+{
+    if (getTarget() == ::DcciTarget::ub)
+        return emitOpError(
+            "target 'ub' is not available: the native whole-UB form is AIV-only and "
+            "requires UB dcache enabled through CTRL[49], which no TLA operation sets");
+    return mlir::success();
+}
+
 mlir::LogicalResult ArchLaneIdxOp::verify()
 {
     auto region = getOperation()->getParentOfType<VecFuncOp>();

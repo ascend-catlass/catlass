@@ -510,3 +510,27 @@ def Tla_ShuffleModeAttr : Tla_I32EnumAttr<"shuffle_mode", Tla_ShuffleModeEnum> {
     Source-lane rule for tla.arch.shuffle.
   }];
 }
+
+// Which dcache domain a whole-domain DCCI processes. The case values ARE the
+// native `dcci_dst_t` selector codes -- CACHELINE_ALL=0, CACHELINE_UB=1,
+// CACHELINE_OUT=2, CACHELINE_ATOMIC=3 -- so the lowering passes the enum value
+// through rather than translating it. `gm_l2` is the public spelling of native
+// OUT: the Ascend C API describes OUT in terms of the GM-addressed dcache
+// lines, which is what it invalidates; it is not an independently established
+// flush of the shared L2.
+def Tla_DcciTarget_All : I32EnumAttrCase<"all", 0>;
+def Tla_DcciTarget_Ub : I32EnumAttrCase<"ub", 1>;
+def Tla_DcciTarget_GmL2 : I32EnumAttrCase<"gm_l2", 2>;
+def Tla_DcciTarget_StAtomic : I32EnumAttrCase<"st_atomic", 3>;
+def Tla_DcciTargetEnum : Tla_I32Enum<
+    "DcciTarget", "Dcache domain processed by a whole-domain DCCI.", [
+      Tla_DcciTarget_All,
+      Tla_DcciTarget_Ub,
+      Tla_DcciTarget_GmL2,
+      Tla_DcciTarget_StAtomic
+    ]>;
+def Tla_DcciTargetAttr : Tla_I32EnumAttr<"dcci_target", Tla_DcciTargetEnum> {
+  let description = [{
+    Dcache domain selected by tla.arch.dcci_cachelines.
+  }];
+}

@@ -41,6 +41,7 @@
 | [`scalar_ops/`](scalar_ops/scalar_ops.py) | 在每个核自身的标量单元上执行的运算。 |
 | [`scalar_arg_alignment/`](scalar_arg_alignment/scalar_arg_alignment.py) | tensor / scalar / tensor 形式的启动参数与对齐约束。 |
 | [`cross_flag_two_way/`](cross_flag_two_way/README.md) | 一个 AIC 与两个 AIV 子块之间的双向 mode-4 cross-flag 握手。 |
+| [`dcache_maintenance/`](dcache_maintenance/dcache_maintenance.py) | 标量 dcache 维护：`dcci_cacheline` 和 `dcci_cachelines` 将单条缓存行或指定缓存域中的脏数据写回。 |
 
 ## 调试与输出
 

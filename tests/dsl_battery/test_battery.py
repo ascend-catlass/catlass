@@ -622,6 +622,15 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         [["end_to_end/gm_ub_copy_pad.py", *dev]],
     )
 
+    # --- scalar dcache maintenance: dcci_cacheline / dcci_cachelines / dci ---
+    # Each case dirties one GM word from the kernel and the host reads it back,
+    # so the dcci cases must publish it and the dci case must discard it. One
+    # core, one buffer per case.
+    yield (
+        "dcache-maintenance",
+        [["dsl_tutorials/dcache_maintenance/dcache_maintenance.py", *dev]],
+    )
+
 
     # --- basic_mixed ---
     # One test on purpose: the second invocation exercises cache reuse and is

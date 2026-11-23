@@ -1,5 +1,6 @@
-// Lower the TLA scalar ops that have no MLIR op of their own into calls to the
-// meta-op bitcode helpers that carry the matching scalar instruction.
+// Lower the TLA scalar ops that have no MLIR op of their own: the scalar unit's
+// conversion instructions, and the scalar architectural state ops -- today the
+// three data cache maintenance operations behind tla.arch.
 //
 // Why these need a lowering at all, when tla.sqrt does not: math.sqrt and
 // math.absf are ordinary MLIR ops the backend selects, so the frontend emits
@@ -19,45 +20,33 @@
 // always_inline helper there is the one route that works, and costs a single
 // instruction once the bitcode is linked.
 //
-// The table below is the extension point: a new scalar op that maps to a bitcode
-// helper is one entry plus the helper itself, not a new pass.
+// Two routes go down from here, because HIVM covers only part of what these ops
+// need. Most become a call to a meta-op bitcode helper; the table and the
+// `replaceWithScalarHelperCall` helper below are the extension point, so a new
+// scalar op that maps to a helper is one entry plus the helper itself. The
+// exception is tla.arch.dcci_cachelines, which becomes hivm.dcci directly: it
+// carries no address, so there is nothing that op's optional memref operand
+// would have to describe, and HIVM materializes the address-0 placeholder that
+// the native entire-domain API passes.
 //
-// Placement (see buildTlaPipeline): after tla-lower-ptr, so an op taking an
-// address sees an i64 rather than a !tla.ptr -- the atomics and the D-cache
-// bypass store will need that -- and downstream of the region passes, so that
-// anything which might SYNTHESIZE a scalar op still has a lowering behind it.
-// The tla.vector lowering passes already synthesize instruction sequences of
-// their own, so
-// that is the constraint worth designing to; it is not a correctness
-// requirement for the ops here today, since a func.call survives
-// vector-function outlining, as tla-lower-extern-call demonstrates from much
-// earlier in the pipeline.
+// Addressed DCCI takes an i64 byte address from the existing pointer lowering.
+// DCI uses an inline bitcode helper.
 
 #include "PassesCommon.h"
 #include "PassesInternal.h"
-
-#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 
 namespace tla {
 
 namespace {
 
-// tla.scalar_round_cast mode -> bitcode helper. The mode/result-type pairing is
-// enforced by the op's verifier, so this only has to map a validated mode.
-static StringRef scalarRoundCastCallee(StringRef mode)
-{
-    return llvm::StringSwitch<StringRef>(mode)
-        .Case("rn", "_mlir_ciface_tla_cast_f32_to_i32_rn")
-        .Case("ra", "_mlir_ciface_tla_cast_f32_to_i32_ra")
-        .Case("rd", "_mlir_ciface_tla_cast_f32_to_i32_rd")
-        .Case("ru", "_mlir_ciface_tla_cast_f32_to_i32_ru")
-        .Case("o", "_mlir_ciface_tla_cast_f32_to_f16_o")
-        .Default(StringRef());
-}
-
-// The scalar unit is on both cores, so the declaration is AIC_OR_AIV;
-// ALWAYS_INLINE keeps the linked helper from staying a real call.
-static func::FuncOp getOrCreateHelper(ModuleOp module, StringRef name, TypeRange operands, TypeRange results)
+// A bitcode helper is reached through a private func.func declaration which the
+// linker resolves against the per-core bitcode module. The declaration carries
+// two attributes, and both matter: ALWAYS_INLINE keeps the linked helper from
+// staying a real call, and AIC_OR_AIV says the scalar unit it targets exists on
+// both cores, so one declaration serves an AIC and an AIV function alike.
+//
+// Declare `name` in `module`, or return the declaration already there.
+func::FuncOp getOrCreateScalarHelper(ModuleOp module, StringRef name, TypeRange operands, TypeRange results)
 {
     if (auto existing = module.lookupSymbol<func::FuncOp>(name))
         return existing;
@@ -73,15 +62,47 @@ static func::FuncOp getOrCreateHelper(ModuleOp module, StringRef name, TypeRange
 
 // Replace one op with a call to `callee`, taking the op's operands and results.
 template <typename OpTy>
-static LogicalResult replaceWithHelperCall(OpTy op, StringRef callee)
+LogicalResult replaceWithScalarHelperCall(OpTy op, StringRef callee)
 {
     ModuleOp module = op->template getParentOfType<ModuleOp>();
-    func::FuncOp declaration = getOrCreateHelper(module, callee, op->getOperandTypes(), op->getResultTypes());
+    func::FuncOp declaration = getOrCreateScalarHelper(module, callee, op->getOperandTypes(), op->getResultTypes());
     OpBuilder builder(op);
     auto call = builder.create<func::CallOp>(op.getLoc(), declaration, op->getOperands());
     op->replaceAllUsesWith(call.getResults());
     op->erase();
     return success();
+}
+
+// tla.scalar_round_cast mode -> bitcode helper. The mode/result-type pairing is
+// enforced by the op's verifier, so this only has to map a validated mode.
+static StringRef scalarRoundCastCallee(StringRef mode)
+{
+    return llvm::StringSwitch<StringRef>(mode)
+        .Case("rn", "_mlir_ciface_tla_cast_f32_to_i32_rn")
+        .Case("ra", "_mlir_ciface_tla_cast_f32_to_i32_ra")
+        .Case("rd", "_mlir_ciface_tla_cast_f32_to_i32_rd")
+        .Case("ru", "_mlir_ciface_tla_cast_f32_to_i32_ru")
+        .Case("o", "_mlir_ciface_tla_cast_f32_to_f16_o")
+        .Default(StringRef());
+}
+
+// tla.arch.dcci_cachelines target -> HIVM data cache kind. The op's verifier
+// rejects `ub`, so only the three domains the DSL exposes can reach this; HIVM
+// itself has the kind either way, which is why the guard below is a diagnostic
+// and not an unrepresentable case.
+static std::optional<hivm::DataCacheKind> dcciDataCacheKind(::DcciTarget target)
+{
+    switch (target) {
+        case ::DcciTarget::all:
+            return hivm::DataCacheKind::ALL;
+        case ::DcciTarget::gm_l2:
+            return hivm::DataCacheKind::OUT;
+        case ::DcciTarget::st_atomic:
+            return hivm::DataCacheKind::ATOMIC;
+        case ::DcciTarget::ub:
+            break;
+    }
+    return std::nullopt;
 }
 
 class TlaLowerScalarOpsPass : public PassWrapper<TlaLowerScalarOpsPass, OperationPass<ModuleOp>> {
@@ -98,12 +119,12 @@ public:
     }
     StringRef getDescription() const override
     {
-        return "Lower TLA scalar ops to calls into the meta-op bitcode helpers";
+        return "Lower TLA scalar conversion and cache control operations";
     }
 
     void getDependentDialects(DialectRegistry& registry) const override
     {
-        registry.insert<func::FuncDialect, hivm::HIVMDialect, LLVM::LLVMDialect>();
+        registry.insert<arith::ArithDialect, func::FuncDialect, hivm::HIVMDialect, LLVM::LLVMDialect>();
     }
 
     void runOnOperation() override
@@ -119,7 +140,46 @@ public:
                 op.emitOpError() << "unsupported rounding mode \"" << op.getMode() << "\"";
                 return signalPassFailure();
             }
-            if (failed(replaceWithHelperCall(op, callee)))
+            if (failed(replaceWithScalarHelperCall(op, callee)))
+                return signalPassFailure();
+        }
+
+        SmallVector<::tla::ArchDcciCachelineOp, 8> cachelines;
+        module.walk([&](::tla::ArchDcciCachelineOp op) { cachelines.push_back(op); });
+        for (::tla::ArchDcciCachelineOp op : cachelines) {
+            OpBuilder builder(op);
+            Location loc = op.getLoc();
+            auto pointerType =
+                LLVM::LLVMPointerType::get(builder.getContext(), static_cast<unsigned>(hivm::AddressSpace::GM));
+            Value pointer = builder.create<LLVM::IntToPtrOp>(loc, pointerType, op.getAddress());
+            Value mode =
+                builder.create<arith::ConstantIntOp>(loc, static_cast<int64_t>(hivm::DCCIMode::SINGLE_CACHE_LINE), 64);
+            Value kind = builder.create<arith::ConstantIntOp>(loc, static_cast<int64_t>(hivm::DataCacheKind::ALL), 64);
+            builder.create<hivm::DCCIDstInstrOp>(loc, pointer, mode, kind);
+            op.erase();
+        }
+
+        // One whole dcache domain. This one needs no bitcode: with no address to
+        // pass there is nothing for hivm.dcci's memref operand to describe.
+        SmallVector<::tla::ArchDcciCachelinesOp, 8> dcciDomains;
+        module.walk([&](::tla::ArchDcciCachelinesOp op) { dcciDomains.push_back(op); });
+        for (::tla::ArchDcciCachelinesOp op : dcciDomains) {
+            std::optional<hivm::DataCacheKind> kind = dcciDataCacheKind(op.getTarget());
+            if (!kind) {
+                // The verifier rejects `ub`; this guards hand-written IR.
+                op.emitOpError() << "unsupported target \"" << ::stringifyDcciTarget(op.getTarget()) << "\"";
+                return signalPassFailure();
+            }
+            OpBuilder builder(op);
+            builder.create<hivm::DCCIOp>(op.getLoc(), hivm::DCCIMode::ALL_CACHE_LINES, *kind, /*ptr=*/Value());
+            op->erase();
+        }
+
+        // Whole-dcache invalidate without writeback.
+        SmallVector<::tla::ArchDciOp, 8> dciOps;
+        module.walk([&](::tla::ArchDciOp op) { dciOps.push_back(op); });
+        for (::tla::ArchDciOp op : dciOps) {
+            if (failed(replaceWithScalarHelperCall(op, "_mlir_ciface_tla_dci")))
                 return signalPassFailure();
         }
     }

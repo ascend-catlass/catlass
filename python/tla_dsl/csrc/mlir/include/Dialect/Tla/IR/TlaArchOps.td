@@ -209,3 +209,66 @@ def Tla_ArchDcachePrefetchOp : Tla_Op<"arch.dcache_prefetch", [MemoryEffects<[Me
   let hasVerifier = 1;
   let assemblyFormat = "$address `,` $byte_offset attr-dict `:` qualified(type($address))";
 }
+
+// Cache maintenance changes the issuing scalar core's cache state.
+def Tla_ArchDcciCachelineOp : Tla_Op<"arch.dcci_cacheline", [MemoryEffects<[MemRead, MemWrite]>]> {
+  let summary = "Clean and invalidate the one dcache line holding an address";
+  let description = [{
+    Write back the dcache line that contains ``address`` and then invalidate it,
+    so a later access to that line reads global memory. The address selects one
+    line; it need not be line-aligned, and nothing else in the dcache is
+    touched.
+
+    The operand is the GM byte address extracted from the DSL pointer.
+    ``tla-lower-scalar-ops`` converts it to an addrspace(1) pointer and emits
+    ``hivm.DCCI.DST`` with the single-line mode and ALL cache kind.
+
+    This publishes one line; it is not a barrier and not cross-core
+    synchronization. The caller still owes whatever flag/wait protocol the
+    consumer needs.
+  }];
+  let arguments = (ins I64:$address);
+  let assemblyFormat = [{ $address attr-dict }];
+}
+
+def Tla_ArchDcciCachelinesOp : Tla_Op<"arch.dcci_cachelines", [MemoryEffects<[MemRead, MemWrite]>]> {
+  let summary = "Clean and invalidate every valid dcache line of one domain";
+  let description = [{
+    Write back and invalidate all valid dcache lines belonging to ``target`` on
+    the issuing core. There is no address and no line count: the domain is the
+    whole unit of work.
+
+    ``target`` is a ``tla.dcci_target``: ``all`` covers the core's whole
+    dcache, ``gm_l2`` the GM-addressed lines (native OUT), and ``st_atomic``
+    the lines used by scalar atomic stores. ``ub`` is rejected -- the native
+    whole-UB form is AIV-only and depends on UB dcache being enabled through
+    CTRL[49], which no operation here does.
+
+    ``tla-lower-scalar-ops`` rewrites this into ``hivm.dcci`` with mode
+    ``all_cache_lines`` and the matching data cache kind. There is no address to
+    carry, so that op's optional memref operand stays empty and HIVM's own
+    lowering materializes the address-0 placeholder the native entire-domain API
+    passes.
+  }];
+  let arguments = (ins Tla_DcciTargetAttr:$target);
+  let hasVerifier = 1;
+  let assemblyFormat = [{ $target attr-dict }];
+}
+
+def Tla_ArchDciOp : Tla_Op<"arch.dci", [MemoryEffects<[MemRead, MemWrite]>]> {
+  let summary = "Invalidate the whole local dcache without writing it back";
+  let description = [{
+    Mark every line of the issuing core's dcache invalid, discarding dirty data
+    instead of writing it back, so later accesses reload from global memory.
+    Ascend 950PR / 950DT (arch 3510) has the instruction; A2 and A3 do not.
+
+    This is not a faster publication: every dirty line is lost, including
+    scalar writes this kernel never named, such as compiler spills. Use it only
+    where discarding those values is the intent.
+
+    Issue a DSB_ALL data barrier before this operation to wait for preceding
+    memory accesses. Use ``tla.arch.dcci_cachelines`` to write back dirty
+    lines before invalidation.
+  }];
+  let assemblyFormat = [{ attr-dict }];
+}

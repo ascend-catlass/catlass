@@ -1,0 +1,15 @@
+// RUN: sed -n '/^\/\/ BEGIN_UB_TARGET$/,/^\/\/ END_UB_TARGET$/p' %s | sed '1d;$d;s|^// ||' > %t.ub-target.mlir && not %tla_compile %t.ub-target.mlir -o %t 2>&1 | %filecheck %s --check-prefix=UB-TARGET
+
+// UB-TARGET: error:
+// UB-TARGET-SAME: 'tla.arch.dcci_cachelines' op target 'ub' is not available
+
+// BEGIN_UB_TARGET
+// module {
+//   func.func @dcci_entire_ub() {
+//     "tla.vector"() ({
+//       tla.arch.dcci_cachelines <ub>
+//     }) : () -> ()
+//     func.return
+//   }
+// }
+// END_UB_TARGET

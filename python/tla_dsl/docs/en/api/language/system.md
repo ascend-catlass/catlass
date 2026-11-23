@@ -237,6 +237,166 @@ with tla.vector():
 
 ---
 
+### `tla.arch.dcci_cacheline`
+
+**Source:** [`catlass.core_api.arch_dcci_cacheline`](../../../../catlass/core_api.py)
+
+Description:
+
+Clean and invalidate the one dcache line that holds `address`.
+
+The line is written back to global memory and then marked invalid, so a
+later scalar read of it reloads from memory. Exactly one line is
+affected -- the line that holds `address` -- and `address` need not be
+line-aligned. How much of a range a single operation covers is not
+specified here: to maintain more than one line, issue one call per
+address or use `tla.arch.dcci_cachelines`.
+
+This publishes one line. It is not a barrier, and it does not
+synchronize other cores: whatever flag / wait protocol the consumer
+needs is still the caller's to issue. To publish a whole domain in one
+operation use `tla.arch.dcci_cachelines`.
+
+Prototype:
+
+```python
+tla.arch.dcci_cacheline(address: Pointer) -> None
+```
+
+Parameters:
+
+- `address` (`Pointer`): GM pointer to the data whose line is
+  maintained. Required. The line maintained is the one holding this
+  address, whatever produced the pointer.
+
+  A tensor's `ptr` is its backing pointer, so `t.ptr` addresses element
+  0 and `t.ptr + i` addresses element `i`. A view exposes the same
+  backing pointer as the tensor it views rather than its own first
+  element, so include the view's displacement: a `tla.tile_view` at tile
+  index `c` with tile shape `n` starts at `view.ptr + c * n`.
+
+Constraints:
+
+- Must be called inside a `@tla.kernel`-decorated kernel function.
+- Must be inside `tla.cube()` or `tla.vector()`, and outside
+  `tla.vec.func`.
+- `address` must be a `Pointer` in the `gm` address space. A UB-addressed
+  line is a different native operation and is not available here.
+- Ascend 950 (arch 3510).
+
+Example:
+
+```python
+with tla.vector():
+    out[0] = tla.Int32(101)
+    tla.arch.dcci_cacheline(out.ptr)
+    # A view's first element, addressed explicitly.
+    tile = tla.tile_view(out, tla.make_shape(8), tla.make_coord(3))
+    tla.arch.dcci_cacheline(tile.ptr + 3 * 8)
+```
+
+---
+
+### `tla.arch.dcci_cachelines`
+
+**Source:** [`catlass.core_api.arch_dcci_cachelines`](../../../../catlass/core_api.py)
+
+Description:
+
+Clean and invalidate every valid dcache line of one domain on this core.
+
+Each line of the selected domain is written back and then marked
+invalid. There is no address and no line count: "cachelines" is the whole
+domain, not a range.
+
+`tla.params.DcciTarget` selects it. `ALL` is this core's whole dcache,
+`GM_L2` the lines holding GM addresses (native OUT), and `ST_ATOMIC` the
+lines used by scalar atomic stores, which is the domain the documented
+atomic saturation transition asks for.
+
+Like `tla.arch.dcci_cacheline` this is cache maintenance only: it is not
+a pipe barrier and not cross-core synchronization, and `GM_L2` does not
+promise a flush of the shared L2.
+
+Prototype:
+
+```python
+tla.arch.dcci_cachelines(target: Any = None) -> None
+```
+
+Parameters:
+
+- `target` (`tla.params.DcciTarget`): Domain to process, positionally or
+  by keyword. Optional, default `DcciTarget.ALL`.
+
+Constraints:
+
+- Must be called inside a `@tla.kernel`-decorated kernel function.
+- Must be inside `tla.cube()` or `tla.vector()`, and outside
+  `tla.vec.func`.
+- `target` is compile-time; no address or line count is accepted.
+- `DcciTarget.UB` is rejected: the native whole-UB form is AIV-only and
+  depends on UB dcache being enabled through CTRL[49], which no TLA
+  operation sets.
+- Ascend 950 (arch 3510).
+
+Example:
+
+```python
+with tla.vector():
+    out[0] = tla.Int32(7)
+    tla.arch.dcci_cachelines(tla.params.DcciTarget.GM_L2)
+```
+
+---
+
+### `tla.arch.dci`
+
+**Source:** [`catlass.core_api.arch_dci`](../../../../catlass/core_api.py)
+
+Description:
+
+Invalidate this core's whole dcache **without** writing it back.
+
+Every line is marked invalid and its dirty data is discarded, so later
+accesses reload from global memory.
+
+This is not a faster publication. Dirty data is lost, including scalar
+writes the kernel never named, such as compiler spills, so use it only
+where discarding those values is the intent. To publish instead, use
+`tla.arch.dcci_cachelines`, which cleans before it invalidates. Nothing
+here synchronizes peer cores, the icache or the shared L2.
+
+Prototype:
+
+```python
+tla.arch.dci() -> None
+```
+
+Parameters:
+
+- None.
+
+Constraints:
+
+- Must be called inside a `@tla.kernel`-decorated kernel function.
+- Must be inside `tla.cube()` or `tla.vector()`, and outside
+  `tla.vec.func`.
+- Ascend 950 (arch 3510) only; A2 and A3 have no such instruction.
+
+- Issue a `DSB_ALL` data barrier first to complete preceding memory
+  accesses. TLA has no public API for this barrier.
+
+Example:
+
+```python
+# Required sequence in a scalar region:
+# 1. Issue a DSB_ALL data barrier.
+# 2. Call tla.arch.dci().
+```
+
+---
+
 ### `tla.arch.warpsize`
 
 **Source:** [`catlass.core_api.arch_warpsize`](../../../../catlass/core_api.py)

@@ -222,6 +222,146 @@ with tla.vector():
 
 ---
 
+### `tla.arch.dcci_cacheline`
+
+**源码：** [`catlass.core_api.arch_dcci_cacheline`](../../../../catlass/core_api.py)
+
+功能说明：
+
+清理并失效持有 `address` 的那一条 dcache 行。
+
+该行先写回 Global Memory，随后被置为无效，之后再读该行会重新从内存取数。
+只影响一条行，即持有 `address` 的那一条，`address` 无需按行边界对齐。
+单次操作覆盖多大范围不在此约定：要维护多条行，请逐地址各调用一次，或改用
+`tla.arch.dcci_cachelines`。
+
+本操作发布一条行，既不是 barrier，也不做跨核同步：消费方所需的 flag / wait
+协议仍由调用方负责。要一次发布整个域，使用 `tla.arch.dcci_cachelines`。
+
+函数原型：
+
+```python
+tla.arch.dcci_cacheline(address: Pointer) -> None
+```
+
+参数说明：
+
+- `address`（`Pointer`）：指向待维护数据的 GM 指针。必选。被维护的是持有该地址
+  的那一条行，与指针由什么产生无关。
+
+  张量的 `ptr` 是其背后的指针，因此 `t.ptr` 寻址元素 0，`t.ptr + i` 寻址元素
+  `i`。视图暴露的是所视张量的同一个背后指针，而非视图自身的首元素，因此需自行
+  加上视图位移：tile 下标为 `c`、tile 形状为 `n` 的 `tla.tile_view`，其首元素
+  位于 `view.ptr + c * n`。
+
+约束说明：
+
+- 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
+- 须在 `tla.cube()` 或 `tla.vector()` 内，且在 `tla.vec.func` 之外。
+- `address` 须为 `gm` 地址空间的 `Pointer`。UB 寻址的行属于另一条原生指令，
+  此处不支持。
+- Ascend 950（架构 3510）。
+
+调用示例：
+
+```python
+with tla.vector():
+    out[0] = tla.Int32(101)
+    tla.arch.dcci_cacheline(out.ptr)
+```
+
+---
+
+### `tla.arch.dcci_cachelines`
+
+**源码：** [`catlass.core_api.arch_dcci_cachelines`](../../../../catlass/core_api.py)
+
+功能说明：
+
+清理并失效本核上某一个域内所有有效的 dcache 行。
+
+所选域内每条行先写回再置为无效。没有地址也没有行数：“cachelines”指整个域，
+不是一段地址区间。
+
+域由 `tla.params.DcciTarget` 选择：`ALL` 为本核整个 dcache，`GM_L2` 为持有 GM
+地址的行（原生 OUT），`ST_ATOMIC` 为标量原子存储使用的行，即文档所述原子饱和
+切换所要求的域。
+
+与 `tla.arch.dcci_cacheline` 一样，本操作只做 cache 维护：既不是 pipe barrier，
+也不做跨核同步；`GM_L2` 不承诺刷新共享 L2。
+
+函数原型：
+
+```python
+tla.arch.dcci_cachelines(target: Any = None) -> None
+```
+
+参数说明：
+
+- `target`（`tla.params.DcciTarget`）：待处理的域，可按位置或关键字传入。
+  可选，默认 `DcciTarget.ALL`。
+
+约束说明：
+
+- 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
+- 须在 `tla.cube()` 或 `tla.vector()` 内，且在 `tla.vec.func` 之外。
+- `target` 为编译期参数；不接受地址或行数。
+- `DcciTarget.UB` 被拒绝：原生整个 UB 的形式仅 AIV 可用，且依赖通过 CTRL[49]
+  启用 UB dcache，而 TLA 没有任何操作设置该位。
+- Ascend 950（架构 3510）。
+
+调用示例：
+
+```python
+with tla.vector():
+    out[0] = tla.Int32(7)
+    tla.arch.dcci_cachelines(tla.params.DcciTarget.GM_L2)
+```
+
+---
+
+### `tla.arch.dci`
+
+**源码：** [`catlass.core_api.arch_dci`](../../../../catlass/core_api.py)
+
+功能说明：
+
+失效本核整个 dcache，**不**写回。
+
+每条行都被置为无效，其中的脏数据被丢弃，之后的访问重新从 Global Memory 取数。
+
+本操作不是更快的发布手段。脏数据会丢失，包括 kernel 未显式写出的标量写，如
+编译器溢出，因此仅在确实要丢弃这些值时使用。要发布数据请使用
+`tla.arch.dcci_cachelines`，它先清理再失效。本操作不同步其他核、icache
+或共享 L2。
+
+函数原型：
+
+```python
+tla.arch.dci() -> None
+```
+
+参数说明：
+
+- 无。
+
+约束说明：
+
+- 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
+- 须在 `tla.cube()` 或 `tla.vector()` 内，且在 `tla.vec.func` 之外。
+- 仅 Ascend 950（架构 3510）；A2 与 A3 没有该指令。
+- 调用前须发出 `DSB_ALL` 数据屏障，等待此前发出的内存访问完成。TLA 当前未提供该屏障的公开 API。
+
+调用示例：
+
+```python
+# 标量区域中的调用顺序：
+# 1. 发出 DSB_ALL 数据屏障。
+# 2. 调用 tla.arch.dci()。
+```
+
+---
+
 ### `tla.arch.warpsize`
 
 **源码：** [`catlass.core_api.arch_warpsize`](../../../../catlass/core_api.py)

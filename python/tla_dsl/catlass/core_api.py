@@ -172,6 +172,7 @@ from .types import (
 from .params import (
     AtomicMode,
     CachePolicy,
+    DcciTarget,
     RegPart,
     RegSlot,
     HF32Mode,
@@ -12392,6 +12393,191 @@ def arch_dcache_prefetch(
     )
 
 
+def _require_core_region(op_name: str) -> None:
+    if _runtime._has_enclosing_region("vec.func"):
+        _op_error(
+            op_name,
+            "is a scalar operation and must be placed outside tla.vec.func, "
+            "directly in the tla.cube() or tla.vector() region",
+        )
+    in_cube = _runtime._has_enclosing_region("cube")
+    in_vector = _runtime._has_enclosing_region("vector")
+    if not in_cube and not in_vector:
+        _op_error(
+            op_name,
+            "must be nested inside tla.cube() or tla.vector(), which is what "
+            "says whose dcache is maintained",
+        )
+    if in_cube and in_vector:
+        _op_error(op_name, "mixed cube/vector placement is unsupported")
+
+
+@dsl_user_op
+def arch_dcci_cacheline(
+    address: Pointer, *, loc: mlir_ir.Location | None = None
+) -> None:
+    """Directory: System Variable Access / Architecture Helpers
+    Description:
+        Clean and invalidate the one dcache line that holds `address`.
+
+        The line is written back to global memory and then marked invalid, so a
+        later scalar read of it reloads from memory. Exactly one line is
+        affected -- the line that holds `address` -- and `address` need not be
+        line-aligned. How much of a range a single operation covers is not
+        specified here: to maintain more than one line, issue one call per
+        address or use `tla.arch.dcci_cachelines`.
+
+        This publishes one line. It is not a barrier, and it does not
+        synchronize other cores: whatever flag / wait protocol the consumer
+        needs is still the caller's to issue. To publish a whole domain in one
+        operation use `tla.arch.dcci_cachelines`.
+
+        Parameters:
+        - `address` (`Pointer`): GM pointer to the data whose line is
+          maintained. Required. The line maintained is the one holding this
+          address, whatever produced the pointer.
+
+          A tensor's `ptr` is its backing pointer, so `t.ptr` addresses element
+          0 and `t.ptr + i` addresses element `i`. A view exposes the same
+          backing pointer as the tensor it views rather than its own first
+          element, so include the view's displacement: a `tla.tile_view` at tile
+          index `c` with tile shape `n` starts at `view.ptr + c * n`.
+
+        Constraints:
+        - Must be called inside a `@tla.kernel`-decorated kernel function.
+        - Must be inside `tla.cube()` or `tla.vector()`, and outside
+          `tla.vec.func`.
+        - `address` must be a `Pointer` in the `gm` address space. A UB-addressed
+          line is a different native operation and is not available here.
+        - Ascend 950 (arch 3510).
+
+        Example:
+        ```python
+        with tla.vector():
+            out[0] = tla.Int32(101)
+            tla.arch.dcci_cacheline(out.ptr)
+            # A view's first element, addressed explicitly.
+            tile = tla.tile_view(out, tla.make_shape(8), tla.make_coord(3))
+            tla.arch.dcci_cacheline(tile.ptr + 3 * 8)
+        ```
+    """
+    name = "arch.dcci_cacheline"
+    _require_frontend_state(name)
+    _require_core_region(name)
+    _require_category(name, "address", address, "pointer", 0)
+    ptr = _coerce_pointer_arg(address)
+    if ptr.addrspace is not AddressSpace.gm:
+        _op_error(name, f"expected a gm pointer, got {ptr.addrspace}")
+    byte_address = _tla_ops_gen.ptrtoint(
+        mlir_ir.IntegerType.get_signless(64), ptr.value, loc=loc
+    )
+    _tla_ops_gen.arch_dcci_cacheline(byte_address, loc=loc)
+
+
+@dsl_user_op
+def arch_dcci_cachelines(
+    target: Any = None, *, loc: mlir_ir.Location | None = None
+) -> None:
+    """Directory: System Variable Access / Architecture Helpers
+    Description:
+        Clean and invalidate every valid dcache line of one domain on this core.
+
+        Each line of the selected domain is written back and then marked
+        invalid. There is no address and no line count: "cachelines" is the whole
+        domain, not a range.
+
+        `tla.params.DcciTarget` selects it. `ALL` is this core's whole dcache,
+        `GM_L2` the lines holding GM addresses (native OUT), and `ST_ATOMIC` the
+        lines used by scalar atomic stores, which is the domain the documented
+        atomic saturation transition asks for.
+
+        Like `tla.arch.dcci_cacheline` this is cache maintenance only: it is not
+        a pipe barrier and not cross-core synchronization, and `GM_L2` does not
+        promise a flush of the shared L2.
+
+        Parameters:
+        - `target` (`tla.params.DcciTarget`): Domain to process, positionally or
+          by keyword. Optional, default `DcciTarget.ALL`.
+
+        Constraints:
+        - Must be called inside a `@tla.kernel`-decorated kernel function.
+        - Must be inside `tla.cube()` or `tla.vector()`, and outside
+          `tla.vec.func`.
+        - `target` is compile-time; no address or line count is accepted.
+        - `DcciTarget.UB` is rejected: the native whole-UB form is AIV-only and
+          depends on UB dcache being enabled through CTRL[49], which no TLA
+          operation sets.
+        - Ascend 950 (arch 3510).
+
+        Example:
+        ```python
+        with tla.vector():
+            out[0] = tla.Int32(7)
+            tla.arch.dcci_cachelines(tla.params.DcciTarget.GM_L2)
+        ```
+    """
+    _require_frontend_state("arch.dcci_cachelines")
+    _require_core_region("arch.dcci_cachelines")
+    selected = DcciTarget.ALL if target is None else target
+    if not isinstance(selected, DcciTarget):
+        _op_error(
+            "arch.dcci_cachelines",
+            f"invalid argument 'target' (position 0): expected tla.params.DcciTarget, "
+            f"got {_type_name(target)}",
+        )
+    if selected is DcciTarget.UB:
+        _op_error(
+            "arch.dcci_cachelines",
+            "target DcciTarget.UB is not available: the native whole-UB form is "
+            "AIV-only and requires UB dcache enabled through CTRL[49], which no "
+            "TLA operation sets",
+        )
+    ctx = loc.context if loc is not None else mlir_ir.Context()
+    attr = mlir_ir.Attribute.parse(
+        f"#tla.dcci_target<{selected.mlir_token}>", context=ctx
+    )
+    _tla_ops_gen.arch_dcci_cachelines(attr, loc=loc)
+
+
+@dsl_user_op
+def arch_dci(*, loc: mlir_ir.Location | None = None) -> None:
+    """Directory: System Variable Access / Architecture Helpers
+    Description:
+        Invalidate this core's whole dcache **without** writing it back.
+
+        Every line is marked invalid and its dirty data is discarded, so later
+        accesses reload from global memory.
+
+        This is not a faster publication. Dirty data is lost, including scalar
+        writes the kernel never named, such as compiler spills, so use it only
+        where discarding those values is the intent. To publish instead, use
+        `tla.arch.dcci_cachelines`, which cleans before it invalidates. Nothing
+        here synchronizes peer cores, the icache or the shared L2.
+
+        Parameters:
+        - None.
+
+        Constraints:
+        - Must be called inside a `@tla.kernel`-decorated kernel function.
+        - Must be inside `tla.cube()` or `tla.vector()`, and outside
+          `tla.vec.func`.
+        - Ascend 950 (arch 3510) only; A2 and A3 have no such instruction.
+
+        - Issue a `DSB_ALL` data barrier first to complete preceding memory
+          accesses. TLA has no public API for this barrier.
+
+        Example:
+        ```python
+        # Required sequence in a scalar region:
+        # 1. Issue a DSB_ALL data barrier.
+        # 2. Call tla.arch.dci().
+        ```
+    """
+    _require_frontend_state("arch.dci")
+    _require_core_region("arch.dci")
+    _tla_ops_gen.arch_dci(loc=loc)
+
+
 @dsl_user_op
 def arch_warpsize(*, loc: mlir_ir.Location | None = None) -> Int32:
     """Directory: System Variable Access / Architecture Helpers
@@ -12669,6 +12855,14 @@ def arch_sync_threads(*, loc: mlir_ir.Location | None = None) -> None:
     _tla_ops_gen.arch_sync_threads(loc=loc)
 
 
+# --- scalar dcache maintenance --------------------------------------------
+#
+# These three run on the issuing core's own scalar unit, so each is available on
+# AIC and AIV alike. What they share is a placement rule: the core that issues
+# the maintenance is the core whose cache it affects, so the op has to sit in a
+# region that names one. A kernel body outside both regions does not: in a mixed
+# kernel it is duplicated into the AIC and the AIV function, which would mean
+# two cache operations where the source asked for one.
 # A shuffle moves a bit pattern between registers without interpreting it, so
 # every integer and float width the intrinsics cover is supported, signed and
 # unsigned alike: inside a SIMT region a Numeric presents its value as a
@@ -13481,11 +13675,17 @@ _require_generated("simt_pow")
 _require_generated("simt_load")
 _require_generated("simt_store")
 _require_generated("arch_sync_threads")
+_require_generated("arch_dcci_cacheline")
+_require_generated("arch_dcci_cachelines")
+_require_generated("arch_dci")
 _require_generated("inttoptr")
 _require_generated("recast_ptr")
 
 arch = _Namespace()
 arch._set("dcache_prefetch", arch_dcache_prefetch)
+arch._set("dcci_cacheline", arch_dcci_cacheline)
+arch._set("dcci_cachelines", arch_dcci_cachelines)
+arch._set("dci", arch_dci)
 arch._set("block_idx", arch_block_idx)
 arch._set("sub_block_idx", arch_sub_block_idx)
 arch._set("block_num", arch_block_num)

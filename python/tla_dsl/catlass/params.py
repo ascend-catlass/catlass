@@ -75,6 +75,42 @@ class CachePolicy(enum.Enum):
         }[self]
 
 
+class DcciTarget(enum.IntEnum):
+    """Dcache domain for ``tla.arch.dcci_cachelines``.
+
+    The values are the native ``dcci_dst_t`` selector codes, so no translation
+    happens on the way down: ``CACHELINE_ALL``, ``CACHELINE_UB``,
+    ``CACHELINE_OUT``, ``CACHELINE_ATOMIC``.
+
+    ``GM_L2`` is the public spelling of native OUT. What OUT invalidates is the
+    GM-addressed lines of this core's dcache; the name does not promise a flush
+    of the shared L2 as well.
+
+    ``UB`` is defined because it is the domain the hardware names, but
+    ``tla.arch.dcci_cachelines`` rejects it: the native whole-UB form is
+    AIV-only and depends on UB dcache being enabled through CTRL[49], which no
+    TLA operation sets.
+    """
+
+    ALL = 0
+    UB = 1
+    GM_L2 = 2
+    ST_ATOMIC = 3
+
+    def __str__(self) -> str:
+        return self.name  # "ALL"/"UB"/"GM_L2"/"ST_ATOMIC"
+
+    @property
+    def mlir_token(self) -> str:
+        """Keyword of the matching ``tla.dcci_target`` attribute case."""
+        return {
+            DcciTarget.ALL: "all",
+            DcciTarget.UB: "ub",
+            DcciTarget.GM_L2: "gm_l2",
+            DcciTarget.ST_ATOMIC: "st_atomic",
+        }[self]
+
+
 class RegPart(enum.Enum):
     """Register half selection."""
 
