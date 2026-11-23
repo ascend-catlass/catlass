@@ -11319,6 +11319,7 @@ def squeeze(
     src: VectorSSA,
     mask: MaskSSA,
     *,
+    record_nbytes: bool = False,
     loc: mlir_ir.Location | None = None,
 ) -> VectorSSA:
     """Directory: SIMD Vector Compute / Data Compress
@@ -11328,22 +11329,40 @@ def squeeze(
         Parameters:
         - `src` (`VectorSSA`): Source vector to compress. Required.
         - `mask` (`MaskSSA`): Mask of elements to keep. Required.
+        - `record_nbytes` (`bool`): When `True`, hardware calculates the byte
+          count of the data selected by `mask` and records it in a dedicated
+          internal register. `store` uses this count in
+          `POST_MODE_UPDATE_NBYTES` mode. Defaults to `False`. Keyword-only.
 
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function.
-        - Must be called inside `tla.vec.func()`.
+        - Must be called inside `tla.vec.func(mode="simd")`.
         - Supported element types: `f32`, `f16`, `i8`, `i16`, `i32`, `u8`, `u16`, `u32`.
+
+        With `record_nbytes=True`, the byte count is the number of kept
+        elements times the size of each element in bytes. Hardware records
+        this count in a dedicated internal register. Before the count is
+        overwritten, the caller must call `store` with
+        `UnalignStoreParams(post_mode=POST_MODE_UPDATE_NBYTES)` to write the
+        intended data to the destination. For an example, see
+        [`Tensor.store`](language/data_movement.md#tlatensorstore).
 
         Example:
         ```python
+        # src_ub is a contiguous Int16 UB window with 128 elements.
         with tla.vec.func(mode="simd"):
-            packed = tla.squeeze(src, m)
+            keep, _ = tla.update_mask(3, dtype=tla.Int16)
+            packed = tla.squeeze(src_ub.load(), keep)
         ```
     """
     _require_category("squeeze", "src", src, "vector_ssa", 0)
     _require_category("squeeze", "mask", mask, "mask_ssa", 1)
+    if not isinstance(record_nbytes, bool):
+        _op_error("squeeze", "record_nbytes must be a bool")
     _require_frontend_state("squeeze")
     _runtime._require_enclosing_region("squeeze", "vec.func")
+    if _runtime._in_simt_vec_func():
+        _op_error("squeeze", "requires tla.vec.func(mode='simd')")
     src_value = _as_value(src)
     mask_value = _as_value(mask)
     _require_mask_matches_vector("squeeze", mask_value, src_value)
@@ -11351,6 +11370,7 @@ def squeeze(
         src_value.type,
         src_value,
         mask_value,
+        store_reg=record_nbytes,
         loc=loc,
     )
     return VectorSSA(result)

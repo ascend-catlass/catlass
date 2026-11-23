@@ -360,14 +360,18 @@ def Tla_HistogramsOp : Tla_Op<"histograms", [Pure]> {
   let hasVerifier = 1;
 }
 
-def Tla_SqueezeOp : Tla_Op<"squeeze", [Pure]> {
+def Tla_SqueezeOp : Tla_Op<"squeeze", [DeclareOpInterfaceMethods<MemoryEffectsOpInterface>,
+    DeclareOpInterfaceMethods<ConditionallySpeculatable>]> {
   let summary = "Mask-compress vector lanes into low indices";
   let description = [{
   Copy lanes of ``src`` selected by ``mask`` into ``result`` starting at lane 0.
   Remaining lanes in ``result`` are zeroed. This matches AscendC ``Squeeze``
   semantics (valid elements packed from low to high, not value-sorted).
+  ``store_reg`` additionally records the hardware compressed-store length.
+  This mode has a hardware-state side effect; the default remains pure.
   }];
-  let arguments = (ins Tla_VectorSSAType:$src, Tla_MaskSSAType:$mask);
+  let arguments = (ins Tla_VectorSSAType:$src, Tla_MaskSSAType:$mask,
+                       DefaultValuedAttr<BoolAttr, "false">:$store_reg);
   let results = (outs Tla_VectorSSAType:$result);
   let assemblyFormat = [{
     $src `,` $mask attr-dict `:`
@@ -853,16 +857,25 @@ def Tla_CreateUregOp : Tla_Op<"create_ureg", []> {
   }];
 }
 
-def Tla_StoreUnalignPostOp : Tla_Op<"store_unalign_post", []> {
+// Reset the accumulated byte offset in AR at the start of a compression stream.
+def Tla_ClearSqueezeStateOp : Tla_Op<"clear_squeeze_state",
+    [DeclareOpInterfaceMethods<MemoryEffectsOpInterface>]> {
+  let summary = "Initialize the hardware address state of a compression stream";
+  let assemblyFormat = "attr-dict";
+}
+
+def Tla_StoreUnalignPostOp : Tla_Op<"store_unalign_post",
+    [DeclareOpInterfaceMethods<MemoryEffectsOpInterface>]> {
   let summary = "StoreUnAlignPost (vstas); UnAlign store-side ureg flush";
   let description = [{
     Flushes the store-side ureg after the ``store_unalign_update`` whose ureg
     result is not taken as input by a later store UPDATE. ``dest`` is the next
-    window Tensor (``make_tensor`` / ``make_tensor_like`` of ``next_ptr``, or
-    the ``scf.for`` result that carries that Tensor). Inserted by
-    ``tla-unalign-ureg``.
+    window Tensor (``make_tensor`` / ``make_tensor_like`` of ``next_ptr``, or the ``scf.for`` result
+    that carries that Tensor). For compressed stores, ``dest`` is the
+    most recent store's base window or its byte address. Inserted by ``tla-unalign-ureg``.
   }];
-  let arguments = (ins Tla_UregType:$ureg, Tla_TensorType:$dest);
+  let arguments = (ins Tla_UregType:$ureg, AnyTypeOf<[Tla_TensorType, I64]>:$dest,
+                       DefaultValuedAttr<BoolAttr, "false">:$compressed);
   let assemblyFormat = [{
     $ureg `,` $dest attr-dict `:` qualified(type($ureg)) `,` type($dest)
   }];
@@ -897,20 +910,27 @@ def Tla_LoadUnalignUpdateOp : Tla_Op<"load_unalign_update", []> {
   let hasVerifier = 1;
 }
 
-def Tla_StoreUnalignUpdateOp : Tla_Op<"store_unalign_update", []> {
+def Tla_StoreUnalignUpdateOp : Tla_Op<"store_unalign_update",
+    [DeclareOpInterfaceMethods<MemoryEffectsOpInterface>]> {
   let summary = "StoreUnAlign POST_MODE_UPDATE (vstus.post + ureg SSA; HW next_ptr)";
   let description = [{
     Stores one unaligned window. ``post_update_stride`` is an element count
-    (AscendC ``postUpdateStride``). Same default / explicit / ``(0, VL]`` rule
-    as ``load_unalign_update``. Same HIVM ``$eleSize`` / HW ``newPtr`` rule.
+    (AscendC ``postUpdateStride``). Same default / explicit / ``(0, VL]`` rule as
+    ``load_unalign_update``. Same HIVM ``$eleSize`` / HW ``newPtr`` rule.
     Python omits ``ureg_in``; ``tla-unalign-ureg`` inserts ``create_ureg``,
     fills ``ureg_in``, and places ``store_unalign_post`` after the ureg that
-    is not taken by a later store UPDATE.
+    is not taken by a later store UPDATE. With ``compressed`` set, the store uses
+    the byte count that hardware recorded during ``squeeze`` and requires a zero
+    explicit stride.
+    Compressed stores use the supplied ``dest`` and share the hardware write
+    offset. In this mode ``next_ptr`` represents the base address used by the
+    store so the compiler can use it for the final tail writeback.
   }];
   let arguments = (ins Tla_TensorType:$dest,
                        Tla_VectorSSAType:$source,
                        Tla_IntegerOrIndexType:$post_update_stride,
-                       Optional<Tla_UregType>:$ureg_in);
+                       Optional<Tla_UregType>:$ureg_in,
+                       DefaultValuedAttr<BoolAttr, "false">:$compressed);
   let results = (outs Tla_PtrType:$next_ptr,
                       Tla_UregType:$ureg_out);
   let assemblyFormat = [{

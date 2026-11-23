@@ -276,7 +276,7 @@ static Value emitEmptyStoreUreg(OpBuilder& b, Location loc)
     return b.create<hivm_regbaseintrins::InitVectorAlignDataInstrOp>(loc, uregVectorType(b)).getResult();
 }
 
-static Value getVectorHelperStorageIdentity(Value source);
+static Value getVectorHelperStorageIdentity(Value source, Region& outlinedRegion);
 
 /// Emit ``vldus.post`` and return ``{vec, newUreg, newPtr}``.
 ///
@@ -989,20 +989,22 @@ static func::FuncOp getOrCreateMaskLoadUsDsLibraryCall(
     return callee;
 }
 
-static std::string getSqueezeLibraryCallName(Type elementType)
+static std::string getSqueezeLibraryCallName(Type elementType, bool storeReg)
 {
+    std::string name;
     if (elementType.isF32())
-        return "vsqueeze_float";
-    if (elementType.isF16())
-        return "vsqueeze_half";
-    if (auto intType = dyn_cast<IntegerType>(elementType)) {
-        // vsqz moves whole elements and is sign-agnostic, but every 8/16/32-bit
-        // signedness still needs its own ABI stub (VectorReg<int|uint*_t>).
+        name = "vsqueeze_float";
+    else if (elementType.isF16())
+        name = "vsqueeze_half";
+    else if (auto intType = dyn_cast<IntegerType>(elementType)) {
+        // Preserve the signedness when selecting the bitcode ABI stub.
         unsigned width = intType.getWidth();
         if (width == 8 || width == 16 || width == 32)
-            return std::string("vsqueeze_") + (intType.isUnsigned() ? "uint" : "int") + std::to_string(width) + "_t";
+            name = std::string("vsqueeze_") + (intType.isUnsigned() ? "uint" : "int") + std::to_string(width) + "_t";
     }
-    return {};
+    if (!name.empty() && storeReg)
+        name += "_store_reg";
+    return name;
 }
 
 static std::string getVectorPackLibraryCallName(Type srcElement, Type dstElement, ::RegPart part)
@@ -2553,6 +2555,10 @@ static FailureOr<Value> createVectorScalarBinaryResult(
 
 static FailureOr<Type> lowerSCFCarrierType(Type type)
 {
+    if (isa<::tla::UregType>(type)) {
+        OpBuilder builder(type.getContext());
+        return uregVectorType(builder);
+    }
     if (auto vectorType = dyn_cast<::tla::VectorSSAType>(type)) {
         auto ctx = deriveVecCtxForElement(vectorType.getElementType());
         if (failed(ctx))
@@ -2580,9 +2586,27 @@ static LogicalResult materializeTensorDescSubview(
 {
     Location loc = descOp.getLoc();
     Value baseMemref = valueMap.lookup(descOp.getResult());
-    if (!baseMemref)
+    Value descBase = descOp.getBase();
+    Value address = valueMap.lookup(descBase);
+    if (!address) {
+        if (auto intToPtr = descBase.getDefiningOp<::tla::IntToPtrOp>())
+            address = lookupOrCloneScalarValue(b, intToPtr.getAddr(), valueMap);
+    }
+    if (address && !address.getType().isIntOrIndex() && !isa<LLVM::LLVMPointerType>(address.getType()))
+        address = {};
+
+    auto sourceType = baseMemref ? dyn_cast<MemRefType>(baseMemref.getType()) : MemRefType{};
+    if (!baseMemref && address) {
+        // A pointer selected inside the helper may have no base argument
+        // at the call site. Its descriptor has an unknown backing extent.
+        auto bridgedType = getBridgedTensorMemrefType(descOp.getResult());
+        if (failed(bridgedType))
+            return failure();
+        sourceType = MemRefType::get(
+            {ShapedType::kDynamic}, bridgedType->getElementType(), AffineMap(), bridgedType->getMemorySpace());
+    }
+    if (!baseMemref && !address)
         return descOp.emitError("failed to map tla.tensor_desc base in vector helper"), failure();
-    auto sourceType = dyn_cast<MemRefType>(baseMemref.getType());
     if (!sourceType || sourceType.getRank() != 1)
         return descOp.emitError("expected rank-1 base memref for vector tensor_desc"), failure();
     auto lanesOr = getVectorLaneCount(sourceType.getElementType());
@@ -2595,8 +2619,10 @@ static LogicalResult materializeTensorDescSubview(
     // seed helper arg (for ABI dedup / memref type only) — that seed must not
     // replace a mapped live address. If the live addr is not reachable in the
     // helper, keep the seed memref (ordinary lit / non-UPDATE paths).
-    auto rebuildFromAddrI64 = [&](Value addr) {
-        Value addrI64 = ::tla::castValueToI64(b, loc, addr);
+    if (address) {
+        if (isa<LLVM::LLVMPointerType>(address.getType()))
+            address = b.create<LLVM::PtrToIntOp>(loc, b.getI64Type(), address);
+        Value addrI64 = ::tla::castValueToI64(b, loc, address);
         SmallVector<Value, 1> dynamicSizes;
         if (!sourceType.hasStaticShape()) {
             for (int64_t dim : sourceType.getShape()) {
@@ -2605,17 +2631,6 @@ static LogicalResult materializeTensorDescSubview(
             }
         }
         baseMemref = b.create<hivm::PointerCastOp>(loc, sourceType, addrI64, dynamicSizes).getResult();
-    };
-    Value descBase = descOp.getBase();
-    if (Value mappedBase = valueMap.lookup(descBase)) {
-        if (mappedBase.getType().isInteger(64) || isa<IndexType>(mappedBase.getType()))
-            rebuildFromAddrI64(mappedBase);
-        else if (isa<LLVM::LLVMPointerType>(mappedBase.getType())) {
-            rebuildFromAddrI64(b.create<LLVM::PtrToIntOp>(loc, b.getI64Type(), mappedBase));
-        }
-    } else if (auto intToPtr = descBase.getDefiningOp<::tla::IntToPtrOp>()) {
-        if (Value addr = lookupOrCloneScalarValue(b, intToPtr.getAddr(), valueMap))
-            rebuildFromAddrI64(addr);
     }
 
     Value rowOff = lookupOrCloneScalarValue(b, descOp.getCoord0(), valueMap);
@@ -3439,9 +3454,7 @@ static LogicalResult lowerVectorScalarBinary(
     return success();
 }
 
-/// tla.squeeze: mask-compress src lanes via linked bitcode (vsqz).
-/// Uses NO_STORE_REG; streaming writeback stays on ``store_unalign_update`` /
-/// ``store_unalign_post`` rather than squeeze STORE_REG.
+/// Lower squeeze to vsqz, selecting the stub that records the byte count when requested.
 static LogicalResult lowerSqueeze(
     ::tla::SqueezeOp squeezeOp, OpBuilder& b, ModuleOp module, DenseMap<Value, Value>& valueMap,
     AutoFullPredicateCache& fullMasks)
@@ -3458,9 +3471,9 @@ static LogicalResult lowerSqueeze(
     if (failed(opCtx))
         return failure();
     // ``srcTy`` is the AVE (signless) vector type; recover the original tla
-    // element type so unsigned 8/16-bit squeeze picks the uint*_t stub.
+    // element type so unsigned squeeze picks the uint*_t stub.
     Type tlaElem = tlaElementOr(squeezeOp.getSrc().getType(), srcTy.getElementType());
-    std::string calleeName = getSqueezeLibraryCallName(tlaElem);
+    std::string calleeName = getSqueezeLibraryCallName(tlaElem, squeezeOp.getStoreReg());
     if (calleeName.empty())
         return squeezeOp.emitError("unsupported element type for tla.squeeze: ") << tlaElem, failure();
     VectorType pregVecType = fullPregVecType(b.getContext());
@@ -4412,9 +4425,16 @@ static LogicalResult lowerStoreUpdate(
     return success();
 }
 
+static LogicalResult lowerCompressedUpdate(
+    ::tla::StoreUnalignUpdateOp op, OpBuilder& b, ModuleOp module, DenseMap<Value, Value>& map);
+static LogicalResult lowerCompressedPost(
+    ::tla::StoreUnalignPostOp op, OpBuilder& b, ModuleOp module, DenseMap<Value, Value>& map);
+
 static LogicalResult lowerStoreUnalignUpdate(
-    ::tla::StoreUnalignUpdateOp op, OpBuilder& b, DenseMap<Value, Value>& valueMap)
+    ::tla::StoreUnalignUpdateOp op, OpBuilder& b, ModuleOp module, DenseMap<Value, Value>& valueMap)
 {
+    if (op.getCompressed())
+        return lowerCompressedUpdate(op, b, module, valueMap);
     Location loc = op.getLoc();
     Value src = valueMap.lookup(op.getSource());
     if (!src)
@@ -4474,8 +4494,11 @@ static LogicalResult lowerCreateUreg(::tla::CreateUregOp op, OpBuilder& b, Dense
     return success();
 }
 
-static LogicalResult lowerStoreUnalignPost(::tla::StoreUnalignPostOp op, OpBuilder& b, DenseMap<Value, Value>& valueMap)
+static LogicalResult lowerStoreUnalignPost(
+    ::tla::StoreUnalignPostOp op, OpBuilder& b, ModuleOp module, DenseMap<Value, Value>& valueMap)
 {
+    if (op.getCompressed())
+        return lowerCompressedPost(op, b, module, valueMap);
     Location loc = op.getLoc();
     Value ureg = valueMap.lookup(op.getUreg());
     if (!ureg)
@@ -4486,9 +4509,116 @@ static LogicalResult lowerStoreUnalignPost(::tla::StoreUnalignPostOp op, OpBuild
     return emitVstas(b, loc, ureg, *ptrOr);
 }
 
-/// scf.for: rebuild the loop, including loop-carried iter_args, and lower its
-/// body. Init args and the scf.yield operands may be register, index, scalar,
-/// or ``!tla.ureg`` SSA (inserted by tla-unalign-ureg; carried like any other).
+static func::FuncOp getOrCreateCompressionCall(
+    ModuleOp module, Location loc, StringRef name, TypeRange args, TypeRange results)
+{
+    if (auto function = module.lookupSymbol<func::FuncOp>(name))
+        return function;
+    OpBuilder moduleBuilder(module.getBodyRegion());
+    auto function =
+        moduleBuilder.create<func::FuncOp>(loc, name, FunctionType::get(module.getContext(), args, results));
+    annotateAivLibraryCall(function);
+    return function;
+}
+
+static std::string compressionStoreName(Type elementType)
+{
+    std::string name = getSqueezeLibraryCallName(elementType, false);
+    if (name.empty())
+        return {};
+    return "squeeze_store_" + name.substr(std::string("vsqueeze_").size());
+}
+
+static LogicalResult lowerClearSqueezeState(::tla::ClearSqueezeStateOp op, OpBuilder& b, ModuleOp module)
+{
+    auto function = getOrCreateCompressionCall(module, op.getLoc(), "squeeze_stream_clear", {}, {});
+    b.create<func::CallOp>(op.getLoc(), function, ValueRange{});
+    return success();
+}
+
+static LogicalResult lowerCompressedUpdate(
+    ::tla::StoreUnalignUpdateOp op, OpBuilder& b, ModuleOp module, DenseMap<Value, Value>& map)
+{
+    Value source = map.lookup(op.getSource());
+    Value state = map.lookup(op.getUregIn());
+    if (!source || !state)
+        return op.emitOpError("compression source or ureg_in was not lowered");
+    auto pointer = resolveEffectiveUbPtr(op.getDest(), b, op.getLoc(), map);
+    if (failed(pointer))
+        return op.emitOpError("compression store requires a live UB destination");
+    Type element = cast<::tla::VectorSSAType>(op.getSource().getType()).getElementType();
+    std::string name = compressionStoreName(element);
+    if (name.empty())
+        return op.emitOpError("unsupported compression store element type");
+    auto function = getOrCreateCompressionCall(
+        module, op.getLoc(), name, TypeRange{source.getType(), pointer->getType(), state.getType()},
+        TypeRange{state.getType()});
+    auto call = b.create<func::CallOp>(op.getLoc(), function, ValueRange{source, *pointer, state});
+    map[op.getUregOut()] = call.getResult(0);
+    if (!op.getNextPtr().use_empty())
+        mapUpdateNextPtrI64(op.getNextPtr(), b.create<LLVM::PtrToIntOp>(op.getLoc(), b.getI64Type(), *pointer), map);
+    return success();
+}
+
+static LogicalResult lowerCompressedPost(
+    ::tla::StoreUnalignPostOp op, OpBuilder& b, ModuleOp module, DenseMap<Value, Value>& map)
+{
+    Value state = map.lookup(op.getUreg());
+    Value dest = op.getDest();
+    Value pointer;
+    if (isa<::tla::TlaTensorType>(dest.getType())) {
+        auto resolved = resolveEffectiveUbPtr(dest, b, op.getLoc(), map);
+        if (succeeded(resolved))
+            pointer = *resolved;
+    } else if (Value address = lookupOrCloneScalarValue(b, dest, map)) {
+        pointer = intToUbPtr(b, op.getLoc(), address);
+    }
+    if (!state || !pointer)
+        return op.emitOpError("compression stream tail requires a live UB destination and ureg");
+    // VSTAR writes the buffered bytes for every element type.
+    auto function = getOrCreateCompressionCall(
+        module, op.getLoc(), "squeeze_store_post_uint8_t", TypeRange{pointer.getType(), state.getType()}, {});
+    b.create<func::CallOp>(op.getLoc(), function, ValueRange{pointer, state});
+    return success();
+}
+
+static scf::IfOp lowerCompressedForExit(scf::ForOp loop)
+{
+    // A compressed store updates the alignment register in place. With the
+    // test in the loop header, the device compiler can copy that register
+    // only on reentry and leave the tail write using stale state on exit.
+    // Test after the body so both successors receive the current state.
+    Location loc = loop.getLoc();
+    OpBuilder b(loop);
+    auto predicate = loop.getUnsignedCmp() ? arith::CmpIPredicate::ult : arith::CmpIPredicate::slt;
+    Value enters = b.create<arith::CmpIOp>(loc, predicate, loop.getLowerBound(), loop.getUpperBound());
+    auto guard = b.create<scf::IfOp>(loc, loop.getResultTypes(), enters, /*withElseRegion=*/true);
+
+    SmallVector<Value> inits{loop.getLowerBound()};
+    llvm::append_range(inits, loop.getInitArgs());
+    b.setInsertionPointToEnd(guard.thenBlock());
+    auto rotated = b.create<scf::WhileOp>(
+        loc, TypeRange(ValueRange(inits)), inits, /*beforeBuilder=*/nullptr,
+        [](OpBuilder& body, Location loc, ValueRange args) { body.create<scf::YieldOp>(loc, args); });
+    rotated.getBefore().takeBody(loop.getRegion());
+    b.create<scf::YieldOp>(loc, rotated.getResults().drop_front());
+
+    auto yield = cast<scf::YieldOp>(rotated.getBeforeBody()->getTerminator());
+    b.setInsertionPoint(yield);
+    Value next = b.create<arith::AddIOp>(
+        loc, rotated.getBeforeBody()->getArgument(0), loop.getStep(), arith::IntegerOverflowFlags::nsw);
+    Value continues = b.create<arith::CmpIOp>(loc, predicate, next, loop.getUpperBound());
+    SmallVector<Value> results{next};
+    llvm::append_range(results, yield.getOperands());
+    b.create<scf::ConditionOp>(loc, continues, results);
+    yield.erase();
+
+    b.setInsertionPointToEnd(guard.elseBlock());
+    b.create<scf::YieldOp>(loc, loop.getInitArgs());
+    loop.erase();
+    return guard;
+}
+
 static LogicalResult lowerScfFor(
     scf::ForOp forOp, OpBuilder& b, ModuleOp module, DenseMap<Value, Value>& valueMap,
     AutoFullPredicateCache& fullMasks)
@@ -4598,12 +4728,19 @@ static LogicalResult lowerScfFor(
         });
     if (failed(bodyStatus))
         return failure();
+    ValueRange results = newFor.getResults();
+    if (forOp
+            .walk([](::tla::StoreUnalignUpdateOp store) {
+                return store.getCompressed() ? WalkResult::interrupt() : WalkResult::advance();
+            })
+            .wasInterrupted())
+        results = lowerCompressedForExit(newFor).getResults();
     // Only remap for *results*. Do not overwrite valueMap entries for yield
     // operands: those SSA values often exist outside the loop (e.g. ``b`` in
     // ``a = b``), and remapping them to for-results corrupts post-loop users
     // even on zero-trip loops. Stream-tail Post uses for results, covered here.
     for (auto [i, oldRes] : llvm::enumerate(forOp.getResults())) {
-        Value newRes = newFor.getResult(i);
+        Value newRes = results[i];
         if (wasIndex[i] && !oldRes.use_empty())
             newRes = b.create<arith::IndexCastOp>(loc, b.getIndexType(), newRes);
         valueMap[oldRes] = newRes;
@@ -4897,16 +5034,18 @@ static LogicalResult lowerNestedVectorOp(
 
     if (auto preOp = dyn_cast<::tla::LoadUnalignPreOp>(op))
         return lowerLoadUnalignPre(preOp, b, valueMap);
+    if (auto clear = dyn_cast<::tla::ClearSqueezeStateOp>(op))
+        return lowerClearSqueezeState(clear, b, module);
     if (auto emptyOp = dyn_cast<::tla::CreateUregOp>(op))
         return lowerCreateUreg(emptyOp, b, valueMap);
     if (auto postOp = dyn_cast<::tla::StoreUnalignPostOp>(op))
-        return lowerStoreUnalignPost(postOp, b, valueMap);
+        return lowerStoreUnalignPost(postOp, b, module, valueMap);
 
     if (auto loadUnalignUpdateOp = dyn_cast<::tla::LoadUnalignUpdateOp>(op))
         return lowerLoadUnalignUpdate(loadUnalignUpdateOp, b, valueMap);
 
     if (auto storeUnalignUpdateOp = dyn_cast<::tla::StoreUnalignUpdateOp>(op))
-        return lowerStoreUnalignUpdate(storeUnalignUpdateOp, b, valueMap);
+        return lowerStoreUnalignUpdate(storeUnalignUpdateOp, b, module, valueMap);
 
     // Preserve local-memory ordering while outlining a vec.func into its AVE
     // helper. Every operation in the source region must be recreated explicitly;
@@ -5264,192 +5403,113 @@ static Value stripHelperAddressCasts(Value address)
     return address;
 }
 
-/// Chase ``scf.for`` / ``scf.while`` iter_args *and* results back to their init
-/// so ``tensor_desc(inttoptr(scf_i64))`` shares one helper memref *identity*
-/// with the seed tile (parent UB). This is allocation dedup / call-site ABI
-/// only — not the effective address used by ordinary load/store or UPDATE.
-/// Post-loop epilogue tiles carry for/while *results*; without chasing those,
-/// helper-call materialization would take an address defined inside
-/// ``tla.vec.func`` and leave an external use that blocks eraseOp.
+static Value getScfLoopCarrierInit(Value value)
+{
+    if (auto argument = dyn_cast<BlockArgument>(value)) {
+        Operation* parent = argument.getOwner()->getParentOp();
+        unsigned index = argument.getArgNumber();
+        if (auto loop = dyn_cast<scf::ForOp>(parent); loop && index > 0 && index <= loop.getNumRegionIterArgs())
+            return loop.getInitArgs()[index - 1];
+        if (auto loop = dyn_cast<scf::WhileOp>(parent); loop && index < loop.getInits().size())
+            return loop.getInits()[index];
+        return {};
+    }
+    if (auto loop = value.getDefiningOp<scf::ForOp>())
+        return loop.getInitArgs()[cast<OpResult>(value).getResultNumber()];
+    if (auto loop = value.getDefiningOp<scf::WhileOp>()) {
+        unsigned index = cast<OpResult>(value).getResultNumber();
+        if (index < loop.getInits().size())
+            return loop.getInits()[index];
+    }
+    return {};
+}
+
+// Use the loop's initial address for the helper argument. Inside the helper,
+// tensor accesses still use the address carried by the loop.
 static Value chaseScfCarrierInit(Value address)
 {
     address = stripHelperAddressCasts(address);
-    // No fixed step budget: stop at a fixed point or SSA cycle (visited).
     DenseSet<Value> visited;
     while (visited.insert(address).second) {
-        if (auto ba = dyn_cast<BlockArgument>(address)) {
-            Operation* parent = ba.getOwner()->getParentOp();
-            if (auto forOp = dyn_cast<scf::ForOp>(parent)) {
-                // Region args: induction var then iter_args.
-                unsigned argNum = ba.getArgNumber();
-                if (argNum == 0)
-                    break;
-                unsigned iterIdx = argNum - 1;
-                if (iterIdx >= forOp.getNumRegionIterArgs())
-                    break;
-                address = stripHelperAddressCasts(forOp.getInitArgs()[iterIdx]);
-                continue;
-            }
-            if (auto whileOp = dyn_cast<scf::WhileOp>(parent)) {
-                unsigned argNum = ba.getArgNumber();
-                if (argNum >= whileOp.getInits().size())
-                    break;
-                address = stripHelperAddressCasts(whileOp.getInits()[argNum]);
-                continue;
-            }
+        Value init = getScfLoopCarrierInit(address);
+        if (!init)
             break;
-        }
-        // Epilogue after the loop: carrier is an scf.for / scf.while result.
-        if (auto forOp = address.getDefiningOp<scf::ForOp>()) {
-            unsigned idx = cast<OpResult>(address).getResultNumber();
-            if (idx >= forOp.getNumRegionIterArgs())
-                break;
-            address = stripHelperAddressCasts(forOp.getInitArgs()[idx]);
-            continue;
-        }
-        if (auto whileOp = address.getDefiningOp<scf::WhileOp>()) {
-            unsigned idx = cast<OpResult>(address).getResultNumber();
-            if (idx >= whileOp.getInits().size())
-                break;
-            address = stripHelperAddressCasts(whileOp.getInits()[idx]);
-            continue;
-        }
-        break;
+        address = stripHelperAddressCasts(init);
     }
     return address;
 }
 
-// Allocation identity for helper-operand dedup. Must not be used as the
-// effective load/store address (live inttoptr / descriptor coord own that).
-// Chase UPDATE next_ptr producers, tile_view, and ptrtoint/inttoptr / SCF
-// carrier wrappers back to the same seed so chained UPDATE windows share one
-// helper memref. Do not chase ``tla.ptr_add`` or peel lowered i64 addi/muli.
-static Value getVectorHelperStorageIdentity(Value source)
+// Follow the address through views, UPDATE and other pointer wrappers. Leave
+// pointer arithmetic alone because the same SSA address seeds the helper ABI.
+static Value getVectorHelperStorageParent(Value source)
 {
-    // IR-wrapper chase only (not loop trip count). Unbounded except SSA cycles.
+    if (auto desc = source.getDefiningOp<::tla::TensorDescOp>())
+        return desc.getBase();
+    if (auto make = source.getDefiningOp<::tla::MakeTensorOp>())
+        return make.getPtr();
+    if (auto make = source.getDefiningOp<::tla::MakeTensorLikeOp>())
+        return make.getPtr();
+    if (auto tile = source.getDefiningOp<::tla::TileViewOp>())
+        return tile.getSource();
+    if (auto ptr = source.getDefiningOp<::tla::TensorPtrOp>())
+        return ptr.getSrc();
+    if (auto load = source.getDefiningOp<::tla::LoadUpdateOp>())
+        return load.getSource();
+    if (auto load = source.getDefiningOp<::tla::LoadUnalignUpdateOp>())
+        return load.getSource();
+    if (auto store = source.getDefiningOp<::tla::StoreUpdateOp>())
+        return store.getDest();
+    if (auto store = source.getDefiningOp<::tla::StoreUnalignUpdateOp>())
+        return store.getDest();
+    if (auto toInt = source.getDefiningOp<::tla::PtrToIntOp>())
+        return toInt.getPtr();
+    if (auto toInt = source.getDefiningOp<LLVM::PtrToIntOp>())
+        return toInt.getArg();
+    if (auto toPtr = source.getDefiningOp<::tla::IntToPtrOp>())
+        return toPtr.getAddr();
+    if (auto toPtr = source.getDefiningOp<LLVM::IntToPtrOp>())
+        return toPtr.getArg();
+    if (auto extract = source.getDefiningOp<mlir::memref::ExtractAlignedPointerAsIndexOp>())
+        return extract.getSource();
+    if (auto cast = source.getDefiningOp<mlir::memref::CastOp>())
+        return cast.getSource();
+    return {};
+}
+
+// For results selected inside the helper, deduplicate only when every branch
+// leads to the same seed. Results from outside already name a live address.
+static Value getVectorHelperStorageIdentity(Value source, Region& outlinedRegion)
+{
     DenseSet<Value> visited;
-    while (visited.insert(source).second) {
-        source = stripHelperAddressCasts(source);
-        // Tile SSA carried across ``scf.for`` / ``scf.while`` (iter_arg or result)
-        // must share the seed identity with the init window. Otherwise a
-        // once→for→once UnAlign stream registers the post-loop tile as a new
-        // helper operand whose ``inttoptr`` addr is an in-region ``ptrtoint`` of
-        // the live next_ptr — dominate check rejects the outline (silent
-        // legalize failure). Same chase as ``chaseScfCarrierInit`` but on the
-        // tensor/ptr carrier itself, not only the i64 address.
-        if (auto ba = dyn_cast<BlockArgument>(source)) {
-            Operation* parent = ba.getOwner()->getParentOp();
-            if (auto forOp = dyn_cast<scf::ForOp>(parent)) {
-                unsigned argNum = ba.getArgNumber();
-                if (argNum > 0 && argNum - 1 < forOp.getNumRegionIterArgs()) {
-                    source = forOp.getInitArgs()[argNum - 1];
-                    continue;
-                }
-            } else if (auto whileOp = dyn_cast<scf::WhileOp>(parent)) {
-                unsigned argNum = ba.getArgNumber();
-                if (argNum < whileOp.getInits().size()) {
-                    source = whileOp.getInits()[argNum];
-                    continue;
-                }
-            }
-            break;
-        }
-        if (auto forOp = source.getDefiningOp<scf::ForOp>()) {
-            unsigned idx = cast<OpResult>(source).getResultNumber();
-            if (idx < forOp.getNumRegionIterArgs()) {
-                source = forOp.getInitArgs()[idx];
+    SmallVector<Value, 2> pending{source};
+    Value identity;
+    while (!pending.empty()) {
+        Value value = stripHelperAddressCasts(pending.pop_back_val());
+        if (!visited.insert(value).second)
+            continue;
+        if (outlinedRegion.isAncestor(value.getParentRegion())) {
+            if (auto conditional = value.getDefiningOp<scf::IfOp>()) {
+                unsigned index = cast<OpResult>(value).getResultNumber();
+                pending.push_back(conditional.thenYield().getOperand(index));
+                pending.push_back(conditional.elseYield().getOperand(index));
                 continue;
             }
-            break;
-        }
-        if (auto whileOp = source.getDefiningOp<scf::WhileOp>()) {
-            unsigned idx = cast<OpResult>(source).getResultNumber();
-            if (idx < whileOp.getInits().size()) {
-                source = whileOp.getInits()[idx];
+            if (Value init = getScfLoopCarrierInit(value)) {
+                pending.push_back(init);
                 continue;
             }
-            break;
         }
-        if (auto descOp = source.getDefiningOp<::tla::TensorDescOp>()) {
-            source = descOp.getBase();
+        if (Value parent = getVectorHelperStorageParent(value)) {
+            pending.push_back(parent);
             continue;
         }
-        if (auto makeOp = source.getDefiningOp<::tla::MakeTensorOp>()) {
-            source = makeOp.getPtr();
-            continue;
-        }
-        if (auto makeLikeOp = source.getDefiningOp<::tla::MakeTensorLikeOp>()) {
-            source = makeLikeOp.getPtr();
-            continue;
-        }
-        if (auto tileOp = source.getDefiningOp<::tla::TileViewOp>()) {
-            source = tileOp.getSource();
-            continue;
-        }
-        if (auto tensorPtr = source.getDefiningOp<::tla::TensorPtrOp>()) {
-            source = tensorPtr.getSrc();
-            continue;
-        }
-        if (auto loadUpdate = source.getDefiningOp<::tla::LoadUpdateOp>()) {
-            source = loadUpdate.getSource();
-            continue;
-        }
-        if (auto loadUnalignUpdate = source.getDefiningOp<::tla::LoadUnalignUpdateOp>()) {
-            source = loadUnalignUpdate.getSource();
-            continue;
-        }
-        if (auto storeUpdate = source.getDefiningOp<::tla::StoreUpdateOp>()) {
-            source = storeUpdate.getDest();
-            continue;
-        }
-        if (auto storeUnalignUpdate = source.getDefiningOp<::tla::StoreUnalignUpdateOp>()) {
-            source = storeUnalignUpdate.getDest();
-            continue;
-        }
-        if (auto ptrToInt = source.getDefiningOp<::tla::PtrToIntOp>()) {
-            source = ptrToInt.getPtr();
-            continue;
-        }
-        if (auto llvmPtrToInt = source.getDefiningOp<LLVM::PtrToIntOp>()) {
-            source = llvmPtrToInt.getArg();
-            continue;
-        }
-        if (auto intToPtr = source.getDefiningOp<::tla::IntToPtrOp>()) {
-            // Address SSA is i64; chase SCF carriers then unwrap ptrtoint seeds.
-            Value addr = chaseScfCarrierInit(intToPtr.getAddr());
-            if (auto fromPtr = addr.getDefiningOp<::tla::PtrToIntOp>()) {
-                source = fromPtr.getPtr();
-                continue;
-            }
-            if (auto fromPtr = addr.getDefiningOp<LLVM::PtrToIntOp>()) {
-                source = fromPtr.getArg();
-                continue;
-            }
-            return addr;
-        }
-        if (auto llvmIntToPtr = source.getDefiningOp<LLVM::IntToPtrOp>()) {
-            Value addr = chaseScfCarrierInit(llvmIntToPtr.getArg());
-            if (auto fromPtr = addr.getDefiningOp<::tla::PtrToIntOp>()) {
-                source = fromPtr.getPtr();
-                continue;
-            }
-            if (auto fromPtr = addr.getDefiningOp<LLVM::PtrToIntOp>()) {
-                source = fromPtr.getArg();
-                continue;
-            }
-            return addr;
-        }
-        if (auto castOp = source.getDefiningOp<mlir::memref::CastOp>()) {
-            source = castOp.getSource();
-            continue;
-        }
-        if (auto pointerCast = source.getDefiningOp<hivm::PointerCastOp>())
-            return stripHelperAddressCasts(pointerCast.getSingleAddr());
-        if (source.getDefiningOp<::tla::AllocPtrOp>())
+        if (auto pointerCast = value.getDefiningOp<hivm::PointerCastOp>())
+            value = stripHelperAddressCasts(pointerCast.getSingleAddr());
+        if (identity && identity != value)
             return source;
-        break;
+        identity = value;
     }
-    return source;
+    return identity ? identity : source;
 }
 
 static FailureOr<MemRefType> getVectorHelperOperandType(Value source)
@@ -5462,12 +5522,13 @@ static FailureOr<MemRefType> getVectorHelperOperandType(Value source)
 // Add `source` as a helper operand unless another operand already represents
 // the same allocation with the same helper memref type. Record every source's
 // representative so scalar views can reuse a tensor operand's helper argument.
-static void addVectorHelperOperand(Value source, SmallVectorImpl<Value>& operands, DenseMap<Value, Value>& aliases)
+static void addVectorHelperOperand(
+    Value source, Region& outlinedRegion, SmallVectorImpl<Value>& operands, DenseMap<Value, Value>& aliases)
 {
-    Value identity = getVectorHelperStorageIdentity(source);
+    Value identity = getVectorHelperStorageIdentity(source, outlinedRegion);
     FailureOr<MemRefType> sourceType = getVectorHelperOperandType(source);
     for (Value operand : operands) {
-        if (identity != getVectorHelperStorageIdentity(operand))
+        if (identity != getVectorHelperStorageIdentity(operand, outlinedRegion))
             continue;
         FailureOr<MemRefType> operandType = getVectorHelperOperandType(operand);
         // Same allocation seed: reuse the representative even when ``source`` is
@@ -5512,51 +5573,65 @@ static LogicalResult collectVectorHelperOperands(
     Block* block, Region& outlinedRegion, Operation* callSite, DominanceInfo& dominanceInfo,
     SmallVectorImpl<Value>& operands, DenseMap<Value, Value>& aliases)
 {
+    auto collectWindow = [&](Value window) {
+        if (auto desc = window.getDefiningOp<::tla::TensorDescOp>()) {
+            Value base = desc.getBase();
+            if (auto ptr = base.getDefiningOp<::tla::IntToPtrOp>()) {
+                // Local addresses are computed in the helper. Capture a seed
+                // only if it is available at the call site.
+                if (outlinedRegion.isAncestor(ptr.getAddr().getParentRegion()) &&
+                    !dominanceInfo.dominates(getVectorHelperStorageIdentity(window, outlinedRegion), callSite))
+                    return;
+            }
+        }
+        addVectorHelperOperand(window, outlinedRegion, operands, aliases);
+    };
     for (Operation& op : block->getOperations()) {
         if (auto loadOp = dyn_cast<::tla::LoadOp>(op)) {
-            addVectorHelperOperand(loadOp.getSource(), operands, aliases);
+            collectWindow(loadOp.getSource());
             continue;
         }
         if (auto loadUpdateOp = dyn_cast<::tla::LoadUpdateOp>(op)) {
-            addVectorHelperOperand(loadUpdateOp.getSource(), operands, aliases);
+            collectWindow(loadUpdateOp.getSource());
             continue;
         }
         if (auto loadUnalignUpdateOp = dyn_cast<::tla::LoadUnalignUpdateOp>(op)) {
-            addVectorHelperOperand(loadUnalignUpdateOp.getSource(), operands, aliases);
+            collectWindow(loadUnalignUpdateOp.getSource());
             continue;
         }
         if (auto preOp = dyn_cast<::tla::LoadUnalignPreOp>(op)) {
-            addVectorHelperOperand(preOp.getSource(), operands, aliases);
+            collectWindow(preOp.getSource());
             continue;
         }
         if (auto storeOp = dyn_cast<::tla::StoreOp>(op)) {
-            addVectorHelperOperand(storeOp.getDest(), operands, aliases);
+            collectWindow(storeOp.getDest());
             continue;
         }
         if (auto storeUpdateOp = dyn_cast<::tla::StoreUpdateOp>(op)) {
-            addVectorHelperOperand(storeUpdateOp.getDest(), operands, aliases);
+            collectWindow(storeUpdateOp.getDest());
             continue;
         }
         if (auto storeUnalignUpdateOp = dyn_cast<::tla::StoreUnalignUpdateOp>(op)) {
-            addVectorHelperOperand(storeUnalignUpdateOp.getDest(), operands, aliases);
+            collectWindow(storeUnalignUpdateOp.getDest());
             continue;
         }
         if (auto postOp = dyn_cast<::tla::StoreUnalignPostOp>(op)) {
-            addVectorHelperOperand(postOp.getDest(), operands, aliases);
+            if (isa<::tla::TlaTensorType>(postOp.getDest().getType()))
+                collectWindow(postOp.getDest());
             continue;
         }
         if (auto printOp = dyn_cast<::tla::PrintTensorOp>(op)) {
-            addVectorHelperOperand(printOp.getValue(), operands, aliases);
+            collectWindow(printOp.getValue());
             continue;
         }
         if (auto gatherOp = dyn_cast<::tla::GatherOp>(op)) {
             // Only UB-tensor gather needs a helper memref argument.
             if (isa<::tla::TlaTensorType>(gatherOp.getX().getType()))
-                addVectorHelperOperand(gatherOp.getX(), operands, aliases);
+                collectWindow(gatherOp.getX());
             continue;
         }
         if (auto scatterOp = dyn_cast<::tla::ScatterOp>(op)) {
-            addVectorHelperOperand(scatterOp.getDst(), operands, aliases);
+            collectWindow(scatterOp.getDst());
             continue;
         }
         // A memref-backed tensor.ptr in an extern argument reads the aligned address.
@@ -5564,7 +5639,7 @@ static LogicalResult collectVectorHelperOperands(
             auto source = getScalarAccessHelperMemref(addr.getSource(), outlinedRegion, callSite, dominanceInfo);
             if (failed(source))
                 return failure();
-            addVectorHelperOperand(*source, operands, aliases);
+            addVectorHelperOperand(*source, outlinedRegion, operands, aliases);
             continue;
         }
         if (auto memLoad = dyn_cast<mlir::memref::LoadOp>(op)) {
@@ -5572,7 +5647,7 @@ static LogicalResult collectVectorHelperOperands(
                 getScalarAccessHelperMemref(memLoad.getMemRef(), outlinedRegion, callSite, dominanceInfo);
             if (failed(source))
                 return failure();
-            addVectorHelperOperand(*source, operands, aliases);
+            addVectorHelperOperand(*source, outlinedRegion, operands, aliases);
             continue;
         }
         if (auto memStore = dyn_cast<mlir::memref::StoreOp>(op)) {
@@ -5580,7 +5655,7 @@ static LogicalResult collectVectorHelperOperands(
                 getScalarAccessHelperMemref(memStore.getMemRef(), outlinedRegion, callSite, dominanceInfo);
             if (failed(source))
                 return failure();
-            addVectorHelperOperand(*source, operands, aliases);
+            addVectorHelperOperand(*source, outlinedRegion, operands, aliases);
             continue;
         }
         for (Region& region : op.getRegions())
@@ -5721,9 +5796,10 @@ static FailureOr<func::FuncOp> buildHelperFunc(
     // in lowerNestedVectorOp can map it.
     DenseMap<Value, Value> baseToArg;
     DenseMap<Value, Value> identityToArg;
+    Region& outlinedRegion = vecFuncOp.getBody();
     for (Value operand : helperOperands) {
         if (Value arg = valueMap.lookup(operand)) {
-            identityToArg[getVectorHelperStorageIdentity(operand)] = arg;
+            identityToArg[getVectorHelperStorageIdentity(operand, outlinedRegion)] = arg;
             if (auto d = operand.getDefiningOp<::tla::TensorDescOp>())
                 baseToArg[d.getBase()] = arg;
         }
@@ -5736,7 +5812,8 @@ static FailureOr<func::FuncOp> buildHelperFunc(
             return;
         }
         // Distinct ``inttoptr(scf_i64)`` ops share chased seed identity.
-        if (auto it = identityToArg.find(getVectorHelperStorageIdentity(desc.getResult())); it != identityToArg.end())
+        if (auto it = identityToArg.find(getVectorHelperStorageIdentity(desc.getResult(), outlinedRegion));
+            it != identityToArg.end())
             valueMap[desc.getResult()] = it->second;
     });
     // A descriptor produced *outside* the region and used inside it needs the
@@ -5820,6 +5897,7 @@ public:
         SmallVector<::tla::StoreUpdateOp, 2> storeUpdates;
         SmallVector<Value, 4> unalignLoads;
         int unalignStores = 0;
+        bool hasCompressedStore = false;
         bool hasDebugPrint = false;
         bool hasExtern = false;
         vecFuncOp->walk([&](Operation* op) {
@@ -5846,8 +5924,9 @@ public:
                 stores.push_back(store);
             } else if (auto storeUpdate = dyn_cast<::tla::StoreUpdateOp>(op)) {
                 storeUpdates.push_back(storeUpdate);
-            } else if (isa<::tla::StoreUnalignUpdateOp>(op)) {
+            } else if (auto store = dyn_cast<::tla::StoreUnalignUpdateOp>(op)) {
                 ++unalignStores;
+                hasCompressedStore |= store.getCompressed();
             } else if (isVectorComputeOp(op)) {
                 computeOps.push_back(op);
             }
@@ -6117,7 +6196,7 @@ public:
             invalidScalarAccessBase = true;
             return failure();
         }
-        if (helperOperands.empty() && !hasDebugPrint && !hasExtern)
+        if (helperOperands.empty() && !hasDebugPrint && !hasExtern && !hasCompressedStore)
             return rewriter.notifyMatchFailure(vecFuncOp, "expected vector region tensor operands");
         // Scalars captured from outside the region (e.g. a sub_block_idx computed at
         // the top of the kernel) are passed as trailing scalar arguments.
@@ -6143,7 +6222,7 @@ public:
             // Prefer storage-identity seed (AllocPtr / outside ptr_add): SCF +
             // UPDATE next_ptr chase. Fall back to the inttoptr addr only when
             // identity itself is still an address SSA.
-            Value identity = getVectorHelperStorageIdentity(tensor);
+            Value identity = getVectorHelperStorageIdentity(tensor, vecFuncOp.getBody());
             Value callAddr = identity;
             if (!dominanceInfo.dominates(callAddr, vecFuncOp.getOperation())) {
                 callAddr = stripHelperAddressCasts(chaseScfCarrierInit(itp.getAddr()));
@@ -6152,11 +6231,11 @@ public:
                 while (peelVisited.insert(callAddr).second &&
                        !dominanceInfo.dominates(callAddr, vecFuncOp.getOperation())) {
                     if (auto p2i = callAddr.getDefiningOp<::tla::PtrToIntOp>()) {
-                        callAddr = getVectorHelperStorageIdentity(p2i.getPtr());
+                        callAddr = getVectorHelperStorageIdentity(p2i.getPtr(), vecFuncOp.getBody());
                         continue;
                     }
                     if (auto p2i = callAddr.getDefiningOp<LLVM::PtrToIntOp>()) {
-                        callAddr = getVectorHelperStorageIdentity(p2i.getArg());
+                        callAddr = getVectorHelperStorageIdentity(p2i.getArg(), vecFuncOp.getBody());
                         continue;
                     }
                     break;
@@ -6208,11 +6287,13 @@ public:
                 // materializeTensorDescParameteri / resolveEffectiveUbPtr.
                 if (auto itp = ptr.getDefiningOp<::tla::IntToPtrOp>()) {
                     Value liveAddr = stripHelperAddressCasts(itp.getAddr());
-                    Value seedAddr = stripHelperAddressCasts(chaseScfCarrierInit(liveAddr));
+                    Value seedAddr = liveAddr;
+                    if (!dominanceInfo.dominates(liveAddr, vecFuncOp.getOperation()))
+                        seedAddr = chaseScfCarrierInit(liveAddr);
                     // Once→for→once UnAlign: live addr may be in-region ptrtoint of
                     // next_ptr; peel to a dominating seed (same as outline check).
                     if (!dominanceInfo.dominates(seedAddr, vecFuncOp.getOperation())) {
-                        Value identity = getVectorHelperStorageIdentity(tensor);
+                        Value identity = getVectorHelperStorageIdentity(tensor, vecFuncOp.getBody());
                         if (dominanceInfo.dominates(identity, vecFuncOp.getOperation())) {
                             OpBuilder::InsertionGuard guard(rewriter);
                             rewriter.setInsertionPoint(vecFuncOp);
@@ -6224,6 +6305,12 @@ public:
                             else if (isa<LLVM::LLVMPointerType>(identity.getType()))
                                 seedAddr = rewriter.create<LLVM::PtrToIntOp>(
                                     vecFuncOp.getLoc(), rewriter.getI64Type(), identity);
+                            else if (isa<MemRefType>(identity.getType())) {
+                                Location loc = vecFuncOp.getLoc();
+                                Value address =
+                                    rewriter.create<mlir::memref::ExtractAlignedPointerAsIndexOp>(loc, identity);
+                                seedAddr = ::tla::castValueToI64(rewriter, loc, address);
+                            }
                         }
                     }
                     if (seedAddr != liveAddr) {

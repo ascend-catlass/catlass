@@ -3,6 +3,7 @@
 
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/Builders.h"
+#include "mlir/IR/Dominance.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
@@ -112,6 +113,126 @@ static Value windowTensorOf(Operation* updateOp, bool isLoad)
         return store.getDest();
     }
     return Value();
+}
+
+// Find the same window through an unchanged loop argument or result.
+static Value compressionBase(Value window)
+{
+    while (true) {
+        if (auto argument = dyn_cast<BlockArgument>(window)) {
+            auto loop = dyn_cast<scf::ForOp>(argument.getOwner()->getParentOp());
+            if (loop && argument.getArgNumber() > 0) {
+                unsigned index = argument.getArgNumber() - 1;
+                if (loop.getBody()->getTerminator()->getOperand(index) == window) {
+                    window = loop.getInitArgs()[index];
+                    continue;
+                }
+            }
+        }
+        if (auto loop = window.getDefiningOp<scf::ForOp>()) {
+            unsigned index = cast<OpResult>(window).getResultNumber();
+            if (loop.getBody()->getTerminator()->getOperand(index) == loop.getRegionIterArgs()[index]) {
+                window = loop.getInitArgs()[index];
+                continue;
+            }
+        }
+        return window;
+    }
+}
+
+static bool containsCompressedUpdate(Operation* operation)
+{
+    return operation
+        ->walk([](::tla::StoreUnalignUpdateOp store) {
+            return store.getCompressed() ? WalkResult::interrupt() : WalkResult::advance();
+        })
+        .wasInterrupted();
+}
+
+// The first value is the alignment state. A second value carries the byte
+// address of the most recent append when its base can vary.
+using CompressionState = SmallVector<Value, 2>;
+
+static FailureOr<CompressionState> carryCompressionUreg(Block& block, CompressionState state)
+{
+    for (Operation& operation : llvm::make_early_inc_range(block)) {
+        if (auto store = dyn_cast<::tla::StoreUnalignUpdateOp>(&operation)) {
+            if (store.getCompressed()) {
+                store.getUregInMutable().assign(state.front());
+                state.front() = store.getUregOut();
+                if (state.size() == 2) {
+                    OpBuilder builder(&operation);
+                    builder.setInsertionPointAfter(&operation);
+                    state.back() =
+                        builder.create<::tla::PtrToIntOp>(store.getLoc(), builder.getI64Type(), store.getNextPtr());
+                }
+            }
+            continue;
+        }
+        if (!containsCompressedUpdate(&operation))
+            continue;
+        OpBuilder builder(&operation);
+        if (auto loop = dyn_cast<scf::ForOp>(&operation)) {
+            auto inits = llvm::to_vector(loop.getInitArgs());
+            llvm::append_range(inits, state);
+            auto replacement = builder.create<scf::ForOp>(
+                loop.getLoc(), loop.getLowerBound(), loop.getUpperBound(), loop.getStep(), inits);
+            Block& body = *replacement.getBody();
+            if (!body.empty())
+                body.getTerminator()->erase();
+            loop.getInductionVar().replaceAllUsesWith(replacement.getInductionVar());
+            auto args = replacement.getRegionIterArgs();
+            for (auto [oldArg, newArg] : llvm::zip_equal(loop.getRegionIterArgs(), args.drop_back(state.size())))
+                oldArg.replaceAllUsesWith(newArg);
+            body.getOperations().splice(body.end(), loop.getBody()->getOperations());
+            auto next = carryCompressionUreg(body, CompressionState(args.take_back(state.size())));
+            if (failed(next))
+                return failure();
+            auto yield = cast<scf::YieldOp>(body.getTerminator());
+            auto values = llvm::to_vector(yield.getOperands());
+            llvm::append_range(values, *next);
+            OpBuilder(yield).create<scf::YieldOp>(yield.getLoc(), values);
+            yield.erase();
+            auto results = replacement.getResults();
+            loop.replaceAllUsesWith(results.drop_back(state.size()));
+            state = CompressionState(results.take_back(state.size()));
+            loop.erase();
+            continue;
+        }
+        if (auto conditional = dyn_cast<scf::IfOp>(&operation)) {
+            auto types = llvm::to_vector(conditional.getResultTypes());
+            llvm::append_range(types, ValueRange(state).getTypes());
+            auto replacement = builder.create<scf::IfOp>(
+                conditional.getLoc(), types, conditional.getCondition(), /*withElseRegion=*/true);
+            for (unsigned branch = 0; branch != 2; ++branch) {
+                Block* before = branch == 0 ? conditional.thenBlock() :
+                                              (conditional.getElseRegion().empty() ? nullptr : conditional.elseBlock());
+                Block* after = branch == 0 ? replacement.thenBlock() : replacement.elseBlock();
+                if (!after->empty())
+                    after->getTerminator()->erase();
+                if (before) {
+                    after->getOperations().splice(after->end(), before->getOperations());
+                    auto next = carryCompressionUreg(*after, state);
+                    if (failed(next))
+                        return failure();
+                    auto yield = cast<scf::YieldOp>(after->getTerminator());
+                    auto values = llvm::to_vector(yield.getOperands());
+                    llvm::append_range(values, *next);
+                    OpBuilder(yield).create<scf::YieldOp>(yield.getLoc(), values);
+                    yield.erase();
+                } else {
+                    OpBuilder::atBlockEnd(after).create<scf::YieldOp>(conditional.getLoc(), state);
+                }
+            }
+            auto results = replacement.getResults();
+            conditional.replaceAllUsesWith(results.drop_back(state.size()));
+            state = CompressionState(results.take_back(state.size()));
+            conditional.erase();
+            continue;
+        }
+        return operation.emitError("compression UPDATE supports scf.for and scf.if control flow"), failure();
+    }
+    return state;
 }
 
 /// Peel trivial casts, then look up the ureg for ``tensor`` on one direction.
@@ -423,7 +544,7 @@ static DenseSet<Operation*> ownSameDirUpdateChain(scf::ForOp forOp, Operation* h
                     continue;
             } else {
                 auto store = dyn_cast<::tla::StoreUnalignUpdateOp>(&op);
-                if (!store || store.getDest() != next)
+                if (!store || store.getCompressed() || store.getDest() != next)
                     continue;
             }
             nextUpdate = &op;
@@ -434,6 +555,63 @@ static DenseSet<Operation*> ownSameDirUpdateChain(scf::ForOp forOp, Operation* h
         cur = nextUpdate;
     }
     return chain;
+}
+
+static LogicalResult prepareCompressedUpdates(::tla::VecFuncOp vector)
+{
+    SmallVector<::tla::StoreUnalignUpdateOp> stores;
+    vector.walk([&](::tla::StoreUnalignUpdateOp store) {
+        if (store.getCompressed())
+            stores.push_back(store);
+    });
+    if (stores.empty())
+        return success();
+
+    Block* block = &vector.getBody().front();
+    // A final store in this block always supplies the tail address. For
+    // nested stores, a fixed window can also be used directly.
+    Value tailDest;
+    if (stores.back()->getBlock() == block) {
+        tailDest = stores.back().getDest();
+    } else {
+        Value base = compressionBase(stores.front().getDest());
+        DominanceInfo dominance(vector->getParentOfType<func::FuncOp>());
+        if (dominance.dominates(base, &block->back()) && llvm::all_of(llvm::drop_begin(stores), [&](auto store) {
+                return compressionBase(store.getDest()) == base;
+            }))
+            tailDest = base;
+    }
+
+    OpBuilder builder = OpBuilder::atBlockBegin(block);
+    builder.create<::tla::ClearSqueezeStateOp>(vector.getLoc());
+    Type uregType = ::tla::UregType::get(vector.getContext());
+    CompressionState initial{builder.create<::tla::CreateUregOp>(vector.getLoc(), uregType).getResult()};
+    Value noAppend;
+    if (!tailDest) {
+        // UB byte addresses are nonnegative. The sentinel covers paths where
+        // no store has executed and there is no tail to write.
+        noAppend = builder.create<arith::ConstantIntOp>(vector.getLoc(), -1, 64);
+        initial.push_back(noAppend);
+        tailDest = noAppend;
+    }
+    // Keep the destination attached to an operand while loop and branch
+    // results are replaced. Place the post right after the last append.
+    builder.setInsertionPoint(&block->back());
+    auto post = builder.create<::tla::StoreUnalignPostOp>(vector.getLoc(), initial.front(), tailDest, true);
+    auto final = carryCompressionUreg(*block, initial);
+    if (failed(final))
+        return failure();
+    post.getUregMutable().assign(final->front());
+    post->moveAfter((noAppend ? final->back() : final->front()).getDefiningOp());
+    if (noAppend) {
+        post.getDestMutable().assign(final->back());
+        builder.setInsertionPoint(post);
+        Value hasAppend =
+            builder.create<arith::CmpIOp>(vector.getLoc(), arith::CmpIPredicate::ne, final->back(), noAppend);
+        auto flush = builder.create<scf::IfOp>(vector.getLoc(), hasAppend, /*withElseRegion=*/false);
+        post->moveBefore(flush.thenBlock()->getTerminator());
+    }
+    return success();
 }
 
 /// Store for-carry puts Post after the for. Skip when the body has any other
@@ -498,7 +676,7 @@ static SmallVector<Operation*, 2> findUpdatesOnWindow(scf::ForOp forOp, Value wi
                 continue;
         } else {
             auto store = dyn_cast<::tla::StoreUnalignUpdateOp>(&op);
-            if (!store || store.getDest() != window)
+            if (!store || store.getCompressed() || store.getDest() != window)
                 continue;
         }
         found.push_back(&op);
@@ -674,6 +852,8 @@ static void fillUregInBlock(Block& block, UregMaps& uregMaps)
             windowTensor = load.getSource();
             isLoad = true;
         } else if (auto store = dyn_cast<::tla::StoreUnalignUpdateOp>(&op)) {
+            if (store.getCompressed())
+                continue;
             if (store.getUregIn()) {
                 if (Value next = nextWindowTensorFromUpdate(&op))
                     uregMaps.store[next] = store.getUregOut();
@@ -971,6 +1151,8 @@ static LogicalResult insertStoreUregPosts(func::FuncOp funcOp)
     // previous Post instead (尾插, program/walk order).
     DenseMap<Operation*, Operation*> lastPostAfterAnchor;
     for (::tla::StoreUnalignUpdateOp store : stores) {
+        if (store.getCompressed())
+            continue;
         Value tipUreg, tipWindowTensor;
         Operation* insertAfter = nullptr;
         switch (resolveStoreUregTip(store, tipUreg, tipWindowTensor, insertAfter)) {
@@ -998,6 +1180,13 @@ static LogicalResult insertStoreUregPosts(func::FuncOp funcOp)
 
 static LogicalResult runOnFunction(func::FuncOp funcOp)
 {
+    LogicalResult compressionStatus = success();
+    funcOp.walk([&](::tla::VecFuncOp vector) {
+        if (failed(prepareCompressedUpdates(vector)))
+            compressionStatus = failure();
+    });
+    if (failed(compressionStatus))
+        return failure();
     UregMaps uregMaps;
     bool changed = true;
     while (changed) {

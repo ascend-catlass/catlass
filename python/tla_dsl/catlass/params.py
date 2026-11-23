@@ -113,6 +113,7 @@ class CopyParams:
 class PostMode:
     POST_MODE_NORMAL = "norm"
     POST_MODE_UPDATE = "update"
+    POST_MODE_UPDATE_NBYTES = "update_nbytes"
 
 
 class LoadDist:
@@ -205,6 +206,14 @@ class UnalignStoreParams(StoreParams):
     ``(0, VL]`` (element count for the dtype); overlapping / dirty writes are
     the caller's responsibility.
     Returns the next-window tile (from the HW post-update pointer).
+
+    Before each append, call ``squeeze(..., record_nbytes=True)`` so hardware
+    calculates and records the byte count. Call ``store`` with
+    ``POST_MODE_UPDATE_NBYTES`` before that count is overwritten. Leave
+    ``post_update_stride`` at ``0`` and allocate space for all appended data.
+    Compressed ``store`` calls return the supplied window and share the write
+    offset and pending tail. The compiler writes the tail using the most
+    recently used base address.
     """
 
     post_mode: str = PostMode.POST_MODE_NORMAL

@@ -455,9 +455,11 @@ tla.Tensor.store(value: VectorSSA | MaskSSA | tuple[VectorSSA, VectorSSA], param
     - `post_update_stride`（`Any`）：`post_mode=POST_MODE_UPDATE` 时的元素步长；
       `0` 表示按 `tile_extent`（`origin_shape`）推进。默认 `0`。
   - `UnalignStoreParams`：
-    - `post_mode`（`str`）：`POST_MODE_NORMAL`（默认）或 `POST_MODE_UPDATE`。
-    - `post_update_stride`（`Any`）：`0`（默认）按 `origin_shape` 推进；
-      有效步长须在 `(0, VL]`。默认 `0`。
+    - `post_mode`（`str`）：`POST_MODE_NORMAL`（默认）、`POST_MODE_UPDATE` 或
+      `POST_MODE_UPDATE_NBYTES`。
+    - `post_update_stride`（`Any`）：使用 `POST_MODE_UPDATE` 时，`0` 表示按
+      `origin_shape` 推进，有效步长须在 `(0, VL]`。使用 `POST_MODE_UPDATE_NBYTES`
+      时，须为 `0`。默认 `0`。
   - `BlockStoreParams`：
     - `block_stride`（`int`）：块头间隔，单位 32B DataBlock。默认 `0`。
     - `post_mode`（`str`）：`POST_MODE_NORMAL`（默认）或 `POST_MODE_UPDATE`。
@@ -476,6 +478,9 @@ tla.Tensor.store(value: VectorSSA | MaskSSA | tuple[VectorSSA, VectorSSA], param
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
 - 须在 `tla.vec.func(mode="simd")` 内调用；目标 tile 须位于 UB。
+
+**`POST_MODE_NORMAL` 模式**
+
 - `DIST_PACK4_B32` 支持源和目标均为相同的 4 字节元素类型，也支持 1、2 或 4 字节
   源元素搭配 1 字节目标元素。该模式向按 32 字节对齐的地址最多写入 64 字节。
   处理 FP32→FP8 结果时，写回前使用 `RegSlot.ZERO` 将转换结果放入寄存器字节位置
@@ -490,15 +495,6 @@ tla.Tensor.store(value: VectorSSA | MaskSSA | tuple[VectorSSA, VectorSSA], param
   （b8 → 1 字节，b16 → 2 字节，b32 → 4 字节）；传入谓词 `mask` 会报错。
 - `UnalignStoreParams` 在 NORMAL 模式下按目标有效长度写回，最多写入一个向量的元素。
   在 UPDATE 模式下，有效步长同时决定写回元素数和地址推进量。
-- `POST_MODE_UPDATE` 要求 rank-1 连续 tile、`DIST_NORM`，且源和目标元素类型匹配，
-  位宽为 b8/b16/b32/b64。返回下一个窗口。在
-  `tla.vec.func` 内须用 `tla.range` 赋回。与 UPDATE `load` 相同：调用前须为
-  原点窗（`coord=0`）。`NormalStoreParams`：默认 `post_update_stride=0` 按
-  `tile_extent`（`origin_shape`）推进；显式 stride 与填充解耦。
-  `UnalignStoreParams`：默认 `0`→`tile_extent`；有效步长须在 `(0, VL]`；干净
-  for 上 Pre/Post 在环外。
-
-调用示例：
 
 ```python
 with tla.vec.func(mode="simd"):
@@ -514,6 +510,70 @@ with tla.vec.func(mode="simd"):
         reg_slot=tla.params.RegSlot.ZERO))
     fp8_ub.store(fp8_reg, tla.params.NormalStoreParams(
         store_dist=tla.params.StoreDist.DIST_PACK4_B32))
+```
+
+- `POST_MODE_UPDATE` 要求 rank-1 连续 tile、`DIST_NORM`，且源和目标元素类型匹配，
+  位宽为 b8/b16/b32/b64。返回下一个窗口。在
+  `tla.vec.func` 内须用 `tla.range` 赋回。与 UPDATE `load` 相同：调用前须为
+  原点窗（`coord=0`）。`NormalStoreParams`：默认 `post_update_stride=0` 按
+  `tile_extent`（`origin_shape`）推进；显式 stride 与填充解耦。
+  `UnalignStoreParams`：默认 `0`→`tile_extent`；有效步长须在 `(0, VL]`；干净
+  for 上 Pre/Post 在环外。
+
+**`POST_MODE_UPDATE_NBYTES` 模式**
+
+该模式按 `squeeze` 记录的字节数追加数据。
+每次追加时，调用者先在同一 SIMD 区域调用 `squeeze(..., record_nbytes=True)`，
+由硬件计算并记录字节数。在计数被覆盖前，使用
+`UnalignStoreParams(post_mode=POST_MODE_UPDATE_NBYTES)` 调用 `store`。
+`store` 从源向量开头取记录的字节数，写入地址为传入窗口的基址加当前写入偏移。
+写入后推进偏移，并返回传入的窗口。
+
+**使用限制**
+
+- 目标须为 `coord=0` 的一维连续 UB 窗口，元素类型须与源向量一致。支持
+  `Float16`、`Float32`、`Int8`、`UInt8`、`Int16`、`UInt16`、`Int32` 和 `UInt32`。
+  `post_update_stride` 须为编译期常量 `0`，并省略 `store` 的 `mask`。
+- 同一 SIMD 区域内的追加共享写入偏移和待写尾部。尾部写回使用最后一次以
+  `POST_MODE_UPDATE_NBYTES` 模式执行 `store` 时的目标窗口基址。
+- 为追加和尾部写回预留足够空间。从首次追加到退出 SIMD 区域并完成同步，其他读写须避开压缩输出范围。
+- 从初始化到尾部写回，外部调用须保留写入偏移和待写尾部。`squeeze` 记录的字节数须保留到对应的
+  `store` 使用时。
+
+**`POST_MODE_UPDATE_NBYTES` 模式使用示例**
+
+下面的循环把 `src_ub[0:3]` 中的 `[7, 9, 12]` 和 `src_ub[128:130]` 中的 `[20, 24]`
+依次追加到 `dst_ub`。示例中 `dst_ub` 的起始地址按 32 字节对齐。
+
+1. **初始化**。进入 SIMD 区域时，编译器安排硬件把写入偏移置为 0，并清空暂存尾部数据的空间。
+2. **压缩并追加**。第一轮，`squeeze(..., record_nbytes=True)` 压紧 3 个 Int16 元素，
+   硬件记录 6 字节。调用 `store` 后，硬件暂存这 6 字节，并将写入偏移推进到 6 字节。
+   第二轮，硬件为保留的 2 个元素记录 4 字节，`store` 把这 4 字节接在前 6 字节后面。
+   两轮合计 10 字节，凑不满一个 32 字节块，因此都留在硬件中，成为待写回的尾部。
+   接口用法见 [`tla.squeeze` 说明](simd/compress.md#tlasqueeze)。
+3. **写回尾部**。循环结束后，编译器安排硬件把暂存的 10 字节写入 `dst_ub[0:5]`。
+   退出 SIMD 区域并完成同步后，`dst_ub` 的前 5 个元素为 `[7, 9, 12, 20, 24]`。
+
+调用示例：
+
+```python
+# src_ub 和 dst_ub 是两块独立的一维连续 Int16 UB 窗口，coord 均为 0。
+# src_ub 有 256 个元素，dst_ub 有 128 个元素。
+with tla.vec.func(mode="simd"):
+    # 每次追加都使用硬件记录的字节数。
+    update = tla.params.UnalignStoreParams(
+        post_mode=tla.params.PostMode.POST_MODE_UPDATE_NBYTES,
+    )
+    block = tla.make_shape(128)
+    for i in tla.range(2):
+        # 第一轮选取源下标 0～127，第二轮选取 128～255。
+        src_tile = tla.tile_view(src_ub, block, tla.make_coord(i))
+        # 第一轮保留当前窗口的前 3 个元素，第二轮保留前 2 个元素。
+        keep, _ = tla.update_mask(3 - i, dtype=tla.Int16)
+        # 压紧保留的元素。Int16 每个元素占 2 字节，硬件依次记录 6 字节和 4 字节。
+        packed = tla.squeeze(src_tile.load(), keep, record_nbytes=True)
+        # 每轮都传入 dst_ub，由硬件推进写入偏移。
+        dst_ub.store(packed, update)
 ```
 
 ---

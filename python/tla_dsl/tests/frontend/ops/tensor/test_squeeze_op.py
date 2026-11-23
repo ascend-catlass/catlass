@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import pytest
+
+from catlass.execution_lowering import TlaLoweringError
 from catlass.tla.runtime import make_fake_tensor
 
 
@@ -106,3 +109,150 @@ def test_squeeze_op_integer_dtypes_emit_mlir() -> None:
         assert vector_ty in mlir
         squeeze_lines = [line for line in mlir.splitlines() if "tla.squeeze" in line]
         assert len(squeeze_lines) == 1
+
+
+def _integer_kernel(dtype, record, *, append=False, stride=0, extra_mask=False):
+    @tla.kernel
+    def kernel(src: tla.Tensor, dst: tla.Tensor):
+        with tla.vector():
+            with tla.vec.func(mode="simd"):
+                keep = tla.create_mask(pattern=tla.mask.VL8, dtype=dtype)
+                packed = tla.squeeze(src.load(), keep, record_nbytes=record)
+                if tla.const_expr(append):
+                    dst = dst.store(
+                        packed,
+                        tla.params.UnalignStoreParams(
+                            post_mode=tla.params.PostMode.POST_MODE_UPDATE_NBYTES,
+                            post_update_stride=stride,
+                        ),
+                        mask=keep if extra_mask else None,
+                    )
+                else:
+                    dst.store(packed)
+
+    return kernel
+
+
+def _integer_pair(dtype):
+    return _vector_tensor_pair_for(dtype, 2048 // dtype.width)
+
+
+def test_squeeze_without_byte_count_recording():
+    ir = _integer_kernel(tla.Int16, False).dump_mlir(type_args=_integer_pair(tla.Int16))
+    assert "tla.squeeze" in ir
+    assert "store_reg = true" not in ir
+
+
+@pytest.mark.parametrize(
+    "dtype", [tla.Int8, tla.UInt8, tla.Int16, tla.UInt16, tla.Int32, tla.UInt32]
+)
+def test_squeeze_append_uses_update_nbytes(dtype):
+    ir = _integer_kernel(dtype, True, append=True).dump_mlir(
+        type_args=_integer_pair(dtype)
+    )
+    assert "tla.squeeze" in ir and f"{2048 // dtype.width}x" in ir
+    assert "store_reg = true" in ir
+    assert "tla.store_unalign_update" in ir
+    assert "compressed = true" in ir
+    assert "!tla.ureg" in ir
+    assert "tla.clear_squeeze_state" not in ir  # Compiler inserts lifecycle ops.
+
+
+@pytest.mark.parametrize("record", [None, "true", 1])
+def test_squeeze_rejects_non_bool_byte_count_flag(record):
+    with pytest.raises(
+        tla.TlaCoreAPIError, match="record_nbytes must be a bool"
+    ):
+        _integer_kernel(tla.Int16, record).dump_mlir(type_args=_integer_pair(tla.Int16))
+
+
+def test_squeeze_append_rejects_a_second_length_source():
+    with pytest.raises(Exception, match="recorded byte count"):
+        _integer_kernel(
+            tla.Int16,
+            True,
+            append=True,
+            stride=1,
+        ).dump_mlir(type_args=_integer_pair(tla.Int16))
+
+
+def test_squeeze_append_rejects_a_second_predicate():
+    with pytest.raises(Exception, match="does not accept mask"):
+        _integer_kernel(tla.Int16, True, append=True, extra_mask=True).dump_mlir(
+            type_args=_integer_pair(tla.Int16)
+        )
+
+
+@tla.kernel
+def squeeze_default_update(src: tla.Tensor, dst: tla.Tensor):
+    with tla.vector():
+        with tla.vec.func(mode="simd"):
+            keep = tla.create_mask(pattern=tla.mask.VL8, dtype=tla.Float32)
+            packed = tla.squeeze(src.load(), keep)
+            dst = dst.store(
+                packed,
+                tla.params.UnalignStoreParams(
+                    post_mode=tla.params.PostMode.POST_MODE_UPDATE
+                ),
+            )
+
+
+def test_squeeze_default_keeps_ordinary_update_length():
+    ir = squeeze_default_update.dump_mlir(type_args=_vector_tensor_pair())
+    assert "tla.store_unalign_update" in ir
+    assert "store_reg = true" not in ir
+    assert "arith.constant 64" in ir
+
+
+def _branch_squeeze_kernel(post_mode, *, add_after_merge=False):
+    @tla.kernel
+    def kernel(src: tla.Tensor, dst: tla.Tensor, condition: tla.Int32):
+        with tla.vector():
+            with tla.vec.func(mode="simd"):
+                values = src.load()
+                keep = tla.create_mask(pattern=tla.mask.VL8, dtype=tla.Float16)
+                packed = values
+                if condition > 0:
+                    packed = tla.squeeze(values, keep, record_nbytes=True)
+                else:
+                    packed = tla.squeeze(values + values, keep, record_nbytes=True)
+                if tla.const_expr(add_after_merge):
+                    packed = packed + values
+                dst.store(
+                    packed,
+                    tla.params.UnalignStoreParams(
+                        post_mode=post_mode
+                    ),
+                )
+
+    return kernel
+
+
+@pytest.mark.parametrize(
+    "post_mode",
+    [tla.params.PostMode.POST_MODE_UPDATE, tla.params.PostMode.POST_MODE_UPDATE_NBYTES],
+)
+@pytest.mark.parametrize("add_after_merge", [False, True])
+def test_unaligned_store_uses_selected_mode_after_if(post_mode, add_after_merge):
+    kernel = _branch_squeeze_kernel(post_mode, add_after_merge=add_after_merge)
+    ir = kernel.dump_mlir(type_args=(*_integer_pair(tla.Float16), tla.Int32(0)))
+    assert "scf.if" in ir
+    assert "tla.store_unalign_update" in ir
+    compressed = post_mode == tla.params.PostMode.POST_MODE_UPDATE_NBYTES
+    assert ("compressed = true" in ir) is compressed
+
+
+def test_update_nbytes_requires_unaligned_store():
+    @tla.kernel
+    def kernel(src: tla.Tensor, dst: tla.Tensor):
+        with tla.vector():
+            with tla.vec.func(mode="simd"):
+                dst.store(
+                    src.load(),
+                    tla.params.NormalStoreParams(
+                        post_mode=tla.params.PostMode.POST_MODE_UPDATE_NBYTES
+                    ),
+                )
+
+    with pytest.raises(TlaLoweringError, match="requires UnalignStoreParams"):
+        kernel.dump_mlir(type_args=_vector_tensor_pair())

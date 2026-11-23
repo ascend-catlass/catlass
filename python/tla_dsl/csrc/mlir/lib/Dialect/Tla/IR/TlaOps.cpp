@@ -1453,6 +1453,58 @@ mlir::LogicalResult ScatterOp::verify()
     return mlir::success();
 }
 
+namespace {
+struct SqueezeStateResource : mlir::SideEffects::Resource::Base<SqueezeStateResource> {
+    MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(SqueezeStateResource)
+    llvm::StringRef getName() final
+    {
+        return "tla.squeeze_state";
+    }
+};
+} // namespace
+
+void SqueezeOp::getEffects(llvm::SmallVectorImpl<mlir::MemoryEffects::EffectInstance>& effects)
+{
+    if (getStoreReg()) {
+        effects.emplace_back(mlir::MemoryEffects::Read::get(), SqueezeStateResource::get());
+        effects.emplace_back(mlir::MemoryEffects::Write::get(), SqueezeStateResource::get());
+    }
+}
+
+mlir::Speculation::Speculatability SqueezeOp::getSpeculatability()
+{
+    return getStoreReg() ? mlir::Speculation::NotSpeculatable : mlir::Speculation::Speculatable;
+}
+
+void ClearSqueezeStateOp::getEffects(llvm::SmallVectorImpl<mlir::MemoryEffects::EffectInstance>& effects)
+{
+    effects.emplace_back(mlir::MemoryEffects::Write::get(), SqueezeStateResource::get());
+}
+
+void StoreUnalignUpdateOp::getEffects(llvm::SmallVectorImpl<mlir::MemoryEffects::EffectInstance>& effects)
+{
+    if (getCompressed()) {
+        effects.emplace_back(mlir::MemoryEffects::Read::get(), SqueezeStateResource::get());
+        effects.emplace_back(mlir::MemoryEffects::Write::get(), SqueezeStateResource::get());
+    }
+    effects.emplace_back(
+        mlir::MemoryEffects::Write::get(), &getOperation()->getOpOperand(0), mlir::SideEffects::DefaultResource::get());
+}
+
+void StoreUnalignPostOp::getEffects(llvm::SmallVectorImpl<mlir::MemoryEffects::EffectInstance>& effects)
+{
+    if (getCompressed()) {
+        effects.emplace_back(mlir::MemoryEffects::Read::get(), SqueezeStateResource::get());
+        effects.emplace_back(mlir::MemoryEffects::Write::get(), SqueezeStateResource::get());
+    }
+    if (getDest().getType().isInteger(64))
+        effects.emplace_back(mlir::MemoryEffects::Write::get(), mlir::SideEffects::DefaultResource::get());
+    else
+        effects.emplace_back(
+            mlir::MemoryEffects::Write::get(), &getOperation()->getOpOperand(1),
+            mlir::SideEffects::DefaultResource::get());
+}
+
 mlir::LogicalResult SqueezeOp::verify()
 {
     if (!hasEnclosingRegion<VecFuncOp>(getOperation()))
@@ -1941,9 +1993,12 @@ mlir::LogicalResult StoreUnalignUpdateOp::verify()
     mlir::Type elemType = destType.getPtr().getPointee();
     if (sourceVec.getElementType() != elemType)
         return emitOpError("store_unalign_update source and destination element types must match");
-    // Bool UnAlign Store UPDATE: AscendC SupportBytes b8 → uint8_t/int8_t vstus.
-    if (failed(verifyUnalignUpdateStride(getOperation(), getPostUpdateStride(), elemType)))
+    if (getCompressed()) {
+        if (isBoolElementType(elemType))
+            return emitOpError("compressed UPDATE does not support Bool elements");
+    } else if (failed(verifyUnalignUpdateStride(getOperation(), getPostUpdateStride(), elemType))) {
         return mlir::failure();
+    }
     return verifyUpdatePtr(getOperation(), getNextPtr(), elemType);
 }
 

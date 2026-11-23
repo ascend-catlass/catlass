@@ -345,11 +345,23 @@ def _validate_post_update_params(params: Any) -> bool:
         LoadDist,
         PostMode,
         StoreDist,
+        UnalignStoreParams,
     )
 
     # Params without PostMode fields are never UPDATE.
     if not hasattr(params, "post_mode"):
         return False
+    if params.post_mode == PostMode.POST_MODE_UPDATE_NBYTES:
+        if not isinstance(params, UnalignStoreParams):
+            raise TlaLoweringError(
+                "POST_MODE_UPDATE_NBYTES requires UnalignStoreParams"
+            )
+        if _const_int_value(params.post_update_stride) != 0:
+            raise TlaLoweringError(
+                "POST_MODE_UPDATE_NBYTES uses the recorded byte count. "
+                "Leave post_update_stride at 0"
+            )
+        return True
     # BlockLoad NORMAL: nonzero repeat_stride is the vsldb pre-offset.
     # BlockStore NORMAL: no pre-offset path — nonzero must not be ignored.
     # Block UPDATE: repeat_stride is the vsldb/vsstb POST repeat stride.
@@ -1079,10 +1091,12 @@ class _Tensor(TensorABC):
                   `post_mode=POST_MODE_UPDATE`; `0` advances by `tile_extent`
                   (`origin_shape`). Default `0`.
               - `UnalignStoreParams`:
-                - `post_mode` (`str`): `POST_MODE_NORMAL` (default) or
-                  `POST_MODE_UPDATE`.
-                - `post_update_stride` (`Any`): `0` (default) advances by
-                  `origin_shape`; effective stride must be in `(0, VL]`. Default `0`.
+                - `post_mode` (`str`): `POST_MODE_NORMAL` (default),
+                  `POST_MODE_UPDATE`, or `POST_MODE_UPDATE_NBYTES`.
+                - `post_update_stride` (`Any`): With `POST_MODE_UPDATE`,
+                  `0` advances by `origin_shape` and the effective stride
+                  must be in `(0, VL]`. With `POST_MODE_UPDATE_NBYTES`,
+                  use `0`. Default `0`.
               - `BlockStoreParams`:
                 - `block_stride` (`int`): Heads apart in 32B DataBlocks.
                   Default `0`.
@@ -1104,6 +1118,9 @@ class _Tensor(TensorABC):
             Constraints:
             - Must be called inside a `@tla.kernel`-decorated kernel function.
             - Must be called inside `tla.vec.func(mode="simd")`; destination tile must be UB.
+
+            **`POST_MODE_NORMAL` mode**
+
             - `DIST_PACK4_B32` supports matching 4-byte element types.
               It also supports 1/2/4-byte source elements with a 1-byte
               destination. It writes at most 64 bytes to a 32-byte-aligned
@@ -1124,16 +1141,7 @@ class _Tensor(TensorABC):
             - `UnalignStoreParams` in NORMAL mode writes up to one vector of
               elements using the destination's valid length. In UPDATE mode,
               the effective stride sets both the write length and pointer advance.
-            - `POST_MODE_UPDATE` requires a rank-1 contiguous tile, `DIST_NORM`
-              and matching source and destination element types of width
-              b8/b16/b32/b64. It returns the next tile. Inside `tla.vec.func`, assign it back with
-              `tla.range`. Same origin window (`coord=0`) contract as UPDATE
-              `load`. `NormalStoreParams`: default `post_update_stride=0`
-              advances by `tile_extent` (`origin_shape`); an explicit stride is
-              decoupled. `UnalignStoreParams`: default `0`→`tile_extent`;
-              effective stride must be in `(0, VL]`; clean for hoists Pre/Post.
 
-            Example:
             ```python
             with tla.vec.func(mode="simd"):
                 y_ub.store(y_reg)
@@ -1148,6 +1156,88 @@ class _Tensor(TensorABC):
                     reg_slot=tla.params.RegSlot.ZERO))
                 fp8_ub.store(fp8_reg, tla.params.NormalStoreParams(
                     store_dist=tla.params.StoreDist.DIST_PACK4_B32))
+            ```
+
+            - `POST_MODE_UPDATE` requires a rank-1 contiguous tile, `DIST_NORM`
+              and matching source and destination element types of width
+              b8/b16/b32/b64. It returns the next tile. Inside `tla.vec.func`, assign it back with
+              `tla.range`. Same origin window (`coord=0`) contract as UPDATE
+              `load`. `NormalStoreParams`: default `post_update_stride=0`
+              advances by `tile_extent` (`origin_shape`); an explicit stride is
+              decoupled. `UnalignStoreParams`: default `0`→`tile_extent`;
+              effective stride must be in `(0, VL]`; clean for hoists Pre/Post.
+
+            **`POST_MODE_UPDATE_NBYTES` mode**
+
+            This mode appends data using the byte count recorded by `squeeze`.
+            Before each append, call `squeeze(..., record_nbytes=True)` in the
+            same SIMD region so hardware calculates and records the byte count.
+            Before that count is overwritten, call `store` with
+            `UnalignStoreParams(post_mode=POST_MODE_UPDATE_NBYTES)`.
+            `store` takes that many bytes from the start of the source vector
+            and writes them at the supplied window's base address plus the
+            current write offset. It advances the offset and returns the
+            supplied window.
+
+            **Usage restrictions**
+
+            - Use a contiguous one-dimensional UB window at `coord=0`. The
+              source and destination element types must match. Supported types
+              are `Float16`, `Float32`, `Int8`, `UInt8`, `Int16`, `UInt16`,
+              `Int32`, and `UInt32`. Keep `post_update_stride` at the
+              compile-time constant `0` and omit `mask` from `store`.
+            - Appends in the same SIMD region share the write offset and
+              pending tail. Tail writeback uses the destination base address
+              of the last `store` executed with `POST_MODE_UPDATE_NBYTES`.
+            - Reserve space for appends and tail writeback. From the first
+              append through SIMD exit and synchronization, keep other reads
+              and writes outside the compressed output byte range.
+            - External calls must preserve the write offset and pending tail
+              from initialization through tail writeback, and the byte count
+              from when `squeeze` records it until the corresponding `store`
+              uses it.
+
+            **Example using `POST_MODE_UPDATE_NBYTES`**
+
+            The loop appends `[7, 9, 12]` from `src_ub[0:3]` and `[20, 24]`
+            from `src_ub[128:130]` to the same destination, `dst_ub`. In
+            this example, the start address of `dst_ub` is 32-byte aligned.
+
+            1. **Initialize.** On entry to the SIMD region, the compiler sets
+               up a zero write offset and an empty buffer for pending bytes.
+            2. **Compress and append.** In the first iteration,
+               `squeeze(..., record_nbytes=True)` packs three Int16 elements
+               and hardware records 6 bytes. The `store` leaves those bytes
+               in the hardware buffer and advances the write offset to 6 bytes.
+               In the second iteration, hardware records 4 bytes for two kept
+               elements, and `store` adds them after the first 6. The 10
+               bytes fall short of a 32-byte block, so they stay in the buffer
+               as the pending tail. See the
+               [`tla.squeeze` reference](language/simd/compress.md#tlasqueeze).
+            3. **Write back the tail.** After the loop, the compiler inserts
+               a writeback of the 10 buffered bytes to `dst_ub[0:5]`. After
+               leaving the SIMD region and synchronizing, the first five
+               elements of `dst_ub` are `[7, 9, 12, 20, 24]`.
+
+            Example:
+            ```python
+            # src_ub and dst_ub are separate contiguous Int16 UB windows at coord=0.
+            # src_ub contains 256 elements, and dst_ub contains 128.
+            with tla.vec.func(mode="simd"):
+                # Use the hardware-recorded byte count for each append.
+                update = tla.params.UnalignStoreParams(
+                    post_mode=tla.params.PostMode.POST_MODE_UPDATE_NBYTES,
+                )
+                block = tla.make_shape(128)
+                for i in tla.range(2):
+                    # Select source indices 0 through 127, then 128 through 255.
+                    src_tile = tla.tile_view(src_ub, block, tla.make_coord(i))
+                    # Keep the first 3 elements of the first tile and the first 2 of the second.
+                    keep, _ = tla.update_mask(3 - i, dtype=tla.Int16)
+                    # Pack the kept elements. At 2 bytes per Int16, hardware records 6, then 4 bytes.
+                    packed = tla.squeeze(src_tile.load(), keep, record_nbytes=True)
+                    # Pass dst_ub each time. Hardware advances the write offset.
+                    dst_ub.store(packed, update)
             ```
         """
         from ..core_api import (
@@ -1167,6 +1257,7 @@ class _Tensor(TensorABC):
             MaskStoreDist,
             MaskStoreParams,
             NormalStoreParams,
+            PostMode,
             StoreDist,
             UnalignStoreParams,
         )
@@ -1288,12 +1379,16 @@ class _Tensor(TensorABC):
                 _require_update_unit_stride(window)
                 dest = _as_value(window)
                 elem_ty = _tla_tensor_type_for_mlir_value(dest).element_type
-                _require_update_supported_dtype(elem_ty)
                 _require_update_store_matching_dtype(value_val, elem_ty)
                 ptr_type = _tla_type_bridge.tensor_ptr_type_get(dest.type)
-                stride_val = _unalign_update_stride_value(
-                    params, window, element_type=elem_ty
-                )
+                compressed = params.post_mode == PostMode.POST_MODE_UPDATE_NBYTES
+                if compressed:
+                    stride_val = _as_value(0)
+                else:
+                    _require_update_supported_dtype(elem_ty)
+                    stride_val = _unalign_update_stride_value(
+                        params, window, element_type=elem_ty
+                    )
                 ctx = loc.context if loc is not None else mlir_ir.Context.current
                 ureg_type = mlir_ir.Type.parse("!tla.ureg", context=ctx)
                 next_ptr, _ureg_out = _tla_ops_gen.store_unalign_update(
@@ -1302,8 +1397,11 @@ class _Tensor(TensorABC):
                     dest,
                     value_val,
                     stride_val,
+                    compressed=True if compressed else None,
                     loc=loc,
                 )
+                if compressed:
+                    return window
                 return _make_update_tile_from_ptr(next_ptr, window, loc=loc)
             is_block = isinstance(params, BlockStoreParams)
             if not is_block and not isinstance(params, NormalStoreParams):
