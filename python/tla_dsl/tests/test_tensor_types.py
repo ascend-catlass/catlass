@@ -11,7 +11,6 @@ from catlass import _tla_type_bridge
 import catlass.core_api as core_api_mod
 import catlass.runtime as runtime_mod
 from catlass.execution_lowering import TlaLoweringError
-from catlass.tla.runtime import from_dlpack
 from catlass._mlir import ir as mlir_ir
 
 
@@ -246,13 +245,3 @@ def test_make_fake_tensor_is_unbound() -> None:
     assert fake._flat_shape == (4, 8)
     assert fake.stride == (8, 1)
     assert isinstance(fake, tla.Tensor)
-
-
-def test_from_dlpack_requires_layout_tag() -> None:
-    class _Buf:
-        def __dlpack__(self, stream: int | None = None):
-            del stream
-            return object()
-
-    with pytest.raises(TypeError, match=r"required keyword-only argument: 'layout_tag'"):
-        from_dlpack(_Buf())

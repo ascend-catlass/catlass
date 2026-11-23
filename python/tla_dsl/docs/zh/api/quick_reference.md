@@ -29,7 +29,7 @@ nav_order: 5
 | [`@tla.extern`](runtime/kernel_entry.md#tlaextern) | 声明由内联源码实现的 Ascend C ABI 入口。 | Host 声明；调用位于单个 Cube 或 Vector 区域，可在 SIMD VF 内调用。SIMT VF 不支持 extern 调用。 |
 | [`tla.compile`](runtime/compile_launch.md#tlacompile) | 从类型样本编译 kernel，返回 `JitCompiledFunction`。 | Host；类型样本不必绑定 NPU 缓冲。`block_num` / `stream` 等启动参数写在编译结果上。 |
 | [`tla.JitCompiledFunction.__call__`](runtime/compile_launch.md#tlajitcompiledfunction__call__) | 启动已编译 kernel，并复用 executor 与二进制。 | Host；tensor 实参须为已绑定的 NPU 缓冲，`make_fake_tensor` 结果不能启动。 |
-| [`tla.from_dlpack`](runtime/host_tensor.md#tlafrom_dlpack) | 零拷贝绑定 DLPack tensor 为 TLA Host tensor。 | Host；`layout_tag` 必填。NPU 缓冲可启动，CPU 缓冲只提供编译元数据。 |
+| [`tla.from_dlpack`](runtime/host_tensor.md#tlafrom_dlpack) | 零拷贝绑定 DLPack tensor 为 TLA Host tensor。 | 所有输入均须显式指定 `layout_tag`，包括四维预打包 NZ 视图。NPU 缓冲可用于启动，CPU 缓冲仅提供编译元数据。 |
 | [`tla.make_tensor`](runtime/host_tensor.md#tlamake_tensor) | Host 双模式：由 `tla.make_ptr` + `tla.make_layout` 绑定缓冲。 | Host 路径跳过 DLPack；Kernel 内仍发 IR。 |
 | [`tla.make_fake_tensor`](runtime/host_tensor.md#tlamake_fake_tensor) | 创建仅含元数据的编译样本。 | Host；无设备缓冲，不能启动。shape 输入是 Python 整数树，不是 Kernel layout 值。 |
 

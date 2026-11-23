@@ -27,10 +27,8 @@ Bind a real NPU buffer with `from_dlpack` or Host dual-mode `tla.make_ptr` / `tl
 
 Description:
 
-Bind a pointer and layout as a TLA Host tensor without DLPack (dual-mode
-``tla.make_tensor`` outside ``@tla.kernel``). Prefer this on the launch hot
-path when address and layout metadata are already known: it skips capsule
-export/parse/ownership and does not open ``_eager_capture``.
+When the buffer address and layout are known, call
+``tla.make_tensor(ptr, layout)`` on the Host to bind the buffer directly.
 
 Build ``ptr`` / ``layout`` with the same ``tla.make_ptr`` /
 ``tla.make_layout`` APIs used in Kernel code. Inside a kernel the same
@@ -57,9 +55,10 @@ Constraints:
 - Host path rejects Kernel SSA ``Pointer`` / ``Layout``; call
   ``tla.make_ptr`` / ``tla.make_layout`` on the Host (no ``@tla.kernel``
   context).
-- Hot-path bind trusts ``make_ptr`` / ``make_layout`` metadata (no
-  Kernel trait checks / RM-CM compact gate). Keep buffer metadata
-  consistent; prefer ``from_dlpack`` when you need those checks.
+- Nested NZFamily 2x2 trees must satisfy layout traits and have a flat
+  logical origin `(M, N)`. Trait-valid partial views are allowed.
+  The caller supplies the allocation and its metadata. Use ``from_dlpack``
+  to validate a full-tile remap against an exported buffer.
 - Does **not** own DLPack lifetime. Keep the live buffer alive across
   launch.
 - ``ptr.data_ptr == 0`` builds an unbound sample (`_external_binding` is
@@ -91,8 +90,8 @@ host = tla.make_tensor(ptr, layout)
 
 Description:
 
-Bind a DLPack NPU tensor to a TLA Host tensor (zero-copy). The returned
-object shares the device buffer of `tensor_dlpack`.
+Bind a DLPack buffer to a TLA Host tensor. NPU buffers are shared without
+copying, and CPU buffers supply metadata for compilation.
 
 Prototype:
 
@@ -107,19 +106,27 @@ Parameters:
   host (CPU) buffer, such as a torch tensor on CPU, is accepted too,
   but only its metadata is taken: the result has `data_ptr == 0`, so
   it can be compiled against and not launched. Required.
-- *`layout_tag`* (`tla.arch.*`): Layout tag such as `tla.arch.RowMajor`,
-  `tla.arch.ColumnMajor`, `tla.arch.zN`. Required.
+- *`layout_tag`* (`tla.arch.*`): Required layout tag such as
+  `tla.arch.RowMajor`, `tla.arch.ColumnMajor`, `tla.arch.zN`, or
+  `tla.arch.nZ`. The four-dimensional packed NZ view's shape and
+  strides are checked against the specified layout.
 - *`origin_shape`* (`tuple | int | None`): Logical origin as a Python int
-  tree. Optional; derived from the DLPack physical shape and `layout_tag`
-  when omitted. Not a Kernel `tla.make_shape`.
+  tree. Optional for linear layouts (derived from the DLPack physical
+  shape and `layout_tag` when omitted). Flat packed NZ inputs require
+  `(M, N)`. Four-dimensional packed NZ views default to the padded
+  dimensions. Pass `(M, N)` to retain the logical size before padding.
+  GM MxScale infers this pair from a 2-D input when omitted.
+  CPU-only samples can use `None` for a dynamic extent. Four-dimensional
+  views still have their actual export geometry checked.
 - *`assumed_align`* (`int | None`): Reserved; currently unused.
 - *`stream`* (`int | None`): Passed to `__dlpack__(stream=...)`. Default
   `-1` (no stream sync). `None` omits the `stream` argument.
 - *`element_type`* (`type | None`): Optional override for the element
   type inferred from DLPack. Default `None` keeps the DLPack type.
   Use when DLPack cannot express the real type (e.g. fp8): pass
-  `tla.Float8E4M3FN` / `Float8E5M2`. Must have the same per-element
-  bit width as the exported buffer.
+  `tla.Float8E4M3FN` / `Float8E5M2`. Storage widths must match, except
+  for FP4 exported as two elements per integer byte. `Bool` occupies
+  one byte.
 
 Constraints:
 
@@ -131,17 +138,28 @@ Constraints:
   `from_dlpack(x.contiguous().to(device), ...)` is safe.
 - A capsule is single-use; passing an already-consumed capsule raises
   `RuntimeTensorError`. Call `from_dlpack` again for another binding.
+- If the DLPack export omits strides, assume C-contiguous strides.
 - 2-D `RowMajor` requires `tensor.contiguous()`. 2-D `ColumnMajor`
   requires `tensor.permute(1, 0).contiguous()`. A mismatch raises
   `RuntimeTensorError`. Providing `origin_shape` skips that check.
+- Packed NZ layouts accept a flat, contiguous prepacked buffer (e.g.
+  `host_nd2nz`) with at least the padded storage length, or a
+  four-dimensional DLPack view in physical leaf order
+  `(m0, m1, n0, n1)`. The view's shape and strides must match the
+  layout, with singleton strides ignored. Export and TLA storage widths
+  must match for four-dimensional views. Use the flat form for FP4
+  exported as bytes.
+- GM MxScale accepts dense scale storage spanning the remapped
+  descriptor, including any pair padding. Supply `origin_shape` if the
+  DLPack dimensions do not describe the logical scale matrix.
 - A rank-1 `origin_shape` under `RowMajor`/`VectorLayout` is bound as a
   flat, unit-stride run. The buffer must then read consecutive elements
   (`torch.arange(64)[::2]` is refused); this holds whatever rank the
   physical slice is spelled in, and `origin_shape` does not skip it.
-- Default layout is static. Call `mark_layout_dynamic` /
-  `mark_compact_shape_dynamic` for dynamic extents.
-- When `element_type` is set, its per-element bit width must match the
-  exported DLPack buffer.
+- The default layout is static. Call `mark_layout_dynamic()` before
+  compiling with a packed NZ tensor as a GM kernel argument. For linear
+  layouts, `mark_layout_dynamic()` and `mark_compact_shape_dynamic()`
+  make extents dynamic when needed.
 
 Example:
 
@@ -150,6 +168,23 @@ tx = from_dlpack(x.contiguous(), layout_tag=tla.arch.RowMajor)
 ty = from_dlpack(
     y.permute(1, 0).contiguous(),
     layout_tag=tla.arch.ColumnMajor,
+)
+t_zn = from_dlpack(
+    zn_buf,
+    layout_tag=tla.arch.zN,
+    origin_shape=(M, N),
+)
+# zn_f32 is a flat prepacked buffer for a 32-by-64 FP32 matrix.
+zn_view = zn_f32.as_strided(
+    size=(16, 2, 8, 8),
+    stride=(8, 128, 1, 256),
+)
+t_zn_view = from_dlpack(zn_view, layout_tag=tla.arch.zN)
+t_zn_view.mark_layout_dynamic()
+t_nz = from_dlpack(
+    nz_buf,
+    layout_tag=tla.arch.nZ,
+    origin_shape=(M, N),
 )
 ```
 
@@ -174,15 +209,15 @@ tla.make_fake_tensor(dtype: Any, shape: Any, stride: Any, *, layout_tag: Any | N
 Parameters:
 
 - *`dtype`*: Element type such as `tla.Float16` / `tla.Float32`. Required.
-- *`shape`* (`int | tuple`): Logical shape tree (nested tuples for zN
+- *`shape`* (`int | tuple`): Shape tree (nested tuples for zN
   physical layouts). Required.
-- *`stride`* (`int | tuple | None`): Stride tree; structure must match
-  `shape`. When ``None``, derived from layout remap (same as historical
-  ``_Tensor`` construction).
+- *`stride`* (`int | tuple | None`): Stride tree with the same structure
+  as `shape`. Pass `None` to derive it from the layout.
 - *`layout_tag`*: `tla.arch` tag. Optional; default `tla.arch.RowMajor`.
 - *`addrspace`*: Address space. Optional; default `AddressSpace.gm`.
 - *`origin_shape`* (`int | tuple | None`): Logical origin. Optional;
-  defaults to `shape`.
+  defaults to `shape` for linear layouts and to the padded `(M, N)`
+  for nested NZFamily layouts.
 - *`coord`* (`int | tuple | None`): Coordinate tree. Optional; derived
   from the layout when omitted (typically zeros).
 - *`assumed_align`* (`int | None`): Reserved; currently unused.
@@ -193,10 +228,9 @@ Constraints:
   not Kernel `tla.make_shape` / `tla.make_stride` / `tla.make_coord`.
 - Always unbound; cannot be launched until replaced by a bound Host
   tensor (`tla.make_tensor` / `from_dlpack`).
-- Explicit `shape` / `stride` are kept as given (no layout remap).
-- Signature unchanged; implemented via ``tla.make_ptr`` +
-  ``tla.make_layout`` + Host ``tla.make_tensor``. ``stride=None`` /
-  ``coord=None`` keep the pre-existing remap defaults.
+- Explicit `shape` / `stride` are kept. Like Host `make_tensor`,
+  nested NZFamily layouts are checked against layout traits and use a
+  flat logical origin. A trait-valid partial view is allowed.
 
 Example:
 

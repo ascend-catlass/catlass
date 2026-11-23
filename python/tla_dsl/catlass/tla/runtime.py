@@ -5,6 +5,7 @@ from __future__ import annotations
 import ctypes
 import weakref
 from collections import namedtuple
+from math import prod
 from typing import Any, Iterable, Iterator
 
 from catlass._mlir import ir as mlir_ir  # type: ignore[assignment]
@@ -30,6 +31,7 @@ from ..types import (
     _tree_structure_mask,
     _try_remap_stride_coord_trees,
     dtype_size_bytes,
+    dtype_size_bits,
 )
 from .typing import Tensor as TensorABC
 
@@ -67,6 +69,91 @@ def _is_contiguous_run(shape: tuple[int, ...], strides: tuple[int, ...]) -> bool
             return False
         expected *= extent
     return True
+
+
+def _require_packed_nz_buffer(
+    layout_token: str,
+    phys_shape: tuple[int, ...],
+    phys_strides: tuple[int, ...],
+    logical_origin: tuple[int | None, ...],
+    *,
+    expected_storage_elems: int | None,
+) -> None:
+    """Reject a buffer that an NZFamily Host bind cannot safely describe.
+
+    Mirrors the 2-D ``RowMajor`` / ``ColumnMajor`` compact check: DLPack still
+    carries an ND view, so the binding must prove the storage matches the
+    fractal claim before remap metadata is trusted.
+
+    Host prepack (``host_nd2nz``) yields a flat, contiguous run whose length
+    is the padded fractal numel for ``origin_shape``. A producer may also expose
+    the four physical modes directly, which are validated separately.
+    """
+    if len(phys_shape) != 1:
+        raise RuntimeTensorError(
+            f"from_dlpack layout_tag={layout_token!r} expects a flat 1-D "
+            f"prepacked buffer (e.g. host_nd2nz) or a matching four-dimensional "
+            f"DLPack view; got shape={phys_shape} for origin_shape={logical_origin!r}"
+        )
+    if not _is_contiguous_run(phys_shape, phys_strides):
+        raise RuntimeTensorError(
+            f"from_dlpack layout_tag={layout_token!r} requires a contiguous "
+            f"prepacked buffer; got shape={phys_shape} strides={phys_strides}. "
+            f"Take a contiguous copy of the packed run first "
+            f"(e.g. tensor.contiguous())."
+        )
+    if expected_storage_elems is not None and phys_shape[0] < expected_storage_elems:
+        raise RuntimeTensorError(
+            f"from_dlpack layout_tag={layout_token!r} for "
+            f"origin_shape={logical_origin!r} requires a contiguous prepacked "
+            f"buffer of at least {expected_storage_elems} elements "
+            f"(host_nd2nz / equivalent); got shape={phys_shape} "
+            f"({phys_shape[0]} elements)"
+        )
+
+
+def _require_mx_scale_buffer(
+    layout_token: str,
+    phys_shape: tuple[int, ...],
+    phys_strides: tuple[int, ...],
+    expected_storage_elems: int | None,
+) -> None:
+    # Prepared scale buffers can be transposed views of dense storage. Check
+    # contiguity in address order because the remap supplies its own strides.
+    storage_elems = prod(phys_shape)
+    if storage_elems:
+        modes = sorted(zip(phys_strides, phys_shape), reverse=True)
+        strides = tuple(stride for stride, _ in modes)
+        shape = tuple(extent for _, extent in modes)
+        if not _is_contiguous_run(shape, strides):
+            raise RuntimeTensorError(
+                f"from_dlpack layout_tag={layout_token!r} requires dense MxScale "
+                f"storage; got shape={phys_shape} strides={phys_strides}"
+            )
+    if expected_storage_elems is not None and storage_elems < expected_storage_elems:
+        raise RuntimeTensorError(
+            f"from_dlpack layout_tag={layout_token!r} requires at least "
+            f"{expected_storage_elems} storage elements for the MxScale "
+            f"descriptor; got {storage_elems}"
+        )
+
+
+def _require_nz_origin(origin: Any, *, for_op: str, allow_dynamic: bool) -> None:
+    if not isinstance(origin, tuple) or len(origin) != 2:
+        valid = False
+    else:
+        valid = all(
+            (allow_dynamic and extent is None) or (type(extent) is int and extent >= 0)
+            for extent in origin
+        )
+    if not valid:
+        expected = (
+            "non-negative integers or None" if allow_dynamic else "concrete integers"
+        )
+        raise RuntimeTensorError(
+            f"{for_op} requires a flat NZFamily origin_shape=(M, N) with "
+            f"{expected}; got {origin!r}"
+        )
 
 
 def _require_flat_1d_binding(
@@ -236,16 +323,19 @@ class _Tensor(TensorABC):
         # would allocate two ctypes objects per capsule for the same fields.
         dl = DLManagedTensor.from_address(managed_ptr).dl_tensor
         ndim = int(dl.ndim)
+        if ndim < 0 or (ndim and not dl.shape):
+            raise DlpackBridgeError("DLPack tensor has invalid rank or missing shape")
         # Slicing a ctypes int64 pointer reads the whole run in one call, where
         # an index-by-index generator pays Python's indexing cost per mode.
         shape = tuple(dl.shape[:ndim])
-        if not dl.strides:
-            raise DlpackBridgeError(
-                "DLPack tensor has null strides; explicit per-dimension strides are "
-                "required (e.g. torch_npu / PyTorch export). NumPy C-contiguous "
-                "buffers are not supported."
-            )
-        strides = tuple(dl.strides[:ndim])
+        if dl.strides:
+            strides = tuple(dl.strides[:ndim])
+        else:
+            # Use C-contiguous strides when the exporter leaves them unset.
+            compact = [1] * ndim
+            for axis in range(ndim - 2, -1, -1):
+                compact[axis] = compact[axis + 1] * max(shape[axis + 1], 1)
+            strides = tuple(compact)
         data_ptr = int(dl.data or 0) + int(dl.byte_offset)
         return {
             "managed_ptr": int(managed_ptr),
@@ -276,6 +366,7 @@ class _Tensor(TensorABC):
         self._external_binding = False
         self._assumed_align: int | None = None
         self._cache_key_memo: tuple[Any, ...] | None = None
+        self._memref_launch_metadata: tuple[Any, Any, tuple[int, ...]] | None = None
         # DLPack ownership, set by from_dlpack: the consumed DLManagedTensor is
         # released by _dlpack_release when this tensor dies, and _dlpack_source
         # keeps the producer object itself alive meanwhile.
@@ -401,6 +492,7 @@ class _Tensor(TensorABC):
             else flat_stride
         )
         self._cache_key_memo: tuple[Any, ...] | None = None
+        self._memref_launch_metadata = None
         return self
 
     @property
@@ -656,10 +748,30 @@ class _Tensor(TensorABC):
         )
 
     def build_memref_launch_fields(self) -> tuple[int, ...]:
-        """Build unified schema-v4 GM launch values in canonical ABI order."""
+        """Build unified schema-v4 GM launch values in canonical ABI order.
+
+        Fixed 13 slots: ``allocated/aligned/offset`` + ``size0..3`` +
+        ``stride0..3`` + ``originShape0/1``. Linear layouts pad unused size /
+        stride leaves with ``1``; NZFamily uses all four physical leaves and a
+        two-leaf logical origin ``(M, N)``.
+        """
         self._require_bound()
         data_ptr = int(self.data_ptr)
+        # Dynamic markers only change the compile-time type. Reuse the
+        # concrete fields until the origin or layout is replaced.
+        origin = self.origin_shape
+        layout_tag = self.layout_tag
+        cached = self._memref_launch_metadata
+        if cached is not None and cached[0] is origin and cached[1] == layout_tag:
+            fields = cached[2]
+        else:
+            fields = self._build_memref_metadata_fields(origin, layout_tag)
+            self._memref_launch_metadata = (origin, layout_tag, fields)
+        return (data_ptr, data_ptr, 0, *fields)
 
+    def _build_memref_metadata_fields(
+        self, origin: tuple[Any, ...], layout_tag: str
+    ) -> tuple[int, ...]:
         shape = self._flat_shape or ()
         if not shape:
             raise RuntimeTensorError(
@@ -668,17 +780,38 @@ class _Tensor(TensorABC):
         rank = len(shape)
         if rank > 4:
             raise RuntimeTensorError(
-                "build_memref_launch_fields supports at most 4 shape/stride "
-                f"leaves, got {rank}"
+                "build_memref_launch_fields supports at most 4 physical "
+                f"shape/stride leaves (schema v4 size0..size3); got {rank}. "
+                "NZFamily packs a nested 2x2 into exactly 4 leaves; logical "
+                "higher-rank views are not encoded in the 13-slot GM ABI"
             )
         strides = self._flat_stride
-        # Concrete origin from construction (mark_* only shadows the type tree).
-        origin = self.origin_shape
+        if strides is None or len(strides) != rank:
+            raise RuntimeTensorError(
+                "build_memref_launch_fields requires concrete strides with "
+                f"the same leaf count as shape ({rank}); got "
+                f"{0 if strides is None else len(strides)}"
+            )
+        if any(type(leaf) is not int for leaf in (*shape, *strides)):
+            raise RuntimeTensorError(
+                "build_memref_launch_fields requires concrete integer shape/stride leaves"
+            )
+        # Rank-4 alone is not NZFamily — linear views can also pad to 4 leaves.
+        from ..core_api import _NZ_FAMILY_LAYOUT_TOKENS
+
+        if layout_tag in _NZ_FAMILY_LAYOUT_TOKENS and rank == 4:
+            _require_nz_origin(
+                origin, for_op="build_memref_launch_fields", allow_dynamic=False
+            )
+        elif not origin or any(
+            type(leaf) is not int or leaf < 0 for leaf in origin[:2]
+        ):
+            raise RuntimeTensorError(
+                "build_memref_launch_fields requires concrete integer origin_shape "
+                f"slots; got {origin!r}"
+            )
 
         return (
-            data_ptr,
-            data_ptr,
-            0,
             shape[0],
             shape[1] if rank > 1 else 1,
             shape[2] if rank > 2 else 1,
@@ -944,6 +1077,22 @@ def _canonical_origin_shape_leaf(value: Any) -> Any:
     return int(value)
 
 
+def _packed_nz_view_matches(
+    phys_shape: tuple[int, ...],
+    phys_strides: tuple[int, ...],
+    remapped: Any,
+) -> bool:
+    """Check the layout exported by DLPack in TLA leaf order."""
+    # A singleton stride never contributes to the address. Keep the canonical
+    # TLA stride for the ABI, including when a producer reports 1 for that mode.
+    return phys_shape == remapped.flat_shape and all(
+        extent <= 1 or step == expected_stride
+        for extent, step, expected_stride in zip(
+            phys_shape, phys_strides, remapped.flat_stride
+        )
+    )
+
+
 def _derive_bind_metadata(
     layout_tag: Any,
     phys_shape: tuple[int, ...],
@@ -952,58 +1101,70 @@ def _derive_bind_metadata(
     dtype_bits: int,
     element_type: type | None,
     origin_shape: Any,
+    *,
+    host_resident: bool,
 ) -> _BindMetadata:
     """Validate a DLPack buffer's geometry and derive the tile metadata for it.
 
     Reads only its arguments, so :func:`from_dlpack` can memoise the result: both
     the checks and the derivation are pure, and every rejection below depends on
     the same geometry the memo is keyed on.
+
+    For packed NZ layouts, the exporter can supply a flat prepacked run or a
+    four-dimensional view in TLA leaf order.
     """
     from ..core_api import (
         _MX_SCALE_GM_LAYOUT_TOKENS,
+        _NZ_FAMILY_LAYOUT_TOKENS,
         _remap_tensor_like_prefix_fields_for_layout_trees,
         _resolve_arch_layout_tag,
     )
 
+    if any(extent < 0 for extent in phys_shape):
+        raise RuntimeTensorError(
+            f"from_dlpack requires non-negative DLPack extents; got {phys_shape}"
+        )
     dtype = _dlpack_dtype_map().get((dtype_code, dtype_bits))
     if dtype is None:
         raise RuntimeTensorError(
             f"unsupported DLPack dtype code={dtype_code} bits={dtype_bits} lanes=1"
         )
 
+    element_bits = dtype_bits
     if element_type is not None:
-        # Read the widths directly rather than through a defaulted getattr: a
-        # missing `width` would make both sides compare equal and turn the check
-        # below into a no-op, which is exactly when it is most needed.
         try:
-            exported_width = int(dtype.width)
-            override_width = int(element_type.width)
-        except (AttributeError, TypeError) as exc:
+            declared_bits = int(element_type.width)
+        except (AttributeError, TypeError, ValueError) as exc:
             raise RuntimeTensorError(
-                "from_dlpack element_type override requires both the exported dtype and the "
-                f"override to declare a storage width; got {dtype!r} and {element_type!r}"
+                "from_dlpack element_type override must declare a width; "
+                f"got {element_type!r}"
             ) from exc
-        # Narrowing to a sub-byte element that tiles the exported width is the
-        # one width change that is well defined: the host has no 4-bit dtype, so
-        # a packed fp4 buffer can only be exported as bytes, and the override is
-        # what says how many elements each byte holds. origin_shape carries the
-        # true element count. Anything else -- f32 read as i32, say -- is a
-        # reinterpretation the caller almost never means.
-        packs_into_exported = (
-            override_width < exported_width and exported_width % override_width == 0
+        # Bool has an i1 IR type but occupies one byte. FP4 elements are packed.
+        override_dtype = str(getattr(element_type, "dtype", "")).strip().lower()
+        element_bits = dtype_size_bits(override_dtype) or declared_bits
+        packed_fp4 = (
+            dtype_bits == 8
+            and override_dtype in {"f4e1m2", "f4e2m1"}
+            and dtype_code in (DLDataTypeCode.kDLInt, DLDataTypeCode.kDLUInt)
         )
-        if override_width != exported_width and not packs_into_exported:
+        if element_bits != dtype_bits and not packed_fp4:
             raise RuntimeTensorError(
                 f"from_dlpack element_type override {element_type.__name__} is "
-                f"{override_width}-bit but the exported buffer is {exported_width}-bit; "
-                "an override may narrow to a sub-byte element that tiles the "
-                "exported width, but must not otherwise change it"
+                f"{element_bits}-bit but the exported buffer is {dtype_bits}-bit; "
+                "use matching storage widths or FP4 packed in integer bytes"
             )
         dtype = element_type
 
     dtype_token = str(getattr(dtype, "dtype", "")).strip().lower()
+    padded_origin = None
+    if len(phys_shape) == 4:
+        m0, m1, n0, n1 = phys_shape
+        padded_origin = (m0 * m1, n0 * n1)
     layout_token = _resolve_arch_layout_tag(layout_tag, for_op="from_dlpack")
-    if layout_token in _MX_SCALE_GM_LAYOUT_TOKENS and dtype_token != "f8e8m0":
+    is_nz_family = layout_token in _NZ_FAMILY_LAYOUT_TOKENS
+    is_mx_scale = layout_token in _MX_SCALE_GM_LAYOUT_TOKENS
+    is_packed_nz_view = is_nz_family and not is_mx_scale and padded_origin is not None
+    if is_mx_scale and dtype_token != "f8e8m0":
         # The GM MxScale tags describe an e8m0 shared-exponent block; carrying
         # any other element type under them would be a silent reinterpretation
         # downstream, where the bc layer hands the buffer to e8m0-typed copies.
@@ -1017,7 +1178,22 @@ def _derive_bind_metadata(
     # with 1. Reject before any metadata is derived, and judge by the rank the
     # tile is projected to -- a (1, N) physical slice with a rank-1 origin is
     # flattened just the same.
-    if origin_shape is None:
+    if is_nz_family:
+        if origin_shape is not None:
+            logical_origin = origin_shape
+        elif is_packed_nz_view:
+            logical_origin = padded_origin
+        elif is_mx_scale and len(phys_shape) == 2:
+            logical_origin = phys_shape
+        else:
+            raise RuntimeTensorError(
+                f"from_dlpack layout_tag={layout_token!r} requires "
+                "origin_shape=(M, N) when the DLPack shape cannot supply it"
+            )
+        _require_nz_origin(
+            logical_origin, for_op="from_dlpack", allow_dynamic=host_resident
+        )
+    elif origin_shape is None:
         # A physically contiguous buffer is passed here (stride = (shape[1], 1)).
         # A size-1 extent is exempt: torch is free to leave its stride at 1,
         # which would otherwise make a transposed one-row buffer look non-compact.
@@ -1068,7 +1244,6 @@ def _derive_bind_metadata(
     # rounding an odd cols yields a half-byte stride, and every GM tile whose
     # base sits past row 0 is addressed one byte off per row. Byte-width (and
     # wider) elements keep the exact stride: round_up(cols, 1) is cols.
-    element_bits = int(getattr(dtype, "width", 8))
     linear_stride_alignment_bytes = 1 if 0 < element_bits < 8 else None
     remapped = _remap_tensor_like_prefix_fields_for_layout_trees(
         logical_origin,
@@ -1076,11 +1251,60 @@ def _derive_bind_metadata(
         layout_token,
         linear_stride_alignment_bytes=linear_stride_alignment_bytes,
     )
-    if remapped is None:
-        raise RuntimeTensorError(
-            f"from_dlpack cannot derive layout metadata for origin_shape={logical_origin!r} "
-            f"layout={layout_tag!r}"
+    view_geometry = remapped
+    if is_packed_nz_view and None in logical_origin:
+        # Validate the export with concrete sizes while retaining the dynamic
+        # geometry for the CPU-only compile sample.
+        concrete_origin = tuple(
+            padded if extent is None else extent
+            for extent, padded in zip(logical_origin, padded_origin)
         )
+        view_geometry = _remap_tensor_like_prefix_fields_for_layout_trees(
+            concrete_origin, dtype_token, layout_token
+        )
+    if remapped is None or view_geometry is None:
+        raise RuntimeTensorError(
+            f"from_dlpack cannot derive layout metadata for "
+            f"origin_shape={logical_origin!r} layout={layout_tag!r}"
+        )
+    if is_packed_nz_view:
+        if element_bits != dtype_bits:
+            raise RuntimeTensorError(
+                "from_dlpack four-dimensional packed NZ views require export and "
+                "TLA storage widths to match. Use a flat packed buffer for "
+                "sub-byte elements exported as bytes."
+            )
+        if not _packed_nz_view_matches(phys_shape, phys_strides, view_geometry):
+            raise RuntimeTensorError(
+                "from_dlpack four-dimensional DLPack shape/stride do not match "
+                f"layout {layout_token!r} for origin_shape={logical_origin!r}: "
+                f"expected shape={view_geometry.flat_shape!r} stride={view_geometry.flat_stride!r}, "
+                f"got shape={phys_shape!r} stride={phys_strides!r}"
+            )
+    elif is_nz_family:
+        expected_storage = None
+        if None not in logical_origin:
+            extents, strides = remapped.flat_shape, remapped.flat_stride
+            # The last address follows descriptor strides, including MxScale
+            # pair padding. DLPack extents count exported storage elements.
+            span = (
+                1 + sum((extent - 1) * step for extent, step in zip(extents, strides))
+                if all(extents)
+                else 0
+            )
+            expected_storage = (span * element_bits + dtype_bits - 1) // dtype_bits
+        if is_mx_scale:
+            _require_mx_scale_buffer(
+                layout_token, phys_shape, phys_strides, expected_storage
+            )
+        else:
+            _require_packed_nz_buffer(
+                layout_token,
+                phys_shape,
+                phys_strides,
+                logical_origin,
+                expected_storage_elems=expected_storage,
+            )
     return _BindMetadata(dtype, layout_token, remapped)
 
 
@@ -1092,6 +1316,8 @@ def _bind_metadata(
     dtype_bits: int,
     element_type: type | None,
     origin_shape: Any,
+    *,
+    host_resident: bool,
 ) -> _BindMetadata:
     """:func:`_derive_bind_metadata` with its result memoised on its arguments.
 
@@ -1108,6 +1334,7 @@ def _bind_metadata(
         dtype_bits,
         element_type,
         origin_shape,
+        host_resident,
     )
     try:
         hit = _BIND_METADATA_MEMO.get(key)
@@ -1123,6 +1350,7 @@ def _bind_metadata(
             dtype_bits,
             element_type,
             origin_shape,
+            host_resident=host_resident,
         )
     if hit is not None:
         return hit
@@ -1134,6 +1362,7 @@ def _bind_metadata(
         dtype_bits,
         element_type,
         origin_shape,
+        host_resident=host_resident,
     )
     if len(_BIND_METADATA_MEMO) >= _BIND_METADATA_MEMO_LIMIT:
         _BIND_METADATA_MEMO.clear()
@@ -1152,8 +1381,8 @@ def from_dlpack(
 ) -> _Tensor:
     """Directory: Host Tensor / Binding
     Description:
-        Bind a DLPack NPU tensor to a TLA Host tensor (zero-copy). The returned
-        object shares the device buffer of `tensor_dlpack`.
+        Bind a DLPack buffer to a TLA Host tensor. NPU buffers are shared without
+        copying, and CPU buffers supply metadata for compilation.
 
         Parameters:
         - *`tensor_dlpack`* (`object`): Object implementing `__dlpack__()`.
@@ -1161,19 +1390,27 @@ def from_dlpack(
           host (CPU) buffer, such as a torch tensor on CPU, is accepted too,
           but only its metadata is taken: the result has `data_ptr == 0`, so
           it can be compiled against and not launched. Required.
-        - *`layout_tag`* (`tla.arch.*`): Layout tag such as `tla.arch.RowMajor`,
-          `tla.arch.ColumnMajor`, `tla.arch.zN`. Required.
+        - *`layout_tag`* (`tla.arch.*`): Required layout tag such as
+          `tla.arch.RowMajor`, `tla.arch.ColumnMajor`, `tla.arch.zN`, or
+          `tla.arch.nZ`. The four-dimensional packed NZ view's shape and
+          strides are checked against the specified layout.
         - *`origin_shape`* (`tuple | int | None`): Logical origin as a Python int
-          tree. Optional; derived from the DLPack physical shape and `layout_tag`
-          when omitted. Not a Kernel `tla.make_shape`.
+          tree. Optional for linear layouts (derived from the DLPack physical
+          shape and `layout_tag` when omitted). Flat packed NZ inputs require
+          `(M, N)`. Four-dimensional packed NZ views default to the padded
+          dimensions. Pass `(M, N)` to retain the logical size before padding.
+          GM MxScale infers this pair from a 2-D input when omitted.
+          CPU-only samples can use `None` for a dynamic extent. Four-dimensional
+          views still have their actual export geometry checked.
         - *`assumed_align`* (`int | None`): Reserved; currently unused.
         - *`stream`* (`int | None`): Passed to `__dlpack__(stream=...)`. Default
           `-1` (no stream sync). `None` omits the `stream` argument.
         - *`element_type`* (`type | None`): Optional override for the element
           type inferred from DLPack. Default `None` keeps the DLPack type.
           Use when DLPack cannot express the real type (e.g. fp8): pass
-          `tla.Float8E4M3FN` / `Float8E5M2`. Must have the same per-element
-          bit width as the exported buffer.
+          `tla.Float8E4M3FN` / `Float8E5M2`. Storage widths must match, except
+          for FP4 exported as two elements per integer byte. `Bool` occupies
+          one byte.
 
         Constraints:
         - A host (CPU) buffer binds metadata only. Use it to compile a kernel
@@ -1184,17 +1421,28 @@ def from_dlpack(
           `from_dlpack(x.contiguous().to(device), ...)` is safe.
         - A capsule is single-use; passing an already-consumed capsule raises
           `RuntimeTensorError`. Call `from_dlpack` again for another binding.
+        - If the DLPack export omits strides, assume C-contiguous strides.
         - 2-D `RowMajor` requires `tensor.contiguous()`. 2-D `ColumnMajor`
           requires `tensor.permute(1, 0).contiguous()`. A mismatch raises
           `RuntimeTensorError`. Providing `origin_shape` skips that check.
+        - Packed NZ layouts accept a flat, contiguous prepacked buffer (e.g.
+          `host_nd2nz`) with at least the padded storage length, or a
+          four-dimensional DLPack view in physical leaf order
+          `(m0, m1, n0, n1)`. The view's shape and strides must match the
+          layout, with singleton strides ignored. Export and TLA storage widths
+          must match for four-dimensional views. Use the flat form for FP4
+          exported as bytes.
+        - GM MxScale accepts dense scale storage spanning the remapped
+          descriptor, including any pair padding. Supply `origin_shape` if the
+          DLPack dimensions do not describe the logical scale matrix.
         - A rank-1 `origin_shape` under `RowMajor`/`VectorLayout` is bound as a
           flat, unit-stride run. The buffer must then read consecutive elements
           (`torch.arange(64)[::2]` is refused); this holds whatever rank the
           physical slice is spelled in, and `origin_shape` does not skip it.
-        - Default layout is static. Call `mark_layout_dynamic` /
-          `mark_compact_shape_dynamic` for dynamic extents.
-        - When `element_type` is set, its per-element bit width must match the
-          exported DLPack buffer.
+        - The default layout is static. Call `mark_layout_dynamic()` before
+          compiling with a packed NZ tensor as a GM kernel argument. For linear
+          layouts, `mark_layout_dynamic()` and `mark_compact_shape_dynamic()`
+          make extents dynamic when needed.
 
         Example:
         ```python
@@ -1203,8 +1451,29 @@ def from_dlpack(
             y.permute(1, 0).contiguous(),
             layout_tag=tla.arch.ColumnMajor,
         )
+        t_zn = from_dlpack(
+            zn_buf,
+            layout_tag=tla.arch.zN,
+            origin_shape=(M, N),
+        )
+        # zn_f32 is a flat prepacked buffer for a 32-by-64 FP32 matrix.
+        zn_view = zn_f32.as_strided(
+            size=(16, 2, 8, 8),
+            stride=(8, 128, 1, 256),
+        )
+        t_zn_view = from_dlpack(zn_view, layout_tag=tla.arch.zN)
+        t_zn_view.mark_layout_dynamic()
+        t_nz = from_dlpack(
+            nz_buf,
+            layout_tag=tla.arch.nZ,
+            origin_shape=(M, N),
+        )
         ```
     """
+    if layout_tag is None:
+        raise RuntimeTensorError(
+            "from_dlpack requires layout_tag (e.g. tla.arch.RowMajor or tla.arch.zN)"
+        )
     try:
         dlpack_data = export_dlpack_capsule(tensor_dlpack, stream=stream)
     except DlpackBridgeError as exc:
@@ -1238,12 +1507,6 @@ def from_dlpack(
     if lanes != 1:
         raise RuntimeTensorError(f"unsupported DLPack dtype lanes={lanes}")
 
-    if layout_tag is None:
-        raise RuntimeTensorError(
-            "from_dlpack requires layout_tag (e.g. tla.arch.RowMajor or "
-            "tla.arch.ColumnMajor)"
-        )
-
     # Everything from here to the tensor's metadata is a function of the
     # buffer's geometry, not of its address, so it is derived once per distinct
     # geometry and reused: binding the same resident weight for the four
@@ -1256,6 +1519,7 @@ def from_dlpack(
         int(parsed["dtype_bits"]),
         element_type,
         origin_shape,
+        host_resident=host_resident,
     )
 
     # The trees come from the remap, which is where they are normalized, so the
@@ -1301,8 +1565,12 @@ def _host_make_tensor(ptr: Any, layout: Any, *, coord: Any | None = None) -> _Te
         _Shape,
         _Stride,
         _infer_padded_origin_tree_from_nz_family_shape,
+        _is_flat_pair,
+        _is_nz_family_2x2_tree,
         _resolve_arch_layout_tag,
+        _validate_static_make_tensor_layout,
     )
+    from ..execution_lowering import TlaLoweringError
 
     if not isinstance(ptr, _Pointer) or ptr.value is not None:
         raise TypeError(
@@ -1325,8 +1593,21 @@ def _host_make_tensor(ptr: Any, layout: Any, *, coord: Any | None = None) -> _Te
     shape_tree = shape_obj._components
     stride_tree = stride_obj._components
     layout_token = _resolve_arch_layout_tag(layout.layout_tag, for_op="make_tensor")
+    is_nz_family = layout_token in _NZ_FAMILY_LAYOUT_TOKENS
+    # Some compile samples describe an on-chip NZ tensor as a logical matrix.
+    # An explicit physical layout must give the nesting for both trees.
+    is_physical_nz = is_nz_family and not (
+        _is_flat_pair(shape_tree) and _is_flat_pair(stride_tree)
+    )
+    if is_physical_nz and not (
+        _is_nz_family_2x2_tree(shape_tree) and _is_nz_family_2x2_tree(stride_tree)
+    ):
+        raise RuntimeTensorError(
+            f"make_tensor layout {layout_token!r} requires shape and stride as "
+            f"nested pairs ((m0, m1), (n0, n1)); got {shape_tree!r} and {stride_tree!r}"
+        )
     if origin_obj is None:
-        if layout_token in _NZ_FAMILY_LAYOUT_TOKENS:
+        if is_nz_family:
             origin_tree = _infer_padded_origin_tree_from_nz_family_shape(
                 shape_tree, for_op="make_tensor"
             )
@@ -1334,6 +1615,26 @@ def _host_make_tensor(ptr: Any, layout: Any, *, coord: Any | None = None) -> _Te
             origin_tree = shape_tree
     else:
         origin_tree = origin_obj._components
+
+    dtype_token = str(getattr(ptr.dtype, "dtype", "")).strip().lower()
+    # Host hot path still trusts linear / non-nested metadata (compile samples
+    # and noncompact views). Nested NZ 2x2 trees are the explicit-4D path:
+    # validate layout traits, but do not require equality with a full-tile
+    # remap — cropped fractal tiles keep a smaller ceil leaf than origin.
+    if is_physical_nz:
+        _require_nz_origin(
+            origin_tree, for_op="make_tensor", allow_dynamic=ptr.data_ptr == 0
+        )
+        try:
+            _validate_static_make_tensor_layout(
+                shape_tree,
+                stride_tree,
+                dtype=dtype_token,
+                layout_tag=layout_token,
+                for_op="make_tensor",
+            )
+        except TlaLoweringError as exc:
+            raise RuntimeTensorError(str(exc)) from exc
 
     if coord is None:
         coord_tree = _zeros_index_tree(origin_tree)
@@ -1378,15 +1679,15 @@ def make_fake_tensor(
 
         Parameters:
         - *`dtype`*: Element type such as `tla.Float16` / `tla.Float32`. Required.
-        - *`shape`* (`int | tuple`): Logical shape tree (nested tuples for zN
+        - *`shape`* (`int | tuple`): Shape tree (nested tuples for zN
           physical layouts). Required.
-        - *`stride`* (`int | tuple | None`): Stride tree; structure must match
-          `shape`. When ``None``, derived from layout remap (same as historical
-          ``_Tensor`` construction).
+        - *`stride`* (`int | tuple | None`): Stride tree with the same structure
+          as `shape`. Pass `None` to derive it from the layout.
         - *`layout_tag`*: `tla.arch` tag. Optional; default `tla.arch.RowMajor`.
         - *`addrspace`*: Address space. Optional; default `AddressSpace.gm`.
         - *`origin_shape`* (`int | tuple | None`): Logical origin. Optional;
-          defaults to `shape`.
+          defaults to `shape` for linear layouts and to the padded `(M, N)`
+          for nested NZFamily layouts.
         - *`coord`* (`int | tuple | None`): Coordinate tree. Optional; derived
           from the layout when omitted (typically zeros).
         - *`assumed_align`* (`int | None`): Reserved; currently unused.
@@ -1396,10 +1697,9 @@ def make_fake_tensor(
           not Kernel `tla.make_shape` / `tla.make_stride` / `tla.make_coord`.
         - Always unbound; cannot be launched until replaced by a bound Host
           tensor (`tla.make_tensor` / `from_dlpack`).
-        - Explicit `shape` / `stride` are kept as given (no layout remap).
-        - Signature unchanged; implemented via ``tla.make_ptr`` +
-          ``tla.make_layout`` + Host ``tla.make_tensor``. ``stride=None`` /
-          ``coord=None`` keep the pre-existing remap defaults.
+        - Explicit `shape` / `stride` are kept. Like Host `make_tensor`,
+          nested NZFamily layouts are checked against layout traits and use a
+          flat logical origin. A trait-valid partial view is allowed.
 
         Example:
         ```python
@@ -1418,7 +1718,11 @@ def make_fake_tensor(
     from ..core_api import make_ptr as _make_ptr
     from ..core_api import make_shape as _make_shape
     from ..core_api import make_stride as _make_stride
-    from ..core_api import _resolve_arch_layout_tag
+    from ..core_api import (
+        _NZ_FAMILY_LAYOUT_TOKENS,
+        _infer_padded_origin_tree_from_nz_family_shape,
+        _resolve_arch_layout_tag,
+    )
 
     if layout_tag is None:
         layout_tag = _arch.RowMajor
@@ -1429,6 +1733,11 @@ def make_fake_tensor(
         return (tree,)
 
     shape_tree = _as_host_index_tree(shape, what="shape")
+    layout_token = _resolve_arch_layout_tag(layout_tag, for_op="Tensor")
+    if origin_shape is None and layout_token in _NZ_FAMILY_LAYOUT_TOKENS:
+        origin_shape = _infer_padded_origin_tree_from_nz_family_shape(
+            shape_tree, for_op="make_fake_tensor"
+        )
     origin_tree = _as_host_index_tree(
         shape if origin_shape is None else origin_shape, what="origin_shape"
     )
@@ -1437,7 +1746,6 @@ def make_fake_tensor(
     # Match historical ``_Tensor(..., stride=None, coord=None)``: derive from
     # the same layout remap helper, then feed concrete trees into Host make_*.
     if resolved_stride is None or resolved_coord is None:
-        layout_token = _resolve_arch_layout_tag(layout_tag, for_op="Tensor")
         dtype_token = _coerce_host_tensor_dtype(dtype)
         rs_stride, rs_coord = _try_remap_stride_coord_trees(
             shape_tree, origin_tree, dtype_token, layout_token

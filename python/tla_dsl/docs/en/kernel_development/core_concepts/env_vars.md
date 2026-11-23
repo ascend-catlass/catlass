@@ -87,7 +87,6 @@ Each value selects exactly one artifact and is named after the pipeline stage th
 For example: `tla-ir,kernel` or `all`.
 
 Each value enables only the work its own artifact requires, so requesting one artifact never produces another as a side effect.
-The former values `ir` and `ir-debug` have been **removed**: `ir-debug` stood for two artifacts at once, and keeping it as an alias would have enabled IR printing for callers that never asked for the pass dump.
 
 ---
 

@@ -389,9 +389,10 @@ Constraints:
 
 - Kernel path: must be inside `@tla.kernel`; pointer, layout, and coord
   must match the target address space and dtype.
-- Host path: no frontend; Host ``make_ptr`` / ``make_layout`` only;
-  trusts layout metadata (prefer ``from_dlpack`` when you need those
-  checks). ``loc`` is ignored.
+- Host path: no frontend; Host ``make_ptr`` / ``make_layout`` only.
+  Nested NZFamily 2x2 trees must satisfy layout traits and have a flat
+  logical origin `(M, N)`. Trait-valid partial views are allowed. For a
+  full-tile remap and buffer validation, use ``from_dlpack``. ``loc`` is ignored.
 - `coord` defaults to a zero coord matching the layout's rank (rank-2 ->
   `make_coord(0, 0)`, rank-1 -> `make_coord(0)`). Element type and address
   space come from `ptr`; layout tag, shape, stride, and origin
@@ -404,9 +405,9 @@ Constraints:
 - Kernel-local batched views prepend a scalar batch mode to the physical
   shape and stride, with flat `(B, M, N)` origin and coordinates.
   The batch stride is in elements and may describe disjoint interleaved
-  NZ matrices. Batched views currently support GM-to-L1 `copy` and
-  `get_tile`; host argument binding and other tensor operations retain
-  their existing rank limits.
+  NZ matrices. In the kernel, batched views support GM-to-L1 `copy` and
+  `get_tile`. For Host `from_dlpack` bindings of NZ layouts, the logical
+  origin is two-dimensional `(M, N)`.
 - A full Kernel compile requires `ptr` to carry backing storage; an on-chip
   pointer from `allocate` (optionally via `recast_ptr`) is the supported
   form for runnable kernels.

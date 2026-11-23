@@ -41,7 +41,7 @@ torch.npu.synchronize()
 
 How the compiled artifact is cached, how the first launch differs from repeated launches, and how to reuse the same compiled artifact on multiple devices are described in [Compile and Launch](compile_and_launch.md).
 
-Here `x` must implement `__dlpack__` (usually a `torch` tensor on the NPU, for example via `torch_npu`). The conversion is **zero-copy**: the returned `tla.Tensor` shares the same device memory as the source tensor; the source tensor's lifetime must cover the subsequent `tla.compile` / launch, otherwise the pointer becomes invalid.
+Here `x` is an NPU tensor that implements `__dlpack__`. The returned `tla.Tensor` shares its device memory without copying and retains the source object.
 
 By default you get a **static layout** (the concrete shape / stride / origin are written into the compiled type). To get a dynamic or mixed static/dynamic layout, call `mark_layout_dynamic` / `mark_compact_shape_dynamic` after the conversion (see [Layout](layout.md)).
 
@@ -55,16 +55,18 @@ def from_dlpack(
     origin_shape: Any | None = None,
     assumed_align: int | None = None,
     stream: int | None = -1,
+    element_type: type | None = None,
 ) -> Tensor:
 ```
 
 | Parameter | Description |
 |------|------|
-| `tensor_dlpack` | an object implementing `__dlpack__`; must be a buffer on an **Ascend/NPU device**; CPU / NumPy are not supported |
-| `layout_tag` | **Required**. A `tla.arch` layout tag: 1D `RowMajor`; 2D linear `RowMajor` / `ColumnMajor`; and `zN` / `nZ` / `L0Clayout` / `zNUnAlign` (logical 2D, with shape/stride as nested quadruples) |
-| `origin_shape` | Optional. The logical origin, a plain `tuple` (such as `(M, K)`). When omitted, it is derived from the framework tensor's shape and `layout_tag` |
+| `tensor_dlpack` | An object implementing `__dlpack__`. An **Ascend/NPU** buffer produces a launchable binding. CPU buffers such as PyTorch tensors and NumPy arrays provide metadata for `tla.compile` with `data_ptr == 0`. |
+| `layout_tag` | Required `tla.arch` layout tag. For a 4D packed NZ view, `from_dlpack` checks the exported shape and strides against this tag. |
+| `origin_shape` | Logical shape as a Python tuple (for example, `(M, N)`). Linear layouts can derive it from the input. Flat packed NZ buffers require it. Four-dimensional packed NZ views default to the padded dimensions. |
 | `assumed_align` | **Reserved parameter**. The value passed currently does not affect actual behavior |
 | `stream` | Passed to the framework's `__dlpack__(stream=...)`; it only affects whether the framework side performs stream synchronization during conversion; the default `-1` means no synchronization |
+| `element_type` | Optional TLA element type override. The default `None` uses the DLPack type. |
 
 ### Layout and Physical Storage
 
@@ -78,6 +80,16 @@ When `origin_shape` is not passed, 2D `RowMajor` / `ColumnMajor` must satisfy th
 A `RuntimeTensorError` is raised when the physical layout is inconsistent with `layout_tag`.
 
 If `origin_shape` is passed explicitly, that logical origin is used and the physical layout is no longer validated against the table above. Under nested layouts such as `zN`, the logical origin is 2D `(M, N)`, and the corresponding shape / stride are nested quadruples.
+
+A 4D packed NZ view exposes the physical dimensions in `(m0, m1, n0, n1)` order. Its shape and effective strides must match the packed layout. Pass `origin_shape=(M, N)` to keep the logical size before padding. Call `mark_layout_dynamic()` on a packed NZ tensor before compiling a kernel that takes it as a GM argument.
+
+PyTorch's `as_strided` takes the view's shape as its `size` argument.
+
+```python
+# packed_zn is a flat prepacked FP32 NPU buffer for a (32, 64) zN matrix.
+view_4d = packed_zn.as_strided(size=(16, 2, 8, 8), stride=(8, 128, 1, 256))
+gm = tla.from_dlpack(view_4d, layout_tag=tla.arch.zN).mark_layout_dynamic()
+```
 
 ### Code Example
 

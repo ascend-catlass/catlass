@@ -155,6 +155,9 @@ For example, a rank-1 static memref selects indices `(0, 1, 2, 3, 7)`, not the f
 
 Dynamic-GM directly packs all 13 values; multiple descriptors form independent field groups respectively.
 
+For NZFamily, the schema v4 runtime fills all four physical size and stride slots
+in `(m0, m1, n0, n1)` order. The last two slots hold the logical dimensions `(M, N)`.
+
 Thus the nested position only affects the logical path and does not change the descriptor rules for that Tensor.
 For a runnable example, see [mixed_memref_arguments.py](../../../../../../examples/python/tla_dsl/dsl_tutorials/structured_arguments/mixed_memref_arguments.py).
 

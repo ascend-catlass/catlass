@@ -42,7 +42,7 @@ torch.npu.synchronize()
 编译产物如何缓存、首次与重复启动有何区别，以及如何在多个设备上复用同一份编译
 产物，见 [编译与启动](compile_and_launch.md)。
 
-其中 `x` 须实现 `__dlpack__`（通常为 NPU 上的 `torch` tensor，如经 `torch_npu`）。转换**零拷贝**：返回的 `tla.Tensor` 与源 tensor 共享同一块设备内存；源 tensor 生命周期须覆盖后续 `tla.compile` / launch，否则指针失效。
+示例中的 `x` 是实现 `__dlpack__` 的 NPU 张量。返回的 `tla.Tensor` 与 `x` 零拷贝共享设备内存，并持有对 `x` 的引用。
 
 默认得到**静态 layout**（具体 shape / stride / origin 写进编译类型）。要得到动态或混合静态/动态 layout，须在转换后调用 `mark_layout_dynamic` / `mark_compact_shape_dynamic`（见 [Layout](layout.md)）。
 
@@ -56,16 +56,18 @@ def from_dlpack(
     origin_shape: Any | None = None,
     assumed_align: int | None = None,
     stream: int | None = -1,
+    element_type: type | None = None,
 ) -> Tensor:
 ```
 
 | 参数 | 说明 |
 |------|------|
-| `tensor_dlpack` | 实现 `__dlpack__` 的对象。**Ascend/NPU 设备**上的缓冲区得到可下发的张量；Host（CPU）缓冲区（CPU 上的 torch 张量、NumPy 数组）也可传入，但只取其元数据（`data_ptr == 0`），仅可用于编译，不可下发 |
-| `layout_tag` | **必填**。`tla.arch` 布局标签：一维 `RowMajor`；二维线性 `RowMajor` / `ColumnMajor`；以及 `zN` / `nZ` / `L0Clayout` / `zNUnAlign`（逻辑二维，shape/stride 为嵌套四元组） |
-| `origin_shape` | 可选。逻辑 origin，普通 `tuple`（如 `(M, K)`）。省略时由框架张量的 shape 与 `layout_tag` 推导 |
+| `tensor_dlpack` | 实现 `__dlpack__` 的对象。**Ascend/NPU** 缓冲区可用于启动 kernel。CPU 缓冲区（如 PyTorch 张量和 NumPy 数组）仅提供 `tla.compile` 所需的元数据，返回的张量 `data_ptr == 0`。 |
+| `layout_tag` | 必填的 `tla.arch` 布局标签。对于四维预打包 NZ 视图，`from_dlpack` 按此标签校验导出的形状和步长。 |
+| `origin_shape` | 以 Python 元组表示的逻辑形状，例如 `(M, N)`。线性布局可从输入推导。一维预打包 NZ 缓冲区须显式传入，四维预打包 NZ 视图默认使用填充后的尺寸。 |
 | `assumed_align` | **预留参数**。当前传入值不影响实际行为 |
 | `stream` | 传给框架的 `__dlpack__(stream=...)`，只影响转换时框架侧是否做流同步；默认 `-1` 表示不做同步 |
+| `element_type` | 可选，指定 TLA 元素类型。默认 `None`，使用 DLPack 元素类型。 |
 
 ### 布局与物理存储
 
@@ -79,6 +81,16 @@ def from_dlpack(
 物理布局与 `layout_tag` 不一致时抛出 `RuntimeTensorError`。
 
 若显式传入 `origin_shape`，则使用该逻辑 origin，且不再按上表校验物理布局。`zN` 等嵌套布局下，逻辑 origin 为二维 `(M, N)`，对应的 shape / stride 为嵌套四元组。
+
+四维预打包 NZ 视图按 `(m0, m1, n0, n1)` 的顺序导出物理维度。形状和有效步长须匹配预打包布局。传入 `origin_shape=(M, N)` 可保留填充前的逻辑尺寸。将预打包 NZ 张量作为 GM 参数传给 kernel 时，编译前须调用 `mark_layout_dynamic()`。
+
+PyTorch 的 `as_strided` 通过 `size` 参数接收视图的形状。
+
+```python
+# packed_zn 是逻辑尺寸为 (32, 64) 的 FP32 zN 一维预打包 NPU 缓冲区。
+view_4d = packed_zn.as_strided(size=(16, 2, 8, 8), stride=(8, 128, 1, 256))
+gm = tla.from_dlpack(view_4d, layout_tag=tla.arch.zN).mark_layout_dynamic()
+```
 
 ### 代码示例
 

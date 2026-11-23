@@ -7,6 +7,7 @@ import inspect
 
 import catlass.tla as tla
 import catlass.runtime as runtime_mod
+from catlass.core_api import _remap_tensor_like_prefix_fields_for_layout_trees
 from catlass.execution_lowering import TlaLoweringError
 from catlass import _tla_type_bridge
 
@@ -261,14 +262,19 @@ def _gemv_lhs(k: int):
     )
 
 def _gemv_rhs(k: int, n: int, layout_tag=tla.arch.nZ):
+    dtype = tla.Float32
+    geometry = _remap_tensor_like_prefix_fields_for_layout_trees(
+        (k, n), dtype.dtype, str(layout_tag)
+    )
+    assert geometry is not None
     return make_fake_tensor(
-        tla.Float32,
-        ((16, k // 16), (16, n // 16)),
-        ((1, 2048), (16, 256)),
+        dtype,
+        geometry.shape,
+        geometry.stride,
         addrspace=tla.AddressSpace.l0b,
-        origin_shape=(k, n),
+        origin_shape=geometry.origin_shape,
         layout_tag=layout_tag,
-        coord=(0, 0),
+        coord=geometry.coord,
     )
 
 def _gemv_acc(m: int, n: int):

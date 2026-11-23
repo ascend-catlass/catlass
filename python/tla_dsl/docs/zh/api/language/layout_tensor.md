@@ -381,8 +381,9 @@ tla.make_tensor(ptr: Pointer, layout: TlaLayout, coord: CoordLike | None = None)
 约束说明：
 
 - Kernel 路径：须在 `@tla.kernel` 内；指针、layout、coord 须匹配目标地址空间与 dtype。
-- Host 路径：无 frontend；仅 Host ``make_ptr`` / ``make_layout``；
-  信任 layout 元数据（需要校验时请用 ``from_dlpack``）。``loc`` 忽略。
+- Host 路径使用 Host `make_ptr` 和 `make_layout`。嵌套 NZFamily 2*2 树必须满足
+  布局约束，并使用平坦的逻辑 `origin_shape=(M, N)`。支持满足布局约束的局部视图。
+  需验证完整 remap 和 DLPack 缓冲区时，使用 `from_dlpack`。Host 路径忽略 `loc`。
 - `coord` 缺省为零坐标，秩与 layout 一致（秩 2 → `make_coord(0, 0)`，秩 1 → `make_coord(0)`）。元素类型与地址空间来自 `ptr`；layout tag、shape、stride、origin 来自 layout（未给 `origin_shape` 时 origin 默认为 `shape`）。
 - Lowering 支持 RowMajor、ColumnMajor、zN、nZ、L0Clayout、zNUnAlign。
   对 `zN` / `nZ` / `L0Clayout` / `zNUnAlign`，物理 `shape` / `stride`
@@ -390,8 +391,8 @@ tla.make_tensor(ptr: Pointer, layout: TlaLayout, coord: CoordLike | None = None)
   省略 `origin_shape`，则从物理 shape 推断逻辑尺寸（例如 `(m0*m1, n0*n1)`）。
 - Kernel 内部的批矩阵视图在物理 shape 和 stride 前增加标量批次维，
   origin 和坐标为扁平 `(B, M, N)`。批次 stride 以元素为单位，允许描述
-  存储互不重叠的交错 NZ 矩阵。目前批矩阵视图支持 GM→L1 `copy` 和
-  `get_tile`；Host 参数绑定及其他 tensor 操作保留原有的秩限制。
+  存储互不重叠的交错 NZ 矩阵。Kernel 内的批矩阵视图支持 GM→L1 `copy` 和
+  `get_tile`。Host 通过 `from_dlpack` 绑定 NZ 布局时，逻辑形状为二维 `(M, N)`。
 - 完整 Kernel 编译要求 `ptr` 具备底层存储；可运行 kernel 中片上指针的推荐形式是 `allocate`（可选再经 `recast_ptr`）。
 
 调用示例：

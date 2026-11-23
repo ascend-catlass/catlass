@@ -190,10 +190,8 @@ HOST_ENTRY_OVERRIDES: dict[str, dict[str, object]] = {
 HOST_MAKE_TENSOR_DOC = """\
 Directory: Host Tensor / Binding
 Description:
-    Bind a pointer and layout as a TLA Host tensor without DLPack (dual-mode
-    ``tla.make_tensor`` outside ``@tla.kernel``). Prefer this on the launch hot
-    path when address and layout metadata are already known: it skips capsule
-    export/parse/ownership and does not open ``_eager_capture``.
+    When the buffer address and layout are known, call
+    ``tla.make_tensor(ptr, layout)`` on the Host to bind the buffer directly.
 
     Build ``ptr`` / ``layout`` with the same ``tla.make_ptr`` /
     ``tla.make_layout`` APIs used in Kernel code. Inside a kernel the same
@@ -212,9 +210,10 @@ Constraints:
     - Host path rejects Kernel SSA ``Pointer`` / ``Layout``; call
       ``tla.make_ptr`` / ``tla.make_layout`` on the Host (no ``@tla.kernel``
       context).
-    - Hot-path bind trusts ``make_ptr`` / ``make_layout`` metadata (no
-      Kernel trait checks / RM-CM compact gate). Keep buffer metadata
-      consistent; prefer ``from_dlpack`` when you need those checks.
+    - Nested NZFamily 2x2 trees must satisfy layout traits and have a flat
+      logical origin `(M, N)`. Trait-valid partial views are allowed.
+      The caller supplies the allocation and its metadata. Use ``from_dlpack``
+      to validate a full-tile remap against an exported buffer.
     - Does **not** own DLPack lifetime. Keep the live buffer alive across
       launch.
     - ``ptr.data_ptr == 0`` builds an unbound sample (`_external_binding` is

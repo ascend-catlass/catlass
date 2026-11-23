@@ -123,6 +123,10 @@ GM_L1_BOOL_HIF8_CASES = (
     "nd2nz-i8",
 )
 GM_L1_BOOL_HIF8_CASE_IDS = {f"gm-l1-bool-hif8-{case}" for case in GM_L1_BOOL_HIF8_CASES}
+HOST_DLPACK_GM_L1_CASES = {
+    f"host-dlpack-{layout.lower()}-gm-l1": layout
+    for layout in ("zN", "nZ")
+}
 
 EVG_OPS = (
     "add",
@@ -655,6 +659,12 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         "host-make-tensor-torch-vadd",
         [["end_to_end/host_make_tensor_torch_vadd.py", *dev, "--block-num", "1"]],
     )
+    # Host from_dlpack NZFamily (4-leaf / 13-slot ABI) → GM zN/nZ → L1 copy.
+    for case_id, layout in HOST_DLPACK_GM_L1_CASES.items():
+        yield (
+            case_id,
+            [["end_to_end/host_dlpack_zn_gm_to_l1_copy.py", *dev, "--layout", layout]],
+        )
     # tla.full with a runtime scalar (kernel argument captured into the vector
     # helper, lowered to ave.hir.broadcast / vdups.z). Kernel is not
     # block-partitioned, so launch a single vector core.
@@ -1474,6 +1484,7 @@ def test_case(case_id: str, device: int) -> None:
         or case_id in L1_FILL_CASE_IDS
         or case_id in VECTOR_LAYOUT_GM_L1_CASE_IDS
         or case_id in GM_L1_BOOL_HIF8_CASE_IDS
+        or case_id in HOST_DLPACK_GM_L1_CASES
     ):
         from catlass.base_dsl.runtime import ascend_debug_fifo
 

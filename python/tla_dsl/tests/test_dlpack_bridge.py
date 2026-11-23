@@ -56,8 +56,8 @@ class _ManagedExport:
     def __init__(
         self,
         *,
-        shape: tuple[int, int] = (2, 3),
-        strides: tuple[int, int] | None = (3, 1),
+        shape: tuple[int, ...] = (2, 3),
+        strides: tuple[int, ...] | None = (3, 1),
         device_type: int = int(DLDeviceType.kDLNpuCandidate1),
     ) -> None:
         self._shape = shape
@@ -146,11 +146,24 @@ def test_from_dlpack_preserves_column_major_logical_metadata() -> None:
     )
 
 
-def test_from_dlpack_zn_uses_layout_leaves_for_launch() -> None:
+def _f32_packed_numel_zn(rows: int, cols: int) -> int:
+    """Padded f32 zN element count: round_up(M,16) * round_up(N,8)."""
+    return ((rows + 15) // 16 * 16) * ((cols + 7) // 8 * 8)
+
+
+def _f32_packed_numel_nz(rows: int, cols: int) -> int:
+    """Padded f32 nZ element count: round_up(M,8) * round_up(N,16)."""
+    return ((rows + 7) // 8 * 8) * ((cols + 15) // 16 * 16)
+
+
+@pytest.mark.parametrize("extra_storage", [0, 1])
+def test_from_dlpack_zn_uses_layout_leaves_for_launch(extra_storage) -> None:
+    rows, cols = 32, 64
+    packed = _f32_packed_numel_zn(rows, cols)
     tensor = from_dlpack(
-        _ManagedExport(),
+        _ManagedExport(shape=(packed + extra_storage,), strides=(1,)),
         layout_tag=tla.arch.zN,
-        origin_shape=(32, 64),
+        origin_shape=(rows, cols),
     )
 
     assert tensor.shape == ((16, 2), (8, 8))
@@ -172,10 +185,402 @@ def test_from_dlpack_zn_uses_layout_leaves_for_launch() -> None:
     )
 
 
-def test_parse_rejects_null_dlpack_strides() -> None:
-    exporter = _ManagedExport(strides=None)
+@pytest.mark.parametrize("extra_storage", [0, 1])
+def test_from_dlpack_nz_uses_layout_leaves_for_launch(extra_storage) -> None:
+    """nZ is the column-fractal dual of zN; still packs into the 13-slot ABI."""
+    rows, cols = 32, 64
+    packed = _f32_packed_numel_nz(rows, cols)
+    tensor = from_dlpack(
+        _ManagedExport(shape=(packed + extra_storage,), strides=(1,)),
+        layout_tag=tla.arch.nZ,
+        origin_shape=(rows, cols),
+    )
 
-    with pytest.raises(RuntimeTensorError, match="null strides"):
+    assert tensor.shape == ((8, 4), (16, 4))
+    assert tensor.stride == ((1, 512), (8, 128))
+    fields = tensor.build_memref_launch_fields()
+    assert len(fields) == 13
+    assert fields == (
+        tensor.data_ptr,
+        tensor.data_ptr,
+        0,
+        8,
+        4,
+        16,
+        4,
+        1,
+        512,
+        8,
+        128,
+        32,
+        64,
+    )
+
+
+def test_from_dlpack_zn_reads_four_dimensional_export() -> None:
+    tensor = from_dlpack(
+        _ManagedExport(shape=(16, 2, 8, 8), strides=(8, 128, 1, 256)),
+        layout_tag=tla.arch.zN,
+    )
+
+    assert tensor.layout_tag == "zN"
+    assert tensor.shape == ((16, 2), (8, 8))
+    assert tensor.stride == ((8, 128), (1, 256))
+    assert tensor.build_memref_launch_fields()[-2:] == (32, 64)
+    tensor.origin_shape = (28, 62)
+    assert tensor.build_memref_launch_fields()[-2:] == (28, 62)
+
+
+def test_from_dlpack_zn_canonicalizes_singleton_export_stride() -> None:
+    tensor = from_dlpack(
+        _ManagedExport(shape=(16, 1, 8, 2), strides=(8, 1, 1, 128)),
+        layout_tag=tla.arch.zN,
+    )
+    assert tensor.layout_tag == "zN"
+    assert tensor.stride == ((8, 128), (1, 128))
+
+
+@pytest.mark.parametrize(
+    ("strides", "layout_tag"),
+    [((128, 64, 8, 1), tla.arch.zN), ((8, 128, 1, 256), tla.arch.nZ)],
+)
+def test_from_dlpack_rejects_four_dimensional_layout_mismatch(
+    strides, layout_tag
+) -> None:
+    exporter = _ManagedExport(shape=(16, 2, 8, 8), strides=strides)
+    with pytest.raises(RuntimeTensorError, match="do not match layout"):
+        from_dlpack(exporter, layout_tag=layout_tag)
+
+
+def test_from_dlpack_validates_four_dimensional_dynamic_cpu_sample() -> None:
+    cpu = int(DLDeviceType.kDLCPU)
+    kwargs = dict(layout_tag=tla.arch.zN, origin_shape=(None, None))
+    shape = (16, 1, 8, 2)
+    sample = from_dlpack(
+        _ManagedExport(shape=shape, strides=(8, 128, 1, 128), device_type=cpu), **kwargs
+    )
+    assert sample.data_ptr == 0
+    assert sample.origin_shape == (None, None)
+    assert sample.shape == ((16, None), (8, None))
+    with pytest.raises(RuntimeTensorError, match="do not match layout"):
+        from_dlpack(
+            _ManagedExport(shape=shape, strides=(8, 128, 1, 0), device_type=cpu),
+            **kwargs,
+        )
+
+
+def test_from_dlpack_zn_rejects_four_dimensional_origin_inconsistency() -> None:
+    """Trait-legal leaves that disagree with origin remap are still refused."""
+    with pytest.raises(RuntimeTensorError, match="do not match layout"):
+        from_dlpack(
+            _ManagedExport(shape=(16, 4, 8, 8), strides=(8, 128, 1, 512)),
+            layout_tag=tla.arch.zN,
+            origin_shape=(32, 64),
+        )
+
+
+@pytest.mark.parametrize(
+    ("shape", "strides"), [((2048,), (1,)), ((16, 2, 8, 8), (8, 128, 1, 256))]
+)
+def test_from_dlpack_requires_layout_tag(shape, strides) -> None:
+    exporter = _ManagedExport(shape=shape, strides=strides)
+    with pytest.raises(TypeError, match="layout_tag"):
+        from_dlpack(exporter)
+    with pytest.raises(RuntimeTensorError, match="requires layout_tag"):
+        from_dlpack(exporter, layout_tag=None)
+
+
+def test_host_make_tensor_zn_keeps_explicit_trees() -> None:
+    host = tla.make_tensor(
+        tla.make_ptr(tla.Float32, 0, tla.AddressSpace.gm),
+        tla.make_layout(
+            tla.make_shape((16, 2), (8, 8)),
+            tla.make_stride((8, 128), (1, 256)),
+            origin_shape=tla.make_shape(32, 64),
+            layoutTag=tla.arch.zN,
+        ),
+    )
+    assert host.shape == ((16, 2), (8, 8))
+    assert host.stride == ((8, 128), (1, 256))
+    assert host.origin_shape == (32, 64)
+
+
+@pytest.mark.parametrize(
+    ("shape", "stride", "message"),
+    [
+        (((8, 4), (8, 8)), ((8, 128), (1, 256)), "do not match layout"),
+        (((16, 2), (8, 8)), ((8, 7), (1, 256)), "do not match layout"),
+        (((16, 2), (8, 8)), (8, 7, 1, 256), "requires shape and stride"),
+        ((16, 2, 8, 8), ((8, 128), (1, 256)), "requires shape and stride"),
+    ],
+)
+def test_host_make_tensor_zn_rejects_bad_explicit_trees(shape, stride, message) -> None:
+    # Host make_tensor trait-checks nested NZ trees; remap equality is a
+    # from_dlpack gate (tiles may use a smaller ceil leaf than origin).
+    with pytest.raises(RuntimeTensorError, match=message):
+        tla.make_tensor(
+            tla.make_ptr(tla.Float32, 0, tla.AddressSpace.gm),
+            tla.make_layout(
+                tla.make_shape(*shape),
+                tla.make_stride(*stride),
+                origin_shape=tla.make_shape(32, 64),
+                layoutTag=tla.arch.zN,
+            ),
+        )
+
+
+@pytest.mark.parametrize("derive_stride", [False, True])
+def test_make_fake_tensor_infers_nz_origin_and_coord(derive_stride) -> None:
+    shape = ((16, 2), (8, 8))
+    stride = ((8, 128), (1, 256))
+    fake = tla.make_fake_tensor(
+        tla.Float32, shape, None if derive_stride else stride, layout_tag=tla.arch.zN
+    )
+    assert (fake.shape, fake.stride, fake.origin_shape, fake.coord) == (
+        shape,
+        stride,
+        (32, 64),
+        (0, 0),
+    )
+
+
+def test_from_dlpack_zn_requires_origin_shape() -> None:
+    with pytest.raises(RuntimeTensorError, match="requires origin_shape"):
+        from_dlpack(
+            _ManagedExport(shape=(2048,), strides=(1,)),
+            layout_tag=tla.arch.zN,
+        )
+
+
+def test_from_dlpack_zn_rejects_nd_logical_view() -> None:
+    """Aligned ND (M,N) must not pass as zN even when lengths coincide."""
+    with pytest.raises(RuntimeTensorError, match="flat 1-D prepacked"):
+        from_dlpack(
+            _ManagedExport(shape=(32, 64), strides=(64, 1)),
+            layout_tag=tla.arch.zN,
+            origin_shape=(32, 64),
+        )
+
+
+def test_from_dlpack_zn_rejects_wrong_packed_numel() -> None:
+    with pytest.raises(RuntimeTensorError, match="requires a contiguous prepacked"):
+        from_dlpack(
+            _ManagedExport(shape=(16,), strides=(1,)),
+            layout_tag=tla.arch.zN,
+            origin_shape=(32, 64),
+        )
+
+
+def test_from_dlpack_zn_rejects_strided_packed_run() -> None:
+    with pytest.raises(RuntimeTensorError, match="contiguous prepacked"):
+        from_dlpack(
+            _ManagedExport(shape=(2048,), strides=(2,)),
+            layout_tag=tla.arch.zN,
+            origin_shape=(32, 64),
+        )
+
+
+@pytest.mark.parametrize(
+    ("element_type", "origin", "storage_elems"),
+    [(tla.Bool, (16, 32), 512), (tla.Float4E2M1, (16, 64), 512)],
+)
+def test_from_dlpack_zn_checks_storage_width(
+    element_type, origin, storage_elems
+) -> None:
+    kwargs = dict(
+        layout_tag=tla.arch.zN, origin_shape=origin, element_type=element_type
+    )
+    packed = from_dlpack(np.zeros(storage_elems, dtype=np.uint8), **kwargs)
+    assert packed.origin_shape == origin
+    oversized = from_dlpack(np.zeros(storage_elems + 1, dtype=np.uint8), **kwargs)
+    assert (oversized.shape, oversized.stride) == (packed.shape, packed.stride)
+    for bad_size in (64, storage_elems - 1):
+        with pytest.raises(
+            RuntimeTensorError, match=f"buffer of at least {storage_elems} elements"
+        ):
+            from_dlpack(np.zeros(bad_size, dtype=np.uint8), **kwargs)
+
+
+def test_from_dlpack_nz_preserves_logical_origin_of_padded_view() -> None:
+    tensor = from_dlpack(
+        _ManagedExport(shape=(8, 3, 16, 3), strides=(1, 384, 8, 128)),
+        layout_tag=tla.arch.nZ,
+        origin_shape=(19, 33),
+    )
+    assert tensor.layout_tag == "nZ"
+    assert tensor.build_memref_launch_fields()[3:] == (
+        8,
+        3,
+        16,
+        3,
+        1,
+        384,
+        8,
+        128,
+        19,
+        33,
+    )
+
+
+def test_from_dlpack_rejects_float32_storage_as_float16() -> None:
+    with pytest.raises(
+        RuntimeTensorError, match="16-bit but the exported buffer is 32-bit"
+    ):
+        from_dlpack(
+            np.zeros(512, dtype=np.float32),
+            layout_tag=tla.arch.zN,
+            origin_shape=(32, 32),
+            element_type=tla.Float16,
+        )
+
+
+@pytest.mark.parametrize(
+    ("layout", "origin", "stride"),
+    [
+        (tla.arch.RowMajorMxScaleA, (32, 3), ((0, 4), (1, 2))),
+        (tla.arch.ColMajorMxScaleA, (32, 3), ((0, 2), (1, 64))),
+        (tla.arch.RowMajorMxScaleB, (3, 32), ((1, 64), (0, 2))),
+        (tla.arch.ColMajorMxScaleB, (3, 32), ((1, 2), (0, 4))),
+    ],
+)
+def test_from_dlpack_mx_scale_checks_padded_storage(layout, origin, stride) -> None:
+    kwargs = dict(layout_tag=layout, element_type=tla.Float8E8M0, origin_shape=origin)
+    # An address-contiguous transpose is a valid prepared scale buffer.
+    transposed = np.zeros((4, 32), dtype=np.uint8).T
+    assert from_dlpack(transposed, **kwargs).stride == stride
+    for bad_size in (1, 127):
+        with pytest.raises(RuntimeTensorError, match="at least 128 storage elements"):
+            from_dlpack(np.zeros(bad_size, dtype=np.uint8), **kwargs)
+    with pytest.raises(RuntimeTensorError, match="requires dense MxScale storage"):
+        from_dlpack(np.zeros(256, dtype=np.uint8)[::2], **kwargs)
+
+
+def test_from_dlpack_mx_scale_infers_origin_from_2d_input() -> None:
+    kwargs = dict(layout_tag=tla.arch.RowMajorMxScaleA, element_type=tla.Float8E8M0)
+    tensor = from_dlpack(np.zeros((32, 4), dtype=np.uint8), **kwargs)
+    assert (tensor.origin_shape, tensor.shape, tensor.stride) == (
+        (32, 4),
+        ((1, 32), (2, 2)),
+        ((0, 4), (1, 2)),
+    )
+    with pytest.raises(RuntimeTensorError, match="requires origin_shape"):
+        from_dlpack(np.zeros(128, dtype=np.uint8), **kwargs)
+
+
+def test_from_dlpack_mx_scale_rejects_negative_export_extents() -> None:
+    class InvalidExport(_ManagedExport):
+        def _build_managed(self):
+            managed = super()._build_managed()
+            managed.dl_tensor.dtype = DLDataType(int(DLDataTypeCode.kDLUInt), 8, 1)
+            managed.dl_tensor.shape[0] = -128
+            managed.dl_tensor.shape[1] = -128
+            return managed
+
+    with pytest.raises(RuntimeTensorError, match="non-negative DLPack extents"):
+        from_dlpack(
+            InvalidExport(),
+            layout_tag=tla.arch.RowMajorMxScaleA,
+            element_type=tla.Float8E8M0,
+            origin_shape=(32, 4),
+        )
+
+
+def test_from_dlpack_zn_dynamic_origin_is_compile_only() -> None:
+    kwargs = dict(layout_tag=tla.arch.zN, origin_shape=(None, 16))
+    sample = from_dlpack(np.zeros(256, dtype=np.float32), **kwargs)
+    assert sample.data_ptr == 0
+    assert sample.origin_shape == (None, 16)
+    assert sample.shape == ((16, None), (8, 2))
+    # Same geometry as the CPU sample must not get past the device check via the memo.
+    with pytest.raises(RuntimeTensorError, match="with concrete integers"):
+        from_dlpack(_ManagedExport(shape=(256,), strides=(1,)), **kwargs)
+
+
+def test_host_make_tensor_zn_rejects_nested_origin() -> None:
+    with pytest.raises(RuntimeTensorError, match="flat NZFamily origin_shape"):
+        tla.make_tensor(
+            tla.make_ptr(tla.Float32, 1, tla.AddressSpace.gm),
+            tla.make_layout(
+                tla.make_shape((16, 2), (8, 8)),
+                tla.make_stride((8, 128), (1, 256)),
+                origin_shape=tla.make_shape((16, 2), (8, 8)),
+                layoutTag=tla.arch.zN,
+            ),
+        )
+
+
+def test_linear_launch_fields_reject_nested_origin() -> None:
+    bound = tla.make_tensor(
+        tla.make_ptr(tla.Float32, 64, tla.AddressSpace.gm),
+        tla.make_layout(
+            tla.make_shape(4, 8),
+            tla.make_stride(8, 1),
+            origin_shape=tla.make_shape((2, 2), (2, 4)),
+            layoutTag=tla.arch.RowMajor,
+        ),
+    )
+    with pytest.raises(RuntimeTensorError, match="concrete integer origin_shape"):
+        bound.build_memref_launch_fields()
+
+
+def test_host_make_tensor_zn_keeps_trait_valid_partial_view() -> None:
+    shape, stride, origin = ((16, 1), (8, 8)), ((8, 128), (1, 256)), (32, 64)
+    layout = tla.make_layout(
+        tla.make_shape(*shape),
+        tla.make_stride(*stride),
+        origin_shape=tla.make_shape(*origin),
+        layoutTag=tla.arch.zN,
+    )
+    host = tla.make_tensor(tla.make_ptr(tla.Float32, 1, tla.AddressSpace.gm), layout)
+    assert host.build_memref_launch_fields()[3:] == (
+        16,
+        1,
+        8,
+        8,
+        8,
+        128,
+        1,
+        256,
+        32,
+        64,
+    )
+    fake = tla.make_fake_tensor(
+        tla.Float32, shape, stride, layout_tag=tla.arch.zN, origin_shape=origin
+    )
+    assert (fake.shape, fake.stride, fake.origin_shape) == (shape, stride, origin)
+    with pytest.raises(RuntimeTensorError, match="do not match layout"):
+        from_dlpack(
+            _ManagedExport(shape=(16, 1, 8, 8), strides=(8, 128, 1, 256)),
+            layout_tag=tla.arch.zN,
+            origin_shape=origin,
+        )
+
+
+def test_from_dlpack_derives_legacy_compact_strides() -> None:
+    matrix = from_dlpack(_ManagedExport(strides=None), layout_tag=tla.arch.RowMajor)
+    assert (matrix.shape, matrix.stride) == ((2, 3), (3, 1))
+    tensor = from_dlpack(
+        _ManagedExport(shape=(16, 1, 8, 1), strides=None), layout_tag=tla.arch.zN
+    )
+    assert tensor.layout_tag == "zN"
+    assert tensor.build_memref_launch_fields()[3:] == (
+        16,
+        1,
+        8,
+        1,
+        8,
+        128,
+        1,
+        128,
+        16,
+        8,
+    )
+
+
+def test_from_dlpack_releases_a_buffer_with_rejected_geometry() -> None:
+    exporter = _ManagedExport(strides=(1, 2))
+
+    with pytest.raises(RuntimeTensorError, match="requires a buffer prepared"):
         from_dlpack(exporter, layout_tag=tla.arch.RowMajor)
 
     # A rejected capsule was never consumed, so the producer still owns it and

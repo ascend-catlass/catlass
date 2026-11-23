@@ -73,7 +73,7 @@ When you need to explicitly declare that "this argument is a compile-time consta
 
 ### Compile-time expansion
 
-When a small, intentional compile-time expansion is needed, use `tla.range_constexpr(...)`. The bounds must be compile-time Python integers (they may also come from compile-time Numeric values such as `tla.as_numeric(...)`); Python executes the loop while building the kernel and expands the loop body. When the iteration count reaches 64 or more, CATLASS emits one `DSLOptimizationWarning` before expansion but **still continues expanding**. When expansion is not needed, prefer `range(...)` or `tla.range(...)`.
+When a small, intentional compile-time expansion is needed, use `tla.range_constexpr(...)`. The bounds must be compile-time Python integers (they may also come from compile-time Numeric values such as `tla.as_numeric(...)`); Python executes the loop while building the kernel and expands the loop body. When the iteration count reaches 64 or more, CATLASS emits one `DSLOptimizationWarning` before expansion but **still continues expanding**. Use `tla.range(...)` for a runtime loop.
 
 ```python
 @tla.kernel
@@ -83,14 +83,6 @@ def static_stages(count: tla.Constexpr[int]) -> None:
 ```
 
 A compile-time `while` uses `while tla.const_expr(condition):`, with the same warning behavior; an incorrect condition may make compilation unable to terminate, so `tla.range_constexpr(...)` is more recommended for bounded repetition.
-
-### Planned semantic changes
-
-The following semantic changes have been confirmed in review, and the corresponding sections of this document will be updated when the code lands. When writing kernels now, it is recommended to adopt the target form directly to avoid later migration:
-
-- **`range` semantics adjustment**: `range` (the Python built-in) will change from "compile-time expansion" to execution-time (dynamic) semantics; in the future `tla.range == range`.
-- **Explicit compile-time expansion**: loops that need compile-time expansion will uniformly be written explicitly as `tla.range_constexpr` (see 2.1), no longer relying on the built-in `range`.
-- **`@tla.jit` requirement**: ordinary Python functions entering a kernel will be required to be explicitly decorated with `@tla.jit` (see 1.3), no longer allowing bare module-level functions to participate implicitly.
 
 ## Control-Flow Restrictions
 

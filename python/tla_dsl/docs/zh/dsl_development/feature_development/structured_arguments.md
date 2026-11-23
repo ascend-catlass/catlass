@@ -163,6 +163,9 @@ packer 准备阶段校验静态 rank（1～4）、字段顺序、宽度和分组
 
 Dynamic-GM 直接打包全部 13 个值；多个描述符分别形成独立字段组。
 
+对于 NZFamily，schema v4 运行时按 `(m0, m1, n0, n1)` 的顺序填入四个物理尺寸和四个物理步长，
+最后两个槽记录逻辑尺寸 `(M, N)`。
+
 这样嵌套位置只影响逻辑路径，不改变该 Tensor 的描述符规则。
 可运行用例见 [mixed_memref_arguments.py](../../../../../../examples/python/tla_dsl/dsl_tutorials/structured_arguments/mixed_memref_arguments.py)。
 

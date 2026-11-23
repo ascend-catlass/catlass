@@ -26,7 +26,7 @@ Context labels: **Host** means a Python script outside `@tla.kernel`; **kernel**
 | [`@tla.extern`](runtime/kernel_entry.md#tlaextern) | Declare an Ascend C ABI entry implemented by inline source. | Host declaration; calls belong in one Cube or Vector region, including SIMD VFs. SIMT VFs are unsupported. |
 | [`tla.compile`](runtime/compile_launch.md#tlacompile) | Compile a kernel from type samples and return a `JitCompiledFunction`. | Host; samples need not be bound NPU buffers. Launch options such as `block_num` and `stream` belong to the compiled call. |
 | [`tla.JitCompiledFunction.__call__`](runtime/compile_launch.md#tlajitcompiledfunction__call__) | Launch a compiled kernel and reuse its executor and binary. | Host; tensor arguments must be bound NPU buffers. `make_fake_tensor` results cannot be launched. |
-| [`tla.from_dlpack`](runtime/host_tensor.md#tlafrom_dlpack) | Bind a DLPack tensor as a TLA Host tensor without copying device data. | Host; `layout_tag` is required. NPU buffers support launch; CPU buffers provide compile-only metadata. |
+| [`tla.from_dlpack`](runtime/host_tensor.md#tlafrom_dlpack) | Bind a DLPack tensor as a TLA Host tensor without copying device data. | `layout_tag` is required for all inputs, including 4D packed NZ views. NPU buffers support launch. CPU buffers provide compile-only metadata. |
 | [`tla.make_tensor`](runtime/host_tensor.md#tlamake_tensor) | Dual-mode Host bind via `tla.make_ptr` + `tla.make_layout`. | Host path skips DLPack; Kernel path still emits IR. |
 | [`tla.make_fake_tensor`](runtime/host_tensor.md#tlamake_fake_tensor) | Create a metadata-only compile sample. | Host; no device buffer and no launch. Shape-related inputs are Python integer trees, not Kernel layout values. |
 

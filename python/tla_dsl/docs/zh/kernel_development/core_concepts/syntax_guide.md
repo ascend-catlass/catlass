@@ -76,7 +76,7 @@ kernel 中出现的普通 Python 函数（模块级函数、不在白名单里�
 
 ### 编译期展开
 
-需要小规模、有意的编译期展开时，使用 `tla.range_constexpr(...)`。边界须为编译期 Python 整数（也可来自 `tla.as_numeric(...)` 等编译期 Numeric 值）；Python 在构建 kernel 时执行循环并展开循环体。迭代次数达到 64 次及以上时，CATLASS 会在展开前发出一条 `DSLOptimizationWarning`，但**仍会继续展开**。不需要展开时应优先使用 `range(...)` 或 `tla.range(...)`。
+需要小规模、有意的编译期展开时，使用 `tla.range_constexpr(...)`。边界须为编译期 Python 整数（也可来自 `tla.as_numeric(...)` 等编译期 Numeric 值）；Python 在构建 kernel 时执行循环并展开循环体。迭代次数达到 64 次及以上时，CATLASS 会在展开前发出一条 `DSLOptimizationWarning`，但**仍会继续展开**。运行期循环使用 `tla.range(...)`。
 
 ```python
 @tla.kernel
@@ -86,14 +86,6 @@ def static_stages(count: tla.Constexpr[int]) -> None:
 ```
 
 编译期 `while` 使用 `while tla.const_expr(condition):`，告警行为相同；条件写错可能导致编译无法终止，有界重复更推荐 `tla.range_constexpr(...)`。
-
-### 规划中的语义变更
-
-以下语义变更已在评审中确认，合入代码后本文档相应章节将同步更新。当前编写 kernel 时建议直接采用目标写法，避免后续迁移：
-
-- **`range` 语义调整**：`range`（Python 内建）将由"编译期展开"改为执行期（动态）语义；未来 `tla.range == range`。
-- **编译期展开显式化**：需要编译期展开的循环将统一显式写 `tla.range_constexpr`（见 2.1），不再依赖内建 `range`。
-- **`@tla.jit` 要求**：进入 kernel 的普通 Python 函数将要求显式加 `@tla.jit` 装饰（见 1.3），不再允许裸模块级函数隐式参与。
 
 ## 控制流限制
 

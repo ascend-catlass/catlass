@@ -15,6 +15,7 @@ from __future__ import annotations
 import pytest
 
 from catlass import tla
+from catlass.core_api import _remap_tensor_like_prefix_fields_for_layout_trees
 from catlass.runtime import TlaCoreAPIError
 from catlass.tla.runtime import make_fake_tensor
 
@@ -47,15 +48,17 @@ def _gm_col(dtype):
 
 
 def _zn_tensor(dtype, addrspace):
-    c0 = 32  # 1-byte elements
-    shape = ((16, _ROWS // 16), (c0, _COLS // c0))
-    stride = ((c0, 16 * c0), (1, _ROWS * c0))
+    origin = (_ROWS, _COLS)
+    geometry = _remap_tensor_like_prefix_fields_for_layout_trees(
+        origin, dtype.dtype, str(tla.arch.zN)
+    )
+    assert geometry is not None
     return make_fake_tensor(
         dtype,
-        shape,
-        stride,
+        geometry.shape,
+        geometry.stride,
         addrspace=addrspace,
-        origin_shape=(_ROWS, _COLS),
+        origin_shape=origin,
         layout_tag=tla.arch.zN,
     )
 
