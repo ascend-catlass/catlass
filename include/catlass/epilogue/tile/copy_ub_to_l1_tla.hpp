@@ -23,6 +23,8 @@ struct CopyUb2L1Tla {
     static_assert(DEPENDENT_FALSE<ArchTag>, "Unsupported CopyUb2L1Tla, can not find the specialization.");
 };
 
+#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202)) || \
+    (defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9201 || __NPU_ARCH__ == 9202))
 /// Partial specialization for CopyUbToL1, Ascend950, RowMajor in and zN out.
 template <class ElementSrc, class ElementDst, class LayoutSrc, class LayoutDst, class CoordSrc, class CoordDst>
 struct CopyUb2L1Tla<
@@ -185,8 +187,10 @@ struct CopyUb2L1Tla<
               tla::detail::iszNUnAlign<ElementSrc, LayoutSrc>::value &&
               tla::detail::iszN<ElementDst, LayoutDst>::value>> {};
 #endif
+#endif
 
-#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202))
+#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202)) || \
+    (defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9201 || __NPU_ARCH__ == 9202))
 /// Partial specialization for Ascend950, zN in and zN out.
 template <class ElementSrc, class ElementDst, class LayoutSrc, class LayoutDst, class CoordSrc, class CoordDst>
 struct CopyUb2L1Tla<

@@ -23,6 +23,8 @@ struct CopyUb2UbTla {
     static_assert(DEPENDENT_FALSE<ArchTag>, "Unsupported CopyUb2UbTla, can not find the specialization.");
 };
 
+#if (defined(CATLASS_ARCH) && (CATLASS_ARCH == 3510 || CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202)) || \
+    (defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9201 || __NPU_ARCH__ == 9202))
 /// Partial specialization for Ascend950, RowMajor in and RowMajor out.
 template <class ElementSrc, class ElementDst, class LayoutSrc, class LayoutDst, class CoordSrc, class CoordDst>
 struct CopyUb2UbTla<
@@ -214,6 +216,7 @@ struct CopyUb2UbTla<
         }
     }
 };
+#endif
 #if defined(CATLASS_ARCH) && (CATLASS_ARCH == 9201 || CATLASS_ARCH == 9202)
 template <class ElementSrc, class ElementDst, class LayoutSrc, class LayoutDst, class CoordSrc, class CoordDst>
 struct CopyUb2UbTla<
