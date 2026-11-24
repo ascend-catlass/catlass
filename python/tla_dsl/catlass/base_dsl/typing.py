@@ -603,6 +603,8 @@ class IntegerMeta(NumericMeta):
                 )
             if width == 1:
                 return [1 if bool(self.value) else 0]
+            if width % 8:
+                return [int(self.value) & ((1 << width) - 1)]
             if signed:
                 c_value = getattr(ctypes, f"c_int{width}")(int(self.value))
                 return [c_value.value & ((1 << width) - 1)]
@@ -863,6 +865,12 @@ def _mlir_i(width: int, *, unsigned: bool = False) -> Callable[[], mlir_ir.Type]
     return factory
 
 
+def _mlir_i4x2() -> mlir_ir.Type:
+    from .._tla_type_bridge import int4x2_type_get
+
+    return int4x2_type_get(mlir_ir.Context.current)
+
+
 def _mlir_f16() -> mlir_ir.Type:
     return mlir_ir.F16Type.get()
 
@@ -1047,9 +1055,10 @@ class Numeric(metaclass=NumericMeta, is_abstract=True):
         elif isinstance(ty, mlir_ir.Float8E5M2Type):
             token = "f8e5m2"
         else:
-            # Dialect floats have no mlir_ir class for isinstance dispatch.
+            # Dialect element types have no mlir_ir class for isinstance dispatch.
             printed = str(ty)
             if printed not in (
+                "!tla.i4x2",
                 "!tla.f4e2m1",
                 "!tla.f4e1m2",
                 "!tla.f8e8m0",
@@ -1082,7 +1091,7 @@ class Numeric(metaclass=NumericMeta, is_abstract=True):
                 ).results[0]
             return self.value
         cls = type(self)
-        if cls.dtype in ("f4e2m1x2", "f4e1m2x2"):
+        if cls.dtype in ("f4e2m1x2", "f4e1m2x2", "i4x2"):
             raise TypeError(
                 f"{cls.__name__} is a packed encoding, not a scalar literal; "
                 "use a Tensor load, register conversion, or bitcast"
@@ -1680,6 +1689,23 @@ class UInt64(
     signed=False,
     mlir_type=_mlir_i(64, unsigned=True),
 ):
+    pass
+
+
+class Int4x2(
+    Integer,
+    metaclass=IntegerMeta,
+    width=8,
+    dtype="i4x2",
+    signed=True,
+    mlir_type=_mlir_i4x2,
+):
+    """One byte holding two signed int4 values, low nibble first.
+
+    Vector lane counts and memory offsets count packed pairs. This is a
+    register/storage encoding, not a scalar numeric value.
+    """
+
     pass
 
 

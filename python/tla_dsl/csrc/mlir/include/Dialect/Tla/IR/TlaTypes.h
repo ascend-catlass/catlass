@@ -97,8 +97,10 @@ inline int64_t getByteSizeOfFixedWidthScalarType(::mlir::Type type)
     // fp8 cube operand formats (f8E4M3FN / f8E5M2) are byte-sized.
     if (::llvm::isa<::mlir::Float8E4M3FNType, ::mlir::Float8E5M2Type>(type))
         return 1;
-    // HiF8, packed FP4 pairs and E8M0 shared exponents occupy one byte.
-    if (::llvm::isa<::tla::Float8E8M0Type, ::tla::HiFloat8Type, ::tla::Float4E2M1x2Type, ::tla::Float4E1M2x2Type>(type))
+    // HiF8, packed FP4 pairs, Int4x2 pairs and E8M0 shared exponents occupy one byte.
+    if (::llvm::isa<
+            ::tla::Float8E8M0Type, ::tla::HiFloat8Type, ::tla::Float4E2M1x2Type, ::tla::Float4E1M2x2Type,
+            ::tla::Int4x2Type>(type))
         return 1;
     if (auto intTy = ::llvm::dyn_cast<::mlir::IntegerType>(type)) {
         if (intTy.getWidth() % 8 == 0)
@@ -151,10 +153,29 @@ inline int64_t getBitSizeOfFixedWidthScalarType(::mlir::Type type)
 {
     if (auto intTy = ::llvm::dyn_cast<::mlir::IntegerType>(type))
         return intTy.getWidth();
-    // The packed fp4 formats are the sub-byte case getByteSize... cannot express.
+    // The packed fp4 formats are the sub-byte cases getByteSize... cannot
+    // express.
     if (::llvm::isa<::tla::Float4E2M1Type, ::tla::Float4E1M2Type>(type))
         return 4;
     return getByteSizeOfFixedWidthScalarType(type) * 8;
+}
+
+/// True for the packed signed int4 pair byte.
+inline bool isInt4PairType(::mlir::Type type)
+{
+    return ::llvm::isa<::tla::Int4x2Type>(type);
+}
+
+/// Register-view bit width. Int4x2 is already an 8-bit Byte carrier.
+inline int64_t getRegisterBitSize(::mlir::Type type)
+{
+    return getBitSizeOfFixedWidthScalarType(type);
+}
+
+/// Register-view byte width. Int4x2 is already an 8-bit Byte carrier.
+inline int64_t getRegisterByteSize(::mlir::Type type)
+{
+    return getByteSizeOfFixedWidthScalarType(type);
 }
 
 /// Predicate geometry for a packed vector store.  The factor converts logical
@@ -175,8 +196,8 @@ inline std::optional<PackedStorePredicateGeometry> getPackedStorePredicateGeomet
     if (storeDist == ::StoreDist::norm)
         return PackedStorePredicateGeometry{1};
 
-    // Storage widths (Bool i1 → 8 bits). Logical getBitSize(Bool)==1 is wrong
-    // for Dist layout checks that key off b8/b16/b32/b64 movers.
+    // Storage widths. Int4x2 already reports one Byte per lane through
+    // elementStorageBits.
     int64_t sourceBits = elementStorageBits(sourceElementType);
     int64_t destBits = elementStorageBits(destElementType);
     if (sourceElementType == destElementType) {
@@ -212,9 +233,9 @@ inline bool isPackedFp4Type(::mlir::Type type)
 /// builtin for it. These are buffered as i8 at the memref boundary.
 inline bool isTlaCustomElementType(::mlir::Type type)
 {
-    return isPackedFp4Type(type) ||
-           ::llvm::isa<::tla::Float8E8M0Type, ::tla::HiFloat8Type, ::tla::Float4E2M1x2Type, ::tla::Float4E1M2x2Type>(
-               type);
+    return isPackedFp4Type(type) || ::llvm::isa<
+                                        ::tla::Float8E8M0Type, ::tla::HiFloat8Type, ::tla::Float4E2M1x2Type,
+                                        ::tla::Float4E1M2x2Type, ::tla::Int4x2Type>(type);
 }
 
 using coord = ::mlir::Type;

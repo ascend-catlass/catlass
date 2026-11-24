@@ -125,8 +125,8 @@ Parameters:
   type inferred from DLPack. Default `None` keeps the DLPack type.
   Use when DLPack cannot express the real type (e.g. fp8): pass
   `tla.Float8E4M3FN` / `Float8E5M2`. Storage widths must match, except
-  for FP4 exported as two elements per integer byte. `Bool` occupies
-  one byte.
+  for packed 4-bit elements (`Float4E1M2` / `Float4E2M1`)
+  exported as two elements per integer byte. `Bool` occupies one byte.
 
 Constraints:
 

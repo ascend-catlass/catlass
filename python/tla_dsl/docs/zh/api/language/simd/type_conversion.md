@@ -71,6 +71,10 @@ Tensor 的 shape 和 offset 按数对计数。
 普通的 FP32→BF16→FP4 连续转换可能产生 double rounding。FP4x2 与逻辑四位 Tensor
 类型不同，不支持 SIMT 转换。
 
+`tla.Int4` 的源数据按每字节两个值打包。`Int4.to()` 可扩宽为 Int16、
+Float16 或 BFloat16，且必须使用 `CAST_NONE`，因为扩宽指令没有舍入操作数；
+其他目标类型需要显式组合转换路线。
+
 函数原型：
 
 ```python
@@ -94,6 +98,7 @@ tla.VectorSSA.to(dst_type: Any, params: CastParams, mask: Any | None = None) -> 
   饱和参数，也没有 pack-quarter 选择子。
 - `reg_slot` 的 `TWO` 与 `THREE` 指向 pack 的四分之一，仅在位宽变化为 4 倍的整数
   cast、直接的 fp8/HiF8<->f32 指令以及 BF16<->FP4x2 转换上合法。
+- `i4` 源仅支持 i16/f16/bf16 目标且必须使用 `CAST_NONE` 舍入；Int4 是源类型，不能作为 cast 目标。
 - 线程级标量 cast 在 `mode="simt"` 下使用 `Numeric.to`；本方法是 vector（AVE）
   形态，始终需要 `CastParams`。
 

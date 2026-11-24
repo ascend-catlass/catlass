@@ -69,7 +69,7 @@ static bool isAlignPostByteAliasElem(Type elemType)
 {
     return isBoolElementType(elemType) ||
            isa<Float8E4M3FNType, Float8E5M2Type, ::tla::HiFloat8Type, ::tla::Float8E8M0Type, ::tla::Float4E2M1x2Type,
-               ::tla::Float4E1M2x2Type>(elemType);
+               ::tla::Float4E1M2x2Type, ::tla::Int4x2Type>(elemType);
 }
 
 /// True when the integer element should take the unsigned HIVM load/store
@@ -247,8 +247,8 @@ static Type dataVectorType(OpBuilder& b, Type elemType)
     // Bool / HiFloat8 / e8m0 / fp4x2: no HIVM unalign mover for the IR type;
     // AVE payload is i8 (AscendC UnAlign UPDATE casts these to ``uint8_t`` /
     // ``int8_t``; ``TypeGet<bool>`` → ``vector_s8``).
-    if (isBoolElementType(elemType) ||
-        isa<::tla::HiFloat8Type, ::tla::Float8E8M0Type, ::tla::Float4E2M1x2Type, ::tla::Float4E1M2x2Type>(elemType))
+    if (isBoolElementType(elemType) || isa<::tla::HiFloat8Type, ::tla::Float8E8M0Type, ::tla::Float4E2M1x2Type,
+                                           ::tla::Float4E1M2x2Type, ::tla::Int4x2Type>(elemType))
         return VectorType::get({256}, IntegerType::get(b.getContext(), 8));
     if (auto intTy = dyn_cast<IntegerType>(elemType)) {
         unsigned width = intTy.getWidth();
@@ -334,8 +334,8 @@ static FailureOr<std::tuple<Value, Value, Value>> emitVldusPost(
     else if (isa<Float8E5M2Type>(elemType))
         op = b.create<hivm_regbaseintrins::VldusPostF8E5InstrOp>(loc, structTy, ptr, ureg, countBytes);
     else if (
-        isBoolElementType(elemType) ||
-        isa<::tla::HiFloat8Type, ::tla::Float8E8M0Type, ::tla::Float4E2M1x2Type, ::tla::Float4E1M2x2Type>(elemType))
+        isBoolElementType(elemType) || isa<::tla::HiFloat8Type, ::tla::Float8E8M0Type, ::tla::Float4E2M1x2Type,
+                                           ::tla::Float4E1M2x2Type, ::tla::Int4x2Type>(elemType))
         // No ``vldus.post`` for Bool/hif8/e8m0/fp4x2; AscendC → int8_t/uint8_t.
         op = b.create<hivm_regbaseintrins::VldusPostS8InstrOp>(loc, structTy, ptr, ureg, countBytes);
     else
@@ -387,8 +387,8 @@ static FailureOr<std::pair<Value, Value>> emitVstusPost(
     else if (isa<Float8E5M2Type>(elemType))
         op = b.create<hivm_regbaseintrins::VstusPostF8E5InstrOp>(loc, structTy, src, ptr, countBytes, ureg);
     else if (
-        isBoolElementType(elemType) ||
-        isa<::tla::HiFloat8Type, ::tla::Float8E8M0Type, ::tla::Float4E2M1x2Type, ::tla::Float4E1M2x2Type>(elemType))
+        isBoolElementType(elemType) || isa<::tla::HiFloat8Type, ::tla::Float8E8M0Type, ::tla::Float4E2M1x2Type,
+                                           ::tla::Float4E1M2x2Type, ::tla::Int4x2Type>(elemType))
         // No ``vstus.post`` for Bool/hif8/e8m0/fp4x2; AscendC → int8_t/uint8_t.
         op = b.create<hivm_regbaseintrins::VstusPostS8InstrOp>(loc, structTy, src, ptr, countBytes, ureg);
     else
@@ -1215,7 +1215,8 @@ static std::string dataBlockCopyElementSuffix(Type elementType)
     if (isBoolElementType(elementType))
         return "int8";
     // Logical TLA types that AVE already carries as i8 (not FP8E4/E5 AS_BYTES).
-    if (isa<::tla::HiFloat8Type, ::tla::Float8E8M0Type>(elementType) || isFp4PairType(elementType))
+    if (isa<::tla::HiFloat8Type, ::tla::Float8E8M0Type>(elementType) || isFp4PairType(elementType) ||
+        isInt4PairType(elementType))
         return "int8";
     if (elementType.isF32())
         return "float";
@@ -1809,7 +1810,7 @@ static bool isSupportedCastElementType(Type t)
         if (isBoolElementType(i))
             return false;
         unsigned w = i.getWidth();
-        return w == 8 || w == 16 || w == 32 || w == 64;
+        return w == 4 || w == 8 || w == 16 || w == 32 || w == 64;
     }
     return false;
 }
@@ -2170,6 +2171,9 @@ struct VecLowerCtx {
 // AscendC TypeGet<bool> → vector_s8: Bool VectorSSA lowers as i8 carriers.
 static Type aveVectorElementType(Type elementType)
 {
+    // Int4x2 registers carry one packed Byte per lane.
+    if (isInt4PairType(elementType))
+        return IntegerType::get(elementType.getContext(), 8);
     if (isa<::tla::Float8E8M0Type, ::tla::HiFloat8Type>(elementType) || isFp4PairType(elementType) ||
         isBoolElementType(elementType))
         return IntegerType::get(elementType.getContext(), 8);
@@ -3209,6 +3213,36 @@ static LogicalResult lowerCast(
                    "cast is not supported"),
                failure();
     auto dstVecType = VectorType::get({*dstLanesOr}, aveVectorElementType(tlaDstElem));
+    if (isInt4PairType(tlaSrcElem)) {
+        // int4x2_t -> b16. The widening instruction has no rounding or
+        // saturation operand; only CAST_NONE is meaningful.
+        ArrayRef<int32_t> trait = castOp.getTrait();
+        if (trait.size() != 3)
+            return castOp.emitError("tla.cast trait must have 3 codes"), failure();
+        if (static_cast<::RoundMode>(trait[2]) != ::RoundMode::cast_none)
+            return castOp.emitError("Int4x2 source casts require CAST_NONE"), failure();
+        bool toF16 = tlaDstElem.isF16();
+        bool toBF16 = tlaDstElem.isBF16();
+        bool toI16 = tlaDstElem.isSignlessInteger(16);
+        if (!toF16 && !toBF16 && !toI16)
+            return castOp.emitError("Int4x2 source only widens to f16/bf16/i16"), failure();
+        Value mask =
+            castOp.getMask() ? valueMap.lookup(castOp.getMask()) : fullMasks.get(loc, srcVecType.getNumElements());
+        if (!mask)
+            return failure();
+        Value preg = castMaskToPregType(b, loc, mask, fullPregVecType(b.getContext()));
+        Value pp = b.create<arith::ConstantIntOp>(loc, static_cast<int64_t>(trait[0]), 32);
+        Value result;
+        if (toF16) {
+            result = b.create<hivm_regbaseintrins::VcvtifS4x22F16InstrOp>(loc, dstVecType, src, preg, pp).getResult();
+        } else if (toBF16) {
+            result = b.create<hivm_regbaseintrins::VcvtifS4x22BF16InstrOp>(loc, dstVecType, src, preg, pp).getResult();
+        } else {
+            result = b.create<hivm_regbaseintrins::VcvtiiS4x22S16InstrOp>(loc, dstVecType, src, preg, pp).getResult();
+        }
+        valueMap[castOp.getResult()] = result;
+        return success();
+    }
     if (isa<::tla::HiFloat8Type>(tlaSrcElem) || isa<::tla::HiFloat8Type>(tlaDstElem)) {
         std::string name = getHiFloat8CastLibraryCallName(tlaSrcElem, castOp.getTrait());
         int64_t maskLanes = srcVecType.getNumElements();
@@ -4992,7 +5026,7 @@ static LogicalResult lowerNestedVectorOp(
     // operations like where/bitcast rather than integer arithmetic.
     auto isFp4Vector = [](Type type) {
         auto vec = dyn_cast<::tla::VectorSSAType>(type);
-        return vec && isFp4PairType(vec.getElementType());
+        return vec && (isFp4PairType(vec.getElementType()) || isInt4PairType(vec.getElementType()));
     };
     bool hasFp4Vector =
         llvm::any_of(op.getOperandTypes(), isFp4Vector) || llvm::any_of(op.getResultTypes(), isFp4Vector);
@@ -5003,7 +5037,8 @@ static LogicalResult lowerNestedVectorOp(
             ::tla::StoreUnalignPostOp, ::tla::WhereOp, ::tla::InterleaveOp, ::tla::DeInterleaveOp, ::tla::GatherOp,
             ::tla::BitwiseNotOp, ::tla::BitwiseAndOp, ::tla::BitwiseOrOp, ::tla::BitwiseXorOp, scf::ForOp, scf::IfOp>(
             op))
-        return op.emitError("FP4x2 arithmetic is unsupported; only bitwise, select and layout ops are allowed");
+        return op.emitError(
+            "Packed 4-bit pair arithmetic is unsupported; only bitwise, select and layout ops are allowed");
 
     // make_shape / make_coord are dead after tla-lower-tensor-desc (their leaves
     // were folded into tensor_desc operands); skip them. (tla-finalize-memref

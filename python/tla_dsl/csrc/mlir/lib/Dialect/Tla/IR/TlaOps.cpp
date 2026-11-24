@@ -1822,6 +1822,8 @@ mlir::LogicalResult LoadOp::verify()
         return emitOpError() << "load_dist " << stringifyLoadDist(dist) << " requires a second !tla.vector result";
     if (!dual && getResult2())
         return emitOpError("second result is only valid as !tla.vector with a dintlv_b8/b16/b32 load_dist");
+    if (dist == ::LoadDist::dintlv_b8 && isInt4PairType(sourceType.getPtr().getPointee()))
+        return emitOpError("dintlv_b8 does not support Int4x2 register pairs");
 
     int64_t width;
     switch (dist) {
@@ -1860,7 +1862,8 @@ mlir::LogicalResult LoadOp::verify()
     if (getUnalignedUbAccess().value_or(false))
         return emitOpError() << "load_dist " << stringifyLoadDist(dist) << " requires aligned UB access";
     auto sourceElem = sourceType.getPtr().getPointee();
-    if (elementStorageBytes(sourceElem) != width)
+    const int64_t sourceBytes = elementStorageBytes(sourceElem);
+    if (sourceBytes != width)
         return emitOpError() << stringifyLoadDist(dist) << " requires a " << width << "-byte source element type";
     const int64_t lanes = 256 / width;
     if (dual && (getResult2().getType() != vectorResult || vectorResult.getElementType() != sourceElem ||

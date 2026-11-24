@@ -389,6 +389,12 @@ int64_t crossFlagMode(MlirType type)
     return checkedTlaType<::tla::CrossFlagType>(type, "!tla.cross_flag type").getMode();
 }
 
+MlirType int4x2TypeGet(MlirContext context)
+{
+    MLIRContext* ctx = bridgeContext(context);
+    return toMlirType(::tla::Int4x2Type::get(ctx), "tla.i4x2");
+}
+
 // Element formats this MLIR has no builtin for. See Tla.td.
 MlirType float4E2M1TypeGet(MlirContext context)
 {
@@ -1127,6 +1133,7 @@ PYBIND11_MODULE(_tla_type_bridge_native, m)
     m.def("cross_flag_type_get", &crossFlagTypeGet, py::arg("context"), py::arg("mode"));
     m.def("cross_flag_mode", &crossFlagMode, py::arg("type"));
     m.def("mutex_type_get", &mutexTypeGet, py::arg("context"));
+    m.def("int4x2_type_get", &int4x2TypeGet, py::arg("context"));
     m.def("float4_e2m1_type_get", &float4E2M1TypeGet, py::arg("context"));
     m.def("float4_e1m2_type_get", &float4E1M2TypeGet, py::arg("context"));
     m.def("float8_e8m0_type_get", &float8E8M0TypeGet, py::arg("context"));

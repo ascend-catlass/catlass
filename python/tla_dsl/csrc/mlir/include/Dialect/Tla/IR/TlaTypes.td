@@ -117,6 +117,13 @@ def Tla_Float8E8M0Type : Tla_EncodedElementType<"Float8E8M0", "f8e8m0",
 def Tla_HiFloat8Type : Tla_EncodedElementType<"HiFloat8", "hif8",
     "HiFloat8 payload with tapered exponent and mantissa fields.">;
 
+// One byte holding two signed int4 values. Shape, stride and coord count
+// packed pairs, matching the int4x2_t register lane.
+def Tla_Int4x2Type : TypeDef<TlaDialect, "Int4x2", []> {
+  let mnemonic = "i4x2";
+  let summary = "One byte holding two signed int4 values, low nibble first.";
+}
+
 
 def Tla_Float4E2M1x2Type : TypeDef<TlaDialect, "Float4E2M1x2", []> {
   let mnemonic = "f4e2m1x2";

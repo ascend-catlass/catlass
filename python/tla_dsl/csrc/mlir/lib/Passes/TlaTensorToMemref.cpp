@@ -338,7 +338,6 @@ FailureOr<int64_t> getStaticNumElements(ArrayRef<int64_t> shape)
 
 FailureOr<int64_t> getElementByteWidth(Type elementType)
 {
-    // Single SoT with elementStorageBytes (Bool i1 → 1; rejects true sub-byte).
     int64_t bytes = elementStorageBytes(elementType);
     if (bytes <= 0)
         return failure();
@@ -686,8 +685,9 @@ static StringRef scalarB8B16B32CopyElemSuffix(Type elementType)
 
 static StringRef copyRuntimeElemSuffix(Type elementType)
 {
-    // Packed fp4 x2 IR types that still stage under the int8_t symbol.
-    if (isa<::tla::Float4E2M1x2Type, ::tla::Float4E1M2x2Type>(elementType))
+    // Packed 4-bit pair carriers keep byte-denominated shape/stride/coord, so
+    // they stage through the int8_t copy symbols without descriptor rescaling.
+    if (isa<::tla::Float4E2M1x2Type, ::tla::Float4E1M2x2Type, ::tla::Int4x2Type>(elementType))
         return "int8_t";
     if (auto suffix = scalarB8B16B32CopyElemSuffix(elementType); !suffix.empty())
         return suffix;

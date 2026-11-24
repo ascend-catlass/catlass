@@ -1139,19 +1139,20 @@ def _derive_bind_metadata(
                 "from_dlpack element_type override must declare a width; "
                 f"got {element_type!r}"
             ) from exc
-        # Bool has an i1 IR type but occupies one byte. FP4 elements are packed.
+        # Bool has an i1 IR type but occupies one byte. Logical FP4 elements
+        # are packed two-per-byte in the exported integer buffer.
         override_dtype = str(getattr(element_type, "dtype", "")).strip().lower()
         element_bits = dtype_size_bits(override_dtype) or declared_bits
-        packed_fp4 = (
+        packed_sub_byte = (
             dtype_bits == 8
             and override_dtype in {"f4e1m2", "f4e2m1"}
             and dtype_code in (DLDataTypeCode.kDLInt, DLDataTypeCode.kDLUInt)
         )
-        if element_bits != dtype_bits and not packed_fp4:
+        if element_bits != dtype_bits and not packed_sub_byte:
             raise RuntimeTensorError(
                 f"from_dlpack element_type override {element_type.__name__} is "
                 f"{element_bits}-bit but the exported buffer is {dtype_bits}-bit; "
-                "use matching storage widths or FP4 packed in integer bytes"
+                "use matching storage widths or packed 4-bit types in integer bytes"
             )
         dtype = element_type
 
@@ -1409,8 +1410,8 @@ def from_dlpack(
           type inferred from DLPack. Default `None` keeps the DLPack type.
           Use when DLPack cannot express the real type (e.g. fp8): pass
           `tla.Float8E4M3FN` / `Float8E5M2`. Storage widths must match, except
-          for FP4 exported as two elements per integer byte. `Bool` occupies
-          one byte.
+          for packed 4-bit elements (`Float4E1M2` / `Float4E2M1`)
+          exported as two elements per integer byte. `Bool` occupies one byte.
 
         Constraints:
         - A host (CPU) buffer binds metadata only. Use it to compile a kernel

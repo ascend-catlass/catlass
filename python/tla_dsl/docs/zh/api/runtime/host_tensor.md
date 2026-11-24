@@ -53,7 +53,8 @@ tla.from_dlpack(tensor_dlpack: object, *, layout_tag: Any, origin_shape: Any | N
   `None` 表示省略 `stream` 参数。
 - *`element_type`*（`type | None`）：可选，覆盖从 DLPack 推导出的元素类型。默认 `None`，
   沿用 DLPack 类型。DLPack 无法表达实际类型（如 FP8）时，可传入 `tla.Float8E4M3FN` 或
-  `Float8E5M2`。存储位宽须一致，FP4 按每个整型字节打包两个元素时除外。`Bool` 占一个字节。
+  `Float8E5M2`。存储位宽须一致；`Float4E1M2` / `Float4E2M1` / `Int4` 按每个整型字节
+  打包两个元素时除外。`Bool` 占一个字节。
 
 约束说明：
 

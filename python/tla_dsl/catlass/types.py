@@ -593,6 +593,8 @@ _TENSOR_DTYPE_SIZES: dict[str, int] = {
     "hif8": 1,
     "f4e2m1x2": 1,
     "f4e1m2x2": 1,
+    # Int4x2 is one packed register lane byte (two logical 4-bit values).
+    "i4x2": 1,
 }
 
 
@@ -610,11 +612,12 @@ _TENSOR_DTYPE_BITS: dict[str, int] = {
 def dtype_size_bits(dtype: str) -> int:
     """Storage size in bits for a Tla element type token.
 
-    Unlike :func:`dtype_size_bytes` this can express the sub-byte types (``i4``),
-    which is what lets a packed fp4 tile derive its C0 geometry from the element
-    type. For Bool (``i1``) this is **8** (AscendC b8 storage), matching
-    ``elementStorageBits`` — not the logical IR width of 1. Unknown names
-    return ``0``.
+    Unlike :func:`dtype_size_bytes` this can express the logical 4-bit formats
+    (``f4e2m1`` / ``f4e1m2``), which is what lets a packed fp4 tile derive its
+    C0 geometry from the element type. Packed pair types (``f4e2m1x2`` /
+    ``f4e1m2x2`` / ``i4x2``) are byte-sized. For Bool (``i1``) this is **8**
+    (AscendC b8 storage), matching ``elementStorageBits`` — not the logical IR
+    width of 1. Unknown names return ``0``.
     """
     return int(_TENSOR_DTYPE_BITS.get(dtype.strip().lower(), 0))
 
@@ -809,6 +812,7 @@ from .base_dsl.typing import (
     Float,
     cast,
     Bool,
+    Int4x2,
     Int8,
     Int16,
     Int32,
@@ -862,6 +866,7 @@ __all__ = [
     "Float",
     "cast",
     "Bool",
+    "Int4x2",
     "Int8",
     "Int16",
     "Int32",

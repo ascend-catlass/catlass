@@ -1209,6 +1209,17 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         [["end_to_end/fp4_op.py", "--case", "dintlv", "--run", *dev]],
     )
 
+    # Int4x2 route: cast Int4x2 to f16/bf16/i16 and Int4x2 -> f16 -> i8
+    yield (
+        "vector-i4-pack4",
+        [["end_to_end/i4_pack4_op.py", "--run", *dev]],
+    )
+
+    yield (
+        "vector-i4-to-i8",
+        [["end_to_end/i4_to_i8_op.py", "--run", *dev]],
+    )
+
     # Same-width bit reinterpretation: the f32 round trips through i32 and u32
     # are subtracted to zero, so a rewritten register shows as a mismatch
     # rather than hiding behind the exponent term.

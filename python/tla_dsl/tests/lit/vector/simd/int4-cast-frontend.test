@@ -1,0 +1,37 @@
+// Int4x2 is a TLA element type: the frontend emits it as !tla.i4x2 and widens it
+// to a byte-carried numeric type before the SIMD cast is lowered.
+// RUN: split-file %s %t
+// RUN: %python %t/generate.py | %filecheck %s
+
+// CHECK: tla.load
+// CHECK-SAME: -> !tla.vector<256x!tla.i4x2>
+// CHECK: tla.cast
+// CHECK-SAME: [0, 2, 4] : !tla.vector<256x!tla.i4x2> -> !tla.vector<128xf16>
+
+//--- generate.py
+import catlass.tla as tla
+from catlass.params import CastParams, RoundMode
+from catlass.tla.runtime import make_fake_tensor
+
+
+def _ub(dtype, count):
+    return make_fake_tensor(
+        dtype,
+        (count,),
+        (1,),
+        addrspace=tla.AddressSpace.ub,
+        origin_shape=(count,),
+        layout_tag=tla.arch.RowMajor,
+    )
+
+
+@tla.kernel
+def convert(src: tla.Tensor, dst: tla.Tensor) -> None:
+    with tla.vector():
+        with tla.vec.func(mode="simd"):
+            dst.store(src.load().to(
+                tla.Float16, CastParams(round_mode=RoundMode.CAST_NONE)
+            ))
+
+
+print(convert.dump_mlir(type_args=(_ub(tla.Int4x2, 256), _ub(tla.Float16, 128))))

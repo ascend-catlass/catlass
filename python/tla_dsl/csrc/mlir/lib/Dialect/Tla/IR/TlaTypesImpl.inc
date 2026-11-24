@@ -320,7 +320,8 @@ LogicalResult VectorSSAType::verify(function_ref<InFlightDiagnostic()> emitError
                                     int64_t validLanes, Type elementType) {
   if (!elementType)
     return emitError() << "tla.vector element type must be non-null";
-  if (!mlir::isa<IntegerType, FloatType, Float8E8M0Type, HiFloat8Type, Float4E2M1x2Type, Float4E1M2x2Type>(elementType))
+  if (!mlir::isa<IntegerType, FloatType, Float8E8M0Type, HiFloat8Type, Float4E2M1x2Type, Float4E1M2x2Type,
+                    Int4x2Type>(elementType))
     return emitError() << "tla.vector element type must be an integer or float, got "
                        << elementType;
 

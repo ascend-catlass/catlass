@@ -382,7 +382,11 @@ def test_from_dlpack_zn_rejects_strided_packed_run() -> None:
 
 @pytest.mark.parametrize(
     ("element_type", "origin", "storage_elems"),
-    [(tla.Bool, (16, 32), 512), (tla.Float4E2M1, (16, 64), 512)],
+    [
+        (tla.Bool, (16, 32), 512),
+        (tla.Float4E2M1, (16, 64), 512),
+        (tla.Int4x2, (16, 64), 1024),
+    ],
 )
 def test_from_dlpack_zn_checks_storage_width(
     element_type, origin, storage_elems

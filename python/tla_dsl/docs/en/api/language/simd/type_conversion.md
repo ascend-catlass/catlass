@@ -48,6 +48,11 @@ explicit Python composition; a plain FP32->BF16->FP4 cast
 can double-round. These packed register types are distinct from
 logical four-bit Tensor types and do not support SIMT conversion.
 
+Int4x2 sources are packed two per byte. `Int4x2.to()` widens to
+Int16, Float16 or BFloat16 and requires `CAST_NONE`, because the
+widening instruction has no rounding operand; other targets
+require an explicit route.
+
 Prototype:
 
 ```python
@@ -72,6 +77,8 @@ Constraints:
   routes, f16/bf16/f32, f8e4m3fn/f8e5m2, hif8 and FP4x2 pairs.
   Not supported: bool, f64,
   f8e8m0, fp8-to-fp8, fp8-to-integer.
+- An `i4x2` source is accepted only with an i16/f16/bf16 target and
+  `CAST_NONE` rounding. Int4x2 is a source type, not a cast target.
 - A same-type cast (`f16`->`f16`, `bf16`->`bf16`, `f32`->`f32`)
   keeps the element type and re-rounds every lane: only `round_mode`
   takes effect. Other same-type casts (integers, fp8) are not

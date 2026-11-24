@@ -1015,6 +1015,10 @@ class _Tensor(TensorABC):
                     f"DIST_{params.load_dist.upper()} requires a {widths}-byte "
                     f"element type (got {elem})"
                 )
+            if elem == "i4x2" and params.load_dist == LoadDist.DIST_DINTLV_B8:
+                raise TlaLoweringError(
+                    "DIST_DINTLV_B8 does not support Int4x2 vector pairs"
+                )
             result_desc = _full_vector_ssa_descriptor(elem)
         elif is_block_load:
             result_desc = _full_vector_ssa_descriptor(source_desc.element_type)

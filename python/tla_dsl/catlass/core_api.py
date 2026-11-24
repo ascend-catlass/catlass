@@ -32,9 +32,12 @@ from .params import CastParams, RoundMode, SatMode
 # converted by shifting rather than by a cast.
 _CAST_FP8_DTYPES = frozenset({"f8e4m3fn", "f8e5m2"})
 _FP4_PAIR_DTYPES = frozenset({"f4e2m1x2", "f4e1m2x2"})
-
+# Int4x2 pairs two signed int4 values per byte. Like FP4x2, the native cast
+# pairs each packed byte with a 16-bit destination lane.
+_INT4_CAST_TARGETS = frozenset({"i16", "f16", "bf16"})
 # Element width per cast token, used to tell a 4x width step from a 2x one.
 _CAST_TOKEN_BITS = {
+    "i4x2": 8,
     "i8": 8,
     "i16": 16,
     "i32": 32,
@@ -256,6 +259,9 @@ _FP4_FORMATS = frozenset({"f4e2m1", "f4e1m2"})
 #: whole number of bytes, so this is the granularity the routes below require.
 _FP4_PER_BYTE = 2
 
+#: Packed int4 pair formats. Shape and offsets count these bytes.
+_INT4_FORMATS = frozenset({"i4x2"})
+
 #: The copy routes that stage packed fp4 through byte descriptors, and so
 #: carry the halving constraint below. These are exactly the routes whose
 #: registration in ``Vector/dma.cpp`` converts the descriptor before handing it
@@ -289,9 +295,11 @@ _FP4_HALVED_STRIDE_LEAF = {
 }
 
 
-def _partial_byte_fp4_extent(desc) -> int | str | None:
-    """The packed-axis origin extent of a byte-staged fp4 tile, unless it is a
-    whole number of bytes.
+def _partial_byte_fp4_extent(
+    desc, elements_per_byte: int = _FP4_PER_BYTE
+) -> int | str | None:
+    """The packed-axis origin extent of a byte-staged packed tile, unless it is
+    a whole number of bytes. ``elements_per_byte`` is 2 for fp4 and int4.
 
     The fp4 staging routes do not run on fp4 descriptors: the AIV backend
     refuses sub-byte floats, so ``Vector/dma.cpp`` converts the descriptor to
@@ -329,16 +337,20 @@ def _partial_byte_fp4_extent(desc) -> int | str | None:
     last = origin[-1]
     if not isinstance(last, int):
         return "dynamic"
-    if last % _FP4_PER_BYTE:
+    if last % elements_per_byte:
         return last
     return None
 
 
 def _fp4_odd_byte_mapping(
-    desc, *, stride_field: tuple[str, int] | None
+    desc,
+    *,
+    stride_field: tuple[str, int] | None,
+    elements_per_byte: int = _FP4_PER_BYTE,
 ) -> tuple[str, int | str] | None:
-    """The halved stride or origin coordinate of a byte-staged fp4 tile, unless
-    both are a whole number of bytes.
+    """The packed stride or origin coordinate of a byte-staged packed tile,
+    unless both are a whole number of bytes. ``elements_per_byte`` is 2 for fp4
+    and int4.
 
     A whole-byte extent fixes the length of each row, but not where the row
     starts. An odd halved stride puts every row, or every C0 column, after the
@@ -383,7 +395,7 @@ def _fp4_odd_byte_mapping(
         value = leaves[index]
         if not isinstance(value, int):
             return what, "dynamic"
-        if value % _FP4_PER_BYTE:
+        if value % elements_per_byte:
             return what, value
     return None
 
@@ -407,6 +419,7 @@ _MAKE_TENSOR_SUPPORTED_ELEMENT_TYPES = frozenset(
         "i16",
         "u16",
         "i1",
+        "i4x2",
         "i8",
         "u8",
         "f8e4m3fn",
@@ -1177,6 +1190,11 @@ class VectorSSA(_RegisterSSA):
             can double-round. These packed register types are distinct from
             logical four-bit Tensor types and do not support SIMT conversion.
 
+            Int4x2 sources are packed two per byte. `Int4x2.to()` widens to
+            Int16, Float16 or BFloat16 and requires `CAST_NONE`, because the
+            widening instruction has no rounding operand; other targets
+            require an explicit route.
+
             Parameters:
             - `dst_type` (`type[Numeric]`): Element type to convert to. Required.
             - `params` (`CastParams`): Rounding, saturation and register slot. Required.
@@ -1193,6 +1211,8 @@ class VectorSSA(_RegisterSSA):
               routes, f16/bf16/f32, f8e4m3fn/f8e5m2, hif8 and FP4x2 pairs.
               Not supported: bool, f64,
               f8e8m0, fp8-to-fp8, fp8-to-integer.
+            - An `i4x2` source is accepted only with an i16/f16/bf16 target and
+              `CAST_NONE` rounding. Int4x2 is a source type, not a cast target.
             - A same-type cast (`f16`->`f16`, `bf16`->`bf16`, `f32`->`f32`)
               keeps the element type and re-rounds every lane: only `round_mode`
               takes effect. Other same-type casts (integers, fp8) are not
@@ -1315,6 +1335,19 @@ class VectorSSA(_RegisterSSA):
                 _op_error(
                     "cast",
                     "BF16->FP4x2 requires SAT or UNKNOWN; the native instruction always saturates",
+                )
+        if src_token == "i4x2":
+            if dst_token not in _INT4_CAST_TARGETS:
+                _op_error(
+                    "cast",
+                    f"unsupported cast 'i4x2'->'{dst_token}': Int4x2 widens to "
+                    f"i16/f16/bf16 only; compose another route explicitly",
+                )
+            if params.round_mode is not RoundMode.CAST_NONE:
+                _op_error(
+                    "cast",
+                    "Int4x2 source casts require CAST_NONE; the widening "
+                    "instruction has no rounding operand",
                 )
         if (
             src_token == "f16"
@@ -2255,10 +2288,18 @@ def _cast_result_descriptor(
     src_lanes = src_desc.valid_lanes
     if src_lanes is None:
         return TlaVectorSSATypeDescriptor(None, dst_token)
-    if src_desc.element_type in _FP4_PAIR_DTYPES and dst_token == "bf16":
+    packed_narrow = (
+        src_desc.element_type in _INT4_FORMATS and dst_token in _INT4_CAST_TARGETS
+    ) or (src_desc.element_type in _FP4_PAIR_DTYPES and dst_token == "bf16")
+    if packed_narrow:
+        # One packed byte lane holds two 4-bit values and widens to two 16-bit
+        # lanes. A cast reads one of four register slots, so the result is
+        # 2 * ceil((src_lanes - slot) / 4).
         slot = params.codes()[0]
         if src_lanes <= slot:
-            _op_error("cast", "FP4x2 source has no valid byte in the selected slot")
+            _op_error(
+                "cast", "packed 4-bit source has no valid byte in the selected slot"
+            )
         return TlaVectorSSATypeDescriptor(2 * ((src_lanes - slot + 3) // 4), dst_token)
     src_bytes = dtype_size_bytes(src_desc.element_type)
     dst_bytes = dtype_size_bytes(dst_token)
@@ -6465,6 +6506,7 @@ _SUPPORTED_VECTOR_COPY_ROUTES = {
         "f8e8m0",
         "f4e2m1",
         "f4e1m2",
+        "i4x2",
         "hif8",
         "f4e2m1x2",
         "f4e1m2x2",
@@ -6504,6 +6546,7 @@ _SUPPORTED_VECTOR_COPY_ROUTES = {
         "f8e8m0",
         "f4e2m1",
         "f4e1m2",
+        "i4x2",
         "hif8",
         "f4e2m1x2",
         "f4e1m2x2",
@@ -8019,9 +8062,13 @@ def copy(
                     f"{_route[0]},{src_layout} -> {_route[1]},{dst_layout} {src_dtype}",
                 )
             elif src_dtype in _FP4_FORMATS and _route in _FP4_BYTE_STAGED_ROUTES:
-                # Only the byte-staged routes halve the descriptor, so only
-                # they constrain the shape. Other fp4 routes keep their own
-                # denomination and are left alone.
+                # Only the byte-staged routes pack the descriptor, so only
+                # they constrain the shape. Other packed routes keep their own
+                # denomination and are left alone. fp4 stores two logical
+                # elements per byte, so an odd extent, stride or coordinate
+                # starts or ends a tile mid-byte, and the other half belongs to
+                # a neighbouring element the copy cannot carry or disturb.
+                _elements_per_byte = _FP4_PER_BYTE
                 _sides = (
                     ("src", src_desc, src_layout),
                     ("dst", dst_desc, dst_layout),
@@ -8030,6 +8077,7 @@ def copy(
                     _bad = _fp4_odd_byte_mapping(
                         _desc,
                         stride_field=_FP4_HALVED_STRIDE_LEAF.get(str(_layout)),
+                        elements_per_byte=_elements_per_byte,
                     )
                     if _bad is not None:
                         _what, _value = _bad
@@ -8045,11 +8093,13 @@ def copy(
                             f"staged as bytes on this route, so its {_what} "
                             f"must be even -- it {_detail}. An odd one puts "
                             "the tile's rows, its C0 columns or its first "
-                            "element half a byte off, which the halved "
-                            "descriptor cannot express",
+                            "element half a byte off, which a byte-granular "
+                            "copy cannot express",
                         )
                 for _side, _desc, _layout in _sides:
-                    _bad_extent = _partial_byte_fp4_extent(_desc)
+                    _bad_extent = _partial_byte_fp4_extent(
+                        _desc, elements_per_byte=_elements_per_byte
+                    )
                     if _bad_extent is not None:
                         _detail = (
                             "is not known until run time, so it cannot be "
@@ -12316,6 +12366,7 @@ def _require_reg_slot_reachable(src_token: str, dst_token: str, slot: RegSlot) -
     )
     if (
         (int_pair and ratio >= 4)
+        or (src_token == "i4x2" and dst_token in _INT4_CAST_TARGETS)
         or fp8_f32_pair
         or u8_f32_pair
         or hif8_f32_pair
