@@ -163,6 +163,7 @@ bool validateTensorDescriptor(mlir::Operation* op, const TensorDescriptor& desc,
 // Allocation capacity is optional provenance, not part of pointer identity.
 // Preserve it only across joins whose alternatives prove the same capacity;
 // otherwise tensor consumers build a view from their own shape/layout.
+// Descriptor lowering can inspect a loop before its yield is in place.
 static FailureOr<int64_t> inferStaticAllocationSizeBytes(
     Value address, llvm::DenseSet<Value> visiting,
     llvm::DenseMap<Value, int64_t> assumedCapacities = llvm::DenseMap<Value, int64_t>())
@@ -174,12 +175,14 @@ static FailureOr<int64_t> inferStaticAllocationSizeBytes(
 
     if (auto blockArg = dyn_cast<BlockArgument>(address)) {
         if (auto forOp = dyn_cast_or_null<scf::ForOp>(blockArg.getOwner()->getParentOp())) {
+            Block* body = forOp.getBody();
             unsigned argNumber = blockArg.getArgNumber();
-            if (blockArg.getOwner() == forOp.getBody() && argNumber > 0 && argNumber - 1 < forOp.getInitArgs().size()) {
+            if (blockArg.getOwner() == body && argNumber > 0 && argNumber - 1 < forOp.getInitArgs().size() &&
+                body->mightHaveTerminator()) {
                 unsigned iterArgNumber = argNumber - 1;
                 auto initSize =
                     inferStaticAllocationSizeBytes(forOp.getInitArgs()[iterArgNumber], visiting, assumedCapacities);
-                auto yield = dyn_cast<scf::YieldOp>(forOp.getBody()->getTerminator());
+                auto yield = dyn_cast<scf::YieldOp>(body->getTerminator());
                 if (failed(initSize) || !yield || iterArgNumber >= yield.getNumOperands())
                     return failure();
 
@@ -226,11 +229,12 @@ static FailureOr<int64_t> inferStaticAllocationSizeBytes(
         return failure();
     }
     if (auto forOp = dyn_cast<scf::ForOp>(def)) {
+        Block* body = forOp.getBody();
         unsigned resultNumber = cast<OpResult>(address).getResultNumber();
-        if (resultNumber >= forOp.getInitArgs().size())
+        if (resultNumber >= forOp.getInitArgs().size() || !body->mightHaveTerminator())
             return failure();
         auto initSize = inferStaticAllocationSizeBytes(forOp.getInitArgs()[resultNumber], visiting, assumedCapacities);
-        auto yield = dyn_cast<scf::YieldOp>(forOp.getBody()->getTerminator());
+        auto yield = dyn_cast<scf::YieldOp>(body->getTerminator());
         if (failed(initSize) || !yield || resultNumber >= yield.getNumOperands())
             return failure();
 

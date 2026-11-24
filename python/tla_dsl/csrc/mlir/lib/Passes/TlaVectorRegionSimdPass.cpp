@@ -4613,6 +4613,26 @@ static LogicalResult lowerStoreUpdate(
     return success();
 }
 
+/// Emit PSTU with the stream's ureg and return the updated ureg and UB pointer.
+static FailureOr<std::pair<Value, Value>> emitPstu(
+    OpBuilder& b, Location loc, Value mask, Value ptr, Value ureg, Type elemType)
+{
+    auto ubPtrTy = getUbPtrType(b.getContext());
+    Type resultTy = LLVM::LLVMStructType::getLiteral(b.getContext(), {uregVectorType(b), ubPtrTy});
+    Value preg = castMaskToPregType(b, loc, mask, fullPregVecType(b.getContext()));
+    int64_t elemBytes = elementStorageBytes(elemType);
+    Value result;
+    if (elemBytes == 2)
+        result = b.create<hivm_regbaseintrins::PSTUStoreS16InstOp>(loc, resultTy, preg, ptr, ureg).getResult();
+    else if (elemBytes == 4)
+        result = b.create<hivm_regbaseintrins::PSTUStoreS32InstOp>(loc, resultTy, preg, ptr, ureg).getResult();
+    else
+        return failure();
+    Value nextUreg = b.create<LLVM::ExtractValueOp>(loc, result, 0);
+    Value nextPtr = b.create<LLVM::ExtractValueOp>(loc, result, 1);
+    return std::make_pair(nextUreg, nextPtr);
+}
+
 static LogicalResult lowerCompressedUpdate(
     ::tla::StoreUnalignUpdateOp op, OpBuilder& b, ModuleOp module, DenseMap<Value, Value>& map);
 static LogicalResult lowerCompressedPost(
@@ -4627,61 +4647,52 @@ static LogicalResult lowerStoreUnalignUpdate(
     Value src = valueMap.lookup(op.getSource());
     if (!src)
         return failure();
-    // AscendC: HIVM $eleSize = postUpdateStride×sizeof(T); next_ptr = HW newPtr.
-    Value postUpdateStride = valueMap.lookup(op.getPostUpdateStride());
-    if (!postUpdateStride)
-        postUpdateStride = lookupOrCloneScalarValue(b, op.getPostUpdateStride(), valueMap);
-    if (!postUpdateStride)
-        return op.emitError("failed to materialize post_update_stride"), failure();
     auto ptrOr = resolveEffectiveUbPtr(op.getDest(), b, loc, valueMap);
     if (failed(ptrOr))
         return op.emitError("store_unalign_update requires a live UB address"), failure();
-    auto srcTy = dyn_cast<VectorType>(src.getType());
-    if (!srcTy)
-        return failure();
-    // Prefer TLA VectorSSA / tensor element (Bool=i1) over the AVE i8 carrier.
-    Type tlaStoreElem = srcTy.getElementType();
-    if (auto tlaVec = dyn_cast<::tla::VectorSSAType>(op.getSource().getType()))
-        tlaStoreElem = tlaVec.getElementType();
-    Type tlaDestElem = tlaStoreElem;
-    if (auto destTensor = dyn_cast<::tla::TlaTensorType>(op.getDest().getType()))
-        tlaDestElem = destTensor.getPtr().getPointee();
-    if (tlaStoreElem != tlaDestElem)
-        return op.emitError("store_unalign_update source and destination element types must match"), failure();
-    // Stride bytes follow storage width (Bool i1 → 1B); emit uses TLA elem so
-    // Bool hits the s8 alias path rather than mistaking the i8 carrier alone.
-    Value countBytes = strideElemsToByteOffI32(b, loc, postUpdateStride, tlaDestElem);
     Value uregIn = valueMap.lookup(op.getUregIn());
     if (!uregIn)
         return op.emitError("store_unalign_update ureg_in not mapped in vector helper"), failure();
-    Value second;
-    Value firstCount = countBytes;
-    Value secondCount;
-    Type carrierElem = tlaDestElem;
-    if (Value secondSource = op.getSource2()) {
-        Value other = valueMap.lookup(secondSource);
-        if (!other)
-            return op.emitError("dual unaligned store second source is not mapped"), failure();
-        int64_t distBytes = std::min<int64_t>(elementStorageBytes(tlaDestElem), 4);
-        Value even = bitcastToIntlvCarrier(b, loc, src, distBytes);
-        Value odd = bitcastToIntlvCarrier(b, loc, other, distBytes);
-        if (!even || !odd)
-            return op.emitError("dual unaligned store sources must be vectors"), failure();
-        auto pair =
-            b.create<hivmave::VFInterleaveOp>(loc, TypeRange{even.getType(), odd.getType()}, ValueRange{even, odd});
-        src = pair->getResult(0);
-        second = pair->getResult(1);
-        carrierElem = cast<VectorType>(src.getType()).getElementType();
-        std::tie(firstCount, secondCount) = splitUnalignUpdateCount(b, loc, countBytes);
+    Type destElem = cast<::tla::TlaTensorType>(op.getDest().getType()).getPtr().getPointee();
+    FailureOr<std::pair<Value, Value>> emitted = failure();
+    if (isa<::tla::MaskSSAType>(op.getSource().getType())) {
+        emitted = emitPstu(b, loc, src, *ptrOr, uregIn, destElem);
+    } else {
+        // The verifier checks matching TLA element types. Use the destination
+        // type here so Bool uses its b8 carrier even if the AVE type is i8.
+        Value stride = lookupOrCloneScalarValue(b, op.getPostUpdateStride(), valueMap);
+        if (!stride)
+            return op.emitError("failed to materialize post_update_stride"), failure();
+        Value countBytes = strideElemsToByteOffI32(b, loc, stride, destElem);
+        Value second;
+        Value firstCount = countBytes;
+        Value secondCount;
+        Type carrierElem = destElem;
+        if (Value secondSource = op.getSource2()) {
+            Value other = valueMap.lookup(secondSource);
+            if (!other)
+                return op.emitError("dual unaligned store second source is not mapped"), failure();
+            int64_t distBytes = std::min<int64_t>(elementStorageBytes(destElem), 4);
+            Value even = bitcastToIntlvCarrier(b, loc, src, distBytes);
+            Value odd = bitcastToIntlvCarrier(b, loc, other, distBytes);
+            if (!even || !odd)
+                return op.emitError("dual unaligned store sources must be vectors"), failure();
+            auto pair =
+                b.create<hivmave::VFInterleaveOp>(loc, TypeRange{even.getType(), odd.getType()}, ValueRange{even, odd});
+            src = pair->getResult(0);
+            second = pair->getResult(1);
+            carrierElem = cast<VectorType>(src.getType()).getElementType();
+            std::tie(firstCount, secondCount) = splitUnalignUpdateCount(b, loc, countBytes);
+        }
+        emitted = emitVstusPost(b, loc, src, *ptrOr, uregIn, firstCount, carrierElem);
+        if (second && succeeded(emitted)) {
+            auto [ureg, nextPtr] = *emitted;
+            // The second emission uses the same carrier as the first.
+            emitted = emitVstusPost(b, loc, second, nextPtr, ureg, secondCount, carrierElem);
+        }
     }
-    auto emitted = emitVstusPost(b, loc, src, *ptrOr, uregIn, firstCount, carrierElem);
     if (failed(emitted))
         return op.emitError("unsupported element type for tla.store_unalign_update"), failure();
-    if (second) {
-        auto [ureg, nextPtr] = *emitted;
-        // The second emission uses the same carrier as the first.
-        emitted = emitVstusPost(b, loc, second, nextPtr, ureg, secondCount, carrierElem);
-    }
     valueMap[op.getUregOut()] = emitted->first;
     mapUpdateNextPtrI64(op.getNextPtr(), b.create<LLVM::PtrToIntOp>(loc, b.getI64Type(), emitted->second), valueMap);
     // Stream-tail ``vstas`` comes from ``store_unalign_post`` only.

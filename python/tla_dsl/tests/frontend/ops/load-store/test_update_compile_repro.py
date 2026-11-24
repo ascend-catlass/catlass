@@ -10,6 +10,7 @@ from catlass.params import (
     NormalStoreParams,
     PostMode,
     UnalignLoadParams,
+    UnalignMaskStoreParams,
     UnalignStoreParams,
 )
 from catlass.tla.runtime import make_fake_tensor
@@ -18,6 +19,7 @@ LOAD = NormalLoadParams(post_mode=PostMode.POST_MODE_UPDATE)
 STORE = NormalStoreParams(post_mode=PostMode.POST_MODE_UPDATE)
 UNALIGN_LOAD = UnalignLoadParams(post_mode=PostMode.POST_MODE_UPDATE)
 UNALIGN_STORE = UnalignStoreParams(post_mode=PostMode.POST_MODE_UPDATE)
+UNALIGN_MASK_STORE = UnalignMaskStoreParams()
 
 
 def _gm(n: int = 256) -> tla.Tensor:
@@ -170,6 +172,67 @@ def test_loop_unalign_update_with_sidecar_full_compile(isolated_compile_cache) -
     assert art is not None
 
 
+@pytest.mark.parametrize(
+    ("control_flow", "dtype", "store_params"),
+    [
+        pytest.param("for", tla.Int32, UNALIGN_MASK_STORE, id="b32-for"),
+        pytest.param("if", tla.Int32, UNALIGN_MASK_STORE, id="b32-if"),
+        pytest.param("for-if", tla.Float16, UNALIGN_MASK_STORE, id="b16-for-if"),
+        pytest.param("if-for", tla.Float16, UNALIGN_MASK_STORE, id="b16-if-for"),
+        pytest.param("for-if-for", tla.Int32, UNALIGN_MASK_STORE, id="b32-for-if-for"),
+        pytest.param(
+            "for-if-for", tla.Float16, UNALIGN_MASK_STORE, id="b16-for-if-for"
+        ),
+        pytest.param("for-if-for", tla.Int32, UNALIGN_STORE, id="vector-for-if-for"),
+    ],
+)
+def test_unalign_store_window_dynamic_control_flow_full_compile(
+    isolated_compile_cache,
+    control_flow: str,
+    dtype: type[tla.Numeric],
+    store_params: UnalignMaskStoreParams | UnalignStoreParams,
+) -> None:
+    del isolated_compile_cache
+    mask_store = isinstance(store_params, UnalignMaskStoreParams)
+    window_elements = (2 if dtype is tla.Int32 else 8) if mask_store else 64
+
+    @tla.kernel
+    def write(flag: tla.Int32, trips: tla.Int32) -> None:
+        ptr = tla.allocate(8 * window_elements, dtype, tla.AddressSpace.ub, 32)
+        layout = tla.make_layout(tla.make_shape(window_elements), tla.make_stride(1))
+        window = tla.make_tensor(ptr, layout)
+        with tla.vector():
+            with tla.vec.func(mode="simd"):
+                value = (
+                    tla.create_mask(pattern=tla.mask.VL1, dtype=dtype)
+                    if mask_store
+                    else tla.full(1, dtype)
+                )
+                if control_flow == "for":
+                    for _ in tla.range(trips):
+                        window = window.store(value, store_params)
+                elif control_flow == "if":
+                    if flag > 0:
+                        window = window.store(value, store_params)
+                elif control_flow == "for-if":
+                    for i in tla.range(trips):
+                        if i < flag:
+                            window = window.store(value, store_params)
+                elif control_flow == "if-for":
+                    if flag > 0:
+                        for _ in tla.range(trips):
+                            window = window.store(value, store_params)
+                else:
+                    for i in tla.range(trips):
+                        if i < flag:
+                            for _ in tla.range(trips):
+                                window = window.store(value, store_params)
+                window.store(value, store_params)
+
+    art = tla.compile(write, tla.Int32(1), tla.Int32(2), options="--npu-arch 3510")
+    assert art is not None
+
+
 def test_loop_update_dynamic_extent_full_compile(isolated_compile_cache) -> None:
     del isolated_compile_cache
     art = tla.compile(loop_update_dynamic_extent, _gm(), _gm(), tla.Int32(64))
@@ -187,7 +250,9 @@ def _gm_dtype(dtype: type[tla.Numeric], n: int = 256) -> tla.Tensor:
 
 
 @tla.kernel
-def unalign_update_byte_encoding_roundtrip(mem_x: tla.Tensor, mem_z: tla.Tensor) -> None:
+def unalign_update_byte_encoding_roundtrip(
+    mem_x: tla.Tensor, mem_z: tla.Tensor
+) -> None:
     """UnAlign UPDATE memcpy on UB for move-only byte encodings (no GM copy)."""
     x_ub = tla.make_tensor_like(
         tla.allocate(256, mem_x.element_type, tla.AddressSpace.ub, 256),

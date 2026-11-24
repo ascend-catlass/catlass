@@ -283,6 +283,43 @@ def _make_update_tile_from_ptr(
     return make_tensor(ptr, layout, make_coord(as_numeric(0), loc=loc), loc=loc)
 
 
+def _emit_store_unalign_update(
+    window: _Tensor,
+    value: mlir_ir.Value,
+    stride: mlir_ir.Value,
+    next_ptr_type: mlir_ir.Type,
+    *,
+    loc: mlir_ir.Location | None,
+    source2: mlir_ir.Value | None = None,
+    compressed: bool = False,
+) -> _Tensor:
+    from ..core_api import _as_value
+
+    ctx = loc.context if loc is not None else mlir_ir.Context.current
+    ureg_type = mlir_ir.Type.parse("!tla.ureg", context=ctx)
+    next_ptr, _ = _tla_ops_gen.store_unalign_update(
+        next_ptr_type,
+        ureg_type,
+        _as_value(window),
+        value,
+        stride,
+        source2=source2,
+        compressed=True if compressed else None,
+        loc=loc,
+    )
+    if compressed:
+        return window
+    if _tla_type_bridge.type_is_mask_ssa(value.type):
+        # Diagnose known UB address misalignment during frontend compilation.
+        from ..execution_lowering import TlaLoweringError
+
+        try:
+            _as_value(next_ptr).owner.verify()
+        except mlir_ir.MLIRError as exc:
+            raise TlaLoweringError(str(exc)) from exc
+    return _make_update_tile_from_ptr(next_ptr, window, loc=loc)
+
+
 # Align / UnAlign PostMode UPDATE: b8/b16/b32/b64 widths (signed/unsigned
 # integers, Bool/i1, fp8/hif8/e8m0/fp4x2 on b8, f16/bf16/f32, and f64). Align
 # byte encodings UPDATE as s8 bits (no ``vldsx1.post.v256f8*``); UnAlign f8e4/e5
@@ -1209,7 +1246,8 @@ class _Tensor(TensorABC):
               `None`.
               - `None` / `NormalStoreParams` / `UnalignStoreParams` /
                 `BlockStoreParams` → vector store.
-              - `MaskStoreParams` → mask store.
+              - `MaskStoreParams` → aligned mask store.
+              - `UnalignMaskStoreParams` → unaligned packed mask store.
               - `NormalStoreParams`:
                 - `store_dist` (`str`): `tla.params.StoreDist` token. Default
                   `DIST_NORM`.
@@ -1255,9 +1293,20 @@ class _Tensor(TensorABC):
               - `MaskStoreParams`:
                 - `store_dist` (`str`): `tla.params.MaskStoreDist` token.
                   Default `DIST_NORM`.
+              - `dst.store(mask, tla.params.UnalignMaskStoreParams())` packs
+                `mask` into one bit per lane and writes it to `dst`, a rank-1
+                contiguous UB window at `coord=0`. A b16 store writes 16 bytes
+                and requires a 16-byte-aligned starting address. A b32 store
+                writes 8 bytes and requires an 8-byte-aligned starting address.
+                The returned tile begins at the starting address of `dst` plus
+                the number of bytes written and can be used for the next store.
+                It retains the pointer type of `dst`, including its alignment
+                declaration. The caller must ensure that the actual address
+                meets the alignment required by each operation using the tile.
             - `mask` (`MaskSSA | None`): Optional predicate for vector stores;
-              rejected by `UnalignStoreParams`, `MaskStoreParams`, first-element
-              and interleaved modes. Default `None`. For `DIST_PACK4_B32`, masks use source lanes:
+              rejected by `UnalignStoreParams`, `MaskStoreParams`,
+              `UnalignMaskStoreParams`, first-element and interleaved modes.
+              Default `None`. For `DIST_PACK4_B32`, masks use source lanes:
               4/2/1 lanes per destination byte for 1/2/4-byte sources.
               An omitted mask follows the destination's valid length;
               an explicit mask is not clipped to that length. Masked-out
@@ -1438,6 +1487,7 @@ class _Tensor(TensorABC):
             MaskStoreParams,
             NormalStoreParams,
             PostMode,
+            UnalignMaskStoreParams,
             UnalignStoreParams,
         )
         from ..types import (
@@ -1477,29 +1527,35 @@ class _Tensor(TensorABC):
         else:
             value_val = _as_value(value)
 
-        # MaskSSA path: selected by MaskStoreParams.
-        if isinstance(params, MaskStoreParams):
+        if isinstance(params, (MaskStoreParams, UnalignMaskStoreParams)):
+            params_name = type(params).__name__
             if value2_val is not None:
                 raise TlaLoweringError(
-                    "store(..., MaskStoreParams) does not accept a dual-source tuple"
+                    f"store(..., {params_name}) does not accept a dual-source tuple"
                 )
             if mask is not None:
                 raise TlaLoweringError(
-                    "store(..., MaskStoreParams) does not accept predicate mask="
+                    f"store(..., {params_name}) does not accept predicate mask="
                 )
-            if params.store_dist != MaskStoreDist.DIST_NORM:
-                # TODO: Once all `StoreDist` mode supported, remove this guard.
+            if (
+                isinstance(params, MaskStoreParams)
+                and params.store_dist != MaskStoreDist.DIST_NORM
+            ):
                 raise NotImplementedError(
                     f"currently unsupported store_dist {params.store_dist!r}"
                 )
             _require_category("store", "value", value, "mask_ssa", 1)
             elem = str(dest_desc.element_type).strip().lower()
+            elem_bytes = dtype_size_bytes(elem)
             # AscendC StoreAlign<__ubuf__ T*, MaskReg>: T is address typing;
             # sizeof(bool)==1 admits Bool as the b8 MaskReg spill path.
-            if dtype_size_bytes(elem) not in _MASK_UB_ELEM_BYTES:
+            unaligned = isinstance(params, UnalignMaskStoreParams)
+            supported_bytes = (2, 4) if unaligned else _MASK_UB_ELEM_BYTES
+            if elem_bytes not in supported_bytes:
+                widths = "b16/b32" if unaligned else "b8/b16/b32/b64"
                 _op_error(
                     "store",
-                    f"invalid argument 'dest': expected b8/b16/b32/b64 "
+                    f"invalid argument 'dest': expected {widths} "
                     f"scalar element type for MaskSSA store, got "
                     f"{dest_desc.element_type}",
                 )
@@ -1513,12 +1569,24 @@ class _Tensor(TensorABC):
                     f"!tla.mask<{ub_lanes}> (256/sizeof); use matching "
                     "UB width (e.g. f32 UB with f32 / mask<64>)",
                 )
+            if unaligned:
+                from ..base_dsl.typing import as_numeric
+
+                _runtime._require_kernel_simd_region("store")
+                window = _require_update_origin_window(self, loc=loc)
+                _require_update_unit_stride(window)
+                packed_bytes = ub_lanes // 8
+                stride = _as_value(as_numeric(packed_bytes // elem_bytes))
+                ptr_type = _tla_type_bridge.tensor_ptr_type_get(dest.type)
+                return _emit_store_unalign_update(
+                    window, value_val, stride, ptr_type, loc=loc
+                )
             _tla_ops_gen.store(dest, value_val, loc=loc)
             return None
 
         if value2_val is None and _tla_type_bridge.type_is_mask_ssa(value_val.type):
             raise TlaLoweringError(
-                "storing MaskSSA requires MaskStoreParams "
+                "storing MaskSSA requires MaskStoreParams or UnalignMaskStoreParams "
                 "(got "
                 f"{type(params).__name__ if params is not None else 'None'})"
             )
@@ -1533,8 +1601,9 @@ class _Tensor(TensorABC):
             params, (NormalStoreParams, UnalignStoreParams, BlockStoreParams)
         ):
             raise TlaLoweringError(
-                "store params must be NormalStoreParams, UnalignStoreParams, or "
-                f"MaskStoreParams, got {type(params).__name__}"
+                "store params must be NormalStoreParams, UnalignStoreParams, "
+                "BlockStoreParams, MaskStoreParams, or UnalignMaskStoreParams, "
+                f"got {type(params).__name__}"
             )
         dual_width = (
             _INTLV_BYTES.get(params.store_dist)
@@ -1603,21 +1672,15 @@ class _Tensor(TensorABC):
                     stride_val = _unalign_update_stride_value(
                         params, window, element_type=elem_ty, dual=is_intlv
                     )
-                ctx = loc.context if loc is not None else mlir_ir.Context.current
-                ureg_type = mlir_ir.Type.parse("!tla.ureg", context=ctx)
-                next_ptr, _ureg_out = _tla_ops_gen.store_unalign_update(
-                    ptr_type,
-                    ureg_type,
-                    dest,
+                return _emit_store_unalign_update(
+                    window,
                     value_val,
                     stride_val,
+                    ptr_type,
                     source2=value2_val,
-                    compressed=True if compressed else None,
                     loc=loc,
+                    compressed=compressed,
                 )
-                if compressed:
-                    return window
-                return _make_update_tile_from_ptr(next_ptr, window, loc=loc)
             is_block = isinstance(params, BlockStoreParams)
             if not is_block and not isinstance(params, NormalStoreParams):
                 raise TlaLoweringError(

@@ -534,7 +534,8 @@ Parameters:
   `None`.
   - `None` / `NormalStoreParams` / `UnalignStoreParams` /
     `BlockStoreParams` → vector store.
-  - `MaskStoreParams` → mask store.
+  - `MaskStoreParams` → aligned mask store.
+  - `UnalignMaskStoreParams` → unaligned packed mask store.
   - `NormalStoreParams`:
     - `store_dist` (`str`): `tla.params.StoreDist` token. Default
       `DIST_NORM`.
@@ -580,9 +581,20 @@ Parameters:
   - `MaskStoreParams`:
     - `store_dist` (`str`): `tla.params.MaskStoreDist` token.
       Default `DIST_NORM`.
+  - `dst.store(mask, tla.params.UnalignMaskStoreParams())` packs
+    `mask` into one bit per lane and writes it to `dst`, a rank-1
+    contiguous UB window at `coord=0`. A b16 store writes 16 bytes
+    and requires a 16-byte-aligned starting address. A b32 store
+    writes 8 bytes and requires an 8-byte-aligned starting address.
+    The returned tile begins at the starting address of `dst` plus
+    the number of bytes written and can be used for the next store.
+    It retains the pointer type of `dst`, including its alignment
+    declaration. The caller must ensure that the actual address
+    meets the alignment required by each operation using the tile.
 - `mask` (`MaskSSA | None`): Optional predicate for vector stores;
-  rejected by `UnalignStoreParams`, `MaskStoreParams`, first-element
-  and interleaved modes. Default `None`. For `DIST_PACK4_B32`, masks use source lanes:
+  rejected by `UnalignStoreParams`, `MaskStoreParams`,
+  `UnalignMaskStoreParams`, first-element and interleaved modes.
+  Default `None`. For `DIST_PACK4_B32`, masks use source lanes:
   4/2/1 lanes per destination byte for 1/2/4-byte sources.
   An omitted mask follows the destination's valid length;
   an explicit mask is not clipped to that length. Masked-out

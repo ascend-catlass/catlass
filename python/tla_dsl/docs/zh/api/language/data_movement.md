@@ -479,7 +479,8 @@ tla.Tensor.store(value: VectorSSA | MaskSSA | tuple[VectorSSA, VectorSSA], param
 - `params`（`StoreParams | None`）：写回模式。可选，默认 `None`。
   - `None` / `NormalStoreParams` / `UnalignStoreParams` /
     `BlockStoreParams` → vector 写回。
-  - `MaskStoreParams` → mask 写回。
+  - `MaskStoreParams` → 对齐掩码写回。
+  - `UnalignMaskStoreParams` → 非对齐掩码位图写回。
   - `NormalStoreParams`：
     - `store_dist`（`str`）：`tla.params.StoreDist` token。默认 `DIST_NORM`。
 
@@ -518,8 +519,15 @@ tla.Tensor.store(value: VectorSSA | MaskSSA | tuple[VectorSSA, VectorSSA], param
   - `MaskStoreParams`：
     - `store_dist`（`str`）：`tla.params.MaskStoreDist` token。默认
       `DIST_NORM`。
+  - `dst.store(mask, tla.params.UnalignMaskStoreParams())` 将 `mask` 中每个 lane 的值用一位表示，
+    打包写入 `dst` 指向的一维连续 UB 窗口（`coord=0`）。
+    b16 写入 16 字节，要求 `dst` 起始地址按 16 字节对齐。
+    b32 写入 8 字节，要求 `dst` 起始地址按 8 字节对齐。
+    返回的 tile 从原 `dst` 的起始地址向后推进写入的字节数，可直接用于下一次写回。
+    其指针类型沿用 `dst`，包括对齐声明。调用方须保证实际地址满足使用该 tile 的各项操作的对齐要求。
 - `mask`（`MaskSSA | None`）：vector 写回的可选谓词；`UnalignStoreParams`、
-  `MaskStoreParams`、first-element 和交织模式均不接受此参数。默认 `None`。`DIST_PACK4_B32` 的 mask
+  `MaskStoreParams`、`UnalignMaskStoreParams`、first-element 和交织模式均不接受此参数。
+  默认 `None`。`DIST_PACK4_B32` 的 mask
   按源 lane 计数，1/2/4 字节源元素每个目标字节分别对应 4/2/1 个源 lane。
   省略 mask 时按目标有效长度推导；显式 mask 不再受该长度限制。
   被 mask 屏蔽的目标字节保持原值。

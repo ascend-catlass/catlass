@@ -706,8 +706,8 @@ def Tla_StoreOp : Tla_Op<"store", [AttrSizedOperandSegments]> {
       destination (AscendC ``StoreAlign`` / ``DIST_INTLV_*``).
     * ``!tla.mask`` — continuous-aligned MaskReg store (AscendC
       ``StoreAlign(..., MaskReg&)`` / ``DIST_NORM`` / ``psts``). Destination
-      UB element type must be a b8/b16/b32/b64 scalar (int or float). Spill size
-      is ``N/8`` from the ``MaskSSA`` source; the UB tile supplies the
+      UB element type must be a b8/b16/b32/b64 scalar (int or float). Stores
+      the full 32-byte mask register to the UB tile's 32-byte-aligned
       address. Predicate ``mask`` and ``unaligned_ub_access`` are not
       allowed. Lowers via ``ave.hir.masked_store <NORM_B8>`` on an ``i1``
       memref view to ``hivm.psts.b8``.
@@ -925,16 +925,19 @@ def Tla_LoadUnalignUpdateOp : Tla_Op<"load_unalign_update", []> {
 
 def Tla_StoreUnalignUpdateOp : Tla_Op<"store_unalign_update",
     [AttrSizedOperandSegments, DeclareOpInterfaceMethods<MemoryEffectsOpInterface>]> {
-  let summary = "StoreUnAlign POST_MODE_UPDATE (vstus.post + ureg SSA; HW next_ptr)";
+  let summary = "Store a vector or mask to an unaligned UB address with ureg state";
   let description = [{
-    Stores one unaligned window. ``post_update_stride`` is an element count
-    (AscendC ``postUpdateStride``). Same default / explicit / ``(0, VL]`` rule as
-    ``load_unalign_update``. Same HIVM ``$eleSize`` / HW ``newPtr`` rule.
+    For a vector source, ``post_update_stride`` is an element count
+    (AscendC ``postUpdateStride``) in ``(0, VL]``. Lowers to ``vstus.post``.
+    For a mask source, ``pstu`` packs one bit per lane and advances the UB
+    pointer by a fixed amount. A b16 destination (16-byte aligned) takes
+    ``!tla.mask<128>`` and advances 8 elements. A b32 destination (8-byte aligned)
+    takes ``!tla.mask<64>`` and advances 2 elements.
     Python omits ``ureg_in``; ``tla-unalign-ureg`` inserts ``create_ureg``,
     fills ``ureg_in``, and places ``store_unalign_post`` after the ureg that
-    is not taken by a later store UPDATE. With ``compressed`` set, the store uses
-    the byte count that hardware recorded during ``squeeze`` and requires a zero
-    explicit stride.
+    is not taken by a later store UPDATE. With ``compressed`` set, a vector store
+    uses the byte count that hardware recorded during ``squeeze`` and requires a
+    zero explicit stride.
     Compressed stores use the supplied ``dest`` and share the hardware write
     offset. In this mode ``next_ptr`` represents the base address used by the
     store so the compiler can use it for the final tail writeback.
@@ -943,7 +946,7 @@ def Tla_StoreUnalignUpdateOp : Tla_Op<"store_unalign_update",
     Dual UPDATE accepts a stride in ``(0, 2 * VL]``.
   }];
   let arguments = (ins Tla_TensorType:$dest,
-                       Tla_VectorSSAType:$source,
+                       AnyTypeOf<[Tla_VectorSSAType, Tla_MaskSSAType]>:$source,
                        Tla_IntegerOrIndexType:$post_update_stride,
                        Optional<Tla_UregType>:$ureg_in,
                        Optional<Tla_VectorSSAType>:$source2,

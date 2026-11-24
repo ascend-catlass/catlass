@@ -279,14 +279,23 @@ class BlockStoreParams(StoreParams):
 
 @dataclass
 class MaskStoreParams(StoreParams):
-    """Continuous-aligned MaskSSA store to 1/2/4-byte UB.
+    """Store the full 32-byte mask register to a 32-byte-aligned UB address.
 
-    Spill size is ``N/8`` from the ``MaskSSA`` value. ``N`` must equal
-    ``256 / sizeof(T)`` for the destination UB element type (``T`` may be int
-    or float of that width). Default distribution is ``DIST_NORM``.
+    The logical mask lane count must equal ``256 / sizeof(T)`` for the
+    destination element type.
     """
 
     store_dist: str = MaskStoreDist.DIST_NORM
+
+
+@dataclass
+class UnalignMaskStoreParams(StoreParams):
+    """Store a packed MaskSSA bitmap and return the next UB tile.
+
+    b16 and b32 stores advance by 16 and 8 bytes, respectively. The starting
+    UB address must be aligned to that same byte count. A chain of stores
+    flushes its tail automatically.
+    """
 
 
 class LoadParams:

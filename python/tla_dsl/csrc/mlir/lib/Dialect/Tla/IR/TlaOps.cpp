@@ -2389,15 +2389,111 @@ mlir::LogicalResult LoadUnalignUpdateOp::verify()
     return verifyUpdatePtr(getOperation(), getNextPtr(), elemType);
 }
 
+// UPDATE uses an origin window. Recover known byte offsets from its backing
+// pointer, including ptr_add, whose type alone may describe the allocation.
+static std::optional<uint64_t> getStaticMaskStoreAddressRemainder(mlir::Value value, uint64_t alignment)
+{
+    uint64_t byteOffset = 0;
+    while (value) {
+        if (auto view = value.getDefiningOp<TileViewOp>()) {
+            value = view.getSource();
+        } else if (auto make = value.getDefiningOp<MakeTensorOp>()) {
+            value = make.getPtr();
+        } else if (auto like = value.getDefiningOp<MakeTensorLikeOp>()) {
+            value = like.getPtr();
+        } else if (auto desc = value.getDefiningOp<TensorDescOp>();
+                   desc && mlir::isa<PtrType>(desc.getBase().getType())) {
+            value = desc.getBase();
+        } else if (auto tensorPtr = value.getDefiningOp<TensorPtrOp>()) {
+            value = tensorPtr.getSrc();
+        } else if (auto recast = value.getDefiningOp<RecastPtrOp>()) {
+            value = recast.getSrc();
+        } else if (auto add = value.getDefiningOp<PtrAddOp>()) {
+            llvm::APInt offset;
+            if (!mlir::matchPattern(add.getOffset(), mlir::m_ConstantInt(&offset)))
+                return std::nullopt;
+            int64_t elemBytes = elementStorageBytes(add.getPtr().getType().getPointee());
+            if (elemBytes <= 0)
+                return std::nullopt;
+            byteOffset += (offset.sextOrTrunc(64).getZExtValue() % alignment) * elemBytes;
+            value = add.getPtr();
+        } else if (auto ptrFromInt = value.getDefiningOp<IntToPtrOp>()) {
+            llvm::APInt address;
+            if (!mlir::matchPattern(ptrFromInt.getAddr(), mlir::m_ConstantInt(&address)))
+                return std::nullopt;
+            return (address.sextOrTrunc(64).getZExtValue() + byteOffset) % alignment;
+        } else if (auto ifOp = value.getDefiningOp<mlir::scf::IfOp>()) {
+            // Pointer types can retain the allocation alignment after offsets.
+            // A branch result only proves the remainder common to both yields.
+            unsigned index = mlir::cast<mlir::OpResult>(value).getResultNumber();
+            std::optional<uint64_t> remainder;
+            for (mlir::Region& region : ifOp->getRegions()) {
+                if (!region.hasOneBlock() || !region.front().mightHaveTerminator())
+                    return std::nullopt;
+                auto yield = mlir::dyn_cast<mlir::scf::YieldOp>(region.front().getTerminator());
+                if (!yield || index >= yield.getNumOperands())
+                    return std::nullopt;
+                auto branchRemainder = getStaticMaskStoreAddressRemainder(yield.getOperand(index), alignment);
+                if (!branchRemainder || (remainder && remainder != branchRemainder))
+                    return std::nullopt;
+                remainder = branchRemainder;
+            }
+            return (*remainder + byteOffset) % alignment;
+        } else {
+            // A store fed by a loop-carried window can use the seed on the
+            // first iteration, including when the store is in a nested branch.
+            // Inspect the seed before relying on the carried type.
+            if (auto arg = mlir::dyn_cast<mlir::BlockArgument>(value); arg && arg.getArgNumber() > 0) {
+                if (auto loop = mlir::dyn_cast<mlir::scf::ForOp>(arg.getOwner()->getParentOp());
+                    loop && arg.getArgNumber() <= loop.getInitArgs().size()) {
+                    value = loop.getInitArgs()[arg.getArgNumber() - 1];
+                    continue;
+                }
+            }
+            auto ptr = mlir::dyn_cast<PtrType>(value.getType());
+            if (auto tensor = mlir::dyn_cast<TlaTensorType>(value.getType()))
+                ptr = tensor.getPtr();
+            if (ptr && ptr.getAlignment() != 0 && ptr.getAlignment() % alignment == 0)
+                return byteOffset % alignment;
+            return std::nullopt;
+        }
+    }
+    return std::nullopt;
+}
+
 mlir::LogicalResult StoreUnalignUpdateOp::verify()
 {
     if (failed(verifyUnalignUbTensor(getOperation(), getDest(), "dest")))
         return mlir::failure();
-    auto sourceVec = mlir::dyn_cast<VectorSSAType>(getSource().getType());
-    if (!sourceVec)
-        return emitOpError("source must be !tla.vector");
     auto destType = mlir::cast<TlaTensorType>(getDest().getType());
     mlir::Type elemType = destType.getPtr().getPointee();
+    if (auto sourceMask = mlir::dyn_cast<MaskSSAType>(getSource().getType())) {
+        if (getSource2())
+            return emitOpError("unaligned mask store requires a single mask source");
+        if (getCompressed())
+            return emitOpError("compressed UPDATE requires a vector source");
+        auto region = getOperation()->getParentOfType<VecFuncOp>();
+        if (auto mode = region->getAttrOfType<mlir::StringAttr>("mode");
+            mode && !mode.getValue().equals_insensitive("simd"))
+            return emitOpError("unaligned mask store requires a SIMD tla.vec.func region");
+        int64_t elemBytes = elementStorageBytes(elemType);
+        if (elemBytes != 2 && elemBytes != 4)
+            return emitOpError("unaligned mask store destination must have b16 or b32 elements");
+        constexpr int64_t kVectorRegisterBytes = 256;
+        int64_t lanes = kVectorRegisterBytes / elemBytes;
+        if (sourceMask.getPhysicalLanes() != lanes)
+            return emitOpError("unaligned mask store requires a mask with ") << lanes << " lanes";
+        int64_t packedBytes = lanes / 8;
+        llvm::APInt stride;
+        if (!mlir::matchPattern(getPostUpdateStride(), mlir::m_ConstantInt(&stride)) ||
+            stride != packedBytes / elemBytes)
+            return emitOpError("unaligned mask store requires a constant post_update_stride of ")
+                   << packedBytes / elemBytes << " elements";
+        if (auto remainder = getStaticMaskStoreAddressRemainder(getDest(), packedBytes); remainder && *remainder != 0)
+            return emitOpError("unaligned mask store requires a ") << packedBytes << "-byte-aligned UB address";
+        return verifyUpdatePtr(getOperation(), getNextPtr(), elemType);
+    }
+    auto sourceVec = mlir::cast<VectorSSAType>(getSource().getType());
     if (sourceVec.getElementType() != elemType)
         return emitOpError("store_unalign_update source and destination element types must match");
     if (getCompressed()) {
