@@ -52,6 +52,8 @@ DTYPES: dict[str, DTypeSpec] = {
     "f8e8m0": DTypeSpec("f8e8m0", tla.Float8E8M0, "uint8", 0, 1),
     "f4e2m1x2": DTypeSpec("f4e2m1x2", tla.Float4E2M1x2, "uint8", 0, 1),
     "f4e1m2x2": DTypeSpec("f4e1m2x2", tla.Float4E1M2x2, "uint8", 0, 1),
+    "hif8": DTypeSpec("hif8", tla.HiFloat8, "uint8", 0, 1),
+    "bool": DTypeSpec("bool", tla.Bool, "bool", 0, 1),
 }
 
 # Element types that must be bound via from_dlpack(..., element_type=...).
@@ -62,6 +64,7 @@ _DLPACK_ELEMENT_TYPE_OVERRIDE: frozenset[Any] = frozenset(
         tla.Float8E8M0,
         tla.Float4E2M1x2,
         tla.Float4E1M2x2,
+        tla.HiFloat8,
     }
 )
 

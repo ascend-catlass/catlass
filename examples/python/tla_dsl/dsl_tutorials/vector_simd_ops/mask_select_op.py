@@ -26,7 +26,25 @@ from catlass import tla
 VECTOR_ELE = 512
 VL_ELE = 64
 LOOPS = 8
-ALL_DTYPES = ("i8", "f16", "f32")  # Covers mask<256>, mask<128>, mask<64>.
+ALL_DTYPES = (
+    "bool",
+    "i8",
+    "u8",
+    "i16",
+    "u16",
+    "i32",
+    "u32",
+    "f16",
+    "bf16",
+    "f32",
+    "i64",
+    "u64",
+    "f8e4m3fn",
+    "f8e5m2",
+    "hif8",
+    "f4e2m1x2",
+    "f4e1m2x2",
+)
 
 _KERNEL_DTYPE = tla.Float32
 _KERNEL_SHAPE = (VECTOR_ELE,)
@@ -119,10 +137,14 @@ def _set_kernel_config(
 
 def _make_inputs(args: Any, dtype_name: str, torch: Any) -> tuple[Any, Any]:
     _, dtype, _ = _set_kernel_config(args.op, dtype_name, args.shape)
-    index = torch.arange(VECTOR_ELE, dtype=torch.int32, device="npu")
-    data_a = ((index % 31) + 1).to(dtype)
-    data_b = (-(index % 29) - 1).to(dtype)
-    return data_a, data_b
+    index = torch.arange(VECTOR_ELE, dtype=torch.int64)
+    if dtype_name == "bool":
+        data_a = ((index % 3) == 0).to(torch.bool)
+        data_b = ((index % 5) == 0).to(torch.bool)
+    else:
+        data_a = ((index % 31) + 1).to(dtype)
+        data_b = (-(index % 29) - 1).to(dtype)
+    return data_a.to("npu"), data_b.to("npu")
 
 
 def _expected(op_name: str, inputs: tuple[Any, ...]) -> Any:
@@ -137,7 +159,15 @@ def _expected(op_name: str, inputs: tuple[Any, ...]) -> Any:
     src0 = lane < VL_ELE // 4
     src1 = (lane % 4) == 0
     selected = torch.where(selector, src0, src1).repeat(LOOPS)
-    return torch.where(selected, data_a, data_b).to(inputs[0].device)
+    if data_a.dtype in (torch.uint8, torch.uint16, torch.uint32, torch.uint64):
+        # torch.where has no unsigned-integer kernels; select in int64 and cast
+        # back. Values stay exact for these inputs.
+        result = torch.where(
+            selected, data_a.to(torch.int64), data_b.to(torch.int64)
+        ).to(data_a.dtype)
+    else:
+        result = torch.where(selected, data_a, data_b)
+    return result.to(inputs[0].device)
 
 
 HARNESS = DirectVectorOpHarness(
@@ -154,7 +184,7 @@ HARNESS = DirectVectorOpHarness(
         unsupported_case=_is_unsupported_case,
         print_skip=_print_skip,
         script_path=Path(__file__).resolve(),
-        float_dtypes=frozenset({"f16", "f32"}),
+        float_dtypes=frozenset({"f16", "bf16", "f32"}),
         input_count=2,
     )
 )

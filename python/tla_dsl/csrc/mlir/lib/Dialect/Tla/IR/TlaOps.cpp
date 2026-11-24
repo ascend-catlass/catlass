@@ -62,17 +62,50 @@ static mlir::LogicalResult getIndexTreeLeavesForVerify(
 
 static bool isSupportedCmpElementType(mlir::Type elementType)
 {
-    if (elementType.isF16() || elementType.isF32())
+    if (elementType.isF16() || elementType.isBF16() || elementType.isF32())
         return true;
     auto intType = mlir::dyn_cast<mlir::IntegerType>(elementType);
     if (!intType)
         return false;
     unsigned width = intType.getWidth();
-    // Frontend whitelist: u8/u16/u32 + i32. Signed/signless only at 32-bit;
-    // unsigned also at 8/16 so VCmpU* can be selected for the top-half values.
-    if (intType.isUnsigned())
-        return width == 8 || width == 16 || width == 32;
-    return (intType.isSignless() || intType.isSigned()) && width == 32;
+    // AscendC Compare/Compares accept the 8/16/32/64-bit integer families.
+    // Unsigned elements keep VCmpU* selection; signed and signless share the
+    // signed instruction family.
+    return width == 8 || width == 16 || width == 32 || width == 64;
+}
+
+// AscendC Select accepts bool plus the 8/16/32/64-bit widths. AVE vectors are
+// signless; Bool rides the b8 carrier, so it is accepted as i1 here. The
+// low-precision formats select their byte/pair carriers: f8e4m3fn/f8e5m2 use
+// the native f8 vsel, hif8 and packed FP4 ride the i8 path.
+static bool isSupportedSelectElementType(mlir::Type elementType)
+{
+    if (elementType.isInteger(1))
+        return true;
+    if (elementType.isF16() || elementType.isBF16() || elementType.isF32())
+        return true;
+    if (mlir::isa<
+            mlir::Float8E4M3FNType, mlir::Float8E5M2Type, ::tla::HiFloat8Type, ::tla::Float4E2M1x2Type,
+            ::tla::Float4E1M2x2Type>(elementType))
+        return true;
+    auto intType = mlir::dyn_cast<mlir::IntegerType>(elementType);
+    if (!intType)
+        return false;
+    unsigned width = intType.getWidth();
+    return width == 8 || width == 16 || width == 32 || width == 64;
+}
+
+// The scalar carrier of a vector-scalar compare is signless: arith.constant
+// and the AVE scalar ABI only accept signless integers. An unsigned vector
+// element therefore accepts its same-width signless twin.
+static bool isCompareScalarTypeCompatible(mlir::Type scalarType, mlir::Type elementType)
+{
+    if (scalarType == elementType)
+        return true;
+    auto elemInt = mlir::dyn_cast<mlir::IntegerType>(elementType);
+    auto scalarInt = mlir::dyn_cast<mlir::IntegerType>(scalarType);
+    return elemInt && scalarInt && elemInt.isUnsigned() && scalarInt.isSignless() &&
+           elemInt.getWidth() == scalarInt.getWidth();
 }
 
 static bool isSupportedPrintTensorInteger(mlir::Type elementType)
@@ -1337,8 +1370,13 @@ mlir::LogicalResult WhereOp::verify()
 
     if (xIsVector) {
         auto xVec = mlir::cast<VectorSSAType>(getX().getType());
-        if (isBoolElementType(xVec.getElementType()))
-            return emitOpError("Bool VectorSSA is move-only (load/store); where/select is not supported");
+        auto yVec = mlir::dyn_cast<VectorSSAType>(getY().getType());
+        auto resultVec = mlir::dyn_cast<VectorSSAType>(getResult().getType());
+        if (!isSupportedSelectElementType(xVec.getElementType()))
+            return emitOpError() << "unsupported select element type " << xVec.getElementType();
+        if (!yVec || !resultVec || yVec.getElementType() != xVec.getElementType() ||
+            resultVec.getElementType() != xVec.getElementType())
+            return emitOpError("requires x, y, and result to have the same VectorSSA element type");
         return verifyMaskMatchesVector(getOperation(), getMask(), xVec);
     }
 
@@ -2357,8 +2395,9 @@ mlir::LogicalResult CmpOp::verify()
     auto rhsType = getRhs().getType();
     auto rhsVectorType = mlir::dyn_cast<::tla::VectorSSAType>(rhsType);
     if (!rhsVectorType) {
-        if (rhsType != lhsElementType)
-            return emitOpError() << "scalar operand must have element type " << lhsElementType << ", got " << rhsType;
+        if (!isCompareScalarTypeCompatible(rhsType, lhsElementType))
+            return emitOpError() << "scalar operand must have element type " << lhsElementType
+                                 << " or its same-width signless carrier, got " << rhsType;
         return mlir::success();
     }
 

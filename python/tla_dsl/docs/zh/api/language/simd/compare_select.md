@@ -39,6 +39,7 @@ tla.where(mask: Any, x: Any, y: Any) -> Any
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
 - 须在 `tla.vec.func()` 内调用；SIMD 路径的操作数必须属于同一类别。
 - MaskSSA 路径中，操作数和选择掩码必须具有完全相同的类型。
+- VectorSSA 路径中，元素类型须为 Bool、i8/u8、i16/u16、i32/u32、f16/bf16/f32、i64/u64、f8e4m3fn/f8e5m2、hif8 或 f4e2m1x2/f4e1m2x2；Bool 以 b8 存储字节为单位选择，低精度格式按其字节/数对载体选择。
 - per-thread 形式要求 `mode="simt"`，并生成 `tla.simt_where`。
 
 调用示例：
@@ -83,6 +84,7 @@ tla.cmp(lhs: VectorSSA, rhs: VectorSSA | Numeric | bool | int | float, mode: str
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
 - 须在 `tla.vec.func()` 内调用；`mode` 须为上表取值之一。
+- 元素类型须为 f16/bf16/f32、i8/i16/i32/i64 或 u8/u16/u32/u64；向量-向量与向量-标量比较使用同一元素类型集合。
 
 调用示例：
 

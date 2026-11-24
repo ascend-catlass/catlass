@@ -55,8 +55,9 @@ Constraints:
 - Must be called inside `tla.vec.func()`; `pattern` is required.
 - Ops that take `mask=` need a `MaskSSA` from `create_mask` /
   `update_mask`, not a raw `tla.mask.*` token.
-- `VectorSSA[tla.Bool]` is single-VL and move-only (load/store); it
-  cannot be used for arithmetic / cast.
+- `VectorSSA[tla.Bool]` is single-VL; it supports load/store and
+  `tla.where` select on the b8 carrier. Arithmetic and cast remain
+  unsupported.
 
 Example:
 

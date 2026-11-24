@@ -45,12 +45,39 @@ def scalar_cmp_kernel(lhs: tla.Tensor) -> None:
 
 
 @tla.kernel
-def scalar_cmp_i64_kernel(lhs: tla.Tensor) -> None:
-    lhs_tile = tla.tile_view(lhs, tla.make_shape(32), tla.make_coord(0))
+def scalar_cmp_f8_kernel(lhs: tla.Tensor) -> None:
+    lhs_tile = tla.tile_view(lhs, tla.make_shape(256), tla.make_coord(0))
     with tla.vector():
         with tla.vec.func(mode="simd"):
             lhs_reg = lhs_tile.load()
             _ = tla.cmp(lhs_reg, 0, "gt")
+
+
+@tla.kernel
+def cmp_lane_kernel(
+    lhs: tla.Tensor, rhs: tla.Tensor, lanes: tla.Constexpr[int]
+) -> None:
+    lhs_tile = tla.tile_view(lhs, tla.make_shape(lanes), tla.make_coord(0))
+    rhs_tile = tla.tile_view(rhs, tla.make_shape(lanes), tla.make_coord(0))
+    with tla.vector():
+        with tla.vec.func(mode="simd"):
+            _ = tla.cmp(lhs_tile.load(), rhs_tile.load(), "lt")
+
+
+@tla.kernel
+def scalar_cmp_lane_kernel(lhs: tla.Tensor, lanes: tla.Constexpr[int]) -> None:
+    lhs_tile = tla.tile_view(lhs, tla.make_shape(lanes), tla.make_coord(0))
+    with tla.vector():
+        with tla.vec.func(mode="simd"):
+            _ = tla.cmp(lhs_tile.load(), 0, "gt")
+
+
+@tla.kernel
+def runtime_threshold_cmp_kernel(lhs: tla.Tensor, threshold: tla.Int32) -> None:
+    lhs_tile = tla.tile_view(lhs, tla.make_shape(32), tla.make_coord(0))
+    with tla.vector():
+        with tla.vec.func(mode="simd"):
+            _ = tla.cmp(lhs_tile.load(), threshold, "lt")
 
 
 @tla.kernel
@@ -199,9 +226,57 @@ def test_mask_bitwise_rejects_mismatched_mask_types() -> None:
 
 
 def test_cmp_rejects_unsupported_dtype() -> None:
-    tensor = _vector_tensor(shape=32, dtype=tla.Int64)
+    tensor = _vector_tensor(shape=256, dtype=tla.Float8E4M3FN)
     with pytest.raises(Exception, match="unsupported compare element type"):
-        scalar_cmp_i64_kernel.dump_mlir(type_args=(tensor,))
+        scalar_cmp_f8_kernel.dump_mlir(type_args=(tensor,))
+
+
+@pytest.mark.parametrize(
+    "dtype,shape",
+    [
+        (tla.Int8, 256),
+        (tla.Int16, 128),
+        (tla.BFloat16, 128),
+        (tla.Int64, 32),
+        (tla.UInt64, 32),
+    ],
+)
+def test_cmp_accepts_extended_element_types(dtype, shape: int) -> None:
+    tensor = _vector_tensor(shape=shape, dtype=dtype)
+    mlir = cmp_lane_kernel.dump_mlir(type_args=(tensor, tensor, shape))
+    assert mlir.count("tla.cmp") == 1
+
+
+@pytest.mark.parametrize(
+    "dtype,shape",
+    [
+        (tla.Int8, 256),
+        (tla.Int16, 128),
+        (tla.BFloat16, 128),
+        (tla.Int64, 32),
+        (tla.UInt64, 32),
+    ],
+)
+def test_scalar_cmp_accepts_extended_element_types(dtype, shape: int) -> None:
+    tensor = _vector_tensor(shape=shape, dtype=dtype)
+    mlir = scalar_cmp_lane_kernel.dump_mlir(type_args=(tensor, shape))
+    assert "tla.cmp" in mlir
+
+
+def test_scalar_cmp_unsigned_literal_uses_signless_carrier() -> None:
+    tensor = _vector_tensor(shape=32, dtype=tla.UInt64)
+    mlir = scalar_cmp_lane_kernel.dump_mlir(type_args=(tensor, 32))
+    (cmp_line,) = [line for line in mlir.splitlines() if "tla.cmp" in line]
+    assert "!tla.vector<32xui64>, i64" in cmp_line
+
+
+def test_uint64_scalar_cmp_accepts_int32_runtime_threshold() -> None:
+    tensor = _vector_tensor(shape=32, dtype=tla.UInt64)
+    mlir = runtime_threshold_cmp_kernel.dump_mlir(type_args=(tensor, 1))
+    (cmp_line,) = [line for line in mlir.splitlines() if "tla.cmp" in line]
+    assert "!tla.vector<32xui64>, i64" in cmp_line
+    # The runtime Int32 threshold must widen to signless i64, not unsigned ui64.
+    assert "-> ui64" not in mlir
 
 
 @pytest.mark.parametrize(

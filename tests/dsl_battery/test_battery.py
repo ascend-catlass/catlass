@@ -1005,7 +1005,7 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         "vector-compare-mask",
         [[
             "dsl_tutorials/vector_simd_ops/compare_mask.py", "--batch-run", *COMPARE_MASK_OPS,
-            "--shape", "400", "--batch-size", "4", *dev,
+            "--all-dtypes", "--shape", "512", "--batch-size", "4", *dev,
         ]],
     )
     yield (

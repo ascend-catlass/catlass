@@ -40,6 +40,10 @@ Constraints:
 - Must be called inside a `@tla.kernel`-decorated kernel function.
 - Must be called inside `tla.vec.func()`; SIMD arms must belong to the same category.
 - MaskSSA arms and their selector must have exactly the same type.
+- VectorSSA arms must use one of Bool, i8/u8, i16/u16, i32/u32, f16/bf16/f32,
+  i64/u64, f8e4m3fn/f8e5m2, hif8, or f4e2m1x2/f4e1m2x2. Bool values
+  select whole b8 storage bytes; the low-precision formats select their
+  byte/pair carriers.
 - Inside a `tla.vec.func(mode="simt")` region a `Bool` mask emits the
   per-thread `tla.simt_where`; outside one, only the `MaskSSA`
   whole-vector form is available.
@@ -88,7 +92,8 @@ Constraints:
 
 - Must be called inside a `@tla.kernel`-decorated kernel function.
 - Must be called inside `tla.vec.func()`; `mode` must be a supported compare mnemonic.
-- Element type must be one of f16/f32/i32/u32/u16/u8.
+- Element type must be one of f16/bf16/f32, i8/i16/i32/i64, or u8/u16/u32/u64.
+  Vector-vector and vector-scalar compares use the same element-type set.
 
 Example:
 

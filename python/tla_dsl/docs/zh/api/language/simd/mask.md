@@ -56,7 +56,7 @@ tla.create_mask(*, pattern: _MaskPattern | str | None = None, dtype: DTypeLike =
 - 须在 `tla.vec.func()` 内调用；`pattern` 必填。
 - 接受 `mask=` 的接口需要 `create_mask` / `update_mask` 得到的 `MaskSSA`，
   不能直接传 `tla.mask.*` token。
-- `VectorSSA[tla.Bool]` 为单 VL、仅搬运（load/store）；不可用于算术 / cast。
+- `VectorSSA[tla.Bool]` 为单 VL；支持搬运（load/store）以及在 b8 载体上做 `tla.where` 选择。算术与 cast 仍不支持。
 
 调用示例：
 

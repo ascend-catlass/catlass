@@ -95,6 +95,28 @@ public:
                         hivm_regbaseintrins::VCmpsSZLeInstrOp, hivm_regbaseintrins::VCmpsUZLeInstrOp>(
                         rewriter, op, op.getRes().getType(), isUnsigned);
                     break;
+                // Unsigned relational modes are already selected by the TLA
+                // pass (VCmpU*); the scalar twin must follow the same rule.
+                case hivmave::CmpType::ULT:
+                    result = createScalarCmpIntrinsic<
+                        hivm_regbaseintrins::VCmpsUZLtInstrOp, hivm_regbaseintrins::VCmpsUZLtInstrOp>(
+                        rewriter, op, op.getRes().getType(), /*isUnsigned=*/true);
+                    break;
+                case hivmave::CmpType::ULE:
+                    result = createScalarCmpIntrinsic<
+                        hivm_regbaseintrins::VCmpsUZLeInstrOp, hivm_regbaseintrins::VCmpsUZLeInstrOp>(
+                        rewriter, op, op.getRes().getType(), /*isUnsigned=*/true);
+                    break;
+                case hivmave::CmpType::UGT:
+                    result = createScalarCmpIntrinsic<
+                        hivm_regbaseintrins::VCmpsUZGtInstrOp, hivm_regbaseintrins::VCmpsUZGtInstrOp>(
+                        rewriter, op, op.getRes().getType(), /*isUnsigned=*/true);
+                    break;
+                case hivmave::CmpType::UGE:
+                    result = createScalarCmpIntrinsic<
+                        hivm_regbaseintrins::VCmpsUZGeInstrOp, hivm_regbaseintrins::VCmpsUZGeInstrOp>(
+                        rewriter, op, op.getRes().getType(), /*isUnsigned=*/true);
+                    break;
                 default:
                     op.emitError("unsupported scalar compare mode");
                     failed = true;

@@ -2,6 +2,7 @@
 
 Arithmetic / gather / scatter / non-NORM dist stay move-only.
 DATA_BLOCK_COPY (BlockLoad/BlockStore) matches AscendC bool→b8.
+where/select is allowed on the b8 carrier (AscendC Select bool row).
 
 Type capacity / extern / bitcast are covered in test_tensor_types,
 test_extern_reg, and test_vector_bitcast_ops. MaskLoad US/DS ABI is in
@@ -119,9 +120,10 @@ def test_bool_add_rejected() -> None:
         _bool_add_kernel.dump_mlir(type_args=(_ub(tla.Bool),))
 
 
-def test_bool_where_rejected() -> None:
-    with pytest.raises(TlaCoreAPIError, match="move-only|where"):
-        _bool_where_kernel.dump_mlir(type_args=(_ub(tla.Bool), _ub(tla.Bool)))
+def test_bool_where_emits() -> None:
+    mlir = _bool_where_kernel.dump_mlir(type_args=(_ub(tla.Bool), _ub(tla.Bool)))
+    (where_line,) = [line for line in mlir.splitlines() if "tla.where" in line]
+    assert "!tla.vector<256xi1>" in where_line
 
 
 def test_bool_gather_rejected() -> None:

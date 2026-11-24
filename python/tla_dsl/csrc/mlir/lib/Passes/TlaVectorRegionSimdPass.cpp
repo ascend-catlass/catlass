@@ -938,6 +938,23 @@ static void annotateAivLibraryCall(func::FuncOp callee)
     callee->setAttr(hivm::TFuncCoreTypeAttr::name, hivm::TFuncCoreTypeAttr::get(ctx, hivm::TFuncCoreType::AIV));
 }
 
+// 64-bit AVE library calls cannot legalize a <32xi64> result in the device
+// backend; route them through linked bitcode helpers (same ABI as the shift
+// stubs: <32xi64> vectors and the native b64 predicate).
+static Value createInlineB64Call(
+    OpBuilder& b, Location loc, ModuleOp module, StringRef name, TypeRange inputTypes, Type resultType,
+    ValueRange operands)
+{
+    auto callee = module.lookupSymbol<func::FuncOp>(name);
+    if (!callee) {
+        OpBuilder moduleBuilder(module.getBodyRegion());
+        auto fnType = FunctionType::get(b.getContext(), inputTypes, {resultType});
+        callee = moduleBuilder.create<func::FuncOp>(loc, name, fnType);
+        annotateAivLibraryCall(callee);
+    }
+    return b.create<func::CallOp>(loc, callee, operands).getResult(0);
+}
+
 // MaskLoadDist US/DS: one bc symbol per UB element byte width. Element type
 // is address typing only; plds always takes __ubuf__ uint32_t*. Typed stubs
 // keep the memref ABI exact (PointerCast-to-i8 views have tripped BiShengLIR).
@@ -4086,6 +4103,42 @@ static LogicalResult lowerCmp(
             return failure();
     } else {
         mask = fullMasks.get(loc, opCtx->lanes);
+        // PGE has no b64 mode; the omitted-mask carrier is the b32 predicate.
+        // Pack its low half into the native b64 predicate like tla.create_mask
+        // does before the compare reaches the 64-bit helper.
+        if (tlaElem.isInteger(64)) {
+            Value lower = b.create<arith::ConstantIntOp>(loc, 0, 32);
+            mask = b.create<hivm_regbaseintrins::PunpackInstrOp>(loc, opCtx->maskVecType, mask, lower).getResult();
+        }
+    }
+    if (tlaElem.isInteger(64)) {
+        // The 64-bit AVE cmp/select ABI does not legalize in the device
+        // backend; call the linked bitcode helpers directly.
+        const bool scalar = !isa<::tla::VectorSSAType>(cmpOp.getRhs().getType());
+        const bool isUnsigned = tlaElem.isUnsignedInteger();
+        std::string typeName = isUnsigned ? "uint64_t" : "int64_t";
+        // Must match the extern "C" names exported by
+        // csrc/mlir/bc/Vector/cmp_sel_reg.cpp.
+        std::string calleeName = (scalar ? "cmps_" : "cmp_") + cmpOp.getMode().str() + "_" + typeName;
+        Value rhs;
+        if (scalar) {
+            rhs = lookupOrCloneScalarValue(b, cmpOp.getRhs(), valueMap);
+            if (!rhs)
+                return failure();
+            if (auto intTy = dyn_cast<IntegerType>(rhs.getType()); intTy && intTy.isUnsigned()) {
+                Type signless = IntegerType::get(b.getContext(), intTy.getWidth());
+                rhs = b.create<UnrealizedConversionCastOp>(loc, signless, rhs).getResult(0);
+            }
+        } else {
+            rhs = valueMap.lookup(cmpOp.getRhs());
+            if (!rhs)
+                return failure();
+        }
+        SmallVector<Type, 3> inputTypes{
+            opCtx->vecType, scalar ? Type(b.getI64Type()) : Type(opCtx->vecType), opCtx->maskVecType};
+        valueMap[cmpOp.getResult()] =
+            createInlineB64Call(b, loc, module, calleeName, inputTypes, opCtx->maskVecType, ValueRange{lhs, rhs, mask});
+        return success();
     }
     if (isa<::tla::VectorSSAType>(cmpOp.getRhs().getType())) {
         Value rhs = valueMap.lookup(cmpOp.getRhs());
@@ -4096,17 +4149,15 @@ static LogicalResult lowerCmp(
         Value rhs = lookupOrCloneScalarValue(b, cmpOp.getRhs(), valueMap);
         if (!rhs)
             return failure();
-        auto scalarOr = castScalarForVectorElement(rhs, opCtx->elementType);
+        // The AVE scalar ABI is signless; unsigned TLA scalars are bit-identical.
+        if (auto intTy = dyn_cast<IntegerType>(rhs.getType()); intTy && intTy.isUnsigned()) {
+            Type signless = IntegerType::get(b.getContext(), intTy.getWidth());
+            rhs = b.create<UnrealizedConversionCastOp>(loc, signless, rhs).getResult(0);
+        }
+        auto scalarOr = castScalarForVectorElement(rhs, aveVectorElementType(opCtx->elementType));
         if (failed(scalarOr))
             return failure();
         Value scalar = *scalarOr;
-        // VFCmpS scalar ODS is signless; keep the vector unsigned for VCmpU*.
-        if (auto intTy = dyn_cast<IntegerType>(scalar.getType())) {
-            if (intTy.isUnsigned()) {
-                Type signless = IntegerType::get(b.getContext(), intTy.getWidth());
-                scalar = b.create<UnrealizedConversionCastOp>(loc, signless, scalar).getResult(0);
-            }
-        }
         valueMap[cmpOp.getResult()] = b.create<hivmave::VFCmpS>(loc, opCtx->maskVecType, *cmpType, lhs, scalar, mask);
     }
     return success();
@@ -5121,15 +5172,6 @@ static LogicalResult lowerNestedVectorOp(
         if (!mask || !x || !y)
             return failure();
 
-        // Bool VectorSSA is move-only; vsel on the i8 carrier would silently
-        // accept lane select beyond the supported surface.
-        if (auto xVec = dyn_cast<::tla::VectorSSAType>(whereOp.getX().getType());
-            xVec && isBoolVectorElement(xVec.getElementType()))
-            return whereOp.emitError(
-                       "Bool VectorSSA is move-only (load/store); "
-                       "where/select is not supported"),
-                   failure();
-
         // After type conversion all MaskSSA values use vector<256xi1>, so the
         // original TLA operand type determines whether this is predicate select.
         if (isa<::tla::MaskSSAType>(whereOp.getX().getType())) {
@@ -5147,6 +5189,17 @@ static LogicalResult lowerNestedVectorOp(
         auto xTy = dyn_cast<VectorType>(x.getType());
         if (!xTy)
             return failure();
+        if (auto tlaVec = dyn_cast<::tla::VectorSSAType>(whereOp.getX().getType());
+            tlaVec && tlaVec.getElementType().isInteger(64)) {
+            // The 64-bit AVE vsel ABI does not legalize in the device backend;
+            // call the linked bitcode helper with the native b64 predicate.
+            // Name must match csrc/mlir/bc/Vector/cmp_sel_reg.cpp.
+            std::string name = tlaVec.getElementType().isUnsignedInteger() ? "select_uint64_t" : "select_int64_t";
+            SmallVector<Type, 3> inputTypes{fullPregVecType(b.getContext()), xTy, xTy};
+            valueMap[whereOp.getResult()] =
+                createInlineB64Call(b, loc, module, name, inputTypes, xTy, ValueRange{mask, x, y});
+            return success();
+        }
         auto opCtx = deriveVecCtxForElement(xTy.getElementType());
         if (failed(opCtx))
             return failure();

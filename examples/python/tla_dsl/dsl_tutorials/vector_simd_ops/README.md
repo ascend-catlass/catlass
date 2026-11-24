@@ -112,7 +112,7 @@ def vector_op(mem_in: tla.Tensor, mem_out: tla.Tensor) -> None:
 | [**`multi_binary.py`**](multi_binary.py) | 多算子二元计算示例，演示多级混合计算过程。 |
 | [**`masked_binary.py`**](masked_binary.py) | 多算子掩码二元运算示例，演示不同掩码模式下 `add`/`sub`/`mul`/`div` 向量计算。 |
 | [**`bitwise_ops.py`**](bitwise_ops.py) | 按位运算示例，支持 `bitwise_and`/`bitwise_or`/`bitwise_xor`/`bitwise_not`。 |
-| [**`compare_mask.py`**](compare_mask.py) | 比较掩码示例，覆盖 `tla.cmp` 的六种比较模式（lt/le/gt/ge/eq/ne）、向量-标量比较；另含 u8/u16/u32（`VCmpU`，操作数越过有符号边界）。 |
+| [**`compare_mask.py`**](compare_mask.py) | 比较掩码示例，覆盖 `tla.cmp` 的六种比较模式（lt/le/gt/ge/eq/ne）、向量-标量比较；另含 i8/i16/bf16/i64/u64，以及越过有符号边界的 u8/u16/u32（`VCmpU`）。 |
 | [**`cast_multi.py`**](cast_multi.py) | `tla.cast` 类型转换示例，覆盖 `f32` / `f16` / `bf16` / `i32` / `i16` / `i8` 之间的多级类型转换；另含 unsigned `f16↔u8`（值 ≥128 咬住 signed twin）。 |
 | [**`arange_op.py`**](arange_op.py) | `tla.arange` 序列生成示例，在 UB 上生成递增/递减（`increase`/`decrease`）序列。 |
 | [**`gather_reg_op.py`**](gather_reg_op.py) | `tla.gather` Reg→Reg 独立上板样例：`vselr`（源为寄存器）；`--mixed` 走 AIC/AIV mix（回归 #822）。 |
@@ -123,7 +123,7 @@ def vector_op(mem_in: tla.Tensor, mem_out: tla.Tensor) -> None:
 | [**`load_mask_dist.py`**](load_mask_dist.py) | `MaskLoadParams`：`ds`/`us` * `--mask-dtype i8\|i16\|i32` → `tla.where`. |
 | [**`load_store_mask.py`**](load_store_mask.py) | 掩码搬运往返示例，掩码 UB 与伴随向量同 dtype；另含 u8 GM↔UB（含 128..255）。 |
 | [**`pack_op.py`**](pack_op.py) | `tla.pack` 示例，覆盖 MaskSSA 宽度扩展，并验证低半/高半结果。 |
-| [**`mask_select_op.py`**](mask_select_op.py) | MaskSSA 选择示例，使用 `H` 在 `Q` 和 `M4` 两个 predicate 之间逐 bit 选择。 |
+| [**`mask_select_op.py`**](mask_select_op.py) | MaskSSA 选择示例，使用 `H` 在 `Q` 和 `M4` 两个 predicate 之间逐 bit 选择；数据侧覆盖整型、浮点、bf16、bool 以及 f8/hif8/fp4x2 字节载体。 |
 | [**`load_store_update.py`**](load_store_update.py) | 对齐 `PostMode.UPDATE`：`tile.load` / `tile.store`（`add`；b8/b16/b32 + f16/bf16/f32；b64 仅 frontend UT；可选 `--dynamic-extent`）。 |
 | [**`load_store_block_update.py`**](load_store_block_update.py) | Block `PostMode.UPDATE`：`BlockLoadParams` / `BlockStoreParams` 滑动窗口（`add`，`block_stride=1`）。 |
 | [**`load_store_unalign.py`**](load_store_unalign.py) | 非对齐 PostMode UPDATE：`tile_extent` / 有效步长 `(0, VL]` 的 `post_update_stride`；`tla-unalign-ureg` 在干净 `tla.range` 上消除环内 Pre/Post（`Unalign*Params(post_mode=update)`，`add`；支持 `--tile-extent 1`）。 |
@@ -390,7 +390,7 @@ first mismatch=None
   - `load_mask_dist.py`（独立脚本）：`MaskLoadParams` 的 `ds` / `us` 两种模式。
 
 - 功能说明：
-  - **`compare_mask.py`**（f32）：
+  - **`compare_mask.py`**（f32, i8/i16/bf16, i64/u64, u8/u16/u32）：
 
     | op | 语义 |
     |------|------|
@@ -407,19 +407,19 @@ first mismatch=None
     - `--mask-dtype i8|i16|i32`：mask UB 寻址类型（b8/b16/b32；IR 亦接受 b64）；首 64 mask 字节布局跨 dtype 相同
       （`make_tensor_like`/GM↔UB 暂无 i64，故 e2e 未覆盖 b64）
 
-  - **`mask_select_op.py`**（f32, f16, i8）：op `mask_select`，使用 `H` 作 selector，在 `Q` 和 `M4` 两个 MaskSSA 之间选择；结果掩码再驱动数据版 `tla.where` 写回 GM，便于观察 predicate bit 结果。
+  - **`mask_select_op.py`**（i8/u8、i16/u16、i32/u32、i64/u64、f16/bf16/f32、f8e4m3fn/f8e5m2、hif8、f4e2m1x2/f4e1m2x2、bool）：op `mask_select`，使用 `H` 作 selector，在 `Q` 和 `M4` 两个 MaskSSA 之间选择；结果掩码再驱动数据版 `tla.where` 写回 GM，便于观察 predicate bit 结果。
 
 - 约束说明：
   - 支持的数据类型：
 
     | 文件 | 支持的数据类型 |
     |------|---------------|
-    | `compare_mask.py` | f32；u8/u16/u32（仅 `vector_vector_*`） |
-    | `mask_select_op.py` | f32, f16, i8 |
+    | `compare_mask.py` | f32；i8/i16/bf16（全 op）；u8/u16/u32、i64/u64（仅 `vector_vector_*`） |
+    | `mask_select_op.py` | i8/u8、i16/u16、i32/u32、i64/u64、f16/bf16/f32、f8e4m3fn/f8e5m2、hif8、f4e2m1x2/f4e1m2x2、bool |
     | `load_store_mask.py` | f32, f16, i8, u8 |
     | `load_mask_dist.py ds/us` | f32 伴随 + mask `i8/i16/i32`（IR 另支持 b64） |
 
-  - `compare_mask.py`：f32 全 op；u8/u16/u32 仅 `vector_vector_*`（越过有符号边界）；输入 2、输出 1；支持 batch。
+  - `compare_mask.py`：f32 全 op；i8/i16/bf16 全 op；u8/u16/u32、i64/u64 仅 `vector_vector_*`（u8/u16/u32 的操作数越过有符号边界）；默认 `--shape 512`，i64/u64 要求 `--shape` 为 32 的整数倍；输入 2、输出 1；支持 batch。
   - `mask_select_op.py`：shape 必须是完整向量寄存器 lane 数的整数倍；分别覆盖 `mask<64/128/256>`。
   - `load_store_mask.py`：shape 随 dtype 变化（f32→64、f16→128、i8/u8→256），输出仅前 `ELE/2` lane 有效；掩码与伴随向量 dtype 一致。
   - `load_mask_dist.py`：必须显式传 `op` 与 `--run`；默认 `--mask-dtype i8`。

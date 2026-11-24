@@ -20,6 +20,17 @@ def _vector_tensor() -> tla.Tensor:
     )
 
 
+def _vector_tensor_for(dtype: type[tla.Numeric], shape: int) -> tla.Tensor:
+    return make_fake_tensor(
+        dtype,
+        (shape,),
+        (1,),
+        addrspace=tla.AddressSpace.ub,
+        origin_shape=(shape,),
+        layout_tag=tla.arch.RowMajor,
+    )
+
+
 @tla.kernel
 def _mask_where_width(dtype: tla.Constexpr[type]) -> None:
     with tla.vector():  # noqa: SIM117 - DSL regions must remain syntactically nested.
@@ -267,3 +278,72 @@ def test_mask_where_feeds_vector_select_in_mlir() -> None:
     assert mlir.count("tla.where") == 2
     assert "!tla.mask<64>" in mlir
     assert "!tla.vector<64xf32>" in mlir
+
+
+@tla.kernel
+def _vector_where_dtype(
+    x: tla.Tensor,
+    y: tla.Tensor,
+    dst: tla.Tensor,
+    dtype: tla.Constexpr[type],
+    lanes: tla.Constexpr[int],
+) -> None:
+    x_tile = tla.tile_view(x, tla.make_shape(lanes), tla.make_coord(0))
+    y_tile = tla.tile_view(y, tla.make_shape(lanes), tla.make_coord(0))
+    dst_tile = tla.tile_view(dst, tla.make_shape(lanes), tla.make_coord(0))
+    with tla.vector():  # noqa: SIM117 - DSL regions must remain syntactically nested.
+        with tla.vec.func(mode="simd"):
+            mask = tla.create_mask(pattern=tla.mask.H, dtype=dtype)
+            selected = tla.where(mask, x_tile.load(), y_tile.load())
+            dst_tile.store(selected)
+
+
+@pytest.mark.parametrize(
+    ("dtype", "lanes"),
+    (
+        (tla.Bool, 256),
+        (tla.Int8, 256),
+        (tla.UInt8, 256),
+        (tla.Int16, 128),
+        (tla.UInt16, 128),
+        (tla.BFloat16, 128),
+        (tla.Float16, 128),
+        (tla.Int32, 64),
+        (tla.UInt32, 64),
+        (tla.Float32, 64),
+        (tla.Int64, 32),
+        (tla.UInt64, 32),
+        (tla.Float8E4M3FN, 256),
+        (tla.Float8E5M2, 256),
+        (tla.HiFloat8, 256),
+        (tla.Float4E2M1x2, 256),
+        (tla.Float4E1M2x2, 256),
+    ),
+    ids=lambda value: getattr(value, "dtype", str(value)),
+)
+def test_vector_where_accepts_supported_element_types(
+    dtype: type[tla.Numeric], lanes: int
+) -> None:
+    tensor = _vector_tensor_for(dtype, lanes)
+    mlir = _vector_where_dtype.dump_mlir(
+        type_args=(tensor, tensor, tensor, dtype, lanes)
+    )
+
+    (where_line,) = [line for line in mlir.splitlines() if "tla.where" in line]
+    assert f"!tla.vector<{lanes}x" in where_line
+
+
+@tla.kernel
+def _vector_where_f64(x: tla.Tensor, y: tla.Tensor) -> None:
+    x_tile = tla.tile_view(x, tla.make_shape(32), tla.make_coord(0))
+    y_tile = tla.tile_view(y, tla.make_shape(32), tla.make_coord(0))
+    with tla.vector():  # noqa: SIM117 - DSL regions must remain syntactically nested.
+        with tla.vec.func(mode="simd"):
+            mask = tla.create_mask(pattern=tla.mask.H, dtype=tla.Float64)
+            _ = tla.where(mask, x_tile.load(), y_tile.load())
+
+
+def test_vector_where_rejects_unsupported_element_type() -> None:
+    tensor = _vector_tensor_for(tla.Float64, 32)
+    with pytest.raises(tla.TlaCoreAPIError, match="unsupported select element type f64"):
+        _vector_where_f64.dump_mlir(type_args=(tensor, tensor))

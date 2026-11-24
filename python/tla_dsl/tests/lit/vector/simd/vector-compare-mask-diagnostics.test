@@ -2,12 +2,14 @@
 // RUN: sed -n '/^\/\/ BEGIN_TYPE_MISMATCH$/,/^\/\/ END_TYPE_MISMATCH$/p' %s | sed '1d;$d;s|^// ||' > %t.type_mismatch.mlir && not %tla_compile %t.type_mismatch.mlir -o %t 2>&1 | %filecheck %s --check-prefix=TYPE-MISMATCH
 // RUN: sed -n '/^\/\/ BEGIN_SCALAR_MISMATCH$/,/^\/\/ END_SCALAR_MISMATCH$/p' %s | sed '1d;$d;s|^// ||' > %t.scalar_mismatch.mlir && not %tla_compile %t.scalar_mismatch.mlir -o %t 2>&1 | %filecheck %s --check-prefix=SCALAR-MISMATCH
 // RUN: sed -n '/^\/\/ BEGIN_UNSUPPORTED$/,/^\/\/ END_UNSUPPORTED$/p' %s | sed '1d;$d;s|^// ||' > %t.unsupported.mlir && not %tla_compile %t.unsupported.mlir -o %t 2>&1 | %filecheck %s --check-prefix=UNSUPPORTED-TYPE
+// RUN: sed -n '/^\/\/ BEGIN_BAD_SELECT$/,/^\/\/ END_BAD_SELECT$/p' %s | sed '1d;$d;s|^// ||' > %t.bad_select.mlir && not %tla_compile %t.bad_select.mlir -o %t 2>&1 | %filecheck %s --check-prefix=UNSUPPORTED-SELECT
 
 // BAD-MODE: 'tla.cmp' op mode must be one of lt, le, gt, ge, eq, ne, got "between"
 // TYPE-MISMATCH: 'tla.cmp' op operands must have the same element type
-// SCALAR-MISMATCH: 'tla.cmp' op scalar operand must have element type 'f32', got 'i32'
+// SCALAR-MISMATCH: 'tla.cmp' op scalar operand must have element type 'f32' or its same-width signless carrier, got 'i32'
 // UNSUPPORTED-TYPE: 'tla.cmp' op unsupported compare element type
-// UNSUPPORTED-TYPE-SAME: bf16
+// UNSUPPORTED-TYPE-SAME: f8E4M3FN
+// UNSUPPORTED-SELECT: unsupported select element type 'f64'
 
 // BEGIN_BAD_MODE
 // !vec = !tla.vector<64xf32>
@@ -41,11 +43,21 @@
 // END_SCALAR_MISMATCH
 
 // BEGIN_UNSUPPORTED
-// !vec = !tla.vector<64xbf16>
+// !vec = !tla.vector<256xf8E4M3FN>
 // module {
 //   func.func @unsupported(%lhs: !vec, %rhs: !vec) {
-//     "tla.vec.func"() ({ %mask = tla.cmp "lt" %lhs, %rhs : !vec, !vec -> !tla.mask<64> }) : () -> ()
+//     "tla.vec.func"() ({ %mask = tla.cmp "lt" %lhs, %rhs : !vec, !vec -> !tla.mask<256> }) : () -> ()
 //     return
 //   }
 // }
 // END_UNSUPPORTED
+
+// BEGIN_BAD_SELECT
+// !f64vec = !tla.vector<32xf64>
+// module {
+//   func.func @bad_select(%mask: !tla.mask<32>, %x: !f64vec, %y: !f64vec) {
+//     "tla.vec.func"() ({ %r = "tla.where"(%mask, %x, %y) : (!tla.mask<32>, !f64vec, !f64vec) -> !f64vec }) : () -> ()
+//     return
+//   }
+// }
+// END_BAD_SELECT

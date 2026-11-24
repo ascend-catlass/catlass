@@ -203,7 +203,47 @@ _PIPE_VALUES = {
     "fix",
 }
 _MISSING = object()
-_SUPPORTED_COMPARE_ELEMENT_TYPES = frozenset({"f16", "f32", "i32", "u32", "u16", "u8"})
+_SUPPORTED_COMPARE_ELEMENT_TYPES = frozenset(
+    {
+        "f16",
+        "bf16",
+        "f32",
+        "i8",
+        "i16",
+        "i32",
+        "i64",
+        "u8",
+        "u16",
+        "u32",
+        "u64",
+    }
+)
+# AscendC Select: bool plus the 8/16/32/64-bit integers and half/float/bf16.
+# AVE vectors are signless, so unsigned arms select whole bytes like their
+# signed twins; Bool rides the b8 carrier. The low-precision formats below
+# select whole byte/pair carriers too: f8e4m3fn/f8e5m2 use the native f8 vsel,
+# hif8 and the packed FP4 pair carriers ride the i8 path.
+_SUPPORTED_SELECT_ELEMENT_TYPES = frozenset(
+    {
+        "i1",
+        "i8",
+        "u8",
+        "i16",
+        "u16",
+        "i32",
+        "u32",
+        "f16",
+        "bf16",
+        "f32",
+        "i64",
+        "u64",
+        "f8e4m3fn",
+        "f8e5m2",
+        "hif8",
+        "f4e2m1x2",
+        "f4e1m2x2",
+    }
+)
 _MASK_CMP_MODES = ("lt", "le", "gt", "ge", "eq", "ne")
 # The two packed 4-bit cube float formats. Same width, different exponent /
 # mantissa split, and the two matmul operands may use different ones.
@@ -400,6 +440,17 @@ def _check_compare_element_type_supported(op_name: str, element_type: str) -> No
     _op_error(
         op_name,
         f"unsupported compare element type {element_type}; "
+        f"supported element types are {supported}",
+    )
+
+
+def _check_select_element_type_supported(op_name: str, element_type: str) -> None:
+    if element_type in _SUPPORTED_SELECT_ELEMENT_TYPES:
+        return
+    supported = ", ".join(sorted(_SUPPORTED_SELECT_ELEMENT_TYPES))
+    _op_error(
+        op_name,
+        f"unsupported select element type {element_type}; "
         f"supported element types are {supported}",
     )
 
@@ -9802,21 +9853,91 @@ def _as_vector_scalar_numeric(value: Any) -> Numeric | None:
     return None
 
 
-def _numeric_ir_value_for_element_type(
+def _runtime_scalar_as_signless_integer(
     op_name: str,
     scalar: Numeric,
     element_type: mlir_ir.Type,
     *,
     loc: mlir_ir.Location | None = None,
 ) -> mlir_ir.Value:
+    """Convert a runtime integer scalar to the signless carrier of ``element_type``.
+
+    Unsigned vector element types keep their unsigned ``!tla.vector`` type, but
+    the scalar ABI is signless. A signed scalar widening to the element width
+    sign-extends (an ``Int32`` threshold compared with a ``UInt64`` vector
+    becomes ``i64``); an unsigned source zero-extends.
+    """
+    int_ty = mlir_ir.IntegerType(element_type)
+    width = int(int_ty.width)
+    signless_ty = mlir_ir.IntegerType.get_signless(width)
+    value = scalar.ir_value(loc=loc)
+    if value.type == signless_ty:
+        return value
+    if isinstance(value.type, mlir_ir.IndexType):
+        return mlir_ir.Operation.create(
+            "arith.index_cast", operands=[value], results=[signless_ty], loc=loc
+        ).results[0]
+    if not mlir_ir.IntegerType.isinstance(value.type):
+        _op_error(
+            op_name,
+            f"invalid scalar type {value.type} for {element_type}; "
+            "expected an integer scalar",
+        )
+    src_int = mlir_ir.IntegerType(value.type)
+    src_width = int(src_int.width)
+    src_unsigned = bool(src_int.is_unsigned)
+    if not src_int.is_signless:
+        # arith integer casts are signless-only.
+        signless_src = mlir_ir.IntegerType.get_signless(src_width)
+        value = mlir_ir.Operation.create(
+            "builtin.unrealized_conversion_cast",
+            operands=[value],
+            results=[signless_src],
+            loc=loc,
+        ).results[0]
+    if src_width == width:
+        return value
+    op = "arith.trunci"
+    if src_width < width:
+        op = "arith.extui" if src_unsigned else "arith.extsi"
+    return mlir_ir.Operation.create(
+        op, operands=[value], results=[signless_ty], loc=loc
+    ).results[0]
+
+
+def _numeric_ir_value_for_element_type(
+    op_name: str,
+    scalar: Numeric,
+    element_type: mlir_ir.Type,
+    *,
+    normalize_unsigned: bool = False,
+    loc: mlir_ir.Location | None = None,
+) -> mlir_ir.Value:
     """Materialize scalar for vector–scalar ops via ``to`` + ``ir_value``.
 
     Host Python numbers keep literal ``arith.constant`` emission (range / fraction
     checks). Dynamic SSA uses ``Numeric.to`` + ``ir_value``.
+
+    ``normalize_unsigned`` emits an unsigned literal as its same-width signless
+    carrier, keeping the unsigned range check. ``arith.constant`` and the AVE
+    scalar ABI only accept signless integers, while the vector result keeps its
+    unsigned ``!tla.vector`` type.
     """
     if isinstance(scalar.value, (bool, int, float)):
         return _scalar_constant_for_element_type(
-            op_name, scalar.value, element_type, loc=loc
+            op_name,
+            scalar.value,
+            element_type,
+            normalize_unsigned=normalize_unsigned,
+            loc=loc,
+        )
+    if (
+        normalize_unsigned
+        and mlir_ir.IntegerType.isinstance(element_type)
+        and mlir_ir.IntegerType(element_type).is_unsigned
+    ):
+        return _runtime_scalar_as_signless_integer(
+            op_name, scalar, element_type, loc=loc
         )
     dest_cls = Numeric.from_mlir_type(element_type)
     return scalar.to(dest_cls, loc=loc).ir_value(loc=loc)
@@ -9827,6 +9948,7 @@ def _scalar_constant_for_element_type(
     scalar: Any,
     element_type: mlir_ir.Type,
     *,
+    normalize_unsigned: bool = False,
     loc: mlir_ir.Location | None = None,
 ) -> mlir_ir.Value:
     """Emit ``arith.constant`` from a host scalar literal only."""
@@ -9856,6 +9978,8 @@ def _scalar_constant_for_element_type(
         # Range check before IntegerAttr.get (signed bounds for signless integer types).
         if isinstance(element_type, mlir_ir.IndexType):
             lo, hi = -(2**63), 2**63 - 1
+            attr_type = element_type
+            attr_value = int_value
         else:
             int_ty = mlir_ir.IntegerType(element_type)
             width = int(int_ty.width)
@@ -9863,6 +9987,12 @@ def _scalar_constant_for_element_type(
                 lo, hi = 0, 2**width - 1
             else:
                 lo, hi = -(2 ** (width - 1)), 2 ** (width - 1) - 1
+            attr_type = element_type
+            attr_value = int_value
+            if normalize_unsigned and int_ty.is_unsigned:
+                attr_type = mlir_ir.IntegerType.get_signless(width)
+                if attr_value >= 2 ** (width - 1):
+                    attr_value -= 2**width
         if not (lo <= int_value <= hi):
             _op_error(
                 op_name,
@@ -9871,8 +10001,8 @@ def _scalar_constant_for_element_type(
             )
         return mlir_ir.Operation.create(
             "arith.constant",
-            results=[element_type],
-            attributes={"value": mlir_ir.IntegerAttr.get(element_type, int_value)},
+            results=[attr_type],
+            attributes={"value": mlir_ir.IntegerAttr.get(attr_type, attr_value)},
             loc=loc,
         ).results[0]
     if (
@@ -11334,11 +11464,7 @@ def _vector_where(
             "where",
             f"y has element type {y_desc.element_type}, expected {x_desc.element_type}",
         )
-    if is_bool_element_type(x_desc.element_type):
-        _op_error(
-            "where",
-            "Bool VectorSSA is move-only (load/store); where/select is not supported",
-        )
+    _check_select_element_type_supported("where", x_desc.element_type)
     _require_mask_matches_vector("where", mask_value, x_value)
     result = _tla_ops_gen.where(
         x_value.type,
@@ -11402,6 +11528,10 @@ def where(mask: Any, x: Any, y: Any, *, loc: mlir_ir.Location | None = None) -> 
         - Must be called inside a `@tla.kernel`-decorated kernel function.
         - Must be called inside `tla.vec.func()`; SIMD arms must belong to the same category.
         - MaskSSA arms and their selector must have exactly the same type.
+        - VectorSSA arms must use one of Bool, i8/u8, i16/u16, i32/u32, f16/bf16/f32,
+          i64/u64, f8e4m3fn/f8e5m2, hif8, or f4e2m1x2/f4e1m2x2. Bool values
+          select whole b8 storage bytes; the low-precision formats select their
+          byte/pair carriers.
         - Inside a `tla.vec.func(mode="simt")` region a `Bool` mask emits the
           per-thread `tla.simt_where`; outside one, only the `MaskSSA`
           whole-vector form is available.
@@ -11777,7 +11907,8 @@ def cmp(
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function.
         - Must be called inside `tla.vec.func()`; `mode` must be a supported compare mnemonic.
-        - Element type must be one of f16/f32/i32/u32/u16/u8.
+        - Element type must be one of f16/bf16/f32, i8/i16/i32/i64, or u8/u16/u32/u64.
+          Vector-vector and vector-scalar compares use the same element-type set.
 
         Example:
         ```python
@@ -11805,14 +11936,22 @@ def cmp(
     _runtime._require_enclosing_region("cmp", "vec.func")
     lhs_value = _as_value(lhs)
     lhs_desc = _vector_ssa_type_for_mlir_value(lhs_value)
+    _check_compare_element_type_supported("cmp", lhs_desc.element_type)
     if rhs_category == "vector_ssa":
         rhs_value = _as_value(rhs)
     else:
         assert rhs_num is not None
+        # Unsigned vectors keep their unsigned TLA type, but the scalar carrier
+        # is a signless integer: arith.constant only accepts signless, and the
+        # AVE scalar ABI is signless too. The compare itself still derives
+        # unsigned semantics from the vector element type.
         rhs_value = _numeric_ir_value_for_element_type(
-            "cmp", rhs_num, lhs_desc.element_mlir_type(lhs_value.type.context), loc=loc
+            "cmp",
+            rhs_num,
+            lhs_desc.element_mlir_type(lhs_value.type.context),
+            normalize_unsigned=True,
+            loc=loc,
         )
-        _check_compare_element_type_supported("cmp", lhs_desc.element_type)
     mask_ty = _mask_ssa_type_for_element_type(lhs_desc.element_type).to_mlir_type(
         lhs_value.type.context
     )
@@ -13930,8 +14069,9 @@ def create_mask(
         - Must be called inside `tla.vec.func()`; `pattern` is required.
         - Ops that take `mask=` need a `MaskSSA` from `create_mask` /
           `update_mask`, not a raw `tla.mask.*` token.
-        - `VectorSSA[tla.Bool]` is single-VL and move-only (load/store); it
-          cannot be used for arithmetic / cast.
+        - `VectorSSA[tla.Bool]` is single-VL; it supports load/store and
+          `tla.where` select on the b8 carrier. Arithmetic and cast remain
+          unsupported.
 
         Example:
         ```python

@@ -29,11 +29,14 @@ from vector_op_harness import (
 #   - static ``tile_view(coord=0)`` reference vs dynamic loop chunks (shape metadata
 #     may differ while tile width stays VL-wide)
 
-VECTOR_ELE = 400
+# A multiple of every VL width (32/64/128/256), so 64-bit registers stay full
+# and the 64-bit store verifier accepts every chunk.
+VECTOR_ELE = 512
 VL_ELE = 64
 LOOPS = (VECTOR_ELE + VL_ELE - 1) // VL_ELE
-ALL_DTYPES = ("f32", "u8", "u16", "u32")
-_UNSIGNED = frozenset({"u8", "u16", "u32"})
+ALL_DTYPES = ("f32", "u8", "u16", "u32", "i8", "i16", "bf16", "i64", "u64")
+_UNSIGNED = frozenset({"u8", "u16", "u32", "u64"})
+_64BIT = frozenset({"i64", "u64"})
 # Values above each signed boundary so VCmp vs VCmpU disagree.
 _UNSIGNED_BIAS = {"u8": 128, "u16": 32768, "u32": 0x80000000}
 
@@ -80,14 +83,14 @@ def compare_mask(mem_a: tla.Tensor, mem_b: tla.Tensor, mem_out: tla.Tensor) -> N
 
                 if _OP_NAME == "static_dynamic_lt":
                     m = tla.cmp(a_ref, bv, "lt")
-                    out_tile.store(tla.where(m, bv, zero), mask=tail)
+                    _store_result(out_tile, tla.where(m, bv, zero), tail)
                 elif _OP_NAME == "cmp_masked_fused":
                     m_lt = tla.cmp(av, bv, "lt")
                     m_ge = tla.cmp(av, 0.0, "ge")
                     fused = tla.add(av, bv, mask=m_lt)
-                    out_tile.store(tla.where(m_ge, fused, zero), mask=tail)
+                    _store_result(out_tile, tla.where(m_ge, fused, zero), tail)
                 else:
-                    out_tile.store(_CMP_OP(av, bv), mask=tail)
+                    _store_result(out_tile, _CMP_OP(av, bv), tail)
 
         tla.set_flag(vec_done)
         tla.wait_flag(vec_done)
@@ -115,7 +118,7 @@ def _batch_compare_chunk(
         result = tla.where(m_ge, tla.add(av, bv, mask=m_lt), zero)
     else:
         result = _operator_specs()[op_name]["op"](av, bv)
-    out_tile.store(result, mask=tail)
+    _store_result(out_tile, result, tail)
 
 
 @tla.kernel
@@ -168,6 +171,15 @@ def compare_mask_batch(
         tla.wait_flag(vec_done)
         tla.copy(out_gm, out_ub)
         tla.pipe_barrier(tla.pipes.ALL)
+
+
+def _store_result(out_tile: Any, result: Any, tail: Any) -> None:
+    # 64-bit masked stores hit the same AVE library-call ABI limitation; the
+    # tutorial keeps a full 32-lane register, so store 64-bit results unmasked.
+    if _KERNEL_ELEMENT_BYTES == 8:
+        out_tile.store(result)
+    else:
+        out_tile.store(result, mask=tail)
 
 
 def _make_ub_tensor(like_tensor: Any) -> Any:
@@ -230,9 +242,21 @@ def _operator_specs() -> dict[str, dict[str, Any]]:
     return specs
 
 
+def _require_full_64bit_registers(dtype_name: str, config: Any) -> None:
+    # The 64-bit register store requires a full 32-lane register. Keep the
+    # tutorial shape a multiple of the lane count instead of failing in the IR.
+    if dtype_name in _64BIT and config.vector_elements % config.lanes:
+        raise SystemExit(
+            f"compare_mask.py: {dtype_name} requires --shape to be a multiple "
+            f"of {config.lanes} (one full 64-bit register)"
+        )
+
+
 def _is_unsupported_case(op_name: str, dtype_name: str) -> bool:
     # Unsigned only covers vector-vector cmp (VCmpU); scalar/fused ops use f32 0.0.
-    if dtype_name in _UNSIGNED:
+    # 64-bit compare+select is covered by vector-vector only; the fused paths
+    # also exercise 64-bit vector arithmetic, which is outside this case set.
+    if dtype_name in _UNSIGNED or dtype_name in _64BIT:
         return not op_name.startswith("vector_vector_")
     return False
 
@@ -254,6 +278,7 @@ def _set_kernel_config(
             f"unknown compare-mask operator {op_name!r}; expected one of: {choices}"
         )
     config = vector_kernel_config(dtype_name, shape, ALL_DTYPES)
+    _require_full_64bit_registers(dtype_name, config)
     VECTOR_ELE = config.vector_elements
     _KERNEL_SHAPE = shape if shape is not None else (VECTOR_ELE,)
     VL_ELE = config.lanes
@@ -273,6 +298,7 @@ def _configure_batch(
     if not 1 <= len(ops) <= 4:
         raise SystemExit("compare-mask batch requires one to four operations")
     config = vector_kernel_config(dtype_name, shape, ALL_DTYPES)
+    _require_full_64bit_registers(dtype_name, config)
     VECTOR_ELE = config.vector_elements
     _KERNEL_SHAPE = shape
     VL_ELE = config.lanes
@@ -289,9 +315,19 @@ def _make_inputs(args: Any, dtype_name: str, torch: Any) -> tuple[Any, Any]:
     # NPU arange lacks uint; build on CPU then .to(npu).
     idx = torch.arange(VECTOR_ELE, dtype=torch.int64)
     if dtype_name in _UNSIGNED:
-        bias = _UNSIGNED_BIAS[dtype_name]
-        a64 = (idx % 50) + (bias - 10)
-        b64 = torch.flip(a64, dims=[0])
+        bias = _UNSIGNED_BIAS.get(dtype_name)
+        if bias is None:
+            # u64: keep inputs inside the int64 range so the CPU golden can
+            # compare them through .to(torch.int64); torch has no uint64 lt.
+            a64 = idx % 31
+            b64 = torch.flip(a64, dims=[0]) + 1
+        else:
+            a64 = (idx % 50) + (bias - 10)
+            b64 = torch.flip(a64, dims=[0])
+        return a64.to(dtype).to(device), b64.to(dtype).to(device)
+    if dtype_name in ("i8", "i16", "i64"):
+        a64 = (idx % 31) - 15
+        b64 = torch.flip(a64, dims=[0]) + 1
         return a64.to(dtype).to(device), b64.to(dtype).to(device)
     idx = idx.to(dtype=dtype, device=device)
     a = ((idx % 31) - 15.0) * 0.5
@@ -304,22 +340,27 @@ def _chunk_expected(a: Any, b: Any, op_name: str, torch: Any) -> Any:
         mode = op_name.removeprefix("vector_vector_")
         # Unsigned: compare in int64 so values above the signed bound stay correct.
         # Float: keep native compare — casting to int64 truncates fractions.
-        if a.dtype in (torch.uint8, torch.uint16, torch.uint32):
+        if a.dtype in (torch.uint8, torch.uint16, torch.uint32, torch.uint64):
             lhs, rhs = a.to(torch.int64), b.to(torch.int64)
         else:
             lhs, rhs = a, b
+        # torch.where has no uint64 kernel; select in the int64 view and cast back.
+        wa, wb = (lhs, rhs) if a.dtype == torch.uint64 else (a, b)
         if mode == "lt":
-            return torch.where(lhs < rhs, a, b)
-        if mode == "le":
-            return torch.where(lhs <= rhs, a, b)
-        if mode == "gt":
-            return torch.where(lhs > rhs, a, b)
-        if mode == "ge":
-            return torch.where(lhs >= rhs, a, b)
-        if mode == "eq":
-            return torch.where(lhs == rhs, a, b)
-        if mode == "ne":
-            return torch.where(lhs != rhs, a, b)
+            out = torch.where(lhs < rhs, wa, wb)
+        elif mode == "le":
+            out = torch.where(lhs <= rhs, wa, wb)
+        elif mode == "gt":
+            out = torch.where(lhs > rhs, wa, wb)
+        elif mode == "ge":
+            out = torch.where(lhs >= rhs, wa, wb)
+        elif mode == "eq":
+            out = torch.where(lhs == rhs, wa, wb)
+        elif mode == "ne":
+            out = torch.where(lhs != rhs, wa, wb)
+        else:
+            raise AssertionError(mode)
+        return out.to(torch.uint64) if a.dtype == torch.uint64 else out
     if op_name == "vector_scalar_gt":
         return torch.where(a > 0.0, a, torch.zeros_like(a))
     if op_name == "vector_scalar_ge":
@@ -379,7 +420,7 @@ HARNESS = DirectVectorOpHarness(
         unsupported_case=_is_unsupported_case,
         print_skip=_print_skip,
         script_path=Path(__file__).resolve(),
-        float_dtypes=frozenset({"f32"}),
+        float_dtypes=frozenset({"f32", "bf16"}),
         input_count=2,
         batch_kernel=compare_mask_batch,
         configure_batch=_configure_batch,
