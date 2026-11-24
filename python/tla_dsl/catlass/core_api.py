@@ -6603,23 +6603,71 @@ _SUPPORTED_CUBE_FIXPIPE_ROUTES = {
     ("ub", "RowMajor", "nosplit", "NO_QUANT", True): {"f32": ("f32", "f16", "bf16"), "i32": ("i32",)},
     ("ub", "ColumnMajor", "nosplit", "NO_QUANT", True): {"f32": ("f32", "f16", "bf16"), "i32": ("i32",)},
 
-    ("gm", "RowMajor", "-", "PER_TENSOR", False): {"f32": ("f32", "f16", "bf16", "i8", "u8"), "i32": ("f16", "bf16", "i8", "u8")},
-    ("gm", "RowMajor", "-", "PER_TENSOR", True): {"f32": ("f32", "f16", "bf16", "i8", "u8"), "i32": ("f16", "bf16", "i8", "u8")},
-    ("gm", "ColumnMajor", "-", "PER_TENSOR", False): {"f32": ("f32", "f16", "bf16", "i8", "u8"), "i32": ("f16", "bf16", "i8", "u8")},
-    ("gm", "ColumnMajor", "-", "PER_TENSOR", True): {"f32": ("f32", "f16", "bf16", "i8", "u8"), "i32": ("f16", "bf16", "i8", "u8")},
-    ("ub", "RowMajor", "nosplit", "PER_TENSOR", False): {"f32": ("f32", "f16", "bf16"), "i32": ("f16", "bf16")},
-    ("ub", "RowMajor", "nosplit", "PER_TENSOR", True): {"f32": ("f32", "f16", "bf16"), "i32": ("f16", "bf16")},
-    ("ub", "ColumnMajor", "nosplit", "PER_TENSOR", False): {"f32": ("f32", "f16", "bf16"), "i32": ("f16", "bf16")},
-    ("ub", "ColumnMajor", "nosplit", "PER_TENSOR", True): {"f32": ("f32", "f16", "bf16"), "i32": ("f16", "bf16")},
+    ("gm", "RowMajor", "-", "PER_TENSOR", False): {
+        "f32": ("f32", "f16", "bf16", "i8", "u8", "f8e4m3fn", "hif8"),
+        "i32": ("f16", "bf16", "i8", "u8"),
+    },
+    ("gm", "RowMajor", "-", "PER_TENSOR", True): {
+        "f32": ("f32", "f16", "bf16", "i8", "u8", "f8e4m3fn", "hif8"),
+        "i32": ("f16", "bf16", "i8", "u8"),
+    },
+    ("gm", "ColumnMajor", "-", "PER_TENSOR", False): {
+        "f32": ("f32", "f16", "bf16", "i8", "u8", "f8e4m3fn", "hif8"),
+        "i32": ("f16", "bf16", "i8", "u8"),
+    },
+    ("gm", "ColumnMajor", "-", "PER_TENSOR", True): {
+        "f32": ("f32", "f16", "bf16", "i8", "u8", "f8e4m3fn", "hif8"),
+        "i32": ("f16", "bf16", "i8", "u8"),
+    },
+    ("ub", "RowMajor", "nosplit", "PER_TENSOR", False): {
+        "f32": ("f32", "f16", "bf16", "i8", "u8", "f8e4m3fn", "hif8"),
+        "i32": ("f16", "bf16", "i8", "u8"),
+    },
+    ("ub", "RowMajor", "nosplit", "PER_TENSOR", True): {
+        "f32": ("f32", "f16", "bf16", "i8", "u8", "f8e4m3fn", "hif8"),
+        "i32": ("f16", "bf16", "i8", "u8"),
+    },
+    ("ub", "ColumnMajor", "nosplit", "PER_TENSOR", False): {
+        "f32": ("f32", "f16", "bf16", "i8", "u8", "f8e4m3fn", "hif8"),
+        "i32": ("f16", "bf16", "i8", "u8"),
+    },
+    ("ub", "ColumnMajor", "nosplit", "PER_TENSOR", True): {
+        "f32": ("f32", "f16", "bf16", "i8", "u8", "f8e4m3fn", "hif8"),
+        "i32": ("f16", "bf16", "i8", "u8"),
+    },
 
-    ("gm", "RowMajor", "-", "PER_CHANNEL", False): {"f32": ("f32", "f16", "bf16", "i8", "u8"), "i32": ("f16", "bf16", "i8", "u8")},
-    ("gm", "RowMajor", "-", "PER_CHANNEL", True): {"f32": ("f32", "f16", "bf16", "i8", "u8"), "i32": ("f16", "bf16", "i8", "u8")},
-    ("gm", "ColumnMajor", "-", "PER_CHANNEL", False): {"f32": ("f32", "f16", "bf16", "i8", "u8"), "i32": ("f16", "bf16", "i8", "u8")},
-    ("gm", "ColumnMajor", "-", "PER_CHANNEL", True): {"f32": ("f32", "f16", "bf16", "i8", "u8"), "i32": ("f16", "bf16", "i8", "u8")},
-    ("ub", "RowMajor", "nosplit", "PER_CHANNEL", False): {"f32": ("f32", "f16", "bf16"), "i32": ("f16", "bf16")},
-    ("ub", "RowMajor", "nosplit", "PER_CHANNEL", True): {"f32": ("f32", "f16", "bf16"), "i32": ("f16", "bf16")},
-    ("ub", "ColumnMajor", "nosplit", "PER_CHANNEL", False): {"f32": ("f32", "f16", "bf16"), "i32": ("f16", "bf16")},
-    ("ub", "ColumnMajor", "nosplit", "PER_CHANNEL", True): {"f32": ("f32", "f16", "bf16"), "i32": ("f16", "bf16")},
+    ("gm", "RowMajor", "-", "PER_CHANNEL", False): {
+        "f32": ("f32", "f16", "bf16", "i8", "u8", "f8e4m3fn", "hif8"),
+        "i32": ("f16", "bf16", "i8", "u8"),
+    },
+    ("gm", "RowMajor", "-", "PER_CHANNEL", True): {
+        "f32": ("f32", "f16", "bf16", "i8", "u8", "f8e4m3fn", "hif8"),
+        "i32": ("f16", "bf16", "i8", "u8"),
+    },
+    ("gm", "ColumnMajor", "-", "PER_CHANNEL", False): {
+        "f32": ("f32", "f16", "bf16", "i8", "u8", "f8e4m3fn", "hif8"),
+        "i32": ("f16", "bf16", "i8", "u8"),
+    },
+    ("gm", "ColumnMajor", "-", "PER_CHANNEL", True): {
+        "f32": ("f32", "f16", "bf16", "i8", "u8", "f8e4m3fn", "hif8"),
+        "i32": ("f16", "bf16", "i8", "u8"),
+    },
+    ("ub", "RowMajor", "nosplit", "PER_CHANNEL", False): {
+        "f32": ("f32", "f16", "bf16", "i8", "u8", "f8e4m3fn", "hif8"),
+        "i32": ("f16", "bf16", "i8", "u8"),
+    },
+    ("ub", "RowMajor", "nosplit", "PER_CHANNEL", True): {
+        "f32": ("f32", "f16", "bf16", "i8", "u8", "f8e4m3fn", "hif8"),
+        "i32": ("f16", "bf16", "i8", "u8"),
+    },
+    ("ub", "ColumnMajor", "nosplit", "PER_CHANNEL", False): {
+        "f32": ("f32", "f16", "bf16", "i8", "u8", "f8e4m3fn", "hif8"),
+        "i32": ("f16", "bf16", "i8", "u8"),
+    },
+    ("ub", "ColumnMajor", "nosplit", "PER_CHANNEL", True): {
+        "f32": ("f32", "f16", "bf16", "i8", "u8", "f8e4m3fn", "hif8"),
+        "i32": ("f16", "bf16", "i8", "u8"),
+    },
 
     ("l1", "zN", "-", "PER_TENSOR", False): {"f32": ("f16", "bf16", "i8"), "i32": ("f16", "bf16", "i8")},
     ("l1", "zN", "-", "PER_TENSOR", True): {"f32": ("f16", "bf16", "i8"), "i32": ("f16", "bf16", "i8")},
@@ -6650,6 +6698,84 @@ def _validate_supported_copy(
         elif key in _SUPPORTED_VECTOR_COPY_ROUTES:
             return dtype in _SUPPORTED_VECTOR_COPY_ROUTES[key]
     return False
+
+
+# L0C→UB Fixpipe 1-byte destinations: Fixpipe RoundUp's the UB write extent
+# (RowMajor N / ColumnMajor M) to a 32-element block regardless of unitFlag.
+# That write needs a matching UB pitch, or pad spills into the next row / OOB.
+# With unitFlag!=0, mmad still counts fractals by 16, so an unaligned extent
+# can also hang. Static extents/pitches are checked here; dynamic values stay
+# a caller contract.
+_FIXPIPE_UB_1BYTE_DTYPES = frozenset({"i8", "u8", "f8e4m3fn", "hif8"})
+_FIXPIPE_UB_1BYTE_ALIGN = 32
+
+
+def _round_up_pos_int(value: int, align: int) -> int:
+    return ((value + align - 1) // align) * align
+
+
+def _check_fixpipe_ub_1byte_align(
+    dst_addr: str,
+    dst_layout: str,
+    dst_dtype: str,
+    params: CopyL0C2DstParams,
+    dst_desc,
+) -> None:
+    """Reject unsafe L0C→UB 1-byte static extents / pitches for Fixpipe RoundUp."""
+    if dst_addr != "ub" or dst_dtype not in _FIXPIPE_UB_1BYTE_DTYPES:
+        return
+    dst_m, dst_n = _flat_dim_pair_from_tree(dst_desc.origin_shape)
+    dst_s0, dst_s1 = _flat_dim_pair_from_tree(dst_desc.stride)
+
+    # Pitch must cover RoundUp(write-axis, 32) for every unit_flag: Fixpipe
+    # always writes that many elements along the axis.
+    if dst_layout == "RowMajor":
+        if dst_n is not None and dst_s0 is not None:
+            need = _round_up_pos_int(dst_n, _FIXPIPE_UB_1BYTE_ALIGN)
+            if dst_s0 < need:
+                _op_error(
+                    "copy",
+                    "L0C→UB 1-byte RowMajor destination pitch (stride0) must be "
+                    f">= RoundUp(N, {_FIXPIPE_UB_1BYTE_ALIGN})={need} "
+                    f"(got N={dst_n}, pitch={dst_s0}, dtype={dst_dtype}); "
+                    "pad the UB row stride or align N to 32",
+                )
+    elif dst_layout == "ColumnMajor":
+        if dst_m is not None and dst_s1 is not None:
+            need = _round_up_pos_int(dst_m, _FIXPIPE_UB_1BYTE_ALIGN)
+            if dst_s1 < need:
+                _op_error(
+                    "copy",
+                    "L0C→UB 1-byte ColumnMajor destination pitch (stride1) must be "
+                    f">= RoundUp(M, {_FIXPIPE_UB_1BYTE_ALIGN})={need} "
+                    f"(got M={dst_m}, pitch={dst_s1}, dtype={dst_dtype}); "
+                    "pad the UB column stride or align M to 32",
+                )
+
+    # unit_flag!=0 also needs the write-axis extent itself 32-aligned, else
+    # Fixpipe waits for mmad fractals that were never produced.
+    if params.unit_flag == 0:
+        return
+    if dst_layout == "RowMajor":
+        if dst_n is not None and dst_n % _FIXPIPE_UB_1BYTE_ALIGN != 0:
+            _op_error(
+                "copy",
+                "L0C→UB 1-byte destination with unit_flag!=0 requires "
+                f"RowMajor N % {_FIXPIPE_UB_1BYTE_ALIGN} == 0 "
+                f"(got N={dst_n}, dtype={dst_dtype}); align N to 32, or use "
+                "unit_flag=0 only when UB pitch >= RoundUp(N, 32) and mmad "
+                "uses flag sync",
+            )
+    elif dst_layout == "ColumnMajor":
+        if dst_m is not None and dst_m % _FIXPIPE_UB_1BYTE_ALIGN != 0:
+            _op_error(
+                "copy",
+                "L0C→UB 1-byte destination with unit_flag!=0 requires "
+                f"ColumnMajor M % {_FIXPIPE_UB_1BYTE_ALIGN} == 0 "
+                f"(got M={dst_m}, dtype={dst_dtype}); align M to 32, or use "
+                "unit_flag=0 only when UB pitch >= RoundUp(M, 32) and mmad "
+                "uses flag sync",
+            )
 
 
 def _validate_supported_fixpipe(
@@ -6751,7 +6877,19 @@ def _modify_doc_copy(fn: Callable[..., Any]) -> None:
         "- If the dst is ub, there's an extra `split_mode`, support nosplit(`NO_SPLIT_VEC_0`, `NO_SPLIT_VEC_1`), and split(`SPLIT_M`, `SPLIT_N`)",
         "- If dst is (ub, ColumnMajor), only support `nosplit` mode",
         "- In to ub is `split` mode, any quant_mode/relu is disabled, neither pure cast, so only `f32`->`f32` and `i32`->`i32` is enabled",
-        "- A quantized copy to l1 supports only the `zN` layout\n",
+        "- A quantized copy to l1 supports only the `zN` layout",
+        "- L0C→UB 1-byte destinations (`i8`/`u8`/`f8e4m3fn`/`hif8`): Fixpipe "
+        "always RoundUp's the write axis (RowMajor `N` / ColumnMajor `M`) to "
+        "a 32-element block, independent of `unit_flag`. Static UB pitch must "
+        "be `>= RoundUp(extent, 32)` (RowMajor `stride0`, ColumnMajor "
+        "`stride1`), or pad overwrites the next row / goes OOB. Prefer "
+        "aligning the write-axis extent to 32. With `unit_flag != 0`, mmad "
+        "counts fractals by 16, so a static unaligned extent also hangs; the "
+        "frontend then requires `N % 32 == 0` (RowMajor) or `M % 32 == 0` "
+        "(ColumnMajor). `unit_flag=0` only removes the hang — pitch must "
+        "still cover the RoundUp write (and mmad must use flag sync). "
+        "Dynamic extents/pitches skip these checks (caller contract). GM "
+        "1-byte destinations are not under this rule.\n",
         "|`dst`|`dst_layout`|`split_mode`|`quant_mode`|`relu`|`src_dtype`:`dst_dtype`|",
         "|-----|------------|------------|------------|------|-----------------------|",
     ]
@@ -7526,6 +7664,18 @@ def copy(
           exactly one element per channel of the destination tile, ``originShape[1]``
           after `tile_view` cropping. When both lengths are static, a mismatch
           fails compilation.
+        - L0C→UB 1-byte destinations (`i8`/`u8`/`f8e4m3fn`/`hif8`): Fixpipe
+          always RoundUp's the write axis (RowMajor `N` / ColumnMajor `M`)
+          to a 32-element block, independent of `unit_flag`. Static UB pitch
+          must be `>= RoundUp(extent, 32)` (RowMajor `stride0`, ColumnMajor
+          `stride1`), or pad overwrites the next row / goes OOB. Prefer
+          aligning the write-axis extent to 32. With `unit_flag != 0`, mmad
+          counts fractals by 16, so a static unaligned extent also hangs;
+          the frontend then requires `N % 32 == 0` (RowMajor) or
+          `M % 32 == 0` (ColumnMajor). `unit_flag=0` only removes the hang —
+          pitch must still cover the RoundUp write (and mmad must use flag
+          sync). Dynamic extents/pitches skip these checks (caller
+          contract). GM 1-byte destinations are not under this rule.
         - **Prepacked `GM` tiles:** a buffer already packed in fractal order is
           tagged `zN` (or `nZ` for the transposed packing) and copied to the
           matching `L1` tile with no re-layout. Only the aligned `zN` / `nZ` are
@@ -7723,6 +7873,9 @@ def copy(
                 f"{_route[0]},{src_layout} -> {_route[1]},{dst_layout} "
                 f"{src_dtype}, params={params}",
             )
+        _check_fixpipe_ub_1byte_align(
+            _route[1], dst_layout, dst_dtype, params, dst_desc
+        )
 
         ctx = loc.context if loc is not None else mlir_ir.Context.current
         quant_mode_attr = mlir_ir.Attribute.parse(

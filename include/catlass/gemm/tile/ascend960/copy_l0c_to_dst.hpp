@@ -171,6 +171,34 @@ template <>
 struct CopyL0CToDstQuantMode<Arch::Ascend960PR, float, float, ScaleGranularity::PER_CHANNEL>
     : CopyL0CToDstQuantMode<Arch::Ascend950, float, float, ScaleGranularity::PER_CHANNEL> {};
 
+template <>
+struct CopyL0CToDstQuantMode<Arch::Ascend960DT, float, fp8_e4m3fn_t, ScaleGranularity::PER_TENSOR>
+    : CopyL0CToDstQuantMode<Arch::Ascend950, float, fp8_e4m3fn_t, ScaleGranularity::PER_TENSOR> {};
+template <>
+struct CopyL0CToDstQuantMode<Arch::Ascend960PR, float, fp8_e4m3fn_t, ScaleGranularity::PER_TENSOR>
+    : CopyL0CToDstQuantMode<Arch::Ascend950, float, fp8_e4m3fn_t, ScaleGranularity::PER_TENSOR> {};
+
+template <>
+struct CopyL0CToDstQuantMode<Arch::Ascend960DT, float, fp8_e4m3fn_t, ScaleGranularity::PER_CHANNEL>
+    : CopyL0CToDstQuantMode<Arch::Ascend950, float, fp8_e4m3fn_t, ScaleGranularity::PER_CHANNEL> {};
+template <>
+struct CopyL0CToDstQuantMode<Arch::Ascend960PR, float, fp8_e4m3fn_t, ScaleGranularity::PER_CHANNEL>
+    : CopyL0CToDstQuantMode<Arch::Ascend950, float, fp8_e4m3fn_t, ScaleGranularity::PER_CHANNEL> {};
+
+template <>
+struct CopyL0CToDstQuantMode<Arch::Ascend960DT, float, hifloat8_t, ScaleGranularity::PER_TENSOR>
+    : CopyL0CToDstQuantMode<Arch::Ascend950, float, hifloat8_t, ScaleGranularity::PER_TENSOR> {};
+template <>
+struct CopyL0CToDstQuantMode<Arch::Ascend960PR, float, hifloat8_t, ScaleGranularity::PER_TENSOR>
+    : CopyL0CToDstQuantMode<Arch::Ascend950, float, hifloat8_t, ScaleGranularity::PER_TENSOR> {};
+
+template <>
+struct CopyL0CToDstQuantMode<Arch::Ascend960DT, float, hifloat8_t, ScaleGranularity::PER_CHANNEL>
+    : CopyL0CToDstQuantMode<Arch::Ascend950, float, hifloat8_t, ScaleGranularity::PER_CHANNEL> {};
+template <>
+struct CopyL0CToDstQuantMode<Arch::Ascend960PR, float, hifloat8_t, ScaleGranularity::PER_CHANNEL>
+    : CopyL0CToDstQuantMode<Arch::Ascend950, float, hifloat8_t, ScaleGranularity::PER_CHANNEL> {};
+
 } // namespace Catlass::Gemm::Tile
 
 #endif

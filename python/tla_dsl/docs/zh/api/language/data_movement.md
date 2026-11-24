@@ -102,6 +102,15 @@ tla.copy(dst: Tensor, src: Tensor, params: CopyParams | None = None, *, scale: T
   每个元素携带一个输出通道内全部元素共享的反量化参数，因此长度须与目的
   tile 通道数精确一致（`tile_view` 裁剪后的 `originShape[1]`）。两侧长度
   均为静态时不相等即编译报错。
+- L0C→UB 的 1-byte 目的（`i8`/`u8`/`f8e4m3fn`/`hif8`）：Fixpipe **不论**
+  `unit_flag` 都会把写出维（RowMajor 的 `N` / ColumnMajor 的 `M`）按块长
+  上取整到 32 元素。静态 UB 行距须 `>= RoundUp(写出维, 32)`（RowMajor 的
+  `stride0`，ColumnMajor 的 `stride1`），否则多写部分会踩到下一行或越界。
+  首选把写出维本身对齐到 32。若 `unit_flag != 0`，mmad 仍按 16 计分形，
+  静态写出维未对齐还会挂死，前端因此要求 `N % 32 == 0`（RowMajor）或
+  `M % 32 == 0`（ColumnMajor）。`unit_flag=0` **只消除挂死**，行距仍须覆盖
+  RoundUp 写出（且 mmad 须改走 flag 同步）。动态 shape/stride 不做该静态
+  校验（调用方约定）。**GM** 上的 1-byte 目的不受此限。
 - **预打包 `GM` tile：** 已按分形顺序存放的缓冲区可用 `zN` 或转置排布的
   `nZ` tag 描述，并拷贝到相同布局的 L1 tile，不再重排数据。GM 源 tag 仅使用
   对齐的 `zN` / `nZ`；M 轴紧凑存储的 `zNUnAlign` 用于 UB→L1，GM 端的
@@ -160,6 +169,15 @@ fixpipe 支持随路 quant 与 relu；quant 模式支持 `NO_QUANT`、`PER_TENSO
 - UB 的 `split` 模式下禁用任何 quant_mode/relu，也不做纯 cast，仅允许
   `f32`→`f32` 与 `i32`→`i32`。
 - 目的为 L1 的量化拷贝仅支持 `zN` 布局。
+- L0C→UB 的 1-byte 目的（`i8`/`u8`/`f8e4m3fn`/`hif8`）：Fixpipe **不论**
+  `unit_flag` 都会把写出维（RowMajor 的 `N` / ColumnMajor 的 `M`）按块长
+  上取整到 32 元素。静态 UB 行距须 `>= RoundUp(写出维, 32)`（RowMajor 的
+  `stride0`，ColumnMajor 的 `stride1`），否则多写部分会踩到下一行或越界。
+  首选把写出维本身对齐到 32。若 `unit_flag != 0`，mmad 仍按 16 计分形，
+  静态写出维未对齐还会挂死，前端因此要求 `N % 32 == 0`（RowMajor）或
+  `M % 32 == 0`（ColumnMajor）。`unit_flag=0` **只消除挂死**，行距仍须覆盖
+  RoundUp 写出（且 mmad 须改走 flag 同步）。动态 shape/stride 不做该静态
+  校验（调用方约定）。**GM** 上的 1-byte 目的不受此限。
 
 |`dst`|`dst_layout`|`split_mode`|`quant_mode`|`relu`|`src_dtype`:`dst_dtype`|
 |-----|------------|------------|------------|------|-----------------------|
@@ -174,22 +192,22 @@ fixpipe 支持随路 quant 与 relu；quant 模式支持 `NO_QUANT`、`PER_TENSO
 |`l1`|`zN`|`-`|`NO_QUANT`|`True`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `i32`|
 |`ub`|`RowMajor`|`nosplit`|`NO_QUANT`|`True`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `i32`|
 |`ub`|`ColumnMajor`|`nosplit`|`NO_QUANT`|`True`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `i32`|
-|`gm`|`RowMajor`|`-`|`PER_TENSOR`|`False`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
-|`gm`|`RowMajor`|`-`|`PER_TENSOR`|`True`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
-|`gm`|`ColumnMajor`|`-`|`PER_TENSOR`|`False`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
-|`gm`|`ColumnMajor`|`-`|`PER_TENSOR`|`True`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
-|`ub`|`RowMajor`|`nosplit`|`PER_TENSOR`|`False`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `f16`,`bf16`|
-|`ub`|`RowMajor`|`nosplit`|`PER_TENSOR`|`True`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `f16`,`bf16`|
-|`ub`|`ColumnMajor`|`nosplit`|`PER_TENSOR`|`False`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `f16`,`bf16`|
-|`ub`|`ColumnMajor`|`nosplit`|`PER_TENSOR`|`True`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `f16`,`bf16`|
-|`gm`|`RowMajor`|`-`|`PER_CHANNEL`|`False`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
-|`gm`|`RowMajor`|`-`|`PER_CHANNEL`|`True`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
-|`gm`|`ColumnMajor`|`-`|`PER_CHANNEL`|`False`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
-|`gm`|`ColumnMajor`|`-`|`PER_CHANNEL`|`True`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
-|`ub`|`RowMajor`|`nosplit`|`PER_CHANNEL`|`False`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `f16`,`bf16`|
-|`ub`|`RowMajor`|`nosplit`|`PER_CHANNEL`|`True`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `f16`,`bf16`|
-|`ub`|`ColumnMajor`|`nosplit`|`PER_CHANNEL`|`False`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `f16`,`bf16`|
-|`ub`|`ColumnMajor`|`nosplit`|`PER_CHANNEL`|`True`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `f16`,`bf16`|
+|`gm`|`RowMajor`|`-`|`PER_TENSOR`|`False`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`,`f8e4m3fn`,`hif8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
+|`gm`|`RowMajor`|`-`|`PER_TENSOR`|`True`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`,`f8e4m3fn`,`hif8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
+|`gm`|`ColumnMajor`|`-`|`PER_TENSOR`|`False`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`,`f8e4m3fn`,`hif8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
+|`gm`|`ColumnMajor`|`-`|`PER_TENSOR`|`True`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`,`f8e4m3fn`,`hif8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
+|`ub`|`RowMajor`|`nosplit`|`PER_TENSOR`|`False`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`,`f8e4m3fn`,`hif8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
+|`ub`|`RowMajor`|`nosplit`|`PER_TENSOR`|`True`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`,`f8e4m3fn`,`hif8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
+|`ub`|`ColumnMajor`|`nosplit`|`PER_TENSOR`|`False`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`,`f8e4m3fn`,`hif8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
+|`ub`|`ColumnMajor`|`nosplit`|`PER_TENSOR`|`True`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`,`f8e4m3fn`,`hif8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
+|`gm`|`RowMajor`|`-`|`PER_CHANNEL`|`False`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`,`f8e4m3fn`,`hif8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
+|`gm`|`RowMajor`|`-`|`PER_CHANNEL`|`True`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`,`f8e4m3fn`,`hif8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
+|`gm`|`ColumnMajor`|`-`|`PER_CHANNEL`|`False`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`,`f8e4m3fn`,`hif8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
+|`gm`|`ColumnMajor`|`-`|`PER_CHANNEL`|`True`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`,`f8e4m3fn`,`hif8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
+|`ub`|`RowMajor`|`nosplit`|`PER_CHANNEL`|`False`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`,`f8e4m3fn`,`hif8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
+|`ub`|`RowMajor`|`nosplit`|`PER_CHANNEL`|`True`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`,`f8e4m3fn`,`hif8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
+|`ub`|`ColumnMajor`|`nosplit`|`PER_CHANNEL`|`False`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`,`f8e4m3fn`,`hif8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
+|`ub`|`ColumnMajor`|`nosplit`|`PER_CHANNEL`|`True`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`,`f8e4m3fn`,`hif8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
 |`l1`|`zN`|`-`|`PER_TENSOR`|`False`|`f32`: `f16`,`bf16`,`i8`<br>`i32`: `f16`,`bf16`,`i8`|
 |`l1`|`zN`|`-`|`PER_TENSOR`|`True`|`f32`: `f16`,`bf16`,`i8`<br>`i32`: `f16`,`bf16`,`i8`|
 |`l1`|`zN`|`-`|`PER_CHANNEL`|`False`|`f32`: `f16`,`bf16`,`i8`<br>`i32`: `f16`,`bf16`,`i8`|

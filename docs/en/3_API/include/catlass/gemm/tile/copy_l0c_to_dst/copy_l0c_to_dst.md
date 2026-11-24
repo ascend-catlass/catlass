@@ -55,6 +55,8 @@ The CopyL0CToDstQuantMode struct maps `(ElementSrc, ElementDst, ScaleGranularity
 | `float` | `half` | `QF322F16_PRE` |
 | `float` | `bfloat16_t` | `QF322BF16_PRE` |
 | `float` | `float` | `QF322F32_PRE` |
+| `float` | `fp8_e4m3fn_t` | `QF322FP8_PRE` |
+| `float` | `hifloat8_t` | `QF322HIF8_PRE` |
 
 ### PER_CHANNEL
 
@@ -67,6 +69,8 @@ The CopyL0CToDstQuantMode struct maps `(ElementSrc, ElementDst, ScaleGranularity
 | `float` | `half` | `VQF322F16_PRE` |
 | `float` | `bfloat16_t` | `VQF322BF16_PRE` |
 | `float` | `float` | `VQF322F32_PRE` |
+| `float` | `fp8_e4m3fn_t` | `VQF322FP8_PRE` |
+| `float` | `hifloat8_t` | `VQF322HIF8_PRE` |
 
 > `CopyL0CToGmQuantMode` of Atlas A2 does not support the `QS322BF16`, `QF322F16`, `QF322BF16` or `QF322F32` mode.
 

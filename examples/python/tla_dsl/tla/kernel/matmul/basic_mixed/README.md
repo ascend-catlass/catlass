@@ -31,6 +31,7 @@ $$
 ├── basic_mixed_fixpipe_nz2dn.py
 ├── basic_mixed_fixpipe_per_channel.py
 ├── basic_mixed_fixpipe_per_tensor.py
+├── basic_mixed_l0c2ub_b8_unitflag_pad.py
 ├── basic_mixed_mutex.py
 ├── basic_mixed_store_zN.py
 ├── basic_mixed_store_zNUnAlign.py
@@ -46,6 +47,7 @@ $$
 | [**`basic_mixed_mutex.py`**](basic_mixed_mutex.py)                     | 使用`Mutex` 原语实现流水同步的 CV 融合示例。                                                                           |
 | [**`basic_mixed_fixpipe_nz2dn.py`**](basic_mixed_fixpipe_nz2dn.py)     | 使用`L0C`→`UB` 通路定向搬运到 AIV0 上进行计算。                                                                     |
 | [**`basic_mixed_fixpipe_per_tensor.py`**](basic_mixed_fixpipe_per_tensor.py) | `L0C`→`UB` 通路上启用 FIXPIPE 的 per-tensor 量化，整块 tile 共用一个标量 scale，按块编号奇偶分派 AIV。 |
+| [**`basic_mixed_l0c2ub_b8_unitflag_pad.py`**](basic_mixed_l0c2ub_b8_unitflag_pad.py) | 演示 `unit_flag` + UB `i8`/`u8` 时如何把写出轴（Col→M / Row→N）上对齐到 32，避免 Fixpipe/mmad 分形计数不一致卡死。 |
 | [**`basic_mixed_fixpipe_per_channel.py`**](basic_mixed_fixpipe_per_channel.py) | 同上，但每个输出通道一个 scale，dequant tensor 按块由 GM 搬入 L1。 |
 | [**`basic_mixed_ub2l1.py`**](basic_mixed_ub2l1.py)                     | 启用`UB`→`L1` 通路的 CV 融合示例，AIV 将矩阵 A 从 GM 经 UB 搬运到 L1，不改动数据排布。                              |
 | [**`basic_mixed_store_zN.py`**](basic_mixed_store_zN.py)               | 启用`UB`→`L1` 通路的 CV 融合示例，AIV 将矩阵 A 转为 `zN` 排布后再写入 L1。                                        |
@@ -55,6 +57,7 @@ $$
 
 - 本目录下示例固定采用 `f32` 数据类型。
 - `basic_mixed_fixpipe_per_tensor.py` 与 `basic_mixed_fixpipe_per_channel.py` 例外：输入 `--dtype-ab` 可选 `f32` 或 `i8`（`i8` 累加到 `i32`），输出 `--dtype-c` 可选 `f32` / `f16` / `bf16`，不支持 `i8` / `u8`。
+- `basic_mixed_l0c2ub_b8_unitflag_pad.py` 例外：专用于 UB `i8`/`u8` + `unit_flag` 的对齐规避；单 block，`m/n/k` 与对齐后的 cube frame 均须落入 64 的 L0 tile。
 - 上述两个量化示例的 K 轴不切分，要求 `k` 不超过一个 L1 tile（`MIXED_TILING.l1_tk`，即 `k <= 64`）；M、N 不受 tile 大小限制，由 kernel 遍历 tile 网格。
 
 ## 使用示例

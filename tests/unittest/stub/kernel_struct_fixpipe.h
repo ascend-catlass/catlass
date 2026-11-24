@@ -39,6 +39,10 @@ enum QuantMode_t
     VQF322BF16_PRE,   // float量化成bf16，tensor量化
     QF322F32_PRE,     // float量化成float，scalar量化
     VQF322F32_PRE,    // float量化成float，tensor量化
+    QF322FP8_PRE,     // float量化成fp8_e4m3fn_t，scalar量化
+    VQF322FP8_PRE,    // float量化成fp8_e4m3fn_t，tensor量化
+    QF322HIF8_PRE,    // float量化成hifloat8_t，scalar量化（Half to Away）
+    VQF322HIF8_PRE,   // float量化成hifloat8_t，tensor量化（Half to Away）
 };
 
 namespace AscendC {

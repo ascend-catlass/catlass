@@ -155,6 +155,27 @@ struct CopyL0CToDstQuantMode<Arch::Ascend950, float, float, ScaleGranularity::PE
     static constexpr auto VALUE = QuantMode_t::VQF322F32_PRE;
 };
 
+// CopyL0CToDst quant float to fp8_e4m3fn / hifloat8 (Ascend 950 Fixpipe)
+template <>
+struct CopyL0CToDstQuantMode<Arch::Ascend950, float, fp8_e4m3fn_t, ScaleGranularity::PER_TENSOR> {
+    static constexpr auto VALUE = QuantMode_t::QF322FP8_PRE;
+};
+
+template <>
+struct CopyL0CToDstQuantMode<Arch::Ascend950, float, fp8_e4m3fn_t, ScaleGranularity::PER_CHANNEL> {
+    static constexpr auto VALUE = QuantMode_t::VQF322FP8_PRE;
+};
+
+template <>
+struct CopyL0CToDstQuantMode<Arch::Ascend950, float, hifloat8_t, ScaleGranularity::PER_TENSOR> {
+    static constexpr auto VALUE = QuantMode_t::QF322HIF8_PRE;
+};
+
+template <>
+struct CopyL0CToDstQuantMode<Arch::Ascend950, float, hifloat8_t, ScaleGranularity::PER_CHANNEL> {
+    static constexpr auto VALUE = QuantMode_t::VQF322HIF8_PRE;
+};
+
 template <
     class ArchTag, class ElementAccumulator, class GmType,
     ScaleGranularity DEQUANT_GRANULARITY = ScaleGranularity::NO_QUANT, bool ReluEnable = false>

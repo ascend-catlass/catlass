@@ -126,6 +126,18 @@ Constraints:
   exactly one element per channel of the destination tile, ``originShape[1]``
   after `tile_view` cropping. When both lengths are static, a mismatch
   fails compilation.
+- L0C→UB 1-byte destinations (`i8`/`u8`/`f8e4m3fn`/`hif8`): Fixpipe
+  always RoundUp's the write axis (RowMajor `N` / ColumnMajor `M`)
+  to a 32-element block, independent of `unit_flag`. Static UB pitch
+  must be `>= RoundUp(extent, 32)` (RowMajor `stride0`, ColumnMajor
+  `stride1`), or pad overwrites the next row / goes OOB. Prefer
+  aligning the write-axis extent to 32. With `unit_flag != 0`, mmad
+  counts fractals by 16, so a static unaligned extent also hangs;
+  the frontend then requires `N % 32 == 0` (RowMajor) or
+  `M % 32 == 0` (ColumnMajor). `unit_flag=0` only removes the hang —
+  pitch must still cover the RoundUp write (and mmad must use flag
+  sync). Dynamic extents/pitches skip these checks (caller
+  contract). GM 1-byte destinations are not under this rule.
 - **Prepacked `GM` tiles:** a buffer already packed in fractal order is
   tagged `zN` (or `nZ` for the transposed packing) and copied to the
   matching `L1` tile with no re-layout. Only the aligned `zN` / `nZ` are
@@ -186,6 +198,7 @@ The fixpipe has these rules:
 - If dst is (ub, ColumnMajor), only support `nosplit` mode
 - In to ub is `split` mode, any quant_mode/relu is disabled, neither pure cast, so only `f32`->`f32` and `i32`->`i32` is enabled
 - A quantized copy to l1 supports only the `zN` layout
+- L0C→UB 1-byte destinations (`i8`/`u8`/`f8e4m3fn`/`hif8`): Fixpipe always RoundUp's the write axis (RowMajor `N` / ColumnMajor `M`) to a 32-element block, independent of `unit_flag`. Static UB pitch must be `>= RoundUp(extent, 32)` (RowMajor `stride0`, ColumnMajor `stride1`), or pad overwrites the next row / goes OOB. Prefer aligning the write-axis extent to 32. With `unit_flag != 0`, mmad counts fractals by 16, so a static unaligned extent also hangs; the frontend then requires `N % 32 == 0` (RowMajor) or `M % 32 == 0` (ColumnMajor). `unit_flag=0` only removes the hang — pitch must still cover the RoundUp write (and mmad must use flag sync). Dynamic extents/pitches skip these checks (caller contract). GM 1-byte destinations are not under this rule.
 
 |`dst`|`dst_layout`|`split_mode`|`quant_mode`|`relu`|`src_dtype`:`dst_dtype`|
 |-----|------------|------------|------------|------|-----------------------|
@@ -200,22 +213,22 @@ The fixpipe has these rules:
 |`l1`|`zN`|`-`|`NO_QUANT`|`True`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `i32`|
 |`ub`|`RowMajor`|`nosplit`|`NO_QUANT`|`True`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `i32`|
 |`ub`|`ColumnMajor`|`nosplit`|`NO_QUANT`|`True`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `i32`|
-|`gm`|`RowMajor`|`-`|`PER_TENSOR`|`False`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
-|`gm`|`RowMajor`|`-`|`PER_TENSOR`|`True`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
-|`gm`|`ColumnMajor`|`-`|`PER_TENSOR`|`False`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
-|`gm`|`ColumnMajor`|`-`|`PER_TENSOR`|`True`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
-|`ub`|`RowMajor`|`nosplit`|`PER_TENSOR`|`False`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `f16`,`bf16`|
-|`ub`|`RowMajor`|`nosplit`|`PER_TENSOR`|`True`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `f16`,`bf16`|
-|`ub`|`ColumnMajor`|`nosplit`|`PER_TENSOR`|`False`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `f16`,`bf16`|
-|`ub`|`ColumnMajor`|`nosplit`|`PER_TENSOR`|`True`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `f16`,`bf16`|
-|`gm`|`RowMajor`|`-`|`PER_CHANNEL`|`False`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
-|`gm`|`RowMajor`|`-`|`PER_CHANNEL`|`True`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
-|`gm`|`ColumnMajor`|`-`|`PER_CHANNEL`|`False`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
-|`gm`|`ColumnMajor`|`-`|`PER_CHANNEL`|`True`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
-|`ub`|`RowMajor`|`nosplit`|`PER_CHANNEL`|`False`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `f16`,`bf16`|
-|`ub`|`RowMajor`|`nosplit`|`PER_CHANNEL`|`True`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `f16`,`bf16`|
-|`ub`|`ColumnMajor`|`nosplit`|`PER_CHANNEL`|`False`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `f16`,`bf16`|
-|`ub`|`ColumnMajor`|`nosplit`|`PER_CHANNEL`|`True`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `f16`,`bf16`|
+|`gm`|`RowMajor`|`-`|`PER_TENSOR`|`False`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`,`f8e4m3fn`,`hif8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
+|`gm`|`RowMajor`|`-`|`PER_TENSOR`|`True`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`,`f8e4m3fn`,`hif8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
+|`gm`|`ColumnMajor`|`-`|`PER_TENSOR`|`False`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`,`f8e4m3fn`,`hif8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
+|`gm`|`ColumnMajor`|`-`|`PER_TENSOR`|`True`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`,`f8e4m3fn`,`hif8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
+|`ub`|`RowMajor`|`nosplit`|`PER_TENSOR`|`False`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`,`f8e4m3fn`,`hif8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
+|`ub`|`RowMajor`|`nosplit`|`PER_TENSOR`|`True`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`,`f8e4m3fn`,`hif8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
+|`ub`|`ColumnMajor`|`nosplit`|`PER_TENSOR`|`False`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`,`f8e4m3fn`,`hif8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
+|`ub`|`ColumnMajor`|`nosplit`|`PER_TENSOR`|`True`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`,`f8e4m3fn`,`hif8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
+|`gm`|`RowMajor`|`-`|`PER_CHANNEL`|`False`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`,`f8e4m3fn`,`hif8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
+|`gm`|`RowMajor`|`-`|`PER_CHANNEL`|`True`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`,`f8e4m3fn`,`hif8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
+|`gm`|`ColumnMajor`|`-`|`PER_CHANNEL`|`False`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`,`f8e4m3fn`,`hif8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
+|`gm`|`ColumnMajor`|`-`|`PER_CHANNEL`|`True`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`,`f8e4m3fn`,`hif8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
+|`ub`|`RowMajor`|`nosplit`|`PER_CHANNEL`|`False`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`,`f8e4m3fn`,`hif8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
+|`ub`|`RowMajor`|`nosplit`|`PER_CHANNEL`|`True`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`,`f8e4m3fn`,`hif8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
+|`ub`|`ColumnMajor`|`nosplit`|`PER_CHANNEL`|`False`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`,`f8e4m3fn`,`hif8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
+|`ub`|`ColumnMajor`|`nosplit`|`PER_CHANNEL`|`True`|`f32`: `f32`,`f16`,`bf16`,`i8`,`u8`,`f8e4m3fn`,`hif8`<br>`i32`: `f16`,`bf16`,`i8`,`u8`|
 |`l1`|`zN`|`-`|`PER_TENSOR`|`False`|`f32`: `f16`,`bf16`,`i8`<br>`i32`: `f16`,`bf16`,`i8`|
 |`l1`|`zN`|`-`|`PER_TENSOR`|`True`|`f32`: `f16`,`bf16`,`i8`<br>`i32`: `f16`,`bf16`,`i8`|
 |`l1`|`zN`|`-`|`PER_CHANNEL`|`False`|`f32`: `f16`,`bf16`,`i8`<br>`i32`: `f16`,`bf16`,`i8`|

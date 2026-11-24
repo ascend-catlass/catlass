@@ -759,13 +759,13 @@ static StringRef vectorLayoutGmUbCopyElemSuffix(Type elementType)
 // accumulator would be safe only for as long as copyRuntimeElemSuffix had no
 // mapping for the other types: the route would resolve to an empty suffix and be
 // rejected further down. fp8 already has a suffix -- the vector staging routes
-// need it -- so that accidental guard is gone: an fp8 destination accepted here
-// would resolve to a callee name with no REGISTER_L0C_TO_* behind it and fail at
-// link time instead of as a diagnostic here.
+// need it -- so that accidental guard is gone: an unsupported fp8 destination
+// accepted here would resolve to a callee name with no REGISTER_L0C_TO_* behind
+// it and fail at link time instead of as a diagnostic here.
 //
-// fp8 destinations are not supported for now. Of the two fp8 encodings, the
-// on-the-fly quant supports e4m3fn; e5m2 has no quant route at all. Neither is
-// in the legal set, and no REGISTER_L0C_TO_* is instantiated for either.
+// On-the-fly quant destinations for f32 include e4m3fn and typed HiFloat8
+// (REGISTER_L0C_TO_* + CopyL0CToDstQuantMode). e5m2 still has no Fixpipe quant
+// route and stays illegal here.
 static bool isLegalFixpipeElementType(Type srcElementType, Type dstElementType, bool isQuantMode)
 {
     if (!isQuantMode) {
@@ -774,10 +774,11 @@ static bool isLegalFixpipeElementType(Type srcElementType, Type dstElementType, 
             return dstElementType.isF32() || dstElementType.isF16() || dstElementType.isBF16();
         return srcElementType.isSignlessInteger(32) && dstElementType.isSignlessInteger(32);
     } else {
-        // PER_TENSOR/PER_CHANNEL: f32->f32/f16/bf16/i8/u8 or i32->f16/bf16/i8/u8
+        // PER_TENSOR/PER_CHANNEL: f32->f32/f16/bf16/i8/u8/fp8/hif8 or i32->f16/bf16/i8/u8
         if (srcElementType.isF32())
             return dstElementType.isF32() || dstElementType.isF16() || dstElementType.isBF16() ||
-                   dstElementType.isSignlessInteger(8) || dstElementType.isUnsignedInteger(8);
+                   dstElementType.isSignlessInteger(8) || dstElementType.isUnsignedInteger(8) ||
+                   dstElementType.isFloat8E4M3FN() || ::llvm::isa<::tla::HiFloat8Type>(dstElementType);
         if (srcElementType.isSignlessInteger(32))
             return dstElementType.isF16() || dstElementType.isBF16() || dstElementType.isSignlessInteger(8) ||
                    dstElementType.isUnsignedInteger(8);

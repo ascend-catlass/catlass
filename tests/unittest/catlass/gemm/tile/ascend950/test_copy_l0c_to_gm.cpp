@@ -350,6 +350,111 @@ TEST_P(TileCopyL0CToGmTestAscend950, zNToRowMajorTestPerChannel)
     ASSERT_EQ(fixpipeCfg->format, fixpipeFmt);
 }
 
+// Data-path: zN (L0C) → RowMajor (GM)
+// Element-type: float → fp8_e4m3fn_t / hifloat8_t
+// Speciality: PerTensor QuantMode mapping (QF322FP8_PRE / QF322HIF8_PRE)
+TEST_P(TileCopyL0CToGmTestAscend950, zNToRowMajorTestPerTensorFp8Hif8)
+{
+    using ElementAccumulator = float;
+    using LayoutSrc = layout::zN;
+    using LayoutDst = layout::RowMajor;
+    constexpr CO2Layout fixpipeFmt = CO2Layout::ROW_MAJOR;
+
+    auto runOne = [&](auto dstTag, QuantMode_t expectedQuant) {
+        using ElementDst = decltype(dstTag);
+        constexpr auto quantPre = CopyL0CToDstQuantMode<ArchTag, ElementAccumulator, ElementDst,
+            ScaleGranularity::PER_TENSOR>::VALUE;
+        ASSERT_EQ(quantPre, expectedQuant);
+
+        CopyL0CToGm<ArchTag, ElementAccumulator, Gemm::GemmType<ElementDst, LayoutDst>,
+            ScaleGranularity::PER_TENSOR> copyL0CToGm;
+
+        AscendC::GlobalTensor<ElementDst> gmTensor;
+        AscendC::LocalTensor<ElementAccumulator> l0cTensor;
+        LayoutSrc layoutSrc;
+        LayoutDst layoutDst;
+        setShape<ElementAccumulator>();
+        setLayout<ElementAccumulator>(_m, _n, layoutSrc, layoutDst);
+
+        float _scale = 2.0;
+        uint64_t _scale_uint64 = static_cast<uint64_t>(*reinterpret_cast<const int32_t*>(&_scale));
+        copyL0CToGm.params.scale = _scale;
+        copyL0CToGm(gmTensor, l0cTensor, layoutDst, layoutSrc, _unitFlag);
+
+        AscendCCallLogger& logger = AscendCCallLogger::Instance();
+        auto logs = logger.GetLogs();
+        ASSERT_EQ(logs.size(), 1);
+        AscendCCallLog logFixpipe = logs[0];
+        BaseCheck<ElementDst, ElementAccumulator, true>(logFixpipe, gmTensor, l0cTensor);
+
+        const AscendC::FixpipeParamsC310<fixpipeFmt>* fixpipeArg =
+            logFixpipe.GetArgsAt(2).Value<AscendC::FixpipeParamsC310<fixpipeFmt>>();
+        ASSERT_EQ(fixpipeArg->quantPre, quantPre);
+        ASSERT_EQ(fixpipeArg->deqScalar, _scale_uint64);
+        ASSERT_EQ(fixpipeArg->unitFlag, _unitFlag);
+        logger.Clear();
+    };
+
+    runOne(fp8_e4m3fn_t{}, QuantMode_t::QF322FP8_PRE);
+    runOne(hifloat8_t{}, QuantMode_t::QF322HIF8_PRE);
+}
+
+// Data-path: zN (L0C) → RowMajor (GM)
+// Element-type: float → fp8_e4m3fn_t / hifloat8_t
+// Speciality: PerChannel QuantMode mapping (VQF322FP8_PRE / VQF322HIF8_PRE)
+TEST_P(TileCopyL0CToGmTestAscend950, zNToRowMajorTestPerChannelFp8Hif8)
+{
+    using ElementAccumulator = float;
+    using LayoutSrc = layout::zN;
+    using LayoutDst = layout::RowMajor;
+    constexpr CO2Layout fixpipeFmt = CO2Layout::ROW_MAJOR;
+
+    auto runOne = [&](auto dstTag, QuantMode_t expectedQuant) {
+        using ElementDst = decltype(dstTag);
+        constexpr auto quantPre = CopyL0CToDstQuantMode<ArchTag, ElementAccumulator, ElementDst,
+            ScaleGranularity::PER_CHANNEL>::VALUE;
+        ASSERT_EQ(quantPre, expectedQuant);
+
+        CopyL0CToGm<ArchTag, ElementAccumulator, Gemm::GemmType<ElementDst, LayoutDst>,
+            ScaleGranularity::PER_CHANNEL> copyL0CToGm;
+
+        AscendC::GlobalTensor<ElementDst> gmTensor;
+        AscendC::LocalTensor<ElementAccumulator> l0cTensor;
+        AscendC::LocalTensor<uint64_t> scaleTensor;
+        LayoutSrc layoutSrc;
+        LayoutDst layoutDst;
+        setShape<ElementAccumulator>();
+        setLayout<ElementAccumulator>(_m, _n, layoutSrc, layoutDst);
+        ASSERT_TRUE(isContiguous(layoutSrc));
+        ASSERT_TRUE(isContiguous(layoutDst));
+
+        copyL0CToGm(gmTensor, l0cTensor, scaleTensor, layoutDst, layoutSrc, _unitFlag);
+
+        AscendCCallLogger& logger = AscendCCallLogger::Instance();
+        auto logs = logger.GetLogs();
+        ASSERT_EQ(logs.size(), 1);
+        AscendCCallLog logFixpipe = logs[0];
+        ASSERT_EQ(logFixpipe.name, "Fixpipe");
+        ASSERT_EQ(logFixpipe.args.size(), 4);
+
+        auto logGmTensor = logFixpipe.GetArgsAt(0).RawValue();
+        auto logL0cTensor = logFixpipe.GetArgsAt(1).RawValue();
+        auto logScaleTensor = logFixpipe.GetArgsAt(2).RawValue();
+        ASSERT_EQ(logGmTensor, &gmTensor);
+        ASSERT_EQ(logL0cTensor, &l0cTensor);
+        ASSERT_EQ(logScaleTensor, &scaleTensor);
+
+        const AscendC::FixpipeParamsC310<fixpipeFmt>* fixpipeArg =
+            logFixpipe.GetArgsAt(3).Value<AscendC::FixpipeParamsC310<fixpipeFmt>>();
+        ASSERT_EQ(fixpipeArg->quantPre, quantPre);
+        ASSERT_EQ(fixpipeArg->unitFlag, _unitFlag);
+        logger.Clear();
+    };
+
+    runOne(fp8_e4m3fn_t{}, QuantMode_t::VQF322FP8_PRE);
+    runOne(hifloat8_t{}, QuantMode_t::VQF322HIF8_PRE);
+}
+
 ///////////////////////////// TEST WITH PARAMETERIC GROUPS
 INSTANTIATE_TEST_SUITE_P(
     CopyL0CToGm,

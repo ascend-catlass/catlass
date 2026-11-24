@@ -312,10 +312,18 @@ _TORCH_DTYPES = {
     "i32": torch.int32,
     "i8": torch.int8,
     "u8": torch.uint8,
+    # Host storage for typed low-p fixpipe destinations; HiF8 needs element_type.
+    "f8e4m3fn": torch.float8_e4m3fn,
+    "hif8": torch.uint8,
+}
+
+_FP8_HIF8_TLA = {
+    "f8e4m3fn": tla.Float8E4M3FN,
+    "hif8": tla.HiFloat8,
 }
 
 _DST_DTYPES = {
-    "f32": ("f32", "f16", "bf16", "i8", "u8"),
+    "f32": ("f32", "f16", "bf16", "i8", "u8", "f8e4m3fn", "hif8"),
     "i32": ("f16", "bf16", "i8", "u8"),
 }
 
@@ -366,7 +374,66 @@ def per_tensor_quant_golden(
         quantized = torch.round(torch.clamp(scaled, -256, 255)).to(torch.int16)
         quantized += int(quant_offset)
         return torch.round(torch.clamp(quantized, lo, hi)).to(dst_dtype)
+    elif dst_dtype == torch.float8_e4m3fn:
+        # Fixpipe QF322FP8_PRE: scale then cast to e4m3fn (no int offset).
+        return scaled.to(torch.float8_e4m3fn)
     raise RuntimeError(f"unsupported quant dst_dtype {dst_dtype}")
+
+
+def _load_encode_hif8_rna():
+    """Load ``encode_hif8_rna`` from the repo end_to_end reference module.
+
+    Uses ``importlib`` + an absolute file path so the example does not mutate
+    ``sys.path`` (CodeCheck G.PSL.03) or re-import module-level ``sys``/``Path``
+    (G.VAR.03).
+    """
+    import importlib.util
+
+    here = Path(__file__).resolve()
+    ref_path = None
+    for parent in here.parents:
+        candidate = (
+            parent
+            / "python"
+            / "tla_dsl"
+            / "tests"
+            / "end_to_end"
+            / "_lowp_reference.py"
+        )
+        if candidate.is_file():
+            ref_path = candidate
+            break
+    if ref_path is None:
+        raise RuntimeError(
+            "cannot locate python/tla_dsl/tests/end_to_end/_lowp_reference.py "
+            "from this example; keep the repo layout intact for --dtype-c hif8"
+        )
+    spec = importlib.util.spec_from_file_location("_lowp_reference_hif8", ref_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load HiF8 reference module from {ref_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.encode_hif8_rna
+
+
+def per_tensor_quant_golden_hif8(
+    acc: torch.Tensor,
+    quant_scale: float,
+    relu: bool = False,
+    simulate_npu: bool = False,
+) -> torch.Tensor:
+    """Host reference for QF322HIF8_PRE (Half to Away / RNA)."""
+    encode_hif8_rna = _load_encode_hif8_rna()
+
+    if simulate_npu:
+        scaled = acc.float() * prepare_quant_scale(quant_scale)
+    else:
+        scaled = acc.float() * torch.tensor(quant_scale, dtype=torch.float32)
+    if relu:
+        scaled = torch.where(acc > 0, scaled, torch.zeros_like(scaled))
+    flat = scaled.detach().cpu().reshape(-1).tolist()
+    codes = [encode_hif8_rna(float(v), saturate=True) for v in flat]
+    return torch.tensor(codes, dtype=torch.uint8).reshape(acc.shape)
 
 
 def run(args: argparse.Namespace) -> int:
@@ -388,6 +455,8 @@ def run(args: argparse.Namespace) -> int:
     dtype_c = _TORCH_DTYPES[args.dtype_c]
     layout_a, layout_b = "row", "row"
     layout_c = args.layout_c
+    is_hif8_dst = args.dtype_c == "hif8"
+    is_f8_dst = args.dtype_c == "f8e4m3fn"
 
     print(
         f"--- mnk=({args.m},{args.n},{args.k}) "
@@ -406,22 +475,36 @@ def run(args: argparse.Namespace) -> int:
         b = torch.rand(args.k, args.n, dtype=dtype_b, device="cpu") * 10.0 - 5.0
         acc_ref = a.float() @ b.float()
 
-    host_golden = per_tensor_quant_golden(
-        acc_ref,
-        dtype_c,
-        args.quant_scale,
-        args.quant_offset,
-        relu=bool(args.relu_enable),
-        simulate_npu=False,
-    )
-    host_cpu = per_tensor_quant_golden(
-        acc_ref,
-        dtype_c,
-        args.quant_scale,
-        args.quant_offset,
-        relu=bool(args.relu_enable),
-        simulate_npu=True,
-    )
+    if is_hif8_dst:
+        host_golden = per_tensor_quant_golden_hif8(
+            acc_ref,
+            args.quant_scale,
+            relu=bool(args.relu_enable),
+            simulate_npu=False,
+        )
+        host_cpu = per_tensor_quant_golden_hif8(
+            acc_ref,
+            args.quant_scale,
+            relu=bool(args.relu_enable),
+            simulate_npu=True,
+        )
+    else:
+        host_golden = per_tensor_quant_golden(
+            acc_ref,
+            dtype_c,
+            args.quant_scale,
+            args.quant_offset,
+            relu=bool(args.relu_enable),
+            simulate_npu=False,
+        )
+        host_cpu = per_tensor_quant_golden(
+            acc_ref,
+            dtype_c,
+            args.quant_scale,
+            args.quant_offset,
+            relu=bool(args.relu_enable),
+            simulate_npu=True,
+        )
 
     c = torch.zeros(args.m, args.n, dtype=dtype_c, device="cpu")
 
@@ -437,7 +520,8 @@ def run(args: argparse.Namespace) -> int:
     c = c.contiguous().npu()
     a_tensor = create_tla_tensor(a, layout_a)
     b_tensor = create_tla_tensor(b, layout_b)
-    c_tensor = create_tla_tensor(c, layout_c)
+    c_elem = _FP8_HIF8_TLA.get(args.dtype_c)
+    c_tensor = create_tla_tensor(c, layout_c, element_type=c_elem)
 
     artifact = tla.compile(
         basic_mmad_fixpipe_per_tensor_kernel,
@@ -467,6 +551,46 @@ def run(args: argparse.Namespace) -> int:
     result = c.detach().cpu()
     if layout_c == "col":
         result = result.transpose(0, 1).contiguous()
+    if is_hif8_dst:
+        # Byte-exact vs RNA codebook; allow ±1 LSB for scale truncation ties.
+        max_delta = (
+            (result.to(torch.int32) - host_golden.to(torch.int32)).abs().max().item()
+        )
+        max_delta_cpu = (
+            (result.to(torch.int32) - host_cpu.to(torch.int32)).abs().max().item()
+        )
+        passed = max_delta <= 1 or max_delta_cpu <= 1
+        print(
+            f"passed={passed} max_abs_delta={max_delta} "
+            f"max_abs_delta_cpu={max_delta_cpu} cache_key={artifact.cache_key}"
+        )
+        return 0 if passed else 1
+    if is_f8_dst:
+        # Compare e4m3fn via float32 decode; also keep a byte view for delta.
+        res_f = result.to(torch.float32)
+        gold_f = host_golden.to(torch.float32)
+        cpu_f = host_cpu.to(torch.float32)
+        passed1 = compare(res_f, gold_f, args.k)
+        metrics = compute_error_metrics(
+            res_f,
+            cpu_f,
+            gold_f,
+            mare_threshold=10.0,
+            mere_threshold=2.0,
+            rmse_threshold=2.0,
+        )
+        byte_delta = (
+            (
+                result.view(torch.uint8).to(torch.int32)
+                - host_golden.view(torch.uint8).to(torch.int32)
+            )
+            .abs()
+            .max()
+            .item()
+        )
+        passed = passed1 or metrics.passed or byte_delta <= 1
+        print(f"passed={passed} byte_delta={byte_delta} cache_key={artifact.cache_key}")
+        return 0 if passed else 1
     if dtype_c in (torch.int8, torch.uint8):
         max_delta = (
             (result.to(torch.int32) - host_golden.to(torch.int32)).abs().max().item()
@@ -516,7 +640,7 @@ def main() -> int:
     parser.add_argument("--dtype-ab", choices=("f32", "i8"), default="f32")
     parser.add_argument(
         "--dtype-c",
-        choices=("f32", "f16", "bf16", "i8", "u8"),
+        choices=("f32", "f16", "bf16", "i8", "u8", "f8e4m3fn", "hif8"),
         default="f16",
         help=f"valid dtype-c: f32->{_DST_DTYPES['f32']} i32->{_DST_DTYPES['i32']}",
     )

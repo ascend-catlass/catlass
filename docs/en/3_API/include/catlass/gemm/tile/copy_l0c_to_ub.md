@@ -38,7 +38,7 @@ struct CopyL0CToUBTla {
 
 | CopyMode | M Processing| N Processing| dualDstCtl | Movement Instruction|
 | :------ | :------ | :------ | :------ | :------ |
-| `NO_SPLIT` | Original M| Original N| — | `AscendC::Fixpipe` + `CFG_ROW_MAJOR_UB` |
+| `NO_SPLIT` | RowMajor: original M; ColumnMajor: `RoundUp(M, ELE_NUM_PER_BLK)` (32 for 1-byte)| RowMajor: `RoundUp(N, ELE_NUM_PER_BLK)` (32 for 1-byte); ColumnMajor: original N| — | `AscendC::Fixpipe` + `CFG_ROW_MAJOR_UB` / `CFG_COLUMN_MAJOR_UB` |
 | `SPLIT_M` | `RoundUp(M, 2)` | Original N| `1` | `AscendC::Fixpipe` + `CFG_ROW_MAJOR_UB` |
 | `SPLIT_N` | Original M| `RoundUp(N, 32)` | `2` | `AscendC::Fixpipe` + `CFG_ROW_MAJOR_UB` |
 
