@@ -61,7 +61,7 @@ stages:
     - type: auto
     fail-fast: true
   stage2:
-    name: compile
+    name: Compile
     jobs:
       JOB_codecheck_action:
         permissions:
@@ -76,7 +76,7 @@ stages:
         permissions:
           repository: read
           id-token: write
-        name: arm_compile
+        name: Compile_arm
         uses: .gitcode/workflows/arm_compile_action.yml
         with:
           task_name: 'arm_compile'
@@ -85,7 +85,7 @@ stages:
         permissions:
           repository: read
           id-token: write
-        name: arm_pre_smoke
+        name: UT_pre_smoke_arm
         uses: .gitcode/workflows/arm_pre_smoke.yml
         with:
           task_name: 'arm_pre_smoke'

@@ -9,13 +9,31 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 # -----------------------------------------------------------------------------------------------------------
 
+# CATLASS_TEST_GROUPS_V1
 # 不使用 set -e：单个测试失败后继续执行其他测试，最后统一返回失败数量。
 set -uo pipefail
 
 DRY_RUN=${CI_DRY_RUN:-0}
 FAILED=0
 
+# 用法: pre_smoke.sh <workspace> [group]
+#   group         测试分组，默认 all（串行执行全部测试，兼容旧调用）
 WORKSPACE=$1
+TEST_GROUP=${2:-all}
+
+ALLOWED_GROUPS=(all unittest example optest python_extension cppgen mstuner)
+group_allowed=false
+for allowed in "${ALLOWED_GROUPS[@]}"; do
+    if [ "${TEST_GROUP}" = "${allowed}" ]; then
+        group_allowed=true
+        break
+    fi
+done
+if [ "${group_allowed}" != "true" ]; then
+    echo "ERROR: unknown test group '${TEST_GROUP}'. Allowed: ${ALLOWED_GROUPS[*]}" >&2
+    exit 2
+fi
+
 cd "${WORKSPACE}"
 
 # ============================================================================
@@ -70,6 +88,23 @@ run_test() {
     echo "    [FAIL] ${name}"
     FAILED=$((FAILED + 1))
     return 1
+}
+
+# 当前 job 是否负责执行指定测试分组（all 表示全部）。
+group_enabled() {
+    [ "${TEST_GROUP}" = "all" ] || [ "${TEST_GROUP}" = "$1" ]
+}
+
+# 指定分组在本次变更下是否确实有工作可做。
+group_has_work() {
+    case "$1" in
+        unittest)         [ "${RUN_SELF_CONTAINED}" = "true" ] || [ "${RUN_UNITTEST}" = "true" ] ;;
+        example|optest)   [ "${#EXAMPLE_CASES[@]}" -gt 0 ] ;;
+        python_extension) [ "${RUN_PYEXT}" = "true" ] ;;
+        cppgen)           [ "${RUN_CPPGEN}" = "true" ] ;;
+        mstuner)          [ "${RUN_MSTUNER}" = "true" ] ;;
+        *)                return 1 ;;
+    esac
 }
 
 echo "============================================================"
@@ -165,6 +200,7 @@ echo "  mstuner       : ${RUN_MSTUNER}"
 echo "  unittest      : ${RUN_UNITTEST}"
 echo "  self_contained: ${RUN_SELF_CONTAINED}"
 echo "  dsl           : ${RUN_DSL}"
+echo "  test_group    : ${TEST_GROUP}"
 echo "============================================================"
 
 # ============================================================================
@@ -188,6 +224,13 @@ if [ "${ut_type:-}" = "dsl" ]; then
     export PATH="/opt/AscendNPU-IR/build/bin:${PATH}"
     run_test "dsl_lit" llvm-lit -sv "${WORKSPACE}/python/tla_dsl/csrc/mlir/build/tests/lit" || true
     exit "${FAILED}"
+fi
+
+# 分 job 执行时，本分组在本次变更下没有工作就直接退出，避免空跑环境准备。
+if [ "${TEST_GROUP}" != "all" ] && ! group_has_work "${TEST_GROUP}"; then
+    echo
+    echo "No work for test group '${TEST_GROUP}' under this change; skip."
+    exit 0
 fi
 
 # ============================================================================
@@ -216,16 +259,18 @@ cd "${WORKSPACE}" || exit 1
 # 5. 执行常规分项测试
 # ============================================================================
 
-if [ "${RUN_SELF_CONTAINED}" = "true" ]; then
-    run_test "self_contained_includes" \
-        bash "${WORKSPACE}/scripts/build.sh" --clean --tests test_self_contained_includes || true
+if group_enabled unittest; then
+    if [ "${RUN_SELF_CONTAINED}" = "true" ]; then
+        run_test "self_contained_includes" \
+            bash "${WORKSPACE}/scripts/build.sh" --clean --tests test_self_contained_includes || true
+    fi
+
+    if [ "${RUN_UNITTEST}" = "true" ]; then
+        run_test "unittest" bash "${WORKSPACE}/tests/run_unittest.sh" || true
+    fi
 fi
 
-if [ "${RUN_UNITTEST}" = "true" ]; then
-    run_test "unittest" bash "${WORKSPACE}/tests/run_unittest.sh" || true
-fi
-
-# 受影响 example：跑 test_example.py（C++ bin）+ 对应 optest（torch_catlass 算子测试）
+# 受影响 example 与 optest 是两个独立分组，可分别在不同 job 中执行。
 if [ "${#EXAMPLE_CASES[@]}" -gt 0 ]; then
     EXAMPLE_FILTER=""
     for case_name in "${EXAMPLE_CASES[@]}"; do
@@ -235,40 +280,44 @@ if [ "${#EXAMPLE_CASES[@]}" -gt 0 ]; then
         EXAMPLE_FILTER="${EXAMPLE_FILTER}${case_name}"
     done
 
-    # 样例未注册用例时 pytest 以 rc=5 结束，记 SKIP；其余收集错误仍照常报红。
-    if [ "${DRY_RUN}" -eq 1 ]; then
-        run_test "example" \
-            python3 -m pytest -q "${WORKSPACE}/tests/test_example.py" -k "${EXAMPLE_FILTER}"
-    else
-        python3 -m pytest --collect-only -q "${WORKSPACE}/tests/test_example.py" -k "${EXAMPLE_FILTER}" \
-            > /dev/null 2>&1
-        if [ $? -eq 5 ]; then
-            echo
-            echo "=== [example] ==="
-            echo "    [SKIP] example (样例未注册用例: ${EXAMPLE_FILTER})"
-        else
+    if group_enabled example; then
+        # 样例未注册用例时 pytest 以 rc=5 结束，记 SKIP；其余收集错误仍照常报红。
+        if [ "${DRY_RUN}" -eq 1 ]; then
             run_test "example" \
-                python3 -m pytest -q "${WORKSPACE}/tests/test_example.py" -k "${EXAMPLE_FILTER}" || true
+                python3 -m pytest -q "${WORKSPACE}/tests/test_example.py" -k "${EXAMPLE_FILTER}"
+        else
+            python3 -m pytest --collect-only -q "${WORKSPACE}/tests/test_example.py" -k "${EXAMPLE_FILTER}" \
+                > /dev/null 2>&1
+            if [ $? -eq 5 ]; then
+                echo
+                echo "=== [example] ==="
+                echo "    [SKIP] example (样例未注册用例: ${EXAMPLE_FILTER})"
+            else
+                run_test "example" \
+                    python3 -m pytest -q "${WORKSPACE}/tests/test_example.py" -k "${EXAMPLE_FILTER}" || true
+            fi
         fi
     fi
 
-    # optest：把受影响用例名透传给 run_optest.sh，由后者按数字前缀匹配 tests/test_NN_*.py；
-    # 不传参数时 run_optest.sh 执行 tests/ 全量（tests/run_all_test.sh 走该默认路径）。
-    npu-smi info
-    run_test "optest" \
-        bash "${WORKSPACE}/tests/run_optest.sh" "${EXAMPLE_CASES[@]}" || true
+    if group_enabled optest; then
+        # optest：把受影响用例名透传给 run_optest.sh，由后者按数字前缀匹配 tests/test_NN_*.py；
+        # 不传参数时 run_optest.sh 执行 tests/ 全量（tests/run_all_test.sh 走该默认路径）。
+        npu-smi info
+        run_test "optest" \
+            bash "${WORKSPACE}/tests/run_optest.sh" "${EXAMPLE_CASES[@]}" || true
+    fi
 fi
 
-# python extension / torch lib 
-if [ "${RUN_PYEXT}" = "true" ]; then
+# python extension / torch lib
+if group_enabled python_extension && [ "${RUN_PYEXT}" = "true" ]; then
     run_test "python_extension" bash "${WORKSPACE}/tests/run_python_extension.sh" || true
 fi
 
-if [ "${RUN_CPPGEN}" = "true" ]; then
+if group_enabled cppgen && [ "${RUN_CPPGEN}" = "true" ]; then
     run_test "cppgen" bash "${WORKSPACE}/tests/run_cppgen.sh" || true
 fi
 
-if [ "${RUN_MSTUNER}" = "true" ]; then
+if group_enabled mstuner && [ "${RUN_MSTUNER}" = "true" ]; then
     run_test "mstuner" python3 "${WORKSPACE}/tools/tuner/test/test_mstuner.py" || true
 fi
 

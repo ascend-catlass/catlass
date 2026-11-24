@@ -11,6 +11,8 @@ on:
         type: string
 
 jobs:
+  # 原 pre_smoke_catlass job：保留 job 名，负责轻量的 self_contained + unittest。
+  # 若 OBS 上的 pre_smoke.sh 尚不支持分组（旧脚本），由本 job 回退执行全量，其余分项 job 跳过。
   JOB_pre_smoke:
     name: pre_smoke_catlass
     steps:
@@ -21,7 +23,6 @@ jobs:
         with:
           ref: ${{ atomgit.event.pull_request.merge_commit_sha || atomgit.sha }}
           allow-unsafe-pr-checkout: true
-
       -
         name: oidc_auth
         uses: huaweicloud-oidc-auth
@@ -42,24 +43,271 @@ jobs:
             ${{ env.obs_path }}/pr_filelist_mod.txt
             ${{ env.obs_path }}/pre_smoke.sh
           path: ${{ steps.process_checkout.outputs.path }}
-
       -
         name: pre_smoke_catlass
-        timeout-minutes: 300
+        timeout-minutes: 30
         run: |
           set -e
-          # set env
-          export repo_name=${{env.repo_name}}
-          export pr_id=${{ env.MERGE_ID }}
-          export obs_smoke_path=${{ env.obs_smoke_path_A2 }}
-          export obs_path=${{ env.obs_path }}
           export WORKSPACE=${{ steps.process_checkout.outputs.path }}
-          whoami
-          pwd
-          sudo bash ${{ steps.process_checkout.outputs.path }}/pre_smoke.sh ${{ steps.process_checkout.outputs.path }}
+          PRE_SMOKE="${WORKSPACE}/pre_smoke.sh"
+          if grep -q 'CATLASS_TEST_GROUPS_V1' "${PRE_SMOKE}"; then
+            sudo bash "${PRE_SMOKE}" "${WORKSPACE}" unittest
+          else
+            echo "[fallback] pre_smoke.sh does not support test groups; running full suite in this job"
+            sudo bash "${PRE_SMOKE}" "${WORKSPACE}"
+          fi
 
     if: "${{ default() }}"
     runs-on: ['self-hosted','npu=1','smoke=204']
     container:
-          image: swr.cn-north-4.myhuaweicloud.com/hw-ascend/${{ inputs.image_version }}
+      image: swr.cn-north-4.myhuaweicloud.com/hw-ascend/${{ inputs.image_version }}
 
+  JOB_pre_smoke_example:
+    name: pre_smoke_example
+    steps:
+      -
+        name: Checkout
+        identifier: process_checkout
+        uses: checkout
+        with:
+          ref: ${{ atomgit.event.pull_request.merge_commit_sha || atomgit.sha }}
+          allow-unsafe-pr-checkout: true
+      -
+        name: oidc_auth
+        uses: huaweicloud-oidc-auth
+        with:
+          audience: ${{ secrets.audience }}
+          agency_urn: ${{ secrets.agency_urn }}
+          provider_urn: ${{ secrets.provider_urn }}
+          region: cn-north-4
+          duration: 3600
+      -
+        name: download
+        uses: obs-download
+        with:
+          endpoint: "https://obs.cn-north-4.myhuaweicloud.com"
+          bucket: "ascend-ci"
+          access-key: ${{ secrets.AK }}
+          secret-key: ${{ secrets.SK }}
+          key: |
+            ${{ env.obs_path }}/pr_filelist.txt
+            ${{ env.obs_path }}/pr_filelist_mod.txt
+            ${{ env.obs_path }}/pre_smoke.sh
+          path: ${{ steps.process_checkout.outputs.path }}
+      -
+        name: pre_smoke_example
+        timeout-minutes: 60
+        run: |
+          set -e
+          export WORKSPACE=${{ steps.process_checkout.outputs.path }}
+          PRE_SMOKE="${WORKSPACE}/pre_smoke.sh"
+          if grep -q 'CATLASS_TEST_GROUPS_V1' "${PRE_SMOKE}"; then
+            sudo bash "${PRE_SMOKE}" "${WORKSPACE}" example
+          else
+            echo "[skip] pre_smoke.sh does not support test groups; full suite runs in pre_smoke_catlass"
+          fi
+
+    if: "${{ default() }}"
+    runs-on: ['self-hosted','npu=1','smoke=204']
+    container:
+      image: swr.cn-north-4.myhuaweicloud.com/hw-ascend/${{ inputs.image_version }}
+
+  JOB_pre_smoke_optest:
+    name: pre_smoke_optest
+    steps:
+      -
+        name: Checkout
+        identifier: process_checkout
+        uses: checkout
+        with:
+          ref: ${{ atomgit.event.pull_request.merge_commit_sha || atomgit.sha }}
+          allow-unsafe-pr-checkout: true
+      -
+        name: oidc_auth
+        uses: huaweicloud-oidc-auth
+        with:
+          audience: ${{ secrets.audience }}
+          agency_urn: ${{ secrets.agency_urn }}
+          provider_urn: ${{ secrets.provider_urn }}
+          region: cn-north-4
+          duration: 3600
+      -
+        name: download
+        uses: obs-download
+        with:
+          endpoint: "https://obs.cn-north-4.myhuaweicloud.com"
+          bucket: "ascend-ci"
+          access-key: ${{ secrets.AK }}
+          secret-key: ${{ secrets.SK }}
+          key: |
+            ${{ env.obs_path }}/pr_filelist.txt
+            ${{ env.obs_path }}/pr_filelist_mod.txt
+            ${{ env.obs_path }}/pre_smoke.sh
+          path: ${{ steps.process_checkout.outputs.path }}
+      -
+        name: pre_smoke_optest
+        timeout-minutes: 60
+        run: |
+          set -e
+          export WORKSPACE=${{ steps.process_checkout.outputs.path }}
+          PRE_SMOKE="${WORKSPACE}/pre_smoke.sh"
+          if grep -q 'CATLASS_TEST_GROUPS_V1' "${PRE_SMOKE}"; then
+            sudo bash "${PRE_SMOKE}" "${WORKSPACE}" optest
+          else
+            echo "[skip] pre_smoke.sh does not support test groups; full suite runs in pre_smoke_catlass"
+          fi
+
+    if: "${{ default() }}"
+    runs-on: ['self-hosted','npu=1','smoke=204']
+    container:
+      image: swr.cn-north-4.myhuaweicloud.com/hw-ascend/${{ inputs.image_version }}
+
+  JOB_pre_smoke_pyext:
+    name: pre_smoke_python_extension
+    steps:
+      -
+        name: Checkout
+        identifier: process_checkout
+        uses: checkout
+        with:
+          ref: ${{ atomgit.event.pull_request.merge_commit_sha || atomgit.sha }}
+          allow-unsafe-pr-checkout: true
+      -
+        name: oidc_auth
+        uses: huaweicloud-oidc-auth
+        with:
+          audience: ${{ secrets.audience }}
+          agency_urn: ${{ secrets.agency_urn }}
+          provider_urn: ${{ secrets.provider_urn }}
+          region: cn-north-4
+          duration: 3600
+      -
+        name: download
+        uses: obs-download
+        with:
+          endpoint: "https://obs.cn-north-4.myhuaweicloud.com"
+          bucket: "ascend-ci"
+          access-key: ${{ secrets.AK }}
+          secret-key: ${{ secrets.SK }}
+          key: |
+            ${{ env.obs_path }}/pr_filelist.txt
+            ${{ env.obs_path }}/pr_filelist_mod.txt
+            ${{ env.obs_path }}/pre_smoke.sh
+          path: ${{ steps.process_checkout.outputs.path }}
+      -
+        name: pre_smoke_python_extension
+        timeout-minutes: 45
+        run: |
+          set -e
+          export WORKSPACE=${{ steps.process_checkout.outputs.path }}
+          PRE_SMOKE="${WORKSPACE}/pre_smoke.sh"
+          if grep -q 'CATLASS_TEST_GROUPS_V1' "${PRE_SMOKE}"; then
+            sudo bash "${PRE_SMOKE}" "${WORKSPACE}" python_extension
+          else
+            echo "[skip] pre_smoke.sh does not support test groups; full suite runs in pre_smoke_catlass"
+          fi
+
+    if: "${{ default() }}"
+    runs-on: ['self-hosted','npu=1','smoke=204']
+    container:
+      image: swr.cn-north-4.myhuaweicloud.com/hw-ascend/${{ inputs.image_version }}
+
+  JOB_pre_smoke_cppgen:
+    name: pre_smoke_cppgen
+    steps:
+      -
+        name: Checkout
+        identifier: process_checkout
+        uses: checkout
+        with:
+          ref: ${{ atomgit.event.pull_request.merge_commit_sha || atomgit.sha }}
+          allow-unsafe-pr-checkout: true
+      -
+        name: oidc_auth
+        uses: huaweicloud-oidc-auth
+        with:
+          audience: ${{ secrets.audience }}
+          agency_urn: ${{ secrets.agency_urn }}
+          provider_urn: ${{ secrets.provider_urn }}
+          region: cn-north-4
+          duration: 3600
+      -
+        name: download
+        uses: obs-download
+        with:
+          endpoint: "https://obs.cn-north-4.myhuaweicloud.com"
+          bucket: "ascend-ci"
+          access-key: ${{ secrets.AK }}
+          secret-key: ${{ secrets.SK }}
+          key: |
+            ${{ env.obs_path }}/pr_filelist.txt
+            ${{ env.obs_path }}/pr_filelist_mod.txt
+            ${{ env.obs_path }}/pre_smoke.sh
+          path: ${{ steps.process_checkout.outputs.path }}
+      -
+        name: pre_smoke_cppgen
+        timeout-minutes: 45
+        run: |
+          set -e
+          export WORKSPACE=${{ steps.process_checkout.outputs.path }}
+          PRE_SMOKE="${WORKSPACE}/pre_smoke.sh"
+          if grep -q 'CATLASS_TEST_GROUPS_V1' "${PRE_SMOKE}"; then
+            sudo bash "${PRE_SMOKE}" "${WORKSPACE}" cppgen
+          else
+            echo "[skip] pre_smoke.sh does not support test groups; full suite runs in pre_smoke_catlass"
+          fi
+
+    if: "${{ default() }}"
+    runs-on: ['self-hosted','npu=1','smoke=204']
+    container:
+      image: swr.cn-north-4.myhuaweicloud.com/hw-ascend/${{ inputs.image_version }}
+
+  JOB_pre_smoke_mstuner:
+    name: pre_smoke_mstuner
+    steps:
+      -
+        name: Checkout
+        identifier: process_checkout
+        uses: checkout
+        with:
+          ref: ${{ atomgit.event.pull_request.merge_commit_sha || atomgit.sha }}
+          allow-unsafe-pr-checkout: true
+      -
+        name: oidc_auth
+        uses: huaweicloud-oidc-auth
+        with:
+          audience: ${{ secrets.audience }}
+          agency_urn: ${{ secrets.agency_urn }}
+          provider_urn: ${{ secrets.provider_urn }}
+          region: cn-north-4
+          duration: 3600
+      -
+        name: download
+        uses: obs-download
+        with:
+          endpoint: "https://obs.cn-north-4.myhuaweicloud.com"
+          bucket: "ascend-ci"
+          access-key: ${{ secrets.AK }}
+          secret-key: ${{ secrets.SK }}
+          key: |
+            ${{ env.obs_path }}/pr_filelist.txt
+            ${{ env.obs_path }}/pr_filelist_mod.txt
+            ${{ env.obs_path }}/pre_smoke.sh
+          path: ${{ steps.process_checkout.outputs.path }}
+      -
+        name: pre_smoke_mstuner
+        timeout-minutes: 45
+        run: |
+          set -e
+          export WORKSPACE=${{ steps.process_checkout.outputs.path }}
+          PRE_SMOKE="${WORKSPACE}/pre_smoke.sh"
+          if grep -q 'CATLASS_TEST_GROUPS_V1' "${PRE_SMOKE}"; then
+            sudo bash "${PRE_SMOKE}" "${WORKSPACE}" mstuner
+          else
+            echo "[skip] pre_smoke.sh does not support test groups; full suite runs in pre_smoke_catlass"
+          fi
+
+    if: "${{ default() }}"
+    runs-on: ['self-hosted','npu=1','smoke=204']
+    container:
+      image: swr.cn-north-4.myhuaweicloud.com/hw-ascend/${{ inputs.image_version }}
