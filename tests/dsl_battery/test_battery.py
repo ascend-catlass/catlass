@@ -386,6 +386,11 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
             ]],
         )
 
+    yield (
+        "atomic-max-min-writeback",
+        [["end_to_end/atomic_writeback.py", *dev]],
+    )
+
     # --- basic_matmul_bias: a required 1 x N bias operand, loaded GM -> L1 ->
     # biasbuf through the flat VectorLayout routes and consumed by the first MMAD of
     # every block. Operand dtypes follow basic_matmul.py, and the output follows

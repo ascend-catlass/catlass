@@ -313,24 +313,25 @@ def Tla_RegSlotEnum : Tla_I32Enum<"RegSlot", "Packed-register position for a nar
 // front-end (catlass/params.py). The enum keywords are the MLIR-asm tokens.
 // ---------------------------------------------------------------------------
 
-// AtomicMode: None, Add
+// Atomic writeback modes
 
 def Tla_AtomicMode_None : I32EnumAttrCase<"none", 0>;
 def Tla_AtomicMode_Add : I32EnumAttrCase<"add", 1>;
+def Tla_AtomicMode_Max : I32EnumAttrCase<"max", 2>;
+def Tla_AtomicMode_Min : I32EnumAttrCase<"min", 3>;
 
 def Tla_AtomicMode_Enum : Tla_I32Enum<"AtomicMode", "Atomic type", [
   Tla_AtomicMode_None,
-  Tla_AtomicMode_Add
+  Tla_AtomicMode_Add,
+  Tla_AtomicMode_Max,
+  Tla_AtomicMode_Min
 ]>;
 
 def Tla_AtomicModeAttr : Tla_EnumAttr<"AtomicMode", "atomic_mode"> {
   let parameters = (ins EnumParameter<Tla_AtomicMode_Enum>:$atomic_mode);
   let assemblyFormat = "`<` params `>`";
   let description = [{
-    Atomic operation kind for tla.copy
-
-    The supported atomic mode listed below:
-      - ADD
+    Selects ordinary overwrite, atomic addition, maximum, or minimum for this copy.
   }];
 }
 

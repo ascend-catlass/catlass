@@ -48,6 +48,8 @@ class AtomicMode(enum.Enum):
 
     NONE = "none"  # No atomic operation
     ADD = "add"  # Set atomic add
+    MAX = "max"
+    MIN = "min"
 
     def __str__(self) -> str:
         return self.value
@@ -369,11 +371,10 @@ class CopyUbToGmParams(CopyParams):
     atomic_mode: AtomicMode = AtomicMode.NONE
 
     def _validate(self):
-        VALID_ATOMIC_MODE = (AtomicMode.NONE, AtomicMode.ADD)
         cls_name = type(self).__name__
-        if self.atomic_mode not in VALID_ATOMIC_MODE:
+        if not isinstance(self.atomic_mode, AtomicMode):
             raise ValueError(
-                f"{cls_name}.atomic_mode must be one of {VALID_ATOMIC_MODE}"
+                f"{cls_name}.atomic_mode must be one of {tuple(AtomicMode)}"
             )
 
 
@@ -488,7 +489,6 @@ class CopyL0C2DstParams(CopyParams):
         from .execution_lowering import TlaLoweringError
 
         VALID_UNIT_FLAG = (0b00, 0b11)
-        VALID_ATOMIC_MODE = (AtomicMode.NONE, AtomicMode.ADD)
         cls_name = type(self).__name__
         if not isinstance(self.unit_flag, int):
             raise TlaLoweringError(f"{cls_name}.unit_flag must be a compile-time int")
@@ -527,9 +527,9 @@ class CopyL0C2DstParams(CopyParams):
                 raise TlaLoweringError(
                     f"{cls_name}.quant_tensor must be a tensor, got {type(self.quant_tensor).__name__}"
                 )
-        if self.atomic_mode not in VALID_ATOMIC_MODE:
+        if not isinstance(self.atomic_mode, AtomicMode):
             raise ValueError(
-                f"{cls_name}.atomic_mode must be one of {VALID_ATOMIC_MODE}"
+                f"{cls_name}.atomic_mode must be one of {tuple(AtomicMode)}"
             )
 
 

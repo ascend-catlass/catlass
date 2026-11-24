@@ -55,6 +55,12 @@ tla.copy(dst: Tensor, src: Tensor, params: CopyParams | None = None, *, scale: T
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
 - 须在 `tla.cube()` 或 `tla.vector()` 内调用。
 - 拷贝大小按各 tile 的 `origin_shape`。
+- UB 到 GM 和 L0C 到 GM 的搬运可通过 `params.atomic_mode`
+  指定本次写回的运算。`AtomicMode.ADD`、`MAX`、`MIN` 分别将写入值与 GM 旧值相加、
+  取最大值或取最小值。默认的 `NONE` 直接覆盖旧值。原子写回支持的 GM 元素类型为
+  i8、i16、i32、f16、bf16 和 f32。L0C 搬出的值先经过所选的类型转换、量化或 ReLU，再参与原子运算。
+  UB 到 GM 搬运可省略 `params`，或传入 `CopyUbToGmParams`。该参数对象的
+  `atomic_mode` 必须是 `AtomicMode` 枚举成员，默认值为 `AtomicMode.NONE`。
 - 当 `params` 为 `CopyPadParams`：仅 GM→UB，layout 为 RowMajor→RowMajor 或
   VectorLayout→VectorLayout；元素 dtype 为
   f32/f16/bf16/i32/u32/i16/u16/i8/u8/i1/i64/u64/f64（不含 fp8/hif8/fp4）。

@@ -51,6 +51,9 @@ inline constexpr StringLiteral kParallelModeAttrName = "parallel_mode";
 inline constexpr StringLiteral kHivmVectorFunctionAttrName = "hivm.vector_function";
 inline constexpr StringLiteral kCoreRatioAttrName = "tla.core_ratio";
 
+void emitCopyRuntimeCall(
+    PatternRewriter& rewriter, CopyOp op, func::FuncOp callee, ValueRange operands, Value dstMemref);
+
 inline hivm::TModuleCoreType toModuleCoreType(hivm::TFuncCoreType coreType)
 {
     switch (coreType) {

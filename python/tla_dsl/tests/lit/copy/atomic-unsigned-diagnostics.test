@@ -1,0 +1,15 @@
+// RUN: sed -n '/^\/\/ BEGIN$/,/^\/\/ END$/p' %s | sed '1d;$d;s|^// ||' > %t.mlir && not %tla_compile %t.mlir -o %t 2>&1 | %filecheck %s
+// CHECK: atomic operation requires dst element type to be one of
+// BEGIN
+// !layout = !tla.layout<!tla.shape<32,32>, !tla.stride<32,1>, !tla.shape<32,32>, RowMajor>
+// !dst = !tla.tensor<!layout, !tla.coord<0,0>, !tla.ptr<ui8, gm, 4>>
+// !src = !tla.tensor<!layout, !tla.coord<0,0>, !tla.ptr<ui8, ub, 256>>
+// module {
+//   tla.func @unsigned_max(%dst: !dst, %src: !src) {
+//     "tla.vector"() ({
+//       tla.copy %dst, %src {atomic_mode = #tla.atomic_mode<max>} : !dst, !src
+//     }) : () -> ()
+//     tla.return
+//   }
+// }
+// END

@@ -180,6 +180,7 @@ from .params import (
     CopyL0C2DstParams,
     CopyPadParams,
     CopyParams,
+    CopyUbToGmParams,
     HistogramsBinType,
     HistogramsParams,
     HistogramsType,
@@ -7399,6 +7400,15 @@ def copy(
         - Must be called inside a `@tla.kernel`-decorated kernel function.
         - Must be called inside `tla.cube()` or `tla.vector()`.
         - Copy size follows each tile's `origin_shape`.
+        - UB-to-GM and L0C-to-GM copies accept
+          `params.atomic_mode`. Use `AtomicMode.ADD`, `MAX`, or `MIN` to combine
+          this write with the old GM value. The default, `NONE`, overwrites it.
+          The GM element type must be i8, i16, i32, f16, bf16, or f32 for atomic
+          writes. For L0C, conversion, quantization, and ReLU take effect before
+          the atomic operation.
+          For UB-to-GM, supply `CopyUbToGmParams` or omit `params`. Within
+          that parameter object, `atomic_mode` must be an `AtomicMode` member
+          and defaults to `AtomicMode.NONE`.
         - When `params` is `CopyPadParams`: GM→UB only, layouts
           RowMajor→RowMajor or VectorLayout→VectorLayout; element dtypes
           f32/f16/bf16/i32/u32/i16/u16/i8/u8/i1/i64/u64/f64 (not
@@ -7972,8 +7982,17 @@ def copy(
             pad_value_bits_value,
             loc=loc,
         )
+    elif _route == ("ub", "gm") and params is not None:
+        if not isinstance(params, CopyUbToGmParams):
+            _op_error(
+                "copy",
+                f"UB-to-GM copy expects CopyUbToGmParams, got {type(params).__name__}",
+            )
+        try:
+            params._validate()
+        except ValueError as exc:
+            _op_error("copy", str(exc))
     elif params is not None and not isinstance(params, CopyL0C2DstParams):
-        # CopyUbToGmParams (atomic) and future bags: duck-typed below.
         # Reject unknown CopyParams subclasses early when they lack atomic_mode.
         if not hasattr(params, "atomic_mode") and _route[0] != "l0c":
             _op_error(
@@ -7986,7 +8005,7 @@ def copy(
     atomic_mode_attr = None
     atomic_mode = getattr(params, "atomic_mode", None) if params is not None else None
     if atomic_mode is not None and atomic_mode != AtomicMode.NONE:
-        if atomic_mode != AtomicMode.ADD:
+        if not isinstance(atomic_mode, AtomicMode):
             raise NotImplementedError(
                 f"currently unsupported atomic mode {str(atomic_mode)}"
             )
@@ -7996,9 +8015,9 @@ def copy(
                 f"When atomic operation is enabled, the dst location should only be GM but got {_route[1]}"
             )
 
-        dst_dtype = (
-            str(_tla_tensor_type_for_mlir_value(dst_value).element_type).strip().lower()
-        )
+        if _route[0] not in ("ub", "l0c"):
+            raise TlaLoweringError("atomic writeback requires a UB or L0C source")
+
         if dst_dtype not in ("f32", "f16", "i16", "i32", "i8", "bf16"):
             raise TlaLoweringError(
                 "The supported atomic operation's data type includes f32, f16, i16, i32, i8, bf16, "

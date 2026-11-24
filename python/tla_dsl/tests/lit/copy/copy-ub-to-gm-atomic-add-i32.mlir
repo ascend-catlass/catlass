@@ -1,8 +1,5 @@
 // RUN: %tla_compile %s -o - | %filecheck %s
-// 
-// Test lowering of tla.copy from UB to GM with atomic add operation.
-// The copy should be enclosed by the set_ctrl sequence for atomic add i32,
-// followed by the set_ctrl sequence that disables atomic writes.
+// Each atomic copy configures its own operation. The final copy overwrites GM.
 
 module {
   tla.func @atomic_add_ub2gm(%arg0: !tla.tensor<!tla.layout<!tla.shape<64,64>, !tla.stride<64,1>, !tla.shape<64,64>, RowMajor>, !tla.coord<0,0>, !tla.ptr<i32, gm, 4>>) {
@@ -19,6 +16,9 @@ module {
     %10 = tla.make_tensor %5, %8, %9 : !tla.ptr<i32, ub, 256>, !tla.layout<!tla.shape<16,16>, !tla.stride<16,1>, !tla.shape<16,16>, RowMajor>, !tla.coord<0,0> -> !tla.tensor<!tla.layout<!tla.shape<16,16>, !tla.stride<16,1>, !tla.shape<16,16>, RowMajor>, !tla.coord<0,0>, !tla.ptr<i32, ub, 256>>
     "tla.vector"() ({
       tla.copy %3, %10 {atomic_mode = #tla.atomic_mode<add>} : !tla.tensor<!tla.layout<!tla.shape<16,16>, !tla.stride<64,1>, !tla.shape<16,16>, RowMajor>, !tla.coord<0,0>, !tla.ptr<i32, gm, 4>>, !tla.tensor<!tla.layout<!tla.shape<16,16>, !tla.stride<16,1>, !tla.shape<16,16>, RowMajor>, !tla.coord<0,0>, !tla.ptr<i32, ub, 256>>
+      tla.copy %3, %10 {atomic_mode = #tla.atomic_mode<max>} : !tla.tensor<!tla.layout<!tla.shape<16,16>, !tla.stride<64,1>, !tla.shape<16,16>, RowMajor>, !tla.coord<0,0>, !tla.ptr<i32, gm, 4>>, !tla.tensor<!tla.layout<!tla.shape<16,16>, !tla.stride<16,1>, !tla.shape<16,16>, RowMajor>, !tla.coord<0,0>, !tla.ptr<i32, ub, 256>>
+      tla.copy %3, %10 {atomic_mode = #tla.atomic_mode<min>} : !tla.tensor<!tla.layout<!tla.shape<16,16>, !tla.stride<64,1>, !tla.shape<16,16>, RowMajor>, !tla.coord<0,0>, !tla.ptr<i32, gm, 4>>, !tla.tensor<!tla.layout<!tla.shape<16,16>, !tla.stride<16,1>, !tla.shape<16,16>, RowMajor>, !tla.coord<0,0>, !tla.ptr<i32, ub, 256>>
+      tla.copy %3, %10 : !tla.tensor<!tla.layout<!tla.shape<16,16>, !tla.stride<64,1>, !tla.shape<16,16>, RowMajor>, !tla.coord<0,0>, !tla.ptr<i32, gm, 4>>, !tla.tensor<!tla.layout<!tla.shape<16,16>, !tla.stride<16,1>, !tla.shape<16,16>, RowMajor>, !tla.coord<0,0>, !tla.ptr<i32, ub, 256>>
     }) : () -> ()
     tla.return
   }
@@ -36,5 +36,25 @@ module {
 // CHECK: hivm.hir.set_ctrl false at ctrl[6]
 // CHECK-NEXT: hivm.hir.set_ctrl false at ctrl[7]
 // CHECK-NEXT: hivm.hir.set_ctrl false at ctrl[8]
+// CHECK: hivm.hir.set_ctrl false at ctrl[6]
+// CHECK-NEXT: hivm.hir.set_ctrl false at ctrl[7]
+// CHECK-NEXT: hivm.hir.set_ctrl true at ctrl[8]
+// CHECK-NEXT: hivm.hir.set_ctrl true at ctrl[9]
+// CHECK-NEXT: hivm.hir.set_ctrl false at ctrl[10]
+// CHECK: call @copy_ub_RowMajor_to_gm_RowMajor_int32_t
+// CHECK: hivm.hir.set_ctrl false at ctrl[6]
+// CHECK-NEXT: hivm.hir.set_ctrl false at ctrl[7]
+// CHECK-NEXT: hivm.hir.set_ctrl false at ctrl[8]
+// CHECK: hivm.hir.set_ctrl false at ctrl[6]
+// CHECK-NEXT: hivm.hir.set_ctrl false at ctrl[7]
+// CHECK-NEXT: hivm.hir.set_ctrl true at ctrl[8]
+// CHECK-NEXT: hivm.hir.set_ctrl false at ctrl[9]
+// CHECK-NEXT: hivm.hir.set_ctrl true at ctrl[10]
+// CHECK: call @copy_ub_RowMajor_to_gm_RowMajor_int32_t
+// CHECK: hivm.hir.set_ctrl false at ctrl[6]
+// CHECK-NEXT: hivm.hir.set_ctrl false at ctrl[7]
+// CHECK-NEXT: hivm.hir.set_ctrl false at ctrl[8]
+// CHECK-NOT: hivm.hir.set_ctrl
+// CHECK: call @copy_ub_RowMajor_to_gm_RowMajor_int32_t
 // CHECK-NOT: tla.copy
 // CHECK-NOT: tla.make_tensor

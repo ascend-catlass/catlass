@@ -2253,15 +2253,15 @@ mlir::LogicalResult CopyOp::verify()
     // Validate atomic_mode attribute when present.
     auto atomicModeAttr = getAtomicModeAttr();
     if (atomicModeAttr && atomicModeAttr.getAtomicMode() != AtomicMode::none) {
-        if (atomicModeAttr.getAtomicMode() != AtomicMode::add)
-            return emitOpError("unsupported atomic_mode; currently only 'add' is supported");
-
         if (dst != AddressSpace::gm)
             return emitOpError("atomic operation requires dst to be in GM address space");
 
+        if (src != AddressSpace::ub && src != AddressSpace::l0c)
+            return emitOpError("atomic writeback requires a UB or L0C source");
+
         auto elemType = dstTy.getPtr().getPointee();
-        if (!elemType.isF32() && !elemType.isF16() && !elemType.isBF16() && !elemType.isInteger(32) &&
-            !elemType.isInteger(16) && !elemType.isInteger(8))
+        if (!elemType.isF32() && !elemType.isF16() && !elemType.isBF16() && !elemType.isSignlessInteger(32) &&
+            !elemType.isSignlessInteger(16) && !elemType.isSignlessInteger(8))
             return emitOpError(
                 "atomic operation requires dst element type to be one of "
                 "f32, f16, bf16, i32, i16, i8");

@@ -1347,4 +1347,36 @@ func::FuncOp getOrCreateRuntimeCall(
     return func;
 }
 
+static hivm::AtomicKind getCopyAtomicKind(CopyOp op)
+{
+    auto attr = op.getAtomicModeAttr();
+    switch (attr ? attr.getAtomicMode() : AtomicMode::none) {
+        case AtomicMode::none:
+            return hivm::AtomicKind::NONE;
+        case AtomicMode::add:
+            return hivm::AtomicKind::ADD;
+        case AtomicMode::max:
+            return hivm::AtomicKind::MAX;
+        case AtomicMode::min:
+            return hivm::AtomicKind::MIN;
+    }
+    llvm_unreachable("unknown copy atomic mode");
+}
+
+void emitCopyRuntimeCall(
+    PatternRewriter& rewriter, CopyOp op, func::FuncOp callee, ValueRange operands, Value dstMemref)
+{
+    auto kind = getCopyAtomicKind(op);
+    auto setAtomic = [&](hivm::AtomicKind mode) {
+        auto elemType = cast<MemRefType>(dstMemref.getType()).getElementType();
+        rewriter.create<hivm::SetAtomicOp>(
+            op.getLoc(), hivm::AtomicKindAttr::get(rewriter.getContext(), mode), TypeAttr::get(elemType));
+    };
+    if (kind != hivm::AtomicKind::NONE)
+        setAtomic(kind);
+    rewriter.create<func::CallOp>(op.getLoc(), callee, operands);
+    if (kind != hivm::AtomicKind::NONE)
+        setAtomic(hivm::AtomicKind::NONE);
+}
+
 } // namespace tla

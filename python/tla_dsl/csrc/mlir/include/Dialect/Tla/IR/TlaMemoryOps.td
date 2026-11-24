@@ -52,7 +52,8 @@ def Tla_CopyOp : Tla_Op<"copy", []> {
     inside a ``tla.cube`` region; vector staging copies (GM->UB, UB->GM, UB->L1)
     must be nested inside a ``tla.vector`` region.
 
-    The atomic operation is enabled if ``atomic_mode`` provided, and currently only ``AtomicMode.ADD`` is supported, which is lowered to HIVM ``SetAtomicOp``
+    UB-to-GM and L0C-to-GM copies support atomic add, max, and min in the
+    GM element type. An absent or none atomic_mode performs an ordinary copy.
 
     ``src_cache_policy`` / ``dst_cache_policy`` carry a ``SetL2CacheHint`` for the
     GM endpoint of the copy (default NORMAL). Frontend entry is

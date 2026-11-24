@@ -59,6 +59,15 @@ Constraints:
 - Must be called inside a `@tla.kernel`-decorated kernel function.
 - Must be called inside `tla.cube()` or `tla.vector()`.
 - Copy size follows each tile's `origin_shape`.
+- UB-to-GM and L0C-to-GM copies accept
+  `params.atomic_mode`. Use `AtomicMode.ADD`, `MAX`, or `MIN` to combine
+  this write with the old GM value. The default, `NONE`, overwrites it.
+  The GM element type must be i8, i16, i32, f16, bf16, or f32 for atomic
+  writes. For L0C, conversion, quantization, and ReLU take effect before
+  the atomic operation.
+  For UB-to-GM, supply `CopyUbToGmParams` or omit `params`. Within
+  that parameter object, `atomic_mode` must be an `AtomicMode` member
+  and defaults to `AtomicMode.NONE`.
 - When `params` is `CopyPadParams`: GM→UB only, layouts
   RowMajor→RowMajor or VectorLayout→VectorLayout; element dtypes
   f32/f16/bf16/i32/u32/i16/u16/i8/u8/i1/i64/u64/f64 (not
