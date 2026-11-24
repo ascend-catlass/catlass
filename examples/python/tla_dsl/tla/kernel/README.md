@@ -12,6 +12,8 @@
 | [`basic_mmad_streamk/`](matmul/basic_mmad_streamk/README.md) | StreamK 调度矩阵乘：常规 tile 全 K 计算，尾轮 tile 多核切 K 归约。 |
 | [`basic_syrk/`](matmul/basic_syrk/README.md) | 计算输入矩阵与其转置的乘积（SYRK）。 |
 | [`batched_matmul/`](matmul/batched_matmul/README.md) | 批量矩阵乘。 |
+| [`mm_batchinvariant/`](matmul/mm_batchinvariant/README.md) | 满足 batch 一致性的二维矩阵乘，对齐 `torch.mm`。 |
+| [`matmul_batchinvariant/`](matmul/matmul_batchinvariant/README.md) | 满足 batch 一致性的矩阵乘，对齐 `torch.matmul`，支持 1～6 维与 batch 广播。 |
 | [`multi_core_splitk_matmul/`](matmul/multi_core_splitk_matmul/README.md) | 多核切 K 矩阵乘，含尾块切分变体。 |
 | [`mx_mmad/`](matmul/mx_mmad/README.md) | 微缩放（MX FP8/FP4）矩阵乘，演示 scale 搬运与 `tla.mmad_mx`。 |
 | [`fused_ffn/`](matmul/fused_ffn/README.md) | 融合 FFN：`Up Matmul → Act → SyncAll → Down Matmul`（SiLU / GELU / SwiGLU，可选 Cube BT bias）。 |
