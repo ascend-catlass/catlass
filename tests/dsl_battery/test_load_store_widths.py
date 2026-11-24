@@ -10,6 +10,7 @@ import pytest
 
 from catlass import tla
 from catlass.params import (
+    LoadDist,
     NormalLoadParams,
     NormalStoreParams,
     PostMode,
@@ -190,3 +191,193 @@ def _verify_move(device, dtype, width, mode):
     artifact(src, dst, block_num=1)
     torch.npu.synchronize()
     torch.testing.assert_close(dst_npu.cpu(), expected, rtol=0, atol=0)
+
+
+@tla.kernel
+def _dual_update(
+    src: tla.Tensor,
+    dst: tla.Tensor,
+    dtype: tla.Constexpr,
+    width: tla.Constexpr,
+    load_dist: tla.Constexpr,
+    store_dist: tla.Constexpr,
+    unaligned: tla.Constexpr,
+    transfer_bytes: tla.Constexpr,
+    dynamic_stride: tla.Constexpr,
+):
+    src_ptr = tla.allocate(1280, tla.UInt8, tla.AddressSpace.ub, 32)
+    dst_ptr = tla.allocate(2304, tla.UInt8, tla.AddressSpace.ub, 32)
+    src_bytes = tla.make_tensor_like(src_ptr, src, tla.arch.RowMajor)
+    dst_bytes = tla.make_tensor_like(dst_ptr, dst, tla.arch.RowMajor)
+    loaded = tla.flag("dual_loaded", tla.arch.MTE2, tla.arch.VECTOR)
+    stored = tla.flag("dual_stored", tla.arch.VECTOR, tla.arch.MTE3)
+    layout = tla.make_layout(tla.make_shape(512 // width), tla.make_stride(1))
+    stride = transfer_bytes // width
+    if tla.const_expr(dynamic_stride):
+        stride = tla.Int32(stride) + tla.arch.block_idx()
+    if tla.const_expr(unaligned):
+        x = tla.make_tensor(tla.recast_ptr(src_ptr + width, dtype=dtype), layout)
+        y = tla.make_tensor(tla.recast_ptr(dst_ptr + 3 * width, dtype=dtype), layout)
+    else:
+        x = tla.make_tensor(tla.recast_ptr(src_ptr + 32, dtype=dtype), layout)
+        y = tla.make_tensor(tla.recast_ptr(dst_ptr + 64, dtype=dtype), layout)
+    with tla.vector():
+        tla.copy(src_bytes, src)
+        tla.copy(dst_bytes, dst)
+        tla.set_flag(loaded)
+        tla.wait_flag(loaded)
+        with tla.vec.func(mode="simd"):
+            if tla.const_expr(unaligned):
+                load = UnalignLoadParams(
+                    load_dist=load_dist,
+                    post_mode=PostMode.POST_MODE_UPDATE,
+                    post_update_stride=stride,
+                )
+                store = UnalignStoreParams(
+                    store_dist=store_dist,
+                    post_mode=PostMode.POST_MODE_UPDATE,
+                    post_update_stride=stride,
+                )
+            else:
+                load = NormalLoadParams(
+                    load_dist=load_dist,
+                    post_mode=PostMode.POST_MODE_UPDATE,
+                    post_update_stride=544 // width,
+                )
+                store = NormalStoreParams(
+                    store_dist=store_dist,
+                    post_mode=PostMode.POST_MODE_UPDATE,
+                    post_update_stride=576 // width,
+                )
+            register = tla.make_layout(tla.make_shape(256 // width), tla.make_stride(1))
+            first = tla.make_tensor(
+                tla.recast_ptr(src_ptr + 32, dtype=dtype), register
+            ).load()
+            second = tla.make_tensor(
+                tla.recast_ptr(src_ptr + 288, dtype=dtype), register
+            ).load()
+            for iteration in tla.range(2):
+                pair, x = x.load(load)
+                even, odd = pair
+                dump = dst_ptr + (1280 + 512 * iteration)
+                tla.make_tensor(tla.recast_ptr(dump, dtype=dtype), register).store(even)
+                tla.make_tensor(
+                    tla.recast_ptr(dump + 256, dtype=dtype), register
+                ).store(odd)
+                y = y.store((first, second), store)
+        tla.set_flag(stored)
+        tla.wait_flag(stored)
+        tla.copy(dst, dst_bytes)
+        tla.pipe_barrier(tla.pipes.ALL)
+
+
+@pytest.mark.parametrize(
+    "dtype,width",
+    (
+        (tla.Bool, 1),
+        (tla.Int8, 1),
+        (tla.UInt8, 1),
+        (tla.Float8E4M3FN, 1),
+        (tla.Float8E5M2, 1),
+        (tla.HiFloat8, 1),
+        (tla.Float8E8M0, 1),
+        (tla.Float4E2M1x2, 1),
+        (tla.Float4E1M2x2, 1),
+        (tla.Int16, 2),
+        (tla.UInt16, 2),
+        (tla.Float16, 2),
+        (tla.BFloat16, 2),
+        (tla.Int32, 4),
+        (tla.UInt32, 4),
+        (tla.Float32, 4),
+        (tla.Int64, 8),
+        (tla.UInt64, 8),
+        (tla.Float64, 8),
+    ),
+)
+@pytest.mark.parametrize("unaligned", (False, True), ids=("aligned", "unaligned"))
+def test_dual_update_register_move(device, dtype, width, unaligned):
+    _verify_dual_update(device, dtype, width, unaligned, 512)
+
+
+@pytest.mark.parametrize(
+    "dtype,width,transfer_bytes,dynamic_stride",
+    (
+        (tla.UInt8, 1, 192, False),
+        (tla.UInt8, 1, 352, False),
+        (tla.UInt8, 1, 352, True),
+        (tla.Int16, 2, 193 * 2, False),
+        (tla.Int16, 2, 193 * 2, True),
+    ),
+)
+def test_dual_unaligned_update_partial_stride(
+    device, dtype, width, transfer_bytes, dynamic_stride
+):
+    _verify_dual_update(device, dtype, width, True, transfer_bytes, dynamic_stride)
+
+
+def _verify_dual_update(
+    device, dtype, width, unaligned, transfer_bytes, dynamic_stride=False
+):
+    import torch
+    import torch_npu  # noqa: F401
+
+    torch.npu.set_device(device)
+    unit = min(width, 4)
+    load_dist, store_dist = {
+        1: (LoadDist.DIST_DINTLV_B8, StoreDist.DIST_INTLV_B8),
+        2: (LoadDist.DIST_DINTLV_B16, StoreDist.DIST_INTLV_B16),
+        4: (LoadDist.DIST_DINTLV_B32, StoreDist.DIST_INTLV_B32),
+    }[unit]
+    values = torch.randint(
+        2 if dtype is tla.Bool else 256,
+        (1280,),
+        dtype=torch.uint8,
+        generator=torch.Generator().manual_seed(5),
+    )
+    expected = torch.full((2304,), 0xA5, dtype=torch.uint8)
+    checked = torch.ones_like(expected, dtype=torch.bool)
+    store_bytes = torch.stack(
+        (values[32:288].reshape(-1, unit), values[288:544].reshape(-1, unit)), dim=1
+    ).flatten()
+    for iteration in range(2):
+        if unaligned:
+            src_offset = width + iteration * transfer_bytes
+            dst_offset = 3 * width + iteration * transfer_bytes
+        else:
+            src_offset = 32 + iteration * 544
+            dst_offset = 64 + iteration * 576
+        expected[dst_offset : dst_offset + transfer_bytes] = store_bytes[
+            :transfer_bytes
+        ]
+        elements = values[src_offset : src_offset + transfer_bytes].reshape(-1, unit)
+        dump = 1280 + iteration * 512
+        for lane in range(2):
+            valid = elements[lane::2].flatten()
+            begin = dump + lane * 256
+            end = begin + valid.numel()
+            expected[begin:end] = valid
+            # A partial load only defines the lanes in its effective prefix.
+            checked[end : begin + 256] = False
+
+    src_npu, dst_npu = values.npu(), torch.full_like(expected, 0xA5).npu()
+    src = from_dlpack(src_npu, layout_tag=tla.arch.RowMajor)
+    dst = from_dlpack(dst_npu, layout_tag=tla.arch.RowMajor)
+    artifact = tla.compile(
+        _dual_update,
+        src,
+        dst,
+        dtype,
+        width,
+        load_dist,
+        store_dist,
+        unaligned,
+        transfer_bytes,
+        dynamic_stride,
+        options="--npu-arch 3510",
+    )
+    artifact(src, dst, block_num=1)
+    torch.npu.synchronize()
+    torch.testing.assert_close(
+        dst_npu.cpu()[checked], expected[checked], rtol=0, atol=0
+    )

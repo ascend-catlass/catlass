@@ -1341,16 +1341,54 @@ static func::FuncOp getOrCreateLoadDintlvB8LibraryCall(ModuleOp module, Location
 // AVE StoreDist enum as ``dist`` (no AIV bc). Carriers are signless integer
 // vectors of the Dist width — same bit-move model as AscendC's typed
 // StoreAlign<DIST_INTLV_*> after TypeGet aliasing.
-static Value bitcastToIntlvCarrier(OpBuilder& b, Location loc, Value src, int64_t elemBytes)
+static VectorType dualTransferCarrierType(MLIRContext* ctx, int64_t distBytes)
+{
+    return VectorType::get({256 / distBytes}, IntegerType::get(ctx, distBytes * 8));
+}
+
+// Each unaligned instruction advances by at most one register. Split a
+// partial transfer between the low and high halves in address order.
+static std::pair<Value, Value> splitUnalignUpdateCount(OpBuilder& b, Location loc, Value countBytes)
+{
+    Value vlBytes = b.create<arith::ConstantIntOp>(loc, 256, 32);
+    Value first = b.create<arith::MinUIOp>(loc, countBytes, vlBytes);
+    Value second = b.create<arith::SubIOp>(loc, countBytes, first);
+    return {first, second};
+}
+
+static Value bitcastToIntlvCarrier(OpBuilder& b, Location loc, Value src, int64_t distBytes)
 {
     auto srcTy = dyn_cast<VectorType>(src.getType());
     if (!srcTy)
         return nullptr;
-    Type carrierElem = IntegerType::get(b.getContext(), elemBytes * 8);
-    auto carrierTy = VectorType::get({srcTy.getNumElements()}, carrierElem);
+    auto carrierTy = dualTransferCarrierType(b.getContext(), distBytes);
     if (srcTy == carrierTy)
         return src;
     return b.create<mlir::vector::BitCastOp>(loc, carrierTy, src).getResult();
+}
+
+static Value emitVldsx2Post(
+    OpBuilder& b, Location loc, Value ptr, Value stride, Type elemType, VectorType carrierTy, hivmave::LoadDist dist)
+{
+    namespace intr = hivm_regbaseintrins;
+    Value byteOff = strideElemsToByteOffI32(b, loc, stride, elemType);
+    Value postEnable = b.create<arith::ConstantIntOp>(loc, 1, 32);
+    Type pairAndPtr =
+        LLVM::LLVMStructType::getLiteral(b.getContext(), {carrierTy, carrierTy, getUbPtrType(b.getContext())});
+    Value distribution = b.create<arith::ConstantIntOp>(loc, static_cast<uint32_t>(dist), 32);
+    auto emit = [&](auto opTag) -> Value {
+        return b.create<decltype(opTag)>(loc, pairAndPtr, ptr, byteOff, distribution, postEnable).getResult();
+    };
+    switch (carrierTy.getElementTypeBitWidth()) {
+        case 8:
+            return emit(intr::Vldsx2PostV256U8InstrOp{});
+        case 16:
+            return emit(intr::Vldsx2PostV128U16InstrOp{});
+        case 32:
+            return emit(intr::Vldsx2PostV64U32InstrOp{});
+        default:
+            llvm_unreachable("verified DINTLV carrier width");
+    }
 }
 
 static LogicalResult emitVstsx2Intlv(
@@ -3111,6 +3149,24 @@ static LogicalResult lowerLoadUpdate(
         stride = lookupOrCloneScalarValue(b, loadOp.getPostUpdateStride(), valueMap);
     if (!stride)
         return loadOp.emitError("failed to materialize post_update_stride in vector helper"), failure();
+    if (Value second = loadOp.getResult2()) {
+        // B32 distribution also accepts b64 values as pairs of 32-bit words.
+        int64_t distBytes = std::min<int64_t>(elementStorageBytes(tlaSrcElem), 4);
+        auto carrierTy = dualTransferCarrierType(b.getContext(), distBytes);
+        auto dist = mapTlaLoadDistToAve(loadOp.getLoadDist()->getLoadDist());
+        Value packed = emitVldsx2Post(b, loc, *ptrOr, stride, tlaSrcElem, carrierTy, dist);
+        auto extract = [&](int64_t index) -> Value {
+            Value lane = b.create<LLVM::ExtractValueOp>(loc, packed, index);
+            if (carrierTy == opCtx->vecType)
+                return lane;
+            return b.create<mlir::vector::BitCastOp>(loc, opCtx->vecType, lane);
+        };
+        valueMap[loadOp.getResult()] = extract(0);
+        valueMap[second] = extract(1);
+        Value next = b.create<LLVM::ExtractValueOp>(loc, packed, 2);
+        mapUpdateNextPtrI64(loadOp.getNextPtr(), b.create<LLVM::PtrToIntOp>(loc, b.getI64Type(), next), valueMap);
+        return success();
+    }
     Type elemTy = sourceType.getElementType();
     FailureOr<std::pair<Value, Value>> emitted = emitVldsx1Post(b, loc, *ptrOr, stride, elemTy, opCtx->vecType);
     if (failed(emitted))
@@ -3143,13 +3199,37 @@ static LogicalResult lowerLoadUnalignUpdate(
     Value uregIn = valueMap.lookup(op.getUregIn());
     if (!uregIn)
         return op.emitError("load_unalign_update ureg_in not mapped in vector helper"), failure();
-    FailureOr<std::tuple<Value, Value, Value>> emitted = emitVldusPost(b, loc, *ptrOr, uregIn, countBytes, elemType);
+    Value secondResult = op.getResult2();
+    Type carrierElem = elemType;
+    Value firstCount = countBytes;
+    Value secondCount;
+    if (secondResult) {
+        int64_t distBytes = std::min<int64_t>(elementStorageBytes(elemType), 4);
+        carrierElem = IntegerType::get(b.getContext(), distBytes * 8);
+        std::tie(firstCount, secondCount) = splitUnalignUpdateCount(b, loc, countBytes);
+    }
+    auto emitted = emitVldusPost(b, loc, *ptrOr, uregIn, firstCount, carrierElem);
     if (failed(emitted))
         return op.emitError("unsupported element type for tla.load_unalign_update"), failure();
-    valueMap[op.getResult()] = std::get<0>(*emitted);
-    valueMap[op.getUregOut()] = std::get<1>(*emitted);
-    mapUpdateNextPtrI64(
-        op.getNextPtr(), b.create<LLVM::PtrToIntOp>(loc, b.getI64Type(), std::get<2>(*emitted)), valueMap);
+    auto [first, uregOut, nextPtr] = *emitted;
+    if (secondResult) {
+        // Both halves use the carrier validated by the first emission.
+        auto [second, nextUreg, finalPtr] = *emitVldusPost(b, loc, nextPtr, uregOut, secondCount, carrierElem);
+        auto pair = b.create<hivmave::VFDeInterleaveOp>(
+            loc, TypeRange{first.getType(), first.getType()}, ValueRange{first, second});
+        Type resultType = dataVectorType(b, elemType);
+        auto decode = [&](Value bits) -> Value {
+            return bits.getType() == resultType ? bits :
+                                                  b.create<mlir::vector::BitCastOp>(loc, resultType, bits).getResult();
+        };
+        first = decode(pair->getResult(0));
+        valueMap[secondResult] = decode(pair->getResult(1));
+        uregOut = nextUreg;
+        nextPtr = finalPtr;
+    }
+    valueMap[op.getResult()] = first;
+    valueMap[op.getUregOut()] = uregOut;
+    mapUpdateNextPtrI64(op.getNextPtr(), b.create<LLVM::PtrToIntOp>(loc, b.getI64Type(), nextPtr), valueMap);
     return success();
 }
 
@@ -4432,6 +4512,29 @@ static LogicalResult lowerStoreUpdate(
         tlaDestElem = destMem.getElementType();
     if (tlaStoreElem != tlaDestElem)
         return storeOp.emitError("store_update source and destination element types must match"), failure();
+    if (Value second = storeOp.getSource2()) {
+        Value source2 = valueMap.lookup(second);
+        Value stride = valueMap.lookup(storeOp.getPostUpdateStride());
+        if (!stride)
+            stride = lookupOrCloneScalarValue(b, storeOp.getPostUpdateStride(), valueMap);
+        auto ptrOr = resolveEffectiveUbPtr(storeOp.getDest(), b, loc, valueMap);
+        if (!source2 || !stride || failed(ptrOr))
+            return storeOp.emitError("failed to materialize dual store_update operands"), failure();
+        int64_t distBytes = std::min<int64_t>(elementStorageBytes(tlaStoreElem), 4);
+        auto dist = mapTlaStoreDistToAve(storeOp.getStoreDist()->getStoreDist());
+        Value data0 = bitcastToIntlvCarrier(b, loc, source, distBytes);
+        Value data1 = bitcastToIntlvCarrier(b, loc, source2, distBytes);
+        Value mask = fullMasks.get(loc, 256 / distBytes);
+        if (!data0 || !data1 || failed(emitVstsx2Intlv(b, loc, dist, data0, data1, *ptrOr, mask)))
+            return storeOp.emitError("failed to emit dual store_update"), failure();
+        // VSTSx2 has no post-update instruction. Keep the same cursor SSA ABI
+        // by advancing the effective address after the zero-offset store.
+        Value address = b.create<LLVM::PtrToIntOp>(loc, b.getI64Type(), *ptrOr);
+        Value byteOff = strideElemsToByteOffI32(b, loc, stride, tlaStoreElem);
+        Value next = b.create<arith::AddIOp>(loc, address, castValueToI64(b, loc, byteOff));
+        mapUpdateNextPtrI64(storeOp.getNextPtr(), next, valueMap);
+        return success();
+    }
     // Bool Align UPDATE: AscendC move-only b8 (AVE i8 carrier → s8 post).
     Value mask;
     auto opCtx = deriveVecCtxForElement(tlaStoreElem);
@@ -4551,9 +4654,34 @@ static LogicalResult lowerStoreUnalignUpdate(
     Value uregIn = valueMap.lookup(op.getUregIn());
     if (!uregIn)
         return op.emitError("store_unalign_update ureg_in not mapped in vector helper"), failure();
-    FailureOr<std::pair<Value, Value>> emitted = emitVstusPost(b, loc, src, *ptrOr, uregIn, countBytes, tlaDestElem);
+    Value second;
+    Value firstCount = countBytes;
+    Value secondCount;
+    Type carrierElem = tlaDestElem;
+    if (Value secondSource = op.getSource2()) {
+        Value other = valueMap.lookup(secondSource);
+        if (!other)
+            return op.emitError("dual unaligned store second source is not mapped"), failure();
+        int64_t distBytes = std::min<int64_t>(elementStorageBytes(tlaDestElem), 4);
+        Value even = bitcastToIntlvCarrier(b, loc, src, distBytes);
+        Value odd = bitcastToIntlvCarrier(b, loc, other, distBytes);
+        if (!even || !odd)
+            return op.emitError("dual unaligned store sources must be vectors"), failure();
+        auto pair =
+            b.create<hivmave::VFInterleaveOp>(loc, TypeRange{even.getType(), odd.getType()}, ValueRange{even, odd});
+        src = pair->getResult(0);
+        second = pair->getResult(1);
+        carrierElem = cast<VectorType>(src.getType()).getElementType();
+        std::tie(firstCount, secondCount) = splitUnalignUpdateCount(b, loc, countBytes);
+    }
+    auto emitted = emitVstusPost(b, loc, src, *ptrOr, uregIn, firstCount, carrierElem);
     if (failed(emitted))
         return op.emitError("unsupported element type for tla.store_unalign_update"), failure();
+    if (second) {
+        auto [ureg, nextPtr] = *emitted;
+        // The second emission uses the same carrier as the first.
+        emitted = emitVstusPost(b, loc, second, nextPtr, ureg, secondCount, carrierElem);
+    }
     valueMap[op.getUregOut()] = emitted->first;
     mapUpdateNextPtrI64(op.getNextPtr(), b.create<LLVM::PtrToIntOp>(loc, b.getI64Type(), emitted->second), valueMap);
     // Stream-tail ``vstas`` comes from ``store_unalign_post`` only.
@@ -6007,6 +6135,8 @@ public:
                 loadUpdates.push_back(loadUpdate);
             } else if (auto loadUnalignUpdate = dyn_cast<::tla::LoadUnalignUpdateOp>(op)) {
                 unalignLoads.push_back(loadUnalignUpdate.getResult());
+                if (Value second = loadUnalignUpdate.getResult2())
+                    unalignLoads.push_back(second);
             } else if (auto full = dyn_cast<::tla::FullOp>(op)) {
                 fulls.push_back(full);
             } else if (auto createMask = dyn_cast<::tla::CreateMaskOp>(op)) {
@@ -6061,8 +6191,11 @@ public:
             if (Value result2 = load.getResult2())
                 producedValues.insert(result2);
         }
-        for (::tla::LoadUpdateOp loadUpdate : loadUpdates)
+        for (::tla::LoadUpdateOp loadUpdate : loadUpdates) {
             producedValues.insert(loadUpdate.getResult());
+            if (Value second = loadUpdate.getResult2())
+                producedValues.insert(second);
+        }
         for (Value unalignLoad : unalignLoads)
             producedValues.insert(unalignLoad);
         for (::tla::FullOp full : fulls)
@@ -6261,6 +6394,9 @@ public:
                 return rewriter.notifyMatchFailure(vecFuncOp, "expected tla.store source from tla.load or compute op");
         }
         for (::tla::StoreUpdateOp storeUpdate : storeUpdates) {
+            if (Value second = storeUpdate.getSource2(); second && !producedValues.contains(second))
+                return rewriter.notifyMatchFailure(
+                    vecFuncOp, "expected tla.store_update second source from tla.load or compute op");
             if (storeUpdate.getMask() && !producedValues.contains(storeUpdate.getMask()))
                 return rewriter.notifyMatchFailure(
                     vecFuncOp, "expected tla.store_update mask from a legal mask producer");

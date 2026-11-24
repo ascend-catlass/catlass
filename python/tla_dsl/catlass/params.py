@@ -245,6 +245,9 @@ class UnalignStoreParams(StoreParams):
     the caller's responsibility.
     Returns the next-window tile (from the HW post-update pointer).
 
+    `DIST_INTLV_B8/B16/B32` in UPDATE mode accept two vectors and extend
+    the effective stride range to ``(0, 2 * VL]``.
+
     Before each append, call ``squeeze(..., record_nbytes=True)`` so hardware
     calculates and records the byte count. Call ``store`` with
     ``POST_MODE_UPDATE_NBYTES`` before that count is overwritten. Leave
@@ -256,6 +259,7 @@ class UnalignStoreParams(StoreParams):
 
     post_mode: str = PostMode.POST_MODE_NORMAL
     post_update_stride: Any = 0
+    store_dist: str = StoreDist.DIST_NORM
 
 
 @dataclass
@@ -315,10 +319,13 @@ class UnalignLoadParams(LoadParams):
     ``(0, VL]`` (element count for the dtype); overlapping / dirty lanes are
     the caller's responsibility.
     Returns ``(vector, next_tile)`` (next tile from the HW post-update pointer).
+    `DIST_DINTLV_B8/B16/B32` in UPDATE mode return a vector pair and extend
+    the effective stride range to ``(0, 2 * VL]``.
     """
 
     post_mode: str = PostMode.POST_MODE_NORMAL
     post_update_stride: Any = 0
+    load_dist: str = LoadDist.DIST_NORM
 
 
 @dataclass

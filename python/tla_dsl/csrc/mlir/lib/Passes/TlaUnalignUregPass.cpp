@@ -709,12 +709,27 @@ static bool storeUregReuseCrossesConflict(Value ureg, Operation* consumerStore)
         *prevStore->getBlock()->getParent(), prevStore.getOperation(), consumerStore, dest, next);
 }
 
+// A dual load stream can refresh the next window's head when each load
+// advances by the total width of its results.
+static bool hasFullLoadAdvance(::tla::LoadUnalignUpdateOp load)
+{
+    auto constant = load.getPostUpdateStride().getDefiningOp<arith::ConstantOp>();
+    auto stride = constant ? dyn_cast<IntegerAttr>(constant.getValue()) : IntegerAttr();
+    Type element = load.getResult().getType().getElementType();
+    int64_t elemBytes = elementStorageBytes(element);
+    int64_t bytes = load.getResult2() ? 512 : 256;
+    return stride && elemBytes > 0 && stride.getInt() == bytes / elemBytes;
+}
+
 /// Prior load ``ureg_out`` must not feed a later load across a same-root conflict.
 static bool loadUregReuseCrossesConflict(Value ureg, Operation* consumerLoad, Value loadWindow)
 {
     auto prevLoad = ureg.getDefiningOp<::tla::LoadUnalignUpdateOp>();
     if (!prevLoad || prevLoad.getUregOut() != ureg)
         return false;
+    auto consumer = cast<::tla::LoadUnalignUpdateOp>(consumerLoad);
+    if ((prevLoad.getResult2() || consumer.getResult2()) && !hasFullLoadAdvance(prevLoad))
+        return true;
     Value loadNext = nextWindowTensorFromUpdate(prevLoad.getOperation());
     return hasConflictingMemOp(
         *prevLoad->getBlock()->getParent(), prevLoad.getOperation(), consumerLoad, loadWindow, loadNext);
@@ -753,7 +768,15 @@ static FailureOr<SmallVector<Operation*, 4>> buildUregCarryChain(
     SmallVector<Operation*, 4> chain;
     Operation* cur = head;
     DenseSet<Operation*> seen;
+    bool hasDualLoad = false;
+    bool hasPartialLoadAdvance = false;
     while (cur && seen.insert(cur).second) {
+        if (auto load = dyn_cast<::tla::LoadUnalignUpdateOp>(cur)) {
+            hasDualLoad |= bool(load.getResult2());
+            hasPartialLoadAdvance |= !hasFullLoadAdvance(load);
+            if (hasDualLoad && hasPartialLoadAdvance)
+                return SmallVector<Operation*, 4>{};
+        }
         chain.push_back(cur);
         Value next = nextWindowTensorFromUpdate(cur);
         if (!next)

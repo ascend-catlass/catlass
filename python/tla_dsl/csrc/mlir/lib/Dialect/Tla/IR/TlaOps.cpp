@@ -11,9 +11,11 @@
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/IRMapping.h"
 #include "mlir/IR/Matchers.h"
 #include "mlir/IR/OpImplementation.h"
 #include "llvm/ADT/ArrayRef.h"
@@ -25,6 +27,21 @@
 #include "tla/Ops.cpp.inc"
 
 namespace tla {
+
+mlir::FailureOr<mlir::Value> resolveTensorBacking(mlir::Value tensor)
+{
+    if (mlir::isa<mlir::MemRefType, PtrType>(tensor.getType()))
+        return tensor;
+    if (auto desc = tensor.getDefiningOp<TensorDescOp>())
+        return resolveTensorBacking(desc.getBase());
+    if (auto tileView = tensor.getDefiningOp<TileViewOp>())
+        return resolveTensorBacking(tileView.getSource());
+    if (auto makeTensor = tensor.getDefiningOp<MakeTensorOp>())
+        return makeTensor.getPtr();
+    if (auto makeTensorLike = tensor.getDefiningOp<MakeTensorLikeOp>())
+        return makeTensorLike.getPtr();
+    return mlir::failure();
+}
 
 static constexpr llvm::StringLiteral kPrintTensorSupportedDtypes = "f16, f32, i8, i16, i32, u8, u16, u32";
 static constexpr unsigned kDebugPrintMaxFormatFields = 8;
@@ -1913,8 +1930,9 @@ static mlir::LogicalResult verifyUpdateStride(mlir::Operation* op, mlir::Value s
     return mlir::success();
 }
 
-/// UnAlign UPDATE stride is an element count in ``(0, VL]`` (VL = 256B / sizeof(T)).
-static mlir::LogicalResult verifyUnalignUpdateStride(mlir::Operation* op, mlir::Value stride, mlir::Type elemType)
+/// UnAlign UPDATE stride advances up to one VL per register in the operation.
+static mlir::LogicalResult verifyUnalignUpdateStride(
+    mlir::Operation* op, mlir::Value stride, mlir::Type elemType, bool dual)
 {
     if (failed(verifyUpdateStride(op, stride)))
         return mlir::failure();
@@ -1930,9 +1948,9 @@ static mlir::LogicalResult verifyUnalignUpdateStride(mlir::Operation* op, mlir::
         return mlir::success();
     constexpr int64_t kVectorRegisterBytes = 256;
     int64_t vl = kVectorRegisterBytes / elemBytes;
-    if (intAttr.getInt() > vl)
-        return op->emitOpError("post_update_stride must be in (0, VL] for the dtype (VL=")
-               << vl << " elements), got " << intAttr.getInt();
+    if (intAttr.getInt() > (dual ? 2 * vl : vl))
+        return op->emitOpError("post_update_stride must be in (0, ")
+               << (dual ? "2 * VL" : "VL") << "] for the dtype (VL=" << vl << " elements), got " << intAttr.getInt();
     return mlir::success();
 }
 
@@ -1975,6 +1993,180 @@ static mlir::LogicalResult verifyDataBlockUpdateStride(mlir::Operation* op, mlir
     return mlir::success();
 }
 
+static constexpr int64_t kDualUpdateAlignment = 32;
+
+static mlir::Value foldIntegerExpression(mlir::Value value, mlir::OpBuilder& scratch, mlir::IRMapping& constants)
+{
+    if (mlir::Value cached = constants.lookupOrNull(value))
+        return cached;
+    mlir::IntegerAttr attr;
+    if (mlir::matchPattern(value, mlir::m_Constant(&attr))) {
+        mlir::Value constant = scratch.create<mlir::arith::ConstantOp>(value.getLoc(), attr);
+        constants.map(value, constant);
+        return constant;
+    }
+
+    mlir::Operation* producer = value.getDefiningOp();
+    if (!producer || producer->getName().getDialectNamespace() != mlir::arith::ArithDialect::getDialectNamespace() ||
+        !value.getType().isIntOrIndex() || producer->getNumResults() != 1)
+        return {};
+    for (mlir::Value operand : producer->getOperands())
+        if (!foldIntegerExpression(operand, scratch, constants))
+            return {};
+
+    // Fold an isolated copy because a fold hook may update its operation in place.
+    mlir::Operation* copy = scratch.clone(*producer, constants);
+    llvm::SmallVector<mlir::Value, 1> folded;
+    if (mlir::failed(scratch.tryFold(copy, folded)) || folded.size() != 1 ||
+        !mlir::matchPattern(folded.front(), mlir::m_Constant(&attr)))
+        return {};
+    constants.map(value, folded.front());
+    return folded.front();
+}
+
+static std::optional<int64_t> getStaticInteger(mlir::Value value)
+{
+    mlir::IntegerAttr attr;
+    if (!mlir::matchPattern(value, mlir::m_Constant(&attr))) {
+        mlir::Block scratch;
+        mlir::OpBuilder builder(value.getContext());
+        builder.setInsertionPointToEnd(&scratch);
+        mlir::IRMapping constants;
+        if (mlir::Value folded = foldIntegerExpression(value, builder, constants))
+            mlir::matchPattern(folded, mlir::m_Constant(&attr));
+    }
+    if (attr && attr.getValue().isSignedIntN(64))
+        return attr.getInt();
+    return std::nullopt;
+}
+
+static std::optional<int64_t> getDualUpdateTensorResidue(mlir::Value tensor, mlir::Value relativeTo = {});
+
+static std::optional<int64_t> getDualUpdatePointerResidue(mlir::Value pointer, mlir::Value relativeTo)
+{
+    auto pointerType = mlir::dyn_cast<PtrType>(pointer.getType());
+    if (!pointerType)
+        return std::nullopt;
+    if (auto add = pointer.getDefiningOp<PtrAddOp>()) {
+        auto base = getDualUpdatePointerResidue(add.getPtr(), relativeTo);
+        auto offset = getStaticInteger(add.getOffset());
+        auto elemBytes = elementStorageBytes(pointerType.getPointee());
+        if (base && offset && elemBytes > 0)
+            return (*base + (*offset % kDualUpdateAlignment) * elemBytes) % kDualUpdateAlignment;
+        return std::nullopt;
+    }
+    if (auto recast = pointer.getDefiningOp<RecastPtrOp>())
+        return getDualUpdatePointerResidue(recast.getSrc(), relativeTo);
+    if (auto tensorPtr = pointer.getDefiningOp<TensorPtrOp>()) {
+        auto backing = resolveTensorBacking(tensorPtr.getSrc());
+        if (succeeded(backing))
+            return getDualUpdatePointerResidue(*backing, relativeTo);
+        return std::nullopt;
+    }
+    if (relativeTo) {
+        mlir::Value window, stride;
+        if (auto load = pointer.getDefiningOp<LoadUpdateOp>(); load && !load.getBlockStride()) {
+            window = load.getSource();
+            stride = load.getPostUpdateStride();
+        } else if (auto store = pointer.getDefiningOp<StoreUpdateOp>(); store && !store.getBlockStride()) {
+            window = store.getDest();
+            stride = store.getPostUpdateStride();
+        } else {
+            return std::nullopt;
+        }
+        auto base = getDualUpdateTensorResidue(window, relativeTo);
+        auto advance = getStaticInteger(stride);
+        auto elemBytes = elementStorageBytes(pointerType.getPointee());
+        if (base && advance && elemBytes > 0)
+            return (*base + (*advance % kDualUpdateAlignment) * elemBytes) % kDualUpdateAlignment;
+        return std::nullopt;
+    }
+    if (auto fromInt = pointer.getDefiningOp<IntToPtrOp>()) {
+        auto address = getStaticInteger(fromInt.getOperand());
+        if (address)
+            return *address % kDualUpdateAlignment;
+        return std::nullopt;
+    }
+    // UPDATE results carry the same pointer type even if the advance changes
+    // alignment. An arbitrary block argument can carry such a result too.
+    if (pointer.getDefiningOp<AllocPtrOp>() && pointerType.getAlignment() % kDualUpdateAlignment == 0)
+        return 0;
+    return std::nullopt;
+}
+
+static std::optional<int64_t> getDualUpdateTensorResidue(mlir::Value tensor, mlir::Value relativeTo)
+{
+    if (tensor == relativeTo)
+        return 0;
+    auto type = mlir::cast<TlaTensorType>(tensor.getType());
+    if (!isLinearLayout(type.getLayout().getLayoutTag()))
+        return std::nullopt;
+    if (auto argument = mlir::dyn_cast<mlir::BlockArgument>(tensor)) {
+        // A loop argument inherits its initial residue only when the backedge
+        // is derived from that argument and advances it by a multiple of 32 bytes.
+        auto loop = mlir::dyn_cast<mlir::scf::ForOp>(argument.getOwner()->getParentOp());
+        if (relativeTo || !loop || argument.getArgNumber() == 0)
+            return std::nullopt;
+        unsigned index = argument.getArgNumber() - 1;
+        auto yield = mlir::cast<mlir::scf::YieldOp>(loop.getBody()->getTerminator());
+        auto delta = getDualUpdateTensorResidue(yield.getOperand(index), argument);
+        if (!delta || *delta != 0)
+            return std::nullopt;
+        return getDualUpdateTensorResidue(loop.getInitArgs()[index]);
+    }
+    mlir::Value pointer;
+    llvm::SmallVector<int64_t, 2> coord, stride;
+    if (auto desc = tensor.getDefiningOp<TensorDescOp>()) {
+        pointer = desc.getBase();
+        coord = {
+            getStaticInteger(desc.getCoord0()).value_or(mlir::ShapedType::kDynamic),
+            getStaticInteger(desc.getCoord1()).value_or(mlir::ShapedType::kDynamic)};
+        stride = {
+            getStaticInteger(desc.getStride0()).value_or(mlir::ShapedType::kDynamic),
+            getStaticInteger(desc.getStride1()).value_or(mlir::ShapedType::kDynamic)};
+    } else {
+        if (auto make = tensor.getDefiningOp<MakeTensorOp>())
+            pointer = make.getPtr();
+        else if (auto make = tensor.getDefiningOp<MakeTensorLikeOp>())
+            pointer = make.getPtr();
+        else
+            return std::nullopt;
+        if (failed(getTlaIndexTreeLeaves(type.getCoord().getTree(), coord)) ||
+            failed(getTlaIndexTreeLeaves(type.getLayout().getStride().getTree(), stride)))
+            return std::nullopt;
+    }
+    auto base = getDualUpdatePointerResidue(pointer, relativeTo);
+    if (!base || coord.size() != stride.size())
+        return std::nullopt;
+    int64_t elemOffset = 0;
+    for (auto [c, s] : llvm::zip_equal(coord, stride)) {
+        if (c == 0 || s == 0)
+            continue;
+        if (mlir::ShapedType::isDynamic(c) || mlir::ShapedType::isDynamic(s))
+            return std::nullopt;
+        elemOffset += (c % kDualUpdateAlignment) * (s % kDualUpdateAlignment);
+    }
+    auto elemBytes = elementStorageBytes(type.getPtr().getPointee());
+    return (*base + elemOffset * elemBytes) % kDualUpdateAlignment;
+}
+
+static mlir::LogicalResult verifyDualUpdate(
+    mlir::Operation* op, mlir::Value window, int64_t distBytes, mlir::Type elem, VectorSSAType first,
+    mlir::Value second, mlir::Value stride)
+{
+    int64_t elemBytes = elementStorageBytes(elem);
+    bool usesB32Carrier = distBytes == 4 && (elem.isInteger(64) || elem.isF64());
+    if (elemBytes != distBytes && !usesB32Carrier)
+        return op->emitOpError("dual UPDATE distribution does not match the element width");
+    if (!second || second.getType() != first || first.getValidLanes() != 256 / elemBytes)
+        return op->emitOpError("dual UPDATE requires two identical full VL vectors");
+    if (auto address = getDualUpdateTensorResidue(window); address && *address != 0)
+        return op->emitOpError("dual UPDATE effective UB address must be 32-byte aligned");
+    if (auto advance = getStaticInteger(stride); advance && *advance % (kDualUpdateAlignment / elemBytes) != 0)
+        return op->emitOpError("dual UPDATE post_update_stride in bytes must be 32-byte aligned");
+    return mlir::success();
+}
+
 mlir::LogicalResult LoadUpdateOp::verify()
 {
     if (!hasEnclosingRegion<VecFuncOp>(getOperation()))
@@ -1990,7 +2182,29 @@ mlir::LogicalResult LoadUpdateOp::verify()
     mlir::Type srcElem = sourceType.getPtr().getPointee();
     if (resultVec.getElementType() != srcElem)
         return emitOpError("load_update source and result element types must match");
-    // Bool Align UPDATE is AscendC move-only b8 (TypeGet<bool>→vector_s8 / int8_t).
+    if (auto dist = getLoadDist()) {
+        if (getBlockStride())
+            return emitOpError("load_dist is mutually exclusive with block_stride");
+        int64_t distBytes;
+        switch (dist->getLoadDist()) {
+            case ::LoadDist::dintlv_b8:
+                distBytes = 1;
+                break;
+            case ::LoadDist::dintlv_b16:
+                distBytes = 2;
+                break;
+            case ::LoadDist::dintlv_b32:
+                distBytes = 4;
+                break;
+            default:
+                return emitOpError("load_update load_dist must be a DINTLV distribution");
+        }
+        if (failed(verifyDualUpdate(
+                getOperation(), getSource(), distBytes, srcElem, resultVec, getResult2(), getPostUpdateStride())))
+            return mlir::failure();
+    } else if (getResult2()) {
+        return emitOpError("second vector result requires a DINTLV load_dist");
+    }
     if (failed(verifyOptionalBlockStride(getOperation(), getBlockStride())))
         return mlir::failure();
     if (getBlockStride()) {
@@ -2017,7 +2231,31 @@ mlir::LogicalResult StoreUpdateOp::verify()
     mlir::Type destElem = destType.getPtr().getPointee();
     if (sourceVec.getElementType() != destElem)
         return emitOpError("store_update source and destination element types must match");
-    // Bool Align UPDATE is AscendC move-only b8 (vsts via int8_t / uint8_t).
+    if (auto dist = getStoreDist()) {
+        if (getBlockStride())
+            return emitOpError("store_dist is mutually exclusive with block_stride");
+        if (getMask())
+            return emitOpError("predicate mask is not supported with intlv store_dist");
+        int64_t distBytes;
+        switch (dist->getStoreDist()) {
+            case ::StoreDist::intlv_b8:
+                distBytes = 1;
+                break;
+            case ::StoreDist::intlv_b16:
+                distBytes = 2;
+                break;
+            case ::StoreDist::intlv_b32:
+                distBytes = 4;
+                break;
+            default:
+                return emitOpError("store_update store_dist must be an INTLV distribution");
+        }
+        if (failed(verifyDualUpdate(
+                getOperation(), getDest(), distBytes, destElem, sourceVec, getSource2(), getPostUpdateStride())))
+            return mlir::failure();
+    } else if (getSource2()) {
+        return emitOpError("second vector source requires an INTLV store_dist");
+    }
     if (failed(verifyOptionalBlockStride(getOperation(), getBlockStride())))
         return mlir::failure();
     if (getBlockStride()) {
@@ -2043,6 +2281,16 @@ static mlir::LogicalResult verifyUnalignUbTensor(mlir::Operation* op, mlir::Valu
     return mlir::success();
 }
 
+static mlir::LogicalResult verifyUnalignDualVectors(mlir::Operation* op, VectorSSAType first, mlir::Value second)
+{
+    auto elemBytes = elementStorageBytes(first.getElementType());
+    if (elemBytes != 1 && elemBytes != 2 && elemBytes != 4 && elemBytes != 8)
+        return op->emitOpError("dual unaligned UPDATE requires b8/b16/b32/b64 storage");
+    if (second.getType() != first || first.getValidLanes() != 256 / elemBytes)
+        return op->emitOpError("dual unaligned UPDATE requires two identical full VL vectors");
+    return mlir::success();
+}
+
 mlir::LogicalResult LoadUnalignUpdateOp::verify()
 {
     if (failed(verifyUnalignUbTensor(getOperation(), getSource(), "source")))
@@ -2055,7 +2303,9 @@ mlir::LogicalResult LoadUnalignUpdateOp::verify()
     if (resultVec.getElementType() != elemType)
         return emitOpError("load_unalign_update source and result element types must match");
     // Bool UnAlign Load UPDATE: AscendC casts to int8_t (SupportBytes b8).
-    if (failed(verifyUnalignUpdateStride(getOperation(), getPostUpdateStride(), elemType)))
+    if (getResult2() && failed(verifyUnalignDualVectors(getOperation(), resultVec, getResult2())))
+        return mlir::failure();
+    if (failed(verifyUnalignUpdateStride(getOperation(), getPostUpdateStride(), elemType, bool(getResult2()))))
         return mlir::failure();
     return verifyUpdatePtr(getOperation(), getNextPtr(), elemType);
 }
@@ -2072,10 +2322,15 @@ mlir::LogicalResult StoreUnalignUpdateOp::verify()
     if (sourceVec.getElementType() != elemType)
         return emitOpError("store_unalign_update source and destination element types must match");
     if (getCompressed()) {
+        if (getSource2())
+            return emitOpError("compressed UPDATE requires a single vector");
         if (isBoolElementType(elemType))
             return emitOpError("compressed UPDATE does not support Bool elements");
-    } else if (failed(verifyUnalignUpdateStride(getOperation(), getPostUpdateStride(), elemType))) {
-        return mlir::failure();
+    } else {
+        if (getSource2() && failed(verifyUnalignDualVectors(getOperation(), sourceVec, getSource2())))
+            return mlir::failure();
+        if (failed(verifyUnalignUpdateStride(getOperation(), getPostUpdateStride(), elemType, bool(getSource2()))))
+            return mlir::failure();
     }
     return verifyUpdatePtr(getOperation(), getNextPtr(), elemType);
 }

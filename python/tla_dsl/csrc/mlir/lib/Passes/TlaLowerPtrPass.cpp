@@ -20,26 +20,6 @@
 namespace tla {
 namespace {
 
-// Resolve tensor_ptr while tensor descriptors still carry source provenance.
-// A pointer backed by another !tla.ptr aliases that address. A pointer backed
-// by a kernel-argument memref starts at the memref's aligned address. The
-// resulting inttoptr is source IR for the uniform ptr conversion below; it is
-// not a long-lived lowering bridge.
-static FailureOr<Value> resolveTensorBacking(Value tensor)
-{
-    if (isa<MemRefType, ::tla::PtrType>(tensor.getType()))
-        return tensor;
-    if (auto desc = tensor.getDefiningOp<::tla::TensorDescOp>())
-        return resolveTensorBacking(desc.getBase());
-    if (auto tileView = tensor.getDefiningOp<::tla::TileViewOp>())
-        return resolveTensorBacking(tileView.getSource());
-    if (auto makeTensor = tensor.getDefiningOp<::tla::MakeTensorOp>())
-        return makeTensor.getPtr();
-    if (auto makeTensorLike = tensor.getDefiningOp<::tla::MakeTensorLikeOp>())
-        return makeTensorLike.getPtr();
-    return failure();
-}
-
 static LogicalResult resolveTensorPtrOps(ModuleOp module)
 {
     SmallVector<::tla::TensorPtrOp, 8> tensorPtrOps;

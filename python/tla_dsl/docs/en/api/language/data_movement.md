@@ -338,7 +338,7 @@ Load this UB tensor tile into vector or mask SSA (`tile.load`).
 Prototype:
 
 ```python
-tla.Tensor.load(params: LoadParams | None = None) -> MaskSSA | VectorSSA | tuple[VectorSSA, VectorSSA] | tuple[VectorSSA, _Tensor]
+tla.Tensor.load(params: LoadParams | None = None) -> MaskSSA | VectorSSA | tuple[VectorSSA, VectorSSA] | tuple[VectorSSA | tuple[VectorSSA, VectorSSA], _Tensor]
 ```
 
 Parameters:
@@ -359,7 +359,7 @@ Parameters:
       | `DIST_BRC_B32` | Broadcast one b32 element to all lanes |
       | `DIST_DINTLV_B8` | Load 512 bytes; even/odd b8 elements fill two 256-lane vectors |
       | `DIST_DINTLV_B16` | Load 512 bytes; return two 128-lane b16 registers, even positions first and odd positions second |
-      | `DIST_DINTLV_B32` | b32 deinterleave (f32/i32/u32); dual results |
+      | `DIST_DINTLV_B32` | Deinterleave 32-bit words into two vectors. Supports f32/i32/u32, plus i64/u64/f64 with UPDATE. |
       | `DIST_US_B8` / `DIST_US_B16` | 2x up-sample |
       | `DIST_DS_B8` / `DIST_DS_B16` | Load 512 bytes and retain every other b8/b16 element into one full vector |
       | `DIST_BRC_B16` | Broadcast one b16 element |
@@ -376,10 +376,16 @@ Parameters:
       `post_mode=POST_MODE_UPDATE`; `0` advances by `tile_extent`
       (`origin_shape`). Default `0`.
   - `UnalignLoadParams`:
+    - `load_dist` (`str`) defaults to `DIST_NORM` for a single-register
+      load. `DIST_DINTLV_B8`, `DIST_DINTLV_B16` and
+      `DIST_DINTLV_B32` select a dual load and require `POST_MODE_UPDATE`.
     - `post_mode` (`str`): `POST_MODE_NORMAL` (default) or
       `POST_MODE_UPDATE`.
-    - `post_update_stride` (`Any`): `0` (default) advances by
-      `origin_shape`; effective stride must be in `(0, VL]`. Default `0`.
+    - `post_update_stride` (`Any`) defaults to `0`. With
+      `POST_MODE_UPDATE`, `0` advances by `origin_shape`.
+      The effective stride must be in `(0, VL]` elements for a
+      single-register load or `(0, 2 * VL]` elements for a dual load.
+      `VL` is the element count of one 256-byte register.
   - `BlockLoadParams`:
     - `block_stride` (`int`): Heads apart in 32B DataBlocks; `0`
       repeats the first block into all 8 slots. Default `0`.
@@ -404,10 +410,10 @@ Constraints:
 - Must be called inside `tla.vec.func(mode="simd")`; source tile must be UB.
 - The actual read range must stay within the usable UB address space.
 - Mask load ``DIST_NORM`` requires a b8/b16/b32/b64 scalar UB element type.
-- Each width-suffixed distribution requires the corresponding
-  element storage width. b8 includes Bool and byte encodings.
-  `DIST_BLK` supports b8/b16/b32. For b64, use `DIST_NORM`
-  or a full 32-lane `UnalignLoadParams` load.
+- Width-suffixed distributions require the corresponding element storage width,
+  with a b64 exception for `DIST_DINTLV_B32` in UPDATE. b8 includes Bool and
+  byte encodings. `DIST_BLK` supports b8/b16/b32. For single-vector b64 loads,
+  use `DIST_NORM` or a full 32-lane `UnalignLoadParams` load.
 - `DIST_DINTLV_B8` supports i8/u8/f8E4M3FN/f8E5M2/HiFloat8/E8M0 and packed
   Float4E2M1x2/Float4E1M2x2. Each register
   holds 256 one-byte elements; one load reads `2 * 256 = 512` bytes
@@ -447,8 +453,8 @@ Constraints:
   base + offset×sizeof(T)): ``DIST_NORM`` → ``VL/8``;
   ``DIST_US`` → ``VL/16``; ``DIST_DS`` → ``min(32, VL/4)``.
   On VL=256 this is 32B / 16B / 32B.
-- `POST_MODE_UPDATE` requires a rank-1 contiguous tile,
-  `DIST_NORM`, and element type of width b8/b16/b32/b64
+- Single-vector aligned `POST_MODE_UPDATE` uses `DIST_NORM`
+  and accepts b8/b16/b32/b64
   (Bool, i/u integers, FP8, HiFloat8, E8M0, FP4x2, f16, bf16,
   f32 and f64). Returns
   `(vector, next_tile)`. Inside `tla.vec.func`, assign
@@ -458,10 +464,30 @@ Constraints:
   UPDATE never automatically folds non-zero coordinates.
   `NormalLoadParams`: `post_update_stride=0` (default) advances
   by `tile_extent` (`origin_shape`); an explicit stride keeps
-  fill / stride-advance decoupling. `UnalignLoadParams`: default
-  `0`→`tile_extent`; effective stride must be in `(0, VL]`. On a clean
-  `tla.range`, `tla-unalign-ureg` hoists Pre/Post outside the for;
-  `for`⊃dynamic `if` keeps per-trip dual-instr.
+  fill / stride-advance decoupling. `UnalignLoadParams` with
+  `DIST_NORM` uses `tile_extent` when the stride is `0`.
+  The effective stride must be in `(0, VL]`. On a clean `tla.range`,
+  `tla-unalign-ureg` hoists Pre/Post out of the loop.
+  A dynamic `if` inside the loop keeps both
+  instructions in each iteration.
+- Aligned `DIST_DINTLV_B8`, `DIST_DINTLV_B16` and `DIST_DINTLV_B32` UPDATE
+  return `((even, odd), next_tile)`. Each access reads 512 bytes from a
+  rank-1 contiguous UB tile at `coord=0`. The start address and the stride
+  in bytes must be 32-byte aligned. The compiler rejects statically known
+  misalignment. The caller guarantees alignment for runtime addresses and
+  strides. `post_update_stride` is in elements and
+  defaults to the tile's `origin_shape`. In UPDATE, B32 also accepts
+  i64, u64 and f64 in single-register vectors and deinterleaves 32-bit words.
+- Use the same DINTLV distributions with `UnalignLoadParams` and
+  `POST_MODE_UPDATE` for unaligned UB addresses. The return value
+  is `((even, odd), next_tile)`. The compiler emits two unaligned
+  loads that share one `ureg`. The stride defaults to
+  `origin_shape` and must be in `(0, 2 * VL]` elements. Only
+  lanes corresponding to the first `post_update_stride` effective
+  source elements are guaranteed for a partial transfer.
+  Allocate backing UB space for two full registers. The compiler
+  carries the load alignment state when it proves a full-stride
+  loop is safe and initializes it per access otherwise.
 
 Example:
 
@@ -522,7 +548,7 @@ Parameters:
       | `DIST_PACK4_B32` | Store register byte slots 0,4,...,252 to UB byte slots 0,1,...,63, subject to the mask |
       | `DIST_INTLV_B8` | Interleave two b8 registers into consecutive dst elements |
       | `DIST_INTLV_B16` | Interleave two b16 registers |
-      | `DIST_INTLV_B32` | Interleave two b32 registers |
+      | `DIST_INTLV_B32` | Interleave 32-bit words from two vectors. Supports f32/i32/u32, plus i64/u64/f64 with UPDATE. |
       | `DIST_FIRST_ELEMENT_B8` | Write only lane 0 (1-byte) |
       | `DIST_FIRST_ELEMENT_B16` | Write only lane 0 (2-byte) |
       | `DIST_FIRST_ELEMENT_B32` | Write only lane 0 (4-byte) |
@@ -533,12 +559,17 @@ Parameters:
       `post_mode=POST_MODE_UPDATE`; `0` advances by `tile_extent`
       (`origin_shape`). Default `0`.
   - `UnalignStoreParams`:
+    - `store_dist` (`str`) defaults to `DIST_NORM` for a single-register
+      store. `DIST_INTLV_B8`, `DIST_INTLV_B16` and
+      `DIST_INTLV_B32` select a dual store and require `POST_MODE_UPDATE`.
     - `post_mode` (`str`): `POST_MODE_NORMAL` (default),
       `POST_MODE_UPDATE`, or `POST_MODE_UPDATE_NBYTES`.
-    - `post_update_stride` (`Any`): With `POST_MODE_UPDATE`,
-      `0` advances by `origin_shape` and the effective stride
-      must be in `(0, VL]`. With `POST_MODE_UPDATE_NBYTES`,
-      use `0`. Default `0`.
+    - `post_update_stride` (`Any`) defaults to `0`. With
+      `POST_MODE_UPDATE`, `0` advances by `origin_shape`.
+      The effective stride must be in `(0, VL]` elements for a
+      single-register store or `(0, 2 * VL]` elements for a dual store.
+      `VL` is the element count of one 256-byte register.
+      With `POST_MODE_UPDATE_NBYTES`, use `0`.
   - `BlockStoreParams`:
     - `block_stride` (`int`): Heads apart in 32B DataBlocks.
       Default `0`.
@@ -576,8 +607,9 @@ Constraints:
   for two active source lanes.
 - `DIST_INTLV_B8` / `DIST_INTLV_B16` / `DIST_INTLV_B32` require a
   two-vector `value` tuple of identical full-VL registers matching
-  the dest element type (b8: Bool/i8/u8/f8*/hif8/e8m0/fp4x2, b16:
-  f16/bf16/i16/u16; b32: f32/i32/u32). Predicate masks are rejected.
+  the destination element type. B8 supports Bool/i8/u8/f8*/hif8/e8m0/fp4x2.
+  B16 supports f16/bf16/i16/u16. B32 supports f32/i32/u32, plus i64/u64/f64
+  with UPDATE. Predicate masks are rejected.
 - First-element modes require the stored value and the dest tile to
   use the suffix-matching element width (b8 → 1-byte, b16 → 2-byte,
   b32 → 4-byte); passing a predicate mask raises an error.
@@ -601,14 +633,45 @@ with tla.vec.func(mode="simd"):
         store_dist=tla.params.StoreDist.DIST_PACK4_B32))
 ```
 
-- `POST_MODE_UPDATE` requires a rank-1 contiguous tile, `DIST_NORM`
-  and matching source and destination element types of width
+- Single-vector aligned `POST_MODE_UPDATE` uses `DIST_NORM`
+  with matching source and destination element types of width
   b8/b16/b32/b64. It returns the next tile. Inside `tla.vec.func`, assign it back with
   `tla.range`. Same origin window (`coord=0`) contract as UPDATE
   `load`. `NormalStoreParams`: default `post_update_stride=0`
   advances by `tile_extent` (`origin_shape`); an explicit stride is
-  decoupled. `UnalignStoreParams`: default `0`→`tile_extent`;
-  effective stride must be in `(0, VL]`; clean for hoists Pre/Post.
+  decoupled. `UnalignStoreParams` with `DIST_NORM` uses `tile_extent`
+  when the stride is `0`. The effective stride must be in `(0, VL]`.
+  The compiler can hoist Pre/Post out of the loop.
+- Aligned `DIST_INTLV_B8`, `DIST_INTLV_B16` and `DIST_INTLV_B32` UPDATE
+  write 512 bytes and return the next tile. The compiler advances the
+  address after issuing the aligned interleaved store. These modes use the
+  same UB window and stride requirements as dual UPDATE load. In UPDATE,
+  B32 also accepts i64, u64 and f64 in single-register vectors and interleaves 32-bit words.
+- Use the same INTLV distributions with `UnalignStoreParams` and
+  `POST_MODE_UPDATE` for unaligned UB addresses. The compiler emits
+  two unaligned stores that share one `ureg`. The effective
+  stride is in `(0, 2 * VL]` elements and sets both the length
+  written and the pointer advance. Store writes the prefix of
+  the interleaved pair. The compiler reuses the store alignment state
+  in eligible loops under the existing UPDATE rules.
+
+For b16 elements, the dual UPDATE load and store advance the UB
+windows in a loop.
+
+```python
+from catlass.params import LoadDist, NormalLoadParams, NormalStoreParams, PostMode, StoreDist
+
+load = NormalLoadParams(
+    load_dist=LoadDist.DIST_DINTLV_B16, post_mode=PostMode.POST_MODE_UPDATE
+)
+store = NormalStoreParams(
+    store_dist=StoreDist.DIST_INTLV_B16, post_mode=PostMode.POST_MODE_UPDATE
+)
+with tla.vec.func(mode="simd"):
+    for _ in tla.range(trips):
+        pair, src = src.load(load)
+        dst = dst.store(pair, store)
+```
 
 **`POST_MODE_UPDATE_NBYTES` mode**
 

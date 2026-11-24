@@ -772,10 +772,11 @@ def Tla_LoadUpdateOp : Tla_Op<"load_update", []> {
   let summary = "PostMode UPDATE load (aligned or DATA_BLOCK_COPY)";
   let description = [{
     UB load with AscendC ``POST_MODE_UPDATE``. Results are the loaded
-    ``!tla.vector`` and the next-window ``!tla.ptr``.
+    vector or vector pair and the next-window ``!tla.ptr``.
 
     * Without ``block_stride``: continuous aligned load. ``post_update_stride``
-      is an **element** count. VectorRegion emits HIVM ``vldsx1.post``.
+      is an **element** count. DINTLV distributions return even and odd
+      vectors through HIVM ``vldsx2.post``; NORM uses ``vldsx1.post``.
     * With ``block_stride``: AscendC ``LoadAlign<T, DATA_BLOCK_COPY,
       POST_MODE_UPDATE>`` (``vsldb`` POST). Both ``block_stride`` and
       ``post_update_stride`` are 32B DataBlock counts. There is no HIVMC
@@ -787,15 +788,18 @@ def Tla_LoadUpdateOp : Tla_Op<"load_update", []> {
   }];
   let arguments = (ins Tla_TensorType:$source,
                        Tla_IntegerOrIndexType:$post_update_stride,
-                       Optional<Tla_IntegerOrIndexType>:$block_stride);
+                       Optional<Tla_IntegerOrIndexType>:$block_stride,
+                       OptionalAttr<Tla_LoadDistAttr>:$load_dist);
   let results = (outs Tla_VectorSSAType:$result,
+                      Optional<Tla_VectorSSAType>:$result2,
                       Tla_PtrType:$next_ptr);
   let assemblyFormat = [{
     $source `post_update_stride` $post_update_stride
     (`block_stride` $block_stride^)? attr-dict `:`
     type($source) `post_update_stride` qualified(type($post_update_stride))
     (`block_stride` qualified(type($block_stride))^)?
-    `->` qualified(type($result)) `,` qualified(type($next_ptr))
+    `->` qualified(type($result)) (`second` qualified(type($result2))^)?
+    `,` qualified(type($next_ptr))
   }];
   let hasVerifier = 1;
 }
@@ -807,7 +811,9 @@ def Tla_StoreUpdateOp : Tla_Op<"store_update", [AttrSizedOperandSegments]> {
     ``!tla.ptr``. Optional predicate ``mask``.
 
     * Without ``block_stride``: continuous aligned store. ``post_update_stride``
-      is an **element** count. VectorRegion emits HIVM ``vstsx1.post``.
+      is an **element** count. NORM uses HIVM ``vstsx1.post``. INTLV
+      stores two vectors through ``vstsx2`` and advances the pointer after
+      the write. INTLV writes two full vectors and requires no predicate.
     * With ``block_stride``: AscendC ``StoreAlign<T, DATA_BLOCK_COPY,
       POST_MODE_UPDATE>`` (``vsstb`` POST). Both strides are 32B DataBlock
       counts. There is no HIVMC ``vsstb.post``, so VectorRegion lowers through
@@ -820,13 +826,15 @@ def Tla_StoreUpdateOp : Tla_Op<"store_update", [AttrSizedOperandSegments]> {
                        Tla_VectorSSAType:$source,
                        Tla_IntegerOrIndexType:$post_update_stride,
                        Optional<Tla_MaskSSAType>:$mask,
-                       Optional<Tla_IntegerOrIndexType>:$block_stride);
+                       Optional<Tla_IntegerOrIndexType>:$block_stride,
+                       Optional<Tla_VectorSSAType>:$source2,
+                       OptionalAttr<Tla_StoreDistAttr>:$store_dist);
   let results = (outs Tla_PtrType:$next_ptr);
   let assemblyFormat = [{
-    $dest `,` $source `post_update_stride` $post_update_stride
+    $dest `,` $source (`,` $source2^)? `post_update_stride` $post_update_stride
     (`mask` $mask^)? (`block_stride` $block_stride^)?
     attr-dict `:`
-    type($dest) `,` qualified(type($source))
+    type($dest) `,` qualified(type($source)) (`,` qualified(type($source2))^)?
     `post_update_stride` qualified(type($post_update_stride))
     (`mask` qualified(type($mask))^)?
     (`block_stride` qualified(type($block_stride))^)?
@@ -886,16 +894,20 @@ def Tla_LoadUnalignUpdateOp : Tla_Op<"load_unalign_update", []> {
   let description = [{
     Loads one unaligned window. ``post_update_stride`` is an element count
     (AscendC ``postUpdateStride``). Python default ``0`` uses window
-    ``origin_shape``; effective stride (default or explicit) must be in
+    ``origin_shape``. A single result accepts an effective stride in
     ``(0, VL]``. Lowering passes ``stride×sizeof(T)`` as HIVM ``$cceVL`` and
     returns the HW ``newPtr``. Python omits ``ureg_in``; ``tla-unalign-ureg``
     inserts ``load_unalign_pre`` and fills ``ureg_in`` from the prior UPDATE's
     ``ureg_out`` when the next window Tensor is that prior ``next_ptr``.
+    With a second result, two transfers share one ureg and accept a stride in
+    ``(0, 2 * VL]``.
+    The results are deinterleaved at the storage width, or at b32 for b64.
   }];
   let arguments = (ins Tla_TensorType:$source,
                        Tla_IntegerOrIndexType:$post_update_stride,
                        Optional<Tla_UregType>:$ureg_in);
   let results = (outs Tla_VectorSSAType:$result,
+                      Optional<Tla_VectorSSAType>:$result2,
                       Tla_PtrType:$next_ptr,
                       Tla_UregType:$ureg_out);
   let assemblyFormat = [{
@@ -905,13 +917,14 @@ def Tla_LoadUnalignUpdateOp : Tla_Op<"load_unalign_update", []> {
     type($source)
     `post_update_stride` qualified(type($post_update_stride))
     (`ureg_in` qualified(type($ureg_in))^)?
-    `->` qualified(type($result)) `,` qualified(type($next_ptr)) `,` qualified(type($ureg_out))
+    `->` qualified(type($result)) (`second` qualified(type($result2))^)?
+    `,` qualified(type($next_ptr)) `,` qualified(type($ureg_out))
   }];
   let hasVerifier = 1;
 }
 
 def Tla_StoreUnalignUpdateOp : Tla_Op<"store_unalign_update",
-    [DeclareOpInterfaceMethods<MemoryEffectsOpInterface>]> {
+    [AttrSizedOperandSegments, DeclareOpInterfaceMethods<MemoryEffectsOpInterface>]> {
   let summary = "StoreUnAlign POST_MODE_UPDATE (vstus.post + ureg SSA; HW next_ptr)";
   let description = [{
     Stores one unaligned window. ``post_update_stride`` is an element count
@@ -925,19 +938,23 @@ def Tla_StoreUnalignUpdateOp : Tla_Op<"store_unalign_update",
     Compressed stores use the supplied ``dest`` and share the hardware write
     offset. In this mode ``next_ptr`` represents the base address used by the
     store so the compiler can use it for the final tail writeback.
+    With a second source, the two vectors are interleaved at the storage
+    width (b32 for b64) and stored in two transfers that share one ureg.
+    Dual UPDATE accepts a stride in ``(0, 2 * VL]``.
   }];
   let arguments = (ins Tla_TensorType:$dest,
                        Tla_VectorSSAType:$source,
                        Tla_IntegerOrIndexType:$post_update_stride,
                        Optional<Tla_UregType>:$ureg_in,
+                       Optional<Tla_VectorSSAType>:$source2,
                        DefaultValuedAttr<BoolAttr, "false">:$compressed);
   let results = (outs Tla_PtrType:$next_ptr,
                       Tla_UregType:$ureg_out);
   let assemblyFormat = [{
-    $dest `,` $source `post_update_stride` $post_update_stride
+    $dest `,` $source (`,` $source2^)? `post_update_stride` $post_update_stride
     (`ureg_in` $ureg_in^)?
     attr-dict `:`
-    type($dest) `,` qualified(type($source))
+    type($dest) `,` qualified(type($source)) (`,` qualified(type($source2))^)?
     `post_update_stride` qualified(type($post_update_stride))
     (`ureg_in` qualified(type($ureg_in))^)?
     `->` qualified(type($next_ptr)) `,` qualified(type($ureg_out))

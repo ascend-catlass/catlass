@@ -69,8 +69,8 @@ def test_block_update_emits_bc_ops(compiler_tlair: Any) -> None:
     )
     assert "tla.load_update" in mlir
     assert "tla.store_update" in mlir
-    # Generic form: store_update with block_stride SSA (no mask) → segments 1,1,1,0,1
-    assert "operandSegmentSizes = array<i32: 1, 1, 1, 0, 1>" in mlir
+    # Generic form: block_stride SSA present, mask and second source absent.
+    assert "operandSegmentSizes = array<i32: 1, 1, 1, 0, 1, 0>" in mlir
     assert "tla.make_tensor" in mlir
 
 
@@ -106,7 +106,7 @@ def test_block_update_loop_emits_bc_ops(compiler_tlair: Any) -> None:
     )
     assert "tla.load_update" in mlir
     assert "tla.store_update" in mlir
-    assert "operandSegmentSizes = array<i32: 1, 1, 1, 0, 1>" in mlir
+    assert "operandSegmentSizes = array<i32: 1, 1, 1, 0, 1, 0>" in mlir
     assert "scf.for" in mlir
 
 

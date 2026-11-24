@@ -1,0 +1,86 @@
+// RUN: split-file %s %t
+// RUN: not %tla_compile %t/load.mlir -o - 2>&1 | %filecheck %s --check-prefix=LOAD
+// RUN: not %tla_compile %t/store.mlir -o - 2>&1 | %filecheck %s --check-prefix=STORE
+// RUN: %tla_compile %t/loop.mlir -o %t.loop.out
+// RUN: sed 's/load_offset = arith.constant 0/load_offset = arith.constant 1/' %t/loop.mlir > %t/loop-load.mlir
+// RUN: not %tla_compile %t/loop-load.mlir -o - 2>&1 | %filecheck %s --check-prefix=LOAD
+// RUN: sed 's/store_offset = arith.constant 0/store_offset = arith.constant 1/' %t/loop.mlir > %t/loop-store.mlir
+// RUN: not %tla_compile %t/loop-store.mlir -o - 2>&1 | %filecheck %s --check-prefix=STORE
+// RUN: sed 's/post_update_stride %c256/post_update_stride %runtime_stride/g' %t/loop.mlir > %t/loop-runtime-stride.mlir
+// RUN: %tla_compile %t/loop-runtime-stride.mlir -o %t.loop-runtime-stride.out
+
+// LOAD: 'tla.load_update' op dual UPDATE effective UB address must be 32-byte aligned
+// STORE: 'tla.store_update' op dual UPDATE effective UB address must be 32-byte aligned
+
+//--- load.mlir
+!ptr = !tla.ptr<i16, ub, 32>
+!tile = !tla.tensor<!tla.layout<!tla.shape<256>, !tla.stride<1>, !tla.shape<256>, RowMajor>, !tla.coord<0>, !ptr>
+!reg = !tla.vector<128xi16>
+module {
+  func.func @misaligned_load() {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c3 = arith.constant 3 : i32
+    %c5 = arith.constant 5 : i32
+    %c256 = arith.constant 256 : index
+    %base = tla.alloc_ptr{size_bytes = 544} -> !ptr
+    %offset_i32 = arith.muli %c3, %c5 : i32
+    %offset_elements = arith.index_cast %offset_i32 : i32 to index
+    %offset = tla.ptr_add %base, %offset_elements : !ptr, index -> !ptr
+    %src = tla.tensor_desc %offset shape [%c1, %c256, %c1, %c1] stride [%c256, %c1, %c1, %c1] origin_shape [%c1, %c256] coord [%c0, %c0] : !ptr -> !tile
+    "tla.vec.func"() ({
+      %even, %odd, %next = tla.load_update %src post_update_stride %c256 {load_dist = #tla.load_dist<dintlv_b16>} : !tile post_update_stride index -> !reg second !reg, !ptr
+    }) : () -> ()
+    return
+  }
+}
+
+//--- store.mlir
+!ptr = !tla.ptr<i16, ub, 32>
+!tile = !tla.tensor<!tla.layout<!tla.shape<256>, !tla.stride<1>, !tla.shape<256>, RowMajor>, !tla.coord<1>, !ptr>
+!reg = !tla.vector<128xi16>
+module {
+  func.func @misaligned_store(%value: i16) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c256 = arith.constant 256 : index
+    %base = tla.alloc_ptr{size_bytes = 544} -> !ptr
+    %dst = tla.tensor_desc %base shape [%c1, %c256, %c1, %c1] stride [%c256, %c1, %c1, %c1] origin_shape [%c1, %c256] coord [%c0, %c1] : !ptr -> !tile
+    "tla.vec.func"() ({
+      %data = tla.full %value : i16 -> !reg
+      %next = tla.store_update %dst, %data, %data post_update_stride %c256 {store_dist = #tla.store_dist<intlv_b16>} : !tile, !reg, !reg post_update_stride index -> !ptr
+    }) : () -> ()
+    return
+  }
+}
+
+//--- loop.mlir
+!ptr = !tla.ptr<i16, ub, 32>
+!tile = !tla.tensor<!tla.layout<!tla.shape<256>, !tla.stride<1>, !tla.shape<256>, RowMajor>, !tla.coord<0>, !ptr>
+!reg = !tla.vector<128xi16>
+module {
+  func.func @loop_alignment(%runtime_stride: index) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+    %c256 = arith.constant 256 : index
+    %load_offset = arith.constant 0 : index
+    %store_offset = arith.constant 0 : index
+    %src_base = tla.alloc_ptr{size_bytes = 1056} -> !ptr
+    %dst_base = tla.alloc_ptr{size_bytes = 1056} -> !ptr
+    %src_ptr = tla.ptr_add %src_base, %load_offset : !ptr, index -> !ptr
+    %dst_ptr = tla.ptr_add %dst_base, %store_offset : !ptr, index -> !ptr
+    %src = tla.tensor_desc %src_ptr shape [%c1, %c256, %c1, %c1] stride [%c256, %c1, %c1, %c1] origin_shape [%c1, %c256] coord [%c0, %c0] : !ptr -> !tile
+    %dst = tla.tensor_desc %dst_ptr shape [%c1, %c256, %c1, %c1] stride [%c256, %c1, %c1, %c1] origin_shape [%c1, %c256] coord [%c0, %c0] : !ptr -> !tile
+    "tla.vec.func"() ({
+      %windows:2 = scf.for %i = %c0 to %c2 step %c1 iter_args(%in = %src, %out = %dst) -> (!tile, !tile) {
+        %even, %odd, %sp = tla.load_update %in post_update_stride %c256 {load_dist = #tla.load_dist<dintlv_b16>} : !tile post_update_stride index -> !reg second !reg, !ptr
+        %dp = tla.store_update %out, %even, %odd post_update_stride %c256 {store_dist = #tla.store_dist<intlv_b16>} : !tile, !reg, !reg post_update_stride index -> !ptr
+        %next_src = tla.make_tensor_like %sp like %src layoutTag(<RowMajor>) : !ptr, !tile -> !tile
+        %next_dst = tla.make_tensor_like %dp like %dst layoutTag(<RowMajor>) : !ptr, !tile -> !tile
+        scf.yield %next_src, %next_dst : !tile, !tile
+      }
+    }) : () -> ()
+    return
+  }
+}

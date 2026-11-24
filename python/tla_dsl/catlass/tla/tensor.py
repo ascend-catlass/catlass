@@ -11,7 +11,7 @@ from .. import _tla_type_bridge
 from .. import runtime as _runtime
 from ..base_dsl.op import dsl_user_op
 from ..base_dsl.typing import Bool, Numeric
-from ..params import LoadParams, StoreParams
+from ..params import LoadDist, LoadParams, StoreDist, StoreParams
 from .typing import Tensor as TensorABC
 
 if TYPE_CHECKING:
@@ -34,6 +34,17 @@ def _dynamic_metadata_values(type_tree: Any, metadata_tree: Any) -> list[Any]:
 _MASK_UB_ELEM_BYTES = frozenset((1, 2, 4, 8))
 # AscendC MaskReg width after plds (VL bits). Used when tile shape cannot hint N.
 _MASK_DIST_US_DS_DEFAULT_LANES = 256
+
+_DINTLV_BYTES = {
+    LoadDist.DIST_DINTLV_B8: 1,
+    LoadDist.DIST_DINTLV_B16: 2,
+    LoadDist.DIST_DINTLV_B32: 4,
+}
+_INTLV_BYTES = {
+    StoreDist.DIST_INTLV_B8: 1,
+    StoreDist.DIST_INTLV_B16: 2,
+    StoreDist.DIST_INTLV_B32: 4,
+}
 
 
 def _rank1_leaf_or_meta(
@@ -117,9 +128,9 @@ def _tile_origin_extent(tile: _Tensor) -> Any:
 
 
 def _unalign_update_stride_value(
-    params: Any, window: _Tensor, *, element_type: Any
+    params: Any, window: _Tensor, *, element_type: Any, dual: bool = False
 ) -> Any:
-    """Default ``0`` → tile_extent; effective stride must be in ``(0, VL]``."""
+    """Default ``0`` uses the tile extent and each register covers one VL."""
     from ..base_dsl.typing import as_numeric
     from ..core_api import _as_value, _const_int_value, _vector_lane_count
     from ..execution_lowering import TlaLoweringError
@@ -139,10 +150,12 @@ def _unalign_update_stride_value(
         # Dynamic explicit stride: no static bound check.
         return _as_value(params.post_update_stride)
 
-    if effective is not None and not 0 < effective <= vl:
+    limit = 2 * vl if dual else vl
+    if effective is not None and not 0 < effective <= limit:
+        bound = "2 * VL" if dual else "VL"
         raise TlaLoweringError(
             "UnAlign post_mode=update post_update_stride must be in "
-            f"(0, VL] for the dtype (VL={vl} elements), got "
+            f"(0, {bound}] for the dtype (VL={vl} elements), got "
             f"{effective!r} (post_update_stride={params.post_update_stride!r})"
         )
     return result
@@ -335,6 +348,42 @@ def _require_update_store_matching_dtype(
         )
 
 
+def _require_dual_update_width(dist: str, element_type: Any, width: int) -> None:
+    from ..execution_lowering import TlaLoweringError
+    from ..types import dtype_size_bytes
+
+    _require_update_supported_dtype(element_type)
+    widths = (4, 8) if width == 4 else (width,)
+    if dtype_size_bytes(element_type) not in widths:
+        allowed = "/".join(map(str, widths))
+        raise TlaLoweringError(
+            f"DIST_{dist.upper()} with post_mode=update requires a "
+            f"{allowed}-byte element type (got {element_type})"
+        )
+
+
+def _aligned_update_stride_value(
+    params: Any, window: _Tensor, *, dual_element_type: Any = None
+) -> mlir_ir.Value:
+    from ..base_dsl.typing import as_numeric
+    from ..core_api import _as_value, _const_int_value
+    from ..execution_lowering import TlaLoweringError
+    from ..types import dtype_size_bytes
+
+    stride = params.post_update_stride
+    static_stride = _const_int_value(stride)
+    if static_stride == 0:
+        stride = as_numeric(_tile_origin_extent(window))
+        if dual_element_type is not None:
+            static_stride = _const_int_value(stride)
+    if dual_element_type is not None and static_stride is not None:
+        if static_stride * dtype_size_bytes(dual_element_type) % 32:
+            raise TlaLoweringError(
+                "dual UPDATE post_update_stride in bytes must be 32-byte aligned"
+            )
+    return _as_value(stride)
+
+
 def _validate_post_update_params(params: Any) -> bool:
     """Return True if UPDATE is requested; raise on illegal combinations."""
     from ..core_api import _const_int_value
@@ -342,15 +391,27 @@ def _validate_post_update_params(params: Any) -> bool:
     from ..params import (
         BlockLoadParams,
         BlockStoreParams,
-        LoadDist,
         PostMode,
-        StoreDist,
+        UnalignLoadParams,
         UnalignStoreParams,
     )
 
     # Params without PostMode fields are never UPDATE.
     if not hasattr(params, "post_mode"):
         return False
+    if params.post_mode != PostMode.POST_MODE_UPDATE and (
+        (
+            isinstance(params, UnalignLoadParams)
+            and params.load_dist != LoadDist.DIST_NORM
+        )
+        or (
+            isinstance(params, UnalignStoreParams)
+            and params.store_dist != StoreDist.DIST_NORM
+        )
+    ):
+        raise TlaLoweringError(
+            "non-default unaligned distribution requires POST_MODE_UPDATE"
+        )
     if params.post_mode == PostMode.POST_MODE_UPDATE_NBYTES:
         if not isinstance(params, UnalignStoreParams):
             raise TlaLoweringError(
@@ -400,12 +461,20 @@ def _validate_post_update_params(params: Any) -> bool:
     static_stride = None if isinstance(stride, bool) else _const_int_value(stride)
     if is_update:
         load_dist = getattr(params, "load_dist", None)
-        if load_dist is not None and load_dist != LoadDist.DIST_NORM:
+        if (
+            load_dist is not None
+            and load_dist != LoadDist.DIST_NORM
+            and load_dist not in _DINTLV_BYTES
+        ):
             raise NotImplementedError(
                 f"post_mode=update with load_dist={load_dist!r} is not supported yet"
             )
         store_dist = getattr(params, "store_dist", None)
-        if store_dist is not None and store_dist != StoreDist.DIST_NORM:
+        if (
+            store_dist is not None
+            and store_dist != StoreDist.DIST_NORM
+            and store_dist not in _INTLV_BYTES
+        ):
             raise NotImplementedError(
                 f"post_mode=update with store_dist={store_dist!r} is not supported yet"
             )
@@ -646,7 +715,12 @@ class _Tensor(TensorABC):
         params: LoadParams | None = None,
         *,
         loc: mlir_ir.Location | None = None,
-    ) -> MaskSSA | VectorSSA | tuple[VectorSSA, VectorSSA] | tuple[VectorSSA, _Tensor]:
+    ) -> (
+        MaskSSA
+        | VectorSSA
+        | tuple[VectorSSA, VectorSSA]
+        | tuple[VectorSSA | tuple[VectorSSA, VectorSSA], _Tensor]
+    ):
         """Directory: Data Movement
         Description:
             Load this UB tensor tile into vector or mask SSA (`tile.load`).
@@ -668,7 +742,7 @@ class _Tensor(TensorABC):
                   | `DIST_BRC_B32` | Broadcast one b32 element to all lanes |
                   | `DIST_DINTLV_B8` | Load 512 bytes; even/odd b8 elements fill two 256-lane vectors |
                   | `DIST_DINTLV_B16` | Load 512 bytes; return two 128-lane b16 registers, even positions first and odd positions second |
-                  | `DIST_DINTLV_B32` | b32 deinterleave (f32/i32/u32); dual results |
+                  | `DIST_DINTLV_B32` | Deinterleave 32-bit words into two vectors. Supports f32/i32/u32, plus i64/u64/f64 with UPDATE. |
                   | `DIST_US_B8` / `DIST_US_B16` | 2x up-sample |
                   | `DIST_DS_B8` / `DIST_DS_B16` | Load 512 bytes and retain every other b8/b16 element into one full vector |
                   | `DIST_BRC_B16` | Broadcast one b16 element |
@@ -685,10 +759,16 @@ class _Tensor(TensorABC):
                   `post_mode=POST_MODE_UPDATE`; `0` advances by `tile_extent`
                   (`origin_shape`). Default `0`.
               - `UnalignLoadParams`:
+                - `load_dist` (`str`) defaults to `DIST_NORM` for a single-register
+                  load. `DIST_DINTLV_B8`, `DIST_DINTLV_B16` and
+                  `DIST_DINTLV_B32` select a dual load and require `POST_MODE_UPDATE`.
                 - `post_mode` (`str`): `POST_MODE_NORMAL` (default) or
                   `POST_MODE_UPDATE`.
-                - `post_update_stride` (`Any`): `0` (default) advances by
-                  `origin_shape`; effective stride must be in `(0, VL]`. Default `0`.
+                - `post_update_stride` (`Any`) defaults to `0`. With
+                  `POST_MODE_UPDATE`, `0` advances by `origin_shape`.
+                  The effective stride must be in `(0, VL]` elements for a
+                  single-register load or `(0, 2 * VL]` elements for a dual load.
+                  `VL` is the element count of one 256-byte register.
               - `BlockLoadParams`:
                 - `block_stride` (`int`): Heads apart in 32B DataBlocks; `0`
                   repeats the first block into all 8 slots. Default `0`.
@@ -712,10 +792,10 @@ class _Tensor(TensorABC):
             - Must be called inside `tla.vec.func(mode="simd")`; source tile must be UB.
             - The actual read range must stay within the usable UB address space.
             - Mask load ``DIST_NORM`` requires a b8/b16/b32/b64 scalar UB element type.
-            - Each width-suffixed distribution requires the corresponding
-              element storage width. b8 includes Bool and byte encodings.
-              `DIST_BLK` supports b8/b16/b32. For b64, use `DIST_NORM`
-              or a full 32-lane `UnalignLoadParams` load.
+            - Width-suffixed distributions require the corresponding element storage width,
+              with a b64 exception for `DIST_DINTLV_B32` in UPDATE. b8 includes Bool and
+              byte encodings. `DIST_BLK` supports b8/b16/b32. For single-vector b64 loads,
+              use `DIST_NORM` or a full 32-lane `UnalignLoadParams` load.
             - `DIST_DINTLV_B8` supports i8/u8/f8E4M3FN/f8E5M2/HiFloat8/E8M0 and packed
               Float4E2M1x2/Float4E1M2x2. Each register
               holds 256 one-byte elements; one load reads `2 * 256 = 512` bytes
@@ -755,8 +835,8 @@ class _Tensor(TensorABC):
               base + offset×sizeof(T)): ``DIST_NORM`` → ``VL/8``;
               ``DIST_US`` → ``VL/16``; ``DIST_DS`` → ``min(32, VL/4)``.
               On VL=256 this is 32B / 16B / 32B.
-            - `POST_MODE_UPDATE` requires a rank-1 contiguous tile,
-              `DIST_NORM`, and element type of width b8/b16/b32/b64
+            - Single-vector aligned `POST_MODE_UPDATE` uses `DIST_NORM`
+              and accepts b8/b16/b32/b64
               (Bool, i/u integers, FP8, HiFloat8, E8M0, FP4x2, f16, bf16,
               f32 and f64). Returns
               `(vector, next_tile)`. Inside `tla.vec.func`, assign
@@ -766,10 +846,30 @@ class _Tensor(TensorABC):
               UPDATE never automatically folds non-zero coordinates.
               `NormalLoadParams`: `post_update_stride=0` (default) advances
               by `tile_extent` (`origin_shape`); an explicit stride keeps
-              fill / stride-advance decoupling. `UnalignLoadParams`: default
-              `0`→`tile_extent`; effective stride must be in `(0, VL]`. On a clean
-              `tla.range`, `tla-unalign-ureg` hoists Pre/Post outside the for;
-              `for`⊃dynamic `if` keeps per-trip dual-instr.
+              fill / stride-advance decoupling. `UnalignLoadParams` with
+              `DIST_NORM` uses `tile_extent` when the stride is `0`.
+              The effective stride must be in `(0, VL]`. On a clean `tla.range`,
+              `tla-unalign-ureg` hoists Pre/Post out of the loop.
+              A dynamic `if` inside the loop keeps both
+              instructions in each iteration.
+            - Aligned `DIST_DINTLV_B8`, `DIST_DINTLV_B16` and `DIST_DINTLV_B32` UPDATE
+              return `((even, odd), next_tile)`. Each access reads 512 bytes from a
+              rank-1 contiguous UB tile at `coord=0`. The start address and the stride
+              in bytes must be 32-byte aligned. The compiler rejects statically known
+              misalignment. The caller guarantees alignment for runtime addresses and
+              strides. `post_update_stride` is in elements and
+              defaults to the tile's `origin_shape`. In UPDATE, B32 also accepts
+              i64, u64 and f64 in single-register vectors and deinterleaves 32-bit words.
+            - Use the same DINTLV distributions with `UnalignLoadParams` and
+              `POST_MODE_UPDATE` for unaligned UB addresses. The return value
+              is `((even, odd), next_tile)`. The compiler emits two unaligned
+              loads that share one `ureg`. The stride defaults to
+              `origin_shape` and must be in `(0, 2 * VL]` elements. Only
+              lanes corresponding to the first `post_update_stride` effective
+              source elements are guaranteed for a partial transfer.
+              Allocate backing UB space for two full registers. The compiler
+              carries the load alignment state when it proves a full-stride
+              loop is safe and initializes it per access otherwise.
 
             Example:
             ```python
@@ -804,7 +904,6 @@ class _Tensor(TensorABC):
         from ..execution_lowering import TlaLoweringError
         from ..params import (
             BlockLoadParams,
-            LoadDist,
             MaskLoadDist,
             MaskLoadParams,
             NormalLoadParams,
@@ -899,6 +998,11 @@ class _Tensor(TensorABC):
                 f"BlockLoadParams, or MaskLoadParams, got {type(params).__name__}"
             )
 
+        dual_width = (
+            _DINTLV_BYTES.get(params.load_dist)
+            if isinstance(params, (NormalLoadParams, UnalignLoadParams))
+            else None
+        )
         if _validate_post_update_params(params):
             if isinstance(params, UnalignLoadParams):
                 # UPDATE only; ``tla-unalign-ureg`` inserts Pre and fills ureg.
@@ -906,18 +1010,23 @@ class _Tensor(TensorABC):
                 _require_update_unit_stride(window)
                 source = _as_value(window)
                 source_desc = _tla_tensor_type_for_mlir_value(source)
-                _require_update_supported_dtype(source_desc.element_type)
-                result_type = _coerce_type(
-                    _vector_ssa_type_from_tensor_descriptor(source_desc)
-                )
+                elem = source_desc.element_type
+                if dual_width is not None:
+                    _require_dual_update_width(params.load_dist, elem, dual_width)
+                    result_desc = _full_vector_ssa_descriptor(elem)
+                else:
+                    _require_update_supported_dtype(elem)
+                    result_desc = _vector_ssa_type_from_tensor_descriptor(source_desc)
+                result_type = _coerce_type(result_desc)
                 ptr_type = _tla_type_bridge.tensor_ptr_type_get(source.type)
                 stride_val = _unalign_update_stride_value(
-                    params, window, element_type=source_desc.element_type
+                    params, window, element_type=elem, dual=dual_width is not None
                 )
                 ctx = loc.context if loc is not None else mlir_ir.Context.current
                 ureg_type = mlir_ir.Type.parse("!tla.ureg", context=ctx)
-                vec_val, next_ptr, _ureg_out = _tla_ops_gen.load_unalign_update(
+                vector, *second, next_ptr, _ureg_out = _tla_ops_gen.load_unalign_update(
                     result_type,
+                    result_type if dual_width is not None else None,
                     ptr_type,
                     ureg_type,
                     source,
@@ -925,56 +1034,66 @@ class _Tensor(TensorABC):
                     loc=loc,
                 )
                 next_tile = _make_update_tile_from_ptr(next_ptr, window, loc=loc)
-                return VectorSSA(vec_val), next_tile
+                value = (
+                    (VectorSSA(vector), VectorSSA(second[0]))
+                    if second
+                    else VectorSSA(vector)
+                )
+                return value, next_tile
             is_block = isinstance(params, BlockLoadParams)
             if not is_block and not isinstance(params, NormalLoadParams):
                 raise TlaLoweringError(
                     "post_mode=update on tile.load only accepts NormalLoadParams, "
                     f"UnalignLoadParams, or BlockLoadParams, got {type(params).__name__}"
                 )
-            from ..base_dsl.typing import as_numeric
-            from ..core_api import _const_int_value
-
             window = _require_update_origin_window(self, loc=loc)
             if not is_block:
                 _require_update_unit_stride(window)
             source = _as_value(window)
             source_desc = _tla_tensor_type_for_mlir_value(source)
-            if not is_block:
-                _require_update_supported_dtype(source_desc.element_type)
-            result_type = _coerce_type(
-                _vector_ssa_type_from_tensor_descriptor(source_desc)
-            )
+            elem = source_desc.element_type
+            if dual_width is not None:
+                _require_dual_update_width(params.load_dist, elem, dual_width)
+                result_desc = _full_vector_ssa_descriptor(elem)
+            else:
+                if not is_block:
+                    _require_update_supported_dtype(elem)
+                result_desc = _vector_ssa_type_from_tensor_descriptor(source_desc)
+            result_type = _coerce_type(result_desc)
             ptr_type = _tla_type_bridge.tensor_ptr_type_get(source.type)
             load_kwargs: dict[str, Any] = {"loc": loc}
             if is_block:
                 load_kwargs["block_stride"] = _as_value(params.block_stride)
                 stride_val = _as_value(params.repeat_stride)
             else:
-                # Default 0 → tile_extent (origin_shape); explicit keeps decoupling.
-                static_stride = _const_int_value(params.post_update_stride)
-                if static_stride == 0:
-                    stride_val = _as_value(as_numeric(_tile_origin_extent(window)))
-                else:
-                    stride_val = _as_value(params.post_update_stride)
-            vec_val, next_ptr = _tla_ops_gen.load_update(
+                stride_val = _aligned_update_stride_value(
+                    params,
+                    window,
+                    dual_element_type=elem if dual_width is not None else None,
+                )
+            if dual_width is not None:
+                load_kwargs["load_dist"] = mlir_ir.Attribute.parse(
+                    f"#tla.load_dist<{params.load_dist}>"
+                )
+            vector, *second, next_ptr = _tla_ops_gen.load_update(
                 result_type,
+                result_type if dual_width is not None else None,
                 ptr_type,
                 source,
                 stride_val,
                 **load_kwargs,
             )
-            return VectorSSA(vec_val), _make_update_tile_from_ptr(
-                next_ptr, window, loc=loc
+            value = (
+                (VectorSSA(vector), VectorSSA(second[0]))
+                if second
+                else VectorSSA(vector)
             )
+            return value, _make_update_tile_from_ptr(next_ptr, window, loc=loc)
 
-        is_dintlv = isinstance(params, NormalLoadParams) and params.load_dist in (
-            LoadDist.DIST_DINTLV_B8,
-            LoadDist.DIST_DINTLV_B16,
-            LoadDist.DIST_DINTLV_B32,
-        )
-        dist_bytes = (
-            {
+        is_dintlv = dual_width is not None
+        dist_bytes = (dual_width,) if dual_width is not None else None
+        if isinstance(params, NormalLoadParams) and dist_bytes is None:
+            dist_bytes = {
                 LoadDist.DIST_BRC_B8: (1,),
                 LoadDist.DIST_BRC_B16: (2,),
                 LoadDist.DIST_BRC_B32: (4,),
@@ -988,14 +1107,8 @@ class _Tensor(TensorABC):
                 LoadDist.DIST_UNPACK4_B8: (1,),
                 LoadDist.DIST_E2B_B16: (2,),
                 LoadDist.DIST_E2B_B32: (4,),
-                LoadDist.DIST_DINTLV_B8: (1,),
-                LoadDist.DIST_DINTLV_B16: (2,),
-                LoadDist.DIST_DINTLV_B32: (4,),
                 LoadDist.DIST_BLK: (1, 2, 4),
             }.get(params.load_dist)
-            if isinstance(params, NormalLoadParams)
-            else None
-        )
         is_block_load = isinstance(params, BlockLoadParams)
         if is_block_load:
             # vsldb packs each stride into a 16-bit immediate field: reject
@@ -1110,7 +1223,7 @@ class _Tensor(TensorABC):
                   | `DIST_PACK4_B32` | Store register byte slots 0,4,...,252 to UB byte slots 0,1,...,63, subject to the mask |
                   | `DIST_INTLV_B8` | Interleave two b8 registers into consecutive dst elements |
                   | `DIST_INTLV_B16` | Interleave two b16 registers |
-                  | `DIST_INTLV_B32` | Interleave two b32 registers |
+                  | `DIST_INTLV_B32` | Interleave 32-bit words from two vectors. Supports f32/i32/u32, plus i64/u64/f64 with UPDATE. |
                   | `DIST_FIRST_ELEMENT_B8` | Write only lane 0 (1-byte) |
                   | `DIST_FIRST_ELEMENT_B16` | Write only lane 0 (2-byte) |
                   | `DIST_FIRST_ELEMENT_B32` | Write only lane 0 (4-byte) |
@@ -1121,12 +1234,17 @@ class _Tensor(TensorABC):
                   `post_mode=POST_MODE_UPDATE`; `0` advances by `tile_extent`
                   (`origin_shape`). Default `0`.
               - `UnalignStoreParams`:
+                - `store_dist` (`str`) defaults to `DIST_NORM` for a single-register
+                  store. `DIST_INTLV_B8`, `DIST_INTLV_B16` and
+                  `DIST_INTLV_B32` select a dual store and require `POST_MODE_UPDATE`.
                 - `post_mode` (`str`): `POST_MODE_NORMAL` (default),
                   `POST_MODE_UPDATE`, or `POST_MODE_UPDATE_NBYTES`.
-                - `post_update_stride` (`Any`): With `POST_MODE_UPDATE`,
-                  `0` advances by `origin_shape` and the effective stride
-                  must be in `(0, VL]`. With `POST_MODE_UPDATE_NBYTES`,
-                  use `0`. Default `0`.
+                - `post_update_stride` (`Any`) defaults to `0`. With
+                  `POST_MODE_UPDATE`, `0` advances by `origin_shape`.
+                  The effective stride must be in `(0, VL]` elements for a
+                  single-register store or `(0, 2 * VL]` elements for a dual store.
+                  `VL` is the element count of one 256-byte register.
+                  With `POST_MODE_UPDATE_NBYTES`, use `0`.
               - `BlockStoreParams`:
                 - `block_stride` (`int`): Heads apart in 32B DataBlocks.
                   Default `0`.
@@ -1163,8 +1281,9 @@ class _Tensor(TensorABC):
               for two active source lanes.
             - `DIST_INTLV_B8` / `DIST_INTLV_B16` / `DIST_INTLV_B32` require a
               two-vector `value` tuple of identical full-VL registers matching
-              the dest element type (b8: Bool/i8/u8/f8*/hif8/e8m0/fp4x2, b16:
-              f16/bf16/i16/u16; b32: f32/i32/u32). Predicate masks are rejected.
+              the destination element type. B8 supports Bool/i8/u8/f8*/hif8/e8m0/fp4x2.
+              B16 supports f16/bf16/i16/u16. B32 supports f32/i32/u32, plus i64/u64/f64
+              with UPDATE. Predicate masks are rejected.
             - First-element modes require the stored value and the dest tile to
               use the suffix-matching element width (b8 → 1-byte, b16 → 2-byte,
               b32 → 4-byte); passing a predicate mask raises an error.
@@ -1188,14 +1307,45 @@ class _Tensor(TensorABC):
                     store_dist=tla.params.StoreDist.DIST_PACK4_B32))
             ```
 
-            - `POST_MODE_UPDATE` requires a rank-1 contiguous tile, `DIST_NORM`
-              and matching source and destination element types of width
+            - Single-vector aligned `POST_MODE_UPDATE` uses `DIST_NORM`
+              with matching source and destination element types of width
               b8/b16/b32/b64. It returns the next tile. Inside `tla.vec.func`, assign it back with
               `tla.range`. Same origin window (`coord=0`) contract as UPDATE
               `load`. `NormalStoreParams`: default `post_update_stride=0`
               advances by `tile_extent` (`origin_shape`); an explicit stride is
-              decoupled. `UnalignStoreParams`: default `0`→`tile_extent`;
-              effective stride must be in `(0, VL]`; clean for hoists Pre/Post.
+              decoupled. `UnalignStoreParams` with `DIST_NORM` uses `tile_extent`
+              when the stride is `0`. The effective stride must be in `(0, VL]`.
+              The compiler can hoist Pre/Post out of the loop.
+            - Aligned `DIST_INTLV_B8`, `DIST_INTLV_B16` and `DIST_INTLV_B32` UPDATE
+              write 512 bytes and return the next tile. The compiler advances the
+              address after issuing the aligned interleaved store. These modes use the
+              same UB window and stride requirements as dual UPDATE load. In UPDATE,
+              B32 also accepts i64, u64 and f64 in single-register vectors and interleaves 32-bit words.
+            - Use the same INTLV distributions with `UnalignStoreParams` and
+              `POST_MODE_UPDATE` for unaligned UB addresses. The compiler emits
+              two unaligned stores that share one `ureg`. The effective
+              stride is in `(0, 2 * VL]` elements and sets both the length
+              written and the pointer advance. Store writes the prefix of
+              the interleaved pair. The compiler reuses the store alignment state
+              in eligible loops under the existing UPDATE rules.
+
+            For b16 elements, the dual UPDATE load and store advance the UB
+            windows in a loop.
+
+            ```python
+            from catlass.params import LoadDist, NormalLoadParams, NormalStoreParams, PostMode, StoreDist
+
+            load = NormalLoadParams(
+                load_dist=LoadDist.DIST_DINTLV_B16, post_mode=PostMode.POST_MODE_UPDATE
+            )
+            store = NormalStoreParams(
+                store_dist=StoreDist.DIST_INTLV_B16, post_mode=PostMode.POST_MODE_UPDATE
+            )
+            with tla.vec.func(mode="simd"):
+                for _ in tla.range(trips):
+                    pair, src = src.load(load)
+                    dst = dst.store(pair, store)
+            ```
 
             **`POST_MODE_UPDATE_NBYTES` mode**
 
@@ -1288,7 +1438,6 @@ class _Tensor(TensorABC):
             MaskStoreParams,
             NormalStoreParams,
             PostMode,
-            StoreDist,
             UnalignStoreParams,
         )
         from ..types import (
@@ -1387,11 +1536,12 @@ class _Tensor(TensorABC):
                 "store params must be NormalStoreParams, UnalignStoreParams, or "
                 f"MaskStoreParams, got {type(params).__name__}"
             )
-        is_intlv = isinstance(params, NormalStoreParams) and params.store_dist in (
-            StoreDist.DIST_INTLV_B8,
-            StoreDist.DIST_INTLV_B16,
-            StoreDist.DIST_INTLV_B32,
+        dual_width = (
+            _INTLV_BYTES.get(params.store_dist)
+            if isinstance(params, (NormalStoreParams, UnalignStoreParams))
+            else None
         )
+        is_intlv = dual_width is not None
         if is_intlv and value2_val is None:
             raise TlaLoweringError(
                 f"{params.store_dist} requires a 2-tuple of VectorSSA values "
@@ -1402,22 +1552,56 @@ class _Tensor(TensorABC):
                 "dual-source store tuple is only valid with "
                 "DIST_INTLV_B8/DIST_INTLV_B16/DIST_INTLV_B32"
             )
-        if _validate_post_update_params(params):
+        is_update = _validate_post_update_params(params)
+        if is_intlv and mask is not None:
+            raise TlaLoweringError(
+                f"{params.store_dist} does not accept a predicate mask"
+            )
+        if is_intlv:
+            src0 = _vector_ssa_type_for_mlir_value(value_val)
+            src_elem = normalize_element_type_token(src0.element_type)
+            dst_elem = normalize_element_type_token(dest_desc.element_type)
+            if value_val.type != value2_val.type:
+                raise TlaLoweringError(
+                    f"{params.store_dist} requires two identical VectorSSA sources"
+                )
+            if src_elem != dst_elem:
+                raise TlaLoweringError(
+                    f"{params.store_dist} requires matching source/dest element "
+                    f"types (got source {src_elem}, dest {dst_elem})"
+                )
+            elem_bytes = dtype_size_bytes(src_elem)
+            if is_update:
+                _require_dual_update_width(params.store_dist, src_elem, dual_width)
+            elif elem_bytes != dual_width:
+                raise TlaLoweringError(
+                    f"DIST_{params.store_dist.upper()} requires a {dual_width}-byte "
+                    f"element type (got {src_elem})"
+                )
+            expected_lanes = 256 // elem_bytes
+            if src0.valid_lanes != expected_lanes:
+                raise TlaLoweringError(
+                    f"{params.store_dist} requires two full {expected_lanes}-lane "
+                    f"vectors (got {src0.valid_lanes})"
+                )
+        if is_update:
             if isinstance(params, UnalignStoreParams):
                 # UPDATE only; ``tla-unalign-ureg`` inserts create_ureg/Post.
                 window = _require_update_origin_window(self, loc=loc)
                 _require_update_unit_stride(window)
                 dest = _as_value(window)
                 elem_ty = _tla_tensor_type_for_mlir_value(dest).element_type
-                _require_update_store_matching_dtype(value_val, elem_ty)
+                if not is_intlv:
+                    _require_update_store_matching_dtype(value_val, elem_ty)
                 ptr_type = _tla_type_bridge.tensor_ptr_type_get(dest.type)
                 compressed = params.post_mode == PostMode.POST_MODE_UPDATE_NBYTES
                 if compressed:
                     stride_val = _as_value(0)
                 else:
-                    _require_update_supported_dtype(elem_ty)
+                    if not is_intlv:
+                        _require_update_supported_dtype(elem_ty)
                     stride_val = _unalign_update_stride_value(
-                        params, window, element_type=elem_ty
+                        params, window, element_type=elem_ty, dual=is_intlv
                     )
                 ctx = loc.context if loc is not None else mlir_ir.Context.current
                 ureg_type = mlir_ir.Type.parse("!tla.ureg", context=ctx)
@@ -1427,6 +1611,7 @@ class _Tensor(TensorABC):
                     dest,
                     value_val,
                     stride_val,
+                    source2=value2_val,
                     compressed=True if compressed else None,
                     loc=loc,
                 )
@@ -1439,9 +1624,6 @@ class _Tensor(TensorABC):
                     "post_mode=update on tile.store only accepts NormalStoreParams, "
                     f"UnalignStoreParams, or BlockStoreParams, got {type(params).__name__}"
                 )
-            from ..base_dsl.typing import as_numeric
-            from ..core_api import _const_int_value
-
             mask_val = _as_value(mask) if mask is not None else None
             if mask_val is not None:
                 _require_category("store", "mask", mask, "mask_ssa", 2)
@@ -1451,17 +1633,18 @@ class _Tensor(TensorABC):
                 _require_update_unit_stride(window)
             dest = _as_value(window)
             dest_desc = _tla_tensor_type_for_mlir_value(dest)
-            src_elem = normalize_element_type_token(
-                _vector_ssa_type_for_mlir_value(value_val).element_type
-            )
-            dst_elem = normalize_element_type_token(dest_desc.element_type)
-            if src_elem != dst_elem:
-                _op_error(
-                    "store",
-                    "source and destination element types must match "
-                    f"(got source {src_elem}, dest {dst_elem})",
+            if not is_intlv:
+                src_elem = normalize_element_type_token(
+                    _vector_ssa_type_for_mlir_value(value_val).element_type
                 )
-            if not is_block:
+                dst_elem = normalize_element_type_token(dest_desc.element_type)
+                if src_elem != dst_elem:
+                    _op_error(
+                        "store",
+                        "source and destination element types must match "
+                        f"(got source {src_elem}, dest {dst_elem})",
+                    )
+            if not is_block and not is_intlv:
                 _require_update_supported_dtype(dest_desc.element_type)
             ptr_type = _tla_type_bridge.tensor_ptr_type_get(dest.type)
             store_kwargs: dict[str, Any] = {"mask": mask_val, "loc": loc}
@@ -1469,16 +1652,21 @@ class _Tensor(TensorABC):
                 store_kwargs["block_stride"] = _as_value(params.block_stride)
                 stride_val = _as_value(params.repeat_stride)
             else:
-                static_stride = _const_int_value(params.post_update_stride)
-                if static_stride == 0:
-                    stride_val = _as_value(as_numeric(_tile_origin_extent(window)))
-                else:
-                    stride_val = _as_value(params.post_update_stride)
+                stride_val = _aligned_update_stride_value(
+                    params,
+                    window,
+                    dual_element_type=dest_desc.element_type if is_intlv else None,
+                )
+            if is_intlv:
+                store_kwargs["store_dist"] = mlir_ir.Attribute.parse(
+                    f"#tla.store_dist<{params.store_dist}>"
+                )
             next_ptr = _tla_ops_gen.store_update(
                 ptr_type,
                 dest,
                 value_val,
                 stride_val,
+                source2=value2_val,
                 **store_kwargs,
             )
             return _make_update_tile_from_ptr(next_ptr, window, loc=loc)
@@ -1522,43 +1710,6 @@ class _Tensor(TensorABC):
                     f"DIST_{params.store_dist.upper()} requires matching "
                     f"{widths}-byte source and destination element types "
                     f"(got source {src_elem}, dest {dst_elem})"
-                )
-        if is_intlv:
-            if mask_val is not None:
-                raise TlaLoweringError(
-                    f"{params.store_dist} does not accept a predicate mask"
-                )
-            src0 = _vector_ssa_type_for_mlir_value(value_val)
-            src1 = _vector_ssa_type_for_mlir_value(value2_val)
-            src_elem = normalize_element_type_token(src0.element_type)
-            dst_elem = normalize_element_type_token(dest_desc.element_type)
-            if (
-                src0.element_type != src1.element_type
-                or src0.valid_lanes != src1.valid_lanes
-            ):
-                raise TlaLoweringError(
-                    f"{params.store_dist} requires two identical VectorSSA sources"
-                )
-            if src_elem != dst_elem:
-                raise TlaLoweringError(
-                    f"{params.store_dist} requires matching source/dest element "
-                    f"types (got source {src_elem}, dest {dst_elem})"
-                )
-            width = {
-                StoreDist.DIST_INTLV_B8: 1,
-                StoreDist.DIST_INTLV_B16: 2,
-                StoreDist.DIST_INTLV_B32: 4,
-            }[params.store_dist]
-            if dtype_size_bytes(src_elem) != width:
-                raise TlaLoweringError(
-                    f"DIST_{params.store_dist.upper()} requires a {width}-byte "
-                    f"element type (got {src_elem})"
-                )
-            expected_lanes = 256 // width
-            if src0.valid_lanes != expected_lanes:
-                raise TlaLoweringError(
-                    f"{params.store_dist} requires two full {expected_lanes}-lane "
-                    f"vectors (got {src0.valid_lanes})"
                 )
         if isinstance(params, NormalStoreParams) and params.store_dist in (
             StoreDist.DIST_FIRST_ELEMENT_B8,

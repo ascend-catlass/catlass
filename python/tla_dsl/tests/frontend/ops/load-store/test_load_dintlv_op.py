@@ -182,25 +182,34 @@ def test_load_dintlv_b8_requires_ub(compiler_tlair: Any):
         )
 
 
-# compiler_tlair uses execution lowering: NotImplementedError is wrapped as
-# UnsupportedExecutionLowering; TlaLoweringError has a separate catch branch.
-def test_load_dintlv_b8_rejects_post_update(compiler_tlair: Any):
+@pytest.mark.parametrize("stride", (0, 32, 31))
+def test_load_dintlv_b8_post_update(compiler_tlair: Any, stride: int):
     @tla.kernel
-    def update(source: tla.Tensor):
+    def update(source: tla.Tensor, dest: tla.Tensor):
         with tla.vector():
             with tla.vec.func(mode="simd"):
-                source.load(
+                pair, _next_source = source.load(
                     NormalLoadParams(
                         load_dist=LoadDist.DIST_DINTLV_B8,
                         post_mode=PostMode.POST_MODE_UPDATE,
+                        post_update_stride=stride,
                     )
                 )
+                _, odd = pair
+                dest.store(odd)
 
-    with pytest.raises(
-        UnsupportedExecutionLowering,
-        match="post_mode=update with load_dist='dintlv_b8' is not supported yet",
-    ):
-        compiler_tlair(update, type_args=(_ub_tensor(tla.Int8, 512),))
+    type_args = (_ub_tensor(tla.Int8, 512), _ub_tensor(tla.Int8, 256))
+    if stride == 31:
+        with pytest.raises(TlaLoweringError, match="32-byte aligned"):
+            compiler_tlair(update, type_args=type_args)
+    else:
+        mlir = compiler_tlair(update, type_args=type_args)
+        assert '"tla.load_update"' in mlir
+        assert "#tla.load_dist<dintlv_b8>" in mlir
+        assert (
+            "-> (!tla.vector<256xi8>, !tla.vector<256xi8>, !tla.ptr<i8, ub"
+            in mlir
+        )
 
 
 def test_load_dintlv_b8_is_not_a_mask_distribution(compiler_tlair: Any):

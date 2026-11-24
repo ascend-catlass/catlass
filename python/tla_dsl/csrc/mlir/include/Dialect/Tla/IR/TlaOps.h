@@ -12,3 +12,8 @@
 
 #define GET_OP_CLASSES
 #include "tla/Ops.h.inc"
+
+namespace tla {
+// Resolve the storage behind tensor_ptr without applying a view's coordinates.
+mlir::FailureOr<mlir::Value> resolveTensorBacking(mlir::Value tensor);
+} // namespace tla
