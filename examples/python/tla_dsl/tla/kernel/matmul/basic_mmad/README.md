@@ -32,6 +32,8 @@
 ├── basic_matmul_fixpipe_per_tensor.py
 ├── basic_matmul_gemv.py
 ├── basic_matmul_l0c2l1.py
+├── basic_matmul_l0c2l1_fixpipe_per_channel.py
+├── basic_matmul_l0c2l1_fixpipe_per_tensor.py
 ├── basic_matmul_mutex.py
 ├── basic_matmul_mutex_with.py
 ├── basic_mmad_ptr.py
@@ -47,7 +49,9 @@
 | [**`basic_matmul_fixpipe_per_channel.py`**](basic_matmul_fixpipe_per_channel.py) | 带随路量化的矩阵乘（`per-channel`）量化示例，按输出通道应用 `u64` 量化参数，支持随路 ReLU。 |
 | [**`basic_matmul_fixpipe_per_tensor.py`**](basic_matmul_fixpipe_per_tensor.py) | 带随路量化的矩阵乘（`per-tensor`）量化示例，使用标量 `quant_scale`/`quant_offset`，支持随路 ReLU。 |
 | [**`basic_matmul_gemv.py`**](basic_matmul_gemv.py) | GEMV 示例（`m = 1`）：`tla.mmad` 按 `lhs` 的 layout 选择模式，rank-1 `VectorLayout` 的 A 走 `GM → L1 → L0A` 扁平搬运，B 的 L0B 仍为 `nZ`，结果按 `RowMajor` 写出。 |
-| [**`basic_matmul_l0c2l1.py`**](basic_matmul_l0c2l1.py) | L0C→L1 回搬示例，连续计算 `E = (A × B) × D`，固定 f32 静态场景。 |
+| [**`basic_matmul_l0c2l1.py`**](basic_matmul_l0c2l1.py) | L0C→L1 回搬示例，连续计算 `E = (A * B) * D`，固定 f32 静态场景。 |
+| [**`basic_matmul_l0c2l1_fixpipe_per_channel.py`**](basic_matmul_l0c2l1_fixpipe_per_channel.py) | L0C→L1 回搬叠加随路量化（`per-channel`）的示例，按输出通道量化写回 L1，再用量化结果计算 `E = C * D`，支持随路 ReLU。 |
+| [**`basic_matmul_l0c2l1_fixpipe_per_tensor.py`**](basic_matmul_l0c2l1_fixpipe_per_tensor.py) | L0C→L1 回搬叠加随路量化（`per-tensor`）的示例，使用标量 `quant_scale`/`quant_offset` 在 L0C→L1 写出时量化，再用量化结果计算 `E = C * D`，支持随路 ReLU。 |
 | [**`basic_matmul_mutex.py`**](basic_matmul_mutex.py) | 使用 `Mutex` 原语的矩阵乘示例，不同于 `set`/`wait` 原语，`Mutex` 原语同步不再区分源和目的指令。 |
 | [**`basic_matmul_mutex_with.py`**](basic_matmul_mutex_with.py) | 同样为利用 `Mutex` 原语的矩阵乘示例，使用 `with tla.mutex_guard(...)` 表达。 |
 | [**`basic_mmad_ptr.py`**](basic_mmad_ptr.py) | 矩阵乘最小集示例，显式构造 `tla.Tensor` 供 kernel 计算，仅支持静态场景。 |
@@ -76,6 +80,11 @@
 | `quant_tensor`        | Input  | `(n,)` | `u64` | Per-channel 量化系数（`tla.UInt64` 类型视图） |
 | `quant_scale`         | Input(Scalar) | `(1)` | `f32` | Per-tensor 量化系数 |
 | `quant_offset`         | Input(Scalar) | `(1)` | `i32` | Per-tensor 量化偏置 |
+
+上述量化参数在 L0C→L1 变体中同样适用，但量化发生在第一次 MMAD 结果写回 L1 时：
+
+- [`basic_matmul_l0c2l1_fixpipe_per_tensor`](basic_matmul_l0c2l1_fixpipe_per_tensor.py) 的 `quant_scale`（`f32`）与 `quant_offset`（`i32`）以运行时标量参数传入 kernel，不作为张量加载。
+- [`basic_matmul_l0c2l1_fixpipe_per_channel`](basic_matmul_l0c2l1_fixpipe_per_channel.py) 的 `quant_tensor` 是形如 `(n,)` 的 `u64` 张量，host 侧按输出通道打包后经 GM→L1 搬到 L1，作为 fixpipe 的 dequant 张量。
 
 部分样例包含下述参数，做下述说明（具体也请通过查询[命令行参数](#命令行参数)确认）：
 
@@ -125,6 +134,14 @@
    per-channel 的 `u64` 量化参数由样例内部构造。
 - [`basic_matmul_gemv`](basic_matmul_gemv.py) 固定 `m = 1`，`--n` 与 `--k` 取任意正整数。A/B 的元素类型由 `--dtype-ab {f32,f16,i8,f8e5m2}` 指定；结果类型随 `--dtype-ab` 推导，`i8` 输入为 `i32`，其余为 `f32`。
 
+- [`basic_matmul_l0c2l1_fixpipe_per_channel`](basic_matmul_l0c2l1_fixpipe_per_channel.py) 及 [`basic_matmul_l0c2l1_fixpipe_per_tensor`](basic_matmul_l0c2l1_fixpipe_per_tensor.py) 在 L0C→L1 写出时完成量化，类型支持为：
+
+   | `DTYPE_A` / `DTYPE_B` | 量化后 C 与 `DTYPE_D` | `DTYPE_E` | `DTYPE_quant` |
+   | ----------- | ----------- | ----------- | ----------- |
+   | f32 或 i8 | f16/bf16/i8 | f16/bf16 时为 `f32`，i8 时为 `i32` | per-channel：`u64`（`(n,)`）<br> per-tensor：`f32`（scale）+ `i32`（offset） |
+
+   A/B 共用一种数据类型，量化后的 C 与 D 共用一种数据类型；E 保持第二次 MMAD 的累加类型。
+
 ## 使用示例
 
 要运行本路径下的样例，请参考[快速开始](../../../../../../../python/tla_dsl/docs/zh/quick_start.md)完成部署。
@@ -166,6 +183,11 @@ basic_matmul.py [-h] [--device DEVICE] [--m M] [--n N] [--k K]
   - `--layout-c {row,col}`：结果矩阵布局。
   - `--relu-enable {0,1}`：是否启用随路 ReLU。
   - `--quant-scale` / `--quant-offset`：仅 `basic_matmul_fixpipe_per_tensor.py` 提供，分别为 f32/i32 标量；`quant_offset` 仅在 i8/u8 输出时生效。`basic_matmul_fixpipe_per_channel.py` 的量化参数由样例内部构造，无额外命令行参数。
+- [`basic_matmul_l0c2l1_fixpipe_per_channel`](basic_matmul_l0c2l1_fixpipe_per_channel.py) 及 [`basic_matmul_l0c2l1_fixpipe_per_tensor`](basic_matmul_l0c2l1_fixpipe_per_tensor.py) 为静态单 block 样例，不提供 `--m`/`--n`/`--k`/`--layout-*`/`--dtype-a` 等参数；`--device` 与通用参数相同，`--block-num` 默认取 `1`，kernel 只写单 block。此外提供：
+  - `--src-dtype {f32,i8}`（默认 `f32`）：A/B 的数据类型，同时决定第一次 MMAD 的累加类型（`f32` 或 `i32`）。
+  - `--quant-dtype {f16,bf16,i8}`（默认 `f16`）：量化后 C 与 D 的数据类型，同时决定最终 E 的类型（`f16`/`bf16` 时为 `f32`，`i8` 时为 `i32`）。
+  - `--relu-enable {0,1}`：是否在 L0C→L1 量化写出时启用随路 ReLU。
+  - `--quant-scale` / `--quant-offset`：仅 `basic_matmul_l0c2l1_fixpipe_per_tensor.py` 提供，分别为 `f32`/`i32` 标量，默认分别取 `[0, 1)` 与 `[-5, 5)` 的随机值（`torch.rand(1)` 与 `torch.randint(-5, 5)`）；`quant_offset` 仅在 `--quant-dtype i8` 时生效。`basic_matmul_l0c2l1_fixpipe_per_channel.py` 的量化参数由样例内部构造，无额外命令行参数。
 
 ### 执行示例
 
@@ -428,6 +450,71 @@ tla.mmad(l0_c, l0_a, l0_b, init_c=init_c, unit_flag=unit_flag)
 ```
 
 A 通路是 `GM → L1 → L0A` 的 `VectorLayout → VectorLayout` 扁平搬运，B 通路在 L0B 上仍是 `nZ` layout。
+
+### basic_matmul_l0c2l1_fixpipe_per_tensor
+
+**文件**：[`basic_matmul_l0c2l1_fixpipe_per_tensor.py`](./basic_matmul_l0c2l1_fixpipe_per_tensor.py)
+
+在 [`basic_matmul_l0c2l1`](basic_matmul_l0c2l1.py) 的 `E = (A * B) * D` 链路上，让第一次 MMAD 的结果在 L0C→L1 写出时经 FIXPIPE 完成随路量化（`QuantMode.PER_TENSOR`），量化后的 tile 直接作为第二次 MMAD 的 L0A 输入，不再绕回 GM。
+
+- A/B 共用一种数据类型（`f32` 或 `i8`），第一次 MMAD 的累加类型相应为 `f32` 或 `i32`；量化后的 C 与 D 共用一种数据类型（`f16`、`bf16` 或 `i8`）；最终 E 不携带 fixpipe 参数，保持第二次 MMAD 的累加类型。
+- 量化 L0C→L1 写出只支持 `zN` 布局，L1 上的 C tile 用 `tla.make_tensor_like(..., tla.arch.zN)` 标注。
+- `quant_scale` 与 `quant_offset` 是运行时标量而非 `tla.Constexpr`，一次编译的 kernel 可用于任意 scale；`quant_offset` 仅在目的类型为 `i8` 时生效，在中间结果饱和到 `[-256, 255]` 之后、饱和到 `[-128, 127]` 之前加入。
+- `relu_enable` 是 `tla.Constexpr`，在编译期选择带/不带 ReLU 的 fixpipe 通路；分支由原始累加值的符号决定，早于 8 bit 饱和与 offset。
+- 第一次 MMAD 与量化写出使用 unit flag（`0b11`），即由累加完成信号直接触发 fixpipe；第二次 MMAD 不带 unit flag，其 GM 写出由显式的 CUBE→FIX 同步保证。
+
+关键代码如下：
+
+```python
+tla.mmad(l0c_c, l0a_a, l0b_b, init_c=True, unit_flag=0b11)
+
+l1_c = tla.make_tensor_like(l1c_ptr, l0c_c, tla.arch.zN)
+tla.copy(
+   l1_c,
+   l0c_c,
+   tla.params.CopyL0C2DstParams(
+      unit_flag=0b11,
+      relu_enable=relu_enable,
+      quant_mode=tla.params.QuantMode.PER_TENSOR,
+      quant_scale=quant_scale,
+      quant_offset=quant_offset if dst_is_b8 else None,
+   ),
+)
+```
+
+矩阵尺寸固定为 `M/N/K = 50/60/64`（L1/L0 tile 取 64），单 block 执行。`--quant-scale` 与 `--quant-offset` 的默认值取随机数，且 scale 在 host 侧与 golden 中同样截断 f32 低 13 位，以匹配硬件字段。
+
+### basic_matmul_l0c2l1_fixpipe_per_channel
+
+**文件**：[`basic_matmul_l0c2l1_fixpipe_per_channel.py`](./basic_matmul_l0c2l1_fixpipe_per_channel.py)
+
+链路与 [`basic_matmul_l0c2l1_fixpipe_per_tensor`](basic_matmul_l0c2l1_fixpipe_per_tensor.py) 相同，区别在于量化模式为 `QuantMode.PER_CHANNEL`：每个输出通道对应一个 `u64` 量化字（低 32 位为 f32 scale，bit 46 为 8 bit 目的类型的符号选择位，[45:37] 为 9 bit 有符号 offset）。量化张量在 kernel 启动时以 `VectorLayout` 从 GM 扁平搬到 L1，再作为 fixpipe 的 dequant 张量读取；kernel 内按 `N_L1` 个字搬运，host 侧按问题的 N 构造。
+
+关键代码如下：
+
+```python
+# GM -> L1：逐通道量化系数，按 u64 字扁平搬运
+gm_quant = tla.tile_view(
+   mem_quant, tla.make_shape(L1_QUANT_SIZE), tla.make_coord(0)
+)
+l1_quant = tla.make_tensor_like(l1_quant_ptr, gm_quant, tla.arch.VectorLayout)
+tla.copy(l1_quant, gm_quant)
+
+# L0C -> L1，按通道量化
+l1_c = tla.make_tensor_like(l1c_ptr, l0c_c, tla.arch.zN)
+tla.copy(
+   l1_c,
+   l0c_c,
+   tla.params.CopyL0C2DstParams(
+      unit_flag=0b11,
+      relu_enable=relu_enable,
+      quant_mode=tla.params.QuantMode.PER_CHANNEL,
+      quant_tensor=l1_quant,
+   ),
+)
+```
+
+其余类型组合、尺寸（`M/N/K = 50/60/64`，tile 取 64）与同步方式同 per-tensor 版本。量化参数在样例内部构造：scale 取 `[-1, 1)` 的随机值并截断 f32 低 13 位，`i8` 目的类型再按通道生成 `[-10, 10)` 的 offset。
 
 ### basic_mmad_ptr
 

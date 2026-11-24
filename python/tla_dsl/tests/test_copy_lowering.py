@@ -1728,3 +1728,255 @@ def test_conv_prefetch_forwards_trailing_cache_policy(tmp_path) -> None:
         )
     )
     assert int(consts[operands[-1]]) == 1  # kCachePolicyNormal
+
+
+@tla.kernel
+def copy_l0c_to_l1_pertensor_kernel(gm_c: tla.Tensor) -> None:
+    """L0C -> L1 zN with PER_TENSOR quant; zN is the only L1 quant layout."""
+    gm_tile = tla.tile_view(gm_c, tla.make_shape(32, 32), tla.make_coord(0, 0))
+    l0c = tla.make_tensor_like(
+        tla.allocate((32, 32), tla.Float32, tla.AddressSpace.l0c, 1024),
+        gm_tile,
+        tla.arch.L0Clayout,
+    )
+    l1 = tla.make_tensor_like(
+        tla.allocate((32, 32), tla.Float16, tla.AddressSpace.l1, 512),
+        l0c,
+        tla.arch.zN,
+    )
+    with tla.cube():
+        tla.copy(
+            l1,
+            l0c,
+            tla.params.CopyL0C2DstParams(
+                quant_mode=tla.params.QuantMode.PER_TENSOR,
+                quant_scale=1.0,
+            ),
+        )
+
+
+def test_frontend_accepts_l0c_to_l1_pertensor() -> None:
+    """f32 accumulator -> f16 L1 zN with PER_TENSOR quant is a supported route."""
+    gm = _fp_tensor(tla.Float16, tla.arch.RowMajor)
+    mlir = copy_l0c_to_l1_pertensor_kernel.dump_mlir(type_args=(gm,))
+    assert "quant_mode = #tla.quant_mode<PER_TENSOR>" in mlir
+
+
+def _l0c_to_l1_perchannel_kernel():
+    """L0C -> L1 zN with PER_CHANNEL quant fed from a host ``quant`` tile."""
+
+    @tla.kernel
+    def kernel(gm_c: tla.Tensor, quant: tla.Tensor) -> None:
+        gm_tile = tla.tile_view(gm_c, tla.make_shape(32, 32), tla.make_coord(0, 0))
+        l0c = tla.make_tensor_like(
+            tla.allocate((32, 32), tla.Float32, tla.AddressSpace.l0c, 1024),
+            gm_tile,
+            tla.arch.L0Clayout,
+        )
+        l1 = tla.make_tensor_like(
+            tla.allocate((32, 32), tla.Float16, tla.AddressSpace.l1, 512),
+            l0c,
+            tla.arch.zN,
+        )
+        with tla.cube():
+            tla.copy(
+                l1,
+                l0c,
+                tla.params.CopyL0C2DstParams(
+                    quant_mode=tla.params.QuantMode.PER_CHANNEL,
+                    quant_tensor=quant,
+                ),
+            )
+
+    return kernel
+
+
+def test_frontend_accepts_l0c_to_l1_perchannel() -> None:
+    """The packed dequant run also feeds the L1 zN destination."""
+    gm = _fp_tensor(tla.Float16, tla.arch.RowMajor)
+    mlir = _l0c_to_l1_perchannel_kernel().dump_mlir(
+        type_args=(gm, _quant_tensor(tla.UInt64))
+    )
+    assert "quant_mode = #tla.quant_mode<PER_CHANNEL>" in mlir
+
+
+@tla.kernel
+def copy_l0c_to_l1_pertensor_nz_kernel(gm_c: tla.Tensor) -> None:
+    """L1 nZ destination: no quant route is registered for anything but zN."""
+    gm_tile = tla.tile_view(gm_c, tla.make_shape(32, 32), tla.make_coord(0, 0))
+    l0c = tla.make_tensor_like(
+        tla.allocate((32, 32), tla.Float32, tla.AddressSpace.l0c, 1024),
+        gm_tile,
+        tla.arch.L0Clayout,
+    )
+    l1 = tla.make_tensor_like(
+        tla.allocate((32, 32), tla.Float16, tla.AddressSpace.l1, 512),
+        l0c,
+        tla.arch.nZ,
+    )
+    with tla.cube():
+        tla.copy(
+            l1,
+            l0c,
+            tla.params.CopyL0C2DstParams(
+                quant_mode=tla.params.QuantMode.PER_TENSOR,
+                quant_scale=1.0,
+            ),
+        )
+
+
+def test_frontend_rejects_l0c_to_l1_quant_non_zn_layout() -> None:
+    """Quantized L0C -> L1 is zN-only; nZ falls back to the unquantized table."""
+    gm = _fp_tensor(tla.Float16, tla.arch.RowMajor)
+    with pytest.raises(
+        runtime_mod.TlaCoreAPIError,
+        match=r"unsupported fixpipe route",
+    ):
+        copy_l0c_to_l1_pertensor_nz_kernel.dump_mlir(type_args=(gm,))
+
+
+@tla.kernel
+def copy_l0c_to_l1_pertensor_int8_kernel(gm_c: tla.Tensor) -> None:
+    """f32 accumulator -> i8 L1 zN with PER_TENSOR quant, offset included."""
+    gm_tile = tla.tile_view(gm_c, tla.make_shape(32, 32), tla.make_coord(0, 0))
+    l0c = tla.make_tensor_like(
+        tla.allocate((32, 32), tla.Float32, tla.AddressSpace.l0c, 1024),
+        gm_tile,
+        tla.arch.L0Clayout,
+    )
+    l1 = tla.make_tensor_like(
+        tla.allocate((32, 32), tla.Int8, tla.AddressSpace.l1, 512),
+        l0c,
+        tla.arch.zN,
+    )
+    with tla.cube():
+        tla.copy(
+            l1,
+            l0c,
+            tla.params.CopyL0C2DstParams(
+                quant_mode=tla.params.QuantMode.PER_TENSOR,
+                quant_scale=0.5,
+                quant_offset=3,
+            ),
+        )
+
+
+def test_frontend_accepts_l0c_to_l1_pertensor_int8() -> None:
+    """An i8 destination is quantized through the same zN per-tensor route."""
+    gm = _fp_tensor(tla.Float16, tla.arch.RowMajor)
+    mlir = copy_l0c_to_l1_pertensor_int8_kernel.dump_mlir(type_args=(gm,))
+    assert "quant_mode = #tla.quant_mode<PER_TENSOR>" in mlir
+    assert "i8" in mlir
+
+
+@tla.kernel
+def copy_l0c_to_l1_perchannel_int8_kernel(
+    gm_c: tla.Tensor, quant: tla.Tensor
+) -> None:
+    """i32 accumulator -> i8 L1 zN with the dequant run read from L1."""
+    gm_tile = tla.tile_view(gm_c, tla.make_shape(32, 32), tla.make_coord(0, 0))
+    l0c = tla.make_tensor_like(
+        tla.allocate((32, 32), tla.Int32, tla.AddressSpace.l0c, 1024),
+        gm_tile,
+        tla.arch.L0Clayout,
+    )
+    l1 = tla.make_tensor_like(
+        tla.allocate((32, 32), tla.Int8, tla.AddressSpace.l1, 512),
+        l0c,
+        tla.arch.zN,
+    )
+    with tla.cube():
+        tla.copy(
+            l1,
+            l0c,
+            tla.params.CopyL0C2DstParams(
+                quant_mode=tla.params.QuantMode.PER_CHANNEL,
+                quant_tensor=quant,
+            ),
+        )
+
+
+def test_frontend_accepts_l0c_to_l1_perchannel_int8() -> None:
+    """The packed dequant run also feeds an i8 zN destination."""
+    gm = _fp_tensor(tla.Float16, tla.arch.RowMajor)
+    mlir = copy_l0c_to_l1_perchannel_int8_kernel.dump_mlir(
+        type_args=(gm, _quant_tensor(tla.UInt64))
+    )
+    assert "quant_mode = #tla.quant_mode<PER_CHANNEL>" in mlir
+    assert "i8" in mlir
+
+
+@tla.kernel
+def copy_l0c_to_l1_pertensor_f32_kernel(gm_c: tla.Tensor) -> None:
+    """f32 accumulator -> f32 L1 zN: no quant route is registered for it."""
+    gm_tile = tla.tile_view(gm_c, tla.make_shape(32, 32), tla.make_coord(0, 0))
+    l0c = tla.make_tensor_like(
+        tla.allocate((32, 32), tla.Float32, tla.AddressSpace.l0c, 1024),
+        gm_tile,
+        tla.arch.L0Clayout,
+    )
+    l1 = tla.make_tensor_like(
+        tla.allocate((32, 32), tla.Float32, tla.AddressSpace.l1, 512),
+        l0c,
+        tla.arch.zN,
+    )
+    with tla.cube():
+        tla.copy(
+            l1,
+            l0c,
+            tla.params.CopyL0C2DstParams(
+                quant_mode=tla.params.QuantMode.PER_TENSOR,
+                quant_scale=0.5,
+            ),
+        )
+
+
+def test_frontend_rejects_l0c_to_l1_pertensor_f32() -> None:
+    """An f32 destination is not a supported L1 quant route."""
+    gm = _fp_tensor(tla.Float16, tla.arch.RowMajor)
+    with pytest.raises(
+        runtime_mod.TlaCoreAPIError,
+        match=r"unsupported fixpipe route",
+    ):
+        copy_l0c_to_l1_pertensor_f32_kernel.dump_mlir(type_args=(gm,))
+
+
+@tla.kernel
+def copy_l0c_to_l1_perchannel_f32_kernel(
+    gm_c: tla.Tensor, quant: tla.Tensor
+) -> None:
+    """f32 accumulator -> f32 L1 zN: the per-channel dequant tile is not routed either."""
+    gm_tile = tla.tile_view(gm_c, tla.make_shape(32, 32), tla.make_coord(0, 0))
+    l0c = tla.make_tensor_like(
+        tla.allocate((32, 32), tla.Float32, tla.AddressSpace.l0c, 1024),
+        gm_tile,
+        tla.arch.L0Clayout,
+    )
+    l1 = tla.make_tensor_like(
+        tla.allocate((32, 32), tla.Float32, tla.AddressSpace.l1, 512),
+        l0c,
+        tla.arch.zN,
+    )
+    with tla.cube():
+        tla.copy(
+            l1,
+            l0c,
+            tla.params.CopyL0C2DstParams(
+                quant_mode=tla.params.QuantMode.PER_CHANNEL,
+                quant_tensor=quant,
+            ),
+        )
+
+
+def test_frontend_rejects_l0c_to_l1_perchannel_f32() -> None:
+    """VQF322F32_PRE is not reachable from the frontend."""
+    gm = _fp_tensor(tla.Float16, tla.arch.RowMajor)
+    with pytest.raises(
+        runtime_mod.TlaCoreAPIError,
+        match=r"unsupported fixpipe route",
+    ):
+        copy_l0c_to_l1_perchannel_f32_kernel.dump_mlir(
+            type_args=(gm, _quant_tensor(tla.UInt64))
+        )
+
+

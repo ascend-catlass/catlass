@@ -159,6 +159,7 @@ fixpipe 支持随路 quant 与 relu；quant 模式支持 `NO_QUANT`、`PER_TENSO
 - 目的为 `(ub, ColumnMajor)` 时仅支持 `nosplit`。
 - UB 的 `split` 模式下禁用任何 quant_mode/relu，也不做纯 cast，仅允许
   `f32`→`f32` 与 `i32`→`i32`。
+- 目的为 L1 的量化拷贝仅支持 `zN` 布局。
 
 |`dst`|`dst_layout`|`split_mode`|`quant_mode`|`relu`|`src_dtype`:`dst_dtype`|
 |-----|------------|------------|------------|------|-----------------------|
@@ -189,6 +190,10 @@ fixpipe 支持随路 quant 与 relu；quant 模式支持 `NO_QUANT`、`PER_TENSO
 |`ub`|`RowMajor`|`nosplit`|`PER_CHANNEL`|`True`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `f16`,`bf16`|
 |`ub`|`ColumnMajor`|`nosplit`|`PER_CHANNEL`|`False`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `f16`,`bf16`|
 |`ub`|`ColumnMajor`|`nosplit`|`PER_CHANNEL`|`True`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `f16`,`bf16`|
+|`l1`|`zN`|`-`|`PER_TENSOR`|`False`|`f32`: `f16`,`bf16`,`i8`<br>`i32`: `f16`,`bf16`,`i8`|
+|`l1`|`zN`|`-`|`PER_TENSOR`|`True`|`f32`: `f16`,`bf16`,`i8`<br>`i32`: `f16`,`bf16`,`i8`|
+|`l1`|`zN`|`-`|`PER_CHANNEL`|`False`|`f32`: `f16`,`bf16`,`i8`<br>`i32`: `f16`,`bf16`,`i8`|
+|`l1`|`zN`|`-`|`PER_CHANNEL`|`True`|`f32`: `f16`,`bf16`,`i8`<br>`i32`: `f16`,`bf16`,`i8`|
 
 Vector 拷贝通路
 

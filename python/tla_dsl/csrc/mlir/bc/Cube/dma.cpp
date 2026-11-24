@@ -118,6 +118,35 @@ CATLASS_DEVICE void copyL0CToL1(
         ReluEnable>{}(dstTensor, srcTensor, unitFlag);
 }
 
+// L0C -> L1 per-tensor quant.
+template <class ArchTag, LayoutTag DstLayout, typename ElementSrc, typename ElementDst, bool ReluEnable = false>
+CATLASS_DEVICE void copyL0CToL1QuantPerTensor(
+    memref_t<__cc__ ElementSrc, 1>* src, memref_t<__cbuf__ ElementDst, 1>* dst, const TensorDesc& srcDesc,
+    const TensorDesc& dstDesc, uint8_t unitFlag, float quantScale, int32_t quantOffset)
+{
+    auto srcTensor = makeL0CTensor<LayoutTag::L0Clayout, ElementSrc>(src, srcDesc);
+    auto dstTensor = makeL1Tensor<DstLayout, ElementDst>(dst, dstDesc);
+    using CopyL0CToL1Tla = Catlass::Gemm::Tile::CopyL0CToL1Tla<
+        ArchTag, decltype(srcTensor), decltype(dstTensor), Catlass::Gemm::Tile::ScaleGranularity::PER_TENSOR,
+        ReluEnable>;
+    typename CopyL0CToL1Tla::Params params(quantScale, quantOffset);
+    CopyL0CToL1Tla{params}(dstTensor, srcTensor, unitFlag);
+}
+
+// L0C -> L1 per-channel quant.
+template <class ArchTag, LayoutTag DstLayout, typename ElementSrc, typename ElementDst, bool ReluEnable = false>
+CATLASS_DEVICE void copyL0CToL1QuantPerChannel(
+    memref_t<__cc__ ElementSrc, 1>* src, memref_t<__cbuf__ ElementDst, 1>* dst, memref_t<__cbuf__ uint64_t, 1>* scale,
+    const TensorDesc& srcDesc, const TensorDesc& dstDesc, const TensorDesc& scaleDesc, uint8_t unitFlag)
+{
+    auto srcTensor = makeL0CTensor<LayoutTag::L0Clayout, ElementSrc>(src, srcDesc);
+    auto dstTensor = makeL1Tensor<DstLayout, ElementDst>(dst, dstDesc);
+    auto quantTensor = makeL1Tensor<LayoutTag::VectorLayout, uint64_t>(scale, scaleDesc);
+    Catlass::Gemm::Tile::CopyL0CToL1Tla<
+        ArchTag, decltype(srcTensor), decltype(dstTensor), Catlass::Gemm::Tile::ScaleGranularity::PER_CHANNEL,
+        ReluEnable>{}(dstTensor, srcTensor, quantTensor, unitFlag);
+}
+
 template <
     class ArchTag, LayoutTag DstLayout, Catlass::Gemm::Tile::CopyL0CToUBMode Mode, typename ElementSrc,
     typename ElementDst, bool ReluEnable = false>
@@ -571,6 +600,54 @@ REGISTER_L1_TO_L0B_MX(nZ, float4_e1m2x2_t)
     REGISTER_L0C_TO_L1_NORELU(LayoutDst, DTypeSrc, DTypeDst) \
     REGISTER_L0C_TO_L1_RELU(LayoutDst, DTypeSrc, DTypeDst)
 
+#define REGISTER_L0C_TO_L1_PER_TENSOR_NORELU(LayoutDst, DTypeSrc, DTypeDst)                                   \
+    [aicore] __attribute__((always_inline)) void                                                              \
+        _mlir_ciface_copy_l0c_to_l1_##LayoutDst##_pertensor_##DTypeSrc##_##DTypeDst(                          \
+            memref_t<__cc__ DTypeSrc, 1>* src, memref_t<__cbuf__ DTypeDst, 1>* dst, DESC_ABI_PARAMS(src),     \
+            DESC_ABI_PARAMS(dst), uint8_t unitFlag, float quantScale, int32_t quantOffset)                    \
+    {                                                                                                         \
+        copyL0CToL1QuantPerTensor<Catlass::Arch::Ascend950, LayoutTag::LayoutDst, DTypeSrc, DTypeDst, false>( \
+            src, dst, TENSOR_DESC_12(src), TENSOR_DESC_12(dst), unitFlag, quantScale, quantOffset);           \
+    }
+
+#define REGISTER_L0C_TO_L1_PER_TENSOR_RELU(LayoutDst, DTypeSrc, DTypeDst)                                    \
+    [aicore] __attribute__((always_inline)) void                                                             \
+        _mlir_ciface_copy_l0c_to_l1_##LayoutDst##_pertensor_relu_##DTypeSrc##_##DTypeDst(                    \
+            memref_t<__cc__ DTypeSrc, 1>* src, memref_t<__cbuf__ DTypeDst, 1>* dst, DESC_ABI_PARAMS(src),    \
+            DESC_ABI_PARAMS(dst), uint8_t unitFlag, float quantScale, int32_t quantOffset)                   \
+    {                                                                                                        \
+        copyL0CToL1QuantPerTensor<Catlass::Arch::Ascend950, LayoutTag::LayoutDst, DTypeSrc, DTypeDst, true>( \
+            src, dst, TENSOR_DESC_12(src), TENSOR_DESC_12(dst), unitFlag, quantScale, quantOffset);          \
+    }
+
+#define REGISTER_L0C_TO_L1_PER_TENSOR(LayoutDst, DTypeSrc, DTypeDst)    \
+    REGISTER_L0C_TO_L1_PER_TENSOR_NORELU(LayoutDst, DTypeSrc, DTypeDst) \
+    REGISTER_L0C_TO_L1_PER_TENSOR_RELU(LayoutDst, DTypeSrc, DTypeDst)
+
+#define REGISTER_L0C_TO_L1_PER_CHANNEL_NORELU(LayoutDst, DTypeSrc, DTypeDst)                                       \
+    [aicore] __attribute__((always_inline)) void                                                                   \
+        _mlir_ciface_copy_l0c_to_l1_##LayoutDst##_perchannel_##DTypeSrc##_##DTypeDst(                              \
+            memref_t<__cc__ DTypeSrc, 1>* src, memref_t<__cbuf__ DTypeDst, 1>* dst, DESC_ABI_PARAMS(src),          \
+            DESC_ABI_PARAMS(dst), uint8_t unitFlag, memref_t<__cbuf__ uint64_t, 1>* quant, DESC_ABI_PARAMS(quant)) \
+    {                                                                                                              \
+        copyL0CToL1QuantPerChannel<Catlass::Arch::Ascend950, LayoutTag::LayoutDst, DTypeSrc, DTypeDst, false>(     \
+            src, dst, quant, TENSOR_DESC_12(src), TENSOR_DESC_12(dst), TENSOR_DESC_12(quant), unitFlag);           \
+    }
+
+#define REGISTER_L0C_TO_L1_PER_CHANNEL_RELU(LayoutDst, DTypeSrc, DTypeDst)                                         \
+    [aicore] __attribute__((always_inline)) void                                                                   \
+        _mlir_ciface_copy_l0c_to_l1_##LayoutDst##_perchannel_relu_##DTypeSrc##_##DTypeDst(                         \
+            memref_t<__cc__ DTypeSrc, 1>* src, memref_t<__cbuf__ DTypeDst, 1>* dst, DESC_ABI_PARAMS(src),          \
+            DESC_ABI_PARAMS(dst), uint8_t unitFlag, memref_t<__cbuf__ uint64_t, 1>* quant, DESC_ABI_PARAMS(quant)) \
+    {                                                                                                              \
+        copyL0CToL1QuantPerChannel<Catlass::Arch::Ascend950, LayoutTag::LayoutDst, DTypeSrc, DTypeDst, true>(      \
+            src, dst, quant, TENSOR_DESC_12(src), TENSOR_DESC_12(dst), TENSOR_DESC_12(quant), unitFlag);           \
+    }
+
+#define REGISTER_L0C_TO_L1_PER_CHANNEL(LayoutDst, DTypeSrc, DTypeDst)    \
+    REGISTER_L0C_TO_L1_PER_CHANNEL_NORELU(LayoutDst, DTypeSrc, DTypeDst) \
+    REGISTER_L0C_TO_L1_PER_CHANNEL_RELU(LayoutDst, DTypeSrc, DTypeDst)
+
 #define REGISTER_L0C_TO_UB_NORELU(LayoutDst, mode, MODE, DTypeSrc, DTypeDst)                                      \
     [aicore] __attribute__((always_inline)) void                                                                  \
         _mlir_ciface_copy_l0c_to_ub_##LayoutDst##_##mode##_##DTypeSrc##_##DTypeDst(                               \
@@ -658,6 +735,23 @@ REGISTER_L0C_TO_L1(zN, float, float)
 REGISTER_L0C_TO_L1(zN, float, half)
 REGISTER_L0C_TO_L1(zN, float, bf16)
 REGISTER_L0C_TO_L1(zN, int32_t, int32_t)
+
+// L0C -> L1 quant, only dst layout zN is enabled
+REGISTER_L0C_TO_L1_PER_TENSOR(zN, float, float)
+REGISTER_L0C_TO_L1_PER_TENSOR(zN, float, half)
+REGISTER_L0C_TO_L1_PER_TENSOR(zN, float, bf16)
+REGISTER_L0C_TO_L1_PER_TENSOR(zN, float, int8_t)
+REGISTER_L0C_TO_L1_PER_TENSOR(zN, int32_t, half)
+REGISTER_L0C_TO_L1_PER_TENSOR(zN, int32_t, bf16)
+REGISTER_L0C_TO_L1_PER_TENSOR(zN, int32_t, int8_t)
+
+REGISTER_L0C_TO_L1_PER_CHANNEL(zN, float, float)
+REGISTER_L0C_TO_L1_PER_CHANNEL(zN, float, half)
+REGISTER_L0C_TO_L1_PER_CHANNEL(zN, float, bf16)
+REGISTER_L0C_TO_L1_PER_CHANNEL(zN, float, int8_t)
+REGISTER_L0C_TO_L1_PER_CHANNEL(zN, int32_t, half)
+REGISTER_L0C_TO_L1_PER_CHANNEL(zN, int32_t, bf16)
+REGISTER_L0C_TO_L1_PER_CHANNEL(zN, int32_t, int8_t)
 
 // RowMajor nosplit (the only split mode ReLU is registered for)
 REGISTER_L0C_TO_UB(RowMajor, nosplit, NO_SPLIT, float, float)

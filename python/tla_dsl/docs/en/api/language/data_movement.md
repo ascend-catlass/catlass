@@ -185,6 +185,7 @@ The fixpipe has these rules:
 - If the dst is ub, there's an extra `split_mode`, support nosplit(`NO_SPLIT_VEC_0`, `NO_SPLIT_VEC_1`), and split(`SPLIT_M`, `SPLIT_N`)
 - If dst is (ub, ColumnMajor), only support `nosplit` mode
 - In to ub is `split` mode, any quant_mode/relu is disabled, neither pure cast, so only `f32`->`f32` and `i32`->`i32` is enabled
+- A quantized copy to l1 supports only the `zN` layout
 
 |`dst`|`dst_layout`|`split_mode`|`quant_mode`|`relu`|`src_dtype`:`dst_dtype`|
 |-----|------------|------------|------------|------|-----------------------|
@@ -215,6 +216,10 @@ The fixpipe has these rules:
 |`ub`|`RowMajor`|`nosplit`|`PER_CHANNEL`|`True`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `f16`,`bf16`|
 |`ub`|`ColumnMajor`|`nosplit`|`PER_CHANNEL`|`False`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `f16`,`bf16`|
 |`ub`|`ColumnMajor`|`nosplit`|`PER_CHANNEL`|`True`|`f32`: `f32`,`f16`,`bf16`<br>`i32`: `f16`,`bf16`|
+|`l1`|`zN`|`-`|`PER_TENSOR`|`False`|`f32`: `f16`,`bf16`,`i8`<br>`i32`: `f16`,`bf16`,`i8`|
+|`l1`|`zN`|`-`|`PER_TENSOR`|`True`|`f32`: `f16`,`bf16`,`i8`<br>`i32`: `f16`,`bf16`,`i8`|
+|`l1`|`zN`|`-`|`PER_CHANNEL`|`False`|`f32`: `f16`,`bf16`,`i8`<br>`i32`: `f16`,`bf16`,`i8`|
+|`l1`|`zN`|`-`|`PER_CHANNEL`|`True`|`f32`: `f16`,`bf16`,`i8`<br>`i32`: `f16`,`bf16`,`i8`|
 
 
 Supported vector copy routes

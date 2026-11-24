@@ -56,6 +56,20 @@ FIXPIPE_QUANT_SRC_DST = (
     ("i32", "u8"),
 )
 
+#: The L0C -> L1 quantized-store examples fix their own shape (M=50/N=60/K=64)
+#: and the zN layout, so a case varies only the dtype pair and the relu flag.
+#: `--src-dtype` names the first operand (f32 -> f32 accumulator, i8 -> i32) and
+#: `--quant-dtype` the tile the fixpipe writes to L1, which both routes support
+#: for f16/bf16/i8 -- there is no u8 or f32 destination on this route.
+L0C2L1_FIXPIPE_QUANT_SRC_DST = (
+    ("f32", "f16"),
+    ("f32", "bf16"),
+    ("f32", "i8"),
+    ("i8", "f16"),
+    ("i8", "bf16"),
+    ("i8", "i8"),
+)
+
 #: The basic_mixed per-tensor example ships float destinations only.
 MIXED_FIXPIPE_QUANT_SRC_DST = (
     ("f32", "f32"),
@@ -458,6 +472,35 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
     # basic_mmad_l0c2l1: cube-only E=(A@B)@D, L0C->L1 (fixpipe) staging reused
     # as the second mmad's LHS; single static tile (M=50/N=60/K=64).
     yield ("mmad-l0c2l1", [["tla/kernel/matmul/basic_mmad/basic_matmul_l0c2l1.py", *dev]])
+
+    # --- basic_mmad L0C->L1 fixpipe quant, with and without relu ---
+    # Same fixpipe route as the per-tensor / per-channel cases below, except the
+    # quantized tile lands in L1 and becomes the second mmad's LHS instead of
+    # leaving for GM. `--src-dtype` picks the accumulator the same way
+    # `--dtype-ab` does above (f32 -> f32, i8 -> i32), and the example itself
+    # fixes the shape and the zN store, so only dtype pair and relu vary.
+    for src, dst in L0C2L1_FIXPIPE_QUANT_SRC_DST:
+        for relu in (0, 1):
+            yield (
+                f"mmad-l0c2l1-fixpipe-per-tensor-{src}-{dst}-relu{relu}",
+                [[
+                    "tla/kernel/matmul/basic_mmad/basic_matmul_l0c2l1_fixpipe_per_tensor.py",
+                    "--src-dtype", src, "--quant-dtype", dst,
+                    "--relu-enable", str(relu),
+                    *dev,
+                ]],
+            )
+    for src, dst in L0C2L1_FIXPIPE_QUANT_SRC_DST:
+        for relu in (0, 1):
+            yield (
+                f"mmad-l0c2l1-fixpipe-per-channel-{src}-{dst}-relu{relu}",
+                [[
+                    "tla/kernel/matmul/basic_mmad/basic_matmul_l0c2l1_fixpipe_per_channel.py",
+                    "--src-dtype", src, "--quant-dtype", dst,
+                    "--relu-enable", str(relu),
+                    *dev,
+                ]],
+            )
 
     # --- basic_mmad fixpipe per-tensor quant, with and without relu ---
     # `--dtype-ab` picks the accumulator (f32 -> f32, i8 -> i32) and with it the
