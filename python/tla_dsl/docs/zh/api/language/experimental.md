@@ -23,7 +23,7 @@ Do not regenerate this file from a glossary.
 
 功能说明：
 
-将 L1 特征图 tile 以 img2col 展开加载到 L0A，供卷积使用。
+将 L1 特征图 tile 以 img2col 展开搬入 L0A 或 L0B。
 
 函数原型：
 
@@ -33,9 +33,8 @@ tla.experimental.img2col(dst: Tensor, src: Tensor, params: Img2colParams) -> Non
 
 参数说明：
 
-- `dst`（`Tensor`）：L0A tile，标签 `zN`，形状 `(M, K)`。形状给出加载范围，
-  coord 给出起点，因此同一 L1 tile 上瞄准不同窗口即可对隐式 GEMM 的 M/K 做分块，
-  不增加额外 L1 流量。必填。
+- `dst`（`Tensor`）：形状为 `(M, K)` 的 L0A `zN` 或 L0B `nZ` tile。形状和
+  坐标确定搬入窗口的存储布局和起点。L0B 通路自动将数据排列为 `nZ`。必填。
 - `src`（`Tensor`）：L1 特征图 tile，标签 `zNUnAlign`，NC1HWC0 嵌套为
   `((h*w, 1), (C0, c1))`。必填。
 - `params`（`Img2colParams`）：卷积几何。必填。
@@ -44,23 +43,37 @@ tla.experimental.img2col(dst: Tensor, src: Tensor, params: Img2colParams) -> Non
   - `stride_hw`（`tuple`）：步长 `(sH, sW)`。默认 `(1, 1)`。
   - `dilation_hw`（`tuple`）：膨胀 `(dH, dW)`。默认 `(1, 1)`。
   - `pad`（`tuple`）：填充 `(left, right, top, bottom)`。默认 `(0, 0, 0, 0)`。
-  - `pad_value`（`int`）：填充值。默认 `0`。
+  - `pad_value`（`int`）：填充值的位模式。默认 `0`。
+  - `repeat_load_stride`（`int`）：相邻两次搬运的源起点间距。沿 M 时以 16 个元素为单位，
+    沿 K 时以一个源 C0 为单位。必填。
+  - `repeat_load_time`（`int`）：加载次数。`0` 表示不执行加载。必填。
+  - `repeat_load_axis`：`tla.experimental.height` 沿目标 M 轴重复加载，
+    `tla.experimental.width` 沿目标 K 轴重复加载。必填。
 
 约束说明：
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
 - 须在 `tla.cube()` 内调用。
-- 元素类型须为 `f32` / `f16` / `bf16`（仅 2、4 字节；无 int8/fp8 路径）。
-- `src` 与 `dst` 须同元素类型。
-- 源通道来自 NC1HWC0 源形状，与目的 K 窗口无关。源 C0/C1 与目的 K 范围及 K
-  坐标须为静态；`filter_hw` 须为编译期整数。
-- 目的 K 范围与起始坐标须按 C0 对齐：窗口可起止于同一 C1 切片
-  （`kh * kw * C0` 个元素）内部，也可跨越切片边界，只须落在源完整 K 轴内。
-  源通道与目的 K 范围须在 1..65535；目的 K 坐标须在 0..65535。
-- `fmap_hw` 各分量须在 1..65535，stride / dilation 在 1..255，pad 各分量在
-  0..255。编译期常量超范围会被拒绝；运行期取值满足上述范围为调用方前置条件，
-  违反则行为未定义。
+- `src` 与 `dst` 须同元素类型。两条通路均支持 `f16`、`bf16`、`f32`、`i32` 和
+  `u32`。L0A 还支持 `i8`、`u8`、`hif8`、`f8e4m3fn` 和 `f8e5m2`。
+- 源通道按 NC1HWC0 的完整通道块组织，通道数须在 1..65535。源 C0/C1、目的 K 范围和坐标须为静态。
+  源视图须包含至少 `H * W` 个空间位置。源视图包含多个 C1 时，相邻 C1 的间距须为
+  `H * W * C0` 个元素。该约束适用于任何目的 K 窗口。只搬运一个 C1 的空间子区域时，
+  可以传入仅包含该 C1 的源视图。
+- K 搬运长度为目的逻辑 K 长度向上对齐到源 C0 后的长度。目的存储须容纳该长度。
+  例如，FP32 的 8 个通道可以搬入补齐到 16 列的 L0B 存储。K 起点在 L0A 上须按 C0
+  对齐，在 L0B 上须按 16 个元素对齐。每轮 K 窗口均须落在源通道和卷积核共同决定的
+  展开矩阵内，包括沿 K 重复搬运的最后一轮。K 搬运长度须在 1..65535，
+  目的 K 坐标须在 0..65535。目的 M 范围须在 0..65535，坐标须在 0..32767。
+- `fmap_hw` 各分量须在 1..32767，步长各分量须在 1..63，膨胀系数各分量须在
+  1..255，填充宽度各分量须在 0..255。编译器校验静态值，运行时值须满足同样约束。
 - 卷积核尺寸为编译期整数，范围 1..511。
+- `repeat_load_stride` 和 `repeat_load_time` 须为编译期整数，范围分别为
+  0..65535 和 0..255。三个字段的默认值 `-1`、`-1` 和 `None` 会在追踪时触发报错。
+- 外层分形步长取自目的布局，包括父矩阵子视图。字节步长须为 512 的正整数倍，
+  换算为分形数后须能用无符号 16 位整数表示。
+- 有效地址包括 tensor 坐标和指针偏移。L1 有效地址须按 32 字节对齐，
+  L0A 和 L0B 有效地址须按 512 字节对齐。运行时地址由调用方保证对齐。
 
 调用示例：
 
@@ -68,7 +81,9 @@ tla.experimental.img2col(dst: Tensor, src: Tensor, params: Img2colParams) -> Non
 with tla.cube():
     # l1_fmap 为 NC1HWC0；l1_filter 为 (K, N) 权重矩阵。
     tla.experimental.img2col(l0_a, l1_fmap, tla.experimental.Img2colParams(
-        fmap_hw=(hi, wi), filter_hw=(3, 3), pad=(1, 1, 1, 1)))
+        fmap_hw=(hi, wi), filter_hw=(3, 3), pad=(1, 1, 1, 1),
+        repeat_load_stride=0, repeat_load_time=1,
+        repeat_load_axis=tla.experimental.height))
     tla.copy(l0_b, l1_filter)
     tla.mmad(l0_c, l0_a, l0_b, init_c=True)
 ```

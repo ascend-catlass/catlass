@@ -24,12 +24,6 @@ import argparse
 import sys
 from pathlib import Path
 
-_DSL_EXAMPLE_PATH = str(
-    next(p for p in Path(__file__).resolve().parents if (p / "helpers").is_dir())
-)
-if _DSL_EXAMPLE_PATH not in sys.path:
-    sys.path.append(_DSL_EXAMPLE_PATH)
-
 import catlass.tla as tla
 import torch
 import torch.nn.functional as F
@@ -56,7 +50,9 @@ FMAP_ROWS = HI * WI
 
 
 @tla.kernel
-def basic_conv2d(fmap: tla.Tensor, filt: tla.Tensor, out: tla.Tensor) -> None:
+def basic_conv2d(
+    fmap: tla.Tensor, filt: tla.Tensor, out: tla.Tensor, pad_value: tla.Constexpr = 0
+) -> None:
     l1_loaded = tla.flag("l1_loaded", tla.arch.MTE2, tla.arch.MTE1)
     l0_loaded = tla.flag("l0_loaded", tla.arch.MTE1, tla.arch.CUBE)
     l0c_ready = tla.flag("l0c_ready", tla.arch.CUBE, tla.arch.FIX)
@@ -113,6 +109,10 @@ def basic_conv2d(fmap: tla.Tensor, filt: tla.Tensor, out: tla.Tensor) -> None:
                 stride_hw=(STRIDE_H, STRIDE_W),
                 dilation_hw=(DIL_H, DIL_W),
                 pad=(PAD_L, PAD_R, PAD_T, PAD_B),
+                pad_value=pad_value,
+                repeat_load_stride=0,
+                repeat_load_time=1,
+                repeat_load_axis=tla.experimental.height,
             ),
         )
         l0_b = tla.make_tensor_like(l0b_ptr, gm_b, tla.arch.nZ)
@@ -156,6 +156,12 @@ def to_filter_matrix(w: torch.Tensor) -> torch.Tensor:
 
 def run(args: argparse.Namespace) -> int:
     from catlass.tla.runtime import from_dlpack
+
+    example_root = str(
+        next(p for p in Path(__file__).resolve().parents if (p / "helpers").is_dir())
+    )
+    if example_root not in sys.path:
+        sys.path.append(example_root)
     from helpers import compare
 
     torch.npu.set_device(args.device)

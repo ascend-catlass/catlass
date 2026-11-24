@@ -149,7 +149,12 @@ def conv_k_windows(
                 l0_a,
                 l1_fmap,
                 tla.experimental.Img2colParams(
-                    fmap_hw=(HI, WI), filter_hw=(KH, KW), pad=(0, 0, 0, 0)
+                    fmap_hw=(HI, WI),
+                    filter_hw=(KH, KW),
+                    pad=(0, 0, 0, 0),
+                    repeat_load_stride=0,
+                    repeat_load_time=1,
+                    repeat_load_axis=tla.experimental.height,
                 ),
             )
             tla.set_flag(l0a_ready)

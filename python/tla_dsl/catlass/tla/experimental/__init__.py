@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any
 
 from catlass._mlir import ir as mlir_ir
@@ -10,6 +11,8 @@ from catlass._mlir import ir as mlir_ir
 from ... import runtime as _runtime
 from ...base_dsl.op import dsl_user_op
 from ...core_api import (
+    _IMG2COL_L0A_DTYPES,
+    _IMG2COL_L0B_DTYPES,
     IndexLike,
     MaskSSA,
     VectorSSA,
@@ -28,10 +31,10 @@ from ...core_api import (
     create_mask,
 )
 from ...params import CastParams, RegSlot, RoundMode
-from ...types import TlaVectorSSATypeDescriptor
+from ...types import TlaVectorSSATypeDescriptor, dtype_size_bytes
 from ..typing import Tensor
 
-__all__ = ["Img2colParams", "img2col", "mx_to", "exp_sub"]
+__all__ = ["Img2colParams", "exp_sub", "height", "img2col", "mx_to", "width"]
 
 
 @dsl_user_op
@@ -177,19 +180,30 @@ def mx_to(
     _op_error("mx_to", "unsupported tensor layout for whole-tile bitcode conversion")
 
 
+class _RepeatLoadAxis(Enum):
+    HEIGHT = 0
+    WIDTH = 1
+
+
+height = _RepeatLoadAxis.HEIGHT
+width = _RepeatLoadAxis.WIDTH
+
+
 @dataclass(frozen=True)
 class Img2colParams:
     """Convolution geometry for `tla.experimental.img2col`.
 
-    `filter_hw` is required; everything else defaults to the no-op convolution
-    (unit stride, unit dilation, no padding), so a 1x1 conv needs only the
-    filter shape.
+    `fmap_hw`, `filter_hw` and the three repeat-load fields are required.
+    Convolution stride and dilation default to one, and padding defaults to zero.
 
     Feature-map extent, stride, dilation and padding accept runtime values.
     Compile-time values are checked against the documented ranges. For
     runtime values, callers must satisfy those ranges; violating them is
     undefined behavior. The filter shape is static so the K axis extent can be
     validated before the load.
+
+    For a single load, set `repeat_load_stride=0`, `repeat_load_time=1`
+    and `repeat_load_axis=tla.experimental.height`.
     """
 
     fmap_hw: tuple[IndexLike, IndexLike]
@@ -199,6 +213,9 @@ class Img2colParams:
     # left, right, top, bottom
     pad: tuple[IndexLike, IndexLike, IndexLike, IndexLike] = (0, 0, 0, 0)
     pad_value: int = 0
+    repeat_load_stride: int = 0
+    repeat_load_time: int = 1
+    repeat_load_axis: _RepeatLoadAxis = height
 
 
 @dsl_user_op
@@ -211,13 +228,13 @@ def img2col(
 ) -> None:
     """Directory: Experimental APIs
     Description:
-        Load an L1 feature-map tile into L0A with img2col expansion for convolution.
+        Load an L1 feature-map tile into L0A or L0B with img2col expansion.
 
         Parameters:
-        - `dst` (`Tensor`): L0A tile, tagged `zN`, shaped `(M, K)`. Its shape gives
-          the load's extents and its coord gives the start points, so M and K of the
-          implicit GEMM are tiled by aiming this at a different window of the same
-          L1 tile -- at no extra L1 traffic. Required.
+        - `dst` (`Tensor`): L0A `zN` or L0B `nZ` tile shaped `(M, K)`,
+          where `(M, K)` is the expanded matrix window. The L0B path
+          automatically arranges the data in `nZ`. The destination layout
+          and coordinate specify the storage and window start. Required.
         - `src` (`Tensor`): L1 feature-map tile, tagged `zNUnAlign`, which is the
           NC1HWC0 nesting `((h*w, 1), (C0, c1))`. Required.
         - `params` (`Img2colParams`): Convolution geometry. Required.
@@ -228,36 +245,61 @@ def img2col(
           - `dilation_hw` (`tuple`): Dilation `(dH, dW)`. Default `(1, 1)`.
           - `pad` (`tuple`): Padding `(left, right, top, bottom)`. Default
             `(0, 0, 0, 0)`.
-          - `pad_value` (`int`): Padding fill value. Default `0`.
+          - `pad_value` (`int`): Bit pattern of the padding fill value. Default `0`.
+          - `repeat_load_stride` (`int`): Distance between successive source
+            starts, in units of 16 elements along M or one source C0 along K.
+            Required.
+          - `repeat_load_time` (`int`): Number of loads. `0` performs no load. Required.
+          - `repeat_load_axis`: `tla.experimental.height` along M or
+            `tla.experimental.width` along K of the expanded matrix. Required.
 
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function.
         - Must be called inside `tla.cube()`.
-        - Element type must be `f32`, `f16` or `bf16` (2- and 4-byte elements
-          only; no int8/fp8 route).
+        - L0A and L0B support `f16`, `bf16`, `f32`, `i32` and `u32`.
+          L0A also supports `i8`, `u8`, `hif8`, `f8e4m3fn` and `f8e5m2`.
         - `src` and `dst` must share an element type.
         - Source channels come from the NC1HWC0 source shape, independently of
           the destination K window. Source C0/C1 and destination K extent and
           K coordinate must be static. `filter_hw` must be compile-time integers.
-        - The destination K extent and starting coordinate are C0-aligned: a
-          window may start and end inside one C1 slice (`kh * kw * C0`
-          elements) and may straddle a slice boundary, as long as it stays
-          within the source's full K axis. Source channels and destination K
-          extent must fit in 1..65535; the destination K coordinate must fit
-          in 0..65535.
-        - `fmap_hw` entries must be in 1..65535, stride and dilation entries
-          in 1..255, and each padding entry in 0..255. Compile-time constants
-          outside these ranges are rejected. For runtime values, satisfying
-          these ranges is a caller precondition; violating them is undefined
-          behavior.
+        - The source view must contain at least `H * W` spatial positions.
+          If the source view contains multiple C1 slices, its C1 stride must
+          equal `H * W * C0` elements regardless of the destination K window.
+          A spatial crop of one C1 can use a source view containing just that slice.
+        - The K transfer length is the destination logical K extent rounded up
+          to a source C0. The storage must fit that length. For example,
+          8 FP32 channels can be loaded into L0B storage padded to 16 columns.
+          The K start must align to C0 for L0A or 16 elements for L0B.
+          Every K window, including the last load in a width repeat, must fit
+          within the full K axis of the source channel/filter combination.
+          Source channels and the K transfer length must fit in 1..65535.
+          The destination K coordinate must fit in 0..65535.
+        - The destination M extent and coordinate must be in 0..65535
+          and 0..32767, respectively.
+        - `fmap_hw` entries must be in 1..32767, stride entries in 1..63,
+          dilation entries in 1..255, and padding entries in 0..255. The
+          compiler checks static values. Runtime values must satisfy the same
+          constraints.
         - Filter extents are compile-time integers in 1..511.
+        - `repeat_load_stride` and `repeat_load_time` must be compile-time
+          integers in 0..65535 and 0..255, respectively. Tracing rejects the
+          repeat-load defaults `-1`, `-1` and `None`.
+        - The destination layout supplies the outer fractal stride (along K for
+          L0A or M for L0B), including for a view into a parent matrix. Its byte
+          stride must be a positive multiple of 512 and fit in an unsigned
+          16-bit field in fractal units.
+        - Effective addresses, including any tensor coordinates and pointer
+          offsets, must align to 32 bytes for L1 and 512 bytes for L0A or L0B.
+          The caller must ensure this alignment for runtime addresses.
 
         Example:
         ```python
         with tla.cube():
             # l1_fmap holds NC1HWC0; l1_filter holds the (K, N) weight matrix.
             tla.experimental.img2col(l0_a, l1_fmap, tla.experimental.Img2colParams(
-                fmap_hw=(hi, wi), filter_hw=(3, 3), pad=(1, 1, 1, 1)))
+                fmap_hw=(hi, wi), filter_hw=(3, 3), pad=(1, 1, 1, 1),
+                repeat_load_stride=0, repeat_load_time=1,
+                repeat_load_axis=tla.experimental.height))
             tla.copy(l0_b, l1_filter)
             tla.mmad(l0_c, l0_a, l0_b, init_c=True)
         ```
@@ -279,21 +321,24 @@ def img2col(
             "src must be an l1 feature-map tile tagged zNUnAlign (the NC1HWC0 nesting), "
             f"got {src_desc.addrspace}/{src_desc.layout_tag}",
         )
-    if (dst_desc.addrspace, dst_desc.layout_tag) != ("l0a", "zN"):
+    dst_is_l0b = dst_desc.addrspace == "l0b"
+    if (dst_desc.addrspace, dst_desc.layout_tag) not in (("l0a", "zN"), ("l0b", "nZ")):
         _op_error(
             "img2col",
-            f"dst must be an l0a tile tagged zN, got {dst_desc.addrspace}/{dst_desc.layout_tag}",
+            "dst must be an l0a tile tagged zN or an l0b tile tagged nZ, "
+            f"got {dst_desc.addrspace}/{dst_desc.layout_tag}",
         )
     if src_desc.element_type != dst_desc.element_type:
         _op_error(
             "img2col",
             f"src and dst element types must match, got {src_desc.element_type} and {dst_desc.element_type}",
         )
-    # The A5 img2col path is instantiated for 2- and 4-byte elements only.
-    if src_desc.element_type not in ("f32", "f16", "bf16"):
+    supported_dtypes = _IMG2COL_L0B_DTYPES if dst_is_l0b else _IMG2COL_L0A_DTYPES
+    if src_desc.element_type not in supported_dtypes:
         _op_error(
             "img2col",
-            f"element type must be one of f32/f16/bf16, got {src_desc.element_type}",
+            f"{dst_desc.addrspace} element type must be one of "
+            f"{'/'.join(supported_dtypes)}, got {src_desc.element_type}",
         )
 
     filter_hw = params.filter_hw
@@ -307,12 +352,18 @@ def img2col(
         )
     src_shape = list(_flatten_tla_tuple(src_desc.shape))
     dst_shape = list(_flatten_tla_tuple(dst_desc.shape))
+    dst_origin = list(_flatten_tla_tuple(dst_desc.origin_shape))
     dst_coord = list(_flatten_tla_tuple(dst_desc.coord))
-    c0 = 8 if src_desc.element_type == "f32" else 16
-    if len(src_shape) != 4 or len(dst_shape) != 4 or len(dst_coord) != 2:
+    c0 = 32 // dtype_size_bytes(src_desc.element_type)
+    if (
+        len(src_shape) != 4
+        or len(dst_shape) != 4
+        or len(dst_origin) != 2
+        or len(dst_coord) != 2
+    ):
         _op_error(
             "img2col",
-            "requires four-leaf tensor shapes and a two-axis destination coordinate",
+            "requires four-leaf tensor shapes and two-axis destination origin shape and coordinate",
         )
     if (
         src_shape[2] != c0
@@ -323,25 +374,33 @@ def img2col(
             "img2col",
             "source channels must be static whole C1 slices within 1..65535 channels",
         )
+    dst_k_block = 16 if dst_is_l0b else c0
+    k_blocks = dst_shape[3]
+    if dst_shape[2] != dst_k_block or not isinstance(k_blocks, int) or k_blocks < 1:
+        _op_error(
+            "img2col",
+            f"destination storage must have static {dst_k_block}-element K blocks",
+        )
+    logical_k = dst_origin[1]
+    if not isinstance(logical_k, int) or not 1 <= logical_k <= (65535 // c0) * c0:
+        _op_error(
+            "img2col",
+            "destination logical K extent must be static and fit a C0-rounded length in 1..65535",
+        )
+    k_extent = ((logical_k + c0 - 1) // c0) * c0
+    if k_extent > dst_k_block * k_blocks:
+        _op_error(
+            "img2col", "destination K storage is smaller than the K transfer length"
+        )
+    k_start = dst_coord[1]
     if (
-        dst_shape[2] != c0
-        or not isinstance(dst_shape[3], int)
-        or not 1 <= dst_shape[3] <= 65535 // c0
+        not isinstance(k_start, int)
+        or not 0 <= k_start <= 65535
+        or k_start % dst_k_block
     ):
         _op_error(
             "img2col",
-            "destination K extent must be static, C0-aligned and within 1..65535",
-        )
-    k_extent = c0 * dst_shape[3]
-    k_start = dst_coord[1]
-    if not isinstance(k_start, int) or not 0 <= k_start <= 65535 or k_start % c0:
-        _op_error(
-            "img2col",
-            "destination K coordinate must be static, within 0..65535 and C0-aligned",
-        )
-    if k_start + k_extent > src_shape[2] * src_shape[3] * filter_hw[0] * filter_hw[1]:
-        _op_error(
-            "img2col", "destination K window exceeds the source channel/filter extent"
+            f"destination K coordinate must be static, within 0..65535 and aligned to {dst_k_block} elements",
         )
 
     def _pair(name: str, value: Any, count: int) -> tuple[mlir_ir.Value, ...]:
@@ -361,6 +420,40 @@ def img2col(
             "pad_value must be a trace-time int holding the fill value's bit pattern, "
             f"got {params.pad_value!r}",
         )
+
+    def _require_int_range(name: str, value: Any, lo: int, hi: int) -> int:
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or not lo <= value <= hi
+        ):
+            _op_error("img2col", f"{name} must be an int in {lo}..{hi}, got {value!r}")
+        return value
+
+    repeat_stride = _require_int_range(
+        "repeat_load_stride", params.repeat_load_stride, 0, 65535
+    )
+    repeat_time = _require_int_range(
+        "repeat_load_time", params.repeat_load_time, 0, 255
+    )
+    repeat_axis = params.repeat_load_axis
+    if not isinstance(repeat_axis, _RepeatLoadAxis):
+        _op_error(
+            "img2col",
+            "repeat_load_axis must be tla.experimental.height or tla.experimental.width, "
+            f"got {repeat_axis!r}",
+        )
+
+    if repeat_time > 0:
+        k_end = k_start + k_extent
+        if repeat_axis is width:
+            k_end += (repeat_time - 1) * repeat_stride * c0
+        if k_end > c0 * src_shape[3] * filter_hw[0] * filter_hw[1]:
+            _op_error(
+                "img2col",
+                "destination K window exceeds the source channel/filter extent",
+            )
+
     return _tla_ops_gen.img2col(
         dst_value,
         src_value,
@@ -377,6 +470,9 @@ def img2col(
         pad_top,
         pad_bottom,
         pad_value=params.pad_value,
+        repeat_stride=repeat_stride,
+        repeat_time=repeat_time,
+        repeat_mode=repeat_axis.value,
         loc=loc,
     )
 

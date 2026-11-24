@@ -1540,6 +1540,21 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         "img2col-k-windows-control",
         [["end_to_end/img2col_k_window_conv.py", *dev, "--control-shift"]],
     )
+    # img2col pad fill with one height-direction load against a constant-padded
+    # conv2d golden. The control pass compares against a zero-pad golden and must
+    # disagree, proving the non-zero pad_value is what the device used.
+    yield (
+        "img2col-pad-value",
+        [["end_to_end/img2col_pad_value_conv.py", *dev]],
+    )
+    yield (
+        "img2col-pad-value-control",
+        [["end_to_end/img2col_pad_value_conv.py", *dev, "--control-wrong-pad"]],
+    )
+    yield (
+        "img2col-dst-layout",
+        [["end_to_end/img2col_dst_layout.py", *dev]],
+    )
 
     # --- end_to_end: GM↔UB bool + GM→L1 bool/hif8 (needs L1 debug readback) ---
     yield (

@@ -1,15 +1,8 @@
-// img2colv2_cbuf_to_cb -- the L0B destination, which the hardware has and which
-// dgrad/wgrad would need -- is not instantiated: there is no
-// @img2col_l1_zNUnAlign_to_l0b_* runtime symbol. The lowering must refuse it here.
-//
-// This has to be checked in the compiler, not only in the DSL frontend. The
-// frontend does reject it, but the compiler must not depend on the frontend for
-// IR it did not produce -- and the failure mode it prevents is a well-formed
-// callee name with no implementation behind it, which surfaces as a link error
-// instead of a diagnostic.
+// L0B stores the img2col window in nZ. Reject zN even when
+// the IR bypasses the Python frontend.
 
 // RUN: not %tla_compile %s -o - 2>&1 | %filecheck %s --check-prefix=L0BDST
-// L0BDST: img2col destination must be an l0a tile
+// L0BDST: img2col destination must be an l0a tile tagged zN or an l0b tile tagged nZ
 
 module {
   tla.func @img2col_min(%arg0: !tla.tensor<!tla.layout<!tla.shape<64,288>, !tla.stride<288,1>, !tla.shape<64,288>, RowMajor>, !tla.coord<0,0>, !tla.ptr<f16, gm, 2>>) {

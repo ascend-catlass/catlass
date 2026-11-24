@@ -655,18 +655,16 @@ mlir::LogicalResult Img2colOp::verify()
     if (srcTy.getLayout().getLayoutTag() != LayoutTag::zNUnAlign)
         return emitOpError("img2col source must be tagged zNUnAlign");
     AddressSpace dst = dstTy.getPtr().getAddrspace();
-    if (dst != AddressSpace::l0a)
-        return emitOpError("img2col destination must be an l0a tile");
-    if (dstTy.getLayout().getLayoutTag() != LayoutTag::zN)
-        return emitOpError("img2col destination must be tagged zN");
+    auto dstLayout = dstTy.getLayout().getLayoutTag();
+    bool toL0B = dst == AddressSpace::l0b;
+    if (!((dst == AddressSpace::l0a && dstLayout == LayoutTag::zN) || (toL0B && dstLayout == LayoutTag::nZ)))
+        return emitOpError("img2col destination must be an l0a tile tagged zN or an l0b tile tagged nZ");
     if (srcTy.getPtr().getPointee() != dstTy.getPtr().getPointee())
         return emitOpError("img2col source and destination element types must match");
-    // The A5 img2col path is instantiated for 2- and 4-byte elements only
-    // (f16/bf16/f32); int8/fp8/fp4 have no img2col route, so refuse them here
-    // rather than at lowering time.
     ::mlir::Type elem = srcTy.getPtr().getPointee();
-    if (!elem.isF16() && !elem.isBF16() && !elem.isF32())
-        return emitOpError("img2col element type must be f16, bf16 or f32, but got ") << elem;
+    int64_t elementBytes = getByteSizeOfFixedWidthScalarType(elem);
+    if (!isImg2colElementType(elem) || (toL0B && elementBytes == 1))
+        return emitOpError("unsupported img2col element type for ") << (toL0B ? "l0b: " : "l0a: ") << elem;
 
     // Validate the packing contract before lowering narrows hardware fields.
     // A dynamic filter or K window cannot establish whole-C1 boundaries, so
@@ -697,12 +695,14 @@ mlir::LogicalResult Img2colOp::verify()
         return mlir::success();
     };
     for (auto [value, name] : {std::pair{getFmapH(), "fmap_h"}, std::pair{getFmapW(), "fmap_w"}}) {
-        if (mlir::failed(verifyConstantRange(value, name, 1, 65535)))
+        if (mlir::failed(verifyConstantRange(value, name, 1, 32767)))
             return mlir::failure();
     }
-    for (auto [value, name] :
-         {std::pair{getStrideH(), "stride_h"}, std::pair{getStrideW(), "stride_w"},
-          std::pair{getDilationH(), "dilation_h"}, std::pair{getDilationW(), "dilation_w"}}) {
+    for (auto [value, name] : {std::pair{getStrideH(), "stride_h"}, std::pair{getStrideW(), "stride_w"}}) {
+        if (mlir::failed(verifyConstantRange(value, name, 1, 63)))
+            return mlir::failure();
+    }
+    for (auto [value, name] : {std::pair{getDilationH(), "dilation_h"}, std::pair{getDilationW(), "dilation_w"}}) {
         if (mlir::failed(verifyConstantRange(value, name, 1, 255)))
             return mlir::failure();
     }
@@ -713,24 +713,103 @@ mlir::LogicalResult Img2colOp::verify()
             return mlir::failure();
     }
 
-    llvm::SmallVector<int64_t> srcShape, dstShape, dstCoord;
+    llvm::SmallVector<int64_t, 4> srcShape, dstShape, srcStride, dstStride;
+    llvm::SmallVector<int64_t, 2> srcCoord, dstCoord, dstOrigin;
     if (failed(getTlaIndexTreeLeaves(srcTy.getLayout().getShape().getTree(), srcShape)) ||
         failed(getTlaIndexTreeLeaves(dstTy.getLayout().getShape().getTree(), dstShape)) ||
-        failed(getTlaIndexTreeLeaves(dstTy.getCoord().getTree(), dstCoord)) || srcShape.size() != 4 ||
-        dstShape.size() != 4 || dstCoord.size() != 2)
-        return emitOpError("requires four-leaf source/destination shapes and a two-axis destination coordinate");
-    int64_t c0 = elem.isF32() ? 8 : 16;
+        failed(getTlaIndexTreeLeaves(srcTy.getLayout().getStride().getTree(), srcStride)) ||
+        failed(getTlaIndexTreeLeaves(dstTy.getLayout().getStride().getTree(), dstStride)) || srcShape.size() != 4 ||
+        dstShape.size() != 4 || srcStride.size() != 4 || dstStride.size() != 4)
+        return emitOpError("requires four-leaf source and destination shapes and strides");
+    if (!dstTy.getLayout().getOrigin() ||
+        failed(getTlaIndexTreeLeaves(dstTy.getLayout().getOrigin().getTree(), dstOrigin)) ||
+        failed(getTlaIndexTreeLeaves(srcTy.getCoord().getTree(), srcCoord)) ||
+        failed(getTlaIndexTreeLeaves(dstTy.getCoord().getTree(), dstCoord)) || srcCoord.size() != 2 ||
+        dstCoord.size() != 2 || dstOrigin.size() != 2)
+        return emitOpError("requires two-axis coordinates and destination origin shape");
+    int64_t c0 = 32 / elementBytes;
     if (srcShape[2] != c0 || srcShape[3] < 1 || srcShape[3] > 65535 / c0)
         return emitOpError("source channels must be static whole C1 slices within 1..65535 channels");
-    int64_t channels = c0 * srcShape[3];
-    if (dstShape[2] != c0 || dstShape[3] < 1 || dstShape[3] > 65535 / c0)
-        return emitOpError("destination K extent must be static, C0-aligned and within 1..65535");
-    int64_t kExtent = c0 * dstShape[3];
-    if (dstCoord[1] < 0 || dstCoord[1] > 65535 || dstCoord[1] % c0 != 0)
-        return emitOpError("destination K coordinate must be static, within 0..65535 and C0-aligned");
-    int64_t fullK = channels * filterExtents[0] * filterExtents[1];
-    if (dstCoord[1] + kExtent > fullK)
+
+    llvm::APInt fmapH, fmapW;
+    if (mlir::matchPattern(getFmapH(), mlir::m_ConstantInt(&fmapH)) &&
+        mlir::matchPattern(getFmapW(), mlir::m_ConstantInt(&fmapW))) {
+        int64_t positions = fmapH.getSExtValue() * fmapW.getSExtValue();
+        if (!mlir::ShapedType::isDynamic(srcShape[0]) && !mlir::ShapedType::isDynamic(srcShape[1]) &&
+            positions > srcShape[0] * srcShape[1])
+            return emitOpError("fmap_hw exceeds the number of spatial positions in the source view");
+        if (srcShape[3] > 1 && !mlir::ShapedType::isDynamic(srcStride[3]) && srcStride[3] != positions * c0)
+            return emitOpError("source C1 stride must equal fmap_h * fmap_w * C0 for multiple C1 slices");
+    }
+
+    if (!mlir::ShapedType::isDynamic(dstCoord[0]) && (dstCoord[0] < 0 || dstCoord[0] > 32767))
+        return emitOpError("destination M coordinate must be within 0..32767");
+    if (!mlir::ShapedType::isDynamic(dstShape[0]) && !mlir::ShapedType::isDynamic(dstShape[1]) &&
+        dstShape[0] * dstShape[1] > 65535)
+        return emitOpError("destination M extent must be within 0..65535");
+
+    int64_t dstKBlock = toL0B ? 16 : c0;
+    int64_t kBlocks = dstShape[3];
+    if (dstShape[2] != dstKBlock || kBlocks < 1)
+        return emitOpError("destination storage must have static ") << dstKBlock << "-element K blocks";
+    int64_t logicalK = dstOrigin[1];
+    if (logicalK < 1 || logicalK > (65535 / c0) * c0)
+        return emitOpError("destination logical K extent must be static and fit a C0-rounded length in 1..65535");
+    int64_t kExtent = ((logicalK + c0 - 1) / c0) * c0;
+    if ((kExtent + dstKBlock - 1) / dstKBlock > kBlocks)
+        return emitOpError("destination K storage is smaller than the K transfer length");
+    int64_t kStart = dstCoord[1];
+    if (kStart < 0 || kStart > 65535 || kStart % dstKBlock != 0)
+        return emitOpError("destination K coordinate must be static, within 0..65535 and aligned to ")
+               << dstKBlock << " elements";
+    int64_t outerStride = dstStride[toL0B ? 1 : 3];
+    int64_t elementsPerFractal = 16 * c0;
+    if (outerStride != mlir::ShapedType::kDynamic &&
+        (outerStride <= 0 || outerStride % elementsPerFractal != 0 || outerStride / elementsPerFractal > 65535))
+        return emitOpError("destination outer stride must fit the unsigned 16-bit 512-byte-fractal field");
+
+    int64_t repeatStride = getRepeatStride();
+    int64_t repeatTime = getRepeatTime();
+    int64_t repeatMode = getRepeatMode();
+    if (repeatStride < 0 || repeatStride > 65535)
+        return emitOpError("repeat_stride must be in 0..65535");
+    if (repeatTime < 0 || repeatTime > 255)
+        return emitOpError("repeat_time must be in 0..255");
+    if (repeatMode != 0 && repeatMode != 1)
+        return emitOpError("repeat_mode must be 0 (height/M) or 1 (width/K)");
+    if (repeatTime == 0)
+        return mlir::success();
+
+    int64_t fullK = c0 * srcShape[3] * filterExtents[0] * filterExtents[1];
+    int64_t kEnd = kStart + kExtent;
+    if (repeatMode == 1)
+        kEnd += (repeatTime - 1) * repeatStride * c0;
+    if (kEnd > fullK)
         return emitOpError("destination K window exceeds the source channel/filter extent");
+
+    // Every L0 outer-fractal stride is a multiple of 512 bytes. Only the
+    // coordinates within the fractal can make an otherwise aligned base miss.
+    if (!mlir::ShapedType::isDynamic(dstCoord[0])) {
+        int64_t row = dstCoord[0];
+        int64_t withinFractal = toL0B ? row % c0 + (kStart % 16) * c0 : (row % 16) * c0 + kStart % c0;
+        int64_t baseAlignment = std::gcd<int64_t>(dstTy.getPtr().getAlignment(), 512);
+        if ((withinFractal * elementBytes) % baseAlignment != 0)
+            return emitOpError("effective L0 destination address must be 512-byte aligned");
+    }
+
+    // Each spatial row contributes one 32-byte C0. Only the channel offset
+    // can change the alignment residue.
+    if (srcCoord[1] >= 0) {
+        int64_t c1Residue = (srcCoord[1] / c0) % c0;
+        bool staticStride = !mlir::ShapedType::isDynamic(srcStride[3]);
+        if (c1Residue == 0 || staticStride) {
+            int64_t strideResidue = staticStride ? srcStride[3] % c0 : 0;
+            int64_t withinBlock = (srcCoord[1] % c0 + c1Residue * strideResidue) % c0;
+            int64_t baseAlignment = std::gcd<int64_t>(srcTy.getPtr().getAlignment(), 32);
+            if ((withinBlock * elementBytes) % baseAlignment != 0)
+                return emitOpError("effective L1 source address must be 32-byte aligned");
+        }
+    }
     return mlir::success();
 }
 

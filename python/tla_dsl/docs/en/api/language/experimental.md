@@ -100,7 +100,7 @@ with tla.vector():
 
 Description:
 
-Load an L1 feature-map tile into L0A with img2col expansion for convolution.
+Load an L1 feature-map tile into L0A or L0B with img2col expansion.
 
 Prototype:
 
@@ -110,10 +110,10 @@ tla.experimental.img2col(dst: Tensor, src: Tensor, params: Img2colParams) -> Non
 
 Parameters:
 
-- `dst` (`Tensor`): L0A tile, tagged `zN`, shaped `(M, K)`. Its shape gives
-  the load's extents and its coord gives the start points, so M and K of the
-  implicit GEMM are tiled by aiming this at a different window of the same
-  L1 tile -- at no extra L1 traffic. Required.
+- `dst` (`Tensor`): L0A `zN` or L0B `nZ` tile shaped `(M, K)`,
+  where `(M, K)` is the expanded matrix window. The L0B path
+  automatically arranges the data in `nZ`. The destination layout
+  and coordinate specify the storage and window start. Required.
 - `src` (`Tensor`): L1 feature-map tile, tagged `zNUnAlign`, which is the
   NC1HWC0 nesting `((h*w, 1), (C0, c1))`. Required.
 - `params` (`Img2colParams`): Convolution geometry. Required.
@@ -124,30 +124,53 @@ Parameters:
   - `dilation_hw` (`tuple`): Dilation `(dH, dW)`. Default `(1, 1)`.
   - `pad` (`tuple`): Padding `(left, right, top, bottom)`. Default
     `(0, 0, 0, 0)`.
-  - `pad_value` (`int`): Padding fill value. Default `0`.
+  - `pad_value` (`int`): Bit pattern of the padding fill value. Default `0`.
+  - `repeat_load_stride` (`int`): Distance between successive source
+    starts, in units of 16 elements along M or one source C0 along K.
+    Required.
+  - `repeat_load_time` (`int`): Number of loads. `0` performs no load. Required.
+  - `repeat_load_axis`: `tla.experimental.height` along M or
+    `tla.experimental.width` along K of the expanded matrix. Required.
 
 Constraints:
 
 - Must be called inside a `@tla.kernel`-decorated kernel function.
 - Must be called inside `tla.cube()`.
-- Element type must be `f32`, `f16` or `bf16` (2- and 4-byte elements
-  only; no int8/fp8 route).
+- L0A and L0B support `f16`, `bf16`, `f32`, `i32` and `u32`.
+  L0A also supports `i8`, `u8`, `hif8`, `f8e4m3fn` and `f8e5m2`.
 - `src` and `dst` must share an element type.
 - Source channels come from the NC1HWC0 source shape, independently of
   the destination K window. Source C0/C1 and destination K extent and
   K coordinate must be static. `filter_hw` must be compile-time integers.
-- The destination K extent and starting coordinate are C0-aligned: a
-  window may start and end inside one C1 slice (`kh * kw * C0`
-  elements) and may straddle a slice boundary, as long as it stays
-  within the source's full K axis. Source channels and destination K
-  extent must fit in 1..65535; the destination K coordinate must fit
-  in 0..65535.
-- `fmap_hw` entries must be in 1..65535, stride and dilation entries
-  in 1..255, and each padding entry in 0..255. Compile-time constants
-  outside these ranges are rejected. For runtime values, satisfying
-  these ranges is a caller precondition; violating them is undefined
-  behavior.
+- The source view must contain at least `H * W` spatial positions.
+  If the source view contains multiple C1 slices, its C1 stride must
+  equal `H * W * C0` elements regardless of the destination K window.
+  A spatial crop of one C1 can use a source view containing just that slice.
+- The K transfer length is the destination logical K extent rounded up
+  to a source C0. The storage must fit that length. For example,
+  8 FP32 channels can be loaded into L0B storage padded to 16 columns.
+  The K start must align to C0 for L0A or 16 elements for L0B.
+  Every K window, including the last load in a width repeat, must fit
+  within the full K axis of the source channel/filter combination.
+  Source channels and the K transfer length must fit in 1..65535.
+  The destination K coordinate must fit in 0..65535.
+- The destination M extent and coordinate must be in 0..65535
+  and 0..32767, respectively.
+- `fmap_hw` entries must be in 1..32767, stride entries in 1..63,
+  dilation entries in 1..255, and padding entries in 0..255. The
+  compiler checks static values. Runtime values must satisfy the same
+  constraints.
 - Filter extents are compile-time integers in 1..511.
+- `repeat_load_stride` and `repeat_load_time` must be compile-time
+  integers in 0..65535 and 0..255, respectively. Tracing rejects the
+  repeat-load defaults `-1`, `-1` and `None`.
+- The destination layout supplies the outer fractal stride (along K for
+  L0A or M for L0B), including for a view into a parent matrix. Its byte
+  stride must be a positive multiple of 512 and fit in an unsigned
+  16-bit field in fractal units.
+- Effective addresses, including any tensor coordinates and pointer
+  offsets, must align to 32 bytes for L1 and 512 bytes for L0A or L0B.
+  The caller must ensure this alignment for runtime addresses.
 
 Example:
 
@@ -155,7 +178,9 @@ Example:
 with tla.cube():
     # l1_fmap holds NC1HWC0; l1_filter holds the (K, N) weight matrix.
     tla.experimental.img2col(l0_a, l1_fmap, tla.experimental.Img2colParams(
-        fmap_hw=(hi, wi), filter_hw=(3, 3), pad=(1, 1, 1, 1)))
+        fmap_hw=(hi, wi), filter_hw=(3, 3), pad=(1, 1, 1, 1),
+        repeat_load_stride=0, repeat_load_time=1,
+        repeat_load_axis=tla.experimental.height))
     tla.copy(l0_b, l1_filter)
     tla.mmad(l0_c, l0_a, l0_b, init_c=True)
 ```

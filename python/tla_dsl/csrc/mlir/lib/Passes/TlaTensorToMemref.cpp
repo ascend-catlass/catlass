@@ -716,6 +716,11 @@ static StringRef copyRuntimeElemSuffix(Type elementType)
     return {};
 }
 
+StringRef getImg2colRuntimeElemSuffix(Type elementType)
+{
+    return isImg2colElementType(elementType) ? copyRuntimeElemSuffix(elementType) : StringRef{};
+}
+
 // Keep 64-bit symbols local to the routes that register them.
 static StringRef b64CopyElemSuffix(Type elementType)
 {
@@ -878,7 +883,7 @@ std::string getCopyRouteCallee(
         srcLayout == LayoutTag::zNUnAlign && dstLayout == LayoutTag::zNUnAlign) {
         if (srcElementType != dstElem)
             return {};
-        StringRef suffix = copyRuntimeElemSuffix(srcElementType);
+        StringRef suffix = getImg2colRuntimeElemSuffix(srcElementType);
         if (suffix.empty())
             return {};
         return Twine("copy_gm_zNUnAlign_to_l1_zNUnAlign_").concat(suffix).str();

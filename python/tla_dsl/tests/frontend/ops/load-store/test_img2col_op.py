@@ -1,4 +1,4 @@
-"""Tests for tla.experimental.img2col, the img2col L1->L0A load.
+"""Tests for tla.experimental.img2col, the img2col L1->L0A/L0B load.
 
 These cover the frontend only: that the op reaches TLA IR carrying its
 convolution geometry, and that the operand descriptors it refuses are refused
@@ -78,7 +78,11 @@ def img2col_3x3_pad1(fmap: tla.Tensor) -> None:
         img2col(
             l0_a,
             l1_a,
-            Img2colParams(fmap_hw=(HI, WI), filter_hw=(KH, KW), pad=(1, 1, 1, 1)),
+            Img2colParams(
+                fmap_hw=(HI, WI),
+                filter_hw=(KH, KW),
+                pad=(1, 1, 1, 1),
+            ),
         )
 
 
@@ -118,6 +122,9 @@ def img2col_stride2_dilation2(fmap: tla.Tensor) -> None:
                 # Deliberately all different: padList order is the easiest thing
                 # to get wrong, and a symmetric case cannot catch a swap.
                 pad=(4, 5, 6, 7),
+                repeat_load_stride=0,
+                repeat_load_time=1,
+                repeat_load_axis=tla.experimental.height,
             ),
         )
 
@@ -140,12 +147,18 @@ def img2col_src_not_zNUnAlign(fmap: tla.Tensor) -> None:
         tla.experimental.img2col(
             l0_a,
             l1_a,
-            tla.experimental.Img2colParams(fmap_hw=(HI, WI), filter_hw=(KH, KW)),
+            Img2colParams(
+                fmap_hw=(HI, WI),
+                filter_hw=(KH, KW),
+                repeat_load_stride=0,
+                repeat_load_time=1,
+                repeat_load_axis=tla.experimental.height,
+            ),
         )
 
 
 @tla.kernel
-def img2col_dst_is_l0b(fmap: tla.Tensor) -> None:
+def img2col_dst_is_l0b(fmap: tla.Tensor, layout: tla.Constexpr) -> None:
     l1a_ptr = tla.allocate(CIN1 * FMAP_ROWS * C0, tla.Float16, tla.AddressSpace.l1, 512)
     l0b_ptr = tla.allocate(M * K, tla.Float16, tla.AddressSpace.l0b, 512)
     with tla.cube():
@@ -167,53 +180,61 @@ def img2col_dst_is_l0b(fmap: tla.Tensor) -> None:
                 layoutTag=tla.arch.RowMajor,
             ),
         )
-        l0_b = tla.make_tensor_like(l0b_ptr, ref, tla.arch.zN)
+        l0_b = tla.make_tensor_like(l0b_ptr, ref, layout)
         tla.experimental.img2col(
             l0_b,
             l1_a,
-            tla.experimental.Img2colParams(fmap_hw=(HI, WI), filter_hw=(KH, KW)),
+            Img2colParams(
+                fmap_hw=(HI, WI),
+                filter_hw=(KH, KW),
+                repeat_load_stride=0,
+                repeat_load_time=1,
+                repeat_load_axis=tla.experimental.height,
+            ),
         )
 
 
-# C0 is 32 BYTES, so an int8 feature map has 32 elements per C0 block, not 16.
-# Using 16 here makes make_tensor reject the zNUnAlign layout before img2col ever
-# sees the element type, which would test the wrong thing.
-C0_B8 = 32
-K_B8 = CIN1 * KH * KW * C0_B8
-
-
 @tla.kernel
-def img2col_int8_is_rejected(fmap: tla.Tensor) -> None:
-    l1a_ptr = tla.allocate(
-        CIN1 * FMAP_ROWS * C0_B8, tla.Int8, tla.AddressSpace.l1, 512
-    )
-    l0a_ptr = tla.allocate(M * K_B8, tla.Int8, tla.AddressSpace.l0a, 512)
+def img2col_dtype(
+    fmap: tla.Tensor,
+    dtype: tla.Constexpr,
+    c0: tla.Constexpr,
+    dst_space: tla.Constexpr,
+    dst_layout: tla.Constexpr,
+) -> None:
+    k = CIN1 * KH * KW * c0
+    l1_ptr = tla.allocate(CIN1 * FMAP_ROWS * c0, dtype, tla.AddressSpace.l1, 512)
+    l0_ptr = tla.allocate(M * k, dtype, dst_space, 512)
     with tla.cube():
         gm_a = tla.make_tensor(
             fmap.ptr,
             tla.make_layout(
-                tla.make_shape((FMAP_ROWS, 1), (C0_B8, CIN1)),
-                tla.make_stride(
-                    (C0_B8, FMAP_ROWS * C0_B8), (1, FMAP_ROWS * C0_B8)
-                ),
-                origin_shape=tla.make_shape(FMAP_ROWS, CIN1 * C0_B8),
+                tla.make_shape((FMAP_ROWS, 1), (c0, CIN1)),
+                tla.make_stride((c0, FMAP_ROWS * c0), (1, FMAP_ROWS * c0)),
+                origin_shape=tla.make_shape(FMAP_ROWS, CIN1 * c0),
                 layoutTag=tla.arch.zNUnAlign,
             ),
         )
-        l1_a = tla.make_tensor_like(l1a_ptr, gm_a, tla.arch.zNUnAlign)
+        l1_a = tla.make_tensor_like(l1_ptr, gm_a, tla.arch.zNUnAlign)
         ref = tla.make_tensor(
             fmap.ptr,
             tla.make_layout(
-                tla.make_shape(M, K_B8),
-                tla.make_stride(K_B8, 1),
+                tla.make_shape(M, k),
+                tla.make_stride(k, 1),
                 layoutTag=tla.arch.RowMajor,
             ),
         )
-        l0_a = tla.make_tensor_like(l0a_ptr, ref, tla.arch.zN)
+        dst = tla.make_tensor_like(l0_ptr, ref, dst_layout)
         tla.experimental.img2col(
-            l0_a,
+            dst,
             l1_a,
-            tla.experimental.Img2colParams(fmap_hw=(HI, WI), filter_hw=(KH, KW)),
+            Img2colParams(
+                fmap_hw=(HI, WI),
+                filter_hw=(KH, KW),
+                repeat_load_stride=0,
+                repeat_load_time=1,
+                repeat_load_axis=tla.experimental.height,
+            ),
         )
 
 
@@ -244,6 +265,47 @@ def img2col_params_wrong_type(fmap: tla.Tensor) -> None:
         tla.experimental.img2col(l0_a, l1_a, "not-a-params-object")
 
 
+@tla.kernel
+def img2col_pad_value_and_repeat(fmap: tla.Tensor) -> None:
+    l1a_ptr = tla.allocate(CIN1 * FMAP_ROWS * C0, tla.Float16, tla.AddressSpace.l1, 512)
+    l0a_ptr = tla.allocate(M * K, tla.Float16, tla.AddressSpace.l0a, 512)
+    with tla.cube():
+        gm_a = tla.make_tensor(
+            fmap.ptr,
+            tla.make_layout(
+                tla.make_shape(*_FMAP_SHAPE),
+                tla.make_stride(*_FMAP_STRIDE),
+                origin_shape=tla.make_shape(FMAP_ROWS, CIN),
+                layoutTag=tla.arch.zNUnAlign,
+            ),
+        )
+        l1_a = tla.make_tensor_like(l1a_ptr, gm_a, tla.arch.zNUnAlign)
+        tla.copy(l1_a, gm_a)
+        ref = tla.make_tensor(
+            fmap.ptr,
+            tla.make_layout(
+                tla.make_shape(M, K),
+                tla.make_stride(K, 1),
+                layoutTag=tla.arch.RowMajor,
+            ),
+        )
+        l0_a = tla.make_tensor_like(l0a_ptr, ref, tla.arch.zN)
+        window = tla.get_tile(l0_a, tla.make_coord(0, 0), tla.make_shape(M, 2 * C0))
+        img2col(
+            window,
+            l1_a,
+            Img2colParams(
+                fmap_hw=(HI, WI),
+                filter_hw=(KH, KW),
+                pad=(1, 1, 1, 1),
+                pad_value=7,
+                repeat_load_stride=2,
+                repeat_load_time=3,
+                repeat_load_axis=tla.experimental.width,
+            ),
+        )
+
+
 def test_img2col_emits_tlair(compiler_tlair: Any) -> None:
     mlir = compiler_tlair(img2col_3x3_pad1, type_args=(_gm_tensor(),))
 
@@ -253,6 +315,65 @@ def test_img2col_emits_tlair(compiler_tlair: Any) -> None:
     assert "zNUnAlign" in mlir
     assert "l0a" in mlir
     assert "pad_value = 0 : i32" in mlir
+    assert "repeat_stride = 0 : i32" in mlir
+    assert "repeat_time = 1 : i32" in mlir
+    assert "repeat_mode = 0 : i32" in mlir
+
+
+def test_img2col_emits_pad_value_and_repeat_load(compiler_tlair: Any) -> None:
+    mlir = compiler_tlair(img2col_pad_value_and_repeat, type_args=(_gm_tensor(),))
+
+    assert "tla.img2col" in mlir
+    assert "pad_value = 7 : i32" in mlir
+    assert "repeat_stride = 2 : i32" in mlir
+    assert "repeat_time = 3 : i32" in mlir
+    assert "repeat_mode = 1 : i32" in mlir
+    assert "dst_stride" not in mlir
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("repeat_load_stride", -1),
+        ("repeat_load_time", -1),
+        ("repeat_load_axis", None),
+        ("repeat_load_stride", 65536),
+        ("repeat_load_time", 256),
+        ("repeat_load_axis", 1),
+    ],
+)
+def test_img2col_rejects_invalid_repeat_load(field: str, value: Any) -> None:
+    params = Img2colParams(fmap_hw=(HI, WI), filter_hw=(KH, KW), **{field: value})
+
+    with pytest.raises(tla.TlaCoreAPIError, match=rf"{field} must be"):
+
+        @tla.kernel
+        def bad(fmap: tla.Tensor) -> None:
+            l1a_ptr = tla.allocate(CIN1 * FMAP_ROWS * C0, tla.Float16, tla.AddressSpace.l1, 512)
+            l0a_ptr = tla.allocate(M * K, tla.Float16, tla.AddressSpace.l0a, 512)
+            with tla.cube():
+                gm_a = tla.make_tensor(
+                    fmap.ptr,
+                    tla.make_layout(
+                        tla.make_shape(*_FMAP_SHAPE),
+                        tla.make_stride(*_FMAP_STRIDE),
+                        origin_shape=tla.make_shape(FMAP_ROWS, CIN),
+                        layoutTag=tla.arch.zNUnAlign,
+                    ),
+                )
+                l1_a = tla.make_tensor_like(l1a_ptr, gm_a, tla.arch.zNUnAlign)
+                ref = tla.make_tensor(
+                    fmap.ptr,
+                    tla.make_layout(
+                        tla.make_shape(M, K),
+                        tla.make_stride(K, 1),
+                        layoutTag=tla.arch.RowMajor,
+                    ),
+                )
+                l0_a = tla.make_tensor_like(l0a_ptr, ref, tla.arch.zN)
+                img2col(l0_a, l1_a, params)
+
+        bad.dump_mlir(type_args=(_gm_tensor(),))
 
 
 def test_img2col_carries_stride_dilation_and_asymmetric_pad(
@@ -277,22 +398,37 @@ def test_img2col_source_must_be_l1_zNUnAlign() -> None:
         img2col_src_not_zNUnAlign.dump_mlir(type_args=(_gm_tensor(),))
 
 
-def test_img2col_l0b_destination_is_rejected() -> None:
-    # img2colv2_cbuf_to_cb exists in hardware but nothing instantiates it, so an
-    # l0b destination has to be refused rather than lowered to a call with no
-    # implementation behind it.
-    with pytest.raises(tla.TlaCoreAPIError, match=r"dst must be an l0a tile tagged zN"):
-        img2col_dst_is_l0b.dump_mlir(type_args=(_gm_tensor(),))
+def test_img2col_accepts_nz_l0b_destination(compiler_tlair: Any) -> None:
+    mlir = compiler_tlair(img2col_dst_is_l0b, type_args=(_gm_tensor(), tla.arch.nZ))
+    img2col_line = next(line for line in mlir.splitlines() if "tla.img2col" in line)
+    assert f"!tla.shape<{M},{K}>, nZ>" in img2col_line
+    assert "!tla.ptr<f16, l0b, 512>" in img2col_line
 
 
-def test_img2col_rejects_unsupported_element_type() -> None:
-    # The A5 img2col path is instantiated for 2- and 4-byte elements only, so
-    # there is no int8/fp8 route however well-formed the descriptors look.
-    with pytest.raises(
-        tla.TlaCoreAPIError, match=r"element type must be one of f32/f16/bf16"
-    ):
-        img2col_int8_is_rejected.dump_mlir(
-            type_args=(_gm_tensor(tla.Int8, cols=K_B8),)
+def test_img2col_rejects_zn_l0b_destination() -> None:
+    with pytest.raises(tla.TlaCoreAPIError, match=r"l0b tile tagged nZ"):
+        img2col_dst_is_l0b.dump_mlir(type_args=(_gm_tensor(), tla.arch.zN))
+
+
+@pytest.mark.parametrize(
+    "dtype,c0,space,layout",
+    [
+        (tla.Int16, 16, tla.AddressSpace.l0a, tla.arch.zN),
+        (tla.UInt16, 16, tla.AddressSpace.l0b, tla.arch.nZ),
+        (tla.Int8, 32, tla.AddressSpace.l0b, tla.arch.nZ),
+        (tla.Float8E4M3FN, 32, tla.AddressSpace.l0b, tla.arch.nZ),
+    ],
+)
+def test_img2col_rejects_unsupported_element_type(dtype, c0, space, layout) -> None:
+    with pytest.raises(tla.TlaCoreAPIError, match=r"element type must be one of"):
+        img2col_dtype.dump_mlir(
+            type_args=(
+                _gm_tensor(dtype, cols=CIN1 * KH * KW * c0),
+                dtype,
+                c0,
+                space,
+                layout,
+            )
         )
 
 
@@ -301,10 +437,14 @@ def test_img2col_rejects_non_params_object() -> None:
         img2col_params_wrong_type.dump_mlir(type_args=(_gm_tensor(),))
 
 
-def _img2col_k_window(k_extent: int, k_start: int = 0, filter_h: int = 3):
+def _img2col_k_window(
+    k_extent: int, k_start: int = 0, filter_h: int = 3, repeat_time: int = 1
+):
     @tla.kernel
     def kernel(fmap: tla.Tensor) -> None:
-        l1_ptr = tla.allocate(CIN1 * FMAP_ROWS * C0, tla.Float16, tla.AddressSpace.l1, 512)
+        l1_ptr = tla.allocate(
+            CIN1 * FMAP_ROWS * C0, tla.Float16, tla.AddressSpace.l1, 512
+        )
         l0_ptr = tla.allocate(M * K, tla.Float16, tla.AddressSpace.l0a, 512)
         with tla.cube():
             src = tla.make_tensor(
@@ -325,8 +465,20 @@ def _img2col_k_window(k_extent: int, k_start: int = 0, filter_h: int = 3):
                 ),
             )
             dst = tla.make_tensor_like(l0_ptr, ref, tla.arch.zN)
-            dst = tla.get_tile(dst, tla.make_coord(0, k_start), tla.make_shape(M, k_extent))
-            tla.experimental.img2col(dst, src, tla.experimental.Img2colParams(fmap_hw=(HI, WI), filter_hw=(filter_h, KW)))
+            dst = tla.get_tile(
+                dst, tla.make_coord(0, k_start), tla.make_shape(M, k_extent)
+            )
+            tla.experimental.img2col(
+                dst,
+                src,
+                Img2colParams(
+                    fmap_hw=(HI, WI),
+                    filter_hw=(filter_h, KW),
+                    repeat_load_stride=1,
+                    repeat_load_time=repeat_time,
+                    repeat_load_axis=tla.experimental.width,
+                ),
+            )
 
     return kernel
 
@@ -334,7 +486,12 @@ def _img2col_k_window(k_extent: int, k_start: int = 0, filter_h: int = 3):
 @pytest.mark.parametrize(
     "k_extent,k_start,filter_h,message",
     [
-        (144, 8, 3, "K coordinate must be static, within 0..65535 and C0-aligned"),
+        (
+            144,
+            8,
+            3,
+            "K coordinate must be static, within 0..65535 and aligned to 16 elements",
+        ),
         (432, 0, 3, "K window exceeds"),
         (288, 0, 0, "filter_hw must contain"),
         (288, 0, 512, "filter_hw must contain"),
@@ -342,7 +499,16 @@ def _img2col_k_window(k_extent: int, k_start: int = 0, filter_h: int = 3):
 )
 def test_img2col_rejects_invalid_k_window(k_extent, k_start, filter_h, message):
     with pytest.raises(tla.TlaCoreAPIError, match=message):
-        _img2col_k_window(k_extent, k_start, filter_h).dump_mlir(type_args=(_gm_tensor(),))
+        _img2col_k_window(k_extent, k_start, filter_h).dump_mlir(
+            type_args=(_gm_tensor(),)
+        )
+
+
+def test_img2col_rejects_last_repeat_outside_k_window():
+    with pytest.raises(tla.TlaCoreAPIError, match="K window exceeds"):
+        _img2col_k_window(C0, K - C0, repeat_time=2).dump_mlir(
+            type_args=(_gm_tensor(),)
+        )
 
 
 @pytest.mark.parametrize(

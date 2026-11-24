@@ -163,7 +163,7 @@ Supported cube copy routes without scale, `tla.copy(dst, src, scale=None)`
 |`gm`|`ColumnMajor`|`l1`|`nZ`|`f32`,`f16`,`bf16`,`i8`,`i1`,`hif8`,`i16`,`i32`,`u8`,`u16`,`u32`,`f8e4m3fn`,`f8e5m2`,`f4e2m1`,`f4e1m2`|
 |`gm`|`zN`|`l1`|`zN`|`f32`,`f16`,`bf16`,`i8`,`i16`,`i32`,`u8`,`u16`,`u32`,`i1`,`hif8`,`f8e4m3fn`,`f8e5m2`,`f4e2m1`,`f4e1m2`|
 |`gm`|`nZ`|`l1`|`nZ`|`f32`,`f16`,`bf16`,`i8`,`i16`,`i32`,`u8`,`u16`,`u32`,`i1`,`hif8`,`f8e4m3fn`,`f8e5m2`,`f4e2m1`,`f4e1m2`|
-|`gm`|`zNUnAlign`|`l1`|`zNUnAlign`|`f32`,`f16`,`bf16`|
+|`gm`|`zNUnAlign`|`l1`|`zNUnAlign`|`f16`,`bf16`,`f32`,`i32`,`u32`,`i8`,`u8`,`hif8`,`f8e4m3fn`,`f8e5m2`|
 |`gm`|`RowMajorMxScaleA`|`l1`|`zZMxScale`|`f8e8m0`|
 |`gm`|`ColMajorMxScaleA`|`l1`|`zZMxScale`|`f8e8m0`|
 |`gm`|`RowMajorMxScaleB`|`l1`|`nNMxScale`|`f8e8m0`|

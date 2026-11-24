@@ -6391,6 +6391,10 @@ _COPY_CUBE_ROUTES = {
 
 _COPY_VECTOR_ROUTES = {("gm", "ub"), ("ub", "gm"), ("ub", "l1"), ("ub", "ub")}
 
+# Data types of the Ascend C LoadDataWithStride operands and their L1 staging copy.
+_IMG2COL_L0B_DTYPES = ("f16", "bf16", "f32", "i32", "u32")
+_IMG2COL_L0A_DTYPES = (*_IMG2COL_L0B_DTYPES, "i8", "u8", "hif8", "f8e4m3fn", "f8e5m2")
+
 # fmt: off
 # Cube copy
 _SUPPORTED_CUBE_COPY_ROUTES = {
@@ -6473,7 +6477,7 @@ _SUPPORTED_CUBE_COPY_ROUTES = {
     ),
     # NC1HWC0 feature map: the same tree on both sides, so this is a run of
     # contiguous C1 slices rather than a re-layout. It is what feeds tla.experimental.img2col.
-    ("gm", "zNUnAlign", "l1", "zNUnAlign"): ("f32", "f16", "bf16"),
+    ("gm", "zNUnAlign", "l1", "zNUnAlign"): _IMG2COL_L0A_DTYPES,
     ("gm", "RowMajorMxScaleA", "l1", "zZMxScale"): ("f8e8m0",),
     ("gm", "ColMajorMxScaleA", "l1", "zZMxScale"): ("f8e8m0",),
     ("gm", "RowMajorMxScaleB", "l1", "nNMxScale"): ("f8e8m0",),

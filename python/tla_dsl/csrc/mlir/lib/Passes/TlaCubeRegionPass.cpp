@@ -498,7 +498,7 @@ private:
     DenseMap<Value, Value>& loweredMemrefByValue;
 };
 
-// tla.img2col: L1 NC1HWC0 feature map -> L0A, expanded by the img2col unit. The
+// tla.img2col: L1 NC1HWC0 feature map -> L0A or L0B, expanded by the img2col unit. The
 // geometry rides along as scalars, so one compiled kernel serves any
 // pad/stride/dilation; the extents and start points come off the destination
 // tile's descriptor inside the callee.
@@ -542,28 +542,15 @@ struct LowerTlaImg2colPattern : public OpRewritePattern<::tla::Img2colOp> {
         if (failed(srcMemref) || failed(dstMemref))
             return failure();
 
-        if (dstDesc->addrspace != "l0a") {
-            // img2col to L0B exists in hardware (img2colv2_cbuf_to_cb) and is what
-            // wgrad would need, but nothing instantiates it yet.
-            op.emitError() << "tla.img2col currently supports an l0a destination only";
+        StringRef typeName = ::tla::getImg2colRuntimeElemSuffix(srcDesc->elementType);
+        if (typeName.empty()) {
+            op.emitError() << "unsupported tla.img2col element type " << srcDesc->elementType;
             return failure();
         }
+        StringRef route = dstDesc->addrspace == "l0b" ? "l0b_nZ_" : "l0a_zN_";
+        std::string calleeName = (Twine("img2col_l1_zNUnAlign_to_") + route + typeName).str();
 
-        StringRef typeName;
-        ::mlir::Type elem = srcDesc->elementType;
-        if (elem.isF16())
-            typeName = "half";
-        else if (elem.isBF16())
-            typeName = "bf16";
-        else if (elem.isF32())
-            typeName = "float";
-        else {
-            op.emitError() << "unsupported tla.img2col element type " << elem << "; expected f16, bf16 or f32";
-            return failure();
-        }
-        std::string calleeName = (Twine("img2col_l1_zNUnAlign_to_l0a_zN_") + typeName).str();
-
-        SmallVector<Value, 32> payload;
+        SmallVector<Value, 40> payload;
         auto appendDesc = [&](const TensorDescriptor& desc) {
             SmallVector<Value, 12> fields = ::tla::buildCopyPayloadForDescriptor(rewriter, op.getLoc(), desc);
             payload.append(fields.begin(), fields.end());
@@ -581,13 +568,18 @@ struct LowerTlaImg2colPattern : public OpRewritePattern<::tla::Img2colOp> {
               op.getDilationH(), op.getDilationW(), op.getPadLeft(), op.getPadRight(), op.getPadTop(),
               op.getPadBottom()})
             payload.push_back(toI32(v));
-        payload.push_back(rewriter.create<arith::ConstantOp>(
-            op.getLoc(), rewriter.getI32IntegerAttr(static_cast<int32_t>(op.getPadValue()))));
+        auto pushI32Attr = [&](int32_t value) {
+            payload.push_back(rewriter.create<arith::ConstantOp>(op.getLoc(), rewriter.getI32IntegerAttr(value)));
+        };
+        pushI32Attr(static_cast<int32_t>(op.getPadValue()));
+        pushI32Attr(static_cast<int32_t>(op.getRepeatStride()));
+        pushI32Attr(static_cast<int32_t>(op.getRepeatTime()));
+        pushI32Attr(static_cast<int32_t>(op.getRepeatMode()));
 
-        SmallVector<Type, 32> operandTypes = {(*srcMemref).getType(), (*dstMemref).getType()};
+        SmallVector<Type, 42> operandTypes = {(*srcMemref).getType(), (*dstMemref).getType()};
         for (Value v : payload)
             operandTypes.push_back(v.getType());
-        SmallVector<Value, 32> operands = {*srcMemref, *dstMemref};
+        SmallVector<Value, 42> operands = {*srcMemref, *dstMemref};
         operands.append(payload.begin(), payload.end());
 
         auto callee = ::tla::getOrCreateRuntimeCall(op->getParentOfType<ModuleOp>(), calleeName, operandTypes);

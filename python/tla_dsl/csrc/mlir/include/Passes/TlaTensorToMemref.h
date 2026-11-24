@@ -45,6 +45,9 @@ std::string getCopyRouteCallee(
     mlir::MLIRContext* ctx, llvm::StringRef srcAddrspace, llvm::StringRef dstAddrspace, ::LayoutTag srcLayout,
     ::LayoutTag dstLayout, mlir::Type srcElementType, mlir::Type dstElementType, llvm::StringRef extraDesc = "");
 
+/// C++ type suffix of the img2col and NC1HWC0 staging-copy runtime symbols.
+llvm::StringRef getImg2colRuntimeElemSuffix(mlir::Type elementType);
+
 /// Runtime template symbol for an L1 fill of an element type, or "" if the
 /// (layout-tag, element-type) combination is unsupported. Symbols are
 /// `fill_l1_<zN|nZ>_<elem-suffix>`.

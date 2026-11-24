@@ -119,9 +119,8 @@ def Tla_CopyMxOp : Tla_Op<"copy_mx", []> {
 def Tla_Img2colOp : Tla_Op<"img2col", []> {
   let summary = "img2col L1->L0 load";
   let description = [{
-    Load a tile from an L1 feature map into L0A (or L0B), expanding it on the way
-    with the hardware's img2col unit (``load3dv2`` / ``img2colv2_cbuf_to_ca``).
-    Must be nested inside a ``tla.cube`` region.
+    Load a tile from an L1 feature map into L0A or L0B, expanding it on the way
+    with the hardware img2col unit. Must be nested inside a ``tla.cube`` region.
 
     This is the only conv-specific instruction in the dialect. It turns an
     ``(hi, wi)`` feature-map window into the implicit-GEMM matrix
@@ -130,19 +129,24 @@ def Tla_Img2colOp : Tla_Op<"img2col", []> {
     ``tla.mmad`` consumes with no knowledge that a convolution is happening.
     Convolution is therefore a property of the *load*, not of the matmul.
 
-    ``dst`` is the L0 tile and gives ``mExtension``/``kExtension`` through its
-    shape and ``mStartPt``/``kStartPt`` through its coordinate -- so M and K of
-    the implicit GEMM can be tiled by re-issuing this op into a different window
-    of the same L1 tile, with no extra L1 traffic.
+    ``dst`` is an L0A ``zN`` or L0B ``nZ`` tile in ``(M, K)`` order.
+    Hardware automatically arranges the L0B result in ``nZ``. Its shape and
+    coordinate give the extents and start points of the expanded matrix window.
 
     ``src`` is the L1 feature-map tile. The feature-map extent
-    (``fmap_h``/``fmap_w``, the ``set_fmatrix`` operands) is passed explicitly
-    rather than read off the tile, because the L1 tile is a flat NC1HWC0 run of
-    bytes whose logical rows are ``hi * wi``, not a 4-D spatial view.
+    (``fmap_h``/``fmap_w``) is passed explicitly rather than read off the tile,
+    because the L1 tile is a flat NC1HWC0 run of bytes whose logical rows are
+    ``hi * wi``, not a 4-D spatial view.
 
     ``pad_*`` is the padding of *this* block, not of the whole problem: a tiled
     convolution pads only the blocks that touch the feature-map border, so these
     are runtime values. Padding is filled with ``pad_value``.
+
+    ``repeat_stride`` / ``repeat_time`` / ``repeat_mode`` describe a multi-iteration
+    load along the expanded matrix's M axis (mode 0) or K axis (mode 1).
+    The runtime derives the outer fractal stride from the destination layout.
+    It must be a positive multiple of 512 bytes and fit in an unsigned 16-bit
+    field in fractal units.
 
     Geometry operands are ``index``. Filter extents must be constants in
     1..511; source channels and destination K extent/coordinate must be static.
@@ -160,7 +164,10 @@ def Tla_Img2colOp : Tla_Op<"img2col", []> {
                        Index:$dilation_h, Index:$dilation_w,
                        Index:$pad_left, Index:$pad_right,
                        Index:$pad_top, Index:$pad_bottom,
-                       I32Attr:$pad_value);
+                       I32Attr:$pad_value,
+                       DefaultValuedAttr<I32Attr, "0">:$repeat_stride,
+                       DefaultValuedAttr<I32Attr, "1">:$repeat_time,
+                       DefaultValuedAttr<I32Attr, "0">:$repeat_mode);
   let assemblyFormat = [{
     $dst `,` $src `,` `fmap` `(` $fmap_h `,` $fmap_w `)`
     `filter` `(` $filter_h `,` $filter_w `)`

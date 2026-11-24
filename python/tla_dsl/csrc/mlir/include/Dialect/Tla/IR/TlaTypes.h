@@ -86,6 +86,14 @@ inline bool isOfficialL1FillElementType(::mlir::Type type)
            type.isSignlessInteger(32) || type.isUnsignedInteger(32);
 }
 
+/// Element types supported by LoadDataWithStride into L0A and its NC1HWC0 staging copy.
+inline bool isImg2colElementType(::mlir::Type type)
+{
+    return type.isF16() || type.isBF16() || type.isF32() || type.isSignlessInteger(32) || type.isUnsignedInteger(32) ||
+           type.isSignlessInteger(8) || type.isUnsignedInteger(8) || type.isFloat8E4M3FN() || type.isFloat8E5M2() ||
+           ::llvm::isa<::tla::HiFloat8Type>(type);
+}
+
 inline int64_t getByteSizeOfFixedWidthScalarType(::mlir::Type type)
 {
     if (type.isBF16() || type.isF16())

@@ -5,23 +5,17 @@
 // table; bc_compile.py globs every Cube/*.cpp into the same aic bitcode, so the
 // split adds no link step.
 
-// The pad fill value travels as an i32 bit pattern, because the op carries it as
-// an attribute and MLIR has no element-typed attribute that spans f16/bf16/f32.
-// Reinterpret, do not convert: 0 is 0 in every one of these formats, and a
-// caller asking for -inf means the bit pattern of -inf.
+// Configure FMatrix via Ascend C and write the padding register from the raw
+// bits. The SDK's typed setter can convert FP8 and truncate 32-bit values.
+constexpr AscendC::IsResetLoad3dConfig kImg2colLoadConfig{true, false};
+
 template <typename T>
-CATLASS_DEVICE T bitsToPadValue(uint32_t bits)
+CATLASS_DEVICE int64_t nc1hwc0Offset(const TensorDesc& desc)
 {
-    if constexpr (sizeof(T) == 2) {
-        uint16_t narrow = static_cast<uint16_t>(bits);
-        T value;
-        __builtin_memcpy(&value, &narrow, sizeof(T));
-        return value;
-    } else {
-        T value;
-        __builtin_memcpy(&value, &bits, sizeof(T));
-        return value;
-    }
+    constexpr uint32_t c0 = Catlass::BytesToElements<T>(Catlass::BYTE_PER_C0);
+    // Spatial coordinates refer to the parent buffer and advance one C0 per
+    // row. Only moving between channel slices uses the parent's C1 stride.
+    return static_cast<int64_t>(desc.coord0) * c0 + (desc.coord1 / c0) * desc.stride3 + desc.coord1 % c0;
 }
 
 // NC1HWC0 feature map, GM -> L1. Both sides carry the same tree, so this moves
@@ -33,7 +27,7 @@ CATLASS_DEVICE T bitsToPadValue(uint32_t bits)
 // A 2-D (hiBlock x wiBlock) window needs a second loop over hi, and the pitch to
 // go with it; that is the next step, not this one. Here the tile is a run of
 // whole feature-map rows.
-template <class ArchTag, typename T>
+template <typename T>
 CATLASS_DEVICE void copyGMToL1Nc1hwc0(
     memref_t<__gm__ T, 2>* src, memref_t<__cbuf__ T, 1>* dst, const TensorDesc& srcDesc, const TensorDesc& dstDesc,
     int64_t gmCachePolicy = kCachePolicyNormal)
@@ -48,8 +42,8 @@ CATLASS_DEVICE void copyGMToL1Nc1hwc0(
     uint32_t srcC1Pitch = static_cast<uint32_t>(srcDesc.stride3);
     uint32_t dstC1Pitch = static_cast<uint32_t>(dstDesc.stride3);
 
-    auto srcOffset = srcTensor.layout()(srcTensor.coord());
-    auto dstOffset = dstTensor.layout()(dstTensor.coord());
+    auto srcOffset = nc1hwc0Offset<T>(srcDesc);
+    auto dstOffset = nc1hwc0Offset<T>(dstDesc);
 
     // DataCopy counts GM->L1 in 32-byte blocks, and one C0 is exactly one block.
     for (uint32_t cin1Idx = 0; cin1Idx < cin1; ++cin1Idx) {
@@ -66,7 +60,7 @@ CATLASS_DEVICE void copyGMToL1Nc1hwc0(
     }
 }
 
-// tla.img2col: L1 NC1HWC0 feature map -> L0A, expanded by the img2col unit.
+// tla.img2col: L1 NC1HWC0 feature map -> L0A or L0B, expanded by the img2col unit.
 //
 // This mirrors Catlass::Conv::Tile::CopyL1ToL0ATla, but takes the feature-map
 // extent and the convolution geometry as arguments instead of reading them off a
@@ -76,19 +70,20 @@ CATLASS_DEVICE void copyGMToL1Nc1hwc0(
 // The destination tile supplies both extents and both start points, so tiling
 // the implicit GEMM's M and K is a matter of pointing this at a different window
 // of the same L1 tile.
-template <class ArchTag, typename T>
-CATLASS_DEVICE void img2colL1ToL0A(
-    memref_t<__cbuf__ T, 1>* src, memref_t<__ca__ T, 1>* dst, const TensorDesc& srcDesc, const TensorDesc& dstDesc,
+template <LayoutTag DstLayout, typename T, typename DstTensor>
+CATLASS_DEVICE void img2colL1ToL0(
+    memref_t<__cbuf__ T, 1>* src, const DstTensor& dstTensor, const TensorDesc& srcDesc, const TensorDesc& dstDesc,
     uint32_t fmapH, uint32_t fmapW, uint32_t filterH, uint32_t filterW, uint32_t strideH, uint32_t strideW,
     uint32_t dilationH, uint32_t dilationW, uint32_t padLeft, uint32_t padRight, uint32_t padTop, uint32_t padBottom,
-    uint32_t padValueBits)
+    uint32_t padValueBits, uint32_t repeatStride, uint32_t repeatTime, uint32_t repeatMode)
 {
     auto srcTensor = makeL1Tensor<LayoutTag::zNUnAlign, T>(src, srcDesc);
-    auto dstTensor = makeL0ATensor<LayoutTag::zN, T>(dst, dstDesc);
+    constexpr bool toL0B = DstLayout == LayoutTag::nZ;
 
-    // M is fractal-blocked on L0A (leaf 0 x leaf 1), K is C0-blocked (leaf 2 x leaf 3).
+    // L0B transposes the physical layout while preserving the (M, K) window.
     uint32_t mExtension = dstDesc.shape0 * dstDesc.shape1;
-    uint32_t kExtension = dstDesc.shape2 * dstDesc.shape3;
+    constexpr uint32_t elementsPerC0 = Catlass::BytesToElements<T>(Catlass::BYTE_PER_C0);
+    uint32_t kExtension = CeilDiv<elementsPerC0>(dstDesc.originShape1) * elementsPerC0;
     // The feature map defines the channel count independently of the K window.
     // Deriving it from kExtension would change the feature-map interpretation
     // whenever the destination covers only part of the implicit-GEMM K axis.
@@ -105,8 +100,6 @@ CATLASS_DEVICE void img2colL1ToL0A(
     loadDataParams.channelSize = static_cast<uint16_t>(channelSize);
     loadDataParams.kExtension = static_cast<uint16_t>(kExtension);
     loadDataParams.mExtension = static_cast<uint16_t>(mExtension);
-    // The tile coordinate is the window into the img2col matrix, which is exactly
-    // what the hardware's start points mean.
     loadDataParams.kStartPt = static_cast<uint16_t>(dstDesc.coord1);
     loadDataParams.mStartPt = static_cast<uint16_t>(dstDesc.coord0);
     loadDataParams.strideW = static_cast<uint8_t>(strideW);
@@ -121,16 +114,26 @@ CATLASS_DEVICE void img2colL1ToL0A(
     loadDataParams.dilationFilterH = static_cast<uint8_t>(dilationH);
     loadDataParams.enTranspose = false;
     loadDataParams.enSmallK = false;
-    loadDataParams.padValue = bitsToPadValue<T>(padValueBits);
+    if constexpr (sizeof(T) == 1) {
+        // B8 uses the same byte in both halves of the low 16 bits.
+        padValueBits = (padValueBits & 0xffu) * 0x0101u;
+    } else if constexpr (sizeof(T) == 2) {
+        padValueBits &= 0xffffu;
+    }
+    set_padding(padValueBits);
 
-    // A5 Load3Dv2 takes the destination stride in L3D_RPT; this path does not
-    // transpose, so it is the number of 16-element fractals mExtension covers.
-    uint16_t dstStride = CeilDiv<Catlass::C0_NUM_PER_FRACTAL>(mExtension);
-    AscendC::SetLoadDataRepeatWithStride({0, 1, 0, dstStride});
+    // The view preserves the parent pitch along its outer fractal axis.
+    constexpr uint32_t elementsPerFractal = Catlass::BytesToElements<T>(Catlass::BYTE_PER_FRACTAL);
+    int64_t outerStride = toL0B ? dstDesc.stride1 : dstDesc.stride3;
+    uint16_t dstStride = static_cast<uint16_t>(outerStride / elementsPerFractal);
+    AscendC::SetLoadDataRepeatWithStride(
+        {static_cast<uint16_t>(repeatStride), static_cast<uint8_t>(repeatTime), static_cast<uint8_t>(repeatMode),
+         dstStride});
 
-    auto srcOffset = srcTensor.layout()(srcTensor.coord());
+    auto srcOffset = nc1hwc0Offset<T>(srcDesc);
     auto dstOffset = dstTensor.layout()(dstTensor.coord());
-    AscendC::LoadDataWithStride(dstTensor.data()[dstOffset], srcTensor.data()[srcOffset], loadDataParams);
+    AscendC::LoadDataWithStride<T, kImg2colLoadConfig>(
+        dstTensor.data()[dstOffset], srcTensor.data()[srcOffset], loadDataParams);
 }
 
 extern "C" {
@@ -141,31 +144,51 @@ extern "C" {
         memref_t<__gm__ DType, 2>* src, memref_t<__cbuf__ DType, 1>* dst, DESC_ABI_PARAMS(src), DESC_ABI_PARAMS(dst), \
         int64_t gmCachePolicy)                                                                                        \
     {                                                                                                                 \
-        copyGMToL1Nc1hwc0<Catlass::Arch::Ascend950, DType>(                                                           \
-            src, dst, TENSOR_DESC_12(src), TENSOR_DESC_12(dst), gmCachePolicy);                                       \
+        copyGMToL1Nc1hwc0<DType>(src, dst, TENSOR_DESC_12(src), TENSOR_DESC_12(dst), gmCachePolicy);                  \
     }
 
-#define REGISTER_IMG2COL_L1_TO_L0A(DType)                                                                             \
-    [aicore] __attribute__((always_inline)) void _mlir_ciface_img2col_l1_zNUnAlign_to_l0a_zN_##DType(                 \
-        memref_t<__cbuf__ DType, 1>* src, memref_t<__ca__ DType, 1>* dst, DESC_ABI_PARAMS(src), DESC_ABI_PARAMS(dst), \
-        uint32_t fmapH, uint32_t fmapW, uint32_t filterH, uint32_t filterW, uint32_t strideH, uint32_t strideW,       \
-        uint32_t dilationH, uint32_t dilationW, uint32_t padLeft, uint32_t padRight, uint32_t padTop,                 \
-        uint32_t padBottom, uint32_t padValueBits)                                                                    \
-    {                                                                                                                 \
-        img2colL1ToL0A<Catlass::Arch::Ascend950, DType>(                                                              \
-            src, dst, TENSOR_DESC_12(src), TENSOR_DESC_12(dst), fmapH, fmapW, filterH, filterW, strideH, strideW,     \
-            dilationH, dilationW, padLeft, padRight, padTop, padBottom, padValueBits);                                \
+#define REGISTER_IMG2COL(DType, DstSpace, DstLayout, AddrQual, MakeDstTensor)                                          \
+    [aicore]                                                                                                           \
+        __attribute__((always_inline)) void _mlir_ciface_img2col_l1_zNUnAlign_to_##DstSpace##_##DstLayout##_##DType(   \
+            memref_t<__cbuf__ DType, 1>* src, memref_t<AddrQual DType, 1>* dst, DESC_ABI_PARAMS(src),                  \
+            DESC_ABI_PARAMS(dst), uint32_t fmapH, uint32_t fmapW, uint32_t filterH, uint32_t filterW,                  \
+            uint32_t strideH, uint32_t strideW, uint32_t dilationH, uint32_t dilationW, uint32_t padLeft,              \
+            uint32_t padRight, uint32_t padTop, uint32_t padBottom, uint32_t padValueBits, uint32_t repeatStride,      \
+            uint32_t repeatTime, uint32_t repeatMode)                                                                  \
+    {                                                                                                                  \
+        auto dstDesc = TENSOR_DESC_12(dst);                                                                            \
+        auto dstTensor = MakeDstTensor<LayoutTag::DstLayout, DType>(dst, dstDesc);                                     \
+        img2colL1ToL0<LayoutTag::DstLayout, DType>(                                                                    \
+            src, dstTensor, TENSOR_DESC_12(src), dstDesc, fmapH, fmapW, filterH, filterW, strideH, strideW, dilationH, \
+            dilationW, padLeft, padRight, padTop, padBottom, padValueBits, repeatStride, repeatTime, repeatMode);      \
     }
 
 REGISTER_GM_TO_L1_NC1HWC0(float)
 REGISTER_GM_TO_L1_NC1HWC0(half)
 REGISTER_GM_TO_L1_NC1HWC0(bf16)
+REGISTER_GM_TO_L1_NC1HWC0(int32_t)
+REGISTER_GM_TO_L1_NC1HWC0(uint32_t)
+REGISTER_GM_TO_L1_NC1HWC0(int8_t)
+REGISTER_GM_TO_L1_NC1HWC0(uint8_t)
+REGISTER_GM_TO_L1_NC1HWC0(hifloat8_t)
+REGISTER_GM_TO_L1_NC1HWC0(fp8_e4m3fn_t)
+REGISTER_GM_TO_L1_NC1HWC0(fp8_e5m2_t)
 
-// img2col is instantiated for 2- and 4-byte elements only: that is what the A5
-// path supports, and the op's verifier refuses anything else up front.
-REGISTER_IMG2COL_L1_TO_L0A(float)
-REGISTER_IMG2COL_L1_TO_L0A(half)
-REGISTER_IMG2COL_L1_TO_L0A(bf16)
+REGISTER_IMG2COL(float, l0a, zN, __ca__, makeL0ATensor)
+REGISTER_IMG2COL(half, l0a, zN, __ca__, makeL0ATensor)
+REGISTER_IMG2COL(bf16, l0a, zN, __ca__, makeL0ATensor)
+REGISTER_IMG2COL(int32_t, l0a, zN, __ca__, makeL0ATensor)
+REGISTER_IMG2COL(uint32_t, l0a, zN, __ca__, makeL0ATensor)
+REGISTER_IMG2COL(int8_t, l0a, zN, __ca__, makeL0ATensor)
+REGISTER_IMG2COL(uint8_t, l0a, zN, __ca__, makeL0ATensor)
+REGISTER_IMG2COL(hifloat8_t, l0a, zN, __ca__, makeL0ATensor)
+REGISTER_IMG2COL(fp8_e4m3fn_t, l0a, zN, __ca__, makeL0ATensor)
+REGISTER_IMG2COL(fp8_e5m2_t, l0a, zN, __ca__, makeL0ATensor)
+REGISTER_IMG2COL(float, l0b, nZ, __cb__, makeL0BTensor)
+REGISTER_IMG2COL(half, l0b, nZ, __cb__, makeL0BTensor)
+REGISTER_IMG2COL(bf16, l0b, nZ, __cb__, makeL0BTensor)
+REGISTER_IMG2COL(int32_t, l0b, nZ, __cb__, makeL0BTensor)
+REGISTER_IMG2COL(uint32_t, l0b, nZ, __cb__, makeL0BTensor)
 
 #endif
 } // extern "C"
