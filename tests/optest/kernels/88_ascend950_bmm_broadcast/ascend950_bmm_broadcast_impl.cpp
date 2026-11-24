@@ -65,7 +65,7 @@ extern "C" void run(uint32_t blockNum, aclrtStream stream, const CatlassKernel::
         params->outputAddr[0],
         tla::MakeLayout<ElementA, LayoutTagC>(params->m, params->n),
         nullptr,
-        static_cast<Gemm::Kernel::BiasMode>(params->biasMode)};
+        static_cast<Gemm::BiasMode>(params->biasMode)};
     if (params->biasMode != 0) {
         arguments.ptrBias = params->inputAddr[2];
     }

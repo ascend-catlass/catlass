@@ -51,7 +51,7 @@ static bool Run(const BatchedMatmulBroadcastTlaOptions& options, aclrtStream str
         Gemm::Kernel::BatchedMatmulBroadcastTla<BlockMmad, Gemm::Block::GemmIdentityBlockSwizzle<3, 0>>;
     using MatmulAdapter = Gemm::Device::DeviceGemm<MatmulKernel>;
 
-    using BiasMode = Gemm::Kernel::BiasMode;
+    using BiasMode = Gemm::BiasMode;
     constexpr BiasMode biasMode = BiasMode::SharedN;
 
     auto layoutA = tla::MakeLayout<Element, LayoutTagA>(options.problemShape.m(), options.problemShape.k());

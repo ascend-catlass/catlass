@@ -176,6 +176,52 @@ void ComputeBatchedMatmul(
     }
 }
 
+// simple IterBatch broadcast batched matmul: C[b] = cast(op(A[ba]) * op(B[bb]) + Bias(b)),
+// where ba = (batchA == 1) ? 0 : b and bb = (batchB == 1) ? 0 : b.
+// biasMode: 0 = none, 1 = shared [N] (stride 0), 2 = per-batch [batch, N] (stride N).
+// The accumulation order must match the kernel: FP32 matmul -> add bias -> cast to
+// ElementGolden (never cast the bias to a lower precision before adding).
+template <
+    class ElementA, class LayoutA, class ElementB, class LayoutB, class ElementGolden, class LayoutGolden,
+    class ElementBias>
+void ComputeIterBatchBroadcastMatmul(
+    const uint32_t batchCount, const uint32_t batchA, const uint32_t batchB, const GemmCoord& problemShape,
+    const std::vector<ElementA>& dataA, const LayoutA& layoutA, const std::vector<ElementB>& dataB,
+    const LayoutB& layoutB, std::vector<ElementGolden>& dataC, const LayoutGolden& layoutGolden,
+    const std::vector<ElementBias>& dataBias = {}, const uint32_t biasMode = 0)
+{
+    const uint32_t m = problemShape.m();
+    const uint32_t n = problemShape.n();
+    const uint32_t k = problemShape.k();
+    const size_t strideA = static_cast<size_t>(m) * k;
+    const size_t strideB = static_cast<size_t>(k) * n;
+    const size_t strideC = static_cast<size_t>(m) * n;
+    const bool broadcastA = (batchA == 1);
+    const bool broadcastB = (batchB == 1);
+
+    for (uint32_t b = 0; b < batchCount; ++b) {
+        const size_t batchOffsetA = (broadcastA ? 0U : static_cast<size_t>(b)) * strideA;
+        const size_t batchOffsetB = (broadcastB ? 0U : static_cast<size_t>(b)) * strideB;
+        const size_t batchOffsetC = static_cast<size_t>(b) * strideC;
+        const size_t biasOffsetBase = (biasMode == 2) ? static_cast<size_t>(b) * n : 0;
+        for (uint32_t i = 0; i < m; ++i) {
+            for (uint32_t j = 0; j < n; ++j) {
+                float accumulator = 0.0f;
+                for (uint32_t kk = 0; kk < k; ++kk) {
+                    const size_t offsetA = batchOffsetA + layoutA.GetOffset(MakeCoord(i, kk));
+                    const size_t offsetB = batchOffsetB + layoutB.GetOffset(MakeCoord(kk, j));
+                    accumulator += static_cast<float>(dataA[offsetA]) * static_cast<float>(dataB[offsetB]);
+                }
+                if (biasMode != 0) {
+                    accumulator += static_cast<float>(dataBias[biasOffsetBase + j]);
+                }
+                const size_t offsetGolden = batchOffsetC + layoutGolden.GetOffset(MakeCoord(i, j));
+                dataC[offsetGolden] = static_cast<ElementGolden>(accumulator);
+            }
+        }
+    }
+}
+
 // simple grouped matmul
 template <class ElementA, class LayoutA, class ElementB, class LayoutB, class ElementGolden, class LayoutGolden>
 void ComputeGroupedMatmul(

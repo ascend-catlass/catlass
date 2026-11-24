@@ -192,6 +192,7 @@ struct BlockMmadFAG {
 #include "catlass/gemm/block/block_mmad_syrk_tla.hpp"
 #include "catlass/gemm/block/block_mmad_hstu_qk_split_row_tla.hpp"
 #include "catlass/gemm/block/block_mmad_hstu_pv_split_row_tla.hpp"
+#include "catlass/gemm/block/block_mmad_iterbatch_broadcast_tla.hpp"
 #endif
 #include "catlass/gemm/block/block_mmad_xfai_qk.hpp"
 #include "catlass/gemm/block/block_mmad_xfai_pv.hpp"

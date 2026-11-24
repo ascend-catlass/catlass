@@ -689,6 +689,25 @@ __attribute__((weak)) void PlanarComplexMatmul(
 __attribute__((weak)) void GroupedMatmulSliceMGelu(
     const uint32_t blockNum, aclrtStream stream, const TParams& tParams, const GroupedMatmulParams& params);
 
+/**
+ * @brief Runtime parameters for example 85_ascend950_iterbatch_broadcast_matmul.
+ */
+struct IterBatchBroadcastMatmulParams : public MatmulParams {
+    bool broadcastA = false; ///< A is a single (M, K) matrix shared by all output batches.
+    bool broadcastB = false; ///< B is a single (K, N) matrix shared by all output batches.
+    uint32_t biasMode = 0;   ///< 0 = none, 1 = shared bias [N], 2 = per-batch bias [batch, N].
+};
+
+/**
+ * @brief JIT interface for example 85_ascend950_iterbatch_broadcast_matmul.
+ *
+ * C[b] = cast(op(A[ba]) * op(B[bb]) + Bias(b)), ba = broadcastA ? 0 : b, bb = broadcastB ? 0 : b.
+ * ``params.batch`` is the output batch count; ``inputAddr`` is [A, B] or [A, B, bias].
+ */
+void Ascend950IterBatchBroadcastMatmul(
+    const uint32_t blockNum, aclrtStream stream, const TParams& tParams,
+    const IterBatchBroadcastMatmulParams& params);
+
 } // extern "C"
 
 } // namespace CatlassKernel

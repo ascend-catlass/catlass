@@ -180,6 +180,44 @@ struct ElementAccumulatorSelector<AscendC::int4b_t, AscendC::int4b_t> {
     using ElementAccumulator = int32_t;
 };
 
+// GM 2-D layout tag -> L1 fractal layout tag (RowMajor -> zN, ColumnMajor -> nZ,
+// fractal tags pass through). Shared rule behind L1ATypeSelector / L1BTypeSelector
+// below and the IterBatch resource plan (IterBatchL1FractalTag).
+template <class LayoutTag>
+struct L1FractalLayout {
+    static_assert(DEPENDENT_FALSE<LayoutTag>, "Unsupported layout tag, can not find the specialization.");
+};
+
+template <>
+struct L1FractalLayout<layout::RowMajor> {
+    using type = layout::zN;
+};
+
+template <>
+struct L1FractalLayout<layout::ColumnMajor> {
+    using type = layout::nZ;
+};
+
+template <>
+struct L1FractalLayout<layout::zN> {
+    using type = layout::zN;
+};
+
+template <>
+struct L1FractalLayout<layout::nZ> {
+    using type = layout::nZ;
+};
+
+template <>
+struct L1FractalLayout<layout::PaddingRowMajor> {
+    using type = layout::zN;
+};
+
+template <>
+struct L1FractalLayout<layout::PaddingColumnMajor> {
+    using type = layout::nZ;
+};
+
 template <class GmAType>
 struct L1ATypeSelector {
     static_assert(DEPENDENT_FALSE<GmAType>, "Unsupported layout selector, can not find the specialization.");

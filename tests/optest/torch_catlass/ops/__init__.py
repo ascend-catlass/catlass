@@ -137,7 +137,7 @@ from .ascend950_basic_syrk import (  # example 82
     ascend950_syrk_polynomial,
 )
 from .ascend950_syrk import ascend950_syrk  # example 84
-
+from .ascend950_iterbatch_broadcast_matmul import ascend950_iterbatch_broadcast_matmul  # example 85
 from .ascend950_quant_matmul import (  # example 79, 81
     ascend950_fp4_mx_quant_matmul,
     ascend950_fp8_e4m3_quant_matmul,
@@ -248,4 +248,5 @@ __all__ = [
     "ascend950_basic_syrk",  # example 82
     "ascend950_syrk_polynomial",  # example 82
     "ascend950_syrk",  # example 84
+    "ascend950_iterbatch_broadcast_matmul",  # example 85
 ]

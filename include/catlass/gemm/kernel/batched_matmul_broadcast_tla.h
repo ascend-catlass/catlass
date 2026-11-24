@@ -15,16 +15,12 @@
 
 #include "catlass/arch/resource.hpp"
 #include "catlass/gemm_coord.hpp"
+#include "catlass/gemm/gemm_type.hpp"
 #include "tla/tensor.hpp"
 
 namespace Catlass::Gemm::Kernel {
 
-enum class BiasMode : uint32_t
-{
-    None,
-    SharedN,
-    PerBatchN
-};
+// BiasMode is the shared library-wide Catlass::Gemm::BiasMode.
 
 // Continuous physical matrices; RowMajor/ColumnMajor describe the logical transpose.
 template <class BlockMmad_, class BlockScheduler_>

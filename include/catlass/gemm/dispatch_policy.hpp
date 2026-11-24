@@ -414,6 +414,21 @@ struct MmadMultiBatch : public MmadBase<ArchTag_, false> {
     static constexpr uint32_t L0C_STAGES = L0C_STAGES_;
 };
 
+// IterBatch broadcast batched matmul: batches of one L1 group stay resident in L1
+// (the broadcast side is loaded once), and each L0 sub-group computes iterBatchL0
+// batches with independent L0C accumulators. L1_STAGES is the number of L1 group
+// slots (double-buffered group prefetch when 2).
+template <
+    class ArchTag_, bool USE_HF32_MODE_ = false, uint32_t L0C_STAGES_ = 1, uint32_t L1_STAGES_ = 2,
+    uint32_t L0A_STAGES_ = 2, uint32_t L0B_STAGES_ = 2>
+struct MmadIterBatchBroadcast : public MmadBase<ArchTag_, false> {
+    static constexpr uint32_t L1_STAGES = L1_STAGES_;
+    static constexpr uint32_t L0A_STAGES = L0A_STAGES_;
+    static constexpr uint32_t L0B_STAGES = L0B_STAGES_;
+    static constexpr uint32_t L0C_STAGES = L0C_STAGES_;
+    static constexpr bool USE_HF32_MODE = USE_HF32_MODE_;
+};
+
 template <
     class ArchTag_, uint32_t PRELOAD_STAGES_, uint32_t L1A_STAGES_, uint32_t L1B_STAGES_, uint32_t L0A_STAGES_,
     uint32_t L0B_STAGES_, uint32_t L0C_STAGES_, bool ENABLE_UNIT_FLAG_, bool ENABLE_SHUFFLE_K_,

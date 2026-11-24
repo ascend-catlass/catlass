@@ -31,6 +31,7 @@
 #include "template/rain_fusion_attention.h"
 #include "template/grouped_matmul.h"
 #include "template/grouped_quant_matmul.h"
+#include "template/iterbatch_broadcast_matmul.h"
 #include "template/matmul.h"
 #include "template/matmul_evg.h"
 #include "template/matmul_extra.h"
@@ -495,6 +496,12 @@ REGISTER_TORCH_FUNC(planar_complex_matmul);
 // ── example 78_matrix_inverse ──
 static auto& matrix_inverse = MatrixInverseOp::Run;
 REGISTER_TORCH_FUNC(matrix_inverse);
+
+// ── example 85_ascend950_iterbatch_broadcast_matmul ──
+using Ascend950IterBatchBroadcastMatmulOp =
+    IterBatchBroadcastMatmulLike<CatlassKernel::Ascend950IterBatchBroadcastMatmul>;
+static auto& ascend950_iterbatch_broadcast_matmul = Ascend950IterBatchBroadcastMatmulOp::Run;
+REGISTER_TORCH_FUNC(ascend950_iterbatch_broadcast_matmul);
 
 // ── example 78_x_attention ──
 static auto& x_attention = XAttentionOp::Run;

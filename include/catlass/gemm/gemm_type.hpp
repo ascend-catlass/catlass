@@ -24,6 +24,17 @@ struct GemmType {
     static constexpr AscendC::TPosition POSITION = POSITION_;
 };
 
+// Bias mode of GEMM-family kernels (the single definition shared by all kernels).
+// None:      no bias.
+// SharedN:   bias shape [N], shared by all output batches.
+// PerBatchN: bias shape [batch, N], one row per output batch.
+enum class BiasMode : uint32_t
+{
+    None = 0,
+    SharedN = 1,
+    PerBatchN = 2,
+};
+
 } // namespace Catlass::Gemm
 
 #endif // CATLASS_GEMM_GEMM_TYPE_HPP
