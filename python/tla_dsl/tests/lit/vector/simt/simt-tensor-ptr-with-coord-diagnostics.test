@@ -1,0 +1,16 @@
+// RUN: sed -n '/^\/\/ BEGIN_RANK3$/,/^\/\/ END_RANK3$/p' %s | sed '1d;$d;s|^// ||' > %t.RANK3.mlir && not %tla_compile %t.RANK3.mlir -o %t 2>&1 | %filecheck %s --check-prefix=RANK3
+// RANK3: error: 'tla.tensor_ptr_with_coord' op
+// RANK3-SAME: one or two leaves
+
+// The view-start offset formula covers exactly two logical dimensions, so a
+// rank-3 coordinate is rejected at verification instead of silently folding a
+// partial offset.
+
+// BEGIN_RANK3
+// module {
+//   func.func @rank3_ptr(%d: !tla.tensor<!tla.layout<!tla.shape<2,2,2>, !tla.stride<4,2,1>, !tla.shape<2,2,2>, RowMajor>, !tla.coord<0,0,0>, !tla.ptr<f32, gm, 4>>) {
+//     %p = tla.tensor_ptr_with_coord %d : !tla.tensor<!tla.layout<!tla.shape<2,2,2>, !tla.stride<4,2,1>, !tla.shape<2,2,2>, RowMajor>, !tla.coord<0,0,0>, !tla.ptr<f32, gm, 4>> -> !tla.ptr<f32, gm, 4>
+//     return
+//   }
+// }
+// END_RANK3

@@ -2,14 +2,18 @@
 #include "PassesInternal.h"
 #include "Passes/TlaTensorDescDerivation.h"
 
-// tla-lower-tensor-desc: the single owner of tile descriptor derivation. Runs
-// after tla-lower-ptr and tla-split-mixed-func, before both region passes. It
-// derives descriptors for every tensor view producer
+// tla-lower-tensor-desc: the single owner of tile descriptor materialization.
+// Runs after tla-lower-ptr and tla-split-mixed-func, before both region passes.
+// It derives descriptors for every tensor view producer
 // (tla.tile_view / tla.make_tensor{,_like}), rewrites each result as one
 // tla.tensor_desc, and expands tensor-valued scf.if/for/while carriers into the
 // resolved base/address and descriptor index leaves. Region entries and SCF
 // results are reconstructed as tla.tensor_desc. Downstream passes only collect
 // and consume those materialized descriptor ops.
+//
+// tla-lower-ptr runs earlier and consults the same producer analysis for the
+// view-start offset of tla.tensor_ptr_with_coord, but only this pass rewrites
+// producers into tla.tensor_desc.
 //
 // tla.tensor_ptr is already resolved by tla-lower-ptr (which runs before this
 // pass): a ptr-backed tensor_ptr folds to the underlying !tla.ptr and a

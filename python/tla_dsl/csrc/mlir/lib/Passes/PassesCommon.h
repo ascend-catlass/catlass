@@ -69,6 +69,26 @@ inline hivm::TModuleCoreType toModuleCoreType(hivm::TFuncCoreType coreType)
     llvm_unreachable("AIC_OR_AIV has no module core type equivalent");
 }
 
+// ``tla.ptrtoint(tla.inttoptr(i64))`` is the address itself. tla-lower-ptr and
+// the SIMT region lowering both materialize such round trips, so they share one
+// fold; leaving a pair behind would keep a dead inttoptr in the outlined body.
+inline void foldIntToPtrPtrToIntRoundTrips(Operation* root)
+{
+    SmallVector<::tla::PtrToIntOp, 8> ptrToInts;
+    root->walk([&](::tla::PtrToIntOp op) { ptrToInts.push_back(op); });
+    for (::tla::PtrToIntOp op : ptrToInts) {
+        if (!op || !op->getBlock())
+            continue;
+        auto intToPtr = op.getPtr().getDefiningOp<::tla::IntToPtrOp>();
+        if (!intToPtr || !intToPtr.getAddr().getType().isInteger(64))
+            continue;
+        op.getResult().replaceAllUsesWith(intToPtr.getAddr());
+        op.erase();
+        if (intToPtr.use_empty())
+            intToPtr.erase();
+    }
+}
+
 // The function's effective core type, resolved from the hivm.func_core_type
 // attribute stamped by TlaLowerFuncPass (and carried onto outlined fragments
 // by the tla.vector lowering passes / tla-cube-region / tla-split-mixed-func).

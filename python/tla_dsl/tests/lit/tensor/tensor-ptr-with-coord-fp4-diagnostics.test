@@ -1,0 +1,66 @@
+// RUN: sed -n '/^\/\/ BEGIN_HALFBYTE$/,/^\/\/ END_HALFBYTE$/p' %s | sed '1d;$d;s|^// ||' > %t.HALFBYTE.mlir && not %tla_compile %t.HALFBYTE.mlir -o %t 2>&1 | %filecheck %s --check-prefix=HALFBYTE
+// HALFBYTE: error: 'tla.tensor_ptr_with_coord' op view starts at element 1 of a '!tla.f4e2m1' tensor
+// HALFBYTE-SAME: not a whole number of bytes
+// HALFBYTE-SAME: must be a multiple of 2
+
+// RUN: sed -n '/^\/\/ BEGIN_SIMT$/,/^\/\/ END_SIMT$/p' %s | sed '1d;$d;s|^// ||' > %t.SIMT.mlir && not %tla_compile %t.SIMT.mlir -o %t 2>&1 | %filecheck %s --check-prefix=SIMT
+// SIMT: error: 'tla.vec.func' op the SIMT buffer view of a '!tla.f4e2m1' tensor starts at element 1
+// SIMT-SAME: not a whole number of bytes
+// SIMT-SAME: must be a multiple of 2
+
+// Two fp4 elements share one byte, so a view starting at an odd logical element
+// has no byte address. Both the scalar pointer path and the SIMT launch GEP
+// reject it instead of truncating to the containing byte.
+
+// BEGIN_HALFBYTE
+// !gm = !tla.tensor<!tla.layout<!tla.shape<16>, !tla.stride<1>, !tla.shape<16>, RowMajor>, !tla.coord<0>, !tla.ptr<!tla.f4e2m1, gm, 1>>
+// !view = !tla.tensor<!tla.layout<!tla.shape<4>, !tla.stride<1>, !tla.shape<16>, RowMajor>, !tla.coord<1>, !tla.ptr<!tla.f4e2m1, gm, 1>>
+//
+// module {
+//   func.func @fp4_half_byte(%gm: memref<8xi8, #hivm.address_space<gm>>, %sink: memref<1xi64>) {
+//     %c0 = arith.constant 0 : index
+//     %c1 = arith.constant 1 : index
+//     %c4 = arith.constant 4 : index
+//     %c16 = arith.constant 16 : index
+//     %root = tla.tensor_desc %gm shape [%c1, %c16, %c1, %c1] stride [%c16, %c1, %c1, %c1] origin_shape [%c1, %c16] coord [%c0, %c0] : memref<8xi8, #hivm.address_space<gm>> -> !gm
+//     %vs = tla.make_shape -> !tla.shape<4>
+//     %vc = tla.make_coord -> !tla.coord<1>
+//     %view = tla.tile_view %root, %vs, %vc : !gm, !tla.shape<4>, !tla.coord<1> -> !view
+//     %p = tla.tensor_ptr_with_coord %view : !view -> !tla.ptr<!tla.f4e2m1, gm, 1>
+//     %a = tla.ptrtoint %p : !tla.ptr<!tla.f4e2m1, gm, 1> -> i64
+//     memref.store %a, %sink[%c0] : memref<1xi64>
+//     return
+//   }
+// }
+// END_HALFBYTE
+
+// BEGIN_SIMT
+// !gm = !tla.tensor<!tla.layout<!tla.shape<16,16>, !tla.stride<16,1>, !tla.shape<16,16>, RowMajor>, !tla.coord<0,0>, !tla.ptr<!tla.f4e2m1, gm, 1>>
+// !view = !tla.tensor<!tla.layout<!tla.shape<2,8>, !tla.stride<16,1>, !tla.shape<2,8>, RowMajor>, !tla.coord<0,1>, !tla.ptr<!tla.f4e2m1, gm, 1>>
+// !sink = !tla.tensor<!tla.layout<!tla.shape<16>, !tla.stride<1>, !tla.shape<16>, RowMajor>, !tla.coord<0>, !tla.ptr<i32, gm, 4>>
+//
+// module {
+//   func.func @simt_fp4_half_byte(%gm: memref<128xi8, #hivm.address_space<gm>>, %out: memref<16xi32, #hivm.address_space<gm>>) {
+//     %c0 = arith.constant 0 : index
+//     %c1 = arith.constant 1 : index
+//     %c2 = arith.constant 2 : index
+//     %c8 = arith.constant 8 : index
+//     %c16 = arith.constant 16 : index
+//     %root = tla.tensor_desc %gm shape [%c16, %c16, %c1, %c1] stride [%c16, %c1, %c1, %c1] origin_shape [%c16, %c16] coord [%c0, %c0] : memref<128xi8, #hivm.address_space<gm>> -> !gm
+//     %vs = tla.make_shape -> !tla.shape<2,8>
+//     %vc = tla.make_coord -> !tla.coord<0,1>
+//     %view = tla.tile_view %root, %vs, %vc : !gm, !tla.shape<2,8>, !tla.coord<0,1> -> !view
+//     %s = tla.tensor_desc %out shape [%c1, %c16, %c1, %c1] stride [%c16, %c1, %c1, %c1] origin_shape [%c1, %c16] coord [%c0, %c0] : memref<16xi32, #hivm.address_space<gm>> -> !sink
+//     "tla.vector"() ({
+//       "tla.vec.func"() ({
+//         %p = tla.tensor_ptr_with_coord %view : !view -> !tla.ptr<!tla.f4e2m1, gm, 1>
+//         %a = tla.ptrtoint %p : !tla.ptr<!tla.f4e2m1, gm, 1> -> i64
+//         %i = arith.index_cast %a : i64 to index
+//         %v = tla.simt_load %s[%i] : !sink -> i32
+//         tla.simt_store %s[%c0], %v : !sink, i32
+//       }) {mode = "simt", thread_block_dim = array<i64: 1, 1, 1>} : () -> ()
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_SIMT

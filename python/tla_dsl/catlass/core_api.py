@@ -1648,6 +1648,37 @@ def _require_frontend_state(op_name: str) -> None:
         )
 
 
+# Rejection hint per tensor-construction API. The op name is the API the user
+# wrote, so a `get_tile` call is never reported as its internal `make_tensor`.
+_SIMT_TENSOR_CONSTRUCTION_HINTS = {
+    "tile_view": "请在区域外创建视图，再在区域内读取 view.ptr_with_coord。",
+    "get_tile": "请在区域外创建视图，再在区域内读取 view.ptr_with_coord。",
+    "make_tensor": "请在区域外创建张量，再在区域内读取 tensor 元素或 tensor.ptr_with_coord。",
+    "make_tensor_like": "请在区域外创建张量，再在区域内读取 tensor 元素或 tensor.ptr_with_coord。",
+}
+
+
+def _reject_simt_tensor_construction(op_name: str) -> None:
+    """Refuse to build a tensor/view inside a ``tla.vec.func(mode="simt")``.
+
+    A SIMT region is outlined into a per-thread function whose buffers cross the
+    launch ABI as one bare pointer each, with no descriptor or layout. A tensor
+    built inside the region materializes a ``tla.tensor_desc`` whose base is the
+    enclosing raw memref, so the SIMT capture check used to reject the region
+    for "indexing 1 raw memref(s) directly" -- a message about the launch ABI,
+    not about the call the user wrote. Reject the construction at its call site
+    and name the supported pattern: build the view/tensor outside the region and
+    capture it.
+    """
+    if not _runtime._in_simt_vec_func():
+        return
+    hint = _SIMT_TENSOR_CONSTRUCTION_HINTS[op_name]
+    _op_error(
+        op_name,
+        f"SIMT vec.func 内不支持创建 {op_name}。{hint}",
+    )
+
+
 def _region_stub(op_name: str) -> _RegionStub:
     return _RegionStub(f"tla.{op_name}")
 
@@ -5621,6 +5652,7 @@ def _emit_tile_view(
             f"got shape={_type_name(shape)}, coord={_type_name(coord)}",
         )
     _require_frontend_state("tile_view")
+    _reject_simt_tensor_construction("tile_view")
     source_value = _as_value(source)
     view_ty = _format_tensor_type_descriptor(
         source_value, shape._components, coord._components
@@ -5757,6 +5789,7 @@ def get_tile(
             f"shape={_type_name(shape)}",
         )
     _require_frontend_state(op_name)
+    _reject_simt_tensor_construction(op_name)
 
     coord_components = coord._components
     shape_components = shape._components
@@ -5932,6 +5965,7 @@ def make_tensor(
             f"got {_type_name(layout)}",
         )
     _require_frontend_state("make_tensor")
+    _reject_simt_tensor_construction("make_tensor")
     ptr_value = _as_value(ptr)
     if not PtrType.isinstance(ptr_value.type):
         _op_error(
@@ -6141,6 +6175,7 @@ def make_tensor_like(
     """
     _require_category("make_tensor_like", "like", like, "tensor", 1)
     _require_frontend_state("make_tensor_like")
+    _reject_simt_tensor_construction("make_tensor_like")
     ptr_value = _as_value(ptr)
     like_value = _as_value(like)
     try:
@@ -9214,8 +9249,9 @@ def _vec_func(
           `mode="simd"`.
         - `thread_block_dim` entries must be positive, and their product must
           not exceed 2048 threads per block.
-        - A SIMT region may only capture scalar runtime values from the kernel
-          body; captures of `index`-typed values are rejected.
+        - A SIMT region may capture scalar runtime values from the kernel
+          body, plus tensor pointers read through `t.ptr` /
+          `t.ptr_with_coord`; captures of `index`-typed values are rejected.
         - SIMT: allocate on-chip scratch with `tla.allocate` outside the region;
           index work with `tla.arch.thread_idx` / `thread_block_dim`, sync with
           `tla.arch.sync_threads`.
@@ -14042,6 +14078,33 @@ def _emit_tensor_ptr(
     ptr_ty = _tla_type_bridge.tensor_ptr_type_get(source.type)
     op = mlir_ir.Operation.create(
         "tla.tensor_ptr",
+        operands=[source],
+        results=[ptr_ty],
+        loc=loc,
+    )
+    return _Pointer(op.results[0])
+
+
+def _emit_tensor_ptr_with_coord(
+    source: mlir_ir.Value, loc: mlir_ir.Location | None = None
+) -> _Pointer:
+    """Emit ``tla.tensor_ptr_with_coord``: the view-start address of a tensor.
+
+    The result is the address element ``t[0]`` of the view accesses --
+    ``coord[0]*stride[0] + coord[1]*stride[1]`` elements past the storage base
+    that :meth:`_emit_tensor_ptr` returns. Requires a linear-layout tensor of
+    rank one or two. The coordinate and stride are read from the view's
+    producer chain, so a runtime coordinate (a block index, a loop variable)
+    lowers to runtime arithmetic; a view selected by runtime control flow has
+    no single producer, so take this on each branch's view first and select the
+    resulting pointers. Inside a SIMT ``tla.vec.func`` the address comes from
+    the outlined buffer parameter, whose launch pointer already carries the
+    view start, so no extra launch argument is needed.
+    """
+    _require_frontend_state("tensor_ptr_with_coord")
+    ptr_ty = _tla_type_bridge.tensor_ptr_type_get(source.type)
+    op = mlir_ir.Operation.create(
+        "tla.tensor_ptr_with_coord",
         operands=[source],
         results=[ptr_ty],
         loc=loc,

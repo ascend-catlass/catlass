@@ -52,8 +52,9 @@ private:
     llvm::DenseMap<mlir::Block*, llvm::DenseMap<Key, mlir::Value, KeyInfo>> byScope;
 };
 
-/// Stateful producer-chain analysis used only while materializing
-/// `tla.tensor_desc` operations.
+/// Stateful producer-chain analysis shared by `tla-lower-tensor-desc`, which
+/// materializes the descriptors, and `tla-lower-ptr`, which needs a view's
+/// coordinate/stride before those descriptors exist.
 class TensorDescriptorDerivation {
 public:
     mlir::LogicalResult derive(mlir::func::FuncOp funcOp);

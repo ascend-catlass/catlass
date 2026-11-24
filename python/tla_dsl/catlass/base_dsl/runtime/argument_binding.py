@@ -49,6 +49,20 @@ class _RuntimeArgumentProxy:
         )
         return _emit_tensor_ptr(_as_value(self), loc)
 
+    @property
+    def ptr_with_coord(self) -> Any:
+        """Resolve ``arg.ptr_with_coord`` to a ``tla.tensor_ptr_with_coord`` operation."""
+        from ... import runtime
+        from ...base_dsl.op import _capture_user_loc
+        from ...core_api import _as_value, _emit_tensor_ptr_with_coord
+
+        loc = (
+            _capture_user_loc()
+            if runtime._current_frontend_state() is not None
+            else None
+        )
+        return _emit_tensor_ptr_with_coord(_as_value(self), loc)
+
     def _metadata(self, field: str) -> Any:
         from ...core_api import _as_value, _tensor_metadata_field
 

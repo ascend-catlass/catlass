@@ -4,6 +4,7 @@
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/Dominance.h"
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
@@ -27,10 +28,15 @@
 //      to also carry a ureg; Pre / create_ureg before the for as ureg init;
 //      yield the ureg of the UPDATE whose next window is the yielded tensor
 //      (a same-direction chain of UPDATEs in one trip is wired end-to-end).
-//      Conflict model (sound, same-base only): peel tensors/ptrs to a
-//      ``storageRoot`` (allocate / stable base). Same root ⇒ May/Must conflict
-//      for RAW/WAR/WAW; different root ⇒ no conflict. ``ptr_add`` / ``recast_ptr``
-//      peel through. Recognized mem ops: load/store (+UnAlign/Align UPDATE),
+//      Conflict model (sound, same-base only): peel tensors/ptrs and address
+//      arithmetic to a ``storageRoot`` (allocate leg / memref / stable base).
+//      Same root ⇒ May/Must conflict for RAW/WAR/WAW; different known roots ⇒
+//      no conflict. Unknown provenance ⇒ assume a possible conflict, because
+//      the pass cannot prove the windows disjoint and a deferred store tail
+//      must not land after the reader. ``ptr_add`` / ``recast_ptr`` and chained
+//      ``arith.addi`` / index casts peel through, so a window rebuilt from
+//      ``t.ptr_with_coord`` reaches the same allocation as the raw-base window.
+//      Recognized mem ops: load/store (+UnAlign/Align UPDATE),
 //      ``tla.scalar_load`` / ``tla.scalar_store``, ``tla.copy`` (src/dst),
 //      ``tla.fill`` (dst). No user-addi heuristic.
 //      Store/load for-elim is skipped when the for body has another mem op on
@@ -288,119 +294,168 @@ static bool isCleanForUregCarry(Operation* updateOp, scf::ForOp forOp)
     return parent == forOp.getOperation();
 }
 
-/// Peel derived tensor/ptr constructors to a stable UB/base identity.
-/// Same root ⇒ same underlying storage (conflict for RAW/WAR/WAW).
+/// One storage identity behind a tensor/ptr value.
+///
+/// ``constant`` marks an integer constant address. Offset arithmetic is all
+/// constants and no storage base, so the caller must not pick a constant as the
+/// base when the other side of an addition is a real storage root.
+struct StorageRootInfo {
+    Value value;
+    bool constant = false;
+};
+
+/// Peel derived tensor/ptr constructors and address arithmetic to a stable
+/// UB/base identity. Same root ⇒ same underlying storage (conflict for
+/// RAW/WAR/WAW). ``nullopt`` means the provenance cannot be proven; callers
+/// must then assume a possible overlap instead of proving separation.
 ///
 /// Closed peel list (extend when a new derived constructor is added):
-///   tile_view | make_tensor | make_tensor_like | tensor_ptr | ptr_add
-///   | recast_ptr | UnAlign/Align UPDATE next_ptr → window | ptrtoint/inttoptr
+///   tile_view | make_tensor | make_tensor_like | tensor_ptr |
+///   tensor_ptr_with_coord | ptr_add | recast_ptr | tensor_desc
+///   | UnAlign/Align UPDATE next_ptr → window | ptrtoint/inttoptr
+///   | arith.addi / index casts on an address
+///   | memref.extract_aligned_pointer_as_index → its memref
 ///   | scf.for iter_arg → matching init | 1-op unrealized_conversion_cast
-static Value storageRoot(Value v)
+///
+/// Address additions chain after tla-lower-ptr: a view built from
+/// ``t.ptr_with_coord`` is ``addi(addi(ptrtoint(alloc), slot), viewOffset)``,
+/// while the same window built from the raw base and a coordinate carries only
+/// the allocation's own ``addi``. Tracing through every addi level is what lets
+/// both spellings compare as the same UB allocation.
+static std::optional<StorageRootInfo> storageRootInfo(Value v, DenseSet<Value>& seen)
+{
+    if (!v || !seen.insert(v).second)
+        return std::nullopt;
+
+    if (std::optional<int64_t> constant = getConstantIntValue(v))
+        return StorageRootInfo{v, /*constant=*/true};
+
+    if (auto ba = dyn_cast<BlockArgument>(v)) {
+        if (auto forOp = dyn_cast<scf::ForOp>(ba.getOwner()->getParentOp())) {
+            unsigned n = ba.getArgNumber();
+            if (n >= 1 && n - 1 < forOp.getInitArgs().size())
+                return storageRootInfo(forOp.getInitArgs()[n - 1], seen);
+        }
+        // A memref / tensor / pointer argument names a buffer. A scalar
+        // argument used as an address has no provable storage identity.
+        Type type = ba.getType();
+        if (isa<MemRefType, ::tla::TlaTensorType, ::tla::PtrType>(type))
+            return StorageRootInfo{v, /*constant=*/false};
+        return std::nullopt;
+    }
+
+    Operation* def = v.getDefiningOp();
+    if (!def)
+        return std::nullopt;
+
+    if (isa<UnrealizedConversionCastOp>(def) && def->getNumOperands() == 1)
+        return storageRootInfo(def->getOperand(0), seen);
+    if (auto tile = dyn_cast<::tla::TileViewOp>(def))
+        return storageRootInfo(tile.getSource(), seen);
+    if (auto make = dyn_cast<::tla::MakeTensorOp>(def))
+        return storageRootInfo(make.getPtr(), seen);
+    if (auto makeLike = dyn_cast<::tla::MakeTensorLikeOp>(def))
+        return storageRootInfo(makeLike.getPtr(), seen);
+    if (auto tptr = dyn_cast<::tla::TensorPtrOp>(def))
+        return storageRootInfo(tptr.getSrc(), seen);
+    if (auto tptr = dyn_cast<::tla::TensorPtrWithCoordOp>(def))
+        return storageRootInfo(tptr.getSrc(), seen);
+    if (auto padd = dyn_cast<::tla::PtrAddOp>(def))
+        return storageRootInfo(padd.getPtr(), seen);
+    if (auto recast = dyn_cast<::tla::RecastPtrOp>(def))
+        return storageRootInfo(recast.getSrc(), seen);
+    if (auto desc = dyn_cast<::tla::TensorDescOp>(def))
+        return storageRootInfo(desc.getBase(), seen);
+    // UPDATE next_ptr is the same storage root as the window it advanced.
+    if (auto loadU = dyn_cast<::tla::LoadUnalignUpdateOp>(def))
+        return storageRootInfo(loadU.getSource(), seen);
+    if (auto storeU = dyn_cast<::tla::StoreUnalignUpdateOp>(def))
+        return storageRootInfo(storeU.getDest(), seen);
+    if (auto loadU = dyn_cast<::tla::LoadUpdateOp>(def))
+        return storageRootInfo(loadU.getSource(), seen);
+    if (auto storeU = dyn_cast<::tla::StoreUpdateOp>(def))
+        return storageRootInfo(storeU.getDest(), seen);
+    if (auto pti = dyn_cast<::tla::PtrToIntOp>(def))
+        return storageRootInfo(pti.getPtr(), seen);
+    if (auto itp = dyn_cast<::tla::IntToPtrOp>(def))
+        return storageRootInfo(itp.getOperand(), seen);
+    if (def->getName().getStringRef() == "llvm.ptrtoint")
+        return storageRootInfo(def->getOperand(0), seen);
+    if (def->getName().getStringRef() == "llvm.inttoptr")
+        return storageRootInfo(def->getOperand(0), seen);
+    if (auto extract = dyn_cast<::mlir::memref::ExtractAlignedPointerAsIndexOp>(def))
+        return storageRootInfo(extract.getSource(), seen);
+    if (auto cast = dyn_cast<arith::IndexCastOp>(def))
+        return storageRootInfo(cast.getIn(), seen);
+    if (auto cast = dyn_cast<arith::ExtUIOp>(def))
+        return storageRootInfo(cast.getIn(), seen);
+    if (auto cast = dyn_cast<arith::ExtSIOp>(def))
+        return storageRootInfo(cast.getIn(), seen);
+    if (auto cast = dyn_cast<arith::TruncIOp>(def))
+        return storageRootInfo(cast.getIn(), seen);
+    if (auto addi = dyn_cast<arith::AddIOp>(def)) {
+        std::optional<StorageRootInfo> lhs = storageRootInfo(addi.getLhs(), seen);
+        std::optional<StorageRootInfo> rhs = storageRootInfo(addi.getRhs(), seen);
+        if (!lhs && !rhs)
+            return std::nullopt;
+        if (!lhs)
+            return rhs;
+        if (!rhs)
+            return lhs;
+        // One side is a constant offset, the other the address it advances.
+        if (lhs->constant != rhs->constant)
+            return lhs->constant ? rhs : lhs;
+        if (lhs->value == rhs->value)
+            return lhs;
+        if (lhs->constant)
+            return StorageRootInfo{v, /*constant=*/true};
+        // Two different storage bases: the sum is not a base we can name.
+        return std::nullopt;
+    }
+    // Leaves that name storage directly.
+    if (isa<LLVM::AddressOfOp, ::tla::AllocPtrOp, ::tla::DynamicUbBaseOp>(def))
+        return StorageRootInfo{v, /*constant=*/false};
+    if (isa<LLVM::ConstantOp>(def))
+        return StorageRootInfo{v, /*constant=*/true};
+    return std::nullopt;
+}
+
+static std::optional<StorageRootInfo> storageRootInfo(Value v)
 {
     DenseSet<Value> seen;
-    while (v && seen.insert(v).second) {
-        if (auto ba = dyn_cast<BlockArgument>(v)) {
-            if (auto forOp = dyn_cast<scf::ForOp>(ba.getOwner()->getParentOp())) {
-                unsigned n = ba.getArgNumber();
-                if (n >= 1 && n - 1 < forOp.getInitArgs().size()) {
-                    v = forOp.getInitArgs()[n - 1];
-                    continue;
-                }
-            }
-            break;
-        }
-        Operation* def = v.getDefiningOp();
-        if (!def)
-            break;
-        if (isa<UnrealizedConversionCastOp>(def) && def->getNumOperands() == 1) {
-            v = def->getOperand(0);
-            continue;
-        }
-        if (auto tile = dyn_cast<::tla::TileViewOp>(def)) {
-            v = tile.getSource();
-            continue;
-        }
-        if (auto make = dyn_cast<::tla::MakeTensorOp>(def)) {
-            v = make.getPtr();
-            continue;
-        }
-        if (auto makeLike = dyn_cast<::tla::MakeTensorLikeOp>(def)) {
-            v = makeLike.getPtr();
-            continue;
-        }
-        if (auto tptr = dyn_cast<::tla::TensorPtrOp>(def)) {
-            v = tptr.getSrc();
-            continue;
-        }
-        if (auto padd = dyn_cast<::tla::PtrAddOp>(def)) {
-            v = padd.getPtr();
-            continue;
-        }
-        if (auto recast = dyn_cast<::tla::RecastPtrOp>(def)) {
-            v = recast.getSrc();
-            continue;
-        }
-        // UPDATE next_ptr is the same storage root as the window it advanced.
-        if (auto loadU = dyn_cast<::tla::LoadUnalignUpdateOp>(def)) {
-            v = loadU.getSource();
-            continue;
-        }
-        if (auto storeU = dyn_cast<::tla::StoreUnalignUpdateOp>(def)) {
-            v = storeU.getDest();
-            continue;
-        }
-        if (auto loadU = dyn_cast<::tla::LoadUpdateOp>(def)) {
-            v = loadU.getSource();
-            continue;
-        }
-        if (auto storeU = dyn_cast<::tla::StoreUpdateOp>(def)) {
-            v = storeU.getDest();
-            continue;
-        }
-        if (auto pti = dyn_cast<::tla::PtrToIntOp>(def)) {
-            v = pti.getPtr();
-            continue;
-        }
-        if (auto itp = dyn_cast<::tla::IntToPtrOp>(def)) {
-            v = itp.getOperand();
-            continue;
-        }
-        if (def->getName().getStringRef() == "llvm.ptrtoint") {
-            v = def->getOperand(0);
-            continue;
-        }
-        // Constant byte/element adjust on an integerized ptr: keep peeling the
-        // ptrtoint side when obvious; otherwise stop (unknown → distinct SSA).
-        if (auto addi = dyn_cast<arith::AddIOp>(def)) {
-            Value lhs = addi.getLhs();
-            Value rhs = addi.getRhs();
-            if (lhs.getDefiningOp<::tla::PtrToIntOp>() ||
-                (lhs.getDefiningOp() && lhs.getDefiningOp()->getName().getStringRef() == "llvm.ptrtoint")) {
-                v = lhs;
-                continue;
-            }
-            if (rhs.getDefiningOp<::tla::PtrToIntOp>() ||
-                (rhs.getDefiningOp() && rhs.getDefiningOp()->getName().getStringRef() == "llvm.ptrtoint")) {
-                v = rhs;
-                continue;
-            }
-            break;
-        }
-        break;
+    return storageRootInfo(v, seen);
+}
+
+/// True when the two roots denote the same storage. Unknown provenance on
+/// either side counts as a possible overlap: the pass must not prove the access
+/// disjoint, or a deferred store tail can land after the reader.
+static bool sameStorageRoot(const StorageRootInfo& root, Value window)
+{
+    if (!window)
+        return false;
+    std::optional<StorageRootInfo> other = storageRootInfo(window);
+    if (!other)
+        return true;
+    if (root.constant && other->constant) {
+        std::optional<int64_t> lhs = getConstantIntValue(root.value);
+        std::optional<int64_t> rhs = getConstantIntValue(other->value);
+        if (lhs && rhs)
+            return *lhs == *rhs;
     }
-    return v;
+    return root.value == other->value;
 }
 
 static bool sharesRootWithWindows(Value accessWindow, Value windowA, Value windowB)
 {
     if (!accessWindow)
         return false;
-    Value root = storageRoot(accessWindow);
+    std::optional<StorageRootInfo> root = storageRootInfo(accessWindow);
+    // An address of unknown origin may alias either window.
     if (!root)
-        return false;
-    if (windowA && storageRoot(windowA) == root)
         return true;
-    if (windowB && storageRoot(windowB) == root)
+    if (sameStorageRoot(*root, windowA))
+        return true;
+    if (sameStorageRoot(*root, windowB))
         return true;
     return false;
 }

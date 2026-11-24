@@ -307,4 +307,23 @@ mlir::FailureOr<TensorDescriptor> descriptorFromTensorDescOp(::tla::TensorDescOp
     return d;
 }
 
+mlir::Value descriptorViewElementOffset(mlir::OpBuilder& builder, mlir::Location loc, const TensorDescriptor& desc)
+{
+    const auto isZeroConstantValue = [](mlir::Value value) {
+        std::optional<int64_t> constant = getConstantIntValue(value);
+        return constant && *constant == 0;
+    };
+    if (isZeroConstantValue(desc.coord[0]) && isZeroConstantValue(desc.coord[1]))
+        return mlir::Value();
+
+    // No contiguity requirement: consumers fold the tensor's real strides into
+    // every index (SIMT linearization, scalar access lowering), so the offset
+    // only has to carry the view's *start*. A strided view -- tile_view of a
+    // wider parent at a non-zero coordinate -- is handled by the two together:
+    // this offset moves the base, and the linearized index walks the rows.
+    mlir::Value rowOffset = builder.createOrFold<mlir::arith::MulIOp>(loc, desc.coord[0], desc.stride[0]);
+    mlir::Value colOffset = builder.createOrFold<mlir::arith::MulIOp>(loc, desc.coord[1], desc.stride[1]);
+    return builder.createOrFold<mlir::arith::AddIOp>(loc, rowOffset, colOffset);
+}
+
 } // namespace tla

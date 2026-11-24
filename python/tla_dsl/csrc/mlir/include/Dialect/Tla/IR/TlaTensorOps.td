@@ -62,6 +62,38 @@ def Tla_TensorPtrOp : Tla_Op<"tensor_ptr", [Pure]> {
   let hasVerifier = 1;
 }
 
+def Tla_TensorPtrWithCoordOp : Tla_Op<"tensor_ptr_with_coord", [Pure]> {
+  let summary = "Extract the view-start address of a tla.tensor";
+  let description = [{
+    Yields the ``!tla.ptr`` backing a ``!tla.tensor`` with the view's starting
+    coordinate folded in: ``coord[0]*stride[0] + coord[1]*stride[1]`` elements
+    ahead of the storage base, in the same element units ``tla.tensor_desc``
+    and the SIMT launch GEP use. Unlike ``tla.tensor_ptr`` -- which is always
+    the raw storage base -- this is the address element ``t[0]`` of the view
+    addresses.
+
+    The source must be a linear-layout tensor (``RowMajor``, ``ColumnMajor`` or
+    ``VectorLayout``) of rank one or two: the offset formula and the SIMT
+    launch GEP cover exactly two logical dimensions.
+
+    Coordinate and stride come from the source's producer chain: a materialized
+    ``tla.tensor_desc``, or the operands of the ``tla.tile_view`` /
+    ``tla.make_tensor{,_like}`` ops that build the view. A runtime coordinate
+    therefore lowers to runtime address arithmetic. A tensor selected by runtime
+    control flow has no single producer here; take this op on each branch's view
+    first and select the resulting pointers instead of selecting the tensor.
+    Inside a SIMT ``tla.vec.func`` the address comes from the outlined buffer
+    parameter, whose launch pointer already carries the view start, so no extra
+    launch argument is needed.
+  }];
+  let arguments = (ins Tla_TensorType:$src);
+  let results = (outs Tla_PtrType:$ptr);
+  let assemblyFormat = [{
+    $src attr-dict `:` qualified(type($src)) `->` qualified(type($ptr))
+  }];
+  let hasVerifier = 1;
+}
+
 def Tla_PtrAddOp : Tla_Op<"ptr_add", [Pure]> {
   let summary = "Offset a tla.ptr by a scalar element count";
   let description = [{

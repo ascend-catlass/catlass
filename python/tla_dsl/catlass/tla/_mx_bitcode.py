@@ -7,12 +7,15 @@ from ..address_space import AddressSpace
 from ..base_dsl.typing import Int8, Int32, Numeric
 from ..core_api import (
     _as_value,
+    _const_int_value,
     _MaskPattern,
     _op_error,
+    _tensor_metadata_field,
     _tla_ops_gen,
     allocate,
     recast_ptr,
 )
+from ..types import dtype_size_bits
 from .typing import Tensor
 
 
@@ -34,26 +37,101 @@ _DENSE = {"f32": ("f32", 4), "f16": ("f16", 2), "bf16": ("bf16", 2)}
 _PREFIX_MASKS = {"ALLF": 0, **{f"VL{n}": n for n in (1, 2, 3, 4, 8, 16, 32, 64, 128)}}
 
 
+def _static_view_byte_offset(tensor_value):
+    """Byte displacement of a tensor's first element from its raw storage base.
+
+    The raw base is what ``tensor.ptr`` returns; the displacement is what
+    ``tensor.ptr_with_coord`` adds (``coord[0]*stride[0] +
+    coord[1]*stride[1]`` elements). Returns ``None`` when a leaf is not a static
+    integer, when the layout is not rank 1/2, or when a packed sub-byte offset
+    is not a whole storage byte -- callers then treat the capacity as unknown
+    rather than guessing.
+    """
+    coord = _tensor_metadata_field(tensor_value, "coord")
+    if not isinstance(coord, tuple) or len(coord) not in (1, 2):
+        return None
+    # A zero coordinate is the common case and stays foldable even when the
+    # strides are runtime values or a nested MX-scale tree.
+    if all(_const_int_value(leaf) == 0 for leaf in coord):
+        return 0
+    stride = _tensor_metadata_field(tensor_value, "stride")
+    if not isinstance(stride, tuple) or len(stride) != len(coord):
+        return None
+    element_offset = 0
+    for coord_leaf, stride_leaf in zip(coord, stride, strict=True):
+        coord_value = _const_int_value(coord_leaf)
+        stride_value = _const_int_value(stride_leaf)
+        if coord_value is None or stride_value is None:
+            return None
+        element_offset += coord_value * stride_value
+    bits = dtype_size_bits(str(_tensor_metadata_field(tensor_value, "dtype")))
+    if bits <= 0 or (element_offset * bits) % 8:
+        return None
+    return element_offset * bits // 8
+
+
+def _tensor_raw_storage(value):
+    """``(root, byte_offset)`` of a tensor's raw backing pointer.
+
+    ``root`` identifies the underlying allocation (for example the result of
+    ``tla.alloc_ptr``) and ``byte_offset`` is how far that pointer has been
+    advanced, for example by ``tensor.ptr_with_coord`` or a recast.
+    """
+    value = getattr(value, "value", value)
+    owner = getattr(value, "owner", None)
+    name = getattr(owner, "name", None)
+    if name in ("tla.make_tensor", "tla.make_tensor_like"):
+        return _pointer_storage(owner.operands[0])
+    if name == "tla.tile_view":
+        return _tensor_raw_storage(owner.operands[0])
+    return value, 0
+
+
+def _tensor_start_storage(value):
+    """``(root, byte_offset)`` of a tensor's view start (``ptr_with_coord``)."""
+    value = getattr(value, "value", value)
+    root, base = _tensor_raw_storage(value)
+    if base is None:
+        return root, None
+    view = _static_view_byte_offset(value)
+    if view is None:
+        return root, None
+    return root, base + view
+
+
+def _pointer_storage(value):
+    """``(root, byte_offset)`` of a ``!tla.ptr`` value's address."""
+    value = getattr(value, "value", value)
+    owner = getattr(value, "owner", None)
+    name = getattr(owner, "name", None)
+    if name == "tla.tensor_ptr":
+        return _tensor_raw_storage(owner.operands[0])
+    if name == "tla.tensor_ptr_with_coord":
+        return _tensor_start_storage(owner.operands[0])
+    if name == "tla.recast_ptr":
+        return _pointer_storage(owner.operands[0])
+    return value, 0
+
+
 def _backing_pointer(tensor):
-    """Find the original pointer for direct tensor construction and recasts."""
-    value = tensor.value
-    while getattr(getattr(value, "owner", None), "name", None) in (
-        "tla.make_tensor",
-        "tla.make_tensor_like",
-        "tla.tensor_ptr",
-        "tla.recast_ptr",
-    ):
-        value = value.owner.operands[0]
-        value = getattr(value, "value", value)
-    return value
+    """Find the original allocation behind a tensor construction chain.
+
+    Follows direct construction, recasts, raw ``tensor_ptr``, and the newer
+    ``tensor_ptr_with_coord`` (whose view displacement is tracked separately so
+    two addresses of one allocation still compare as one storage).
+    """
+    root, _offset = _tensor_start_storage(tensor.value)
+    return root
 
 
 def _allocation_bytes(tensor):
-    value = _backing_pointer(tensor)
+    value, offset = _tensor_start_storage(tensor.value)
     owner = getattr(value, "owner", None)
-    if getattr(owner, "name", None) == "tla.alloc_ptr":
-        return int(owner.attributes["size_bytes"].value)
-    return None
+    if getattr(owner, "name", None) != "tla.alloc_ptr" or offset is None:
+        return None
+    size = int(owner.attributes["size_bytes"].value)
+    remaining = size - offset
+    return remaining if remaining >= 0 else None
 
 
 def _static_layout(tensor: Tensor, *, dynamic_coord=False, dynamic_shape=False):

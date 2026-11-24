@@ -28,13 +28,14 @@ The subsections below follow the same order as **SIMD Vector Compute**: what the
 
 ## Region Scope
 
-The region is declared by `tla.vec.func` (see **Scopes and Control Flow**), which owns the geometry rules, the 2048 threads-per-block limit and the scalar-only capture rule. On-chip scratch is allocated outside the region with `tla.allocate` (see **Resource Management**), and a pipe barrier goes after it, inside `tla.vector()`, as the example above does.
+The region is declared by `tla.vec.func` (see **Scopes and Control Flow**), which owns the geometry rules, the 2048 threads-per-block limit and the capture rule: scalar runtime values, plus tensor pointers read through `t.ptr` / `t.ptr_with_coord`. On-chip scratch is allocated outside the region with `tla.allocate` (see **Resource Management**), and a pipe barrier goes after it, inside `tla.vector()`, as the example above does.
 
 **What a SIMT region may contain**
 
 The body is per-thread scalar code. These are available:
 
 - Element access on a `gm` or `ub` tensor (`tensor[i]`, `tensor[i] = value`) -- see **Element Access** below.
+- Tensor pointers `tensor.ptr` (raw storage base) and `tensor.ptr_with_coord` (view-start address), with element offset arithmetic -- see **Pointer Access** below.
 - Scalar arithmetic, comparison, selection and conversion on `Numeric` values, each emitting its per-thread op -- see **Basic Arithmetic**, **Compare and Select** and **Type Conversion** below.
 - `tla.range` loops and runtime `if`.
 - `tla.print` for per-thread scalars, formatted strings, and GM/UB prefixes -- see [Debug and Printing](../language/debug.md).
@@ -45,7 +46,7 @@ The body is per-thread scalar code. These are available:
 These are not, and are rejected when the kernel is compiled:
 
 - Register-vector and mask ops -- `VectorSSA` / `MaskSSA` values, the arithmetic and mask APIs under **SIMD Vector Compute**, `Tensor.load` / `Tensor.store`, `tla.full`, `tla.create_mask`. These APIs operate on SIMD register-vector values.
-- `tla.copy`: a DMA needs the tensor itself, and a SIMT region may capture only scalar runtime values. Stage data before the region, or let each thread address global memory directly.
+- `tla.copy`: a DMA needs the tensor itself, and a SIMT region may capture only scalar runtime values and tensor pointers. Stage data before the region, or let each thread address global memory directly.
 - `tla.local_mem_bar`, `tla.data_sync_barrier` and `tla.pipe_barrier`.
 - `while` loops, in any `tla.vec.func`; carry the iteration through `tla.range` instead.
 - A nested `tla.vec.func`.
@@ -58,6 +59,26 @@ A thread moves data by element access on a `gm` or `ub` tensor: `value = tensor[
 with tla.vec.func(mode="simt", thread_block_dim=256):
     tid, _, _ = tla.arch.thread_idx()
     gm_out[tid] = gm_in[tid]
+```
+
+## Pointer Access
+
+`tensor.ptr` returns the tensor's raw storage base as a `Pointer`; `tensor.ptr_with_coord` returns the view-start address, `coord[0]*stride[0] + coord[1]*stride[1]` elements past that base. Both are available in kernel scalar code and inside a SIMT region, and both support element offset arithmetic (`t.ptr + offset`). A Dynamic-GM Tensor argument exposes the same two properties as `arg.ptr` / `arg.ptr_with_coord`.
+
+`tla.tile_view` takes its coordinate at tile granularity, so `tla.make_coord(block, 0)` over an 8-row shape starts the view at row `block*8`. A runtime coordinate -- `tla.arch.block_idx()` or a loop variable -- is supported: the offset is computed from the view's `tile_view` / `tla.make_tensor` operands. A view selected by runtime control flow has no single producer: take `t.ptr_with_coord` on each branch's view first (or `t.ptr` for the raw base), then select the resulting pointers (for example `va.ptr_with_coord if cond else vb.ptr_with_coord`), rather than selecting the tensor.
+
+`ptr_with_coord` requires a linear layout (`RowMajor`, `ColumnMajor` or `VectorLayout`) and logical rank 1 or 2, because the offset covers exactly two dimensions. Inside a SIMT region, reading `t.ptr` adds the tensor's storage as one bare-pointer launch argument (GM or UB, statically shaped), while `ptr_with_coord` reuses the view pointer that the region's element accesses already carry and costs no extra argument.
+
+Packed sub-byte element types such as `tla.Float4E2M1` keep the offset in logical elements: two fp4 elements share one byte, so the address advances by half a byte per element and a view start must be a multiple of two elements. A statically known start in the middle of a byte is rejected when the kernel is compiled; a runtime start must be even as well, and is divided by the packing factor like Ascend C's FP4 address conversion.
+
+```python
+row = tla.arch.block_idx()
+tail = tla.tile_view(gm_out, tla.make_shape(8, 16), tla.make_coord(row, 0))
+
+with tla.vec.func(mode="simt", thread_block_dim=256):
+    tid, _, _ = tla.arch.thread_idx()
+    view_ptr = tail.ptr_with_coord  # raw base + row*8 rows
+    raw_ptr = tail.ptr              # raw storage base
 ```
 
 ## Basic Arithmetic

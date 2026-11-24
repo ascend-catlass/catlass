@@ -566,6 +566,32 @@ class _Tensor(TensorABC):
         )
         return _emit_tensor_ptr(_as_value(self), loc)
 
+    @property
+    def ptr_with_coord(self) -> Any:
+        """Return the view-start address of this tensor.
+
+        Unlike :attr:`ptr` -- always the raw storage base -- this is the address
+        element ``t[0]`` of the view accesses: ``coord[0]*stride[0] +
+        coord[1]*stride[1]`` elements past the storage base. Requires a
+        linear-layout tensor (``RowMajor``/``ColumnMajor``/``VectorLayout``) of
+        rank one or two.
+
+        The coordinate may be a runtime value (for example
+        ``tla.arch.block_idx()`` or a loop variable): the offset is built from
+        the view's producer operands. A view selected by runtime control flow
+        has no single producer, so take ``ptr_with_coord`` on each branch's view
+        first, then select the resulting pointers.
+        """
+        from ..base_dsl.op import _capture_user_loc
+        from ..core_api import _as_value, _emit_tensor_ptr_with_coord
+
+        loc = (
+            _capture_user_loc()
+            if _runtime._current_frontend_state() is not None
+            else None
+        )
+        return _emit_tensor_ptr_with_coord(_as_value(self), loc)
+
     @staticmethod
     def _prepare_scalar_indices(
         crd: Any,

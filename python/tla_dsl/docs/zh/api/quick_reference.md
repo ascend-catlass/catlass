@@ -69,12 +69,14 @@ nav_order: 5
 - **SIMD** 作用于整向量寄存器与 mask。数据先搬到 UB，再使用 `Tensor.load` /
   `Tensor.store`，适合规则稠密向量计算。
 - **SIMT** 以标量算术与元素访问表达单线程程序。使用 `thread_block_dim`，
-  只允许捕获标量运行期值；区域内不允许寄存器向量、mask 操作、
+  允许捕获标量运行期值，以及通过 `t.ptr` / `t.ptr_with_coord` 读取的 tensor
+  指针；区域内不允许寄存器向量、mask 操作、
   `Tensor.load` / `Tensor.store` 或 `tla.copy`。
 
 | API | 用途 | 上下文或关键约束 |
 | --- | --- | --- |
 | [`tla.vec.func`](language/scopes.md#tlavecfunc) | 选择 `simd` 或 `simt` 向量执行模式。 | Kernel / Vector；SIMT 需 `thread_block_dim`，每 block 至多 2048 线程；SIMD 拒绝该参数。 |
+| [`tla.Tensor.ptr`](language/simt.md#指针访问)、[`tla.Tensor.ptr_with_coord`](language/simt.md#指针访问) | 读取 tensor 的原始存储基址或视图起始地址。 | Kernel / Vector；`ptr_with_coord` 要求线性布局且逻辑秩为 1 或 2；二者都支持元素偏移运算。 |
 | [`tla.create_mask`](language/simd/mask.md#tlacreate_mask)、[`tla.update_mask`](language/simd/mask.md#tlaupdate_mask) | 创建固定模式或尾部 mask。 | Kernel / Vector / SIMD；SIMT 无寄存器向量 mask。 |
 | [`tla.add`](language/simd/arithmetic.md#tlaadd)、[`tla.sub`](language/simd/arithmetic.md#tlasub)、[`tla.mul`](language/simd/arithmetic.md#tlamul)、[`tla.div`](language/simd/arithmetic.md#tladiv) | 逐元素算术。 | Kernel / Vector；SIMD 使用 `VectorSSA`，SIMT 使用逐线程 `Numeric` 标量；mask 只作用于向量形态。 |
 | [`tla.max`](language/simd/arithmetic.md#tlamax)、[`tla.min`](language/simd/arithmetic.md#tlamin) | 逐元素最大值或最小值。 | Kernel / Vector；SIMD 向量与 SIMT 标量形态各有 dtype 规则。 |

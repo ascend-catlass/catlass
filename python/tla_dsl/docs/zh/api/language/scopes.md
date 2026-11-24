@@ -182,7 +182,8 @@ tla.vec.func(*, mode: str = 'simd', thread_block_dim: int | tuple[int, int, int]
 - `mode` 须为 `"simd"` 或 `"simt"`。
 - `thread_block_dim` 在 `mode="simt"` 时必填，在 `mode="simd"` 时禁止。
 - `thread_block_dim` 各分量须为正，乘积不超过 2048。
-- SIMT 区域只能从 kernel 体捕获标量运行期值。
+- SIMT 区域可从 kernel 体捕获标量运行期值，以及通过 `t.ptr` /
+  `t.ptr_with_coord` 读取的 tensor 指针；`index` 类型的捕获会被拒绝。
 - SIMT：片上 scratch 用 `tla.allocate` 在区域外分配；用
   `tla.arch.thread_idx` / `thread_block_dim` 索引，用 `tla.arch.sync_threads`
   同步。

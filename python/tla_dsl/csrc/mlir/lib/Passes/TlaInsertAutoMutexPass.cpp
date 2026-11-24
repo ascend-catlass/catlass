@@ -210,6 +210,10 @@ private:
             return resolveImpl(add.getPtr(), assumptions, visiting);
         if (auto tensorPtr = value.getDefiningOp<::tla::TensorPtrOp>())
             return resolveImpl(tensorPtr.getSrc(), assumptions, visiting);
+        // A view-start pointer aliases the same allocation as the tensor it was
+        // derived from; the coordinate only shifts the address inside it.
+        if (auto tensorPtr = value.getDefiningOp<::tla::TensorPtrWithCoordOp>())
+            return resolveImpl(tensorPtr.getSrc(), assumptions, visiting);
         // UPDATE next_ptr aliases the same UB root as the window it advanced
         // from — required so auto-sync sees outlined chained UPDATE.
         if (auto loadUpdate = value.getDefiningOp<::tla::LoadUpdateOp>())

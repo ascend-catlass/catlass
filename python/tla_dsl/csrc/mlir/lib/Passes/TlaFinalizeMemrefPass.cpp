@@ -144,7 +144,7 @@ public:
             ::tla::LoadUnalignUpdateOp, ::tla::StoreUnalignUpdateOp, ::tla::LoadUnalignPreOp, ::tla::CreateUregOp,
             ::tla::StoreUnalignPostOp, ::tla::FuncOp, ::tla::ReturnOp, ::tla::CubeOp, ::tla::VectorOp, ::tla::MmadOp,
             ::tla::ClearSqueezeStateOp, ::tla::MmadMxOp, ::tla::FillOp, ::tla::AllocPtrOp, ::tla::RecastPtrOp,
-            ::tla::TensorPtrOp, ::tla::PtrAddOp>();
+            ::tla::TensorPtrOp, ::tla::TensorPtrWithCoordOp, ::tla::PtrAddOp>();
         target.addDynamicallyLegalOp<
             ::tla::MakeShapeOp, ::tla::MakeCoordOp, ::tla::MakeStrideOp, ::tla::MakeLayoutOp, ::tla::IntToPtrOp,
             ::tla::PtrToIntOp, ::tla::TensorDescOp>([](Operation* op) { return !hasNoResultUses(op); });

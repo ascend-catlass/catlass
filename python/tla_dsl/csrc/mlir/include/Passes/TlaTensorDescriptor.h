@@ -85,4 +85,12 @@ mlir::FailureOr<int64_t> getStaticAllocationElementCount(mlir::Value ptr);
 /// Decode an already materialized `tla.tensor_desc`.
 mlir::FailureOr<TensorDescriptor> descriptorFromTensorDescOp(::tla::TensorDescOp op);
 
+/// Element offset of a descriptor's view within its allocation, or a null
+/// Value when the view starts at the allocation's own base: the formula
+/// ``coord[0]*stride[0] + coord[1]*stride[1]`` (elements) that the SIMT launch
+/// GEP and ``tla.tensor_ptr_with_coord`` lowering must share, or the same
+/// tensor would mean different addresses on the two paths. A descriptor always
+/// carries both coordinate and stride leaves, so this cannot fail.
+mlir::Value descriptorViewElementOffset(mlir::OpBuilder& builder, mlir::Location loc, const TensorDescriptor& desc);
+
 } // namespace tla

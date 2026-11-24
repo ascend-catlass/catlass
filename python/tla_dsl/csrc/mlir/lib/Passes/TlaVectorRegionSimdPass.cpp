@@ -5541,6 +5541,8 @@ static Value getVectorHelperStorageParent(Value source)
         return tile.getSource();
     if (auto ptr = source.getDefiningOp<::tla::TensorPtrOp>())
         return ptr.getSrc();
+    if (auto ptr = source.getDefiningOp<::tla::TensorPtrWithCoordOp>())
+        return ptr.getSrc();
     if (auto load = source.getDefiningOp<::tla::LoadUpdateOp>())
         return load.getSource();
     if (auto load = source.getDefiningOp<::tla::LoadUnalignUpdateOp>())

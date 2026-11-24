@@ -64,11 +64,12 @@ Context labels: **Host** means a Python script outside `@tla.kernel`; **kernel**
 Both modes run in `tla.vec.func` nested inside `tla.vector()`:
 
 - **SIMD** operates on whole vector registers and masks. Stage data in UB and use `Tensor.load` / `Tensor.store`; this mode fits regular, dense vector work.
-- **SIMT** expresses the program of one thread through scalar arithmetic and element access. It uses `thread_block_dim`, permits only scalar runtime captures, and does not allow register-vector operations, mask operations, `Tensor.load` / `Tensor.store`, or `tla.copy` inside the region.
+- **SIMT** expresses the program of one thread through scalar arithmetic and element access. It uses `thread_block_dim`, permits scalar runtime captures and tensor pointers read through `t.ptr` / `t.ptr_with_coord`, and does not allow register-vector operations, mask operations, `Tensor.load` / `Tensor.store`, or `tla.copy` inside the region.
 
 | API | Purpose | Context or key constraint |
 | --- | --- | --- |
 | [`tla.vec.func`](language/scopes.md#tlavecfunc) | Select `simd` or `simt` vector execution. | Kernel / Vector; SIMT requires `thread_block_dim`, with at most 2048 threads per block. SIMD rejects this argument. |
+| [`tla.Tensor.ptr`](language/simt.md#pointer-access), [`tla.Tensor.ptr_with_coord`](language/simt.md#pointer-access) | Read a tensor's raw storage base or its view-start address. | Kernel / Vector; `ptr_with_coord` requires a linear layout and logical rank 1 or 2, and both support element offset arithmetic. |
 | [`tla.create_mask`](language/simd/mask.md#tlacreate_mask), [`tla.update_mask`](language/simd/mask.md#tlaupdate_mask) | Create fixed-pattern or tail masks. | Kernel / Vector / SIMD; register-vector masks are not available in SIMT. |
 | [`tla.add`](language/simd/arithmetic.md#tlaadd), [`tla.sub`](language/simd/arithmetic.md#tlasub), [`tla.mul`](language/simd/arithmetic.md#tlamul), [`tla.div`](language/simd/arithmetic.md#tladiv) | Perform element-wise arithmetic. | Kernel / Vector; SIMD uses `VectorSSA`, while SIMT uses per-thread `Numeric` scalars. Execution masks apply to vector forms. |
 | [`tla.max`](language/simd/arithmetic.md#tlamax), [`tla.min`](language/simd/arithmetic.md#tlamin) | Compute element-wise maxima or minima. | Kernel / Vector; SIMD vector and SIMT scalar forms have their own dtype rules. |

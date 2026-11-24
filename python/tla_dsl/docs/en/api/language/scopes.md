@@ -183,8 +183,9 @@ Constraints:
   `mode="simd"`.
 - `thread_block_dim` entries must be positive, and their product must
   not exceed 2048 threads per block.
-- A SIMT region may only capture scalar runtime values from the kernel
-  body; captures of `index`-typed values are rejected.
+- A SIMT region may capture scalar runtime values from the kernel
+  body, plus tensor pointers read through `t.ptr` /
+  `t.ptr_with_coord`; captures of `index`-typed values are rejected.
 - SIMT: allocate on-chip scratch with `tla.allocate` outside the region;
   index work with `tla.arch.thread_idx` / `thread_block_dim`, sync with
   `tla.arch.sync_threads`.

@@ -65,3 +65,55 @@ def test_ptr_add_rejects_float_offset() -> None:
 
     with pytest.raises(Exception):
         bad_kernel.dump_mlir(type_args=(_host_mem(),))
+
+
+# --- ptr_with_coord -----------------------------------------------------------
+
+
+@tla.kernel
+def ptr_with_coord_kernel(mem_in: tla.Tensor) -> None:
+    # tile_view coordinates are tile granularity: coord (1, 0) over an (8, 16)
+    # shape becomes element coord (8, 0), and the parent's RowMajor stride (16,
+    # 1) puts the view start 8*16 = 128 elements into the storage.
+    tail = tla.tile_view(mem_in, tla.make_shape(8, 16), tla.make_coord(1, 0))
+    _ = tail.ptr_with_coord
+
+
+def test_ptr_with_coord_emits_tensor_ptr_with_coord() -> None:
+    mlir = ptr_with_coord_kernel.dump_mlir(type_args=(_host_mem(),))
+    assert "tla.tensor_ptr_with_coord" in mlir
+    # Result type matches the tensor's embedded ptr type, like tla.tensor_ptr.
+    assert "-> !tla.ptr<f32, gm, 4>" in mlir
+    # The emitted view carries the element coordinate (8, 0), not the tile
+    # coordinate (1, 0): the tile-to-element scaling is part of the offset.
+    assert "!tla.coord<8,0>" in mlir
+
+
+def test_ptr_with_coord_keeps_tensor_ptr_untouched() -> None:
+    @tla.kernel
+    def both_kernel(mem_in: tla.Tensor) -> None:
+        tail = tla.tile_view(mem_in, tla.make_shape(8, 16), tla.make_coord(1, 0))
+        _ = tail.ptr
+        _ = tail.ptr_with_coord
+
+    mlir = both_kernel.dump_mlir(type_args=(_host_mem(),))
+    # Both ops emitted; the raw one stays the storage base (no coord folding).
+    assert "tla.tensor_ptr" in mlir
+    assert "tla.tensor_ptr_with_coord" in mlir
+
+
+@tla.kernel
+def ptr_with_coord_runtime_kernel(mem_in: tla.Tensor) -> None:
+    # The row comes from the launch geometry, so the view coordinate is a
+    # runtime value. The tensor type only records `?` for it; the lowering has
+    # to take the offset from the make_coord operand.
+    block = tla.arch.block_idx()
+    tail = tla.tile_view(mem_in, tla.make_shape(8, 16), tla.make_coord(block, 0))
+    _ = tail.ptr_with_coord
+
+
+def test_ptr_with_coord_emits_runtime_coord() -> None:
+    mlir = ptr_with_coord_runtime_kernel.dump_mlir(type_args=(_host_mem(),))
+    assert "tla.tensor_ptr_with_coord" in mlir
+    # A dynamic coordinate leaf; there is no static offset to read from the type.
+    assert "!tla.coord<?,0>" in mlir

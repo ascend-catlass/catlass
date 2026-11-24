@@ -1,0 +1,54 @@
+// RUN: sed -n '/^\/\/ BEGIN_NONGM$/,/^\/\/ END_NONGM$/p' %s | sed '1d;$d;s|^// ||' > %t.NONGM.mlir && not %tla_compile %t.NONGM.mlir -o %t 2>&1 | %filecheck %s --check-prefix=NONGM
+// NONGM: error: 'tla.vec.func' op a SIMT tla.vec.func can only address GM or UB
+// NONGM-SAME: #1 in 'l1', #2 (raw pointer) in 'l1'
+
+// RUN: sed -n '/^\/\/ BEGIN_DYNAMIC$/,/^\/\/ END_DYNAMIC$/p' %s | sed '1d;$d;s|^// ||' > %t.DYNAMIC.mlir && not %tla_compile %t.DYNAMIC.mlir -o %t 2>&1 | %filecheck %s --check-prefix=DYNAMIC
+// DYNAMIC: error: 'tla.vec.func' op a SIMT tla.vec.func requires statically shaped buffers
+// DYNAMIC-SAME: capture(s) #1, #2 (raw pointer) of 2
+
+// Buffer captures and raw-pointer captures share one one-based numbering, so
+// "#N of M" names a single capture. Raw-pointer captures are marked as such and
+// report the address space under the same name the buffer branch uses (l1, not
+// the HIVM spelling cbuf).
+
+// BEGIN_NONGM
+// !l1t = !tla.tensor<!tla.layout<!tla.shape<8>, !tla.stride<1>, !tla.shape<8>, RowMajor>, !tla.coord<0>, !tla.ptr<f32, l1, 4>>
+//
+// module {
+//   func.func @nongm(%l1: memref<8xf32, #hivm.address_space<cbuf>>) {
+//     %c0 = arith.constant 0 : index
+//     %c1 = arith.constant 1 : index
+//     %c8 = arith.constant 8 : index
+//     %t = tla.tensor_desc %l1 shape [%c1, %c8, %c1, %c1] stride [%c8, %c1, %c1, %c1] origin_shape [%c1, %c8] coord [%c0, %c0] : memref<8xf32, #hivm.address_space<cbuf>> -> !l1t
+//     "tla.vector"() ({
+//       "tla.vec.func"() ({
+//         %v = tla.simt_load %t[%c0] : <!tla.layout<!tla.shape<8>, !tla.stride<1>, !tla.shape<8>, RowMajor>, !tla.coord<0>, !tla.ptr<f32, l1, 4>> -> f32
+//         %p = tla.tensor_ptr %t : !l1t -> !tla.ptr<f32, l1, 4>
+//         %a = tla.ptrtoint %p : !tla.ptr<f32, l1, 4> -> i64
+//       }) {mode = "simt", thread_block_dim = array<i64: 1, 1, 1>} : () -> ()
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_NONGM
+
+// BEGIN_DYNAMIC
+// !dyn = !tla.tensor<!tla.layout<!tla.shape<?>, !tla.stride<1>, !tla.shape<?>, RowMajor>, !tla.coord<0>, !tla.ptr<f32, gm, 4>>
+//
+// module {
+//   func.func @dynamic(%gm: memref<?xf32, #hivm.address_space<gm>>) {
+//     %c0 = arith.constant 0 : index
+//     %c1 = arith.constant 1 : index
+//     %n = memref.dim %gm, %c0 : memref<?xf32, #hivm.address_space<gm>>
+//     %t = tla.tensor_desc %gm shape [%c1, %n, %c1, %c1] stride [%n, %c1, %c1, %c1] origin_shape [%c1, %n] coord [%c0, %c0] : memref<?xf32, #hivm.address_space<gm>> -> !dyn
+//     "tla.vector"() ({
+//       "tla.vec.func"() ({
+//         %v = tla.simt_load %t[%c0] : <!tla.layout<!tla.shape<?>, !tla.stride<1>, !tla.shape<?>, RowMajor>, !tla.coord<0>, !tla.ptr<f32, gm, 4>> -> f32
+//         %p = tla.tensor_ptr %t : !dyn -> !tla.ptr<f32, gm, 4>
+//         %a = tla.ptrtoint %p : !tla.ptr<f32, gm, 4> -> i64
+//       }) {mode = "simt", thread_block_dim = array<i64: 1, 1, 1>} : () -> ()
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_DYNAMIC

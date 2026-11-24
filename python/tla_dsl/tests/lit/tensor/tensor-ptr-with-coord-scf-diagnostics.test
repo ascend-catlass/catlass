@@ -1,0 +1,34 @@
+// RUN: sed -n '/^\/\/ BEGIN_SCF$/,/^\/\/ END_SCF$/p' %s | sed '1d;$d;s|^// ||' > %t.SCF.mlir && not %tla_compile %t.SCF.mlir -o %t 2>&1 | %filecheck %s --check-prefix=SCF
+// SCF: error: tensor_ptr_with_coord cannot trace its source to a buffer
+// SCF-SAME: runtime control flow
+// SCF-SAME: Take ptr_with_coord on each branch's view
+
+// A view whose coordinate comes from a runtime `scf.if` has no producer
+// operands to read the offset from before descriptor materialization runs, so
+// the lowering must say what the user can do instead of pointing at internal
+// descriptor machinery.
+
+// BEGIN_SCF
+// !gm_row = !tla.tensor<!tla.layout<!tla.shape<8,16>, !tla.stride<16,1>, !tla.shape<8,16>, RowMajor>, !tla.coord<?,0>, !tla.ptr<f32, gm, 4>>
+// !gm_full = !tla.tensor<!tla.layout<!tla.shape<16,16>, !tla.stride<16,1>, !tla.shape<16,16>, RowMajor>, !tla.coord<0,0>, !tla.ptr<f32, gm, 4>>
+//
+// module {
+//   func.func @ptr_scf(%gm: memref<256xf32, #hivm.address_space<gm>>, %cond: i1, %row: index) {
+//     %c0 = arith.constant 0 : index
+//     %c1 = arith.constant 1 : index
+//     %c16 = arith.constant 16 : index
+//     %full = tla.tensor_desc %gm shape [%c16, %c16, %c1, %c1] stride [%c16, %c1, %c1, %c1] origin_shape [%c16, %c16] coord [%c0, %c0] : memref<256xf32, #hivm.address_space<gm>> -> !gm_full
+//     %ts = tla.make_shape -> !tla.shape<8,16>
+//     %tc = tla.make_coord %row -> !tla.coord<?,0>
+//     %view = tla.tile_view %full, %ts, %tc : !gm_full, !tla.shape<8,16>, !tla.coord<?,0> -> !gm_row
+//     %t = scf.if %cond -> (!gm_row) {
+//       scf.yield %view : !gm_row
+//     } else {
+//       scf.yield %view : !gm_row
+//     }
+//     %p = tla.tensor_ptr_with_coord %t : !gm_row -> !tla.ptr<f32, gm, 4>
+//     %a = tla.ptrtoint %p : !tla.ptr<f32, gm, 4> -> i64
+//     return
+//   }
+// }
+// END_SCF

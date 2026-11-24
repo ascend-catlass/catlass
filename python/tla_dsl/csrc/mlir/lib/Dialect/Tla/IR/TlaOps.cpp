@@ -267,6 +267,30 @@ mlir::LogicalResult TensorPtrOp::verify()
     return mlir::success();
 }
 
+mlir::LogicalResult TensorPtrWithCoordOp::verify()
+{
+    auto tensorTy = mlir::dyn_cast<TlaTensorType>(getSrc().getType());
+    if (!tensorTy)
+        return emitOpError("src must be a !tla.tensor");
+    auto resTy = mlir::dyn_cast<PtrType>(getPtr().getType());
+    if (!resTy)
+        return emitOpError("result must be !tla.ptr");
+    if (tensorTy.getPtr() != resTy)
+        return emitOpError("result ptr type must match the tensor's embedded pointer type");
+    if (!isLinearLayout(tensorTy.getLayout().getLayoutTag()))
+        return emitOpError(
+            "src must use a linear layout (RowMajor, ColumnMajor or VectorLayout); "
+            "the view-start offset formula does not cover packed layouts");
+    llvm::SmallVector<int64_t, 2> coordLeaves;
+    if (failed(getIndexTreeLeavesForVerify(getOperation(), tensorTy.getCoord(), coordLeaves, "coordinate")))
+        return mlir::failure();
+    if (coordLeaves.size() != 1 && coordLeaves.size() != 2)
+        return emitOpError(
+            "src coordinate must have one or two leaves; the view-start offset "
+            "formula covers exactly two logical dimensions");
+    return mlir::success();
+}
+
 mlir::LogicalResult PtrAddOp::verify()
 {
     auto srcTy = mlir::dyn_cast<PtrType>(getPtr().getType());

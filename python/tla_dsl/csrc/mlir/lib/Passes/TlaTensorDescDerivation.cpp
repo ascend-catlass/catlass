@@ -430,10 +430,43 @@ mlir::LogicalResult TensorDescriptorDerivation::derive(mlir::func::FuncOp funcOp
                 return failure();
             shape0 = (*shapePair)[0];
             shape1 = (*shapePair)[1];
-            // Prefer the result ``!tla.tensor`` coord segment over ``!tla.coord`` printing:
-            // the tensor metadata (e.g. ``0,?`` for outer B along N) stays correct even when
-            // the packed coord type string loses ``?`` and would mis-bind dynamic operands.
+            // A tile_view operand coord is the element offset relative to the
+            // parent view. Its result tensor type stores the accumulated
+            // absolute coord (parent.coord + operand), so reading the result
+            // type's static leaves would add the parent offset a second time
+            // for a nested view. Decode the operand instead; fall back to the
+            // result type only when the operand's packed coord type cannot be
+            // bound (the tensor metadata stays authoritative there).
             if (auto tileOp = dyn_cast<::tla::TileViewOp>(op)) {
+                if (auto operandTy = dyn_cast<::tla::CoordType>(tileOp.getCoord().getType())) {
+                    SmallVector<int64_t, 4> operandLeaves;
+                    if (succeeded(::tla::getTlaIndexTreeLeaves(operandTy.getTree(), operandLeaves))) {
+                        if (operandLeaves.size() == 1)
+                            operandLeaves = {0, operandLeaves[0]};
+                        if (operandLeaves.size() == 2) {
+                            unsigned dynInOperand = 0;
+                            for (int64_t l : operandLeaves)
+                                if (l == ShapedType::kDynamic)
+                                    ++dynInOperand;
+                            auto mc = tileOp.getCoord().getDefiningOp<::tla::MakeCoordOp>();
+                            if (dynInOperand == 0) {
+                                return std::array<Value, 4>{
+                                    getOrCreateConstant(op, operandLeaves[0], 0),
+                                    getOrCreateConstant(op, operandLeaves[1], 0), shape0, shape1};
+                            }
+                            if (mc && dynInOperand == mc.getNumOperands()) {
+                                size_t di = 0;
+                                row = operandLeaves[0] == ShapedType::kDynamic ?
+                                          mc.getDynElems()[di++] :
+                                          getOrCreateConstant(op, operandLeaves[0], 0);
+                                col = operandLeaves[1] == ShapedType::kDynamic ?
+                                          mc.getDynElems()[di++] :
+                                          getOrCreateConstant(op, operandLeaves[1], 0);
+                                return std::array<Value, 4>{row, col, shape0, shape1};
+                            }
+                        }
+                    }
+                }
                 if (auto resTlaTy = dyn_cast<::tla::TlaTensorType>(tileOp.getResult().getType())) {
                     SmallVector<int64_t, 4> coordLeaves;
                     if (succeeded(::tla::getTlaIndexTreeLeaves(resTlaTy.getCoord().getTree(), coordLeaves)) &&

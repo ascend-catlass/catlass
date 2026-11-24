@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 import pytest
 
 import catlass.tla as tla
@@ -79,6 +81,117 @@ def test_mx_to_dynamic_blocked_layout_with_unambiguous_axis() -> None:
             tla.experimental.mx_to(src, (dst, scale))
 
     assert "tla_mx_layout_quant_f32_e4m3" in str(k.dump_mlir(type_args=(tla.Int32(65),)))
+
+
+def _last_allocation_bytes(mlir: str) -> int:
+    sizes = re.findall(r"tla\.alloc_ptr\{size_bytes = (\d+)", mlir)
+    assert sizes, "kernel emitted no tla.alloc_ptr"
+    return int(sizes[-1])
+
+
+def _dynamic_cols_scale_kernel(*, use_coord: bool):
+    @tla.kernel
+    def k(cols: tla.Int32):
+        a = tla.allocate(8192, tla.Float32, tla.AddressSpace.ub, 256)
+        b = tla.allocate(8192, tla.Float8E4M3FN, tla.AddressSpace.ub, 256)
+        s = tla.allocate(8192, tla.Float8E8M0, tla.AddressSpace.ub, 256)
+        arena = tla.make_tensor(
+            s, tla.make_layout(tla.make_shape(8192), tla.make_stride(1))
+        )
+        src = tla.make_tensor(
+            a, tla.make_layout_with_tag((2, cols), tla.Float32, tla.arch.zN)
+        )
+        dst = tla.make_tensor(
+            b, tla.make_layout_with_tag((2, cols), tla.Float8E4M3FN, tla.arch.nZ)
+        )
+        scale_ptr = arena.ptr_with_coord if use_coord else arena.ptr
+        scale = tla.make_tensor(
+            scale_ptr,
+            tla.make_layout_with_tag(
+                (2, (cols + 31) // 32), tla.Float8E8M0, tla.arch.zZMxScale
+            ),
+        )
+        with tla.vector():
+            tla.experimental.mx_to(src, (dst, scale))
+
+    return k
+
+
+@pytest.mark.parametrize("use_coord", (False, True))
+def test_mx_to_dynamic_scale_accepts_ptr_with_coord(use_coord) -> None:
+    # Dynamic column extents make the scale capacity come from the backing
+    # allocation. Both pointer forms address the same zero-offset buffer, so
+    # both must select the same whole-tile bitcode routine.
+    kernel = _dynamic_cols_scale_kernel(use_coord=use_coord)
+    text = str(kernel.dump_mlir(type_args=(tla.Int32(65),)))
+
+    assert "tla_mx_layout_quant_f32_e4m3" in text
+
+
+def _dynamic_cols_view_offset_kernel(offset_rows: int):
+    @tla.kernel
+    def k(cols: tla.Int32):
+        a = tla.allocate(8192, tla.Float32, tla.AddressSpace.ub, 256)
+        b = tla.allocate(8192, tla.Float8E4M3FN, tla.AddressSpace.ub, 256)
+        base = tla.allocate(8192, tla.Float8E8M0, tla.AddressSpace.ub, 256)
+        arena = tla.make_tensor(
+            base, tla.make_layout(tla.make_shape(2, 4096), tla.make_stride(4096, 1))
+        )
+        tail = tla.tile_view(
+            arena, tla.make_shape(1, 4096), tla.make_coord(offset_rows, 0)
+        )
+        src = tla.make_tensor(
+            a, tla.make_layout_with_tag((2, cols), tla.Float32, tla.arch.zN)
+        )
+        dst = tla.make_tensor(
+            b, tla.make_layout_with_tag((2, cols), tla.Float8E4M3FN, tla.arch.nZ)
+        )
+        scale = tla.make_tensor(
+            tail.ptr_with_coord,
+            tla.make_layout_with_tag(
+                (2, (cols + 31) // 32), tla.Float8E8M0, tla.arch.zZMxScale
+            ),
+        )
+        with tla.vector():
+            tla.experimental.mx_to(src, (dst, scale))
+
+    return k
+
+
+def test_mx_to_scale_capacity_subtracts_view_offset() -> None:
+    # A view advanced by one 4096-element row leaves 4096 fewer scale bytes
+    # below it, so the bitcode scratch shrinks by exactly that much. This is
+    # the part a bare allocation lookup (without the view displacement) gets
+    # wrong.
+    def scratch_size(offset_rows: int) -> int:
+        kernel = _dynamic_cols_view_offset_kernel(offset_rows)
+        return _last_allocation_bytes(str(kernel.dump_mlir(type_args=(tla.Int32(65),))))
+
+    assert scratch_size(0) - scratch_size(1) == 4096
+
+
+@pytest.mark.parametrize("use_coord", (False, True))
+def test_mx_to_rejects_overlapping_payloads_through_ptr_with_coord(use_coord) -> None:
+    # Both pointers address the same allocation and the same start element, so
+    # the overlap diagnostic must not depend on which spelling was used.
+    @tla.kernel
+    def k():
+        data = tla.allocate(128, tla.Int8, tla.AddressSpace.ub, 256)
+        scale = tla.allocate(4, tla.Int8, tla.AddressSpace.ub, 256)
+        arena = tla.make_tensor(
+            data, tla.make_layout(tla.make_shape(128), tla.make_stride(1))
+        )
+        layout = tla.make_layout(tla.make_shape(2, 64), tla.make_stride(64, 1))
+        scales = tla.make_layout(tla.make_shape(2, 2), tla.make_stride(2, 1))
+        a = tla.make_tensor(tla.recast_ptr(arena.ptr, dtype=tla.Float4E2M1), layout)
+        b_ptr = arena.ptr_with_coord if use_coord else arena.ptr
+        b = tla.make_tensor(tla.recast_ptr(b_ptr, dtype=tla.Float8E4M3FN), layout)
+        s = tla.make_tensor(scale, scales)
+        with tla.vector():
+            tla.experimental.mx_to((a, s), (b, s))
+
+    with pytest.raises(tla.TlaCoreAPIError, match="payloads must not overlap"):
+        k.dump_mlir()
 
 
 def test_mx_to_rejects_runtime_shape_with_unknown_grouping_axis() -> None:

@@ -86,6 +86,15 @@ struct SimtCaptures {
     SmallVector<Value, 4> tensors;        // tla.tensor values reached by scalar access or printing
     SmallVector<Value, 4> scalars;        // everything else that must be passed in
     SmallVector<Operation*, 8> constants; // clone into the body
+    // Memrefs a raw-pointer chain (t.ptr on a memref-backed tensor) reads from
+    // inside the region. Each crosses as its own bare-pointer launch argument,
+    // with no view offset folded in -- t.ptr is the raw storage base.
+    SmallVector<Value, 4> pointerBuffers;
+    // Memrefs the region indexes directly instead of going through a tensor.
+    // The launch ABI has no layout to carry, so these are rejected rather than
+    // captured under an identity layout that would silently misaddress a
+    // strided or dynamic-stride buffer.
+    SmallVector<Value, 4> directMemrefs;
 };
 
 static bool isDefinedOutside(Value value, Region& region)
@@ -100,6 +109,8 @@ static void collectSimtCaptures(::tla::VecFuncOp vecFuncOp, SimtCaptures& captur
     SetVector<Value> tensorSet;
     SetVector<Value> scalarSet;
     SetVector<Operation*> constantSet;
+    SetVector<Value> pointerSet;
+    SetVector<Value> directMemrefSet;
 
     region.walk([&](Operation* op) {
         // Tensor operands of scalar accesses and prints become memref parameters.
@@ -112,12 +123,32 @@ static void collectSimtCaptures(::tla::VecFuncOp vecFuncOp, SimtCaptures& captur
         } else if (auto print = dyn_cast<::tla::PrintTensorOp>(op)) {
             if (isDefinedOutside(print.getValue(), region))
                 tensorSet.insert(print.getValue());
+        } else if (auto ptrWithCoord = dyn_cast<::tla::TensorPtrWithCoordOp>(op)) {
+            // The view-start address reads off the outlined buffer parameter,
+            // so the source tensor must be captured even if nothing else in
+            // the region touches it.
+            if (isDefinedOutside(ptrWithCoord.getSrc(), region))
+                tensorSet.insert(ptrWithCoord.getSrc());
         }
         for (Value operand : op->getOperands()) {
             if (!isDefinedOutside(operand, region))
                 continue;
             if (tensorSet.contains(operand) || isa<::tla::TlaTensorType>(operand.getType()))
                 continue;
+            // A raw-pointer chain (t.ptr on a memref-backed tensor) reads just
+            // its storage address: tla-lower-ptr expressed that as
+            // extract_aligned_pointer_as_index. Such a memref crosses as its own
+            // bare-pointer launch argument, and the body never indexes it, so
+            // its layout cannot be misread. Any other use indexes the memref, and
+            // the ABI has no layout to carry -- reject it instead of dropping
+            // layout/stride.
+            if (isa<MemRefType>(operand.getType())) {
+                if (isa<mlir::memref::ExtractAlignedPointerAsIndexOp>(op))
+                    pointerSet.insert(operand);
+                else
+                    directMemrefSet.insert(operand);
+                continue;
+            }
             if (Operation* def = operand.getDefiningOp()) {
                 if (def->hasTrait<mlir::OpTrait::ConstantLike>()) {
                     constantSet.insert(def);
@@ -131,6 +162,8 @@ static void collectSimtCaptures(::tla::VecFuncOp vecFuncOp, SimtCaptures& captur
     captures.tensors.assign(tensorSet.begin(), tensorSet.end());
     captures.scalars.assign(scalarSet.begin(), scalarSet.end());
     captures.constants.assign(constantSet.begin(), constantSet.end());
+    captures.pointerBuffers.assign(pointerSet.begin(), pointerSet.end());
+    captures.directMemrefs.assign(directMemrefSet.begin(), directMemrefSet.end());
 }
 
 // Same fan-out as LowerSimtTripleOpPattern, applied directly to a finished
@@ -173,6 +206,82 @@ static std::optional<int> simtAddressSpaceFor(StringRef addrspace)
     if (addrspace == "ub")
         return kSimtUbAddressSpace;
     return std::nullopt;
+}
+
+// Integer address space for a memref's memory space, or failure for one a SIMT
+// vector function cannot reach. Kernel-argument memrefs carry the
+// #hivm.address_space attribute; the integer forms are what memref-to-llvm
+// lowers to a bare pointer matching the launch's !llvm.ptr.
+static std::optional<int> simtAddressSpaceForMemref(MemRefType type)
+{
+    Attribute space = type.getMemorySpace();
+    if (auto hivmSpace = dyn_cast_or_null<hivm::AddressSpaceAttr>(space)) {
+        if (hivmSpace.getAddressSpace() == hivm::AddressSpace::GM)
+            return kSimtGmAddressSpace;
+        if (hivmSpace.getAddressSpace() == hivm::AddressSpace::UB)
+            return kSimtUbAddressSpace;
+        return std::nullopt;
+    }
+    if (auto intSpace = dyn_cast_or_null<IntegerAttr>(space)) {
+        int64_t value = intSpace.getInt();
+        if (value == kSimtGmAddressSpace || value == kSimtUbAddressSpace)
+            return static_cast<int>(value);
+    }
+    return std::nullopt;
+}
+
+// Address-space name for a memref capture's diagnostic. Buffer captures print
+// the tensor's own ``gm`` / ``l1`` string; a raw-pointer capture carries the
+// same information on the memref's memory space, so spell it the same way
+// instead of leaking the HIVM enum name (``cbuf`` for L1).
+static std::string memrefAddressSpaceName(MemRefType type)
+{
+    Attribute space = type.getMemorySpace();
+    if (auto hivmSpace = dyn_cast_or_null<hivm::AddressSpaceAttr>(space)) {
+        switch (hivmSpace.getAddressSpace()) {
+            case hivm::AddressSpace::Zero:
+                return "generic";
+            case hivm::AddressSpace::GM:
+                return "gm";
+            case hivm::AddressSpace::L1:
+                return "l1";
+            case hivm::AddressSpace::L0A:
+                return "l0a";
+            case hivm::AddressSpace::L0B:
+                return "l0b";
+            case hivm::AddressSpace::L0C:
+                return "l0c";
+            case hivm::AddressSpace::UB:
+                return "ub";
+            case hivm::AddressSpace::BiasBUF:
+                return "biasbuf";
+        }
+        return hivm::stringifyAddressSpace(hivmSpace.getAddressSpace()).str();
+    }
+    if (auto intSpace = dyn_cast_or_null<IntegerAttr>(space)) {
+        switch (intSpace.getInt()) {
+            case 0:
+                return "generic";
+            case 1:
+                return "gm";
+            case 2:
+                return "l1";
+            case 3:
+                return "l0a";
+            case 4:
+                return "l0b";
+            case 5:
+                return "l0c";
+            case 6:
+                return "ub";
+            case 12:
+                return "biasbuf";
+            default:
+                break;
+        }
+        return std::to_string(intSpace.getInt());
+    }
+    return "default";
 }
 
 // The per-thread scalar arithmetic ops carry their own identity through the TLA
@@ -519,38 +628,6 @@ static void lowerSimtShuffleIn(func::FuncOp vf)
     }
 }
 
-// Element offset of a descriptor's view within its allocation, or a null Value
-// when the view starts at the allocation's own base.
-//
-// The SIMT launch ABI passes a bare pointer -- there is no descriptor on the
-// other side -- so a view that starts partway in has to have that start folded
-// into the pointer. The formula is the one TlaLowerScalarAccessPass uses for the
-// general path (coord[0]*stride[0] + coord[1]*stride[1], in elements); the two
-// must agree or the same tensor means different things inside and outside a
-// SIMT region.
-static bool isZeroConstantValue(Value value)
-{
-    std::optional<int64_t> constant = getConstantIntValue(value);
-    return constant && *constant == 0;
-}
-
-static FailureOr<Value> simtViewElementOffset(
-    OpBuilder& builder, Location loc, const TensorDescriptor& desc, Operation* diagnosticOp)
-{
-    if (isZeroConstantValue(desc.coord[0]) && isZeroConstantValue(desc.coord[1]))
-        return Value();
-
-    // No contiguity requirement: linearizeSimtAccessesIn folds the tensor's real
-    // strides into every index, so the pointer only has to carry the view's
-    // *start*. A strided view -- tile_view of a wider parent at a non-zero
-    // coordinate -- is handled by the two together: this offset moves the base,
-    // and the linearized index walks the rows.
-
-    Value rowOffset = builder.createOrFold<arith::MulIOp>(loc, desc.coord[0], desc.stride[0]);
-    Value colOffset = builder.createOrFold<arith::MulIOp>(loc, desc.coord[1], desc.stride[1]);
-    return builder.createOrFold<arith::AddIOp>(loc, rowOffset, colOffset);
-}
-
 // Collapse a rank-2 per-thread access into a single linear index, using the
 // tensor's own strides.
 //
@@ -739,7 +816,10 @@ public:
         SmallVector<int, 4> addressSpaces;
         SmallVector<Value, 4> viewOffsets; // null == view starts at the base
         SmallVector<Type, 4> elementTypes;
-        for (auto [operandIndex, tensor] : llvm::enumerate(captures.tensors)) {
+        // Logical elements per storage element of the buffer parameter: 2 for a
+        // packed 4-bit view buffered as i8, 1 otherwise.
+        SmallVector<int64_t, 4> elementsPerStorageUnit;
+        for (Value tensor : captures.tensors) {
             auto descOp = tensor.getDefiningOp<::tla::TensorDescOp>();
             if (!descOp)
                 return vecFuncOp.emitOpError("SIMT capture expects a materialized tla.tensor_desc"), failure();
@@ -766,11 +846,38 @@ public:
             elementTypes.push_back(baseType.getElementType());
 
             // Fold the view's start into the pointer we hand the launch, so two views
-            // of one allocation stay distinguishable on the other side.
-            FailureOr<Value> viewOffset = simtViewElementOffset(callBuilder, loc, *desc, vecFuncOp.getOperation());
-            if (failed(viewOffset))
-                return failure();
-            viewOffsets.push_back(*viewOffset);
+            // of one allocation stay distinguishable on the other side. The SIMT
+            // launch ABI passes one bare pointer -- there is no descriptor on the
+            // other side -- so the start has to move into that pointer. The formula
+            // is the one TlaLowerScalarAccessPass and tla.tensor_ptr_with_coord use
+            // (coord[0]*stride[0] + coord[1]*stride[1], in elements), or the same
+            // tensor would mean different addresses inside and outside the region.
+            Value viewOffset = descriptorViewElementOffset(callBuilder, loc, *desc);
+            viewOffsets.push_back(viewOffset);
+            // A packed sub-byte element type (fp4) is buffered as bytes, so the
+            // launch GEP steps in storage elements: two logical elements share
+            // one byte. The view start must land on a byte boundary; a static
+            // odd offset is a half-byte address and is diagnosed here.
+            int64_t logicalBits = elementStorageBits(desc->elementType);
+            if (logicalBits <= 0)
+                logicalBits = getBitSizeOfFixedWidthScalarType(desc->elementType);
+            int64_t storageBits = elementStorageBits(baseType.getElementType());
+            if (storageBits <= 0)
+                storageBits = getBitSizeOfFixedWidthScalarType(baseType.getElementType());
+            int64_t storageElementsPerLogicalElement =
+                (logicalBits > 0 && storageBits > logicalBits && storageBits % logicalBits == 0) ?
+                    storageBits / logicalBits :
+                    1;
+            if (storageElementsPerLogicalElement > 1) {
+                if (std::optional<int64_t> constant = getConstantIntValue(viewOffset);
+                    constant && *constant % storageElementsPerLogicalElement != 0)
+                    return vecFuncOp.emitOpError()
+                           << "the SIMT buffer view of a " << desc->elementType << " tensor starts at element "
+                           << *constant << ", which is not a whole number of bytes; packed " << logicalBits
+                           << "-bit elements share one byte, so the view start must be a multiple of "
+                           << storageElementsPerLogicalElement;
+            }
+            elementsPerStorageUnit.push_back(storageElementsPerLogicalElement);
             // Parameters are always flat. One bare pointer per buffer crosses the
             // launch ABI, so a memref's implicit packed strides are the only ones it
             // could ever express; rank-2 accesses were linearized above with the
@@ -793,7 +900,7 @@ public:
                 // (rows-1)*stride0, so bounding by rows*cols would cut the buffer short
                 // and the verifier would reject the very access we just linearized.
                 extent = (info->shape[0] - 1) * info->strides[0] + (info->shape[1] - 1) * info->strides[1] + 1;
-            } else if (*viewOffset) {
+            } else if (viewOffset) {
                 // The pointer now starts at the view, so the parameter must be bounded
                 // by the view too: keeping the allocation's extent would let an index
                 // run off the end of the buffer.
@@ -807,7 +914,6 @@ public:
             if (ShapedType::isDynamic(extent))
                 return failure();
             SmallVector<int64_t, 1> paramShape{extent};
-            (void)operandIndex;
             // The parameter must carry an *integer* address space, not
             // #hivm.address_space<...>: only then does memref-to-llvm lower it to a
             // bare pointer matching the !llvm.ptr the launch passes. With the hivm
@@ -816,6 +922,28 @@ public:
             paramTypes.push_back(MemRefType::get(
                 paramShape, baseType.getElementType(), MemRefLayoutAttrInterface{},
                 rewriter.getI64IntegerAttr(*addressSpace)));
+        }
+
+        // Raw-pointer captures: one parameter per memref a t.ptr chain reads,
+        // statically shaped and carrying the integer address space the launch
+        // ABI lowers to a bare pointer. No view offset folds in -- t.ptr is the
+        // raw storage base -- so the launch passes the un-advanced pointer.
+        //
+        // The parameter is given an identity layout on purpose: the outlined
+        // body only extracts its address (extract_aligned_pointer_as_index),
+        // never an index, so a strided source memref is fine here as long as
+        // its shape is static. A memref the region actually indexes is rejected
+        // by checkSimtRegionCaptures instead of being flattened this way.
+        SmallVector<std::pair<Value, int>, 4> pointerParams;
+        for (Value buffer : captures.pointerBuffers) {
+            auto bufferType = cast<MemRefType>(buffer.getType());
+            std::optional<int> addressSpace = simtAddressSpaceForMemref(bufferType);
+            if (!addressSpace)
+                return failure(); // reported by checkSimtRegionCaptures before the driver ran
+            paramTypes.push_back(MemRefType::get(
+                bufferType.getShape(), bufferType.getElementType(), MemRefLayoutAttrInterface{},
+                rewriter.getI64IntegerAttr(*addressSpace)));
+            pointerParams.push_back({buffer, *addressSpace});
         }
 
         // ---- the outlined vector function ----
@@ -862,8 +990,12 @@ public:
         ArrayRef<BlockArgument> vfArgs = vfBody->getArguments();
         for (auto [tensor, arg] : llvm::zip_equal(captures.tensors, vfArgs.take_front(captures.tensors.size())))
             mapping.map(tensor, arg);
-        for (auto [scalar, arg] :
-             llvm::zip_equal(captures.scalars, vfArgs.slice(captures.tensors.size(), captures.scalars.size()))) {
+        for (auto [buffer, arg] : llvm::zip_equal(
+                 captures.pointerBuffers, vfArgs.slice(captures.tensors.size(), captures.pointerBuffers.size())))
+            mapping.map(buffer, arg);
+        for (auto [scalar, arg] : llvm::zip_equal(
+                 captures.scalars,
+                 vfArgs.slice(captures.tensors.size() + captures.pointerBuffers.size(), captures.scalars.size()))) {
             Value mapped = arg;
             if (arg.getType() != scalar.getType())
                 mapped = bodyBuilder.create<UnrealizedConversionCastOp>(loc, scalar.getType(), arg).getResult(0);
@@ -884,6 +1016,8 @@ public:
             return failure();
         if (failed(rewriteSimtAccessesOntoParams(vf)))
             return failure();
+        if (failed(rewriteTensorPtrWithCoordOntoParams(vf)))
+            return failure();
         lowerSimtTripleOpsIn<
             ::tla::ThreadIdxOp, hivm_regbaseintrins::ThreadIdXOp, hivm_regbaseintrins::ThreadIdYOp,
             hivm_regbaseintrins::ThreadIdZOp>(vf);
@@ -898,18 +1032,29 @@ public:
 
         // ---- the launch ----
         SmallVector<Value, 4> launchArgs;
-        for (auto [base, addressSpace, viewOffset, elementType] :
-             llvm::zip_equal(baseMemrefs, addressSpaces, viewOffsets, elementTypes)) {
+        for (auto [base, addressSpace, viewOffset, elementType, elementsPerUnit] :
+             llvm::zip_equal(baseMemrefs, addressSpaces, viewOffsets, elementTypes, elementsPerStorageUnit)) {
             Value pointer = memrefToRawPointer(callBuilder, loc, base, addressSpace);
             if (viewOffset) {
                 Value index = callBuilder.createOrFold<arith::IndexCastOp>(loc, callBuilder.getI64Type(), viewOffset);
+                if (elementsPerUnit > 1) {
+                    // The GEP steps in storage elements (bytes for packed fp4),
+                    // so convert the logical element offset first.
+                    Value divisor = callBuilder.create<arith::ConstantIntOp>(loc, elementsPerUnit, 64);
+                    index = callBuilder.createOrFold<arith::DivSIOp>(loc, index, divisor);
+                }
                 auto pointerType = LLVM::LLVMPointerType::get(callBuilder.getContext(), addressSpace);
                 pointer = callBuilder.create<LLVM::GEPOp>(loc, pointerType, elementType, pointer, ValueRange{index});
             }
             launchArgs.push_back(pointer);
         }
-        // Captured runtime scalars follow the buffers, in capture order: the ABI is
-        // positional, so this must match the parameter list built above.
+        // Raw-pointer launch arguments: the un-advanced storage base, with no
+        // view GEP -- t.ptr must stay the raw base on the other side.
+        for (auto [buffer, addressSpace] : pointerParams)
+            launchArgs.push_back(memrefToRawPointer(callBuilder, loc, buffer, addressSpace));
+        // Captured runtime scalars follow the buffers and raw pointers, in
+        // capture order: the ABI is positional, so this must match the
+        // parameter list built above.
         for (Value scalar : captures.scalars) {
             if (auto integer = dyn_cast<IntegerType>(scalar.getType()); integer && !integer.isSignless())
                 scalar =
@@ -968,6 +1113,36 @@ private:
         return success();
     }
 
+    // Fold tla.tensor_ptr_with_coord onto the buffer parameter its source tensor
+    // was mapped to: the launch pointer already carries the view start, so the
+    // parameter's aligned pointer is exactly raw + coord*stride. Consumers hold
+    // i64 addresses at this point -- lower-ptr converted every !tla.ptr use --
+    // so the chain rebuilds the typed pointer and the ptrtoint(IntToPtr(i64))
+    // pair folds straight back to the address.
+    static LogicalResult rewriteTensorPtrWithCoordOntoParams(func::FuncOp vf)
+    {
+        SmallVector<::tla::TensorPtrWithCoordOp, 8> stale;
+        vf.walk([&](::tla::TensorPtrWithCoordOp op) { stale.push_back(op); });
+        for (::tla::TensorPtrWithCoordOp op : stale) {
+            OpBuilder builder(op);
+            // The clone remapped the tensor operand to a memref parameter; read
+            // it positionally like rewriteSimtAccessesOntoParams does.
+            Value source = op->getOperand(0);
+            if (!isa<MemRefType>(source.getType()))
+                return op.emitOpError("tla.tensor_ptr_with_coord source did not map to a memref parameter"), failure();
+            Value addressIndex = builder.create<mlir::memref::ExtractAlignedPointerAsIndexOp>(op.getLoc(), source);
+            Value addressI64 =
+                builder.create<mlir::arith::IndexCastOp>(op.getLoc(), builder.getI64Type(), addressIndex);
+            Value pointer = builder.create<::tla::IntToPtrOp>(op.getLoc(), op.getResult().getType(), addressI64);
+            op.getResult().replaceAllUsesWith(pointer);
+            op.erase();
+        }
+
+        // tla.ptrtoint(tla.inttoptr(i64)) is the address itself.
+        foldIntToPtrPtrToIntRoundTrips(vf.getOperation());
+        return success();
+    }
+
     ModuleOp module;
     int& nextSimtRegionId;
     DenseMap<Value, Value>& baseMemrefCache;
@@ -997,9 +1172,15 @@ static LogicalResult checkSimtRegionCaptures(func::FuncOp funcOp)
         // Gather every offender first: one diagnostic per region listing them all
         // beats one per tensor, especially since the frontend runs the pipeline
         // twice (typed bridge, then CLI fallback) and doubles whatever is emitted.
+        // Capture indices are one-based and shared by buffer and raw-pointer
+        // captures, so "#N of M" names one capture unambiguously. Raw-pointer
+        // captures are marked as such and carry their address space like the
+        // tensor branch does.
         SmallVector<std::string, 4> nonGm;
-        SmallVector<unsigned, 4> dynamic;
-        for (auto [operandIndex, tensor] : llvm::enumerate(captures.tensors)) {
+        SmallVector<std::string, 4> dynamic;
+        unsigned captureIndex = 0;
+        for (Value tensor : captures.tensors) {
+            ++captureIndex;
             auto descOp = tensor.getDefiningOp<::tla::TensorDescOp>();
             if (!descOp)
                 continue;
@@ -1007,25 +1188,51 @@ static LogicalResult checkSimtRegionCaptures(func::FuncOp funcOp)
             if (failed(desc))
                 continue;
             if (!simtAddressSpaceFor(desc->addrspace))
-                nonGm.push_back((Twine("#") + Twine(operandIndex + 1) + " in '" + desc->addrspace + "'").str());
+                nonGm.push_back((Twine("#") + Twine(captureIndex) + " in '" + desc->addrspace + "'").str());
             else if (!getConstantIntValue(desc->shape[1]))
-                dynamic.push_back(operandIndex + 1);
+                dynamic.push_back((Twine("#") + Twine(captureIndex)).str());
         }
-
-        auto listTensors = [&](ArrayRef<unsigned> indices) {
-            std::string text;
-            llvm::raw_string_ostream os(text);
-            llvm::interleaveComma(indices, os, [&](unsigned index) { os << "#" << index; });
-            return os.str();
-        };
+        // Raw-pointer captures carry the same two constraints as buffer
+        // captures: a reachable address space and a static shape.
+        for (Value buffer : captures.pointerBuffers) {
+            ++captureIndex;
+            auto bufferType = cast<MemRefType>(buffer.getType());
+            std::string label = (Twine("#") + Twine(captureIndex) + " (raw pointer)").str();
+            if (!simtAddressSpaceForMemref(bufferType))
+                nonGm.push_back((Twine(label) + " in '" + memrefAddressSpaceName(bufferType) + "'").str());
+            else if (llvm::any_of(bufferType.getShape(), ShapedType::isDynamic))
+                dynamic.push_back(label);
+        }
+        // A memref the region indexes directly cannot cross the launch ABI
+        // faithfully. The call passes one bare pointer per buffer and no
+        // layout, so the outlined body would re-interpret every index under an
+        // identity layout and silently address the wrong element of a strided
+        // or dynamic-stride buffer. Only the t.ptr address read is layout-free.
+        if (!captures.directMemrefs.empty()) {
+            std::string bufferList;
+            llvm::raw_string_ostream rawBufferList(bufferList);
+            llvm::interleaveComma(captures.directMemrefs, rawBufferList, [&](Value buffer) {
+                buffer.printAsOperand(rawBufferList, OpPrintingFlags());
+                rawBufferList << " : ";
+                buffer.getType().print(rawBufferList);
+            });
+            vecFuncOp.emitOpError()
+                << "a SIMT tla.vec.func can only read a buffer through its tensor: this region indexes "
+                << captures.directMemrefs.size() << " raw memref(s) directly (" << llvm::StringRef(rawBufferList.str())
+                << "). The launch ABI passes one bare pointer per buffer and no layout, so the outlined "
+                   "body would re-interpret every index under an identity layout and can silently read "
+                   "the wrong element of a strided or dynamic-stride buffer. Index the tensor instead "
+                   "(tensor[i] / tensor[i] = value), or read the storage address through t.ptr";
+            result = failure();
+        }
 
         // A SIMT vector function is launched with GM pointers only. A UB operand
         // never gets a base established and silently reads as zeros, so refuse it
         // rather than let the kernel produce wrong answers.
         if (!nonGm.empty()) {
             vecFuncOp.emitOpError() << "a SIMT tla.vec.func can only address GM or UB, but " << nonGm.size() << " of "
-                                    << captures.tensors.size()
-                                    << " tensor(s) used by this region are not: " << llvm::join(nonGm, ", ")
+                                    << (captures.tensors.size() + captures.pointerBuffers.size())
+                                    << " capture(s) used by this region are not: " << llvm::join(nonGm, ", ")
                                     << ". Buffers reach an outlined SIMT vector function as raw pointers, and "
                                        "only the GM and UB address spaces have a SIMT pointer form";
             result = failure();
@@ -1034,8 +1241,9 @@ static LogicalResult checkSimtRegionCaptures(func::FuncOp funcOp)
         // statically shaped memref: a dynamic extent lowers to a 5-field descriptor
         // and hivmc-a5 aborts with an opaque LLVM assertion.
         if (!dynamic.empty()) {
-            vecFuncOp.emitOpError() << "a SIMT tla.vec.func requires statically shaped buffers, but tensor(s) "
-                                    << listTensors(dynamic) << " of " << captures.tensors.size()
+            vecFuncOp.emitOpError() << "a SIMT tla.vec.func requires statically shaped buffers, but capture(s) "
+                                    << llvm::join(dynamic, ", ") << " of "
+                                    << (captures.tensors.size() + captures.pointerBuffers.size())
                                     << " used by this region have a dynamic extent. The launch passes one "
                                        "pointer per buffer, while a dynamic memref lowers to a 5-field "
                                        "descriptor (base, aligned, offset, size, stride), which makes hivmc-a5 "

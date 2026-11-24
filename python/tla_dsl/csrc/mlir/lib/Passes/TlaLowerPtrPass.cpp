@@ -1,5 +1,8 @@
 #include "Passes/TlaSimtUbLimits.h"
+#include "Passes/TlaTensorDescDerivation.h"
+#include "Passes/TlaTensorDescriptor.h"
 #include "Passes/TlaTensorToMemref.h"
+#include "Passes/TlaVectorRegionCommon.h"
 #include "PassesCommon.h"
 #include "Passes/TlaDebugPrint.h"
 #include "PassesInternal.h"
@@ -9,7 +12,10 @@
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/Func/Transforms/FuncConversions.h"
 #include "mlir/Dialect/SCF/Transforms/Patterns.h"
+#include "mlir/IR/Diagnostics.h"
 #include "mlir/Interfaces/FunctionInterfaces.h"
+
+#include <memory>
 
 namespace tla {
 namespace {
@@ -44,8 +50,11 @@ static LogicalResult resolveTensorPtrOps(ModuleOp module)
 
         FailureOr<Value> base = resolveTensorBacking(op.getSrc());
         if (failed(base)) {
-            op.emitError() << "tensor_ptr source must resolve through tensor_desc, tile_view, or "
-                              "make_tensor to a backing !tla.ptr or memref";
+            op.emitError() << "tensor_ptr cannot trace its source to a buffer through a tla.tensor_desc / "
+                              "tla.tile_view / tla.make_tensor{,_like} chain: a tensor selected by runtime "
+                              "control flow has no single storage root here. Take t.ptr on each branch's "
+                              "tensor first, then select the resulting pointers, instead of selecting the "
+                              "tensor and taking its pointer afterwards";
             return failure();
         }
 
@@ -60,6 +69,172 @@ static LogicalResult resolveTensorPtrOps(ModuleOp module)
         Value addressIndex = builder.create<mlir::memref::ExtractAlignedPointerAsIndexOp>(op.getLoc(), *base);
         Value addressI64 = builder.create<arith::IndexCastOp>(op.getLoc(), builder.getI64Type(), addressIndex);
         Value pointer = builder.create<::tla::IntToPtrOp>(op.getLoc(), op.getResult().getType(), addressI64);
+        op.getResult().replaceAllUsesWith(pointer);
+    }
+    return success();
+}
+
+// Element offset from the backing storage to the view's first element,
+// resolved from the producer chain instead of from the (possibly dynamic)
+// tensor type.
+//
+// A source that is already a materialized tla.tensor_desc is the steady state.
+// Before tla-lower-tensor-desc runs, however, an ordinary tile_view /
+// make_tensor chain carries its coordinate as SSA operands (make_coord /
+// make_stride), and the tensor type only says ``?`` for a runtime coordinate.
+// The descriptor analysis derives exactly the descriptor those producers will
+// later be rewritten into, so reusing it here keeps a runtime coordinate
+// lowering correctly and keeps this offset in lockstep with the descriptor /
+// SIMT launch GEP formula.
+static FailureOr<Value> resolvePtrWithCoordViewOffset(
+    OpBuilder& builder, ::tla::TensorPtrWithCoordOp op,
+    llvm::DenseMap<Operation*, std::unique_ptr<TensorDescriptorDerivation>>& derivations)
+{
+    if (auto descOp = op.getSrc().getDefiningOp<::tla::TensorDescOp>()) {
+        FailureOr<TensorDescriptor> desc = descriptorFromTensorDescOp(descOp);
+        if (failed(desc))
+            return failure();
+        return descriptorViewElementOffset(builder, op.getLoc(), *desc);
+    }
+
+    auto funcOp = op->getParentOfType<func::FuncOp>();
+    if (!funcOp)
+        return failure();
+
+    std::unique_ptr<TensorDescriptorDerivation>& derivation = derivations[funcOp.getOperation()];
+    if (!derivation) {
+        derivation = std::make_unique<TensorDescriptorDerivation>();
+        // The analysis belongs to tla-lower-tensor-desc and cannot expand a
+        // structural SCF tensor carrier at this point in the pipeline, so its
+        // diagnostics are dropped rather than reported here -- that pass runs
+        // later and reports the same producer problem with full context. This
+        // lookup only answers whether the view's offset is derivable now.
+        ScopedDiagnosticHandler handler(funcOp->getContext(), [](Diagnostic&) {});
+        (void)derivation->derive(funcOp);
+    }
+    auto found = derivation->descriptorByValue.find(op.getSrc());
+    if (found == derivation->descriptorByValue.end())
+        return failure();
+    return descriptorViewElementOffset(builder, op.getLoc(), found->second);
+}
+
+// Static fallback for a source with no derivable producer, such as a region
+// argument: the type is all we have, so a dynamic coordinate or stride cannot
+// be resolved.
+static FailureOr<int64_t> staticViewElementOffset(Type tensorType)
+{
+    FailureOr<ParsedTensorInfo> info = parseTensorInfo(tensorType);
+    if (failed(info))
+        return failure();
+    // The offset walks coordinate leaves and indexes strides by the same
+    // position. Verified linear types keep those counts equal (the layout
+    // verifier ties origin to shape, the tensor verifier ties coord to origin),
+    // but a hand-written or future type must not read past the stride tree.
+    if (info->coord.size() != info->strides.size())
+        return failure();
+    int64_t elementOffset = 0;
+    for (auto [dim, coord] : llvm::enumerate(info->coord)) {
+        int64_t stride = info->strides[dim];
+        if (coord == ShapedType::kDynamic || stride == ShapedType::kDynamic)
+            return failure();
+        elementOffset += coord * stride;
+    }
+    return elementOffset;
+}
+
+// A packed sub-byte view start must land on a byte boundary: two fp4 elements
+// share a byte, so a static odd element offset is a half-byte address. Diagnose
+// it on the user's op before the internal ptr_add is materialized.
+static LogicalResult checkSubByteViewStart(::tla::TensorPtrWithCoordOp op, std::optional<int64_t> elementOffset)
+{
+    if (!elementOffset)
+        return success();
+    auto ptrType = dyn_cast<::tla::PtrType>(op.getResult().getType());
+    if (!ptrType)
+        return success();
+    int64_t bits = elementStorageBits(ptrType.getPointee());
+    if (bits <= 0)
+        bits = getBitSizeOfFixedWidthScalarType(ptrType.getPointee());
+    if (bits <= 0 || bits % 8 == 0)
+        return success();
+    int64_t elementsPerByte = 8 / bits;
+    if (*elementOffset % elementsPerByte == 0)
+        return success();
+    return op.emitOpError() << "view starts at element " << *elementOffset << " of a " << ptrType.getPointee()
+                            << " tensor, which is not a whole number of bytes; packed " << bits
+                            << "-bit elements share one byte, so the view start must be a multiple of "
+                            << elementsPerByte;
+}
+
+// Resolve ``tla.tensor_ptr_with_coord``: the backing pointer advanced by the
+// view's starting offset, ``coord[0]*stride[0] + coord[1]*stride[1]`` elements
+// -- the same formula the SIMT launch GEP uses, shared through
+// descriptorViewElementOffset so the two paths cannot drift.
+//
+// SIMT vec.func regions are skipped: their outlined buffer parameters already
+// carry the view start in the launch pointer, so tla-vector-region-simt folds
+// the op onto the parameter without an extra launch argument.
+static LogicalResult resolveTensorPtrWithCoordOps(ModuleOp module)
+{
+    SmallVector<::tla::TensorPtrWithCoordOp, 8> ops;
+    module.walk([&](::tla::TensorPtrWithCoordOp op) { ops.push_back(op); });
+    llvm::DenseMap<Operation*, std::unique_ptr<TensorDescriptorDerivation>> derivations;
+    for (::tla::TensorPtrWithCoordOp op : ops) {
+        if (!op || !op->getBlock())
+            continue;
+        if (auto vecFunc = op->getParentOfType<::tla::VecFuncOp>(); vecFunc && vecregion::isSimtVecFunc(vecFunc))
+            continue;
+
+        FailureOr<Value> base = resolveTensorBacking(op.getSrc());
+        if (failed(base)) {
+            op.emitError()
+                << "tensor_ptr_with_coord cannot trace its source to a buffer through a tla.tensor_desc / "
+                   "tla.tile_view / tla.make_tensor{,_like} chain: a tensor selected by runtime control flow "
+                   "has no single storage root here. Take ptr_with_coord on each branch's view first, then "
+                   "select the resulting pointers (va.ptr_with_coord if cond else vb.ptr_with_coord), instead "
+                   "of selecting the tensor and taking its pointer afterwards";
+            return failure();
+        }
+
+        OpBuilder builder(op);
+        Value backing;
+        if (isa<::tla::PtrType>((*base).getType())) {
+            backing = *base;
+        } else if (isa<MemRefType>((*base).getType())) {
+            Value addressIndex = builder.create<mlir::memref::ExtractAlignedPointerAsIndexOp>(op.getLoc(), *base);
+            Value addressI64 = builder.create<arith::IndexCastOp>(op.getLoc(), builder.getI64Type(), addressIndex);
+            backing = builder.create<::tla::IntToPtrOp>(op.getLoc(), op.getResult().getType(), addressI64);
+        } else {
+            op.emitError() << "tensor_ptr_with_coord backing must be a !tla.ptr or a memref";
+            return failure();
+        }
+
+        Value pointer = backing;
+        FailureOr<Value> offset = resolvePtrWithCoordViewOffset(builder, op, derivations);
+        if (succeeded(offset)) {
+            std::optional<int64_t> constantOffset = *offset ? getConstantIntValue(*offset) : std::nullopt;
+            if (failed(checkSubByteViewStart(op, constantOffset)))
+                return failure();
+            if (*offset)
+                pointer = builder.create<::tla::PtrAddOp>(op.getLoc(), op.getResult().getType(), backing, *offset);
+        } else {
+            FailureOr<int64_t> staticOffset = staticViewElementOffset(op.getSrc().getType());
+            if (failed(staticOffset))
+                return op.emitOpError(
+                           "tensor_ptr_with_coord cannot resolve this view's start offset at compile time: "
+                           "its coordinate or stride is dynamic and the view is not a tla.tensor_desc, "
+                           "tla.tile_view or tla.make_tensor{,_like} producer (a tensor selected by runtime "
+                           "control flow is the common case). Take ptr_with_coord on each branch's view "
+                           "first, then select the resulting pointers, instead of selecting the tensor and "
+                           "taking its pointer afterwards"),
+                       failure();
+            if (failed(checkSubByteViewStart(op, *staticOffset)))
+                return failure();
+            if (*staticOffset != 0) {
+                Value offsetValue = builder.create<arith::ConstantIndexOp>(op.getLoc(), *staticOffset);
+                pointer = builder.create<::tla::PtrAddOp>(op.getLoc(), op.getResult().getType(), backing, offsetValue);
+            }
+        }
         op.getResult().replaceAllUsesWith(pointer);
     }
     return success();
@@ -296,9 +471,13 @@ struct LowerPtrAddPattern : public OpConversionPattern<::tla::PtrAddOp> {
         if (!ptrType)
             return rewriter.notifyMatchFailure(op, "source is not !tla.ptr");
         // Bool (i1) is AscendC b8 storage (1 byte/lane); use elementStorageBytes.
-        int64_t elementBytes = elementStorageBytes(ptrType.getPointee());
-        if (elementBytes <= 0)
-            return rewriter.notifyMatchFailure(op, "pointee has no fixed byte width");
+        // Packed fp4 is the one type with no whole-byte storage width, so fall
+        // back to the logical bit width and scale half a byte per element.
+        Type pointee = ptrType.getPointee();
+        int64_t elementBytes = elementStorageBytes(pointee);
+        int64_t elementBits = elementBytes > 0 ? elementBytes * 8 : getBitSizeOfFixedWidthScalarType(pointee);
+        if (elementBits <= 0)
+            return rewriter.notifyMatchFailure(op, "pointee has no fixed width");
 
         Value address = adaptor.getPtr();
         Value elementOffset = castValueToI64(rewriter, op.getLoc(), adaptor.getOffset());
@@ -306,9 +485,27 @@ struct LowerPtrAddPattern : public OpConversionPattern<::tla::PtrAddOp> {
             return rewriter.notifyMatchFailure(op, "converted address/offset must be i64");
 
         Value byteOffset = elementOffset;
-        if (elementBytes != 1) {
-            Value scale = rewriter.create<arith::ConstantIntOp>(op.getLoc(), elementBytes, 64);
-            byteOffset = rewriter.create<arith::MulIOp>(op.getLoc(), elementOffset, scale);
+        if (elementBits % 8 == 0) {
+            int64_t scaleValue = elementBits / 8;
+            if (scaleValue != 1) {
+                Value scale = rewriter.create<arith::ConstantIntOp>(op.getLoc(), scaleValue, 64);
+                byteOffset = rewriter.create<arith::MulIOp>(op.getLoc(), elementOffset, scale);
+            }
+        } else {
+            // Two fp4 elements share a byte, so the byte address is the element
+            // offset divided by the packing factor -- the same conversion Ascend
+            // C GlobalTensor::GetPhyAddr applies to an even FP4 offset.
+            int64_t elementsPerByte = 8 / elementBits;
+            if (std::optional<int64_t> constant = getConstantIntValue(op.getOffset());
+                constant && *constant % elementsPerByte != 0) {
+                op.emitOpError() << "element offset " << *constant << " of a " << pointee
+                                 << " pointer starts in the middle of a byte; packed " << elementBits
+                                 << "-bit elements share one byte, so the offset must be a multiple of "
+                                 << elementsPerByte;
+                return failure();
+            }
+            Value divisor = rewriter.create<arith::ConstantIntOp>(op.getLoc(), elementsPerByte, 64);
+            byteOffset = rewriter.create<arith::DivSIOp>(op.getLoc(), elementOffset, divisor);
         }
         rewriter.replaceOpWithNewOp<arith::AddIOp>(op, address, byteOffset);
         return success();
@@ -462,6 +659,11 @@ public:
             return;
         }
 
+        if (failed(resolveTensorPtrWithCoordOps(module))) {
+            signalPassFailure();
+            return;
+        }
+
         TypeConverter converter;
         converter.addConversion([](Type type) { return type; });
         converter.addConversion([&](::tla::PtrType) -> Type { return IntegerType::get(context, 64); });
@@ -528,18 +730,7 @@ public:
         }
 
         // ``ptrtoint(inttoptr(i64))`` is the address itself.
-        SmallVector<::tla::PtrToIntOp, 8> ptrToInts;
-        module.walk([&](::tla::PtrToIntOp op) { ptrToInts.push_back(op); });
-        for (::tla::PtrToIntOp op : ptrToInts) {
-            if (!op || !op->getBlock())
-                continue;
-            auto intToPtr = op.getPtr().getDefiningOp<::tla::IntToPtrOp>();
-            if (!intToPtr || !intToPtr.getAddr().getType().isInteger(64))
-                continue;
-            op.getResult().replaceAllUsesWith(intToPtr.getAddr());
-            if (op.use_empty())
-                op.erase();
-        }
+        foldIntToPtrPtrToIntRoundTrips(module);
 
         SmallVector<::tla::TensorPtrOp, 8> deadTensorPtrs;
         module.walk([&](::tla::TensorPtrOp op) {
@@ -547,6 +738,14 @@ public:
                 deadTensorPtrs.push_back(op);
         });
         for (::tla::TensorPtrOp op : deadTensorPtrs)
+            op.erase();
+
+        SmallVector<::tla::TensorPtrWithCoordOp, 8> deadTensorPtrWithCoords;
+        module.walk([&](::tla::TensorPtrWithCoordOp op) {
+            if (op.use_empty())
+                deadTensorPtrWithCoords.push_back(op);
+        });
+        for (::tla::TensorPtrWithCoordOp op : deadTensorPtrWithCoords)
             op.erase();
     }
 };
