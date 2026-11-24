@@ -2,6 +2,7 @@
 // RUN: sed -n '/^\/\/ BEGIN_PACK_WIDTH$/,/^\/\/ END_PACK_WIDTH$/p' %s | sed '1d;$d;s|^// ||' > %t.PACK_WIDTH.mlir && not %tla_compile %t.PACK_WIDTH.mlir -o %t 2>&1 | %filecheck %s --check-prefix=PACK-WIDTH
 // RUN: sed -n '/^\/\/ BEGIN_UNPACK_SIGN$/,/^\/\/ END_UNPACK_SIGN$/p' %s | sed '1d;$d;s|^// ||' > %t.UNPACK_SIGN.mlir && not %tla_compile %t.UNPACK_SIGN.mlir -o %t 2>&1 | %filecheck %s --check-prefix=UNPACK-SIGN
 // RUN: sed -n '/^\/\/ BEGIN_UNPACK_WIDTH$/,/^\/\/ END_UNPACK_WIDTH$/p' %s | sed '1d;$d;s|^// ||' > %t.UNPACK_WIDTH.mlir && not %tla_compile %t.UNPACK_WIDTH.mlir -o %t 2>&1 | %filecheck %s --check-prefix=UNPACK-WIDTH
+// RUN: sed -n '/^\/\/ BEGIN_UNPACK_SRC64$/,/^\/\/ END_UNPACK_SRC64$/p' %s | sed '1d;$d;s|^// ||' > %t.UNPACK_SRC64.mlir && not %tla_compile %t.UNPACK_SRC64.mlir -o %t 2>&1 | %filecheck %s --check-prefix=UNPACK-SRC64
 // RUN: sed -n '/^\/\/ BEGIN_FLOAT$/,/^\/\/ END_FLOAT$/p' %s | sed '1d;$d;s|^// ||' > %t.FLOAT.mlir && not %tla_compile %t.FLOAT.mlir -o %t 2>&1 | %filecheck %s --check-prefix=FLOAT
 // RUN: sed -n '/^\/\/ BEGIN_SIMT$/,/^\/\/ END_SIMT$/p' %s | sed '1d;$d;s|^// ||' > %t.SIMT.mlir && not %tla_compile %t.SIMT.mlir -o %t 2>&1 | %filecheck %s --check-prefix=SIMT
 // RUN: sed -n '/^\/\/ BEGIN_FRAGMENT$/,/^\/\/ END_FRAGMENT$/p' %s | sed '1d;$d;s|^// ||' > %t.FRAGMENT.mlir && not %tla_compile %t.FRAGMENT.mlir -o %t 2>&1 | %filecheck %s --check-prefix=FRAGMENT
@@ -57,6 +58,18 @@
 //   }
 // }
 // END_UNPACK_WIDTH
+
+// UNPACK-SRC64: 'tla.unpack' op {{.*}}unsupported vector element type pair {{.*}}expected 8->16, 16->32 or 32->64
+// BEGIN_UNPACK_SRC64
+// module {
+//   func.func @invalid(%src: !tla.vector<32xi64>) {
+//     "tla.vec.func"() ({
+//       %result = tla.unpack %src, <low> : !tla.vector<32xi64> -> !tla.vector<32xi32>
+//     }) {mode = "simd"} : () -> ()
+//     return
+//   }
+// }
+// END_UNPACK_SRC64
 
 // FLOAT: 'tla.pack' op {{.*}}unsupported vector element type pair
 // BEGIN_FLOAT

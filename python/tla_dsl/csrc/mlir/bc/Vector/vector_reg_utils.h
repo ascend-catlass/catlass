@@ -55,6 +55,18 @@ struct VectorTy<uint8_t> {
     using type = vector_u8;
 };
 
+// 64-bit registers. Needed by the composed 32->64 unpack stubs: Ascend 950
+// has no native vunpack for this width, so the destination half is built by
+// interleaving 32-bit lanes with a zero/sign-filled register.
+template <>
+struct VectorTy<int64_t> {
+    using type = vector_s64;
+};
+template <>
+struct VectorTy<uint64_t> {
+    using type = vector_u64;
+};
+
 template <typename T>
 using VectorReg = typename VectorTy<T>::type;
 

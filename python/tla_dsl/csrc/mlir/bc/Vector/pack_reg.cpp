@@ -16,9 +16,13 @@
 // selector into ::HiloPart's underlying integer value, not by naming its
 // enumerators (which this toolchain never declares in a header).
 //
-// 64-bit elements (int64_t/uint64_t) are not supported: there is no native
-// vpack/vunpack for that width, and composing one out of other instructions
-// is not implemented here.
+// 64-bit elements: Ascend 950 has no native vpack/vunpack for that width.
+// 64-bit sources (int64_t/uint64_t -> 128-bit destinations) stay unsupported;
+// 64-bit *destinations* (int32_t/uint32_t sources) reuse AscendC::Reg::UnPack,
+// whose dav_3510 implementation composes them from a zero/sign-filled
+// register plus Interleave. RegTensor<T> (RegTraitNumOne) holds a single raw
+// vector register, so build real wrapper objects and copy the registers in
+// and out instead of reinterpreting the raw registers as RegTensor.
 
 namespace {
 
@@ -33,9 +37,18 @@ __aiv__ __attribute__((always_inline)) VectorReg<T> packRegImpl(VectorReg<U> src
 template <typename T, typename U, bool High>
 __aiv__ __attribute__((always_inline)) VectorReg<T> unpackRegImpl(VectorReg<U> src)
 {
-    VectorReg<T> dst;
-    vunpack(dst, src, std::integral_constant<::HiloPart, static_cast<::HiloPart>(High)>());
-    return dst;
+    if constexpr (sizeof(T) == 8) {
+        constexpr auto part = static_cast<AscendC::Reg::HighLowPart>(High);
+        AscendC::Reg::RegTensor<T> dstReg;
+        AscendC::Reg::RegTensor<U> srcReg;
+        srcReg.reg[0] = src;
+        AscendC::Reg::UnPack<T, U, part>(dstReg, srcReg);
+        return dstReg.reg[0];
+    } else {
+        VectorReg<T> dst;
+        vunpack(dst, src, std::integral_constant<::HiloPart, static_cast<::HiloPart>(High)>());
+        return dst;
+    }
 }
 
 } // namespace
@@ -69,6 +82,8 @@ REGISTER_UNPACK_REG_PARTS(int16_t, int8_t)
 REGISTER_UNPACK_REG_PARTS(uint16_t, uint8_t)
 REGISTER_UNPACK_REG_PARTS(int32_t, int16_t)
 REGISTER_UNPACK_REG_PARTS(uint32_t, uint16_t)
+REGISTER_UNPACK_REG_PARTS(int64_t, int32_t)
+REGISTER_UNPACK_REG_PARTS(uint64_t, uint32_t)
 }
 
 #undef REGISTER_UNPACK_REG_PARTS

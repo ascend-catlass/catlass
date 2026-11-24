@@ -1071,6 +1071,14 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
             for signed_unpack in (False, True)
         ],
     )
+    # UnPack 32-bit sources -> 64-bit destinations: the composed (no native
+    # vunpack) sign/zero-extension route, both register halves; the script
+    # also regresses the 8/16-bit native paths. Battery-only script under
+    # python/tla_dsl/tests/end_to_end/.
+    yield (
+        "unpack",
+        [["end_to_end/unpack_op.py", *dev]],
+    )
     yield (
         "vector-mask-select-op",
         [[

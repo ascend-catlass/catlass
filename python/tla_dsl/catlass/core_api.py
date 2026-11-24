@@ -10587,13 +10587,21 @@ _INTERLEAVE_ELEMENT_TYPES = frozenset(
 )
 
 
-# 64-bit elements are deliberately unsupported: Ascend 950 has no native
-# vpack/vunpack for them, and the hardware-equivalent composition (deinterleave
-# the 32-bit halves against a zero/sign-filled register) is not implemented.
+# 64-bit sources are deliberately unsupported: unpack of an i64/u64 source
+# would need a 128-bit destination. 64-bit *destinations* (i32->i64, u32->u64)
+# are supported: Ascend 950 has no native vunpack for that width, so the AIV
+# stubs reuse AscendC's composition (sign/zero fill + Interleave).
 # Pack produces unsigned elements with half the source bit width.
 # Signed and unsigned source types share the same destination type.
 _VECTOR_PACK_DST_FOR_SRC = {"i16": "u8", "u16": "u8", "i32": "u16", "u32": "u16"}
-_VECTOR_UNPACK_DST_FOR_SRC = {"i8": "i16", "u8": "u16", "i16": "i32", "u16": "u32"}
+_VECTOR_UNPACK_DST_FOR_SRC = {
+    "i8": "i16",
+    "u8": "u16",
+    "i16": "i32",
+    "u16": "u32",
+    "i32": "i64",
+    "u32": "u64",
+}
 
 
 @dsl_user_op
@@ -10704,7 +10712,7 @@ def unpack(
 
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function and `tla.vec.func(mode="simd")`.
-        - Pairs (destination <- source): `Int16 <- Int8`, `UInt16 <- UInt8`, `Int32 <- Int16`, `UInt32 <- UInt16`. 64-bit destinations (`Int64`/`UInt64`) are not supported.
+        - Pairs (destination <- source): `Int16 <- Int8`, `UInt16 <- UInt8`, `Int32 <- Int16`, `UInt32 <- UInt16`, `Int64 <- Int32`, `UInt64 <- UInt32`. 64-bit sources (`Int64`/`UInt64`) are not supported; 64-bit destinations reuse AscendC's composition (no native vunpack for that width).
         - Source and destination signedness must match. The result has half as many lanes.
         - Inputs must fill one 256Byte register (RegTraitNumOne). RegTraitNumTwo is not representable by `VectorSSA`; CANN permits only LOW for that trait.
         - Supports Ascend 950 (`--npu-arch 3510`) only. `LOW/HIGH` map to CANN `HighLowPart::LOWEST/HIGHEST`.
@@ -10713,6 +10721,7 @@ def unpack(
         ```python
         with tla.vec.func(mode="simd"):
             wide = tla.unpack(src_reg, part=tla.RegPart.HIGH)
+            wide64 = tla.unpack(src32_reg, part=tla.RegPart.LOW)  # Int32 -> Int64, sign extension
         ```
     """
     _require_category("unpack", "src", src, "vector_ssa", 0)
@@ -10730,7 +10739,7 @@ def unpack(
         _op_error(
             "unpack",
             f"unsupported vector element type {src_desc.element_type}; "
-            "expected an 8/16-bit integer source",
+            "expected an 8/16/32-bit integer source",
         )
     if (
         src_desc.valid_lanes

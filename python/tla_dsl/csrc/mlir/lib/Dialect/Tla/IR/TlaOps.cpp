@@ -926,14 +926,18 @@ mlir::LogicalResult UnpackOp::verify()
 
     auto src = mlir::cast<VectorSSAType>(getSrc().getType());
     auto dst = mlir::cast<VectorSSAType>(getResult().getType());
-    // 64-bit destinations are not supported: Ascend 950 has no native
-    // vunpack for that width.
+    // 64-bit destinations are legal (i32/u32 sources widen to i64/u64); the
+    // AIV stubs compose them because Ascend 950 has no native vunpack for
+    // that width. 64-bit sources would need a 128-bit destination and stay
+    // rejected.
     auto srcInt = mlir::dyn_cast<mlir::IntegerType>(src.getElementType());
     auto dstInt = mlir::dyn_cast<mlir::IntegerType>(dst.getElementType());
     if (!srcInt || !dstInt || srcInt.isUnsigned() != dstInt.isUnsigned() ||
-        (srcInt.getWidth() != 8 && srcInt.getWidth() != 16) || dstInt.getWidth() != 2 * srcInt.getWidth())
+        (srcInt.getWidth() != 8 && srcInt.getWidth() != 16 && srcInt.getWidth() != 32) ||
+        dstInt.getWidth() != 2 * srcInt.getWidth())
         return emitOpError() << "unsupported vector element type pair " << src.getElementType() << " -> "
-                             << dst.getElementType() << "; expected 8->16 or 16->32 integers with matching signedness";
+                             << dst.getElementType()
+                             << "; expected 8->16, 16->32 or 32->64 integers with matching signedness";
 
     // VectorSSAType caps values at one 256-byte register (RegTraitNumOne).
     // CANN RegTraitNumTwo supports LOW only, but is not represented here.

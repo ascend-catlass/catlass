@@ -76,7 +76,7 @@ tla.unpack(src: VectorSSA, *, part: RegPart) -> VectorSSA
 约束说明：
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体及 `tla.vec.func(mode="simd")` 内调用。
-- 类型对（目标 <- 源）：`Int16 <- Int8`、`UInt16 <- UInt8`、`Int32 <- Int16`、`UInt32 <- UInt16`。不支持 64 位目标（`Int64`/`UInt64`）。
+- 类型对（目标 <- 源）：`Int16 <- Int8`、`UInt16 <- UInt8`、`Int32 <- Int16`、`UInt32 <- UInt16`、`Int64 <- Int32`、`UInt64 <- UInt32`。不支持 64 位源（`Int64`/`UInt64`，需要 128 位目标）；64 位目标复用 AscendC 的组合实现（该位宽没有原生 vunpack）。
 - 源和目标的符号性须一致，结果的 lane 数为源的一半。
 - 输入须填满一个 256Byte 寄存器（RegTraitNumOne）。`VectorSSA` 无法表示 RegTraitNumTwo；CANN 对该 trait 仅允许 LOW。
 - 仅支持 Ascend 950（`--npu-arch 3510`）。`LOW/HIGH` 对应 CANN 的 `HighLowPart::LOWEST/HIGHEST`。
@@ -86,6 +86,7 @@ tla.unpack(src: VectorSSA, *, part: RegPart) -> VectorSSA
 ```python
 with tla.vec.func(mode="simd"):
     wide = tla.unpack(src_reg, part=tla.RegPart.HIGH)
+    wide64 = tla.unpack(src32_reg, part=tla.RegPart.LOW)  # Int32 -> Int64，符号扩展
 ```
 
 ---

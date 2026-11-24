@@ -81,7 +81,7 @@ Parameters:
 Constraints:
 
 - Must be called inside a `@tla.kernel`-decorated kernel function and `tla.vec.func(mode="simd")`.
-- Pairs (destination <- source): `Int16 <- Int8`, `UInt16 <- UInt8`, `Int32 <- Int16`, `UInt32 <- UInt16`. 64-bit destinations (`Int64`/`UInt64`) are not supported.
+- Pairs (destination <- source): `Int16 <- Int8`, `UInt16 <- UInt8`, `Int32 <- Int16`, `UInt32 <- UInt16`, `Int64 <- Int32`, `UInt64 <- UInt32`. 64-bit sources (`Int64`/`UInt64`) are not supported; 64-bit destinations reuse AscendC's composition (no native vunpack for that width).
 - Source and destination signedness must match. The result has half as many lanes.
 - Inputs must fill one 256Byte register (RegTraitNumOne). RegTraitNumTwo is not representable by `VectorSSA`; CANN permits only LOW for that trait.
 - Supports Ascend 950 (`--npu-arch 3510`) only. `LOW/HIGH` map to CANN `HighLowPart::LOWEST/HIGHEST`.
@@ -91,6 +91,7 @@ Example:
 ```python
 with tla.vec.func(mode="simd"):
     wide = tla.unpack(src_reg, part=tla.RegPart.HIGH)
+    wide64 = tla.unpack(src32_reg, part=tla.RegPart.LOW)  # Int32 -> Int64, sign extension
 ```
 
 ---

@@ -18,6 +18,8 @@ _UNPACK_PAIRS = [
     (tla.UInt8, tla.UInt16),
     (tla.Int16, tla.Int32),
     (tla.UInt16, tla.UInt32),
+    (tla.Int32, tla.Int64),
+    (tla.UInt32, tla.UInt64),
 ]
 _SIGNED_DTYPE = {8: tla.Int8, 16: tla.Int16, 32: tla.Int32, 64: tla.Int32}
 # 64-bit "storage" falls back to i32: tla.full does not support i64 (device
@@ -307,7 +309,10 @@ def _compile_inputs(src_dtype, dst_dtype):
     src_bits = int(src_dtype.dtype[1:])
     dst_bits = int(dst_dtype.dtype[1:])
     src_storage = _SIGNED_DTYPE[src_bits]
-    dst_storage = _SIGNED_DTYPE[dst_bits]
+    # 64-bit destinations use their real type as storage: the _SIGNED_DTYPE
+    # fallback (64 -> i32) only serves the source-rejection paths, where an
+    # equal-width bitcast still exercises the diagnostic.
+    dst_storage = _SIGNED_DTYPE[dst_bits] if dst_bits != 64 else dst_dtype
     src_lanes = 2048 // src_bits
     dst_lanes = 2048 // dst_bits
     tensors = tuple(
@@ -364,10 +369,10 @@ def test_pack_rejects_invalid_vector_source(src) -> None:
         _pack_emit.dump_mlir(type_args=("vector", src, tla.UInt8, storage, tla.RegPart.LOW))
 
 
-@pytest.mark.parametrize("src", [tla.Int32, tla.UInt32, tla.Int64, tla.UInt64, tla.Float32])
+@pytest.mark.parametrize("src", [tla.Int64, tla.UInt64, tla.Float32])
 def test_unpack_rejects_invalid_vector_source(src) -> None:
-    # unpack only derives a destination for 8/16-bit integer sources; a
-    # 32-bit source would need a 64-bit destination, which is not supported.
+    # unpack only derives a destination for 8/16/32-bit integer sources; a
+    # 64-bit source would need a 128-bit destination, which does not exist.
     storage = src if src is tla.Float32 else _SIGNED_DTYPE[int(src.dtype[1:])]
     with pytest.raises(tla.TlaCoreAPIError, match="unsupported vector element type"):
         _unpack_emit.dump_mlir(type_args=(src, tla.Int32, storage, tla.RegPart.LOW))
@@ -436,6 +441,8 @@ def test_unpack_rejects_mask() -> None:
         ("pack", "128xui16", "256xui8"),
         ("unpack", "256xi8", "128xi16"),
         ("unpack", "128xui16", "64xui32"),
+        ("unpack", "64xi32", "32xi64"),
+        ("unpack", "64xui32", "32xui64"),
     ],
 )
 @pytest.mark.parametrize("part", ["low", "high"])
