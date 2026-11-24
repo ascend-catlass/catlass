@@ -272,3 +272,51 @@ def Tla_ArchDciOp : Tla_Op<"arch.dci", [MemoryEffects<[MemRead, MemWrite]>]> {
   }];
   let assemblyFormat = [{ attr-dict }];
 }
+
+//===----------------------------------------------------------------------===//
+// The AIV AR register holds the byte count recorded by vector compression.
+//
+// Neither is Pure or speculatable. The read observes a register that vector
+// instructions write, so CSE across such a sequence would report a stale count;
+// the clear is wanted for its effect alone, so an effect-free spelling would let
+// DCE drop it. Leaving the effects unknown is what keeps both in place.
+//===----------------------------------------------------------------------===//
+
+def Tla_ArchGetArOp : Tla_Op<"arch.get_ar", []> {
+  let summary = "Read the AR special register of this AIV";
+  let description = [{
+    Return the AR byte count recorded by vector compression as a signless ``i64``.
+
+    This runs on the scalar unit and must be placed outside ``tla.vec.func``,
+    after the vector sequence that produces the count has completed. Completion
+    is the caller's: the op reads the register, it does not wait for the vector
+    pipe.
+
+    ``tla-lower-scalar-ops`` rewrites this into a call to
+    ``_mlir_ciface_tla_get_ar``, which carries the native AR read.
+  }];
+  let results = (outs I64:$count);
+  let assemblyFormat = [{ attr-dict `->` type($count) }];
+}
+
+def Tla_ArchClearArOp : Tla_Op<"arch.clear_ar", []> {
+  let summary = "Clear the AR special register of this AIV to zero";
+  let description = [{
+    Set AR to zero before a compression sequence records its byte count.
+
+    Two placements, with two lowerings:
+
+      * Inside a SIMD ``tla.vec.func``, ``tla-vector-region-simd`` emits a call
+        to ``squeeze_stream_clear`` into the vector helper it outlines,
+        so the clear sits in the same vector function as the stores that
+        populate AR. This is the placement the native API documents.
+      * Directly in ``tla.vector()``, ``tla-lower-scalar-ops`` emits a call to
+        ``_mlir_ciface_tla_clear_ar``, whose helper opens a vector function of
+        its own around the clear.
+
+    A ``tla.vec.func`` whose body is nothing but this op has no tile work to
+    outline and is flattened into the enclosing ``tla.vector()``, where the
+    second lowering picks it up; the clear survives either way.
+  }];
+  let assemblyFormat = [{ attr-dict }];
+}

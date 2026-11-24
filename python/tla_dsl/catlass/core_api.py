@@ -12874,6 +12874,14 @@ def arch_dcache_prefetch(
     )
 
 
+# --- scalar dcache maintenance --------------------------------------------
+#
+# These three run on the issuing core's own scalar unit, so each is available on
+# AIC and AIV alike. What they share is a placement rule: the core that issues
+# the maintenance is the core whose cache it affects, so the op has to sit in a
+# region that names one. A kernel body outside both regions does not: in a mixed
+# kernel it is duplicated into the AIC and the AIV function, which would mean
+# two cache operations where the source asked for one.
 def _require_core_region(op_name: str) -> None:
     if _runtime._has_enclosing_region("vec.func"):
         _op_error(
@@ -13336,14 +13344,124 @@ def arch_sync_threads(*, loc: mlir_ir.Location | None = None) -> None:
     _tla_ops_gen.arch_sync_threads(loc=loc)
 
 
-# --- scalar dcache maintenance --------------------------------------------
+# --- the AR special register ------------------------------------------------
 #
-# These three run on the issuing core's own scalar unit, so each is available on
-# AIC and AIV alike. What they share is a placement rule: the core that issues
-# the maintenance is the core whose cache it affects, so the op has to sit in a
-# region that names one. A kernel body outside both regions does not: in a mixed
-# kernel it is duplicated into the AIC and the AIV function, which would mean
-# two cache operations where the source asked for one.
+# AR counts the bytes the compressing vector stores have written. It is a
+# vector-unit register, so both operations are AIV-only: a `tla.cube()`
+# placement has no AR to name, and the bitcode helpers behind them are linked
+# into the vector meta-op bitcode alone.
+#
+# The two have different placement rules because the two instructions do. The
+# read runs on the scalar unit and is written outside `tla.vec.func`, after the
+# vector sequence that produced the count. The clear writes a vector-unit
+# register and belongs inside the SIMD `tla.vec.func` that holds the stores,
+# which is where the native API documents it; the scalar placement is supported
+# as well, and the helper behind it opens a vector function of its own.
+def _require_aiv_region(op_name: str, *, inside_vec_func: bool) -> None:
+    if _runtime._has_enclosing_region("cube"):
+        _op_error(
+            op_name,
+            "uses the vector unit's AR register and is unavailable on the AIC; "
+            "place it inside tla.vector()",
+        )
+    if not _runtime._has_enclosing_region("vector"):
+        _op_error(op_name, "must be nested inside tla.vector()")
+    in_vec_func = _runtime._has_enclosing_region("vec.func")
+    if in_vec_func and not inside_vec_func:
+        _op_error(
+            op_name,
+            "runs on the scalar unit and must be placed outside tla.vec.func, "
+            "directly in the tla.vector() region",
+        )
+    if in_vec_func and _runtime._in_simt_vec_func():
+        _op_error(op_name, "is unavailable inside tla.vec.func(mode='simt')")
+
+
+@dsl_user_op
+def arch_get_ar(*, loc: mlir_ir.Location | None = None) -> Int64:
+    """Directory: System Variable Access / Architecture Helpers
+    Description:
+        Read this AIV's AR special register (`Int64`).
+
+        AR holds the byte count from a compressed store sequence that uses
+        `tla.squeeze(..., record_nbytes=True)` and
+        `POST_MODE_UPDATE_NBYTES`.
+
+        The read runs on the scalar unit and observes the register as it stands.
+        It does not wait for the vector pipe, so the handoff that completes the
+        producing sequence is still the caller's to issue, exactly as for a UB
+        value the same sequence wrote.
+
+        Parameters:
+        - None.
+
+        Constraints:
+        - Must be called inside a `@tla.kernel`-decorated kernel function.
+        - Must be inside `tla.vector()`, and outside `tla.vec.func`.
+        - AIV only; `tla.cube()` has no AR.
+        - Ascend 950 (arch 3510).
+
+        Example:
+        ```python
+        count_ready = tla.flag("count_ready", tla.arch.VECTOR, tla.arch.SCALAR)
+        with tla.vector():
+            with tla.vec.func(mode="simd"):
+                tla.arch.clear_ar()
+                ...  # the compression sequence that records bytes in AR
+            tla.set_flag(count_ready)
+            tla.wait_flag(count_ready)
+            count_bytes = tla.arch.get_ar()
+        ```
+    """
+    _require_frontend_state("arch.get_ar")
+    _require_aiv_region("arch.get_ar", inside_vec_func=False)
+    i64 = mlir_ir.IntegerType.get_signless(64)
+    return Int64(_tla_ops_gen.arch_get_ar(i64, loc=loc))
+
+
+@dsl_user_op
+def arch_clear_ar(*, loc: mlir_ir.Location | None = None) -> None:
+    """Directory: System Variable Access / Architecture Helpers
+    Description:
+        Clear this AIV's AR special register to zero.
+
+        Clear the register before a compression sequence to start the count at
+        zero.
+
+        Write it inside the SIMD `tla.vec.func` that holds those stores: the
+        clear then sits in the same vector function as the instructions that
+        populate AR, which is the placement the native API documents. A scalar
+        placement directly in `tla.vector()` is accepted too and clears the
+        same register; the vector function it needs is supplied for it.
+
+        Clearing AR is not synchronization and does not wait for an outstanding
+        sequence. A clear issued while one is still accumulating loses its
+        count.
+
+        Parameters:
+        - None.
+
+        Constraints:
+        - Must be called inside a `@tla.kernel`-decorated kernel function.
+        - Must be inside `tla.vector()`, either directly or inside a
+          `tla.vec.func(mode="simd")` nested in it.
+        - AIV only; `tla.cube()` has no AR. `tla.vec.func(mode="simt")` is
+          rejected.
+        - Ascend 950 (arch 3510).
+
+        Example:
+        ```python
+        with tla.vector():
+            with tla.vec.func(mode="simd"):
+                tla.arch.clear_ar()
+                ...  # the compression sequence that records bytes in AR
+        ```
+    """
+    _require_frontend_state("arch.clear_ar")
+    _require_aiv_region("arch.clear_ar", inside_vec_func=True)
+    _tla_ops_gen.arch_clear_ar(loc=loc)
+
+
 # A shuffle moves a bit pattern between registers without interpreting it, so
 # every integer and float width the intrinsics cover is supported, signed and
 # unsigned alike: inside a SIMT region a Numeric presents its value as a
@@ -14186,6 +14304,8 @@ _require_generated("arch_sync_threads")
 _require_generated("arch_dcci_cacheline")
 _require_generated("arch_dcci_cachelines")
 _require_generated("arch_dci")
+_require_generated("arch_get_ar")
+_require_generated("arch_clear_ar")
 _require_generated("inttoptr")
 _require_generated("recast_ptr")
 
@@ -14209,6 +14329,8 @@ arch._set("lanemask_le", arch_lanemask_le)
 arch._set("lanemask_gt", arch_lanemask_gt)
 arch._set("lanemask_ge", arch_lanemask_ge)
 arch._set("sync_threads", arch_sync_threads)
+arch._set("get_ar", arch_get_ar)
+arch._set("clear_ar", arch_clear_ar)
 arch._set("shuffle_sync", arch_shuffle_sync)
 arch._set("shuffle_sync_up", arch_shuffle_sync_up)
 arch._set("shuffle_sync_down", arch_shuffle_sync_down)

@@ -5127,6 +5127,13 @@ static LogicalResult lowerNestedVectorOp(
     if (auto postOp = dyn_cast<::tla::StoreUnalignPostOp>(op))
         return lowerStoreUnalignPost(postOp, b, module, valueMap);
 
+    // Share the AR clear with compressed stores in the same vector function.
+    if (isa<::tla::ArchClearArOp>(op)) {
+        auto callee = getOrCreateCompressionCall(module, loc, "squeeze_stream_clear", {}, {});
+        b.create<func::CallOp>(loc, callee, ValueRange{});
+        return success();
+    }
+
     if (auto loadUnalignUpdateOp = dyn_cast<::tla::LoadUnalignUpdateOp>(op))
         return lowerLoadUnalignUpdate(loadUnalignUpdateOp, b, valueMap);
 

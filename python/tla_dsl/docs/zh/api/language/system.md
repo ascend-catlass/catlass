@@ -725,6 +725,99 @@ with tla.vec.func(mode="simt", thread_block_dim=THREADS):
 
 ---
 
+### `tla.arch.get_ar`
+
+**源码：** [`catlass.core_api.arch_get_ar`](../../../../catlass/core_api.py)
+
+功能说明：
+
+读取当前 AIV 的 AR 特殊寄存器（`Int64`）。
+
+AR 保存压缩搬出序列的字节数。该序列使用 `tla.squeeze(..., record_nbytes=True)` 和 `POST_MODE_UPDATE_NBYTES`。
+
+本接口在标量单元上执行，读到的是寄存器当前值。它不等待矢量流水，因此完成
+产生该计数的指令序列所需的同步握手仍由调用方负责，与读取同一序列写入的 UB
+数据一样。
+
+函数原型：
+
+```python
+tla.arch.get_ar() -> Int64
+```
+
+参数说明：
+
+- 无。
+
+约束说明：
+
+- 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
+- 须在 `tla.vector()` 内、`tla.vec.func` 外。
+- 仅 AIV 可用；`tla.cube()` 上没有 AR。
+- Ascend 950（arch 3510）。
+
+调用示例：
+
+```python
+count_ready = tla.flag("count_ready", tla.arch.VECTOR, tla.arch.SCALAR)
+with tla.vector():
+    with tla.vec.func(mode="simd"):
+        tla.arch.clear_ar()
+        ...  # 在 AR 中记录字节数的压缩指令序列
+    tla.set_flag(count_ready)
+    tla.wait_flag(count_ready)
+    count_bytes = tla.arch.get_ar()
+```
+
+---
+
+### `tla.arch.clear_ar`
+
+**源码：** [`catlass.core_api.arch_clear_ar`](../../../../catlass/core_api.py)
+
+功能说明：
+
+将当前 AIV 的 AR 特殊寄存器清零。
+
+在压缩指令序列开始前清零 AR，使字节计数从零开始。
+
+写在持有这些搬出指令的 SIMD `tla.vec.func` 内时，清零指令与写 AR 的指令处于
+同一个 Vector Function，这也是原生接口文档给出的位置。直接写在 `tla.vector()`
+内的标量位置同样可用，清零的是同一个寄存器；该指令所需的 Vector Function 由
+实现提供。
+
+清零 AR 不是同步操作，也不等待尚未完成的序列。在序列仍在累计时清零会丢失
+它的计数。
+
+函数原型：
+
+```python
+tla.arch.clear_ar() -> None
+```
+
+参数说明：
+
+- 无。
+
+约束说明：
+
+- 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
+- 须在 `tla.vector()` 内，可以直接写在该区域内，也可以写在其中嵌套的
+  `tla.vec.func(mode="simd")` 内。
+- 仅 AIV 可用；`tla.cube()` 上没有 AR。`tla.vec.func(mode="simt")` 会被拒绝。
+- Ascend 950（arch 3510）。
+
+调用示例：
+
+```python
+with tla.vector():
+    with tla.vec.func(mode="simd"):
+        tla.arch.clear_ar()
+        ...  # 在 AR 中记录字节数的压缩指令序列
+```
+
+---
+
 ### `tla.arch.block_num`
 
 **源码：** [`catlass.core_api.arch_block_num`](../../../../catlass/core_api.py)

@@ -1,8 +1,6 @@
 // Lower the TLA scalar ops that have no MLIR op of their own: the scalar unit's
-// conversion instructions, the data synchronization barrier (one dsb per
-// storage domain; the ub-domain helper is AIV-only, see below), and the scalar
-// architectural state ops -- the three data cache maintenance operations behind
-// tla.arch.
+// conversion instructions, data synchronization barriers, cache maintenance,
+// and AR access.
 //
 // Why these need a lowering at all, when tla.sqrt does not: math.sqrt and
 // math.absf are ordinary MLIR ops the backend selects, so the frontend emits
@@ -24,12 +22,18 @@
 //
 // Two routes go down from here, because HIVM covers only part of what these ops
 // need. Most become a call to a meta-op bitcode helper; the table and the
-// `replaceWithScalarHelperCall` helper below are the extension point, so a new
+// `replaceWithHelperCall` helper below are the extension point, so a new
 // scalar op that maps to a helper is one entry plus the helper itself. The
 // exception is tla.arch.dcci_cachelines, which becomes hivm.dcci directly: it
 // carries no address, so there is nothing that op's optional memref operand
 // would have to describe, and HIVM materializes the address-0 placeholder that
 // the native entire-domain API passes.
+// The AR special-register ops (tla.arch.get_ar and the scalar placement of
+// tla.arch.clear_ar) arrive here for the same reason: ccec compiles them to
+// llvm.hivm.GET.AR and llvm.hivm.sprclr, and neither intrinsic is registered in
+// hivmc's LLVM. They differ from the conversions in where the helper lives --
+// AR is a vector-unit register, so bc/Vector/ar_spr.cpp, declared AIV rather
+// than AIC_OR_AIV.
 //
 // Addressed DCCI takes an i64 byte address from the existing pointer lowering.
 // DCI uses an inline bitcode helper.
@@ -41,14 +45,14 @@ namespace tla {
 
 namespace {
 
-// A bitcode helper is reached through a private func.func declaration which the
-// linker resolves against the per-core bitcode module. The declaration carries
-// two attributes, and both matter: ALWAYS_INLINE keeps the linked helper from
-// staying a real call, and AIC_OR_AIV says the scalar unit it targets exists on
-// both cores, so one declaration serves an AIC and an AIV function alike.
-//
-// Declare `name` in `module`, or return the declaration already there.
-func::FuncOp getOrCreateScalarHelper(ModuleOp module, StringRef name, TypeRange operands, TypeRange results)
+// ALWAYS_INLINE keeps the linked helper from staying a real call. The core type
+// is the helper's own: a scalar-unit instruction exists on both cores and is
+// declared AIC_OR_AIV, while a helper that reaches vector-unit state lives in
+// the vector bitcode only and must say AIV, so an AIC placement is a link error
+// rather than a silently wrong result.
+static func::FuncOp getOrCreateHelper(
+    ModuleOp module, StringRef name, TypeRange operands, TypeRange results,
+    hivm::TFuncCoreType coreType = hivm::TFuncCoreType::AIC_OR_AIV)
 {
     if (auto existing = module.lookupSymbol<func::FuncOp>(name))
         return existing;
@@ -58,16 +62,17 @@ func::FuncOp getOrCreateScalarHelper(ModuleOp module, StringRef name, TypeRange 
     func.setPrivate();
     MLIRContext* ctx = module.getContext();
     func->setAttr(hacc::stringifyEnum(hacc::HACCToLLVMIRTranslateAttr::ALWAYS_INLINE), UnitAttr::get(ctx));
-    func->setAttr(hivm::TFuncCoreTypeAttr::name, hivm::TFuncCoreTypeAttr::get(ctx, hivm::TFuncCoreType::AIC_OR_AIV));
+    func->setAttr(hivm::TFuncCoreTypeAttr::name, hivm::TFuncCoreTypeAttr::get(ctx, coreType));
     return func;
 }
 
 // Replace one op with a call to `callee`, taking the op's operands and results.
 template <typename OpTy>
-LogicalResult replaceWithScalarHelperCall(OpTy op, StringRef callee)
+static LogicalResult replaceWithHelperCall(
+    OpTy op, StringRef callee, hivm::TFuncCoreType coreType = hivm::TFuncCoreType::AIC_OR_AIV)
 {
     ModuleOp module = op->template getParentOfType<ModuleOp>();
-    func::FuncOp declaration = getOrCreateScalarHelper(module, callee, op->getOperandTypes(), op->getResultTypes());
+    func::FuncOp declaration = getOrCreateHelper(module, callee, op->getOperandTypes(), op->getResultTypes(), coreType);
     OpBuilder builder(op);
     auto call = builder.create<func::CallOp>(op.getLoc(), declaration, op->getOperands());
     op->replaceAllUsesWith(call.getResults());
@@ -136,6 +141,24 @@ static std::optional<hivm::DataCacheKind> dcciDataCacheKind(::DcciTarget target)
     return std::nullopt;
 }
 
+// AR is a vector-unit register, and its helpers are in the vector meta-op
+// bitcode only, so an occurrence on the cube core has nothing to resolve
+// against. The frontend rejects a tla.cube() placement, and this covers
+// hand-written IR: without it the failure surfaces as a link or "Unknown core
+// type" error naming a helper the source never mentioned. Core types are
+// settled by now -- tla-lower-func classifies each device function and
+// tla-split-mixed-func has already split a mixed kernel in two.
+static LogicalResult requireAivPlacement(Operation* op)
+{
+    auto func = op->getParentOfType<func::FuncOp>();
+    if (!func)
+        return success();
+    auto coreType = func->getAttrOfType<hivm::TFuncCoreTypeAttr>(hivm::TFuncCoreTypeAttr::name);
+    if (!coreType || coreType.getFuncCoreType() != hivm::TFuncCoreType::AIC)
+        return success();
+    return op->emitOpError("uses the vector unit's AR register and is unavailable on the AIC");
+}
+
 class TlaLowerScalarOpsPass : public PassWrapper<TlaLowerScalarOpsPass, OperationPass<ModuleOp>> {
 public:
     MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(TlaLowerScalarOpsPass)
@@ -150,7 +173,7 @@ public:
     }
     StringRef getDescription() const override
     {
-        return "Lower TLA scalar conversion and cache control operations";
+        return "Lower TLA scalar conversion, cache maintenance, and AR operations";
     }
 
     void getDependentDialects(DialectRegistry& registry) const override
@@ -171,7 +194,7 @@ public:
                 op.emitOpError() << "unsupported rounding mode \"" << op.getMode() << "\"";
                 return signalPassFailure();
             }
-            if (failed(replaceWithScalarHelperCall(op, callee)))
+            if (failed(replaceWithHelperCall(op, callee)))
                 return signalPassFailure();
         }
 
@@ -192,7 +215,7 @@ public:
                     op->erase();
                     continue;
                 }
-                if (failed(replaceWithScalarHelperCall(op, dataSyncBarrierUbcallee())))
+                if (failed(replaceWithHelperCall(op, dataSyncBarrierUbcallee())))
                     return signalPassFailure();
                 continue;
             }
@@ -202,7 +225,7 @@ public:
                 op.emitOpError() << "unsupported data-sync-barrier domain \"" << domain << "\"";
                 return signalPassFailure();
             }
-            if (failed(replaceWithScalarHelperCall(op, callee)))
+            if (failed(replaceWithHelperCall(op, callee)))
                 return signalPassFailure();
         }
 
@@ -241,7 +264,33 @@ public:
         SmallVector<::tla::ArchDciOp, 8> dciOps;
         module.walk([&](::tla::ArchDciOp op) { dciOps.push_back(op); });
         for (::tla::ArchDciOp op : dciOps) {
-            if (failed(replaceWithScalarHelperCall(op, "_mlir_ciface_tla_dci")))
+            if (failed(replaceWithHelperCall(op, "_mlir_ciface_tla_dci")))
+                return signalPassFailure();
+        }
+
+        // The AR read. AIV-only, so the helper is declared AIV and resolves out
+        // of the vector meta-op bitcode alone.
+        SmallVector<::tla::ArchGetArOp, 4> getArs;
+        module.walk([&](::tla::ArchGetArOp op) { getArs.push_back(op); });
+        for (::tla::ArchGetArOp op : getArs) {
+            if (failed(requireAivPlacement(op)))
+                return signalPassFailure();
+            if (failed(replaceWithHelperCall(op, "_mlir_ciface_tla_get_ar", hivm::TFuncCoreType::AIV)))
+                return signalPassFailure();
+        }
+
+        // The AR clear, in its scalar placement. An occurrence inside a SIMD
+        // tla.vec.func is lowered by tla-vector-region-simd into the vector
+        // helper it outlines and never reaches this pass; one that stays behind
+        // -- written directly in tla.vector(), or flattened out of a vec.func
+        // that had no tile work to outline -- needs a vector function of its
+        // own, which is what this helper carries.
+        SmallVector<::tla::ArchClearArOp, 4> clearArs;
+        module.walk([&](::tla::ArchClearArOp op) { clearArs.push_back(op); });
+        for (::tla::ArchClearArOp op : clearArs) {
+            if (failed(requireAivPlacement(op)))
+                return signalPassFailure();
+            if (failed(replaceWithHelperCall(op, "_mlir_ciface_tla_clear_ar", hivm::TFuncCoreType::AIV)))
                 return signalPassFailure();
         }
     }

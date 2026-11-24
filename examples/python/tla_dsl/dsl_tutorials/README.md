@@ -42,6 +42,7 @@
 | [`scalar_arg_alignment/`](scalar_arg_alignment/scalar_arg_alignment.py) | tensor / scalar / tensor 形式的启动参数与对齐约束。 |
 | [`cross_flag_two_way/`](cross_flag_two_way/README.md) | 一个 AIC 与两个 AIV 子块之间的双向 mode-4 cross-flag 握手。 |
 | [`dcache_maintenance/`](dcache_maintenance/dcache_maintenance.py) | 标量 dcache 维护：`dcci_cacheline` 和 `dcci_cachelines` 将单条缓存行或指定缓存域中的脏数据写回。 |
+| [`ar_register/`](ar_register/ar_register.py) | AIV 的 AR 特殊寄存器：`tla.arch.clear_ar` 的两种位置与 `tla.arch.get_ar` 读取累计字节数。 |
 
 ## 调试与输出
 

@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import errno
+import hashlib
 import json
 import os
 import subprocess
@@ -45,7 +46,7 @@ def fake_build(tmp_path: Path, monkeypatch):
 
     def compile_stub(cpp, output, core_type, config):
         compiled.append((core_type, cpp.stem))
-        output.write_text(cpp.stem + "\n")
+        output.write_text(cpp.read_text() + "\n")
 
     def link_bc(inputs, output, config):
         output.write_text("".join(p.read_text() for p in inputs))
@@ -173,6 +174,41 @@ def test_autobuild_builds_announces_and_reuses(fake_build, capsys):
     assert bc_compile.autobuild_on_import() == cache
     assert compiled == []
     assert capsys.readouterr().err == ""
+
+
+def test_ar_stubs_invalidate_the_previous_bitcode_cache(fake_build, monkeypatch):
+    cfg, compiled = fake_build
+    monkeypatch.setattr(bc_compile, "_catlass_version_id", lambda: "2.2.2")
+
+    def previous_key(ccec):
+        return hashlib.sha256(
+            f"2.2.2:{bc_compile._ccec_id(ccec)}:data-sync-barrier-v1".encode()
+        ).hexdigest()[:16]
+
+    with monkeypatch.context() as old_checkout:
+        old_checkout.setattr(bc_compile, "compute_cache_key", previous_key)
+        previous_cache = bc_compile.autobuild_on_import()
+        assert previous_cache == _cache(cfg)
+        assert bc_compile._cache_is_current(cfg, previous_cache)
+
+    stub = cfg.paths.bc_stubs / "Vector" / "ar_spr.cpp"
+    symbols = ("_mlir_ciface_tla_get_ar", "_mlir_ciface_tla_clear_ar")
+    stub.write_text("\n".join(symbols))
+    compiled.clear()
+
+    with pytest.raises(RuntimeError, match="BC not compiled or version mismatch"):
+        bc_compile._ensure_cache(cfg)
+
+    current_cache = bc_compile.autobuild_on_import()
+    assert current_cache == _cache(cfg)
+    assert current_cache != previous_cache
+    assert bc_compile._ensure_cache(cfg) == current_cache
+    assert ("aiv", "ar_spr") in compiled
+    assert ("aic", "ar_spr") not in compiled
+    aggregate = bc_compile._meta_op_filename("aiv", cfg.cce_arch, "normal")
+    for symbol in symbols:
+        assert symbol in (current_cache / aggregate).read_text()
+        assert symbol not in (previous_cache / aggregate).read_text()
 
 
 def test_autobuild_defers_to_the_bc_compile_cli(fake_build, monkeypatch):

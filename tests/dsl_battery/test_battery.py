@@ -639,6 +639,13 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         [["dsl_tutorials/advanced_impl/sort_topk/topk.py", "--k", "8", "--smallest", "1", *dev]],
     )
 
+    # --- the AR special register: clear_ar / get_ar ---
+    # Kernels check cleared counts and the byte count recorded by a masked squeeze.
+    yield (
+        "ar-register",
+        [["dsl_tutorials/ar_register/ar_register.py", *dev]],
+    )
+
     # --- L2 cache hint: GM→UB copy with cache_policy=DISABLE ---
     # Script under python/tla_dsl/tests/end_to_end/. Kernel is not
     # block-partitioned, so launch a single vector core.

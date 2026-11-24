@@ -777,6 +777,106 @@ with tla.vec.func(mode="simt", thread_block_dim=THREADS):
 
 ---
 
+### `tla.arch.get_ar`
+
+**Source:** [`catlass.core_api.arch_get_ar`](../../../../catlass/core_api.py)
+
+Description:
+
+Read this AIV's AR special register (`Int64`).
+
+AR holds the byte count from a compressed store sequence that uses
+`tla.squeeze(..., record_nbytes=True)` and
+`POST_MODE_UPDATE_NBYTES`.
+
+The read runs on the scalar unit and observes the register as it stands.
+It does not wait for the vector pipe, so the handoff that completes the
+producing sequence is still the caller's to issue, exactly as for a UB
+value the same sequence wrote.
+
+Prototype:
+
+```python
+tla.arch.get_ar() -> Int64
+```
+
+Parameters:
+
+- None.
+
+Constraints:
+
+- Must be called inside a `@tla.kernel`-decorated kernel function.
+- Must be inside `tla.vector()`, and outside `tla.vec.func`.
+- AIV only; `tla.cube()` has no AR.
+- Ascend 950 (arch 3510).
+
+Example:
+
+```python
+count_ready = tla.flag("count_ready", tla.arch.VECTOR, tla.arch.SCALAR)
+with tla.vector():
+    with tla.vec.func(mode="simd"):
+        tla.arch.clear_ar()
+        ...  # the compression sequence that records bytes in AR
+    tla.set_flag(count_ready)
+    tla.wait_flag(count_ready)
+    count_bytes = tla.arch.get_ar()
+```
+
+---
+
+### `tla.arch.clear_ar`
+
+**Source:** [`catlass.core_api.arch_clear_ar`](../../../../catlass/core_api.py)
+
+Description:
+
+Clear this AIV's AR special register to zero.
+
+Clear the register before a compression sequence to start the count at
+zero.
+
+Write it inside the SIMD `tla.vec.func` that holds those stores: the
+clear then sits in the same vector function as the instructions that
+populate AR, which is the placement the native API documents. A scalar
+placement directly in `tla.vector()` is accepted too and clears the
+same register; the vector function it needs is supplied for it.
+
+Clearing AR is not synchronization and does not wait for an outstanding
+sequence. A clear issued while one is still accumulating loses its
+count.
+
+Prototype:
+
+```python
+tla.arch.clear_ar() -> None
+```
+
+Parameters:
+
+- None.
+
+Constraints:
+
+- Must be called inside a `@tla.kernel`-decorated kernel function.
+- Must be inside `tla.vector()`, either directly or inside a
+  `tla.vec.func(mode="simd")` nested in it.
+- AIV only; `tla.cube()` has no AR. `tla.vec.func(mode="simt")` is
+  rejected.
+- Ascend 950 (arch 3510).
+
+Example:
+
+```python
+with tla.vector():
+    with tla.vec.func(mode="simd"):
+        tla.arch.clear_ar()
+        ...  # the compression sequence that records bytes in AR
+```
+
+---
+
 ### `tla.arch.block_num`
 
 **Source:** [`catlass.core_api.arch_block_num`](../../../../catlass/core_api.py)

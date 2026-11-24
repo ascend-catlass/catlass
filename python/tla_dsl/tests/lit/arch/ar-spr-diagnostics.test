@@ -1,0 +1,57 @@
+// RUN: sed -n '/^\/\/ BEGIN_CUBE$/,/^\/\/ END_CUBE$/p' %s | sed '1d;$d;s|^// ||' > %t.cube.mlir && not %tla_compile %t.cube.mlir -o %t 2>&1 | %filecheck %s --check-prefix=CUBE
+// RUN: sed -n '/^\/\/ BEGIN_READ_IN_VF$/,/^\/\/ END_READ_IN_VF$/p' %s | sed '1d;$d;s|^// ||' > %t.read.mlir && not %tla_compile %t.read.mlir -o %t 2>&1 | %filecheck %s --check-prefix=READ-IN-VF
+
+// AR belongs to the vector unit, so there is nothing on the cube core for the
+// clear to write. The helpers only exist in the vector meta-op bitcode, so
+// without this the failure would be a link error naming a symbol the source
+// never mentioned.
+// CUBE: error:
+// CUBE-SAME: 'tla.arch.clear_ar' op uses the vector unit's AR register and is unavailable on the AIC
+
+// The read runs on the scalar unit, so it has no place in the vector function
+// the tile work is outlined into. The vec.func below carries a load and a
+// store, which is what makes it a function rather than a region flattened back
+// into its parent -- a vec.func holding only scalar work is inlined into the
+// enclosing tla.vector(), and a read written there is the supported placement
+// rather than an error.
+// READ-IN-VF: error: unsupported op while outlining tla.vec.func into vector helper: tla.arch.get_ar
+
+// BEGIN_CUBE
+// module {
+//   func.func @clear_ar_on_the_cube() {
+//     "tla.cube"() ({
+//       tla.arch.clear_ar
+//     }) : () -> ()
+//     func.return
+//   }
+// }
+// END_CUBE
+
+// BEGIN_READ_IN_VF
+// !t = !tla.tensor<!tla.layout<!tla.shape<64>, !tla.stride<1>, !tla.shape<64>, RowMajor>, !tla.coord<0>, !tla.ptr<f32, ub, 4>>
+// module {
+//   func.func @get_ar_inside_an_outlined_vec_func(
+//       %src_memref: memref<64xf32, #hivm.address_space<ub>>,
+//       %dst_memref: memref<64xf32, #hivm.address_space<ub>>,
+//       %out: memref<1xi64>) {
+//     %c0 = arith.constant 0 : index
+//     %c1 = arith.constant 1 : index
+//     %c64 = arith.constant 64 : index
+//     %src = tla.tensor_desc %src_memref shape [%c1, %c64, %c1, %c1] stride [%c64, %c1, %c1, %c1] origin_shape [%c1, %c64] coord [%c0, %c0] : memref<64xf32, #hivm.address_space<ub>> -> !t
+//     %dst = tla.tensor_desc %dst_memref shape [%c1, %c64, %c1, %c1] stride [%c64, %c1, %c1, %c1] origin_shape [%c1, %c64] coord [%c0, %c0] : memref<64xf32, #hivm.address_space<ub>> -> !t
+//     "tla.vector"() ({
+//       "tla.vec.func"() ({
+//         %shape = "tla.make_shape"() : () -> !tla.shape<64>
+//         %coord = "tla.make_coord"() : () -> !tla.coord<0>
+//         %src_tile = "tla.tile_view"(%src, %shape, %coord) : (!t, !tla.shape<64>, !tla.coord<0>) -> !t
+//         %dst_tile = "tla.tile_view"(%dst, %shape, %coord) : (!t, !tla.shape<64>, !tla.coord<0>) -> !t
+//         %reg = "tla.load"(%src_tile) <{operandSegmentSizes = array<i32: 1, 0, 0>}> : (!t) -> !tla.vector<64xf32>
+//         "tla.store"(%dst_tile, %reg) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!t, !tla.vector<64xf32>) -> ()
+//         %count = tla.arch.get_ar -> i64
+//         memref.store %count, %out[%c0] : memref<1xi64>
+//       }) {mode = "simd"} : () -> ()
+//     }) : () -> ()
+//     func.return
+//   }
+// }
+// END_READ_IN_VF
