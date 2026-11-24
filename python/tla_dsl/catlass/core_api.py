@@ -133,6 +133,8 @@ from .base_dsl.typing import (
     UInt32,
     UInt64,
     as_numeric,
+    _float_literal_attr,
+    _emit_integer_literal,
 )
 from .base_dsl.typing import Pointer, TypedPointer
 from .tla.tensor import normalize_tile_view_coord
@@ -10128,36 +10130,25 @@ def _scalar_constant_for_element_type(
                 f"{element_type}, got {resolved!r}",
             )
         int_value = int(resolved)
-        # Range check before IntegerAttr.get (signed bounds for signless integer types).
+        # Check the logical dtype range before emitting the literal.
         if isinstance(element_type, mlir_ir.IndexType):
             lo, hi = -(2**63), 2**63 - 1
-            attr_type = element_type
-            attr_value = int_value
         else:
             int_ty = mlir_ir.IntegerType(element_type)
             width = int(int_ty.width)
-            if int_ty.is_unsigned:
+            if int_ty.is_unsigned or width == 1:
                 lo, hi = 0, 2**width - 1
             else:
                 lo, hi = -(2 ** (width - 1)), 2 ** (width - 1) - 1
-            attr_type = element_type
-            attr_value = int_value
-            if normalize_unsigned and int_ty.is_unsigned:
-                attr_type = mlir_ir.IntegerType.get_signless(width)
-                if attr_value >= 2 ** (width - 1):
-                    attr_value -= 2**width
         if not (lo <= int_value <= hi):
             _op_error(
                 op_name,
                 f"integer scalar {int_value} out of range for {element_type} "
                 f"(valid range [{lo}, {hi}])",
             )
-        return mlir_ir.Operation.create(
-            "arith.constant",
-            results=[attr_type],
-            attributes={"value": mlir_ir.IntegerAttr.get(attr_type, attr_value)},
-            loc=loc,
-        ).results[0]
+        return _emit_integer_literal(
+            element_type, int_value, normalize_unsigned=normalize_unsigned, loc=loc
+        )
     if (
         mlir_ir.F16Type.isinstance(element_type)
         or mlir_ir.F32Type.isinstance(element_type)
@@ -10167,7 +10158,7 @@ def _scalar_constant_for_element_type(
         return mlir_ir.Operation.create(
             "arith.constant",
             results=[element_type],
-            attributes={"value": mlir_ir.FloatAttr.get(element_type, float(resolved))},
+            attributes={"value": _float_literal_attr(element_type, float(resolved))},
             loc=loc,
         ).results[0]
     _op_error(

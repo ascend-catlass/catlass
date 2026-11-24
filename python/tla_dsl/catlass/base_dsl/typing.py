@@ -632,9 +632,91 @@ class IntegerMeta(NumericMeta):
     def is_float(cls) -> bool:
         return False
 
+    @property
+    def min(cls) -> int:
+        """Smallest representable integer."""
+        if cls.is_abstract:
+            raise AttributeError(f"{cls.__name__} has no numeric limits")
+        return -(1 << (cls.width - 1)) if cls.signed else 0
+
+    lowest = min
+
+    @property
+    def max(cls) -> int:
+        """Largest representable integer."""
+        if cls.is_abstract:
+            raise AttributeError(f"{cls.__name__} has no numeric limits")
+        return (1 << (cls.width - int(cls.signed))) - 1
+
+
+# IEEE formats with scalar literal support. Entries contain minimum and maximum
+# normal exponents, fraction width, and the canonical signaling NaN bits.
+_FLOAT_LIMITS = {
+    "f16": (-14, 15, 10, 0x7D00),
+    "bf16": (-126, 127, 7, 0x7FA0),
+    "f32": (-126, 127, 23, 0x7FA00000),
+    "f64": (-1022, 1023, 52, 0x7FF4000000000000),
+}
+_SIGNALING_NAN_BYTES = bytes.fromhex("7ff4000000000000")
+_SIGNALING_NAN = struct.unpack(">d", _SIGNALING_NAN_BYTES)[0]
+
+
+def _signaling_nan_bits(dtype: str, value: float) -> int | None:
+    # Narrowing a Python float through FloatAttr.get or native casts quiets
+    # this NaN. Preserve its representation when encoding a TLA literal.
+    if math.isnan(value) and struct.pack(">d", value) == _SIGNALING_NAN_BYTES:
+        limits = _FLOAT_LIMITS.get(dtype)
+        if limits is not None:
+            return limits[3]
+    return None
+
+
+def _float_literal_attr(element_type: mlir_ir.Type, value: float) -> mlir_ir.Attribute:
+    bits = _signaling_nan_bits(str(element_type), value) if math.isnan(value) else None
+    if bits is not None:
+        return mlir_ir.Attribute.parse(
+            f"0x{bits:X} : {element_type}", context=element_type.context
+        )
+    return mlir_ir.FloatAttr.get(element_type, value)
+
+
+def _emit_integer_literal(
+    element_type: mlir_ir.Type,
+    value: int,
+    *,
+    normalize_unsigned: bool = False,
+    loc: mlir_ir.Location | None = None,
+) -> mlir_ir.Value:
+    constant_type = element_type
+    if mlir_ir.IntegerType.isinstance(element_type):
+        integer_type = mlir_ir.IntegerType(element_type)
+        if integer_type.is_unsigned:
+            width = integer_type.width
+            constant_type = mlir_ir.IntegerType.get_signless(width)
+            if (1 << (width - 1)) <= value < (1 << width):
+                value -= 1 << width
+    literal = mlir_ir.Operation.create(
+        "arith.constant",
+        results=[constant_type],
+        attributes={"value": mlir_ir.IntegerAttr.get(constant_type, value)},
+        loc=loc,
+    ).results[0]
+    if constant_type == element_type or normalize_unsigned:
+        return literal
+    return mlir_ir.Operation.create(
+        "builtin.unrealized_conversion_cast",
+        operands=[literal],
+        results=[element_type],
+        loc=loc,
+    ).results[0]
+
 
 class FloatMeta(NumericMeta):
-    """Metaclass for floating-point numeric types."""
+    """Metaclass for floating-point numeric types.
+
+    Numeric limits are available as Python floats for Float16, BFloat16,
+    Float32, and Float64.
+    """
 
     def __new__(
         cls,
@@ -667,6 +749,64 @@ class FloatMeta(NumericMeta):
     @property
     def is_float(cls) -> bool:
         return True
+
+    @property
+    def _limits(cls) -> tuple[int, int, int, int]:
+        limits = _FLOAT_LIMITS.get(cls.dtype)
+        if limits is None or cls.is_abstract:
+            raise AttributeError(f"{cls.__name__} has no numeric limits")
+        return limits
+
+    @property
+    def min(cls) -> float:
+        """Smallest positive normal value."""
+        return math.ldexp(1.0, cls._limits[0])
+
+    @property
+    def max(cls) -> float:
+        """Largest finite value."""
+        _, max_exponent, fraction_width, _ = cls._limits
+        return math.ldexp(2.0 - math.ldexp(1.0, -fraction_width), max_exponent)
+
+    @property
+    def lowest(cls) -> float:
+        """Smallest finite value."""
+        return -cls.max
+
+    @property
+    def denorm_min(cls) -> float:
+        """Smallest positive subnormal value."""
+        min_exponent, _, fraction_width, _ = cls._limits
+        return math.ldexp(1.0, min_exponent - fraction_width)
+
+    @property
+    def inf(cls) -> float:
+        """Positive infinity."""
+        _ = cls._limits
+        return math.inf
+
+    infinity = inf
+
+    @property
+    def neg_inf(cls) -> float:
+        """Negative infinity."""
+        return -cls.inf
+
+    negative_infinity = neg_inf
+
+    @property
+    def nan(cls) -> float:
+        """Quiet NaN."""
+        _ = cls._limits
+        return math.nan
+
+    quiet_nan = nan
+
+    @property
+    def signaling_nan(cls) -> float:
+        """Signaling NaN, with its bits preserved when encoded as a TLA literal."""
+        _ = cls._limits
+        return _SIGNALING_NAN
 
 
 @dsl_user_op
@@ -953,7 +1093,7 @@ class Numeric(metaclass=NumericMeta, is_abstract=True):
                 "arith.constant",
                 results=[element_type],
                 attributes={
-                    "value": mlir_ir.FloatAttr.get(element_type, float(self.value))
+                    "value": _float_literal_attr(element_type, float(self.value))
                 },
                 loc=loc,
             ).results[0]
@@ -967,15 +1107,10 @@ class Numeric(metaclass=NumericMeta, is_abstract=True):
             and element_type.is_signless
             and (1 << (cls.width - 1)) <= int_value < (1 << cls.width)
         ):
-            # IntegerAttr's Python binding accepts int64_t, including for i64.
+            # The IntegerAttr binding accepts int64_t when given signless i64.
             # Pass the signed spelling of the same unsigned bit pattern.
             int_value -= 1 << cls.width
-        return mlir_ir.Operation.create(
-            "arith.constant",
-            results=[element_type],
-            attributes={"value": mlir_ir.IntegerAttr.get(element_type, int_value)},
-            loc=loc,
-        ).results[0]
+        return _emit_integer_literal(element_type, int_value, loc=loc)
 
     @dsl_user_op
     def to(
@@ -1383,7 +1518,12 @@ class Float(
 ):
     """Abstract floating-point numeric family."""
 
-    _host_bits: ClassVar[Callable[[float], int]]
+    _encode_host_bits: ClassVar[Callable[[float], int]]
+
+    @classmethod
+    def _host_bits(cls, value: float) -> int:
+        bits = _signaling_nan_bits(cls.dtype, value)
+        return cls._encode_host_bits(value) if bits is None else bits
 
     @dsl_user_op
     def sqrt(self, *, loc: mlir_ir.Location | None = None) -> "Float":
@@ -1545,7 +1685,7 @@ class UInt64(
 
 class Float16(Float, metaclass=FloatMeta, width=16, dtype="f16", mlir_type=_mlir_f16):
     @staticmethod
-    def _host_bits(value: float) -> int:
+    def _encode_host_bits(value: float) -> int:
         f16_val = np.float16(value)
         return int(f16_val.view(np.uint16))
 
@@ -1554,7 +1694,7 @@ class BFloat16(
     Float, metaclass=FloatMeta, width=16, dtype="bf16", mlir_type=_mlir_bf16
 ):
     @staticmethod
-    def _host_bits(value: float) -> int:
+    def _encode_host_bits(value: float) -> int:
         bits = int(np.float32(value).view(np.uint32))
         # Round-to-nearest-even when truncating f32 → bf16 (not plain >> 16).
         if (bits & 0x7F800000) != 0x7F800000:
@@ -1564,7 +1704,7 @@ class BFloat16(
 
 class Float32(Float, metaclass=FloatMeta, width=32, dtype="f32", mlir_type=_mlir_f32):
     @staticmethod
-    def _host_bits(value: float) -> int:
+    def _encode_host_bits(value: float) -> int:
         return struct.unpack("I", struct.pack("f", float(value)))[0]
 
 
@@ -1575,7 +1715,7 @@ class Float64(Float, metaclass=FloatMeta, width=64, dtype="f64", mlir_type=_mlir
     """
 
     @staticmethod
-    def _host_bits(value: float) -> int:
+    def _encode_host_bits(value: float) -> int:
         # Host pointer / IntegerAttr slots are signed int64. Fold the unsigned
         # IEEE bit pattern into that range (same spelling as unsigned i64 above).
         bits = struct.unpack("Q", struct.pack("d", float(value)))[0]

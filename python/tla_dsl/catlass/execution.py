@@ -33,7 +33,7 @@ from .base_dsl import BaseDSL, DSLLocation
 from .bc_compile import (
     get_bc_paths as _get_bc_paths,
 )
-from .base_dsl.typing import Numeric
+from .base_dsl.typing import Numeric, _signaling_nan_bits
 from .compiler_bridge import (
     BridgeDiagnostic,
     BridgeLoweringError,
@@ -949,6 +949,9 @@ def _pack_scalar_argument(
             and descriptor.float_format is not None
             and descriptor.float_format.value == "f32"
         ):
+            bits = _signaling_nan_bits("f32", value)
+            if bits is not None:
+                return bits.to_bytes(storage_size, byteorder="little")
             try:
                 return struct.pack("<f", value)
             except (OverflowError, struct.error) as exc:
