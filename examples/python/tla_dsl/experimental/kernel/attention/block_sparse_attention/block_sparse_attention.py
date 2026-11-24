@@ -143,6 +143,24 @@ def block_sparse_attention_kernel(
         lse_free = tla.flag("lse_free", tla.arch.MTE3, tla.arch.VECTOR)
         lse_ready = tla.flag("lse_ready", tla.arch.VECTOR, tla.arch.MTE3)
 
+    mutex_q_l1 = tla.mutex("bsa_q_l1", id=0)
+    mutex_k_l1_0 = tla.mutex("bsa_k_l1_0", id=1)
+    mutex_k_l1_1 = tla.mutex("bsa_k_l1_1", id=2)
+    mutex_v_l1_0 = tla.mutex("bsa_v_l1_0", id=3)
+    mutex_v_l1_1 = tla.mutex("bsa_v_l1_1", id=4)
+    mutex_l0a_0 = tla.mutex("bsa_l0a_0", id=5)
+    mutex_l0a_1 = tla.mutex("bsa_l0a_1", id=6)
+    mutex_l0b_0 = tla.mutex("bsa_l0b_0", id=7)
+    mutex_l0b_1 = tla.mutex("bsa_l0b_1", id=8)
+    mutex_l0c_qk_0 = tla.mutex("bsa_l0c_qk_0", id=9)
+    mutex_l0c_qk_1 = tla.mutex("bsa_l0c_qk_1", id=10)
+    mutex_l0c_pv_0 = tla.mutex("bsa_l0c_pv_0", id=11)
+    mutex_l0c_pv_1 = tla.mutex("bsa_l0c_pv_1", id=12)
+    mutex_s_ub_0 = tla.mutex("bsa_s_ub_0", id=13)
+    mutex_s_ub_1 = tla.mutex("bsa_s_ub_1", id=14)
+    mutex_o_ub = tla.mutex("bsa_o_ub", id=15)
+    mutex_lse_ub = tla.mutex("bsa_lse_ub", id=16)
+
     c0 = 0
     c1 = 1
 
@@ -281,20 +299,6 @@ def block_sparse_attention_kernel(
     )
 
     with tla.cube():
-        tla.set_flag(q_l0a_ready_l1)
-        tla.set_flag(k_l0b_ready_l1_0)
-        tla.set_flag(k_l0b_ready_l1_1)
-        tla.set_flag(v_l0b_ready_l1_0)
-        tla.set_flag(v_l0b_ready_l1_1)
-        tla.set_flag(mmad_ready_l0a_0)
-        tla.set_flag(mmad_ready_l0a_1)
-        tla.set_flag(mmad_ready_l0b_0)
-        tla.set_flag(mmad_ready_l0b_1)
-        tla.set_flag(fix_ready_mmad_qk_0)
-        tla.set_flag(fix_ready_mmad_qk_1)
-        tla.set_flag(fix_ready_mmad_pv_0)
-        tla.set_flag(fix_ready_mmad_pv_1)
-
         tla.cross_core_set_flag(sm_ready_mm2_0, tla.arch.MTE1)
         tla.cross_core_set_flag(sm_ready_mm2_1, tla.arch.MTE1)
         tla.cross_core_set_flag(sm_ready_mm2_2, tla.arch.MTE1)
@@ -305,13 +309,6 @@ def block_sparse_attention_kernel(
 
         tla.cross_core_set_flag(pv_ready_0, tla.arch.VECTOR)
         tla.cross_core_set_flag(pv_ready_1, tla.arch.VECTOR)
-
-        tla.set_flag(mte3_ready_softmax_0)
-        tla.set_flag(mte3_ready_softmax_1)
-
-        tla.set_flag(mte3_ready_rescale)
-        if tla.const_expr(return_lse):
-            tla.set_flag(lse_free)
 
     pipeline_iter = tla.as_numeric(-1)
     qk_stage_count = tla.as_numeric(0)
@@ -442,10 +439,10 @@ def block_sparse_attention_kernel(
                 tla.make_shape(q_tile_size, head_dim),
                 tla.make_coord(c0, c0),
             )
-            tla.wait_flag(q_l0a_ready_l1)
+            mutex_q_l1.lock(pipe=tla.arch.MTE2)
             tla.copy(l1_q_valid, q_gm)
-            tla.set_flag(q_l1_ready_l0)
-            tla.wait_flag(q_l1_ready_l0)
+            mutex_q_l1.unlock(pipe=tla.arch.MTE2)
+            mutex_q_l1.lock(pipe=tla.arch.MTE1)
 
         pipeline_drain = (
             pre_launch if task + tla.arch.block_num() >= total_tasks else c0
@@ -571,16 +568,16 @@ def block_sparse_attention_kernel(
                     )
 
                     if l1BBufId == c0:
-                        tla.wait_flag(k_l0b_ready_l1_0)
+                        mutex_k_l1_0.lock(pipe=tla.arch.MTE2)
                     else:
-                        tla.wait_flag(k_l0b_ready_l1_1)
+                        mutex_k_l1_1.lock(pipe=tla.arch.MTE2)
                     tla.copy(l1_k_valid, k_gm)
                     if l1BBufId == c0:
-                        tla.set_flag(k_l1_ready_l0_0)
-                        tla.wait_flag(k_l1_ready_l0_0)
+                        mutex_k_l1_0.unlock(pipe=tla.arch.MTE2)
+                        mutex_k_l1_0.lock(pipe=tla.arch.MTE1)
                     else:
-                        tla.set_flag(k_l1_ready_l0_1)
-                        tla.wait_flag(k_l1_ready_l0_1)
+                        mutex_k_l1_1.unlock(pipe=tla.arch.MTE2)
+                        mutex_k_l1_1.lock(pipe=tla.arch.MTE1)
 
                     l0ABufId = prefixSumL0AStages % l0_stages
                     l0BBufId_l0 = prefixSumL0BStages % l0_stages
@@ -590,61 +587,61 @@ def block_sparse_attention_kernel(
                     l0_k = tla.make_tensor_like(l0_k_ptr, l1_k)
 
                     if l0BBufId_l0 == c0:
-                        tla.wait_flag(mmad_ready_l0b_0)
+                        mutex_l0b_0.lock(pipe=tla.arch.MTE1)
                     else:
-                        tla.wait_flag(mmad_ready_l0b_1)
+                        mutex_l0b_1.lock(pipe=tla.arch.MTE1)
                     tla.copy(l0_k, l1_k)
                     if l0BBufId_l0 == c0:
-                        tla.set_flag(l0b_ready_mmad_0)
+                        mutex_l0b_0.unlock(pipe=tla.arch.MTE1)
                     else:
-                        tla.set_flag(l0b_ready_mmad_1)
+                        mutex_l0b_1.unlock(pipe=tla.arch.MTE1)
                     if l1BBufId == c0:
-                        tla.set_flag(k_l0b_ready_l1_0)
+                        mutex_k_l1_0.unlock(pipe=tla.arch.MTE1)
                     else:
-                        tla.set_flag(k_l0b_ready_l1_1)
+                        mutex_k_l1_1.unlock(pipe=tla.arch.MTE1)
 
                     if l0ABufId == c0:
-                        tla.wait_flag(mmad_ready_l0a_0)
+                        mutex_l0a_0.lock(pipe=tla.arch.MTE1)
                     else:
-                        tla.wait_flag(mmad_ready_l0a_1)
+                        mutex_l0a_1.lock(pipe=tla.arch.MTE1)
                     tla.copy(l0_q, l1_q)
                     if l0ABufId == c0:
-                        tla.set_flag(l0a_ready_mmad_0)
+                        mutex_l0a_0.unlock(pipe=tla.arch.MTE1)
                     else:
-                        tla.set_flag(l0a_ready_mmad_1)
+                        mutex_l0a_1.unlock(pipe=tla.arch.MTE1)
 
                     if l0ABufId == c0:
-                        tla.wait_flag(l0a_ready_mmad_0)
+                        mutex_l0a_0.lock(pipe=tla.arch.CUBE)
                     else:
-                        tla.wait_flag(l0a_ready_mmad_1)
+                        mutex_l0a_1.lock(pipe=tla.arch.CUBE)
                     if l0BBufId_l0 == c0:
-                        tla.wait_flag(l0b_ready_mmad_0)
+                        mutex_l0b_0.lock(pipe=tla.arch.CUBE)
                     else:
-                        tla.wait_flag(l0b_ready_mmad_1)
+                        mutex_l0b_1.lock(pipe=tla.arch.CUBE)
                     if l0CBufId == c0:
-                        tla.wait_flag(fix_ready_mmad_qk_0)
+                        mutex_l0c_qk_0.lock(pipe=tla.arch.CUBE)
                     else:
-                        tla.wait_flag(fix_ready_mmad_qk_1)
+                        mutex_l0c_qk_1.lock(pipe=tla.arch.CUBE)
                     tla.mmad(l0c_s, l0_q, l0_k, init_c=True)
                     if l0ABufId == c0:
-                        tla.set_flag(mmad_ready_l0a_0)
+                        mutex_l0a_0.unlock(pipe=tla.arch.CUBE)
                     else:
-                        tla.set_flag(mmad_ready_l0a_1)
+                        mutex_l0a_1.unlock(pipe=tla.arch.CUBE)
                     if l0BBufId_l0 == c0:
-                        tla.set_flag(mmad_ready_l0b_0)
+                        mutex_l0b_0.unlock(pipe=tla.arch.CUBE)
                     else:
-                        tla.set_flag(mmad_ready_l0b_1)
+                        mutex_l0b_1.unlock(pipe=tla.arch.CUBE)
 
                     if ubSBufId == c0:
                         tla.cross_core_wait_flag(qk_ready_0, tla.arch.FIX)
                     else:
                         tla.cross_core_wait_flag(qk_ready_1, tla.arch.FIX)
                     if l0CBufId == c0:
-                        tla.set_flag(mmad_ready_fix_qk_0)
-                        tla.wait_flag(mmad_ready_fix_qk_0)
+                        mutex_l0c_qk_0.unlock(pipe=tla.arch.CUBE)
+                        mutex_l0c_qk_0.lock(pipe=tla.arch.FIX)
                     else:
-                        tla.set_flag(mmad_ready_fix_qk_1)
-                        tla.wait_flag(mmad_ready_fix_qk_1)
+                        mutex_l0c_qk_1.unlock(pipe=tla.arch.CUBE)
+                        mutex_l0c_qk_1.lock(pipe=tla.arch.FIX)
                     tla.copy(
                         ub_s_fix,
                         l0c_s,
@@ -653,15 +650,15 @@ def block_sparse_attention_kernel(
                         ),
                     )
                     if l0CBufId == c0:
-                        tla.set_flag(fix_ready_mmad_qk_0)
+                        mutex_l0c_qk_0.unlock(pipe=tla.arch.FIX)
                     else:
-                        tla.set_flag(fix_ready_mmad_qk_1)
+                        mutex_l0c_qk_1.unlock(pipe=tla.arch.FIX)
                     if ubSBufId == c0:
                         tla.cross_core_set_flag(qk_ready_0, tla.arch.FIX)
                     else:
                         tla.cross_core_set_flag(qk_ready_1, tla.arch.FIX)
                     if kv_iter == (selected_block_count - c1):
-                        tla.set_flag(q_l0a_ready_l1)
+                        mutex_q_l1.unlock(pipe=tla.arch.MTE1)
 
                 with tla.vector():
                     if ubSBufId == c0:
@@ -669,9 +666,9 @@ def block_sparse_attention_kernel(
                     else:
                         tla.cross_core_wait_flag(qk_ready_1, tla.arch.VECTOR)
                     if ubSBufId == c0:
-                        tla.wait_flag(mte3_ready_softmax_0)
+                        mutex_s_ub_0.lock(pipe=tla.arch.VECTOR)
                     else:
-                        tla.wait_flag(mte3_ready_softmax_1)
+                        mutex_s_ub_1.lock(pipe=tla.arch.VECTOR)
 
                     vec_idx = tla.arch.sub_block_idx()
                     update = kv_iter != c0
@@ -818,7 +815,6 @@ def block_sparse_attention_kernel(
                                     ub_max_dst_p1.store(
                                         max_reg_p1,
                                         params=tla.params.UnalignStoreParams(),
-                                        mask=one_mask,
                                     )
                                 tla.local_mem_bar(
                                     tla.params.MemType.VEC_STORE,
@@ -865,7 +861,6 @@ def block_sparse_attention_kernel(
                                     ub_sum_i_p2.store(
                                         block_sum_p2,
                                         params=tla.params.UnalignStoreParams(),
-                                        mask=one_mask,
                                     )
                                     p_even_p2 = exp_even_p2.to(
                                         io_dtype, cast_trait_one, mask=pregFull
@@ -926,7 +921,6 @@ def block_sparse_attention_kernel(
                                     ub_max_dst_p1.store(
                                         max_reg_p1,
                                         params=tla.params.UnalignStoreParams(),
-                                        mask=one_mask,
                                     )
                                 tla.local_mem_bar(
                                     tla.params.MemType.VEC_STORE,
@@ -964,7 +958,6 @@ def block_sparse_attention_kernel(
                                     ub_sum_i_p2.store(
                                         block_sum_p2,
                                         params=tla.params.UnalignStoreParams(),
-                                        mask=one_mask,
                                     )
                                     p_reg0_p2 = exp_reg0_p2.to(
                                         io_dtype, cast_trait_zero, mask=pregFull
@@ -1037,7 +1030,6 @@ def block_sparse_attention_kernel(
                                     ub_max_dst_p1.store(
                                         max_reg_p1,
                                         params=tla.params.UnalignStoreParams(),
-                                        mask=one_mask,
                                     )
                                 tla.local_mem_bar(
                                     tla.params.MemType.VEC_STORE,
@@ -1127,7 +1119,6 @@ def block_sparse_attention_kernel(
                                     ub_exp_sum_i_p2.store(
                                         block_sum_p2,
                                         params=tla.params.UnalignStoreParams(),
-                                        mask=one_mask,
                                     )
                                     p_even_p2 = exp_even_p2.to(
                                         io_dtype, cast_trait_one, mask=pregFull
@@ -1208,7 +1199,6 @@ def block_sparse_attention_kernel(
                                     ub_max_dst_p1.store(
                                         max_reg_p1,
                                         params=tla.params.UnalignStoreParams(),
-                                        mask=one_mask,
                                     )
                                 tla.local_mem_bar(
                                     tla.params.MemType.VEC_STORE,
@@ -1289,7 +1279,6 @@ def block_sparse_attention_kernel(
                                     ub_exp_sum_i_p2.store(
                                         block_sum_p2,
                                         params=tla.params.UnalignStoreParams(),
-                                        mask=one_mask,
                                     )
                                     p_reg0_p2 = exp_reg0_p2.to(
                                         io_dtype, cast_trait_zero, mask=pregFull
@@ -1335,7 +1324,7 @@ def block_sparse_attention_kernel(
                         # Capture the final max here: later QK tasks may overwrite
                         # ub_now_max before this task's delayed PV finishes.
                         if kv_iter == selected_block_count - c1 and q_tile_size_sub > 0:
-                            tla.wait_flag(lse_free)
+                            mutex_lse_ub.lock(pipe=tla.arch.VECTOR)
                             ub_lse = tla.make_tensor(
                                 ub_lse_ptr,
                                 tla.make_layout(
@@ -1397,8 +1386,8 @@ def block_sparse_attention_kernel(
                                         tla.make_shape(vl_float_ele),
                                         tla.make_coord(0),
                                     ).store(lse_reg, mask=lse_mask)
-                            tla.set_flag(lse_ready)
-                            tla.wait_flag(lse_ready)
+                            mutex_lse_ub.unlock(pipe=tla.arch.VECTOR)
+                            mutex_lse_ub.lock(pipe=tla.arch.MTE3)
                             lse_row = q_block_idx * q_block + vec_idx * q_tile_size_half
                             if use_varlen != 0:
                                 lse_gm = tla.make_tensor(
@@ -1437,14 +1426,14 @@ def block_sparse_attention_kernel(
                                     ),
                                 )
                                 tla.copy(lse_gm, lse_src)
-                            tla.set_flag(lse_free)
+                            mutex_lse_ub.unlock(pipe=tla.arch.MTE3)
 
                     if ubSBufId == c0:
-                        tla.set_flag(v_mte3_0)
-                        tla.wait_flag(v_mte3_0)
+                        mutex_s_ub_0.unlock(pipe=tla.arch.VECTOR)
+                        mutex_s_ub_0.lock(pipe=tla.arch.MTE3)
                     else:
-                        tla.set_flag(v_mte3_1)
-                        tla.wait_flag(v_mte3_1)
+                        mutex_s_ub_1.unlock(pipe=tla.arch.VECTOR)
+                        mutex_s_ub_1.lock(pipe=tla.arch.MTE3)
                     if ubSBufId == c0:
                         tla.cross_core_set_flag(qk_ready_0, tla.arch.VECTOR)
                     else:
@@ -1478,9 +1467,9 @@ def block_sparse_attention_kernel(
                     tla.copy(l1_p_sub, ub_p_zN_copy)
                     # 释放 ub_s 给下一轮 softmax
                     if ubSBufId == c0:
-                        tla.set_flag(mte3_ready_softmax_0)
+                        mutex_s_ub_0.unlock(pipe=tla.arch.MTE3)
                     else:
-                        tla.set_flag(mte3_ready_softmax_1)
+                        mutex_s_ub_1.unlock(pipe=tla.arch.MTE3)
 
                     if l1PBufId_qk == c0:
                         tla.cross_core_set_flag(sm_ready_mm2_0, tla.arch.MTE3)
@@ -1595,16 +1584,16 @@ def block_sparse_attention_kernel(
                     )
 
                     if l1BBufId_pv == c0:
-                        tla.wait_flag(v_l0b_ready_l1_0)
+                        mutex_v_l1_0.lock(pipe=tla.arch.MTE2)
                     else:
-                        tla.wait_flag(v_l0b_ready_l1_1)
+                        mutex_v_l1_1.lock(pipe=tla.arch.MTE2)
                     tla.copy(l1_v_valid, v_gm)
                     if l1BBufId_pv == c0:
-                        tla.set_flag(v_l1_ready_l0_0)
-                        tla.wait_flag(v_l1_ready_l0_0)
+                        mutex_v_l1_0.unlock(pipe=tla.arch.MTE2)
+                        mutex_v_l1_0.lock(pipe=tla.arch.MTE1)
                     else:
-                        tla.set_flag(v_l1_ready_l0_1)
-                        tla.wait_flag(v_l1_ready_l0_1)
+                        mutex_v_l1_1.unlock(pipe=tla.arch.MTE2)
+                        mutex_v_l1_1.lock(pipe=tla.arch.MTE1)
 
                     if l1PBufId_pv == c0:
                         tla.cross_core_wait_flag(sm_ready_mm2_0, tla.arch.MTE1)
@@ -1651,28 +1640,28 @@ def block_sparse_attention_kernel(
                     l0_v = tla.make_tensor_like(l0_v_ptr, l1_v)
 
                     if l0BBufId_pv == c0:
-                        tla.wait_flag(mmad_ready_l0b_0)
+                        mutex_l0b_0.lock(pipe=tla.arch.MTE1)
                     else:
-                        tla.wait_flag(mmad_ready_l0b_1)
+                        mutex_l0b_1.lock(pipe=tla.arch.MTE1)
                     tla.copy(l0_v, l1_v)
                     if l0BBufId_pv == c0:
-                        tla.set_flag(l0b_ready_mmad_0)
+                        mutex_l0b_0.unlock(pipe=tla.arch.MTE1)
                     else:
-                        tla.set_flag(l0b_ready_mmad_1)
+                        mutex_l0b_1.unlock(pipe=tla.arch.MTE1)
                     if l1BBufId_pv == c0:
-                        tla.set_flag(v_l0b_ready_l1_0)
+                        mutex_v_l1_0.unlock(pipe=tla.arch.MTE1)
                     else:
-                        tla.set_flag(v_l0b_ready_l1_1)
+                        mutex_v_l1_1.unlock(pipe=tla.arch.MTE1)
 
                     if l0ABufId_pv == c0:
-                        tla.wait_flag(mmad_ready_l0a_0)
+                        mutex_l0a_0.lock(pipe=tla.arch.MTE1)
                     else:
-                        tla.wait_flag(mmad_ready_l0a_1)
+                        mutex_l0a_1.lock(pipe=tla.arch.MTE1)
                     tla.copy(l0_p, l1_p_pv)
                     if l0ABufId_pv == c0:
-                        tla.set_flag(l0a_ready_mmad_0)
+                        mutex_l0a_0.unlock(pipe=tla.arch.MTE1)
                     else:
-                        tla.set_flag(l0a_ready_mmad_1)
+                        mutex_l0a_1.unlock(pipe=tla.arch.MTE1)
                     if l1PBufId_pv == c0:
                         tla.cross_core_set_flag(sm_ready_mm2_0, tla.arch.MTE1)
                     elif l1PBufId_pv == c1:
@@ -1681,37 +1670,37 @@ def block_sparse_attention_kernel(
                         tla.cross_core_set_flag(sm_ready_mm2_2, tla.arch.MTE1)
 
                     if l0ABufId_pv == c0:
-                        tla.wait_flag(l0a_ready_mmad_0)
+                        mutex_l0a_0.lock(pipe=tla.arch.CUBE)
                     else:
-                        tla.wait_flag(l0a_ready_mmad_1)
+                        mutex_l0a_1.lock(pipe=tla.arch.CUBE)
                     if l0BBufId_pv == c0:
-                        tla.wait_flag(l0b_ready_mmad_0)
+                        mutex_l0b_0.lock(pipe=tla.arch.CUBE)
                     else:
-                        tla.wait_flag(l0b_ready_mmad_1)
+                        mutex_l0b_1.lock(pipe=tla.arch.CUBE)
                     if l0CBufId_pv == c0:
-                        tla.wait_flag(fix_ready_mmad_pv_0)
+                        mutex_l0c_pv_0.lock(pipe=tla.arch.CUBE)
                     else:
-                        tla.wait_flag(fix_ready_mmad_pv_1)
+                        mutex_l0c_pv_1.lock(pipe=tla.arch.CUBE)
                     tla.mmad(l0c_pv, l0_p, l0_v, init_c=True)
                     if l0ABufId_pv == c0:
-                        tla.set_flag(mmad_ready_l0a_0)
+                        mutex_l0a_0.unlock(pipe=tla.arch.CUBE)
                     else:
-                        tla.set_flag(mmad_ready_l0a_1)
+                        mutex_l0a_1.unlock(pipe=tla.arch.CUBE)
                     if l0BBufId_pv == c0:
-                        tla.set_flag(mmad_ready_l0b_0)
+                        mutex_l0b_0.unlock(pipe=tla.arch.CUBE)
                     else:
-                        tla.set_flag(mmad_ready_l0b_1)
+                        mutex_l0b_1.unlock(pipe=tla.arch.CUBE)
 
                     if ubOTmpBufId == c0:
                         tla.cross_core_wait_flag(pv_ready_0, tla.arch.FIX)
                     else:
                         tla.cross_core_wait_flag(pv_ready_1, tla.arch.FIX)
                     if l0CBufId_pv == c0:
-                        tla.set_flag(mmad_ready_fix_pv_0)
-                        tla.wait_flag(mmad_ready_fix_pv_0)
+                        mutex_l0c_pv_0.unlock(pipe=tla.arch.CUBE)
+                        mutex_l0c_pv_0.lock(pipe=tla.arch.FIX)
                     else:
-                        tla.set_flag(mmad_ready_fix_pv_1)
-                        tla.wait_flag(mmad_ready_fix_pv_1)
+                        mutex_l0c_pv_1.unlock(pipe=tla.arch.CUBE)
+                        mutex_l0c_pv_1.lock(pipe=tla.arch.FIX)
                     ub_pv_ptr_pv = (
                         ub_pv_ping_ptr if ubOTmpBufId == c0 else ub_pv_pong_ptr
                     )
@@ -1731,9 +1720,9 @@ def block_sparse_attention_kernel(
                         ),
                     )
                     if l0CBufId_pv == c0:
-                        tla.set_flag(fix_ready_mmad_pv_0)
+                        mutex_l0c_pv_0.unlock(pipe=tla.arch.FIX)
                     else:
-                        tla.set_flag(fix_ready_mmad_pv_1)
+                        mutex_l0c_pv_1.unlock(pipe=tla.arch.FIX)
                     if ubOTmpBufId == c0:
                         tla.cross_core_set_flag(pv_ready_0, tla.arch.FIX)
                     else:
@@ -1744,7 +1733,7 @@ def block_sparse_attention_kernel(
                         tla.cross_core_wait_flag(pv_ready_0, tla.arch.VECTOR)
                     else:
                         tla.cross_core_wait_flag(pv_ready_1, tla.arch.VECTOR)
-                    tla.wait_flag(mte3_ready_rescale)
+                    mutex_o_ub.lock(pipe=tla.arch.VECTOR)
 
                     ub_pv_ptr_re = (
                         ub_pv_ping_ptr if ubOTmpBufId == c0 else ub_pv_pong_ptr
@@ -1873,8 +1862,8 @@ def block_sparse_attention_kernel(
                                         out_reg_re1_0, out_reg_re1_1
                                     )
                                     out_tile_re1.store(r0_re1, mask=preg_all_b16_re0)
-                        tla.set_flag(rescale_v_mte3)
-                        tla.wait_flag(rescale_v_mte3)
+                        mutex_o_ub.unlock(pipe=tla.arch.VECTOR)
+                        mutex_o_ub.lock(pipe=tla.arch.MTE3)
                         o_row_start_re0 = (
                             q_block_idx_pv * q_block + vec_idx_re * q_tile_size_half_re
                         )
@@ -1887,6 +1876,7 @@ def block_sparse_attention_kernel(
                         )
                         if q_tile_size_sub_re > 0:
                             tla.copy(o_sub_gm_re0, ub_out_f16_re)
+                        mutex_o_ub.unlock(pipe=tla.arch.MTE3)
 
                     elif is_first_pv and (not is_last_pv):
                         # First block: copy PV to acc
@@ -1910,6 +1900,7 @@ def block_sparse_attention_kernel(
                                     )
                                     cur_reg_re2 = cur_tile_re2.load()
                                     acc_tile_re2.store(cur_reg_re2, mask=pregFull_re2)
+                        mutex_o_ub.unlock(pipe=tla.arch.VECTOR)
 
                     elif (not is_first_pv) and (not is_last_pv):
                         with tla.vec.func(mode="simd"):
@@ -1949,6 +1940,7 @@ def block_sparse_attention_kernel(
                                         mul_reg_re3, cur_reg_re3, mask=pregFull_re3
                                     )
                                     pre_tile_re3.store(add_reg_re3, mask=pregFull_re3)
+                        mutex_o_ub.unlock(pipe=tla.arch.VECTOR)
 
                     else:
                         # Last block: O = (O*expMax + PV) / sum → cast → GM (1 个 vec.func + local_mem_bar)
@@ -2038,8 +2030,8 @@ def block_sparse_attention_kernel(
                                         out_reg_re5_0, out_reg_re5_1
                                     )
                                     out_tile_re5.store(r0_re5, mask=preg_all_b16_re4)
-                        tla.set_flag(rescale_v_mte3)
-                        tla.wait_flag(rescale_v_mte3)
+                        mutex_o_ub.unlock(pipe=tla.arch.VECTOR)
+                        mutex_o_ub.lock(pipe=tla.arch.MTE3)
                         o_row_start_re5 = (
                             q_block_idx_pv * q_block + vec_idx_re * q_tile_size_half_re
                         )
@@ -2052,30 +2044,28 @@ def block_sparse_attention_kernel(
                         )
                         if q_tile_size_sub_re > 0:
                             tla.copy(o_sub_gm_re5, ub_out_f16_re)
+                        mutex_o_ub.unlock(pipe=tla.arch.MTE3)
 
                     if ubOTmpBufId == c0:
                         tla.cross_core_set_flag(pv_ready_0, tla.arch.VECTOR)
                     else:
                         tla.cross_core_set_flag(pv_ready_1, tla.arch.VECTOR)
-                    # O->GM copy 完成, 释放给下一轮 rescale
-                    tla.set_flag(mte3_ready_rescale)
-
                 pv_stage_count = pv_stage_count + c1
 
     with tla.cube():
-        tla.wait_flag(q_l0a_ready_l1)
-        tla.wait_flag(k_l0b_ready_l1_0)
-        tla.wait_flag(k_l0b_ready_l1_1)
-        tla.wait_flag(v_l0b_ready_l1_0)
-        tla.wait_flag(v_l0b_ready_l1_1)
-        tla.wait_flag(mmad_ready_l0a_0)
-        tla.wait_flag(mmad_ready_l0a_1)
-        tla.wait_flag(mmad_ready_l0b_0)
-        tla.wait_flag(mmad_ready_l0b_1)
-        tla.wait_flag(fix_ready_mmad_qk_0)
-        tla.wait_flag(fix_ready_mmad_qk_1)
-        tla.wait_flag(fix_ready_mmad_pv_0)
-        tla.wait_flag(fix_ready_mmad_pv_1)
+        mutex_q_l1.lock(pipe=tla.arch.MTE2)
+        mutex_k_l1_0.lock(pipe=tla.arch.MTE2)
+        mutex_k_l1_1.lock(pipe=tla.arch.MTE2)
+        mutex_v_l1_0.lock(pipe=tla.arch.MTE2)
+        mutex_v_l1_1.lock(pipe=tla.arch.MTE2)
+        mutex_l0a_0.lock(pipe=tla.arch.MTE1)
+        mutex_l0a_1.lock(pipe=tla.arch.MTE1)
+        mutex_l0b_0.lock(pipe=tla.arch.MTE1)
+        mutex_l0b_1.lock(pipe=tla.arch.MTE1)
+        mutex_l0c_qk_0.lock(pipe=tla.arch.CUBE)
+        mutex_l0c_qk_1.lock(pipe=tla.arch.CUBE)
+        mutex_l0c_pv_0.lock(pipe=tla.arch.CUBE)
+        mutex_l0c_pv_1.lock(pipe=tla.arch.CUBE)
 
         tla.cross_core_wait_flag(qk_ready_0, tla.arch.FIX)
         tla.cross_core_wait_flag(qk_ready_1, tla.arch.FIX)
@@ -2087,11 +2077,11 @@ def block_sparse_attention_kernel(
         tla.cross_core_wait_flag(sm_ready_mm2_0, tla.arch.MTE3)
         tla.cross_core_wait_flag(sm_ready_mm2_1, tla.arch.MTE3)
         tla.cross_core_wait_flag(sm_ready_mm2_2, tla.arch.MTE3)
-        tla.wait_flag(mte3_ready_softmax_0)
-        tla.wait_flag(mte3_ready_softmax_1)
-        tla.wait_flag(mte3_ready_rescale)
+        mutex_s_ub_0.lock(pipe=tla.arch.VECTOR)
+        mutex_s_ub_1.lock(pipe=tla.arch.VECTOR)
+        mutex_o_ub.lock(pipe=tla.arch.VECTOR)
         if tla.const_expr(return_lse):
-            tla.wait_flag(lse_free)
+            mutex_lse_ub.lock(pipe=tla.arch.VECTOR)
 
 
 def block_sparse_attention(

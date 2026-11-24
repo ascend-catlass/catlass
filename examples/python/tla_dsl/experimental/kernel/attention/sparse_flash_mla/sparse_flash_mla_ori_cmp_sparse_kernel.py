@@ -82,6 +82,8 @@ from smla_csa_common import (
     declare_sync,
     init_sync,
     init_sync_preload,
+    mutex_lock,
+    mutex_unlock,
     static_range,
     sync_all_cores_aic,
     sync_all_cores_aiv,
@@ -889,10 +891,13 @@ def sparse_flash_mla_ori_cmp_sparse_kernel(
     # `sparse_flash_mla_csa_block_vector_arch35.h:1515` 的
     # `FreeEvent ... WaitFlag<HardEvent::MTE3_V>(INNERCORE_STAGE2)`：set 落在
     # MTE3 管（排在所有已发出拷贝之后），wait 在 V 管消费，核退出前等到它。
-    # 复用 init_mte3_v（MTE3->V，id 0，主循环内无其它使用，set/wait 成对自洽）。
+    # CATLASS 2.2.1 的 mutex id 仅支持 0..31，本 kernel 的资源集合已全部占用。
+    # 此处复用 m_init(id=31)：输出初始化在主循环前已完成且 lock/unlock 配平，
+    # 退出阶段可安全借它完成 MTE3 -> V 排空，避免与 Q/S 的 mutex 共享 id。
     with tla.vector():
-        tla.set_flag(sync.init_mte3_v)
-        tla.wait_flag(sync.init_mte3_v)
+        sync.m_init.lock(pipe=tla.arch.MTE3)
+        sync.m_init.unlock(pipe=tla.arch.MTE3)
+        sync.m_init.lock(pipe=tla.arch.VECTOR)
 
     # ---- 追踪期闭合校验（F45）：承诺开共享臂却一次没发射 ⇒ 编译失败 ----
     _bv.verify_trace_closed("ocs")

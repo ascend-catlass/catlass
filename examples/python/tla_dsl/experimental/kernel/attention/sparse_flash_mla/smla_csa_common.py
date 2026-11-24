@@ -22,6 +22,16 @@ def static_range(start, stop=None):
     return tuple(builtins.range(int(start), int(stop)))
 
 
+@tla.jit
+def mutex_lock(mutex, pipe):
+    mutex.lock(pipe=pipe)
+
+
+@tla.jit
+def mutex_unlock(mutex, pipe):
+    mutex.unlock(pipe=pipe)
+
+
 # ---------------------------------------------------------------- 全核屏障
 # F27 补（#046 间歇性非逐位）：对照 OT csa_kernel_arch35.h:444-449
 #   if constexpr (IS_VEC_S2PHYADDR) { AscendC::SyncAll<false>(); }
@@ -227,6 +237,29 @@ class Sync:
     ab_ready1: object
     ab_free0: object
     ab_free1: object
+    m_q_l1: object
+    m_k_l1_0: object
+    m_k_l1_1: object
+    m_k_l1_2: object
+    m_s_l0c0: object
+    m_s_l0c1: object
+    m_lse: object
+    m_kv0: object
+    m_kv1: object
+    m_idx0: object
+    m_idx1: object
+    m_ab0: object
+    m_ab1: object
+    m_phy_m2v: object
+    m_phy_s2v: object
+    m_phy_v_mte3: object
+    m_phy_m3v: object
+    m_phy_m3s: object
+    m_phy_vs: object
+    m_bc_stage: object
+    m_bc_prev: object
+    m_bc_ws: object
+    m_init: object
     # F27：IS_SPLIT_G 的核间 MTE2 屏障（OT csa_kernel_arch35.h:347-348/:357-358 的
     # CrossCoreSetFlag<0,PIPE_MTE2>(15) / CrossCoreWaitFlag<0,PIPE_MTE2>(15)）。
     # mode=0 = FFTS 全核屏障（AscendC SyncAll<false> 语义：每个核 set 自己的到达位、
@@ -459,6 +492,29 @@ def declare_sync(
         # L0C O 双槽互斥：cube(mm) 侧与 fix 侧用同一 id，才能形成 MMAD->FIX 依赖
         m_l0c_o0=tla.mutex("smla_l0c_o0", id=7),
         m_l0c_o1=tla.mutex("smla_l0c_o1", id=8),
+        m_q_l1=tla.mutex("smla_q_l1", id=9),
+        m_k_l1_0=tla.mutex("smla_k_l1_0", id=10),
+        m_k_l1_1=tla.mutex("smla_k_l1_1", id=11),
+        m_k_l1_2=tla.mutex("smla_k_l1_2", id=12),
+        m_s_l0c0=tla.mutex("smla_s_l0c0", id=13),
+        m_s_l0c1=tla.mutex("smla_s_l0c1", id=14),
+        m_lse=tla.mutex("smla_lse", id=15),
+        m_kv0=tla.mutex("smla_kv0", id=16),
+        m_kv1=tla.mutex("smla_kv1", id=17),
+        m_idx0=tla.mutex("smla_idx0", id=18),
+        m_idx1=tla.mutex("smla_idx1", id=19),
+        m_ab0=tla.mutex("smla_ab0", id=20),
+        m_ab1=tla.mutex("smla_ab1", id=21),
+        m_phy_m2v=tla.mutex("smla_phy_m2v", id=22),
+        m_phy_s2v=tla.mutex("smla_phy_s2v", id=23),
+        m_phy_v_mte3=tla.mutex("smla_phy_v_mte3", id=24),
+        m_phy_m3v=tla.mutex("smla_phy_m3v", id=25),
+        m_phy_m3s=tla.mutex("smla_phy_m3s", id=26),
+        m_phy_vs=tla.mutex("smla_phy_vs", id=27),
+        m_bc_stage=tla.mutex("smla_bc_stage", id=28),
+        m_bc_prev=tla.mutex("smla_bc_prev", id=29),
+        m_bc_ws=tla.mutex("smla_bc_ws", id=30),
+        m_init=tla.mutex("smla_init", id=31),
     )
 
 
@@ -485,39 +541,8 @@ def init_sync(
     got OpResult）。非 swa kernel 不调用 init_sync_preload，指令流与改前逐条
     一致。信用推演（AIC 可超前 AIV 至多 2 tile）见 ITERATIONS.md Iter 23 F6 节。
     """
-    with tla.cube():
-        # 闸门②变体 B（二分定位）：信用恢复原始握手 x1（寻址/合并保留）。
-        tla.set_flag(sync.q_l0a_free)
-        tla.set_flag(sync.k_l0b_free0)
-        tla.set_flag(sync.k_l0b_free1)
-        tla.set_flag(sync.k_l0b_free2)
-        # F10 步骤 2：AB 槽释放信用预置（OT cube_local_buffer.h:70-71 的
-        # SetFlag<M_MTE1>(0)/(1) 同款；L0A/L0B 合并单 bufferId，每槽 1 份）。
-        tla.set_flag(sync.ab_free0)
-        tla.set_flag(sync.ab_free1)
-        tla.set_flag(sync.s_fix_done)
-        if pre_l0c2:
-            # F10 步骤 1（仅 swa preload 实例传 True）：S L0C 槽 1 的首个信用。
-            # 槽平衡与槽 0 相同：bmm1(tile t) wait 槽 t%2、fixpipe(t) 后 set 槽 t%2，
-            # 首两个 tile 各消费 1 个预置信用。静态 bool 分支（pre_bc 同款），非
-            # preload 实例不发出，指令流不变。
-            tla.set_flag(sync.s_fix_done1)
-        tla.set_flag(sync.o_fix_done0)
-        tla.set_flag(sync.o_fix_done1)
     with tla.vector():
         # gather 的 UB 复用信用（MTE3->MTE2），ping-pong 两块各一份
-        tla.set_flag(sync.kv_mte3_mte2_0)
-        tla.set_flag(sync.kv_mte3_mte2_1)
-        if pre_phy_vs:
-            tla.set_flag(sync.phy_vs)
-        if pre_idx_ring:
-            # T1-1：两个槽各预置 1 个 free 信用（首个整环 DMA 的 wait 有信用可
-            # 消费，此后每轮标量读完后归还）。对应竞品 ring 的初始可写状态
-            # （N:448-455 无显式同步，本仓显式补齐，同 W27b 的 a_idx_free 预置）。
-            tla.set_flag(sync.idx_s2m0)
-            tla.set_flag(sync.idx_s2m1)
-        if pre_bc:
-            tla.set_flag(sync.bc_v2m)
         tla.cross_core_set_flag(sync.s_free, tla.arch.VECTOR, aiv_id=0)
         tla.cross_core_set_flag(sync.s_free, tla.arch.VECTOR, aiv_id=1)
         if not defer_ofree:

@@ -25,7 +25,8 @@ import catlass.tla as tla
 
 @tla.jit
 def mx_zero_ub(ptr, bytes: tla.Constexpr[int]):
-    # Full 256-byte vectors plus one masked tail, matching the byte range.
+    # Full 256-byte vectors plus an unaligned tail; UnalignStoreParams handles
+    # the tail without an explicit mask.
     chunk = 256
     units = bytes // chunk
     tail = bytes % chunk
@@ -39,9 +40,8 @@ def mx_zero_ub(ptr, bytes: tla.Constexpr[int]):
             # Tile coordinates are in units of the tile extent.
             tla.tile_view(target, tla.make_shape(chunk), tla.make_coord(i)).store(zero)
         if tail != 0:
-            mask, _ = tla.update_mask(tail, dtype=tla.Int8)
             tla.tile_view(target, tla.make_shape(tail), tla.make_coord(units)).store(
-                zero, tla.params.UnalignStoreParams(), mask=mask
+                zero, tla.params.UnalignStoreParams()
             )
 
 
@@ -133,8 +133,14 @@ def _mx_load_row(scores, row):
 
 @tla.jit
 def _mx_prob_value(scores, row, snap, maskh):
-    # One key row of 64 queries: exp(score - snap) in the native fused unit.
-    return tla.experimental.exp_sub(_mx_load_row(scores, row), snap, mask=maskh)
+    # One key row of 64 queries: exp(score - snap).
+    # CATLASS 2.2.1 does not expose tla.experimental.exp_sub yet. Keep the
+    # original fused implementation here, and use the equivalent
+    # subtract-then-exp form for compatibility.
+    # Original implementation: use tla.experimental.exp_sub(_mx_load_row(scores, row), snap, mask=maskh)
+    diff = tla.sub(_mx_load_row(scores, row), snap, mask=maskh)
+    exp_f16 = tla.exp(diff, mask=maskh)
+    return exp_f16.to(tla.Float32, tla.params.CastParams(), mask=maskh)
 
 
 @tla.jit
@@ -308,9 +314,8 @@ def mx_pad(v, s):
             tla.recast_ptr(s, dtype=tla.Int8),
             tla.make_layout(tla.make_shape(64), tla.make_stride(1)),
         )
-        mask, _ = tla.update_mask(64, dtype=tla.Int8)
         tla.tile_view(scales, tla.make_shape(64), tla.make_coord(0)).store(
-            tla.full(127, tla.Int8), tla.params.UnalignStoreParams(), mask=mask
+            tla.full(127, tla.Int8), tla.params.UnalignStoreParams()
         )
 
 
