@@ -72,7 +72,7 @@ def test_fp4_widen_preserves_pair_count(compiler_tlair, dtype, slot):
     )
     (cast_line,) = [line for line in ir.splitlines() if '"tla.cast"' in line]
     slot_code = list(RegSlot).index(slot)
-    assert f"trait = array<i32: {slot_code}, 2, 0>" in cast_line
+    assert f"trait = array<i32: {slot_code}, 2, 4>" in cast_line
     assert "!tla.vector<128xbf16>" in cast_line
     assert "!tla.mask<256>" in ir
 
@@ -99,7 +99,7 @@ def test_fp4_native_saturation_accepts_source_and_pair_masks(
     assert (
         "!tla.mask<128>" in ir if mask_type is tla.BFloat16 else "!tla.mask<64>" in ir
     )
-    assert "trait = array<i32: 0, 0, 0>" in ir
+    assert "trait = array<i32: 0, 0, 4>" in ir
 
 
 def test_fp4_narrow_rejects_nosat(compiler_tlair):

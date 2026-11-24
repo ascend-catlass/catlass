@@ -12,7 +12,7 @@
 
 Coverage beyond CAST_ROUND/FLOOR/CEIL/TRUNC:
   CAST_RINT  : f32 -> i32, ties to even
-  CAST_NONE  : must be explicit; lossy f32 -> i32 equals RINT; lossless
+  CAST_NONE  : default for CastParams. Lossy f32 -> i32 equals RINT. Lossless
                f16 -> f32 drops the round operand (identity for exact f16)
   CAST_ODD   : f32 -> f16 (hardware supports ODD on this narrow; exact-f16
                inputs make it a no-op so the delta is zero)
@@ -91,7 +91,7 @@ _TRAIT_I32_TO_F32 = tla.params.CastParams(
     sat_mode=tla.params.SatMode.NOSAT,
     round_mode=tla.params.RoundMode.CAST_ROUND,
 )
-# Lossless f16 -> f32: CAST_NONE must be explicit; lowering drops rnd on vextf.
+# Lossless f16 -> f32 omits the rounding operand on vextf.
 _TRAIT_F16_TO_F32_NONE = tla.params.CastParams(
     reg_slot=tla.params.RegSlot.ZERO,
     sat_mode=tla.params.SatMode.NOSAT,

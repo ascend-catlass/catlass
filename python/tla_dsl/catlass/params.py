@@ -584,7 +584,7 @@ class SatMode(enum.Enum):
 class RoundMode(enum.Enum):
     """Rounding applied on precision loss (AVE ``tla.cast`` / ``VectorSSA.to``).
 
-    ``CAST_NONE`` matches AscendC: it must be passed explicitly. Lossless casts
+    ``CAST_NONE`` is the default for ``CastParams``. Lossless casts
     drop the round operand; lossy casts lower as ``CAST_RINT``. ``CAST_HYBRID``
     selects native hybrid rounding for Float32 -> HiFloat8 only.
     """
@@ -656,7 +656,7 @@ class CastParams:
 
     reg_slot: RegSlot = RegSlot.ZERO
     sat_mode: SatMode = SatMode.NOSAT
-    round_mode: RoundMode = RoundMode.CAST_ROUND
+    round_mode: RoundMode = RoundMode.CAST_NONE
 
     def codes(self) -> list[int]:
         """The three enum codes for the tla.cast DenseI32ArrayAttr, in order."""

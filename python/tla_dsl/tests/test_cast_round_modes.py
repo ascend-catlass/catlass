@@ -82,7 +82,11 @@ def test_new_round_modes_emit_on_same_type_f32(mode) -> None:
     assert "tla.cast" in mlir
 
 
-def test_cast_none_must_be_explicit_in_params() -> None:
-    # AscendC-compatible: NONE is never the silent default.
-    assert tla.params.CastParams().round_mode is tla.params.RoundMode.CAST_ROUND
-    assert tla.params.CastParams().round_mode is not tla.params.RoundMode.CAST_NONE
+def test_default_same_type_cast_emits_cast_none() -> None:
+    params = tla.params.CastParams()
+    assert params.round_mode is tla.params.RoundMode.CAST_NONE
+    mlir = _cast_kernel(tla.Float32, params).dump_mlir(
+        type_args=(_ub(tla.Float32), _ub(tla.Float32))
+    )
+    (cast_line,) = [line for line in mlir.splitlines() if "tla.cast" in line]
+    assert "[0, 2, 4]" in cast_line

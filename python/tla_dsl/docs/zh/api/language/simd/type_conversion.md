@@ -29,7 +29,7 @@ FP32→HiF8 支持 `CAST_ROUND`（最近舍入，中点远离零）和 `CAST_HYB
 HiF8→FP32 读取相同 slot，无需舍入。
 算术运算先转换为 Float32，查看编码使用 UInt8 bitcast。
 `CAST_HYBRID` 仅支持 FP32→HiF8，采用 CANN 原生混合舍入，
-结果不保证是最近的可表示值。默认使用 `CAST_ROUND`。
+结果不保证是最近的可表示值。FP32→HiF8 须显式指定 `CAST_ROUND` 或 `CAST_HYBRID`。
 
 lowering 支持有符号整数 `tla.Int8` ~ `tla.Int64`、浮点 `tla.Float16` /
 `tla.BFloat16` / `tla.Float32`，以及两种 OCP fp8 格式 `tla.Float8E4M3FN` /
@@ -54,8 +54,9 @@ fp8 格式没有同类型 cast。
 
 `CastParams.round_mode` 支持 `CAST_ROUND` / `CAST_FLOOR` / `CAST_CEIL` /
 `CAST_TRUNC` / `CAST_RINT` / `CAST_ODD` / `CAST_NONE`；`CAST_HYBRID` 仅支持
-FP32→HiF8。`CAST_NONE` 须显式传入：无损转换（如 `f16→f32`）仍走无
-`rnd` 的指令；有损转换按 `CAST_RINT`（ties to even）处理。
+FP32→HiF8。`CastParams` 默认使用 `CAST_NONE`。无损转换（如 `f16→f32`）
+省略舍入操作数。在支持且使用舍入模式的转换中，包括同类型浮点 cast，
+`CAST_NONE` 按 `CAST_RINT`（中点取偶）处理。
 
 `tla.Float4E2M1x2`、`tla.Float4E1M2x2` 的每个字节保存两个 FP4 数值，低半字节在前。
 Tensor 的 shape 和 offset 按数对计数。
@@ -112,11 +113,10 @@ with tla.vec.func(mode="simd"):
         sat_mode=tla.params.SatMode.UNKNOWN,
         round_mode=tla.params.RoundMode.CAST_TRUNC,
     ))
-    # CAST_NONE 须显式传入；有损路径行为等同 CAST_RINT。
+    # 此转换的默认 CAST_NONE 按 CAST_RINT 处理。
     as_i32 = as_f32.to(tla.Int32, tla.params.CastParams(
         reg_slot=tla.params.RegSlot.ZERO,
         sat_mode=tla.params.SatMode.NOSAT,
-        round_mode=tla.params.RoundMode.CAST_NONE,
     ))
 ```
 

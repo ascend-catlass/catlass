@@ -53,10 +53,11 @@ def test_hif8_narrow_is_a_register_cast(compiler_tlair, slot, sat, round_mode):
     assert "!tla.vector<?x!tla.hif8>" in cast_line
 
 
-def test_hif8_does_not_silently_change_rounding(compiler_tlair):
+@pytest.mark.parametrize("round_mode", [RoundMode.CAST_NONE, RoundMode.CAST_CEIL])
+def test_hif8_does_not_silently_change_rounding(compiler_tlair, round_mode):
     with pytest.raises(TlaCoreAPIError, match="supports CAST_ROUND"):
         compiler_tlair(
-            _kernel(tla.HiFloat8, CastParams(round_mode=RoundMode.CAST_CEIL)),
+            _kernel(tla.HiFloat8, CastParams(round_mode=round_mode)),
             type_args=(_ub(tla.Float32, 64), _ub(tla.HiFloat8, 256)),
         )
 
@@ -69,7 +70,7 @@ def test_hif8_widen_preserves_source_mask_domain(compiler_tlair, slot):
     )
     (cast_line,) = [line for line in ir.splitlines() if '"tla.cast"' in line]
     slot_code = list(RegSlot).index(slot)
-    assert f"trait = array<i32: {slot_code}, 2, 0>" in cast_line
+    assert f"trait = array<i32: {slot_code}, 2, 4>" in cast_line
     assert "!tla.mask<256>" in ir
     assert "!tla.vector<64xf32>" in ir
 

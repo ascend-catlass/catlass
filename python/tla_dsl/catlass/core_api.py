@@ -1103,7 +1103,8 @@ class VectorSSA(_RegisterSSA):
             rounding. Use Float32 for arithmetic or UInt8 bitcast to inspect
             encoded bits. CAST_HYBRID is only supported for Float32 -> HiFloat8;
             it follows CANN's native hybrid rounding and does not guarantee the
-            nearest representable value. The default is CAST_ROUND.
+            nearest representable value. Specify CAST_ROUND or CAST_HYBRID
+            explicitly for Float32 -> HiFloat8.
 
             Float4E2M1x2 and Float4E1M2x2 store two FP4 values per byte,
             low nibble first. Tensor shapes and offsets count packed pairs.
@@ -1149,9 +1150,10 @@ class VectorSSA(_RegisterSSA):
             - `params.round_mode` accepts `CAST_ROUND` / `CAST_FLOOR` /
               `CAST_CEIL` / `CAST_TRUNC` / `CAST_RINT` / `CAST_ODD` /
               `CAST_NONE`. `CAST_HYBRID` is supported only for Float32 ->
-              HiFloat8. `CAST_NONE` must be passed explicitly: lossless casts
-              drop the round operand; lossy casts lower as `CAST_RINT`
-              (ties to even).
+              HiFloat8. `CastParams` defaults to `CAST_NONE`. Lossless casts
+              omit the rounding operand. On supported routes that consume a
+              rounding mode, including same-type float casts, `CAST_NONE`
+              uses `CAST_RINT` (ties to even).
 
             Example:
             ```python
@@ -1168,11 +1170,10 @@ class VectorSSA(_RegisterSSA):
                     sat_mode=tla.params.SatMode.UNKNOWN,
                     round_mode=tla.params.RoundMode.CAST_TRUNC,
                 ))
-                # CAST_NONE must be explicit; lossy paths behave as CAST_RINT.
+                # The default CAST_NONE uses CAST_RINT on this conversion.
                 as_i32 = as_f32.to(tla.Int32, tla.params.CastParams(
                     reg_slot=tla.params.RegSlot.ZERO,
                     sat_mode=tla.params.SatMode.NOSAT,
-                    round_mode=tla.params.RoundMode.CAST_NONE,
                 ))
             ```
         """
