@@ -51,6 +51,8 @@ qsa_indexer(
 | 位置 | `query_positions` 非负且按行单调不减；需满足 `(p_i + 1) / CR ≤ pages × P`。 |
 | 输出宽度 | `W = compress_ratio × (topk_limit + 1)`；top-k 路径写入前先把整行置 `-1`，`W` 需覆盖 `keep_i*CR + tail_i`；`run_topk=False` 时要求 `p_i + 1 ≤ W - 1`，否则下标越界，行为未定义。 |
 | dtype | `q` 与 `compressed_k` 同为 `float16` 或 `bfloat16`；`block_table`、`query_positions`、`output` 为 `int32`。 |
+| 页大小 | `page_size ≥ 8`：原始 FP32 分数按 `page_size` 行步长落在 UB，行字节数需满足 VLD/VST 的 32 字节对齐要求。 |
+| 行数 | `run_topk=True` 时要求 `rows` 为偶数：AIC→AIV 的 `SPLIT_M` 拷贝会把最后一个 `32` 行 tile 均分给两个 AIV 子块，奇数行会把同一 token 的 head 行拆到两个子块。 |
 | 分数单调性 | 分数经 ReLU 后非负，选择阶段的 FP16/BF16 位模式按无符号比较与数值大小等价。 |
 | 片上容量 | 分数 tile 固定为 `32 × page_size` 块、`32 × QH` 行 FP32；top-k 输入复用该 UB 区，要求 `ceil(max_blocks / 256) × 256 ≤ 64 × QH × page_size`；选中块暂存区固定 640 个 FP16 槽位，要求 `topk_limit ≤ 640`。 |
 | 设备与编译 | 所有张量与工作区位于同一 NPU；shape 与属性均为编译期常量，变化需重新 `tla.compile`。 |
@@ -69,8 +71,8 @@ import torch_npu  # noqa: F401
 import catlass.tla as tla
 from qsa_indexer.qsa_indexer import qsa_indexer
 
-rows, qh, kvh, d = 127, 8, 1, 128
-cr, p, topk, pages = 64, 4, 2, 8
+rows, qh, kvh, d = 128, 8, 1, 128
+cr, p, topk, pages = 64, 8, 2, 4
 mb, w = pages * p, cr * (topk + 1)
 i32 = dict(dtype=torch.int32, device="npu:0")
 f16 = dict(dtype=torch.float16, device="npu:0")
@@ -91,5 +93,5 @@ PY
 ```
 
 ```text
-torch.Size([127, 192]) torch.int32
+torch.Size([128, 192]) torch.int32
 ```

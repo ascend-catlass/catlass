@@ -10,7 +10,54 @@
 
 from __future__ import annotations
 
+import re as _re
+from pathlib import Path
+
 import catlass.tla as tla
+from catlass import execution as _catlass_execution
+
+_AIV_DECL_RE = _re.compile(
+    r"(?m)^(\s*func\.func private @(?:"
+    r"histograms_(?:accumulate|frequency)_bin[01]_u8"
+    r"|vsqueeze_(?:float|half|int8_t|uint8_t|int16_t|uint16_t|int32_t|uint32_t)"
+    r"|tla_mask_select"
+    r")\([^\n]*)$"
+)
+
+
+def _backfill_aiv_core_type(path: Path) -> None:
+    try:
+        text = path.read_text()
+    except OSError:
+        return
+
+    def _annotate(match: _re.Match[str]) -> str:
+        line = match.group(1)
+        if "hivm.func_core_type" in line:
+            return line
+        if "attributes {" in line:
+            return line.replace(
+                "attributes {",
+                "attributes {hivm.func_core_type = #hivm.func_core_type<AIV>, ",
+                1,
+            )
+        return line + " attributes {hivm.func_core_type = #hivm.func_core_type<AIV>}"
+
+    patched = _AIV_DECL_RE.sub(_annotate, text)
+    if patched != text:
+        path.write_text(patched)
+
+
+if not getattr(_catlass_execution, "_qsa_aiv_backfill", False):
+    _orig_stamped_hivmc_input = _catlass_execution._create_stamped_hivmc_input
+
+    def _create_stamped_hivmc_input(*args, **kwargs):
+        path, bitcodes = _orig_stamped_hivmc_input(*args, **kwargs)
+        _backfill_aiv_core_type(path)
+        return path, bitcodes
+
+    _catlass_execution._create_stamped_hivmc_input = _create_stamped_hivmc_input
+    _catlass_execution._qsa_aiv_backfill = True
 
 
 @tla.jit
@@ -117,8 +164,25 @@ def _qsa_indexer_mixed_topk_stage(
     SIMT_THREADS = 256
     MIXED_TILE_M = 32
     SCORE_REG_WIDTH = 64
+    # The UB score scratch is row-strided by page_size; keep each row 32-byte
+    # aligned so small page_size does not trigger misaligned VST. Raw score rows
+    # must stay page_size-strided for the L0C->UB SPLIT_M copy, which only
+    # supports the natural layout.
+    SCORE_UB_STRIDE = ((page_size + 15) // 16) * 16
+    if tla.const_expr(page_size < 8):
+        raise ValueError(
+            "qsa_indexer requires page_size >= 8: the raw FP32 score rows are "
+            f"page_size*4 bytes ({page_size * 4} B) and VLD/VST on UB needs a "
+            "32-byte-aligned row start"
+        )
 
     rows = output.origin_shape[0]
+    if tla.const_expr(rows % 2 != 0):
+        raise ValueError(
+            "qsa_indexer requires an even rows count: the AIC-to-AIV SPLIT_M "
+            f"copy splits the last {MIXED_TILE_M}-row tile evenly, so an odd "
+            "row count would split a query token across the two AIV subblocks"
+        )
     max_pages = block_table.origin_shape[1]
     max_blocks = max_pages * page_size
     max_blocks_aligned = ((max_blocks + 255) // 256) * 256
@@ -168,7 +232,7 @@ def _qsa_indexer_mixed_topk_stage(
         256,
     )
     score_ub_ptr = tla.allocate(
-        (MIXED_TILE_M // 2) * page_size,
+        (MIXED_TILE_M // 2) * SCORE_UB_STRIDE,
         score_dtype,
         tla.AddressSpace.ub,
         256,
@@ -294,7 +358,7 @@ def _qsa_indexer_mixed_topk_stage(
                 score_ub_ptr,
                 tla.make_layout(
                     tla.make_shape(MIXED_TILE_M // 2, page_size),
-                    tla.make_stride(page_size, 1),
+                    tla.make_stride(SCORE_UB_STRIDE, 1),
                     origin_shape=tla.make_shape(aiv_m, page_size),
                 ),
             )
@@ -559,7 +623,7 @@ def _qsa_indexer_mixed_topk_stage(
                     score_ub_bits_ptr,
                     tla.make_layout(
                         tla.make_shape(aiv_m, page_size),
-                        tla.make_stride(page_size, 1),
+                        tla.make_stride(SCORE_UB_STRIDE, 1),
                     ),
                 )
                 score_gm_page = tla.make_tensor(
