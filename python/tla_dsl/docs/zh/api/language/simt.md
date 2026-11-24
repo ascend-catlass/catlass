@@ -61,7 +61,7 @@ with tla.vector():
   `tla.create_mask`。这些接口用于 SIMD 寄存器向量编程。
 - `tla.copy`：DMA 需要捕获 tensor 本身，而 SIMT 区域只能捕获标量运行期值。
   可在进入区域前完成搬数，或让各线程直接按索引访问全局内存。
-- `tla.local_mem_bar`、`tla.pipe_barrier`。
+- `tla.local_mem_bar`、`tla.data_sync_barrier`、`tla.pipe_barrier`。
 - 任意 `tla.vec.func` 内的 `while`；迭代请用 `tla.range`。
 - 嵌套的 `tla.vec.func`。
 

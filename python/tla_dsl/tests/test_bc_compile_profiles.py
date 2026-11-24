@@ -13,7 +13,10 @@ from catlass import bc_compile
 def helper_build(tmp_path: Path, monkeypatch):
     sources = {
         "Cube": ("printf", "mmad", "debug_tunnel", "dma", "print_tensor"),
-        "Vector": ("vdiv", "printf", "dma", "print_tensor", "vf_print"),
+        "Vector": ("vdiv", "printf", "dma", "print_tensor", "vf_print", "data_sync_barrier_ub"),
+        # Shared core-agnostic stubs, compiled once per core type and linked
+        # into both meta-op bitcodes (see bc_compile._SHARED_SUBDIRS).
+        "Scalar": ("data_sync_barrier",),
     }
     source_root = tmp_path / "stubs"
     for subdir, names in sources.items():
@@ -53,15 +56,31 @@ def test_build_variants_preserves_print_order_and_compiles_components_once(
     cfg, compiled = helper_build
     cache = bc_compile.init()
 
-    assert (cache / "meta_op.aic.c310.bc").read_text() == "dma\nmmad\n"
-    assert (cache / "meta_op.aiv.c310.bc").read_text() == "dma\nvdiv\n"
+    # Link order follows the combined sorted glob: Cube/ < Scalar/ but
+    # Scalar/ < Vector/, so the shared stub lands last for aic, first for aiv.
+    assert (cache / "meta_op.aic.c310.bc").read_text() == (
+        "dma\nmmad\ndata_sync_barrier\n"
+    )
+    assert (cache / "meta_op.aiv.c310.bc").read_text() == (
+        "data_sync_barrier\ndata_sync_barrier_ub\ndma\nvdiv\n"
+    )
     assert (cache / "meta_op.aic.print.c310.bc").read_text() == (
-        "debug_tunnel\ndma\nmmad\nprint_tensor\nprintf\n"
+        "debug_tunnel\ndma\nmmad\nprint_tensor\nprintf\ndata_sync_barrier\n"
     )
     assert (cache / "meta_op.aiv.print.c310.bc").read_text() == (
-        "dma\nprint_tensor\nprintf\nvdiv\nvf_print\n"
+        "data_sync_barrier\ndata_sync_barrier_ub\ndma\nprint_tensor\nprintf\nvdiv\nvf_print\n"
     )
-    assert len(compiled) == len(set(compiled)) == 10
+    assert len(compiled) == len(set(compiled)) == 13
+    # The shared scalar stub is compiled once per core type, not per variant;
+    # the ub helper is AIV-only (same-name-different-body hazard, see
+    # bc/Vector/data_sync_barrier_ub.cpp).
+    assert {core for core, stem in compiled if stem == "data_sync_barrier"} == {
+        "aic",
+        "aiv",
+    }
+    assert {core for core, stem in compiled if stem == "data_sync_barrier_ub"} == {
+        "aiv",
+    }
     manifest = json.loads((cache / "manifest.json").read_text())
     assert {item["name"] for item in manifest["bc_files"]} == {
         path.name for path in cache.glob("*.bc")
@@ -69,7 +88,7 @@ def test_build_variants_preserves_print_order_and_compiles_components_once(
 
     # Both aggregates reuse their existing outputs during an ordinary rebuild.
     bc_compile.init()
-    assert len(compiled) == 10
+    assert len(compiled) == 13
 
 
 @pytest.mark.parametrize("variant", ["normal", "print"])
@@ -128,11 +147,11 @@ def test_force_rebuild_replaces_legacy_aggregate_without_removing_kernel_cache(
 
     bc_compile.main()
 
-    assert legacy_aggregate.read_text() == "dma\nmmad\n"
+    assert legacy_aggregate.read_text() == "dma\nmmad\ndata_sync_barrier\n"
     assert (
         (cache / "meta_op.aic.print.c310.bc").read_text().startswith("debug_tunnel\n")
     )
     assert not (cache / "stale_component.aic.c310.bc").exists()
     assert kernel_binary.read_bytes() == b"existing compiled kernel"
-    assert len(compiled) == len(set(compiled)) == 10
+    assert len(compiled) == len(set(compiled)) == 13
     bc_compile.check_bc(bc_dir=cache)

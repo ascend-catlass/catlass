@@ -69,6 +69,7 @@ def test_generated_binding_symbols_exist_for_wrapped_ops() -> None:
         "set_flag",
         "wait_flag",
         "pipe_barrier",
+        "data_sync_barrier",
         "mutex",
         "mutex_lock",
         "mutex_unlock",

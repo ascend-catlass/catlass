@@ -314,7 +314,15 @@ Rules and limits:
 - A mutex works only within one core. Use `cross_flag` across cores;
 - Do not call `mutex_lock` / `mutex_unlock` explicitly inside a `mutex_guard` block.
 
-## 8. `pipe_barrier` and `local_mem_bar`
+## 8. `pipe_barrier`, `data_sync_barrier` and `local_mem_bar`
+
+The three entry points act on different axes; pick by what you need to order:
+
+| Interface | Acts on | Valid locations |
+| --- | --- | --- |
+| `tla.pipe_barrier(pipe)` | Instructions already issued on the **given pipe** | `tla.cube()` / `tla.vector()` |
+| `tla.data_sync_barrier(domain)` | Memory accesses already issued to a **storage domain** (GM / UB), one `dsb` instruction | Kernel body, `tla.cube()` / `tla.vector()`; never inside `tla.vec.func()` |
+| `tla.local_mem_bar(src, dst)` | Vector and scalar accesses **inside `tla.vec.func`** | `tla.vec.func()` only |
 
 `tla.pipe_barrier(pipe)` blocks the **given pipe** until the instructions already issued on
 that pipe complete; it does not wait for other pipes. Use `tla.pipes.ALL` to drain every
@@ -328,6 +336,42 @@ set of pipes:
 
 Therefore do not write `tla.pipe_barrier(tla.arch.VECTOR)` inside a vector region; use
 `tla.pipe_barrier(tla.pipes.ALL)` when you need a full drain.
+
+`tla.data_sync_barrier(domain)` is a single `dsb` instruction that blocks subsequent
+instructions until the memory accesses of the given **storage domain** that were issued
+earlier have completed. The domains:
+
+| Domain | Waits for | Notes |
+| --- | --- | --- |
+| `DsbTarget.GM_UB` | Earlier GM and UB accesses | NOT L1 or L0A/L0B/L0C buffers |
+| `DsbTarget.GM` | Earlier GM accesses | Same effective scope as `GM_UB` on AIC, which has no UB |
+| `DsbTarget.UB` | Earlier UB accesses | Rejected in `tla.cube()`; no-op on the AIC copy of a mixed kernel's scalar body |
+| `DsbTarget.SEQ` | Earlier sequencer accesses | Includes the parameter buffer |
+
+`GM_UB` covers GM and UB only — L1 Buffer and the L0A/L0B/L0C Buffers are **not** waited on.
+Ordering L1/L0 traffic still needs `tla.pipe_barrier` (`MTE1`/`FIX`/`CUBE`) or flag
+set/wait pairs; a `dsb` cannot replace them, and getting this wrong reads stale cube data
+with no compile error. The barrier does not participate in `auto_sync`, and each barrier
+blocks the scalar pipeline until the domain drains, so keep it out of hot inner loops.
+
+For cross-core GM handoff, use the officially prescribed pattern: the producer
+bypass-writes the data, then `dsb(GM)`, then bypass-writes the sync flag; the
+consumer spin-polls the flag with bypass reads and reads the data through bypass
+reads as well. The "visible to other cores" guarantee of `dsb` applies to GM
+accesses that bypass the D-cache (`WriteGmBypassDCache` / `ReadGmBypassDCache`,
+wrappable with `tla.extern`; a runnable case lives in
+`tests/end_to_end/data_sync_barrier.py`):
+
+```python
+with tla.vector():
+    bypass_write(src.ptr, 1, data)  # user extern: WriteGmBypassDCache
+    tla.data_sync_barrier(tla.params.DsbTarget.GM)  # wait earlier GM writes out
+    bypass_write(src.ptr, 0, flag)  # only then publish the sync flag
+```
+
+Ordinary scalar-pipe GM writes stay invisible to other engines and other cores
+until kernel end, and V-pipe UB stores are not waited by `dsb(UB)` / `dsb(GM_UB)`
+— a `vec.func` store drained to GM still needs a flag pair.
 
 `tla.local_mem_bar(src, dst)` is only valid inside `tla.vec.func`. It orders vector and
 scalar accesses within the SIMD region, and only 12 `MemType` pairs are supported. Common

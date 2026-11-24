@@ -1,0 +1,28 @@
+// RUN: split-file %s %t
+// RUN: not %tla_compile %t/in-vec-func.mlir -o - 2>&1 | %filecheck %s --check-prefix=VEC_FUNC
+// RUN: not %tla_compile %t/ub-in-cube.mlir -o - 2>&1 | %filecheck %s --check-prefix=UB_IN_CUBE
+
+// VEC_FUNC: must not be nested inside a tla.vec.func region
+// UB_IN_CUBE: ub domain is not issued on AIC
+
+//--- in-vec-func.mlir
+module {
+  tla.func @dsb_in_vec_func() {
+    "tla.vector"() ({
+      "tla.vec.func"() ({
+        tla.data_sync_barrier <gm>
+      }) : () -> ()
+    }) : () -> ()
+    tla.return
+  }
+}
+
+//--- ub-in-cube.mlir
+module {
+  tla.func @dsb_ub_in_cube() {
+    "tla.cube"() ({
+      tla.data_sync_barrier <ub>
+    }) : () -> ()
+    tla.return
+  }
+}

@@ -2193,6 +2193,20 @@ mlir::LogicalResult LocalMemBarOp::verify()
     return mlir::success();
 }
 
+mlir::LogicalResult DataSyncBarrierOp::verify()
+{
+    if ((*this)->getParentOfType<VecFuncOp>())
+        return emitOpError("must not be nested inside a tla.vec.func region; move the barrier outside the region");
+    // Lexical check only: the op is re-verified after tla-lower-func moves it
+    // into func.func, where the tla.cube wrapper is legitimately gone and
+    // hasEnclosingRegion would report every lowered func as a cube.
+    if (getDomain() == DsbTarget::ub && hasEnclosing<CubeOp>(getOperation()))
+        return emitOpError(
+            "ub domain is not issued on AIC; use gm, gm_ub or seq inside tla.cube, or move the barrier into "
+            "tla.vector");
+    return mlir::success();
+}
+
 mlir::LogicalResult CopyOp::verify()
 {
     auto srcTy = mlir::dyn_cast<TlaTensorType>(getSrc().getType());

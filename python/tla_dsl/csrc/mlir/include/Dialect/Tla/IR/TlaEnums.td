@@ -99,6 +99,36 @@ def Tla_PipeAttr : Tla_EnumAttr<"Pipe", "pipe"> {
   }];
 }
 
+// DsbTarget: storage domain of tla.data_sync_barrier (ISA ``dsb``). The
+// immediates are frozen ABI -- each is the storage-domain immediate the
+// instruction takes. ``gm_ub`` covers GM and UB accesses only: L1 and
+// L0A/L0B/L0C buffers are NOT waited on, those still need pipe_barrier or
+// flags. ``ub`` is issued on AIV only: AIC has no UB, so on AIC ``gm_ub`` and
+// ``gm`` cover the same positions.
+def Tla_DsbTarget_GmUb : I32EnumAttrCase<"gm_ub", 0>;
+def Tla_DsbTarget_Gm : I32EnumAttrCase<"gm", 1>;
+def Tla_DsbTarget_Ub : I32EnumAttrCase<"ub", 2>;
+def Tla_DsbTarget_Seq : I32EnumAttrCase<"seq", 3>;
+def Tla_DsbTargetEnum : Tla_I32Enum<"DsbTarget", "Storage domain for tla.data_sync_barrier.", [
+  Tla_DsbTarget_GmUb,
+  Tla_DsbTarget_Gm,
+  Tla_DsbTarget_Ub,
+  Tla_DsbTarget_Seq
+]>;
+def Tla_DsbTargetAttr : Tla_I32EnumAttr<"dsb_target", Tla_DsbTargetEnum> {
+  let description = [{
+    Storage domain for tla.data_sync_barrier:
+
+      - gm_ub (0): wait for previously issued GM and UB access instructions;
+        L1 and L0A/L0B/L0C buffers are not covered.
+      - gm (1): wait for previously issued GM access instructions.
+      - ub (2): wait for previously issued UB access instructions; not
+        issued on AIC, where it would be a no-op.
+      - seq (3): wait for previously issued sequencer accesses (including
+        the parameter buffer).
+  }];
+}
+
 // QuantMode Enum Attr
 def Tla_QuantMode_NoQuant : I32EnumAttrCase<"NO_QUANT", 0>;
 def Tla_QuantMode_PerTensor : I32EnumAttrCase<"PER_TENSOR", 1>;

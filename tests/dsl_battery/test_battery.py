@@ -563,6 +563,12 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
                 ]],
             )
 
+    # --- data_sync_barrier: official pattern (bypass GM writes + dsb + flag poll) ---
+    yield (
+        "sync-data-sync-barrier",
+        [["end_to_end/data_sync_barrier.py", *dev]],
+    )
+
     # --- extern_op: user-provided Ascend C functions called from TLA kernels ---
     yield (
         "extern-simd-reg-types",

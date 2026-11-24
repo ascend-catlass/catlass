@@ -1,6 +1,8 @@
 // Lower the TLA scalar ops that have no MLIR op of their own: the scalar unit's
-// conversion instructions, and the scalar architectural state ops -- today the
-// three data cache maintenance operations behind tla.arch.
+// conversion instructions, the data synchronization barrier (one dsb per
+// storage domain; the ub-domain helper is AIV-only, see below), and the scalar
+// architectural state ops -- the three data cache maintenance operations behind
+// tla.arch.
 //
 // Why these need a lowering at all, when tla.sqrt does not: math.sqrt and
 // math.absf are ordinary MLIR ops the backend selects, so the frontend emits
@@ -86,6 +88,35 @@ static StringRef scalarRoundCastCallee(StringRef mode)
         .Default(StringRef());
 }
 
+// tla.data_sync_barrier storage domain -> bitcode helper. One no-arg helper
+// per domain rather than one helper plus a runtime switch: ALWAYS_INLINE makes
+// every call site exactly one dsb instruction, with no branch and no parameter
+// passing. The helpers must not be marked pure, or CSE/DCE could merge or drop
+// repeated barriers. The helper symbols mirror the DSL domain names.
+static StringRef dataSyncBarrierCallee(StringRef domain)
+{
+    return llvm::StringSwitch<StringRef>(domain)
+        .Case("gm_ub", "_mlir_ciface_tla_data_sync_barrier_gm_ub")
+        .Case("gm", "_mlir_ciface_tla_data_sync_barrier_gm")
+        .Case("seq", "_mlir_ciface_tla_data_sync_barrier_seq")
+        .Default(StringRef());
+}
+
+// The ub domain needs a core-specific symbol: hivmc links BOTH meta_op.aic and
+// meta_op.aiv into each subcore compile, and the AIC-compiled ub helper has an
+// empty body (DataSyncBarrierImpl returns early for MemDsbT::UB on AIC) while
+// the AIV-compiled one issues the dsb. A shared name would let the AIC body win
+// on AIV and silently drop the barrier -- the same hazard that split
+// _mlir_ciface_tla_init_soc_state into _aic/_aiv (TlaPrologueEpiloguePass).
+// The AIV-side helper therefore lives in bc/Vector/ (compiled only into
+// meta_op.aiv.bc) as _mlir_ciface_tla_data_sync_barrier_ub_aiv, and AIC
+// functions drop the op entirely: dsb<ub> is a hardware no-op there, which is
+// exactly what the frontend documents for mixed-kernel scalar bodies.
+static StringRef dataSyncBarrierUbcallee()
+{
+    return "_mlir_ciface_tla_data_sync_barrier_ub_aiv";
+}
+
 // tla.arch.dcci_cachelines target -> HIVM data cache kind. The op's verifier
 // rejects `ub`, so only the three domains the DSL exposes can reach this; HIVM
 // itself has the kind either way, which is why the guard below is a diagnostic
@@ -138,6 +169,37 @@ public:
             if (callee.empty()) {
                 // The verifier rejects any other mode; this guards hand-written IR.
                 op.emitOpError() << "unsupported rounding mode \"" << op.getMode() << "\"";
+                return signalPassFailure();
+            }
+            if (failed(replaceWithScalarHelperCall(op, callee)))
+                return signalPassFailure();
+        }
+
+        SmallVector<::tla::DataSyncBarrierOp, 8> dataSyncBarriers;
+        module.walk([&](::tla::DataSyncBarrierOp op) { dataSyncBarriers.push_back(op); });
+        for (::tla::DataSyncBarrierOp op : dataSyncBarriers) {
+            StringRef domain = stringifyDsbTarget(op.getDomain());
+            if (domain == "ub") {
+                // dsb<ub> is a hardware no-op on AIC (no UB there); drop it
+                // instead of emitting an empty call. Everything else -- AIV,
+                // and defensively MIX/unknown types, where the barrier is the
+                // meaningful form -- calls the AIV-side helper. See the
+                // dataSyncBarrierUbcallee comment for why the symbol is
+                // core-specific.
+                func::FuncOp parentFunc = op->getParentOfType<func::FuncOp>();
+                std::optional<hivm::TFuncCoreType> coreType = getFunctionCoreType(parentFunc);
+                if (coreType == hivm::TFuncCoreType::AIC) {
+                    op->erase();
+                    continue;
+                }
+                if (failed(replaceWithScalarHelperCall(op, dataSyncBarrierUbcallee())))
+                    return signalPassFailure();
+                continue;
+            }
+            StringRef callee = dataSyncBarrierCallee(domain);
+            if (callee.empty()) {
+                // The verifier rejects any other domain; this guards hand-written IR.
+                op.emitOpError() << "unsupported data-sync-barrier domain \"" << domain << "\"";
                 return signalPassFailure();
             }
             if (failed(replaceWithScalarHelperCall(op, callee)))

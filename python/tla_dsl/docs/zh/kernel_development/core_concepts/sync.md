@@ -286,7 +286,15 @@ with tla.cube():
 - mutex 只在单核内有效，跨核请用 `cross_flag`；
 - `mutex_guard` 块内不要再次显式 `mutex_lock`/`mutex_unlock`。
 
-## 8. `pipe_barrier` 与 `local_mem_bar`
+## 8. `pipe_barrier`、`data_sync_barrier` 与 `local_mem_bar`
+
+三个入口作用在不同轴上，按需要排定的对象选择：
+
+| 接口 | 作用对象 | 合法位置 |
+| --- | --- | --- |
+| `tla.pipe_barrier(pipe)` | **指定流水**上已发出的指令 | `tla.cube()` / `tla.vector()` |
+| `tla.data_sync_barrier(domain)` | 发往**存储域**（GM / UB）的、此前已发出的访存，单条 `dsb` 指令 | 内核体、`tla.cube()` / `tla.vector()`；禁止在 `tla.vec.func()` 内 |
+| `tla.local_mem_bar(src, dst)` | **`tla.vec.func` 内部**的向量与标量访问 | 仅 `tla.vec.func()` |
 
 `tla.pipe_barrier(pipe)` 阻塞**指定流水**，直到该流水上此前已发出的指令全部完成；它不会
 等待其它流水。需要排空所有流水时用 `tla.pipes.ALL`。它必须在 `tla.cube()` /
@@ -299,6 +307,37 @@ with tla.cube():
 
 因此 vector 区域里不要写 `tla.pipe_barrier(tla.arch.VECTOR)`，需要全流水等待时用
 `tla.pipe_barrier(tla.pipes.ALL)`。
+
+`tla.data_sync_barrier(domain)` 是单条 `dsb` 指令：阻止后续指令执行，直至发往指定
+**存储域**的、此前已发出的访存指令完成。各存储域：
+
+| 域 | 等待对象 | 说明 |
+| --- | --- | --- |
+| `DsbTarget.GM_UB` | 此前发出的 GM 与 UB 访存 | **不含** L1 与 L0A/L0B/L0C Buffer |
+| `DsbTarget.GM` | 此前发出的 GM 访存 | AIC 上无 UB，`GM_UB` 与 `GM` 的有效范围一致 |
+| `DsbTarget.UB` | 此前发出的 UB 访存 | `tla.cube()` 内拒绝；混合内核标量体的 AIC 副本上为空操作 |
+| `DsbTarget.SEQ` | 此前发出的序列器访问 | 含参数缓冲区 |
+
+`GM_UB` 只覆盖 GM 与 UB——L1 Buffer 与 L0A/L0B/L0C Buffer **不在其中**。L1/L0
+的搬运与计算顺序仍要靠 `tla.pipe_barrier`（`MTE1`/`FIX`/`CUBE`）或 flag
+set/wait 对，`dsb` 不能替代它们；用错不会报编译错误，只会让 cube 侧读到旧数据。
+该屏障不参与 `auto_sync`，且每次屏障都会阻塞标量流水直至该域排空，请放在热点
+内层循环之外。
+
+跨核 GM 数据交接用官方推荐形态：生产者旁路写数据 → `dsb(GM)` → 旁路写同步标记；
+消费者用旁路读自旋轮询该标记，确认后再用旁路读读取数据。`dsb` 的「对其他核可见」
+保证针对**绕过 D-cache** 的 GM 访问（`WriteGmBypassDCache` / `ReadGmBypassDCache`，
+可用 `tla.extern` 包裹，可运行样例见 `tests/end_to_end/data_sync_barrier.py`）：
+
+```python
+with tla.vector():
+    bypass_write(src.ptr, 1, data)  # 用户 extern：WriteGmBypassDCache
+    tla.data_sync_barrier(tla.params.DsbTarget.GM)  # 先等此前的 GM 写落盘
+    bypass_write(src.ptr, 0, flag)  # 再发布同步标记
+```
+
+普通标量 GM 写在内核期内对其他引擎与其他核不可见；V-pipe 的 UB 写也不被
+`dsb(UB)` / `dsb(GM_UB)` 等待——`vec.func` 写 UB 后拷出到 GM 仍须 flag 对。
 
 `tla.local_mem_bar(src, dst)` 只能在 `tla.vec.func` 内使用，用于 SIMD 区域内部
 向量与标量访问之间的可见性，支持的组合限定为 12 种，常见的有：

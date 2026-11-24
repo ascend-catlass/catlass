@@ -185,6 +185,7 @@ from .params import (
     HistogramsParams,
     HistogramsType,
     L0C2UBMode,
+    DsbTarget,
     MemType,
     QuantMode,
     ReduceMode,
@@ -8699,6 +8700,81 @@ def local_mem_bar(
 
 
 @dsl_user_op
+def data_sync_barrier(
+    domain: DsbTarget, *, loc: mlir_ir.Location | None = None
+) -> None:
+    """Directory: Sync Control
+
+    Description:
+        Insert a data synchronization barrier over a storage domain. Blocks
+        subsequent instructions until the memory access instructions of
+        `domain` that were issued earlier have completed.
+
+        Parameters:
+        - `domain` (`DsbTarget`): Storage domain to wait on. Required. `GM_UB`
+          waits for previously issued GM and UB accesses; `GM` for GM only; `UB`
+          for UB only; `SEQ` for sequencer accesses (including the parameter
+          buffer).
+
+        Constraints:
+        - Must be called inside a `@tla.kernel`-decorated kernel function; the
+          kernel body, `tla.cube()` and `tla.vector()` are all valid.
+        - Must not be called inside `tla.vec.func()`; `dsb` is a scalar-pipeline
+          instruction over whole storage domains, not a per-thread view.
+        - `UB` is rejected inside `tla.cube()`: AIC has no UB and would not
+          issue the barrier, so use `GM`, `GM_UB` or `SEQ` there, or move the
+          call into `tla.vector()`. In a mixed kernel's scalar body the `UB`
+          domain is a no-op on the AIC copy.
+        - `GM_UB` covers GM and UB only: L1 and the L0A/L0B/L0C buffers are not
+          waited on; order those with `tla.pipe_barrier` (`MTE1`/`FIX`/`CUBE`)
+          or `tla.flag` / `set_flag` / `wait_flag`.
+        - The cross-core visibility guarantee applies to GM accesses that
+          bypass the D-cache. Ordinary
+          scalar-pipe GM writes stay invisible to other engines and other
+          cores until kernel end, and V-pipe UB stores are not waited by `UB` /
+          `GM_UB` — order a `vec.func` UB store with a flag pair before draining
+          it to GM.
+        - Does not participate in `auto_sync`; place it outside hot inner loops,
+          each barrier costs a wait on every iteration.
+
+        Example:
+        ```python
+        with tla.vector():
+            # Official cross-core pattern: bypass-write the data, wait the GM
+            # domain out, then bypass-write the sync flag; the consumer spin-
+            # polls the flag with bypass reads. See
+            # tests/end_to_end/data_sync_barrier.py.
+            bypass_write(src.ptr, 1, data)  # user extern: WriteGmBypassDCache
+            tla.data_sync_barrier(tla.params.DsbTarget.GM)
+            bypass_write(src.ptr, 0, flag)  # user extern: WriteGmBypassDCache
+        ```
+    """
+    _require_frontend_state("data_sync_barrier")
+    if not isinstance(domain, DsbTarget):
+        _op_error(
+            "data_sync_barrier",
+            f"invalid argument 'domain': expected tla.params.DsbTarget, got {domain!r}",
+        )
+    if _runtime._has_enclosing_region("vec.func"):
+        _op_error(
+            "data_sync_barrier",
+            "must not be called inside tla.vec.func(); move the barrier outside the region",
+        )
+    if _runtime._has_enclosing_region("cube") and domain == DsbTarget.UB:
+        _op_error(
+            "data_sync_barrier",
+            "DsbTarget.UB is not issued on AIC; use DsbTarget.GM, "
+            "DsbTarget.GM_UB or DsbTarget.SEQ inside tla.cube(), or move the "
+            "call into tla.vector()",
+        )
+    ctx = loc.context if loc is not None else mlir_ir.Context.current
+    domain_attr = mlir_ir.Attribute.parse(
+        f"#tla.dsb_target<{domain.name.lower()}>", context=ctx
+    )
+    return _tla_ops_gen.data_sync_barrier(domain_attr, loc=loc)
+
+
+@dsl_user_op
 def range(
     start: IndexLike,
     end: IndexLike | None = None,
@@ -14228,6 +14304,7 @@ __all__ = [
     "prof_end",
     "prof_scope",
     "local_mem_bar",
+    "data_sync_barrier",
     "mutex",
     "mutex_guard",
     "mutex_lock",

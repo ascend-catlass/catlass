@@ -233,7 +233,7 @@ def _ccec_id(ccec: Path) -> str:
 def compute_cache_key(ccec: Path) -> str:
     """Cache key = catlass version ID + ccec identity."""
     return hashlib.sha256(
-        f"{_catlass_version_id()}:{_ccec_id(ccec)}:dcache-prefetch-v1".encode()
+        f"{_catlass_version_id()}:{_ccec_id(ccec)}:data-sync-barrier-v1".encode()
     ).hexdigest()[:16]
 
 

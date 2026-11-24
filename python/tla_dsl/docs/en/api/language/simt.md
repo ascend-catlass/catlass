@@ -46,7 +46,7 @@ These are not, and are rejected when the kernel is compiled:
 
 - Register-vector and mask ops -- `VectorSSA` / `MaskSSA` values, the arithmetic and mask APIs under **SIMD Vector Compute**, `Tensor.load` / `Tensor.store`, `tla.full`, `tla.create_mask`. These APIs operate on SIMD register-vector values.
 - `tla.copy`: a DMA needs the tensor itself, and a SIMT region may capture only scalar runtime values. Stage data before the region, or let each thread address global memory directly.
-- `tla.local_mem_bar` and `tla.pipe_barrier`.
+- `tla.local_mem_bar`, `tla.data_sync_barrier` and `tla.pipe_barrier`.
 - `while` loops, in any `tla.vec.func`; carry the iteration through `tla.range` instead.
 - A nested `tla.vec.func`.
 

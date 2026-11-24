@@ -242,7 +242,7 @@ DIRECTORY_SECTIONS: list[tuple[str, str]] = [
         "- `tla.copy`: a DMA needs the tensor itself, and a SIMT region may "
         "capture only scalar runtime values. Stage data before the region, or "
         "let each thread address global memory directly.\n"
-        "- `tla.local_mem_bar` and `tla.pipe_barrier`.\n"
+        "- `tla.local_mem_bar`, `tla.data_sync_barrier` and `tla.pipe_barrier`.\n"
         "- `while` loops, in any `tla.vec.func`; carry the iteration through "
         "`tla.range` instead.\n"
         "- A nested `tla.vec.func`.",

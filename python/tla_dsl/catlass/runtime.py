@@ -434,6 +434,7 @@ _CORE_API_EXPORTS = (
     "prof_end",
     "prof_scope",
     "local_mem_bar",
+    "data_sync_barrier",
     "mutex",
     "mutex_guard",
     "range",

@@ -95,6 +95,7 @@ start from the [Synchronization Guide](../kernel_development/core_concepts/sync.
 | [`tla.pipe_barrier`](language/sync.md#tlapipe_barrier) | Insert a barrier on a hardware pipe. | Kernel / Cube or Vector; not available inside SIMT. |
 | [`tla.mutex`](language/sync.md#tlamutex), [`tla.mutex_guard`](language/sync.md#tlamutex_guard), [`tla.mutex_lock`](language/sync.md#tlamutex_lock), [`tla.mutex_unlock`](language/sync.md#tlamutex_unlock) | Protect a named resource with explicit locking or a scoped guard. | Kernel / Cube or Vector for lock operations; a guard block must emit `copy` or `mmad` and must not explicitly lock or unlock. |
 | [`tla.local_mem_bar`](language/sync.md#tlalocal_mem_bar) | Order accesses between local-memory types. | Kernel / Vector / SIMD; inside `tla.vec.func`, with a supported `MemType` pair. Not available in SIMT. |
+| [`tla.data_sync_barrier`](language/sync.md#tladata_sync_barrier) | Wait for earlier memory accesses of a storage domain (GM / UB) to complete. | Kernel / Cube or Vector; not inside `tla.vec.func`; `UB` rejected in `tla.cube()`; covers GM and UB only, not L1/L0 buffers. Cross-core visibility applies to D-cache-bypassing GM accesses (`WriteGmBypassDCache` via `tla.extern`). |
 | [`tla.arch.sync_threads`](language/system.md#tlaarchsync_threads) | Synchronize threads in one SIMT block. | Kernel / Vector / SIMT; every thread must reach the barrier. It is not a cross-core or pipe barrier. |
 
 ### Resources and Debugging

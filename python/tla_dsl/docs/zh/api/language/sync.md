@@ -429,3 +429,54 @@ tla.local_mem_bar(src: MemType, dst: MemType)
 with tla.vec.func(mode="simd"):
     tla.local_mem_bar(tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD)
 ```
+
+---
+
+## `tla.data_sync_barrier`
+
+**源码：** [`catlass.core_api.data_sync_barrier`](../../../../catlass/core_api.py)
+
+功能说明：
+
+按存储域插入数据同步屏障。阻止后续指令执行，直至此前发出的 `domain`
+存储域访存指令完成。
+
+函数原型：
+
+```python
+tla.data_sync_barrier(domain: DsbTarget) -> None
+```
+
+参数说明：
+
+- `domain`（`DsbTarget`）：等待的存储域。必填。`GM_UB` 等待此前发出的
+  GM 与 UB 访存；`GM` 仅 GM；`UB` 仅 UB；`SEQ` 为序列器访问（含参数缓冲区）。
+
+约束说明：
+
+- 须在 `@tla.kernel` 装饰的 kernel 函数体内调用；内核体、`tla.cube()` 与
+  `tla.vector()` 均可。
+- 不得在 `tla.vec.func()` 内调用；`dsb` 是作用于整个存储域的标量流水指令，
+  不是按线程生效的视图。
+- `tla.cube()` 内拒绝 `UB`：AIC 无 UB，不会下发该屏障，请改用 `GM`、`GM_UB`
+  或 `SEQ`，或将调用移入 `tla.vector()`。混合内核标量体内 `UB` 域在 AIC
+  副本上为空操作。
+- `GM_UB` 只覆盖 GM 与 UB：不含 L1 与 L0A/L0B/L0C Buffer；这些位置的顺序
+  用 `tla.pipe_barrier`（`MTE1`/`FIX`/`CUBE`）或 `tla.flag` /
+  `set_flag` / `wait_flag` 处理。
+- 「对其他核可见」的保证针对**绕过 D-cache** 的 GM 访问。普通标量流水的
+  GM 写在内核结束前对其他引擎与其他核不可见；V-pipe 的 UB 写不被 `UB` /
+  `GM_UB` 等待——`vec.func` 写 UB 后拷出到 GM 仍须 flag 对排序。
+- 不参与 `auto_sync`；请放在热点内层循环之外，每次迭代多一次屏障等待。
+
+调用示例：
+
+```python
+with tla.vector():
+    # 官方跨核形态：旁路写数据 → 等待 GM 域 → 旁路写同步标记；
+    # 消费者旁路轮询标记后再旁路读数据。完整样例见
+    # tests/end_to_end/data_sync_barrier.py。
+    bypass_write(src.ptr, 1, data)  # 用户 extern：WriteGmBypassDCache
+    tla.data_sync_barrier(tla.params.DsbTarget.GM)
+    bypass_write(src.ptr, 0, flag)  # 用户 extern：WriteGmBypassDCache
+```

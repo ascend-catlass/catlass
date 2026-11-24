@@ -723,3 +723,24 @@ class MemType(enum.IntEnum):
     SCALAR_LOAD = 3
     VEC_ALL = 4
     SCALAR_ALL = 5
+
+
+class DsbTarget(enum.IntEnum):
+    """Storage domain of :func:`tla.data_sync_barrier`.
+
+    The integer values are frozen ABI: each one is the storage-domain
+    immediate the barrier instruction takes.
+
+    - ``GM_UB`` (0): wait for previously issued GM and UB access instructions.
+      L1 and L0A/L0B/L0C buffers are NOT covered.
+    - ``GM`` (1): wait for previously issued GM access instructions.
+    - ``UB`` (2): wait for previously issued UB access instructions; not
+      issued on AIC (rejected inside ``tla.cube()``).
+    - ``SEQ`` (3): wait for previously issued sequencer accesses (including
+      the parameter buffer).
+    """
+
+    GM_UB = 0
+    GM = 1
+    UB = 2
+    SEQ = 3
