@@ -141,3 +141,37 @@ def test_gm_rowmajor_to_l1_zn_rejects_int64() -> None:
                 _gm_row(tla.Int64),
             )
         )
+
+
+def _ub_row(dtype):
+    return make_fake_tensor(
+        dtype,
+        (_ROWS, _COLS),
+        (_COLS, 1),
+        addrspace=tla.AddressSpace.ub,
+        origin_shape=(_ROWS, _COLS),
+        layout_tag=tla.arch.RowMajor,
+    )
+
+
+@tla.kernel
+def ub_to_l1_kernel(dst: tla.Tensor, src: tla.Tensor) -> None:
+    with tla.vector():
+        tla.copy(dst, src)
+
+
+def test_ub_rowmajor_to_l1_zn_accepts_hif8() -> None:
+    mlir = ub_to_l1_kernel.dump_mlir(
+        type_args=(_zn_tensor(tla.HiFloat8, tla.AddressSpace.l1), _ub_row(tla.HiFloat8))
+    )
+    assert "tla.copy" in mlir
+
+
+def test_ub_zn_to_l1_zn_accepts_hif8() -> None:
+    mlir = ub_to_l1_kernel.dump_mlir(
+        type_args=(
+            _zn_tensor(tla.HiFloat8, tla.AddressSpace.l1),
+            _zn_tensor(tla.HiFloat8, tla.AddressSpace.ub),
+        )
+    )
+    assert "tla.copy" in mlir

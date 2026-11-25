@@ -25,6 +25,71 @@ CATLASS_DEVICE void copyGMToL1(
         dstTensor, srcTensor, batchArgs...);
 }
 
+// VL GM→L1 pad ABI (padEnable==0 → two-arg exact). Whitelist: _COPY_PAD_GM_L1_SAFE_DTYPES.
+// hifloat8_t: inline ExtParams<uint8_t> (do not Instantitate ExtParams<hifloat8_t>).
+template <class ArchTag, typename T>
+CATLASS_DEVICE void copyGMToL1VectorPad(
+    memref_t<__gm__ T, 2>* src, memref_t<__cbuf__ T, 1>* dst, const TensorDesc& srcDesc, const TensorDesc& dstDesc,
+    int64_t gmCachePolicy, int64_t padEnable, int64_t leftPadding, int64_t rightPadding, int64_t paddingValueBits)
+{
+    auto srcTensor = makeGMTensor<LayoutTag::VectorLayout, T>(src, srcDesc, gmCachePolicy);
+    auto dstTensor = makeL1Tensor<LayoutTag::VectorLayout, T>(dst, dstDesc);
+    Catlass::Gemm::Tile::TileCopyTla<ArchTag, decltype(srcTensor), decltype(dstTensor)> copyGmToL1;
+    if (padEnable == 0) {
+        (void)leftPadding;
+        (void)rightPadding;
+        (void)paddingValueBits;
+        copyGmToL1(dstTensor, srcTensor);
+        return;
+    }
+    if constexpr (__is_same(T, hifloat8_t)) {
+        AscendC::DataCopyExtParams intriParams{};
+        intriParams.blockCount = 1;
+        intriParams.blockLen = static_cast<uint32_t>(tla::get<0>(srcTensor.originShape()));
+        AscendC::DataCopyPadExtParams<uint8_t> padParams{
+            true, static_cast<uint8_t>(leftPadding), static_cast<uint8_t>(rightPadding),
+            static_cast<uint8_t>(paddingValueBits)};
+        auto dstOffset = dstTensor.layout()(dstTensor.coord());
+        auto srcOffset = srcTensor.layout()(srcTensor.coord());
+        // hif8 Pad bypasses Tile ExtParams; program OUTTOL1 here (see
+        // Catlass::Gemm::Tile::ProgramGmToL1PadFillSpr background).
+        Catlass::Gemm::Tile::ProgramGmToL1PadFillSpr(static_cast<uint8_t>(paddingValueBits));
+        AscendC::DataCopyPad(
+            dstTensor.data()[dstOffset].template ReinterpretCast<uint8_t>(),
+            srcTensor.data()[srcOffset].template ReinterpretCast<uint8_t>(), intriParams, padParams);
+    } else if constexpr (
+        __is_same(T, float) || __is_same(T, half) || __is_same(T, bfloat16_t) || __is_same(T, int32_t) ||
+        __is_same(T, uint32_t) || __is_same(T, int16_t) || __is_same(T, uint16_t) || __is_same(T, int8_t) ||
+        __is_same(T, uint8_t) || __is_same(T, bool) || __is_same(T, int64_t) || __is_same(T, uint64_t) ||
+        __is_same(T, double)) {
+        T padValue{};
+        if constexpr (__is_same(T, bool)) {
+            padValue = static_cast<bool>(paddingValueBits != 0);
+        } else if constexpr (sizeof(T) == 1) {
+            uint8_t v = static_cast<uint8_t>(paddingValueBits);
+            padValue = *reinterpret_cast<T*>(&v);
+        } else if constexpr (sizeof(T) == 2) {
+            uint16_t v = static_cast<uint16_t>(paddingValueBits);
+            padValue = *reinterpret_cast<T*>(&v);
+        } else if constexpr (sizeof(T) == 4) {
+            uint32_t v = static_cast<uint32_t>(paddingValueBits);
+            padValue = *reinterpret_cast<T*>(&v);
+        } else {
+            (void)paddingValueBits;
+            padValue = static_cast<T>(0);
+        }
+        AscendC::DataCopyPadExtParams<T> padParams{
+            true, static_cast<uint8_t>(leftPadding), static_cast<uint8_t>(rightPadding), padValue};
+        copyGmToL1(dstTensor, srcTensor, padParams);
+    } else {
+        // Frontend rejects these T; exact-byte fallback.
+        (void)leftPadding;
+        (void)rightPadding;
+        (void)paddingValueBits;
+        copyGmToL1(dstTensor, srcTensor);
+    }
+}
+
 template <class ArchTag, LayoutTag SrcLayout, LayoutTag DstLayout, typename T>
 CATLASS_DEVICE void copyL1ToL0A(
     memref_t<__cbuf__ T, 1>* src, memref_t<__ca__ T, 1>* dst, const TensorDesc& srcDesc, const TensorDesc& dstDesc)
@@ -284,6 +349,17 @@ extern "C" {
             src, dst, TENSOR_DESC_12(src), TENSOR_DESC_12(dst), gmCachePolicy);                                       \
     }
 
+// VectorLayout→VectorLayout only: trailing pad ABI (padEnable/left/right/valueBits).
+#define REGISTER_GM_TO_L1_VL(DType)                                                                                    \
+    [aicore] __attribute__((always_inline)) void _mlir_ciface_copy_gm_VectorLayout_to_l1_VectorLayout_##DType(         \
+        memref_t<__gm__ DType, 2>* src, memref_t<__cbuf__ DType, 1>* dst, DESC_ABI_PARAMS(src), DESC_ABI_PARAMS(dst),  \
+        int64_t gmCachePolicy, int64_t padEnable, int64_t leftPadding, int64_t rightPadding, int64_t paddingValueBits) \
+    {                                                                                                                  \
+        copyGMToL1VectorPad<Catlass::Arch::Ascend950, DType>(                                                          \
+            src, dst, TENSOR_DESC_12(src), TENSOR_DESC_12(dst), gmCachePolicy, padEnable, leftPadding, rightPadding,   \
+            paddingValueBits);                                                                                         \
+    }
+
 #define REGISTER_GM_TO_L1_BATCH(Src, Dst, Type)                                                                     \
     [aicore] __attribute__((always_inline)) void _mlir_ciface_copy_gm_##Src##_to_l1_##Dst##_##Type##_batch(         \
         memref_t<__gm__ Type, 2>* src, memref_t<__cbuf__ Type, 1>* dst, DESC_ABI_PARAMS(src), DESC_ABI_PARAMS(dst), \
@@ -391,30 +467,23 @@ REGISTER_GM_TO_L1(nZ, nZ, fp8_e5m2_t)
 REGISTER_GM_TO_L1(nZ, nZ, float4_e2m1x2_t)
 REGISTER_GM_TO_L1(nZ, nZ, float4_e1m2x2_t)
 
-// VectorLayout -> VectorLayout is the flat contiguous run: GM and L1 both come out rank-1
-// (VectorLayout), so the VectorLayout TileCopyTla specialization in
-// copy_gm_to_l1.hpp serves it. RowMajor has no variant here: a flat tile is
-// spelled VectorLayout, and RowMajor stays two-dimensional.
-REGISTER_GM_TO_L1(VectorLayout, VectorLayout, float)
-REGISTER_GM_TO_L1(VectorLayout, VectorLayout, half)
-REGISTER_GM_TO_L1(VectorLayout, VectorLayout, bf16)
-REGISTER_GM_TO_L1(VectorLayout, VectorLayout, int8_t)
-REGISTER_GM_TO_L1(VectorLayout, VectorLayout, int16_t)
-REGISTER_GM_TO_L1(VectorLayout, VectorLayout, int32_t)
-REGISTER_GM_TO_L1(VectorLayout, VectorLayout, int64_t)
-// The per-channel fixpipe dequant scale tile is the same flat run, one u64 word
-// (a packed fp32 scale) per output channel. i64 / double share the same
-// DataCopyPad VectorLayout path (8-byte elements, exact byte length).
-REGISTER_GM_TO_L1(VectorLayout, VectorLayout, uint8_t)
-REGISTER_GM_TO_L1(VectorLayout, VectorLayout, uint16_t)
-REGISTER_GM_TO_L1(VectorLayout, VectorLayout, uint32_t)
-REGISTER_GM_TO_L1(VectorLayout, VectorLayout, uint64_t)
-REGISTER_GM_TO_L1(VectorLayout, VectorLayout, double)
-// AscendC a5 DataCopyPad continuous GM→L1 lists bool (1 byte / element).
-REGISTER_GM_TO_L1(VectorLayout, VectorLayout, bool)
-REGISTER_GM_TO_L1(VectorLayout, VectorLayout, fp8_e4m3fn_t)
-REGISTER_GM_TO_L1(VectorLayout, VectorLayout, fp8_e5m2_t)
-REGISTER_GM_TO_L1(VectorLayout, VectorLayout, hifloat8_t)
+// VectorLayout -> VectorLayout flat run; pad ABI trailing args (padEnable==0 = exact).
+REGISTER_GM_TO_L1_VL(float)
+REGISTER_GM_TO_L1_VL(half)
+REGISTER_GM_TO_L1_VL(bf16)
+REGISTER_GM_TO_L1_VL(int8_t)
+REGISTER_GM_TO_L1_VL(int16_t)
+REGISTER_GM_TO_L1_VL(int32_t)
+REGISTER_GM_TO_L1_VL(int64_t)
+REGISTER_GM_TO_L1_VL(uint8_t)
+REGISTER_GM_TO_L1_VL(uint16_t)
+REGISTER_GM_TO_L1_VL(uint32_t)
+REGISTER_GM_TO_L1_VL(uint64_t)
+REGISTER_GM_TO_L1_VL(double)
+REGISTER_GM_TO_L1_VL(bool)
+REGISTER_GM_TO_L1_VL(fp8_e4m3fn_t)
+REGISTER_GM_TO_L1_VL(fp8_e5m2_t)
+REGISTER_GM_TO_L1_VL(hifloat8_t)
 
 REGISTER_L1_TO_L0A(zN, zN, float)
 REGISTER_L1_TO_L0A(zN, zN, half)

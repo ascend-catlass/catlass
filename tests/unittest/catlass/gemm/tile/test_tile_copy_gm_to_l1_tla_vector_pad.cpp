@@ -19,6 +19,7 @@
 
 #if defined(CATLASS_ARCH) && CATLASS_ARCH == 3510
 
+#include <cstring>
 #include <gtest/gtest.h>
 #include "stub/ascendc_test_fixture.h"
 #include "stub/kernel_operator.h"
@@ -98,6 +99,101 @@ TEST_F(TileCopyGmToL1TlaVectorPadAscend950, FloatLen128AlignedStillExact)
     uint32_t blockLenBytes = 0;
     RunVectorGmToL1TwoArg<float>(kLogicalLen, blockLenBytes);
     EXPECT_EQ(blockLenBytes, kLogicalLen * sizeof(float));
+}
+
+template <class Element>
+void RunVectorGmToL1WithExtParams(
+    uint32_t logicalLen, AscendC::DataCopyPadExtParams<Element> const& pad, uint32_t& outBlockLenBytes,
+    AscendC::DataCopyPadExtParams<Element>& outPad)
+{
+    using LayoutTag = layout::VectorLayout;
+    using Layout = detail::TagToLayout_t<Element, LayoutTag>;
+    using CoordZero = tla::Coord<tla::Int<0>>;
+    using TensorSrc = tla::Tensor<AscendC::GlobalTensor<Element>, Layout, CoordZero, AscendC::TPosition::GM>;
+    using TensorDst = tla::Tensor<AscendC::LocalTensor<Element>, Layout, CoordZero, AscendC::TPosition::A1>;
+
+    AscendC::GlobalTensor<Element> gmSrc;
+    AscendC::LocalTensor<Element> l1Dst;
+
+    auto layoutSrc = tla::MakeLayout(logicalLen);
+    auto layoutDst = tla::MakeLayout(logicalLen);
+    TensorSrc tensorGm(gmSrc, layoutSrc);
+    TensorDst tensorL1(l1Dst, layoutDst);
+
+    TileCopyTla<Arch::Ascend950, TensorSrc, TensorDst> copyGmToL1;
+    copyGmToL1(tensorL1, tensorGm, pad);
+
+    auto logs = AscendCCallLogger::Instance().GetLogs();
+    // isPad=true → set_pad_val_outtol1 then DataCopyPad (dav_3510 OUTTOL1 workaround).
+    ASSERT_EQ(logs.size(), 2U);
+    ASSERT_EQ(logs[0].name, "set_pad_val_outtol1");
+    ASSERT_EQ(logs[1].name, "DataCopyPad");
+    ASSERT_GE(logs[1].args.size(), 4U);
+
+    const auto* params = logs[1].GetArgsAt(2).template Value<AscendC::DataCopyExtParams>();
+    ASSERT_NE(params, nullptr);
+    outBlockLenBytes = params->blockLen;
+
+    const auto* padParams = logs[1].GetArgsAt(3).template Value<AscendC::DataCopyPadExtParams<Element>>();
+    ASSERT_NE(padParams, nullptr);
+    outPad = *padParams;
+}
+
+TEST_F(TileCopyGmToL1TlaVectorPadAscend950, FloatPadLeftRightAndValueForwarded)
+{
+    constexpr uint32_t kLogicalLen = 48;
+    // 4 floats = 16B left, 4 floats = 16B right (<= 32B/side).
+    AscendC::DataCopyPadExtParams<float> pad{true, 4, 4, 1.5f};
+
+    uint32_t blockLenBytes = 0;
+    AscendC::DataCopyPadExtParams<float> gotPad{};
+    RunVectorGmToL1WithExtParams<float>(kLogicalLen, pad, blockLenBytes, gotPad);
+
+    EXPECT_EQ(blockLenBytes, kLogicalLen * sizeof(float));
+    EXPECT_TRUE(gotPad.isPad);
+    EXPECT_EQ(gotPad.leftPadding, 4);
+    EXPECT_EQ(gotPad.rightPadding, 4);
+    EXPECT_EQ(gotPad.paddingValue, 1.5f);
+
+    // IEEE bits of 1.5f must reach PAD_VAL_OUTTOL1 (workaround for dav_3510).
+    auto logs = AscendCCallLogger::Instance().GetLogs();
+    ASSERT_EQ(logs[0].name, "set_pad_val_outtol1");
+    const uint64_t* sprBits = logs[0].GetArgsAt(0).template Value<uint64_t>();
+    ASSERT_NE(sprBits, nullptr);
+    uint32_t f32Bits = 0;
+    float padVal = 1.5f;
+    std::memcpy(&f32Bits, &padVal, sizeof(f32Bits));
+    EXPECT_EQ(*sprBits, static_cast<uint64_t>(f32Bits));
+}
+
+TEST_F(TileCopyGmToL1TlaVectorPadAscend950, FloatLegacyThreeArgIsZeroSides)
+{
+    using Element = float;
+    using LayoutTag = layout::VectorLayout;
+    using Layout = detail::TagToLayout_t<Element, LayoutTag>;
+    using CoordZero = tla::Coord<tla::Int<0>>;
+    using TensorSrc = tla::Tensor<AscendC::GlobalTensor<Element>, Layout, CoordZero, AscendC::TPosition::GM>;
+    using TensorDst = tla::Tensor<AscendC::LocalTensor<Element>, Layout, CoordZero, AscendC::TPosition::A1>;
+
+    AscendC::GlobalTensor<Element> gmSrc;
+    AscendC::LocalTensor<Element> l1Dst;
+    auto layoutSrc = tla::MakeLayout(64u);
+    auto layoutDst = tla::MakeLayout(64u);
+    TensorSrc tensorGm(gmSrc, layoutSrc);
+    TensorDst tensorL1(l1Dst, layoutDst);
+
+    TileCopyTla<Arch::Ascend950, TensorSrc, TensorDst> copyGmToL1;
+    copyGmToL1(tensorL1, tensorGm, Element(2.0f));
+
+    auto logs = AscendCCallLogger::Instance().GetLogs();
+    ASSERT_EQ(logs.size(), 2U);
+    ASSERT_EQ(logs[0].name, "set_pad_val_outtol1");
+    ASSERT_EQ(logs[1].name, "DataCopyPad");
+    const auto* padParams = logs[1].GetArgsAt(3).template Value<AscendC::DataCopyPadExtParams<Element>>();
+    ASSERT_NE(padParams, nullptr);
+    EXPECT_TRUE(padParams->isPad);
+    EXPECT_EQ(padParams->leftPadding, 0);
+    EXPECT_EQ(padParams->rightPadding, 0);
 }
 
 #endif // CATLASS_ARCH == 3510

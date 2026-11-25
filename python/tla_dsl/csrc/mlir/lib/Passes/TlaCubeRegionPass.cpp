@@ -727,6 +727,19 @@ struct LowerTlaCopyPattern : public OpRewritePattern<::tla::CopyOp> {
                 op.emitError() << "expected tla.copy " << src2Dst << " has 3 operands";
                 return failure();
             }
+        } else if (op->getNumOperands() == 3) {
+            // GM→L1 VectorLayout may carry CopyPadParams; other cube routes stay 2-op.
+            Value params = op.getParams();
+            const bool gmToL1Pad = srcAddrspace == "gm" && dstAddrspace == "l1" && params &&
+                                   mlir::isa<::tla::CopyPadParamsType>(params.getType());
+            if (!gmToL1Pad) {
+                op.emitError() << "expected tla.copy " << src2Dst << " has 2 operands";
+                return failure();
+            }
+            if (srcDesc.layoutTag != LayoutTag::VectorLayout || dstDesc.layoutTag != LayoutTag::VectorLayout) {
+                op.emitError() << "GM→L1 CopyPadParams require VectorLayout→VectorLayout";
+                return failure();
+            }
         } else if (op->getNumOperands() != 2) {
             op.emitError() << "expected tla.copy " << src2Dst << " has 2 operands";
             return failure();
@@ -821,6 +834,10 @@ struct LowerTlaCopyPattern : public OpRewritePattern<::tla::CopyOp> {
             // Trailing gmCachePolicy for GM-endpoint stubs (after unitFlag/quant).
             ::tla::appendGmCachePolicyOperand(
                 rewriter, op.getLoc(), op, srcAddrspace, dstAddrspace, operandTypes, operands);
+            // VL GM→L1 ciface always takes pad trailing args (zeros when no CopyPadParams).
+            ::tla::appendGmToL1VectorPadOperands(
+                rewriter, op.getLoc(), op, srcAddrspace, dstAddrspace, srcDesc.layoutTag, dstDesc.layoutTag,
+                operandTypes, operands);
             auto callee = ::tla::getOrCreateRuntimeCall(op->getParentOfType<ModuleOp>(), calleeName, operandTypes);
 
             emitCopyRuntimeCall(rewriter, op, callee, operands, *dstRuntimeMemref);

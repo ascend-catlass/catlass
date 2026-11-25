@@ -238,6 +238,7 @@ REGISTER_UB_TO_L1(RowMajor, zN, fp8_e5m2_t)
 REGISTER_UB_TO_L1(RowMajor, zN, float4_e2m1x2_t)
 REGISTER_UB_TO_L1(RowMajor, zN, float4_e1m2x2_t)
 REGISTER_UB_TO_L1(RowMajor, zN, bool)
+REGISTER_UB_TO_L1(RowMajor, zN, hifloat8_t)
 REGISTER_UB_TO_L1(zN, zN, float)
 REGISTER_UB_TO_L1(zN, zN, half)
 REGISTER_UB_TO_L1(zN, zN, bf16)
@@ -252,6 +253,7 @@ REGISTER_UB_TO_L1(zN, zN, fp8_e5m2_t)
 REGISTER_UB_TO_L1(zN, zN, float4_e2m1x2_t)
 REGISTER_UB_TO_L1(zN, zN, float4_e1m2x2_t)
 REGISTER_UB_TO_L1(zN, zN, bool)
+REGISTER_UB_TO_L1(zN, zN, hifloat8_t)
 // The MX block scale is an e8m0 exponent byte on both sides, so it rides the
 // typed UB -> L1 route like fp8: the specialization that lands the scale block
 // the L1 -> L0 load reads is chosen by layout order, not by element type.

@@ -241,6 +241,31 @@ struct TileCopyTla<
     }
 };
 
+/// Program PAD_VAL_OUTTOL1 before GM→L1 DataCopyPad when ``isPad`` is true.
+///
+/// Background (AscendC dav_3510): ``DataCopyPadGm2L1Impl`` writes the fill via
+/// ``set_mov_pad_val`` (PAD_VAL_OUTTOUB), but ``CopyGmToCbufAlignV2`` /
+/// ``MOV_OUT_TO_L1_ALIGN_V2`` reads PAD_VAL_OUTTOL1. Non-zero ``paddingValue``
+/// then appears as 0 on device. dav_m310 already uses ``set_pad_val_outtol1``.
+/// Keep this explicit OUTTOL1 program until AscendC fixes the 3510 SPR choice.
+/// Not part of the public DSL/API surface — device-side workaround only.
+///
+/// Named outside ``detail`` so host UTs that ``using namespace Tile`` still
+/// resolve ``Catlass::detail::TagToLayout_t`` correctly.
+template <typename T>
+CATLASS_DEVICE void ProgramGmToL1PadFillSpr(T paddingValue)
+{
+    // Bit-identical to AscendC GetScalarBitcodeValue; avoid depending on that
+    // helper being visible in every BC TU.
+    alignas(T) unsigned char raw[sizeof(T)]{};
+    *reinterpret_cast<T*>(raw) = paddingValue;
+    uint64_t bits = 0;
+    for (uint32_t i = 0; i < sizeof(T) && i < sizeof(uint64_t); ++i) {
+        bits |= static_cast<uint64_t>(raw[i]) << (8U * i);
+    }
+    set_pad_val_outtol1(bits);
+}
+
 /// Partial specialization for CopyGmToL1, Ascend950, VectorLayout in and VectorLayout out.
 ///
 /// Default two-arg path uses DataCopyPad with an exact byte length from originShape,
@@ -304,6 +329,35 @@ struct TileCopyTla<
         intriParams.blockCount = 1;
         intriParams.blockLen = tla::get<0>(srcTensor.originShape()) * sizeof(ElementSrc);
         AscendC::DataCopyPadExtParams<ElementSrc> padParams{true, 0, 0, padValue};
+        ProgramGmToL1PadFillSpr(padValue);
+        AscendC::DataCopyPad(dstTensor.data()[dstOffset], srcTensor.data()[srcOffset], intriParams, padParams);
+    }
+
+    // hifloat8_t Pad is not Instantitated here (ccec-unsafe ExtParams<hifloat8_t>);
+    // Cube BC inlines ExtParams<uint8_t> DataCopyPad for that type.
+    template <class TensorDst, class TensorSrc>
+    CATLASS_DEVICE void operator()(
+        TensorDst const& dstTensor, TensorSrc const& srcTensor,
+        AscendC::DataCopyPadExtParams<ElementSrc> const& padParams)
+    {
+        static_assert(
+            tla::detail::isVector<typename TensorSrc::Layout>::value &&
+                tla::detail::isVector<typename TensorDst::Layout>::value &&
+                TensorSrc::position == AscendC::TPosition::GM && TensorDst::position == AscendC::TPosition::A1,
+            "The input parameters do not match. TensorSrc must be GM and Vector, "
+            "while TensorDst must be L1 and Vector");
+        static_assert(
+            SizeOfBits<ElementSrc>::value == BytesToBits(sizeof(ElementSrc)),
+            "Padding copy requires byte-addressable elements");
+
+        auto dstOffset = dstTensor.layout()(dstTensor.coord());
+        auto srcOffset = srcTensor.layout()(srcTensor.coord());
+        AscendC::DataCopyExtParams intriParams{};
+        intriParams.blockCount = 1;
+        intriParams.blockLen = tla::get<0>(srcTensor.originShape()) * sizeof(ElementSrc);
+        if (padParams.isPad) {
+            ProgramGmToL1PadFillSpr(padParams.paddingValue);
+        }
         AscendC::DataCopyPad(dstTensor.data()[dstOffset], srcTensor.data()[srcOffset], intriParams, padParams);
     }
 };

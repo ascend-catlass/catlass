@@ -354,4 +354,12 @@ inline void Brcb(
 
 } // namespace AscendC
 
+// CCE intrinsic stub: GM→L1 pad fill SPR (PAD_VAL_OUTTOL1). Real device code
+// calls this from Catlass::Gemm::Tile::ProgramGmToL1PadFillSpr.
+inline void set_pad_val_outtol1(uint64_t config)
+{
+    const std::vector<Arg> args = {config};
+    ASCENDC_LOG_CALL(set_pad_val_outtol1, args);
+}
+
 #endif

@@ -668,11 +668,15 @@ def test_gm2ub_runtime_right_skips_static_byte_check(compiler_tlair: Any) -> Non
     assert "!tla.copy_pad_params" in mlir
 
 
-def _call_trailing_i64s(lowered: str, *, callee: str) -> list[int]:
+def _call_trailing_i64s(
+    lowered: str, *, callee: str, expected_nargs: int | None = 31
+) -> list[int]:
     match = re.search(rf"call @{re.escape(callee)}\(([^)]*)\)", lowered)
     assert match is not None, lowered
     operands = [op.strip() for op in match.group(1).split(",")]
-    assert len(operands) == 31, (len(operands), lowered)
+    if expected_nargs is not None:
+        assert len(operands) == expected_nargs, (len(operands), lowered)
+    assert len(operands) >= 4, (len(operands), lowered)
     values: list[int] = []
     for ssa in operands[-4:]:
         const = re.search(
@@ -684,11 +688,15 @@ def _call_trailing_i64s(lowered: str, *, callee: str) -> list[int]:
     return values
 
 
-def _call_trailing_ssa(lowered: str, *, callee: str) -> list[str]:
+def _call_trailing_ssa(
+    lowered: str, *, callee: str, expected_nargs: int | None = 31
+) -> list[str]:
     match = re.search(rf"call @{re.escape(callee)}\(([^)]*)\)", lowered)
     assert match is not None, lowered
     operands = [op.strip() for op in match.group(1).split(",")]
-    assert len(operands) == 31, (len(operands), lowered)
+    if expected_nargs is not None:
+        assert len(operands) == expected_nargs, (len(operands), lowered)
+    assert len(operands) >= 4, (len(operands), lowered)
     return operands[-4:]
 
 
@@ -868,9 +876,7 @@ def gm2ub_vector_bool_pad_alloc(gm_tensor: tla.Tensor) -> None:
         tla.copy(
             ub,
             gm_tensor,
-            params=tla.params.CopyPadParams(
-                right_padding=1, padding_value=False
-            ),
+            params=tla.params.CopyPadParams(right_padding=1, padding_value=False),
         )
 
 
@@ -1047,3 +1053,216 @@ def test_gm2ub_b64_pad_rejects_nonzero_float_numeric_value(
                 _ub_tensor(dtype=tla.Float64, shape=(8, 4)),
             )
         )
+
+
+def _gm_vec(dtype: type[tla.Numeric] = tla.Float32, n: int = 48) -> tla.Tensor:
+    return make_fake_tensor(
+        dtype,
+        (n,),
+        (1,),
+        origin_shape=(n,),
+        layout_tag=tla.arch.VectorLayout,
+    )
+
+
+def _l1_vec(dtype: type[tla.Numeric] = tla.Float32, n: int = 56) -> tla.Tensor:
+    return make_fake_tensor(
+        dtype,
+        (n,),
+        (1,),
+        addrspace=tla.AddressSpace.l1,
+        origin_shape=(n,),
+        layout_tag=tla.arch.VectorLayout,
+    )
+
+
+@tla.kernel
+def gm2l1_vl_with_right_pad(gm_tensor: tla.Tensor, l1_tensor: tla.Tensor) -> None:
+    with tla.cube():
+        tla.copy(
+            l1_tensor,
+            gm_tensor,
+            params=tla.params.CopyPadParams(right_padding=1, padding_value=0.0),
+        )
+
+
+@tla.kernel
+def gm2l1_vl_bool_pad(gm_tensor: tla.Tensor, l1_tensor: tla.Tensor) -> None:
+    with tla.cube():
+        tla.copy(
+            l1_tensor,
+            gm_tensor,
+            params=tla.params.CopyPadParams(right_padding=1, padding_value=False),
+        )
+
+
+def test_gm2l1_vl_pad_emits_ir_pad_operands(compiler_tlair: Any) -> None:
+    mlir = gm2l1_vl_with_right_pad.dump_mlir(
+        type_args=(_gm_vec(n=48), _l1_vec(n=56)),
+    )
+    assert "tla.CopyPadParams" in mlir
+    assert "!tla.copy_pad_params" in mlir
+    assert "tla.copy" in mlir
+
+
+@tla.kernel
+def gm2l1_vl_with_right_pad_alloc(gm_tensor: tla.Tensor) -> None:
+    """Kernel-arg GM only (L1 allocated inside) so TlaCompile accepts it."""
+    l1_ptr = tla.allocate(56, tla.Float32, tla.AddressSpace.l1, 256)
+    l1 = tla.make_tensor(
+        l1_ptr,
+        tla.make_layout(
+            tla.make_shape(56),
+            tla.make_stride(1),
+            origin_shape=tla.make_shape(56),
+            layoutTag=tla.arch.VectorLayout,
+        ),
+        tla.make_coord(0),
+    )
+    with tla.cube():
+        tla.copy(
+            l1,
+            gm_tensor,
+            params=tla.params.CopyPadParams(right_padding=1, padding_value=0.0),
+        )
+
+
+def test_gm2l1_vl_pad_lowering_trailing_i64s(tmp_path: pathlib.Path) -> None:
+    tla_compile = _require_tla_compile()
+    mlir = gm2l1_vl_with_right_pad_alloc.dump_mlir(type_args=(_gm_vec(n=48),))
+    path = tmp_path / "gm2l1_vl_pad.mlir"
+    path.write_text(mlir)
+    result = subprocess.run(
+        [str(tla_compile), str(path), "-o", "-"],
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr
+    pad_enable, left, right, value_bits = _call_trailing_i64s(
+        result.stdout,
+        callee="copy_gm_VectorLayout_to_l1_VectorLayout_float",
+        expected_nargs=None,
+    )
+    assert (pad_enable, left, right, value_bits) == (1, 0, 1, 0)
+
+
+def test_gm2l1_vl_bool_pad_accepts(compiler_tlair: Any) -> None:
+    mlir = gm2l1_vl_bool_pad.dump_mlir(
+        type_args=(_gm_vec(dtype=tla.Bool, n=48), _l1_vec(dtype=tla.Bool, n=56)),
+    )
+    assert "tla.CopyPadParams" in mlir
+
+
+def test_gm2l1_rm_zn_pad_rejected(compiler_tlair: Any) -> None:
+    from catlass.core_api import _remap_tensor_like_prefix_fields_for_layout_trees
+
+    @tla.kernel
+    def gm2l1_rm_pad(gm_tensor: tla.Tensor, l1_tensor: tla.Tensor) -> None:
+        with tla.cube():
+            tla.copy(
+                l1_tensor,
+                gm_tensor,
+                params=CopyPadParams(right_padding=1),
+            )
+
+    origin = (32, 32)
+    geometry = _remap_tensor_like_prefix_fields_for_layout_trees(
+        origin, tla.Float32.dtype, str(tla.arch.zN)
+    )
+    assert geometry is not None
+    with pytest.raises(TlaCoreAPIError, match="VectorLayout→VectorLayout"):
+        gm2l1_rm_pad.dump_mlir(
+            type_args=(
+                _gm_tensor(shape=origin),
+                make_fake_tensor(
+                    tla.Float32,
+                    geometry.shape,
+                    geometry.stride,
+                    addrspace=tla.AddressSpace.l1,
+                    origin_shape=origin,
+                    layout_tag=tla.arch.zN,
+                ),
+            )
+        )
+
+
+def test_gm2l1_vl_pad_rejects_fp8(compiler_tlair: Any) -> None:
+    @tla.kernel
+    def gm2l1_fp8_pad(gm_tensor: tla.Tensor, l1_tensor: tla.Tensor) -> None:
+        with tla.cube():
+            tla.copy(
+                l1_tensor,
+                gm_tensor,
+                params=CopyPadParams(right_padding=1),
+            )
+
+    with pytest.raises(TlaCoreAPIError, match="not supported for dtype"):
+        gm2l1_fp8_pad.dump_mlir(
+            type_args=(
+                _gm_vec(dtype=tla.Float8E4M3FN, n=48),
+                _l1_vec(dtype=tla.Float8E4M3FN, n=56),
+            )
+        )
+
+
+def test_gm2l1_vl_hif8_pad_accepts(compiler_tlair: Any) -> None:
+    @tla.kernel
+    def gm2l1_hif8_pad(gm_tensor: tla.Tensor, l1_tensor: tla.Tensor) -> None:
+        with tla.cube():
+            tla.copy(
+                l1_tensor,
+                gm_tensor,
+                params=CopyPadParams(right_padding=1, padding_value=0),
+            )
+
+    mlir = gm2l1_hif8_pad.dump_mlir(
+        type_args=(
+            _gm_vec(dtype=tla.HiFloat8, n=48),
+            _l1_vec(dtype=tla.HiFloat8, n=56),
+        )
+    )
+    assert "tla.CopyPadParams" in mlir
+
+
+@tla.kernel
+def gm2l1_vl_hif8_pad_alloc(gm_tensor: tla.Tensor) -> None:
+    """Kernel-arg GM only so TlaCompile covers the hif8 uint8 ExtParams BC path."""
+    l1_ptr = tla.allocate(56, tla.HiFloat8, tla.AddressSpace.l1, 256)
+    l1 = tla.make_tensor(
+        l1_ptr,
+        tla.make_layout(
+            tla.make_shape(56),
+            tla.make_stride(1),
+            origin_shape=tla.make_shape(56),
+            layoutTag=tla.arch.VectorLayout,
+        ),
+        tla.make_coord(0),
+    )
+    with tla.cube():
+        tla.copy(
+            l1,
+            gm_tensor,
+            params=tla.params.CopyPadParams(right_padding=1, padding_value=0),
+        )
+
+
+def test_gm2l1_vl_hif8_pad_lowering_trailing_i64s(tmp_path: pathlib.Path) -> None:
+    tla_compile = _require_tla_compile()
+    mlir = gm2l1_vl_hif8_pad_alloc.dump_mlir(
+        type_args=(_gm_vec(dtype=tla.HiFloat8, n=48),)
+    )
+    path = tmp_path / "gm2l1_vl_hif8_pad.mlir"
+    path.write_text(mlir)
+    result = subprocess.run(
+        [str(tla_compile), str(path), "-o", "-"],
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "copy_gm_VectorLayout_to_l1_VectorLayout_hifloat8_t" in result.stdout
+    pad_enable, left, right, value_bits = _call_trailing_i64s(
+        result.stdout,
+        callee="copy_gm_VectorLayout_to_l1_VectorLayout_hifloat8_t",
+        expected_nargs=None,
+    )
+    assert (pad_enable, left, right, value_bits) == (1, 0, 1, 0)

@@ -76,6 +76,13 @@ void appendGmToUbPadOperands(
     llvm::StringRef dstAddrspace, llvm::SmallVectorImpl<mlir::Type>& operandTypes,
     llvm::SmallVectorImpl<mlir::Value>& operands);
 
+/// Append GM→L1 VectorLayout DataCopyPad trailing ABI (same four ``i64`` slots).
+/// No-op unless ``src=gm``, ``dst=l1``, and both layouts are ``VectorLayout``.
+void appendGmToL1VectorPadOperands(
+    mlir::OpBuilder& builder, mlir::Location loc, ::tla::CopyOp copyOp, llvm::StringRef srcAddrspace,
+    llvm::StringRef dstAddrspace, ::LayoutTag srcLayout, ::LayoutTag dstLayout,
+    llvm::SmallVectorImpl<mlir::Type>& operandTypes, llvm::SmallVectorImpl<mlir::Value>& operands);
+
 /// Declare (once) the private runtime template `name`, core-annotating it (AIC or
 /// AIV, always-inline, C-interface) by symbol so the backend inlines it on the
 /// right core. Returns the existing decl if already present.

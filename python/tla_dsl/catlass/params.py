@@ -423,13 +423,16 @@ class CopyPadParams(CopyParams):
     Exact-byte copy remains ``params=None``. There is no public ``is_pad``.
 
     Route / dtype (enforced by ``tla.copy``):
-    - GM→UB only, layouts ``RowMajor→RowMajor`` or ``VectorLayout→VectorLayout``.
-    - Element dtypes: ``f32``/``f16``/``bf16``/``i32``/``u32``/``i16``/``u16``/
-      ``i8``/``u8``/``i1``/``i64``/``u64``/``f64`` (not fp8/hif8/fp4).
+    - GM→UB: layouts ``RowMajor→RowMajor`` or ``VectorLayout→VectorLayout``.
+    - GM→L1: ``VectorLayout→VectorLayout`` only (cube region).
+    - GM→UB element dtypes: ``f32``/``f16``/``bf16``/``i32``/``u32``/``i16``/
+      ``u16``/``i8``/``u8``/``i1``/``i64``/``u64``/``f64``.
+    - GM→L1 adds ``hif8``; fp8/fp4 Pad are not opened on either route.
 
     Parameters:
-    - ``left_padding`` / ``right_padding``: elements padded on each side of the
-      innermost axis. Static non-negative ``int`` (or integer ``Numeric`` /
+    - ``left_padding`` / ``right_padding``: independent left/right element
+      counts on the innermost axis (both may be non-zero together; each
+      defaults to ``0``). Static non-negative ``int`` (or integer ``Numeric`` /
       runtime integer/index SSA). **Must not** be ``bool``/``tla.Bool``/``i1``.
       When a side count is a static int, ``count * sizeof(T)`` must be ≤ 32B;
       when extents are also static, dst innermost ≥ src + left + right.
@@ -440,10 +443,15 @@ class CopyPadParams(CopyParams):
         ``int`` is rejected.
       - integer tiles: bare ``int`` or a ``Numeric`` whose ``dtype`` equals the
         tile (e.g. ``tla.Int32(1)`` on ``i32``); cross-width Numerics rejected.
-      - float tiles: bare ``float`` or a matching float ``Numeric`` (e.g.
-        ``tla.Float32(1.0)`` on ``f32``); non-zero bare ``int`` and cross-dtype
-        Numerics rejected. Bare ``int`` ``0`` is accepted as zero-fill
-        (dataclass default). Constants encode as IEEE bits for the tile width.
+      - float tiles (``f16``/``bf16``/``f32``/``f64``): bare ``float`` or a
+        matching float ``Numeric`` (e.g. ``tla.Float32(1.0)`` on ``f32``);
+        non-zero bare ``int`` and cross-dtype Numerics rejected. Bare ``int``
+        ``0`` is accepted as zero-fill (dataclass default). Constants encode
+        as IEEE bits for the tile width.
+      - ``hif8`` tiles (GM→L1 Pad only): an **8-bit integer bit pattern** —
+        bare ``int`` or ``tla.HiFloat8`` whose host is an ``int``. There is no
+        host float encode path; bare ``float`` / float ``Numeric`` are
+        rejected. Pattern is masked to 8 bits.
       Runtime non-``i1`` ``padding_value`` is an ``i64`` bit pattern (integer
       SSA); runtime ``i1`` SSA is not supported (use a static bool).
 

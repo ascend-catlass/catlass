@@ -1202,12 +1202,10 @@ void appendGmCachePolicyOperand(
     operands.push_back(builder.create<arith::ConstantIntOp>(loc, policyVal, 64));
 }
 
-void appendGmToUbPadOperands(
-    OpBuilder& builder, Location loc, ::tla::CopyOp copyOp, StringRef srcAddrspace, StringRef dstAddrspace,
-    SmallVectorImpl<Type>& operandTypes, SmallVectorImpl<Value>& operands)
+static void appendCopyPadTrailingOperands(
+    OpBuilder& builder, Location loc, ::tla::CopyOp copyOp, SmallVectorImpl<Type>& operandTypes,
+    SmallVectorImpl<Value>& operands)
 {
-    if (srcAddrspace != "gm" || dstAddrspace != "ub")
-        return;
     Type i64Ty = builder.getI64Type();
     auto constI64 = [&](int64_t val) -> Value { return builder.create<arith::ConstantIntOp>(loc, val, 64); };
     auto widenToI64 = [&](Value v) -> Value {
@@ -1236,6 +1234,26 @@ void appendGmToUbPadOperands(
     operands.push_back(right ? widenToI64(right) : constI64(0));
     operandTypes.push_back(i64Ty);
     operands.push_back(valueBits ? widenToI64(valueBits) : constI64(0));
+}
+
+void appendGmToUbPadOperands(
+    OpBuilder& builder, Location loc, ::tla::CopyOp copyOp, StringRef srcAddrspace, StringRef dstAddrspace,
+    SmallVectorImpl<Type>& operandTypes, SmallVectorImpl<Value>& operands)
+{
+    if (srcAddrspace != "gm" || dstAddrspace != "ub")
+        return;
+    appendCopyPadTrailingOperands(builder, loc, copyOp, operandTypes, operands);
+}
+
+void appendGmToL1VectorPadOperands(
+    OpBuilder& builder, Location loc, ::tla::CopyOp copyOp, StringRef srcAddrspace, StringRef dstAddrspace,
+    ::LayoutTag srcLayout, ::LayoutTag dstLayout, SmallVectorImpl<Type>& operandTypes, SmallVectorImpl<Value>& operands)
+{
+    if (srcAddrspace != "gm" || dstAddrspace != "l1")
+        return;
+    if (srcLayout != LayoutTag::VectorLayout || dstLayout != LayoutTag::VectorLayout)
+        return;
+    appendCopyPadTrailingOperands(builder, loc, copyOp, operandTypes, operands);
 }
 
 static bool isAicTemplateRuntimeCall(StringRef name)

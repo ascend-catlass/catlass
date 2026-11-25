@@ -35,13 +35,25 @@ tla.copy(dst: Tensor, src: Tensor, params: CopyParams | None = None, *, scale: T
 - `dst`（`Tensor`）：目的 tile。必填。
 - `src`（`Tensor`）：源 tile。必填。
 - `params`（`CopyParams | None`）：通路参数：`CopyL0C2DstParams`、
-  `CopyUbToGmParams` 或 `CopyPadParams`。默认 `None`。
-  - `CopyPadParams`：开启 GM→UB DataCopyPad（`isPad=true`）。支持的通路、
-    dtype 与填充规则见下方约束说明。
-  - `left_padding` / `right_padding`：最内维每侧填充的**元素个数**（编译期
-    int，或运行期整型/index SSA）。
-  - `padding_value`：填充区写入值（编译期字面量/Numeric，或运行期整型 bit
-    pattern）。默认 `0` 表示零填充。
+  `CopyUbToGmParams` 或 `CopyPadParams`。默认 `None`（精确字节拷贝 /
+  无 pad / fixpipe 默认行为）。
+  - `CopyL0C2DstParams`：L0C → GM/L1/UB 的 fixpipe 选项（`unit_flag`、
+    `relu_enable`、`quant_mode`、`quant_scale`、`quant_offset`、
+    `quant_tensor`、`l0c2ub_mode`、`atomic_mode`）。支持组合见下方
+    Cube fixpipe 通路表。
+  - `CopyUbToGmParams`：UB → GM 写回选项。字段：`atomic_mode`
+    （`AtomicMode`，默认 `NONE`）。
+  - `CopyPadParams`：开启 DataCopyPad（`isPad=true`；GM→UB 或
+    GM→L1 VectorLayout→VectorLayout）。支持的通路与 dtype 见下方
+    CopyPad 通路表。可选字段（可同时设置，各自默认 `0`）：
+    - `left_padding`：最内维**左侧**填充的元素个数（编译期 int，或运行期
+      整型/index SSA）。不得为 bool/`tla.Bool`/i1。
+    - `right_padding`：最内维**右侧**填充的元素个数（类型规则同
+      `left_padding`）。
+    - `padding_value`：填充区写入值。默认 `0` 表示零填充。须与源元素
+      dtype 一致（见约束说明）；对 `hif8` 须为 **8bit 整型 bit pattern**
+      （裸 `int`，或 host 为 int 的 `HiFloat8`），不得使用裸 float /
+      浮点 Numeric。
 - `scale`（`Tensor | None`）：L1 上的 OCP `e8m0` 共享指数 tile，用于
   L1→L0A/L0B 的 MX load。以 `i8`/`u8` 存储；目的为 L0A 时 tag
   `tla.arch.zZMxScale`，为 L0B 时 tag `tla.arch.nNMxScale`。默认 `None`。
@@ -61,16 +73,16 @@ tla.copy(dst: Tensor, src: Tensor, params: CopyParams | None = None, *, scale: T
   i8、i16、i32、f16、bf16 和 f32。L0C 搬出的值先经过所选的类型转换、量化或 ReLU，再参与原子运算。
   UB 到 GM 搬运可省略 `params`，或传入 `CopyUbToGmParams`。该参数对象的
   `atomic_mode` 必须是 `AtomicMode` 枚举成员，默认值为 `AtomicMode.NONE`。
-- 当 `params` 为 `CopyPadParams`：仅 GM→UB，layout 为 RowMajor→RowMajor 或
-  VectorLayout→VectorLayout；元素 dtype 为
-  f32/f16/bf16/i32/u32/i16/u16/i8/u8/i1/i64/u64/f64（不含 fp8/hif8/fp4）。
+- 当 `params` 为 `CopyPadParams`：通路与 dtype 见下方 CopyPad 通路表。
   侧边计数不得为 bool/`tla.Bool`/i1；静态侧边须满足 pad 字节 ≤32B；两端
-  extent 亦为静态时，目的最内维 ≥ src + left + right。
+  extent 亦为静态时，目的最内维 ≥ src + left + right。此处不开 fp8/fp4 Pad。
 - `CopyPadParams.padding_value` 须与源元素 dtype 一致（i1：bool/`tla.Bool`；
-  整型：裸 int 或同 dtype Numeric；浮点：裸 float 或同 dtype 浮点 Numeric；
-  裸 int `0` 为 dataclass 默认零填充）。运行期非 i1 按 i64 bit pattern；
-  运行期 i1 SSA 不支持。对 8B（`i64`/`u64`/`f64`）仅保证静态零填充；运行期
-  不做数值拦截，BC 恒填 0。
+  整型：裸 int 或同 dtype Numeric；浮点 f16/bf16/f32/f64：裸 float 或同
+  dtype 浮点 Numeric；**hif8：8bit 整型 bit pattern**——裸 int 或 host 为
+  int 的 `HiFloat8`，无 host 浮点编码路径，裸 float / 浮点 Numeric 会被
+  拒绝；裸 int `0` 为 dataclass 默认零填充）。运行期非 i1 按 i64 bit
+  pattern；运行期 i1 SSA 不支持。对 8B（`i64`/`u64`/`f64`）仅保证静态零
+  填充；运行期不做数值拦截，BC 恒填 0。
 - Ascend 950 上，两个逻辑秩为 3 的视图 `(B, M, N)` 启用批量 GM→L1 布局转换。
   FP8 支持 RowMajor→zN 和 ColumnMajor→nZ；E8M0 支持下表的四条 GM MX scale 通路。
   批次数取自 `origin_shape[0]`，源、目的矩阵间距分别取各自 layout 的首维 stride，
@@ -222,11 +234,24 @@ Vector 拷贝通路
 |`ub`|`RowMajor`|`gm`|`RowMajor`|`i64`,`u64`,`f64`,`f32`,`f16`,`bf16`,`i32`,`i16`,`i8`,`i1`,`u32`,`u16`,`u8`,`f8e4m3fn`,`f8e5m2`,`f8e8m0`,`f4e2m1`,`f4e1m2`,`i4`,`hif8`,`f4e2m1x2`,`f4e1m2x2`|
 |`ub`|`RowMajor`|`ub`|`RowMajor`|`f32`,`f16`,`bf16`,`i32`,`i16`,`i8`,`i1`,`u32`,`u16`,`u8`,`f8e4m3fn`,`f8e5m2`,`f8e8m0`,`f4e2m1`,`f4e1m2`|
 |`ub`|`RowMajor`|`ub`|`ColumnMajor`|`f32`,`f16`,`bf16`,`i32`,`i16`,`i8`,`i1`,`u32`,`u16`,`u8`,`f8e4m3fn`,`f8e5m2`|
-|`ub`|`RowMajor`|`l1`|`zN`|`f32`,`f16`,`bf16`,`i8`,`i1`,`i16`,`i32`,`u8`,`u16`,`u32`,`f8e4m3fn`,`f8e5m2`,`f4e2m1`,`f4e1m2`|
-|`ub`|`zN`|`l1`|`zN`|`f32`,`f16`,`bf16`,`i8`,`i1`,`i16`,`i32`,`u8`,`u16`,`u32`,`f8e4m3fn`,`f8e5m2`,`f4e2m1`,`f4e1m2`|
+|`ub`|`RowMajor`|`l1`|`zN`|`f32`,`f16`,`bf16`,`i8`,`i1`,`i16`,`i32`,`u8`,`u16`,`u32`,`f8e4m3fn`,`f8e5m2`,`hif8`,`f4e2m1`,`f4e1m2`|
+|`ub`|`zN`|`l1`|`zN`|`f32`,`f16`,`bf16`,`i8`,`i1`,`i16`,`i32`,`u8`,`u16`,`u32`,`f8e4m3fn`,`f8e5m2`,`hif8`,`f4e2m1`,`f4e1m2`|
 |`ub`|`zZMxScale`|`l1`|`zZMxScale`|`f8e8m0`|
 |`ub`|`nNMxScale`|`l1`|`nNMxScale`|`f8e8m0`|
 |`ub`|`zNUnAlign`|`l1`|`zN`|`f32`,`f16`,`bf16`,`i8`,`f8e4m3fn`,`f8e5m2`|
+
+CopyPad 通路：`tla.copy(dst, src, params=CopyPadParams(...))`。
+开启 AscendC DataCopyPad（`isPad=true`），覆盖 Vector 的 GM→UB 与 Cube 的
+GM→L1 VectorLayout→VectorLayout；不开 fp8/fp4 Pad。侧边计数不得为
+bool/`tla.Bool`/i1；静态侧边须满足 pad 字节 ≤32B；两端 extent 亦为静态时，
+目的最内维 ≥ src + left + right。`padding_value` 的 dtype 规则见上方约束
+（含 GM→L1 上 hif8 的 8bit 整型 bit pattern）。
+
+|`src_addr`|`src_layout`|`dst_addr`|`dst_layout`|`dtypes`|
+|----------|------------|----------|------------|--------|
+|`gm`|`RowMajor`|`ub`|`RowMajor`|`f32`,`f16`,`bf16`,`i32`,`u32`,`i16`,`u16`,`i8`,`u8`,`i1`,`i64`,`u64`,`f64`|
+|`gm`|`VectorLayout`|`ub`|`VectorLayout`|`f32`,`f16`,`bf16`,`i32`,`u32`,`i16`,`u16`,`i8`,`u8`,`i1`,`i64`,`u64`,`f64`|
+|`gm`|`VectorLayout`|`l1`|`VectorLayout`|`f32`,`f16`,`bf16`,`i32`,`u32`,`i16`,`u16`,`i8`,`u8`,`i1`,`i64`,`u64`,`f64`,`hif8`|
 
 调用示例：
 

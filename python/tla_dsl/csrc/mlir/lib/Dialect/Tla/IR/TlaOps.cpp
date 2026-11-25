@@ -2895,12 +2895,27 @@ mlir::LogicalResult CopyOp::verify()
     if (getDstCachePolicyAttr() && dst != AddressSpace::gm)
         return emitOpError("dst_cache_policy requires dst to be in GM address space");
 
-    // Optional params is either L0C fixpipe knobs or GM→UB pad bundle.
+    // Optional params is either L0C fixpipe knobs or CopyPadParams (GM→UB / GM→L1 VL).
     if (mlir::Value params = getParams()) {
         mlir::Type paramsTy = params.getType();
         if (mlir::isa<CopyPadParamsType>(paramsTy)) {
-            if (!(src == AddressSpace::gm && dst == AddressSpace::ub))
-                return emitOpError("copy_pad_params require GM→UB copy route");
+            const bool gmToUb = src == AddressSpace::gm && dst == AddressSpace::ub;
+            const bool gmToL1 = src == AddressSpace::gm && dst == AddressSpace::l1;
+            if (!(gmToUb || gmToL1))
+                return emitOpError("copy_pad_params require GM→UB or GM→L1 copy route");
+            if (gmToL1) {
+                // Pad ABI is only registered for VectorLayout→VectorLayout; other
+                // GM→L1 layouts would silently drop pad trailing operands.
+                if (srcTy.getLayout().getLayoutTag() != LayoutTag::VectorLayout ||
+                    dstTy.getLayout().getLayoutTag() != LayoutTag::VectorLayout)
+                    return emitOpError("copy_pad_params on GM→L1 require VectorLayout→VectorLayout");
+                // fp8/fp4 VL stubs exist for exact copy, but padEnable=1 falls through to
+                // the two-arg path in Cube BC — reject here to match frontend whitelist.
+                mlir::Type padElem = srcTy.getPtr().getPointee();
+                if (padElem.isFloat8E4M3FN() || padElem.isFloat8E5M2() || mlir::isa<::tla::Float8E8M0Type>(padElem) ||
+                    ::tla::isPackedFp4Type(padElem))
+                    return emitOpError("copy_pad_params on GM→L1 does not support fp8/fp4 element types");
+            }
             if (!params.getDefiningOp<CopyPadParamsOp>())
                 return emitOpError("copy_pad_params must be produced by tla.CopyPadParams");
         } else if (mlir::isa<CopyL0C2DstParamsType>(paramsTy)) {

@@ -35,14 +35,26 @@ Parameters:
 - `src` (`Tensor`): Source tile. Required.
 - `params` (`CopyParams | None`): Path-specific params:
   `CopyL0C2DstParams`, `CopyUbToGmParams`, or `CopyPadParams`.
-  Default `None`.
-  - `CopyPadParams`: enables GM→UB DataCopyPad (`isPad=true`). See
-    Constraints for supported routes/dtypes and fill rules.
-  - `left_padding` / `right_padding`: elements padded on each side of
-    the innermost axis (compile-time int or runtime integer/index SSA).
-  - `padding_value`: fill value for padded elements (compile-time
-    literal/Numeric, or runtime integer bit pattern). Default `0`
-    means zero-fill.
+  Default `None` (exact-byte copy / no pad / default fixpipe).
+  - `CopyL0C2DstParams`: L0C → GM/L1/UB fixpipe options
+    (`unit_flag`, `relu_enable`, `quant_mode`, `quant_scale`,
+    `quant_offset`, `quant_tensor`, `l0c2ub_mode`, `atomic_mode`).
+    See the Cube fixpipe table for supported combinations.
+  - `CopyUbToGmParams`: UB → GM writeback options. Field:
+    `atomic_mode` (`AtomicMode`, default `NONE`).
+  - `CopyPadParams`: enables DataCopyPad (`isPad=true`) on GM→UB or
+    GM→L1 VectorLayout→VectorLayout (cube). Supported routes/dtypes
+    are listed in the CopyPad table below. Optional fields
+    (may be set together; each defaults to `0`):
+    - `left_padding`: elements padded on the left of the innermost
+      axis (compile-time int or runtime integer/index SSA). Must
+      not be bool/tla.Bool/i1.
+    - `right_padding`: elements padded on the right of the innermost
+      axis (same type rules as `left_padding`).
+    - `padding_value`: fill for padded elements. Default `0` means
+      zero-fill. Must match the source element dtype (see
+      Constraints); for `hif8` use an 8-bit integer bit pattern
+      (bare `int` or `HiFloat8` with int host), not a float.
 - `scale` (`Tensor | None`): L1 OCP `e8m0` shared-exponent tile for
   L1→L0A/L0B MX load. Stored as `i8`/`u8`; destination tag is
   `tla.arch.zZMxScale` (L0A) or `tla.arch.nNMxScale` (L0B).
@@ -68,18 +80,18 @@ Constraints:
   For UB-to-GM, supply `CopyUbToGmParams` or omit `params`. Within
   that parameter object, `atomic_mode` must be an `AtomicMode` member
   and defaults to `AtomicMode.NONE`.
-- When `params` is `CopyPadParams`: GM→UB only, layouts
-  RowMajor→RowMajor or VectorLayout→VectorLayout; element dtypes
-  f32/f16/bf16/i32/u32/i16/u16/i8/u8/i1/i64/u64/f64 (not
-  fp8/hif8/fp4). Side counts must not be bool/tla.Bool/i1; a static
-  side count must satisfy pad bytes ≤ 32B; with static extents, dst
-  innermost ≥ src + left + right.
+- When `params` is `CopyPadParams`: see the CopyPad coverage table
+  below. Side counts must not be bool/tla.Bool/i1; a static side
+  count must satisfy pad bytes ≤ 32B; with static extents, dst
+  innermost ≥ src + left + right. fp8/fp4 Pad are not opened.
 - `CopyPadParams.padding_value` must match the source element dtype
-  (i1: bool/tla.Bool; integer: bare int or same-dtype Numeric; float:
-  bare float or matching float Numeric; bare int 0 is the dataclass
-  default zero-fill). Runtime non-i1 is an i64 bit pattern; runtime
-  i1 SSA is unsupported. For 8B (`i64`/`u64`/`f64`), only a static
-  zero fill is guaranteed; runtime is not value-checked and the BC
+  (i1: bool/tla.Bool; integer: bare int or same-dtype Numeric;
+  float f16/bf16/f32/f64: bare float or matching float Numeric;
+  hif8: 8-bit integer bit pattern via bare int or HiFloat8 with int
+  host — no float encode; bare int 0 is the dataclass default
+  zero-fill). Runtime non-i1 is an i64 bit pattern; runtime i1 SSA
+  is unsupported. For 8B (`i64`/`u64`/`f64`), only a static zero
+  fill is guaranteed; runtime is not value-checked and the BC
   always zero-fills.
 - On Ascend 950, two logical rank-3 views `(B, M, N)` select batched
   GM-to-L1 layout conversion. FP8 supports RowMajor→zN and
@@ -244,11 +256,26 @@ Supported vector copy routes
 |`ub`|`RowMajor`|`gm`|`RowMajor`|`i64`,`u64`,`f64`,`f32`,`f16`,`bf16`,`i32`,`i16`,`i8`,`i1`,`u32`,`u16`,`u8`,`f8e4m3fn`,`f8e5m2`,`f8e8m0`,`f4e2m1`,`f4e1m2`,`i4x2`,`hif8`,`f4e2m1x2`,`f4e1m2x2`|
 |`ub`|`RowMajor`|`ub`|`RowMajor`|`f32`,`f16`,`bf16`,`i32`,`i16`,`i8`,`i1`,`u32`,`u16`,`u8`,`f8e4m3fn`,`f8e5m2`,`f8e8m0`,`f4e2m1`,`f4e1m2`|
 |`ub`|`RowMajor`|`ub`|`ColumnMajor`|`f32`,`f16`,`bf16`,`i32`,`i16`,`i8`,`i1`,`u32`,`u16`,`u8`,`f8e4m3fn`,`f8e5m2`|
-|`ub`|`RowMajor`|`l1`|`zN`|`f32`,`f16`,`bf16`,`i8`,`i1`,`i16`,`i32`,`u8`,`u16`,`u32`,`f8e4m3fn`,`f8e5m2`,`f4e2m1`,`f4e1m2`|
-|`ub`|`zN`|`l1`|`zN`|`f32`,`f16`,`bf16`,`i8`,`i1`,`i16`,`i32`,`u8`,`u16`,`u32`,`f8e4m3fn`,`f8e5m2`,`f4e2m1`,`f4e1m2`|
+|`ub`|`RowMajor`|`l1`|`zN`|`f32`,`f16`,`bf16`,`i8`,`i1`,`i16`,`i32`,`u8`,`u16`,`u32`,`f8e4m3fn`,`f8e5m2`,`hif8`,`f4e2m1`,`f4e1m2`|
+|`ub`|`zN`|`l1`|`zN`|`f32`,`f16`,`bf16`,`i8`,`i1`,`i16`,`i32`,`u8`,`u16`,`u32`,`f8e4m3fn`,`f8e5m2`,`hif8`,`f4e2m1`,`f4e1m2`|
 |`ub`|`zZMxScale`|`l1`|`zZMxScale`|`f8e8m0`|
 |`ub`|`nNMxScale`|`l1`|`nNMxScale`|`f8e8m0`|
 |`ub`|`zNUnAlign`|`l1`|`zN`|`f32`,`f16`,`bf16`,`i8`,`f8e4m3fn`,`f8e5m2`|
+
+
+Supported CopyPad routes, `tla.copy(dst, src, params=CopyPadParams(...))`.
+Enables AscendC DataCopyPad (`isPad=true`) on GM→UB (vector) or
+GM→L1 VectorLayout→VectorLayout (cube). fp8/fp4 Pad are not opened.
+Side counts must not be bool/tla.Bool/i1; a static side count must
+satisfy pad bytes ≤ 32B; with static extents, dst innermost ≥
+src + left + right. See Constraints for `padding_value` dtype rules
+(including hif8 8-bit integer bit patterns on GM→L1).
+
+|`src_addr`|`src_layout`|`dst_addr`|`dst_layout`|`dtypes`|
+|----------|------------|----------|------------|--------|
+|`gm`|`RowMajor`|`ub`|`RowMajor`|`f32`,`f16`,`bf16`,`i32`,`u32`,`i16`,`u16`,`i8`,`u8`,`i1`,`i64`,`u64`,`f64`|
+|`gm`|`VectorLayout`|`ub`|`VectorLayout`|`f32`,`f16`,`bf16`,`i32`,`u32`,`i16`,`u16`,`i8`,`u8`,`i1`,`i64`,`u64`,`f64`|
+|`gm`|`VectorLayout`|`l1`|`VectorLayout`|`f32`,`f16`,`bf16`,`i32`,`u32`,`i16`,`u16`,`i8`,`u8`,`i1`,`i64`,`u64`,`f64`,`hif8`|
 
 Example:
 
