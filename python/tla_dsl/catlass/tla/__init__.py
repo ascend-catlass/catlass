@@ -30,6 +30,7 @@ from .typing import Tensor, TypedTensor
 
 _EXPLICIT_EXPORTS = (
     "experimental",
+    "ceil_div",
     "Tensor",
     "TypedTensor",
     "DlpackBridgeError",
@@ -226,7 +227,7 @@ def __getattr__(name: str) -> Any:
             _version = "0.0.0"
         value = _version
     else:
-        # Errors, const_expr, arch/utils/pipes, and core_api helpers live on
+        # Errors, const_expr, arch/pipes, and core_api helpers live on
         # catlass.runtime (includes Host hot path make_ptr/shape/stride/layout).
         from .. import runtime as _runtime
 

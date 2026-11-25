@@ -30,6 +30,22 @@ struct LowerSubBlockIdxOp : public OpRewritePattern<::tla::SubBlockIdxOp> {
     }
 };
 
+struct LowerSubBlockNumOp : public OpRewritePattern<::tla::SubBlockNumOp> {
+    using OpRewritePattern<::tla::SubBlockNumOp>::OpRewritePattern;
+
+    LogicalResult matchAndRewrite(::tla::SubBlockNumOp op, PatternRewriter& rewriter) const override
+    {
+        auto coreType = getFunctionCoreType(op->getParentOfType<func::FuncOp>());
+        if (coreType == hivm::TFuncCoreType::AIC)
+            rewriter.replaceOpWithNewOp<arith::ConstantIntOp>(op, 1, 64);
+        else if (coreType == hivm::TFuncCoreType::AIV)
+            rewriter.replaceOpWithNewOp<hivm::GetSubBlockNumOp>(op, rewriter.getI64Type());
+        else
+            return op.emitOpError("requires an enclosing device function with AIC or AIV core type");
+        return success();
+    }
+};
+
 struct LowerBlockNumOp : public OpRewritePattern<::tla::BlockNumOp> {
     using OpRewritePattern<::tla::BlockNumOp>::OpRewritePattern;
 
@@ -256,10 +272,13 @@ public:
             mlir::DLTIDialect, hacc::HACCDialect, hivm::HIVMDialect, arith::ArithDialect, func::FuncDialect,
             ::mlir::memref::MemRefDialect, ::tla::TlaDialect>();
         target.markUnknownOpDynamicallyLegal([](Operation*) { return true; });
-        target.addIllegalOp<::tla::BlockNumOp, ::tla::BlockIdxOp, ::tla::SubBlockIdxOp, ::tla::GetSystemCycleOp>();
+        target.addIllegalOp<
+            ::tla::BlockNumOp, ::tla::BlockIdxOp, ::tla::SubBlockIdxOp, ::tla::SubBlockNumOp,
+            ::tla::GetSystemCycleOp>();
 
         RewritePatternSet patterns(&getContext());
-        patterns.add<LowerBlockNumOp, LowerBlockIdxOp, LowerSubBlockIdxOp, LowerGetSystemCycleOp>(&getContext());
+        patterns.add<LowerBlockNumOp, LowerBlockIdxOp, LowerSubBlockIdxOp, LowerSubBlockNumOp, LowerGetSystemCycleOp>(
+            &getContext());
 
         if (failed(applyPartialConversion(module, target, std::move(patterns)))) {
             signalPassFailure();

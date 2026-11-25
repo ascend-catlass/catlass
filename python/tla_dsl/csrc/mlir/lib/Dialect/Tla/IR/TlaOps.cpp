@@ -934,6 +934,13 @@ mlir::LogicalResult ArchWarpReduceOp::verify()
     return mlir::success();
 }
 
+mlir::LogicalResult SubBlockNumOp::verify()
+{
+    if (hasEnclosing<VecFuncOp>(getOperation()))
+        return emitOpError("compute outside tla.vec.func and pass the scalar into the region");
+    return mlir::success();
+}
+
 mlir::LogicalResult VecFuncOp::verify()
 {
     if (!hasEnclosingRegion<VectorOp>(getOperation()))

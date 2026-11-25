@@ -618,7 +618,11 @@ def _collect_core_functions(
             continue
         if node.name not in exported:
             continue
-        if node.name == "print" or has_dsl_user_op(node.decorator_list):
+        if (
+            node.name == "print"
+            or has_dsl_user_op(node.decorator_list)
+            or directory_path(ast.get_docstring(node) or "") is not None
+        ):
             entries[node.name] = function_entry(node.name, node)
     return entries
 

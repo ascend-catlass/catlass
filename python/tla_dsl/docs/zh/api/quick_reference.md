@@ -88,6 +88,7 @@ nav_order: 5
 | [`tla.VectorSSA.reduce`](language/simd/discrete_aggregate.md#tlavectorssareduce) | 在 mask 下归约为单 lane。 | Kernel / Vector / SIMD；必须提供 mask，可用 `full` 广播该结果。 |
 | [`tla.VectorSSA.to`](language/simd/type_conversion.md#tlavectorssato) | 转换寄存器向量元素类型。 | Kernel / Vector / SIMD；支持类型见完整条目。 |
 | [`tla.Numeric.to`](language/values_types.md#tlanumericto) | 转换标量元素类型。 | Kernel；SIMT 中生成逐线程转换。寄存器向量 `tla.cast` 没有逐线程等价接口。 |
+| [`tla.ceil_div`](language/values_types.md#tlaceil_div) | 将非负整数相除并向上取整。 | 支持宿主端常量或 kernel 标量。除数为 0 时返回 0。 |
 
 ## 6. 同步、资源与调试
 
@@ -112,8 +113,11 @@ nav_order: 5
 | --- | --- | --- |
 | [`tla.allocate`](language/resources.md#tlaallocate) | 分配片上 scratch 并返回带类型 pointer。 | Kernel；仅支持静态 shape 与片上地址空间。SIMT scratch 在区域外分配。 |
 | [`tla.arch.block_idx`](language/system.md#tlaarchblock_idx)、[`tla.arch.block_num`](language/system.md#tlaarchblock_num) | 读取启动 block 索引或 block 数。 | Kernel；描述 AI Core block，不是 SIMT 线程。 |
+| [`tla.arch.sub_block_num`](language/system.md#tlaarchsub_block_num) | 读取每个逻辑 AI Core 上当前核类型的配置核数。 | Kernel 标量代码，返回 `tla.Int64`。 |
 | [`tla.arch.thread_idx`](language/system.md#tlaarchthread_idx)、[`tla.arch.thread_block_dim`](language/system.md#tlaarchthread_block_dim) | 读取 SIMT 线程坐标或线程 block 尺寸。 | Kernel / Vector / SIMT。 |
 | [`tla.arch.get_capacity_in_bytes`](language/system.md#tlaarchget_capacity_in_bytes) | 查询编译目标的片上存储容量。 | Host 或 Kernel；作为编译期常量折叠。仅限片上地址空间；UB 可用量仍受编译器预留影响。 |
+| [`tla.arch.get_vec_len_in_bytes`](language/system.md#tlaarchget_vec_len_in_bytes) | 以字节为单位返回向量寄存器长度。 | Ascend 950（3510）。在宿主端或 kernel 追踪时返回 Python `int`。 |
+| [`tla.arch.get_datablock_size_in_bytes`](language/system.md#tlaarchget_datablock_size_in_bytes) | 以字节为单位返回一个 DataBlock 的大小。 | Ascend 950（3510）。在宿主端或 kernel 追踪时返回 Python `int`。 |
 | [`tla.arch.get_dyn_ub`](language/system.md#tlaarchget_dyn_ub) | 获取启动时指定大小的动态 UB pointer。 | Kernel；每 kernel 至多一个区域。启动传 `ub=` 指定字节数；kernel 内尺寸不做边界检查。 |
 | [`tla.arch.clear_ar`](language/system.md#tlaarchclear_ar)、[`tla.arch.get_ar`](language/system.md#tlaarchget_ar) | 清零 AR 或读取矢量压缩记录的字节数。 | Kernel / Vector，仅 AIV。清零写在 `tla.vec.func(mode="simd")` 内或直接写在 `tla.vector()` 内；读取写在 `tla.vec.func` 外、产生计数的序列完成之后。 |
 | [`tla.TlaJitFunction.dump_mlir`](runtime/compile_launch.md#tlatlajitfunctiondump_mlir) | 返回前端 TLA IR，不构建或启动二进制。 | Host；类型样本规则与编译相同。 |

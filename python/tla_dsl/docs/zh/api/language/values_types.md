@@ -257,3 +257,38 @@ def kernel() -> None:
     r = tla.Float32(4.0).sqrt()
     tla.make_coord(r.to(tla.Int32), 0)
 ```
+
+---
+
+## `tla.ceil_div`
+
+**源码：** [`catlass.core_api.ceil_div`](../../../../catlass/core_api.py)
+
+功能说明：
+
+将两个整数相除并向上取整。除数为 0 时返回 0。两个参数均为 Python `int` 时返回 Python `int`，其余情况返回 `tla.Int32`。
+
+函数原型：
+
+```python
+tla.ceil_div(num1: int | Int32, num2: int | Int32) -> int | Int32
+```
+
+参数说明：
+
+- `num1`：被除数，类型为 Python `int` 或 `tla.Int32`。
+- `num2`：除数，类型为 Python `int` 或 `tla.Int32`。
+
+约束说明：
+
+- 两个操作数均须在 0～2,147,483,647 范围内（含上下限）。调用方须保证运行时传入的值也满足此约束。超出此范围的行为未规定。
+- 常量操作数可在宿主端使用，也可在 kernel 追踪时折叠。运行时操作数可在 kernel 标量代码中使用。
+
+调用示例：
+
+```python
+import catlass.tla as tla
+
+tile_count = tla.ceil_div(129, 64)
+zero = tla.ceil_div(129, 0)
+```

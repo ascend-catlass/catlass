@@ -919,6 +919,38 @@ with tla.vector():
 
 ---
 
+### `tla.arch.sub_block_num`
+
+**Source:** [`catlass.core_api.arch_sub_block_num`](../../../../catlass/core_api.py)
+
+Description:
+
+Return the configured count of this core type per logical AI Core.
+In separated mode each side of a MIX kernel evaluates its own i64 result.
+
+Prototype:
+
+```python
+tla.arch.sub_block_num() -> Int64
+```
+
+Parameters:
+
+- None.
+
+Constraints:
+
+- Call in kernel scalar code, including cube and vector scopes. Compute
+  outside SIMD and SIMT `tla.vec.func` regions and pass the scalar in.
+
+Example:
+
+```python
+value = tla.arch.sub_block_num()  # tla.Int64
+```
+
+---
+
 ### `tla.arch.block_num`
 
 **Source:** [`catlass.core_api.arch_block_num`](../../../../catlass/core_api.py)
@@ -995,6 +1027,72 @@ with tla.vec.func(mode="simt", thread_block_dim=256):
     nthreads, _, _ = tla.arch.thread_block_dim()
     for i in tla.range(tid, N, nthreads):
         gm_out[i] = gm_in[i]
+```
+
+---
+
+### `tla.arch.get_vec_len_in_bytes`
+
+**Source:** [`catlass.core_api.arch_get_vec_len_in_bytes`](../../../../catlass/core_api.py)
+
+Description:
+
+Return the vector register length in bytes as a Python `int`.
+
+Prototype:
+
+```python
+tla.arch.get_vec_len_in_bytes() -> int
+```
+
+Parameters:
+
+None.
+
+Constraints:
+
+- Returns 256 bytes for the Ascend 950 (3510) compile target.
+- Can be called on the host or evaluated as a constant during kernel tracing.
+
+Example:
+
+```python
+import catlass.tla as tla
+
+vector_bytes = tla.arch.get_vec_len_in_bytes()
+```
+
+---
+
+### `tla.arch.get_datablock_size_in_bytes`
+
+**Source:** [`catlass.core_api.arch_get_datablock_size_in_bytes`](../../../../catlass/core_api.py)
+
+Description:
+
+Return the size of one DataBlock in bytes as a Python `int`.
+
+Prototype:
+
+```python
+tla.arch.get_datablock_size_in_bytes() -> int
+```
+
+Parameters:
+
+None.
+
+Constraints:
+
+- Returns 32 bytes for the Ascend 950 (3510) compile target.
+- Can be called on the host or evaluated as a constant during kernel tracing.
+
+Example:
+
+```python
+import catlass.tla as tla
+
+datablock_bytes = tla.arch.get_datablock_size_in_bytes()
 ```
 
 ---

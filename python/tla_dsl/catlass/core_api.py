@@ -2906,6 +2906,70 @@ class _RemappedTensorMetadata:
     flat_stride: tuple[Any, ...]
 
 
+def _validate_ceil_div_operand(value: int | Int32, name: str) -> None:
+    if type(value) is int:
+        literal = value
+    elif isinstance(value, Int32):
+        literal = value.value
+        if not isinstance(literal, (int, float)):
+            return
+    else:
+        raise TypeError(f"ceil_div {name} must be a Python int or Int32")
+
+    if isinstance(literal, float):
+        raise TypeError(f"ceil_div {name} must be an integer")
+    if not -(1 << 31) <= literal < (1 << 31):
+        raise ValueError(f"ceil_div {name} is outside the Int32 range")
+
+
+def ceil_div(num1: int | Int32, num2: int | Int32) -> int | Int32:
+    """Directory: Scalar Compute
+
+    Description:
+        Divide two integers and round the quotient up. A zero divisor returns zero.
+        The result is a Python `int` when both arguments are Python `int` values,
+        or a `tla.Int32` otherwise.
+
+    Parameters:
+        - `num1`: Dividend, a Python `int` or `tla.Int32`.
+        - `num2`: Divisor, a Python `int` or `tla.Int32`.
+
+    Constraints:
+        - Both operands must be in the inclusive range 0 to 2,147,483,647. The caller must ensure this also holds for runtime values. Behavior outside this range is unspecified.
+        - Constant operands can be used on the host or folded during kernel tracing. Runtime operands are supported in kernel scalar code.
+
+    Example:
+        ```python
+        import catlass.tla as tla
+
+        tile_count = tla.ceil_div(129, 64)
+        zero = tla.ceil_div(129, 0)
+        ```
+    """
+    _validate_ceil_div_operand(num1, "num1")
+    _validate_ceil_div_operand(num2, "num2")
+    lhs = num1.value if isinstance(num1, Int32) else num1
+    rhs = num2.value if isinstance(num2, Int32) else num2
+    if not isinstance(lhs, mlir_ir.Value) and not isinstance(rhs, mlir_ir.Value):
+        quotient, remainder = divmod(lhs, rhs) if rhs else (0, 0)
+        result = quotient + int(remainder != 0)
+        return result if type(num1) is int and type(num2) is int else Int32(result)
+
+    numerator = Int32(lhs)
+    divisor = Int32(rhs)
+    zero = Int32(0)
+    nonzero = (divisor != zero).ir_value()
+    safe_divisor = Int32(
+        _mlir_arith.SelectOp(nonzero, divisor.ir_value(), Int32(1).ir_value()).result
+    )
+    quotient = numerator // safe_divisor
+    remainder = numerator % safe_divisor
+    rounded = quotient + (remainder != zero).to(Int32)
+    return Int32(
+        _mlir_arith.SelectOp(nonzero, rounded.ir_value(), zero.ir_value()).result
+    )
+
+
 def _ceil_div(a: int, b: int) -> int:
     if b <= 0:
         raise ValueError("ceil_div divisor must be positive")
@@ -14381,6 +14445,34 @@ def arch_shuffle_sync_bfly(
 
 
 @dsl_user_op
+def arch_sub_block_num(*, loc: mlir_ir.Location | None = None) -> Int64:
+    """Directory: System Variable Access / Architecture Helpers
+    Description:
+        Return the configured count of this core type per logical AI Core.
+        In separated mode each side of a MIX kernel evaluates its own i64 result.
+
+        Parameters:
+        - None.
+
+        Constraints:
+        - Call in kernel scalar code, including cube and vector scopes. Compute
+          outside SIMD and SIMT `tla.vec.func` regions and pass the scalar in.
+
+        Example:
+        ```python
+        value = tla.arch.sub_block_num()  # tla.Int64
+        ```
+    """
+    _require_frontend_state("arch.sub_block_num")
+    if _runtime._has_enclosing_region("vec.func"):
+        raise TlaIRNotExecutableError(
+            "tla.arch.sub_block_num: compute outside tla.vec.func and pass the scalar into the region"
+        )
+    i64 = mlir_ir.IntegerType.get_signless(64)
+    return Int64(_tla_ops_gen.arch_sub_block_num(i64, loc=loc))
+
+
+@dsl_user_op
 def arch_block_num(*, loc: mlir_ir.Location | None = None) -> Int32:
     """Directory: System Variable Access / Architecture Helpers
     Description:
@@ -14487,6 +14579,52 @@ def arch_thread_block_dim(
     i32 = mlir_ir.IntegerType.get_signless(32)
     values = _tla_ops_gen.arch_thread_block_dim(i32, i32, i32, loc=loc)
     return (Int32(values[0]), Int32(values[1]), Int32(values[2]))
+
+
+def arch_get_vec_len_in_bytes() -> int:
+    """Directory: System Variable Access / Architecture Helpers
+
+    Description:
+        Return the vector register length in bytes as a Python `int`.
+
+    Parameters:
+        None.
+
+    Constraints:
+        - Returns 256 bytes for the Ascend 950 (3510) compile target.
+        - Can be called on the host or evaluated as a constant during kernel tracing.
+
+    Example:
+        ```python
+        import catlass.tla as tla
+
+        vector_bytes = tla.arch.get_vec_len_in_bytes()
+        ```
+    """
+    return _VECTOR_REGISTER_BYTES
+
+
+def arch_get_datablock_size_in_bytes() -> int:
+    """Directory: System Variable Access / Architecture Helpers
+
+    Description:
+        Return the size of one DataBlock in bytes as a Python `int`.
+
+    Parameters:
+        None.
+
+    Constraints:
+        - Returns 32 bytes for the Ascend 950 (3510) compile target.
+        - Can be called on the host or evaluated as a constant during kernel tracing.
+
+    Example:
+        ```python
+        import catlass.tla as tla
+
+        datablock_bytes = tla.arch.get_datablock_size_in_bytes()
+        ```
+    """
+    return 32
 
 
 def arch_get_capacity_in_bytes(mem_scope: AddressSpace) -> int:
@@ -14903,6 +15041,7 @@ _require_generated("cmp")
 _require_generated("arch_block_idx")
 _require_generated("arch_sub_block_idx")
 _require_generated("arch_block_num")
+_require_generated("arch_sub_block_num")
 _require_generated("arch_get_system_cycle")
 _require_generated("arch_thread_block_dim")
 _require_generated("arch_thread_idx")
@@ -14939,6 +15078,7 @@ arch._set("load_bypass_dcache", arch_load_bypass_dcache)
 arch._set("block_idx", arch_block_idx)
 arch._set("sub_block_idx", arch_sub_block_idx)
 arch._set("block_num", arch_block_num)
+arch._set("sub_block_num", arch_sub_block_num)
 arch._set("get_system_cycle", arch_get_system_cycle)
 arch._set("thread_block_dim", arch_thread_block_dim)
 arch._set("thread_idx", arch_thread_idx)
@@ -14959,6 +15099,8 @@ arch._set("shuffle_sync_up", arch_shuffle_sync_up)
 arch._set("shuffle_sync_down", arch_shuffle_sync_down)
 arch._set("shuffle_sync_bfly", arch_shuffle_sync_bfly)
 arch._set("get_capacity_in_bytes", arch_get_capacity_in_bytes)
+arch._set("get_vec_len_in_bytes", arch_get_vec_len_in_bytes)
+arch._set("get_datablock_size_in_bytes", arch_get_datablock_size_in_bytes)
 arch._set("get_dyn_ub", arch_get_dyn_ub)
 arch._set("SCALAR", _runtime.pipes.SCALAR)
 arch._set("VECTOR", _runtime.pipes.VECTOR)
@@ -15434,6 +15576,7 @@ def prof_scope(*, loc: mlir_ir.Location | None = None) -> _ProfScope:
 
 __all__ = [
     "TlaCoreAPIError",
+    "ceil_div",
     "dsl_user_op",
     "arch",
     "mask",

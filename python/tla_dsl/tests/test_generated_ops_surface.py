@@ -81,6 +81,7 @@ def test_generated_binding_symbols_exist_for_wrapped_ops() -> None:
         "arch_block_idx",
         "arch_thread_block_dim",
         "arch_block_num",
+        "arch_sub_block_num",
         "arch_thread_idx",
         "arch_lane_idx",
         "arch_lanemask",

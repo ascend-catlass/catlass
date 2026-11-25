@@ -856,6 +856,37 @@ with tla.vector():
 
 ---
 
+### `tla.arch.sub_block_num`
+
+**源码：** [`catlass.core_api.arch_sub_block_num`](../../../../catlass/core_api.py)
+
+说明：
+
+返回当前配置中每个逻辑 AI Core 上与调用者同类型的核数。
+在分离模式下，MIX kernel 的各侧分别计算自己的 i64 结果。
+
+原型：
+
+```python
+tla.arch.sub_block_num() -> Int64
+```
+
+参数：
+
+- 无。
+
+约束：
+
+- 在 kernel 标量代码中调用，包括 cube 和 vector 区域。要在 SIMD 或 SIMT 的 `tla.vec.func` 中使用结果，请在区域外计算，再传入标量。
+
+示例：
+
+```python
+value = tla.arch.sub_block_num()  # tla.Int64
+```
+
+---
+
 ### `tla.arch.block_num`
 
 **源码：** [`catlass.core_api.arch_block_num`](../../../../catlass/core_api.py)
@@ -923,6 +954,72 @@ with tla.vec.func(mode="simt", thread_block_dim=256):
     nthreads, _, _ = tla.arch.thread_block_dim()
     for i in tla.range(tid, N, nthreads):
         gm_out[i] = gm_in[i]
+```
+
+---
+
+### `tla.arch.get_vec_len_in_bytes`
+
+**源码：** [`catlass.core_api.arch_get_vec_len_in_bytes`](../../../../catlass/core_api.py)
+
+功能说明：
+
+以字节为单位返回向量寄存器的长度，返回类型为 Python `int`。
+
+函数原型：
+
+```python
+tla.arch.get_vec_len_in_bytes() -> int
+```
+
+参数说明：
+
+无参数。
+
+约束说明：
+
+- 编译目标为 Ascend 950（3510）时，返回值为 256 字节。
+- 可在宿主端调用，也可在 kernel 追踪时作为常量求值。
+
+调用示例：
+
+```python
+import catlass.tla as tla
+
+vector_bytes = tla.arch.get_vec_len_in_bytes()
+```
+
+---
+
+### `tla.arch.get_datablock_size_in_bytes`
+
+**源码：** [`catlass.core_api.arch_get_datablock_size_in_bytes`](../../../../catlass/core_api.py)
+
+功能说明：
+
+以字节为单位返回一个 DataBlock 的大小，返回类型为 Python `int`。
+
+函数原型：
+
+```python
+tla.arch.get_datablock_size_in_bytes() -> int
+```
+
+参数说明：
+
+无参数。
+
+约束说明：
+
+- 编译目标为 Ascend 950（3510）时，返回值为 32 字节。
+- 可在宿主端调用，也可在 kernel 追踪时作为常量求值。
+
+调用示例：
+
+```python
+import catlass.tla as tla
+
+datablock_bytes = tla.arch.get_datablock_size_in_bytes()
 ```
 
 ---

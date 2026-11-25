@@ -45,6 +45,17 @@ def Tla_BlockNumOp : Tla_Op<"arch.block_num", [Pure]> {
   }];
 }
 
+def Tla_SubBlockNumOp : Tla_Op<"arch.sub_block_num", [Pure]> {
+  let summary = "Get the sub-block count for the executing core type";
+  let description = [{
+    Return the configured number of cores of the executing type per logical AI
+    Core as signless i64. Evaluate separately in each split MIX function.
+  }];
+  let results = (outs I64:$num);
+  let assemblyFormat = [{ attr-dict `->` type($num) }];
+  let hasVerifier = 1;
+}
+
 def Tla_BlockIdxOp : Tla_Op<"arch.block_idx", [Pure]> {
   let summary = "Block index";
   let description = [{

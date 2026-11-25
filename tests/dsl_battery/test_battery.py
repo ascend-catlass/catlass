@@ -724,6 +724,8 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         "mixed-core-ratio-11",
         [["end_to_end/basic_mixed_core_ratio_11.py", *dev, "--block-num", "1"]],
     )
+    yield "sub-block-num", [["end_to_end/sub_block_num.py", *dev]]
+    yield "ceil-div", [["end_to_end/ceil_div.py", *dev]]
     # Host make_ptr/make_layout/make_tensor Torch bind (no DLPack), vector add.
     yield (
         "host-make-tensor-torch-vadd",

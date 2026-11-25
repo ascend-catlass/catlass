@@ -260,3 +260,40 @@ def kernel() -> None:
     r = tla.Float32(4.0).sqrt()
     tla.make_coord(r.to(tla.Int32), 0)
 ```
+
+---
+
+## `tla.ceil_div`
+
+**Source:** [`catlass.core_api.ceil_div`](../../../../catlass/core_api.py)
+
+Description:
+
+Divide two integers and round the quotient up. A zero divisor returns zero.
+The result is a Python `int` when both arguments are Python `int` values,
+or a `tla.Int32` otherwise.
+
+Prototype:
+
+```python
+tla.ceil_div(num1: int | Int32, num2: int | Int32) -> int | Int32
+```
+
+Parameters:
+
+- `num1`: Dividend, a Python `int` or `tla.Int32`.
+- `num2`: Divisor, a Python `int` or `tla.Int32`.
+
+Constraints:
+
+- Both operands must be in the inclusive range 0 to 2,147,483,647. The caller must ensure this also holds for runtime values. Behavior outside this range is unspecified.
+- Constant operands can be used on the host or folded during kernel tracing. Runtime operands are supported in kernel scalar code.
+
+Example:
+
+```python
+import catlass.tla as tla
+
+tile_count = tla.ceil_div(129, 64)
+zero = tla.ceil_div(129, 0)
+```

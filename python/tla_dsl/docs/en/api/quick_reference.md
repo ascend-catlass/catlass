@@ -81,6 +81,7 @@ Both modes run in `tla.vec.func` nested inside `tla.vector()`:
 | [`tla.VectorSSA.reduce`](language/simd/discrete_aggregate.md#tlavectorssareduce) | Reduce a vector under a mask to a one-lane fragment. | Kernel / Vector / SIMD; a mask is required. Use `full` to broadcast the fragment. |
 | [`tla.VectorSSA.to`](language/simd/type_conversion.md#tlavectorssato) | Convert register-vector element types. | Kernel / Vector / SIMD; supported source and destination types are listed in the full entry. |
 | [`tla.Numeric.to`](language/values_types.md#tlanumericto) | Convert a scalar element type. | Kernel; in SIMT this emits the per-thread conversion. There is no per-thread equivalent of register-vector `tla.cast`. |
+| [`tla.ceil_div`](language/values_types.md#tlaceil_div) | Divide nonnegative integers and round up. | Host for constants or kernel scalar code. A zero divisor returns zero. |
 
 ## 6. Synchronization, Resources, and Debugging
 
@@ -105,8 +106,11 @@ start from the [Synchronization Guide](../kernel_development/core_concepts/sync.
 | --- | --- | --- |
 | [`tla.allocate`](language/resources.md#tlaallocate) | Allocate on-chip scratch and return a typed pointer. | Kernel; static shape and on-chip address space only. Allocate SIMT scratch outside the SIMT region. |
 | [`tla.arch.block_idx`](language/system.md#tlaarchblock_idx), [`tla.arch.block_num`](language/system.md#tlaarchblock_num) | Read the launch block index or block count. | Kernel; these describe AI Core blocks, not SIMT threads. |
+| [`tla.arch.sub_block_num`](language/system.md#tlaarchsub_block_num) | Read the configured core count per logical AI Core for the executing core type. | Kernel scalar code. Returns `tla.Int64`. |
 | [`tla.arch.thread_idx`](language/system.md#tlaarchthread_idx), [`tla.arch.thread_block_dim`](language/system.md#tlaarchthread_block_dim) | Read SIMT thread coordinates or thread-block extents. | Kernel / Vector / SIMT only. |
 | [`tla.arch.get_capacity_in_bytes`](language/system.md#tlaarchget_capacity_in_bytes) | Query an on-chip memory capacity for the compile target. | Host or kernel; evaluated as a compile-time constant. On-chip address spaces only; compiler reservations still apply to usable UB. |
+| [`tla.arch.get_vec_len_in_bytes`](language/system.md#tlaarchget_vec_len_in_bytes) | Return the vector register length in bytes. | Ascend 950 (3510). Returns a Python `int` on the host or during kernel tracing. |
+| [`tla.arch.get_datablock_size_in_bytes`](language/system.md#tlaarchget_datablock_size_in_bytes) | Return the size of one DataBlock in bytes. | Ascend 950 (3510). Returns a Python `int` on the host or during kernel tracing. |
 | [`tla.arch.get_dyn_ub`](language/system.md#tlaarchget_dyn_ub) | Obtain the dynamic UB pointer whose size is supplied at launch. | Kernel; at most one region per kernel. Pass launch `ub=` for the required bytes; kernel-side extents are not bounds-checked. |
 | [`tla.arch.clear_ar`](language/system.md#tlaarchclear_ar), [`tla.arch.get_ar`](language/system.md#tlaarchget_ar) | Clear AR or read the byte count recorded by vector compression. | Kernel / Vector, AIV only. Write the clear inside `tla.vec.func(mode="simd")` or directly in `tla.vector()`; the read goes outside `tla.vec.func`, after the producing sequence completes. |
 | [`tla.TlaJitFunction.dump_mlir`](runtime/compile_launch.md#tlatlajitfunctiondump_mlir) | Return frontend TLA IR without building or launching a binary. | Host; type samples follow the same rules as compilation. |
