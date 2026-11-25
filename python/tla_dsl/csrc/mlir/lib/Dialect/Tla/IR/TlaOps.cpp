@@ -1151,6 +1151,35 @@ static mlir::LogicalResult verifyMaskMatchesVector(mlir::Operation* op, mlir::Va
         return mlir::success();                                                \
     }
 
+// AscendC Duplicate accepts Bool, the 8/16/32/64-bit integers, f16/bf16/f32,
+// fp8 e4m3fn/e5m2, and the byte-carried TLA formats (hif8/e8m0/fp4x2).
+static bool isSupportedFullElementType(mlir::Type elementType)
+{
+    if (auto intType = mlir::dyn_cast<mlir::IntegerType>(elementType)) {
+        unsigned width = intType.getWidth();
+        return width == 1 || width == 8 || width == 16 || width == 32 || width == 64;
+    }
+    return elementType.isF16() || elementType.isBF16() || elementType.isF32() ||
+           isa<mlir::Float8E4M3FNType, mlir::Float8E5M2Type, HiFloat8Type, Float8E8M0Type>(elementType) ||
+           isFp4PairType(elementType);
+}
+
+// The scalar carrier of a tla.full value: Bool/hif8/e8m0/fp4x2 broadcast an i8
+// byte, unsigned elements broadcast their same-width signless twin, and every
+// other element type broadcasts itself.
+static bool isFullScalarCarrier(mlir::Type scalarType, mlir::Type elementType)
+{
+    if (scalarType == elementType)
+        return true;
+    if (isBoolElementType(elementType) || isa<HiFloat8Type, Float8E8M0Type>(elementType) || isFp4PairType(elementType))
+        return scalarType.isInteger(8);
+    if (auto elemInt = mlir::dyn_cast<mlir::IntegerType>(elementType); elemInt && elemInt.isUnsigned()) {
+        auto scalarInt = mlir::dyn_cast<mlir::IntegerType>(scalarType);
+        return scalarInt && scalarInt.isSignless() && scalarInt.getWidth() == elemInt.getWidth();
+    }
+    return scalarType == elementType;
+}
+
 // tla.full broadcasts a scalar, or a *one-lane* vector fragment such as a
 // tla.reduce result. A full-width VectorSSA source is rejected: the lowering
 // would silently splat lane 0 and drop the rest. The optional predicate must
@@ -1166,12 +1195,20 @@ mlir::LogicalResult FullOp::verify()
     auto resultType = mlir::dyn_cast<VectorSSAType>(getResult().getType());
     if (!resultType)
         return emitOpError("expected a !tla.vector result");
+    if (!isSupportedFullElementType(resultType.getElementType()))
+        return emitOpError() << "unsupported full element type " << resultType.getElementType();
     if (auto srcType = mlir::dyn_cast<VectorSSAType>(getValue().getType())) {
+        if (srcType.getElementType() != resultType.getElementType())
+            return emitOpError() << "vector source element type " << srcType.getElementType()
+                                 << " does not match result element type " << resultType.getElementType();
         auto lanes = srcType.getValidLanes();
         if (lanes != 1)
             return emitOpError() << "vector source must be a one-lane fragment, got " << lanes
                                  << " valid lanes; broadcasting a full-width vector would keep "
                                     "lane 0 only";
+    } else if (!isFullScalarCarrier(getValue().getType(), resultType.getElementType())) {
+        return emitOpError() << "scalar source type " << getValue().getType() << " is not a valid carrier for "
+                             << resultType.getElementType();
     }
     return verifyMaskMatchesVector(getOperation(), getMask(), resultType);
 }

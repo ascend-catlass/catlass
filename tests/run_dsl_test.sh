@@ -27,7 +27,7 @@
 # interleave_op.py, mask_interleave_op.py, pack_op.py, mask_select_op.py, load_dintlv_op.py, load_store_mask.py,
 # load_mask_dist.py, load_store_update.py, load_store_block_update.py, load_store_unalign.py, squeeze_op.py,
 # register_control_flow.py, load_and_store_scalar_after_reduction.py, load_us_b8_op.py,
-# cast_multi.py, gather_op.py, shift_op.py).
+# full_op.py, cast_multi.py, gather_op.py, shift_op.py).
 # python/tla_dsl/tests/end_to_end (fill_op.py: L1 constant fill).
 # python/tla_dsl/tests/end_to_end (fp4x2_bitwise_ops.py: packed FP4 pair bitwise ops).
 # examples/python/tla_dsl/dsl_tutorials/tensor_index (scalar_index_control_flow.py,
@@ -128,6 +128,7 @@ BINARY_OP_REL="dsl_tutorials/vector_simd_ops/binary_op.py"
 REDUCTION_OPS_REL="dsl_tutorials/vector_simd_ops/reduction_ops.py"
 PAIR_WISE_OP_REL="python/tla_dsl/tests/end_to_end/pair_wise_op.py"
 LOAD_STORE_SCALAR_AFTER_REDUCTION_REL="dsl_tutorials/vector_simd_ops/load_and_store_scalar_after_reduction.py"
+FULL_OP_REL="dsl_tutorials/vector_simd_ops/full_op.py"
 COMPARE_MASK_REL="dsl_tutorials/vector_simd_ops/compare_mask.py"
 COMPARE_MASK_OPS=(
     vector_vector_lt vector_vector_le vector_vector_gt vector_vector_ge vector_vector_eq vector_vector_ne
@@ -549,6 +550,10 @@ if [[ ! -f "${EXAMPLES_DIR}/${LOAD_STORE_SCALAR_AFTER_REDUCTION_REL}" ]]; then
 fi
 if [[ ! -f "${EXAMPLES_DIR}/${COMPARE_MASK_REL}" ]]; then
     echo "error: missing ${COMPARE_MASK_REL} under ${EXAMPLES_DIR}" >&2
+    exit 1
+fi
+if [[ ! -f "${EXAMPLES_DIR}/${FULL_OP_REL}" ]]; then
+    echo "error: missing ${FULL_OP_REL} under ${EXAMPLES_DIR}" >&2
     exit 1
 fi
 if [[ ! -f "${EXAMPLES_DIR}/${MASK_INTERLEAVE_OP_REL}" ]]; then

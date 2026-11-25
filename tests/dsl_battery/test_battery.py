@@ -1012,6 +1012,13 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         "vector-load-store-scalar-after-reduction",
         [["dsl_tutorials/vector_simd_ops/load_and_store_scalar_after_reduction.py", *dev]],
     )
+    # tla.full across the AscendC Duplicate element-type matrix (bool, 8/16/32/64
+    # integers, f16/bf16/f32, fp8, hif8, e8m0, packed fp4 pairs), including the
+    # one-lane fragment source where tla.reduce supports the element type.
+    yield (
+        "vector-full-op",
+        [["dsl_tutorials/vector_simd_ops/full_op.py", "--all-dtypes", "--shape", "512", *dev]],
+    )
     yield (
         "vector-compare-mask",
         [[

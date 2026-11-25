@@ -79,6 +79,7 @@ def vector_op(mem_in: tla.Tensor, mem_out: tla.Tensor) -> None:
 ├── bitwise_ops.py
 ├── cast_multi.py
 ├── compare_mask.py
+├── full_op.py
 ├── gather_reg_op.py
 ├── gather_op.py
 ├── interleave_op.py
@@ -129,6 +130,7 @@ def vector_op(mem_in: tla.Tensor, mem_out: tla.Tensor) -> None:
 | [**`load_store_unalign.py`**](load_store_unalign.py) | 非对齐 PostMode UPDATE：`tile_extent` / 有效步长 `(0, VL]` 的 `post_update_stride`；`tla-unalign-ureg` 在干净 `tla.range` 上消除环内 Pre/Post（`Unalign*Params(post_mode=update)`，`add`；支持 `--tile-extent 1`）。 |
 | [**`store_pack.py`**](store_pack.py) | 压缩存储示例：先 cast 再同类型 PACK 紧凑落盘。 |
 | [**`reduction_ops.py`**](reduction_ops.py) | `tla.reduce` 归约示例，支持 `add`/`max`/`min` 三种模式，覆盖对齐与非对齐场景。 |
+| [**`full_op.py`**](full_op.py) | 广播示例，覆盖 `tla.full` 的标量与单 lane fragment 两种源；`--all-dtypes` 遍历 Bool、8/16/32/64 位整数、f16/bf16/f32、fp8、hif8、e8m0 与打包 fp4 pair。 |
 | [**`histograms_op.py`**](histograms_op.py) | `tla.histograms` 独立上板样例：FREQUENCY/ACCUMULATE*BIN0/BIN1（`full(0)` 清零 / 跨调用累加 / 全零 CDF）。 |
 | [**`squeeze_op.py`**](squeeze_op.py) | `tla.squeeze` 示例，按掩码（M4）压缩有效 lane 并紧凑写回。 |
 | [**`register_control_flow.py`**](register_control_flow.py) | 控制流示例，演示 for-loop 控制流及 `VectorSSA` 与 `MaskSSA` 跨循环边界存活。 |
@@ -771,28 +773,33 @@ first mismatch=None
 
   | 输出 | 计算 | 语义 |
   |------|------|------|
-  | `out_vec_nomask` | `full(reduced, data_type)` | 单 lane `fragment`（`tla.reduce` 后的结果）广播到所有 lane |
-  | `out_scl_nomask` | `full(SCALAR_FILL, data_type)` | Python 标量填充到所有 lane |
-  | `out_vec_mask` | `full(reduced, data_type, mask=mask)` | 仅 lane < `MASK_LANES` 写归约值 |
-  | `out_scl_mask` | `full(SCALAR_FILL, data_type, mask=mask)` | 仅 lane < `MASK_LANES` 写标量 |
+  | `out_scalar` | `full(SCALAR, dtype)` | 标量广播到所有 lane |
+  | `out_scalar_masked` | `full(SCALAR, dtype, mask=half)` | 每个块的 lane < `MASK_LANES` 写标量 |
+  | `out_fragment` | `full(reduced, dtype)` | 单 lane `fragment`（`tla.reduce` 后的结果）广播到所有 lane |
+  | `out_fragment_masked` | `full(reduced, dtype, mask=half)` | 每个块的 lane < `MASK_LANES` 写归约值 |
 
-  其中 `fragment` 形式是：`tla.reduce` 的结果位于向量寄存器的一个 lane，SIMD 后端没有把 lane 读回标量寄存器的指令；直接广播 fragment 无需经过标量寄存器即可完成数据相关的填充。
+  其中 `fragment` 形式是：`tla.reduce` 的结果位于向量寄存器的一个 lane，SIMD 后端没有把 lane 读回标量寄存器的指令；直接广播 fragment 无需经过标量寄存器即可完成数据相关的填充。`tla.reduce` 当前只支持 f16/f32/i16/i32/u16/u32，其余 dtype 只运行 `out_scalar` / `out_scalar_masked` 两路。
 
 - 约束说明：
   - 支持的数据类型：
 
     | 文件 | 支持的数据类型 |
     |------|---------------|
-    | `full_op.py` | f32 |
+    | `full_op.py` | Bool、i8/u8、i16/u16、i32/u32、i64/u64、f16/bf16/f32、f8e4m3fn/f8e5m2、f8e8m0、hif8、f4e2m1x2/f4e1m2x2 |
 
-  - `full_op.py`：固定 `VECTOR_ELE = 64`（恰好一个物理向量寄存器）、`MASK_LANES = 40`、`SCALAR_FILL = 3.0`；输入 1 个（`x`），输出 4 个（`vn` / `sn` / `vm` / `sm`）。
-  - 掩码未命中的 lane（`vm[40:]` / `sm[40:]`）不写入，保持初始设定值 `-999.0`，故 golden 校验只比较前 `MASK_LANES` 个元素。
+  - `--shape` 默认 512，须为当前 dtype 单寄存器 lane 数（`256 / 元素字节数`）的整数倍；`--all-dtypes` 遍历全部 dtype，`--dtype` 选择单个 dtype。
+  - 标量取值：浮点为 1.5，整数取各自位宽的边界值，Bool 为 `True`；`hif8` 直接给编码字节 `0x38`，fp4 pair 给 `0x21`，`f8e8m0` 给 2.0（编码为 `0x80`）。fp8/hif8/e8m0/fp4x2 的 Host 存储是 uint8，经 `from_dlpack(element_type=...)` 绑定。
+  - 64 位广播由 bitcode helper 实现；`tla.reduce` 暂不支持 64 位，故 `out_fragment` / `out_fragment_masked` 两路对 i64/u64 不运行。
+  - 掩码未命中的 lane 不校验；每块只比较前 `MASK_LANES` 个 lane。
+  - 每个输出 GM 缓冲区的前后各有 256 字节保护区（填充 `0xA5`），kernel 结束后校验保护区未被改写。
 
 - 执行示例：
 
   ```bash
   # 在仓库根目录下执行
   cd /path/to/catlass
-  # 标量填充 / 单 lane fragment 广播，含带掩码变体
+  # 默认 f32：标量填充 / 单 lane fragment 广播，含带掩码变体
   python examples/python/tla_dsl/dsl_tutorials/vector_simd_ops/full_op.py --device 0
+  # 全部 dtype 上板
+  python examples/python/tla_dsl/dsl_tutorials/vector_simd_ops/full_op.py --all-dtypes --shape 512 --device 0
   ```

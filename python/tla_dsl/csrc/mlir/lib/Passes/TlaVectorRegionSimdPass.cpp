@@ -3396,6 +3396,8 @@ static LogicalResult lowerFull(
     auto opCtx = deriveVecCtxForElement(resultType.getElementType());
     if (failed(opCtx))
         return fullOp.emitError("unsupported tla.full result element type"), failure();
+    // AVE vectors are signless and Bool/hif8/e8m0/fp4x2 ride an i8 carrier.
+    Type carrierElem = aveVectorElementType(resultType.getElementType());
     // An optional tla mask predicates the broadcast lanes; all-true when absent.
     Value mask;
     if (fullOp.getMask()) {
@@ -3413,11 +3415,24 @@ static LogicalResult lowerFull(
     // backend cannot legalize.
     if (Value mapped = valueMap.lookup(fullOp.getValue())) {
         if (auto srcVecType = dyn_cast<VectorType>(mapped.getType())) {
-            if (srcVecType.getElementType() != opCtx->elementType)
+            if (srcVecType.getElementType() != carrierElem)
                 return fullOp.emitError("tla.full source element type ")
-                           << srcVecType.getElementType() << " does not match vector element type "
-                           << opCtx->elementType,
+                           << srcVecType.getElementType() << " does not match vector element type " << carrierElem,
                        failure();
+            if (resultType.getElementType().isInteger(64)) {
+                // The 64-bit AVE vector-broadcast ABI does not legalize either;
+                // call the linked bitcode helper with the native b64 predicate.
+                if (!fullOp.getMask()) {
+                    Value lower = b.create<arith::ConstantIntOp>(loc, 0, 32);
+                    mask =
+                        b.create<hivm_regbaseintrins::PunpackInstrOp>(loc, opCtx->maskVecType, mask, lower).getResult();
+                }
+                std::string name =
+                    resultType.getElementType().isUnsignedInteger() ? "dup_vec_uint64_t" : "dup_vec_int64_t";
+                valueMap[fullOp.getResult()] = createInlineB64Call(
+                    b, loc, module, name, {opCtx->vecType, opCtx->maskVecType}, opCtx->vecType, {mapped, mask});
+                return success();
+            }
             valueMap[fullOp.getResult()] =
                 b.create<hivmave::VFBroadcastVectorOp>(loc, opCtx->vecType, mapped, mask, true).getRes();
             return success();
@@ -3425,16 +3440,39 @@ static LogicalResult lowerFull(
     }
 
     // A plain scalar source broadcasts across the register via AVE broadcast
-    // (mask-capable scalar splat, lowers to vdups.z). i1 never reaches here:
-    // it is absent from the op's accepted value types, and an i1 result type
-    // fails deriveVecCtxForElement above.
+    // (mask-capable scalar splat, lowers to vdups.z).
     Value source = lookupOrCloneScalarValue(b, fullOp.getValue(), valueMap);
     if (!source)
         return failure();
-    if (source.getType() != opCtx->elementType)
+    Type tlaElem = resultType.getElementType();
+    if (source.getType() != carrierElem) {
+        // Unsigned and the byte-carried TLA formats keep their TLA type until
+        // here: the AVE scalar ABI is signless, and Bool/hif8/e8m0/fp4x2
+        // broadcast an i8 byte.
+        auto sourceInt = dyn_cast<IntegerType>(source.getType());
+        if (source.getType() == tlaElem && tlaElem.isInteger(1)) {
+            source = b.create<arith::ExtUIOp>(loc, carrierElem, source);
+        } else if (source.getType() == tlaElem || (sourceInt && sourceInt.isUnsigned())) {
+            source = b.create<UnrealizedConversionCastOp>(loc, carrierElem, source).getResult(0);
+        }
+    }
+    if (source.getType() != carrierElem)
         return fullOp.emitError("tla.full scalar type ")
-                   << source.getType() << " does not match vector element type " << opCtx->elementType,
+                   << source.getType() << " does not match vector element type " << carrierElem,
                failure();
+    if (resultType.getElementType().isInteger(64)) {
+        // vdups has no legalizable 64-bit AVE library call; the bitcode helper
+        // broadcasts the scalar and takes the native b64 predicate (PGE has no
+        // b64 mode, so an omitted mask is packed like tla.create_mask does).
+        if (!fullOp.getMask()) {
+            Value lower = b.create<arith::ConstantIntOp>(loc, 0, 32);
+            mask = b.create<hivm_regbaseintrins::PunpackInstrOp>(loc, opCtx->maskVecType, mask, lower).getResult();
+        }
+        std::string name = resultType.getElementType().isUnsignedInteger() ? "dup_uint64_t" : "dup_int64_t";
+        valueMap[fullOp.getResult()] = createInlineB64Call(
+            b, loc, module, name, {carrierElem, opCtx->maskVecType}, opCtx->vecType, {source, mask});
+        return success();
+    }
     valueMap[fullOp.getResult()] =
         b.create<hivmave::VFBroadcastScalarMaskOp>(loc, opCtx->vecType, source, mask).getRes();
     return success();
@@ -5137,7 +5175,7 @@ static LogicalResult lowerNestedVectorOp(
         // DINTLV_B8 / Block / UnAlign / UPDATE. Reject non-transport ops below.
         if (!isa<
                 ::tla::LoadOp, ::tla::StoreOp, ::tla::LoadUpdateOp, ::tla::StoreUpdateOp, ::tla::LoadUnalignUpdateOp,
-                ::tla::StoreUnalignUpdateOp, scf::ForOp, scf::IfOp>(op)) {
+                ::tla::StoreUnalignUpdateOp, ::tla::FullOp, scf::ForOp, scf::IfOp>(op)) {
             return op.emitError("E8M0 arithmetic and register casts are unsupported; only transport is allowed");
         }
     }
@@ -5156,7 +5194,7 @@ static LogicalResult lowerNestedVectorOp(
             ::tla::CastOp, ::tla::BitCastOp, ::tla::LoadOp, ::tla::StoreOp, ::tla::LoadUpdateOp, ::tla::StoreUpdateOp,
             ::tla::LoadUnalignUpdateOp, ::tla::StoreUnalignUpdateOp, ::tla::LoadUnalignPreOp, ::tla::CreateUregOp,
             ::tla::StoreUnalignPostOp, ::tla::WhereOp, ::tla::InterleaveOp, ::tla::DeInterleaveOp, ::tla::GatherOp,
-            scf::ForOp, scf::IfOp>(candidate);
+            ::tla::FullOp, scf::ForOp, scf::IfOp>(candidate);
     };
     if (hasHiFloat8 && !isMoveOnlyEncodingOp(op))
         return op.emitError("HiFloat8 arithmetic is unsupported; convert or bitcast the register explicitly");
@@ -5174,8 +5212,8 @@ static LogicalResult lowerNestedVectorOp(
             ::tla::CastOp, ::tla::BitCastOp, ::tla::LoadOp, ::tla::StoreOp, ::tla::LoadUpdateOp, ::tla::StoreUpdateOp,
             ::tla::LoadUnalignUpdateOp, ::tla::StoreUnalignUpdateOp, ::tla::LoadUnalignPreOp, ::tla::CreateUregOp,
             ::tla::StoreUnalignPostOp, ::tla::WhereOp, ::tla::InterleaveOp, ::tla::DeInterleaveOp, ::tla::GatherOp,
-            ::tla::BitwiseNotOp, ::tla::BitwiseAndOp, ::tla::BitwiseOrOp, ::tla::BitwiseXorOp, scf::ForOp, scf::IfOp>(
-            op))
+            ::tla::BitwiseNotOp, ::tla::BitwiseAndOp, ::tla::BitwiseOrOp, ::tla::BitwiseXorOp, ::tla::FullOp,
+            scf::ForOp, scf::IfOp>(op))
         return op.emitError(
             "Packed 4-bit pair arithmetic is unsupported; only bitwise, select and layout ops are allowed");
 

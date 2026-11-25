@@ -1,8 +1,7 @@
 // RUN: not %tla_compile %s -o - 2>&1 | %filecheck %s --check-prefix=CHECK-ERR
 //
-// Diagnostic: a runtime tla.full scalar must match the result element type
-// exactly (lowerFull rejects the mismatch; the frontend passes the SSA
-// through unchecked).
+// Diagnostic: a runtime tla.full scalar must be the result element type or its
+// broadcast carrier; the op verifier rejects anything else before lowering.
 
 !t = !tla.tensor<!tla.layout<!tla.shape<64>, !tla.stride<1>, !tla.shape<64>, RowMajor>, !tla.coord<0>, !tla.ptr<f32, ub, 4>>
 
@@ -31,5 +30,4 @@ module {
     return
   }
 }
-// CHECK-ERR: tla.full scalar type
-// CHECK-ERR: does not match vector element type
+// CHECK-ERR: 'tla.full' op scalar source type 'i32' is not a valid carrier for 'f32'

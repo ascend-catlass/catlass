@@ -32,7 +32,10 @@ Parameters:
 
 - `value` (`bool | int | float | Numeric | VectorSSA`): Fill constant, a
   runtime scalar SSA, or a one-lane vector fragment to broadcast. Required.
-- `dtype` (`type[Numeric]`): Vector element type. Required.
+- `dtype` (`type[Numeric]`): Vector element type. Required. Supported:
+  Bool, i8/u8, i16/u16, i32/u32, i64/u64, f16, bf16, f32, f8e4m3fn,
+  f8e5m2, f8e8m0, hif8, f4e2m1x2, f4e1m2x2. Complex has no TLA vector
+  type and is rejected.
 - `mask` (`MaskSSA | None`): Predicates which lanes are written. Optional;
   defaults to writing every lane.
 
@@ -41,8 +44,23 @@ Constraints:
 - Must be called inside a `@tla.kernel`-decorated kernel function.
 - Must be called inside `tla.vec.func(mode="simd")`; `value` must be a
   Python scalar literal, a host `Numeric`, a runtime scalar SSA (e.g. a
-  kernel scalar argument or a tensor element read; its type must match
-  `dtype`), or a one-lane vector fragment.
+  kernel scalar argument or a tensor element read), or a one-lane vector
+  fragment.
+- A runtime scalar must be the element type or its broadcast carrier:
+  Bool/hif8/e8m0/fp4x2 broadcast an i8 byte, unsigned broadcasts the
+  same-width signless integer, and every other type broadcasts itself.
+- `f4e2m1x2` / `f4e1m2x2` take one packed pair byte (low nibble first),
+  not two independent FP4 values. `hif8` takes an explicit encoded byte
+  (there is no host encoder). `f8e8m0` takes a power of two in
+  `[2**-127, 2**127]` (for example 0.5, 1.0 or 2.0).
+- A trace-time `f8e4m3fn` / `f8e5m2` scalar must be exactly
+  representable in the target format; the frontend rejects inexact
+  values rather than rounding them. Pass an already-rounded value
+  (for example 0.125), or a runtime scalar that was converted
+  explicitly.
+- 64-bit broadcasts lower through linked bitcode helpers. A 64-bit
+  fragment source needs a 64-bit reduction, which `tla.reduce` does not
+  support yet.
 - A vector `value` must have exactly one valid lane and its element type
   must match `dtype`.
 - `mask`, when given, must match the result element type.

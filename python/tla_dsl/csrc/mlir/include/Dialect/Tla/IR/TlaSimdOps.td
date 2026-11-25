@@ -62,14 +62,22 @@ def Tla_FullOp : Tla_Op<"full", [Pure]> {
     latter avoids materializing a scalar register, which the SIMD backend cannot
     read from a vector lane.
 
-    ``i1`` is not supported: the AVE ``broadcast`` op does not accept an ``i1``
-    source, so boolean fills must be built another way.
+    Element types follow AscendC ``Duplicate``: Bool, the 8/16/32/64-bit
+    integers, f16/bf16/f32, fp8 e4m3fn/e5m2, and the TLA byte-carried formats
+    hif8/e8m0/fp4x2. Bool, hif8, e8m0 and the packed fp4 pairs ride an ``i8``
+    carrier scalar; an unsigned element rides the same-width signless integer
+    (``arith.constant`` and the AVE scalar ABI reject ``ui*``). The scalar
+    source must be that carrier type. The packed fp4 formats take one
+    pre-encoded pair byte, not two independent 4-bit values.
 
     An optional ``mask`` predicates the broadcast: masked-out lanes are not
     written. It is passed through to the AVE broadcast op's lane mask; when
     absent an all-true mask is used.
   }];
-  let arguments = (ins AnyTypeOf<[I8, I16, I32, I64, BF16, F16, F32,
+  let arguments = (ins AnyTypeOf<[I1, AnyInteger, BF16, F16, F32,
+                                  F8E4M3FN, F8E5M2,
+                                  Tla_HiFloat8Type, Tla_Float8E8M0Type,
+                                  Tla_Float4E2M1x2Type, Tla_Float4E1M2x2Type,
                                   Tla_VectorSSAType]>:$value,
                        Optional<Tla_MaskSSAType>:$mask);
   let results = (outs Tla_VectorSSAType:$result);
