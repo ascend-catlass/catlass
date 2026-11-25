@@ -38,7 +38,7 @@
 //      ``t.ptr_with_coord`` reaches the same allocation as the raw-base window.
 //      Recognized mem ops: load/store (+UnAlign/Align UPDATE),
 //      ``tla.scalar_load`` / ``tla.scalar_store``, ``tla.copy`` (src/dst),
-//      ``tla.fill`` (dst). No user-addi heuristic.
+//      ``tla.fill`` and ``tla.scatter`` (dst). No user-addi heuristic.
 //      Store/load for-elim is skipped when the for body has another mem op on
 //      the same root (excluding this UPDATE's own same-direction chain).
 //      ``before=nullptr`` scans the whole for body.
@@ -483,6 +483,8 @@ static Value storeDestOf(Operation* op)
         return store.getDest();
     if (auto store = dyn_cast<::tla::ScalarStoreOp>(op))
         return store.getDest();
+    if (auto scatter = dyn_cast<::tla::ScatterOp>(op))
+        return scatter.getDst();
     return Value();
 }
 
