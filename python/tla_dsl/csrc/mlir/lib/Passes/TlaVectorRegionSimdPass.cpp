@@ -4179,6 +4179,26 @@ static LogicalResult lowerScatter(
     return success();
 }
 
+// tla.log mode=subnormal: vln treats subnormal inputs as zero, so the only
+// subnormal-preserving sequence is the software log with FTZ disabled. Call
+// the linked AIV bitcode helper instead of emitting ave.hir.vln.
+static LogicalResult lowerVectorLogSubnormal(
+    ::tla::LogOp logOp, Value operand, VectorType operandVecType, Value mask, OpBuilder& b, ModuleOp module,
+    DenseMap<Value, Value>& valueMap)
+{
+    Location loc = logOp.getLoc();
+    Type elementType = operandVecType.getElementType();
+    if (!elementType.isF16() && !elementType.isF32())
+        return logOp.emitError("tla.log subnormal mode requires f16 or f32, got ") << elementType, failure();
+
+    VectorType pregType = fullPregVecType(b.getContext());
+    Value preg = castMaskToPregType(b, loc, mask, pregType);
+    std::string calleeName = elementType.isF32() ? "log_subnormal_f32" : "log_subnormal_f16";
+    auto callee = getOrCreateInlineAivLibraryCall(module, loc, {operandVecType, pregType}, operandVecType, calleeName);
+    valueMap[logOp.getResult()] = b.create<func::CallOp>(loc, callee, ValueRange{operand, preg}).getResult(0);
+    return success();
+}
+
 static LogicalResult lowerVectorUnary(
     Operation& op, const VectorUnaryInfo* info, OpBuilder& b, ModuleOp module, DenseMap<Value, Value>& valueMap,
     AutoFullPredicateCache& fullMasks)
@@ -4217,6 +4237,12 @@ static LogicalResult lowerVectorUnary(
             return failure();
     } else {
         mask = allTrueMaskFor(fullMasks, loc, operandVecType, tlaOperandType);
+    }
+    // tla.log mode=subnormal: the FTZ path keeps the existing ave.hir.vln
+    // lowering; only the subnormal-preserving mode needs the bitcode helper.
+    if (auto logOp = dyn_cast<::tla::LogOp>(op)) {
+        if (auto algo = logOp.getLogAlgoAttr(); algo && algo.getValue() == LogAlgo::subnormal)
+            return lowerVectorLogSubnormal(logOp, operand, operandVecType, mask, b, module, valueMap);
     }
     Value result = createVectorUnaryResult(b, loc, info->kind, tlaOperandType, operandVecType, operand, mask);
     if (!result)

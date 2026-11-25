@@ -1009,6 +1009,12 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         "vector-pair-wise-op",
         [["end_to_end/pair_wise_op.py", "--batch-run", *dev]],
     )
+    # tla.log LogAlgo: Flush-To-Zero (existing vln) vs Subnormal (software
+    # path), both dtypes; script under python/tla_dsl/tests/end_to_end/.
+    yield (
+        "vector-log-algo",
+        [["end_to_end/log_algo.py", "--batch-run", *dev]],
+    )
     yield (
         "vector-load-store-scalar-after-reduction",
         [["dsl_tutorials/vector_simd_ops/load_and_store_scalar_after_reduction.py", *dev]],

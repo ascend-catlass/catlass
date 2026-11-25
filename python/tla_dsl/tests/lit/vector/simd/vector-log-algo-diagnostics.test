@@ -1,0 +1,12 @@
+// RUN: split-file %s %t
+// RUN: not %tla_compile %t/invalid-log-algo.mlir -o - 2>&1 | %filecheck %s --check-prefix=BAD_ALGO
+
+// BAD_ALGO: expected ::LogAlgo to be one of: flush_to_zero, subnormal
+
+//--- invalid-log-algo.mlir
+module {
+  func.func @bad_log_algo(%v: !tla.vector<64xf32>) {
+    %0 = "tla.log"(%v) {log_algo = #tla.log_algo<ftz>} : (!tla.vector<64xf32>) -> !tla.vector<64xf32>
+    return
+  }
+}

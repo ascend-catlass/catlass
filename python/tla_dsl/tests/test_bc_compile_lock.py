@@ -34,6 +34,7 @@ def fake_build(tmp_path: Path, monkeypatch):
         (stubs / subdir).mkdir(parents=True)
         (stubs / subdir / "dma.cpp").write_text("dma")
         (stubs / subdir / "system_counter.cpp").write_text("counter")
+    (stubs / "Vector" / "log.cpp").write_text("log")
     ccec = tmp_path / "ccec"
     ccec.write_bytes(b"test compiler")
     cfg = bc_compile.BCConfig(

@@ -565,3 +565,23 @@ def Tla_DcciTargetAttr : Tla_I32EnumAttr<"dcci_target", Tla_DcciTargetEnum> {
     Dcache domain selected by tla.arch.dcci_cachelines.
   }];
 }
+
+// Subnormal handling of tla.log, matching LogAlgo in catlass/params.py.
+// flush_to_zero (the default, and the only form when the attribute is absent)
+// keeps the existing ave.hir.vln lowering. subnormal selects the software
+// implementation through the linked AIV bitcode helper, because vln flushes
+// positive subnormal inputs.
+def Tla_LogAlgo_FlushToZero : I32EnumAttrCase<"flush_to_zero", 0>;
+def Tla_LogAlgo_Subnormal : I32EnumAttrCase<"subnormal", 1>;
+def Tla_LogAlgoEnum : Tla_I32Enum<
+    "LogAlgo", "Subnormal handling of tla.log.", [
+      Tla_LogAlgo_FlushToZero,
+      Tla_LogAlgo_Subnormal
+    ]>;
+def Tla_LogAlgoAttr : Tla_I32EnumAttr<"log_algo", Tla_LogAlgoEnum> {
+  let description = [{
+    Optional tla.log attribute. Absent or flush_to_zero keeps the existing
+    ave.hir.vln path; subnormal calls the linked AIV bitcode helper that runs
+    the software log with FTZ disabled.
+  }];
+}

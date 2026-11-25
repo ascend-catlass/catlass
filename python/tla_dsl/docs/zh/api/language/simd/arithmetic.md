@@ -61,13 +61,20 @@ vector 逐元素对数（需 f16/f32），或逐线程标量对数。
 函数原型：
 
 ```python
-tla.log(operand: VectorSSA | Numeric, *, mask: MaskSSA | None = None) -> VectorSSA | Numeric
+tla.log(operand: VectorSSA | Numeric, *, mask: MaskSSA | None = None, mode: LogAlgo = LogAlgo.FLUSH_TO_ZERO) -> VectorSSA | Numeric
 ```
 
 参数说明：
 
 - `operand`（`VectorSSA | Numeric`）：源 vector 寄存器，或浮点标量。必填。
 - `mask`（`MaskSSA | None`）：可选执行掩码；`None` 表示全有效。仅 vector 形态。可选，默认 `None`。
+- `mode`（`tla.params.LogAlgo`）：vector 形态的次正规数处理方式。
+  `tla.params.LogAlgo.FLUSH_TO_ZERO`（默认）沿用 AVE `vln` 路径：在
+  Ascend 950 上，f32 的 `vln` 会把正次正规输入（`0 < x < 2^-126`）按 0
+  处理并返回 `-inf`，而 f16 的 `vln` 路径本身就能正确计算正次正规输入；
+  两种模式下负输入均返回 NaN，`+/-0.0` 均返回 `-inf`。
+  `tla.params.LogAlgo.SUBNORMAL` 始终执行软件实现，两种 dtype 都能计算
+  正次正规输入。可选，默认 `tla.params.LogAlgo.FLUSH_TO_ZERO`。
 
 约束说明：
 
@@ -76,12 +83,15 @@ tla.log(operand: VectorSSA | Numeric, *, mask: MaskSSA | None = None) -> VectorS
 - 在 `tla.vec.func(mode="simt")` 区域内，标量操作数生成逐线程
   `tla.simt_log`；区域外标量形态会被拒绝，因为核内标量单元没有对数运算。
 - 标量形态仅支持浮点，且不接受 `mask`。
+- `mode=SUBNORMAL` 仅适用于 SIMD vector 形态：逐线程标量形态与
+  `tla.vec.func(mode="simt")` 都会拒绝。
 
 调用示例：
 
 ```python
 with tla.vec.func(mode="simd"):
     y = tla.log(x_reg)
+    z = tla.log(x_reg, mode=tla.params.LogAlgo.SUBNORMAL)
 ```
 
 ---

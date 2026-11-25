@@ -230,7 +230,11 @@ def _ccec_id(ccec: Path) -> str:
     return f"stat:{stat.st_size}:{stat.st_mtime_ns}"
 
 
-_CACHE_SOURCE_FILES = ("Cube/system_counter.cpp", "Vector/system_counter.cpp")
+_CACHE_SOURCE_FILES = (
+    "Cube/system_counter.cpp",
+    "Vector/log.cpp",
+    "Vector/system_counter.cpp",
+)
 
 
 def _bc_source_id(relative_paths: tuple[str, ...]) -> str:

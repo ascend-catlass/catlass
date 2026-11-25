@@ -63,13 +63,22 @@ Logarithm of a vector (requires f16/f32), or of a per-thread scalar.
 Prototype:
 
 ```python
-tla.log(operand: VectorSSA | Numeric, *, mask: MaskSSA | None = None) -> VectorSSA | Numeric
+tla.log(operand: VectorSSA | Numeric, *, mask: MaskSSA | None = None, mode: LogAlgo = LogAlgo.FLUSH_TO_ZERO) -> VectorSSA | Numeric
 ```
 
 Parameters:
 
 - `operand` (`VectorSSA | Numeric`): Source vector register, or a float scalar. Required.
 - `mask` (`MaskSSA | None`): Optional execution mask; `None` means all lanes enabled. Vector form only. Optional, default `None`.
+- `mode` (`tla.params.LogAlgo`): Subnormal handling of the vector
+  form. `tla.params.LogAlgo.FLUSH_TO_ZERO` (default) reuses the AVE
+  `vln` path: on Ascend 950 it flushes positive f32 subnormal inputs
+  (`0 < x < 2^-126`) to zero and returns `-inf`, while the f16 `vln`
+  path already computes positive subnormal inputs. Negative inputs
+  return NaN and `+/-0.0` returns `-inf` in both modes.
+  `tla.params.LogAlgo.SUBNORMAL` always runs the software sequence, so
+  positive subnormal inputs are computed for both dtypes.
+  Optional, default `tla.params.LogAlgo.FLUSH_TO_ZERO`.
 
 Constraints:
 
@@ -77,15 +86,18 @@ Constraints:
 - Must be called inside `tla.vec.func()`; element type must be f16/f32.
 - Inside a `tla.vec.func(mode="simt")` region a scalar operand emits the
   per-thread `tla.simt_log`; outside one the scalar form is rejected,
-  because the core's own scalar unit has no logarithm. Pass a `VectorSSA`
-  for the whole-vector form.
+  because the core's own scalar unit has no logarithm. Pass a
+  `VectorSSA` for the whole-vector form.
 - The scalar form is float-only and takes no `mask`.
+- `mode=SUBNORMAL` is available only for the SIMD vector form: the
+  per-thread scalar form and `tla.vec.func(mode="simt")` reject it.
 
 Example:
 
 ```python
 with tla.vec.func(mode="simd"):
     y = tla.log(x_reg)
+    z = tla.log(x_reg, mode=tla.params.LogAlgo.SUBNORMAL)
 ```
 
 ---

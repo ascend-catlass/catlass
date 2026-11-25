@@ -141,6 +141,24 @@ class ReduceMode(enum.Enum):
         return self.value
 
 
+class LogAlgo(enum.Enum):
+    """Subnormal handling of ``tla.log``.
+
+    ``FLUSH_TO_ZERO`` (default) reuses the AVE ``vln`` intrinsic: on Ascend 950
+    it flushes positive f32 subnormal inputs (``0 < x < 2^-126``) to zero,
+    while the f16 ``vln`` path already computes positive subnormal inputs.
+    ``SUBNORMAL`` keeps positive subnormal inputs by running a software
+    sequence around ``vln``, so the result no longer depends on the dtype's
+    ``vln`` behavior.
+    """
+
+    FLUSH_TO_ZERO = "flush_to_zero"  # reuse the existing AVE vln path
+    SUBNORMAL = "subnormal"  # keep subnormal inputs via the software sequence
+
+    def __str__(self) -> str:
+        return self.value
+
+
 @dataclass
 class CopyParams:
     """Marker annotation for base copy params."""

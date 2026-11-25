@@ -646,7 +646,29 @@ def Tla_ExpOp : Tla_VectorUnaryOp<"exp",
 
 def Tla_LogOp : Tla_VectorUnaryOp<"log",
     "Vector natural logarithm on VectorSSA values",
-    "Element-wise natural logarithm on VectorSSA values.">;
+    "Element-wise natural logarithm on VectorSSA values."> {
+  // Optional; absent means LogAlgo::flush_to_zero, which keeps the existing
+  // ave.hir.vln lowering. subnormal selects the software implementation
+  // through a linked AIV bitcode helper (f16/f32 only).
+  let arguments = (ins Tla_VectorSSAType:$operand,
+                       Optional<Tla_MaskSSAType>:$mask,
+                       OptionalAttr<Tla_LogAlgoAttr>:$log_algo);
+  let description = [{
+    Element-wise natural logarithm on VectorSSA values.
+
+    Optional ``log_algo`` selects subnormal handling. Absent or
+    ``flush_to_zero`` (the default) keeps the ``ave.hir.vln`` lowering: on
+    Ascend 950 it flushes positive f32 subnormal inputs (``0 < x < 2^-126``) to
+    zero, while the f16 ``vln`` path already computes positive subnormal
+    inputs. ``subnormal`` calls the linked AIV bitcode helper that runs the
+    software log with FTZ disabled (f16/f32 only), so positive subnormal
+    inputs are computed for both dtypes. The Python frontend spells this as
+    ``tla.log(..., mode=...)``.
+
+    An optional mask controls which lanes are computed; masked-out lanes are
+    undefined/zeroed.
+  }];
+}
 
 def Tla_SqrtOp : Tla_VectorUnaryOp<"sqrt",
     "Vector square root on VectorSSA values",

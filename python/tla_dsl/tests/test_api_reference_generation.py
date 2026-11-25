@@ -176,14 +176,23 @@ def test_scalar_aware_aliases_have_public_signatures() -> None:
 
     unary = generator._collect_unary_aliases(
         tree,
-        {"exp", "log", "sqrt", "abs", "neg"},
+        {"exp", "sqrt", "abs", "neg"},
         generator._unary_op_template(tree),
     )
-    for name in ("exp", "log", "sqrt", "abs"):
+    for name in ("exp", "sqrt", "abs"):
         assert unary[name].params[0].annotation == "VectorSSA | Numeric"
         assert unary[name].returns == "VectorSSA | Numeric"
     assert unary["neg"].params[0].annotation == "VectorSSA"
     assert unary["neg"].returns == "VectorSSA"
+
+    # tla.log is a documented function with its own mode parameter, not a
+    # scalar-aware alias.
+    log_entry = generator.parse_core_api(package_root / "catlass" / "core_api.py")[
+        "tla.log"
+    ]
+    assert [param.name for param in log_entry.params] == ["operand", "mask", "mode"]
+    assert log_entry.params[0].annotation == "VectorSSA | Numeric"
+    assert log_entry.returns == "VectorSSA | Numeric"
 
     binary = generator._collect_scalar_aware_binary_aliases(tree, {"max", "min"})
     assert set(binary) == {"max", "min"}
