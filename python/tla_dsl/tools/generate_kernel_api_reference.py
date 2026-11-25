@@ -512,7 +512,7 @@ DIRECTORY_SECTIONS: list[tuple[str, str]] = [
     ("Resource Management", "On-chip scratch allocation via `allocate`."),
     (
         "Debug APIs",
-        "In-kernel scalar / tensor debug printing.",
+        "In-kernel scalar / tensor debug printing and exception termination.",
     ),
     (
         "Scopes and Control Flow",

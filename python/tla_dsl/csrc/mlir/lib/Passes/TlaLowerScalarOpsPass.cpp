@@ -228,7 +228,7 @@ public:
     }
     StringRef getDescription() const override
     {
-        return "Lower TLA scalar conversion, cache maintenance, and AR operations";
+        return "Lower TLA scalar conversion, cache maintenance, AR and trap operations";
     }
 
     void getDependentDialects(DialectRegistry& registry) const override
@@ -339,6 +339,28 @@ public:
         module.walk([&](::tla::ArchDciOp op) { dciOps.push_back(op); });
         for (::tla::ArchDciOp op : dciOps) {
             if (failed(replaceWithHelperCall(op, "_mlir_ciface_tla_dci")))
+                return signalPassFailure();
+        }
+
+        // Trap on the scalar unit. TrapOp::verify rejects the op inside
+        // tla.vec.func, so every trap here is scalar code of a plain AIC/AIV
+        // function. The two placement guards below stay as a backstop: this
+        // `[aicore]` helper must never be emitted into an outlined vector
+        // helper or a SIMT per-thread function, where the scalar trap would run
+        // as vector code.
+        SmallVector<::tla::TrapOp, 4> traps;
+        module.walk([&](::tla::TrapOp op) { traps.push_back(op); });
+        for (::tla::TrapOp op : traps) {
+            func::FuncOp parentFunc = op->getParentOfType<func::FuncOp>();
+            if (!parentFunc)
+                return op.emitOpError("must be nested inside a kernel function"), signalPassFailure();
+            if (parentFunc->hasAttr(kHivmVectorFunctionAttrName) ||
+                parentFunc->hasAttr(hivm_regbaseintrins::kDavinciCallingConvAttrName))
+                return op.emitOpError("was not lowered by its vector region pass"), signalPassFailure();
+            std::optional<hivm::TFuncCoreType> coreType = getFunctionCoreType(parentFunc);
+            if (coreType != hivm::TFuncCoreType::AIC && coreType != hivm::TFuncCoreType::AIV)
+                return op.emitOpError("requires a split AIC or AIV function"), signalPassFailure();
+            if (failed(replaceWithHelperCall(op, "_mlir_ciface_tla_trap")))
                 return signalPassFailure();
         }
 

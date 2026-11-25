@@ -39,6 +39,25 @@ def Tla_DebugPrintOp : Tla_Op<"debug_print", [MemoryEffects<[MemWrite]>]> {
   let hasVerifier = 1;
 }
 
+def Tla_TrapOp : Tla_Op<"trap", [MemoryEffects<[MemWrite]>]> {
+  let summary = "Terminate the AI Core on the current execution unit";
+  let description = [{
+    Side-effecting marker for a device trap. On device the core stops with an
+    AI Core exception, the launch fails, and every output of the running kernel
+    is undefined. Legal in a plain kernel body and in ``tla.cube`` /
+    ``tla.vector`` on the scalar unit. It is rejected inside ``tla.vec.func``:
+    a vector function has no trap lowering yet, and the frontend reports the
+    placement at compile time instead of leaving it to a region pass.
+
+    Deliberately not a terminator and not marked ``noreturn``: ``Trap()`` is an
+    ordinary ``void`` call, code after it stays in the IR (dead at run time),
+    and no rewrite has to reason about an early exit. The write effect keeps it
+    from being dropped by DCE or merged by CSE.
+  }];
+  let assemblyFormat = [{ attr-dict }];
+  let hasVerifier = 1;
+}
+
 def Tla_CallExternOp : Tla_Op<"call_extern", [MemoryEffects<[MemRead, MemWrite]>]> {
   let summary = "Call a user-provided device function";
   let description = [{

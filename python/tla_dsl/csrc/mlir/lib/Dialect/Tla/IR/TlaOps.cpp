@@ -2800,6 +2800,17 @@ mlir::LogicalResult FlagOp::verify()
     return mlir::success();
 }
 
+// Trap terminates the core from scalar code. Inside tla.vec.func it has no
+// supported lowering, so reject it at the placement rather than fail later while
+// outlining the vector region. The message names the way out: the condition has
+// to be decided before the region is entered.
+mlir::LogicalResult TrapOp::verify()
+{
+    if (hasEnclosing<VecFuncOp>(getOperation()))
+        return emitOpError("requires scalar code outside tla.vec.func; hoist the check out of the region");
+    return mlir::success();
+}
+
 // Synchronization/mutex/barrier ops must live inside a tla.cube or tla.vector
 mlir::LogicalResult GetSystemCycleOp::verify()
 {

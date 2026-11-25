@@ -1,0 +1,34 @@
+// RUN: split-file %s %t
+// RUN: not %tla_compile %t/simd.mlir -o - 2>&1 | %filecheck %s --check-prefix=SIMD
+// RUN: not %tla_compile %t/simt.mlir -o - 2>&1 | %filecheck %s --check-prefix=SIMT
+
+// A trap inside a vector function has no supported lowering yet: the op verifier
+// rejects the placement where it is written, for both vector modes, and names the
+// way out.
+
+// SIMD: requires scalar code outside tla.vec.func; hoist the check out of the region
+// SIMT: requires scalar code outside tla.vec.func; hoist the check out of the region
+
+//--- simd.mlir
+module {
+  tla.func @simd_trap() {
+    "tla.vector"() ({
+      "tla.vec.func"() ({
+        tla.trap
+      }) {mode = "simd"} : () -> ()
+    }) : () -> ()
+    tla.return
+  }
+}
+
+//--- simt.mlir
+module {
+  tla.func @simt_trap() {
+    "tla.vector"() ({
+      "tla.vec.func"() ({
+        tla.trap
+      }) {mode = "simt", thread_block_dim = array<i64: 32, 1, 1>} : () -> ()
+    }) : () -> ()
+    tla.return
+  }
+}

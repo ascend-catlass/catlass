@@ -12,7 +12,7 @@ Do not edit manually. Update docstrings/Examples in catlass/core_api.py
 
 [Language Reference](index.md) | [API Quick Reference](../quick_reference.md)
 
-In-kernel scalar / tensor debug printing.
+In-kernel scalar / tensor debug printing and exception termination.
 
 ## `tla.print`
 
@@ -65,6 +65,49 @@ with tla.vector():
             tla.print("thread={} value={}", thread, source_gm[thread])
         if thread == 0:
             tla.print(source_gm, 8)
+```
+
+---
+
+## `tla.trap`
+
+**Source:** [`catlass.core_api.trap`](../../../../catlass/core_api.py)
+
+Description:
+
+Terminate the AI Core with a trap exception: on device the core stops
+and the kernel launch fails, and every output of the running kernel is
+undefined.
+
+Prototype:
+
+```python
+tla.trap() -> None
+```
+
+Parameters:
+
+- None.
+
+Constraints:
+
+- Call inside a `@tla.kernel` function: the kernel body itself (outside
+  any `tla.cube()` / `tla.vector()` region), or the scalar code inside
+  those regions (the AIC / AIV scalar units). Placement inside a SIMD or
+  SIMT `tla.vec.func` is rejected at compile time; that lowering is not
+  implemented yet, so hoist the check out of the region.
+- Call it only when the kernel must fail. `tla.trap` is unconditional and
+  does not return; code after it is unreachable at run time.
+- After a trap the stream and context are not recoverable. Exit the
+  process instead of reusing the stream or launching again.
+
+Example:
+
+```python
+with tla.vector():
+    divisor = src_gm[0]
+    if divisor == 0:
+        tla.trap()
 ```
 
 ---

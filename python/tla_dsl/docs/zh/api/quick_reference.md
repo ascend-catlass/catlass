@@ -122,3 +122,4 @@ nav_order: 5
 | [`tla.arch.clear_ar`](language/system.md#tlaarchclear_ar)、[`tla.arch.get_ar`](language/system.md#tlaarchget_ar) | 清零 AR 或读取矢量压缩记录的字节数。 | Kernel / Vector，仅 AIV。清零写在 `tla.vec.func(mode="simd")` 内或直接写在 `tla.vector()` 内；读取写在 `tla.vec.func` 外、产生计数的序列完成之后。 |
 | [`tla.TlaJitFunction.dump_mlir`](runtime/compile_launch.md#tlatlajitfunctiondump_mlir) | 返回前端 TLA IR，不构建或启动二进制。 | Host；类型样本规则与编译相同。 |
 | [`tla.print`](language/debug.md#tlaprint) | 打印标量、格式化字符串或 Tensor／寄存器前缀。 | Kernel / Cube 或 Vector，包括 `vec.func`。SIMD：标量／寄存器／UB；SIMT：标量／GM／UB。dtype、长度和同步规则见 API 说明。 |
+| [`tla.trap`](language/debug.md#tlatrap) | 以 trap 异常终止 AI Core，使 kernel 启动失败。 | Kernel / kernel 函数体本身、Cube 或 Vector 内的标量代码；`vec.func` 内不支持。无条件、不返回；输出未定义，stream／context 不可恢复，应退出进程。 |

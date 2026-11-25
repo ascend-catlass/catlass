@@ -5291,6 +5291,46 @@ print.__signature__ = _TlaPrintSignature(
 )
 
 
+@dsl_user_op
+def trap(*, loc: mlir_ir.Location | None = None) -> None:
+    """Directory: Debug APIs
+    Description:
+        Terminate the AI Core with a trap exception: on device the core stops
+        and the kernel launch fails, and every output of the running kernel is
+        undefined.
+
+        Parameters:
+        - None.
+
+        Constraints:
+        - Call inside a `@tla.kernel` function: the kernel body itself (outside
+          any `tla.cube()` / `tla.vector()` region), or the scalar code inside
+          those regions (the AIC / AIV scalar units). Placement inside a SIMD or
+          SIMT `tla.vec.func` is rejected at compile time; that lowering is not
+          implemented yet, so hoist the check out of the region.
+        - Call it only when the kernel must fail. `tla.trap` is unconditional and
+          does not return; code after it is unreachable at run time.
+        - After a trap the stream and context are not recoverable. Exit the
+          process instead of reusing the stream or launching again.
+
+        Example:
+        ```python
+        with tla.vector():
+            divisor = src_gm[0]
+            if divisor == 0:
+                tla.trap()
+        ```
+    """
+    api = "trap"
+    _require_frontend_state(api)
+    if _runtime._has_enclosing_region("vec.func"):
+        _op_error(
+            api,
+            "requires scalar code outside tla.vec.func; hoist the check out of the region",
+        )
+    _tla_ops_gen.trap(loc=loc)
+
+
 def _require_dtype(op_name: str, name: str, value: Any, position: int) -> None:
     if isinstance(value, mlir_ir.Type):
         return
@@ -15393,6 +15433,7 @@ _require_generated("wait_flag")
 _require_generated("pipe_barrier")
 _require_generated("prof_start")
 _require_generated("prof_end")
+_require_generated("trap")
 _require_generated("mutex")
 _require_generated("mutex_lock")
 _require_generated("mutex_unlock")
@@ -16009,6 +16050,7 @@ __all__ = [
     "make_tensor_like",
     "copy",
     "print",
+    "trap",
     "flag",
     "cross_flag",
     "cross_core_set_flag",

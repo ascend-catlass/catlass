@@ -14,7 +14,7 @@ Do not regenerate this file from a glossary.
 
 [语言参考](index.md) | [API 速查](../quick_reference.md)
 
-kernel 内标量 / tensor 调试打印。
+kernel 内标量 / tensor 调试打印与异常终止。
 
 ## `tla.print`
 
@@ -67,6 +67,47 @@ with tla.vector():
             tla.print("thread={} value={}", thread, source_gm[thread])
         if thread == 0:
             tla.print(source_gm, 8)
+```
+
+---
+
+## `tla.trap`
+
+**源码：** [`catlass.core_api.trap`](../../../../catlass/core_api.py)
+
+功能说明：
+
+以 trap 异常终止 AI Core：设备上核心停止、kernel 启动失败，该 kernel 的全部
+输出未定义。
+
+函数原型：
+
+```python
+tla.trap() -> None
+```
+
+参数说明：
+
+- 无。
+
+约束说明：
+
+- 须在 `@tla.kernel` 函数内调用：kernel 函数体本身（未包在 `tla.cube()` /
+  `tla.vector()` 内），或这两个区域内的标量代码（AIC / AIV 标量单元）。写在
+  SIMD / SIMT 的 `tla.vec.func` 内会在编译期被拒绝；`vec.func` 内的降级尚未支持，
+  当前请把判断移到区域外。
+- 仅在 kernel 必须失败时调用。`tla.trap` 无条件执行且不返回，其后的代码在
+  运行期不可达。
+- trap 之后 stream 与 context 不可恢复。应退出进程，不要复用 stream 或再次
+  launch。
+
+调用示例：
+
+```python
+with tla.vector():
+    divisor = src_gm[0]
+    if divisor == 0:
+        tla.trap()
 ```
 
 ---
