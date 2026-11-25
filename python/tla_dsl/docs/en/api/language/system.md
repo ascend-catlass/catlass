@@ -1173,6 +1173,228 @@ artifact(out, block_num=1, ub=64 * 1024)
 
 ---
 
+### `tla.arch.bcnt0`
+
+**Source:** [`catlass.core_api.arch_bcnt0`](../../../../catlass/core_api.py)
+
+Description:
+
+Count the `0` bits in the binary representation of a `UInt64` value.
+
+This is the scalar complement of `bcnt1`; together they count the bits
+of a 64-bit mask. It runs on the core's scalar unit and must be placed
+directly in a `tla.cube()` or `tla.vector()` region, outside
+`tla.vec.func`.
+
+Prototype:
+
+```python
+tla.arch.bcnt0(value: Any) -> Int64
+```
+
+Parameters:
+
+- `value`: a `UInt64` scalar, a non-negative Python `int` that fits
+  64 bits, or a runtime `UInt64` kernel scalar argument.
+
+Returns:
+
+- `Int64`: the number of `0` bits, in `[0, 64]`.
+
+Constraints:
+
+- Must be called inside a `@tla.kernel`-decorated kernel function.
+- Must be placed in a `tla.cube()` or `tla.vector()` region, outside
+  `tla.vec.func`.
+- Ascend 950 (3510) only.
+
+Example:
+
+```python
+with tla.vector():
+    zeros = tla.arch.bcnt0(mask)
+```
+
+---
+
+### `tla.arch.bcnt1`
+
+**Source:** [`catlass.core_api.arch_bcnt1`](../../../../catlass/core_api.py)
+
+Description:
+
+Count the `1` bits in the binary representation of a `UInt64` value.
+
+The result is the population count of the value. It runs on the core's
+scalar unit and must be placed directly in a `tla.cube()` or
+`tla.vector()` region, outside `tla.vec.func`.
+
+Prototype:
+
+```python
+tla.arch.bcnt1(value: Any) -> Int64
+```
+
+Parameters:
+
+- `value`: a `UInt64` scalar, a non-negative Python `int` can fit
+  64 bits, or a runtime `UInt64` kernel scalar argument.
+
+Returns:
+
+- `Int64`: the number of `1` bits, in `[0, 64]`.
+
+Constraints:
+
+- Must be called inside a `@tla.kernel`-decorated kernel function.
+- Must be placed in a `tla.cube()` or `tla.vector()` region, outside
+  `tla.vec.func`.
+- Ascend 950 (3510) only.
+
+Example:
+
+```python
+with tla.vector():
+    ones = tla.arch.bcnt1(mask)
+```
+
+---
+
+### `tla.arch.clz`
+
+**Source:** [`catlass.core_api.arch_clz`](../../../../catlass/core_api.py)
+
+Description:
+
+Count the leading `0` bits of a `UInt64` value, from the most
+significant bit down to the first `1`.
+
+A value of `0` has no `1` bit, so the query returns `64`. It runs on the
+core's scalar unit and must be placed directly in a `tla.cube()` or
+`tla.vector()` region, outside `tla.vec.func`.
+
+Prototype:
+
+```python
+tla.arch.clz(value: Any) -> Int64
+```
+
+Parameters:
+
+- `value`: a `UInt64` scalar, a non-negative Python `int` that fits
+  64 bits, or a runtime `UInt64` kernel scalar argument.
+
+Returns:
+
+- `Int64`: the leading zero count, in `[0, 64]`.
+
+Constraints:
+
+- Must be called inside a `@tla.kernel`-decorated kernel function.
+- Must be placed in a `tla.cube()` or `tla.vector()` region, outside
+  `tla.vec.func`.
+- Ascend 950 (3510) only.
+
+Example:
+
+```python
+with tla.cube():
+    zeros = tla.arch.clz(value)
+
+with tla.vector():
+    zeros = tla.arch.clz(value)
+```
+
+---
+
+### `tla.arch.sff0`
+
+**Source:** [`catlass.core_api.arch_sff0`](../../../../catlass/core_api.py)
+
+Description:
+
+Find the position of the first `0` bit of a `UInt64` value, starting
+from the least significant bit.
+
+A value whose bits are all `1` has no such bit, so the query returns
+`-1`. It runs on the core's scalar unit and must be placed directly in a
+`tla.cube()` or `tla.vector()` region, outside `tla.vec.func`.
+
+Prototype:
+
+```python
+tla.arch.sff0(value: Any) -> Int64
+```
+
+Parameters:
+
+- `value`: a `UInt64` scalar, a non-negative Python `int` that fits
+  64 bits, or a runtime `UInt64` kernel scalar argument.
+
+Returns:
+
+- `Int64`: the bit position, in `[0, 63]`, or `-1` if not found.
+
+Constraints:
+
+- Must be called inside a `@tla.kernel`-decorated kernel function.
+- Must be placed in a `tla.cube()` or `tla.vector()` region, outside
+  `tla.vec.func`.
+- Ascend 950 (3510) only.
+
+Example:
+
+```python
+with tla.vector():
+    pos = tla.arch.sff0(value)
+```
+
+---
+
+### `tla.arch.sff1`
+
+**Source:** [`catlass.core_api.arch_sff1`](../../../../catlass/core_api.py)
+
+Description:
+
+Find the position of the first `1` bit of a `UInt64` value, starting
+from the least significant bit.
+
+A value of `0` has no `1` bit, so the query returns `-1`. It runs on the
+core's scalar unit and must be placed directly in a `tla.cube()` or
+`tla.vector()` region, outside `tla.vec.func`.
+
+Prototype:
+
+```python
+tla.arch.sff1(value: Any) -> Int64
+```
+
+Parameters:
+
+- `value`: a `UInt64` scalar, a non-negative Python `int` that fits
+  64 bits, or a runtime `UInt64` kernel scalar argument.
+
+Returns:
+
+- `Int64`: the bit position, in `[0, 63]`, or `-1` if not found.
+
+Constraints:
+
+- Must be called inside a `@tla.kernel`-decorated kernel function.
+- Must be placed in a `tla.cube()` or `tla.vector()` region, outside
+  `tla.vec.func`.
+- Ascend 950 (3510) only.
+
+Example:
+
+```python
+with tla.vector():
+    pos = tla.arch.sff1(value)
+```
+
+---
+
 ## Instruction-Cache Prefetch
 
 Instruction-cache requests and status observations on Ascend 950.

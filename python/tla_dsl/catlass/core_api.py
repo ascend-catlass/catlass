@@ -1982,6 +1982,66 @@ def _is_bool_like_pad_operand(value: Any) -> bool:
     return False
 
 
+def _as_signless_i64_ssa(
+    value: mlir_ir.Value, *, what: str, loc: mlir_ir.Location | None = None
+) -> mlir_ir.Value:
+    """Bridge an integer SSA value to signless ``i64``.
+
+    Unsigned integers go uiN→iN via ``builtin.unrealized_conversion_cast`` then
+    ``arith.extui`` (or identity at width 64), never the signed ``arith.extsi``
+    path.
+    ``index`` is cast with ``arith.index_cast``. Rejects ``i1``; callers
+    that allow only one width should check ``IntegerType.width`` first.
+    """
+    i64_type = mlir_ir.IntegerType.get_signless(64)
+    if isinstance(value.type, mlir_ir.IndexType):
+        return mlir_ir.Operation.create(
+            "arith.index_cast",
+            operands=[value],
+            results=[i64_type],
+            loc=loc,
+        ).results[0]
+    if mlir_ir.IntegerType.isinstance(value.type):
+        int_type = mlir_ir.IntegerType(value.type)
+        if int_type.width == 1:
+            raise TypeError(
+                f"{what} must not be bool/tla.Bool/i1; "
+                "use a non-boolean integer (e.g. Int32/Int64)"
+            )
+        if int_type.is_unsigned:
+            # arith.* only accepts signless ints; uiN → iN via
+            # unrealized_conversion_cast (same pattern as debug print).
+            signless_n = mlir_ir.IntegerType.get_signless(int_type.width)
+            as_signless = mlir_ir.Operation.create(
+                "builtin.unrealized_conversion_cast",
+                operands=[value],
+                results=[signless_n],
+                loc=loc,
+            ).results[0]
+            if int_type.width == 64:
+                return as_signless
+            if int_type.width < 64:
+                return mlir_ir.Operation.create(
+                    "arith.extui",
+                    operands=[as_signless],
+                    results=[i64_type],
+                    loc=loc,
+                ).results[0]
+            raise TypeError(
+                f"{what} unsigned width {int_type.width} cannot widen to i64"
+            )
+        if int_type.width == 64:
+            return value
+        cast_name = "arith.extsi" if int_type.width < 64 else "arith.trunci"
+        return mlir_ir.Operation.create(
+            cast_name,
+            operands=[value],
+            results=[i64_type],
+            loc=loc,
+        ).results[0]
+    raise TypeError(f"{what} expected i64-like integer SSA, got {value.type}")
+
+
 def _as_i64_copy_pad_operand(
     value: Any, *, what: str, loc: mlir_ir.Location | None = None
 ) -> mlir_ir.Value:
@@ -1997,7 +2057,6 @@ def _as_i64_copy_pad_operand(
             "use a non-boolean integer (e.g. Int32/Int64)"
         )
     resolved = _resolve_bound_value(value)
-    i64_type = mlir_ir.IntegerType.get_signless(64)
     if isinstance(resolved, Numeric):
         dtype = type(resolved).dtype.lower()
         host = resolved.value
@@ -2029,57 +2088,74 @@ def _as_i64_copy_pad_operand(
             )
         resolved = resolved.ir_value(loc=loc)
     if isinstance(resolved, mlir_ir.Value):
-        if isinstance(resolved.type, mlir_ir.IndexType):
-            return mlir_ir.Operation.create(
-                "arith.index_cast",
-                operands=[resolved],
-                results=[i64_type],
-                loc=loc,
-            ).results[0]
-        if mlir_ir.IntegerType.isinstance(resolved.type):
-            int_type = mlir_ir.IntegerType(resolved.type)
-            if int_type.width == 1:
-                raise TypeError(
-                    f"CopyPadParams.{what} must not be bool/tla.Bool/i1; "
-                    "use a non-boolean integer (e.g. Int32/Int64)"
-                )
-            if int_type.is_unsigned:
-                # arith.* only accepts signless ints; uiN → iN via
-                # unrealized_conversion_cast (same pattern as debug print).
-                signless_n = mlir_ir.IntegerType.get_signless(int_type.width)
-                as_signless = mlir_ir.Operation.create(
-                    "builtin.unrealized_conversion_cast",
-                    operands=[resolved],
-                    results=[signless_n],
-                    loc=loc,
-                ).results[0]
-                if int_type.width == 64:
-                    return as_signless
-                if int_type.width < 64:
-                    return mlir_ir.Operation.create(
-                        "arith.extui",
-                        operands=[as_signless],
-                        results=[i64_type],
-                        loc=loc,
-                    ).results[0]
-                raise TypeError(
-                    f"CopyPadParams.{what} unsigned width {int_type.width} "
-                    "cannot widen to i64"
-                )
-            if int_type.width == 64:
-                return resolved
-            cast_name = "arith.extsi" if int_type.width < 64 else "arith.trunci"
-            return mlir_ir.Operation.create(
-                cast_name,
-                operands=[resolved],
-                results=[i64_type],
-                loc=loc,
-            ).results[0]
+        if isinstance(
+            resolved.type, mlir_ir.IndexType
+        ) or mlir_ir.IntegerType.isinstance(resolved.type):
+            return _as_signless_i64_ssa(resolved, what=f"CopyPadParams.{what}", loc=loc)
     if isinstance(resolved, int) and not isinstance(resolved, bool):
         return _const_i64(resolved, loc=loc)
     raise TypeError(
         f"CopyPadParams.{what} expected i64-like integer, got {type(value).__name__}"
     )
+
+
+def _u64_two_complement(value: int) -> int:
+    """Wrap an unsigned 64-bit value into the signless i64 constant domain."""
+    bits = value & ((1 << 64) - 1)
+    return bits - (1 << 64) if bits >= (1 << 63) else bits
+
+
+def _as_u64_bit_operand(name: str, value: Any, *, loc) -> mlir_ir.Value:
+    """Resolve a uint64 bit-query operand to a signless i64 SSA value.
+
+    Accepts a ``UInt64`` Numeric (host literal or SSA), a non-negative Python
+    ``int`` that fits 64 bits, or a runtime scalar argument proxy bound to a
+    64-bit unsigned SSA. ``bool`` / ``tla.Bool`` / ``i1`` and signed or narrower
+    integers are rejected: the query is only defined on a uint64 bit pattern.
+    """
+    if isinstance(value, bool):
+        _op_error(name, "value must be a UInt64 scalar, not bool")
+    if isinstance(value, int):
+        if not 0 <= value < (1 << 64):
+            _op_error(
+                name, "value must be a non-negative Python int that fits in 64 bits"
+            )
+        return _const_i64(_u64_two_complement(value), loc=loc)
+
+    # Only a non-numeric category is rejected here.
+    category = _category(value)
+    if category not in (None, "numeric"):
+        _op_error(name, f"value must be a UInt64 scalar, got {_type_name(value)}")
+    resolved = _resolve_bound_value(value)
+
+    if isinstance(resolved, Numeric):
+        if not isinstance(resolved, UInt64):
+            _op_error(
+                name,
+                "value must be a UInt64 scalar (64-bit unsigned integer), "
+                f"got {type(resolved).__name__}",
+            )
+        host = resolved.value
+        if isinstance(host, mlir_ir.Value):
+            ssa = resolved.ir_value(loc=loc)
+        elif isinstance(host, int) and not isinstance(host, bool):
+            if not 0 <= host < (1 << 64):
+                _op_error(name, "value must fit in 64 bits")
+            return _const_i64(_u64_two_complement(host), loc=loc)
+        else:
+            _op_error(name, "value must be a UInt64 scalar")
+    elif isinstance(resolved, mlir_ir.Value):
+        ssa = resolved
+    else:
+        _op_error(name, f"value must be a UInt64 scalar, got {_type_name(value)}")
+
+    # The bitcode helper takes uint64; bridge the unsigned SSA to signless i64
+    if not mlir_ir.IntegerType.isinstance(ssa.type):
+        _op_error(name, f"value must be a 64-bit unsigned integer, got {ssa.type}")
+    int_type = mlir_ir.IntegerType(ssa.type)
+    if int_type.width != 64 or not int_type.is_unsigned:
+        _op_error(name, f"value must be a 64-bit unsigned integer, got {ssa.type}")
+    return _as_signless_i64_ssa(ssa, what=name, loc=loc)
 
 
 def _coerce_inttoptr_address(
@@ -13584,11 +13660,7 @@ def _require_core_region(op_name: str) -> None:
     in_cube = _runtime._has_enclosing_region("cube")
     in_vector = _runtime._has_enclosing_region("vector")
     if not in_cube and not in_vector:
-        _op_error(
-            op_name,
-            "must be nested inside tla.cube() or tla.vector(), which is what "
-            "says whose dcache is maintained",
-        )
+        _op_error(op_name, "must be nested inside tla.cube() or tla.vector()")
     if in_cube and in_vector:
         _op_error(op_name, "mixed cube/vector placement is unsupported")
 
@@ -14958,6 +15030,188 @@ def arch_get_dyn_ub(
     return _Pointer(op.results[0])
 
 
+def _emit_arch_bit_op(name: str, mode: str, value: Any, *, loc) -> Int64:
+    _require_frontend_state(name)
+    _require_core_region(name)
+    operand = _as_u64_bit_operand(name, value, loc=loc)
+    result = _tla_ops_gen.scalar_bit_op(
+        mlir_ir.IntegerType.get_signless(64), operand, mode, loc=loc
+    )
+    return Int64(result)
+
+
+@dsl_user_op
+def arch_bcnt0(value: Any, *, loc: mlir_ir.Location | None = None) -> Int64:
+    """Directory: System Variable Access / Architecture Helpers
+    Description:
+        Count the `0` bits in the binary representation of a `UInt64` value.
+
+        This is the scalar complement of `bcnt1`; together they count the bits
+        of a 64-bit mask. It runs on the core's scalar unit and must be placed
+        directly in a `tla.cube()` or `tla.vector()` region, outside
+        `tla.vec.func`.
+
+        Parameters:
+        - `value`: a `UInt64` scalar, a non-negative Python `int` that fits
+          64 bits, or a runtime `UInt64` kernel scalar argument.
+
+        Returns:
+
+        - `Int64`: the number of `0` bits, in `[0, 64]`.
+
+        Constraints:
+        - Must be called inside a `@tla.kernel`-decorated kernel function.
+        - Must be placed in a `tla.cube()` or `tla.vector()` region, outside
+          `tla.vec.func`.
+        - Ascend 950 (3510) only.
+
+        Example:
+        ```python
+        with tla.vector():
+            zeros = tla.arch.bcnt0(mask)
+        ```
+    """
+    return _emit_arch_bit_op("arch.bcnt0", "bcnt0", value, loc=loc)
+
+
+@dsl_user_op
+def arch_bcnt1(value: Any, *, loc: mlir_ir.Location | None = None) -> Int64:
+    """Directory: System Variable Access / Architecture Helpers
+    Description:
+        Count the `1` bits in the binary representation of a `UInt64` value.
+
+        The result is the population count of the value. It runs on the core's
+        scalar unit and must be placed directly in a `tla.cube()` or
+        `tla.vector()` region, outside `tla.vec.func`.
+
+        Parameters:
+        - `value`: a `UInt64` scalar, a non-negative Python `int` can fit
+          64 bits, or a runtime `UInt64` kernel scalar argument.
+
+        Returns:
+
+        - `Int64`: the number of `1` bits, in `[0, 64]`.
+
+        Constraints:
+        - Must be called inside a `@tla.kernel`-decorated kernel function.
+        - Must be placed in a `tla.cube()` or `tla.vector()` region, outside
+          `tla.vec.func`.
+        - Ascend 950 (3510) only.
+
+        Example:
+        ```python
+        with tla.vector():
+            ones = tla.arch.bcnt1(mask)
+        ```
+    """
+    return _emit_arch_bit_op("arch.bcnt1", "bcnt1", value, loc=loc)
+
+
+@dsl_user_op
+def arch_clz(value: Any, *, loc: mlir_ir.Location | None = None) -> Int64:
+    """Directory: System Variable Access / Architecture Helpers
+    Description:
+        Count the leading `0` bits of a `UInt64` value, from the most
+        significant bit down to the first `1`.
+
+        A value of `0` has no `1` bit, so the query returns `64`. It runs on the
+        core's scalar unit and must be placed directly in a `tla.cube()` or
+        `tla.vector()` region, outside `tla.vec.func`.
+
+        Parameters:
+        - `value`: a `UInt64` scalar, a non-negative Python `int` that fits
+          64 bits, or a runtime `UInt64` kernel scalar argument.
+
+        Returns:
+
+        - `Int64`: the leading zero count, in `[0, 64]`.
+
+        Constraints:
+        - Must be called inside a `@tla.kernel`-decorated kernel function.
+        - Must be placed in a `tla.cube()` or `tla.vector()` region, outside
+          `tla.vec.func`.
+        - Ascend 950 (3510) only.
+
+        Example:
+        ```python
+        with tla.cube():
+            zeros = tla.arch.clz(value)
+
+        with tla.vector():
+            zeros = tla.arch.clz(value)
+        ```
+    """
+    return _emit_arch_bit_op("arch.clz", "clz", value, loc=loc)
+
+
+@dsl_user_op
+def arch_sff0(value: Any, *, loc: mlir_ir.Location | None = None) -> Int64:
+    """Directory: System Variable Access / Architecture Helpers
+    Description:
+        Find the position of the first `0` bit of a `UInt64` value, starting
+        from the least significant bit.
+
+        A value whose bits are all `1` has no such bit, so the query returns
+        `-1`. It runs on the core's scalar unit and must be placed directly in a
+        `tla.cube()` or `tla.vector()` region, outside `tla.vec.func`.
+
+        Parameters:
+        - `value`: a `UInt64` scalar, a non-negative Python `int` that fits
+          64 bits, or a runtime `UInt64` kernel scalar argument.
+
+        Returns:
+
+        - `Int64`: the bit position, in `[0, 63]`, or `-1` if not found.
+
+        Constraints:
+        - Must be called inside a `@tla.kernel`-decorated kernel function.
+        - Must be placed in a `tla.cube()` or `tla.vector()` region, outside
+          `tla.vec.func`.
+        - Ascend 950 (3510) only.
+
+        Example:
+        ```python
+        with tla.vector():
+            pos = tla.arch.sff0(value)
+        ```
+    """
+    return _emit_arch_bit_op("arch.sff0", "sff0", value, loc=loc)
+
+
+@dsl_user_op
+def arch_sff1(value: Any, *, loc: mlir_ir.Location | None = None) -> Int64:
+    """Directory: System Variable Access / Architecture Helpers
+    Description:
+        Find the position of the first `1` bit of a `UInt64` value, starting
+        from the least significant bit.
+
+        A value of `0` has no `1` bit, so the query returns `-1`. It runs on the
+        core's scalar unit and must be placed directly in a `tla.cube()` or
+        `tla.vector()` region, outside `tla.vec.func`.
+
+        Parameters:
+        - `value`: a `UInt64` scalar, a non-negative Python `int` that fits
+          64 bits, or a runtime `UInt64` kernel scalar argument.
+
+        Returns:
+
+        - `Int64`: the bit position, in `[0, 63]`, or `-1` if not found.
+
+        Constraints:
+        - Must be called inside a `@tla.kernel`-decorated kernel function.
+        - Must be placed in a `tla.cube()` or `tla.vector()` region, outside
+          `tla.vec.func`.
+        - Ascend 950 (3510) only.
+
+        Example:
+        ```python
+        with tla.vector():
+            pos = tla.arch.sff1(value)
+        ```
+    """
+    return _emit_arch_bit_op("arch.sff1", "sff1", value, loc=loc)
+
+
 @dsl_user_op
 def make_ptr(
     dtype: type[Numeric] | None,
@@ -15192,6 +15446,7 @@ _require_generated("arch_lane_idx")
 _require_generated("arch_activemask")
 _require_generated("arch_lanemask")
 _require_generated("arch_warp_reduce")
+_require_generated("scalar_bit_op")
 _require_generated("simt_add")
 _require_generated("simt_sub")
 _require_generated("simt_mul")
@@ -15218,6 +15473,11 @@ arch._set("dcci_cacheline", arch_dcci_cacheline)
 arch._set("dcci_cachelines", arch_dcci_cachelines)
 arch._set("dci", arch_dci)
 arch._set("load_bypass_dcache", arch_load_bypass_dcache)
+arch._set("bcnt0", arch_bcnt0)
+arch._set("bcnt1", arch_bcnt1)
+arch._set("clz", arch_clz)
+arch._set("sff0", arch_sff0)
+arch._set("sff1", arch_sff1)
 arch._set("block_idx", arch_block_idx)
 arch._set("sub_block_idx", arch_sub_block_idx)
 arch._set("block_num", arch_block_num)

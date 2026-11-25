@@ -3038,6 +3038,15 @@ mlir::LogicalResult ScalarRoundCastOp::verify()
     return emitOpError() << "an i32 result takes one of rn, ra, rd, ru, got \"" << getMode() << "\"";
 }
 
+mlir::LogicalResult ScalarBitOp::verify()
+{
+    static constexpr ::llvm::StringLiteral kModes[] = {"bcnt0", "bcnt1", "clz", "sff0", "sff1"};
+    for (::llvm::StringLiteral mode : kModes)
+        if (getMode() == mode)
+            return mlir::success();
+    return emitOpError() << "unsupported bit query \"" << getMode() << "\"";
+}
+
 mlir::LogicalResult SimtCmpOp::verify()
 {
     if (!isSupportedCmpMode(getMode()))

@@ -30,6 +30,7 @@
 # full_op.py, cast_multi.py, gather_op.py, shift_op.py).
 # python/tla_dsl/tests/end_to_end (fill_op.py: L1 constant fill).
 # python/tla_dsl/tests/end_to_end (fp4x2_bitwise_ops.py: packed FP4 pair bitwise ops).
+# python/tla_dsl/tests/end_to_end (u64_scalar_ops.py: uint64 bcnt0/bcnt1/clz/sff0/sff1).
 # examples/python/tla_dsl/dsl_tutorials/tensor_index (scalar_index_control_flow.py,
 # scalar_kernel_arg.py).
 # examples/python/tla_dsl/dsl_tutorials/debug_print (debug_print.py, debug_print_mixed.py,
@@ -161,6 +162,7 @@ SCALAR_ARG_ALIGNMENT_REL="dsl_tutorials/scalar_arg_alignment/scalar_arg_alignmen
 PRINT_TENSOR_REL="dsl_tutorials/print_tensor/print_tensor.py"
 FILL_OP_REL="tests/end_to_end/fill_op.py"
 FP4X2_BITWISE_OPS_REL="tests/end_to_end/fp4x2_bitwise_ops.py"
+U64_SCALAR_OPS_REL="tests/end_to_end/u64_scalar_ops.py"
 STREAMK_OPS_REL="tla/kernel/matmul/basic_mmad_streamk/basic_mmad_streamk.py"
 GROUPED_MATMUL_SLICEM_REL="tla/kernel/gmm/grouped_matmul_slice_m/grouped_matmul_slice_m.py"
 BATCHED_MATMUL_REL="tla/kernel/matmul/batched_matmul/batched_matmul.py"
@@ -262,6 +264,8 @@ Run end-to-end validation for:
     per-field scalar kernel args; constexpr + tensor + scalar fields)
   - fp4x2_bitwise_ops (fp4x2_bitwise_ops.py --batch-run: packed pair carriers,
     bitwise_and/or/xor/not and OR chains over partial tiles)
+  - u64_scalar_ops (u64_scalar_ops.py: uint64 bcnt0/bcnt1/clz/sff0/sff1 per op,
+    plus --batch-run with one block per query)
   - fill_op (fill_op.py: L1 fill for i16/u16/f16/bf16/i32/u32/f32,
     one nonzero pattern and one layout per dtype, covering zN/nZ in a strided region;
     requires DebugBus readback)
@@ -614,6 +618,10 @@ if [[ ! -f "${CATLASS_DSL_DIR}/${FILL_OP_REL}" ]]; then
 fi
 if [[ ! -f "${CATLASS_DSL_DIR}/${FP4X2_BITWISE_OPS_REL}" ]]; then
     echo "error: missing ${FP4X2_BITWISE_OPS_REL} under ${CATLASS_DSL_DIR}" >&2
+    exit 1
+fi
+if [[ ! -f "${CATLASS_DSL_DIR}/${U64_SCALAR_OPS_REL}" ]]; then
+    echo "error: missing ${U64_SCALAR_OPS_REL} under ${CATLASS_DSL_DIR}" >&2
     exit 1
 fi
 if [[ ! -f "${EXAMPLES_DIR}/${PRINT_TENSOR_REL}" ]]; then

@@ -122,6 +122,19 @@ static StringRef dataSyncBarrierUbcallee()
     return "_mlir_ciface_tla_data_sync_barrier_ub_aiv";
 }
 
+// tla.scalar_bit_op mode -> bitcode helper. All five queries take one uint64
+// and return int64, so only the mode has to be mapped.
+static StringRef scalarBitOpCallee(StringRef mode)
+{
+    return llvm::StringSwitch<StringRef>(mode)
+        .Case("bcnt0", "_mlir_ciface_bcnt0")
+        .Case("bcnt1", "_mlir_ciface_bcnt1")
+        .Case("clz", "_mlir_ciface_clz")
+        .Case("sff0", "_mlir_ciface_sff0")
+        .Case("sff1", "_mlir_ciface_sff1")
+        .Default(StringRef());
+}
+
 // tla.arch.dcci_cachelines target -> HIVM data cache kind. The op's verifier
 // rejects `ub`, so only the three domains the DSL exposes can reach this; HIVM
 // itself has the kind either way, which is why the guard below is a diagnostic
@@ -352,6 +365,19 @@ public:
             if (failed(requireAivPlacement(op)))
                 return signalPassFailure();
             if (failed(replaceWithHelperCall(op, "_mlir_ciface_tla_clear_ar", hivm::TFuncCoreType::AIV)))
+                return signalPassFailure();
+        }
+
+        SmallVector<::tla::ScalarBitOp, 8> bitOps;
+        module.walk([&](::tla::ScalarBitOp op) { bitOps.push_back(op); });
+        for (::tla::ScalarBitOp op : bitOps) {
+            StringRef callee = scalarBitOpCallee(op.getMode());
+            if (callee.empty()) {
+                // The verifier rejects any other mode; this guards hand-written IR.
+                op.emitOpError() << "unsupported bit query \"" << op.getMode() << "\"";
+                return signalPassFailure();
+            }
+            if (failed(replaceWithHelperCall(op, callee)))
                 return signalPassFailure();
         }
     }

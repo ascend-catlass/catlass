@@ -1109,6 +1109,204 @@ artifact(out, block_num=1, ub=64 * 1024)
 
 ---
 
+### `tla.arch.bcnt0`
+
+**源码：** [`catlass.core_api.arch_bcnt0`](../../../../catlass/core_api.py)
+
+功能说明：
+
+统计 `UInt64` 值二进制表示中 `0` 位的个数。
+
+它是 `bcnt1` 的标量补集：两者结合可用于统计 64 位掩码中的位数。该查询在核的标量单元上执行，须直接放置在 `tla.cube()` 或 `tla.vector()` 区域，且在 `tla.vec.func` 之外。
+
+函数原型：
+
+```python
+tla.arch.bcnt0(value: Any) -> Int64
+```
+
+参数说明：
+
+- `value`：`UInt64` 标量、可放入 64 位的非负 Python `int`，或运行时 `UInt64` kernel 标量入参。
+
+返回值：
+
+- `Int64`：`0` 位的个数，范围为 `[0, 64]`。
+
+约束：
+
+- 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
+- 须放置在 `tla.cube()` 或 `tla.vector()` 区域，且在 `tla.vec.func` 之外。
+- 仅支持 Ascend 950（3510）。
+
+示例：
+
+```python
+with tla.vector():
+    zeros = tla.arch.bcnt0(mask)
+```
+
+---
+
+### `tla.arch.bcnt1`
+
+**源码：** [`catlass.core_api.arch_bcnt1`](../../../../catlass/core_api.py)
+
+功能说明：
+
+统计 `UInt64` 值二进制表示中 `1` 位的个数。
+
+结果即该值的位数统计（population count）。该查询在核的标量单元上执行，须直接放置在 `tla.cube()` 或 `tla.vector()` 区域，且在 `tla.vec.func` 之外。
+
+函数原型：
+
+```python
+tla.arch.bcnt1(value: Any) -> Int64
+```
+
+参数说明：
+
+- `value`：`UInt64` 标量、可放入 64 位的非负 Python `int`，或运行时 `UInt64` kernel 标量入参。
+
+返回值：
+
+- `Int64`：`1` 位的个数，范围为 `[0, 64]`。
+
+约束：
+
+- 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
+- 须放置在 `tla.cube()` 或 `tla.vector()` 区域，且在 `tla.vec.func` 之外。
+- 仅支持 Ascend 950（3510）。
+
+示例：
+
+```python
+with tla.vector():
+    ones = tla.arch.bcnt1(mask)
+```
+
+---
+
+### `tla.arch.clz`
+
+**源码：** [`catlass.core_api.arch_clz`](../../../../catlass/core_api.py)
+
+功能说明：
+
+统计 `UInt64` 值的前导 `0` 位数，即从最高有效位到首个 `1` 位的 `0` 的个数。
+
+值为 `0` 时不存在 `1` 位，查询返回 `64`。该查询在核的标量单元上执行，须直接放置在 `tla.cube()` 或 `tla.vector()` 区域，且在 `tla.vec.func` 之外。
+
+函数原型：
+
+```python
+tla.arch.clz(value: Any) -> Int64
+```
+
+参数说明：
+
+- `value`：`UInt64` 标量、可放入 64 位的非负 Python `int`，或运行时 `UInt64` kernel 标量入参。
+
+返回值：
+
+- `Int64`：前导 `0` 的个数，范围为 `[0, 64]`。
+
+约束：
+
+- 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
+- 须放置在 `tla.cube()` 或 `tla.vector()` 区域，且在 `tla.vec.func` 之外。
+- 仅支持 Ascend 950（3510）。
+
+示例：
+
+```python
+with tla.cube():
+    zeros = tla.arch.clz(value)
+
+with tla.vector():
+    zeros = tla.arch.clz(value)
+```
+
+---
+
+### `tla.arch.sff0`
+
+**源码：** [`catlass.core_api.arch_sff0`](../../../../catlass/core_api.py)
+
+功能说明：
+
+从最低有效位开始，查找 `UInt64` 值中首个 `0` 位的位置。
+
+若所有位均为 `1`，则不存在该位，查询返回 `-1`。该查询在核的标量单元上执行，须直接放置在 `tla.cube()` 或 `tla.vector()` 区域，且在 `tla.vec.func` 之外。
+
+函数原型：
+
+```python
+tla.arch.sff0(value: Any) -> Int64
+```
+
+参数说明：
+
+- `value`：`UInt64` 标量、可放入 64 位的非负 Python `int`，或运行时 `UInt64` kernel 标量入参。
+
+返回值：
+
+- `Int64`：位位置，范围为 `[0, 63]`；未找到时返回 `-1`。
+
+约束：
+
+- 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
+- 须放置在 `tla.cube()` 或 `tla.vector()` 区域，且在 `tla.vec.func` 之外。
+- 仅支持 Ascend 950（3510）。
+
+示例：
+
+```python
+with tla.vector():
+    pos = tla.arch.sff0(value)
+```
+
+---
+
+### `tla.arch.sff1`
+
+**源码：** [`catlass.core_api.arch_sff1`](../../../../catlass/core_api.py)
+
+功能说明：
+
+从最低有效位开始，查找 `UInt64` 值中首个 `1` 位的位置。
+
+值为 `0` 时不存在 `1` 位，查询返回 `-1`。该查询在核的标量单元上执行，须直接放置在 `tla.cube()` 或 `tla.vector()` 区域，且在 `tla.vec.func` 之外。
+
+函数原型：
+
+```python
+tla.arch.sff1(value: Any) -> Int64
+```
+
+参数说明：
+
+- `value`：`UInt64` 标量、可放入 64 位的非负 Python `int`，或运行时 `UInt64` kernel 标量入参。
+
+返回值：
+
+- `Int64`：位位置，范围为 `[0, 63]`；未找到时返回 `-1`。
+
+约束：
+
+- 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
+- 须放置在 `tla.cube()` 或 `tla.vector()` 区域，且在 `tla.vec.func` 之外。
+- 仅支持 Ascend 950（3510）。
+
+示例：
+
+```python
+with tla.vector():
+    pos = tla.arch.sff1(value)
+```
+
+---
+
 ## Warp 函数
 
 `tla.arch` 上的 warp 内数据交换，仅适用于 SIMT 区域。

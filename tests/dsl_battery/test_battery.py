@@ -892,6 +892,14 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         [["end_to_end/warp_reduce.py", *dev]],
     )
 
+    # --- end_to_end: uint64 scalar bit queries ---
+    # Currently supported operators: bcnt0/bcnt1/clz/sff0/sff1, launched once
+    # per scope (vector and cube) with one block per operator.
+    yield (
+        "u64-scalar-ops-batch",
+        [["end_to_end/u64_scalar_ops.py", *dev, "--batch-run"]],
+    )
+
     # --- multi_core_splitk_matmul and tail_multi_core_splitk_matmul ---
     for script in ("multi_core_splitk_matmul.py", "tail_multi_core_splitk_matmul.py"):
         for m, n, k in MMAD_SHAPES + BIG_SHAPES:

@@ -7,7 +7,7 @@
 // plain kernel body.
 //
 // Lowered by TlaLowerScalarAccessPass (load/store) and TlaLowerScalarOpsPass
-// (round cast).
+// (round cast, uint64 bit queries).
 //
 // Included by Dialect/Tla/IR/Tla.td, the file mlir-tblgen is run on.
 //===----------------------------------------------------------------------===//
@@ -86,5 +86,33 @@ def Tla_ScalarRoundCastOp : Tla_Op<"scalar_round_cast", [Pure]> {
   let hasVerifier = 1;
   let assemblyFormat = [{
     $mode $source attr-dict `:` type($source) `to` type($result)
+  }];
+}
+
+def Tla_ScalarBitOp : Tla_Op<"scalar_bit_op", [Pure]> {
+  let summary = "Scalar uint64 bit-manipulation query";
+  let description = [{
+    Query the binary representation of a ``uint64`` scalar on the core's own
+    scalar unit. ``mode`` names the query:
+
+    - ``bcnt0`` / ``bcnt1``: number of ``0`` / ``1`` bits.
+    - ``clz``: number of leading zeros before the most significant ``1``; ``64``
+      when the input is ``0``.
+    - ``sff0`` / ``sff1``: position of the first ``0`` / ``1`` bit starting from
+      the least significant bit; ``-1`` when there is none.
+
+    The operand and result are signless ``i64``: the frontend's ``UInt64`` is
+    the ``uint64_t`` argument and the query counts/positions are returned as
+    ``int64``. Each mode is a single scalar instruction -- ``bcnt0`` / ``bcnt1``,
+    ``clz``, ``sff0`` / ``sff1`` -- reachable only through the meta-op bitcode.
+    The vector ``hivm.vbcnt.x`` / ``hivm.vcls.*`` ops are 32-lane operations, so
+    they cannot lower this 64-bit scalar query; ``tla-lower-scalar-ops``
+    therefore rewrites this into a call to ``_mlir_ciface_bcnt0`` and friends.
+  }];
+  let arguments = (ins I64:$value, StrAttr:$mode);
+  let results = (outs I64:$result);
+  let hasVerifier = 1;
+  let assemblyFormat = [{
+    $mode $value attr-dict `:` type($value) `to` type($result)
   }];
 }
