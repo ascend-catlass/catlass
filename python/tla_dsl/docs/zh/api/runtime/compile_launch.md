@@ -48,6 +48,7 @@ tla.compile(func: Any, *args: Any, **kwargs: Any) -> JitCompiledFunction
 
 约束说明：
 
+- 不支持多进程并发调用该接口，该接口仅支持由单个进程调用。多个进程共享缓存目录并并发编译同一 kernel 时，可能破坏编译产物并导致编译失败。
 - `func` 必须是 `@tla.kernel` 得到的 `TlaJitFunction`，或由 `@tla.jit __call__` 指出其 kernel 的类实例。
 - 从实例读到的 kernel 方法（`实例.kernel`）自带该实例作为 receiver，该实例排在编译类型样本的第 0 位，落进 kernel 的 `self` 参数。
 - 传入类实例时编译其 `@tla.jit __call__` 转发到的 kernel，因此类必须声明该 `__call__`。转发必须是 `self.<kernel>(...)` 形式的纯调用，并按自身参数顺序传参；其它形式的 `@tla.jit __call__` 函数体不支持。
@@ -106,6 +107,7 @@ TlaJitFunction.compile(*, type_args: Sequence[Any] | None = None, **kwargs: Any)
 
 约束说明：
 
+- 不支持多进程并发调用该接口，该接口仅支持由单个进程调用。多个进程共享缓存目录并并发编译同一 kernel 时，可能破坏编译产物并导致编译失败。
 - `type_args` 只作编译期类型样本，不必绑定 NPU 缓冲（`make_fake_tensor` 合法）。
 - 用 `options="--npu-arch 3510"` 指定芯片名；不支持的取值在编译时报错。
 

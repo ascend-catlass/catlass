@@ -68,6 +68,10 @@ Parameters:
 
 Constraints:
 
+- Concurrent calls from multiple processes are not supported.
+  Invoke this interface from a single process. Concurrent compilation
+  of the same kernel in a shared cache directory can corrupt
+  compilation artifacts and cause compilation failures.
 - `func` must be a `@tla.kernel` `TlaJitFunction`, or an instance of a
   class that declares one.
 - A kernel read off an instance (`instance.kernel`) carries that instance
@@ -137,6 +141,10 @@ Parameters:
 
 Constraints:
 
+- Concurrent calls from multiple processes are not supported.
+  Invoke this interface from a single process. Concurrent compilation
+  of the same kernel in a shared cache directory can corrupt
+  compilation artifacts and cause compilation failures.
 - `type_args` are compile-time type samples; they need not be bound NPU
   buffers (`make_fake_tensor` is valid).
 - Pass the public chip name with `options="--npu-arch 3510"`;

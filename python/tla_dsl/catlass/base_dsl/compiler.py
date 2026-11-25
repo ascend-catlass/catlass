@@ -137,6 +137,10 @@ class CompileCallable:
               here.
 
             Constraints:
+            - Concurrent calls from multiple processes are not supported.
+              Invoke this interface from a single process. Concurrent compilation
+              of the same kernel in a shared cache directory can corrupt
+              compilation artifacts and cause compilation failures.
             - `func` must be a `@tla.kernel` `TlaJitFunction`, or an instance of a
               class that declares one.
             - A kernel read off an instance (`instance.kernel`) carries that instance
