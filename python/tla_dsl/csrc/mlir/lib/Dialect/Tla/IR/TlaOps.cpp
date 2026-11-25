@@ -851,6 +851,23 @@ static constexpr int64_t kMaxSimtThreadsPerBlock = 2048;
 // field's index: the hardware keeps its low 5 bits and discards the rest.
 static constexpr int64_t kWarpSize = 32;
 
+mlir::LogicalResult ArchLoadBypassDcacheOp::verify()
+{
+    auto* op = getOperation();
+    bool inCube = hasEnclosing<CubeOp>(op);
+    bool inVector = hasEnclosing<VectorOp>(op);
+    if (!inCube && !inVector && !isInLoweredFunc(op))
+        return op->emitOpError("must be nested inside a tla.cube or tla.vector region");
+    if (inCube && inVector)
+        return op->emitOpError("mixed cube/vector placement is unsupported");
+    if (hasEnclosing<VecFuncOp>(op))
+        return op->emitOpError("requires scalar core code outside tla.vec.func");
+    auto resultType = mlir::cast<mlir::IntegerType>(getResult().getType());
+    if (!llvm::is_contained(llvm::ArrayRef<unsigned>{8, 16, 32, 64}, resultType.getWidth()))
+        return emitOpError("result must be an 8-, 16-, 32-, or 64-bit integer");
+    return mlir::success();
+}
+
 mlir::LogicalResult ArchDcachePrefetchOp::verify()
 {
     if (mlir::cast<PtrType>(getAddress().getType()).getAddrspace() != AddressSpace::gm)

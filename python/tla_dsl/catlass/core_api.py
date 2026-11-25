@@ -13229,6 +13229,102 @@ def arch_dci(*, loc: mlir_ir.Location | None = None) -> None:
     _tla_ops_gen.arch_dci(loc=loc)
 
 
+def _bypass_load_alignment(pointer: _Pointer) -> int:
+    """Conservatively check the alignment of a pointer used by a bypass load."""
+    alignment = pointer.alignment
+    constant_byte_offset = 0
+    value = pointer.value
+    while not isinstance(value.owner, mlir_ir.Block):
+        producer = value.owner
+        if producer.name == "tla.recast_ptr":
+            value = _as_value(producer.operands[0])
+            continue
+        if producer.name != "tla.ptr_add":
+            break
+        value = _as_value(producer.operands[0])
+        offset = producer.operands[1]
+        pointee = PtrType(value.type).pointee
+        element_bytes = _builtins.max(1, Numeric.from_mlir_type(pointee).width // 8)
+        if (
+            not isinstance(offset.owner, mlir_ir.Block)
+            and offset.owner.name == "arith.index_cast"
+        ):
+            offset = offset.owner.operands[0]
+        offset_producer = offset.owner
+        if (
+            not isinstance(offset_producer, mlir_ir.Block)
+            and offset_producer.name == "arith.constant"
+        ):
+            constant_byte_offset += (
+                element_bytes
+                * mlir_ir.IntegerAttr(offset_producer.attributes["value"]).value
+            )
+        else:
+            alignment = math.gcd(alignment, element_bytes)
+    return math.gcd(alignment, constant_byte_offset)
+
+
+@dsl_user_op
+def arch_load_bypass_dcache(
+    ptr: Pointer, *, loc: mlir_ir.Location | None = None
+) -> Numeric:
+    """Directory: System Variable Access / Architecture Helpers
+
+    Description:
+        Read one GM integer scalar while bypassing DCache. Each call performs
+        a separate read.
+
+    Parameters:
+        - `ptr` (`Pointer`): GM pointer to a signed or unsigned 8-, 16-,
+          32-, or 64-bit integer. Required.
+
+    Returns:
+
+    - `Numeric`: Scalar with the same type as the pointee.
+
+    Constraints:
+        - On Ascend 950, call inside `tla.cube()` or `tla.vector()` and outside
+          `tla.vec.func()`.
+        - The pointer must refer to a valid GM element and be naturally aligned
+          for its pointee type.
+
+    Example:
+        ```python
+        @tla.kernel
+        def read_first(src: tla.Tensor, dst: tla.Tensor):
+            with tla.cube():
+                dst[0] = tla.arch.load_bypass_dcache(src.ptr)
+        ```
+    """
+    name = "arch.load_bypass_dcache"
+    _require_frontend_state(name)
+    if not (
+        _runtime._has_enclosing_region("cube")
+        or _runtime._has_enclosing_region("vector")
+    ):
+        _op_error(name, "must be nested inside tla.cube() or tla.vector()")
+    _require_core_region(name)
+    _require_category(name, "ptr", ptr, "pointer", 0)
+    pointer = _coerce_pointer_arg(ptr)
+    if pointer.addrspace != AddressSpace.gm:
+        _op_error(name, "ptr must point to GM")
+    pointee = pointer.pointee
+    if not isinstance(pointee, mlir_ir.IntegerType) or pointee.width not in (
+        8,
+        16,
+        32,
+        64,
+    ):
+        _op_error(name, "ptr must point to an 8-, 16-, 32-, or 64-bit integer")
+    if _bypass_load_alignment(pointer) < pointee.width // 8:
+        _op_error(name, "ptr must be naturally aligned for its pointee type")
+    byte_address = _tla_ops_gen.ptrtoint(
+        mlir_ir.IntegerType.get_signless(64), pointer.value, loc=loc
+    )
+    result = _tla_ops_gen.arch_load_bypass_dcache(pointee, byte_address, loc=loc)
+    return Numeric.from_mlir_type(pointee)(result)
+
+
 @dsl_user_op
 def arch_warpsize(*, loc: mlir_ir.Location | None = None) -> Int32:
     """Directory: System Variable Access / Architecture Helpers
@@ -14503,6 +14599,7 @@ _require_generated("arch_dcci_cachelines")
 _require_generated("arch_dci")
 _require_generated("arch_get_ar")
 _require_generated("arch_clear_ar")
+_require_generated("arch_load_bypass_dcache")
 _require_generated("inttoptr")
 _require_generated("recast_ptr")
 
@@ -14511,6 +14608,7 @@ arch._set("dcache_prefetch", arch_dcache_prefetch)
 arch._set("dcci_cacheline", arch_dcci_cacheline)
 arch._set("dcci_cachelines", arch_dcci_cachelines)
 arch._set("dci", arch_dci)
+arch._set("load_bypass_dcache", arch_load_bypass_dcache)
 arch._set("block_idx", arch_block_idx)
 arch._set("sub_block_idx", arch_sub_block_idx)
 arch._set("block_num", arch_block_num)

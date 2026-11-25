@@ -36,6 +36,7 @@ def test_generated_comparison_keeps_mask_outside_the_mode_table() -> None:
         ("language/data_movement.md", "tla.Tensor.__getitem__"),
         ("language/system.md", "tla.arch.thread_idx"),
         ("language/system.md", "tla.arch.thread_block_dim"),
+        ("language/system.md", "tla.arch.load_bypass_dcache"),
     ],
 )
 def test_generated_reference_separates_return_lists(

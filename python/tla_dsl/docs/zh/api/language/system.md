@@ -362,6 +362,44 @@ tla.arch.dci() -> None
 
 ---
 
+### `tla.arch.load_bypass_dcache`
+
+**源码：** [`catlass.core_api.arch_load_bypass_dcache`](../../../../catlass/core_api.py)
+
+功能说明：
+
+绕过 DCache，从 GM 读取一个整数标量。每次调用执行一次独立读取。
+
+函数原型：
+
+```python
+tla.arch.load_bypass_dcache(ptr: Pointer) -> Numeric
+```
+
+参数说明：
+
+- `ptr`（`Pointer`）：指向 GM 中 8、16、32 或 64 位有符号或无符号整数的指针。必填。
+
+返回值：
+
+- `Numeric`：类型与指针所指元素一致的标量。
+
+约束：
+
+- 在 Ascend 950 上，须在 `tla.cube()` 或 `tla.vector()` 内调用，并位于 `tla.vec.func()` 外。
+- 指针须指向有效的 GM 元素，地址须按元素类型自然对齐。
+
+示例：
+
+```python
+@tla.kernel
+def read_first(src: tla.Tensor, dst: tla.Tensor):
+    with tla.cube():
+        dst[0] = tla.arch.load_bypass_dcache(src.ptr)
+```
+
+---
+
 ### `tla.arch.warpsize`
 
 **源码：** [`catlass.core_api.arch_warpsize`](../../../../catlass/core_api.py)

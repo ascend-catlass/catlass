@@ -874,6 +874,7 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         "tla/kernel/system_counter/system_counter.py", *dev,
         "--passes", "0", "32", "256", "--warmup", "1", "--samples", "2",
     ]]
+    yield "gm-bypass-dcache", [["end_to_end/gm_bypass_dcache.py", *dev]]
     yield (
         "simt-warp-activemask",
         [["end_to_end/warp_activemask.py", *dev]],

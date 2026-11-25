@@ -229,6 +229,23 @@ public:
                 return signalPassFailure();
         }
 
+        SmallVector<::tla::ArchLoadBypassDcacheOp, 8> bypassLoads;
+        module.walk([&](::tla::ArchLoadBypassDcacheOp op) { bypassLoads.push_back(op); });
+        for (::tla::ArchLoadBypassDcacheOp op : bypassLoads) {
+            OpBuilder builder(op);
+            Location loc = op.getLoc();
+            auto pointerType =
+                LLVM::LLVMPointerType::get(builder.getContext(), static_cast<unsigned>(hivm::AddressSpace::GM));
+            Value pointer = builder.create<LLVM::IntToPtrOp>(loc, pointerType, op.getAddress());
+            auto resultType = cast<IntegerType>(op.getResult().getType());
+            auto signlessType = builder.getIntegerType(resultType.getWidth());
+            Value result = builder.create<hivm::LoadScalarOp>(loc, signlessType, pointer);
+            if (resultType != signlessType)
+                result = builder.create<UnrealizedConversionCastOp>(loc, resultType, result).getResult(0);
+            op.getResult().replaceAllUsesWith(result);
+            op.erase();
+        }
+
         SmallVector<::tla::ArchDcciCachelineOp, 8> cachelines;
         module.walk([&](::tla::ArchDcciCachelineOp op) { cachelines.push_back(op); });
         for (::tla::ArchDcciCachelineOp op : cachelines) {

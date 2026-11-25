@@ -397,6 +397,48 @@ Example:
 
 ---
 
+### `tla.arch.load_bypass_dcache`
+
+**Source:** [`catlass.core_api.arch_load_bypass_dcache`](../../../../catlass/core_api.py)
+
+Description:
+
+Read one GM integer scalar while bypassing DCache. Each call performs
+a separate read.
+
+Prototype:
+
+```python
+tla.arch.load_bypass_dcache(ptr: Pointer) -> Numeric
+```
+
+Parameters:
+
+- `ptr` (`Pointer`): GM pointer to a signed or unsigned 8-, 16-,
+      32-, or 64-bit integer. Required.
+
+Returns:
+
+- `Numeric`: Scalar with the same type as the pointee.
+
+Constraints:
+
+- On Ascend 950, call inside `tla.cube()` or `tla.vector()` and outside
+  `tla.vec.func()`.
+- The pointer must refer to a valid GM element and be naturally aligned
+  for its pointee type.
+
+Example:
+
+```python
+@tla.kernel
+def read_first(src: tla.Tensor, dst: tla.Tensor):
+    with tla.cube():
+        dst[0] = tla.arch.load_bypass_dcache(src.ptr)
+```
+
+---
+
 ### `tla.arch.warpsize`
 
 **Source:** [`catlass.core_api.arch_warpsize`](../../../../catlass/core_api.py)

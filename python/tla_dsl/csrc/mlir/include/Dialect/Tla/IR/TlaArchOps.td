@@ -223,6 +223,16 @@ def Tla_ArchDcachePrefetchOp : Tla_Op<"arch.dcache_prefetch", [MemoryEffects<[Me
 }
 
 // Cache maintenance changes the issuing scalar core's cache state.
+// A bypass read is observable even when its result is unused or the same
+// address is read twice. Leave its effects unknown to prevent DCE and CSE.
+def Tla_ArchLoadBypassDcacheOp : Tla_Op<"arch.load_bypass_dcache", []> {
+  let summary = "Read one integer from GM through the DCache bypass path";
+  let arguments = (ins I64:$address);
+  let results = (outs AnyInteger:$result);
+  let assemblyFormat = "$address attr-dict `:` type($result)";
+  let hasVerifier = 1;
+}
+
 def Tla_ArchDcciCachelineOp : Tla_Op<"arch.dcci_cacheline", [MemoryEffects<[MemRead, MemWrite]>]> {
   let summary = "Clean and invalidate the one dcache line holding an address";
   let description = [{
