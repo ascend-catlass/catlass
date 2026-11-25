@@ -10978,7 +10978,8 @@ def _emit_vector_unary(
     _require_frontend_state(op_name)
     _runtime._require_enclosing_region(op_name, "vec.func")
     operand_value = _as_value(operand)
-    element_type = _vector_ssa_type_for_mlir_value(operand_value).element_type
+    operand_desc = _vector_ssa_type_for_mlir_value(operand_value)
+    element_type = operand_desc.element_type
     if is_bool_element_type(element_type):
         _op_error(
             op_name,
@@ -10990,6 +10991,13 @@ def _emit_vector_unary(
                 op_name,
                 f"tla.{op_name} requires f16 or f32 element type, got {element_type}",
             )
+    elif op_name == "relu":
+        if element_type not in ("f16", "f32", "i32", "i64"):
+            _op_error(
+                op_name, f"requires f16, f32, i32, or i64 elements, got {element_type}"
+            )
+        if element_type == "i64" and operand_desc.valid_lanes != 32:
+            _op_error(op_name, "Int64 requires a full 32-lane vector register")
     elif op_name in {"abs", "neg"} and element_type not in _ABS_ELEMENT_TYPES:
         _op_error(
             op_name,
@@ -12125,6 +12133,146 @@ def mul(
         mask=mask,
         loc=loc,
         commutative=True,
+    )
+
+
+@dsl_user_op
+def relu(
+    src: VectorSSA,
+    *,
+    mask: MaskSSA | None = None,
+    loc: mlir_ir.Location | None = None,
+) -> VectorSSA:
+    """Directory: SIMD Vector Compute / Basic Arithmetic
+
+    Description:
+        Compute ReLU per lane and return a vector of the same type as `src`.
+        FP16, FP32, and Int32 use the native VRELU instruction.
+        Int64 uses a signed 64-bit maximum with zero.
+
+        Parameters:
+        - `src` (`VectorSSA`): FP16, FP32, Int32, or Int64 input register. Required.
+        - `mask` (`MaskSSA | None`): Execution mask in the source lane
+          domain. Defaults to `None`, which enables all physical lanes.
+          Masked-off lanes are zeroed.
+
+        Constraints:
+        - Call inside a `@tla.kernel` and `tla.vec.func(mode="simd")`.
+        - Use a 128-lane mask for FP16, a 64-lane mask for FP32 or Int32,
+          or a 32-lane mask for Int64. Int64 requires a full 32-lane
+          source register. Use a mask to limit execution on partial inputs.
+
+        Example:
+        ```python
+        with tla.vec.func(mode="simd"):
+            y = tla.relu(x, mask=mask)
+        ```
+    """
+    _runtime._require_kernel_simd_region("relu")
+    return _emit_vector_unary("relu", _tla_ops_gen.relu, src, mask=mask, loc=loc)
+
+
+@dsl_user_op
+def prelu(
+    src: VectorSSA,
+    slope: VectorSSA,
+    *,
+    mask: MaskSSA | None = None,
+    loc: mlir_ir.Location | None = None,
+) -> VectorSSA:
+    """Directory: SIMD Vector Compute / Basic Arithmetic
+
+    Description:
+        Apply PReLU per lane using the native VPRELU instruction. Positive
+        values and `+0.0` pass through. Negative values and `-0.0` are
+        multiplied by the corresponding slope. A slope of `+inf` produces
+        `NaN` for `-0.0`.
+
+        Parameters:
+        - `src` (`VectorSSA`): FP16 or FP32 input register. Required.
+        - `slope` (`VectorSSA`): Per-lane slopes with the same element type
+          as `src`. Required.
+        - `mask` (`MaskSSA | None`): Execution mask in the source lane
+          domain. Defaults to `None`, which enables all physical lanes.
+          Masked-off lanes are zeroed.
+
+        Constraints:
+        - Call inside a `@tla.kernel` and `tla.vec.func(mode="simd")`.
+        - The result has the same type as `src`. Use a 128-lane mask for FP16
+          or a 64-lane mask for FP32. For partial inputs, use a mask that
+          enables only valid lanes in both input registers.
+
+        Example:
+        ```python
+        with tla.vec.func(mode="simd"):
+            y = tla.prelu(x, slopes, mask=mask)
+        ```
+    """
+    _runtime._require_kernel_simd_region("prelu")
+    _require_category("prelu", "src", src, "vector_ssa", 0)
+    element_type = _vector_ssa_type_for_mlir_value(_as_value(src)).element_type
+    if element_type not in ("f16", "f32"):
+        _op_error("prelu", "src must have Float16 or Float32 elements")
+    return _emit_vector_binary(
+        "prelu", _tla_ops_gen.prelu, src, slope, mask=mask, loc=loc
+    )
+
+
+@dsl_user_op
+def leaky_relu(
+    src: VectorSSA,
+    slope: Float16 | Float32 | float,
+    *,
+    mask: MaskSSA | None = None,
+    loc: mlir_ir.Location | None = None,
+) -> VectorSSA:
+    """Directory: SIMD Vector Compute / Basic Arithmetic
+
+    Description:
+        Apply Leaky ReLU per lane using the native VLRELU instruction.
+        Positive values and `+0.0` pass through. Negative values and `-0.0`
+        are multiplied by the shared scalar slope. A slope of `+inf`
+        produces `NaN` for `-0.0`.
+
+        Parameters:
+        - `src` (`VectorSSA`): FP16 or FP32 input register. Required.
+        - `slope` (`Float16 | Float32 | float`): Shared scalar slope. A typed
+          slope must match the element type of `src`. A Python `float` literal
+          is materialized in the element type of `src`. Required.
+        - `mask` (`MaskSSA | None`): Execution mask in the source lane
+          domain. Defaults to `None`, which enables all physical lanes.
+          Masked-off lanes are zeroed.
+
+        Constraints:
+        - Call inside a `@tla.kernel` and `tla.vec.func(mode="simd")`.
+        - The result has the same type as `src`. Use a 128-lane mask for FP16
+          or a 64-lane mask for FP32. For partial inputs, use a mask that
+          enables only valid source lanes.
+
+        Example:
+        ```python
+        with tla.vec.func(mode="simd"):
+            y = tla.leaky_relu(x, 0.25, mask=mask)
+        ```
+    """
+    _runtime._require_kernel_simd_region("leaky_relu")
+    _require_category("leaky_relu", "src", src, "vector_ssa", 0)
+    element_type = _vector_ssa_type_for_mlir_value(_as_value(src)).element_type
+    if element_type not in ("f16", "f32"):
+        _op_error("leaky_relu", "src must have Float16 or Float32 elements")
+    resolved_slope = _resolve_bound_value(slope)
+    slope_num = _as_vector_scalar_numeric(resolved_slope)
+    if not isinstance(slope_num, (Float16, Float32)):
+        _op_error(
+            "leaky_relu", "slope must be a Float16 or Float32 scalar or a Python float"
+        )
+    if not isinstance(resolved_slope, float) and slope_num.dtype != element_type:
+        _op_error(
+            "leaky_relu",
+            f"slope must match the src element type {element_type}, got {slope_num.dtype}",
+        )
+    return _emit_vector_scalar_binary(
+        "leaky_relu", _tla_ops_gen.leaky_relu, src, slope_num, mask=mask, loc=loc
     )
 
 
@@ -16080,6 +16228,9 @@ __all__ = [
     "max",
     "min",
     "div",
+    "relu",
+    "prelu",
+    "leaky_relu",
     "shift_left",
     "shift_right",
     "where",

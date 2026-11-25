@@ -646,6 +646,7 @@ enum class VectorBinaryKind
     And,
     Or,
     Xor,
+    Relu,
     ShiftLeft,
     ShiftRight
 };
@@ -736,6 +737,7 @@ enum class VectorUnaryKind
     Log,
     Sqrt,
     Abs,
+    Relu,
     Neg,
     Not
 };
@@ -769,6 +771,8 @@ static std::optional<VectorUnaryInfo> getVectorUnaryInfo(Operation* op)
         return VectorUnaryInfo{VectorUnaryKind::Sqrt, "sqrt", getTlaUnaryOperands(o)};
     if (auto o = dyn_cast<::tla::AbsOp>(op))
         return VectorUnaryInfo{VectorUnaryKind::Abs, "abs", getTlaUnaryOperands(o)};
+    if (auto o = dyn_cast<::tla::ReluOp>(op))
+        return VectorUnaryInfo{VectorUnaryKind::Relu, "relu", getTlaUnaryOperands(o)};
     if (auto o = dyn_cast<::tla::NegOp>(op))
         return VectorUnaryInfo{VectorUnaryKind::Neg, "neg", getTlaUnaryOperands(o)};
     if (auto o = dyn_cast<::tla::BitwiseNotOp>(op))
@@ -787,6 +791,9 @@ static LogicalResult validateVectorUnaryElementType(Operation* op, VectorUnaryIn
                                        << elementType;
             if (isa<BFloat16Type>(elementType))
                 return op->emitError() << "tla." << info.name << " does not support bf16 element type yet";
+            return success();
+        case VectorUnaryKind::Relu:
+            // ReluOp::verify checks the source type before signedness is erased.
             return success();
         case VectorUnaryKind::Abs:
         case VectorUnaryKind::Neg:
@@ -857,6 +864,7 @@ static std::optional<VectorOpInfo> getVectorBinaryInfo(Operation* op)
         .Case([](::tla::BitwiseAndOp o) { return binaryInfo(o, K::And, kVec, "bitwise_and"); })
         .Case([](::tla::BitwiseOrOp o) { return binaryInfo(o, K::Or, kVec, "bitwise_or"); })
         .Case([](::tla::BitwiseXorOp o) { return binaryInfo(o, K::Xor, kVec, "bitwise_xor"); })
+        .Case([](::tla::PreluOp o) { return binaryInfo(o, K::Relu, kVec, "prelu"); })
         .Case([](::tla::ShiftLeftOp o) { return binaryInfo(o, K::ShiftLeft, kVec, "shift_left"); })
         .Case([](::tla::ShiftRightOp o) { return binaryInfo(o, K::ShiftRight, kVec, "shift_right"); })
         .Default(std::optional<VectorOpInfo>{std::nullopt});
@@ -876,6 +884,7 @@ static std::optional<VectorOpInfo> getVectorScalarBinaryInfo(Operation* op)
         .Case([](::tla::MaxsOp o) { return binaryInfo(o, K::Max, kScalar, "maxs"); })
         .Case([](::tla::MinsOp o) { return binaryInfo(o, K::Min, kScalar, "mins"); })
         .Case([](::tla::DivsOp o) { return binaryInfo(o, K::Div, kScalar, "divs"); })
+        .Case([](::tla::LeakyReluOp o) { return binaryInfo(o, K::Relu, kScalar, "leaky_relu"); })
         .Case([](::tla::ShiftLeftsOp o) { return binaryInfo(o, K::ShiftLeft, kScalar, "shift_lefts"); })
         .Case([](::tla::ShiftRightsOp o) { return binaryInfo(o, K::ShiftRight, kScalar, "shift_rights"); })
         .Default(std::optional<VectorOpInfo>{std::nullopt});
@@ -1525,6 +1534,57 @@ static bool isUnsignedInt(Type type)
     return i && i.isUnsigned();
 }
 
+static Value createInt64Max(
+    OpBuilder& b, Location loc, ModuleOp module, VectorType vecType, Value lhs, Value rhs, Value mask,
+    bool hasExplicitMask)
+{
+    auto wordType = VectorType::get({vecType.getNumElements() * 2}, b.getI32Type());
+    auto pregType = fullPregVecType(b.getContext());
+    Value zero = b.create<arith::ConstantIntOp>(loc, 0, 32);
+    Value zeroWords = b.create<hivmave::VFBroadcastScalarOp>(loc, wordType, zero).getRes();
+    mask = castMaskToPregType(b, loc, mask, pregType);
+    if (hasExplicitMask) {
+        // Explicit b64 masks use every eighth bit. After splitting into words,
+        // each half uses a b32 mask with one bit per original lane.
+        mask = b.create<hivm_regbaseintrins::PpackInstrOp>(loc, pregType, mask, zero).getResult();
+    }
+
+    auto splitWords = [&](Value value) -> std::pair<Value, Value> {
+        if (isa<VectorType>(value.getType())) {
+            Value words = b.create<vector::BitCastOp>(loc, wordType, value);
+            auto split =
+                b.create<hivmave::VFDeInterleaveOp>(loc, TypeRange{wordType, wordType}, ValueRange{words, zeroWords});
+            return {split->getResult(0), split->getResult(1)};
+        }
+        Value shift = b.create<arith::ConstantIntOp>(loc, 32, 64);
+        Value upper = b.createOrFold<arith::ShRUIOp>(loc, value, shift);
+        Value low = b.createOrFold<arith::TruncIOp>(loc, b.getI32Type(), value);
+        Value high = b.createOrFold<arith::TruncIOp>(loc, b.getI32Type(), upper);
+        return {
+            b.create<hivmave::VFBroadcastScalarOp>(loc, wordType, low).getRes(),
+            b.create<hivmave::VFBroadcastScalarOp>(loc, wordType, high).getRes()};
+    };
+    auto [lhsLow, lhsHigh] = splitWords(lhs);
+    auto [rhsLow, rhsHigh] = splitWords(rhs);
+    using CmpType = hivmave::CmpType;
+    // Compare signed high words first, then compare unsigned low words at ties.
+    Value highGt = b.create<hivmave::VFCmpOp>(loc, pregType, CmpType::GT, lhsHigh, rhsHigh, mask);
+    Value highEq = b.create<hivmave::VFCmpOp>(loc, pregType, CmpType::EQ, lhsHigh, rhsHigh, mask);
+    Value lowGt = b.create<hivmave::VFCmpOp>(loc, pregType, CmpType::UGT, lhsLow, rhsLow, mask);
+
+    auto maskSelect = getOrCreateMaskSelectLibraryCall(module, loc, pregType);
+    Value takeLhs = b.create<func::CallOp>(loc, maskSelect, ValueRange{lowGt, highGt, highEq}).getResult(0);
+
+    auto selectWords = [&](Value x, Value y) -> Value {
+        Value selected = b.create<hivmave::VFSelectOp>(loc, wordType, takeLhs, x, y);
+        return b.create<hivmave::VFSelectOp>(loc, wordType, mask, selected, zeroWords);
+    };
+    Value low = selectWords(lhsLow, rhsLow);
+    Value high = selectWords(lhsHigh, rhsHigh);
+    auto joined = b.create<hivmave::VFInterleaveOp>(loc, TypeRange{wordType, wordType}, ValueRange{low, high});
+    return b.create<vector::BitCastOp>(loc, vecType, joined->getResult(0));
+}
+
 // Build the AVE vector op for a tla binary op. The mask controls active lanes.
 // Div uses TypeFn for signedness; unsigned max/min select vumax/vumin.
 static Value createVectorBinaryResult(
@@ -1552,6 +1612,8 @@ static Value createVectorBinaryResult(
             if (isUnsigned)
                 return b.create<hivmave::VMinUIOp>(loc, vecType, lhs, rhs, mask).getResult();
             return b.create<hivmave::VFMinOp>(loc, vecType, lhs, rhs, mask).getResult();
+        case VectorBinaryKind::Relu:
+            return b.create<hivmave::VFPReluOp>(loc, vecType, lhs, rhs, mask).getResult();
         case VectorBinaryKind::And:
             if (isa<::tla::VectorSSAType>(tlaOperandType))
                 return b.create<hivmave::VFAndOp>(loc, vecType, lhs, rhs, mask).getResult();
@@ -2166,8 +2228,8 @@ static FailureOr<Value> createVectorReductionResult(
 }
 
 static Value createVectorUnaryResult(
-    OpBuilder& b, Location loc, VectorUnaryKind kind, Type tlaOperandType, VectorType vecType, Value operand,
-    Value mask)
+    OpBuilder& b, Location loc, ModuleOp module, VectorUnaryKind kind, Type tlaOperandType, VectorType vecType,
+    Value operand, Value mask, bool hasExplicitMask)
 {
     switch (kind) {
         case VectorUnaryKind::Exp:
@@ -2178,6 +2240,12 @@ static Value createVectorUnaryResult(
             return b.create<hivmave::VFSqrtOp>(loc, vecType, operand, mask).getResult();
         case VectorUnaryKind::Abs:
             return b.create<hivmave::VFAbsOp>(loc, vecType, operand, mask).getResult();
+        case VectorUnaryKind::Relu: {
+            if (!vecType.getElementType().isInteger(64))
+                return b.create<hivmave::VFReluOp>(loc, vecType, operand, mask).getResult();
+            Value zero = b.create<arith::ConstantIntOp>(loc, 0, 64);
+            return createInt64Max(b, loc, module, vecType, operand, zero, mask, hasExplicitMask);
+        }
         case VectorUnaryKind::Neg:
             return b.create<hivmave::VFNegOp>(loc, vecType, operand, mask).getResult();
         case VectorUnaryKind::Not:
@@ -2577,7 +2645,8 @@ static FailureOr<Value> materializeVectorScalarValue(
 }
 
 static FailureOr<Value> createVectorScalarBinaryResult(
-    OpBuilder& b, Location loc, VectorOpInfo info, VecLowerCtx& ctx, Value lhs, Value scalar, Value mask)
+    OpBuilder& b, Location loc, ModuleOp module, VectorOpInfo info, VecLowerCtx& ctx, Value lhs, Value scalar,
+    Value mask)
 {
     if (info.kind == VectorBinaryKind::ShiftLeft || info.kind == VectorBinaryKind::ShiftRight) {
         if (!isa<IntegerType>(ctx.elementType) || ctx.elementType.isInteger(64) || !scalar.getType().isInteger(16))
@@ -2592,6 +2661,9 @@ static FailureOr<Value> createVectorScalarBinaryResult(
                    b.create<hivm_regbaseintrins::VshrsSXInstrOp>(loc, ctx.vecType, lhs, scalar, mask).getRes();
     }
 
+    if (info.kind == VectorBinaryKind::Relu)
+        return b.create<hivmave::VFLRelusOp>(loc, ctx.vecType, lhs, scalar, mask).getResult();
+
     if (info.kind == VectorBinaryKind::Add || info.kind == VectorBinaryKind::Mul ||
         info.kind == VectorBinaryKind::Max || info.kind == VectorBinaryKind::Min) {
         if (info.kind == VectorBinaryKind::Add)
@@ -2599,6 +2671,9 @@ static FailureOr<Value> createVectorScalarBinaryResult(
         if (info.kind == VectorBinaryKind::Mul)
             return b.create<hivmave::VFMulsOp>(loc, ctx.vecType, lhs, scalar, mask).getResult();
         if (info.kind == VectorBinaryKind::Max) {
+            if (ctx.elementType.isSignlessInteger(64))
+                return createInt64Max(
+                    b, loc, module, ctx.vecType, lhs, scalar, mask, static_cast<bool>(info.operands.mask));
             if (isUnsignedInt(ctx.elementType))
                 return b.create<hivmave::VMaxsUIOp>(loc, ctx.vecType, lhs, scalar, mask).getResult();
             return b.create<hivmave::VFMaxsOp>(loc, ctx.vecType, lhs, scalar, mask).getResult();
@@ -3567,11 +3642,15 @@ static LogicalResult lowerVectorBinary(
         mask = allTrueMaskFor(fullMasks, loc, opVecType, operands.lhs.getType());
     }
     // createVectorBinaryResult peels unsigned from the tla lhs type.
-    Value result =
-        isShift(info->kind) && opVecType.getElementType().isInteger(64) ?
-            lowerShift64(b, loc, module, *info, lhs, rhs, mask) :
-            createVectorBinaryResult(
-                b, loc, info->kind, operands.lhs.getType(), opVecType.getElementType(), opVecType, lhs, rhs, mask);
+    Type elementType = tlaElementOr(operands.lhs.getType(), opVecType.getElementType());
+    Value result;
+    if (info->kind == VectorBinaryKind::Max && elementType.isSignlessInteger(64))
+        result = createInt64Max(b, loc, module, opVecType, lhs, rhs, mask, static_cast<bool>(operands.mask));
+    else if (isShift(info->kind) && opVecType.getElementType().isInteger(64))
+        result = lowerShift64(b, loc, module, *info, lhs, rhs, mask);
+    else
+        result = createVectorBinaryResult(
+            b, loc, info->kind, operands.lhs.getType(), opVecType.getElementType(), opVecType, lhs, rhs, mask);
     if (!result)
         return failure();
     valueMap[op.getResult(0)] = result;
@@ -3617,7 +3696,7 @@ static LogicalResult lowerVectorScalarBinary(
         valueMap[op.getResult(0)] = lowerShift64(b, loc, module, *info, lhs, *scalarOr, mask);
         return success();
     }
-    auto result = createVectorScalarBinaryResult(b, loc, *info, *opCtx, lhs, *scalarOr, mask);
+    auto result = createVectorScalarBinaryResult(b, loc, module, *info, *opCtx, lhs, *scalarOr, mask);
     if (failed(result))
         return failure();
     valueMap[op.getResult(0)] = *result;
@@ -4246,7 +4325,8 @@ static LogicalResult lowerVectorUnary(
         if (auto algo = logOp.getLogAlgoAttr(); algo && algo.getValue() == LogAlgo::subnormal)
             return lowerVectorLogSubnormal(logOp, operand, operandVecType, mask, b, module, valueMap);
     }
-    Value result = createVectorUnaryResult(b, loc, info->kind, tlaOperandType, operandVecType, operand, mask);
+    Value result = createVectorUnaryResult(
+        b, loc, module, info->kind, tlaOperandType, operandVecType, operand, mask, static_cast<bool>(operands.mask));
     if (!result)
         return failure();
     valueMap[op.getResult(0)] = result;

@@ -1348,6 +1348,53 @@ TLA_VERIFY_MASKED_VECTOR_LHS(MinsOp)
 
 #undef TLA_VERIFY_MASKED_VECTOR_LHS
 
+static mlir::LogicalResult verifyReluOp(
+    mlir::Operation* op, VectorSSAType source, VectorSSAType result, mlir::Value mask)
+{
+    auto region = op->getParentOfType<VecFuncOp>();
+    if (!region)
+        return op->emitOpError("must be nested inside a tla.vec.func region");
+    if (auto mode = region->getAttrOfType<mlir::StringAttr>("mode");
+        mode && !mode.getValue().equals_insensitive("simd"))
+        return op->emitOpError("requires a SIMD tla.vec.func region");
+
+    if (result != source)
+        return op->emitOpError("requires the result type to match the source vector type");
+    return verifyMaskMatchesVector(op, mask, source);
+}
+
+mlir::LogicalResult ReluOp::verify()
+{
+    VectorSSAType source = getOperand().getType();
+    mlir::Type element = source.getElementType();
+    if (!element.isF16() && !element.isF32() && !element.isSignlessInteger(32) && !element.isSignlessInteger(64))
+        return emitOpError("requires f16, f32, i32, or i64 source elements");
+    if (element.isSignlessInteger(64) && source.getValidLanes() != 32)
+        return emitOpError("requires a full 32-lane i64 source register");
+    return verifyReluOp(getOperation(), source, getResult().getType(), getMask());
+}
+
+static mlir::LogicalResult verifyReluWithSlopeOp(
+    mlir::Operation* op, VectorSSAType source, mlir::Type slopeElement, VectorSSAType result, mlir::Value mask)
+{
+    mlir::Type element = source.getElementType();
+    if ((!element.isF16() && !element.isF32()) || slopeElement != element)
+        return op->emitOpError("requires matching f16 or f32 source and slope element types");
+    return verifyReluOp(op, source, result, mask);
+}
+
+mlir::LogicalResult PreluOp::verify()
+{
+    return verifyReluWithSlopeOp(
+        getOperation(), getLhs().getType(), getRhs().getType().getElementType(), getResult().getType(), getMask());
+}
+
+mlir::LogicalResult LeakyReluOp::verify()
+{
+    return verifyReluWithSlopeOp(
+        getOperation(), getLhs().getType(), getRhs().getType(), getResult().getType(), getMask());
+}
+
 mlir::LogicalResult ExpSubOp::verify()
 {
     if (!hasEnclosingRegion<VecFuncOp>(getOperation()))

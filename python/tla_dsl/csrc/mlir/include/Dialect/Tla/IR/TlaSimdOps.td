@@ -297,6 +297,10 @@ def Tla_MinOp : Tla_VectorBinaryOp<"min",
     "Vector minimum on VectorSSA values",
     "Element-wise minimum on VectorSSA values.">;
 
+def Tla_PreluOp : Tla_VectorBinaryOp<"prelu",
+    "PReLU on f16 or f32 VectorSSA values",
+    "Apply PReLU with a per-lane slope and zero inactive lanes.">;
+
 def Tla_ShiftLeftOp : Tla_VectorShiftOp<"shift_left",
     "Vector-vector left shift on VectorSSA values",
     "Element-wise left shift by the signed amounts in the rhs VectorSSA value.">;
@@ -540,6 +544,10 @@ def Tla_DivsOp : Tla_VectorScalarBinaryOp<"divs",
     "Vector-scalar divide on VectorSSA values",
     "Element-wise divide of VectorSSA values by a scalar.">;
 
+def Tla_LeakyReluOp : Tla_VectorScalarBinaryOp<"leaky_relu",
+    "Leaky ReLU on f16 or f32 VectorSSA values",
+    "Apply Leaky ReLU with one scalar slope and zero inactive lanes.">;
+
 def Tla_ShiftLeftsOp : Tla_VectorScalarShiftOp<"shift_lefts",
     "Vector-scalar left shift on VectorSSA values",
     "Element-wise left shift by a signed i16 scalar amount.">;
@@ -706,6 +714,10 @@ def Tla_SqrtOp : Tla_VectorUnaryOp<"sqrt",
 def Tla_AbsOp : Tla_VectorUnaryOp<"abs",
     "Vector absolute value on VectorSSA values",
     "Element-wise absolute value on VectorSSA values.">;
+
+def Tla_ReluOp : Tla_VectorUnaryOp<"relu",
+    "ReLU on VectorSSA values",
+    "Apply ReLU to f16, f32, i32, or i64 elements and zero inactive lanes.">;
 
 def Tla_NegOp : Tla_VectorUnaryOp<"neg",
     "Vector negate on VectorSSA values",

@@ -457,6 +457,130 @@ with tla.vec.func(mode="simd"):
 
 ---
 
+## `tla.relu`
+
+**Source:** [`catlass.core_api.relu`](../../../../../catlass/core_api.py)
+
+Description:
+
+Compute ReLU per lane and return a vector of the same type as `src`.
+FP16, FP32, and Int32 use the native VRELU instruction.
+Int64 uses a signed 64-bit maximum with zero.
+
+Prototype:
+
+```python
+tla.relu(src: VectorSSA, *, mask: MaskSSA | None = None) -> VectorSSA
+```
+
+Parameters:
+
+- `src` (`VectorSSA`): FP16, FP32, Int32, or Int64 input register. Required.
+- `mask` (`MaskSSA | None`): Execution mask in the source lane
+  domain. Defaults to `None`, which enables all physical lanes.
+  Masked-off lanes are zeroed.
+
+Constraints:
+
+- Call inside a `@tla.kernel` and `tla.vec.func(mode="simd")`.
+- Use a 128-lane mask for FP16, a 64-lane mask for FP32 or Int32,
+  or a 32-lane mask for Int64. Int64 requires a full 32-lane
+  source register. Use a mask to limit execution on partial inputs.
+
+Example:
+
+```python
+with tla.vec.func(mode="simd"):
+    y = tla.relu(x, mask=mask)
+```
+
+---
+
+## `tla.prelu`
+
+**Source:** [`catlass.core_api.prelu`](../../../../../catlass/core_api.py)
+
+Description:
+
+Apply PReLU per lane using the native VPRELU instruction. Positive
+values and `+0.0` pass through. Negative values and `-0.0` are
+multiplied by the corresponding slope. A slope of `+inf` produces
+`NaN` for `-0.0`.
+
+Prototype:
+
+```python
+tla.prelu(src: VectorSSA, slope: VectorSSA, *, mask: MaskSSA | None = None) -> VectorSSA
+```
+
+Parameters:
+
+- `src` (`VectorSSA`): FP16 or FP32 input register. Required.
+- `slope` (`VectorSSA`): Per-lane slopes with the same element type
+  as `src`. Required.
+- `mask` (`MaskSSA | None`): Execution mask in the source lane
+  domain. Defaults to `None`, which enables all physical lanes.
+  Masked-off lanes are zeroed.
+
+Constraints:
+
+- Call inside a `@tla.kernel` and `tla.vec.func(mode="simd")`.
+- The result has the same type as `src`. Use a 128-lane mask for FP16
+  or a 64-lane mask for FP32. For partial inputs, use a mask that
+  enables only valid lanes in both input registers.
+
+Example:
+
+```python
+with tla.vec.func(mode="simd"):
+    y = tla.prelu(x, slopes, mask=mask)
+```
+
+---
+
+## `tla.leaky_relu`
+
+**Source:** [`catlass.core_api.leaky_relu`](../../../../../catlass/core_api.py)
+
+Description:
+
+Apply Leaky ReLU per lane using the native VLRELU instruction.
+Positive values and `+0.0` pass through. Negative values and `-0.0`
+are multiplied by the shared scalar slope. A slope of `+inf`
+produces `NaN` for `-0.0`.
+
+Prototype:
+
+```python
+tla.leaky_relu(src: VectorSSA, slope: Float16 | Float32 | float, *, mask: MaskSSA | None = None) -> VectorSSA
+```
+
+Parameters:
+
+- `src` (`VectorSSA`): FP16 or FP32 input register. Required.
+- `slope` (`Float16 | Float32 | float`): Shared scalar slope. A typed
+  slope must match the element type of `src`. A Python `float` literal
+  is materialized in the element type of `src`. Required.
+- `mask` (`MaskSSA | None`): Execution mask in the source lane
+  domain. Defaults to `None`, which enables all physical lanes.
+  Masked-off lanes are zeroed.
+
+Constraints:
+
+- Call inside a `@tla.kernel` and `tla.vec.func(mode="simd")`.
+- The result has the same type as `src`. Use a 128-lane mask for FP16
+  or a 64-lane mask for FP32. For partial inputs, use a mask that
+  enables only valid source lanes.
+
+Example:
+
+```python
+with tla.vec.func(mode="simd"):
+    y = tla.leaky_relu(x, 0.25, mask=mask)
+```
+
+---
+
 ## `tla.max`
 
 **Source:** [`catlass.core_api.max`](../../../../../catlass/core_api.py)

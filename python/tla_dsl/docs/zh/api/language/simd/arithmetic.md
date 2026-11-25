@@ -443,6 +443,107 @@ with tla.vec.func(mode="simd"):
 
 ---
 
+## `tla.relu`
+
+**源码：** [`catlass.core_api.relu`](../../../../../catlass/core_api.py)
+
+功能说明：
+
+逐元素计算 ReLU，返回与 `src` 相同类型的向量。FP16、FP32 和 Int32 使用原生 `VRELU` 指令。Int64 使用有符号 64 位最大值计算，与零取最大值。
+
+函数原型：
+
+```python
+tla.relu(src: VectorSSA, *, mask: MaskSSA | None = None) -> VectorSSA
+```
+
+参数说明：
+
+- `src`（`VectorSSA`）为 FP16、FP32、Int32 或 Int64 输入寄存器，必需。
+- `mask`（`MaskSSA | None`）为对应输入寄存器的执行掩码。默认值 `None` 启用寄存器中的所有元素位置。掩码未启用的位置输出零。
+
+约束：
+
+- 在 `@tla.kernel` 的 `tla.vec.func(mode="simd")` 作用域中调用。
+- FP16 对应 128 个掩码位置，FP32 和 Int32 对应 64 个，Int64 对应 32 个。Int64 的输入向量需占满一个 32 元素寄存器。输入只含部分有效元素时，通过掩码限制参与计算的位置。
+
+示例：
+
+```python
+with tla.vec.func(mode="simd"):
+    y = tla.relu(x, mask=mask)
+```
+
+---
+
+## `tla.prelu`
+
+**源码：** [`catlass.core_api.prelu`](../../../../../catlass/core_api.py)
+
+功能说明：
+
+使用原生 `VPRELU` 指令逐元素计算 PReLU。正值和 `+0.0` 原样返回。负值和 `-0.0` 与对应元素的斜率相乘。斜率为 `+inf` 时，`-0.0` 的结果为 `NaN`。
+
+函数原型：
+
+```python
+tla.prelu(src: VectorSSA, slope: VectorSSA, *, mask: MaskSSA | None = None) -> VectorSSA
+```
+
+参数说明：
+
+- `src`（`VectorSSA`）为 FP16 或 FP32 输入寄存器，必需。
+- `slope`（`VectorSSA`）为逐元素斜率寄存器，元素类型须与 `src` 一致，必需。
+- `mask`（`MaskSSA | None`）为对应输入寄存器的执行掩码。默认值 `None` 启用寄存器中的所有元素位置。掩码未启用的位置输出零。
+
+约束：
+
+- 在 `@tla.kernel` 的 `tla.vec.func(mode="simd")` 作用域中调用。
+- 返回值与 `src` 类型相同。FP16 对应 128 个掩码位置，FP32 对应 64 个掩码位置。输入寄存器只含部分有效元素时，传入掩码，仅启用两个输入都有效的位置。
+
+示例：
+
+```python
+with tla.vec.func(mode="simd"):
+    y = tla.prelu(x, slopes, mask=mask)
+```
+
+---
+
+## `tla.leaky_relu`
+
+**源码：** [`catlass.core_api.leaky_relu`](../../../../../catlass/core_api.py)
+
+功能说明：
+
+使用原生 `VLRELU` 指令逐元素计算 Leaky ReLU。正值和 `+0.0` 原样返回。负值和 `-0.0` 与共享标量斜率相乘。斜率为 `+inf` 时，`-0.0` 的结果为 `NaN`。
+
+函数原型：
+
+```python
+tla.leaky_relu(src: VectorSSA, slope: Float16 | Float32 | float, *, mask: MaskSSA | None = None) -> VectorSSA
+```
+
+参数说明：
+
+- `src`（`VectorSSA`）为 FP16 或 FP32 输入寄存器，必需。
+- `slope`（`Float16 | Float32 | float`）为标量斜率，必需。带类型的斜率须与 `src` 的元素类型一致。Python `float` 字面量按 `src` 的元素类型生成。
+- `mask`（`MaskSSA | None`）为对应输入寄存器的执行掩码。默认值 `None` 启用寄存器中的所有元素位置。掩码未启用的位置输出零。
+
+约束：
+
+- 在 `@tla.kernel` 的 `tla.vec.func(mode="simd")` 作用域中调用。
+- 返回值与 `src` 类型相同。FP16 对应 128 个掩码位置，FP32 对应 64 个掩码位置。输入寄存器只含部分有效元素时，传入掩码，仅启用有效位置。
+
+示例：
+
+```python
+with tla.vec.func(mode="simd"):
+    y = tla.leaky_relu(x, 0.25, mask=mask)
+```
+
+---
+
 ## `tla.max`
 
 **源码：** [`catlass.core_api.max`](../../../../../catlass/core_api.py)

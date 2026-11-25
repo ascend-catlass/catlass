@@ -1192,6 +1192,10 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         "vector-cast-multi",
         [["dsl_tutorials/vector_simd_ops/cast_multi.py", "cast_multi", "--shape", "256", *dev]],
     )
+    yield (
+        "vector-relu-ops",
+        [["end_to_end/relu_ops.py", *dev]],
+    )
     # CAST_NONE / CAST_RINT / CAST_ODD: lossy NONE equals RINT, lossless NONE
     # widen drops rnd, f32->f16 ODD. Script under python/tla_dsl/tests/end_to_end/.
     yield (
