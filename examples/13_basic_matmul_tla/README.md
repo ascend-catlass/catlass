@@ -18,11 +18,11 @@
 
 ## 样例参数说明
 
-| 参数       | 属性 |shape|dtype| 说明                                                             |
-| ---------- | ------ | --------|---------|----------------------------------------------- |
-| `A`        | Input  | `(m,k)` | `float16/bfloat16/float32` | 左矩阵，layout支持`RowMajor`（默认）和`ColumnMajor`  |
-| `B`        | Input  | `(k,n)` | `float16/bfloat16/float32` | 右矩阵，layout支持`RowMajor`（默认）和`ColumnMajor`，数据类型与左矩阵一致 |
-| `C`        | Output | `(m,n)` | `float16/bfloat16/float32` | 矩阵乘结果，layout仅支持`RowMajor`，数据类型与左矩阵一致 |
+| 参数 | 属性 | shape | dtype | 说明 |
+| --- | --- | --- | --- | --- |
+| `A` | Input | `(m,k)` | `fp16` | 左矩阵，layout支持`RowMajor` |
+| `B` | Input | `(k,n)` | `fp16` | 右矩阵，layout支持`RowMajor`，数据类型与左矩阵一致 |
+| `C` | Output | `(m,n)` | `fp16` | 矩阵乘结果，layout支持`RowMajor`，数据类型与左矩阵一致 |
 
 ## 使用范围说明
 
