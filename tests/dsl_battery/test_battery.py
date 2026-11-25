@@ -1011,6 +1011,12 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         "vector-pair-wise-op",
         [["end_to_end/pair_wise_op.py", "--batch-run", *dev]],
     )
+    # tla.generate_mask: one data block of a register becomes a predicate mask,
+    # for both element widths. Script under python/tla_dsl/tests/end_to_end/.
+    yield (
+        "vector-generate-mask-op",
+        [["end_to_end/generate_mask_op.py", "--batch-run", *dev]],
+    )
     # tla.log LogAlgo: Flush-To-Zero (existing vln) vs Subnormal (software
     # path), both dtypes; script under python/tla_dsl/tests/end_to_end/.
     yield (

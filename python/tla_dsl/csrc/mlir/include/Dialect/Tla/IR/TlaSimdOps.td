@@ -48,6 +48,35 @@ def Tla_UpdateMaskOp : Tla_Op<"update_mask", [Pure]> {
   let hasVerifier = 1;
 }
 
+def Tla_GenerateMaskOp : Tla_Op<"generate_mask", [Pure]> {
+  let summary = "Predicate from a data block of a register";
+  let description = [{
+    Take one data block of ``src`` and expand it into a predicate register.
+    ``src`` is viewed as a bit array ordered by element then by in-element bit;
+    ``offset`` selects one block of ``256 / sizeof(T)`` consecutive bits and each
+    selected bit becomes the predicate lane at the same position.
+
+    Concretely, for 32-bit elements the result has ``64`` lanes and semantic
+    lane ``L`` is register bit ``64 * offset + L``; for 16-bit elements the
+    result has ``128`` lanes and lane ``L`` is register bit
+    ``128 * offset + L``. Physically each selected bit is broadcast to ``4``
+    (32-bit) or ``2`` (16-bit) adjacent predicate bits of the 256-bit container,
+    matching the mask width.
+
+    The source element width fixes the block width (``8Byte`` for 32-bit
+    elements, ``16Byte`` for 16-bit), the block count, the lane count and the
+    ``offset`` range (``0..31`` and ``0..15`` respectively); all blocks together
+    cover one 2048-bit register. Elements of other widths are unsupported.
+  }];
+  let arguments = (ins Tla_VectorSSAType:$src, I32Attr:$offset);
+  let results = (outs Tla_MaskSSAType:$result);
+  let assemblyFormat = [{
+    $src `offset` $offset attr-dict `:`
+    qualified(type($src)) `->` qualified(type($result))
+  }];
+  let hasVerifier = 1;
+}
+
 // Register initializers: neither takes a tensor -- they fill the vector
 // helper register that every op below operates on.
 

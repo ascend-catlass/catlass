@@ -14,6 +14,60 @@ Do not edit manually. Update docstrings/Examples in catlass/core_api.py
 
 Mask creation and tail-mask updates.
 
+## `tla.VectorSSA.generate_mask`
+
+**Source:** [`catlass.core_api.VectorSSA.generate_mask`](../../../../../catlass/core_api.py)
+
+Description:
+
+Build a predicate mask from one data block of this register.
+
+The register is treated as a sequence of data blocks ordered by
+element and then by in-element bit (LSB first). `offset` selects one
+block, and each bit of that block becomes one predicate lane. The
+source element width decides the block width and the block count,
+and together all blocks cover one 2048-bit register:
+
+- 32-bit elements: 32 blocks of 8Byte (64 bits) each, so `offset`
+  is `0..31`. The result is a `mask<64>` whose lane `L` is register
+  bit `64 * offset + L`.
+- 16-bit elements: 16 blocks of 16Byte (128 bits) each, so `offset`
+  is `0..15`. The result is a `mask<128>` whose lane `L` is register
+  bit `128 * offset + L`.
+
+Physically the 32Byte predicate register gives each element 2 bits
+(16-bit) or 4 bits (32-bit); the selected bit is broadcast to those
+bits, and only the lowest one is effective.
+
+Prototype:
+
+```python
+tla.VectorSSA.generate_mask(offset: int) -> 'MaskSSA'
+```
+
+Parameters:
+
+- `offset` (`int`): Compile-time block index. Required. `0..15` for
+  16-bit elements and `0..31` for 32-bit elements.
+
+Constraints:
+
+- Supports Ascend 950 (`--npu-arch 3510`) only.
+- Must be called inside a `@tla.kernel`-decorated kernel function.
+- Must be called inside `tla.vec.func(mode="simd")`.
+- Element width must be 16 or 32 bits; other widths are unsupported.
+- `offset` must be a compile-time Python int within the block range.
+
+Example:
+
+```python
+with tla.vec.func(mode="simd"):
+    bits = src_tile.load()      # !tla.vector<64xf32>
+    m = bits.generate_mask(0)   # !tla.mask<64>
+```
+
+---
+
 ## `tla.create_mask`
 
 **Source:** [`catlass.core_api.create_mask`](../../../../../catlass/core_api.py)

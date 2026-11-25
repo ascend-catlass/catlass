@@ -1496,6 +1496,81 @@ class VectorSSA(_RegisterSSA):
         )
         return VectorSSA(result)
 
+    @dsl_user_op
+    def generate_mask(
+        self,
+        offset: int,
+        *,
+        loc: mlir_ir.Location | None = None,
+    ) -> "MaskSSA":
+        """Directory: SIMD Vector Compute / Mask Compute
+
+        Description:
+            Build a predicate mask from one data block of this register.
+
+            The register is treated as a sequence of data blocks ordered by
+            element and then by in-element bit (LSB first). `offset` selects one
+            block, and each bit of that block becomes one predicate lane. The
+            source element width decides the block width and the block count,
+            and together all blocks cover one 2048-bit register:
+
+            - 32-bit elements: 32 blocks of 8Byte (64 bits) each, so `offset`
+              is `0..31`. The result is a `mask<64>` whose lane `L` is register
+              bit `64 * offset + L`.
+            - 16-bit elements: 16 blocks of 16Byte (128 bits) each, so `offset`
+              is `0..15`. The result is a `mask<128>` whose lane `L` is register
+              bit `128 * offset + L`.
+
+            Physically the 32Byte predicate register gives each element 2 bits
+            (16-bit) or 4 bits (32-bit); the selected bit is broadcast to those
+            bits, and only the lowest one is effective.
+
+            Parameters:
+            - `offset` (`int`): Compile-time block index. Required. `0..15` for
+              16-bit elements and `0..31` for 32-bit elements.
+
+            Constraints:
+            - Supports Ascend 950 (`--npu-arch 3510`) only.
+            - Must be called inside a `@tla.kernel`-decorated kernel function.
+            - Must be called inside `tla.vec.func(mode="simd")`.
+            - Element width must be 16 or 32 bits; other widths are unsupported.
+            - `offset` must be a compile-time Python int within the block range.
+
+            Example:
+            ```python
+            with tla.vec.func(mode="simd"):
+                bits = src_tile.load()      # !tla.vector<64xf32>
+                m = bits.generate_mask(0)   # !tla.mask<64>
+            ```
+        """
+        _require_category("generate_mask", "operand", self, "vector_ssa", 0)
+        _require_frontend_state("generate_mask")
+        _runtime._require_enclosing_region("generate_mask", "vec.func")
+        if _runtime._in_simt_vec_func():
+            _op_error("generate_mask", "is only supported in tla.vec.func(mode='simd')")
+
+        src_value = _as_value(self)
+        src_desc = _vector_ssa_type_for_mlir_value(src_value)
+        limit = _generate_mask_offset_limit("generate_mask", src_desc.element_type)
+        block_index = _require_constexpr_range_bound("generate_mask", "offset", offset)
+        if block_index < 0 or block_index > limit:
+            _op_error(
+                "generate_mask",
+                f"offset must be in 0..{limit} for a {src_desc.element_type} source, "
+                f"got {block_index}",
+            )
+
+        mask_ty = _mask_ssa_type_for_element_type(src_desc.element_type).to_mlir_type(
+            src_value.type.context
+        )
+        result = _tla_ops_gen.generate_mask(
+            mask_ty,
+            src_value,
+            mlir_ir.IntegerAttr.get(mlir_ir.IntegerType.get_signless(32), block_index),
+            loc=loc,
+        )
+        return MaskSSA(result)
+
 
 class MaskSSA(_RegisterSSA):
     """Frontend proxy for a register-resident predicate mask SSA value."""
@@ -15002,6 +15077,7 @@ _require_generated("mutex_lock")
 _require_generated("mutex_unlock")
 _require_generated("cube")
 _require_generated("vector")
+_require_generated("generate_mask")
 _require_generated("mmad")
 _require_generated("mmad_mx")
 _require_generated("add")
@@ -15293,6 +15369,22 @@ def update_mask(
         mask_ty, index_ty, true_shape_value, mlir_ir.TypeAttr.get(elem_type), loc=loc
     )
     return MaskSSA(mask_value), as_numeric(new_true_shape)
+
+
+# generate_mask covers only 16- and 32-bit source elements; the element width
+# fixes both the mask lane count and the legal block offset range.
+_GENERATE_MASK_OFFSET_LIMITS = {16: 15, 32: 31}
+
+
+def _generate_mask_offset_limit(op_name: str, element_type: str) -> int:
+    element_bytes = dtype_size_bytes(element_type)
+    if element_bytes not in (2, 4):
+        _op_error(
+            op_name,
+            f"unsupported source element type {element_type}; "
+            "generate_mask only supports 16- and 32-bit elements",
+        )
+    return _GENERATE_MASK_OFFSET_LIMITS[element_bytes * 8]
 
 
 # Keep this type-only: tla.ffi lazily calls back into core_api, so a

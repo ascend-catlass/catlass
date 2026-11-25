@@ -1230,7 +1230,7 @@ static bool isSupportedFullElementType(mlir::Type elementType)
         return width == 1 || width == 8 || width == 16 || width == 32 || width == 64;
     }
     return elementType.isF16() || elementType.isBF16() || elementType.isF32() ||
-           isa<mlir::Float8E4M3FNType, mlir::Float8E5M2Type, HiFloat8Type, Float8E8M0Type>(elementType) ||
+           mlir::isa<mlir::Float8E4M3FNType, mlir::Float8E5M2Type, HiFloat8Type, Float8E8M0Type>(elementType) ||
            isFp4PairType(elementType);
 }
 
@@ -1241,7 +1241,8 @@ static bool isFullScalarCarrier(mlir::Type scalarType, mlir::Type elementType)
 {
     if (scalarType == elementType)
         return true;
-    if (isBoolElementType(elementType) || isa<HiFloat8Type, Float8E8M0Type>(elementType) || isFp4PairType(elementType))
+    if (isBoolElementType(elementType) || mlir::isa<HiFloat8Type, Float8E8M0Type>(elementType) ||
+        isFp4PairType(elementType))
         return scalarType.isInteger(8);
     if (auto elemInt = mlir::dyn_cast<mlir::IntegerType>(elementType); elemInt && elemInt.isUnsigned()) {
         auto scalarInt = mlir::dyn_cast<mlir::IntegerType>(scalarType);
@@ -1574,6 +1575,41 @@ mlir::LogicalResult UpdateMaskOp::verify()
     return verifyMaskProducerType(getOperation(), getMask().getType(), getDtype());
 }
 
+mlir::LogicalResult GenerateMaskOp::verify()
+{
+    if (!hasEnclosingRegion<VecFuncOp>(getOperation()))
+        return emitOpError("must be nested inside a tla.vec.func region");
+    if (auto region = getOperation()->getParentOfType<VecFuncOp>())
+        if (auto mode = region->getAttrOfType<mlir::StringAttr>("mode"))
+            if (!mode.getValue().equals_insensitive("simd"))
+                return emitOpError("is only supported in tla.vec.func(mode='simd')");
+
+    auto srcType = mlir::dyn_cast<VectorSSAType>(getSrc().getType());
+    if (!srcType)
+        return emitOpError("src must be !tla.vector");
+    // Only the element bit width matters: the register is a bit array, offset
+    // selects a block of 256/sizeof(T) bits, and each bit of that block becomes
+    // one predicate lane. Any 16- or 32-bit integer or float element qualifies.
+    mlir::Type elementType = srcType.getElementType();
+    if (!elementType.isIntOrFloat())
+        return emitOpError() << "unsupported source element type " << elementType
+                             << "; generate_mask only supports 16- and 32-bit elements";
+    int64_t elementBits = elementType.getIntOrFloatBitWidth();
+    if (elementBits != 16 && elementBits != 32)
+        return emitOpError() << "unsupported source element type " << elementType
+                             << "; generate_mask only supports 16- and 32-bit elements";
+
+    if (failed(verifyMaskProducerType(getOperation(), getResult().getType(), elementType)))
+        return mlir::failure();
+
+    int64_t maxOffset = elementBits == 16 ? 15 : 31;
+    int64_t offset = getOffset();
+    if (offset < 0 || offset > maxOffset)
+        return emitOpError() << "offset must be in 0.." << maxOffset << " for a b" << elementBits << " source, got "
+                             << offset;
+    return mlir::success();
+}
+
 static mlir::LogicalResult verifyMaskSelectTypes(
     mlir::Operation* op, mlir::Type mask, mlir::Type x, mlir::Type y, mlir::Type result)
 {
@@ -1836,7 +1872,7 @@ mlir::LogicalResult CastOp::verify()
     if (trait.size() == 3 && trait[2] == static_cast<int32_t>(::RoundMode::cast_hybrid) &&
         !(source.isF32() && mlir::isa<HiFloat8Type>(dest)))
         return emitOpError("CAST_HYBRID only supports Float32->HiFloat8");
-    if (isa<::tla::HiFloat8Type>(source) || isa<::tla::HiFloat8Type>(dest)) {
+    if (mlir::isa<::tla::HiFloat8Type>(source) || mlir::isa<::tla::HiFloat8Type>(dest)) {
         if (trait.size() != 3 || trait[0] < 0 || trait[0] > 3 || trait[1] < 0 || trait[1] > 2 || trait[2] < 0 ||
             !::symbolizeRoundMode(trait[2]))
             return emitOpError("trait must contain valid register-slot, saturation and rounding codes");

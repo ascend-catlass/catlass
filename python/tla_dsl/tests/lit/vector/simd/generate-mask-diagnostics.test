@@ -1,0 +1,96 @@
+// RUN: sed -n '/^\/\/ BEGIN_OFFSET$/,/^\/\/ END_OFFSET$/p' %s | sed '1d;$d;s|^// ||' > %t.offset.mlir && not %tla_compile %t.offset.mlir -o %t 2>&1 | %filecheck %s --check-prefix=OFFSET
+// RUN: sed -n '/^\/\/ BEGIN_LANES$/,/^\/\/ END_LANES$/p' %s | sed '1d;$d;s|^// ||' > %t.lanes.mlir && not %tla_compile %t.lanes.mlir -o %t 2>&1 | %filecheck %s --check-prefix=LANES
+// RUN: sed -n '/^\/\/ BEGIN_B8$/,/^\/\/ END_B8$/p' %s | sed '1d;$d;s|^// ||' > %t.b8.mlir && not %tla_compile %t.b8.mlir -o %t 2>&1 | %filecheck %s --check-prefix=B8
+// RUN: sed -n '/^\/\/ BEGIN_SIMT$/,/^\/\/ END_SIMT$/p' %s | sed '1d;$d;s|^// ||' > %t.simt.mlir && not %tla_compile %t.simt.mlir -o %t 2>&1 | %filecheck %s --check-prefix=SIMT
+
+// tla.generate_mask only accepts 16- and 32-bit sources, an offset inside the
+// block range, and a result mask whose lane count matches the element width.
+// It is also rejected outside a simd vec.func.
+
+// OFFSET: error:
+// OFFSET-SAME: 'tla.generate_mask' op offset must be in 0..31 for a b32 source, got 32
+
+// LANES: error:
+// LANES-SAME: 'tla.generate_mask' op result mask has 128 predicate lanes, expected 64 for dtype 'f32'
+
+// B8: error:
+// B8-SAME: 'tla.generate_mask' op unsupported source element type 'i8'; generate_mask only supports 16- and 32-bit elements
+
+// SIMT: error:
+// SIMT-SAME: 'tla.generate_mask' op is only supported in tla.vec.func(mode='simd')
+
+// BEGIN_OFFSET
+// !t32 = !tla.tensor<!tla.layout<!tla.shape<64>, !tla.stride<1>, !tla.shape<64>, RowMajor>, !tla.coord<0>, !tla.ptr<f32, ub, 4>>
+// module {
+//   func.func @generate_mask_offset(%src: memref<64xf32, #hivm.address_space<ub>>, %dst: memref<64xf32, #hivm.address_space<ub>>) {
+//     %c0 = arith.constant 0 : index
+//     %c1 = arith.constant 1 : index
+//     %n = arith.constant 64 : index
+//     %src_t = tla.tensor_desc %src shape [%c1, %n, %c1, %c1] stride [%n, %c1, %c1, %c1] origin_shape [%c1, %n] coord [%c0, %c0] : memref<64xf32, #hivm.address_space<ub>> -> !t32
+//     %dst_t = tla.tensor_desc %dst shape [%c1, %n, %c1, %c1] stride [%n, %c1, %c1, %c1] origin_shape [%c1, %n] coord [%c0, %c0] : memref<64xf32, #hivm.address_space<ub>> -> !t32
+//     "tla.vec.func"() ({
+//       %a = tla.load %src_t : !t32 -> !tla.vector<64xf32>
+//       %m = tla.generate_mask %a offset 32 : !tla.vector<64xf32> -> !tla.mask<64>
+//       tla.store %dst_t, %a mask %m : !t32, !tla.vector<64xf32> mask !tla.mask<64>
+//     }) {mode = "simd"} : () -> ()
+//     return
+//   }
+// }
+// END_OFFSET
+
+// BEGIN_LANES
+// !t32 = !tla.tensor<!tla.layout<!tla.shape<64>, !tla.stride<1>, !tla.shape<64>, RowMajor>, !tla.coord<0>, !tla.ptr<f32, ub, 4>>
+// module {
+//   func.func @generate_mask_lanes(%src: memref<64xf32, #hivm.address_space<ub>>, %dst: memref<64xf32, #hivm.address_space<ub>>) {
+//     %c0 = arith.constant 0 : index
+//     %c1 = arith.constant 1 : index
+//     %n = arith.constant 64 : index
+//     %src_t = tla.tensor_desc %src shape [%c1, %n, %c1, %c1] stride [%n, %c1, %c1, %c1] origin_shape [%c1, %n] coord [%c0, %c0] : memref<64xf32, #hivm.address_space<ub>> -> !t32
+//     %dst_t = tla.tensor_desc %dst shape [%c1, %n, %c1, %c1] stride [%n, %c1, %c1, %c1] origin_shape [%c1, %n] coord [%c0, %c0] : memref<64xf32, #hivm.address_space<ub>> -> !t32
+//     "tla.vec.func"() ({
+//       %a = tla.load %src_t : !t32 -> !tla.vector<64xf32>
+//       %m = tla.generate_mask %a offset 0 : !tla.vector<64xf32> -> !tla.mask<128>
+//       tla.store %dst_t, %a mask %m : !t32, !tla.vector<64xf32> mask !tla.mask<128>
+//     }) {mode = "simd"} : () -> ()
+//     return
+//   }
+// }
+// END_LANES
+
+// BEGIN_B8
+// !t8 = !tla.tensor<!tla.layout<!tla.shape<256>, !tla.stride<1>, !tla.shape<256>, RowMajor>, !tla.coord<0>, !tla.ptr<i8, ub, 1>>
+// module {
+//   func.func @generate_mask_b8(%src: memref<256xi8, #hivm.address_space<ub>>, %dst: memref<256xi8, #hivm.address_space<ub>>) {
+//     %c0 = arith.constant 0 : index
+//     %c1 = arith.constant 1 : index
+//     %n = arith.constant 256 : index
+//     %src_t = tla.tensor_desc %src shape [%c1, %n, %c1, %c1] stride [%n, %c1, %c1, %c1] origin_shape [%c1, %n] coord [%c0, %c0] : memref<256xi8, #hivm.address_space<ub>> -> !t8
+//     %dst_t = tla.tensor_desc %dst shape [%c1, %n, %c1, %c1] stride [%n, %c1, %c1, %c1] origin_shape [%c1, %n] coord [%c0, %c0] : memref<256xi8, #hivm.address_space<ub>> -> !t8
+//     "tla.vec.func"() ({
+//       %a = tla.load %src_t : !t8 -> !tla.vector<256xi8>
+//       %m = tla.generate_mask %a offset 0 : !tla.vector<256xi8> -> !tla.mask<256>
+//       tla.store %dst_t, %a mask %m : !t8, !tla.vector<256xi8> mask !tla.mask<256>
+//     }) {mode = "simd"} : () -> ()
+//     return
+//   }
+// }
+// END_B8
+
+// BEGIN_SIMT
+// !t32 = !tla.tensor<!tla.layout<!tla.shape<64>, !tla.stride<1>, !tla.shape<64>, RowMajor>, !tla.coord<0>, !tla.ptr<f32, ub, 4>>
+// module {
+//   func.func @generate_mask_simt(%src: memref<64xf32, #hivm.address_space<ub>>, %dst: memref<64xf32, #hivm.address_space<ub>>) {
+//     %c0 = arith.constant 0 : index
+//     %c1 = arith.constant 1 : index
+//     %n = arith.constant 64 : index
+//     %src_t = tla.tensor_desc %src shape [%c1, %n, %c1, %c1] stride [%n, %c1, %c1, %c1] origin_shape [%c1, %n] coord [%c0, %c0] : memref<64xf32, #hivm.address_space<ub>> -> !t32
+//     %dst_t = tla.tensor_desc %dst shape [%c1, %n, %c1, %c1] stride [%n, %c1, %c1, %c1] origin_shape [%c1, %n] coord [%c0, %c0] : memref<64xf32, #hivm.address_space<ub>> -> !t32
+//     "tla.vec.func"() ({
+//       %a = tla.load %src_t : !t32 -> !tla.vector<64xf32>
+//       %m = tla.generate_mask %a offset 0 : !tla.vector<64xf32> -> !tla.mask<64>
+//       tla.store %dst_t, %a mask %m : !t32, !tla.vector<64xf32> mask !tla.mask<64>
+//     }) {mode = "simt", thread_block_dim = array<i64: 32, 1, 1>} : () -> ()
+//     return
+//   }
+// }
+// END_SIMT
