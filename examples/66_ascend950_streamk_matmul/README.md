@@ -61,7 +61,7 @@
 
     ```bash
     cd output/bin
-    ./66_ascend950_streamk_matmul 256 512 1024 0
+    ./66_ascend950_streamk_matmul 256 512 2048 0
     ```
 
 3. 执行结果如下，说明样例执行成功，精度通过：

@@ -51,14 +51,14 @@ Go to the compilation directory `output/bin` of the executable file and run the 
 cd output/bin
 # Executable name | Matrix M-axis | N-axis | K-axis | Device ID
 # The device ID is optional. The default value is 0.
-./34_single_core_splitk_matmul 256 512 1024 0
+./34_single_core_splitk_matmul 2048 2048 4000 0
 ```
 
-• 256: matrix m-axis
+• 2048: matrix m-axis
 
-• 512: n-axis
+• 2048: n-axis
 
-• 1024: k-axis
+• 4000: k-axis
 
 • 0: Device ID (optional). Defaults to 0.
 

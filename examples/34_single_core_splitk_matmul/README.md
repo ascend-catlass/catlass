@@ -69,7 +69,7 @@ PyTorch 接口 `single_core_splitk_matmul` 通过 `transA` 和 `transB` 指定�
 
     ```bash
     cd output/bin
-    ./34_single_core_splitk_matmul 256 512 1024 0
+    ./34_single_core_splitk_matmul 2048 2048 4000 0
     ```
 
 3. 执行结果如下，说明样例执行成功，精度通过：
