@@ -127,10 +127,12 @@ Parameters:
   - `pad_value` (`int`): Bit pattern of the padding fill value. Default `0`.
   - `repeat_load_stride` (`int`): Distance between successive source
     starts, in units of 16 elements along M or one source C0 along K.
-    Required.
-  - `repeat_load_time` (`int`): Number of loads. `0` performs no load. Required.
+    Default `0`.
+  - `repeat_load_time` (`int`): Number of loads. Default `1`.
+    `0` performs no load.
   - `repeat_load_axis`: `tla.experimental.height` along M or
-    `tla.experimental.width` along K of the expanded matrix. Required.
+    `tla.experimental.width` along K of the expanded matrix.
+    Default `tla.experimental.height`.
 
 Constraints:
 
@@ -162,8 +164,8 @@ Constraints:
   constraints.
 - Filter extents are compile-time integers in 1..511.
 - `repeat_load_stride` and `repeat_load_time` must be compile-time
-  integers in 0..65535 and 0..255, respectively. Tracing rejects the
-  repeat-load defaults `-1`, `-1` and `None`.
+  integers in 0..65535 and 0..255, respectively. Omitting all three
+  repeat-load fields performs a single load.
 - The destination layout supplies the outer fractal stride (along K for
   L0A or M for L0B), including for a view into a parent matrix. Its byte
   stride must be a positive multiple of 512 and fit in an unsigned
@@ -178,9 +180,7 @@ Example:
 with tla.cube():
     # l1_fmap holds NC1HWC0; l1_filter holds the (K, N) weight matrix.
     tla.experimental.img2col(l0_a, l1_fmap, tla.experimental.Img2colParams(
-        fmap_hw=(hi, wi), filter_hw=(3, 3), pad=(1, 1, 1, 1),
-        repeat_load_stride=0, repeat_load_time=1,
-        repeat_load_axis=tla.experimental.height))
+        fmap_hw=(hi, wi), filter_hw=(3, 3), pad=(1, 1, 1, 1)))
     tla.copy(l0_b, l1_filter)
     tla.mmad(l0_c, l0_a, l0_b, init_c=True)
 ```

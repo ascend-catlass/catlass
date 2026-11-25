@@ -193,7 +193,7 @@ width = _RepeatLoadAxis.WIDTH
 class Img2colParams:
     """Convolution geometry for `tla.experimental.img2col`.
 
-    `fmap_hw`, `filter_hw` and the three repeat-load fields are required.
+    `fmap_hw` and `filter_hw` are required.
     Convolution stride and dilation default to one, and padding defaults to zero.
 
     Feature-map extent, stride, dilation and padding accept runtime values.
@@ -202,8 +202,9 @@ class Img2colParams:
     undefined behavior. The filter shape is static so the K axis extent can be
     validated before the load.
 
-    For a single load, set `repeat_load_stride=0`, `repeat_load_time=1`
-    and `repeat_load_axis=tla.experimental.height`.
+    All three repeat-load fields are optional. The defaults are
+    `repeat_load_stride=0`, `repeat_load_time=1` and
+    `repeat_load_axis=tla.experimental.height`, which perform a single load.
     """
 
     fmap_hw: tuple[IndexLike, IndexLike]
@@ -248,10 +249,12 @@ def img2col(
           - `pad_value` (`int`): Bit pattern of the padding fill value. Default `0`.
           - `repeat_load_stride` (`int`): Distance between successive source
             starts, in units of 16 elements along M or one source C0 along K.
-            Required.
-          - `repeat_load_time` (`int`): Number of loads. `0` performs no load. Required.
+            Default `0`.
+          - `repeat_load_time` (`int`): Number of loads. Default `1`.
+            `0` performs no load.
           - `repeat_load_axis`: `tla.experimental.height` along M or
-            `tla.experimental.width` along K of the expanded matrix. Required.
+            `tla.experimental.width` along K of the expanded matrix.
+            Default `tla.experimental.height`.
 
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function.
@@ -282,8 +285,8 @@ def img2col(
           constraints.
         - Filter extents are compile-time integers in 1..511.
         - `repeat_load_stride` and `repeat_load_time` must be compile-time
-          integers in 0..65535 and 0..255, respectively. Tracing rejects the
-          repeat-load defaults `-1`, `-1` and `None`.
+          integers in 0..65535 and 0..255, respectively. Omitting all three
+          repeat-load fields performs a single load.
         - The destination layout supplies the outer fractal stride (along K for
           L0A or M for L0B), including for a view into a parent matrix. Its byte
           stride must be a positive multiple of 512 and fit in an unsigned
@@ -297,9 +300,7 @@ def img2col(
         with tla.cube():
             # l1_fmap holds NC1HWC0; l1_filter holds the (K, N) weight matrix.
             tla.experimental.img2col(l0_a, l1_fmap, tla.experimental.Img2colParams(
-                fmap_hw=(hi, wi), filter_hw=(3, 3), pad=(1, 1, 1, 1),
-                repeat_load_stride=0, repeat_load_time=1,
-                repeat_load_axis=tla.experimental.height))
+                fmap_hw=(hi, wi), filter_hw=(3, 3), pad=(1, 1, 1, 1)))
             tla.copy(l0_b, l1_filter)
             tla.mmad(l0_c, l0_a, l0_b, init_c=True)
         ```

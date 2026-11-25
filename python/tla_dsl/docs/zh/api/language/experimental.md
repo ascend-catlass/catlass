@@ -45,10 +45,10 @@ tla.experimental.img2col(dst: Tensor, src: Tensor, params: Img2colParams) -> Non
   - `pad`（`tuple`）：填充 `(left, right, top, bottom)`。默认 `(0, 0, 0, 0)`。
   - `pad_value`（`int`）：填充值的位模式。默认 `0`。
   - `repeat_load_stride`（`int`）：相邻两次搬运的源起点间距。沿 M 时以 16 个元素为单位，
-    沿 K 时以一个源 C0 为单位。必填。
-  - `repeat_load_time`（`int`）：加载次数。`0` 表示不执行加载。必填。
-  - `repeat_load_axis`：`tla.experimental.height` 沿目标 M 轴重复加载，
-    `tla.experimental.width` 沿目标 K 轴重复加载。必填。
+    沿 K 时以一个源 C0 为单位。默认 `0`。
+  - `repeat_load_time`（`int`）：搬运次数。默认 `1`。`0` 表示不执行搬运。
+  - `repeat_load_axis`：`tla.experimental.height` 沿展开矩阵的 M 轴重复搬运，
+    `tla.experimental.width` 沿展开矩阵的 K 轴重复搬运。默认 `tla.experimental.height`。
 
 约束说明：
 
@@ -69,7 +69,7 @@ tla.experimental.img2col(dst: Tensor, src: Tensor, params: Img2colParams) -> Non
   1..255，填充宽度各分量须在 0..255。编译器校验静态值，运行时值须满足同样约束。
 - 卷积核尺寸为编译期整数，范围 1..511。
 - `repeat_load_stride` 和 `repeat_load_time` 须为编译期整数，范围分别为
-  0..65535 和 0..255。三个字段的默认值 `-1`、`-1` 和 `None` 会在追踪时触发报错。
+  0..65535 和 0..255。三个 repeat 参数均省略时执行一次搬运。
 - 外层分形步长取自目的布局，包括父矩阵子视图。字节步长须为 512 的正整数倍，
   换算为分形数后须能用无符号 16 位整数表示。
 - 有效地址包括 tensor 坐标和指针偏移。L1 有效地址须按 32 字节对齐，
@@ -81,9 +81,7 @@ tla.experimental.img2col(dst: Tensor, src: Tensor, params: Img2colParams) -> Non
 with tla.cube():
     # l1_fmap 为 NC1HWC0；l1_filter 为 (K, N) 权重矩阵。
     tla.experimental.img2col(l0_a, l1_fmap, tla.experimental.Img2colParams(
-        fmap_hw=(hi, wi), filter_hw=(3, 3), pad=(1, 1, 1, 1),
-        repeat_load_stride=0, repeat_load_time=1,
-        repeat_load_axis=tla.experimental.height))
+        fmap_hw=(hi, wi), filter_hw=(3, 3), pad=(1, 1, 1, 1)))
     tla.copy(l0_b, l1_filter)
     tla.mmad(l0_c, l0_a, l0_b, init_c=True)
 ```
