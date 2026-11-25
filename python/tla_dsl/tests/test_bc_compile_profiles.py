@@ -12,8 +12,23 @@ from catlass import bc_compile
 @pytest.fixture
 def helper_build(tmp_path: Path, monkeypatch):
     sources = {
-        "Cube": ("printf", "mmad", "debug_tunnel", "dma", "print_tensor"),
-        "Vector": ("vdiv", "printf", "dma", "print_tensor", "vf_print", "data_sync_barrier_ub"),
+        "Cube": (
+            "printf",
+            "mmad",
+            "debug_tunnel",
+            "dma",
+            "print_tensor",
+            "system_counter",
+        ),
+        "Vector": (
+            "vdiv",
+            "printf",
+            "dma",
+            "print_tensor",
+            "vf_print",
+            "data_sync_barrier_ub",
+            "system_counter",
+        ),
         # Shared core-agnostic stubs, compiled once per core type and linked
         # into both meta-op bitcodes (see bc_compile._SHARED_SUBDIRS).
         "Scalar": ("data_sync_barrier",),
@@ -59,18 +74,18 @@ def test_build_variants_preserves_print_order_and_compiles_components_once(
     # Link order follows the combined sorted glob: Cube/ < Scalar/ but
     # Scalar/ < Vector/, so the shared stub lands last for aic, first for aiv.
     assert (cache / "meta_op.aic.c310.bc").read_text() == (
-        "dma\nmmad\ndata_sync_barrier\n"
+        "dma\nmmad\nsystem_counter\ndata_sync_barrier\n"
     )
     assert (cache / "meta_op.aiv.c310.bc").read_text() == (
-        "data_sync_barrier\ndata_sync_barrier_ub\ndma\nvdiv\n"
+        "data_sync_barrier\ndata_sync_barrier_ub\ndma\nsystem_counter\nvdiv\n"
     )
     assert (cache / "meta_op.aic.print.c310.bc").read_text() == (
-        "debug_tunnel\ndma\nmmad\nprint_tensor\nprintf\ndata_sync_barrier\n"
+        "debug_tunnel\ndma\nmmad\nprint_tensor\nprintf\nsystem_counter\ndata_sync_barrier\n"
     )
     assert (cache / "meta_op.aiv.print.c310.bc").read_text() == (
-        "data_sync_barrier\ndata_sync_barrier_ub\ndma\nprint_tensor\nprintf\nvdiv\nvf_print\n"
+        "data_sync_barrier\ndata_sync_barrier_ub\ndma\nprint_tensor\nprintf\nsystem_counter\nvdiv\nvf_print\n"
     )
-    assert len(compiled) == len(set(compiled)) == 13
+    assert len(compiled) == len(set(compiled)) == 15
     # The shared scalar stub is compiled once per core type, not per variant;
     # the ub helper is AIV-only (same-name-different-body hazard, see
     # bc/Vector/data_sync_barrier_ub.cpp).
@@ -88,7 +103,18 @@ def test_build_variants_preserves_print_order_and_compiles_components_once(
 
     # Both aggregates reuse their existing outputs during an ordinary rebuild.
     bc_compile.init()
-    assert len(compiled) == 13
+    assert len(compiled) == 15
+
+
+def test_counter_helper_edit_invalidates_helper_cache(helper_build):
+    cfg, compiled = helper_build
+    first = bc_compile.init()
+    source = cfg.paths.bc_stubs / "Vector" / "system_counter.cpp"
+    source.write_text("changed counter implementation")
+    second = bc_compile.init()
+    assert first != second
+    assert len(compiled) == 30
+    assert (second / "meta_op.aiv.c310.bc").is_file()
 
 
 @pytest.mark.parametrize("variant", ["normal", "print"])
@@ -147,11 +173,13 @@ def test_force_rebuild_replaces_legacy_aggregate_without_removing_kernel_cache(
 
     bc_compile.main()
 
-    assert legacy_aggregate.read_text() == "dma\nmmad\ndata_sync_barrier\n"
+    assert (
+        legacy_aggregate.read_text() == "dma\nmmad\nsystem_counter\ndata_sync_barrier\n"
+    )
     assert (
         (cache / "meta_op.aic.print.c310.bc").read_text().startswith("debug_tunnel\n")
     )
     assert not (cache / "stale_component.aic.c310.bc").exists()
     assert kernel_binary.read_bytes() == b"existing compiled kernel"
-    assert len(compiled) == len(set(compiled)) == 13
+    assert len(compiled) == len(set(compiled)) == 15
     bc_compile.check_bc(bc_dir=cache)

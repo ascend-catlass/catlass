@@ -32,6 +32,7 @@ from .base_dsl.arch import (
 from .base_dsl import BaseDSL, DSLLocation
 from .bc_compile import (
     get_bc_paths as _get_bc_paths,
+    system_counter_build_id as _system_counter_build_id,
 )
 from .base_dsl.typing import Numeric, _signaling_nan_bits
 from .compiler_bridge import (
@@ -1705,6 +1706,8 @@ def _cache_key(
         "extern_compile_specs": extern_compile_identities,
         "extern_compile_environment": extern_compile_environment,
     }
+    if "tla.arch.get_system_cycle" in tlair_mlir:
+        key_payload["system_counter_build"] = _system_counter_build_id()
     return hashlib.sha256(
         json.dumps(key_payload, sort_keys=True).encode("utf-8")
     ).hexdigest()[:16]

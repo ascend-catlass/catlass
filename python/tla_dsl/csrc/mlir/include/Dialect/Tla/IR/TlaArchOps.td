@@ -20,6 +20,18 @@ def Tla_ProfEndOp : Tla_Op<"prof_end", []> {
 }
 
 // Grid coordinates. Used by every kernel -- SIMD, SIMT, cube and mixed alike.
+def Tla_GetSystemCycleOp : Tla_Op<"arch.get_system_cycle", []> {
+  let summary = "Read the issuing core's raw system counter";
+  let description = [{
+    Return SYS_CNT as an i64 bit pattern. This Scalar-pipeline read is not
+    Pure: repeated reads must not be eliminated or commoned. It does not
+    synchronize other pipes or establish a shared clock between issuers.
+  }];
+  let results = (outs I64:$ticks);
+  let assemblyFormat = [{ attr-dict `->` type($ticks) }];
+  let hasVerifier = 1;
+}
+
 def Tla_BlockNumOp : Tla_Op<"arch.block_num", [Pure]> {
   let summary = "Block count";
   let description = [{

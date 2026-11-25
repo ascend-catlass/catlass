@@ -1,0 +1,55 @@
+// RUN: split-file %s %t
+// RUN: not %tla_compile %t/outside.mlir -o - 2>&1 | %filecheck %s --check-prefix=OUTSIDE
+// RUN: not %tla_compile %t/vf.mlir -o - 2>&1 | %filecheck %s --check-prefix=VF
+// RUN: not %tla_compile %t/collision.mlir -o - 2>&1 | %filecheck %s --check-prefix=COLLISION
+
+// OUTSIDE: must be nested inside a tla.cube or tla.vector region
+// VF: must execute on Scalar outside tla.vec.func
+// RUN: not %tla_compile %t/global-collision.mlir -o - 2>&1 | %filecheck %s --check-prefix=COLLISION
+
+// COLLISION: counter helper symbol is reserved
+
+//--- outside.mlir
+module {
+  tla.func @outside() {
+    %ticks = tla.arch.get_system_cycle -> i64
+    tla.return
+  }
+}
+
+//--- vf.mlir
+module {
+  tla.func @inside_vf() {
+    "tla.vector"() ({
+      "tla.vec.func"() ({
+        %ticks = tla.arch.get_system_cycle -> i64
+      }) {mode = "simd"} : () -> ()
+    }) : () -> ()
+    tla.return
+  }
+}
+
+//--- collision.mlir
+module {
+  func.func private @tla_get_system_cycle.vector() -> i64 {
+    %zero = arith.constant 0 : i64
+    return %zero : i64
+  }
+  tla.func @reserved_counter() {
+    "tla.vector"() ({
+      %ticks = tla.arch.get_system_cycle -> i64
+    }) : () -> ()
+    tla.return
+  }
+}
+
+//--- global-collision.mlir
+module {
+  memref.global "private" @tla_get_system_cycle.vector : memref<1xi64> = dense<0>
+  tla.func @reserved_counter_global() {
+    "tla.vector"() ({
+      %ticks = tla.arch.get_system_cycle -> i64
+    }) : () -> ()
+    tla.return
+  }
+}

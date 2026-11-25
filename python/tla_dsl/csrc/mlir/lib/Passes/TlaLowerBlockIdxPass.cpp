@@ -43,6 +43,44 @@ struct LowerBlockNumOp : public OpRewritePattern<::tla::BlockNumOp> {
     }
 };
 
+struct LowerGetSystemCycleOp : public OpRewritePattern<::tla::GetSystemCycleOp> {
+    using OpRewritePattern<::tla::GetSystemCycleOp>::OpRewritePattern;
+
+    LogicalResult matchAndRewrite(::tla::GetSystemCycleOp op, PatternRewriter& rewriter) const override
+    {
+        auto module = op->getParentOfType<ModuleOp>();
+        auto caller = op->getParentOfType<func::FuncOp>();
+        hivm::TFuncCoreTypeAttr core;
+        if (caller)
+            core = caller->getAttrOfType<hivm::TFuncCoreTypeAttr>(hivm::TFuncCoreTypeAttr::name);
+        if (!core ||
+            (core.getFuncCoreType() != hivm::TFuncCoreType::AIC && core.getFuncCoreType() != hivm::TFuncCoreType::AIV))
+            return op.emitOpError("requires a split AIC or AIV function");
+        StringRef name =
+            core.getFuncCoreType() == hivm::TFuncCoreType::AIV ? "tla_get_system_cycle.vector" : "tla_get_system_cycle";
+        Operation* symbol = SymbolTable::lookupSymbolIn(module, name);
+        auto callee = dyn_cast_or_null<func::FuncOp>(symbol);
+        if (symbol && !callee)
+            return op.emitOpError("counter helper symbol is reserved for a function declaration");
+        auto type = rewriter.getFunctionType({}, {rewriter.getI64Type()});
+        if (callee && callee.getFunctionType() != type)
+            return op.emitOpError("counter helper symbol has an incompatible type");
+        if (callee && (!callee.isDeclaration() || !callee.isPrivate() ||
+                       callee->getAttrOfType<hivm::TFuncCoreTypeAttr>(hivm::TFuncCoreTypeAttr::name) != core))
+            return op.emitOpError("counter helper symbol is reserved for the issuing core's private declaration");
+        if (!callee) {
+            OpBuilder::InsertionGuard guard(rewriter);
+            rewriter.setInsertionPointToStart(module.getBody());
+            callee = rewriter.create<func::FuncOp>(op.getLoc(), name, type);
+            callee.setPrivate();
+            callee->setAttr(hivm::TFuncCoreTypeAttr::name, core);
+        }
+        auto call = rewriter.create<func::CallOp>(op.getLoc(), callee, ValueRange{});
+        rewriter.replaceOp(op, call.getResult(0));
+        return success();
+    }
+};
+
 static FailureOr<Type> convertTlaBoundaryTypeToHivm(Type type)
 {
     // !tla.memref boundary types were removed; there is nothing to convert here.
@@ -218,10 +256,10 @@ public:
             mlir::DLTIDialect, hacc::HACCDialect, hivm::HIVMDialect, arith::ArithDialect, func::FuncDialect,
             ::mlir::memref::MemRefDialect, ::tla::TlaDialect>();
         target.markUnknownOpDynamicallyLegal([](Operation*) { return true; });
-        target.addIllegalOp<::tla::BlockNumOp, ::tla::BlockIdxOp, ::tla::SubBlockIdxOp>();
+        target.addIllegalOp<::tla::BlockNumOp, ::tla::BlockIdxOp, ::tla::SubBlockIdxOp, ::tla::GetSystemCycleOp>();
 
         RewritePatternSet patterns(&getContext());
-        patterns.add<LowerBlockNumOp, LowerBlockIdxOp, LowerSubBlockIdxOp>(&getContext());
+        patterns.add<LowerBlockNumOp, LowerBlockIdxOp, LowerSubBlockIdxOp, LowerGetSystemCycleOp>(&getContext());
 
         if (failed(applyPartialConversion(module, target, std::move(patterns)))) {
             signalPassFailure();

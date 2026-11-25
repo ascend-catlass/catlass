@@ -1178,3 +1178,20 @@ with tla.vec.func(mode="simt", thread_block_dim=256):
         total = total + tla.arch.shuffle_sync_bfly(total, mask)
     # 此时 warp 内每个 lane 都持有该 warp 的和
 ```
+
+## 系统周期计数器
+
+### `tla.arch.get_system_cycle`
+
+读取当前核的系统周期计数器，返回保留 64 位位模式的 `Int64`。
+
+- 仅可在 Kernel 的标量 `tla.cube()` 或 `tla.vector()` 区域中调用。
+- 读取不会插入同步。比较同一个物理核的两次读取时，差值按 2 的 64 次方取模。
+- 差值单位为目标设备的系统计数器刻度。
+
+```python
+with tla.vector():
+    before = tla.arch.get_system_cycle()
+    after = tla.arch.get_system_cycle()
+    ticks = after - before
+```

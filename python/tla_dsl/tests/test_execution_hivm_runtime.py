@@ -860,7 +860,9 @@ def test_prepare_hivmc_input_keeps_selected_helpers_for_debug_tunnel(
     monkeypatch.setattr(
         execution,
         "_get_bc_paths",
-        lambda *args, **kwargs: pytest.fail("must reuse selected helpers"),
+        lambda *_args, **_kwargs: pytest.fail(
+            "selected helpers must not be resolved again"
+        ),
     )
     compiler_input, bitcodes = execution._create_stamped_hivmc_input(
         path,
@@ -3251,6 +3253,45 @@ def test_tool_metadata_fingerprint_unavailable_binary(tmp_path, symlink_loop) ->
     if symlink_loop:
         binary.symlink_to(binary)
     assert execution._tool_metadata_fingerprint(binary) == "missing"
+
+
+def test_counter_build_identity_only_invalidates_counter_kernels(monkeypatch, tmp_path):
+    from catlass import bc_compile
+
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    ccec = tools / "ccec"
+    ccec.write_bytes(b"first compiler")
+    (tools / "llvm-link").touch()
+    monkeypatch.setenv("ASCEND_HOME_PATH", str(tmp_path))
+    kwargs = dict(
+        entrypoint="kernel",
+        compile_option=execution.TlaCompileOption(),
+        compiler_bridge_path=None,
+        hivmc=None,
+        target=execution.TlaKernelTarget("aiv.c310", "c310", "aiv", "dav-c310-vec"),
+    )
+    stubs = tmp_path / "stubs"
+    for core in ("Cube", "Vector"):
+        (stubs / core).mkdir(parents=True)
+        (stubs / core / "system_counter.cpp").write_text("original source")
+    monkeypatch.setattr(
+        bc_compile, "_resolve_paths", lambda: bc_compile.BCPaths(stubs, tmp_path, stubs)
+    )
+    ordinary = execution._cache_key(tlair_mlir="module {}", **kwargs)
+    counter = execution._cache_key(tlair_mlir="tla.arch.get_system_cycle", **kwargs)
+    (stubs / "Cube" / "system_counter.cpp").write_text("changed source")
+    assert execution._cache_key(tlair_mlir="module {}", **kwargs) == ordinary
+    after_source_change = execution._cache_key(
+        tlair_mlir="tla.arch.get_system_cycle", **kwargs
+    )
+    assert after_source_change != counter
+    ccec.write_bytes(b"a different compiler")
+    assert execution._cache_key(tlair_mlir="module {}", **kwargs) == ordinary
+    assert (
+        execution._cache_key(tlair_mlir="tla.arch.get_system_cycle", **kwargs)
+        != after_source_change
+    )
 
 
 def test_cache_key_uses_ir_and_debug_print_workspace_abi_revision(

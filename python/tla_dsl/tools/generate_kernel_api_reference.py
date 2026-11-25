@@ -501,6 +501,10 @@ DIRECTORY_SECTIONS: list[tuple[str, str]] = [
         "series products and Atlas A3 series products have no warp shuffle "
         "instruction.",
     ),
+    (
+        "System Variable Access / Counters",
+        "Read the issuing core’s system counter from the Scalar pipeline.",
+    ),
     ("Resource Management", "On-chip scratch allocation via `allocate`."),
     (
         "Debug APIs",

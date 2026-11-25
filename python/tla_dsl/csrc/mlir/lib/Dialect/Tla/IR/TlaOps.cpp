@@ -2619,6 +2619,15 @@ mlir::LogicalResult FlagOp::verify()
 }
 
 // Synchronization/mutex/barrier ops must live inside a tla.cube or tla.vector
+mlir::LogicalResult GetSystemCycleOp::verify()
+{
+    if (hasEnclosing<VecFuncOp>(getOperation()))
+        return emitOpError("must execute on Scalar outside tla.vec.func");
+    if (!hasEnclosingRegion<CubeOp>(getOperation()) && !hasEnclosingRegion<VectorOp>(getOperation()))
+        return emitOpError("must be nested inside a tla.cube or tla.vector region");
+    return mlir::success();
+}
+
 // region (either core-kind region; not the func-level scope).
 #define TLA_VERIFY_IN_CUBE_OR_VECTOR(OpTy)                                                                \
     mlir::LogicalResult OpTy::verify()                                                                    \

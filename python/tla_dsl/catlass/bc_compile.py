@@ -1,8 +1,8 @@
 """BC (LLVM bitcode) compiler for TLA Python.
 
 Compiles BC stub sources using the user's own ``ccec`` / ``llvm-link``
-and caches the result.  Cache key = catlass version ID + ccec identity
-(ELF build-id).
+and caches the result. Cache identity includes the Catlass version, ccec
+identity (ELF build-id), and system-counter helper source contents.
 
 The cache is also built on first import (see :func:`autobuild_on_import`), so
 running an operator needs no separate precompile step.  That import happens in
@@ -230,11 +230,35 @@ def _ccec_id(ccec: Path) -> str:
     return f"stat:{stat.st_size}:{stat.st_mtime_ns}"
 
 
+_CACHE_SOURCE_FILES = ("Cube/system_counter.cpp", "Vector/system_counter.cpp")
+
+
+def _bc_source_id(relative_paths: tuple[str, ...]) -> str:
+    """Hash packaged BC sources by relative path and contents."""
+    root = _resolve_paths().bc_stubs
+    digest = hashlib.sha256()
+    for name in relative_paths:
+        digest.update(name.encode())
+        digest.update(b"\0")
+        digest.update(hashlib.sha256((root / name).read_bytes()).digest())
+    return digest.hexdigest()
+
+
 def compute_cache_key(ccec: Path) -> str:
-    """Cache key = CATLASS version, ccec identity, and bitcode layout revision."""
+    """Key helper aggregates by version, compiler and counter source identity."""
     return hashlib.sha256(
-        f"{_catlass_version_id()}:{_ccec_id(ccec)}:ar-spr-v1".encode()
+        f"{_catlass_version_id()}:{_ccec_id(ccec)}:ar-spr-v1:{_bc_source_id(_CACHE_SOURCE_FILES)}".encode()
     ).hexdigest()[:16]
+
+
+def system_counter_build_id() -> str:
+    """Identify the helper build used by a counter-reading kernel."""
+    try:
+        ccec = _resolve_toolchain().ccec
+    except RuntimeError:
+        # Keep device-less frontend export available before toolchain diagnostics.
+        return _bc_source_id(_CACHE_SOURCE_FILES)
+    return compute_cache_key(ccec)
 
 
 # ---------------------------------------------------------------------------

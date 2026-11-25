@@ -1286,3 +1286,44 @@ with tla.vec.func(mode="simt", thread_block_dim=256):
         total = total + tla.arch.shuffle_sync_bfly(total, mask)
     # every lane of the warp now holds the warp's sum
 ```
+
+---
+
+## Counters
+
+Read the issuing core’s system counter from the Scalar pipeline.
+
+### `tla.arch.get_system_cycle`
+
+**Source:** [`catlass.core_api.arch_get_system_cycle`](../../../../catlass/core_api.py)
+
+Description:
+
+Read the issuing core's 64-bit system counter as an Int64 bit pattern.
+This volatile Scalar-pipeline read inserts no synchronization.
+
+Prototype:
+
+```python
+tla.arch.get_system_cycle() -> Int64
+```
+
+Parameters:
+
+loc: Optional MLIR source location.
+
+Constraints:
+
+Legal inside Cube or Vector scope, outside vec.func. Compare reads
+only on the same physical issuer, with subtraction modulo 2**64.
+Int64 subtraction preserves the bits without unsigned casts. Raw
+ticks are not active-pipe cycles; frequency is target-specific.
+
+Example:
+
+```python
+with tla.vector():
+    before = tla.arch.get_system_cycle()
+    after = tla.arch.get_system_cycle()
+    ticks = after - before
+```

@@ -13829,6 +13829,40 @@ def arch_block_num(*, loc: mlir_ir.Location | None = None) -> Int32:
 
 
 @dsl_user_op
+def arch_get_system_cycle(*, loc: mlir_ir.Location | None = None) -> Int64:
+    """Directory: System Variable Access / Counters
+
+    Description:
+        Read the issuing core's 64-bit system counter as an Int64 bit pattern.
+        This volatile Scalar-pipeline read inserts no synchronization.
+
+    Parameters:
+        loc: Optional MLIR source location.
+
+    Constraints:
+        Legal inside Cube or Vector scope, outside vec.func. Compare reads
+        only on the same physical issuer, with subtraction modulo 2**64.
+        Int64 subtraction preserves the bits without unsigned casts. Raw
+        ticks are not active-pipe cycles; frequency is target-specific.
+
+    Example:
+        ```python
+        with tla.vector():
+            before = tla.arch.get_system_cycle()
+            after = tla.arch.get_system_cycle()
+            ticks = after - before
+        ```
+    """
+    api = "arch.get_system_cycle"
+    _require_frontend_state(api)
+    _runtime._require_enclosing_cube_or_vector(api)
+    if _runtime._has_enclosing_region("vec.func"):
+        _op_error(api, "must execute on Scalar outside tla.vec.func")
+    i64 = mlir_ir.IntegerType.get_signless(64)
+    return Int64(_tla_ops_gen.arch_get_system_cycle(i64, loc=loc))
+
+
+@dsl_user_op
 def arch_thread_block_dim(
     *, loc: mlir_ir.Location | None = None
 ) -> tuple[Int32, Int32, Int32]:
@@ -14288,6 +14322,7 @@ _require_generated("cmp")
 _require_generated("arch_block_idx")
 _require_generated("arch_sub_block_idx")
 _require_generated("arch_block_num")
+_require_generated("arch_get_system_cycle")
 _require_generated("arch_thread_block_dim")
 _require_generated("arch_thread_idx")
 _require_generated("arch_lane_idx")
@@ -14321,6 +14356,7 @@ arch._set("dci", arch_dci)
 arch._set("block_idx", arch_block_idx)
 arch._set("sub_block_idx", arch_sub_block_idx)
 arch._set("block_num", arch_block_num)
+arch._set("get_system_cycle", arch_get_system_cycle)
 arch._set("thread_block_dim", arch_thread_block_dim)
 arch._set("thread_idx", arch_thread_idx)
 arch._set("warpsize", arch_warpsize)
