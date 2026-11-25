@@ -1,0 +1,136 @@
+// RUN: sed -n '/^\/\/ BEGIN_UB$/,/^\/\/ END_UB$/p' %s | sed '1d;$d;s|^// ||' > %t.UB.mlir && not %tla_compile %t.UB.mlir -o %t 2>&1 | %filecheck %s --check-prefix=UB
+// UB: error: 'tla.simd_atomic_add' op SIMD atomic operations require a gm pointer
+
+// BEGIN_UB
+// !gm_i32 = !tla.tensor<!tla.layout<!tla.shape<8>, !tla.stride<1>, !tla.shape<8>, RowMajor>, !tla.coord<0>, !tla.ptr<i32, gm, 4>>
+// !ub_i32 = !tla.tensor<!tla.layout<!tla.shape<8>, !tla.stride<1>, !tla.shape<8>, RowMajor>, !tla.coord<0>, !tla.ptr<i32, ub, 4>>
+// module {
+//   func.func @ub_pointer(%dst_memref: memref<8xi32, #hivm.address_space<ub>>) {
+//     %c0 = arith.constant 0 : index
+//     %c1 = arith.constant 1 : index
+//     %c8 = arith.constant 8 : index
+//     %dst = tla.tensor_desc %dst_memref shape [%c1, %c8, %c1, %c1] stride [%c8, %c1, %c1, %c1] origin_shape [%c1, %c8] coord [%c0, %c0] : memref<8xi32, #hivm.address_space<ub>> -> !ub_i32
+//     "tla.vector"() ({
+//       %p = tla.tensor_ptr %dst : !ub_i32 -> !tla.ptr<i32, ub, 4>
+//       %one = arith.constant 1 : i32
+//       %old = tla.simd_atomic_add %p, %one : !tla.ptr<i32, ub, 4>, i32 -> i32
+//       tla.scalar_store %dst[%c0], %old : !ub_i32, i32
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_UB
+
+// RUN: sed -n '/^\/\/ BEGIN_VALUE$/,/^\/\/ END_VALUE$/p' %s | sed '1d;$d;s|^// ||' > %t.VALUE.mlir && not %tla_compile %t.VALUE.mlir -o %t 2>&1 | %filecheck %s --check-prefix=VALUE
+// VALUE: error: 'tla.simd_atomic_add' op value type 'i64' must match the pointer's pointee type 'i32'
+
+// BEGIN_VALUE
+// !gm_i32 = !tla.tensor<!tla.layout<!tla.shape<8>, !tla.stride<1>, !tla.shape<8>, RowMajor>, !tla.coord<0>, !tla.ptr<i32, gm, 4>>
+// module {
+//   func.func @value_type(%dst_memref: memref<8xi32, #hivm.address_space<gm>>) {
+//     %c0 = arith.constant 0 : index
+//     %c1 = arith.constant 1 : index
+//     %c8 = arith.constant 8 : index
+//     %dst = tla.tensor_desc %dst_memref shape [%c1, %c8, %c1, %c1] stride [%c8, %c1, %c1, %c1] origin_shape [%c1, %c8] coord [%c0, %c0] : memref<8xi32, #hivm.address_space<gm>> -> !gm_i32
+//     "tla.vector"() ({
+//       %p = tla.tensor_ptr %dst : !gm_i32 -> !tla.ptr<i32, gm, 4>
+//       %one = arith.constant 1 : i64
+//       %old = tla.simd_atomic_add %p, %one : !tla.ptr<i32, gm, 4>, i64 -> i64
+//       tla.scalar_store %dst[%c0], %old : !gm_i32, i64
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_VALUE
+
+// RUN: sed -n '/^\/\/ BEGIN_ADD_F16$/,/^\/\/ END_ADD_F16$/p' %s | sed '1d;$d;s|^// ||' > %t.ADD_F16.mlir && not %tla_compile %t.ADD_F16.mlir -o %t 2>&1 | %filecheck %s --check-prefix=ADD_F16
+// ADD_F16: error: 'tla.simd_atomic_add' op unsupported atomic add element type 'f16'
+
+// BEGIN_ADD_F16
+// !gm_f16 = !tla.tensor<!tla.layout<!tla.shape<8>, !tla.stride<1>, !tla.shape<8>, RowMajor>, !tla.coord<0>, !tla.ptr<f16, gm, 2>>
+// module {
+//   func.func @add_f16(%dst_memref: memref<8xf16, #hivm.address_space<gm>>) {
+//     %c0 = arith.constant 0 : index
+//     %c1 = arith.constant 1 : index
+//     %c8 = arith.constant 8 : index
+//     %dst = tla.tensor_desc %dst_memref shape [%c1, %c8, %c1, %c1] stride [%c8, %c1, %c1, %c1] origin_shape [%c1, %c8] coord [%c0, %c0] : memref<8xf16, #hivm.address_space<gm>> -> !gm_f16
+//     "tla.vector"() ({
+//       %p = tla.tensor_ptr %dst : !gm_f16 -> !tla.ptr<f16, gm, 2>
+//       %one = arith.constant 1.000000e+00 : f16
+//       %old = tla.simd_atomic_add %p, %one : !tla.ptr<f16, gm, 2>, f16 -> f16
+//       tla.scalar_store %dst[%c0], %old : !gm_f16, f16
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_ADD_F16
+
+// RUN: sed -n '/^\/\/ BEGIN_EXCH_I32$/,/^\/\/ END_EXCH_I32$/p' %s | sed '1d;$d;s|^// ||' > %t.EXCH_I32.mlir && not %tla_compile %t.EXCH_I32.mlir -o %t 2>&1 | %filecheck %s --check-prefix=EXCH_I32
+// EXCH_I32: error: 'tla.simd_atomic_exch' op atomic exch supports only ui32 and ui64, got 'i32'
+
+// BEGIN_EXCH_I32
+// !gm_i32 = !tla.tensor<!tla.layout<!tla.shape<8>, !tla.stride<1>, !tla.shape<8>, RowMajor>, !tla.coord<0>, !tla.ptr<i32, gm, 4>>
+// module {
+//   func.func @exch_i32(%dst_memref: memref<8xi32, #hivm.address_space<gm>>) {
+//     %c0 = arith.constant 0 : index
+//     %c1 = arith.constant 1 : index
+//     %c8 = arith.constant 8 : index
+//     %dst = tla.tensor_desc %dst_memref shape [%c1, %c8, %c1, %c1] stride [%c8, %c1, %c1, %c1] origin_shape [%c1, %c8] coord [%c0, %c0] : memref<8xi32, #hivm.address_space<gm>> -> !gm_i32
+//     "tla.vector"() ({
+//       %p = tla.tensor_ptr %dst : !gm_i32 -> !tla.ptr<i32, gm, 4>
+//       %one = arith.constant 1 : i32
+//       %old = tla.simd_atomic_exch %p, %one : !tla.ptr<i32, gm, 4>, i32 -> i32
+//       tla.scalar_store %dst[%c0], %old : !gm_i32, i32
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_EXCH_I32
+
+// RUN: sed -n '/^\/\/ BEGIN_VEC_FUNC$/,/^\/\/ END_VEC_FUNC$/p' %s | sed '1d;$d;s|^// ||' > %t.VEC_FUNC.mlir && not %tla_compile %t.VEC_FUNC.mlir -o %t 2>&1 | %filecheck %s --check-prefix=VEC_FUNC
+// VEC_FUNC: error: 'tla.simd_atomic_add' op SIMD atomic operations must not be nested inside a tla.vec.func
+
+// BEGIN_VEC_FUNC
+// !gm_i32 = !tla.tensor<!tla.layout<!tla.shape<8>, !tla.stride<1>, !tla.shape<8>, RowMajor>, !tla.coord<0>, !tla.ptr<i32, gm, 4>>
+// module {
+//   func.func @simd_vec_func(%dst_memref: memref<8xi32, #hivm.address_space<gm>>) {
+//     %c0 = arith.constant 0 : index
+//     %c1 = arith.constant 1 : index
+//     %c8 = arith.constant 8 : index
+//     %dst = tla.tensor_desc %dst_memref shape [%c1, %c8, %c1, %c1] stride [%c8, %c1, %c1, %c1] origin_shape [%c1, %c8] coord [%c0, %c0] : memref<8xi32, #hivm.address_space<gm>> -> !gm_i32
+//     "tla.vector"() ({
+//       "tla.vec.func"() ({
+//         %p = tla.tensor_ptr %dst : !gm_i32 -> !tla.ptr<i32, gm, 4>
+//         %one = arith.constant 1 : i32
+//         %old = tla.simd_atomic_add %p, %one : !tla.ptr<i32, gm, 4>, i32 -> i32
+//         tla.scalar_store %dst[%c0], %old : !gm_i32, i32
+//       }) {mode = "simd"} : () -> ()
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_VEC_FUNC
+
+// RUN: sed -n '/^\/\/ BEGIN_SIMT$/,/^\/\/ END_SIMT$/p' %s | sed '1d;$d;s|^// ||' > %t.SIMT.mlir && not %tla_compile %t.SIMT.mlir -o %t 2>&1 | %filecheck %s --check-prefix=SIMT
+// SIMT: error: 'tla.simd_atomic_add' op SIMD atomic operations must not be nested inside a tla.vec.func
+
+// BEGIN_SIMT
+// !gm_i32 = !tla.tensor<!tla.layout<!tla.shape<8>, !tla.stride<1>, !tla.shape<8>, RowMajor>, !tla.coord<0>, !tla.ptr<i32, gm, 4>>
+// module {
+//   func.func @simt_region(%dst_memref: memref<8xi32, #hivm.address_space<gm>>) {
+//     %c0 = arith.constant 0 : index
+//     %c1 = arith.constant 1 : index
+//     %c8 = arith.constant 8 : index
+//     %dst = tla.tensor_desc %dst_memref shape [%c1, %c8, %c1, %c1] stride [%c8, %c1, %c1, %c1] origin_shape [%c1, %c8] coord [%c0, %c0] : memref<8xi32, #hivm.address_space<gm>> -> !gm_i32
+//     "tla.vector"() ({
+//       "tla.vec.func"() ({
+//         %p = tla.tensor_ptr %dst : !gm_i32 -> !tla.ptr<i32, gm, 4>
+//         %one = arith.constant 1 : i32
+//         %old = tla.simd_atomic_add %p, %one : !tla.ptr<i32, gm, 4>, i32 -> i32
+//         tla.scalar_store %dst[%c0], %old : !gm_i32, i32
+//       }) {mode = "simt", thread_block_dim = array<i64: 1, 1, 1>} : () -> ()
+//     }) : () -> ()
+//     return
+//   }
+// }
+// END_SIMT

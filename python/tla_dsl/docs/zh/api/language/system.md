@@ -411,6 +411,95 @@ def read_first(src: tla.Tensor, dst: tla.Tensor):
 
 ---
 
+### `tla.arch.atomic_add`
+
+**源码：** [`catlass.core_api.arch_atomic_add`](../../../../catlass/core_api.py)
+
+功能说明：
+
+对 `ptr` 指向的元素执行原子加（`tla.arch.atomic_add(ptr, value)`），返回该元素的旧值。
+
+指针同时携带元素类型与地址空间。元素地址由调用方给出：对张量视图，`t.ptr_with_coord` 指向它的首元素。读-改-写是原子的，任意多个核同时命中同一元素都不会丢失更新。典型用途是计数器、直方图桶与归约累加器。`tla.vector()` 与 `tla.cube()` 都可发起该操作：原子单元是共享的，AIV/AIC 混合 kernel 可以从任一侧命中同一元素。
+
+返回值是更新前该元素的内容，类型与指针的元素类型一致：`u32` 指针返回 `UInt32`，`u64` 指针返回 `UInt64`。旧值可直接同类型写回张量，例如 `dst[0] = tla.arch.atomic_add(dst.ptr_with_coord, 1)`。
+
+函数原型：
+
+```python
+tla.arch.atomic_add(ptr: Pointer, value: Any) -> Numeric
+```
+
+参数说明：
+
+- `ptr`（`Pointer`）：指向被更新元素的 GM 指针。必选。
+- `value`（`Numeric | int | float`）：加数。宿主字面量会转换为指针的元素类型；`Numeric` 必须已是该类型。必选。
+
+返回值：
+- `Numeric`：更新前该元素的值，类型同元素类型。只关心累加结果时可忽略。
+
+约束说明：
+
+- 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
+- 须在 `tla.vector()` 或 `tla.cube()` 内，且不得位于任何 `tla.vec.func` 中：原子单元是标量指令，
+  不能作为向量函数的一部分执行。请直接写在 `tla.vector()` 的标量部分，或 `tla.cube()` 中的任意位置。
+- `ptr` 须为 `gm` 指针；原子单元没有 UB 形态。
+- 元素类型须为 `i32`、`u32`、`i64`、`u64` 或 `f32`。
+- 仅 Ascend 950（架构 3510）。
+
+调用示例：
+
+```python
+with tla.vector():
+    old = tla.arch.atomic_add(out.ptr_with_coord, 1)
+    out[0] = old  # 同类型直写：u32 -> u32，i32 -> i32
+```
+
+---
+
+### `tla.arch.atomic_exch`
+
+**源码：** [`catlass.core_api.arch_atomic_exch`](../../../../catlass/core_api.py)
+
+功能说明：
+
+把 `ptr` 指向的元素原子替换为 `value`（`tla.arch.atomic_exch(ptr, value)`），返回该元素的旧值。
+
+交换是一次原子互换，不是 compare-and-swap：无论元素此前是什么，都会被写成 `value`，旧内容作为返回值给出。适合发布槽位或抢占位置而无需重试循环。与 `tla.arch.atomic_add` 一样，`tla.vector()` 与 `tla.cube()` 都可使用。
+
+返回值是交换前该元素的内容，类型与指针的元素类型一致：`u32` 返回 `UInt32`，`u64` 返回 `UInt64`。与 `tla.arch.atomic_add` 相同，旧值可直接同类型写回张量。
+
+函数原型：
+
+```python
+tla.arch.atomic_exch(ptr: Pointer, value: Any) -> Numeric
+```
+
+参数说明：
+
+- `ptr`（`Pointer`）：指向被交换元素的 GM 指针。必选。
+- `value`（`Numeric | int`）：替换值。宿主字面量会转换为指针的元素类型；`Numeric` 必须已是该类型。必选。
+
+返回值：
+- `Numeric`：交换前该元素的值，类型同元素类型。
+
+约束说明：
+
+- 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
+- 须在 `tla.vector()` 或 `tla.cube()` 内，且不得位于任何 `tla.vec.func` 中：原子单元是标量指令，
+  不能作为向量函数的一部分执行。请直接写在 `tla.vector()` 的标量部分，或 `tla.cube()` 中的任意位置。
+- `ptr` 须为 `gm` 指针；原子单元没有 UB 形态。
+- 元素类型须为 `u32` 或 `u64`；交换指令没有有符号与浮点形态。
+- 仅 Ascend 950（架构 3510）。
+
+调用示例：
+
+```python
+with tla.vector():
+    old = tla.arch.atomic_exch(flag.ptr_with_coord, tla.UInt32(1))
+```
+
+---
+
 ### `tla.arch.warpsize`
 
 **源码：** [`catlass.core_api.arch_warpsize`](../../../../catlass/core_api.py)

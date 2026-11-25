@@ -1,4 +1,7 @@
+#include "Passes/TlaAtomicCommon.h"
 #include "PassesCommon.h"
+
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 
 namespace tla {
 namespace {
@@ -93,6 +96,92 @@ struct LowerGetSystemCycleOp : public OpRewritePattern<::tla::GetSystemCycleOp> 
         }
         auto call = rewriter.create<func::CallOp>(op.getLoc(), callee, ValueRange{});
         rewriter.replaceOp(op, call.getResult(0));
+        return success();
+    }
+};
+
+// tla-lower-ptr keeps a typed pointer alive at pointer consumers and rebuilds
+// it as tla.inttoptr(i64). The atom is such a consumer, so peel that bridge back
+// to the byte address the intrinsic takes.
+static Value getAtomicAddress(Value ptr)
+{
+    if (auto intToPtr = ptr.getDefiningOp<::tla::IntToPtrOp>())
+        return intToPtr.getAddr();
+    return {};
+}
+
+// A same-width integer unrealized cast is the unsigned scalar bridge the
+// frontend emits (arith.constant only carries signless integers). Reuse the
+// signless carrier the intrinsic wants instead of stacking a second cast.
+static Value peelUnsignedBridge(Value value)
+{
+    auto cast = value.getDefiningOp<UnrealizedConversionCastOp>();
+    if (!cast || cast->getNumOperands() != 1)
+        return value;
+    Value source = cast.getOperand(0);
+    auto sourceInt = dyn_cast<IntegerType>(source.getType());
+    auto resultInt = dyn_cast<IntegerType>(value.getType());
+    if (!sourceInt || !resultInt || sourceInt.getWidth() != resultInt.getWidth())
+        return value;
+    return source;
+}
+
+// SIMD atomics are GM-only scalar read-modify-writes: the architecture op
+// becomes one atom intrinsic. Arch-op lowering owns the rewrite; tla-lower-ptr
+// only turns !tla.ptr into i64 byte addresses.
+template <typename AtomicOp, AtomicOpKind kKind>
+struct LowerSimdAtomicOp : public OpRewritePattern<AtomicOp> {
+    using OpRewritePattern<AtomicOp>::OpRewritePattern;
+
+    LogicalResult matchAndRewrite(AtomicOp op, PatternRewriter& rewriter) const override
+    {
+        auto ptrType = dyn_cast<::tla::PtrType>(op.getPtr().getType());
+        if (!ptrType)
+            return rewriter.notifyMatchFailure(op, "address is not !tla.ptr");
+        if (ptrType.getAddrspace() != AddressSpace::gm)
+            return rewriter.notifyMatchFailure(op, "SIMD atomics are gm-only");
+        Type elementType = ptrType.getPointee();
+        Type storageType = elementType;
+        if (auto integer = dyn_cast<IntegerType>(elementType))
+            storageType = rewriter.getIntegerType(integer.getWidth());
+
+        Value address = getAtomicAddress(op.getPtr());
+        if (!address || !address.getType().isInteger(64))
+            return rewriter.notifyMatchFailure(op, "atom address is not materialized from an i64 byte address");
+
+        Location loc = op.getLoc();
+        Type pointerType =
+            LLVM::LLVMPointerType::get(rewriter.getContext(), static_cast<unsigned>(hivm::AddressSpace::GM));
+        Value pointer = rewriter.create<LLVM::IntToPtrOp>(loc, pointerType, address);
+
+        Operation* bridge = op.getValue().getDefiningOp();
+        Value value = peelUnsignedBridge(op.getValue());
+        if (value.getType() != storageType) {
+            value = rewriter.create<UnrealizedConversionCastOp>(loc, TypeRange{storageType}, ValueRange{value})
+                        .getResult(0);
+        }
+        // 0 is L2_CACHE_HINT_NORMAL_FV, the hint the SIMT atom lowering uses.
+        Value cacheHint = rewriter.create<arith::ConstantIntOp>(loc, 0, 32);
+        std::string intrinsic =
+            atomicIntrinsicName(kKind == AtomicOpKind::Add ? "ADD" : "EXCH", /*gm=*/true, elementType, kKind);
+        if (intrinsic.empty())
+            return rewriter.notifyMatchFailure(op, "no atom intrinsic for this element type");
+
+        Value oldValue =
+            rewriter.create<LLVM::CallIntrinsicOp>(loc, storageType, intrinsic, ValueRange{pointer, value, cacheHint})
+                .getResult(0);
+        if (oldValue.getType() != elementType) {
+            oldValue = rewriter.create<UnrealizedConversionCastOp>(loc, TypeRange{elementType}, ValueRange{oldValue})
+                           .getResult(0);
+        }
+        Operation* addressOp = op.getPtr().getDefiningOp();
+        rewriter.replaceOp(op, oldValue);
+        // Both were rematerialized only for this consumer; drop them when no
+        // other use remains, so no typed pointer or bridge survives the pass.
+        if (addressOp && addressOp->use_empty())
+            rewriter.eraseOp(addressOp);
+        if (bridge && bridge != addressOp && isa<UnrealizedConversionCastOp>(bridge) && bridge->use_empty())
+            rewriter.eraseOp(bridge);
         return success();
     }
 };
@@ -242,7 +331,7 @@ public:
     {
         registry.insert<
             mlir::DLTIDialect, hacc::HACCDialect, hivm::HIVMDialect, arith::ArithDialect, func::FuncDialect,
-            ::mlir::memref::MemRefDialect, ::tla::TlaDialect>();
+            ::mlir::memref::MemRefDialect, ::tla::TlaDialect, LLVM::LLVMDialect>();
     }
 
     void runOnOperation() override
@@ -270,15 +359,17 @@ public:
         ConversionTarget target(getContext());
         target.addLegalDialect<
             mlir::DLTIDialect, hacc::HACCDialect, hivm::HIVMDialect, arith::ArithDialect, func::FuncDialect,
-            ::mlir::memref::MemRefDialect, ::tla::TlaDialect>();
+            ::mlir::memref::MemRefDialect, ::tla::TlaDialect, LLVM::LLVMDialect>();
         target.markUnknownOpDynamicallyLegal([](Operation*) { return true; });
         target.addIllegalOp<
-            ::tla::BlockNumOp, ::tla::BlockIdxOp, ::tla::SubBlockIdxOp, ::tla::SubBlockNumOp,
-            ::tla::GetSystemCycleOp>();
+            ::tla::BlockNumOp, ::tla::BlockIdxOp, ::tla::SubBlockIdxOp, ::tla::SubBlockNumOp, ::tla::GetSystemCycleOp,
+            ::tla::SimdAtomicAddOp, ::tla::SimdAtomicExchOp>();
 
         RewritePatternSet patterns(&getContext());
-        patterns.add<LowerBlockNumOp, LowerBlockIdxOp, LowerSubBlockIdxOp, LowerSubBlockNumOp, LowerGetSystemCycleOp>(
-            &getContext());
+        patterns.add<
+            LowerBlockNumOp, LowerBlockIdxOp, LowerSubBlockIdxOp, LowerSubBlockNumOp, LowerGetSystemCycleOp,
+            LowerSimdAtomicOp<::tla::SimdAtomicAddOp, AtomicOpKind::Add>,
+            LowerSimdAtomicOp<::tla::SimdAtomicExchOp, AtomicOpKind::Exch>>(&getContext());
 
         if (failed(applyPartialConversion(module, target, std::move(patterns)))) {
             signalPassFailure();

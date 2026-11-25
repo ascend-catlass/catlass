@@ -405,6 +405,15 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         [["end_to_end/atomic_writeback.py", *dev]],
     )
 
+    # --- end_to_end: SIMD / AIC scalar atomics ---
+    # ADD on i32/f32/u32/u64 (AIV) and i64/u32 (AIC), EXCH on u32/u64 (AIV) and
+    # u32 (AIC). Every block records its old value in its own cache line, so the
+    # old-value multiset is checked alongside the final counter.
+    yield (
+        "simd-atomic-add-exch",
+        [["end_to_end/simd_atomic_add_exch.py", *dev]],
+    )
+
     # --- basic_matmul_bias: a required 1 x N bias operand, loaded GM -> L1 ->
     # biasbuf through the flat VectorLayout routes and consumed by the first MMAD of
     # every block. Operand dtypes follow basic_matmul.py, and the output follows

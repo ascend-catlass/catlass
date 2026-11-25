@@ -14115,6 +14115,231 @@ def arch_load_bypass_dcache(
     return Numeric.from_mlir_type(pointee)(result)
 
 
+# --- SIMD scalar atomics ---------------------------------------------------
+#
+# `tla.arch.atomic_add(ptr, value)` / `tla.arch.atomic_exch(ptr, value)` are the
+# two read-modify-write primitives available to a scalar region of `tla.vector()`
+# or `tla.cube()`. They are pure pointer APIs: the caller names the element
+# address, the pointer's pointee type carries the element type, and the DSL
+# guarantees the RMW is atomic with respect to every other core touching that
+# address. Only global memory has the atom unit, so both are gm-only.
+#
+# The old value comes back in the pointer's own type. For the unsigned forms
+# (u32/u64) that means the caller can write it straight back into a u32/u64
+# tensor element.
+_ATOMIC_ADD_ELEMENT_TOKENS = ("i32", "u32", "f32", "i64", "u64")
+_ATOMIC_EXCH_ELEMENT_TOKENS = ("u32", "u64")
+
+
+def _scalar_element_token(element_type: mlir_ir.Type) -> str:
+    if mlir_ir.IntegerType.isinstance(element_type):
+        integer_type = mlir_ir.IntegerType(element_type)
+        return ("u" if integer_type.is_unsigned else "i") + str(integer_type.width)
+    return str(element_type)
+
+
+def _atomic_scalar_operand(
+    op_name: str,
+    element_type: mlir_ir.Type,
+    value: Any,
+    *,
+    loc: mlir_ir.Location | None,
+) -> mlir_ir.Value:
+    """Coerce the addend/exchange value to exactly the pointer's pointee type."""
+    resolved = _resolve_bound_value(value)
+    if isinstance(resolved, bool):
+        _op_error(
+            op_name,
+            f"invalid argument 'value' (position 1): expected scalar, got {_type_name(value)}",
+        )
+    if isinstance(resolved, (int, float)):
+        # A host literal is range-checked and emitted as the pointee type; for an
+        # unsigned pointee the literal is a signless constant bridged by the cast
+        # the op's operand type requires.
+        return _scalar_constant_for_element_type(
+            op_name, resolved, element_type, loc=loc
+        )
+    if isinstance(resolved, Numeric):
+        num = resolved
+    elif isinstance(resolved, mlir_ir.Value):
+        num = as_numeric(resolved)
+    else:
+        _op_error(
+            op_name,
+            f"invalid argument 'value' (position 1): expected Numeric or scalar "
+            f"literal, got {_type_name(value)}",
+        )
+    try:
+        dest_cls = Numeric.from_mlir_type(element_type)
+    except TypeError:
+        _op_error(op_name, f"unsupported pointee type {element_type}")
+    if not isinstance(num, dest_cls):
+        _op_error(
+            op_name,
+            f"type mismatch, the pointer's pointee is {dest_cls.dtype} but the value "
+            f"is {type(num).dtype}; cast explicitly with .to({dest_cls.__name__})",
+        )
+    ir_value = num.ir_value(loc=loc)
+    if str(ir_value.type) != str(element_type):
+        raise TlaLoweringError(
+            f"tla.{op_name} value type mismatch: expected {element_type}, got {ir_value.type}"
+        )
+    return ir_value
+
+
+def _emit_simd_atomic(
+    op_name: str,
+    emitter: Any,
+    element_tokens: tuple[str, ...],
+    ptr: Pointer,
+    value: Any,
+    *,
+    loc: mlir_ir.Location | None,
+) -> Numeric:
+    _require_frontend_state(op_name)
+    _require_core_region(op_name)
+    _require_category(op_name, "ptr", ptr, "pointer", 0)
+    p = _coerce_pointer_arg(ptr)
+    if p.addrspace is not AddressSpace.gm:
+        _op_error(
+            op_name,
+            f"invalid argument 'ptr' (position 0): expected a gm pointer, got {p.addrspace}",
+        )
+    element_type = p.pointee
+    token = _scalar_element_token(element_type)
+    if token not in element_tokens:
+        _op_error(
+            op_name,
+            f"unsupported pointee type {token}; supported types are "
+            f"{', '.join(element_tokens)}",
+        )
+    operand = _atomic_scalar_operand(op_name, element_type, value, loc=loc)
+    old_value = emitter(element_type, p.value, operand, loc=loc)
+    if str(old_value.type) != str(element_type):
+        raise TlaLoweringError(
+            f"tla.{op_name} result type mismatch: expected {element_type}, got {old_value.type}"
+        )
+    return Numeric.from_mlir_type(element_type)(old_value)
+
+
+@dsl_user_op
+def arch_atomic_add(
+    ptr: Pointer, value: Any, *, loc: mlir_ir.Location | None = None
+) -> Numeric:
+    """Directory: System Variable Access / Architecture Helpers
+    Description:
+        Atomically add `value` to the element `ptr` addresses
+        (`tla.arch.atomic_add(ptr, value)`), returning the old element.
+
+        The pointer carries both the element type and the address space. The
+        caller passes the element address -- for a tensor view,
+        `t.ptr_with_coord` names its first element -- and the read-modify-write
+        is atomic, so any number of cores may target the same element without
+        losing an update. Typical uses are counters, histogram bins and
+        reduction accumulators. Both `tla.vector()` and `tla.cube()` can issue
+        it: the atom unit is shared, so a mixed AIV/AIC kernel may target the
+        same element from either core.
+
+        The returned value is the element's contents before the update, in the
+        pointer's own type: a `u32` pointer returns `UInt32`, a `u64` pointer
+        returns `UInt64`. The old value can be written straight back into a
+        tensor of the same type, for example
+        `dst[0] = tla.arch.atomic_add(dst.ptr_with_coord, 1)`.
+
+        Parameters:
+        - `ptr` (`Pointer`): GM pointer to the element that is updated. Required.
+        - `value` (`Numeric | int | float`): Addend. A host literal is converted
+          to the pointer's pointee type; a `Numeric` must already be that type.
+          Required.
+
+        Returns:
+        - `Numeric`: the element's value before the update, typed like the
+          pointee. Ignore it when only the accumulation matters.
+
+        Constraints:
+        - Must be called inside a `@tla.kernel`-decorated kernel function.
+        - Must be inside `tla.vector()` or `tla.cube()`, and must not be inside
+          any `tla.vec.func`: the atom unit is a scalar instruction, so it
+          cannot run as part of a vector function. Call it directly in the
+          scalar part of `tla.vector()`, or anywhere in `tla.cube()`.
+        - `ptr` must be a `gm` pointer; the atom unit has no UB form.
+        - Pointee type must be `i32`, `u32`, `i64`, `u64` or `f32`.
+        - Ascend 950 (arch 3510).
+
+        Example:
+        ```python
+        with tla.vector():
+            old = tla.arch.atomic_add(out.ptr_with_coord, 1)
+            out[0] = old  # same type: u32 -> u32, i32 -> i32
+        ```
+    """
+    return _emit_simd_atomic(
+        "atomic_add",
+        _tla_ops_gen.simd_atomic_add,
+        _ATOMIC_ADD_ELEMENT_TOKENS,
+        ptr,
+        value,
+        loc=loc,
+    )
+
+
+@dsl_user_op
+def arch_atomic_exch(
+    ptr: Pointer, value: Any, *, loc: mlir_ir.Location | None = None
+) -> Numeric:
+    """Directory: System Variable Access / Architecture Helpers
+    Description:
+        Atomically replace the element `ptr` addresses with `value`
+        (`tla.arch.atomic_exch(ptr, value)`), returning the old element.
+
+        Exchange is a single atomic swap, not a compare-and-swap: the element
+        becomes `value` whatever it held before, and the previous contents are
+        returned. Use it to publish a slot or to claim a location without a
+        retry loop. Like `tla.arch.atomic_add`, it is available from
+        `tla.vector()` and `tla.cube()`.
+
+        The returned value is the element's contents before the swap, in the
+        pointer's own type: `u32` returns `UInt32`, `u64` returns `UInt64`. As
+        with `tla.arch.atomic_add`, the old value can be written straight back
+        into a same-type tensor.
+
+        Parameters:
+        - `ptr` (`Pointer`): GM pointer to the element that is exchanged.
+          Required.
+        - `value` (`Numeric | int`): Replacement value. A host literal is
+          converted to the pointer's pointee type; a `Numeric` must already be
+          that type. Required.
+
+        Returns:
+        - `Numeric`: the element's value before the swap, typed like the pointee.
+
+        Constraints:
+        - Must be called inside a `@tla.kernel`-decorated kernel function.
+        - Must be inside `tla.vector()` or `tla.cube()`, and must not be inside
+          any `tla.vec.func`: the atom unit is a scalar instruction, so it
+          cannot run as part of a vector function. Call it directly in the
+          scalar part of `tla.vector()`, or anywhere in `tla.cube()`.
+        - `ptr` must be a `gm` pointer; the atom unit has no UB form.
+        - Pointee type must be `u32` or `u64`; the exchange instruction has no
+          signed or floating-point form.
+        - Ascend 950 (arch 3510).
+
+        Example:
+        ```python
+        with tla.vector():
+            old = tla.arch.atomic_exch(flag.ptr_with_coord, tla.UInt32(1))
+        ```
+    """
+    return _emit_simd_atomic(
+        "atomic_exch",
+        _tla_ops_gen.simd_atomic_exch,
+        _ATOMIC_EXCH_ELEMENT_TOKENS,
+        ptr,
+        value,
+        loc=loc,
+    )
+
+
 @dsl_user_op
 def arch_warpsize(*, loc: mlir_ir.Location | None = None) -> Int32:
     """Directory: System Variable Access / Architecture Helpers
@@ -15650,6 +15875,8 @@ _require_generated("arch_sync_threads")
 _require_generated("arch_dcci_cacheline")
 _require_generated("arch_dcci_cachelines")
 _require_generated("arch_dci")
+_require_generated("simd_atomic_add")
+_require_generated("simd_atomic_exch")
 _require_generated("arch_get_ar")
 _require_generated("arch_clear_ar")
 _require_generated("arch_load_bypass_dcache")
@@ -15662,6 +15889,8 @@ arch._set("dcci_cacheline", arch_dcci_cacheline)
 arch._set("dcci_cachelines", arch_dcci_cachelines)
 arch._set("dci", arch_dci)
 arch._set("load_bypass_dcache", arch_load_bypass_dcache)
+arch._set("atomic_add", arch_atomic_add)
+arch._set("atomic_exch", arch_atomic_exch)
 arch._set("bcnt0", arch_bcnt0)
 arch._set("bcnt1", arch_bcnt1)
 arch._set("clz", arch_clz)

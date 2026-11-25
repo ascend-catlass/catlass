@@ -1058,3 +1058,60 @@ def Tla_StoreUnalignUpdateOp : Tla_Op<"store_unalign_update",
   }];
   let hasVerifier = 1;
 }
+
+// Global-memory scalar atomics on an element address.
+//
+// SIMD regions have no per-lane address state: one dynamic execution updates
+// one address. The pointer carries the element type and address space, exactly
+// as the SIMT counterpart does, so the caller computes the element address and
+// the operation performs no coordinate folding. Both ops return the value the
+// instruction replaced (the fetching form).
+
+def Tla_SimdAtomicAddOp : Tla_Op<"simd_atomic_add", [MemoryEffects<[MemRead, MemWrite]>]> {
+  let summary = "SIMD scalar atomic add on a global-memory element address";
+  let description = [{
+    Atomically add one scalar to the global-memory element ``ptr`` addresses,
+    from the scalar part of a ``tla.vector`` or ``tla.cube`` region: called
+    directly in either region, never inside a ``tla.vec.func``. No coordinate
+    is folded: the pointer is the element address, usually
+    ``t.ptr_with_coord`` for the first element of a view, or another pointer
+    built inside the region.
+
+    The pointee fixes the element type: ``i32``, ``ui32``, ``i64``, ``ui64``
+    or ``f32``, and the address space must be ``gm``. The operation returns the
+    value it replaced; a returned ``ui32``/``ui64`` value can be written
+    straight back to a tensor of the same type.
+
+    The arch-op lowering pass (``tla-lower-block-idx``) rewrites the operation
+    into ``llvm.inttoptr`` + ``llvm.call_intrinsic
+    "llvm.hivm.atom.ADD.G.<type>"``; ``tla-lower-ptr`` only turns its
+    ``!tla.ptr`` operand into an i64 byte address.
+  }];
+  let arguments = (ins Tla_PtrType:$ptr, Tla_ScalarValueType:$value);
+  let results = (outs Tla_ScalarValueType:$result);
+  let hasVerifier = 1;
+  let assemblyFormat = [{
+    $ptr `,` $value attr-dict `:` qualified(type($ptr)) `,` type($value) `->` type($result)
+  }];
+}
+
+def Tla_SimdAtomicExchOp : Tla_Op<"simd_atomic_exch", [MemoryEffects<[MemRead, MemWrite]>]> {
+  let summary = "SIMD scalar atomic exchange on a global-memory element address";
+  let description = [{
+    Atomically replace the global-memory element ``ptr`` addresses with
+    ``value`` and return the replaced value, from a ``tla.vector`` or
+    ``tla.cube`` region. Address semantics match ``tla.simd_atomic_add``: the
+    pointer is the element address and no coordinate is folded.
+
+    The pointee must be ``ui32`` or ``ui64`` and in ``gm``; these are the forms
+    the hardware exchange instruction provides. The arch-op lowering pass
+    (``tla-lower-block-idx``) rewrites the operation into
+    ``llvm.hivm.atom.EXCH.G.<u32|u64>``.
+  }];
+  let arguments = (ins Tla_PtrType:$ptr, Tla_ScalarValueType:$value);
+  let results = (outs Tla_ScalarValueType:$result);
+  let hasVerifier = 1;
+  let assemblyFormat = [{
+    $ptr `,` $value attr-dict `:` qualified(type($ptr)) `,` type($value) `->` type($result)
+  }];
+}

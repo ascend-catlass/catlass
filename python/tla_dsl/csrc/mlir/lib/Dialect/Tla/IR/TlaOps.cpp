@@ -2755,6 +2755,54 @@ static mlir::LogicalResult verifyConstantScalarIndexInBounds(mlir::Operation* op
     return mlir::success();
 }
 
+// Shared checks for the SIMD scalar atomics: element address in GM, value and
+// result matching the pointee, the v1 type matrix, and the SIMD region.
+static mlir::LogicalResult verifySimdAtomicOp(
+    mlir::Operation* op, mlir::Value ptr, mlir::Value value, mlir::Value result, bool isExch)
+{
+    auto ptrType = mlir::dyn_cast<PtrType>(ptr.getType());
+    if (!ptrType)
+        return op->emitOpError() << "address must be a !tla.ptr, got " << ptr.getType();
+    if (ptrType.getAddrspace() != AddressSpace::gm)
+        return op->emitOpError() << "SIMD atomic operations require a gm pointer, got "
+                                 << stringifyAddressSpace(ptrType.getAddrspace());
+
+    mlir::Type elementType = ptrType.getPointee();
+    if (value.getType() != elementType)
+        return op->emitOpError() << "value type " << value.getType() << " must match the pointer's pointee type "
+                                 << elementType;
+    if (result.getType() != elementType)
+        return op->emitOpError() << "result type " << result.getType() << " must match the pointer's pointee type "
+                                 << elementType;
+
+    auto intType = mlir::dyn_cast<mlir::IntegerType>(elementType);
+    if (isExch) {
+        if (!intType || !intType.isUnsigned() || (intType.getWidth() != 32 && intType.getWidth() != 64))
+            return op->emitOpError() << "atomic exch supports only ui32 and ui64, got " << elementType;
+    } else {
+        bool supported = intType ? (intType.getWidth() == 32 || intType.getWidth() == 64) : elementType.isF32();
+        if (!supported)
+            return op->emitOpError() << "unsupported atomic add element type " << elementType
+                                     << " (expected i32, ui32, i64, ui64 or f32)";
+    }
+
+    if (op->getParentOfType<VecFuncOp>())
+        return op->emitOpError(
+            "SIMD atomic operations must not be nested inside a tla.vec.func: "
+            "the atom unit is a scalar instruction");
+    return mlir::success();
+}
+
+mlir::LogicalResult SimdAtomicAddOp::verify()
+{
+    return verifySimdAtomicOp(getOperation(), getPtr(), getValue(), getResult(), /*isExch=*/false);
+}
+
+mlir::LogicalResult SimdAtomicExchOp::verify()
+{
+    return verifySimdAtomicOp(getOperation(), getPtr(), getValue(), getResult(), /*isExch=*/true);
+}
+
 mlir::LogicalResult BitwiseNotOp::verify()
 {
     if (!hasEnclosingRegion<VecFuncOp>(getOperation()))
