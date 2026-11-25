@@ -13,7 +13,10 @@ as Kernel (outside ``@tla.kernel`` they are dual-mode Host entries).
 
 from __future__ import annotations
 
+import sys
 from typing import Any
+
+from .. import params
 
 from .core import lower_copy
 from .runtime import (
@@ -27,6 +30,8 @@ from .tensor import (
     scale_tile_coord_by_shape,
 )
 from .typing import Tensor, TypedTensor
+
+sys.modules[f"{__name__}.params"] = params
 
 _EXPLICIT_EXPORTS = (
     "experimental",

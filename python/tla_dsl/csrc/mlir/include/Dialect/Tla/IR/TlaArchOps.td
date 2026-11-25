@@ -353,3 +353,16 @@ def Tla_ArchClearArOp : Tla_Op<"arch.clear_ar", []> {
   }];
   let assemblyFormat = [{ attr-dict }];
 }
+
+// These operations observe or change the issuing core's instruction-cache state.
+def Tla_ArchICachePrefetchOp : Tla_Op<"arch.icache_prefetch", []> {
+  let arguments = (ins I64Attr:$prefetchUnits);
+  let hasVerifier = 1;
+  let assemblyFormat = "$prefetchUnits attr-dict";
+}
+
+def Tla_ArchGetICachePrefetchStatusOp : Tla_Op<"arch.get_icache_prefetch_status", []> {
+  let results = (outs I64:$result);
+  let hasVerifier = 1;
+  let assemblyFormat = "attr-dict `->` type($result)";
+}

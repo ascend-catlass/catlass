@@ -477,6 +477,10 @@ DIRECTORY_SECTIONS: list[tuple[str, str]] = [
         "`sync_threads`, on-chip capacity, and dynamic UB.",
     ),
     (
+        "System Variable Access / Instruction-Cache Prefetch",
+        "Instruction-cache requests and status observations on Ascend 950.",
+    ),
+    (
         "System Variable Access / Warp Functions",
         "Intra-warp data exchange on `tla.arch`, for SIMT regions only.\n"
         "\n"

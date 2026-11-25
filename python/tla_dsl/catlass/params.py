@@ -3,8 +3,16 @@ from __future__ import annotations
 import enum
 from typing import Any
 
+from .base_dsl.typing import Int64
 from .types import TlaTensor
 from dataclasses import dataclass
+
+
+class ICachePrefetchStatus:
+    """Named Int64 status codes for instruction-cache prefetch."""
+
+    COMPLETE = Int64(0)
+    INCOMPLETE = Int64(1)
 
 
 class QuantMode(enum.IntEnum):

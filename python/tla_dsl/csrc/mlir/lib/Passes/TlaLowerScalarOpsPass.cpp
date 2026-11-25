@@ -159,6 +159,48 @@ static LogicalResult requireAivPlacement(Operation* op)
     return op->emitOpError("uses the vector unit's AR register and is unavailable on the AIC");
 }
 
+static LogicalResult lowerScalarICacheOps(ModuleOp module)
+{
+    SmallVector<Operation*> icacheOps;
+    module.walk([&](Operation* op) {
+        if (isa<ArchICachePrefetchOp, ArchGetICachePrefetchStatusOp>(op))
+            icacheOps.push_back(op);
+    });
+    for (Operation* op : icacheOps) {
+        if (!hasC310TargetAttrs(module)) {
+            op->emitOpError("requires an Ascend 950 target");
+            return failure();
+        }
+        auto func = op->getParentOfType<func::FuncOp>();
+        auto issuer = func ? func->getAttrOfType<hivm::TFuncCoreTypeAttr>(hivm::TFuncCoreTypeAttr::name) : nullptr;
+        if (!issuer || (issuer.getFuncCoreType() != hivm::TFuncCoreType::AIV &&
+                        issuer.getFuncCoreType() != hivm::TFuncCoreType::AIC)) {
+            op->emitOpError("requires a lowered scalar AIC or AIV function");
+            return failure();
+        }
+        auto core = issuer.getFuncCoreType();
+        bool isAiv = core == hivm::TFuncCoreType::AIV;
+        if (auto prefetch = dyn_cast<ArchICachePrefetchOp>(op)) {
+            OpBuilder builder(op);
+            auto units =
+                builder.create<arith::ConstantIntOp>(op->getLoc(), prefetch.getPrefetchUnitsAttr().getInt(), 64);
+            StringRef callee = isAiv ? "_mlir_ciface_tla_icache_prefetch_aiv" : "_mlir_ciface_tla_icache_prefetch_aic";
+            auto helper = getOrCreateHelper(module, callee, TypeRange{units.getType()}, {}, core);
+            builder.create<func::CallOp>(op->getLoc(), helper, ValueRange{units.getResult()});
+            op->erase();
+        } else {
+            StringRef callee = isAiv ? "_mlir_ciface_tla_get_icache_prefetch_status_aiv" :
+                                       "_mlir_ciface_tla_get_icache_prefetch_status_aic";
+            auto helper = getOrCreateHelper(module, callee, {}, op->getResultTypes(), core);
+            OpBuilder builder(op);
+            auto call = builder.create<func::CallOp>(op->getLoc(), helper, ValueRange{});
+            op->replaceAllUsesWith(call.getResults());
+            op->erase();
+        }
+    }
+    return success();
+}
+
 class TlaLowerScalarOpsPass : public PassWrapper<TlaLowerScalarOpsPass, OperationPass<ModuleOp>> {
 public:
     MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(TlaLowerScalarOpsPass)
@@ -184,6 +226,8 @@ public:
     void runOnOperation() override
     {
         ModuleOp module = getOperation();
+        if (failed(lowerScalarICacheOps(module)))
+            return signalPassFailure();
 
         SmallVector<::tla::ScalarRoundCastOp, 8> roundCasts;
         module.walk([&](::tla::ScalarRoundCastOp op) { roundCasts.push_back(op); });

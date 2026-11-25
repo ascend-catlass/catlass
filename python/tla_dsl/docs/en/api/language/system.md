@@ -1173,6 +1173,84 @@ artifact(out, block_num=1, ub=64 * 1024)
 
 ---
 
+## Instruction-Cache Prefetch
+
+Instruction-cache requests and status observations on Ascend 950.
+
+### `tla.arch.icache_prefetch`
+
+**Source:** [`catlass.core_api.arch_icache_prefetch`](../../../../catlass/core_api.py)
+
+Description:
+
+Request instruction prefetch from the current call-site PC on Ascend 950.
+
+Prototype:
+
+```python
+tla.arch.icache_prefetch(prefetch_units: int) -> None
+```
+
+Parameters:
+
+- *`prefetch_units`*: Compile-time Python integer in 2 KiB units.
+
+Constraints:
+
+- Call from a scalar `tla.vector()` or `tla.cube()` region inside a kernel.
+- Vector accepts 1 to 7 units. Cube accepts 1 to 15 units.
+
+Example:
+
+```python
+with tla.vector():
+    tla.arch.icache_prefetch(2)
+```
+
+---
+
+### `tla.arch.get_icache_prefetch_status`
+
+**Source:** [`catlass.core_api.arch_get_icache_prefetch_status`](../../../../catlass/core_api.py)
+
+Description:
+
+Observe the issuing core's instruction-prefetch status on Ascend 950.
+
+Prototype:
+
+```python
+tla.arch.get_icache_prefetch_status() -> Int64
+```
+
+Parameters:
+
+- None.
+
+Returns:
+
+    - A staged Int64 comparable to `tla.params.ICachePrefetchStatus.COMPLETE`
+      (0) or `INCOMPLETE` (1). An unknown code matches neither member.
+
+Constraints:
+
+- Call from a scalar `tla.vector()` or `tla.cube()` region inside a kernel.
+- The observation returns immediately.
+
+Example:
+
+```python
+from catlass.tla.params import ICachePrefetchStatus
+
+with tla.vector():
+    tla.arch.icache_prefetch(2)
+    status = tla.arch.get_icache_prefetch_status()
+    if status == ICachePrefetchStatus.COMPLETE:
+        ...
+```
+
+---
+
 ## Warp Functions
 
 Intra-warp data exchange on `tla.arch`, for SIMT regions only.

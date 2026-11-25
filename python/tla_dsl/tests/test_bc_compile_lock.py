@@ -315,3 +315,33 @@ def test_clean_removes_the_root_and_keeps_the_lock_file(fake_build, monkeypatch)
 
     assert not cfg.cache_dir.exists()
     assert bc_compile._lock_path(cfg.cache_dir).exists()
+
+
+def test_icache_aggregate_rebuilds_preexisting_counter_cache(fake_build):
+    cfg, compiled = fake_build
+    source_id = bc_compile._bc_source_id(bc_compile._CACHE_SOURCE_FILES)
+    revision = f"ar-spr-v1:b32-carry-v1:{source_id}"
+    previous_key = hashlib.sha256(
+        f"{bc_compile._catlass_version_id()}:{bc_compile._ccec_id(cfg.toolchain.ccec)}:{revision}".encode()
+    ).hexdigest()[:16]
+    previous = cfg.cache_dir / previous_key
+    previous.mkdir(parents=True)
+    for core in ("aic", "aiv"):
+        for variant in ("normal", "print"):
+            (previous / bc_compile._meta_op_filename(core, "c310", variant)).touch()
+    scalar_stubs = cfg.paths.bc_stubs / "Scalar"
+    scalar_stubs.mkdir()
+    for name in ("icache", "icache_status"):
+        (scalar_stubs / f"{name}.cpp").write_text(name)
+
+    bc_compile.init()
+    selected = bc_compile.get_bc_paths(
+        "mix", variant="print", icache_cores=frozenset({"aiv"})
+    )
+    aic, aiv = map(Path, selected.split(","))
+    assert (aic.parent, aiv.parent) == (_cache(cfg), _cache(cfg))
+    assert aic.parent != previous
+    assert ("aic", "icache_status") in compiled
+    assert ("aiv", "icache") in compiled
+    assert set(aic.read_text().splitlines()) == {"dma", "counter", "icache_status"}
+    assert set(aiv.read_text().splitlines()) == {"dma", "counter", "log", "icache", "icache_status"}

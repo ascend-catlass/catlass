@@ -8,6 +8,7 @@
 
 #include "Dialect/Tla/IR/TlaAttrs.h"
 #include "Dialect/Tla/IR/TlaTypes.h"
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
@@ -884,6 +885,44 @@ mlir::LogicalResult ArchDcciCachelinesOp::verify()
         return emitOpError(
             "target 'ub' is not available: the native whole-UB form is AIV-only and "
             "requires UB dcache enabled through CTRL[49], which no TLA operation sets");
+    return mlir::success();
+}
+
+// Before core-region flattening, the enclosing region identifies the issuer.
+// After flattening, the split function carries the concrete core type.
+static int64_t getScalarICacheUnitLimit(mlir::Operation* op)
+{
+    if (op->getParentOfType<VecFuncOp>())
+        return 0;
+    bool aiv = bool(op->getParentOfType<VectorOp>());
+    bool aic = bool(op->getParentOfType<CubeOp>());
+    if (aiv || aic)
+        return aiv == aic ? 0 : (aiv ? 7 : 15);
+    if (auto func = op->getParentOfType<mlir::func::FuncOp>()) {
+        auto issuer = func->getAttrOfType<mlir::hivm::TFuncCoreTypeAttr>(mlir::hivm::TFuncCoreTypeAttr::name);
+        if (issuer && issuer.getFuncCoreType() == mlir::hivm::TFuncCoreType::AIV)
+            return 7;
+        if (issuer && issuer.getFuncCoreType() == mlir::hivm::TFuncCoreType::AIC)
+            return 15;
+    }
+    return 0;
+}
+
+mlir::LogicalResult ArchICachePrefetchOp::verify()
+{
+    int64_t limit = getScalarICacheUnitLimit(getOperation());
+    if (!limit)
+        return emitOpError("requires one scalar vector or cube region outside tla.vec.func");
+    int64_t units = getPrefetchUnitsAttr().getInt();
+    if (units < 1 || units > limit)
+        return emitOpError() << "prefetch_units must be in [1, " << limit << "]";
+    return mlir::success();
+}
+
+mlir::LogicalResult ArchGetICachePrefetchStatusOp::verify()
+{
+    if (!getScalarICacheUnitLimit(getOperation()))
+        return emitOpError("requires one scalar vector or cube region outside tla.vec.func");
     return mlir::success();
 }
 

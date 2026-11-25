@@ -367,6 +367,7 @@ class TlaLoweringResult:
     # allocations, and the base is the high-water mark rounded up.
     ub_dynamic_base: int = -1
     runtime_metadata: KernelRuntimeMetadata | None = None
+    icache_prefetch_cores: frozenset[str] = frozenset()
 
 
 def _bridge_diagnostic(value: Any) -> BridgeDiagnostic:
@@ -471,6 +472,7 @@ def lower_tlair_module_to_mlir(
         ub_static_bytes=int(result.get("ub_static_bytes", 0)),
         ub_programmable_bytes=int(result.get("ub_programmable_bytes", 0)),
         ub_dynamic_base=int(result.get("ub_dynamic_base", -1)),
+        icache_prefetch_cores=frozenset(result.get("icache_prefetch_cores", ())),
         runtime_metadata=(
             KernelRuntimeMetadata.from_dict(result["runtime_metadata"])
             if result["runtime_metadata"] is not None

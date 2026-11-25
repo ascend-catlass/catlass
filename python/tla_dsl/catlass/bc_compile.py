@@ -90,7 +90,7 @@ _MODE_CORE_TYPES: dict[str, list[str]] = {
     "mix": ["aic", "aiv"],
 }
 
-_BC_AGGREGATE_VARIANTS = ("normal", "print")
+_BC_AGGREGATE_VARIANTS = ("normal", "print", "icache", "print.icache")
 _PRINT_COMPONENTS = frozenset(
     {"printf", "print_tensor", "debug_tunnel", "vf_print", "simt_print"}
 )
@@ -98,10 +98,8 @@ _PRINT_COMPONENTS = frozenset(
 
 def _meta_op_filename(core_type: str, cce_arch: str, variant: str) -> str:
     if variant not in _BC_AGGREGATE_VARIANTS:
-        raise ValueError(
-            f"Unknown BC aggregate variant {variant!r}; expected 'normal' or 'print'"
-        )
-    suffix = ".print" if variant == "print" else ""
+        raise ValueError(f"Unknown BC aggregate variant {variant!r}")
+    suffix = "" if variant == "normal" else f".{variant}"
     return f"meta_op.{core_type}{suffix}.{cce_arch}.bc"
 
 
@@ -252,7 +250,7 @@ def compute_cache_key(ccec: Path) -> str:
     """Key helper aggregates by version, compiler and counter source identity."""
     revision = f"ar-spr-v1:b32-carry-v1:{_bc_source_id(_CACHE_SOURCE_FILES)}"
     return hashlib.sha256(
-        f"{_catlass_version_id()}:{_ccec_id(ccec)}:{revision}".encode()
+        f"{_catlass_version_id()}:{_ccec_id(ccec)}:{revision}:icache-prefetch-v1".encode()
     ).hexdigest()[:16]
 
 
@@ -383,7 +381,9 @@ def build_meta_op(
                         f"duplicate bc stub name '{cpp.stem}.cpp': {seen[cpp.stem]} and {cpp}"
                     )
                 seen[cpp.stem] = cpp
-                if variant == "normal" and cpp.stem in _PRINT_COMPONENTS:
+                if cpp.stem in _PRINT_COMPONENTS and "print" not in variant:
+                    continue
+                if cpp.stem == "icache" and "icache" not in variant:
                     continue
                 bc_name = cpp.stem + f".{core_type}.{cfg.cce_arch}.bc"
                 bc_path = cache / bc_name
@@ -450,7 +450,7 @@ _cache: Optional[Path] = None
 
 
 def _compile_all(cfg: BCConfig, cache: Path) -> None:
-    """Compile both meta_op variants for aic/aiv
+    """Compile all meta_op variants for aic/aiv
     into *cache* and write the manifest. Existing files are skipped, so an
     up-to-date cache is not recompiled."""
     cache.mkdir(parents=True, exist_ok=True)
@@ -526,13 +526,15 @@ def get_bc_paths(
     bc_dir: Optional[Path] = None,
     variant: str = "print",
     cce_arch: Optional[str] = None,
+    icache_cores: frozenset[str] = frozenset(),
 ) -> str:
     """Get comma-joined BC paths from cache. Raises if not compiled.
 
     ``bc_dir``: already-validated dir holding the ``.bc`` files; defaults to the
     cache dir resolved from the environment.
-    ``variant``: for meta_op aggregates, ``"print"`` includes every helper;
-    ``"normal"`` excludes print/debug helpers.
+    ``variant``: for meta_op aggregates, ``"print"`` enables print/debug helpers;
+    both base variants include icache status reads.
+    ``icache_cores``: cores whose aggregates include prefetch issuance and its metadata.
     ``cce_arch``: aggregate suffix to look for; defaults to the environment's.
     A caller holding a resolved configuration must pass its ``cce_arch``, since
     resolving the default here would look for the wrong artifacts.
@@ -543,7 +545,10 @@ def get_bc_paths(
     core_types = _MODE_CORE_TYPES[kernel_mode]
     paths = []
     for ct in core_types:
-        bc_path = cache / _meta_op_filename(ct, cfg.cce_arch, variant)
+        core_variant = variant
+        if ct in icache_cores:
+            core_variant = "icache" if variant == "normal" else f"{variant}.icache"
+        bc_path = cache / _meta_op_filename(ct, cfg.cce_arch, core_variant)
         if not bc_path.exists():
             raise RuntimeError(
                 f"{bc_path.name} not found. Run: python -m catlass.bc_compile"

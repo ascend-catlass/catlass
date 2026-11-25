@@ -13395,6 +13395,73 @@ def arch_sub_block_idx(*, loc: mlir_ir.Location | None = None) -> Int32:
     return Int32(value)
 
 
+def _require_scalar_icache_region(op_name: str) -> None:
+    _require_frontend_state(op_name)
+    aiv = _runtime._has_enclosing_region("vector")
+    aic = _runtime._has_enclosing_region("cube")
+    if aiv == aic or _runtime._has_enclosing_region("vec.func"):
+        _op_error(
+            op_name, "requires one scalar vector or cube region outside tla.vec.func"
+        )
+
+
+@dsl_user_op
+def arch_icache_prefetch(prefetch_units: int, *, loc=None) -> None:
+    """Directory: System Variable Access / Instruction-Cache Prefetch
+    Description:
+        Request instruction prefetch from the current call-site PC on Ascend 950.
+    Parameters:
+        - *`prefetch_units`*: Compile-time Python integer in 2 KiB units.
+    Constraints:
+        - Call from a scalar `tla.vector()` or `tla.cube()` region inside a kernel.
+        - Vector accepts 1 to 7 units. Cube accepts 1 to 15 units.
+    Example:
+    ```python
+    with tla.vector():
+        tla.arch.icache_prefetch(2)
+    ```
+    """
+    _require_scalar_icache_region("arch.icache_prefetch")
+    limit = 7 if _runtime._has_enclosing_region("vector") else 15
+    if type(prefetch_units) is not int or not 1 <= prefetch_units <= limit:
+        _op_error(
+            "arch.icache_prefetch",
+            f"prefetch_units must be a Python int in [1, {limit}]",
+        )
+    _tla_ops_gen.arch_icache_prefetch(prefetch_units, loc=loc)
+
+
+@dsl_user_op
+def arch_get_icache_prefetch_status(*, loc=None) -> Int64:
+    """Directory: System Variable Access / Instruction-Cache Prefetch
+    Description:
+        Observe the issuing core's instruction-prefetch status on Ascend 950.
+    Parameters:
+        - None.
+
+    Returns:
+
+        - A staged Int64 comparable to `tla.params.ICachePrefetchStatus.COMPLETE`
+          (0) or `INCOMPLETE` (1). An unknown code matches neither member.
+    Constraints:
+        - Call from a scalar `tla.vector()` or `tla.cube()` region inside a kernel.
+        - The observation returns immediately.
+    Example:
+    ```python
+    from catlass.tla.params import ICachePrefetchStatus
+
+    with tla.vector():
+        tla.arch.icache_prefetch(2)
+        status = tla.arch.get_icache_prefetch_status()
+        if status == ICachePrefetchStatus.COMPLETE:
+            ...
+    ```
+    """
+    _require_scalar_icache_region("arch.get_icache_prefetch_status")
+    i64 = mlir_ir.IntegerType.get_signless(64)
+    return Int64(_tla_ops_gen.arch_get_icache_prefetch_status(i64, loc=loc))
+
+
 def _require_arch_warp_region(op_name: str) -> None:
     _require_frontend_state(op_name)
     if not _runtime._in_simt_vec_func():
@@ -15158,6 +15225,8 @@ arch._set("sub_block_num", arch_sub_block_num)
 arch._set("get_system_cycle", arch_get_system_cycle)
 arch._set("thread_block_dim", arch_thread_block_dim)
 arch._set("thread_idx", arch_thread_idx)
+arch._set("icache_prefetch", arch_icache_prefetch)
+arch._set("get_icache_prefetch_status", arch_get_icache_prefetch_status)
 arch._set("warpsize", arch_warpsize)
 arch._set("lane_idx", arch_lane_idx)
 arch._set("warp_reduce_sync", arch_warp_reduce_sync)

@@ -125,6 +125,10 @@ _HIVM_TEMPLATE_BITCODE_ATTRS = {
     "meta_op.aiv.c310.bc": ("hivm.aiv_bitcode", "hivm.aiv_bitcode"),
     "meta_op.aic.print.c310.bc": ("hivm.aic_bitcode", "hivm.aic_bitcode"),
     "meta_op.aiv.print.c310.bc": ("hivm.aiv_bitcode", "hivm.aiv_bitcode"),
+    "meta_op.aic.icache.c310.bc": ("hivm.aic_bitcode", "hivm.aic_bitcode"),
+    "meta_op.aic.print.icache.c310.bc": ("hivm.aic_bitcode", "hivm.aic_bitcode"),
+    "meta_op.aiv.icache.c310.bc": ("hivm.aiv_bitcode", "hivm.aiv_bitcode"),
+    "meta_op.aiv.print.icache.c310.bc": ("hivm.aiv_bitcode", "hivm.aiv_bitcode"),
 }
 _MAX_KERNEL_ABI_PAYLOAD_SIZE = 1 << 20
 # Bump when compiler options or cached launch metadata changes. Version 13
@@ -537,7 +541,13 @@ def _compile_kernel(
     if hivmc is None:
         raise _hivmc_a5_not_found_error()
     variant = _select_bc_aggregate_variant(static_metadata)
-    bitcodes = _resolve_hivm_template_bitcode(resolved_option, variant=variant)
+    icache_cores = lowering_result.icache_prefetch_cores
+    if icache_cores:
+        bitcodes = _resolve_hivm_template_bitcode(
+            resolved_option, variant=variant, icache_cores=icache_cores
+        )
+    else:
+        bitcodes = _resolve_hivm_template_bitcode(resolved_option, variant=variant)
     helper_bitcode_files = bitcodes.split(",")
     hivmc_mlir_path, _ = _create_stamped_hivmc_input(
         mlir_path, lowered.module, static_metadata, bitcodes=bitcodes
@@ -2347,7 +2357,9 @@ def _create_stamped_hivmc_input(
     bitcodes: str,
 ) -> tuple[Path, str | None]:
     """Set print BC attributes on the live module; retain the unstamped artifact."""
-    if _select_bc_aggregate_variant(metadata) == "normal":
+    if _select_bc_aggregate_variant(metadata) == "normal" and not any(
+        ".icache." in Path(path).name for path in bitcodes.split(",")
+    ):
         return mlir_path, None
     if metadata.uses_tensor_print:
         helper_core = metadata.print_helper_core
@@ -2355,7 +2367,11 @@ def _create_stamped_hivmc_input(
             candidates = [
                 Path(path)
                 for path in bitcodes.split(",")
-                if Path(path).name == f"meta_op.{core}.print.c310.bc"
+                if Path(path).name
+                in {
+                    f"meta_op.{core}.print.c310.bc",
+                    f"meta_op.{core}.print.icache.c310.bc",
+                }
             ]
             if len(candidates) != 1:
                 raise TlaRuntimeUnavailableError(
@@ -2412,8 +2428,15 @@ def _select_bc_aggregate_variant(
 
 
 def _resolve_hivm_template_bitcode(
-    compile_option: TlaCompileOption, *, variant: str = "print"
+    compile_option: TlaCompileOption,
+    *,
+    variant: str = "print",
+    icache_cores: frozenset[str] = frozenset(),
 ) -> str:
+    if icache_cores:
+        return _get_bc_paths(
+            compile_option.kernel_mode, variant=variant, icache_cores=icache_cores
+        )
     return _get_bc_paths(compile_option.kernel_mode, variant=variant)
 
 

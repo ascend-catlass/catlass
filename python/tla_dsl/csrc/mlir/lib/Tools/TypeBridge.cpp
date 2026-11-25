@@ -1084,6 +1084,12 @@ py::dict lowerToMlir(
     // collection is meaningful only for successful lowering and must never
     // replace the compiler diagnostic that caused the failure.
     if (success) {
+        py::list icachePrefetchCores;
+        if (module.lookupSymbol<mlir::func::FuncOp>("_mlir_ciface_tla_icache_prefetch_aic"))
+            icachePrefetchCores.append("aic");
+        if (module.lookupSymbol<mlir::func::FuncOp>("_mlir_ciface_tla_icache_prefetch_aiv"))
+            icachePrefetchCores.append("aiv");
+        result["icache_prefetch_cores"] = std::move(icachePrefetchCores);
         if (auto kernelAbi = buildKernelAbi(module, pointerProvenance)) {
             result["kernel_abi"] = *kernelAbi;
             result["runtime_metadata"] =
