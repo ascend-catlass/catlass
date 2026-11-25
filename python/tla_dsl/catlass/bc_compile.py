@@ -246,8 +246,9 @@ def _bc_source_id(relative_paths: tuple[str, ...]) -> str:
 
 def compute_cache_key(ccec: Path) -> str:
     """Key helper aggregates by version, compiler and counter source identity."""
+    revision = f"ar-spr-v1:b32-carry-v1:{_bc_source_id(_CACHE_SOURCE_FILES)}"
     return hashlib.sha256(
-        f"{_catlass_version_id()}:{_ccec_id(ccec)}:ar-spr-v1:{_bc_source_id(_CACHE_SOURCE_FILES)}".encode()
+        f"{_catlass_version_id()}:{_ccec_id(ccec)}:{revision}".encode()
     ).hexdigest()[:16]
 
 
@@ -297,11 +298,10 @@ def compile_stub(cpp: Path, out_bc: Path, core_type: str, cfg: BCConfig) -> None
         asc = cfg.toolchain.ascend_home / "asc"
         if (asc / "include" / "utils" / "debug" / "asc_printf.h").is_file():
             args.extend([f"-I{asc / 'include'}", f"-I{asc}"])
-        # VF helpers contain scalar accesses to UB. CANN's early optimization
-        # translates those accesses for the enclosing execution unit; at this
-        # point the external helper is not yet in its final vector function.
-        # Defer those passes until the kernel links and inlines the helper.
-        # The final kernel still receives the normal O2 optimization pipeline.
+    # Defer CANN's UB address lowering until these helpers are linked into
+    # their vector function. This lets the final O2 pipeline promote the carry
+    # out parameter before it materializes virtual UB addresses.
+    if cpp.name in {"addc_subc.cpp", "vf_print.cpp", "simt_print.cpp"}:
         args.extend(["-Xclang", "-disable-llvm-passes"])
 
     if aicore_arch is not None:

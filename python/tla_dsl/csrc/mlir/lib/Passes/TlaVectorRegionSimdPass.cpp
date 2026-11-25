@@ -927,7 +927,7 @@ static bool isVectorComputeOp(Operation* op)
            isa_and_nonnull<::tla::GatherOp>(op) || isa_and_nonnull<::tla::CastOp>(op) ||
            isa_and_nonnull<::tla::BitCastOp>(op) || isa_and_nonnull<::tla::ExpSubOp>(op) ||
            isa_and_nonnull<::tla::PackOp>(op) || isa_and_nonnull<::tla::UnpackOp>(op) ||
-           isa_and_nonnull<::tla::InterleaveOp>(op) || isa_and_nonnull<::tla::DeInterleaveOp>(op);
+           isa_and_nonnull<::tla::InterleaveOp, ::tla::DeInterleaveOp, ::tla::MullOp, ::tla::AddCOp, ::tla::SubCOp>(op);
 }
 
 static void annotateAivLibraryCall(func::FuncOp callee)
@@ -1666,20 +1666,19 @@ public:
         return mask;
     }
 
-    /// i64 out-param slot for load_update retptr helpers. Always at the outlined
+    /// Private out-parameter slot for BC helpers. Always at the outlined
     /// helper entry — not the enclosing ``scf.for`` / ``scf.if`` region.
     /// ``lowerScfFor`` body callbacks run before the for-region is linked, so
     /// ``getInsertionBlock()->getParentOp()`` is null there; an escaped alloca
     /// left in the loop body would grow the AIV stack every trip after scf→cf.
-    FailureOr<Value> createI64RetptrSlot(OpBuilder& b, Location loc)
+    FailureOr<Value> createRetptrSlot(OpBuilder& b, Location loc, Type ptrTy, Type elemTy, unsigned alignment = 0)
     {
         if (!entry)
             return failure();
         OpBuilder::InsertionGuard guard(b);
         b.setInsertionPointToStart(entry);
         Value one = b.create<LLVM::ConstantOp>(loc, b.getI32Type(), b.getI32IntegerAttr(1));
-        Type slotPtrTy = LLVM::LLVMPointerType::get(b.getContext());
-        return b.create<LLVM::AllocaOp>(loc, slotPtrTy, b.getI64Type(), one).getResult();
+        return b.create<LLVM::AllocaOp>(loc, ptrTy, elemTy, one, alignment).getResult();
     }
 
     // Keep the 512-byte result slot outside runtime loops and branches.
@@ -3131,7 +3130,7 @@ static LogicalResult lowerLoadUpdate(
             module, loc, resultVecType, ("_mlir_ciface_load_with_stride_post_update_retptr_" + suffix));
         Value allTrue = allTrueMaskFor(fullMasks, loc, opCtx->vecType, loadOp.getResult().getType());
         Value preg = castMaskToPregType(b, loc, allTrue, fullPregVecType(b.getContext()));
-        auto slotOr = fullMasks.createI64RetptrSlot(b, loc);
+        auto slotOr = fullMasks.createRetptrSlot(b, loc, LLVM::LLVMPointerType::get(b.getContext()), b.getI64Type());
         if (failed(slotOr))
             return loadOp.emitError("failed to allocate load_update retptr slot in outlined func entry"), failure();
         auto call = b.create<func::CallOp>(loc, callee, ValueRange{*ptrOr, blockStride, repeatStride, preg, *slotOr});
@@ -3871,6 +3870,67 @@ static LogicalResult lowerUnpack(
     auto callee =
         getOrCreateVectorPackUnpackLibraryCall(module, unpackOp.getLoc(), srcCtx->vecType, dstCtx->vecType, name);
     valueMap[unpackOp.getResult()] = b.create<func::CallOp>(unpackOp.getLoc(), callee, ValueRange{src}).getResult(0);
+    return success();
+}
+
+static LogicalResult lowerMull(::tla::MullOp op, OpBuilder& b, DenseMap<Value, Value>& valueMap)
+{
+    Value lhs = valueMap.lookup(op.getLhs());
+    Value rhs = valueMap.lookup(op.getRhs());
+    Value mask = valueMap.lookup(op.getMask());
+    if (!lhs || !rhs || !mask)
+        return failure();
+    const bool isUnsigned = isUnsignedInt(op.getLhs().getType().getElementType());
+    auto cast = isUnsigned ? hivm::TypeFn::cast_unsigned : hivm::TypeFn::cast_signed;
+    auto attr = b.getNamedAttr("cast", hivm::TypeFnAttr::get(b.getContext(), cast));
+    mask = castMaskToPregType(b, op.getLoc(), mask, fullPregVecType(b.getContext()));
+    auto wide = b.create<hivmave::VFVMULLOp>(
+        op.getLoc(), TypeRange{lhs.getType(), lhs.getType()}, ValueRange{lhs, rhs, mask}, ArrayRef{attr});
+    valueMap[op.getLow()] = wide->getResult(0);
+    valueMap[op.getHigh()] = wide->getResult(1);
+    return success();
+}
+
+template <typename CarryOp>
+static LogicalResult lowerB32CarryOp(
+    CarryOp op, OpBuilder& b, ModuleOp module, DenseMap<Value, Value>& valueMap, AutoFullPredicateCache& fullMasks,
+    StringRef signedSymbol, StringRef unsignedSymbol)
+{
+    Value lhs = valueMap.lookup(op.getLhs());
+    Value rhs = valueMap.lookup(op.getRhs());
+    Value carry = valueMap.lookup(op.getCarryIn());
+    Value mask = valueMap.lookup(op.getMask());
+    if (!lhs || !rhs || !carry || !mask)
+        return failure();
+    Location loc = op.getLoc();
+    Type vec = lhs.getType();
+    auto preg = fullPregVecType(b.getContext());
+    carry = castMaskToPregType(b, loc, carry, preg);
+    mask = castMaskToPregType(b, loc, mask, preg);
+    auto declareRawCall = [&](StringRef name, FunctionType fnType) {
+        if (auto fn = module.lookupSymbol<func::FuncOp>(name))
+            return fn;
+        OpBuilder moduleBuilder(module.getBodyRegion());
+        auto fn = moduleBuilder.create<func::FuncOp>(loc, name, fnType);
+        fn.setPrivate();
+        fn->setAttr(
+            hivm::TFuncCoreTypeAttr::name, hivm::TFuncCoreTypeAttr::get(b.getContext(), hivm::TFuncCoreType::AIV));
+        return fn;
+    };
+    StringRef name = isUnsignedInt(op.getLhs().getType().getElementType()) ? unsignedSymbol : signedSymbol;
+    Type ubPtr = getUbPtrType(b.getContext());
+    // This nonescaping BC out parameter is promoted after the always-inline
+    // helpers are linked. A kernel UB tensor would leave a real memory round trip.
+    auto scratch = fullMasks.createRetptrSlot(b, loc, ubPtr, preg, /*alignment=*/32);
+    if (failed(scratch))
+        return op.emitError("could not reserve the carry predicate out parameter"), failure();
+    auto helper = declareRawCall(name, b.getFunctionType({vec, vec, preg, preg, ubPtr}, {vec}));
+    auto result = b.create<func::CallOp>(loc, helper, ValueRange{lhs, rhs, carry, mask, *scratch});
+    valueMap[op->getResult(0)] = result.getResult(0);
+    if (!op.getCarryOut().use_empty()) {
+        auto read = declareRawCall("tla_b32_read_carry", b.getFunctionType({ubPtr}, {preg}));
+        valueMap[op.getCarryOut()] = b.create<func::CallOp>(loc, read, ValueRange{*scratch}).getResult(0);
+    }
     return success();
 }
 
@@ -5505,6 +5565,12 @@ static LogicalResult lowerNestedVectorOp(
     if (auto unpackOp = dyn_cast<::tla::UnpackOp>(op))
         return lowerUnpack(unpackOp, b, module, valueMap);
 
+    if (auto addc = dyn_cast<::tla::AddCOp>(op))
+        return lowerB32CarryOp(addc, b, module, valueMap, fullMasks, "tla_addc_i32", "tla_addc_u32");
+    if (auto subc = dyn_cast<::tla::SubCOp>(op))
+        return lowerB32CarryOp(subc, b, module, valueMap, fullMasks, "tla_subc_i32", "tla_subc_u32");
+    if (auto mull = dyn_cast<::tla::MullOp>(op))
+        return lowerMull(mull, b, valueMap);
     if (auto interleaveOp = dyn_cast<::tla::InterleaveOp>(op))
         return lowerInterleave(interleaveOp, b, module, valueMap, fullMasks);
 
@@ -6274,7 +6340,8 @@ public:
         });
 
         for (Operation* computeOp : computeOps) {
-            if (isa<::tla::InterleaveOp>(computeOp) || isa<::tla::DeInterleaveOp>(computeOp)) {
+            if (isa<::tla::InterleaveOp, ::tla::DeInterleaveOp, ::tla::MullOp, ::tla::AddCOp, ::tla::SubCOp>(
+                    computeOp)) {
                 if (computeOp->getNumResults() != 2)
                     return rewriter.notifyMatchFailure(vecFuncOp, "unexpected two-result tla compute op shape");
             } else if (computeOp->getNumResults() != 1) {
@@ -6387,6 +6454,18 @@ public:
                 if (!producedValues.contains(unpackOp.getSrc()))
                     return rewriter.notifyMatchFailure(
                         vecFuncOp, "expected tla.unpack src from a legal register producer");
+            } else if (isa<::tla::AddCOp, ::tla::SubCOp>(computeOp)) {
+                for (Value input : computeOp->getOperands()) {
+                    if (!producedValues.contains(input))
+                        return rewriter.notifyMatchFailure(
+                            vecFuncOp, "expected carry op inputs from register producers");
+                }
+            } else if (auto mull = dyn_cast<::tla::MullOp>(computeOp)) {
+                const Value inputs[] = {mull.getLhs(), mull.getRhs(), mull.getMask()};
+                for (Value input : inputs) {
+                    if (!producedValues.contains(input))
+                        return rewriter.notifyMatchFailure(vecFuncOp, "expected Mull inputs from register producers");
+                }
             } else if (auto interleaveOp = dyn_cast<::tla::InterleaveOp>(computeOp)) {
                 if (!producedValues.contains(interleaveOp.getSrc0()) ||
                     !producedValues.contains(interleaveOp.getSrc1()))

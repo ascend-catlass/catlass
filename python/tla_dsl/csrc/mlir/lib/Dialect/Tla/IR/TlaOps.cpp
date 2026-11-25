@@ -1159,6 +1159,52 @@ static mlir::LogicalResult verifyMaskMatchesVector(mlir::Operation* op, mlir::Va
     return mlir::success();
 }
 
+static mlir::LogicalResult verifyB32Pair(mlir::Operation* op, VectorSSAType lhs, VectorSSAType rhs, mlir::Value mask)
+{
+    auto vf = op->getParentOfType<VecFuncOp>();
+    auto mode = vf ? vf->getAttrOfType<mlir::StringAttr>("mode") : mlir::StringAttr();
+    if (!vf || (mode && !mode.getValue().equals_insensitive("simd")))
+        return op->emitOpError("must be nested inside a SIMD tla.vec.func region");
+    auto elem = mlir::dyn_cast<mlir::IntegerType>(lhs.getElementType());
+    if (!elem || elem.isSigned() || elem.getWidth() != 32 || lhs.getValidLanes() != 64)
+        return op->emitOpError("requires full 64-lane i32/u32 registers");
+    if (lhs != rhs)
+        return op->emitOpError("requires lhs and rhs to have the same VectorSSA type");
+    return verifyMaskMatchesVector(op, mask, lhs);
+}
+
+template <typename CarryOp>
+static mlir::LogicalResult verifyB32CarryPair(CarryOp op, mlir::Value dataResult)
+{
+    auto lhs = op.getLhs().getType();
+    if (failed(verifyB32Pair(op.getOperation(), lhs, op.getRhs().getType(), op.getMask())) ||
+        failed(verifyMaskMatchesVector(op.getOperation(), op.getCarryIn(), lhs)))
+        return mlir::failure();
+    if (dataResult.getType() != lhs || op.getCarryOut().getType() != op.getCarryIn().getType())
+        return op.emitOpError("data result and carry-out types must match lhs and carry-in");
+    return mlir::success();
+}
+
+mlir::LogicalResult AddCOp::verify()
+{
+    return verifyB32CarryPair(*this, getSum());
+}
+
+mlir::LogicalResult SubCOp::verify()
+{
+    return verifyB32CarryPair(*this, getDiff());
+}
+
+mlir::LogicalResult MullOp::verify()
+{
+    auto lhs = getLhs().getType();
+    if (failed(verifyB32Pair(getOperation(), lhs, getRhs().getType(), getMask())))
+        return mlir::failure();
+    if (getLow().getType() != lhs || getHigh().getType() != lhs)
+        return emitOpError("low and high result types must match lhs");
+    return mlir::success();
+}
+
 // Vector compute ops must live inside a tla.vec.func region.
 #define TLA_VERIFY_IN_VEC_FUNC(OpTy)                                           \
     mlir::LogicalResult OpTy::verify()                                         \

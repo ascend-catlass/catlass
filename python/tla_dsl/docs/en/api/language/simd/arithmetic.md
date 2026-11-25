@@ -208,6 +208,125 @@ with tla.vec.func(mode="simd"):
 
 ---
 
+## `tla.addc`
+
+**Source:** [`catlass.core_api.addc`](../../../../../catlass/core_api.py)
+
+Description:
+
+Add the operand bit patterns and the carry-in per active lane. Return `(sum, carry_out)`
+with the low 32 bits of the sum and the carry bit.
+
+Prototype:
+
+```python
+tla.addc(lhs: VectorSSA, rhs: VectorSSA, carry_in: MaskSSA, *, mask: MaskSSA | None = None) -> tuple[VectorSSA, MaskSSA]
+```
+
+Parameters:
+
+- `lhs` (`VectorSSA`): Left-hand operand. Required.
+- `rhs` (`VectorSSA`): Right-hand operand. Required.
+- `carry_in` (`MaskSSA`): Per-lane input carry predicate. Required.
+- `mask` (`MaskSSA | None`): Execution mask. Defaults to `None`, which enables all lanes.
+
+Constraints:
+
+- Call inside `tla.vec.func(mode="simd")` on Ascend 950.
+- The operands must be 64-lane vectors of the same `i32` or `u32` type. An explicit `mask` must have 64 lanes.
+- `carry_in` and `carry_out` are 64-lane `MaskSSA` predicates (`!tla.mask<64>`) with one bit per lane.
+- A `carry_in` bit of `1` means an incoming carry and adds one to the sum. A bit of `0` means no incoming carry.
+- A `carry_out` bit of `1` means the sum carries beyond the low 32 bits. A bit of `0` means no outgoing carry.
+- `carry_out` is undefined for lanes disabled by `mask`.
+
+Example:
+
+```python
+with tla.vec.func(mode="simd"):
+    # ALLF sets every input bit to 0 for no incoming carry.
+    carry_in = tla.create_mask(pattern=tla.mask.ALLF, dtype=tla.UInt32)
+    total, carry_out = tla.addc(lhs, rhs, carry_in)
+```
+
+---
+
+## `tla.subc`
+
+**Source:** [`catlass.core_api.subc`](../../../../../catlass/core_api.py)
+
+Description:
+
+Compute `lhs - rhs - (1 - carry_in)` per active lane. Return `(diff, carry_out)`
+with the low 32 bits of the difference and the carry bit.
+
+Prototype:
+
+```python
+tla.subc(lhs: VectorSSA, rhs: VectorSSA, carry_in: MaskSSA, *, mask: MaskSSA | None = None) -> tuple[VectorSSA, MaskSSA]
+```
+
+Parameters:
+
+- `lhs` (`VectorSSA`): Left-hand operand (minuend). Required.
+- `rhs` (`VectorSSA`): Right-hand operand (subtrahend). Required.
+- `carry_in` (`MaskSSA`): Per-lane input carry predicate. Required.
+- `mask` (`MaskSSA | None`): Execution mask. Defaults to `None`, which enables all lanes.
+
+Constraints:
+
+- Call inside `tla.vec.func(mode="simd")` on Ascend 950.
+- The operands must be 64-lane vectors of the same `i32` or `u32` type. An explicit `mask` must have 64 lanes.
+- `carry_in` and `carry_out` are 64-lane `MaskSSA` predicates (`!tla.mask<64>`) with one bit per lane.
+- A `carry_in` bit of `1` means no incoming borrow. A bit of `0` means an incoming borrow and subtracts one more.
+- A `carry_out` bit of `1` means no outgoing borrow. A bit of `0` means an outgoing borrow.
+- `carry_out` is undefined for lanes disabled by `mask`.
+
+Example:
+
+```python
+with tla.vec.func(mode="simd"):
+    # ALL sets every input bit to 1 for no incoming borrow.
+    carry_in = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.UInt32)
+    diff, carry_out = tla.subc(lhs, rhs, carry_in)
+```
+
+---
+
+## `tla.mull`
+
+**Source:** [`catlass.core_api.mull`](../../../../../catlass/core_api.py)
+
+Description:
+
+Return the low and high 32-bit halves `(low, high)` of each active lane's product.
+The multiplication is signed for `i32` and unsigned for `u32`.
+
+Prototype:
+
+```python
+tla.mull(lhs: VectorSSA, rhs: VectorSSA, *, mask: MaskSSA | None = None) -> tuple[VectorSSA, VectorSSA]
+```
+
+Parameters:
+
+- `lhs` (`VectorSSA`): Left-hand operand. Required.
+- `rhs` (`VectorSSA`): Right-hand operand. Required.
+- `mask` (`MaskSSA | None`): Execution mask. Defaults to `None`, which enables all lanes.
+
+Constraints:
+
+- Call inside `tla.vec.func(mode="simd")` on Ascend 950.
+- The operands must be 64-lane vectors of the same `i32` or `u32` type. An explicit `mask` must have 64 lanes.
+
+Example:
+
+```python
+with tla.vec.func(mode="simd"):
+    low, high = tla.mull(lhs, rhs)
+```
+
+---
+
 ## `tla.add`
 
 **Source:** [`catlass.core_api.add`](../../../../../catlass/core_api.py)

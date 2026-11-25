@@ -199,6 +199,122 @@ with tla.vec.func(mode="simd"):
 
 ---
 
+## `tla.addc`
+
+**源码：** [`catlass.core_api.addc`](../../../../../catlass/core_api.py)
+
+功能说明：
+
+在每个有效 lane 上将操作数的位模式与输入进位相加，返回 `(sum, carry_out)`，即和的低 32 位与进位。
+
+函数原型：
+
+```python
+tla.addc(lhs: VectorSSA, rhs: VectorSSA, carry_in: MaskSSA, *, mask: MaskSSA | None = None) -> tuple[VectorSSA, MaskSSA]
+```
+
+参数说明：
+
+- `lhs`（`VectorSSA`）：左操作数。必填。
+- `rhs`（`VectorSSA`）：右操作数。必填。
+- `carry_in`（`MaskSSA`）：逐 lane 的输入进位谓词。必填。
+- `mask`（`MaskSSA | None`）：执行掩码。默认 `None`，表示所有 lane 有效。
+
+约束说明：
+
+- 在 Ascend 950 上的 `tla.vec.func(mode="simd")` 内调用。
+- 两个操作数须为同类型的 64-lane `i32` 或 `u32` 向量。显式传入的 `mask` 须有 64 个 lane。
+- `carry_in` 和 `carry_out` 均为 64-lane `MaskSSA` 谓词（`!tla.mask<64>`），每个 lane 占 1 bit。
+- `carry_in` 为 `1` 表示有输入进位，该 lane 的和加一。为 `0` 表示无输入进位。
+- `carry_out` 为 `1` 表示该 lane 的和向第 33 位进位。为 `0` 表示无输出进位。
+- 对 `mask` 未启用的 lane，`carry_out` 未定义。
+
+调用示例：
+
+```python
+with tla.vec.func(mode="simd"):
+    # ALLF 将所有输入位设为 0，表示无输入进位。
+    carry_in = tla.create_mask(pattern=tla.mask.ALLF, dtype=tla.UInt32)
+    total, carry_out = tla.addc(lhs, rhs, carry_in)
+```
+
+---
+
+## `tla.subc`
+
+**源码：** [`catlass.core_api.subc`](../../../../../catlass/core_api.py)
+
+功能说明：
+
+在每个有效 lane 上计算 `lhs - rhs - (1 - carry_in)`，返回 `(diff, carry_out)`，即差的低 32 位与进位。
+
+函数原型：
+
+```python
+tla.subc(lhs: VectorSSA, rhs: VectorSSA, carry_in: MaskSSA, *, mask: MaskSSA | None = None) -> tuple[VectorSSA, MaskSSA]
+```
+
+参数说明：
+
+- `lhs`（`VectorSSA`）：左操作数，被减数。必填。
+- `rhs`（`VectorSSA`）：右操作数，减数。必填。
+- `carry_in`（`MaskSSA`）：逐 lane 的输入进位谓词。必填。
+- `mask`（`MaskSSA | None`）：执行掩码。默认 `None`，表示所有 lane 有效。
+
+约束说明：
+
+- 在 Ascend 950 上的 `tla.vec.func(mode="simd")` 内调用。
+- 两个操作数须为同类型的 64-lane `i32` 或 `u32` 向量。显式传入的 `mask` 须有 64 个 lane。
+- `carry_in` 和 `carry_out` 均为 64-lane `MaskSSA` 谓词（`!tla.mask<64>`），每个 lane 占 1 bit。
+- `carry_in` 为 `1` 表示无输入借位。为 `0` 表示有输入借位，该 lane 多减一。
+- `carry_out` 为 `1` 表示无输出借位。为 `0` 表示有输出借位。
+- 对 `mask` 未启用的 lane，`carry_out` 未定义。
+
+调用示例：
+
+```python
+with tla.vec.func(mode="simd"):
+    # ALL 将所有输入位设为 1，表示无输入借位。
+    carry_in = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.UInt32)
+    diff, carry_out = tla.subc(lhs, rhs, carry_in)
+```
+
+---
+
+## `tla.mull`
+
+**源码：** [`catlass.core_api.mull`](../../../../../catlass/core_api.py)
+
+功能说明：
+
+返回每个有效 lane 的 64 位乘积的低、高 32 位 `(low, high)`。`i32` 按有符号整数相乘，`u32` 按无符号整数相乘。
+
+函数原型：
+
+```python
+tla.mull(lhs: VectorSSA, rhs: VectorSSA, *, mask: MaskSSA | None = None) -> tuple[VectorSSA, VectorSSA]
+```
+
+参数说明：
+
+- `lhs`（`VectorSSA`）：左操作数。必填。
+- `rhs`（`VectorSSA`）：右操作数。必填。
+- `mask`（`MaskSSA | None`）：执行掩码。默认 `None`，表示所有 lane 有效。
+
+约束说明：
+
+- 在 Ascend 950 上的 `tla.vec.func(mode="simd")` 内调用。
+- 两个操作数须为同类型的 64-lane `i32` 或 `u32` 向量。显式传入的 `mask` 须有 64 个 lane。
+
+调用示例：
+
+```python
+with tla.vec.func(mode="simd"):
+    low, high = tla.mull(lhs, rhs)
+```
+
+---
+
 ## `tla.add`
 
 **源码：** [`catlass.core_api.add`](../../../../../catlass/core_api.py)

@@ -11147,6 +11147,178 @@ def unpack(
     return VectorSSA(result)
 
 
+def _prepare_b32_pair(op_name, lhs, rhs, mask, loc):
+    _runtime._require_kernel_simd_region(op_name)
+    _require_category(op_name, "lhs", lhs, "vector_ssa", 0)
+    _require_category(op_name, "rhs", rhs, "vector_ssa", 1)
+    lhs_value, rhs_value = _as_value(lhs), _as_value(rhs)
+    desc = _vector_ssa_type_for_mlir_value(lhs_value)
+    if str(desc.element_type).lower() not in ("i32", "u32") or desc.valid_lanes != 64:
+        _op_error(op_name, "requires full 64-lane i32/u32 registers")
+    if lhs_value.type != rhs_value.type:
+        _op_error(op_name, "lhs and rhs must have the same VectorSSA type")
+    if mask is None:
+        mask = create_mask(pattern="ALL", dtype=UInt32, loc=loc)
+    _require_category(op_name, "mask", mask, "mask_ssa", 2)
+    mask_value = _as_value(mask)
+    _require_mask_matches_vector(op_name, mask_value, lhs_value)
+    return lhs_value, rhs_value, mask_value
+
+
+def _prepare_b32_carry_pair(op_name, lhs, rhs, carry_in, mask, loc):
+    lhs_value, rhs_value, mask_value = _prepare_b32_pair(op_name, lhs, rhs, mask, loc)
+    _require_category(op_name, "carry_in", carry_in, "mask_ssa", 2)
+    carry_value = _as_value(carry_in)
+    _require_mask_matches_vector(op_name, carry_value, lhs_value)
+    return lhs_value, rhs_value, carry_value, mask_value
+
+
+@dsl_user_op
+def addc(
+    lhs: VectorSSA,
+    rhs: VectorSSA,
+    carry_in: MaskSSA,
+    *,
+    mask: MaskSSA | None = None,
+    loc: mlir_ir.Location | None = None,
+) -> tuple[VectorSSA, MaskSSA]:
+    """Directory: SIMD Vector Compute / Basic Arithmetic
+
+    Description:
+    Add the operand bit patterns and the carry-in per active lane. Return `(sum, carry_out)`
+    with the low 32 bits of the sum and the carry bit.
+
+    Parameters:
+    - `lhs` (`VectorSSA`): Left-hand operand. Required.
+    - `rhs` (`VectorSSA`): Right-hand operand. Required.
+    - `carry_in` (`MaskSSA`): Per-lane input carry predicate. Required.
+    - `mask` (`MaskSSA | None`): Execution mask. Defaults to `None`, which enables all lanes.
+
+    Constraints:
+    - Call inside `tla.vec.func(mode="simd")` on Ascend 950.
+    - The operands must be 64-lane vectors of the same `i32` or `u32` type. An explicit `mask` must have 64 lanes.
+    - `carry_in` and `carry_out` are 64-lane `MaskSSA` predicates (`!tla.mask<64>`) with one bit per lane.
+    - A `carry_in` bit of `1` means an incoming carry and adds one to the sum. A bit of `0` means no incoming carry.
+    - A `carry_out` bit of `1` means the sum carries beyond the low 32 bits. A bit of `0` means no outgoing carry.
+    - `carry_out` is undefined for lanes disabled by `mask`.
+
+    Example:
+    ```python
+    with tla.vec.func(mode="simd"):
+        # ALLF sets every input bit to 0 for no incoming carry.
+        carry_in = tla.create_mask(pattern=tla.mask.ALLF, dtype=tla.UInt32)
+        total, carry_out = tla.addc(lhs, rhs, carry_in)
+    ```
+    """
+    lhs_value, rhs_value, carry_value, mask_value = _prepare_b32_carry_pair(
+        "addc", lhs, rhs, carry_in, mask, loc
+    )
+
+    sum_value, carry_out = _tla_ops_gen.addc(
+        lhs_value.type,
+        carry_value.type,
+        lhs_value,
+        rhs_value,
+        carry_value,
+        mask_value,
+        loc=loc,
+    )
+    return VectorSSA(sum_value), MaskSSA(carry_out)
+
+
+@dsl_user_op
+def subc(
+    lhs: VectorSSA,
+    rhs: VectorSSA,
+    carry_in: MaskSSA,
+    *,
+    mask: MaskSSA | None = None,
+    loc: mlir_ir.Location | None = None,
+) -> tuple[VectorSSA, MaskSSA]:
+    """Directory: SIMD Vector Compute / Basic Arithmetic
+
+    Description:
+    Compute `lhs - rhs - (1 - carry_in)` per active lane. Return `(diff, carry_out)`
+    with the low 32 bits of the difference and the carry bit.
+
+    Parameters:
+    - `lhs` (`VectorSSA`): Left-hand operand (minuend). Required.
+    - `rhs` (`VectorSSA`): Right-hand operand (subtrahend). Required.
+    - `carry_in` (`MaskSSA`): Per-lane input carry predicate. Required.
+    - `mask` (`MaskSSA | None`): Execution mask. Defaults to `None`, which enables all lanes.
+
+    Constraints:
+    - Call inside `tla.vec.func(mode="simd")` on Ascend 950.
+    - The operands must be 64-lane vectors of the same `i32` or `u32` type. An explicit `mask` must have 64 lanes.
+    - `carry_in` and `carry_out` are 64-lane `MaskSSA` predicates (`!tla.mask<64>`) with one bit per lane.
+    - A `carry_in` bit of `1` means no incoming borrow. A bit of `0` means an incoming borrow and subtracts one more.
+    - A `carry_out` bit of `1` means no outgoing borrow. A bit of `0` means an outgoing borrow.
+    - `carry_out` is undefined for lanes disabled by `mask`.
+
+    Example:
+    ```python
+    with tla.vec.func(mode="simd"):
+        # ALL sets every input bit to 1 for no incoming borrow.
+        carry_in = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.UInt32)
+        diff, carry_out = tla.subc(lhs, rhs, carry_in)
+    ```
+    """
+    lhs_value, rhs_value, carry_value, mask_value = _prepare_b32_carry_pair(
+        "subc", lhs, rhs, carry_in, mask, loc
+    )
+    diff, carry_out = _tla_ops_gen.subc(
+        lhs_value.type,
+        carry_value.type,
+        lhs_value,
+        rhs_value,
+        carry_value,
+        mask_value,
+        loc=loc,
+    )
+    return VectorSSA(diff), MaskSSA(carry_out)
+
+
+@dsl_user_op
+def mull(
+    lhs: VectorSSA,
+    rhs: VectorSSA,
+    *,
+    mask: MaskSSA | None = None,
+    loc: mlir_ir.Location | None = None,
+) -> tuple[VectorSSA, VectorSSA]:
+    """Directory: SIMD Vector Compute / Basic Arithmetic
+
+    Description:
+    Return the low and high 32-bit halves `(low, high)` of each active lane's product.
+    The multiplication is signed for `i32` and unsigned for `u32`.
+
+    Parameters:
+    - `lhs` (`VectorSSA`): Left-hand operand. Required.
+    - `rhs` (`VectorSSA`): Right-hand operand. Required.
+    - `mask` (`MaskSSA | None`): Execution mask. Defaults to `None`, which enables all lanes.
+
+    Constraints:
+    - Call inside `tla.vec.func(mode="simd")` on Ascend 950.
+    - The operands must be 64-lane vectors of the same `i32` or `u32` type. An explicit `mask` must have 64 lanes.
+
+    Example:
+    ```python
+    with tla.vec.func(mode="simd"):
+        low, high = tla.mull(lhs, rhs)
+    ```
+    """
+    lhs_value, rhs_value, mask_value = _prepare_b32_pair("mull", lhs, rhs, mask, loc)
+    lo, hi = _tla_ops_gen.mull(
+        lhs_value.type,
+        lhs_value.type,
+        lhs_value,
+        rhs_value,
+        mask_value,
+        loc=loc,
+    )
+    return VectorSSA(lo), VectorSSA(hi)
+
+
 @dsl_user_op
 def interleave(
     src0: VectorSSA | MaskSSA,
@@ -14567,6 +14739,9 @@ _require_generated("reduce_intra_block")
 _require_generated("pair_wise")
 _require_generated("bitcast")
 _require_generated("interleave")
+_require_generated("addc")
+_require_generated("subc")
+_require_generated("mull")
 _require_generated("deinterleave")
 _require_generated("pack")
 _require_generated("unpack")
@@ -15164,6 +15339,9 @@ __all__ = [
     "abs",
     "neg",
     "interleave",
+    "addc",
+    "subc",
+    "mull",
     "deinterleave",
     "pack",
     "unpack",

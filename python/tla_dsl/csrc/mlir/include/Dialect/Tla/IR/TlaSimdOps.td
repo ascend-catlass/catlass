@@ -572,6 +572,29 @@ def Tla_PairWiseOp : Tla_Op<"pair_wise", [Pure]> {
   let hasVerifier = 1;
 }
 
+class Tla_B32CarryOp<string mnemonic> : Tla_Op<mnemonic, [Pure]> {
+  let arguments = (ins Tla_VectorSSAType:$lhs, Tla_VectorSSAType:$rhs,
+                       Tla_MaskSSAType:$carry_in, Tla_MaskSSAType:$mask);
+  let hasVerifier = 1;
+}
+
+def Tla_AddCOp : Tla_B32CarryOp<"addc"> {
+  let summary = "B32 register addition with incoming and outgoing carry";
+  let results = (outs Tla_VectorSSAType:$sum, Tla_MaskSSAType:$carry_out);
+}
+
+def Tla_SubCOp : Tla_B32CarryOp<"subc"> {
+  let summary = "B32 register subtraction with incoming and outgoing no-borrow predicates";
+  let results = (outs Tla_VectorSSAType:$diff, Tla_MaskSSAType:$carry_out);
+}
+
+def Tla_MullOp : Tla_Op<"mull", [Pure]> {
+  let summary = "B32 register multiplication with low and high results";
+  let arguments = (ins Tla_VectorSSAType:$lhs, Tla_VectorSSAType:$rhs, Tla_MaskSSAType:$mask);
+  let results = (outs Tla_VectorSSAType:$low, Tla_VectorSSAType:$high);
+  let hasVerifier = 1;
+}
+
 def Tla_InterleaveOp : Tla_Op<"interleave", [Pure]> {
   let summary = "Interleave on VectorSSA or MaskSSA values";
   let arguments = (ins AnyTypeOf<[Tla_VectorSSAType, Tla_MaskSSAType]>:$src0,
