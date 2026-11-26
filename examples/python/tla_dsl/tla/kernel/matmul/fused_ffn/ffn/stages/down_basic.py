@@ -333,6 +333,7 @@ def stage_down_basic(
                 tla.make_shape(_tiling.l1_tm, _tiling.l1_tn),
                 tla.make_coord(block_row, block_col),
             )
+            split_valid = True
             if tla.const_expr(use_mtail):
                 cur_tm = tla.as_numeric(_tiling.l1_tm)
                 cur_tn = tla.as_numeric(_tiling.l1_tn)
@@ -346,153 +347,155 @@ def stage_down_basic(
                     cur_tn = (blk_n + n_tail - 1) // n_tail
                     m_idx = m_si
                     n_idx = n_si
-                gm_a_by_core = tla.tile_view(
-                    gm_a_full, tla.make_shape(cur_tm, k), tla.make_coord(m_idx, c0)
+                # Match CPP ASWT: an offset past the edge produces an empty
+                # task. Check before constructing subviews, whose cropped
+                # origin_shape can otherwise become zero or negative.
+                split_valid = (m_idx * cur_tm < gm_a_full.origin_shape[0]) & (
+                    n_idx * cur_tn < gm_c_full.origin_shape[1]
                 )
-                gm_b_by_core = tla.tile_view(
-                    gm_b_full, tla.make_shape(k, cur_tn), tla.make_coord(c0, n_idx)
-                )
-                gm_c_by_core = tla.tile_view(
-                    gm_c_full,
-                    tla.make_shape(cur_tm, cur_tn),
-                    tla.make_coord(m_idx, n_idx),
-                )
-            else:
-                gm_a_by_core = gm_a_full
-                gm_b_by_core = gm_b_full
-                gm_c_by_core = gm_c_full
 
-            work_tm = gm_a_by_core.origin_shape[0]
-            work_tn = gm_c_by_core.origin_shape[1]
-            k_block = gm_a_by_core.origin_shape[1]
-            k_l1_count = (k_block + l1_tk_step - 1) // l1_tk_step
-
-            l0c_ptr1 = l0c_ptr
-            if tla.const_expr(_l0c_db and (not _l0c_slot0_only)):
-                l0c_ptr1 = l0c_ptr + _l0c_slot_elems
-            cur_l0c_ptr = l0c_ptr
-            if tla.const_expr(not _l0c_slot0_only):
-                cur_l0c_ptr = l0c_ptr if l0c_slot == c0 else l0c_ptr1
-            l0_c = tla.make_tensor_like(cur_l0c_ptr, gm_c_by_core)
-            # CPP DoBFullLoadOrAswt: Wait FIX_M only if enableL0cPingPong_
-            # (l0cDB>1). Up DoAllLoc2Ub always waits — Down must not.
-            if tla.const_expr(_l0c_db):
-                if tla.const_expr(_l0c_slot0_only):
-                    tla.wait_flag(l0c0_available)
-                elif l0c_slot == c0:
-                    tla.wait_flag(l0c0_available)
-                else:
-                    tla.wait_flag(l0c1_available)
-
-            # Bias tensors bound here; CopyInC1 runs after CopyInA1 on first
-            # kL1 (CPP DoBFullLoadOrAswt: A → bias → B under one SoftFlag).
-            if tla.const_expr(USE_BIAS):
-                # Absolute elem offset (same ABI as up gm_l1_abs_1d — avoid
-                # tile_view rank-4 vs make_tensor rank-1 stub lock).
-                # Pass clipped work_tn/cur_tn so N-tail DMA stays in-bounds.
-                # Slot = abL1LoopCnt&1 (bias_buf_idx); stride = baseN (=l1_tn).
-                _bias_col0 = block_col * _tiling.l1_tn
+            # Empty Down tasks perform no DMA/MMAD/FixPipe and consume no
+            # pipeline credits. The stage-level flag drain still runs below.
+            # Without tail splitting this is a compile-time True branch.
+            if split_valid:
                 if tla.const_expr(use_mtail):
-                    gm_bias_by_core = gm_l1_abs_1d(
-                        gm_bias, cur_tn, _bias_col0 + n_idx * cur_tn
+                    gm_a_by_core = tla.tile_view(
+                        gm_a_full, tla.make_shape(cur_tm, k), tla.make_coord(m_idx, c0)
+                    )
+                    gm_b_by_core = tla.tile_view(
+                        gm_b_full, tla.make_shape(k, cur_tn), tla.make_coord(c0, n_idx)
+                    )
+                    gm_c_by_core = tla.tile_view(
+                        gm_c_full,
+                        tla.make_shape(cur_tm, cur_tn),
+                        tla.make_coord(m_idx, n_idx),
                     )
                 else:
-                    gm_bias_by_core = gm_l1_abs_1d(gm_bias, work_tn, _bias_col0)
-                cur_l1_bias_ptr = l1_bias_ptr if bias_buf_idx == c0 else l1_bias_ptr1
-                cur_l0_bias_ptr = l0_bias_ptr if bias_buf_idx == c0 else l0_bias_ptr1
-                l1_bias = tla.make_tensor_like(
-                    cur_l1_bias_ptr, gm_bias_by_core, tla.arch.VectorLayout
-                )
-                l0_bias = tla.make_tensor_like(
-                    cur_l0_bias_ptr, l1_bias, tla.arch.VectorLayout
-                )
+                    gm_a_by_core = gm_a_full
+                    gm_b_by_core = gm_b_full
+                    gm_c_by_core = gm_c_full
 
-            # A∥B L1 ping-pong (CPP DoBFullLoadOrAswt): MTE2 copy → eager MTE2_MTE1
-            # drain → L0 mmad loop; skinny-M may prefetch next K during L0.
-            do_k_prefetch = tla.const_expr(skinny_down and (not l1_single))
-            next_prefetched = runtime_zero
-            # CPP isFirstLoopKL1Half: two fills (CeilAlign(kL1/2), rest),
-            # then skip full k_l1==0. tile_view(shape=half_tk, coord=1) starts
-            # at half_tk; origin crops to rest_tk (always rest<=half for CeilAlign).
-            fh_done = runtime_zero
-            # CPP isFirstLoopKL1Half: once per MN tile (not once per core).
-            # Prior ``if mn_tile_i == c0`` was a dynamic SoftFlag/SSA tax
-            # (HIVM icmp + empty else) and latent miss on 2nd+ tiles when
-            # ``_fh_covers_all`` also skips the k_l1 for.
-            if tla.const_expr(enable_first_half):
-                # SoftFlag-fixed unroll only (gate ⇒ one L0 per half).
-                # ---- FH half0 @ L1/L0 slot0 (init_c) ----
-                gm_a_h0 = gm_l1_tile(gm_a_by_core, work_tm, half_tk, c0, c0)
-                gm_b_h0 = gm_l1_tile(gm_b_by_core, half_tk, work_tn, c0, c0)
-                l1_a_h0 = tla.make_tensor_like(l1a0_ptr, gm_a_h0)
-                l1_b_h0 = tla.make_tensor_like(l1b0_ptr, gm_b_h0)
-                tla.wait_flag(l1_0_available)
-                tla.copy(l1_a_h0, gm_a_h0)
+                work_tm = gm_a_by_core.origin_shape[0]
+                work_tn = gm_c_by_core.origin_shape[1]
+                k_block = gm_a_by_core.origin_shape[1]
+                k_l1_count = (k_block + l1_tk_step - 1) // l1_tk_step
+
+                l0c_ptr1 = l0c_ptr
+                if tla.const_expr(_l0c_db and (not _l0c_slot0_only)):
+                    l0c_ptr1 = l0c_ptr + _l0c_slot_elems
+                cur_l0c_ptr = l0c_ptr
+                if tla.const_expr(not _l0c_slot0_only):
+                    cur_l0c_ptr = l0c_ptr if l0c_slot == c0 else l0c_ptr1
+                l0_c = tla.make_tensor_like(cur_l0c_ptr, gm_c_by_core)
+                # CPP DoBFullLoadOrAswt: Wait FIX_M only if enableL0cPingPong_
+                # (l0cDB>1). Up DoAllLoc2Ub always waits — Down must not.
+                if tla.const_expr(_l0c_db):
+                    if tla.const_expr(_l0c_slot0_only):
+                        tla.wait_flag(l0c0_available)
+                    elif l0c_slot == c0:
+                        tla.wait_flag(l0c0_available)
+                    else:
+                        tla.wait_flag(l0c1_available)
+
+                # Bias tensors bound here; CopyInC1 runs after CopyInA1 on first
+                # kL1 (CPP DoBFullLoadOrAswt: A → bias → B under one SoftFlag).
                 if tla.const_expr(USE_BIAS):
-                    tla.copy(l1_bias, gm_bias_by_core)
-                tla.copy(l1_b_h0, gm_b_h0)
-                tla.set_flag(l1_0_data_ready)
-                tla.wait_flag(l1_0_data_ready)
-                # CPP: curK = Min(baseK, remainK). get_tile crops.
-                l1_a_h0_l0 = gm_l1_tile(l1_a_h0, work_tm, _tiling.l0_tk, c0, c0)
-                l1_b_h0_l0 = gm_l1_tile(l1_b_h0, _tiling.l0_tk, work_tn, c0, c0)
-                l0_a_h0 = tla.make_tensor_like(l0a0_ptr, l1_a_h0_l0)
-                l0_b_h0 = tla.make_tensor_like(l0b0_ptr, l1_b_h0_l0)
-                tla.wait_flag(l0_0_available)
-                tla.copy(l0_a_h0, l1_a_h0_l0)
-                if tla.const_expr(USE_BIAS):
-                    tla.copy(l0_bias, l1_bias)
-                tla.copy(l0_b_h0, l1_b_h0_l0)
-                tla.set_flag(l0_0_data_ready)
-                tla.wait_flag(l0_0_data_ready)
-                if tla.const_expr(USE_BIAS):
-                    tla.mmad(
-                        l0_c,
-                        l0_a_h0,
-                        l0_b_h0,
-                        init_c=True,
-                        unit_flag=_uf_nf,
-                        bias=l0_bias,
+                    # Absolute elem offset (same ABI as up gm_l1_abs_1d — avoid
+                    # tile_view rank-4 vs make_tensor rank-1 stub lock).
+                    # Pass clipped work_tn/cur_tn so N-tail DMA stays in-bounds.
+                    # Slot = abL1LoopCnt&1 (bias_buf_idx); stride = baseN (=l1_tn).
+                    _bias_col0 = block_col * _tiling.l1_tn
+                    if tla.const_expr(use_mtail):
+                        gm_bias_by_core = gm_l1_abs_1d(
+                            gm_bias, cur_tn, _bias_col0 + n_idx * cur_tn
+                        )
+                    else:
+                        gm_bias_by_core = gm_l1_abs_1d(gm_bias, work_tn, _bias_col0)
+                    cur_l1_bias_ptr = (
+                        l1_bias_ptr if bias_buf_idx == c0 else l1_bias_ptr1
                     )
-                else:
-                    tla.mmad(l0_c, l0_a_h0, l0_b_h0, init_c=True, unit_flag=_uf_nf)
-                tla.set_flag(l0_0_available)
-                tla.set_flag(l1_0_available)
-                # ---- FH half1 @ L1/L0 slot1 (accum) ----
-                gm_a_h1 = gm_l1_tile(gm_a_by_core, work_tm, half_tk, c0, c1)
-                gm_b_h1 = gm_l1_tile(gm_b_by_core, half_tk, work_tn, c1, c0)
-                l1_a_h1 = tla.make_tensor_like(l1a1_ptr, gm_a_h1)
-                l1_b_h1 = tla.make_tensor_like(l1b1_ptr, gm_b_h1)
-                tla.wait_flag(l1_1_available)
-                tla.copy(l1_a_h1, gm_a_h1)
-                tla.copy(l1_b_h1, gm_b_h1)
-                tla.set_flag(l1_1_data_ready)
-                tla.wait_flag(l1_1_data_ready)
-                # CPP: curK = Min(baseK, remainK). get_tile crops.
-                l1_a_h1_l0 = gm_l1_tile(l1_a_h1, work_tm, _tiling.l0_tk, c0, c0)
-                l1_b_h1_l0 = gm_l1_tile(l1_b_h1, _tiling.l0_tk, work_tn, c0, c0)
-                l0_a_h1 = tla.make_tensor_like(l0a1_ptr, l1_a_h1_l0)
-                l0_b_h1 = tla.make_tensor_like(l0b1_ptr, l1_b_h1_l0)
-                tla.wait_flag(l0_1_available)
-                tla.copy(l0_a_h1, l1_a_h1_l0)
-                tla.copy(l0_b_h1, l1_b_h1_l0)
-                tla.set_flag(l0_1_data_ready)
-                tla.wait_flag(l0_1_data_ready)
-                if tla.const_expr(_fh_covers_all):
-                    tla.mmad(
-                        l0_c,
-                        l0_a_h1,
-                        l0_b_h1,
-                        init_c=False,
-                        unit_flag=_uf_fin,
+                    cur_l0_bias_ptr = (
+                        l0_bias_ptr if bias_buf_idx == c0 else l0_bias_ptr1
                     )
-                else:
-                    # CPP DoBFullLoadOrAswt: unitFlag=FINAL iff this K slice
-                    # is the last (iter0+1==curKL1Iter && last kL0). FH adds
-                    # one iter and replaces kL1 0, so when k_l1_count==1 the
-                    # second half IS the last mmad. NON_FINAL here leaves
-                    # FixPipe unitFlag=3 waiting (gelu#0052 K=H, l0c_db=1).
-                    if k_l1_count <= c1:
+                    l1_bias = tla.make_tensor_like(
+                        cur_l1_bias_ptr, gm_bias_by_core, tla.arch.VectorLayout
+                    )
+                    l0_bias = tla.make_tensor_like(
+                        cur_l0_bias_ptr, l1_bias, tla.arch.VectorLayout
+                    )
+
+                # A∥B L1 ping-pong (CPP DoBFullLoadOrAswt): MTE2 copy → eager MTE2_MTE1
+                # drain → L0 mmad loop; skinny-M may prefetch next K during L0.
+                do_k_prefetch = tla.const_expr(skinny_down and (not l1_single))
+                next_prefetched = runtime_zero
+                # CPP isFirstLoopKL1Half: two fills (CeilAlign(kL1/2), rest),
+                # then skip full k_l1==0. tile_view(shape=half_tk, coord=1) starts
+                # at half_tk; origin crops to rest_tk (always rest<=half for CeilAlign).
+                fh_done = runtime_zero
+                # CPP isFirstLoopKL1Half: once per MN tile (not once per core).
+                # Prior ``if mn_tile_i == c0`` was a dynamic SoftFlag/SSA tax
+                # (HIVM icmp + empty else) and latent miss on 2nd+ tiles when
+                # ``_fh_covers_all`` also skips the k_l1 for.
+                if tla.const_expr(enable_first_half):
+                    # SoftFlag-fixed unroll only (gate ⇒ one L0 per half).
+                    # ---- FH half0 @ L1/L0 slot0 (init_c) ----
+                    gm_a_h0 = gm_l1_tile(gm_a_by_core, work_tm, half_tk, c0, c0)
+                    gm_b_h0 = gm_l1_tile(gm_b_by_core, half_tk, work_tn, c0, c0)
+                    l1_a_h0 = tla.make_tensor_like(l1a0_ptr, gm_a_h0)
+                    l1_b_h0 = tla.make_tensor_like(l1b0_ptr, gm_b_h0)
+                    tla.wait_flag(l1_0_available)
+                    tla.copy(l1_a_h0, gm_a_h0)
+                    if tla.const_expr(USE_BIAS):
+                        tla.copy(l1_bias, gm_bias_by_core)
+                    tla.copy(l1_b_h0, gm_b_h0)
+                    tla.set_flag(l1_0_data_ready)
+                    tla.wait_flag(l1_0_data_ready)
+                    # CPP: curK = Min(baseK, remainK). get_tile crops.
+                    l1_a_h0_l0 = gm_l1_tile(l1_a_h0, work_tm, _tiling.l0_tk, c0, c0)
+                    l1_b_h0_l0 = gm_l1_tile(l1_b_h0, _tiling.l0_tk, work_tn, c0, c0)
+                    l0_a_h0 = tla.make_tensor_like(l0a0_ptr, l1_a_h0_l0)
+                    l0_b_h0 = tla.make_tensor_like(l0b0_ptr, l1_b_h0_l0)
+                    tla.wait_flag(l0_0_available)
+                    tla.copy(l0_a_h0, l1_a_h0_l0)
+                    if tla.const_expr(USE_BIAS):
+                        tla.copy(l0_bias, l1_bias)
+                    tla.copy(l0_b_h0, l1_b_h0_l0)
+                    tla.set_flag(l0_0_data_ready)
+                    tla.wait_flag(l0_0_data_ready)
+                    if tla.const_expr(USE_BIAS):
+                        tla.mmad(
+                            l0_c,
+                            l0_a_h0,
+                            l0_b_h0,
+                            init_c=True,
+                            unit_flag=_uf_nf,
+                            bias=l0_bias,
+                        )
+                    else:
+                        tla.mmad(l0_c, l0_a_h0, l0_b_h0, init_c=True, unit_flag=_uf_nf)
+                    tla.set_flag(l0_0_available)
+                    tla.set_flag(l1_0_available)
+                    # ---- FH half1 @ L1/L0 slot1 (accum) ----
+                    gm_a_h1 = gm_l1_tile(gm_a_by_core, work_tm, half_tk, c0, c1)
+                    gm_b_h1 = gm_l1_tile(gm_b_by_core, half_tk, work_tn, c1, c0)
+                    l1_a_h1 = tla.make_tensor_like(l1a1_ptr, gm_a_h1)
+                    l1_b_h1 = tla.make_tensor_like(l1b1_ptr, gm_b_h1)
+                    tla.wait_flag(l1_1_available)
+                    tla.copy(l1_a_h1, gm_a_h1)
+                    tla.copy(l1_b_h1, gm_b_h1)
+                    tla.set_flag(l1_1_data_ready)
+                    tla.wait_flag(l1_1_data_ready)
+                    # CPP: curK = Min(baseK, remainK). get_tile crops.
+                    l1_a_h1_l0 = gm_l1_tile(l1_a_h1, work_tm, _tiling.l0_tk, c0, c0)
+                    l1_b_h1_l0 = gm_l1_tile(l1_b_h1, _tiling.l0_tk, work_tn, c0, c0)
+                    l0_a_h1 = tla.make_tensor_like(l0a1_ptr, l1_a_h1_l0)
+                    l0_b_h1 = tla.make_tensor_like(l0b1_ptr, l1_b_h1_l0)
+                    tla.wait_flag(l0_1_available)
+                    tla.copy(l0_a_h1, l1_a_h1_l0)
+                    tla.copy(l0_b_h1, l1_b_h1_l0)
+                    tla.set_flag(l0_1_data_ready)
+                    tla.wait_flag(l0_1_data_ready)
+                    if tla.const_expr(_fh_covers_all):
                         tla.mmad(
                             l0_c,
                             l0_a_h1,
@@ -501,204 +504,230 @@ def stage_down_basic(
                             unit_flag=_uf_fin,
                         )
                     else:
-                        tla.mmad(
-                            l0_c,
-                            l0_a_h1,
-                            l0_b_h1,
-                            init_c=False,
-                            unit_flag=_uf_nf,
-                        )
-                tla.set_flag(l0_1_available)
-                tla.set_flag(l1_1_available)
-                # Two toggles land back on slot0 (matches loop FH).
-                l1_buf_idx = c0
-                if tla.const_expr(not L0_SINGLE):
-                    l0_buf_idx = c0
-                fh_done = c1
-
-            # When FH already ate the only kL1, skip this for (no fh_done tax).
-            if tla.const_expr(not _fh_covers_all):
-                for k_l1 in tla.range(c0, k_l1_count, c1):
-                    if fh_done == c1 and k_l1 == c0:
-                        pass
-                    else:
-                        gm_a_by_l1 = gm_l1_tile(
-                            gm_a_by_core, work_tm, l1_tk_step, c0, k_l1
-                        )
-                        gm_b_by_l1 = gm_l1_tile(
-                            gm_b_by_core, l1_tk_step, work_tn, k_l1, c0
-                        )
-                        l1_a = tla.make_tensor_like(
-                            l1a0_ptr if (l1_buf_idx == c0) else l1a1_ptr, gm_a_by_l1
-                        )
-                        l1_b = tla.make_tensor_like(
-                            l1b0_ptr if (l1_buf_idx == c0) else l1b1_ptr, gm_b_by_l1
-                        )
-                        if next_prefetched == c0:
-                            if l1_buf_idx == c0:
-                                tla.wait_flag(l1_0_available)
-                            else:
-                                tla.wait_flag(l1_1_available)
-                            # CPP: CopyInA1 → CopyInC1(iter0) → CopyInB1.
-                            tla.copy(l1_a, gm_a_by_l1)
-                            if tla.const_expr(USE_BIAS):
-                                if k_l1 == c0:
-                                    tla.copy(l1_bias, gm_bias_by_core)
-                            tla.copy(l1_b, gm_b_by_l1)
-                            # CPP: Set+Wait MTE2_MTE1 immediately (eager).
-                            if l1_buf_idx == c0:
-                                tla.set_flag(l1_0_data_ready)
-                            else:
-                                tla.set_flag(l1_1_data_ready)
-                            if l1_buf_idx == c0:
-                                tla.wait_flag(l1_0_data_ready)
-                            else:
-                                tla.wait_flag(l1_1_data_ready)
+                        # CPP DoBFullLoadOrAswt: unitFlag=FINAL iff this K slice
+                        # is the last (iter0+1==curKL1Iter && last kL0). FH adds
+                        # one iter and replaces kL1 0, so when k_l1_count==1 the
+                        # second half IS the last mmad. NON_FINAL here leaves
+                        # FixPipe unitFlag=3 waiting (gelu#0052 K=H, l0c_db=1).
+                        if k_l1_count <= c1:
+                            tla.mmad(
+                                l0_c,
+                                l0_a_h1,
+                                l0_b_h1,
+                                init_c=False,
+                                unit_flag=_uf_fin,
+                            )
                         else:
-                            # Only when (non-CPP).
-                            if l1_buf_idx == c0:
-                                tla.wait_flag(l1_0_data_ready)
-                            else:
-                                tla.wait_flag(l1_1_data_ready)
-                            next_prefetched = runtime_zero
+                            tla.mmad(
+                                l0_c,
+                                l0_a_h1,
+                                l0_b_h1,
+                                init_c=False,
+                                unit_flag=_uf_nf,
+                            )
+                    tla.set_flag(l0_1_available)
+                    tla.set_flag(l1_1_available)
+                    # Two toggles land back on slot0 (matches loop FH).
+                    l1_buf_idx = c0
+                    if tla.const_expr(not L0_SINGLE):
+                        l0_buf_idx = c0
+                    fh_done = c1
 
-                        k_l0_count = (
-                            l1_a.origin_shape[1] + _tiling.l0_tk - 1
-                        ) // _tiling.l0_tk
-                        k_l0_range = tla.range(c0, k_l0_count, c1)
-
-                        for k_l0 in k_l0_range:
-                            # CPP: curK = Min(baseK, remainK). get_tile crops.
-                            l1_a_by_l0 = gm_l1_tile(
-                                l1_a, work_tm, _tiling.l0_tk, c0, k_l0
+                # When FH already ate the only kL1, skip this for (no fh_done tax).
+                if tla.const_expr(not _fh_covers_all):
+                    for k_l1 in tla.range(c0, k_l1_count, c1):
+                        if fh_done == c1 and k_l1 == c0:
+                            pass
+                        else:
+                            gm_a_by_l1 = gm_l1_tile(
+                                gm_a_by_core, work_tm, l1_tk_step, c0, k_l1
                             )
-                            l1_b_by_l0 = gm_l1_tile(
-                                l1_b, _tiling.l0_tk, work_tn, k_l0, c0
+                            gm_b_by_l1 = gm_l1_tile(
+                                gm_b_by_core, l1_tk_step, work_tn, k_l1, c0
                             )
-
-                            l0_a = tla.make_tensor_like(
-                                l0a0_ptr if (l0_buf_idx == c0) else l0a1_ptr, l1_a_by_l0
+                            l1_a = tla.make_tensor_like(
+                                l1a0_ptr if (l1_buf_idx == c0) else l1a1_ptr, gm_a_by_l1
                             )
-                            l0_b = tla.make_tensor_like(
-                                l0b0_ptr if (l0_buf_idx == c0) else l0b1_ptr, l1_b_by_l0
+                            l1_b = tla.make_tensor_like(
+                                l1b0_ptr if (l1_buf_idx == c0) else l1b1_ptr, gm_b_by_l1
                             )
-                            # CPP: Wait M_MTE1 → A2 → C2(NeedBias) → B2 →
-                            # Set/Wait MTE1_M → Mmad (no bias SoftFlag).
-                            # When first-half ran, k_l1==0 is skipped so init_c stays
-                            # False here; BT was already folded on k_half==0.
-                            if l0_buf_idx == c0:
-                                tla.wait_flag(l0_0_available)
+                            if next_prefetched == c0:
+                                if l1_buf_idx == c0:
+                                    tla.wait_flag(l1_0_available)
+                                else:
+                                    tla.wait_flag(l1_1_available)
+                                # CPP: CopyInA1 → CopyInC1(iter0) → CopyInB1.
+                                tla.copy(l1_a, gm_a_by_l1)
+                                if tla.const_expr(USE_BIAS):
+                                    if k_l1 == c0:
+                                        tla.copy(l1_bias, gm_bias_by_core)
+                                tla.copy(l1_b, gm_b_by_l1)
+                                # CPP: Set+Wait MTE2_MTE1 immediately (eager).
+                                if l1_buf_idx == c0:
+                                    tla.set_flag(l1_0_data_ready)
+                                else:
+                                    tla.set_flag(l1_1_data_ready)
+                                if l1_buf_idx == c0:
+                                    tla.wait_flag(l1_0_data_ready)
+                                else:
+                                    tla.wait_flag(l1_1_data_ready)
                             else:
-                                tla.wait_flag(l0_1_available)
-                            tla.copy(l0_a, l1_a_by_l0)
-                            init_c = True if k_l1 == 0 and k_l0 == 0 else False
-                            if tla.const_expr(USE_BIAS):
-                                if init_c:
-                                    tla.copy(l0_bias, l1_bias)
-                            tla.copy(l0_b, l1_b_by_l0)
-                            if l0_buf_idx == c0:
-                                tla.set_flag(l0_0_data_ready)
-                                tla.wait_flag(l0_0_data_ready)
-                            else:
-                                tla.set_flag(l0_1_data_ready)
-                                tla.wait_flag(l0_1_data_ready)
-                            uf = _uf_nf
-                            if (k_l1 + c1) >= k_l1_count and (k_l0 + c1) >= k_l0_count:
-                                uf = _uf_fin
-                            if tla.const_expr(USE_BIAS):
-                                if init_c:
-                                    tla.mmad(
-                                        l0_c,
-                                        l0_a,
-                                        l0_b,
-                                        init_c=init_c,
-                                        unit_flag=uf,
-                                        bias=l0_bias,
-                                    )
+                                # Only when (non-CPP).
+                                if l1_buf_idx == c0:
+                                    tla.wait_flag(l1_0_data_ready)
+                                else:
+                                    tla.wait_flag(l1_1_data_ready)
+                                next_prefetched = runtime_zero
+
+                            k_l0_count = (
+                                l1_a.origin_shape[1] + _tiling.l0_tk - 1
+                            ) // _tiling.l0_tk
+                            k_l0_range = tla.range(c0, k_l0_count, c1)
+
+                            for k_l0 in k_l0_range:
+                                # CPP: curK = Min(baseK, remainK). get_tile crops.
+                                l1_a_by_l0 = gm_l1_tile(
+                                    l1_a, work_tm, _tiling.l0_tk, c0, k_l0
+                                )
+                                l1_b_by_l0 = gm_l1_tile(
+                                    l1_b, _tiling.l0_tk, work_tn, k_l0, c0
+                                )
+
+                                l0_a = tla.make_tensor_like(
+                                    l0a0_ptr if (l0_buf_idx == c0) else l0a1_ptr,
+                                    l1_a_by_l0,
+                                )
+                                l0_b = tla.make_tensor_like(
+                                    l0b0_ptr if (l0_buf_idx == c0) else l0b1_ptr,
+                                    l1_b_by_l0,
+                                )
+                                # CPP: Wait M_MTE1 → A2 → C2(NeedBias) → B2 →
+                                # Set/Wait MTE1_M → Mmad (no bias SoftFlag).
+                                # When first-half ran, k_l1==0 is skipped so init_c stays
+                                # False here; BT was already folded on k_half==0.
+                                if l0_buf_idx == c0:
+                                    tla.wait_flag(l0_0_available)
+                                else:
+                                    tla.wait_flag(l0_1_available)
+                                tla.copy(l0_a, l1_a_by_l0)
+                                init_c = True if k_l1 == 0 and k_l0 == 0 else False
+                                if tla.const_expr(USE_BIAS):
+                                    if init_c:
+                                        tla.copy(l0_bias, l1_bias)
+                                tla.copy(l0_b, l1_b_by_l0)
+                                if l0_buf_idx == c0:
+                                    tla.set_flag(l0_0_data_ready)
+                                    tla.wait_flag(l0_0_data_ready)
+                                else:
+                                    tla.set_flag(l0_1_data_ready)
+                                    tla.wait_flag(l0_1_data_ready)
+                                uf = _uf_nf
+                                if (k_l1 + c1) >= k_l1_count and (
+                                    k_l0 + c1
+                                ) >= k_l0_count:
+                                    uf = _uf_fin
+                                if tla.const_expr(USE_BIAS):
+                                    if init_c:
+                                        tla.mmad(
+                                            l0_c,
+                                            l0_a,
+                                            l0_b,
+                                            init_c=init_c,
+                                            unit_flag=uf,
+                                            bias=l0_bias,
+                                        )
+                                    else:
+                                        tla.mmad(
+                                            l0_c,
+                                            l0_a,
+                                            l0_b,
+                                            init_c=init_c,
+                                            unit_flag=uf,
+                                        )
                                 else:
                                     tla.mmad(
                                         l0_c, l0_a, l0_b, init_c=init_c, unit_flag=uf
                                     )
-                            else:
-                                tla.mmad(l0_c, l0_a, l0_b, init_c=init_c, unit_flag=uf)
-                            if l0_buf_idx == c0:
-                                tla.set_flag(l0_0_available)
-                            else:
-                                tla.set_flag(l0_1_available)
-                            if tla.const_expr(not L0_SINGLE):
-                                l0_buf_idx = c1 - l0_buf_idx
-
-                            # Non-CPP opt-in: prefetch K+1 during first L0 of K.
-                            if (
-                                tla.const_expr(do_k_prefetch)
-                                and k_l0 == c0
-                                and (k_l1 + c1) < k_l1_count
-                            ):
-                                k_next = k_l1 + c1
-                                other = c1 - l1_buf_idx
-                                gm_a_next = gm_l1_tile(
-                                    gm_a_by_core, work_tm, l1_tk_step, c0, k_next
-                                )
-                                gm_b_next = gm_l1_tile(
-                                    gm_b_by_core, l1_tk_step, work_tn, k_next, c0
-                                )
-                                l1_a_next = tla.make_tensor_like(
-                                    l1a0_ptr if (other == c0) else l1a1_ptr, gm_a_next
-                                )
-                                l1_b_next = tla.make_tensor_like(
-                                    l1b0_ptr if (other == c0) else l1b1_ptr, gm_b_next
-                                )
-                                if other == c0:
-                                    tla.wait_flag(l1_0_available)
+                                if l0_buf_idx == c0:
+                                    tla.set_flag(l0_0_available)
                                 else:
-                                    tla.wait_flag(l1_1_available)
-                                tla.copy(l1_a_next, gm_a_next)
-                                tla.copy(l1_b_next, gm_b_next)
-                                # Set only — consumer waits on next k_l1 (∥ L0).
-                                if other == c0:
-                                    tla.set_flag(l1_0_data_ready)
-                                else:
-                                    tla.set_flag(l1_1_data_ready)
-                                next_prefetched = c1
+                                    tla.set_flag(l0_1_available)
+                                if tla.const_expr(not L0_SINGLE):
+                                    l0_buf_idx = c1 - l0_buf_idx
 
-                        # CPP: SetFlag MTE1_MTE2(l1BufId) after full kL0Iter.
-                        if l1_buf_idx == c0:
-                            tla.set_flag(l1_0_available)
-                        else:
-                            tla.set_flag(l1_1_available)
-                        l1_buf_idx = c1 - l1_buf_idx
-                        # CPP abL1LoopCnt_++ → next tile/kL1 uses other BT slot.
-                        if tla.const_expr(USE_BIAS):
-                            bias_buf_idx = c1 - bias_buf_idx
+                                # Non-CPP opt-in: prefetch K+1 during first L0 of K.
+                                if (
+                                    tla.const_expr(do_k_prefetch)
+                                    and k_l0 == c0
+                                    and (k_l1 + c1) < k_l1_count
+                                ):
+                                    k_next = k_l1 + c1
+                                    other = c1 - l1_buf_idx
+                                    gm_a_next = gm_l1_tile(
+                                        gm_a_by_core, work_tm, l1_tk_step, c0, k_next
+                                    )
+                                    gm_b_next = gm_l1_tile(
+                                        gm_b_by_core, l1_tk_step, work_tn, k_next, c0
+                                    )
+                                    l1_a_next = tla.make_tensor_like(
+                                        l1a0_ptr if (other == c0) else l1a1_ptr,
+                                        gm_a_next,
+                                    )
+                                    l1_b_next = tla.make_tensor_like(
+                                        l1b0_ptr if (other == c0) else l1b1_ptr,
+                                        gm_b_next,
+                                    )
+                                    if other == c0:
+                                        tla.wait_flag(l1_0_available)
+                                    else:
+                                        tla.wait_flag(l1_1_available)
+                                    tla.copy(l1_a_next, gm_a_next)
+                                    tla.copy(l1_b_next, gm_b_next)
+                                    # Set only — consumer waits on next k_l1 (∥ L0).
+                                    if other == c0:
+                                        tla.set_flag(l1_0_data_ready)
+                                    else:
+                                        tla.set_flag(l1_1_data_ready)
+                                    next_prefetched = c1
 
-            # CPP DoBFullLoadOrAswt: Set/Wait M_FIX + Set FIX_M only when
-            # enableL0cPingPong_. !l0cDB → bare FixPipe (ctor/dtor still
-            # prime/drain FIX_M 0/1).
-            if tla.const_expr(_l0c_db):
-                if tla.const_expr(_l0c_slot0_only):
-                    tla.set_flag(l0c0_data_ready)
-                    tla.wait_flag(l0c0_data_ready)
-                elif l0c_slot == c0:
-                    tla.set_flag(l0c0_data_ready)
-                    tla.wait_flag(l0c0_data_ready)
-                else:
-                    tla.set_flag(l0c1_data_ready)
-                    tla.wait_flag(l0c1_data_ready)
-            tla.copy(
-                gm_c_by_core,
-                l0_c,
-                tla.params.CopyL0C2DstParams(relu_enable=False, unit_flag=_uf_fin),
-            )
-            if tla.const_expr(_l0c_db):
-                if tla.const_expr(_l0c_slot0_only):
-                    tla.set_flag(l0c0_available)
-                elif l0c_slot == c0:
-                    tla.set_flag(l0c0_available)
-                else:
-                    tla.set_flag(l0c1_available)
-                if tla.const_expr(not _l0c_slot0_only):
-                    l0c_slot = c1 - l0c_slot
-            mn_tile_i = mn_tile_i + c1
+                            # CPP: SetFlag MTE1_MTE2(l1BufId) after full kL0Iter.
+                            if l1_buf_idx == c0:
+                                tla.set_flag(l1_0_available)
+                            else:
+                                tla.set_flag(l1_1_available)
+                            l1_buf_idx = c1 - l1_buf_idx
+                            # CPP abL1LoopCnt_++ → next tile/kL1 uses other BT slot.
+                            if tla.const_expr(USE_BIAS):
+                                bias_buf_idx = c1 - bias_buf_idx
+
+                # CPP DoBFullLoadOrAswt: Set/Wait M_FIX + Set FIX_M only when
+                # enableL0cPingPong_. !l0cDB → bare FixPipe (ctor/dtor still
+                # prime/drain FIX_M 0/1).
+                if tla.const_expr(_l0c_db):
+                    if tla.const_expr(_l0c_slot0_only):
+                        tla.set_flag(l0c0_data_ready)
+                        tla.wait_flag(l0c0_data_ready)
+                    elif l0c_slot == c0:
+                        tla.set_flag(l0c0_data_ready)
+                        tla.wait_flag(l0c0_data_ready)
+                    else:
+                        tla.set_flag(l0c1_data_ready)
+                        tla.wait_flag(l0c1_data_ready)
+                tla.copy(
+                    gm_c_by_core,
+                    l0_c,
+                    tla.params.CopyL0C2DstParams(relu_enable=False, unit_flag=_uf_fin),
+                )
+                if tla.const_expr(_l0c_db):
+                    if tla.const_expr(_l0c_slot0_only):
+                        tla.set_flag(l0c0_available)
+                    elif l0c_slot == c0:
+                        tla.set_flag(l0c0_available)
+                    else:
+                        tla.set_flag(l0c1_available)
+                    if tla.const_expr(not _l0c_slot0_only):
+                        l0c_slot = c1 - l0c_slot
+                mn_tile_i = mn_tile_i + c1
 
         # CPP ~BlockMmad: Wait MTE1_MTE2(0..3), M_MTE1(6/7), FIX_M(0/1).
         tla.wait_flag(l1_0_available)
