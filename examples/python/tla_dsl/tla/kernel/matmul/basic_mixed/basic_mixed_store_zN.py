@@ -190,6 +190,13 @@ def basic_mixed_store_zN(
 
 
 def run(args: argparse.Namespace) -> int:
+    if min(args.m, args.n, args.k) <= 0:
+        raise ValueError(f"M/N/K must be positive; received {args.m}/{args.n}/{args.k}")
+    if args.m > 64 or args.m % 2 or args.n > 64 or args.k > 256:
+        raise ValueError(
+            "store_zN requires even M in [2, 64], N in [1, 64], K in [1, 256]"
+        )
+
     import torch
     import torch_npu  # noqa: F401
 

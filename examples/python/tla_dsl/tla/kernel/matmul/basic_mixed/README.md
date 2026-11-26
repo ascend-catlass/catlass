@@ -55,10 +55,48 @@ $$
 
 ## 约束说明
 
-- 本目录下示例固定采用 `f32` 数据类型。
-- `basic_mixed_fixpipe_per_tensor.py` 与 `basic_mixed_fixpipe_per_channel.py` 例外：输入 `--dtype-ab` 可选 `f32` 或 `i8`（`i8` 累加到 `i32`），输出 `--dtype-c` 可选 `f32` / `f16` / `bf16`，不支持 `i8` / `u8`。
-- `basic_mixed_l0c2ub_b8_unitflag_pad.py` 例外：专用于 UB `i8`/`u8` + `unit_flag` 的对齐规避；单 block，`m/n/k` 与对齐后的 cube frame 均须落入 64 的 L0 tile。
-- 上述两个量化示例的 K 轴不切分，要求 `k` 不超过一个 L1 tile（`MIXED_TILING.l1_tk`，即 `k <= 64`）；M、N 不受 tile 大小限制，由 kernel 遍历 tile 网格。
+所有样例要求`M > 0`、`N > 0`、`K > 0`。下表是各脚本`run()`实际检查的shape范围；默认值不是额外的固定尺寸限制。
+
+| 脚本 | M | N | K |
+| --- | --- | --- | --- |
+| `basic_mixed.py` | `M = 32` | `N = 32` | `1 <= K <= 32` |
+| `basic_mixed_mutex.py` | `M = 32` | `N = 32` | `1 <= K <= 32` |
+| `basic_mixed_fixpipe_nz2dn.py` | `M = 60` | `N = 100` | `1 <= K <= 64` |
+| `basic_mixed_store_zN.py` | `2 <= M <= 64`，且M为偶数 | `1 <= N <= 64` | `1 <= K <= 256` |
+| `basic_mixed_store_zNUnAlign.py` | `2 <= M <= 64`，且M为偶数 | `1 <= N <= 64` | `1 <= K <= 256` |
+| `basic_mixed_ub2l1.py` | M为正偶数，且满足下述分形存储及容量限制 | 满足下述分形存储及容量限制 | 满足下述分形存储及容量限制 |
+| `basic_mixed_fixpipe_per_tensor.py` | 正整数，支持跨tile计算 | 正整数，支持跨tile计算 | `1 <= K <= 64` |
+| `basic_mixed_fixpipe_per_channel.py` | 正整数，支持跨tile计算 | 正整数，支持跨tile计算 | `1 <= K <= 64` |
+| `basic_mixed_l0c2ub_b8_unitflag_pad.py` | `1 <= M <= 64` | `1 <= N <= 64` | `1 <= K <= 64` |
+
+- `basic_mixed.py`和`basic_mixed_mutex.py`的Vector输出覆盖范围固定，K不分段；不能仅改变GM张量形状来扩大M/N/K。
+- `basic_mixed_fixpipe_nz2dn.py`的输出视图和stride使用固定M/N，K由输入决定但须放入一个tile。
+- 两个store示例通过两个AIV子块各处理`M // 2`行，奇数M会漏行；kernel只处理一个`64*64*256`的tile。M无需是16的倍数。
+- 两个量化示例遍历M/N网格，K不切分。per-tensor的单字节输出还要求：RowMajor输出时`N % 32 == 0`，ColumnMajor输出时`M % 32 == 0`。
+- b8 pad示例在ColumnMajor输出时将M补齐到32的倍数，在RowMajor输出时将N补齐到32的倍数；补齐后的cube frame须落入`64*64`的L0 tile。
+- `basic_mixed.py`、`basic_mixed_mutex.py`和`basic_mixed_fixpipe_nz2dn.py`使用`f32`。UB→L1及两个store示例的类型选择见各脚本的`--dtype`；量化输出类型由各脚本的`--dtype-ab`、`--dtype-c`组合决定。
+- 尺寸校验发生在设备初始化和张量分配之前；数据类型、布局和精度仍须满足对应通路的要求，shape校验不代表所有组合均已经过验证。
+
+### ub2l1的分形存储与容量限制
+
+本示例按逻辑元素数分配片上空间，不额外为分形尾块扩容。令`s`为输入元素的字节数，`C0 = 32 / s`，`R(x,a) = ceil(x/a)*a`，须满足：
+
+- L1A/L0A：`R(M,16)*R(K,C0) <= M*K`。
+- L1B：`R(K,16)*R(N,C0) <= K*N`。
+- L0B：`R(K,C0)*R(N,16) <= K*N`。
+- L0C：`R(M,16)*R(N,16) <= M*N`。
+
+这些检查防止分形补齐后的物理占用超过实际分配空间。通过上述检查后，还须满足：
+
+| 存储层 | 本示例使用的容量判据 |
+| --- | --- |
+| L1 | `R(M*K*s,512) + K*N*s <= 512*1024`字节 |
+| L0A | `M*K*s <= 64*1024`字节 |
+| L0B | `K*N*s <= 64*1024`字节 |
+| L0C | `M*N*4 <= 256*1024`字节 |
+| UB | `(M/2)*K*s <= 248*1024`字节 |
+
+容量依据为本仓库`python/tla_dsl/catlass/base_dsl/arch.py`中Ascend 950的片上容量定义；UB扣除编译器默认保留的8 KiB。示例未传入释放保留空间的编译选项。
 
 ## 使用示例
 
@@ -78,7 +116,7 @@ basic_mixed.py [-h] [--device DEVICE] [--m M] [--n N] [--k K]
 | 参数                            | 默认值                                                  | 说明                                                                                 |
 | ------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------ |
 | `--device`                    | `0`                                                   | 上板执行使用的 NPU 设备号。                                                          |
-| `--m` / `--n` / `--k`     | `32`, `32`, `32`                                  | 矩阵乘加的问题大小                                                                   |
+| `--m` / `--n` / `--k`     | `32`, `32`, `32`                                  | 问题尺寸，各脚本的允许范围见约束说明                                                                   |
 | `--layout-a` / `--layout-b` | `"row"` / `"row"`                                   | 左、右矩阵 A、B 的数据排布格式，可选`"row"` 或 `"col"`，表示行优先或列优先布局。 |
 | `--block-num`                 | `-1`                      | 启用的核数，`-1` 表示自动探测可用核数（满核）。                                               |
 | `--sentinel`                  | `-9.0`                                                | Kernel 启动前预先填入结果矩阵的值。                                                   |
@@ -92,6 +130,9 @@ cd /path/to/catlass
 # 基础测试 (默认 m=32, n=32, k=32)
 python examples/python/tla_dsl/tla/kernel/matmul/basic_mixed/basic_mixed.py
 
+
+# FIXPIPE NZ2DN
+python examples/python/tla_dsl/tla/kernel/matmul/basic_mixed/basic_mixed_fixpipe_nz2dn.py
 
 # 使用 Mutex 同步
 python examples/python/tla_dsl/tla/kernel/matmul/basic_mixed/basic_mixed_mutex.py
@@ -108,6 +149,9 @@ python examples/python/tla_dsl/tla/kernel/matmul/basic_mixed/basic_mixed_fixpipe
 
 # FIXPIPE per-channel 量化
 python examples/python/tla_dsl/tla/kernel/matmul/basic_mixed/basic_mixed_fixpipe_per_channel.py
+
+# L0C -> UB b8 unit_flag
+python examples/python/tla_dsl/tla/kernel/matmul/basic_mixed/basic_mixed_l0c2ub_b8_unitflag_pad.py
 ```
 
 执行测试后，预期输出：
@@ -118,7 +162,7 @@ passed=True cache_key=<cache_key>
 kernel.o=<cache_dir>/<cache_key>/kernel.o
 ```
 
-- 上述 `<m>`， `<n>`， `<k>` 等为占位符，具体依赖外部参数或环境变量传入。
+- 上述`<m>`、`<n>`、`<k>`为回显占位符，实际值由命令行参数决定，且须满足对应脚本的约束。
 
 其中 `passed` 结果为 `True` 或 `False` 表明 NPU 计算结果与 golden 参考值精度校验是否通过；`cache_dir` 是指定的缓存目录，`cache_key` 是编译缓存的哈希值。
 

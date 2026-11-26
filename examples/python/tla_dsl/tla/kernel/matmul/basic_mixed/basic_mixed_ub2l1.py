@@ -146,6 +146,11 @@ def basic_mixed_ub2l1(
 
 
 def run(args: argparse.Namespace) -> int:
+    if min(args.m, args.n, args.k) <= 0:
+        raise ValueError(f"M/N/K must be positive; received {args.m}/{args.n}/{args.k}")
+    if args.m % 2:
+        raise ValueError("ub2l1 requires even M so both AIV subblocks cover all rows")
+
     import torch
     import torch_npu  # noqa: F401
 
@@ -154,6 +159,42 @@ def run(args: argparse.Namespace) -> int:
     global M_DIM, N_DIM, K_DIM, ELEM
     M_DIM, N_DIM, K_DIM = int(args.m), int(args.n), int(args.k)
     ELEM = elem_spec(args.dtype)
+
+    # Allocations below use logical element counts, so verify that the
+    # packed zN/nZ/L0C layouts require no additional backing storage.
+    m, n, k = M_DIM, N_DIM, K_DIM
+    size = ELEM.size_bytes
+    c0 = 32 // size
+
+    def round_up(value, alignment):
+        return (value + alignment - 1) // alignment * alignment
+
+    packed = (
+        ("L1A/L0A", round_up(m, 16) * round_up(k, c0), m * k),
+        ("L1B", round_up(k, 16) * round_up(n, c0), k * n),
+        ("L0B", round_up(k, c0) * round_up(n, 16), k * n),
+        ("L0C", round_up(m, 16) * round_up(n, 16), m * n),
+    )
+    for space, required, allocated in packed:
+        if required > allocated:
+            raise ValueError(
+                f"ub2l1 {space} packed layout needs {required} elements, "
+                f"but the example allocates {allocated}; use aligned M/N/K"
+            )
+
+    # Ascend 950 capacities; L1A/L1B share L1 with 512-byte starts.
+    usage = (
+        ("L1", round_up(m * k * size, 512) + k * n * size, 512 * 1024),
+        ("L0A", m * k * size, 64 * 1024),
+        ("L0B", k * n * size, 64 * 1024),
+        ("L0C", m * n * 4, 256 * 1024),
+        ("UB", (m // 2) * k * size, 248 * 1024),
+    )
+    for space, required, capacity in usage:
+        if required > capacity:
+            raise ValueError(
+                f"ub2l1 {space} requires {required} bytes, capacity is {capacity}"
+            )
 
     torch.npu.set_device(args.device)
     torch.manual_seed(0)

@@ -388,9 +388,12 @@ def per_channel_quant_golden(
 
 
 def run(args: argparse.Namespace) -> int:
-    from helpers import create_tla_tensor, get_block_num, compare, compute_error_metrics
+    if min(args.m, args.n, args.k) <= 0:
+        raise ValueError(f"M/N/K must be positive; received {args.m}/{args.n}/{args.k}")
+    if args.k > MIXED_TILING.l1_tk:
+        raise ValueError(f"K must fit one L1 tile: 1 <= K <= {MIXED_TILING.l1_tk}")
 
-    torch.npu.set_device(args.device)
+    from helpers import create_tla_tensor, get_block_num, compare, compute_error_metrics
 
     acc_dtype = "i32" if args.dtype_ab == "i8" else "f32"
     acc_is_int = acc_dtype == "i32"
@@ -407,10 +410,7 @@ def run(args: argparse.Namespace) -> int:
     layout_a, layout_b = "row", "row"
     layout_c = args.layout_c
 
-    if args.k > MIXED_TILING.l1_tk:
-        raise SystemExit(
-            f"k must fit one L1 tile (k<={MIXED_TILING.l1_tk}); got k={args.k}"
-        )
+    torch.npu.set_device(args.device)
 
     print(
         f"--- mnk=({args.m},{args.n},{args.k}) "

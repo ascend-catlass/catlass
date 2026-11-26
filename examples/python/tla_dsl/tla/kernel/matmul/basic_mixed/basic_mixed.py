@@ -243,6 +243,11 @@ def prepare_npu(buf, layout: str):
 
 
 def run(args: argparse.Namespace) -> int:
+    if min(args.m, args.n, args.k) <= 0:
+        raise ValueError(f"M/N/K must be positive; received {args.m}/{args.n}/{args.k}")
+    if args.m != 32 or args.n != 32 or args.k > 32:
+        raise ValueError("basic_mixed requires M=32, N=32 and 1 <= K <= 32")
+
     import torch
     import torch_npu
 

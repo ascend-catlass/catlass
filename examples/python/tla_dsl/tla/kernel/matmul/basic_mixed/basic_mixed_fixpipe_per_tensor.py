@@ -425,9 +425,12 @@ def per_tensor_quant_golden_hif8(
 
 
 def run(args: argparse.Namespace) -> int:
-    from helpers import create_tla_tensor, get_block_num, compare, compute_error_metrics
+    if min(args.m, args.n, args.k) <= 0:
+        raise ValueError(f"M/N/K must be positive; received {args.m}/{args.n}/{args.k}")
+    if args.k > MIXED_TILING.l1_tk:
+        raise ValueError(f"K must fit one L1 tile: 1 <= K <= {MIXED_TILING.l1_tk}")
 
-    torch.npu.set_device(args.device)
+    from helpers import create_tla_tensor, get_block_num, compare, compute_error_metrics
 
     acc_dtype = "i32" if args.dtype_ab == "i8" else "f32"
     acc_is_int = acc_dtype == "i32"
@@ -446,10 +449,6 @@ def run(args: argparse.Namespace) -> int:
     is_hif8_dst = args.dtype_c == "hif8"
     is_f8_dst = args.dtype_c == "f8e4m3fn"
 
-    if args.k > MIXED_TILING.l1_tk:
-        raise SystemExit(
-            f"k must fit one L1 tile (k<={MIXED_TILING.l1_tk}); got k={args.k}"
-        )
     # 1-byte + unit_flag≠0: static RowMajor N / ColumnMajor M must be %32.
     align_extent = args.m if layout_c == "col" else args.n
     if args.dtype_c in ("i8", "u8", "f8e4m3fn", "hif8") and align_extent % 32 != 0:
@@ -457,6 +456,8 @@ def run(args: argparse.Namespace) -> int:
             f"L0C→UB 1-byte + unit_flag requires "
             f"{'M' if layout_c == 'col' else 'N'} % 32 == 0; got {align_extent}"
         )
+
+    torch.npu.set_device(args.device)
 
     print(
         f"--- mnk=({args.m},{args.n},{args.k}) "

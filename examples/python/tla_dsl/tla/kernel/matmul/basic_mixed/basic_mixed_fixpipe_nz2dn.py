@@ -149,6 +149,13 @@ def prepare_npu(buf, layout: str):
 
 
 def run(args: argparse.Namespace) -> int:
+    if min(args.m, args.n, args.k) <= 0:
+        raise ValueError(f"M/N/K must be positive; received {args.m}/{args.n}/{args.k}")
+    if args.m != 60 or args.n != 100 or args.k > 64:
+        raise ValueError(
+            "basic_mixed_fixpipe_nz2dn requires M=60, N=100 and 1 <= K <= 64"
+        )
+
     import torch
     import torch_npu
 

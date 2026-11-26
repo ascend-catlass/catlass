@@ -281,7 +281,10 @@ def per_tensor_quant_golden(
 
 
 def run(args: argparse.Namespace) -> int:
-    torch.npu.set_device(args.device)
+    if min(args.m, args.n, args.k) <= 0:
+        raise ValueError(f"M/N/K must be positive; received {args.m}/{args.n}/{args.k}")
+    if max(args.m, args.n, args.k) > 64:
+        raise ValueError("b8 unitflag pad requires 1 <= M, N, K <= 64")
 
     m, n, k = int(args.m), int(args.n), int(args.k)
     if k > _TILE.l1_tk:
@@ -303,6 +306,8 @@ def run(args: argparse.Namespace) -> int:
             f"aligned cube frame ({m_cube},{n_cube}) exceeds L0 tile "
             f"({_TILE.l0_tm},{_TILE.l0_tn})"
         )
+
+    torch.npu.set_device(args.device)
 
     dtype_c = torch.int8 if args.dtype_c == "i8" else torch.uint8
     print(
