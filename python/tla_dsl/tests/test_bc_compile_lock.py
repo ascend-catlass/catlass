@@ -35,6 +35,8 @@ def fake_build(tmp_path: Path, monkeypatch):
         (stubs / subdir / "dma.cpp").write_text("dma")
         (stubs / subdir / "system_counter.cpp").write_text("counter")
     (stubs / "Vector" / "log.cpp").write_text("log")
+    for op in ("sub_abs", "axpy", "muls_cast"):
+        (stubs / "Vector" / f"{op}.cpp").write_text(op)
     ccec = tmp_path / "ccec"
     ccec.write_bytes(b"test compiler")
     cfg = bc_compile.BCConfig(
@@ -344,4 +346,13 @@ def test_icache_aggregate_rebuilds_preexisting_counter_cache(fake_build):
     assert ("aic", "icache_status") in compiled
     assert ("aiv", "icache") in compiled
     assert set(aic.read_text().splitlines()) == {"dma", "counter", "icache_status"}
-    assert set(aiv.read_text().splitlines()) == {"dma", "counter", "log", "icache", "icache_status"}
+    assert set(aiv.read_text().splitlines()) == {
+        "sub_abs",
+        "axpy",
+        "counter",
+        "dma",
+        "icache",
+        "icache_status",
+        "log",
+        "muls_cast",
+    }

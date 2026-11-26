@@ -498,6 +498,71 @@ with tla.vec.func(mode="simd"):
 
 ---
 
+## `tla.arch.axpy`
+
+**源码：** [`catlass.core_api.arch_axpy`](../../../../../catlass/core_api.py)
+
+使用 Ascend C Reg Axpy 逐元素计算 `alpha * x + y`，返回与输入元素类型相同的完整寄存器。
+
+```python
+tla.arch.axpy(x: VectorSSA, y: VectorSSA, alpha: Numeric | float | int, *, mask: MaskSSA | None = None) -> VectorSSA
+```
+
+- `x` 和 `y` 的元素类型须相同，支持 FP16、FP32、Int64 和 UInt64。
+- `alpha` 为共享标量。带类型的标量须与输入元素类型一致。浮点寄存器接受 Python `float` 字面量，整数寄存器接受 Python `int` 字面量。
+- `mask` 按输入位置生效。FP16、FP32 和 64 位整数分别使用 128、64 和 32 个 lane 的掩码。默认值 `None` 启用已知有效输入范围内的所有位置。被掩码屏蔽或超出已知有效前缀的位置输出零。
+- 须在 `@tla.kernel` 内的 `tla.vec.func(mode="simd")` 中调用。
+
+```python
+with tla.vec.func(mode="simd"):
+    result = tla.arch.axpy(x, y, 0.5, mask=mask)
+```
+
+---
+
+## `tla.arch.sub_abs`
+
+**源码：** [`catlass.core_api.arch_sub_abs`](../../../../../catlass/core_api.py)
+
+逐元素计算 `abs(lhs - rhs)`，返回与输入元素类型相同的完整寄存器。
+
+```python
+tla.arch.sub_abs(lhs: VectorSSA, rhs: VectorSSA, *, mask: MaskSSA | None = None) -> VectorSSA
+```
+
+- `lhs` 和 `rhs` 的元素类型须相同，支持 FP16、FP32 和 Int64。
+- `mask` 按输入位置生效，分别使用 128、64 和 32 个 lane 的掩码。默认值 `None` 启用已知有效输入范围内的所有位置。被掩码屏蔽或超出已知有效前缀的位置输出零。
+- 须在 `@tla.kernel` 内的 `tla.vec.func(mode="simd")` 中调用。
+
+```python
+with tla.vec.func(mode="simd"):
+    result = tla.arch.sub_abs(lhs, rhs, mask=mask)
+```
+
+---
+
+## `tla.arch.muls_cast`
+
+**源码：** [`catlass.core_api.arch_muls_cast`](../../../../../catlass/core_api.py)
+
+使用 Ascend C Reg MulsCast 将 FP32 向量与 FP32 标量相乘，按 `CAST_ROUND` 转为 FP16，返回包含 128 个 lane 的 FP16 寄存器。
+
+```python
+tla.arch.muls_cast(src: VectorSSA, scalar: Float32 | float, *, reg_slot: RegSlot = RegSlot.ZERO, mask: MaskSSA | None = None) -> VectorSSA
+```
+
+- `src` 须为 FP32 寄存器。`scalar` 接受 FP32 标量或 Python `float` 字面量。
+- `reg_slot` 默认为 `ZERO`，将选中的输入位置 `i` 写入输出位置 `2*i`。`ONE` 写入 `2*i + 1`。使用结果时，读取有效输入对应的目标位置。
+- `mask` 使用 64 个输入 lane。默认值 `None` 启用已知有效输入范围内的所有位置。
+- 须在 `@tla.kernel` 内的 `tla.vec.func(mode="simd")` 中调用。
+
+```python
+with tla.vec.func(mode="simd"):
+    result = tla.arch.muls_cast(src, 0.5, reg_slot=tla.params.RegSlot.ONE)
+```
+
+---
+
 ## `tla.relu`
 
 **源码：** [`catlass.core_api.relu`](../../../../../catlass/core_api.py)

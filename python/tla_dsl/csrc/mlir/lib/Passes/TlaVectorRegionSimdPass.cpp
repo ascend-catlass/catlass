@@ -935,8 +935,9 @@ static bool isVectorComputeOp(Operation* op)
            isa_and_nonnull<::tla::ReduceOp>(op) || isa_and_nonnull<::tla::ReduceIntraBlockOp>(op) ||
            isa_and_nonnull<::tla::PairWiseOp>(op) || isa_and_nonnull<::tla::GatherOp>(op) ||
            isa_and_nonnull<::tla::CastOp>(op) || isa_and_nonnull<::tla::BitCastOp>(op) ||
-           isa_and_nonnull<::tla::ExpSubOp>(op) || isa_and_nonnull<::tla::PackOp>(op) ||
-           isa_and_nonnull<::tla::UnpackOp>(op) ||
+           isa_and_nonnull<::tla::ExpSubOp>(op) ||
+           isa_and_nonnull<::tla::AxpyOp, ::tla::SubAbsOp, ::tla::MulsCastOp>(op) ||
+           isa_and_nonnull<::tla::PackOp>(op) || isa_and_nonnull<::tla::UnpackOp>(op) ||
            isa_and_nonnull<::tla::InterleaveOp, ::tla::DeInterleaveOp, ::tla::MullOp, ::tla::AddCOp, ::tla::SubCOp>(
                op) ||
            isa_and_nonnull<::tla::GenerateMaskOp>(op);
@@ -5421,6 +5422,100 @@ static LogicalResult lowerVfTensorPrint(
     return emitVfDumpCall(b, loc, module, "ub", elementType, {value, count, shape0, shape1, rankValue, callId});
 }
 
+// Intersect the input-domain mask with the shortest valid prefix known at compile time.
+static Value limitMaskToValidLanes(
+    OpBuilder& b, Location loc, Value mask, ValueRange inputs, AutoFullPredicateCache& fullMasks)
+{
+    Type element = cast<::tla::VectorSSAType>(inputs.front().getType()).getElementType();
+    int64_t lanes = 2048 / element.getIntOrFloatBitWidth();
+    int64_t validLanes = lanes;
+    for (Value input : inputs) {
+        int64_t count = cast<::tla::VectorSSAType>(input.getType()).getValidLanes();
+        if (count != ShapedType::kDynamic)
+            validLanes = std::min(validLanes, count);
+    }
+    auto pregType = fullPregVecType(b.getContext());
+    Value preg = castMaskToPregType(b, loc, mask, pregType);
+    if (validLanes == lanes)
+        return preg;
+    Value count = b.create<arith::ConstantIndexOp>(loc, validLanes);
+    Value prefix = createPredicatePlt(b, loc, pregType, lanes, count).getRes();
+    if (lanes == 32)
+        prefix = unpackB64Mask(b, loc, prefix);
+    return b
+        .create<hivmave::PregAndOp>(
+            loc, pregType, maskWidthAttrForElement(b, element), preg, prefix, fullMasks.get(loc, lanes))
+        .getRes();
+}
+
+static LogicalResult lowerAxpy(
+    ::tla::AxpyOp op, OpBuilder& b, ModuleOp module, DenseMap<Value, Value>& valueMap,
+    AutoFullPredicateCache& fullMasks)
+{
+    Location loc = op.getLoc();
+    Value x = valueMap.lookup(op.getX());
+    Value y = valueMap.lookup(op.getY());
+    Value alpha = lookupOrCloneScalarValue(b, op.getAlpha(), valueMap);
+    Value mask = valueMap.lookup(op.getMask());
+    if (!x || !y || !alpha || !mask)
+        return op.emitOpError("cannot map operands into the VF");
+    Value preg = limitMaskToValidLanes(b, loc, mask, {op.getX(), op.getY()}, fullMasks);
+    auto vectorType = cast<VectorType>(x.getType());
+    Type element = op.getX().getType().getElementType();
+    SmallVector<Type> types{vectorType, vectorType, alpha.getType(), preg.getType()};
+    if (element.isInteger(64)) {
+        StringRef symbol = element.isUnsignedInteger(64) ? "tla_axpy_u64" : "tla_axpy_i64";
+        valueMap[op.getResult()] =
+            createInlineB64Call(b, loc, module, symbol, types, vectorType, ValueRange{x, y, alpha, preg});
+    } else {
+        StringRef symbol = element.isF16() ? "tla_axpy_f16" : "tla_axpy_f32";
+        auto callee = getOrCreateInlineAivLibraryCall(module, loc, types, vectorType, symbol);
+        valueMap[op.getResult()] = b.create<func::CallOp>(loc, callee, ValueRange{x, y, alpha, preg}).getResult(0);
+    }
+    return success();
+}
+
+static LogicalResult lowerSubAbs(
+    ::tla::SubAbsOp op, OpBuilder& b, ModuleOp module, DenseMap<Value, Value>& valueMap,
+    AutoFullPredicateCache& fullMasks)
+{
+    Location loc = op.getLoc();
+    Value lhs = valueMap.lookup(op.getLhs());
+    Value rhs = valueMap.lookup(op.getRhs());
+    Value mask = valueMap.lookup(op.getMask());
+    if (!lhs || !rhs || !mask)
+        return op.emitOpError("cannot map operands into the VF");
+    Value preg = limitMaskToValidLanes(b, loc, mask, {op.getLhs(), op.getRhs()}, fullMasks);
+    auto vectorType = cast<VectorType>(lhs.getType());
+    if (vectorType.getElementType().isInteger(64)) {
+        valueMap[op.getResult()] = createInlineB64Call(
+            b, loc, module, "tla_sub_abs_i64", {vectorType, vectorType, preg.getType()}, vectorType,
+            ValueRange{lhs, rhs, preg});
+    } else {
+        valueMap[op.getResult()] = b.create<hivmave::VFAbsDiffOp>(loc, vectorType, lhs, rhs, preg).getResult();
+    }
+    return success();
+}
+
+static LogicalResult lowerMulsCast(
+    ::tla::MulsCastOp op, OpBuilder& b, ModuleOp module, DenseMap<Value, Value>& valueMap,
+    AutoFullPredicateCache& fullMasks)
+{
+    Location loc = op.getLoc();
+    Value src = valueMap.lookup(op.getSrc());
+    Value scalar = lookupOrCloneScalarValue(b, op.getScalar(), valueMap);
+    Value mask = valueMap.lookup(op.getMask());
+    if (!src || !scalar || !mask)
+        return op.emitOpError("cannot map operands into the VF");
+    Value preg = limitMaskToValidLanes(b, loc, mask, {op.getSrc()}, fullMasks);
+    auto resultType = VectorType::get({128}, b.getF16Type());
+    StringRef symbol = op.getPart() == 0 ? "tla_muls_cast_even" : "tla_muls_cast_odd";
+    auto callee = getOrCreateInlineAivLibraryCall(
+        module, loc, {src.getType(), scalar.getType(), preg.getType()}, resultType, symbol);
+    valueMap[op.getResult()] = b.create<func::CallOp>(loc, callee, ValueRange{src, scalar, preg}).getResult(0);
+    return success();
+}
+
 static LogicalResult lowerNestedVectorOp(
     Operation& op, OpBuilder& b, ModuleOp module, DenseMap<Value, Value>& valueMap, AutoFullPredicateCache& fullMasks)
 {
@@ -5592,6 +5687,13 @@ static LogicalResult lowerNestedVectorOp(
     if (auto castOp = dyn_cast<::tla::CastOp>(op))
         return lowerCast(castOp, b, module, valueMap, fullMasks);
 
+    if (auto axpy = dyn_cast<::tla::AxpyOp>(op))
+        return lowerAxpy(axpy, b, module, valueMap, fullMasks);
+    if (auto subAbs = dyn_cast<::tla::SubAbsOp>(op))
+        return lowerSubAbs(subAbs, b, module, valueMap, fullMasks);
+    if (auto mulsCast = dyn_cast<::tla::MulsCastOp>(op))
+        return lowerMulsCast(mulsCast, b, module, valueMap, fullMasks);
+
     if (auto expSubOp = dyn_cast<::tla::ExpSubOp>(op)) {
         Value lhs = valueMap.lookup(expSubOp.getLhs());
         Value rhs = valueMap.lookup(expSubOp.getRhs());
@@ -5604,22 +5706,7 @@ static LogicalResult lowerNestedVectorOp(
         bool halfInput = lhs.getType() == halfVec;
         if ((!halfInput && lhs.getType() != floatVec) || rhs.getType() != lhs.getType())
             return expSubOp.emitError("expected matching vector<128xf16> or vector<64xf32> inputs"), failure();
-        Value preg = castMaskToPregType(b, loc, mask, pregVec);
-        int64_t inputLanes = halfInput ? 128 : 64;
-        int64_t validLanes = inputLanes;
-        for (Value input : {expSubOp.getLhs(), expSubOp.getRhs()}) {
-            int64_t count = cast<::tla::VectorSSAType>(input.getType()).getValidLanes();
-            if (count != ShapedType::kDynamic)
-                validLanes = std::min(validLanes, count);
-        }
-        if (validLanes < inputLanes) {
-            Value count = b.create<arith::ConstantIndexOp>(loc, validLanes);
-            Value prefix = createPredicatePlt(b, loc, pregVec, inputLanes, count).getRes();
-            preg = b.create<hivmave::PregAndOp>(
-                        loc, pregVec, maskWidthAttrForElement(b, cast<VectorType>(lhs.getType()).getElementType()),
-                        preg, prefix, fullMasks.get(loc, inputLanes))
-                       .getRes();
-        }
+        Value preg = limitMaskToValidLanes(b, loc, mask, {expSubOp.getLhs(), expSubOp.getRhs()}, fullMasks);
         // Both FP32 slots use the same input positions. FP16 selects a BC entry
         // point with the corresponding compile-time Ascend C RegLayout.
         StringRef calleeName = "exp_sub_f32";
@@ -6716,6 +6803,12 @@ public:
                 if (!producedValues.contains(castOp.getSource()))
                     return rewriter.notifyMatchFailure(
                         vecFuncOp, "expected tla.cast source from tla.load or prior compute op");
+            } else if (isa<::tla::AxpyOp, ::tla::SubAbsOp, ::tla::MulsCastOp>(computeOp)) {
+                for (Value input : computeOp->getOperands()) {
+                    if (isRegisterCarrier(input) && !producedValues.contains(input))
+                        return rewriter.notifyMatchFailure(
+                            vecFuncOp, "expected register operands from prior register producers");
+                }
             } else if (auto expSubOp = dyn_cast<::tla::ExpSubOp>(computeOp)) {
                 if (!producedValues.contains(expSubOp.getLhs()) || !producedValues.contains(expSubOp.getRhs()) ||
                     !producedValues.contains(expSubOp.getMask()))

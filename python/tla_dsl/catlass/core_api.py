@@ -12335,6 +12335,215 @@ def mul(
 
 
 @dsl_user_op
+def arch_axpy(
+    x: VectorSSA,
+    y: VectorSSA,
+    alpha: Numeric | float | int,
+    *,
+    mask: MaskSSA | None = None,
+    loc: mlir_ir.Location | None = None,
+) -> VectorSSA:
+    """Directory: SIMD Vector Compute / Basic Arithmetic
+
+    Description:
+        Compute `alpha * x + y` using Ascend C Reg Axpy and return a full
+        register of the input element type. Lanes disabled by the mask or
+        outside a known valid input prefix are zeroed.
+
+        Parameters:
+        - `x` (`VectorSSA`): Source register multiplied by `alpha`. Required.
+        - `y` (`VectorSSA`): Addend register with the same element type as `x`. Required.
+        - `alpha` (`Numeric | float | int`): Shared scalar multiplier. A typed
+          scalar must match the vector element type. Python `float` and `int`
+          literals are accepted for floating-point and integer registers,
+          respectively. Required.
+        - `mask` (`MaskSSA | None`): Input-domain mask. Defaults to `None`,
+          which enables all lanes within the known valid input range.
+
+        Constraints:
+        - Call inside a `@tla.kernel` and `tla.vec.func(mode="simd")`.
+        - Supports matching FP16, FP32, Int64, and UInt64 inputs, with 128, 64,
+          32, and 32 mask lanes, respectively.
+
+        Example:
+        ```python
+        with tla.vec.func(mode="simd"):
+            result = tla.arch.axpy(x, y, 0.5, mask=mask)
+        ```
+    """
+    op_name = "arch.axpy"
+    _runtime._require_kernel_simd_region(op_name)
+    _require_category(op_name, "x", x, "vector_ssa", 0)
+    _require_category(op_name, "y", y, "vector_ssa", 1)
+    x_value, y_value = _as_value(x), _as_value(y)
+    x_desc = _vector_ssa_type_for_mlir_value(x_value)
+    dtype = x_desc.element_type
+    if (
+        dtype not in ("f16", "f32", "i64", "u64")
+        or _vector_ssa_type_for_mlir_value(y_value).element_type != dtype
+    ):
+        _op_error(op_name, "x and y must have matching f16, f32, i64, or u64 elements")
+
+    resolved_alpha = _resolve_bound_value(alpha)
+    numeric = _as_vector_scalar_numeric(resolved_alpha)
+    literal_type = float if dtype in ("f16", "f32") else int
+    if (
+        numeric is None
+        or isinstance(resolved_alpha, bool)
+        or (not isinstance(resolved_alpha, literal_type) and numeric.dtype != dtype)
+    ):
+        _op_error(op_name, f"scalar must match the input element type {dtype}")
+    element_type = x_desc.element_mlir_type(x_value.type.context)
+    alpha_value = _numeric_ir_value_for_element_type(
+        op_name, numeric, element_type, normalize_unsigned=True, loc=loc
+    )
+
+    if mask is None:
+        mask = create_mask(pattern="ALL", dtype=element_type, loc=loc)
+    _require_category(op_name, "mask", mask, "mask_ssa", 3)
+    mask_value = _as_value(mask)
+    _require_mask_matches_element_type(op_name, mask_value, dtype)
+    result_type = _coerce_type(
+        TlaVectorSSATypeDescriptor(256 // dtype_size_bytes(dtype), dtype)
+    )
+    return VectorSSA(
+        _tla_ops_gen.axpy(
+            result_type, x_value, y_value, alpha_value, mask_value, loc=loc
+        )
+    )
+
+
+@dsl_user_op
+def arch_sub_abs(
+    lhs: VectorSSA,
+    rhs: VectorSSA,
+    *,
+    mask: MaskSSA | None = None,
+    loc: mlir_ir.Location | None = None,
+) -> VectorSSA:
+    """Directory: SIMD Vector Compute / Basic Arithmetic
+
+    Description:
+        Compute `abs(lhs - rhs)` and return a full register of the input
+        element type. Lanes disabled by the mask or outside a known valid
+        input prefix are zeroed.
+
+        Parameters:
+        - `lhs` (`VectorSSA`): Left input register. Required.
+        - `rhs` (`VectorSSA`): Right input register with the same element type. Required.
+        - `mask` (`MaskSSA | None`): Input-domain mask. Defaults to `None`,
+          which enables all lanes within the known valid input range.
+
+        Constraints:
+        - Call inside a `@tla.kernel` and `tla.vec.func(mode="simd")`.
+        - Supports matching FP16, FP32, and Int64 inputs, with 128, 64, and 32
+          mask lanes, respectively.
+
+        Example:
+        ```python
+        with tla.vec.func(mode="simd"):
+            result = tla.arch.sub_abs(lhs, rhs, mask=mask)
+        ```
+    """
+    op_name = "arch.sub_abs"
+    _runtime._require_kernel_simd_region(op_name)
+    _require_category(op_name, "lhs", lhs, "vector_ssa", 0)
+    _require_category(op_name, "rhs", rhs, "vector_ssa", 1)
+    lhs_value, rhs_value = _as_value(lhs), _as_value(rhs)
+    lhs_desc = _vector_ssa_type_for_mlir_value(lhs_value)
+    dtype = lhs_desc.element_type
+    if (
+        dtype not in ("f16", "f32", "i64")
+        or _vector_ssa_type_for_mlir_value(rhs_value).element_type != dtype
+    ):
+        _op_error(
+            op_name,
+            "vector operands must have matching elements of type f16, f32, or i64",
+        )
+
+    if mask is None:
+        element_type = lhs_desc.element_mlir_type(lhs_value.type.context)
+        mask = create_mask(pattern="ALL", dtype=element_type, loc=loc)
+    _require_category(op_name, "mask", mask, "mask_ssa", 2)
+    mask_value = _as_value(mask)
+    _require_mask_matches_element_type(op_name, mask_value, dtype)
+    result_type = _coerce_type(
+        TlaVectorSSATypeDescriptor(256 // dtype_size_bytes(dtype), dtype)
+    )
+    return VectorSSA(
+        _tla_ops_gen.sub_abs(result_type, lhs_value, rhs_value, mask_value, loc=loc)
+    )
+
+
+@dsl_user_op
+def arch_muls_cast(
+    src: VectorSSA,
+    scalar: Float32 | float,
+    *,
+    reg_slot: RegSlot = RegSlot.ZERO,
+    mask: MaskSSA | None = None,
+    loc: mlir_ir.Location | None = None,
+) -> VectorSSA:
+    """Directory: SIMD Vector Compute / Basic Arithmetic
+
+    Description:
+        Multiply an FP32 register by an FP32 scalar using Ascend C Reg
+        MulsCast and narrow each selected product to FP16 with `CAST_ROUND`.
+        The result is a 128-lane FP16 register.
+
+        Parameters:
+        - `src` (`VectorSSA`): FP32 input register. Required.
+        - `scalar` (`Float32 | float`): Shared multiplier as an FP32 scalar
+          or Python `float` literal. Required.
+        - `reg_slot` (`RegSlot`): `ZERO` writes input lane `i` to output lane
+          `2*i`. `ONE` writes it to lane `2*i + 1`. Defaults to `ZERO`.
+        - `mask` (`MaskSSA | None`): 64-lane input-domain mask. Defaults to
+          `None`, which enables all lanes within the known valid input range.
+
+        Constraints:
+        - Call inside a `@tla.kernel` and `tla.vec.func(mode="simd")`.
+        - Consume the chosen output slot for active input lanes.
+
+        Example:
+        ```python
+        with tla.vec.func(mode="simd"):
+            result = tla.arch.muls_cast(src, 0.5, reg_slot=tla.params.RegSlot.ONE)
+        ```
+    """
+    op_name = "arch.muls_cast"
+    _runtime._require_kernel_simd_region(op_name)
+    _require_category(op_name, "src", src, "vector_ssa", 0)
+    src_value = _as_value(src)
+    if _vector_ssa_type_for_mlir_value(src_value).element_type != "f32":
+        _op_error(op_name, "src must have Float32 elements")
+    if reg_slot not in (RegSlot.ZERO, RegSlot.ONE):
+        _op_error(op_name, "reg_slot must be RegSlot.ZERO or RegSlot.ONE")
+    context = src_value.type.context
+    numeric = _as_vector_scalar_numeric(scalar)
+    if not isinstance(numeric, Float32):
+        _op_error(op_name, "scalar must match the input element type f32")
+    element_type = Float32.mlir_type(context)
+    scalar_value = _numeric_ir_value_for_element_type(
+        op_name, numeric, element_type, loc=loc
+    )
+    if mask is None:
+        mask = create_mask(pattern="ALL", dtype=Float32, loc=loc)
+    _require_category(op_name, "mask", mask, "mask_ssa", 3)
+    mask_value = _as_value(mask)
+    _require_mask_matches_element_type(op_name, mask_value, "f32")
+    part = mlir_ir.IntegerAttr.get(
+        mlir_ir.IntegerType.get_signless(32, context=context),
+        0 if reg_slot is RegSlot.ZERO else 1,
+    )
+    result_type = _coerce_type(TlaVectorSSATypeDescriptor(128, "f16"))
+    return VectorSSA(
+        _tla_ops_gen.muls_cast(
+            result_type, src_value, scalar_value, mask_value, part, loc=loc
+        )
+    )
+
+
+@dsl_user_op
 def relu(
     src: VectorSSA,
     *,
@@ -16463,6 +16672,9 @@ arch._set("bcnt1", arch_bcnt1)
 arch._set("clz", arch_clz)
 arch._set("sff0", arch_sff0)
 arch._set("sff1", arch_sff1)
+arch._set("axpy", arch_axpy)
+arch._set("sub_abs", arch_sub_abs)
+arch._set("muls_cast", arch_muls_cast)
 arch._set("get_ctrl", arch_get_ctrl)
 arch._set("set_ctrl", arch_set_ctrl)
 arch._set("block_idx", arch_block_idx)

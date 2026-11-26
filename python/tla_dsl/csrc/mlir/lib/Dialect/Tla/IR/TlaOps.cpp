@@ -1458,6 +1458,52 @@ mlir::LogicalResult ExpSubOp::verify()
     return mlir::success();
 }
 
+static mlir::LogicalResult verifyFullRegisterResultAndMask(
+    mlir::Operation* op, VectorSSAType input, VectorSSAType result, mlir::Value mask, mlir::Type resultElement)
+{
+    auto vf = op->getParentOfType<VecFuncOp>();
+    auto mode = vf ? vf->getAttrOfType<mlir::StringAttr>("mode") : mlir::StringAttr();
+    if (!vf || (mode && !mode.getValue().equals_insensitive("simd")))
+        return op->emitOpError("must be nested inside a SIMD tla.vec.func region");
+    auto physicalLanes = getPhysicalVectorLanes(result);
+    if (result.getElementType() != resultElement || mlir::failed(physicalLanes) ||
+        result.getValidLanes() != *physicalLanes)
+        return op->emitOpError("requires a full result register of element type ") << resultElement;
+    return verifyMaskMatchesVector(op, mask, input);
+}
+
+mlir::LogicalResult AxpyOp::verify()
+{
+    auto element = getX().getType().getElementType();
+    if ((!element.isF16() && !element.isF32() && !element.isSignlessInteger(64) && !element.isUnsignedInteger(64)) ||
+        getY().getType().getElementType() != element)
+        return emitOpError("requires matching f16, f32, i64, or ui64 vector elements");
+    auto scalar = getAlpha().getType();
+    if (scalar != element && !(element.isUnsignedInteger(64) && scalar.isSignlessInteger(64)))
+        return emitOpError("requires a scalar carrier matching the vector element type");
+    return verifyFullRegisterResultAndMask(getOperation(), getX().getType(), getResult().getType(), getMask(), element);
+}
+
+mlir::LogicalResult SubAbsOp::verify()
+{
+    auto element = getLhs().getType().getElementType();
+    if ((!element.isF16() && !element.isF32() && !element.isSignlessInteger(64)) ||
+        getRhs().getType().getElementType() != element)
+        return emitOpError("requires matching f16, f32, or i64 vector elements");
+    return verifyFullRegisterResultAndMask(
+        getOperation(), getLhs().getType(), getResult().getType(), getMask(), element);
+}
+
+mlir::LogicalResult MulsCastOp::verify()
+{
+    if (!getSrc().getType().getElementType().isF32())
+        return emitOpError("requires an f32 input vector");
+    if (getPart() != 0 && getPart() != 1)
+        return emitOpError("part must be 0 or 1");
+    return verifyFullRegisterResultAndMask(
+        getOperation(), getSrc().getType(), getResult().getType(), getMask(), mlir::Float16Type::get(getContext()));
+}
+
 static mlir::LogicalResult verifyShiftSourceAndResult(
     mlir::Operation* op, VectorSSAType sourceType, VectorSSAType resultType, mlir::Value mask)
 {

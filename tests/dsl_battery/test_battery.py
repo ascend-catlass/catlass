@@ -1263,6 +1263,11 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         "vector-relu-ops",
         [["end_to_end/relu_ops.py", *dev]],
     )
+    for op in ("axpy", "sub-abs", "muls-cast"):
+        yield (
+            f"vector-{op}",
+            [["end_to_end/compound_compute_ops.py", "--op", op, *dev]],
+        )
     # CAST_NONE / CAST_RINT / CAST_ODD: lossy NONE equals RINT, lossless NONE
     # widen drops rnd, f32->f16 ODD. Script under python/tla_dsl/tests/end_to_end/.
     yield (

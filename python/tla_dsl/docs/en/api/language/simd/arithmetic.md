@@ -523,6 +523,126 @@ with tla.vec.func(mode="simd"):
 
 ---
 
+## `tla.arch.axpy`
+
+**Source:** [`catlass.core_api.arch_axpy`](../../../../../catlass/core_api.py)
+
+Description:
+
+Compute `alpha * x + y` using Ascend C Reg Axpy and return a full
+register of the input element type. Lanes disabled by the mask or
+outside a known valid input prefix are zeroed.
+
+Prototype:
+
+```python
+tla.arch.axpy(x: VectorSSA, y: VectorSSA, alpha: Numeric | float | int, *, mask: MaskSSA | None = None) -> VectorSSA
+```
+
+Parameters:
+
+- `x` (`VectorSSA`): Source register multiplied by `alpha`. Required.
+- `y` (`VectorSSA`): Addend register with the same element type as `x`. Required.
+- `alpha` (`Numeric | float | int`): Shared scalar multiplier. A typed
+  scalar must match the vector element type. Python `float` and `int`
+  literals are accepted for floating-point and integer registers,
+  respectively. Required.
+- `mask` (`MaskSSA | None`): Input-domain mask. Defaults to `None`,
+  which enables all lanes within the known valid input range.
+
+Constraints:
+
+- Call inside a `@tla.kernel` and `tla.vec.func(mode="simd")`.
+- Supports matching FP16, FP32, Int64, and UInt64 inputs, with 128, 64,
+  32, and 32 mask lanes, respectively.
+
+Example:
+
+```python
+with tla.vec.func(mode="simd"):
+    result = tla.arch.axpy(x, y, 0.5, mask=mask)
+```
+
+---
+
+## `tla.arch.sub_abs`
+
+**Source:** [`catlass.core_api.arch_sub_abs`](../../../../../catlass/core_api.py)
+
+Description:
+
+Compute `abs(lhs - rhs)` and return a full register of the input
+element type. Lanes disabled by the mask or outside a known valid
+input prefix are zeroed.
+
+Prototype:
+
+```python
+tla.arch.sub_abs(lhs: VectorSSA, rhs: VectorSSA, *, mask: MaskSSA | None = None) -> VectorSSA
+```
+
+Parameters:
+
+- `lhs` (`VectorSSA`): Left input register. Required.
+- `rhs` (`VectorSSA`): Right input register with the same element type. Required.
+- `mask` (`MaskSSA | None`): Input-domain mask. Defaults to `None`,
+  which enables all lanes within the known valid input range.
+
+Constraints:
+
+- Call inside a `@tla.kernel` and `tla.vec.func(mode="simd")`.
+- Supports matching FP16, FP32, and Int64 inputs, with 128, 64, and 32
+  mask lanes, respectively.
+
+Example:
+
+```python
+with tla.vec.func(mode="simd"):
+    result = tla.arch.sub_abs(lhs, rhs, mask=mask)
+```
+
+---
+
+## `tla.arch.muls_cast`
+
+**Source:** [`catlass.core_api.arch_muls_cast`](../../../../../catlass/core_api.py)
+
+Description:
+
+Multiply an FP32 register by an FP32 scalar using Ascend C Reg
+MulsCast and narrow each selected product to FP16 with `CAST_ROUND`.
+The result is a 128-lane FP16 register.
+
+Prototype:
+
+```python
+tla.arch.muls_cast(src: VectorSSA, scalar: Float32 | float, *, reg_slot: RegSlot = RegSlot.ZERO, mask: MaskSSA | None = None) -> VectorSSA
+```
+
+Parameters:
+
+- `src` (`VectorSSA`): FP32 input register. Required.
+- `scalar` (`Float32 | float`): Shared multiplier as an FP32 scalar
+  or Python `float` literal. Required.
+- `reg_slot` (`RegSlot`): `ZERO` writes input lane `i` to output lane
+  `2*i`. `ONE` writes it to lane `2*i + 1`. Defaults to `ZERO`.
+- `mask` (`MaskSSA | None`): 64-lane input-domain mask. Defaults to
+  `None`, which enables all lanes within the known valid input range.
+
+Constraints:
+
+- Call inside a `@tla.kernel` and `tla.vec.func(mode="simd")`.
+- Consume the chosen output slot for active input lanes.
+
+Example:
+
+```python
+with tla.vec.func(mode="simd"):
+    result = tla.arch.muls_cast(src, 0.5, reg_slot=tla.params.RegSlot.ONE)
+```
+
+---
+
 ## `tla.relu`
 
 **Source:** [`catlass.core_api.relu`](../../../../../catlass/core_api.py)

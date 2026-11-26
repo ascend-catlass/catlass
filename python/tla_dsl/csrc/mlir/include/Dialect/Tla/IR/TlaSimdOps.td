@@ -285,6 +285,42 @@ def Tla_MulOp : Tla_VectorBinaryOp<"mul",
     "Vector multiply on VectorSSA values",
     "Element-wise multiply on VectorSSA values.">;
 
+def Tla_AxpyOp : Tla_Op<"axpy", [Pure]> {
+  let summary = "Compute alpha * x + y in SIMD registers";
+  let arguments = (ins Tla_VectorSSAType:$x, Tla_VectorSSAType:$y,
+                       AnyTypeOf<[F16, F32, I64]>:$alpha, Tla_MaskSSAType:$mask);
+  let results = (outs Tla_VectorSSAType:$result);
+  let assemblyFormat = [{
+    $x `,` $y `,` $alpha `mask` $mask attr-dict `:`
+    qualified(type($x)) `,` qualified(type($y)) `,` type($alpha)
+    `mask` qualified(type($mask)) `->` qualified(type($result))
+  }];
+  let hasVerifier = 1;
+}
+
+def Tla_SubAbsOp : Tla_Op<"sub_abs", [Pure]> {
+  let summary = "Compute the absolute difference of two SIMD registers";
+  let arguments = (ins Tla_VectorSSAType:$lhs, Tla_VectorSSAType:$rhs, Tla_MaskSSAType:$mask);
+  let results = (outs Tla_VectorSSAType:$result);
+  let assemblyFormat = [{
+    $lhs `,` $rhs `mask` $mask attr-dict `:`
+    qualified(type($lhs)) `,` qualified(type($rhs))
+    `mask` qualified(type($mask)) `->` qualified(type($result))
+  }];
+  let hasVerifier = 1;
+}
+
+def Tla_MulsCastOp : Tla_Op<"muls_cast", [Pure]> {
+  let summary = "Multiply by an f32 scalar and narrow to one f16 register slot";
+  let arguments = (ins Tla_VectorSSAType:$src, F32:$scalar, Tla_MaskSSAType:$mask, I32Attr:$part);
+  let results = (outs Tla_VectorSSAType:$result);
+  let assemblyFormat = [{
+    $src `,` $scalar `mask` $mask `part` $part attr-dict `:`
+    qualified(type($src)) `mask` qualified(type($mask)) `->` qualified(type($result))
+  }];
+  let hasVerifier = 1;
+}
+
 def Tla_DivOp : Tla_VectorBinaryOp<"div",
     "Vector divide on VectorSSA values",
     "Element-wise divide on VectorSSA values.">;

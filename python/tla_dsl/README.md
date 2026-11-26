@@ -15,6 +15,20 @@ CATLASS Python 是 CATLASS 的 Python 前端。它在 AscendNPU-IR 的基础上�
 
 安装 CATLASS Python 并运行首个算子示例，请参阅[快速开始](docs/zh/quick_start.md)。
 
+## SIMD 复合计算
+
+在 `@tla.kernel` 的 `tla.vec.func(mode="simd")` 内通过 `tla.arch` 调用复合计算接口。下表中的 `i` 表示启用的输入通道。
+
+| 接口 | 计算公式 |
+| --- | --- |
+| [`tla.arch.axpy(x, y, alpha)`](docs/zh/api/language/simd/arithmetic.md#tlaarchaxpy) | `out[i] = alpha * x[i] + y[i]` |
+| [`tla.arch.sub_abs(lhs, rhs)`](docs/zh/api/language/simd/arithmetic.md#tlaarchsub_abs) | `out[i] = abs(lhs[i] - rhs[i])` |
+| [`tla.arch.muls_cast(src, scalar, reg_slot=...)`](docs/zh/api/language/simd/arithmetic.md#tlaarchmuls_cast) | `out[2*i + slot] = FP16(src[i] * scalar)` |
+
+`muls_cast` 以 FP32 计算乘积，再按 `CAST_ROUND` 转为 FP16。`reg_slot` 默认为 `tla.params.RegSlot.ZERO`，对应 `slot = 0`，写入偶数槽位。`tla.params.RegSlot.ONE` 对应 `slot = 1`，写入奇数槽位。只读取启用输入通道对应的输出槽位。
+
+三个接口都接受按输入元素类型构造的 `mask`。省略 `mask` 时启用有效输入范围内的通道。`axpy` 和 `sub_abs` 将未启用的通道置零。
+
 ## 兼容性
 
 CATLASS Python 各版本支持的硬件平台及所需的最低 CANN 版本如下表：

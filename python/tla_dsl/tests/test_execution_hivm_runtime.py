@@ -3276,6 +3276,8 @@ def test_counter_build_identity_only_invalidates_counter_kernels(monkeypatch, tm
         (stubs / core).mkdir(parents=True)
         (stubs / core / "system_counter.cpp").write_text("original source")
     (stubs / "Vector" / "log.cpp").write_text("original source")
+    for op in ("sub_abs", "axpy", "muls_cast"):
+        (stubs / "Vector" / f"{op}.cpp").write_text("original source")
     monkeypatch.setattr(
         bc_compile, "_resolve_paths", lambda: bc_compile.BCPaths(stubs, tmp_path, stubs)
     )
