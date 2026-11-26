@@ -50,6 +50,61 @@ with tla.vec.func(mode="simd"):
 
 ---
 
+## `tla.arch.sub_exp`
+
+**源码：** [`catlass.core_api.arch_sub_exp`](../../../../../catlass/core_api.py)
+
+功能说明：
+
+使用原生 ExpSub 指令逐元素计算差值的自然指数。对每个输出下标 `i`，`reg_slot`
+选定输入下标 `j`。当 `j` 位于两个输入的有效范围内且掩码启用该位置时，结果按下式计算。
+
+```text
+out[i] = exp(fp32(lhs[j]) - fp32(rhs[j]))
+```
+
+`fp32(x)` 表示在相减前将 `x` 转为 FP32。其余输出元素填入 FP32 正零（`+0.0`，ZEROING）。
+
+函数原型：
+
+```python
+tla.arch.sub_exp(lhs: VectorSSA, rhs: VectorSSA, *, reg_slot: RegSlot = RegSlot.ZERO, mask: MaskSSA | None = None) -> VectorSSA
+```
+
+参数说明：
+
+- `lhs`（`VectorSSA`）：FP16 或 FP32 输入。必填。
+- `rhs`（`VectorSSA`）：元素类型和物理宽度均与 `lhs` 相同的输入寄存器。必填。
+- `reg_slot`（`RegSlot`）：决定每个输出位置 `i` 对应的输入位置 `j`，下标从 0 开始。
+  对于 FP16 输入，`ZERO` 取偶数下标 `j = 2*i`，`ONE` 取奇数下标 `j = 2*i + 1`。
+  例如，`ONE` 将输入位置 1、3、5 的计算结果依次放在输出位置 0、1、2。
+  对于 FP32 输入，两种取值都用 `j = i`。默认值为 `RegSlot.ZERO`，仅接受关键字传参。
+- `mask`（`MaskSSA | None`）：按输入元素位置指定的可选掩码。
+  默认值为 `None`，启用有效输入范围内的所有位置。仅接受关键字传参。
+
+约束说明：
+
+- 须在 `@tla.kernel` 和 `tla.vec.func(mode="simd")` 内调用。
+- 两个输入的元素类型须同为 FP16 或同为 FP32。某个输入的有效元素数已知时，
+  其有效范围从首个元素开始，长度为该数量。两个输入的有效元素数均已知时，取较小值。
+- 输出包含 64 个 FP32 元素。
+- ZEROING 也适用于输入为非有限值的情况。FP16 输入仅首个元素有效时，
+  `RegSlot.ONE` 输出全零。
+- 不支持标量和 SIMT 形态、其他输入类型、其他寄存器 slot，以及掩码合并结果。
+
+调用示例：
+
+```python
+with tla.vec.func(mode="simd"):
+    even = tla.arch.sub_exp(lhs_half, rhs_half)
+    odd = tla.arch.sub_exp(
+        lhs_half, rhs_half, reg_slot=tla.params.RegSlot.ONE
+    )
+    result = tla.arch.sub_exp(lhs_float, rhs_float, mask=None)
+```
+
+---
+
 ## `tla.log`
 
 **源码：** [`catlass.core_api.log`](../../../../../catlass/core_api.py)

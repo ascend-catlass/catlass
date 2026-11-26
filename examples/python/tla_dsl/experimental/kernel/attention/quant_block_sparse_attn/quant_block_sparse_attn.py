@@ -134,10 +134,8 @@ def _mx_load_row(scores, row):
 @tla.jit
 def _mx_prob_value(scores, row, snap, maskh):
     # One key row of 64 queries: exp(score - snap).
-    # CATLASS 2.2.1 does not expose tla.experimental.exp_sub yet. Keep the
-    # original fused implementation here, and use the equivalent
-    # subtract-then-exp form for compatibility.
-    # Original implementation: use tla.experimental.exp_sub(_mx_load_row(scores, row), snap, mask=maskh)
+    # Use separate operations for compatibility with CATLASS 2.2.1.
+    # The fused form is tla.arch.sub_exp(_mx_load_row(scores, row), snap, mask=maskh).
     diff = tla.sub(_mx_load_row(scores, row), snap, mask=maskh)
     exp_f16 = tla.exp(diff, mask=maskh)
     return exp_f16.to(tla.Float32, tla.params.CastParams(), mask=maskh)

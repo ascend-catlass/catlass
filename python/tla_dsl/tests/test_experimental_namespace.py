@@ -1,4 +1,4 @@
-"""Experimental APIs are explicitly opt-in, not stable aliases."""
+"""Experimental API exports."""
 
 import importlib
 
@@ -17,10 +17,8 @@ def test_experimental_exports():
         "height",
         "width",
         "mx_to",
-        "exp_sub",
     }
     assert callable(experimental.img2col)
-    assert callable(experimental.exp_sub)
     assert callable(experimental.mx_to)
     params = experimental.Img2colParams((8, 8), (3, 3))
     assert params.stride_hw == (1, 1)
@@ -43,7 +41,6 @@ def test_experimental_exports():
         "height",
         "width",
         "mx_to",
-        "exp_sub",
     ],
 )
 def test_experimental_api_is_not_stable(module, name):
@@ -58,3 +55,11 @@ def test_experimental_has_no_old_spelling():
     assert not hasattr(tla.experimental, "im2col")
     assert not hasattr(tla.experimental, "Im2colParams")
     assert not hasattr(tla.experimental, "LoadRepeatParams")
+
+
+def test_sub_exp_is_only_exposed_on_arch():
+    assert callable(tla.arch.sub_exp)
+    assert not hasattr(tla.arch, "exp_sub")
+    for namespace in (tla, tla.experimental):
+        assert not hasattr(namespace, "exp_sub")
+        assert not hasattr(namespace, "sub_exp")

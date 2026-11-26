@@ -31,10 +31,10 @@ def _mixed_exp_sub_kernel(
             lhs_reg = lhs_tile.load()
             rhs_reg = rhs_tile.load()
             half_mask = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float16)
-            even = tla.experimental.exp_sub(
+            even = tla.arch.sub_exp(
                 lhs_reg, rhs_reg, reg_slot=tla.params.RegSlot.ZERO, mask=half_mask
             )
-            odd = tla.experimental.exp_sub(
+            odd = tla.arch.sub_exp(
                 lhs_reg, rhs_reg, reg_slot=tla.params.RegSlot.ONE, mask=half_mask
             )
             even_tile.store(even)
@@ -74,11 +74,11 @@ def _mixed_exp_sub_from_narrow_cast() -> None:
                 ),
                 mask=float_mask,
             )
-            tla.experimental.exp_sub(
+            tla.arch.sub_exp(
                 narrowed, narrowed, reg_slot=tla.params.RegSlot.ZERO, mask=half_mask
             )
-            tla.experimental.exp_sub(narrowed, narrowed)
-            tla.experimental.exp_sub(narrowed, narrowed, mask=None)
+            tla.arch.sub_exp(narrowed, narrowed)
+            tla.arch.sub_exp(narrowed, narrowed, mask=None)
 
 
 def test_mixed_exp_sub_accepts_unknown_valid_lanes_from_half_cast() -> None:
@@ -99,7 +99,7 @@ def _invalid_mixed_exp_sub(
         with tla.vec.func(mode="simd"):
             value = tla.full(1, dtype)
             mask = tla.create_mask(pattern=tla.mask.ALL, dtype=mask_dtype)
-            tla.experimental.exp_sub(value, value, reg_slot=slot, mask=mask)
+            tla.arch.sub_exp(value, value, reg_slot=slot, mask=mask)
 
 
 @pytest.mark.parametrize(
@@ -136,7 +136,7 @@ def _float_exp_sub_kernel(
     with tla.vector():
         with tla.vec.func(mode="simd"):
             mask = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
-            result = tla.experimental.exp_sub(
+            result = tla.arch.sub_exp(
                 lhs_tile.load(), rhs_tile.load(), reg_slot=slot, mask=mask
             )
             dst_tile.store(result)
@@ -164,7 +164,7 @@ def _mismatched_exp_sub_kernel() -> None:
             half = tla.full(1.0, dtype=tla.Float16)
             float_value = tla.full(1.0, dtype=tla.Float32)
             mask = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float16)
-            tla.experimental.exp_sub(
+            tla.arch.sub_exp(
                 half, float_value, reg_slot=tla.params.RegSlot.ZERO, mask=mask
             )
 
@@ -180,10 +180,8 @@ def _default_exp_sub_kernel(dtype: tla.Constexpr[type]) -> None:
         with tla.vec.func(mode="simd"):
             value = tla.full(1.0, dtype=dtype)
             mask = tla.create_mask(pattern=tla.mask.ALL, dtype=dtype)
-            tla.experimental.exp_sub(value, value, mask=mask)
-            tla.experimental.exp_sub(
-                value, value, reg_slot=tla.params.RegSlot.ZERO, mask=mask
-            )
+            tla.arch.sub_exp(value, value, mask=mask)
+            tla.arch.sub_exp(value, value, reg_slot=tla.params.RegSlot.ZERO, mask=mask)
 
 
 @pytest.mark.parametrize("dtype", [tla.Float16, tla.Float32])
@@ -224,9 +222,9 @@ def _optional_mask_exp_sub_kernel(
         with tla.vec.func(mode="simd"):
             value = tla.full(1.0, dtype=dtype)
             full_mask = tla.create_mask(pattern=tla.mask.ALL, dtype=dtype)
-            tla.experimental.exp_sub(value, value, reg_slot=slot, mask=full_mask)
-            tla.experimental.exp_sub(value, value, reg_slot=slot)
-            tla.experimental.exp_sub(value, value, reg_slot=slot, mask=None)
+            tla.arch.sub_exp(value, value, reg_slot=slot, mask=full_mask)
+            tla.arch.sub_exp(value, value, reg_slot=slot)
+            tla.arch.sub_exp(value, value, reg_slot=slot, mask=None)
 
 
 @pytest.mark.parametrize("dtype", [tla.Float16, tla.Float32])
@@ -243,7 +241,7 @@ def test_exp_sub_rejects_invalid_explicit_masks(bad_mask) -> None:
         with tla.vector():
             with tla.vec.func(mode="simd"):
                 value = tla.full(1.0, dtype=tla.Float16)
-                tla.experimental.exp_sub(value, value, mask=bad_mask)
+                tla.arch.sub_exp(value, value, mask=bad_mask)
 
     with pytest.raises(tla.TlaCoreAPIError, match="mask"):
         kernel.dump_mlir()
@@ -262,12 +260,12 @@ def _static_exp_sub_kernel(
             a = lhs.load()
             b = rhs.load()
             if tla.const_expr(mask_mode == "omitted"):
-                tla.experimental.exp_sub(a, b, reg_slot=slot)
+                tla.arch.sub_exp(a, b, reg_slot=slot)
             elif tla.const_expr(mask_mode == "none"):
-                tla.experimental.exp_sub(a, b, reg_slot=slot, mask=None)
+                tla.arch.sub_exp(a, b, reg_slot=slot, mask=None)
             else:
                 full_mask = tla.create_mask(pattern=tla.mask.ALL, dtype=dtype)
-                tla.experimental.exp_sub(a, b, reg_slot=slot, mask=full_mask)
+                tla.arch.sub_exp(a, b, reg_slot=slot, mask=full_mask)
 
 
 @pytest.mark.parametrize(
@@ -321,7 +319,7 @@ def _static_exp_sub_with_unknown_rhs(lhs: tla.Tensor) -> None:
                     round_mode=tla.params.RoundMode.CAST_ROUND,
                 ),
             )
-            tla.experimental.exp_sub(lhs.load(), unknown_half)
+            tla.arch.sub_exp(lhs.load(), unknown_half)
 
 
 def test_exp_sub_accepts_static_prefix_with_unknown_rhs() -> None:

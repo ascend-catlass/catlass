@@ -79,20 +79,20 @@ def _kernel(mask_mode="explicit", lhs_lanes=None, rhs_lanes=None):
                     else:
                         active = prefix_mask
                     if tla.const_expr(mask_mode == "omitted"):
-                        result0 = tla.experimental.exp_sub(a, b)
-                        result1 = tla.experimental.exp_sub(
+                        result0 = tla.arch.sub_exp(a, b)
+                        result1 = tla.arch.sub_exp(
                             a, b, reg_slot=tla.params.RegSlot.ONE
                         )
                     elif tla.const_expr(mask_mode == "none"):
-                        result0 = tla.experimental.exp_sub(a, b, mask=None)
-                        result1 = tla.experimental.exp_sub(
+                        result0 = tla.arch.sub_exp(a, b, mask=None)
+                        result1 = tla.arch.sub_exp(
                             a, b, reg_slot=tla.params.RegSlot.ONE, mask=None
                         )
                     else:
-                        result0 = tla.experimental.exp_sub(
+                        result0 = tla.arch.sub_exp(
                             a, b, reg_slot=tla.params.RegSlot.ZERO, mask=active
                         )
-                        result1 = tla.experimental.exp_sub(
+                        result1 = tla.arch.sub_exp(
                             a, b, reg_slot=tla.params.RegSlot.ONE, mask=active
                         )
                     # Store every output lane so ZEROING itself is observed.

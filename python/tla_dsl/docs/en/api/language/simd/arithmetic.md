@@ -52,6 +52,72 @@ with tla.vec.func(mode="simd"):
 
 ---
 
+## `tla.arch.sub_exp`
+
+**Source:** [`catlass.core_api.arch_sub_exp`](../../../../../catlass/core_api.py)
+
+Description:
+
+Use the native ExpSub instruction to subtract and then take the natural
+exponential. For each output index `i`, `reg_slot` selects an input
+index `j`. When `j` is valid in both inputs and enabled by the mask,
+the result is
+
+```text
+out[i] = exp(fp32(lhs[j]) - fp32(rhs[j]))
+```
+
+`fp32(x)` converts `x` to FP32 before subtraction. All other output
+elements are FP32 positive zero (`+0.0`, ZEROING).
+
+Prototype:
+
+```python
+tla.arch.sub_exp(lhs: VectorSSA, rhs: VectorSSA, *, reg_slot: RegSlot = RegSlot.ZERO, mask: MaskSSA | None = None) -> VectorSSA
+```
+
+Parameters:
+
+- `lhs` (`VectorSSA`): FP16 or FP32 input. Required.
+- `rhs` (`VectorSSA`): Input register with the same element type and
+  physical width as `lhs`. Required.
+- `reg_slot` (`RegSlot`): Selects the input index `j` for each output
+  index `i`. Indices start at zero. For FP16 inputs, `ZERO` uses
+  even positions (`j = 2*i`) and `ONE` uses odd positions
+  (`j = 2*i + 1`). With `ONE`, the results for input positions 1, 3,
+  and 5 go to output positions 0, 1, and 2, respectively. For FP32
+  inputs, both values use `j = i`. Defaults to `RegSlot.ZERO`.
+  Keyword-only.
+- `mask` (`MaskSSA | None`): Optional mask over input element positions.
+  Defaults to `None`, which enables all positions within the valid input
+  range. Keyword-only.
+
+Constraints:
+
+- Must be called inside a `@tla.kernel` and `tla.vec.func(mode="simd")`.
+- Both inputs must have the same FP16 or FP32 element type. A known
+  valid element count limits an input to that many leading positions.
+  When both counts are known, use the smaller count.
+- The output contains 64 FP32 elements.
+- ZEROING applies even to nonfinite input values.
+  With only the first FP16 input element valid, `RegSlot.ONE`
+  returns all zeros.
+- Scalar and SIMT forms, other input types, other register slots,
+  and merging masked results are unsupported.
+
+Example:
+
+```python
+with tla.vec.func(mode="simd"):
+    even = tla.arch.sub_exp(lhs_half, rhs_half)
+    odd = tla.arch.sub_exp(
+        lhs_half, rhs_half, reg_slot=tla.params.RegSlot.ONE
+    )
+    result = tla.arch.sub_exp(lhs_float, rhs_float, mask=None)
+```
+
+---
+
 ## `tla.log`
 
 **Source:** [`catlass.core_api.log`](../../../../../catlass/core_api.py)

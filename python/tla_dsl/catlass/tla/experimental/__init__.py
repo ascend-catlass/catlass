@@ -14,27 +14,20 @@ from ...core_api import (
     _IMG2COL_L0A_DTYPES,
     _IMG2COL_L0B_DTYPES,
     IndexLike,
-    MaskSSA,
-    VectorSSA,
     _as_index_value,
     _as_value,
-    _coerce_type,
     _flatten_tla_tuple,
-    _mask_ssa_type_for_mlir_value,
     _MaskPattern,
     _op_error,
     _require_category,
-    _require_frontend_state,
     _tla_ops_gen,
     _tla_tensor_type_for_mlir_value,
-    _vector_ssa_type_for_mlir_value,
-    create_mask,
 )
-from ...params import CastParams, RegSlot, RoundMode
-from ...types import TlaVectorSSATypeDescriptor, dtype_size_bytes
+from ...params import CastParams, RoundMode
+from ...types import dtype_size_bytes
 from ..typing import Tensor
 
-__all__ = ["Img2colParams", "exp_sub", "height", "img2col", "mx_to", "width"]
+__all__ = ["Img2colParams", "height", "img2col", "mx_to", "width"]
 
 
 @dsl_user_op
@@ -476,103 +469,3 @@ def img2col(
         repeat_mode=repeat_axis.value,
         loc=loc,
     )
-
-
-@dsl_user_op
-def exp_sub(
-    lhs: VectorSSA,
-    rhs: VectorSSA,
-    *,
-    reg_slot: RegSlot = RegSlot.ZERO,
-    mask: MaskSSA | None = None,
-    loc: mlir_ir.Location | None = None,
-) -> VectorSSA:
-    """Directory: Experimental APIs
-
-    Description:
-        Compute `exp(float(lhs) - float(rhs))` with the native ExpSub
-        instruction. Accept f16 or f32 inputs and return f32 values.
-        This experimental API may change or be removed without
-        backward-compatibility guarantees.
-
-        Parameters:
-        - `lhs` (`VectorSSA`): FP16 or FP32 input. Required.
-        - `rhs` (`VectorSSA`): Input register with the same element type and
-          physical width as `lhs`. Required.
-        - `reg_slot` (`RegSlot`): Chooses the input position `j` used in both
-          `lhs` and `rhs` for each output position `i`. Indices start at zero.
-          If position `j` is valid and enabled by the mask, the output at `i`
-          is `exp(float(lhs[j]) - float(rhs[j]))`. For FP16 inputs, `ZERO`
-          uses even positions (`j = 2*i`) and `ONE` uses odd positions
-          (`j = 2*i + 1`). With `ONE`, the results for input positions 1, 3,
-          and 5 go to output positions 0, 1, and 2, respectively. For FP32
-          inputs, both values use `j = i`. Defaults to `RegSlot.ZERO`.
-          Keyword-only.
-        - `mask` (`MaskSSA | None`): Optional mask over input element positions.
-          Defaults to `None`, which enables all positions within the valid input
-          range. Keyword-only.
-
-        Constraints:
-        - Must be called inside a `@tla.kernel` and `tla.vec.func(mode="simd")`.
-        - Both inputs must have the same FP16 or FP32 element type. A known
-          valid element count limits an input to that many leading positions.
-          When both counts are known, use the smaller count.
-        - The output contains 64 FP32 elements.
-        - An output position receives positive FP32 zero (ZEROING) if its
-          input position is outside the valid range of either input or is
-          disabled by the mask. This applies even to nonfinite input values.
-          With only the first FP16 input element valid, `RegSlot.ONE`
-          returns all zeros.
-        - Scalar and SIMT forms, other input types, other register slots,
-          and merging masked results are unsupported.
-
-        Example:
-        ```python
-        with tla.vec.func(mode="simd"):
-            even = tla.experimental.exp_sub(lhs_half, rhs_half)
-            odd = tla.experimental.exp_sub(
-                lhs_half, rhs_half, reg_slot=tla.params.RegSlot.ONE
-            )
-            result = tla.experimental.exp_sub(lhs_float, rhs_float, mask=None)
-        ```
-    """
-    op_name = "exp_sub"
-    _require_category(op_name, "lhs", lhs, "vector_ssa", 0)
-    _require_category(op_name, "rhs", rhs, "vector_ssa", 1)
-    if mask is not None:
-        _require_category(op_name, "mask", mask, "mask_ssa", 2)
-    if reg_slot not in (RegSlot.ZERO, RegSlot.ONE):
-        _op_error(op_name, "reg_slot must be RegSlot.ZERO or RegSlot.ONE")
-    _require_frontend_state(op_name)
-    _runtime._require_enclosing_region(op_name, "vec.func")
-    if _runtime._in_simt_vec_func():
-        _op_error(op_name, "requires tla.vec.func(mode='simd')")
-    lhs_value = _as_value(lhs)
-    rhs_value = _as_value(rhs)
-    lhs_desc = _vector_ssa_type_for_mlir_value(lhs_value)
-    rhs_desc = _vector_ssa_type_for_mlir_value(rhs_value)
-    if (
-        lhs_desc.element_type not in ("f16", "f32")
-        or rhs_desc.element_type != lhs_desc.element_type
-    ):
-        _op_error(op_name, "lhs and rhs must have matching f16 or f32 element types")
-    lanes = 128 if lhs_desc.element_type == "f16" else 64
-    if mask is None:
-        input_dtype = mlir_ir.Type.parse(
-            lhs_desc.element_type, context=lhs_value.type.context
-        )
-        mask = create_mask(pattern="ALL", dtype=input_dtype, loc=loc)
-    mask_value = _as_value(mask)
-    mask_desc = _mask_ssa_type_for_mlir_value(mask_value)
-    if mask_desc.physical_lanes != lanes:
-        _op_error(op_name, f"mask must be a {lanes}-lane input-domain MaskSSA")
-    context = lhs_value.type.context
-    result_type = _coerce_type(TlaVectorSSATypeDescriptor(64, "f32"))
-    part_attr = mlir_ir.IntegerAttr.get(
-        mlir_ir.IntegerType.get_signless(32, context=context),
-        0 if reg_slot is RegSlot.ZERO else 1,
-    )
-    result = _tla_ops_gen.exp_sub(
-        result_type, lhs_value, rhs_value, mask_value, part_attr, loc=loc
-    )
-    return VectorSSA(result)

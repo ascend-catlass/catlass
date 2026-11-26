@@ -81,6 +81,7 @@ nav_order: 5
 | [`tla.add`](language/simd/arithmetic.md#tlaadd)、[`tla.sub`](language/simd/arithmetic.md#tlasub)、[`tla.mul`](language/simd/arithmetic.md#tlamul)、[`tla.div`](language/simd/arithmetic.md#tladiv) | 逐元素算术。 | Kernel / Vector；SIMD 使用 `VectorSSA`，SIMT 使用逐线程 `Numeric` 标量；mask 只作用于向量形态。 |
 | [`tla.max`](language/simd/arithmetic.md#tlamax)、[`tla.min`](language/simd/arithmetic.md#tlamin) | 逐元素最大值或最小值。 | Kernel / Vector；SIMD 向量与 SIMT 标量形态各有 dtype 规则。 |
 | [`tla.exp`](language/simd/arithmetic.md#tlaexp)、[`tla.log`](language/simd/arithmetic.md#tlalog)、[`tla.sqrt`](language/simd/arithmetic.md#tlasqrt)、[`tla.abs`](language/simd/arithmetic.md#tlaabs) | 一元数学运算。 | Kernel / Vector；SIMD 使用向量，SIMT 使用标量。标量 `exp` / `log` 仅 SIMT 可用。`tla.log` 可通过 `mode=tla.params.LogAlgo.*` 选择 Flush-To-Zero（默认）或次正规数处理。 |
+| [`tla.arch.sub_exp`](language/simd/arithmetic.md#tlaarchsub_exp) | 使用原生 ExpSub 指令逐元素计算 `exp(fp32(lhs) - fp32(rhs))`。 | Kernel / Vector / SIMD，接收同为 FP16 或同为 FP32 的向量，返回 FP32 向量。 |
 | [`tla.cmp`](language/simd/compare_select.md#tlacmp) | 比较向量元素并产生 `MaskSSA`。 | Kernel / Vector / SIMD；SIMT 使用标量比较运算符并产生 `Bool`。 |
 | [`tla.where`](language/simd/compare_select.md#tlawhere) | 按条件选择两个值。 | Kernel / Vector；SIMD 条件为 `MaskSSA`，SIMT 使用逐线程 `Bool`。 |
 | [`tla.full`](language/simd/fill.md#tlafull)、[`tla.arange`](language/simd/fill.md#tlaarange) | 创建常量向量或 lane 索引序列。 | Kernel / Vector / SIMD；SIMT 拒绝这些寄存器向量构造接口。 |
