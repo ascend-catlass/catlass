@@ -103,6 +103,32 @@ static bool isDefinedOutside(Value value, Region& region)
     return !defRegion || !region.isAncestor(defRegion);
 }
 
+// tla-lower-ptr folds pointer arithmetic to i64 and materializes the typed
+// pointer back with tla.inttoptr at each use. For an atomic whose address was
+// computed outside the region, that materialization can land outside too; a
+// !tla.ptr cannot cross the boundary, but its i64 address can. Rebuild the
+// pointer at the atomic: the i64 becomes an ordinary scalar capture and the
+// inttoptr is recreated inside. Pointers that are not backed by an i64 address
+// remain rejected, which keeps the "build the pointer inside the region" API
+// rule where provenance is still visible.
+static void rebuildOutsideAtomicPtrsInside(::tla::VecFuncOp vecFuncOp)
+{
+    Region& region = vecFuncOp.getBody();
+    SmallVector<::tla::SimtAtomicAddOp, 8> atomics;
+    region.walk([&](::tla::SimtAtomicAddOp op) { atomics.push_back(op); });
+    for (::tla::SimtAtomicAddOp op : atomics) {
+        Value pointer = op.getPtr();
+        if (!isDefinedOutside(pointer, region))
+            continue;
+        auto intToPtr = pointer.getDefiningOp<::tla::IntToPtrOp>();
+        if (!intToPtr)
+            continue;
+        OpBuilder builder(op);
+        Value rebuilt = builder.create<::tla::IntToPtrOp>(op.getLoc(), pointer.getType(), intToPtr.getAddr());
+        op->setOperand(0, rebuilt);
+    }
+}
+
 static void collectSimtCaptures(::tla::VecFuncOp vecFuncOp, SimtCaptures& captures)
 {
     Region& region = vecFuncOp.getBody();
@@ -522,6 +548,146 @@ static Value memrefToRawPointer(OpBuilder& builder, Location loc, Value memref, 
     return builder.create<LLVM::IntToPtrOp>(loc, ptrType, asI64);
 }
 
+// The suffix the atom unit's type takes in the intrinsic name. Unsigned adds use
+// the signed form: addition is bit-identical, and the atom unit has no separate
+// unsigned add.
+static std::optional<StringRef> simtAtomicAddTypeToken(Type elementType)
+{
+    if (auto integer = dyn_cast<IntegerType>(elementType)) {
+        if (integer.getWidth() == 32)
+            return "s32";
+        if (integer.getWidth() == 64)
+            return "s64";
+        return std::nullopt;
+    }
+    if (elementType.isF32())
+        return "fp32";
+    if (elementType.isF16())
+        return "fp16";
+    if (elementType.isBF16())
+        return "bf16";
+    return std::nullopt;
+}
+
+// A per-thread atomic add becomes llvm.hivm.atom.ADD.<G|S>.<type> at the address
+// the caller computed. The address is rebuilt here rather than carried across the
+// launch: a !tla.ptr cannot cross the region boundary, so the chain's root is
+// either a captured tensor (tensor_ptr, whose memref parameter is the very
+// pointer the launch passes) or a captured integer address (inttoptr). The
+// offsets between the root and the atomic are folded into one byte offset, each
+// ptr_add scaled by the pointee type it was written against.
+//
+// The atom instruction is fetching, so the old value rides the intrinsic result;
+// for f16/bf16 that hardware value is not the original element, and the frontend
+// drops it for those types.
+static LogicalResult lowerSimtAtomicAdd(OpBuilder& builder, ::tla::SimtAtomicAddOp op)
+{
+    Location loc = op.getLoc();
+    auto ptrType = dyn_cast<::tla::PtrType>(op.getPtr().getType());
+    if (!ptrType)
+        return op.emitOpError("tla.simt_atomic_add pointer did not survive as !tla.ptr"), failure();
+
+    int addressSpace;
+    switch (ptrType.getAddrspace()) {
+        case AddressSpace::gm:
+            addressSpace = kSimtGmAddressSpace;
+            break;
+        case AddressSpace::ub:
+            addressSpace = kSimtUbAddressSpace;
+            break;
+        default:
+            return op.emitOpError("tla.simt_atomic_add pointer must be in gm or ub, got ")
+                       << stringifyAddressSpace(ptrType.getAddrspace()),
+                   failure();
+    }
+
+    Type elementType = ptrType.getPointee();
+    std::optional<StringRef> typeToken = simtAtomicAddTypeToken(elementType);
+    if (!typeToken)
+        return op.emitOpError() << "unsupported atomic add element type " << elementType, failure();
+    int64_t elementBytes = getByteSizeOfFixedWidthScalarType(elementType);
+    if (elementBytes <= 0)
+        return op.emitOpError() << "atomic add element type " << elementType << " has no fixed byte width", failure();
+
+    // The LLVM dialect has no unsigned integers; carry the bits in the signless
+    // storage type. arith.bitcast rejects unsigned operands, so this is the same
+    // unrealized cast the unsigned scalar load/store path uses.
+    Type storageType = elementType;
+    if (auto integer = dyn_cast<IntegerType>(elementType))
+        storageType = builder.getIntegerType(integer.getWidth());
+    Value value = op.getValue();
+    if (value.getType() != storageType)
+        value = builder.create<mlir::UnrealizedConversionCastOp>(loc, TypeRange{storageType}, ValueRange{value})
+                    .getResult(0);
+
+    // Walk the chain back to its root, summing the offsets on the way as bytes:
+    // a recast in the middle changes the element unit, so each ptr_add is scaled
+    // by the pointee type it was written against.
+    Value base = op.getPtr();
+    Value byteOffset;
+    while (true) {
+        if (auto add = base.getDefiningOp<::tla::PtrAddOp>()) {
+            int64_t addBytes = elementBytes;
+            if (auto addPtrType = dyn_cast<::tla::PtrType>(add.getPtr().getType()))
+                addBytes = getByteSizeOfFixedWidthScalarType(addPtrType.getPointee());
+            if (addBytes <= 0)
+                return op.emitOpError("tla.ptr_add pointee has no fixed byte width"), failure();
+            Value step = castValueToI64(builder, loc, add.getOffset());
+            if (addBytes != 1) {
+                Value scale = builder.create<arith::ConstantIntOp>(loc, addBytes, 64);
+                step = builder.createOrFold<arith::MulIOp>(loc, step, scale);
+            }
+            byteOffset = byteOffset ? builder.createOrFold<arith::AddIOp>(loc, byteOffset, step) : step;
+            base = add.getPtr();
+            continue;
+        }
+        if (auto recast = base.getDefiningOp<::tla::RecastPtrOp>()) {
+            base = recast.getSrc();
+            continue;
+        }
+        break;
+    }
+
+    auto pointerType = LLVM::LLVMPointerType::get(builder.getContext(), addressSpace);
+    Value pointer;
+    if (auto ptrWithCoord = base.getDefiningOp<::tla::TensorPtrWithCoordOp>()) {
+        // ptr_with_coord is the view-start address. The source tensor was
+        // captured as a buffer parameter whose launch pointer already carries
+        // the view start, so read that parameter directly.
+        Value param = ptrWithCoord->getOperand(0);
+        if (!isa<MemRefType>(param.getType()))
+            return op.emitOpError("tla.simt_atomic_add ptr_with_coord source did not map to a memref parameter"),
+                   failure();
+        pointer = memrefToRawPointer(builder, loc, param, addressSpace);
+    } else if (auto intToPtr = base.getDefiningOp<::tla::IntToPtrOp>()) {
+        pointer = builder.create<LLVM::IntToPtrOp>(loc, pointerType, intToPtr.getAddr());
+    } else {
+        return op.emitOpError(
+                   "tla.simt_atomic_add pointer must come from tla.tensor_ptr_with_coord or "
+                   "tla.inttoptr inside the region"),
+               failure();
+    }
+
+    if (byteOffset)
+        pointer = builder.create<LLVM::GEPOp>(loc, pointerType, builder.getI8Type(), pointer, ValueRange{byteOffset});
+    // 0 is L2_CACHE_HINT_NORMAL_FV, the cache hint the DPX lowering uses.
+    Value cacheHint = builder.create<arith::ConstantOp>(loc, builder.getI32IntegerAttr(0));
+    std::string intrinsic =
+        ("llvm.hivm.atom.ADD." + Twine(addressSpace == kSimtGmAddressSpace ? "G" : "S") + "." + *typeToken).str();
+    Value oldValue = builder
+                         .create<LLVM::CallIntrinsicOp>(
+                             loc, storageType, builder.getStringAttr(intrinsic), ValueRange{pointer, value, cacheHint})
+                         .getResult(0);
+    // The intrinsic returns the signless storage type; consumers still expect the
+    // declared pointee, so unsigned results need the bridge back, as in the
+    // scalar atomic lowering.
+    if (oldValue.getType() != elementType)
+        oldValue = builder.create<mlir::UnrealizedConversionCastOp>(loc, TypeRange{elementType}, ValueRange{oldValue})
+                       .getResult(0);
+    op.getResult().replaceAllUsesWith(oldValue);
+    return success();
+}
+
 // tla.arch.sync_threads is a block-wide barrier between the threads of a SIMT
 // vector function; it maps straight onto the regbase intrinsic.
 static void lowerSimtSyncThreadsIn(func::FuncOp vf)
@@ -651,7 +817,9 @@ static LogicalResult linearizeSimtAccessesIn(::tla::VecFuncOp vecFuncOp)
     vecFuncOp.getBody().walk([&](Operation* op) {
         if (!isa<::tla::SimtLoadOp, ::tla::SimtStoreOp>(op))
             return;
-        unsigned indexCount = op->getNumOperands() - (isa<::tla::SimtStoreOp>(op) ? 2 : 1);
+        // Operands are tensor, indices..., then a trailing value for the ops that
+        // write; a load has no trailing operand.
+        unsigned indexCount = op->getNumOperands() - (isa<::tla::SimtLoadOp>(op) ? 1 : 2);
         if (indexCount > 1) {
             needsFolding.push_back(op);
             return;
@@ -686,7 +854,7 @@ static LogicalResult linearizeSimtAccessesIn(::tla::VecFuncOp vecFuncOp)
     DenseMap<Value, Value> narrowedStrides;
 
     for (Operation* op : needsFolding) {
-        bool isStore = isa<::tla::SimtStoreOp>(op);
+        bool writes = isa<::tla::SimtStoreOp>(op);
         Value tensor = op->getOperand(0);
 
         // Take the strides from the descriptor rather than the type: they are SSA
@@ -704,9 +872,9 @@ static LogicalResult linearizeSimtAccessesIn(::tla::VecFuncOp vecFuncOp)
         if (failed(desc))
             return failure();
 
-        // operands are: tensor, indices..., (value for a store)
+        // operands are: tensor, indices..., (value for a store/atomic add)
         OperandRange indexRange = op->getOperands().drop_front(1);
-        if (isStore)
+        if (writes)
             indexRange = indexRange.drop_back(1);
         SmallVector<Value, 2> indices(indexRange.begin(), indexRange.end());
         if (indices.size() != 1 && indices.size() != 2)
@@ -742,7 +910,7 @@ static LogicalResult linearizeSimtAccessesIn(::tla::VecFuncOp vecFuncOp)
             linear = linear ? builder.createOrFold<arith::AddIOp>(loc, linear, scaled) : scaled;
         }
 
-        if (isStore) {
+        if (isa<::tla::SimtStoreOp>(op)) {
             builder.create<::tla::SimtStoreOp>(loc, tensor, ValueRange{linear}, op->getOperands().back());
         } else {
             Value loaded =
@@ -777,6 +945,11 @@ public:
             return vecFuncOp.emitOpError("SIMT tla.vec.func requires a 3-element 'thread_block_dim' attribute"),
                    failure();
         int64_t blockDimX = threadBlockDimAttr[0], blockDimY = threadBlockDimAttr[1], blockDimZ = threadBlockDimAttr[2];
+
+        // A pointer folded to i64 by tla-lower-ptr may be materialized outside
+        // the region; rebuild it at the atomic before capture analysis so the
+        // i64 crosses as an ordinary scalar.
+        rebuildOutsideAtomicPtrsInside(vecFuncOp);
 
         SimtCaptures captures;
         collectSimtCaptures(vecFuncOp, captures);
@@ -1083,7 +1256,7 @@ private:
     {
         SmallVector<Operation*, 8> stale;
         vf.walk([&](Operation* op) {
-            if (isa<::tla::SimtLoadOp, ::tla::SimtStoreOp>(op))
+            if (isa<::tla::SimtLoadOp, ::tla::SimtStoreOp, ::tla::SimtAtomicAddOp>(op))
                 stale.push_back(op);
         });
         for (Operation* op : stale) {
@@ -1100,6 +1273,9 @@ private:
                     return load.emitOpError("tla.simt_load source did not map to a memref parameter"), failure();
                 Value loaded = builder.create<mlir::memref::LoadOp>(load.getLoc(), source, indices);
                 load.getResult().replaceAllUsesWith(loaded);
+            } else if (auto atomicAdd = dyn_cast<::tla::SimtAtomicAddOp>(op)) {
+                if (failed(lowerSimtAtomicAdd(builder, atomicAdd)))
+                    return failure();
             } else {
                 auto store = cast<::tla::SimtStoreOp>(op);
                 Value dest = op->getOperand(0);
@@ -1110,6 +1286,18 @@ private:
             }
             op->erase();
         }
+
+        // The pointer chain the atomics consumed has no reader left: the address
+        // was rebuilt from the memref parameter or the captured integer. Reverse
+        // walk order drops the outer ptr_add before the root it still reads.
+        SmallVector<Operation*, 8> chain;
+        vf.walk([&](Operation* op) {
+            if (isa<::tla::PtrAddOp, ::tla::TensorPtrOp, ::tla::IntToPtrOp, ::tla::RecastPtrOp>(op))
+                chain.push_back(op);
+        });
+        for (auto it = chain.rbegin(); it != chain.rend(); ++it)
+            if ((*it)->use_empty())
+                (*it)->erase();
         return success();
     }
 

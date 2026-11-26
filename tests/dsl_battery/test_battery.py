@@ -879,6 +879,14 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         "simt-multi-ops",
         [["dsl_tutorials/vector_simt_ops/multi_ops_simt/multi_ops_simt.py", *dev]],
     )
+    # tla.arch.atomic_add: every supported pointee type on both GM and UB under
+    # contention, the per-thread old-value check, and the tile/alias address
+    # agreement. The mmad-atomic-add-* cases cover the cube epilogue path, not
+    # this one.
+    yield (
+        "simt-atomic-add",
+        [["end_to_end/simt_atomic_add.py", *dev]],
+    )
 
     yield "dcache-prefetch", [["end_to_end/dcache_prefetch.py", *dev]]
     yield "system-cycle", [[

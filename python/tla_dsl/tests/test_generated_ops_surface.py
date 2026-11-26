@@ -97,6 +97,7 @@ def test_generated_binding_symbols_exist_for_wrapped_ops() -> None:
         "simt_abs",
         "simt_load",
         "simt_store",
+        "simt_atomic_add",
         "arch_sync_threads",
         "recast_ptr",
         "adds",

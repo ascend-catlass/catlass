@@ -419,31 +419,46 @@ def read_first(src: tla.Tensor, dst: tla.Tensor):
 
 对 `ptr` 指向的元素执行原子加（`tla.arch.atomic_add(ptr, value)`），返回该元素的旧值。
 
-指针同时携带元素类型与地址空间。元素地址由调用方给出：对张量视图，`t.ptr_with_coord` 指向它的首元素。读-改-写是原子的，任意多个核同时命中同一元素都不会丢失更新。典型用途是计数器、直方图桶与归约累加器。`tla.vector()` 与 `tla.cube()` 都可发起该操作：原子单元是共享的，AIV/AIC 混合 kernel 可以从任一侧命中同一元素。
+指针同时携带元素类型与地址空间。元素地址由调用方给出：`t.ptr` 是存储基址，
+`t.ptr + i` 指向第 `i` 个元素；对视图，`t.ptr_with_coord` 指向它的首元素。
+读-改-写是原子的，任意多个核或线程同时命中同一元素都不会丢失更新。典型用途是
+计数器、直方图桶与归约累加器。
 
-返回值是更新前该元素的内容，类型与指针的元素类型一致：`u32` 指针返回 `UInt32`，`u64` 指针返回 `UInt64`。旧值可直接同类型写回张量，例如 `dst[0] = tla.arch.atomic_add(dst.ptr_with_coord, 1)`。
+该入口同时服务标量形态与 SIMT 形态：
+
+- 标量形态：位于 `tla.vector()` 或 `tla.cube()` 内、且不在任何 `tla.vec.func` 中。
+  原子单元是共享的，AIV/AIC 混合 kernel 可以从任一侧命中同一元素。返回值是更新前
+  该元素的内容，类型与指针的元素类型一致：`u32` 指针返回 `UInt32`，`u64` 指针返回
+  `UInt64`。
+- SIMT 形态：位于 `tla.vec.func(mode="simt")` 内，每个线程各自发起原子加并拿到被
+  替换的旧值。指针须在区域内构造，可指向 GM 或 UB；`f16`/`bf16` 的硬件返回值不可
+  用，返回 `None`。
 
 函数原型：
 
 ```python
-tla.arch.atomic_add(ptr: Pointer, value: Any) -> Numeric
+tla.arch.atomic_add(ptr: Pointer, value: Any) -> Numeric | None
 ```
 
 参数说明：
 
-- `ptr`（`Pointer`）：指向被更新元素的 GM 指针。必选。
-- `value`（`Numeric | int | float`）：加数。宿主字面量会转换为指针的元素类型；`Numeric` 必须已是该类型。必选。
+- `ptr`（`Pointer`）：指向被更新元素的指针。必填。
+- `value`（`Numeric | int | float`）：加数。宿主字面量会转换为指针的元素类型；
+  `Numeric` 必须已是该类型。必填。
 
 返回值：
-- `Numeric`：更新前该元素的值，类型同元素类型。只关心累加结果时可忽略。
+
+- `Numeric | None`：更新前该元素的值，类型同元素类型。SIMT 的 `f16`/`bf16` 形态
+  返回 `None`。只关心累加结果时可忽略。
 
 约束说明：
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
-- 须在 `tla.vector()` 或 `tla.cube()` 内，且不得位于任何 `tla.vec.func` 中：原子单元是标量指令，
-  不能作为向量函数的一部分执行。请直接写在 `tla.vector()` 的标量部分，或 `tla.cube()` 中的任意位置。
-- `ptr` 须为 `gm` 指针；原子单元没有 UB 形态。
-- 元素类型须为 `i32`、`u32`、`i64`、`u64` 或 `f32`。
+- 标量形态：须在 `tla.vector()` 或 `tla.cube()` 内，且不得位于任何 `tla.vec.func`
+  中；`ptr` 须为 `gm` 指针；元素类型须为 `i32`、`u32`、`i64`、`u64` 或 `f32`。
+- SIMT 形态：须在 `tla.vec.func(mode="simt")` 内；`ptr` 须位于 `gm` 或 `ub`，且
+  须在区域内构造；元素类型须为 `i32`、`u32`、`i64`、`u64`、`f32`、`f16` 或
+  `bf16`，64 位类型仅支持 `gm`。
 - 仅 Ascend 950（架构 3510）。
 
 调用示例：
@@ -452,6 +467,10 @@ tla.arch.atomic_add(ptr: Pointer, value: Any) -> Numeric
 with tla.vector():
     old = tla.arch.atomic_add(out.ptr_with_coord, 1)
     out[0] = old  # 同类型直写：u32 -> u32，i32 -> i32
+
+with tla.vec.func(mode="simt", thread_block_dim=32):
+    tid, _, _ = tla.arch.thread_idx()
+    tla.arch.atomic_add(hist.ptr + tid, 1)
 ```
 
 ---

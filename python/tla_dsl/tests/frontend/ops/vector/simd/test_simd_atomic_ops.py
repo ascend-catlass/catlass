@@ -183,15 +183,18 @@ def test_atomic_add_rejects_nested_cube_inside_vector() -> None:
         k.dump_mlir(type_args=(_tensor(tla.Int32),))
 
 
-def test_atomic_add_rejects_simt_vec_func() -> None:
+def test_atomic_add_accepts_simt_vec_func() -> None:
     @tla.kernel
     def k(out: tla.Tensor) -> None:
         with tla.vector():
             with tla.vec.func(mode="simt", thread_block_dim=32):
                 tla.arch.atomic_add(out.ptr, 1)
 
-    with pytest.raises(tla.TlaCoreAPIError, match="outside tla.vec.func"):
-        k.dump_mlir(type_args=(_tensor(tla.Int32),))
+    # The shared entry dispatches to the per-thread SIMT form inside a SIMT
+    # region; the scalar SIMD form only owns the code outside vec.func.
+    ir = k.dump_mlir(type_args=(_tensor(tla.Int32),))
+    assert "tla.simt_atomic_add" in ir
+    assert "tla.simd_atomic_add" not in ir
 
 
 def test_atomic_add_rejects_simd_vec_func() -> None:

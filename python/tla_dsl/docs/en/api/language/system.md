@@ -449,46 +449,53 @@ Atomically add `value` to the element `ptr` addresses
 (`tla.arch.atomic_add(ptr, value)`), returning the old element.
 
 The pointer carries both the element type and the address space. The
-caller passes the element address -- for a tensor view,
-`t.ptr_with_coord` names its first element -- and the read-modify-write
-is atomic, so any number of cores may target the same element without
-losing an update. Typical uses are counters, histogram bins and
-reduction accumulators. Both `tla.vector()` and `tla.cube()` can issue
-it: the atom unit is shared, so a mixed AIV/AIC kernel may target the
-same element from either core.
+caller passes the element address -- `t.ptr` is the storage base, so
+`t.ptr + i` addresses element `i`; for a view, `t.ptr_with_coord` names
+its first element -- and the read-modify-write is atomic, so any number
+of cores or threads may target the same element without losing an
+update. Typical uses are counters, histogram bins and reduction
+accumulators.
 
-The returned value is the element's contents before the update, in the
-pointer's own type: a `u32` pointer returns `UInt32`, a `u64` pointer
-returns `UInt64`. The old value can be written straight back into a
-tensor of the same type, for example
-`dst[0] = tla.arch.atomic_add(dst.ptr_with_coord, 1)`.
+The entry serves both scalar and SIMT code:
+
+- Scalar form, inside `tla.vector()` or `tla.cube()` outside any
+  `tla.vec.func`: the atom unit is shared, so a mixed AIV/AIC kernel
+  may target the same element from either core. The returned value is
+  the element's contents before the update, in the pointer's own type:
+  a `u32` pointer returns `UInt32`, a `u64` pointer returns `UInt64`.
+- SIMT form, inside `tla.vec.func(mode="simt")`: every thread issues
+  its own atomic add and receives the value it replaced. The pointer
+  must be built inside the region and may name GM or UB; `f16`/`bf16`
+  have no usable hardware return value and return `None`.
 
 Prototype:
 
 ```python
-tla.arch.atomic_add(ptr: Pointer, value: Any) -> Numeric
+tla.arch.atomic_add(ptr: Pointer, value: Any) -> Numeric | None
 ```
 
 Parameters:
 
-- `ptr` (`Pointer`): GM pointer to the element that is updated. Required.
+- `ptr` (`Pointer`): pointer to the element that is updated. Required.
 - `value` (`Numeric | int | float`): Addend. A host literal is converted
   to the pointer's pointee type; a `Numeric` must already be that type.
   Required.
 
 Returns:
-- `Numeric`: the element's value before the update, typed like the
-  pointee. Ignore it when only the accumulation matters.
+- `Numeric | None`: the element's value before the update, typed like
+  the pointee. `None` for the SIMT `f16`/`bf16` forms. Ignore it when
+  only the accumulation matters.
 
 Constraints:
 
 - Must be called inside a `@tla.kernel`-decorated kernel function.
-- Must be inside `tla.vector()` or `tla.cube()`, and must not be inside
-  any `tla.vec.func`: the atom unit is a scalar instruction, so it
-  cannot run as part of a vector function. Call it directly in the
-  scalar part of `tla.vector()`, or anywhere in `tla.cube()`.
-- `ptr` must be a `gm` pointer; the atom unit has no UB form.
-- Pointee type must be `i32`, `u32`, `i64`, `u64` or `f32`.
+- Scalar form: inside `tla.vector()` or `tla.cube()` and not inside any
+  `tla.vec.func`; `ptr` must be a `gm` pointer; pointee type must be
+  `i32`, `u32`, `i64`, `u64` or `f32`.
+- SIMT form: inside `tla.vec.func(mode="simt")`; `ptr` must be in `gm`
+  or `ub` and built inside the region; pointee type must be `i32`,
+  `u32`, `i64`, `u64`, `f32`, `f16` or `bf16`, with the 64-bit types
+  only in `gm`.
 - Ascend 950 (arch 3510).
 
 Example:
@@ -497,6 +504,10 @@ Example:
 with tla.vector():
     old = tla.arch.atomic_add(out.ptr_with_coord, 1)
     out[0] = old  # same type: u32 -> u32, i32 -> i32
+
+with tla.vec.func(mode="simt", thread_block_dim=32):
+    tid, _, _ = tla.arch.thread_idx()
+    tla.arch.atomic_add(hist.ptr + tid, 1)
 ```
 
 ---

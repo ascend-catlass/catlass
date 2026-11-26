@@ -879,10 +879,15 @@ mlir::LogicalResult TensorDescriptorDerivation::derive(mlir::func::FuncOp funcOp
                     return builder.createOrFold<arith::MulIOp>(op->getLoc(), quotient, multiple);
                 };
 
-                // Derive dynamic linear strides from the child shape and alignment policy.
+                // Derive dynamic linear strides from the child shape and alignment policy,
+                // unless the pointer is the reference's own (`aliasOfReference`): then this
+                // is the same storage, and a runtime pitch must come from the reference.
+                bool aliasesReference = op->hasAttr("aliasOfReference");
                 auto materializeLinearStride = [&](int64_t leaf, size_t idx) -> FailureOr<Value> {
                     if (leaf != ShapedType::kDynamic)
                         return getOrCreateConstant(op, leaf, 0);
+                    if (aliasesReference)
+                        return parent.stride[idx];
                     // Vector is stored as the normalized (1, N) row-major shape in
                     // the descriptor, so it takes the same stride rule.
                     if (childInfo->layoutTag == LayoutTag::RowMajor || isVectorLayout(childInfo->layoutTag))
@@ -927,7 +932,8 @@ mlir::LogicalResult TensorDescriptorDerivation::derive(mlir::func::FuncOp funcOp
                     // guard was not enough: zN -> zN and nZ -> nZ keep the same tag while
                     // still moving to a differently sized buffer.
                     if (dynamicStrideLeaf) {
-                        leaf = deriveNZFamilyStrideLeafFromShape(shape, i);
+                        leaf = op->hasAttr("aliasOfReference") ? parent.stride[i] :
+                                                                 deriveNZFamilyStrideLeafFromShape(shape, i);
                     } else {
                         leaf = materializeNZFamilyLeafFromTypeOrParent(
                             childInfo->strideDims, parent.stride, i, "NZFamily layout stride");

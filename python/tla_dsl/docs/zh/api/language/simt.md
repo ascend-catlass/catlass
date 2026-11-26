@@ -46,6 +46,8 @@ with tla.vector():
   [元素访问](#元素访问)。
 - tensor 指针：`tensor.ptr`（原始存储基址）与 `tensor.ptr_with_coord`（视图起始地址），
   支持元素偏移运算——见下方 [指针访问](#指针访问)。
+- 对 `gm` / `ub` 元素的原子累加（`tla.arch.atomic_add(ptr, value)`）——见
+  [系统变量访问](system.md#tlaarchatomic_add)。
 - 对 `Numeric` 的标量算术、比较、选择与转换，各自生成逐线程 op——见下方
   [基础算术](#基础算术)、[比较与选择](#比较与选择)、[类型转换](#类型转换)。
 - `tla.range` 循环与运行期 `if`。

@@ -186,3 +186,36 @@ def Tla_SimtStoreOp : Tla_Op<"simt_store", [MemoryEffects<[MemWrite]>]> {
     $dest `[` $indices `]` `,` $value attr-dict `:` type($dest) `,` type($value)
   }];
 }
+
+def Tla_SimtAtomicAddOp : Tla_Op<"simt_atomic_add", [MemoryEffects<[MemRead, MemWrite]>]> {
+  let summary = "Per-thread atomic pointer add";
+  let description = [{
+    Atomically add one per-thread scalar to the element a ``!tla.ptr`` points
+    at, from inside a ``tla.vec.func`` with ``mode = "simt"``. Any number of
+    threads may target the same address; the read-modify-write is atomic, so no
+    update is lost. Typical uses are counters, histogram bins and reduction
+    accumulators.
+
+    The pointer carries the element type and address space, so this operation
+    has no coordinate: the caller computes the element address, exactly as
+    ``cute.arch.atomic_add(ptr, val)`` does. The pointee may be ``i32``/``ui32``/
+    ``f32``/``f16``/``bf16`` in GM or UB; ``i64``/``ui64`` only in GM, which is
+    what the hardware provides. The element is updated in place and the
+    operation returns the value it replaced: the fetching form of the atom
+    instruction. For ``f16``/``bf16`` the hardware return value is not the
+    original element, so the frontend API returns nothing for those types.
+
+    The pointer chain must be built inside the region -- from ``tla.tensor_ptr``
+    (with ``tla.ptr_add`` for the element offset) or ``tla.inttoptr``. A
+    ``!tla.ptr`` value cannot cross the region boundary, so ``tla-lower-ptr``
+    folds the chain to its i64 address and ``tla-vector-region-simt`` rebuilds
+    the pointer inside before lowering it to the
+    ``llvm.hivm.atom.ADD.{G,S}.<type>`` intrinsic.
+  }];
+  let arguments = (ins Tla_PtrType:$ptr, Tla_ScalarValueType:$value);
+  let results = (outs Tla_ScalarValueType:$result);
+  let hasVerifier = 1;
+  let assemblyFormat = [{
+    $ptr `,` $value attr-dict `:` qualified(type($ptr)) `,` type($value) `->` type($result)
+  }];
+}

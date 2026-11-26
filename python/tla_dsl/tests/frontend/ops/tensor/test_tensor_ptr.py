@@ -7,6 +7,7 @@ import pytest
 
 import catlass.tla as tla
 import catlass.runtime as runtime_mod  # noqa: F401
+from catlass import core_api as core
 
 
 # --- Frontend IR emission -----------------------------------------------------
@@ -117,3 +118,108 @@ def test_ptr_with_coord_emits_runtime_coord() -> None:
     assert "tla.tensor_ptr_with_coord" in mlir
     # A dynamic coordinate leaf; there is no static offset to read from the type.
     assert "!tla.coord<?,0>" in mlir
+
+
+_alias_metadata: dict[str, tuple] = {}
+
+
+@tla.kernel
+def alias_metadata_kernel() -> None:
+    buf_ptr = tla.allocate(8 * 16, tla.Int32, tla.AddressSpace.ub, 256)
+    whole = tla.make_tensor(
+        buf_ptr,
+        tla.make_layout(tla.make_shape(8, 16), tla.make_stride(16, 1)),
+        tla.make_coord(0, 0),
+    )
+    tile = tla.tile_view(whole, tla.make_shape(2, 4), tla.make_coord(1, 1))
+    alias = tla.make_tensor_like(tile.ptr, tile, tla.arch.RowMajor)
+    fresh_ptr = tla.allocate(8 * 16, tla.Int32, tla.AddressSpace.ub, 256)
+    fresh = tla.make_tensor_like(fresh_ptr, tile, tla.arch.RowMajor)
+    fields = ("shape", "stride", "coord", "origin_shape")
+    for name, tensor in (("tile", tile), ("alias", alias), ("fresh", fresh)):
+        _alias_metadata[name] = tuple(
+            core._tensor_metadata_field(core._as_value(tensor), field)
+            for field in fields
+        )
+
+
+_layout_alias_metadata: dict[str, tuple] = {}
+
+
+@tla.kernel
+def layout_change_alias_kernel() -> None:
+    buf_ptr = tla.allocate(8 * 16, tla.Int32, tla.AddressSpace.ub, 256)
+    whole = tla.make_tensor(
+        buf_ptr,
+        tla.make_layout(tla.make_shape(8, 16), tla.make_stride(16, 1)),
+        tla.make_coord(0, 0),
+    )
+    tile = tla.tile_view(whole, tla.make_shape(2, 4), tla.make_coord(1, 1))
+    # A new layout must re-derive shape/stride instead of borrowing the
+    # reference's RowMajor trees.
+    column = tla.make_tensor_like(tile.ptr, tile, tla.arch.ColumnMajor)
+    znalign = tla.make_tensor_like(tile.ptr, tile, tla.arch.zNUnAlign)
+    # On L1 the layout is inferred (RowMajor -> zN), so the same pointer is no
+    # longer a same-layout alias.
+    l1_ptr = tla.allocate(8 * 16, tla.Int32, tla.AddressSpace.l1, 256)
+    l1_whole = tla.make_tensor(
+        l1_ptr,
+        tla.make_layout(tla.make_shape(8, 16), tla.make_stride(16, 1)),
+        tla.make_coord(0, 0),
+    )
+    l1_tile = tla.tile_view(l1_whole, tla.make_shape(2, 4), tla.make_coord(1, 1))
+    l1_alias = tla.make_tensor_like(l1_tile.ptr, l1_tile)
+    fields = ("shape", "stride", "coord", "origin_shape")
+    for name, tensor in (
+        ("column", column),
+        ("znalign", znalign),
+        ("l1_tile", l1_tile),
+        ("l1_alias", l1_alias),
+    ):
+        _layout_alias_metadata[name] = tuple(
+            core._tensor_metadata_field(core._as_value(tensor), field)
+            for field in fields
+        )
+
+
+def test_make_tensor_like_from_tile_ptr_keeps_reference_metadata() -> None:
+    _alias_metadata.clear()
+    alias_metadata_kernel.dump_mlir()
+    tile_meta = _alias_metadata["tile"]
+    alias_meta = _alias_metadata["alias"]
+    fresh_meta = _alias_metadata["fresh"]
+    # ``tile.ptr`` names the tile's own storage, so the alias keeps the tile's
+    # geometry -- including the view start. An origin-derived remap would reset
+    # the coord to (0, 0) and a later tile_view/get_tile would start at element
+    # 0 instead of the tile's element (2, 4).
+    assert alias_meta == tile_meta
+    assert alias_meta[2] == (2, 4)
+    # A pointer that is not the reference's storage still re-derives the block.
+    assert fresh_meta != tile_meta
+    assert fresh_meta[2] == (0, 0)
+
+
+def test_make_tensor_like_alias_with_new_layout_remaps_geometry() -> None:
+    _layout_alias_metadata.clear()
+    layout_change_alias_kernel.dump_mlir()
+    column_meta = _layout_alias_metadata["column"]
+    znalign_meta = _layout_alias_metadata["znalign"]
+    l1_tile_meta = _layout_alias_metadata["l1_tile"]
+    l1_alias_meta = _layout_alias_metadata["l1_alias"]
+
+    # RowMajor -> ColumnMajor re-derives the strides for the new layout instead
+    # of keeping the reference's (16, 1).
+    assert column_meta == ((2, 4), (1, 8), (0, 0), (2, 4))
+
+    # NZ-family layouts need four leaves; borrowing the reference's rank-2
+    # RowMajor trees would leave the descriptor with the new tag and the old
+    # geometry, which the descriptor verifier rejects.
+    assert znalign_meta[0] == ((2, 1), (8, 1))
+    assert znalign_meta[1] == ((8, 16), (1, 16))
+    assert znalign_meta[2] == (0, 0)
+
+    # L1 inference turns RowMajor into zN, so this alias is remapped as well.
+    assert l1_alias_meta != l1_tile_meta
+    assert l1_alias_meta[0] == ((16, 1), (8, 1))
+    assert l1_alias_meta[1] == ((8, 128), (1, 128))
+    assert l1_alias_meta[2] == (0, 0)

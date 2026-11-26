@@ -36,6 +36,7 @@ The body is per-thread scalar code. These are available:
 
 - Element access on a `gm` or `ub` tensor (`tensor[i]`, `tensor[i] = value`) -- see **Element Access** below.
 - Tensor pointers `tensor.ptr` (raw storage base) and `tensor.ptr_with_coord` (view-start address), with element offset arithmetic -- see **Pointer Access** below.
+- Atomic add on a `gm` or `ub` element (`tla.arch.atomic_add(ptr, value)`) -- see **System Variable Access**.
 - Scalar arithmetic, comparison, selection and conversion on `Numeric` values, each emitting its per-thread op -- see **Basic Arithmetic**, **Compare and Select** and **Type Conversion** below.
 - `tla.range` loops and runtime `if`.
 - `tla.print` for per-thread scalars, formatted strings, and GM/UB prefixes -- see [Debug and Printing](../language/debug.md).

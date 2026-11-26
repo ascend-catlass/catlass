@@ -6592,7 +6592,21 @@ def make_tensor_like(
         layout,
         linear_stride_alignment_bytes=_CATLASS_BYTE_PER_C0,
     )
-    if remapped is not None:
+    # ``make_tensor_like(tile.ptr, tile)`` re-shapes the tile's own pointer, so it
+    # names the same storage. That makes it an alias rather than a freshly
+    # allocated buffer: it keeps the reference's view start and strides, which
+    # may be runtime values, instead of re-deriving them from the child shape.
+    # Only a same-layout alias may borrow that geometry: a new layout has its own
+    # rank and strides, so keeping the reference's trees would pair the new tag
+    # with the old shape.
+    ptr_owner = ptr_value.owner
+    aliases_reference = (
+        layout == like_type.layout_tag
+        and getattr(ptr_owner, "name", None) == "tla.tensor_ptr"
+        and len(ptr_owner.operands) == 1
+        and str(ptr_owner.operands[0]) == str(like_value)
+    )
+    if remapped is not None and not aliases_reference:
         shape = remapped.shape
         stride = remapped.stride
         coord = remapped.coord
@@ -6616,11 +6630,14 @@ def make_tensor_like(
     )
     ctx = loc.context if loc is not None else mlir_ir.Context.current
     layout_tag_attr = mlir_ir.Attribute.parse(f"#tla.layout_tag<{layout}>", ctx)
+    attributes = {"layoutTag": layout_tag_attr}
+    if aliases_reference:
+        attributes["aliasOfReference"] = mlir_ir.UnitAttr.get(ctx)
     op = mlir_ir.Operation.create(
         "tla.make_tensor_like",
         operands=[ptr_value, like_value],
         results=[_coerce_type(result_desc)],
-        attributes={"layoutTag": layout_tag_attr},
+        attributes=attributes,
         loc=loc,
     )
     out = op.results[0]
@@ -6641,7 +6658,7 @@ def make_tensor_like(
             "addrspace": addr,
             "layout_tag": layout,
         }
-        if remapped is not None:
+        if remapped is not None and not aliases_reference:
             remapped_trees = _materialize_layout_trees_from_origin(
                 like_meta["origin_shape"], dtype, layout
             )
@@ -13492,6 +13509,214 @@ def gather(
 
 
 @dsl_user_op
+def _arch_atomic_add_simt(
+    ptr: Pointer,
+    value: Any,
+    *,
+    loc: mlir_ir.Location | None = None,
+) -> Numeric | None:
+    """Directory: System Variable Access / Architecture Helpers
+    Description:
+        Atomically add a scalar to the element `ptr` addresses
+        (`tla.arch.atomic_add(ptr, value)`).
+
+        The pointer carries the element type and address space, so the caller
+        computes the element address. `t.ptr` is the storage base, so
+        `t.ptr + i` addresses element `i` from the base; for a view, use
+        `t.ptr_with_coord + i` (the view's first element plus `i`) or
+        `t.ptr + element_offset`. Any pointer built with `tla.make_ptr` /
+        `tla.arch.get_dyn_ub` / `tla.allocate` is accepted too.
+
+        The read-modify-write is atomic, so any number of threads may target
+        the same element without losing an update. Typical uses are counters,
+        histogram bins and reduction accumulators.
+
+        Parameters:
+        - `ptr` (`Pointer`): Pointer to the element that is updated. Required.
+        - `value` (`Numeric | int | float | mlir.ir.Value`): Addend. A Python
+          literal is converted to the pointer's pointee type; a `Numeric` value
+          must match it exactly. Required.
+
+        Returns:
+        - The element's value before the update, as a `Numeric`, for every
+          supported type except `f16`/`bf16`: for those the hardware return
+          value is not the original element, so nothing is returned.
+        - When the return value is unused the compiler can emit the better
+          instruction for the 32-bit integer and floating-point types; the
+          64-bit forms have no such choice. Ignore it when only the accumulate
+          matters.
+
+        Constraints:
+        - Must be called inside a `@tla.kernel`-decorated kernel function.
+        - Only available inside `tla.vec.func(mode="simt")`.
+        - The pointer must be in `gm` or `ub`, and must be built inside the
+          region: from `tensor.ptr` / `tensor.ptr_with_coord` or
+          `tla.make_ptr`. A pointer value cannot be captured from outside the
+          region.
+        - Pointee type must be `i32`, `u32`, `i64`, `u64`, `f32`, `f16` or
+          `bf16`; the 64-bit types are only available in `gm`.
+
+        Example:
+        ```python
+        with tla.vec.func(mode="simt", thread_block_dim=256):
+            tid, _, _ = tla.arch.thread_idx()
+            tla.arch.atomic_add(gm_histogram.ptr + tid, 1.0)
+        ```
+    """
+    from .base_dsl.typing import as_numeric
+
+    _require_category("atomic_add", "ptr", ptr, "pointer", 0)
+    _require_frontend_state("atomic_add")
+    if not _runtime._in_simt_vec_func():
+        _op_error(
+            "atomic_add",
+            "is only available inside a tla.vec.func with mode='simt'",
+        )
+
+    p = _coerce_pointer_arg(ptr)
+    ptr_ty = p._ptr_ty
+    addrspace = ptr_ty.addrspace.lower()
+    if addrspace not in ("gm", "ub"):
+        _op_error(
+            "atomic_add",
+            f"invalid argument 'ptr' (position 0): expected a gm or ub pointer, got {addrspace}",
+        )
+
+    elem_type = ptr_ty.pointee
+    if mlir_ir.IntegerType.isinstance(elem_type):
+        integer_type = mlir_ir.IntegerType(elem_type)
+        element_token = ("u" if integer_type.is_unsigned else "i") + str(
+            integer_type.width
+        )
+    else:
+        element_token = str(elem_type)
+    supported = ("i32", "u32", "i64", "u64", "f32", "f16", "bf16")
+    if element_token not in supported:
+        _op_error(
+            "atomic_add",
+            f"unsupported pointee type {element_token}; supported types are "
+            f"{', '.join(supported)}",
+        )
+    # The atom unit's 64-bit forms exist only for GM.
+    if element_token in ("i64", "u64") and addrspace != "gm":
+        _op_error(
+            "atomic_add",
+            f"invalid argument 'ptr' (position 0): 64-bit atomic add is only "
+            f"supported on gm pointers, got {addrspace}",
+        )
+
+    def _atomic_addend(literal):
+        """``arith.constant`` of the pointee type for a host scalar literal.
+
+        arith only carries signless integers, so an unsigned pointee gets a
+        signless constant of the same width and the cast below lifts it back.
+        The literal is range-checked against the unsigned bounds here.
+        """
+        if mlir_ir.IntegerType.isinstance(elem_type):
+            integer_type = mlir_ir.IntegerType(elem_type)
+            if integer_type.is_unsigned:
+                if isinstance(literal, float) and not literal.is_integer():
+                    _op_error(
+                        "atomic_add",
+                        f"invalid argument 'value' (position 1): expected integer "
+                        f"scalar for {elem_type}, got {literal!r}",
+                    )
+                width = int(integer_type.width)
+                number = int(literal)
+                if not 0 <= number <= 2**width - 1:
+                    _op_error(
+                        "atomic_add",
+                        f"invalid argument 'value' (position 1): integer scalar "
+                        f"{number} out of range for {elem_type} (valid range "
+                        f"[0, {2**width - 1}])",
+                    )
+                signless = mlir_ir.IntegerType.get_signless(width)
+                # arith constants are signless: the same bits read as two's
+                # complement. A uint64 literal past 2**63 therefore arrives as
+                # its negative bit pattern, not as an out-of-range attribute.
+                bits = number - (1 << width) if number >= 1 << (width - 1) else number
+                return mlir_ir.Operation.create(
+                    "arith.constant",
+                    results=[signless],
+                    attributes={"value": mlir_ir.IntegerAttr.get(signless, bits)},
+                    loc=loc,
+                ).results[0]
+        return _scalar_constant_for_element_type(
+            "atomic_add", literal, elem_type, loc=loc
+        )
+
+    resolved = _resolve_bound_value(value)
+    if isinstance(resolved, (int, float)) and not isinstance(resolved, bool):
+        add_value = _atomic_addend(resolved)
+    else:
+        try:
+            if isinstance(resolved, Numeric):
+                num = resolved
+            elif isinstance(resolved, mlir_ir.Value):
+                num = as_numeric(resolved)
+            elif isinstance(value, Numeric):
+                num = value
+            elif isinstance(value, mlir_ir.Value):
+                num = as_numeric(value)
+            else:
+                raise TypeError(type(value).__name__)
+        except (TypeError, ValueError, KeyError):
+            _op_error(
+                "atomic_add",
+                f"invalid argument 'value' (position 1): expected Numeric or "
+                f"scalar literal, got {_type_name(value)}",
+            )
+        dest_cls = Numeric.from_mlir_type(elem_type)
+        if not isinstance(num, dest_cls):
+            _op_error(
+                "atomic_add",
+                f"type mismatch, atomic_add {type(num).dtype} to a pointer whose "
+                f"pointee is {dest_cls.dtype}; cast explicitly with "
+                f".to({dest_cls.__name__}) before atomic_add",
+            )
+        if isinstance(num.value, (bool, int, float)):
+            add_value = _atomic_addend(num.value)
+        else:
+            add_value = num.ir_value(loc=loc)
+    # A ui32/ui64 pointer's op operand is the unsigned type; the conversion
+    # helpers produce the signless one.
+    if (
+        mlir_ir.IntegerType.isinstance(elem_type)
+        and mlir_ir.IntegerType(elem_type).is_unsigned
+        and add_value.type
+        == mlir_ir.IntegerType.get_signless(mlir_ir.IntegerType(elem_type).width)
+    ):
+        add_value = mlir_ir.Operation.create(
+            "builtin.unrealized_conversion_cast",
+            operands=[add_value],
+            results=[elem_type],
+            loc=loc,
+        ).results[0]
+    if str(add_value.type) != str(elem_type):
+        raise TlaLoweringError(
+            f"tla.atomic_add value type mismatch: expected {elem_type}, got {add_value.type}"
+        )
+    old_value = _tla_ops_gen.simt_atomic_add(elem_type, p.value, add_value, loc=loc)
+    if str(old_value.type) != str(elem_type):
+        raise TlaLoweringError(
+            f"tla.atomic_add result type mismatch: expected {elem_type}, got {old_value.type}"
+        )
+    # f16/bf16: the hardware return value is not the original element, so the
+    # API returns nothing rather than hand out an unusable value.
+    if element_token in ("f16", "bf16"):
+        return None
+    dtype = Numeric.from_mlir_type(elem_type)
+    if dtype.is_integer and not dtype.signed:
+        old_value = mlir_ir.Operation.create(
+            "builtin.unrealized_conversion_cast",
+            operands=[old_value],
+            results=[mlir_ir.IntegerType.get_signless(dtype.width)],
+            loc=loc,
+        ).results[0]
+    return dtype(old_value)
+
+
+@dsl_user_op
 def scatter(
     dst: Tensor,
     src: VectorSSA,
@@ -14225,45 +14450,52 @@ def _emit_simd_atomic(
 @dsl_user_op
 def arch_atomic_add(
     ptr: Pointer, value: Any, *, loc: mlir_ir.Location | None = None
-) -> Numeric:
+) -> Numeric | None:
     """Directory: System Variable Access / Architecture Helpers
     Description:
         Atomically add `value` to the element `ptr` addresses
         (`tla.arch.atomic_add(ptr, value)`), returning the old element.
 
         The pointer carries both the element type and the address space. The
-        caller passes the element address -- for a tensor view,
-        `t.ptr_with_coord` names its first element -- and the read-modify-write
-        is atomic, so any number of cores may target the same element without
-        losing an update. Typical uses are counters, histogram bins and
-        reduction accumulators. Both `tla.vector()` and `tla.cube()` can issue
-        it: the atom unit is shared, so a mixed AIV/AIC kernel may target the
-        same element from either core.
+        caller passes the element address -- `t.ptr` is the storage base, so
+        `t.ptr + i` addresses element `i`; for a view, `t.ptr_with_coord` names
+        its first element -- and the read-modify-write is atomic, so any number
+        of cores or threads may target the same element without losing an
+        update. Typical uses are counters, histogram bins and reduction
+        accumulators.
 
-        The returned value is the element's contents before the update, in the
-        pointer's own type: a `u32` pointer returns `UInt32`, a `u64` pointer
-        returns `UInt64`. The old value can be written straight back into a
-        tensor of the same type, for example
-        `dst[0] = tla.arch.atomic_add(dst.ptr_with_coord, 1)`.
+        The entry serves both scalar and SIMT code:
+
+        - Scalar form, inside `tla.vector()` or `tla.cube()` outside any
+          `tla.vec.func`: the atom unit is shared, so a mixed AIV/AIC kernel
+          may target the same element from either core. The returned value is
+          the element's contents before the update, in the pointer's own type:
+          a `u32` pointer returns `UInt32`, a `u64` pointer returns `UInt64`.
+        - SIMT form, inside `tla.vec.func(mode="simt")`: every thread issues
+          its own atomic add and receives the value it replaced. The pointer
+          must be built inside the region and may name GM or UB; `f16`/`bf16`
+          have no usable hardware return value and return `None`.
 
         Parameters:
-        - `ptr` (`Pointer`): GM pointer to the element that is updated. Required.
+        - `ptr` (`Pointer`): pointer to the element that is updated. Required.
         - `value` (`Numeric | int | float`): Addend. A host literal is converted
           to the pointer's pointee type; a `Numeric` must already be that type.
           Required.
 
         Returns:
-        - `Numeric`: the element's value before the update, typed like the
-          pointee. Ignore it when only the accumulation matters.
+        - `Numeric | None`: the element's value before the update, typed like
+          the pointee. `None` for the SIMT `f16`/`bf16` forms. Ignore it when
+          only the accumulation matters.
 
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function.
-        - Must be inside `tla.vector()` or `tla.cube()`, and must not be inside
-          any `tla.vec.func`: the atom unit is a scalar instruction, so it
-          cannot run as part of a vector function. Call it directly in the
-          scalar part of `tla.vector()`, or anywhere in `tla.cube()`.
-        - `ptr` must be a `gm` pointer; the atom unit has no UB form.
-        - Pointee type must be `i32`, `u32`, `i64`, `u64` or `f32`.
+        - Scalar form: inside `tla.vector()` or `tla.cube()` and not inside any
+          `tla.vec.func`; `ptr` must be a `gm` pointer; pointee type must be
+          `i32`, `u32`, `i64`, `u64` or `f32`.
+        - SIMT form: inside `tla.vec.func(mode="simt")`; `ptr` must be in `gm`
+          or `ub` and built inside the region; pointee type must be `i32`,
+          `u32`, `i64`, `u64`, `f32`, `f16` or `bf16`, with the 64-bit types
+          only in `gm`.
         - Ascend 950 (arch 3510).
 
         Example:
@@ -14271,8 +14503,14 @@ def arch_atomic_add(
         with tla.vector():
             old = tla.arch.atomic_add(out.ptr_with_coord, 1)
             out[0] = old  # same type: u32 -> u32, i32 -> i32
+
+        with tla.vec.func(mode="simt", thread_block_dim=32):
+            tid, _, _ = tla.arch.thread_idx()
+            tla.arch.atomic_add(hist.ptr + tid, 1)
         ```
     """
+    if _runtime._in_simt_vec_func():
+        return _arch_atomic_add_simt(ptr, value, loc=loc)
     return _emit_simd_atomic(
         "atomic_add",
         _tla_ops_gen.simd_atomic_add,
@@ -15871,6 +16109,7 @@ _require_generated("simt_sqrt")
 _require_generated("simt_pow")
 _require_generated("simt_load")
 _require_generated("simt_store")
+_require_generated("simt_atomic_add")
 _require_generated("arch_sync_threads")
 _require_generated("arch_dcci_cacheline")
 _require_generated("arch_dcci_cachelines")
@@ -15889,7 +16128,6 @@ arch._set("dcci_cacheline", arch_dcci_cacheline)
 arch._set("dcci_cachelines", arch_dcci_cachelines)
 arch._set("dci", arch_dci)
 arch._set("load_bypass_dcache", arch_load_bypass_dcache)
-arch._set("atomic_add", arch_atomic_add)
 arch._set("atomic_exch", arch_atomic_exch)
 arch._set("bcnt0", arch_bcnt0)
 arch._set("bcnt1", arch_bcnt1)
@@ -15921,6 +16159,7 @@ arch._set("shuffle_sync", arch_shuffle_sync)
 arch._set("shuffle_sync_up", arch_shuffle_sync_up)
 arch._set("shuffle_sync_down", arch_shuffle_sync_down)
 arch._set("shuffle_sync_bfly", arch_shuffle_sync_bfly)
+arch._set("atomic_add", arch_atomic_add)
 arch._set("get_capacity_in_bytes", arch_get_capacity_in_bytes)
 arch._set("get_vec_len_in_bytes", arch_get_vec_len_in_bytes)
 arch._set("get_datablock_size_in_bytes", arch_get_datablock_size_in_bytes)

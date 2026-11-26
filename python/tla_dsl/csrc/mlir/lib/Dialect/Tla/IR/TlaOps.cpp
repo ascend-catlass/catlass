@@ -3160,6 +3160,32 @@ mlir::LogicalResult SimtCmpOp::verify()
     return mlir::success();
 }
 
+mlir::LogicalResult SimtAtomicAddOp::verify()
+{
+    auto ptrType = mlir::dyn_cast<PtrType>(getPtr().getType());
+    if (!ptrType)
+        return emitOpError("ptr must be a !tla.ptr");
+    mlir::Type elemType = ptrType.getPointee();
+    if (getValue().getType() != elemType)
+        return emitOpError() << "value type " << getValue().getType() << " must match the pointer's pointee type "
+                             << elemType;
+    if (getResult().getType() != elemType)
+        return emitOpError() << "result type " << getResult().getType() << " must match the pointer's pointee type "
+                             << elemType;
+
+    auto intType = mlir::dyn_cast<mlir::IntegerType>(elemType);
+    bool supported = intType ? (intType.getWidth() == 32 || intType.getWidth() == 64) :
+                               mlir::isa<mlir::Float32Type, mlir::Float16Type, mlir::BFloat16Type>(elemType);
+    if (!supported)
+        return emitOpError() << "unsupported atomic add element type " << elemType
+                             << " (expected i32, ui32, i64, ui64, f32, f16 or bf16)";
+
+    // The hardware atom unit has 64-bit forms only for GM.
+    if (intType && intType.getWidth() == 64 && ptrType.getAddrspace() != AddressSpace::gm)
+        return emitOpError("64-bit atomic add is only supported on gm pointers");
+    return mlir::success();
+}
+
 mlir::LogicalResult CmpOp::verify()
 {
     if (!hasEnclosingRegion<VecFuncOp>(getOperation()))
