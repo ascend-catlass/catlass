@@ -1851,7 +1851,7 @@ _FULL_SUPPORTED_DTYPES = frozenset(
 # signless integer (arith.constant and the AVE scalar ABI reject ui*).
 _FULL_BYTE_CARRIER_DTYPES = frozenset(("i1", "hif8", "f8e8m0", "f4e2m1x2", "f4e1m2x2"))
 
-_ARANGE_SUPPORTED_DTYPES = frozenset(("i8", "i16", "i32", "i64"))
+_ARANGE_SUPPORTED_DTYPES = frozenset(("i8", "i16", "i32", "i64", "f16", "f32"))
 _ARANGE_ORDERS = frozenset(("increase", "decrease"))
 
 # Width of one Ascend vector register tile in bytes. Must stay in sync with
@@ -10386,6 +10386,67 @@ def _full_vector_ssa_descriptor(dtype_token: str) -> TlaVectorSSATypeDescriptor:
     return TlaVectorSSATypeDescriptor(lanes, token)
 
 
+def _arange_integer_start_value(
+    op_name: str,
+    base: Any,
+    element_type: mlir_ir.Type,
+    *,
+    require_constant: bool = False,
+    loc: mlir_ir.Location | None = None,
+) -> mlir_ir.Value:
+    """Materialize the integral ``arange`` start (base) as ``element_type`` SSA."""
+    const = _const_int_value(base)
+    if const is not None:
+        return _scalar_constant_for_element_type(op_name, const, element_type, loc=loc)
+    resolved = _resolve_bound_value(base)
+    if isinstance(resolved, float) or (
+        isinstance(resolved, Numeric)
+        and type(resolved).is_float
+        and isinstance(resolved.value, (int, float))
+    ):
+        value = resolved if isinstance(resolved, float) else resolved.value
+        if isinstance(value, float) and not value.is_integer():
+            _op_error(
+                op_name,
+                f"base must be an integer value; got {value!r}",
+            )
+        return _scalar_constant_for_element_type(
+            op_name, int(value), element_type, loc=loc
+        )
+    if require_constant:
+        # Floating-point results are built from a constant base in the float
+        # domain; a runtime base would be narrowed to the helper integer type
+        # without a range check.
+        _op_error(
+            op_name,
+            "base must be a compile-time integer constant for floating-point dtype",
+        )
+    if isinstance(resolved, mlir_ir.Value):
+        if resolved.type == element_type:
+            return resolved
+        if isinstance(resolved.type, mlir_ir.IndexType):
+            return mlir_ir.Operation.create(
+                "arith.index_cast",
+                operands=[resolved],
+                results=[element_type],
+                loc=loc,
+            ).results[0]
+        _op_error(op_name, "base must be an integer literal or index SSA value")
+    if (
+        isinstance(resolved, Numeric)
+        and type(resolved).is_integer
+        and type(resolved).signed
+    ):
+        index_value = _runtime._coerce_index_value(resolved)
+        return mlir_ir.Operation.create(
+            "arith.index_cast",
+            operands=[index_value],
+            results=[element_type],
+            loc=loc,
+        ).results[0]
+    _op_error(op_name, "base must be an integer literal or index SSA value")
+
+
 @dsl_user_op
 def arange(
     base: bool | int | float | Numeric = 0,
@@ -10402,11 +10463,18 @@ def arange(
         Parameters:
         - `base` (`bool | int | float | Numeric`): Base offset. Optional, default `0`.
         - `order` (`str`): `'increase'` ascending or `'decrease'` descending. Optional, default `'increase'`.
-        - `dtype` (`type[Numeric]`): Vector element type. Required.
+        - `dtype` (`type[Numeric]`): Vector element type. Required. Supported types:
+          `Int8`, `Int16`, `Int32`, `Int64`, `Float16`, `Float32`.
 
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function.
         - Must be called inside `tla.vec.func()`; `order` supports only `increase` / `decrease`.
+        - `base` must be an integer value. With integer dtypes a lane index that
+          overflows wraps around (for `Int8`, lane 128 holds `-128`). With
+          floating-point dtypes `base` must be a compile-time integer constant; it
+          is rounded into the result type and added in the float domain, so the
+          sequence does not wrap. Floating-point indices are only exact while they
+          are representable.
 
         Example:
         ```python
@@ -10444,45 +10512,26 @@ def arange(
     desc = _full_vector_ssa_descriptor(dtype_token)
     context = loc.context if loc is not None else mlir_ir.Context.current
     element_type = desc.element_mlir_type(context)
-    const = _const_int_value(base)
-    if const is not None:
-        start_value = _scalar_constant_for_element_type(
-            op_name, const, element_type, loc=loc
-        )
+    # A floating-point result is built from an integral lane sequence, so its
+    # start operand keeps the matching integer width (f16 -> i16, f32 -> i32)
+    # and must be a compile-time constant: a runtime base would be narrowed to
+    # that integer type without a range check.
+    if mlir_ir.F16Type.isinstance(element_type):
+        start_element_type = mlir_ir.IntegerType.get_signless(16)
+        require_constant = True
+    elif mlir_ir.F32Type.isinstance(element_type):
+        start_element_type = mlir_ir.IntegerType.get_signless(32)
+        require_constant = True
     else:
-        resolved = _resolve_bound_value(base)
-        if isinstance(resolved, mlir_ir.Value):
-            if resolved.type == element_type:
-                start_value = resolved
-            elif isinstance(resolved.type, mlir_ir.IndexType):
-                start_value = mlir_ir.Operation.create(
-                    "arith.index_cast",
-                    operands=[resolved],
-                    results=[element_type],
-                    loc=loc,
-                ).results[0]
-            else:
-                _op_error(
-                    op_name,
-                    "base must be an integer literal or index SSA value",
-                )
-        elif (
-            isinstance(resolved, Numeric)
-            and type(resolved).is_integer
-            and type(resolved).signed
-        ):
-            index_value = _runtime._coerce_index_value(resolved)
-            start_value = mlir_ir.Operation.create(
-                "arith.index_cast",
-                operands=[index_value],
-                results=[element_type],
-                loc=loc,
-            ).results[0]
-        else:
-            _op_error(
-                op_name,
-                "base must be an integer literal or index SSA value",
-            )
+        start_element_type = element_type
+        require_constant = False
+    start_value = _arange_integer_start_value(
+        op_name,
+        base,
+        start_element_type,
+        require_constant=require_constant,
+        loc=loc,
+    )
     result = _tla_ops_gen.arange(_coerce_type(desc), start_value, order=order, loc=loc)
     return VectorSSA(result)
 

@@ -509,7 +509,7 @@ first mismatch=None
 - 文件位置：
   - `arange_op.py`：`tla.arange` 递增/递减序列生成。
 
-- 功能说明：**`arange_op.py`**（i8, i16, i32）
+- 功能说明：**`arange_op.py`**（i8, i16, i32, f16, f32）
 
   | op | 语义 |
   |------|------|
@@ -521,7 +521,7 @@ first mismatch=None
 
     | 文件 | 支持的数据类型 |
     |------|---------------|
-    | `arange_op.py` | i8, i16, i32 |
+    | `arange_op.py` | i8, i16, i32, f16, f32 |
 
   - `arange_op.py`：无 GM 输入（`input_count=0`）；输出 1 个；支持 batch。
 

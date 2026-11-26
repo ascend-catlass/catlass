@@ -24,9 +24,10 @@ from vector_op_harness import (
 VECTOR_ELE = 400
 VL_ELE = 64
 LOOPS = (VECTOR_ELE + VL_ELE - 1) // VL_ELE
-ALL_DTYPES = ("i8", "i16", "i32")
+ALL_DTYPES = ("i8", "i16", "i32", "f16", "f32")
 
 _KERNEL_DTYPE = tla.Int32
+_IS_FLOAT_DTYPE = False
 _KERNEL_TORCH_DTYPE = None
 _KERNEL_ELEMENT_BYTES = 4
 _KERNEL_SHAPE = (VECTOR_ELE,)
@@ -47,14 +48,24 @@ def arange_op(mem_out: tla.Tensor) -> None:
         tla.set_flag(ub_loaded)
         tla.wait_flag(ub_loaded)
         with tla.vec.func(mode="simd"):
-            for i in tla.range(LOOPS):
-                out_tile = tla.tile_view(
-                    out_ub, tla.make_shape(VL_ELE), tla.make_coord(i)
-                )
-                chunk_start = i * VL_ELE
-                out_tile.store(
-                    tla.arange(chunk_start, order=_ARANGE_ORDER, dtype=_KERNEL_DTYPE)
-                )
+            # Floating-point arange requires a compile-time constant base, so
+            # unroll its chunk loop; integer dtypes keep the dynamic loop.
+            if tla.const_expr(_IS_FLOAT_DTYPE):
+                for i in tla.range_constexpr(LOOPS):
+                    out_tile = tla.tile_view(
+                        out_ub, tla.make_shape(VL_ELE), tla.make_coord(i)
+                    )
+                    out_tile.store(
+                        tla.arange(i * VL_ELE, order=_ARANGE_ORDER, dtype=_KERNEL_DTYPE)
+                    )
+            else:
+                for i in tla.range(LOOPS):
+                    out_tile = tla.tile_view(
+                        out_ub, tla.make_shape(VL_ELE), tla.make_coord(i)
+                    )
+                    out_tile.store(
+                        tla.arange(i * VL_ELE, order=_ARANGE_ORDER, dtype=_KERNEL_DTYPE)
+                    )
 
         tla.set_flag(vec_done)
         tla.wait_flag(vec_done)
@@ -81,19 +92,36 @@ def arange_op_batch(mem_out: tla.Tensor) -> None:
         tla.set_flag(ub_loaded)
         tla.wait_flag(ub_loaded)
         with tla.vec.func(mode="simd"):
-            for i in tla.range(LOOPS):
-                out_tile = tla.tile_view(
-                    out_ub, tla.make_shape(VL_ELE), tla.make_coord(i)
-                )
-                chunk_start = i * VL_ELE
-                if block_idx == 0:
-                    _batch_arange_store(out_tile, chunk_start, _BATCH_OPS[0])
-                elif block_idx == 1:
-                    _batch_arange_store(out_tile, chunk_start, _BATCH_OPS[1])
-                elif block_idx == 2:
-                    _batch_arange_store(out_tile, chunk_start, _BATCH_OPS[2])
-                else:
-                    _batch_arange_store(out_tile, chunk_start, _BATCH_OPS[3])
+            # Floating-point arange requires a compile-time constant base, so
+            # unroll its chunk loop; integer dtypes keep the dynamic loop.
+            if tla.const_expr(_IS_FLOAT_DTYPE):
+                for i in tla.range_constexpr(LOOPS):
+                    out_tile = tla.tile_view(
+                        out_ub, tla.make_shape(VL_ELE), tla.make_coord(i)
+                    )
+                    chunk_start = i * VL_ELE
+                    if block_idx == 0:
+                        _batch_arange_store(out_tile, chunk_start, _BATCH_OPS[0])
+                    elif block_idx == 1:
+                        _batch_arange_store(out_tile, chunk_start, _BATCH_OPS[1])
+                    elif block_idx == 2:
+                        _batch_arange_store(out_tile, chunk_start, _BATCH_OPS[2])
+                    else:
+                        _batch_arange_store(out_tile, chunk_start, _BATCH_OPS[3])
+            else:
+                for i in tla.range(LOOPS):
+                    out_tile = tla.tile_view(
+                        out_ub, tla.make_shape(VL_ELE), tla.make_coord(i)
+                    )
+                    chunk_start = i * VL_ELE
+                    if block_idx == 0:
+                        _batch_arange_store(out_tile, chunk_start, _BATCH_OPS[0])
+                    elif block_idx == 1:
+                        _batch_arange_store(out_tile, chunk_start, _BATCH_OPS[1])
+                    elif block_idx == 2:
+                        _batch_arange_store(out_tile, chunk_start, _BATCH_OPS[2])
+                    else:
+                        _batch_arange_store(out_tile, chunk_start, _BATCH_OPS[3])
         tla.set_flag(vec_done)
         tla.wait_flag(vec_done)
         tla.copy(out_gm, out_ub)
@@ -121,6 +149,7 @@ def _set_kernel_config(
         LOOPS, \
         VECTOR_ELE, \
         _KERNEL_DTYPE, \
+        _IS_FLOAT_DTYPE, \
         _KERNEL_TORCH_DTYPE, \
         _KERNEL_ELEMENT_BYTES
     global _KERNEL_SHAPE, _ARANGE_ORDER
@@ -137,6 +166,7 @@ def _set_kernel_config(
     VL_ELE = config.lanes
     LOOPS = config.loops
     _KERNEL_DTYPE = config.tla_dtype
+    _IS_FLOAT_DTYPE = config.tla_dtype in (tla.Float16, tla.Float32)
     _KERNEL_TORCH_DTYPE = config.torch_dtype
     _KERNEL_ELEMENT_BYTES = config.element_bytes
     return config.tla_dtype, config.torch_dtype, config.default_sentinel
@@ -145,7 +175,8 @@ def _set_kernel_config(
 def _configure_batch(
     ops: tuple[str, ...], dtype_name: str, shape: tuple[int, ...]
 ) -> tuple[type[Any], Any, float | int]:
-    global VL_ELE, LOOPS, VECTOR_ELE, _KERNEL_DTYPE, _KERNEL_TORCH_DTYPE
+    global VL_ELE, LOOPS, VECTOR_ELE, _KERNEL_DTYPE, _IS_FLOAT_DTYPE
+    global _KERNEL_TORCH_DTYPE
     global _KERNEL_ELEMENT_BYTES, _KERNEL_SHAPE, _BATCH_OPS
     if not 1 <= len(ops) <= 4:
         raise SystemExit("arange batch requires one to four operations")
@@ -155,6 +186,7 @@ def _configure_batch(
     VL_ELE = config.lanes
     LOOPS = config.loops
     _KERNEL_DTYPE = config.tla_dtype
+    _IS_FLOAT_DTYPE = config.tla_dtype in (tla.Float16, tla.Float32)
     _KERNEL_TORCH_DTYPE = config.torch_dtype
     _KERNEL_ELEMENT_BYTES = config.element_bytes
     _BATCH_OPS = ops + (ops[-1],) * (4 - len(ops))
@@ -201,7 +233,7 @@ HARNESS = DirectVectorOpHarness(
         unsupported_case=lambda _op, _dtype: False,
         print_skip=lambda _op, _dtype, _shape: None,
         script_path=Path(__file__).resolve(),
-        float_dtypes=frozenset(),
+        float_dtypes=frozenset({"f16", "f32"}),
         input_count=0,
         output_count=1,
         batch_kernel=arange_op_batch,

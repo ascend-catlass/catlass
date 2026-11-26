@@ -1124,6 +1124,12 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
             "--shape", "400", "--batch-size", "4", *dev,
         ]],
     )
+    # Script under python/tla_dsl/tests/end_to_end/. Bases cross the helper
+    # integer boundary (f16 32767, f32 INT32_MAX) for both orders.
+    yield (
+        "vector-arange-float-edge",
+        [["end_to_end/arange_edge_op.py", *dev, "--block-num", "1"]],
+    )
     yield (
         "vector-interleave-op",
         [[

@@ -126,8 +126,14 @@ def Tla_ArangeOp : Tla_Op<"arange", [Pure]> {
     With ``order = decrease``, lane ``i`` holds ``base + VL - 1 - i`` (i.e. ``start + VL - 1``, ``start + VL - 2``, ..., ``start``).
 
     Lowers to AVE ``vci`` with ``INCREASE`` / ``DECREASE`` mode.
+
+    ``start`` is the integral lane base. For a floating-point result it keeps the
+    matching integer width (``f16`` -> ``i16``, ``f32`` -> ``i32``) and must be a
+    constant: the integral sequence is generated from zero and the constant base is
+    added in the float domain, so the sequence does not wrap. Integer results accept
+    a runtime start.
   }];
-  let arguments = (ins AnyTypeOf<[I8, I16, I32, I64]>:$start,
+  let arguments = (ins AnyTypeOf<[I8, I16, I32, I64, F16, F32]>:$start,
                        StrAttr:$order);
   let results = (outs Tla_VectorSSAType:$result);
   let assemblyFormat = [{

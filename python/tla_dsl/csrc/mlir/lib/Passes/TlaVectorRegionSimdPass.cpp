@@ -3621,20 +3621,50 @@ static LogicalResult lowerArange(
     auto opCtx = deriveVecCtxForElement(resultType.getElementType());
     if (failed(opCtx))
         return arangeOp.emitError("unsupported tla.arange result element type"), failure();
-    if (isa<FloatType>(opCtx->elementType))
-        return arangeOp.emitError("tla.arange does not support floating-point element types"), failure();
-    if (start.getType() != opCtx->elementType)
-        return arangeOp.emitError("tla.arange start type ")
-                   << start.getType() << " does not match vector element type " << opCtx->elementType,
-               failure();
     auto vciType = hivmave::VCIType::INCREASE;
     if (arangeOp.getOrder() == "decrease")
         vciType = hivmave::VCIType::DECREASE;
     else if (arangeOp.getOrder() != "increase")
         return arangeOp.emitError("unsupported tla.arange order: ") << arangeOp.getOrder(), failure();
-    valueMap[arangeOp.getResult()] =
-        b.create<hivmave::VFVCIOp>(loc, opCtx->vecType, start, hivmave::VCITypeAttr::get(b.getContext(), vciType))
-            .getRes();
+    auto vciAttr = hivmave::VCITypeAttr::get(b.getContext(), vciType);
+    Type resultElem = opCtx->elementType;
+    if (isa<FloatType>(resultElem)) {
+        // The float VCI form cannot take a non-constant start during device
+        // compilation ("Unsupported Inst must be hoisted"), so generate the
+        // lanes from zero and add the (constant) base in the float domain. This
+        // also keeps the sequence out of the narrower integer helper type
+        // (f16 -> i16, f32 -> i32) that would wrap the sign.
+        Type intElem = IntegerType::get(b.getContext(), resultElem.getIntOrFloatBitWidth());
+        auto intCtx = deriveVecCtxForElement(intElem);
+        if (failed(intCtx))
+            return arangeOp.emitError("unsupported tla.arange helper element type ") << intElem, failure();
+        if (start.getType() != intElem)
+            return arangeOp.emitError("tla.arange start type ")
+                       << start.getType() << " does not match integer helper type " << intElem,
+                   failure();
+        Value zeroStart = b.create<arith::ConstantIntOp>(loc, /*value=*/0, intElem.getIntOrFloatBitWidth());
+        Value intVec = b.create<hivmave::VFVCIOp>(loc, intCtx->vecType, zeroStart, vciAttr).getRes();
+        Value intMask = allTrueMaskFor(fullMasks, loc, intCtx->vecType, arangeOp.getResult().getType());
+        // CastParams defaults: RegSlot.ZERO / SatMode.NOSAT / RoundMode.CAST_NONE.
+        // The integral -> float conversion is lossless, so the rounding mode is
+        // not consumed on this path.
+        int32_t trait[3] = {0, 2, 4};
+        auto lanes = createVectorCastResult(
+            b, fullMasks, loc, intCtx->vecType, opCtx->vecType, intElem, resultElem, trait, intVec, intMask,
+            /*hasUserMask=*/false);
+        if (failed(lanes))
+            return arangeOp.emitError("failed to convert tla.arange lanes to ") << resultElem, failure();
+        Value mask = allTrueMaskFor(fullMasks, loc, opCtx->vecType, arangeOp.getResult().getType());
+        Value base = b.create<arith::SIToFPOp>(loc, resultElem, start).getResult();
+        valueMap[arangeOp.getResult()] =
+            b.create<hivmave::VFAddsOp>(loc, opCtx->vecType, *lanes, base, mask).getResult();
+        return success();
+    }
+    if (start.getType() != resultElem)
+        return arangeOp.emitError("tla.arange start type ")
+                   << start.getType() << " does not match vector element type " << resultElem,
+               failure();
+    valueMap[arangeOp.getResult()] = b.create<hivmave::VFVCIOp>(loc, opCtx->vecType, start, vciAttr).getRes();
     return success();
 }
 

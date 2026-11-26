@@ -3027,6 +3027,31 @@ mlir::LogicalResult ArangeOp::verify()
     auto order = getOrderAttr().getValue();
     if (order != "increase" && order != "decrease")
         return emitOpError("unsupported arange order '") << order << "'; expected 'increase' or 'decrease'";
+    auto resultType = mlir::dyn_cast<VectorSSAType>(getResult().getType());
+    if (!resultType)
+        return emitOpError("result must be a tla.vector type");
+    mlir::Type elementType = resultType.getElementType();
+    mlir::Type expectedStartType;
+    if (auto intType = mlir::dyn_cast<mlir::IntegerType>(elementType)) {
+        auto width = intType.getWidth();
+        if (width != 8 && width != 16 && width != 32 && width != 64)
+            return emitOpError("unsupported arange element type ") << elementType;
+        expectedStartType = elementType;
+    } else if (mlir::isa<mlir::Float16Type>(elementType)) {
+        // Floating-point lanes are built from an integral lane sequence, so the
+        // start operand keeps the matching integer width.
+        expectedStartType = mlir::IntegerType::get(getContext(), 16);
+    } else if (mlir::isa<mlir::Float32Type>(elementType)) {
+        expectedStartType = mlir::IntegerType::get(getContext(), 32);
+    } else {
+        return emitOpError("unsupported arange element type ") << elementType;
+    }
+    if (getStart().getType() != expectedStartType)
+        return emitOpError("start type ") << getStart().getType() << " does not match the " << expectedStartType
+                                          << " lane base required for element type " << elementType;
+    if (mlir::isa<mlir::Float16Type, mlir::Float32Type>(elementType) &&
+        !getStart().getDefiningOp<mlir::arith::ConstantOp>())
+        return emitOpError("floating-point arange requires a constant start");
     return mlir::success();
 }
 

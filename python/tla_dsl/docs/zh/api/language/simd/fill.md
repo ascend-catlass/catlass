@@ -90,12 +90,16 @@ tla.arange(base: bool | int | float | Numeric = 0, *, order: str = 'increase', d
 
 - `base`（`bool | int | float | Numeric`）：起始基数。可选，默认 `0`。
 - `order`（`str`）：`'increase'` 递增或 `'decrease'` 递减。可选，默认 `'increase'`。
-- `dtype`（`type[Numeric]`）：vector 元素类型。必填。
+- `dtype`（`type[Numeric]`）：vector 元素类型。必填。支持 `Int8`/`Int16`/`Int32`/
+  `Int64`/`Float16`/`Float32`。
 
 约束说明：
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
 - 须在 `tla.vec.func()` 内调用；`order` 仅支持 `increase` / `decrease`。
+- `base` 须为整数值。整数 `dtype` 下 lane 索引越界会回绕（如 `Int8` 的第 128 个
+  lane 为 `-128`）。浮点 `dtype` 的 `base` 须为编译期整数常量；它先舍入到结果
+  类型，再在浮点域相加，因此不会回绕。浮点索引仅在可精确表示时准确。
 
 调用示例：
 

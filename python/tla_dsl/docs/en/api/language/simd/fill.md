@@ -95,12 +95,19 @@ Parameters:
 
 - `base` (`bool | int | float | Numeric`): Base offset. Optional, default `0`.
 - `order` (`str`): `'increase'` ascending or `'decrease'` descending. Optional, default `'increase'`.
-- `dtype` (`type[Numeric]`): Vector element type. Required.
+- `dtype` (`type[Numeric]`): Vector element type. Required. Supported types:
+  `Int8`, `Int16`, `Int32`, `Int64`, `Float16`, `Float32`.
 
 Constraints:
 
 - Must be called inside a `@tla.kernel`-decorated kernel function.
 - Must be called inside `tla.vec.func()`; `order` supports only `increase` / `decrease`.
+- `base` must be an integer value. With integer dtypes a lane index that
+  overflows wraps around (for `Int8`, lane 128 holds `-128`). With
+  floating-point dtypes `base` must be a compile-time integer constant; it
+  is rounded into the result type and added in the float domain, so the
+  sequence does not wrap. Floating-point indices are only exact while they
+  are representable.
 
 Example:
 
