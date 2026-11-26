@@ -219,7 +219,6 @@ set(EXAMPLE_ASCEND950
     73_ascend950_matmul_full_loadA
     74_ascend950_weight_quant_a8w4_grouped_mx_matmul
     80_ascend950_grouped_matmul_slice_m_gelu
-    82_ascend950_basic_syrk
     83_ascend950_hstu_infer
     84_ascend950_syrk
     88_ascend950_bmm_broadcast

@@ -63,7 +63,13 @@ bf16 输入、输出分别占 `2MK`、`2M²` 字节。输出随 M 平方增长�
 
 ### 执行示例
 
-1. 加载 CANN 环境，进入项目根目录并编译样例。
+本样例位于 `experimental/matmul/`。如需编译，在仓库根目录执行以下命令，将样例复制到 `examples/`，然后在 `examples/CMakeLists.txt` 的 `EXAMPLE_ASCEND950` 列表中加入 `82_ascend950_basic_syrk`。
+
+```bash
+cp -R experimental/matmul/82_ascend950_basic_syrk examples/
+```
+
+1. 在仓库根目录加载 CANN 环境并编译样例。
 
     ```bash
     source /usr/local/Ascend/cann/set_env.sh
