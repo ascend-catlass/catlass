@@ -363,7 +363,7 @@ if init_c:
 
 **文件**：[`basic_matmul_fixpipe_per_channel.py`](./basic_matmul_fixpipe_per_channel.py)
 
-该矩阵乘示例在 L0C→GM 经 FIXPIPE 完成完成随路量化（`QuantMode.PER_CHANNEL`），按输出通道应用量化参数。每个输出通道对应一个 `u64` 量化字：低 32 位为 f32 scale），bit 46 为 8 bit 目的类型的符号选择位，[45:37] 为 9 bit 有符号 offset。
+该矩阵乘示例在 L0C→GM 经 FIXPIPE 完成随路量化（`QuantMode.PER_CHANNEL`），按输出通道应用量化参数。每个输出通道对应一个 `u64` 量化字：低 32 位为 f32 scale，bit 46 为 8 bit 目的类型的符号选择位，[45:37] 为 9 bit 有符号 offset。
 
 通过 `tla.params.CopyL0C2DstParams` 参数指定量化模式及张量，可同时启用随路 ReLU。关键代码如下：
 
