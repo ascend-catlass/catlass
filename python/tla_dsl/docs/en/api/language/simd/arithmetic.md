@@ -687,6 +687,54 @@ with tla.vec.func(mode="simd"):
 
 ---
 
+## `tla.arch.mul_inplace_add`
+
+**Source:** [`catlass.core_api.arch_mul_inplace_add`](../../../../../catlass/core_api.py)
+
+Description:
+
+Return a new register containing `accumulator + lhs * rhs` in each
+active lane. Floating-point results are rounded once after the fused
+operation. Integer results wrap to the input element width. The original
+`accumulator` remains available after the call.
+
+Prototype:
+
+```python
+tla.arch.mul_inplace_add(accumulator: VectorSSA, lhs: VectorSSA, rhs: VectorSSA, *, mask: MaskSSA | None = None) -> VectorSSA
+```
+
+Parameters:
+
+- `accumulator` (`VectorSSA`): Register holding the addend. Required.
+- `lhs` (`VectorSSA`): First multiplicand. Required.
+- `rhs` (`VectorSSA`): Second multiplicand. Required.
+- `mask` (`MaskSSA | None`): Execution mask. Inactive result lanes are zero
+  (ZEROING). `None` enables all lanes. Optional, default `None`.
+
+Constraints:
+
+- Must be called inside `@tla.kernel` and `tla.vec.func(mode="simd")`.
+- All three inputs must have the same element type and valid lane count.
+- Supports `Float16`, `BFloat16`, `Float32`, `Int16`, `UInt16`, `Int32`
+  and `UInt32`.
+- When chaining calls, a lane masked off in one call starts from zero
+  if a later call selects it again. To keep its previous sum, use
+  `tla.where(mask, result, accumulator)` before the next call.
+
+Example:
+
+```python
+with tla.vec.func(mode="simd"):
+    accumulator = accumulator_tile.load()
+    left = left_tile.load()
+    right = right_tile.load()
+    accumulator = tla.arch.mul_inplace_add(accumulator, left, right, mask=active)
+    output_tile.store(accumulator, mask=active)
+```
+
+---
+
 ## `tla.relu`
 
 **Source:** [`catlass.core_api.relu`](../../../../../catlass/core_api.py)

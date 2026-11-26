@@ -940,7 +940,7 @@ static bool isVectorComputeOp(Operation* op)
            isa_and_nonnull<::tla::PackOp>(op) || isa_and_nonnull<::tla::UnpackOp>(op) ||
            isa_and_nonnull<::tla::InterleaveOp, ::tla::DeInterleaveOp, ::tla::MullOp, ::tla::AddCOp, ::tla::SubCOp>(
                op) ||
-           isa_and_nonnull<::tla::GenerateMaskOp>(op);
+           isa_and_nonnull<::tla::GenerateMaskOp, ::tla::MulInplaceAddOp>(op);
 }
 
 static void annotateAivLibraryCall(func::FuncOp callee)
@@ -5813,6 +5813,27 @@ static LogicalResult lowerNestedVectorOp(
     if (auto info = getVectorScalarBinaryInfo(&op))
         return lowerVectorScalarBinary(op, &*info, b, module, valueMap, fullMasks);
 
+    if (auto mulInplaceAddOp = dyn_cast<::tla::MulInplaceAddOp>(op)) {
+        Value accumulator = valueMap.lookup(mulInplaceAddOp.getAccumulator());
+        Value lhs = valueMap.lookup(mulInplaceAddOp.getLhs());
+        Value rhs = valueMap.lookup(mulInplaceAddOp.getRhs());
+        if (!accumulator)
+            return mulInplaceAddOp.emitError("mul_inplace_add failed to map accumulator operand");
+        if (!lhs)
+            return mulInplaceAddOp.emitError("mul_inplace_add failed to map lhs operand");
+        if (!rhs)
+            return mulInplaceAddOp.emitError("mul_inplace_add failed to map rhs operand");
+        auto type = cast<VectorType>(accumulator.getType());
+        Value mask = mulInplaceAddOp.getMask() ?
+                         valueMap.lookup(mulInplaceAddOp.getMask()) :
+                         allTrueMaskFor(fullMasks, loc, type, mulInplaceAddOp.getAccumulator().getType());
+        if (!mask)
+            return mulInplaceAddOp.emitError("mul_inplace_add failed to materialize mask");
+        // VMULA's first operand is the old destination (the addend).
+        valueMap[mulInplaceAddOp.getResult()] = b.create<hivmave::VFMulaOp>(loc, type, accumulator, lhs, rhs, mask);
+        return success();
+    }
+
     // tla.where: per-lane select. The mask controls which lanes take `x`; the
     // remaining lanes take `y`. VectorSSA lowers to ave.hir.vsel(mask, x, y),
     // while MaskSSA calls the linked psel bitcode helper.
@@ -6772,6 +6793,12 @@ public:
                         vecFuncOp,
                         "expected tla.cmp mask from create/update mask or "
                         "prior mask compute op");
+            } else if (auto mulInplaceAddOp = dyn_cast<::tla::MulInplaceAddOp>(computeOp)) {
+                for (OpOperand& operand : mulInplaceAddOp->getOpOperands())
+                    if (!producedValues.contains(operand.get()))
+                        return mulInplaceAddOp.emitError("mul_inplace_add operand #")
+                               << operand.getOperandNumber()
+                               << " requires a vector or mask produced inside the SIMD region";
             } else if (auto whereOp = dyn_cast<::tla::WhereOp>(computeOp)) {
                 if (!producedValues.contains(whereOp.getMask()))
                     return rewriter.notifyMatchFailure(

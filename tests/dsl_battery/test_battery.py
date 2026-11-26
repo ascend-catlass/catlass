@@ -1373,6 +1373,12 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         [["end_to_end/int4_casts_op.py", "--case", "narrow", "--run", *dev]],
     )
 
+    for dtype in ("f16", "bf16", "f32", "i16", "u16", "i32", "u32"):
+        yield (
+            f"vector-mul-inplace-add-{dtype}",
+            [["end_to_end/mul_inplace_add_op.py", "--dtype", dtype, *dev]],
+        )
+
     # Same-width bit reinterpretation: the f32 round trips through i32 and u32
     # are subtracted to zero, so a rewritten register shows as a mismatch
     # rather than hiding behind the exponent term.

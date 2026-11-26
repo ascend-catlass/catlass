@@ -453,6 +453,24 @@ def _check_select_element_type_supported(op_name: str, element_type: str) -> Non
     )
 
 
+_SUPPORTED_MUL_INPLACE_ADD_ELEMENT_TYPES = frozenset(
+    {"bf16", "f16", "f32", "i16", "i32", "u16", "u32"}
+)
+
+
+def _check_mul_inplace_add_element_type_supported(
+    op_name: str, element_type: str
+) -> None:
+    if element_type in _SUPPORTED_MUL_INPLACE_ADD_ELEMENT_TYPES:
+        return
+    supported = ", ".join(sorted(_SUPPORTED_MUL_INPLACE_ADD_ELEMENT_TYPES))
+    _op_error(
+        op_name,
+        f"unsupported mul_inplace_add element type {element_type}; "
+        f"supported element types are {supported}",
+    )
+
+
 class ReductionOp(Enum):
     ADD = "add"
     MAX = "max"
@@ -12643,6 +12661,83 @@ def arch_muls_cast(
 
 
 @dsl_user_op
+def arch_mul_inplace_add(
+    accumulator: VectorSSA,
+    lhs: VectorSSA,
+    rhs: VectorSSA,
+    *,
+    mask: MaskSSA | None = None,
+    loc: mlir_ir.Location | None = None,
+) -> VectorSSA:
+    """Directory: SIMD Vector Compute / Basic Arithmetic
+
+    Description:
+        Return a new register containing `accumulator + lhs * rhs` in each
+        active lane. Floating-point results are rounded once after the fused
+        operation. Integer results wrap to the input element width. The original
+        `accumulator` remains available after the call.
+
+        Parameters:
+        - `accumulator` (`VectorSSA`): Register holding the addend. Required.
+        - `lhs` (`VectorSSA`): First multiplicand. Required.
+        - `rhs` (`VectorSSA`): Second multiplicand. Required.
+        - `mask` (`MaskSSA | None`): Execution mask. Inactive result lanes are zero
+          (ZEROING). `None` enables all lanes. Optional, default `None`.
+
+        Constraints:
+        - Must be called inside `@tla.kernel` and `tla.vec.func(mode="simd")`.
+        - All three inputs must have the same element type and valid lane count.
+        - Supports `Float16`, `BFloat16`, `Float32`, `Int16`, `UInt16`, `Int32`
+          and `UInt32`.
+        - When chaining calls, a lane masked off in one call starts from zero
+          if a later call selects it again. To keep its previous sum, use
+          `tla.where(mask, result, accumulator)` before the next call.
+
+        Example:
+        ```python
+        with tla.vec.func(mode="simd"):
+            accumulator = accumulator_tile.load()
+            left = left_tile.load()
+            right = right_tile.load()
+            accumulator = tla.arch.mul_inplace_add(accumulator, left, right, mask=active)
+            output_tile.store(accumulator, mask=active)
+        ```
+    """
+    op_name = "arch.mul_inplace_add"
+    _runtime._require_kernel_simd_region(op_name)
+    for position, (name, value) in enumerate(
+        (("accumulator", accumulator), ("lhs", lhs), ("rhs", rhs))
+    ):
+        _require_category(op_name, name, value, "vector_ssa", position)
+    if mask is not None:
+        _require_category(op_name, "mask", mask, "mask_ssa", 3)
+    accumulator_value = _as_value(accumulator)
+    lhs_value = _as_value(lhs)
+    rhs_value = _as_value(rhs)
+    element_type = _vector_ssa_type_for_mlir_value(accumulator_value).element_type
+    _check_mul_inplace_add_element_type_supported(op_name, element_type)
+    for name, value in (("lhs", lhs_value), ("rhs", rhs_value)):
+        if value.type != accumulator_value.type:
+            _op_error(
+                op_name,
+                f"{name} must have the same type and valid lane count as accumulator",
+            )
+    mask_value = _as_value(mask) if mask is not None else None
+    if mask_value is not None:
+        _require_mask_matches_element_type(op_name, mask_value, element_type)
+    return VectorSSA(
+        _tla_ops_gen.mul_inplace_add(
+            accumulator_value.type,
+            accumulator_value,
+            lhs_value,
+            rhs_value,
+            mask=mask_value,
+            loc=loc,
+        )
+    )
+
+
+@dsl_user_op
 def relu(
     src: VectorSSA,
     *,
@@ -16893,6 +16988,7 @@ arch._set("shuffle_sync_down", arch_shuffle_sync_down)
 arch._set("shuffle_sync_bfly", arch_shuffle_sync_bfly)
 arch._set("inplace_mul_add", arch_inplace_mul_add)
 arch._set("atomic_add", arch_atomic_add)
+arch._set("mul_inplace_add", arch_mul_inplace_add)
 arch._set("get_capacity_in_bytes", arch_get_capacity_in_bytes)
 arch._set("get_vec_len_in_bytes", arch_get_vec_len_in_bytes)
 arch._set("get_datablock_size_in_bytes", arch_get_datablock_size_in_bytes)

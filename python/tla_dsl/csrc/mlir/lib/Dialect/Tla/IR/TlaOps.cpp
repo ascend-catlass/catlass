@@ -1831,6 +1831,25 @@ static mlir::LogicalResult verifyMaskSelectTypes(
     return mlir::success();
 }
 
+mlir::LogicalResult MulInplaceAddOp::verify()
+{
+    if (!hasEnclosingRegion<VecFuncOp>(getOperation()))
+        return emitOpError("must be nested inside a tla.vec.func region");
+    auto vf = getOperation()->getParentOfType<VecFuncOp>();
+    if (vf && !hasSimdMode(vf))
+        return emitOpError("is only supported in tla.vec.func(mode='simd')");
+    auto type = mlir::cast<VectorSSAType>(getAccumulator().getType());
+    if (getLhs().getType() != type || getRhs().getType() != type || getResult().getType() != type)
+        return emitOpError("requires all inputs and result to have the same type and valid lane count");
+    mlir::Type element = type.getElementType();
+    auto integer = mlir::dyn_cast<mlir::IntegerType>(element);
+    if (!element.isF16() && !element.isBF16() && !element.isF32() &&
+        !(integer && !integer.isSigned() && (integer.getWidth() == 16 || integer.getWidth() == 32)))
+        return emitOpError("unsupported element type ")
+               << element << "; supported element types are bf16, f16, f32, i16, i32, ui16, ui32";
+    return verifyMaskMatchesVector(getOperation(), getMask(), type);
+}
+
 mlir::LogicalResult WhereOp::verify()
 {
     if (!hasEnclosingRegion<VecFuncOp>(getOperation()))

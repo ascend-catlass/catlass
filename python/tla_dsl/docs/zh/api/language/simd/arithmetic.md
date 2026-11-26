@@ -602,6 +602,49 @@ with tla.vec.func(mode="simd"):
 
 ---
 
+## `tla.arch.mul_inplace_add`
+
+**源码：** [`catlass.core_api.arch_mul_inplace_add`](../../../../../catlass/core_api.py)
+
+功能说明：
+
+返回新的寄存器，每个有效 lane 计算 `accumulator + lhs * rhs`。
+浮点结果在融合乘加结束时舍入一次。整数结果按输入元素位宽回绕。调用后仍可使用原来的 `accumulator`。
+
+函数原型：
+
+```python
+tla.arch.mul_inplace_add(accumulator: VectorSSA, lhs: VectorSSA, rhs: VectorSSA, *, mask: MaskSSA | None = None) -> VectorSSA
+```
+
+参数说明：
+
+- `accumulator`（`VectorSSA`）：保存加数的寄存器。必填。
+- `lhs`（`VectorSSA`）：第一个乘数。必填。
+- `rhs`（`VectorSSA`）：第二个乘数。必填。
+- `mask`（`MaskSSA | None`）：执行掩码，未选中的结果 lane 为零（ZEROING）。
+  `None` 表示所有 lane 有效。可选，默认 `None`。
+
+约束说明：
+
+- 须在 `@tla.kernel` 和 `tla.vec.func(mode="simd")` 内调用。
+- 三个输入的元素类型和有效 lane 数须相同。
+- 支持 `Float16`、`BFloat16`、`Float32`、`Int16`、`UInt16`、`Int32` 和 `UInt32`。
+- 连续累加时，如果某个位置本次未被掩码选中，下次再选中时会从零开始累加。要保留该位置原来的累加值，可在下一次调用前使用 `tla.where(mask, result, accumulator)`。
+
+调用示例：
+
+```python
+with tla.vec.func(mode="simd"):
+    accumulator = accumulator_tile.load()
+    left = left_tile.load()
+    right = right_tile.load()
+    accumulator = tla.arch.mul_inplace_add(accumulator, left, right, mask=active)
+    output_tile.store(accumulator, mask=active)
+```
+
+---
+
 ## `tla.relu`
 
 **源码：** [`catlass.core_api.relu`](../../../../../catlass/core_api.py)

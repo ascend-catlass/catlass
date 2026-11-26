@@ -340,6 +340,25 @@ def Tla_MulsCastOp : Tla_Op<"muls_cast", [Pure]> {
   let hasVerifier = 1;
 }
 
+def Tla_MulInplaceAddOp : Tla_Op<"mul_inplace_add", [Pure]> {
+  let summary = "Fused vector multiply-add with an accumulator addend";
+  let description = [{
+    Computes accumulator + lhs * rhs in one fused operation.
+    Inputs and result have the same type and valid lane count. Masked-out
+    result lanes are zero. The accumulator is an SSA input, not mutated storage.
+  }];
+  let arguments = (ins Tla_VectorSSAType:$accumulator,
+                       Tla_VectorSSAType:$lhs, Tla_VectorSSAType:$rhs,
+                       Optional<Tla_MaskSSAType>:$mask);
+  let results = (outs Tla_VectorSSAType:$result);
+  let hasVerifier = 1;
+  let assemblyFormat = [{
+    $accumulator `,` $lhs `,` $rhs (`mask` $mask^)? attr-dict `:`
+    qualified(type($accumulator)) `,` qualified(type($lhs)) `,`
+    qualified(type($rhs)) (`mask` qualified(type($mask))^)? `->` qualified(type($result))
+  }];
+}
+
 def Tla_DivOp : Tla_VectorBinaryOp<"div",
     "Vector divide on VectorSSA values",
     "Element-wise divide on VectorSSA values.">;
