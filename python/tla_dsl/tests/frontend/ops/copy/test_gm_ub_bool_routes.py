@@ -119,18 +119,6 @@ def test_gm_vector_to_ub_accepts_bool(compiler_tlair: Any) -> None:
     assert "tla.copy" in mlir
 
 
-@pytest.mark.parametrize("dtype", [tla.HiFloat8])
-def test_gm_vector_to_ub_rejects_hif8(dtype, compiler_tlair: Any) -> None:
-    """VL GM→UB admits b64 + bool + ExtParams-safe scalars; not hif8/fp8."""
-    with pytest.raises(TlaCoreAPIError, match="unsupported copy route"):
-        gm_to_ub_kernel.dump_mlir(
-            type_args=(
-                _vec(dtype=dtype, addrspace=tla.AddressSpace.ub),
-                _vec(dtype=dtype, addrspace=tla.AddressSpace.gm),
-            )
-        )
-
-
 def test_gm_to_ub_bool_accepts_copy_pad_params(compiler_tlair: Any) -> None:
     """Bool element + CopyPadParams is in scope (pad counts still reject bool)."""
     # Multi-row pad needs AlignUp(src+left+right, 32) dst stride (1B elem → 64).
@@ -173,9 +161,7 @@ def gm_to_ub_with_pad(dst: tla.Tensor, src: tla.Tensor) -> None:
 
     with tla.vector():
         # i1 tiles require bool/tla.Bool fill (bare int is rejected).
-        tla.copy(
-            dst, src, params=CopyPadParams(right_padding=1, padding_value=False)
-        )
+        tla.copy(dst, src, params=CopyPadParams(right_padding=1, padding_value=False))
 
 
 @tla.kernel
@@ -183,9 +169,7 @@ def gm_to_ub_with_pad_true(dst: tla.Tensor, src: tla.Tensor) -> None:
     from catlass.params import CopyPadParams
 
     with tla.vector():
-        tla.copy(
-            dst, src, params=CopyPadParams(right_padding=1, padding_value=True)
-        )
+        tla.copy(dst, src, params=CopyPadParams(right_padding=1, padding_value=True))
 
 
 @tla.kernel

@@ -20,6 +20,12 @@
 
 namespace Catlass::Epilogue::Tile {
 
+/// BC pad bag for hif8/fp8/fp4: distinct from ``DataCopyPadExtParams<ElementSrc>``
+/// so ``ElementSrc == uint8_t`` does not collide with a typed ExtParams overload.
+struct GmUbLowpPadParams {
+    AscendC::DataCopyPadExtParams<uint8_t> pad;
+};
+
 /// CopyGm2UbTla optional third argument is AscendC ``DataCopyPadExtParams<T>``.
 ///
 /// Default two-arg path uses ``isPad=false, left=right=0, value=0`` (exact bytes).
@@ -29,9 +35,8 @@ namespace Catlass::Epilogue::Tile {
 /// - When ``sizeof(T)==8`` (b64), ``paddingValue`` must be 0.
 /// - ``blockLen`` must be a multiple of ``sizeof(T)``; GM src 1B-aligned,
 ///   UB dst 32B-aligned.
-/// - Ascend950 RowMajor mx fp8/fp4 path reinterprets as ``uint8_t``; ExtParams
-///   flags are forwarded, ``paddingValue`` is forced to 0 on that path.
-/// - HiFloat8 uses the same uint8 reinterpret on the two-arg RowMajor path only.
+/// - Ascend950 RowMajor/VectorLayout mx fp8/fp4/hif8 reinterprets as ``uint8_t``.
+///   Pad ExtParams flags and the low 8 bits of ``paddingValue`` are forwarded.
 
 template <class ArchTag, class TensorSrc, class TensorDst, class Enable = void>
 struct CopyGm2UbTla {
@@ -114,7 +119,7 @@ struct CopyGm2UbTla<
     Arch::Ascend950, tla::Tensor<AscendC::GlobalTensor<ElementSrc>, LayoutSrc, CoordSrc, AscendC::TPosition::GM>,
     tla::Tensor<AscendC::LocalTensor<ElementDst>, LayoutDst, CoordDst, AscendC::TPosition::VECCALC>,
     std::enable_if_t<tla::detail::isVector<LayoutSrc>::value && tla::detail::isVector<LayoutDst>::value>> {
-    static constexpr uint32_t ELE_NUM_PER_BLK = BYTE_PER_BLK / sizeof(ElementSrc);
+    static constexpr uint32_t ELE_NUM_PER_BLK = BytesToBits(BYTE_PER_BLK) / SizeOfBits<ElementSrc>::value;
 
     // Methods
 
@@ -135,11 +140,20 @@ struct CopyGm2UbTla<
             "while TensorDst must be UB and Vector");
 
         AscendC::DataCopyExtParams dataCopyParams(
-            1, tla::get<0>(srcTensor.originShape()) * sizeof(ElementSrc), 0, 0, 0);
-        AscendC::DataCopyPadExtParams<ElementSrc> padParams(false, 0, 0, 0);
+            1, ElementsToBytes<ElementSrc>(tla::get<0>(srcTensor.originShape())), 0, 0, 0);
         auto dstOffset = dstTensor.layout()(dstTensor.coord());
         auto srcOffset = srcTensor.layout()(srcTensor.coord());
-        AscendC::DataCopyPad(dstTensor.data()[dstOffset], srcTensor.data()[srcOffset], dataCopyParams, padParams);
+        if constexpr (AscendC::Std::is_one_of_v<
+                          ElementSrc, float8_e4m3_t, float8_e5m2_t, float8_e8m0_t, hifloat8_t, float4_e2m1x2_t,
+                          float4_e1m2x2_t>) {
+            AscendC::DataCopyPadExtParams<uint8_t> padParams(false, 0, 0, 0);
+            AscendC::DataCopyPad(
+                dstTensor.data()[dstOffset].template ReinterpretCast<uint8_t>(),
+                srcTensor.data()[srcOffset].template ReinterpretCast<uint8_t>(), dataCopyParams, padParams);
+        } else {
+            AscendC::DataCopyPadExtParams<ElementSrc> padParams(false, 0, 0, 0);
+            AscendC::DataCopyPad(dstTensor.data()[dstOffset], srcTensor.data()[srcOffset], dataCopyParams, padParams);
+        }
     }
 
     template <class TensorDst, class TensorSrc>
@@ -158,10 +172,42 @@ struct CopyGm2UbTla<
             "while TensorDst must be UB and Vector");
 
         AscendC::DataCopyExtParams dataCopyParams(
-            1, tla::get<0>(srcTensor.originShape()) * sizeof(ElementSrc), 0, 0, 0);
+            1, ElementsToBytes<ElementSrc>(tla::get<0>(srcTensor.originShape())), 0, 0, 0);
         auto dstOffset = dstTensor.layout()(dstTensor.coord());
         auto srcOffset = srcTensor.layout()(srcTensor.coord());
-        AscendC::DataCopyPad(dstTensor.data()[dstOffset], srcTensor.data()[srcOffset], dataCopyParams, padParams);
+        if constexpr (AscendC::Std::is_one_of_v<
+                          ElementSrc, float8_e4m3_t, float8_e5m2_t, float8_e8m0_t, hifloat8_t, float4_e2m1x2_t,
+                          float4_e1m2x2_t>) {
+            uint8_t fillBits = *reinterpret_cast<const uint8_t*>(&padParams.paddingValue);
+            AscendC::DataCopyPadExtParams<uint8_t> padParamsU8(
+                padParams.isPad, padParams.leftPadding, padParams.rightPadding, fillBits);
+            AscendC::DataCopyPad(
+                dstTensor.data()[dstOffset].template ReinterpretCast<uint8_t>(),
+                srcTensor.data()[srcOffset].template ReinterpretCast<uint8_t>(), dataCopyParams, padParamsU8);
+        } else {
+            AscendC::DataCopyPad(dstTensor.data()[dstOffset], srcTensor.data()[srcOffset], dataCopyParams, padParams);
+        }
+    }
+
+    // BC pad path for hif8/fp8/fp4 (ccec-safe uint8 ExtParams bag).
+    template <class TensorDst, class TensorSrc>
+    CATLASS_DEVICE void operator()(
+        TensorDst const& dstTensor, TensorSrc const& srcTensor, GmUbLowpPadParams const& lowpPad)
+    {
+        static_assert(
+            AscendC::Std::is_one_of_v<
+                ElementSrc, float8_e4m3_t, float8_e5m2_t, float8_e8m0_t, hifloat8_t, float4_e2m1x2_t, float4_e1m2x2_t>,
+            "GmUbLowpPadParams is only for low-precision GM→UB VectorLayout");
+        static_assert(
+            std::is_same_v<ElementSrc, ElementDst>,
+            "CopyGm2UbTla: ElementSrc and ElementDst must match AscendC DataCopyPad T");
+        AscendC::DataCopyExtParams dataCopyParams(
+            1, ElementsToBytes<ElementSrc>(tla::get<0>(srcTensor.originShape())), 0, 0, 0);
+        auto dstOffset = dstTensor.layout()(dstTensor.coord());
+        auto srcOffset = srcTensor.layout()(srcTensor.coord());
+        AscendC::DataCopyPad(
+            dstTensor.data()[dstOffset].template ReinterpretCast<uint8_t>(),
+            srcTensor.data()[srcOffset].template ReinterpretCast<uint8_t>(), dataCopyParams, lowpPad.pad);
     }
 };
 
@@ -247,16 +293,46 @@ struct CopyGm2UbTla<
         auto dstOffset = dstTensor.layout()(dstTensor.coord());
         auto srcOffset = srcTensor.layout()(srcTensor.coord());
         if constexpr (AscendC::Std::is_one_of_v<
-                          ElementSrc, float8_e4m3_t, float8_e5m2_t, float8_e8m0_t, float4_e2m1x2_t, float4_e1m2x2_t>) {
-            // MX types go through uint8_t DataCopyPad; forward pad flags, force value 0.
+                          ElementSrc, float8_e4m3_t, float8_e5m2_t, float8_e8m0_t, hifloat8_t, float4_e2m1x2_t,
+                          float4_e1m2x2_t>) {
+            // Low-precision types go through uint8_t DataCopyPad; forward pad
+            // flags and the low 8 bits of paddingValue (UB fill, no OUTTOL1).
+            uint8_t fillBits = *reinterpret_cast<const uint8_t*>(&padParams.paddingValue);
             AscendC::DataCopyPadExtParams<uint8_t> padParamsU8(
-                padParams.isPad, padParams.leftPadding, padParams.rightPadding, static_cast<uint8_t>(0));
+                padParams.isPad, padParams.leftPadding, padParams.rightPadding, fillBits);
             AscendC::DataCopyPad(
                 dstTensor.data()[dstOffset].template ReinterpretCast<uint8_t>(),
                 srcTensor.data()[srcOffset].template ReinterpretCast<uint8_t>(), dataCopyParams, padParamsU8);
         } else {
             AscendC::DataCopyPad(dstTensor.data()[dstOffset], srcTensor.data()[srcOffset], dataCopyParams, padParams);
         }
+    }
+
+    // BC pad path for hif8/fp8/fp4 (ccec-safe uint8 ExtParams bag).
+    template <class TensorDst, class TensorSrc>
+    CATLASS_DEVICE void operator()(
+        TensorDst const& dstTensor, TensorSrc const& srcTensor, GmUbLowpPadParams const& lowpPad)
+    {
+        static_assert(
+            AscendC::Std::is_one_of_v<
+                ElementSrc, float8_e4m3_t, float8_e5m2_t, float8_e8m0_t, hifloat8_t, float4_e2m1x2_t, float4_e1m2x2_t>,
+            "GmUbLowpPadParams is only for low-precision GM→UB RowMajor");
+        static_assert(
+            std::is_same_v<ElementSrc, ElementDst>,
+            "CopyGm2UbTla: ElementSrc and ElementDst must match AscendC DataCopyPad T");
+        const uint32_t blockLen = ElementsToBytes<ElementSrc>(tla::get<1>(srcTensor.originShape()));
+        const int64_t srcStride =
+            ElementsToBytes<ElementSrc, int64_t>(tla::get<0>(srcTensor.stride())) - static_cast<int64_t>(blockLen);
+        const int64_t dstGapElems = tla::get<0>(dstTensor.stride()) - tla::get<1>(srcTensor.originShape()) -
+                                    static_cast<int64_t>(lowpPad.pad.leftPadding) -
+                                    static_cast<int64_t>(lowpPad.pad.rightPadding);
+        AscendC::DataCopyExtParams dataCopyParams(
+            tla::get<0>(srcTensor.originShape()), blockLen, srcStride, dstGapElems / ELE_NUM_PER_BLK, 0);
+        auto dstOffset = dstTensor.layout()(dstTensor.coord());
+        auto srcOffset = srcTensor.layout()(srcTensor.coord());
+        AscendC::DataCopyPad(
+            dstTensor.data()[dstOffset].template ReinterpretCast<uint8_t>(),
+            srcTensor.data()[srcOffset].template ReinterpretCast<uint8_t>(), dataCopyParams, lowpPad.pad);
     }
 };
 #endif

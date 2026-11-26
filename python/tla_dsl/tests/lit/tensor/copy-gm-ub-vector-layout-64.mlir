@@ -3,7 +3,9 @@
 // RUN: sed 's/ptr<i64/ptr<f64/g' %s | %tla_compile - -o - | %filecheck %s --check-prefixes=CHECK,FLOAT
 // RUN: sed 's/ptr<i64/ptr<f32/g' %s | %tla_compile - -o - | %filecheck %s --check-prefixes=CHECK,F32
 // RUN: sed 's/ptr<i64/ptr<i1/g' %s | %tla_compile - -o - | %filecheck %s --check-prefixes=CHECK,BOOL
-// RUN: sed 's/tla.copy %ub_dst, %gm_src : !ub, !gm/tla.copy %gm_src, %ub_dst : !gm, !ub/' %s | not %tla_compile - -o - 2>&1 | %filecheck %s --check-prefix=ROUTE-ERR
+// RUN: sed 's/tla.copy %ub_dst, %gm_src : !ub, !gm/tla.copy %gm_src, %ub_dst : !gm, !ub/' %s | %tla_compile - -o - | %filecheck %s --check-prefixes=UB2GM,SIGNED-UB2GM
+// e8m0 is not on the GM↔UB VectorLayout allow-list (keeps VL suffix closed).
+// RUN: sed 's/ptr<i64,/ptr<!tla.f8e8m0,/g' %s | not %tla_compile - -o - 2>&1 | %filecheck %s --check-prefix=ROUTE-ERR
 
 !layout = !tla.layout<!tla.shape<32>, !tla.stride<1>, !tla.shape<32>, VectorLayout>
 !gm = !tla.tensor<!layout, !tla.coord<0>, !tla.ptr<i64, gm, 8>>
@@ -35,4 +37,7 @@ module {
 // FLOAT: call @copy_gm_VectorLayout_to_ub_VectorLayout_double
 // F32: call @copy_gm_VectorLayout_to_ub_VectorLayout_float
 // BOOL: call @copy_gm_VectorLayout_to_ub_VectorLayout_bool
+// SIGNED-UB2GM: func.func private @copy_ub_VectorLayout_to_gm_VectorLayout_int64_t
+// UB2GM-SAME: hivm.func_core_type = #hivm.func_core_type<AIV>
+// SIGNED-UB2GM: call @copy_ub_VectorLayout_to_gm_VectorLayout_int64_t
 // ROUTE-ERR: failed to legalize operation 'tla.copy'

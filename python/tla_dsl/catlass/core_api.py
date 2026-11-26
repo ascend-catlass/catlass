@@ -6848,7 +6848,7 @@ _SUPPORTED_VECTOR_COPY_ROUTES = {
         "f4e2m1x2",
         "f4e1m2x2",
     ),
-    # Flat VectorLayout GM→UB: b64 + bool (two-arg) + ExtParams-safe scalars.
+    # Flat VectorLayout GM→UB: b64 + bool + ExtParams-safe scalars + hif8/fp8/fp4/i4x2.
     ("gm", "VectorLayout", "ub", "VectorLayout"): (
         "i64",
         "u64",
@@ -6863,6 +6863,14 @@ _SUPPORTED_VECTOR_COPY_ROUTES = {
         "u32",
         "u16",
         "u8",
+        "f8e4m3fn",
+        "f8e5m2",
+        "f4e2m1",
+        "f4e1m2",
+        "hif8",
+        "f4e2m1x2",
+        "f4e1m2x2",
+        "i4x2",
     ),
     ("ub", "RowMajor", "gm", "RowMajor"): (
         "i64",
@@ -6888,6 +6896,30 @@ _SUPPORTED_VECTOR_COPY_ROUTES = {
         "f4e2m1x2",
         "f4e1m2x2",
     ),
+    # Flat VectorLayout UB→GM: same dtype allow-list as GM→UB VectorLayout.
+    ("ub", "VectorLayout", "gm", "VectorLayout"): (
+        "i64",
+        "u64",
+        "f64",
+        "i1",
+        "f32",
+        "f16",
+        "bf16",
+        "i32",
+        "i16",
+        "i8",
+        "u32",
+        "u16",
+        "u8",
+        "f8e4m3fn",
+        "f8e5m2",
+        "f4e2m1",
+        "f4e1m2",
+        "hif8",
+        "f4e2m1x2",
+        "f4e1m2x2",
+        "i4x2",
+    ),
     # UB -> UB is DataCopy (MOV.UB.TO.UB) throughout, with a ragged row rounded
     # up to whole 32-byte blocks, so every element width is carried, 1-byte
     # included. The MX types stay in their own denomination: the block scale is
@@ -6904,11 +6936,16 @@ _SUPPORTED_VECTOR_COPY_ROUTES = {
         "u32",
         "u16",
         "u8",
+        "i64",
+        "u64",
+        "f64",
         "f8e4m3fn",
         "f8e5m2",
         "f8e8m0",
         "f4e2m1",
         "f4e1m2",
+        "hif8",
+        "i4x2",
     ),
     # UB -> UB transposing: the destination tile is tagged ColumnMajor, so the
     # same logical (M, N) shape lands as an (N, M) array. VNCHWCONV carries every
@@ -6926,6 +6963,9 @@ _SUPPORTED_VECTOR_COPY_ROUTES = {
         "u8",
         "f8e4m3fn",
         "f8e5m2",
+        "f8e8m0",
+        "hif8",
+        "i4x2",
     ),
     ("ub", "RowMajor", "l1", "zN"): (
         "f32",
@@ -6964,7 +7004,15 @@ _SUPPORTED_VECTOR_COPY_ROUTES = {
     # The block scale keeps its own fractal layouts on both sides.
     ("ub", "zZMxScale", "l1", "zZMxScale"): ("f8e8m0",),
     ("ub", "nNMxScale", "l1", "nNMxScale"): ("f8e8m0",),
-    ("ub", "zNUnAlign", "l1", "zN"): ("f32", "f16", "bf16", "i8", "f8e4m3fn", "f8e5m2"),
+    ("ub", "zNUnAlign", "l1", "zN"): (
+        "f32",
+        "f16",
+        "bf16",
+        "i8",
+        "f8e4m3fn",
+        "f8e5m2",
+        "hif8",
+    ),
 }
 
 # Cube Copy Fixpipe
@@ -7221,10 +7269,21 @@ _COPY_PAD_SAFE_DTYPES_DOC = (
     "u64",
     "f64",
 )
+# GM→UB Pad also opens hif8/fp8/fp4x2/i4x2 (8-bit pattern fill); GM→L1 keeps hif8 only.
+# Scalar f4e2m1/f4e1m2 stay closed: pad counts are elements on 4-bit tiles.
+_COPY_PAD_GM_UB_SAFE_DTYPES_DOC = (
+    *_COPY_PAD_SAFE_DTYPES_DOC,
+    "hif8",
+    "f8e4m3fn",
+    "f8e5m2",
+    "f4e2m1x2",
+    "f4e1m2x2",
+    "i4x2",
+)
 _COPY_PAD_GM_L1_SAFE_DTYPES_DOC = (*_COPY_PAD_SAFE_DTYPES_DOC, "hif8")
 _SUPPORTED_COPY_PAD_ROUTES = {
-    ("gm", "RowMajor", "ub", "RowMajor"): _COPY_PAD_SAFE_DTYPES_DOC,
-    ("gm", "VectorLayout", "ub", "VectorLayout"): _COPY_PAD_SAFE_DTYPES_DOC,
+    ("gm", "RowMajor", "ub", "RowMajor"): _COPY_PAD_GM_UB_SAFE_DTYPES_DOC,
+    ("gm", "VectorLayout", "ub", "VectorLayout"): _COPY_PAD_GM_UB_SAFE_DTYPES_DOC,
     ("gm", "VectorLayout", "l1", "VectorLayout"): _COPY_PAD_GM_L1_SAFE_DTYPES_DOC,
 }
 
@@ -7336,11 +7395,13 @@ def _modify_doc_copy(fn: Callable[..., Any]) -> None:
         "\n",
         "Supported CopyPad routes, `tla.copy(dst, src, params=CopyPadParams(...))`.",
         "Enables AscendC DataCopyPad (`isPad=true`) on GM→UB (vector) or",
-        "GM→L1 VectorLayout→VectorLayout (cube). fp8/fp4 Pad are not opened.",
+        "GM→L1 VectorLayout→VectorLayout (cube). GM→UB opens hif8/fp8/fp4x2/i4x2",
+        "(scalar `f4e2m1`/`f4e1m2` Pad stay closed); GM→L1 adds hif8 only",
+        "(fp8/fp4 Pad stay closed on GM→L1).",
         "Side counts must not be bool/tla.Bool/i1; a static side count must",
         "satisfy pad bytes ≤ 32B; with static extents, dst innermost ≥",
         "src + left + right. See Constraints for `padding_value` dtype rules",
-        "(including hif8 8-bit integer bit patterns on GM→L1).\n",
+        "(including 8-bit integer bit patterns for hif8/fp8/fp4x2/i4x2).\n",
         "|`src_addr`|`src_layout`|`dst_addr`|`dst_layout`|`dtypes`|",
         "|----------|------------|----------|------------|--------|",
     ]
@@ -7701,7 +7762,7 @@ def _validate_ubub_transpose_shape(src_desc, dst_desc, src_dtype) -> None:
         )
 
 
-# ExtParams-safe GM→UB pad dtypes (must stay aligned with Vector/dma.cpp).
+# ExtParams-safe scalar GM→UB pad dtypes (must stay aligned with Vector/dma.cpp).
 # 8B: static zero padding_value enforced in CopyPadParams._validate; runtime
 # padding_value is not value-gated (BC always zero-fills 8B pads).
 _COPY_PAD_SAFE_DTYPES = frozenset(
@@ -7721,9 +7782,22 @@ _COPY_PAD_SAFE_DTYPES = frozenset(
         "f64",
     }
 )
-# GM→L1 VL Pad reuses the GM→UB base set and additionally opens hif8 (Cube BC +
-# Tile uint8 ExtParams path). Do not merge hif8 into _COPY_PAD_SAFE_DTYPES:
-# Vector GM→UB pad whitelist still excludes hif8. fp8/fp4 Pad are not opened.
+# GM→UB Pad: base scalars ∪ hif8/fp8/fp4x2/i4x2 (8-bit fill pattern).
+# Scalar f4e2m1/f4e1m2 excluded (pad counts are elements on 4-bit tiles).
+# i4x2 stages as int8_t (like fp4x2); pattern fill matches 1B carrier width.
+_COPY_PAD_LOWP_DTYPES = frozenset(
+    {
+        "hif8",
+        "f8e4m3fn",
+        "f8e5m2",
+        "f4e2m1x2",
+        "f4e1m2x2",
+        "i4x2",
+    }
+)
+_COPY_PAD_GM_UB_SAFE_DTYPES = _COPY_PAD_SAFE_DTYPES | _COPY_PAD_LOWP_DTYPES
+# GM→L1 VL Pad reuses the scalar base and additionally opens hif8 only
+# (Cube BC + Tile uint8 ExtParams). Do not merge fp8/fp4 into GM→L1.
 _COPY_PAD_GM_L1_SAFE_DTYPES = _COPY_PAD_SAFE_DTYPES | {"hif8"}
 _COPY_PAD_FLOAT_DTYPES = frozenset({"f32", "f16", "bf16", "f64"})
 _COPY_PAD_INT_DTYPES = frozenset({"i8", "u8", "i16", "u16", "i32", "u32", "i64", "u64"})
@@ -7867,16 +7941,17 @@ def _padding_value_to_i64_bits(value: Any, dtype: str, elem_nbytes: int) -> int:
             except TypeError as exc:
                 raise TypeError(str(exc)) from exc
             return _encode_float_padding_bits(scalar, dtype, mask)
-        if dtype == "hif8":
-            # No host float encode; pad fill is a raw 8-bit pattern.
+        if dtype in _COPY_PAD_LOWP_DTYPES:
+            # No host float encode; pad fill is a raw 8-bit pattern (hif8/fp8/fp4).
             host = value.value
             if isinstance(host, bool):
-                raise TypeError("padding_value for hif8 must not be bool")
+                raise TypeError(f"padding_value for {dtype} must not be bool")
             if isinstance(host, int):
                 return int(host) & mask
             raise TypeError(
-                "padding_value for hif8 must be an 8-bit integer bit pattern "
-                f"(bare int or HiFloat8 with int host; got host {type(host).__name__})"
+                f"padding_value for {dtype} must be an 8-bit integer bit pattern "
+                f"(bare int or matching Numeric with int host; got host "
+                f"{type(host).__name__})"
             )
         raise TypeError(f"cannot encode padding_value for dtype {dtype}")
 
@@ -7888,10 +7963,10 @@ def _padding_value_to_i64_bits(value: Any, dtype: str, elem_nbytes: int) -> int:
         )
     if isinstance(value, int):
         # Dataclass default is ``0``. Accept bare int 0 as universal zero-fill
-        # (0 bits / False / +0.0). Non-zero bare int: integer tiles or hif8 bits.
+        # (0 bits / False / +0.0). Non-zero bare int: integer tiles or lowp bits.
         if value == 0:
             return 0
-        if dtype == "hif8":
+        if dtype in _COPY_PAD_LOWP_DTYPES:
             return int(value) & mask
         if dtype not in _COPY_PAD_INT_DTYPES:
             raise TypeError(
@@ -8043,8 +8118,9 @@ def copy(
               axis (same type rules as `left_padding`).
             - `padding_value`: fill for padded elements. Default `0` means
               zero-fill. Must match the source element dtype (see
-              Constraints); for `hif8` use an 8-bit integer bit pattern
-              (bare `int` or `HiFloat8` with int host), not a float.
+              Constraints); for `hif8`/`fp8`/`fp4x2`/`i4x2` use an 8-bit
+              integer bit pattern (bare `int` or matching Numeric with int
+              host), not a float.
         - `scale` (`Tensor | None`): L1 OCP `e8m0` shared-exponent tile for
           L1→L0A/L0B MX load. Stored as `i8`/`u8`; destination tag is
           `tla.arch.zZMxScale` (L0A) or `tla.arch.nNMxScale` (L0B).
@@ -8072,16 +8148,18 @@ def copy(
         - When `params` is `CopyPadParams`: see the CopyPad coverage table
           below. Side counts must not be bool/tla.Bool/i1; a static side
           count must satisfy pad bytes ≤ 32B; with static extents, dst
-          innermost ≥ src + left + right. fp8/fp4 Pad are not opened.
+          innermost ≥ src + left + right. GM→UB opens hif8/fp8/fp4x2/i4x2
+          (scalar `f4e2m1`/`f4e1m2` Pad stay closed); GM→L1 adds hif8 only
+          (fp8/fp4 Pad stay closed on GM→L1).
         - `CopyPadParams.padding_value` must match the source element dtype
           (i1: bool/tla.Bool; integer: bare int or same-dtype Numeric;
           float f16/bf16/f32/f64: bare float or matching float Numeric;
-          hif8: 8-bit integer bit pattern via bare int or HiFloat8 with int
-          host — no float encode; bare int 0 is the dataclass default
-          zero-fill). Runtime non-i1 is an i64 bit pattern; runtime i1 SSA
-          is unsupported. For 8B (`i64`/`u64`/`f64`), only a static zero
-          fill is guaranteed; runtime is not value-checked and the BC
-          always zero-fills.
+          hif8/fp8/fp4x2/i4x2: 8-bit integer bit pattern via bare int or
+          matching Numeric with int host — no float encode; bare int 0 is
+          the dataclass default zero-fill). Runtime non-i1 is an i64 bit
+          pattern; runtime i1 SSA is unsupported. For 8B (`i64`/`u64`/
+          `f64`), only a static zero fill is guaranteed; runtime is not
+          value-checked and the BC always zero-fills.
         - On Ascend 950, two logical rank-3 views `(B, M, N)` select batched
           GM-to-L1 layout conversion. FP8 supports RowMajor→zN and
           ColumnMajor→nZ; E8M0 supports the four GM MX-scale routes below.
@@ -8555,8 +8633,8 @@ def copy(
                     "VectorLayout→VectorLayout GM→UB "
                     f"(got {src_layout}→{dst_layout})",
                 )
-            _pad_dtype_ok = src_dtype in _COPY_PAD_SAFE_DTYPES
-            _pad_dtype_supported = _COPY_PAD_SAFE_DTYPES
+            _pad_dtype_ok = src_dtype in _COPY_PAD_GM_UB_SAFE_DTYPES
+            _pad_dtype_supported = _COPY_PAD_GM_UB_SAFE_DTYPES
         else:
             # GM→L1: VectorLayout only (ND2NZ / fractal internal pads ≠ user Pad).
             if src_layout != "VectorLayout" or dst_layout != "VectorLayout":

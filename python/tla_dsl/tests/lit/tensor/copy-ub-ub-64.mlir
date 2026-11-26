@@ -1,13 +1,22 @@
-// RUN: not %tla_compile %s -o - 2>&1 | %filecheck %s
-// RUN: sed 's/xi64/xui64/g;s/<i64,/<ui64,/g' %s | not %tla_compile - -o - 2>&1 | %filecheck %s
-// RUN: sed 's/i64/f64/g' %s | not %tla_compile - -o - 2>&1 | %filecheck %s
+// RUN: %tla_compile %s -o - | %filecheck %s --check-prefixes=CHECK,SIGNED
+// RUN: sed 's/xi64/xui64/g;s/<i64,/<ui64,/g' %s | %tla_compile - -o - | %filecheck %s --check-prefixes=CHECK,UNSIGNED
+// RUN: sed 's/i64/f64/g' %s | %tla_compile - -o - | %filecheck %s --check-prefixes=CHECK,FLOAT
+
+// UB→UB RowMajor b64 (i64/u64/f64) is a supported MOV.UB.TO.UB route.
+// SIGNED: copy_ub_RowMajor_to_ub_RowMajor_int64_t
+// UNSIGNED: copy_ub_RowMajor_to_ub_RowMajor_uint64_t
+// FLOAT: copy_ub_RowMajor_to_ub_RowMajor_double
+// CHECK-SAME: hivm.func_core_type = #hivm.func_core_type<AIV>
+// SIGNED: call @copy_ub_RowMajor_to_ub_RowMajor_int64_t
+// UNSIGNED: call @copy_ub_RowMajor_to_ub_RowMajor_uint64_t
+// FLOAT: call @copy_ub_RowMajor_to_ub_RowMajor_double
 
 !tile = !tla.tensor<!tla.layout<!tla.shape<32>, !tla.stride<1>, !tla.shape<32>, RowMajor>, !tla.coord<0>, !tla.ptr<i64, ub, 256>>
 !layout = !tla.layout<!tla.shape<32>, !tla.stride<1>, !tla.shape<32>, RowMajor>
 !ptr = !tla.ptr<i64, ub, 256>
 
 module {
-  tla.func @unsupported_copy() {
+  tla.func @copy_ub_ub_b64() {
     %src = tla.alloc_ptr {size_bytes = 256} -> !ptr
     %dst = tla.alloc_ptr {size_bytes = 256} -> !ptr
     %shape = tla.make_shape -> !tla.shape<32>
@@ -22,5 +31,3 @@ module {
     tla.return
   }
 }
-
-// CHECK: failed to legalize operation 'tla.copy'

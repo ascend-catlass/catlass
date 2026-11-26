@@ -140,14 +140,103 @@ def test_gm2ub_pad_rejects_dst_too_narrow(compiler_tlair: Any) -> None:
         )
 
 
-def test_gm2ub_pad_rejects_unsafe_dtype(compiler_tlair: Any) -> None:
+def test_gm2ub_pad_rejects_e8m0_dtype(compiler_tlair: Any) -> None:
+    """e8m0 stays off the GM→UB Pad whitelist (scale byte, not Pad fill)."""
     with pytest.raises(TlaCoreAPIError, match="not supported for dtype"):
-        gm2ub_pad_fp8_rejected.dump_mlir(
+        gm2ub_pad_dtype_probe.dump_mlir(
             type_args=(
-                _gm_tensor(dtype=tla.Float8E4M3FN, shape=(8, 7)),
-                _ub_tensor(dtype=tla.Float8E4M3FN, shape=(8, 8)),
+                _gm_tensor(dtype=tla.Float8E8M0, shape=(8, 7)),
+                _ub_tensor(dtype=tla.Float8E8M0, shape=(8, 8)),
             ),
         )
+
+
+@pytest.mark.parametrize("dtype", (tla.Float4E2M1, tla.Float4E1M2))
+def test_gm2ub_pad_rejects_scalar_fp4_dtype(compiler_tlair: Any, dtype: Any) -> None:
+    """Scalar fp4 Pad closed: pad counts are elements on 4-bit tiles.
+
+    Use even row strides so the packed-fp4 geometry gate does not fire first.
+    """
+    with pytest.raises(TlaCoreAPIError, match="not supported for dtype"):
+        gm2ub_pad_dtype_probe.dump_mlir(
+            type_args=(
+                _gm_tensor(dtype=dtype, shape=(2, 30)),
+                _ub_tensor(dtype=dtype, shape=(2, 32)),
+            ),
+        )
+
+
+def test_gm2ub_pad_accepts_fp8_dtype(compiler_tlair: Any) -> None:
+    # 1B elems need row stride multiple of 32 for multi-row Pad.
+    mlir = gm2ub_pad_dtype_probe.dump_mlir(
+        type_args=(
+            _gm_tensor(dtype=tla.Float8E4M3FN, shape=(2, 31)),
+            _ub_tensor(dtype=tla.Float8E4M3FN, shape=(2, 32)),
+        ),
+    )
+    assert "tla.CopyPadParams" in mlir
+
+
+def test_gm2ub_pad_accepts_hif8_dtype(compiler_tlair: Any) -> None:
+    mlir = gm2ub_pad_dtype_probe.dump_mlir(
+        type_args=(
+            _gm_tensor(dtype=tla.HiFloat8, shape=(2, 31)),
+            _ub_tensor(dtype=tla.HiFloat8, shape=(2, 32)),
+        ),
+    )
+    assert "tla.CopyPadParams" in mlir
+
+
+def test_gm2ub_vector_hif8_pad_emits_and_lowers(tmp_path: pathlib.Path) -> None:
+    tla_compile = _require_tla_compile()
+
+    @tla.kernel
+    def gm2ub_vl_hif8_pad(gm_tensor: tla.Tensor) -> None:
+        ub_ptr = tla.allocate(64, tla.HiFloat8, tla.AddressSpace.ub, 256)
+        ub = tla.make_tensor(
+            ub_ptr,
+            tla.make_layout(
+                tla.make_shape(8),
+                tla.make_stride(1),
+                origin_shape=tla.make_shape(8),
+                layoutTag=tla.arch.VectorLayout,
+            ),
+            tla.make_coord(0),
+        )
+        with tla.vector():
+            tla.copy(
+                ub,
+                gm_tensor,
+                params=tla.params.CopyPadParams(right_padding=1, padding_value=0xA5),
+            )
+
+    mlir = gm2ub_vl_hif8_pad.dump_mlir(
+        type_args=(_gm_vector(dtype=tla.HiFloat8, length=7),)
+    )
+    path = tmp_path / "gm2ub_vl_hif8_pad.mlir"
+    path.write_text(mlir)
+    result = subprocess.run(
+        [str(tla_compile), str(path), "-o", "-"],
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "copy_gm_VectorLayout_to_ub_VectorLayout_hifloat8_t" in result.stdout
+    pad_enable, left, right, value_bits = _call_trailing_i64s(
+        result.stdout, callee="copy_gm_VectorLayout_to_ub_VectorLayout_hifloat8_t"
+    )
+    assert (pad_enable, left, right, value_bits) == (1, 0, 1, 0xA5)
+
+
+def test_gm2ub_vector_hif8_two_arg_emits(compiler_tlair: Any) -> None:
+    mlir = gm2ub_vector_no_pad.dump_mlir(
+        type_args=(
+            _gm_vector(dtype=tla.HiFloat8, length=16),
+            _ub_vector(dtype=tla.HiFloat8, length=16),
+        ),
+    )
+    assert "VectorLayout" in mlir
+    assert "tla.CopyPadParams" not in mlir
 
 
 def test_gm2ub_pad_float_padding_value_encodes_as_float_bits(
@@ -470,7 +559,8 @@ def gm2ub_pad_dst_too_narrow(gm_tensor: tla.Tensor, ub_tensor: tla.Tensor) -> No
 
 
 @tla.kernel
-def gm2ub_pad_fp8_rejected(gm_tensor: tla.Tensor, ub_tensor: tla.Tensor) -> None:
+def gm2ub_pad_dtype_probe(gm_tensor: tla.Tensor, ub_tensor: tla.Tensor) -> None:
+    """Shared GM→UB Pad probe: accept/reject hinges on ``type_args`` dtype."""
     with tla.vector():
         tla.copy(
             ub_tensor,

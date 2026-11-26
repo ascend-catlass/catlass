@@ -18,9 +18,17 @@ CATLASS_DEVICE void copyGMToUB(
         copyGm2Ub(dstTensor, srcTensor);
         return;
     }
-    // Pad path: only instantiate ExtParams for types known safe under ccec.
-    // Keep aligned with core_api._COPY_PAD_SAFE_DTYPES (frontend rejects others).
+    // Pad path: keep aligned with core_api pad whitelist. hif8/fp8/fp4x2 use
+    // ExtParams<uint8_t> (ccec-unsafe to Instantitate ExtParams on those T);
+    // Tile owns RM/VL geometry and forwards the 8-bit fill (no OUTTOL1 on UB).
     if constexpr (
+        __is_same(T, hifloat8_t) || __is_same(T, fp8_e4m3fn_t) || __is_same(T, fp8_e5m2_t) ||
+        __is_same(T, float4_e2m1x2_t) || __is_same(T, float4_e1m2x2_t)) {
+        Catlass::Epilogue::Tile::GmUbLowpPadParams lowpPad{AscendC::DataCopyPadExtParams<uint8_t>{
+            true, static_cast<uint8_t>(leftPadding), static_cast<uint8_t>(rightPadding),
+            static_cast<uint8_t>(paddingValueBits)}};
+        copyGm2Ub(dstTensor, srcTensor, lowpPad);
+    } else if constexpr (
         __is_same(T, float) || __is_same(T, half) || __is_same(T, bfloat16_t) || __is_same(T, int32_t) ||
         __is_same(T, uint32_t) || __is_same(T, int16_t) || __is_same(T, uint16_t) || __is_same(T, int8_t) ||
         __is_same(T, uint8_t) || __is_same(T, bool) || __is_same(T, int64_t) || __is_same(T, uint64_t) ||
@@ -156,6 +164,11 @@ REGISTER_GM_TO_UB(VectorLayout, VectorLayout, int8_t)
 REGISTER_GM_TO_UB(VectorLayout, VectorLayout, uint8_t)
 REGISTER_GM_TO_UB(VectorLayout, VectorLayout, uint16_t)
 REGISTER_GM_TO_UB(VectorLayout, VectorLayout, uint32_t)
+REGISTER_GM_TO_UB(VectorLayout, VectorLayout, fp8_e4m3fn_t)
+REGISTER_GM_TO_UB(VectorLayout, VectorLayout, fp8_e5m2_t)
+REGISTER_GM_TO_UB(VectorLayout, VectorLayout, float4_e2m1x2_t)
+REGISTER_GM_TO_UB(VectorLayout, VectorLayout, float4_e1m2x2_t)
+REGISTER_GM_TO_UB(VectorLayout, VectorLayout, hifloat8_t)
 REGISTER_GM_TO_UB(RowMajor, RowMajor, fp8_e4m3fn_t)
 REGISTER_GM_TO_UB(RowMajor, RowMajor, fp8_e5m2_t)
 REGISTER_GM_TO_UB(RowMajor, RowMajor, float4_e2m1x2_t)
@@ -186,6 +199,24 @@ REGISTER_UB_TO_GM(RowMajor, RowMajor, float4_e1m2x2_t)
 REGISTER_UB_TO_GM(RowMajor, RowMajor, float8_e8m0_t)
 REGISTER_UB_TO_GM(RowMajor, RowMajor, hifloat8_t)
 REGISTER_UB_TO_GM(RowMajor, RowMajor, bool)
+REGISTER_UB_TO_GM(VectorLayout, VectorLayout, float)
+REGISTER_UB_TO_GM(VectorLayout, VectorLayout, half)
+REGISTER_UB_TO_GM(VectorLayout, VectorLayout, bf16)
+REGISTER_UB_TO_GM(VectorLayout, VectorLayout, int32_t)
+REGISTER_UB_TO_GM(VectorLayout, VectorLayout, int16_t)
+REGISTER_UB_TO_GM(VectorLayout, VectorLayout, int8_t)
+REGISTER_UB_TO_GM(VectorLayout, VectorLayout, uint8_t)
+REGISTER_UB_TO_GM(VectorLayout, VectorLayout, uint16_t)
+REGISTER_UB_TO_GM(VectorLayout, VectorLayout, uint32_t)
+REGISTER_UB_TO_GM(VectorLayout, VectorLayout, int64_t)
+REGISTER_UB_TO_GM(VectorLayout, VectorLayout, uint64_t)
+REGISTER_UB_TO_GM(VectorLayout, VectorLayout, double)
+REGISTER_UB_TO_GM(VectorLayout, VectorLayout, bool)
+REGISTER_UB_TO_GM(VectorLayout, VectorLayout, fp8_e4m3fn_t)
+REGISTER_UB_TO_GM(VectorLayout, VectorLayout, fp8_e5m2_t)
+REGISTER_UB_TO_GM(VectorLayout, VectorLayout, float4_e2m1x2_t)
+REGISTER_UB_TO_GM(VectorLayout, VectorLayout, float4_e1m2x2_t)
+REGISTER_UB_TO_GM(VectorLayout, VectorLayout, hifloat8_t)
 
 REGISTER_UB_TO_UB(RowMajor, RowMajor, float)
 REGISTER_UB_TO_UB(RowMajor, RowMajor, half)
@@ -204,6 +235,10 @@ REGISTER_UB_TO_UB(RowMajor, RowMajor, bool)
 REGISTER_UB_TO_UB(RowMajor, RowMajor, float8_e8m0_t)
 REGISTER_UB_TO_UB(RowMajor, RowMajor, float4_e2m1x2_t)
 REGISTER_UB_TO_UB(RowMajor, RowMajor, float4_e1m2x2_t)
+REGISTER_UB_TO_UB(RowMajor, RowMajor, hifloat8_t)
+REGISTER_UB_TO_UB(RowMajor, RowMajor, int64_t)
+REGISTER_UB_TO_UB(RowMajor, RowMajor, uint64_t)
+REGISTER_UB_TO_UB(RowMajor, RowMajor, double)
 
 // RowMajor -> ColumnMajor: the same logical (M, N) tile lands as an (N, M)
 // array, so the move is a transpose in memory. The destination layout selects
@@ -223,6 +258,10 @@ REGISTER_UB_TO_UB(RowMajor, ColumnMajor, fp8_e4m3fn_t)
 REGISTER_UB_TO_UB(RowMajor, ColumnMajor, fp8_e5m2_t)
 // Bool transpose: CopyUb2UbTla VNCHWCONV b8 path (SizeOfBits==8).
 REGISTER_UB_TO_UB(RowMajor, ColumnMajor, bool)
+REGISTER_UB_TO_UB(RowMajor, ColumnMajor, hifloat8_t)
+REGISTER_UB_TO_UB(RowMajor, ColumnMajor, float8_e8m0_t)
+// fp4 RM→CM not registered yet: CopyUb2UbTla VNCHWCONV asserts SizeOfBits==8;
+// device float4_*x2_t reports SizeOfBits==4. e8m0/hif8 use the b8 path.
 
 REGISTER_UB_TO_L1(RowMajor, zN, float)
 REGISTER_UB_TO_L1(RowMajor, zN, half)

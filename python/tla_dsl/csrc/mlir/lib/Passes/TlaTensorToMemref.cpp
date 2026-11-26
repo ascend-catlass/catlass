@@ -740,16 +740,32 @@ static StringRef rowMajorGmUbCopyElemSuffix(Type elementType)
     return copyRuntimeElemSuffix(elementType);
 }
 
-// GM/UB VectorLayout→VectorLayout: b64 + bool + ExtParams-safe scalars.
-// Do NOT call rowMajorGmUbCopyElemSuffix / full copyRuntimeElemSuffix — those
-// would legalize fp8/hif8/fp4 without matching REGISTER_GM_TO_UB(VectorLayout).
+// GM/UB VectorLayout→VectorLayout: b64 + bool + ExtParams-safe scalars +
+// hif8/fp8/fp4 (REGISTER_GM_TO_UB / REGISTER_UB_TO_GM VectorLayout).
+// Keep this allow-list explicit so new copyRuntimeElemSuffix entries do not
+// silently legalize unregistered VL symbols.
 static StringRef vectorLayoutGmUbCopyElemSuffix(Type elementType)
 {
     if (elementType.isInteger(1))
         return "bool";
     if (auto suffix = b64CopyElemSuffix(elementType); !suffix.empty())
         return suffix;
-    return scalarB8B16B32CopyElemSuffix(elementType);
+    if (auto suffix = scalarB8B16B32CopyElemSuffix(elementType); !suffix.empty())
+        return suffix;
+    if (elementType.isFloat8E4M3FN())
+        return "fp8_e4m3fn_t";
+    if (elementType.isFloat8E5M2())
+        return "fp8_e5m2_t";
+    if (::llvm::isa<::tla::HiFloat8Type>(elementType))
+        return "hifloat8_t";
+    if (::llvm::isa<::tla::Float4E2M1Type>(elementType))
+        return "float4_e2m1x2_t";
+    if (::llvm::isa<::tla::Float4E1M2Type>(elementType))
+        return "float4_e1m2x2_t";
+    // Packed 4-bit pair carriers (fp4x2 / i4x2): byte-denominated; stage as int8_t.
+    if (isa<::tla::Float4E2M1x2Type, ::tla::Float4E1M2x2Type, ::tla::Int4x2Type>(elementType))
+        return "int8_t";
+    return {};
 }
 
 // Whether fixpipe can carry this L0C element type out to the given destination
@@ -849,7 +865,8 @@ std::string getCopyRouteCallee(
         srcLayout == LayoutTag::RowMajor && dstLayout == LayoutTag::RowMajor) {
         if (srcElementType != dstElem)
             return {};
-        StringRef suffix = copyRuntimeElemSuffix(srcElementType);
+        // Same allow-list as GM↔UB RowMajor (includes b64 for UB→UB).
+        StringRef suffix = rowMajorGmUbCopyElemSuffix(srcElementType);
         if (suffix.empty())
             return {};
         return Twine("copy_ub_RowMajor_to_ub_RowMajor_").concat(suffix).str();
@@ -875,6 +892,15 @@ std::string getCopyRouteCallee(
         if (suffix.empty())
             return {};
         return Twine("copy_ub_RowMajor_to_gm_RowMajor_").concat(suffix).str();
+    }
+    if (*srcSpace == hivm::AddressSpace::UB && *dstSpace == hivm::AddressSpace::GM &&
+        srcLayout == LayoutTag::VectorLayout && dstLayout == LayoutTag::VectorLayout) {
+        if (srcElementType != dstElem)
+            return {};
+        StringRef suffix = vectorLayoutGmUbCopyElemSuffix(srcElementType);
+        if (suffix.empty())
+            return {};
+        return Twine("copy_ub_VectorLayout_to_gm_VectorLayout_").concat(suffix).str();
     }
     // NC1HWC0 feature map, GM -> L1: the same tree on both sides, which is what
     // makes it a run of contiguous C1 slices rather than a re-layout. This is the
@@ -1329,6 +1355,7 @@ static bool isAivTemplateRuntimeCall(StringRef name)
            name.starts_with("copy_ub_zN_to_l1_zN_") || name.starts_with("copy_gm_RowMajor_to_ub_RowMajor_") ||
            name.starts_with("copy_gm_VectorLayout_to_ub_VectorLayout_") ||
            name.starts_with("copy_ub_RowMajor_to_gm_RowMajor_") ||
+           name.starts_with("copy_ub_VectorLayout_to_gm_VectorLayout_") ||
            name.starts_with("copy_ub_RowMajor_to_ub_RowMajor_") ||
            name.starts_with("copy_ub_RowMajor_to_ub_ColumnMajor_");
 }

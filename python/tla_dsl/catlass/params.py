@@ -451,9 +451,11 @@ class CopyPadParams(CopyParams):
     Route / dtype (enforced by ``tla.copy``):
     - GM→UB: layouts ``RowMajor→RowMajor`` or ``VectorLayout→VectorLayout``.
     - GM→L1: ``VectorLayout→VectorLayout`` only (cube region).
-    - GM→UB element dtypes: ``f32``/``f16``/``bf16``/``i32``/``u32``/``i16``/
-      ``u16``/``i8``/``u8``/``i1``/``i64``/``u64``/``f64``.
-    - GM→L1 adds ``hif8``; fp8/fp4 Pad are not opened on either route.
+    - GM→UB element dtypes: scalars ``f32``/``f16``/``bf16``/``i32``/``u32``/
+      ``i16``/``u16``/``i8``/``u8``/``i1``/``i64``/``u64``/``f64``, plus
+      ``hif8``/``f8e4m3fn``/``f8e5m2``/``f4e2m1x2``/``f4e1m2x2``/``i4x2``.
+      Scalar ``f4e2m1``/``f4e1m2`` Pad is closed.
+    - GM→L1 adds ``hif8`` only (fp8/fp4 Pad stay closed on GM→L1).
 
     Parameters:
     - ``left_padding`` / ``right_padding``: independent left/right element
@@ -474,9 +476,9 @@ class CopyPadParams(CopyParams):
         non-zero bare ``int`` and cross-dtype Numerics rejected. Bare ``int``
         ``0`` is accepted as zero-fill (dataclass default). Constants encode
         as IEEE bits for the tile width.
-      - ``hif8`` tiles (GM→L1 Pad only): an **8-bit integer bit pattern** —
-        bare ``int`` or ``tla.HiFloat8`` whose host is an ``int``. There is no
-        host float encode path; bare ``float`` / float ``Numeric`` are
+      - ``hif8`` / ``f8e*`` / ``f4e*x2`` / ``i4x2`` tiles: an **8-bit integer bit pattern** —
+        bare ``int`` or a matching Numeric whose host is an ``int``. There is
+        no host float encode path; bare ``float`` / float ``Numeric`` are
         rejected. Pattern is masked to 8 bits.
       Runtime non-``i1`` ``padding_value`` is an ``i64`` bit pattern (integer
       SSA); runtime ``i1`` SSA is not supported (use a static bool).
