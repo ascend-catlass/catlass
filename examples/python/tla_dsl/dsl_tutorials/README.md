@@ -55,7 +55,7 @@
 
 | 目录 | 概述 |
 |------|------|
-| [`advanced_impl/`](advanced_impl/README.md) | 进阶算法算子：完整算子的实现，含多阶段数据通路、缓冲分配与数值域映射。当前收录基数排序与 TopK。 |
+| [`advanced_impl/`](advanced_impl/README.md) | 进阶算法算子：完整算子的实现，含多阶段数据通路、缓冲分配与数值域映射。当前收录基数排序、TopK 与[向量掩码合并](advanced_impl/mask_merging/README.md)。 |
 
 ## 复用已有实现
 

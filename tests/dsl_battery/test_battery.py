@@ -1001,6 +1001,10 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
 
     # --- vector_ops: each of these sweeps or batches many kernels internally ---
     yield (
+        "vector-mask-merging",
+        [["dsl_tutorials/advanced_impl/mask_merging/mask_merging.py", *dev]],
+    )
+    yield (
         "vector-masked-binary",
         [["dsl_tutorials/vector_simd_ops/masked_binary.py", "masked_binary", "--sweep", "--shapes", "400", *dev]],
     )
