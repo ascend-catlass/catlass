@@ -938,6 +938,10 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
     )
     yield "scalar-ctrl", [["end_to_end/scalar_ctrl.py", *dev]]
     yield (
+        "simt-warp-vote-ballot",
+        [["end_to_end/warp_vote_ballot.py", *dev], ["end_to_end/warp_vote_predicate.py", *dev]],
+    )
+    yield (
         "simt-warp-lane-masks",
         [["end_to_end/warp_lane_masks.py", *dev]],
     )

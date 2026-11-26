@@ -108,6 +108,53 @@ public:
 private:
     int64_t bx, by, bz;
 };
+
+class LowerArchVoteBallotPattern : public OpRewritePattern<ArchVoteBallotOp> {
+public:
+    LowerArchVoteBallotPattern(MLIRContext* context, int64_t bx, int64_t by, int64_t bz)
+        : OpRewritePattern<ArchVoteBallotOp>(context), bx(bx), by(by), bz(bz)
+    {}
+
+    LogicalResult matchAndRewrite(ArchVoteBallotOp op, PatternRewriter& rewriter) const override
+    {
+        // Voting has no synchronization effect when its result is unused.
+        if (op->use_empty()) {
+            rewriter.eraseOp(op);
+            return success();
+        }
+        Location loc = op.getLoc();
+        Value lane = buildLaneIdx(rewriter, loc, bx, by, bz);
+        Value value = rewriter.create<arith::ExtUIOp>(loc, rewriter.getI32Type(), op.getPredicate());
+        Value contribution = rewriter.create<arith::ShLIOp>(loc, value, lane);
+        // Each lane contributes a distinct bit, so unsigned addition is bitwise OR.
+        Value mask = rewriter.create<hivm_regbaseintrins::ReduceAddOpU32>(loc, rewriter.getI32Type(), contribution);
+        rewriter.replaceOp(op, mask);
+        return success();
+    }
+
+private:
+    int64_t bx, by, bz;
+};
+template <typename VoteOp, typename ReduceOp>
+class LowerArchVotePredicatePattern : public OpRewritePattern<VoteOp> {
+public:
+    using OpRewritePattern<VoteOp>::OpRewritePattern;
+
+    LogicalResult matchAndRewrite(VoteOp op, PatternRewriter& rewriter) const override
+    {
+        // Voting has no synchronization effect when its result is unused.
+        if (op->use_empty()) {
+            rewriter.eraseOp(op);
+            return success();
+        }
+        Location loc = op.getLoc();
+        Value value = rewriter.create<arith::ExtUIOp>(loc, rewriter.getI32Type(), op.getPredicate());
+        Value reduced = rewriter.create<ReduceOp>(loc, rewriter.getI32Type(), value);
+        Value zero = rewriter.create<arith::ConstantIntOp>(loc, 0, 32);
+        rewriter.replaceOpWithNewOp<arith::CmpIOp>(op, arith::CmpIPredicate::ne, reduced, zero);
+        return success();
+    }
+};
 } // namespace
 
 LogicalResult lowerSimtWarpOpsIn(func::FuncOp vf, int64_t bx, int64_t by, int64_t bz)
@@ -138,6 +185,10 @@ LogicalResult lowerSimtWarpOpsIn(func::FuncOp vf, int64_t bx, int64_t by, int64_
     // The outlined function is outside the original function's greedy driver.
     // Apply only the lowering here, leaving folding and control-flow cleanup to
     // the surrounding pipeline.
+    patterns.add<LowerArchVoteBallotPattern>(vf.getContext(), bx, by, bz);
+    patterns.add<
+        LowerArchVotePredicatePattern<ArchVoteAllOp, hivm_regbaseintrins::ReduceMinOpS32>,
+        LowerArchVotePredicatePattern<ArchVoteAnyOp, hivm_regbaseintrins::ReduceMaxOpS32>>(vf.getContext());
     GreedyRewriteConfig config;
     config.fold = false;
     config.cseConstants = false;

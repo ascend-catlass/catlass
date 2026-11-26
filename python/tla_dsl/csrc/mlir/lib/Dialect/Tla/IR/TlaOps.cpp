@@ -968,30 +968,44 @@ mlir::LogicalResult ArchSetCtrlOp::verify()
     return verifyCtrlMask(*this, getMask(), getBits());
 }
 
-mlir::LogicalResult ArchLaneIdxOp::verify()
+static mlir::LogicalResult requireSimtVecFunc(mlir::Operation* op)
 {
-    auto region = getOperation()->getParentOfType<VecFuncOp>();
+    auto region = op->getParentOfType<VecFuncOp>();
     auto mode = region ? region->getAttrOfType<mlir::StringAttr>("mode") : mlir::StringAttr{};
     if (!mode || !mode.getValue().equals_insensitive("simt"))
-        return emitOpError("must be nested inside a tla.vec.func with mode='simt'");
+        return op->emitOpError("must be nested inside a tla.vec.func with mode='simt'");
     return mlir::success();
+}
+
+mlir::LogicalResult ArchLaneIdxOp::verify()
+{
+    return requireSimtVecFunc(getOperation());
 }
 
 mlir::LogicalResult ArchActivemaskOp::verify()
 {
-    auto region = getOperation()->getParentOfType<VecFuncOp>();
-    auto mode = region ? region->getAttrOfType<mlir::StringAttr>("mode") : mlir::StringAttr{};
-    if (!mode || !mode.getValue().equals_insensitive("simt"))
-        return emitOpError("must be nested inside a tla.vec.func with mode='simt'");
-    return mlir::success();
+    return requireSimtVecFunc(getOperation());
+}
+
+mlir::LogicalResult ArchVoteBallotOp::verify()
+{
+    return requireSimtVecFunc(getOperation());
+}
+
+mlir::LogicalResult ArchVoteAllOp::verify()
+{
+    return requireSimtVecFunc(getOperation());
+}
+
+mlir::LogicalResult ArchVoteAnyOp::verify()
+{
+    return requireSimtVecFunc(getOperation());
 }
 
 mlir::LogicalResult ArchLanemaskOp::verify()
 {
-    auto region = getOperation()->getParentOfType<VecFuncOp>();
-    auto regionMode = region ? region->getAttrOfType<mlir::StringAttr>("mode") : mlir::StringAttr{};
-    if (!regionMode || !regionMode.getValue().equals_insensitive("simt"))
-        return emitOpError("must be nested inside a tla.vec.func with mode='simt'");
+    if (failed(requireSimtVecFunc(getOperation())))
+        return mlir::failure();
     auto mode = getMode();
     if (mode != "eq" && mode != "lt" && mode != "le" && mode != "gt" && mode != "ge")
         return emitOpError("mode must be one of eq, lt, le, gt, ge");
@@ -1000,10 +1014,8 @@ mlir::LogicalResult ArchLanemaskOp::verify()
 
 mlir::LogicalResult ArchWarpReduceOp::verify()
 {
-    auto region = getOperation()->getParentOfType<VecFuncOp>();
-    auto mode = region ? region->getAttrOfType<mlir::StringAttr>("mode") : mlir::StringAttr{};
-    if (!mode || !mode.getValue().equals_insensitive("simt"))
-        return emitOpError("must be nested inside a tla.vec.func with mode='simt'");
+    if (failed(requireSimtVecFunc(getOperation())))
+        return mlir::failure();
     if (getKind() != "add" && getKind() != "max" && getKind() != "min")
         return emitOpError("kind must be one of add, max, min");
     auto type = getValue().getType();
@@ -3893,10 +3905,8 @@ mlir::LogicalResult ArchShuffleOp::verify()
     // The shuffle reads another lane's register, which only exists in a SIMT
     // region; outside one there is no warp and nothing lowers the op, so an
     // unchecked shuffle would survive the pipeline unlowered.
-    auto region = getOperation()->getParentOfType<VecFuncOp>();
-    auto regionMode = region ? region->getAttrOfType<mlir::StringAttr>("mode") : mlir::StringAttr{};
-    if (!regionMode || !regionMode.getValue().equals_insensitive("simt"))
-        return emitOpError("must be nested inside a tla.vec.func with mode='simt'");
+    if (failed(requireSimtVecFunc(getOperation())))
+        return mlir::failure();
 
     const int64_t width = getWidth();
     // A group must tile the 32-lane warp exactly, so only powers of two divide it

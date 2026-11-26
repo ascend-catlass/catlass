@@ -41,7 +41,7 @@ The body is per-thread scalar code. These are available:
 - `tla.range` loops and runtime `if`.
 - `tla.print` for per-thread scalars, formatted strings, and GM/UB prefixes -- see [Debug and Printing](../language/debug.md).
 - `tla.arch.warp_reduce_sync` for add/max/min reductions over the active lanes of a warp -- see **System Variable Access**.
-- Warp queries `tla.arch.warpsize` / `lane_idx` / `lanemask_eq` / `lanemask_lt` / `lanemask_le` / `lanemask_gt` / `lanemask_ge` / `activemask` -- see **System Variable Access**.
+- Warp queries `tla.arch.warpsize` / `lane_idx` / `lanemask_eq` / `lanemask_lt` / `lanemask_le` / `lanemask_gt` / `lanemask_ge` / `activemask` / `vote_ballot_sync` / `vote_all_sync` / `vote_any_sync` -- see **System Variable Access**.
 - `tla.arch.thread_idx` / `thread_block_dim` / `sync_threads`, and the launch-level `tla.arch.block_idx` / `block_num` -- see **System Variable Access**.
 
 These are not, and are rejected when the kernel is compiled:

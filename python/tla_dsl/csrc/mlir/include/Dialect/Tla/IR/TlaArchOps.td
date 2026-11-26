@@ -115,6 +115,20 @@ def Tla_ArchActivemaskOp : Tla_Op<"arch.activemask", []> {
   let assemblyFormat = [{ attr-dict `->` type($result) }];
 }
 
+// Activity-dependent: unknown effects prevent CSE across different active sets.
+// NoMemoryEffect alone would allow a dominating ballot to replace a branch ballot.
+class Tla_ArchVoteOp<string mnemonic, Type resultType> : Tla_Op<mnemonic, []> {
+  let summary = "SIMT vote over predicates in the currently executing warp lanes";
+  let arguments = (ins I1:$predicate);
+  let results = (outs resultType:$result);
+  let hasVerifier = 1;
+  let assemblyFormat = "$predicate attr-dict `:` type($result)";
+}
+
+def Tla_ArchVoteBallotOp : Tla_ArchVoteOp<"arch.vote_ballot", I32>;
+def Tla_ArchVoteAllOp : Tla_ArchVoteOp<"arch.vote_all", I1>;
+def Tla_ArchVoteAnyOp : Tla_ArchVoteOp<"arch.vote_any", I1>;
+
 def Tla_ThreadIdxOp : Tla_Op<"arch.thread_idx", [Pure]> {
   let summary = "SIMT thread index";
   let description = [{

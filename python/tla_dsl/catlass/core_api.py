@@ -123,6 +123,7 @@ from .base_dsl.typing import (
     _float_literal_attr,
     _emit_integer_literal,
 )
+from .base_dsl.typing import Integer as _Integer
 from .base_dsl.typing import Pointer, TypedPointer
 from .tla.tensor import normalize_tile_view_coord
 from .tla.typing import Tensor
@@ -15231,6 +15232,98 @@ def arch_activemask(*, loc: mlir_ir.Location | None = None) -> UInt32:
     return UInt32(_tla_ops_gen.arch_activemask(i32, loc=loc))
 
 
+@dsl_user_op
+def arch_vote_ballot_sync(
+    predicate: Any, *, loc: mlir_ir.Location | None = None
+) -> UInt32:
+    """Directory: System Variable Access / Architecture Helpers
+    Description:
+        Return a `UInt32` mask with bit `j` set when executing lane `j` has a
+        nonzero predicate. Only currently executing lanes participate; inactive
+        or unlaunched lanes contribute zero. Integer predicates are compared
+        against zero in their original width before conversion to `Bool`.
+        Parameters:
+        - `predicate` (`Bool | Integer | bool | int`): Per-thread predicate.
+    Constraints:
+        - Only inside `tla.vec.func(mode="simt")` in a `@tla.kernel`.
+        - Ascend 950 only. No explicit member mask or cross-warp synchronization.
+        - The `_sync` name does not provide a memory barrier or force source
+          branches to remain divergent. Equivalent branch bodies may reconverge.
+        - Floating-point values must be explicitly compared to produce `Bool`.
+    Example:
+        with tla.vec.func(mode="simt", thread_block_dim=(48, 1, 1)):
+            tid, _, _ = tla.arch.thread_idx()
+            gm_out[tid] = tla.arch.vote_ballot_sync(tid % 2 == 0)
+    """
+    pred = _as_arch_vote_predicate("arch.vote_ballot_sync", predicate)
+    i32 = mlir_ir.IntegerType.get_signless(32)
+    return UInt32(_tla_ops_gen.arch_vote_ballot(i32, pred.ir_value(loc=loc), loc=loc))
+
+
+def _as_arch_vote_predicate(op_name: str, predicate: Any) -> Bool:
+    _require_arch_warp_region(op_name)
+    if isinstance(predicate, (bool, int)):
+        return Bool(predicate != 0)
+    if isinstance(predicate, Bool):
+        return predicate
+    if isinstance(predicate, _Integer):
+        return predicate != type(predicate)(0)
+    _op_error(
+        op_name,
+        f"predicate must be a Bool or integer scalar; got {_type_name(predicate)}",
+    )
+
+
+@dsl_user_op
+def arch_vote_all_sync(predicate: Any, *, loc: mlir_ir.Location | None = None) -> Bool:
+    """Directory: System Variable Access / Architecture Helpers
+    Description:
+        Return `Bool` indicating whether all currently executing lanes have
+        a nonzero predicate. Integer predicates are compared with zero at their
+        original width. Inactive or unlaunched lanes do not participate.
+        Parameters:
+        - `predicate` (`Bool | Integer | bool | int`): Per-thread predicate.
+    Constraints:
+        - Only inside `tla.vec.func(mode="simt")` in a `@tla.kernel`.
+        - Ascend 950 only. No explicit member mask or cross-warp synchronization.
+        - The `_sync` name does not provide a memory barrier or force source
+          branches to remain divergent. Equivalent branch bodies may reconverge.
+        - Floating-point values must be explicitly compared to produce `Bool`.
+    Example:
+        with tla.vec.func(mode="simt", thread_block_dim=48):
+            tid, _, _ = tla.arch.thread_idx()
+            gm_out[tid] = tla.arch.vote_all_sync(tid % 2 == 0).to(tla.Int32)
+    """
+    pred = _as_arch_vote_predicate("arch.vote_all_sync", predicate)
+    i1 = mlir_ir.IntegerType.get_signless(1)
+    return Bool(_tla_ops_gen.arch_vote_all(i1, pred.ir_value(loc=loc), loc=loc))
+
+
+@dsl_user_op
+def arch_vote_any_sync(predicate: Any, *, loc: mlir_ir.Location | None = None) -> Bool:
+    """Directory: System Variable Access / Architecture Helpers
+    Description:
+        Return `Bool` indicating whether any currently executing lanes have
+        a nonzero predicate. Integer predicates are compared with zero at their
+        original width. Inactive or unlaunched lanes do not participate.
+        Parameters:
+        - `predicate` (`Bool | Integer | bool | int`): Per-thread predicate.
+    Constraints:
+        - Only inside `tla.vec.func(mode="simt")` in a `@tla.kernel`.
+        - Ascend 950 only. No explicit member mask or cross-warp synchronization.
+        - The `_sync` name does not provide a memory barrier or force source
+          branches to remain divergent. Equivalent branch bodies may reconverge.
+        - Floating-point values must be explicitly compared to produce `Bool`.
+    Example:
+        with tla.vec.func(mode="simt", thread_block_dim=48):
+            tid, _, _ = tla.arch.thread_idx()
+            gm_out[tid] = tla.arch.vote_any_sync(tid % 2 == 0).to(tla.Int32)
+    """
+    pred = _as_arch_vote_predicate("arch.vote_any_sync", predicate)
+    i1 = mlir_ir.IntegerType.get_signless(1)
+    return Bool(_tla_ops_gen.arch_vote_any(i1, pred.ir_value(loc=loc), loc=loc))
+
+
 def _emit_arch_lanemask(op_name: str, mode: str, *, loc=None) -> UInt32:
     _require_arch_warp_region(op_name)
     i32 = mlir_ir.IntegerType.get_signless(32)
@@ -16653,6 +16746,9 @@ _require_generated("arch_thread_block_dim")
 _require_generated("arch_thread_idx")
 _require_generated("arch_lane_idx")
 _require_generated("arch_activemask")
+_require_generated("arch_vote_ballot")
+_require_generated("arch_vote_all")
+_require_generated("arch_vote_any")
 _require_generated("arch_lanemask")
 _require_generated("arch_warp_reduce")
 _require_generated("scalar_bit_op")
@@ -16710,6 +16806,9 @@ arch._set("warpsize", arch_warpsize)
 arch._set("lane_idx", arch_lane_idx)
 arch._set("warp_reduce_sync", arch_warp_reduce_sync)
 arch._set("activemask", arch_activemask)
+arch._set("vote_ballot_sync", arch_vote_ballot_sync)
+arch._set("vote_all_sync", arch_vote_all_sync)
+arch._set("vote_any_sync", arch_vote_any_sync)
 arch._set("lanemask_eq", arch_lanemask_eq)
 arch._set("lanemask_lt", arch_lanemask_lt)
 arch._set("lanemask_le", arch_lanemask_le)

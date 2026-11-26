@@ -781,6 +781,121 @@ with tla.vec.func(mode="simt", thread_block_dim=(48, 1, 1)):
 
 ---
 
+### `tla.arch.vote_ballot_sync`
+
+**Source:** [`catlass.core_api.arch_vote_ballot_sync`](../../../../catlass/core_api.py)
+
+Description:
+
+Return a `UInt32` mask with bit `j` set when executing lane `j` has a
+nonzero predicate. Only currently executing lanes participate; inactive
+or unlaunched lanes contribute zero. Integer predicates are compared
+against zero in their original width before conversion to `Bool`.
+
+Prototype:
+
+```python
+tla.arch.vote_ballot_sync(predicate: Any) -> UInt32
+```
+
+Parameters:
+
+- `predicate` (`Bool | Integer | bool | int`): Per-thread predicate.
+
+Constraints:
+
+- Only inside `tla.vec.func(mode="simt")` in a `@tla.kernel`.
+- Ascend 950 only. No explicit member mask or cross-warp synchronization.
+- The `_sync` name does not provide a memory barrier or force source
+  branches to remain divergent. Equivalent branch bodies may reconverge.
+- Floating-point values must be explicitly compared to produce `Bool`.
+
+Example:
+
+```python
+with tla.vec.func(mode="simt", thread_block_dim=(48, 1, 1)):
+    tid, _, _ = tla.arch.thread_idx()
+    gm_out[tid] = tla.arch.vote_ballot_sync(tid % 2 == 0)
+```
+
+---
+
+### `tla.arch.vote_all_sync`
+
+**Source:** [`catlass.core_api.arch_vote_all_sync`](../../../../catlass/core_api.py)
+
+Description:
+
+Return `Bool` indicating whether all currently executing lanes have
+a nonzero predicate. Integer predicates are compared with zero at their
+original width. Inactive or unlaunched lanes do not participate.
+
+Prototype:
+
+```python
+tla.arch.vote_all_sync(predicate: Any) -> Bool
+```
+
+Parameters:
+
+- `predicate` (`Bool | Integer | bool | int`): Per-thread predicate.
+
+Constraints:
+
+- Only inside `tla.vec.func(mode="simt")` in a `@tla.kernel`.
+- Ascend 950 only. No explicit member mask or cross-warp synchronization.
+- The `_sync` name does not provide a memory barrier or force source
+  branches to remain divergent. Equivalent branch bodies may reconverge.
+- Floating-point values must be explicitly compared to produce `Bool`.
+
+Example:
+
+```python
+with tla.vec.func(mode="simt", thread_block_dim=48):
+    tid, _, _ = tla.arch.thread_idx()
+    gm_out[tid] = tla.arch.vote_all_sync(tid % 2 == 0).to(tla.Int32)
+```
+
+---
+
+### `tla.arch.vote_any_sync`
+
+**Source:** [`catlass.core_api.arch_vote_any_sync`](../../../../catlass/core_api.py)
+
+Description:
+
+Return `Bool` indicating whether any currently executing lanes have
+a nonzero predicate. Integer predicates are compared with zero at their
+original width. Inactive or unlaunched lanes do not participate.
+
+Prototype:
+
+```python
+tla.arch.vote_any_sync(predicate: Any) -> Bool
+```
+
+Parameters:
+
+- `predicate` (`Bool | Integer | bool | int`): Per-thread predicate.
+
+Constraints:
+
+- Only inside `tla.vec.func(mode="simt")` in a `@tla.kernel`.
+- Ascend 950 only. No explicit member mask or cross-warp synchronization.
+- The `_sync` name does not provide a memory barrier or force source
+  branches to remain divergent. Equivalent branch bodies may reconverge.
+- Floating-point values must be explicitly compared to produce `Bool`.
+
+Example:
+
+```python
+with tla.vec.func(mode="simt", thread_block_dim=48):
+    tid, _, _ = tla.arch.thread_idx()
+    gm_out[tid] = tla.arch.vote_any_sync(tid % 2 == 0).to(tla.Int32)
+```
+
+---
+
 ### `tla.arch.lanemask_eq`
 
 **Source:** [`catlass.core_api.arch_lanemask_eq`](../../../../catlass/core_api.py)

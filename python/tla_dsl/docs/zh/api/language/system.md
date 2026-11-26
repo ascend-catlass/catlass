@@ -720,6 +720,123 @@ with tla.vec.func(mode="simt", thread_block_dim=(48, 1, 1)):
 
 ---
 
+### `tla.arch.vote_ballot_sync`
+
+**源码：** [`catlass.core_api.arch_vote_ballot_sync`](../../../../catlass/core_api.py)
+
+功能说明：
+
+返回 Warp 投票掩码。当前执行指令且谓词非零的 Lane `j` 将第 `j` 位置为 1。 整数按原位宽与零比较，不活跃或未启动的 Lane 不参与投票。
+
+函数原型：
+
+```python
+tla.arch.vote_ballot_sync(predicate: Any) -> UInt32
+```
+
+参数说明：
+
+- `predicate`（`Bool | Integer | bool | int`）：当前线程的谓词。
+
+返回值：
+
+- `UInt32`：参与投票的 Lane 得到相同的结果。
+
+约束：
+
+- 仅支持在 Ascend 950 的 `@tla.kernel` 中的 `tla.vec.func(mode="simt")` 内调用。
+- 接口使用当前活跃 Lane，且作用范围为当前 Warp。
+- `_sync` 不提供内存屏障。等价的分支体可能在投票前汇合。
+- 浮点数须先通过显式比较得到 `Bool`。
+
+调用示例：
+
+```python
+with tla.vec.func(mode="simt", thread_block_dim=48):
+    tid, _, _ = tla.arch.thread_idx()
+    gm_out[tid] = tla.arch.vote_ballot_sync(tid % 2 == 0)
+```
+
+---
+
+### `tla.arch.vote_all_sync`
+
+**源码：** [`catlass.core_api.arch_vote_all_sync`](../../../../catlass/core_api.py)
+
+功能说明：
+
+判断当前执行指令的所有 Lane 的谓词是否均非零。 整数按原位宽与零比较，不活跃或未启动的 Lane 不参与投票。
+
+函数原型：
+
+```python
+tla.arch.vote_all_sync(predicate: Any) -> Bool
+```
+
+参数说明：
+
+- `predicate`（`Bool | Integer | bool | int`）：当前线程的谓词。
+
+返回值：
+
+- `Bool`：参与投票的 Lane 得到相同的结果。
+
+约束：
+
+- 仅支持在 Ascend 950 的 `@tla.kernel` 中的 `tla.vec.func(mode="simt")` 内调用。
+- 接口使用当前活跃 Lane，且作用范围为当前 Warp。
+- `_sync` 不提供内存屏障。等价的分支体可能在投票前汇合。
+- 浮点数须先通过显式比较得到 `Bool`。
+
+调用示例：
+
+```python
+with tla.vec.func(mode="simt", thread_block_dim=48):
+    tid, _, _ = tla.arch.thread_idx()
+    gm_out[tid] = tla.arch.vote_all_sync(tid % 2 == 0).to(tla.Int32)
+```
+
+---
+
+### `tla.arch.vote_any_sync`
+
+**源码：** [`catlass.core_api.arch_vote_any_sync`](../../../../catlass/core_api.py)
+
+功能说明：
+
+判断当前执行指令的 Lane 中是否有任一谓词非零。 整数按原位宽与零比较，不活跃或未启动的 Lane 不参与投票。
+
+函数原型：
+
+```python
+tla.arch.vote_any_sync(predicate: Any) -> Bool
+```
+
+参数说明：
+
+- `predicate`（`Bool | Integer | bool | int`）：当前线程的谓词。
+
+返回值：
+
+- `Bool`：参与投票的 Lane 得到相同的结果。
+
+约束：
+
+- 仅支持在 Ascend 950 的 `@tla.kernel` 中的 `tla.vec.func(mode="simt")` 内调用。
+- 接口使用当前活跃 Lane，且作用范围为当前 Warp。
+- `_sync` 不提供内存屏障。等价的分支体可能在投票前汇合。
+- 浮点数须先通过显式比较得到 `Bool`。
+
+调用示例：
+
+```python
+with tla.vec.func(mode="simt", thread_block_dim=48):
+    tid, _, _ = tla.arch.thread_idx()
+    gm_out[tid] = tla.arch.vote_any_sync(tid % 2 == 0).to(tla.Int32)
+```
+
+---
+
 ### `tla.arch.lanemask_eq`
 
 **源码：** [`catlass.core_api.arch_lanemask_eq`](../../../../catlass/core_api.py)
