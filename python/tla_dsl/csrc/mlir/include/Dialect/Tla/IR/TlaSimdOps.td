@@ -321,7 +321,9 @@ def Tla_GatherOp : Tla_Op<"gather", [Pure]> {
     * **Reg→Reg** (``x`` is ``!tla.vector``): register permute
       ``result[i] = x[y[i] % VL]``. ``y`` must be an integer with the same
       element bit-width as ``x`` (``i8``/``u8``, ``i16``/``u16``, or
-      ``i32``/``u32``). No ``mask`` in this form.
+      ``i32``/``u32``). ``y`` may have more valid lanes than ``x``; extra
+      index lanes are ignored and ``result`` keeps ``x``'s valid lane count.
+      No ``mask`` in this form.
   }];
   let arguments = (ins
     AnyTypeOf<[Tla_TensorType, Tla_VectorSSAType]>:$x,
@@ -417,6 +419,28 @@ def Tla_SqueezeOp : Tla_Op<"squeeze", [DeclareOpInterfaceMethods<MemoryEffectsOp
   let assemblyFormat = [{
     $src `,` $mask attr-dict `:`
     qualified(type($src)) `,` qualified(type($mask)) `->` qualified(type($result))
+  }];
+  let hasVerifier = 1;
+}
+
+def Tla_UnsqueezeOp : Tla_Op<"unsqueeze", [Pure]> {
+  let summary = "Mask-expand lane prefix indices";
+  let description = [{
+  Write the exclusive prefix sum of ``mask`` into ``result``: lane ``i`` holds
+  the number of active mask bits in lanes ``< i``. This is the inverse mapping
+  of ``tla.squeeze``; feeding the indices to ``tla.gather`` reads a compacted
+  register back into the lanes selected by ``mask``.
+
+  ``result`` must be an 8/16/32-bit integer VectorSSA (``i8``/``u8``,
+  ``i16``/``u16``, ``i32``/``u32``); its element width fixes the required mask
+  lane count (256/128/64). The count is written in that element width: with a
+  signed 8-bit result, counts above 127 wrap. This matches AscendC ``Unsqueeze``
+  semantics (``vusqz``).
+  }];
+  let arguments = (ins Tla_MaskSSAType:$mask);
+  let results = (outs Tla_VectorSSAType:$result);
+  let assemblyFormat = [{
+    $mask attr-dict `:` qualified(type($mask)) `->` qualified(type($result))
   }];
   let hasVerifier = 1;
 }

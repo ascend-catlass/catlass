@@ -1780,8 +1780,9 @@ mlir::LogicalResult GatherOp::verify()
 
         if (srcTy.getValidLanes() != mlir::ShapedType::kDynamic &&
             indexType.getValidLanes() != mlir::ShapedType::kDynamic &&
-            srcTy.getValidLanes() != indexType.getValidLanes())
-            return emitOpError("src and index must have the same lane count");
+            indexType.getValidLanes() < srcTy.getValidLanes())
+            return emitOpError() << "index has " << indexType.getValidLanes() << " lanes but src has "
+                                 << srcTy.getValidLanes() << "; the index may be wider but not narrower";
 
         return mlir::success();
     }
@@ -1910,6 +1911,22 @@ mlir::LogicalResult SqueezeOp::verify()
     if (!hasEnclosingRegion<VecFuncOp>(getOperation()))
         return emitOpError("must be nested inside a tla.vec.func region");
     return verifyMaskMatchesVector(getOperation(), getMask(), getSrc().getType());
+}
+
+mlir::LogicalResult UnsqueezeOp::verify()
+{
+    if (!hasEnclosingRegion<VecFuncOp>(getOperation()))
+        return emitOpError("must be nested inside a tla.vec.func region");
+    if (auto vf = getOperation()->getParentOfType<VecFuncOp>()) {
+        if (auto mode = vf->getAttrOfType<mlir::StringAttr>("mode");
+            mode && !mode.getValue().equals_insensitive("simd"))
+            return emitOpError("requires a SIMD tla.vec.func region");
+    }
+    auto resultType = getResult().getType();
+    auto elementType = mlir::dyn_cast<mlir::IntegerType>(resultType.getElementType());
+    if (!elementType || (elementType.getWidth() != 8 && elementType.getWidth() != 16 && elementType.getWidth() != 32))
+        return emitOpError("result element type must be an 8/16/32-bit integer, got ") << resultType.getElementType();
+    return verifyMaskMatchesVector(getOperation(), getMask(), resultType);
 }
 
 mlir::LogicalResult HistogramsOp::verify()

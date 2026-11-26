@@ -1,0 +1,35 @@
+// RUN: not %tla_compile %s -o - 2>&1 | %filecheck %s
+
+// A Reg→Reg gather index may be wider than the source, but not narrower.
+// CHECK: 'tla.gather' op index has 32 lanes but src has 64; the index may be wider but not narrower
+
+!srcvec = !tla.tensor<!tla.layout<!tla.shape<64>, !tla.stride<1>, !tla.shape<64>, RowMajor>, !tla.coord<0>, !tla.ptr<i32, ub, 4>>
+!idxvec = !tla.tensor<!tla.layout<!tla.shape<32>, !tla.stride<1>, !tla.shape<32>, RowMajor>, !tla.coord<0>, !tla.ptr<i32, ub, 4>>
+
+module {
+  func.func @gather_reg_narrow_index(
+      %src_memref: memref<64xi32, #hivm.address_space<ub>>,
+      %idx_memref: memref<32xi32, #hivm.address_space<ub>>,
+      %dst_memref: memref<64xi32, #hivm.address_space<ub>>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c32 = arith.constant 32 : index
+    %c64 = arith.constant 64 : index
+    %src = tla.tensor_desc %src_memref shape [%c1, %c64, %c1, %c1] stride [%c64, %c1, %c1, %c1] origin_shape [%c1, %c64] coord [%c0, %c0] : memref<64xi32, #hivm.address_space<ub>> -> !srcvec
+    %idx = tla.tensor_desc %idx_memref shape [%c1, %c32, %c1, %c1] stride [%c32, %c1, %c1, %c1] origin_shape [%c1, %c32] coord [%c0, %c0] : memref<32xi32, #hivm.address_space<ub>> -> !idxvec
+    %dst = tla.tensor_desc %dst_memref shape [%c1, %c64, %c1, %c1] stride [%c64, %c1, %c1, %c1] origin_shape [%c1, %c64] coord [%c0, %c0] : memref<64xi32, #hivm.address_space<ub>> -> !srcvec
+    "tla.vec.func"() ({
+      %shape32 = "tla.make_shape"() : () -> !tla.shape<32>
+      %shape64 = "tla.make_shape"() : () -> !tla.shape<64>
+      %coord = "tla.make_coord"() : () -> !tla.coord<0>
+      %src_tile = "tla.tile_view"(%src, %shape64, %coord) : (!srcvec, !tla.shape<64>, !tla.coord<0>) -> !srcvec
+      %idx_tile = "tla.tile_view"(%idx, %shape32, %coord) : (!idxvec, !tla.shape<32>, !tla.coord<0>) -> !idxvec
+      %dst_tile = "tla.tile_view"(%dst, %shape64, %coord) : (!srcvec, !tla.shape<64>, !tla.coord<0>) -> !srcvec
+      %v0 = "tla.load"(%src_tile) <{operandSegmentSizes = array<i32: 1, 0, 0>}> : (!srcvec) -> !tla.vector<64xi32>
+      %v1 = "tla.load"(%idx_tile) <{operandSegmentSizes = array<i32: 1, 0, 0>}> : (!idxvec) -> !tla.vector<32xi32>
+      %v2 = "tla.gather"(%v0, %v1) : (!tla.vector<64xi32>, !tla.vector<32xi32>) -> !tla.vector<64xi32>
+      "tla.store"(%dst_tile, %v2) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!srcvec, !tla.vector<64xi32>) -> ()
+    }) {mode = "simd"} : () -> ()
+    return
+  }
+}

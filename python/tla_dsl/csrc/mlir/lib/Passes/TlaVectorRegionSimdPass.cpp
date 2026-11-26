@@ -931,11 +931,12 @@ static bool isVectorComputeOp(Operation* op)
 {
     return getAnyVectorOperationInfo(op).has_value() || isa_and_nonnull<::tla::CmpOp>(op) ||
            isa_and_nonnull<::tla::WhereOp>(op) || isa_and_nonnull<::tla::SqueezeOp>(op) ||
-           isa_and_nonnull<::tla::HistogramsOp>(op) || isa_and_nonnull<::tla::ReduceOp>(op) ||
-           isa_and_nonnull<::tla::ReduceIntraBlockOp>(op) || isa_and_nonnull<::tla::PairWiseOp>(op) ||
-           isa_and_nonnull<::tla::GatherOp>(op) || isa_and_nonnull<::tla::CastOp>(op) ||
-           isa_and_nonnull<::tla::BitCastOp>(op) || isa_and_nonnull<::tla::ExpSubOp>(op) ||
-           isa_and_nonnull<::tla::PackOp>(op) || isa_and_nonnull<::tla::UnpackOp>(op) ||
+           isa_and_nonnull<::tla::UnsqueezeOp>(op) || isa_and_nonnull<::tla::HistogramsOp>(op) ||
+           isa_and_nonnull<::tla::ReduceOp>(op) || isa_and_nonnull<::tla::ReduceIntraBlockOp>(op) ||
+           isa_and_nonnull<::tla::PairWiseOp>(op) || isa_and_nonnull<::tla::GatherOp>(op) ||
+           isa_and_nonnull<::tla::CastOp>(op) || isa_and_nonnull<::tla::BitCastOp>(op) ||
+           isa_and_nonnull<::tla::ExpSubOp>(op) || isa_and_nonnull<::tla::PackOp>(op) ||
+           isa_and_nonnull<::tla::UnpackOp>(op) ||
            isa_and_nonnull<::tla::InterleaveOp, ::tla::DeInterleaveOp, ::tla::MullOp, ::tla::AddCOp, ::tla::SubCOp>(
                op) ||
            isa_and_nonnull<::tla::GenerateMaskOp>(op);
@@ -1033,6 +1034,18 @@ static std::string getSqueezeLibraryCallName(Type elementType, bool storeReg)
     if (!name.empty() && storeReg)
         name += "_store_reg";
     return name;
+}
+
+static std::string getUnsqueezeLibraryCallName(Type elementType)
+{
+    if (auto intType = dyn_cast<IntegerType>(elementType)) {
+        unsigned width = intType.getWidth();
+        // vusqz is sign-agnostic, but int*_t / uint*_t still need their own
+        // VectorReg ABI stubs.
+        if (width == 8 || width == 16 || width == 32)
+            return std::string("vunsqueeze_") + (intType.isUnsigned() ? "uint" : "int") + std::to_string(width) + "_t";
+    }
+    return {};
 }
 
 static std::string getVectorPackLibraryCallName(Type srcElement, Type dstElement, ::RegPart part)
@@ -1166,6 +1179,20 @@ static func::FuncOp getOrCreateSqueezeLibraryCall(
     }
     OpBuilder moduleBuilder(module.getBodyRegion());
     auto fnType = FunctionType::get(module.getContext(), {vecType, pregType}, {vecType});
+    auto callee = moduleBuilder.create<func::FuncOp>(loc, calleeName, fnType);
+    annotateAivLibraryCall(callee);
+    return callee;
+}
+
+static func::FuncOp getOrCreateUnsqueezeLibraryCall(
+    ModuleOp module, Location loc, VectorType vecType, VectorType pregType, StringRef calleeName)
+{
+    if (auto existing = module.lookupSymbol<func::FuncOp>(calleeName)) {
+        annotateAivLibraryCall(existing);
+        return existing;
+    }
+    OpBuilder moduleBuilder(module.getBodyRegion());
+    auto fnType = FunctionType::get(module.getContext(), {pregType}, {vecType});
     auto callee = moduleBuilder.create<func::FuncOp>(loc, calleeName, fnType);
     annotateAivLibraryCall(callee);
     return callee;
@@ -3733,6 +3760,31 @@ static LogicalResult lowerSqueeze(
     return success();
 }
 
+/// tla.unsqueeze: exclusive mask prefix sum via linked bitcode (vusqz).
+static LogicalResult lowerUnsqueeze(
+    ::tla::UnsqueezeOp unsqueezeOp, OpBuilder& b, ModuleOp module, DenseMap<Value, Value>& valueMap)
+{
+    Location loc = unsqueezeOp.getLoc();
+    Value mask = valueMap.lookup(unsqueezeOp.getMask());
+    if (!mask)
+        return failure();
+    // No vector operand to key off: the register width comes from the result
+    // VectorSSA element type.
+    auto resultType = unsqueezeOp.getResult().getType();
+    auto opCtx = deriveVecCtxForElement(resultType.getElementType());
+    if (failed(opCtx))
+        return unsqueezeOp.emitError("unsupported tla.unsqueeze result element type"), failure();
+    std::string calleeName = getUnsqueezeLibraryCallName(resultType.getElementType());
+    if (calleeName.empty())
+        return unsqueezeOp.emitError("unsupported element type for tla.unsqueeze: ") << resultType.getElementType(),
+               failure();
+    VectorType pregVecType = fullPregVecType(b.getContext());
+    Value preg = castMaskToPregType(b, loc, mask, pregVecType);
+    auto callee = getOrCreateUnsqueezeLibraryCall(module, loc, opCtx->vecType, pregVecType, calleeName);
+    valueMap[unsqueezeOp.getResult()] = b.create<func::CallOp>(loc, callee, ValueRange{preg}).getResult(0);
+    return success();
+}
+
 static LogicalResult lowerReduce(
     ::tla::ReduceOp reduceOp, OpBuilder& b, ModuleOp module, DenseMap<Value, Value>& valueMap,
     AutoFullPredicateCache& fullMasks)
@@ -5639,6 +5691,9 @@ static LogicalResult lowerNestedVectorOp(
     if (auto squeezeOp = dyn_cast<::tla::SqueezeOp>(op))
         return lowerSqueeze(squeezeOp, b, module, valueMap, fullMasks);
 
+    if (auto unsqueezeOp = dyn_cast<::tla::UnsqueezeOp>(op))
+        return lowerUnsqueeze(unsqueezeOp, b, module, valueMap);
+
     // tla.histograms: Reg FREQUENCY/ACCUMULATE histogram via linked bitcode
     // (dhistv2 / chistv2). Not lowered through HIVMAVE.
     if (auto histOp = dyn_cast<::tla::HistogramsOp>(op)) {
@@ -6564,6 +6619,12 @@ public:
                     return rewriter.notifyMatchFailure(
                         vecFuncOp,
                         "expected tla.squeeze mask from create/update mask or "
+                        "prior mask compute op");
+            } else if (auto unsqueezeOp = dyn_cast<::tla::UnsqueezeOp>(computeOp)) {
+                if (!producedValues.contains(unsqueezeOp.getMask()))
+                    return rewriter.notifyMatchFailure(
+                        vecFuncOp,
+                        "expected tla.unsqueeze mask from create/update mask or "
                         "prior mask compute op");
             } else if (auto histOp = dyn_cast<::tla::HistogramsOp>(computeOp)) {
                 if (!producedValues.contains(histOp.getSrc()))

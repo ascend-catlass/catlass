@@ -459,6 +459,7 @@ _CORE_API_EXPORTS = (
     "shift_right",
     "where",
     "squeeze",
+    "unsqueeze",
     "HistogramsType",
     "HistogramsBinType",
     "histograms",

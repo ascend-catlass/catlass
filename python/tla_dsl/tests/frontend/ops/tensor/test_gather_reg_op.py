@@ -135,3 +135,51 @@ def test_gather_reg_mixed_example_full_compile(
     )
     assert artifact is not None
     assert Path(artifact.kernel_binary_path).is_file()
+
+
+def _i32_tensor(n: int) -> tla.Tensor:
+    return make_fake_tensor(
+        tla.Int32,
+        (n,),
+        (1,),
+        addrspace=tla.AddressSpace.ub,
+        origin_shape=(n,),
+        layout_tag=tla.arch.RowMajor,
+    )
+
+
+@tla.kernel
+def gather_reg_wide_index_kernel(
+    src: tla.Tensor, idx: tla.Tensor, dst: tla.Tensor
+) -> None:
+    src_tile = tla.tile_view(src, tla.make_shape(32), tla.make_coord(0))
+    idx_tile = tla.tile_view(idx, tla.make_shape(64), tla.make_coord(0))
+    dst_tile = tla.tile_view(dst, tla.make_shape(32), tla.make_coord(0))
+    with tla.vector():
+        with tla.vec.func(mode="simd"):
+            dst_tile.store(tla.gather(src_tile.load(), idx_tile.load()))
+
+
+def test_gather_reg_allows_wider_index() -> None:
+    src, idx, dst = _i32_tensor(32), _i32_tensor(64), _i32_tensor(32)
+    mlir = gather_reg_wide_index_kernel.dump_mlir(type_args=(src, idx, dst))
+    gather_line = next(line for line in mlir.splitlines() if "tla.gather" in line)
+    assert "32xi32" in gather_line and "64xi32" in gather_line
+
+
+@tla.kernel
+def gather_reg_narrow_index_kernel(
+    src: tla.Tensor, idx: tla.Tensor, dst: tla.Tensor
+) -> None:
+    src_tile = tla.tile_view(src, tla.make_shape(64), tla.make_coord(0))
+    idx_tile = tla.tile_view(idx, tla.make_shape(32), tla.make_coord(0))
+    dst_tile = tla.tile_view(dst, tla.make_shape(64), tla.make_coord(0))
+    with tla.vector():
+        with tla.vec.func(mode="simd"):
+            dst_tile.store(tla.gather(src_tile.load(), idx_tile.load()))
+
+
+def test_gather_reg_rejects_narrower_index() -> None:
+    src, idx, dst = _i32_tensor(64), _i32_tensor(32), _i32_tensor(64)
+    with pytest.raises(tla.TlaCoreAPIError, match="fewer lanes"):
+        gather_reg_narrow_index_kernel.dump_mlir(type_args=(src, idx, dst))

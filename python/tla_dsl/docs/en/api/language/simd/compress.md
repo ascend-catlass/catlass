@@ -59,3 +59,58 @@ with tla.vec.func(mode="simd"):
     keep, _ = tla.update_mask(3, dtype=tla.Int16)
     packed = tla.squeeze(src_ub.load(), keep)
 ```
+
+---
+
+## `tla.unsqueeze`
+
+**Source:** [`catlass.core_api.unsqueeze`](../../../../../catlass/core_api.py)
+
+Description:
+
+Expand a mask into per-lane compressed prefix indices.
+
+Lane `i` of the result holds the number of active mask bits in lanes
+`< i`. This is the inverse mapping of `tla.squeeze`: feeding the indices
+to `tla.gather` reads a compacted register back into the lanes selected
+by `mask`.
+
+Prototype:
+
+```python
+tla.unsqueeze(mask: MaskSSA, dtype: type[Numeric]) -> VectorSSA
+```
+
+Parameters:
+
+- `mask` (`MaskSSA`): Mask to expand. Required.
+- `dtype` (`type[Numeric]`): Result element type. Required. The width
+  fixes the mask lane count: `i8`/`u8` -> `mask<256>`, `i16`/`u16` ->
+  `mask<128>`, `i32`/`u32` -> `mask<64>`. The result always covers the
+  full vector register (`256`/`128`/`64` valid lanes for 8/16/32-bit
+  elements) and does not inherit the mask's valid-lane count.
+
+Constraints:
+
+- Must be called inside a `@tla.kernel`-decorated kernel function.
+- Must be called inside `tla.vec.func(mode="simd")`.
+- Supported result element types: `i8`, `u8`, `i16`, `u16`, `i32`, `u32`.
+- `dtype` width must match the mask lane count.
+- A partially active mask (for example a 32-lane tail in a 64-lane
+  register) still yields a full-register index; pair it with a masked
+  `store` so only the restored lanes are written.
+- Counts are written in `dtype`'s bit width. An `i8` result wraps counts
+  above 127 (e.g. 128 -> -128); use `u8`/`u16`/`u32` when the caller
+  needs the full non-negative count. The wrapped bit pattern is still a
+  valid gather index.
+
+Example:
+
+```python
+# Restore a 32-lane tail through squeeze -> unsqueeze -> gather.
+with tla.vec.func(mode="simd"):
+    keep, _ = tla.update_mask(32, dtype=tla.Int32)
+    packed = tla.squeeze(src_tile.load(), keep)
+    idx = tla.unsqueeze(keep, tla.UInt32)
+    dst_tile.store(tla.gather(packed, idx), mask=keep)
+```

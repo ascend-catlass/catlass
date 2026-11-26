@@ -31,6 +31,8 @@
 # python/tla_dsl/tests/end_to_end (fill_op.py: L1 constant fill).
 # python/tla_dsl/tests/end_to_end (fp4x2_bitwise_ops.py: packed FP4 pair bitwise ops).
 # python/tla_dsl/tests/end_to_end (u64_scalar_ops.py: uint64 bcnt0/bcnt1/clz/sff0/sff1).
+# python/tla_dsl/tests/end_to_end (unsqueeze_op.py: mask exclusive prefix indices).
+# python/tla_dsl/tests/end_to_end (unsqueeze_restore_op.py: squeeze→unsqueeze→gather tail restore).
 # examples/python/tla_dsl/dsl_tutorials/tensor_index (scalar_index_control_flow.py,
 # scalar_kernel_arg.py).
 # examples/python/tla_dsl/dsl_tutorials/debug_print (debug_print.py, debug_print_mixed.py,
@@ -163,6 +165,8 @@ PRINT_TENSOR_REL="dsl_tutorials/print_tensor/print_tensor.py"
 FILL_OP_REL="tests/end_to_end/fill_op.py"
 FP4X2_BITWISE_OPS_REL="tests/end_to_end/fp4x2_bitwise_ops.py"
 U64_SCALAR_OPS_REL="tests/end_to_end/u64_scalar_ops.py"
+UNSQUEEZE_OP_REL="tests/end_to_end/unsqueeze_op.py"
+UNSQUEEZE_RESTORE_OP_REL="tests/end_to_end/unsqueeze_restore_op.py"
 STREAMK_OPS_REL="tla/kernel/matmul/basic_mmad_streamk/basic_mmad_streamk.py"
 GROUPED_MATMUL_SLICEM_REL="tla/kernel/gmm/grouped_matmul_slice_m/grouped_matmul_slice_m.py"
 BATCHED_MATMUL_REL="tla/kernel/matmul/batched_matmul/batched_matmul.py"
@@ -250,6 +254,8 @@ Run end-to-end validation for:
     --all-dtypes; i32/i16/i8/f32/f16 -> DIST_FIRST_ELEMENT_B32/B16/B8 lane-0
     store, one element per VL tile written to the 32B-aligned tile base)
   - squeeze_op (squeeze_op.py squeeze --all-dtypes)
+  - unsqueeze_op (unsqueeze_op.py unsqueeze --all-dtypes)
+  - unsqueeze_restore (unsqueeze_restore_op.py restore --dtype i32)
   - register_control_flow (register_control_flow.py register_carriers:
     mixed VectorSSA/MaskSSA scf.for carriers and masked store)
   - scalar_index_control_flow (scalar_index_control_flow.py: GM scalar read/write,
@@ -622,6 +628,14 @@ if [[ ! -f "${CATLASS_DSL_DIR}/${FP4X2_BITWISE_OPS_REL}" ]]; then
 fi
 if [[ ! -f "${CATLASS_DSL_DIR}/${U64_SCALAR_OPS_REL}" ]]; then
     echo "error: missing ${U64_SCALAR_OPS_REL} under ${CATLASS_DSL_DIR}" >&2
+    exit 1
+fi
+if [[ ! -f "${CATLASS_DSL_DIR}/${UNSQUEEZE_OP_REL}" ]]; then
+    echo "error: missing ${UNSQUEEZE_OP_REL} under ${CATLASS_DSL_DIR}" >&2
+    exit 1
+fi
+if [[ ! -f "${CATLASS_DSL_DIR}/${UNSQUEEZE_RESTORE_OP_REL}" ]]; then
+    echo "error: missing ${UNSQUEEZE_RESTORE_OP_REL} under ${CATLASS_DSL_DIR}" >&2
     exit 1
 fi
 if [[ ! -f "${EXAMPLES_DIR}/${PRINT_TENSOR_REL}" ]]; then

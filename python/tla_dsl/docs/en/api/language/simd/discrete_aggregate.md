@@ -110,7 +110,8 @@ Two forms:
 - **Reg→Reg**: ``x`` is ``VectorSSA``; ``y`` is an integer index
   vector with the same element bit-width as ``x`` (``i8``/``u8``,
   ``i16``/``u16``, or ``i32``/``u32``); ``result[i] = x[y[i] % VL]``.
-  No ``mask``.
+  ``y`` may have more valid lanes than ``x``; extra index lanes are
+  ignored and the result keeps ``x``'s valid lane count. No ``mask``.
 
 Prototype:
 
@@ -130,6 +131,8 @@ Constraints:
 - Must be called inside a `@tla.kernel`-decorated kernel function.
 - Must be called inside `tla.vec.func()`.
 - Tensor source must reside in UB.
+- For Reg→Reg, the index vector must have at least as many valid lanes
+  as ``x``; a wider index is allowed and its extra lanes are ignored.
 
 Example:
 

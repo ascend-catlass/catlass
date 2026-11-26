@@ -1202,6 +1202,14 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         [["dsl_tutorials/vector_simd_ops/squeeze_op.py", "squeeze", "--sweep", "--shapes", "64", *dev]],
     )
     yield (
+        "vector-unsqueeze-op",
+        [["end_to_end/unsqueeze_op.py", "unsqueeze", "--sweep", "--shapes", "64", *dev]],
+    )
+    yield (
+        "vector-unsqueeze-restore",
+        [["end_to_end/unsqueeze_restore_op.py", "restore", "--dtype", "i32", *dev]],
+    )
+    yield (
         "vector-register-control-flow",
         [["dsl_tutorials/vector_simd_ops/register_control_flow.py", "register_carriers", *dev]],
     )

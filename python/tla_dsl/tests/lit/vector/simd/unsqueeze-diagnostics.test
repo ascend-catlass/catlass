@@ -1,0 +1,73 @@
+// RUN: sed -n '/^\/\/ BEGIN_F32$/,/^\/\/ END_F32$/p' %s | sed '1d;$d;s|^// ||' > %t.f32.mlir && not %tla_compile %t.f32.mlir -o %t 2>&1 | %filecheck %s --check-prefix=F32
+// RUN: sed -n '/^\/\/ BEGIN_MASK$/,/^\/\/ END_MASK$/p' %s | sed '1d;$d;s|^// ||' > %t.mask.mlir && not %tla_compile %t.mask.mlir -o %t 2>&1 | %filecheck %s --check-prefix=MASK
+// RUN: sed -n '/^\/\/ BEGIN_SIMT$/,/^\/\/ END_SIMT$/p' %s | sed '1d;$d;s|^// ||' > %t.simt.mlir && not %tla_compile %t.simt.mlir -o %t 2>&1 | %filecheck %s --check-prefix=SIMT
+
+// F32: error:
+// F32-SAME: 'tla.unsqueeze' op result element type must be an 8/16/32-bit integer, got 'f32'
+// MASK: error:
+// MASK-SAME: 'tla.unsqueeze' op mask has 128 predicate lanes, expected 64 for 'i32' VectorSSA
+// SIMT: error:
+// SIMT-SAME: 'tla.unsqueeze' op requires a SIMD tla.vec.func region
+
+// BEGIN_F32
+// !dst = !tla.tensor<!tla.layout<!tla.shape<64>, !tla.stride<1>, !tla.shape<64>, RowMajor>, !tla.coord<0>, !tla.ptr<f32, ub, 4>>
+// module {
+//   func.func @unsqueeze_f32(%dst_memref: memref<64xf32, #hivm.address_space<ub>>) {
+//     %c0 = arith.constant 0 : index
+//     %c1 = arith.constant 1 : index
+//     %c64 = arith.constant 64 : index
+//     %dst = tla.tensor_desc %dst_memref shape [%c1, %c64, %c1, %c1] stride [%c64, %c1, %c1, %c1] origin_shape [%c1, %c64] coord [%c0, %c0] : memref<64xf32, #hivm.address_space<ub>> -> !dst
+//     "tla.vec.func"() ({
+//       %shape = "tla.make_shape"() : () -> !tla.shape<64>
+//       %coord = "tla.make_coord"() : () -> !tla.coord<0>
+//       %dst_tile = "tla.tile_view"(%dst, %shape, %coord) : (!dst, !tla.shape<64>, !tla.coord<0>) -> !dst
+//       %mask = "tla.create_mask"() {pattern = "M4", dtype = f32} : () -> !tla.mask<64>
+//       %v0 = "tla.unsqueeze"(%mask) : (!tla.mask<64>) -> !tla.vector<64xf32>
+//       "tla.store"(%dst_tile, %v0) : (!dst, !tla.vector<64xf32>) -> ()
+//     }) {mode = "simd"} : () -> ()
+//     return
+//   }
+// }
+// END_F32
+
+// BEGIN_MASK
+// !dst = !tla.tensor<!tla.layout<!tla.shape<64>, !tla.stride<1>, !tla.shape<64>, RowMajor>, !tla.coord<0>, !tla.ptr<i32, ub, 4>>
+// module {
+//   func.func @unsqueeze_mask_mismatch(%dst_memref: memref<64xi32, #hivm.address_space<ub>>) {
+//     %c0 = arith.constant 0 : index
+//     %c1 = arith.constant 1 : index
+//     %c64 = arith.constant 64 : index
+//     %dst = tla.tensor_desc %dst_memref shape [%c1, %c64, %c1, %c1] stride [%c64, %c1, %c1, %c1] origin_shape [%c1, %c64] coord [%c0, %c0] : memref<64xi32, #hivm.address_space<ub>> -> !dst
+//     "tla.vec.func"() ({
+//       %shape = "tla.make_shape"() : () -> !tla.shape<64>
+//       %coord = "tla.make_coord"() : () -> !tla.coord<0>
+//       %dst_tile = "tla.tile_view"(%dst, %shape, %coord) : (!dst, !tla.shape<64>, !tla.coord<0>) -> !dst
+//       %mask = "tla.create_mask"() {pattern = "M4", dtype = i16} : () -> !tla.mask<128>
+//       %v0 = "tla.unsqueeze"(%mask) : (!tla.mask<128>) -> !tla.vector<64xi32>
+//       "tla.store"(%dst_tile, %v0) : (!dst, !tla.vector<64xi32>) -> ()
+//     }) {mode = "simd"} : () -> ()
+//     return
+//   }
+// }
+// END_MASK
+
+// BEGIN_SIMT
+// !dst = !tla.tensor<!tla.layout<!tla.shape<64>, !tla.stride<1>, !tla.shape<64>, RowMajor>, !tla.coord<0>, !tla.ptr<i32, ub, 4>>
+// module {
+//   func.func @unsqueeze_simt(%dst_memref: memref<64xi32, #hivm.address_space<ub>>) {
+//     %c0 = arith.constant 0 : index
+//     %c1 = arith.constant 1 : index
+//     %c64 = arith.constant 64 : index
+//     %dst = tla.tensor_desc %dst_memref shape [%c1, %c64, %c1, %c1] stride [%c64, %c1, %c1, %c1] origin_shape [%c1, %c64] coord [%c0, %c0] : memref<64xi32, #hivm.address_space<ub>> -> !dst
+//     "tla.vec.func"() ({
+//       %shape = "tla.make_shape"() : () -> !tla.shape<64>
+//       %coord = "tla.make_coord"() : () -> !tla.coord<0>
+//       %dst_tile = "tla.tile_view"(%dst, %shape, %coord) : (!dst, !tla.shape<64>, !tla.coord<0>) -> !dst
+//       %mask = "tla.create_mask"() {pattern = "M4", dtype = i32} : () -> !tla.mask<64>
+//       %v0 = "tla.unsqueeze"(%mask) : (!tla.mask<64>) -> !tla.vector<64xi32>
+//       "tla.store"(%dst_tile, %v0) : (!dst, !tla.vector<64xi32>) -> ()
+//     }) {mode = "simt", thread_block_dim = array<i64: 64, 1, 1>} : () -> ()
+//     return
+//   }
+// }
+// END_SIMT

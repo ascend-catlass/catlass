@@ -100,7 +100,7 @@ with tla.vec.func(mode="simd"):
 两种形态：
 
 - **UB→Reg**：`x` 为 UB 上的 `Tensor`；`y` 为 `i32` 索引；可选 `mask`。
-- **Reg→Reg**：`x` 为 `VectorSSA`；`y` 为与 `x` 元素位宽相同的整数索引（`i8`/`u8`、`i16`/`u16` 或 `i32`/`u32`）；`result[i] = x[y[i] % VL]`。无 `mask`。
+- **Reg→Reg**：`x` 为 `VectorSSA`；`y` 为与 `x` 元素位宽相同的整数索引（`i8`/`u8`、`i16`/`u16` 或 `i32`/`u32`）；`result[i] = x[y[i] % VL]`。`y` 的有效 lane 数可以多于 `x`，多出的索引不参与结果，结果保留 `x` 的有效 lane 数。无 `mask`。
 
 函数原型：
 
@@ -119,6 +119,7 @@ tla.gather(x: Tensor | VectorSSA, y: VectorSSA, *, mask: MaskSSA | None = None) 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
 - 须在 `tla.vec.func()` 内调用。
 - Tensor 源须位于 UB。
+- Reg→Reg 形态下，`y` 的有效 lane 数须不少于 `x`；更宽的索引允许，多余 lane 被忽略。
 
 调用示例：
 

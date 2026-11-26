@@ -12832,6 +12832,88 @@ def squeeze(
     return VectorSSA(result)
 
 
+_UNSQUEEZE_SUPPORTED_DTYPES = frozenset(("i8", "u8", "i16", "u16", "i32", "u32"))
+
+
+@dsl_user_op
+def unsqueeze(
+    mask: MaskSSA,
+    dtype: type[Numeric],
+    *,
+    loc: mlir_ir.Location | None = None,
+) -> VectorSSA:
+    """Directory: SIMD Vector Compute / Data Compress
+    Description:
+        Expand a mask into per-lane compressed prefix indices.
+
+        Lane `i` of the result holds the number of active mask bits in lanes
+        `< i`. This is the inverse mapping of `tla.squeeze`: feeding the indices
+        to `tla.gather` reads a compacted register back into the lanes selected
+        by `mask`.
+
+        Parameters:
+        - `mask` (`MaskSSA`): Mask to expand. Required.
+        - `dtype` (`type[Numeric]`): Result element type. Required. The width
+          fixes the mask lane count: `i8`/`u8` -> `mask<256>`, `i16`/`u16` ->
+          `mask<128>`, `i32`/`u32` -> `mask<64>`. The result always covers the
+          full vector register (`256`/`128`/`64` valid lanes for 8/16/32-bit
+          elements) and does not inherit the mask's valid-lane count.
+
+        Constraints:
+        - Must be called inside a `@tla.kernel`-decorated kernel function.
+        - Must be called inside `tla.vec.func(mode="simd")`.
+        - Supported result element types: `i8`, `u8`, `i16`, `u16`, `i32`, `u32`.
+        - `dtype` width must match the mask lane count.
+        - A partially active mask (for example a 32-lane tail in a 64-lane
+          register) still yields a full-register index; pair it with a masked
+          `store` so only the restored lanes are written.
+        - Counts are written in `dtype`'s bit width. An `i8` result wraps counts
+          above 127 (e.g. 128 -> -128); use `u8`/`u16`/`u32` when the caller
+          needs the full non-negative count. The wrapped bit pattern is still a
+          valid gather index.
+
+        Example:
+        ```python
+        # Restore a 32-lane tail through squeeze -> unsqueeze -> gather.
+        with tla.vec.func(mode="simd"):
+            keep, _ = tla.update_mask(32, dtype=tla.Int32)
+            packed = tla.squeeze(src_tile.load(), keep)
+            idx = tla.unsqueeze(keep, tla.UInt32)
+            dst_tile.store(tla.gather(packed, idx), mask=keep)
+        ```
+    """
+    op_name = "unsqueeze"
+    _require_category(op_name, "mask", mask, "mask_ssa", 0)
+    if not (
+        isinstance(dtype, type)
+        and issubclass(dtype, Numeric)
+        and getattr(dtype, "dtype", "")
+    ):
+        _op_error(
+            op_name,
+            f"invalid argument 'dtype' (position 1): expected an integer Numeric "
+            f"type (tla.Int8/UInt8/Int16/UInt16/Int32/UInt32), got {_type_name(dtype)}",
+        )
+    dtype_token = str(dtype.dtype).strip().lower()
+    if dtype_token not in _UNSQUEEZE_SUPPORTED_DTYPES:
+        _op_error(
+            op_name,
+            f"unsupported vector element dtype {dtype.dtype}; supported dtypes are "
+            f"{', '.join(sorted(_UNSQUEEZE_SUPPORTED_DTYPES))}",
+        )
+    _require_frontend_state(op_name)
+    _runtime._require_enclosing_region(op_name, "vec.func")
+    if _runtime._in_simt_vec_func():
+        _op_error(op_name, "requires tla.vec.func(mode='simd')")
+    mask_value = _as_value(mask)
+    _require_mask_matches_element_type(op_name, mask_value, dtype_token)
+    desc = _full_vector_ssa_descriptor(dtype_token)
+    context = loc.context if loc is not None else mlir_ir.Context.current
+    return VectorSSA(
+        _tla_ops_gen.unsqueeze(desc.to_mlir_type(context), mask_value, loc=loc)
+    )
+
+
 def _normalize_histograms_params(params: HistogramsParams) -> HistogramsParams:
     """Accept enum or str for HistogramsParams fields; return enum-typed params."""
     mode = params.mode
@@ -13421,7 +13503,8 @@ def gather(
         - **Reg→Reg**: ``x`` is ``VectorSSA``; ``y`` is an integer index
           vector with the same element bit-width as ``x`` (``i8``/``u8``,
           ``i16``/``u16``, or ``i32``/``u32``); ``result[i] = x[y[i] % VL]``.
-          No ``mask``.
+          ``y`` may have more valid lanes than ``x``; extra index lanes are
+          ignored and the result keeps ``x``'s valid lane count. No ``mask``.
 
         Parameters:
         - `x` (`Tensor | VectorSSA`): Source tile (UB) or source register. Required.
@@ -13433,6 +13516,8 @@ def gather(
         - Must be called inside a `@tla.kernel`-decorated kernel function.
         - Must be called inside `tla.vec.func()`.
         - Tensor source must reside in UB.
+        - For Reg→Reg, the index vector must have at least as many valid lanes
+          as ``x``; a wider index is allowed and its extra lanes are ignored.
 
         Example:
         ```python
@@ -13497,12 +13582,12 @@ def gather(
         if (
             x_desc.valid_lanes is not None
             and y_desc.valid_lanes is not None
-            and x_desc.valid_lanes != y_desc.valid_lanes
+            and y_desc.valid_lanes < x_desc.valid_lanes
         ):
             _op_error(
                 "gather",
-                f"src and index lane counts must match, got "
-                f"{x_desc.valid_lanes} vs {y_desc.valid_lanes}",
+                f"index has fewer lanes than src: got {y_desc.valid_lanes} vs "
+                f"{x_desc.valid_lanes}; the index may be wider but not narrower",
             )
 
         result = _tla_ops_gen.gather(
@@ -16146,6 +16231,7 @@ _require_generated("shift_lefts")
 _require_generated("shift_rights")
 _require_generated("where")
 _require_generated("squeeze")
+_require_generated("unsqueeze")
 _require_generated("bitwise_not")
 _require_generated("bitwise_and")
 _require_generated("bitwise_or")
@@ -16781,6 +16867,7 @@ __all__ = [
     "shift_right",
     "where",
     "squeeze",
+    "unsqueeze",
     "HistogramsType",
     "HistogramsBinType",
     "histograms",
