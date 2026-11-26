@@ -459,6 +459,45 @@ with tla.vec.func(mode="simd"):
 
 ---
 
+## `tla.arch.inplace_mul_add`
+
+**源码：** [`catlass.core_api.arch_inplace_mul_add`](../../../../../catlass/core_api.py)
+
+功能说明：
+
+返回新的寄存器，每个有效 lane 计算 `dst * multiplier + addend`，在最后舍入一次到输入元素类型。
+第一个输入提供旧的目的寄存器值，调用后仍可使用。
+
+函数原型：
+
+```python
+tla.arch.inplace_mul_add(dst: VectorSSA, multiplier: VectorSSA, addend: VectorSSA, *, mask: MaskSSA | None = None) -> VectorSSA
+```
+
+参数说明：
+
+- `dst`（`VectorSSA`）：第一个乘数。必填。
+- `multiplier`（`VectorSSA`）：第二个乘数。必填。
+- `addend`（`VectorSSA`）：加到乘积上的值。必填。
+- `mask`（`MaskSSA | None`）：可选，仅接受关键字传参。默认启用全部 lane，未选中的结果位置置零（ZEROING）。
+
+约束说明：
+
+- 须在 `@tla.kernel` 和 `tla.vec.func(mode="simd")` 内调用。
+- 三个输入须具有相同的元素类型和有效 lane 数，支持 `Float16`、`BFloat16` 和 `Float32`。
+- 把返回值用作下一次调用的 `dst` 时，上次未选中的位置会以零作为第一个乘数。要保留这些位置原来的值，可将 `tla.where(mask, result, dst)` 用作下一次调用的 `dst`。
+
+调用示例：
+
+```python
+with tla.vec.func(mode="simd"):
+    updated = tla.arch.inplace_mul_add(previous, scale, current, mask=active)
+    previous = tla.where(active, updated, previous)
+    out_tile.store(previous)
+```
+
+---
+
 ## `tla.mul`
 
 **源码：** [`catlass.core_api.mul`](../../../../../catlass/core_api.py)

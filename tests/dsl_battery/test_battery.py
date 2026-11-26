@@ -1078,6 +1078,12 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
             for dtype in ("f32", "i16")
         ],
     )
+    for dtype in ("f16", "bf16", "f32"):
+        yield (
+            f"vector-inplace-mul-add-{dtype}",
+            [["end_to_end/inplace_mul_add_op.py", "--dtype", dtype, *dev]],
+        )
+
     # One launch per dtype, with three mask tasks on separate AIV blocks.
     yield (
         "vector-pair-wise-op",

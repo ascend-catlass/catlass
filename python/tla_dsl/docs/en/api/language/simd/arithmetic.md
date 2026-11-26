@@ -484,6 +484,50 @@ with tla.vec.func(mode="simd"):
 
 ---
 
+## `tla.arch.inplace_mul_add`
+
+**Source:** [`catlass.core_api.arch_inplace_mul_add`](../../../../../catlass/core_api.py)
+
+Description:
+
+Return a new register containing `dst * multiplier + addend` in
+each active lane, with a single rounding to the input element type.
+The first input supplies the old destination value and remains available.
+
+Prototype:
+
+```python
+tla.arch.inplace_mul_add(dst: VectorSSA, multiplier: VectorSSA, addend: VectorSSA, *, mask: MaskSSA | None = None) -> VectorSSA
+```
+
+Parameters:
+
+- `dst` (`VectorSSA`): First multiplicand. Required.
+- `multiplier` (`VectorSSA`): Second multiplicand. Required.
+- `addend` (`VectorSSA`): Value added to the product. Required.
+- `mask` (`MaskSSA | None`): Optional keyword-only execution mask.
+  Defaults to all lanes. Inactive result lanes are zero (ZEROING).
+
+Constraints:
+
+- Call inside `@tla.kernel` and `tla.vec.func(mode="simd")`.
+- All three input registers must have the same element type and valid
+  lane count. Supported types are `Float16`, `BFloat16` and `Float32`.
+- When the result is used as the next `dst`, a previously masked-off
+  lane supplies zero as the first multiplicand. To retain its old value,
+  use `tla.where(mask, result, dst)` as the next `dst`.
+
+Example:
+
+```python
+with tla.vec.func(mode="simd"):
+    updated = tla.arch.inplace_mul_add(previous, scale, current, mask=active)
+    previous = tla.where(active, updated, previous)
+    out_tile.store(previous)
+```
+
+---
+
 ## `tla.mul`
 
 **Source:** [`catlass.core_api.mul`](../../../../../catlass/core_api.py)

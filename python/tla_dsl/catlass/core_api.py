@@ -12319,6 +12319,76 @@ def sub(
 
 
 @dsl_user_op
+def arch_inplace_mul_add(
+    dst: VectorSSA,
+    multiplier: VectorSSA,
+    addend: VectorSSA,
+    *,
+    mask: MaskSSA | None = None,
+    loc: mlir_ir.Location | None = None,
+) -> VectorSSA:
+    """Directory: SIMD Vector Compute / Basic Arithmetic
+
+    Description:
+        Return a new register containing `dst * multiplier + addend` in
+        each active lane, with a single rounding to the input element type.
+        The first input supplies the old destination value and remains available.
+
+        Parameters:
+        - `dst` (`VectorSSA`): First multiplicand. Required.
+        - `multiplier` (`VectorSSA`): Second multiplicand. Required.
+        - `addend` (`VectorSSA`): Value added to the product. Required.
+        - `mask` (`MaskSSA | None`): Optional keyword-only execution mask.
+          Defaults to all lanes. Inactive result lanes are zero (ZEROING).
+
+        Constraints:
+        - Call inside `@tla.kernel` and `tla.vec.func(mode="simd")`.
+        - All three input registers must have the same element type and valid
+          lane count. Supported types are `Float16`, `BFloat16` and `Float32`.
+        - When the result is used as the next `dst`, a previously masked-off
+          lane supplies zero as the first multiplicand. To retain its old value,
+          use `tla.where(mask, result, dst)` as the next `dst`.
+
+        Example:
+        ```python
+        with tla.vec.func(mode="simd"):
+            updated = tla.arch.inplace_mul_add(previous, scale, current, mask=active)
+            previous = tla.where(active, updated, previous)
+            out_tile.store(previous)
+        ```
+    """
+    name = "arch.inplace_mul_add"
+    _runtime._require_kernel_simd_region(name)
+    for position, (arg, value) in enumerate(
+        (("dst", dst), ("multiplier", multiplier), ("addend", addend))
+    ):
+        _require_category(name, arg, value, "vector_ssa", position)
+    dst_value, multiplier_value, addend_value = map(
+        _as_value, (dst, multiplier, addend)
+    )
+    element_type = _vector_ssa_type_for_mlir_value(dst_value).element_type
+    if element_type not in ("f16", "bf16", "f32"):
+        _op_error(name, "expected Float16, BFloat16 or Float32 registers")
+    if multiplier_value.type != dst_value.type or addend_value.type != dst_value.type:
+        _op_error(name, "all inputs must have the same type and valid lane count")
+    mask_value = None
+    if mask is not None:
+        _require_category(name, "mask", mask, "mask_ssa", 3)
+        mask_value = _as_value(mask)
+        _require_mask_matches_element_type(name, mask_value, element_type)
+    return VectorSSA(
+        _tla_ops_gen.inplace_mul_add(
+            dst_value.type,
+            dst_value,
+            multiplier_value,
+            addend_value,
+            mask=mask_value,
+            loc=loc,
+        )
+    )
+
+
+@dsl_user_op
 def mul(
     lhs: VectorSSA | Numeric | bool | int | float,
     rhs: VectorSSA | Numeric | bool | int | float,
@@ -16821,6 +16891,7 @@ arch._set("shuffle_sync", arch_shuffle_sync)
 arch._set("shuffle_sync_up", arch_shuffle_sync_up)
 arch._set("shuffle_sync_down", arch_shuffle_sync_down)
 arch._set("shuffle_sync_bfly", arch_shuffle_sync_bfly)
+arch._set("inplace_mul_add", arch_inplace_mul_add)
 arch._set("atomic_add", arch_atomic_add)
 arch._set("get_capacity_in_bytes", arch_get_capacity_in_bytes)
 arch._set("get_vec_len_in_bytes", arch_get_vec_len_in_bytes)

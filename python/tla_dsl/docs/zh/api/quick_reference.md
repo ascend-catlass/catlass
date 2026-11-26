@@ -78,6 +78,7 @@ nav_order: 5
 | [`tla.vec.func`](language/scopes.md#tlavecfunc) | 选择 `simd` 或 `simt` 向量执行模式。 | Kernel / Vector；SIMT 需 `thread_block_dim`，每 block 至多 2048 线程；SIMD 拒绝该参数。 |
 | [`tla.Tensor.ptr`](language/simt.md#指针访问)、[`tla.Tensor.ptr_with_coord`](language/simt.md#指针访问) | 读取 tensor 的原始存储基址或视图起始地址。 | Kernel / Vector；`ptr_with_coord` 要求线性布局且逻辑秩为 1 或 2；二者都支持元素偏移运算。 |
 | [`tla.create_mask`](language/simd/mask.md#tlacreate_mask)、[`tla.update_mask`](language/simd/mask.md#tlaupdate_mask) | 创建固定模式或尾部 mask。 | Kernel / Vector / SIMD；SIMT 无寄存器向量 mask。 |
+| [`tla.arch.inplace_mul_add`](language/simd/arithmetic.md#tlaarchinplace_mul_add) | 融合计算 `dst * multiplier + addend`。 | SIMD 寄存器；未选中的结果 lane 为零。 |
 | [`tla.add`](language/simd/arithmetic.md#tlaadd)、[`tla.sub`](language/simd/arithmetic.md#tlasub)、[`tla.mul`](language/simd/arithmetic.md#tlamul)、[`tla.div`](language/simd/arithmetic.md#tladiv) | 逐元素算术。 | Kernel / Vector；SIMD 使用 `VectorSSA`，SIMT 使用逐线程 `Numeric` 标量；mask 只作用于向量形态。 |
 | [`tla.arch.axpy`](language/simd/arithmetic.md#tlaarchaxpy)、[`tla.arch.sub_abs`](language/simd/arithmetic.md#tlaarchsub_abs)、[`tla.arch.muls_cast`](language/simd/arithmetic.md#tlaarchmuls_cast) | 计算标量乘加、差值绝对值或乘后转 FP16。 | Kernel / Vector / SIMD。 |
 | [`tla.max`](language/simd/arithmetic.md#tlamax)、[`tla.min`](language/simd/arithmetic.md#tlamin) | 逐元素最大值或最小值。 | Kernel / Vector；SIMD 向量与 SIMT 标量形态各有 dtype 规则。 |

@@ -935,7 +935,7 @@ static bool isVectorComputeOp(Operation* op)
            isa_and_nonnull<::tla::ReduceOp>(op) || isa_and_nonnull<::tla::ReduceIntraBlockOp>(op) ||
            isa_and_nonnull<::tla::PairWiseOp>(op) || isa_and_nonnull<::tla::GatherOp>(op) ||
            isa_and_nonnull<::tla::CastOp>(op) || isa_and_nonnull<::tla::BitCastOp>(op) ||
-           isa_and_nonnull<::tla::ExpSubOp>(op) ||
+           isa_and_nonnull<::tla::ExpSubOp, ::tla::InplaceMulAddOp>(op) ||
            isa_and_nonnull<::tla::AxpyOp, ::tla::SubAbsOp, ::tla::MulsCastOp>(op) ||
            isa_and_nonnull<::tla::PackOp>(op) || isa_and_nonnull<::tla::UnpackOp>(op) ||
            isa_and_nonnull<::tla::InterleaveOp, ::tla::DeInterleaveOp, ::tla::MullOp, ::tla::AddCOp, ::tla::SubCOp>(
@@ -5749,6 +5749,34 @@ static LogicalResult lowerNestedVectorOp(
     if (auto mulsCast = dyn_cast<::tla::MulsCastOp>(op))
         return lowerMulsCast(mulsCast, b, module, valueMap, fullMasks);
 
+    if (auto inplaceMulAddOp = dyn_cast<::tla::InplaceMulAddOp>(op)) {
+        Value dst = valueMap.lookup(inplaceMulAddOp.getDst());
+        Value multiplier = valueMap.lookup(inplaceMulAddOp.getMultiplier());
+        Value addend = valueMap.lookup(inplaceMulAddOp.getAddend());
+        if (!dst)
+            return inplaceMulAddOp.emitError("inplace_mul_add failed to map dst operand");
+        if (!multiplier)
+            return inplaceMulAddOp.emitError("inplace_mul_add failed to map multiplier operand");
+        if (!addend)
+            return inplaceMulAddOp.emitError("inplace_mul_add failed to map addend operand");
+        auto vecType = cast<VectorType>(dst.getType());
+        Value mask = inplaceMulAddOp.getMask() ?
+                         valueMap.lookup(inplaceMulAddOp.getMask()) :
+                         allTrueMaskFor(fullMasks, loc, vecType, inplaceMulAddOp.getDst().getType());
+        if (!mask)
+            return inplaceMulAddOp.emitError("inplace_mul_add failed to materialize mask");
+        auto pregType = fullPregVecType(b.getContext());
+        Value preg = castMaskToPregType(b, loc, mask, pregType);
+        Type element = vecType.getElementType();
+        StringRef name = element.isF32() ? "inplace_mul_add_f32" :
+                                           (element.isBF16() ? "inplace_mul_add_bf16" : "inplace_mul_add_f16");
+        auto callee =
+            getOrCreateInlineAivLibraryCall(module, loc, {vecType, vecType, vecType, pregType}, vecType, name);
+        valueMap[inplaceMulAddOp.getResult()] =
+            b.create<func::CallOp>(loc, callee, ValueRange{dst, multiplier, addend, preg}).getResult(0);
+        return success();
+    }
+
     if (auto expSubOp = dyn_cast<::tla::ExpSubOp>(op)) {
         Value lhs = valueMap.lookup(expSubOp.getLhs());
         Value rhs = valueMap.lookup(expSubOp.getRhs());
@@ -6864,6 +6892,12 @@ public:
                         return rewriter.notifyMatchFailure(
                             vecFuncOp, "expected register operands from prior register producers");
                 }
+            } else if (auto inplaceMulAddOp = dyn_cast<::tla::InplaceMulAddOp>(computeOp)) {
+                for (OpOperand& operand : inplaceMulAddOp->getOpOperands())
+                    if (!producedValues.contains(operand.get()))
+                        return inplaceMulAddOp.emitError("inplace_mul_add operand #")
+                               << operand.getOperandNumber()
+                               << " requires a vector or mask produced inside the SIMD region";
             } else if (auto expSubOp = dyn_cast<::tla::ExpSubOp>(computeOp)) {
                 if (!producedValues.contains(expSubOp.getLhs()) || !producedValues.contains(expSubOp.getRhs()) ||
                     !producedValues.contains(expSubOp.getMask()))

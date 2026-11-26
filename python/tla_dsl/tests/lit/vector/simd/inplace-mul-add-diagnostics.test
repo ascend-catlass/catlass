@@ -1,0 +1,27 @@
+// RUN: sed -n '/^module/,$p' %s | sed 's/DTYPE/i32/g;s/LANES/64/g;s/MASK/64/g' | not %tla_compile - -o - 2>&1 | %filecheck %s --check-prefix=TYPE
+// RUN: sed -n '/^module/,$p' %s | sed 's/DTYPE/f32/g;s/LANES/64/g;s/MASK/128/g' | not %tla_compile - -o - 2>&1 | %filecheck %s --check-prefix=MASKERR
+// RUN: sed -n '/^module/,$p' %s | sed 's/DTYPE/f32/g;s/LANES/13/g;s/MASK/64/g' | not %tla_compile - -o - 2>&1 | %filecheck %s --check-prefix=MISMATCH
+// RUN: sed -n '/^tla.func @scope/,/^}/p' %s > %t.scope.mlir
+// RUN: not %tla_compile %t.scope.mlir --emit=tlair -o %t 2>&1 | %filecheck %s --check-prefix=OUTSIDE
+// RUN: sed 's/tla.func @/func.func @/;s/tla.return/return/' %t.scope.mlir | %tla_compile - --emit=tlair -o - | %filecheck %s --check-prefix=LOWERED
+// RUN: sed -n '/^module/,$p' %s | sed 's/DTYPE/f32/g;s/LANES/64/g;s/MASK/64/g;s/mode = "simd"/mode = "simt", thread_block_dim = array<i64: 32, 1, 1>/' | not %tla_compile - --emit=tlair -o %t 2>&1 | %filecheck %s --check-prefix=SIMT
+// OUTSIDE: 'tla.inplace_mul_add' op requires an enclosing tla.vec.func
+// LOWERED: tla.inplace_mul_add
+// SIMT: 'tla.inplace_mul_add' op requires SIMD mode
+// TYPE: requires f16, bf16 or f32 elements
+// MASKERR: mask has 128
+// MISMATCH: all of {dst, multiplier, addend, result} have same type
+
+tla.func @scope(%a: !tla.vector<64xf32>) {
+  %result = tla.inplace_mul_add %a, %a, %a : !tla.vector<64xf32>
+  tla.return
+}
+
+module {
+  func.func @bad(%a: !tla.vector<64xDTYPE>, %b: !tla.vector<LANESxDTYPE>, %m: !tla.mask<MASK>) {
+    "tla.vec.func"() ({
+      %result = "tla.inplace_mul_add"(%a, %b, %a, %m) : (!tla.vector<64xDTYPE>, !tla.vector<LANESxDTYPE>, !tla.vector<64xDTYPE>, !tla.mask<MASK>) -> !tla.vector<64xDTYPE>
+    }) {mode = "simd"} : () -> ()
+    return
+  }
+}

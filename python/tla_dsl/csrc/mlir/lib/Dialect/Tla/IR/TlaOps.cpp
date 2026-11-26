@@ -410,6 +410,13 @@ static bool hasEnclosingRegion(mlir::Operation* op)
     return hasEnclosing<AncestorOp>(op) || isInLoweredFunc(op);
 }
 
+static bool hasSimdMode(VecFuncOp vf)
+{
+    // VecFuncOp defaults to SIMD when its mode attribute is omitted.
+    auto mode = vf->getAttrOfType<mlir::StringAttr>("mode");
+    return !mode || mode.getValue().equals_insensitive("simd");
+}
+
 // Batched descriptors are currently consumed only by GM-to-L1 copy. Other
 // tile operations must reject them rather than silently operating on matrix 0.
 static mlir::LogicalResult requireMatrixTiles(mlir::Operation* op)
@@ -1447,6 +1454,20 @@ mlir::LogicalResult LeakyReluOp::verify()
 {
     return verifyReluWithSlopeOp(
         getOperation(), getLhs().getType(), getRhs().getType(), getResult().getType(), getMask());
+}
+
+mlir::LogicalResult InplaceMulAddOp::verify()
+{
+    if (!hasEnclosingRegion<VecFuncOp>(getOperation()))
+        return emitOpError("requires an enclosing tla.vec.func");
+    auto vf = getOperation()->getParentOfType<VecFuncOp>();
+    if (vf && !hasSimdMode(vf))
+        return emitOpError("requires SIMD mode");
+    VectorSSAType type = getDst().getType();
+    auto element = type.getElementType();
+    if (!element.isF16() && !element.isBF16() && !element.isF32())
+        return emitOpError("requires f16, bf16 or f32 elements");
+    return verifyMaskMatchesVector(getOperation(), getMask(), type);
 }
 
 mlir::LogicalResult ExpSubOp::verify()

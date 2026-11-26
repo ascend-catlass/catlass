@@ -264,6 +264,19 @@ def Tla_SubOp : Tla_VectorBinaryOp<"sub",
     "Vector subtract on VectorSSA values",
     "Element-wise subtract on VectorSSA values.">;
 
+def Tla_InplaceMulAddOp : Tla_Op<"inplace_mul_add",
+    [Pure, AllTypesMatch<["dst", "multiplier", "addend", "result"]>]> {
+  let summary = "Fused dst * multiplier + addend on SIMD registers";
+  let arguments = (ins Tla_VectorSSAType:$dst, Tla_VectorSSAType:$multiplier,
+                       Tla_VectorSSAType:$addend, Optional<Tla_MaskSSAType>:$mask);
+  let results = (outs Tla_VectorSSAType:$result);
+  let assemblyFormat = [{
+    $dst `,` $multiplier `,` $addend (`mask` $mask^)? attr-dict `:`
+    qualified(type($dst)) (`mask` qualified(type($mask))^)?
+  }];
+  let hasVerifier = 1;
+}
+
 def Tla_ExpSubOp : Tla_Op<"exp_sub", [Pure]> {
   let summary = "Exp of the difference of f16 or f32 vectors, returning f32";
   let description = [{
