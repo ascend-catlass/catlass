@@ -62,8 +62,8 @@
 
 | 参数       | 属性 |shape|dtype| 说明                                                             |
 | ---------- | ------ | --------|---------|----------------------------------------------- |
-| `a_tensor`        | Input  | `(m,k)` | `f16/bf16/f32/i8/f8e4m3fn/f8e5m2` | 左矩阵，layout支持`RowMajor`（默认）和`ColumnMajor`  |
-| `b_tensor`        | Input  | `(k,n)` | `f16/bf16/f32/i8/f8e4m3fn/f8e5m2` | 右矩阵，layout支持`RowMajor`（默认）和`ColumnMajor`，支持的数据组合类型参考[使用范围说明](#使用范围说明) |
+| `a_tensor`        | Input  | `(m,k)` | `f16/bf16/f32/i8/f8e4m3fn/f8e5m2/hif8` | 左矩阵，layout支持`RowMajor`（默认）和`ColumnMajor`  |
+| `b_tensor`        | Input  | `(k,n)` | `f16/bf16/f32/i8/f8e4m3fn/f8e5m2/hif8` | 右矩阵，layout支持`RowMajor`（默认）和`ColumnMajor`，支持的数据组合类型参考[使用范围说明](#使用范围说明) |
 | `c_tensor`        | Output | `(m,n)` | `f16/bf16/f32/i32` | 矩阵乘结果，layout支持`RowMajor`（默认）和`ColumnMajor` |
 
 
@@ -108,12 +108,14 @@
 | f32         | f32         | f32           |
 | i8          | i8            | i32         |
 | f8e4m3fn/f8e5m2 | f8e4m3fn/f8e5m2 | f32   |
+| hif8        | hif8        | f32           |
 
 说明：
 
 - `A`/`B` 均为 `float32` 类型时，建议 `K` 小于 2048 以避免绝对误差超阈值（[阈值标准](https://gitcode.com/Ascend/ATK/blob/master/skill/atk-quality-guard/references/experimental_standard.md#22-%E6%B7%B7%E5%90%88%E5%AE%B9%E5%B7%AE%E9%98%88%E5%80%BC%E8%A1%A8)）上限。
 - 为避免误差累加和计算超时，建议矩阵的 M/N/K 轴不超过 122880，且在 GM 上总的分配不超过 10 GiB（即 `M*K*sizeof(DTYPE_A) + K*N*sizeof(DTYPE_B) + M*N*sizeof(DTYPE_C) <= 10 GiB`）。
 - `A`/`B` 为 fp8 时两种编码可以混用（如 `f8e4m3fn × f8e5m2`），输出类型必须为 `f32`。
+- hif8 路由要求 A/B 均为 `hif8` 且 C 为 `f32`。
 - [`atomic_add`](basic_matmul_atomic_add.py) / [`auto_sync`](basic_matmul_auto_sync.py) / [`mutex`](basic_matmul_mutex.py) / [`mutex_with`](basic_matmul_mutex_with.py) 无 i8、f8 通路，输入/输出仅支持 f16/bf16/f32；其中 `atomic_add` 的 `--dtype-c` 仅支持 `f32`。
 - [`basic_matmul_bias`](basic_matmul_bias.py) 的类型支持：
 
@@ -154,8 +156,8 @@
 basic_matmul.py [-h] [--device DEVICE] [--m M] [--n N] [--k K]
                 [--layout-a {row,col,zN}] [--layout-b {row,col,nZ}]
                 [--layout-c {row,col}]
-                [--dtype-a {f16,bf16,f32,i8,f8e4m3fn,f8e5m2}]
-                [--dtype-b {f16,bf16,f32,i8,f8e4m3fn,f8e5m2}]
+                [--dtype-a {f16,bf16,f32,i8,f8e4m3fn,f8e5m2,hif8}]
+                [--dtype-b {f16,bf16,f32,i8,f8e4m3fn,f8e5m2,hif8}]
                 [--dtype-c {f16,bf16,f32,i32}]
                 [--relu-enable {0,1}]
                 [--block-num BLOCK_NUM]
@@ -171,7 +173,7 @@ basic_matmul.py [-h] [--device DEVICE] [--m M] [--n N] [--k K]
 | `--k`                                       | `1024`                                                | 矩阵乘累加轴的大小                                                                         |
 | `--layout-a` / `--layout-b`               | `"row"` / `"row"`                                   | 左、右矩阵 A、B 的数据排布格式。`"row"` / `"col"` 表示行优先 / 列优先；`"zN"`（仅 A）/ `"nZ"`（仅 B）表示 host 侧先用 `host_nd2nz` 显式打包再绑定，GM→L1 只做块搬运、不再重排。       |
 | `--layout-c`                                | `"row"`                                             | 结果矩阵 C 的数据排布格式。选`"col"` 时，L0C→GM 走转置搬出（nz2dn）通路，直接写出 C 的列优先布局。 |
-| `--dtype-a` / `--dtype-b` / `--dtype-c` | `"f16"` / `"f16"` / `"f32"`                       | 左、右矩阵 A、B 和结果矩阵 C 的数据类型。A/B 可选 `"f16"`、`"bf16"`、`"f32"`、`"i8"`、`"f8e4m3fn"`、`"f8e5m2"`；C 可选 `"f16"`、`"bf16"`、`"f32"`、`"i32"`。除 fp8 两种编码可混用外，A/B 需为同一类型。i8 路由要求 A/B 均为 i8 且 C 为 i32；fp8 路由要求 A/B 均为 fp8 且 C 为 f32。 |
+| `--dtype-a` / `--dtype-b` / `--dtype-c` | `"f16"` / `"f16"` / `"f32"`                       | 左、右矩阵 A、B 和结果矩阵 C 的数据类型。A/B 可选 `"f16"`、`"bf16"`、`"f32"`、`"i8"`、`"f8e4m3fn"`、`"f8e5m2"`、`"hif8"`；C 可选 `"f16"`、`"bf16"`、`"f32"`、`"i32"`。除 fp8 两种编码可混用外，A/B 需为同一类型。i8 路由要求 A/B 均为 i8 且 C 为 i32；fp8 路由要求 A/B 均为 fp8 且 C 为 f32；hif8 路由要求 A/B 均为 hif8 且 C 为 f32。 |
 | `--relu-enable`                             | `0`                                         | fixpipe是否开启随路relu                                                                       |
 | `--block-num`                               | `-1`                                        | 启用的核数，`-1` 表示自动探测可用核数（满核）。                                               |
 
