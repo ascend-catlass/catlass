@@ -260,6 +260,89 @@ with tla.vector():
 
 ---
 
+## `tla.sync_all_aiv`
+
+**源码：** [`catlass.core_api.sync_all_aiv`](../../../../catlass/core_api.py)
+
+功能说明：
+
+同步参与本 kernel 的全部 AIV。每个 AIV 通过跨核 flag 发布到达信号，
+再等待所有对端到达，因此是 AIV 的全核同步。
+
+函数原型：
+
+```python
+tla.sync_all_aiv(trigger_pipe: PipeLike = tla.pipes.ALL, wait_pipe: PipeLike = tla.pipes.ALL) -> None
+```
+
+参数说明：
+
+- `trigger_pipe`（`PipeLike`）：发出到达信号的流水。可选，默认 `tla.pipes.ALL`；
+  仅支持 `tla.pipes.MTE2`、`tla.pipes.MTE3` 与 `tla.pipes.ALL`。
+  `tla.pipes.ALL` 会先排空全部流水，再从 `MTE3` 发信号。
+- `wait_pipe`（`PipeLike`）：等待对端的流水。可选，默认 `tla.pipes.ALL`；
+  仅支持 `tla.pipes.MTE2`、`tla.pipes.MTE3` 与 `tla.pipes.ALL`。
+  `tla.pipes.ALL` 使用标量流水等待。
+
+约束说明：
+
+- 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
+- 须在 `tla.vector()` 内调用：纯 AIV kernel 与 MIX kernel 的 vector 侧均可。
+- 每个 AIV 的调用次数、顺序与 pipe 选择必须一致，否则会死锁。
+- MIX kernel 需要 cube/vector 之间的屏障时，两侧改用 `tla.sync_all()`。
+
+调用示例：
+
+```python
+with tla.vector():
+    tla.sync_all_aiv()
+    # 或选择承载数据的拷贝流水
+    tla.sync_all_aiv(tla.pipes.MTE3, tla.pipes.ALL)
+```
+
+---
+
+## `tla.sync_all`
+
+**源码：** [`catlass.core_api.sync_all`](../../../../catlass/core_api.py)
+
+功能说明：
+
+同步 MIX kernel 的 cube 与 vector 核。cube 侧与 vector 侧各写一条调用，
+两条都必须有：cube 等待全部 AIV 到达后放行，AIV 发布到达信号并等待放行。
+
+函数原型：
+
+```python
+tla.sync_all() -> None
+```
+
+参数说明：
+
+- 无。
+
+约束说明：
+
+- 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
+- 仅在声明了 `core_ratio` 的 MIX kernel 中有效；纯 AIV kernel 改用 `tla.sync_all_aiv()`。
+- 须在 `tla.cube()` 或 `tla.vector()` 内调用；cube 侧调用与同一 kernel 的
+  vector 侧调用配对。
+
+调用示例：
+
+```python
+@tla.kernel(core_ratio=tla.arch.C1V2)
+def mixed(...):
+    with tla.cube():
+        ...
+        tla.sync_all()
+    with tla.vector():
+        tla.sync_all()
+        ...
+```
+
+---
+
 ## `tla.mutex`
 
 **源码：** [`catlass.core_api.mutex`](../../../../catlass/core_api.py)

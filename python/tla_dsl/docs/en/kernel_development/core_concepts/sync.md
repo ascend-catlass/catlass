@@ -285,6 +285,25 @@ with tla.vector():
 For a complete runnable version see
 [`cross_flag_two_way.py`](https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/dsl_tutorials/cross_flag_two_way/cross_flag_two_way.py).
 
+### All-core synchronization: `tla.sync_all_aiv` and `tla.sync_all`
+
+These two entries synchronize all cores:
+
+| API | Synchronization scope | Valid location |
+| --- | --- | --- |
+| `tla.sync_all_aiv(trigger_pipe, wait_pipe)` | Every AIV core taking part in this kernel | Inside `tla.vector()`; pipes limited to `MTE2` / `MTE3` / `pipes.ALL` |
+| `tla.sync_all()` | Synchronization all AIC and all AIV cores of a MIX kernel, in both directions | One call in `tla.cube()` and one in `tla.vector()` |
+
+`tla.sync_all_aiv()` makes every AIV publish an arrival signal and waits until all the
+other AIVs have arrived; both pure-AIV kernels and the vector side of a MIX kernel use
+it.
+
+`tla.sync_all()` proceeds in three stages (the AIC waits for all AIVs of its own core
+→ all AICs synchronize among themselves → the AIVs wait for their own AIC), so it is
+written once on the cube side and once on the vector side, as a pair; the kernel must
+declare `core_ratio`. The internal handshake takes reserved flag names
+(`__tla_sync_all_*`).
+
 ## 7. Resource mutex: `tla.mutex`
 
 Flags and mutexes solve different problems:

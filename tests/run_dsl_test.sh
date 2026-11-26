@@ -21,7 +21,8 @@
 # examples/python/tla_dsl/tla/kernel/matmul/basic_mixed (basic_mixed.py), examples/python/tla_dsl/tla/kernel/matmul/basic_mixed (basic_mixed_mutex.py) and
 # examples/python/tla_dsl/tla/kernel/matmul/basic_mixed (basic_mixed_ub2l1.py, basic_mixed_store_zN.py,
 # basic_mixed_store_zNUnAlign.py, basic_mixed_fixpipe_nz2dn.py,
-# basic_mixed_fixpipe_per_tensor.py, basic_mixed_fixpipe_per_channel.py).
+# basic_mixed_fixpipe_per_tensor.py, basic_mixed_fixpipe_per_channel.py,
+# basic_mixed_sync_all.py: tla.sync_all() full-core barrier, both core ratios).
 # examples/python/tla_dsl/dsl_tutorials/vector_simd_ops (binary_op.py, masked_binary.py,
 # bitwise_ops.py, reduction_ops.py, compare_mask.py, unary_ops.py, arange_op.py,
 # interleave_op.py, mask_interleave_op.py, pack_op.py, mask_select_op.py, load_dintlv_op.py, load_store_mask.py,
@@ -125,6 +126,7 @@ BASIC_MIXED_STORE_ZNUNALIGN_REL="tla/kernel/matmul/basic_mixed/basic_mixed_store
 BASIC_MIXED_FIXPIPE_NZ2DN_REL="tla/kernel/matmul/basic_mixed/basic_mixed_fixpipe_nz2dn.py"
 BASIC_MIXED_FIXPIPE_PER_TENSOR_REL="tla/kernel/matmul/basic_mixed/basic_mixed_fixpipe_per_tensor.py"
 BASIC_MIXED_FIXPIPE_PER_CHANNEL_REL="tla/kernel/matmul/basic_mixed/basic_mixed_fixpipe_per_channel.py"
+BASIC_MIXED_SYNC_ALL_REL="tla/kernel/matmul/basic_mixed/basic_mixed_sync_all.py"
 MASKED_BINARY_REL="dsl_tutorials/vector_simd_ops/masked_binary.py"
 BITWISE_OPS_REL="dsl_tutorials/vector_simd_ops/bitwise_ops.py"
 BINARY_OP_REL="dsl_tutorials/vector_simd_ops/binary_op.py"
@@ -532,6 +534,10 @@ if [[ ! -f "${EXAMPLES_DIR}/${BASIC_MIXED_FIXPIPE_PER_TENSOR_REL}" ]]; then
 fi
 if [[ ! -f "${EXAMPLES_DIR}/${BASIC_MIXED_FIXPIPE_PER_CHANNEL_REL}" ]]; then
     echo "error: missing ${BASIC_MIXED_FIXPIPE_PER_CHANNEL_REL} under ${EXAMPLES_DIR}" >&2
+    exit 1
+fi
+if [[ ! -f "${EXAMPLES_DIR}/${BASIC_MIXED_SYNC_ALL_REL}" ]]; then
+    echo "error: missing ${BASIC_MIXED_SYNC_ALL_REL} under ${EXAMPLES_DIR}" >&2
     exit 1
 fi
 if [[ ! -f "${EXAMPLES_DIR}/${MASKED_BINARY_REL}" ]]; then

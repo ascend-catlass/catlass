@@ -726,6 +726,20 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
             [["tla/kernel/matmul/basic_mixed/basic_mixed_store_zNUnAlign.py", *dev, "--m", m]],
         )
     yield ("mixed-fixpipe-nz2dn", [["tla/kernel/matmul/basic_mixed/basic_mixed_fixpipe_nz2dn.py", *dev]])
+    # tla.sync_all() full-core barrier across the AIC and AIV halves. Both core
+    # ratios are covered because the barrier has to release 2 AIVs (1:1) and
+    # 4 AIVs (1:2) alike; the sample fixes its own two-block launch.
+    for core_ratio in ("c1v2", "c1v1"):
+        yield (
+            f"mixed-sync-all-{core_ratio}",
+            [
+                [
+                    "tla/kernel/matmul/basic_mixed/basic_mixed_sync_all.py",
+                    *dev,
+                    "--core-ratio", core_ratio,
+                ]
+            ],
+        )
     # CV 1:1 (core_ratio=C1V1): single-AIV epilogue, L0C→GM, mode-4 aiv_id=0.
     # Script under python/tla_dsl/tests/end_to_end/; battery must keep this case
     # as the C1V1 device guard (do not drop when it fails — fix the launch path).

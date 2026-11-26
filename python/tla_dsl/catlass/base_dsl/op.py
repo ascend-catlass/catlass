@@ -62,6 +62,12 @@ class _FrontendEmitState:
     extern_usages: dict[str, _ExternUsage] = field(default_factory=dict)
     #: Explicit ``@tla.kernel(core_ratio=...)`` when provided; else ``None``.
     core_ratio: tuple[int, int] | None = None
+    #: ``(name, mode)`` -> ``mlir.Value`` of the handshake flags that
+    #: ``tla.sync_all`` / ``tla.sync_all_aiv`` define for the caller. The flag
+    #: ops sit in the enclosing ``tla.func`` entry block and are reused by every
+    #: later call in that kernel, so one kernel holds a single definition per
+    #: internal flag.
+    internal_cross_flags: dict[tuple[str, int], Any] = field(default_factory=dict)
     #: On-chip bytes already claimed per address-space token (``"ub"``,
     #: ``"l1"``, ...), each value being the next free offset after the
     #: allocations made so far. ``tla.allocate`` adds to it so that a kernel

@@ -59,7 +59,12 @@ def unparse(node: ast.AST | None, *, missing: str = "Any") -> str:
     if node is None:
         return missing
     try:
-        return ast.unparse(node).replace("typing.", "")
+        # Render module-private spellings the way users write them.
+        return (
+            ast.unparse(node)
+            .replace("typing.", "")
+            .replace("_runtime.pipes.", "tla.pipes.")
+        )
     except Exception:
         return missing
 

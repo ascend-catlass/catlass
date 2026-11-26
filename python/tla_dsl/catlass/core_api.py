@@ -8960,6 +8960,19 @@ def flag(
     )
 
 
+#: Cross-core flag names owned by :func:`sync_all` / :func:`sync_all_aiv`.
+#: ``tla.cross_flag`` rejects them so a user flag cannot alias the internal
+#: handshake emitted by the two helpers.
+_SYNC_ALL_RESERVED_FLAG_NAMES = frozenset(
+    {
+        "__tla_sync_all_inter_core_aiv_ready__",  # sync all aiv
+        "__tla_sync_all_intra_block_aiv_ready__",  # sync inner aiCore, aic wait aiv
+        "__tla_sync_all_inter_core_aic_ready__",  # all aiCores, sync all aic
+        "__tla_sync_all_intra_block_aic_ready__",  # sync inner aiCore, aiv wait aic
+    }
+)
+
+
 @dsl_user_op
 def cross_flag(
     name: str,
@@ -8989,6 +9002,12 @@ def cross_flag(
         _op_error(
             "cross_flag",
             f"invalid argument 'name' (position 0): expected str, got {_type_name(name)}",
+        )
+    if name in _SYNC_ALL_RESERVED_FLAG_NAMES:
+        _op_error(
+            "cross_flag",
+            f"invalid argument 'name': {name!r} is reserved for the "
+            "tla.sync_all / tla.sync_all_aiv handshake",
         )
     if not isinstance(mode, int) or isinstance(mode, bool) or mode not in (0, 1, 2, 4):
         _op_error(
@@ -9239,6 +9258,190 @@ def pipe_barrier(pipe: PipeLike, *, loc: mlir_ir.Location | None = None) -> None
         )
     pipe_attr = mlir_ir.Attribute.parse(f"#tla.pipe<{pipe_value}>", context=ctx)
     return _tla_ops_gen.pipe_barrier(pipe_attr, loc=loc)
+
+
+#: Pipes a ``sync_all_aiv`` helper accepts for the trigger and the wait: the
+#: rendezvous signal is carried by a copy pipe or by every pipe at once.
+_SYNC_ALL_AIV_PIPES = ("mte2", "mte3", "all")
+
+
+def _require_sync_all_aiv_pipe(
+    op_name: str, name: str, value: Any, position: int
+) -> str:
+    token = _token(value)
+    if token is None or token not in _SYNC_ALL_AIV_PIPES:
+        _op_error(
+            op_name,
+            f"invalid argument '{name}' (position {position}): expected one of "
+            f"{list(_SYNC_ALL_AIV_PIPES)}, got {_type_name(value)}",
+        )
+    return token
+
+
+def _sync_all_flag(name: str, mode: int, *, loc: mlir_ir.Location | None) -> Any:
+    """Return the internal cross-core flag ``name`` of the enclosing kernel.
+
+    The flag op is inserted at the beginning of the ``tla.func`` entry block and
+    cached in the emission state, so repeated calls in one kernel share a single
+    definition and every use is dominated by it.
+    """
+    state = _runtime._current_frontend_state()
+    if state is None:
+        raise TlaCoreAPIError(
+            "tla.sync_all: handshake flags must be created during kernel emission"
+        )
+    cached = state.internal_cross_flags.get((name, mode))
+    if cached is not None:
+        return cached
+    try:
+        func_op = mlir_ir.InsertionPoint.current.block.owner
+    except ValueError:
+        func_op = None
+    while func_op is not None and func_op.name != "tla.func":
+        func_op = func_op.parent
+    if func_op is None:
+        raise TlaCoreAPIError(
+            "tla.sync_all: must be called inside a @tla.kernel-decorated function"
+        )
+    ctx = loc.context if loc is not None else mlir_ir.Context.current
+    entry_block = func_op.regions[0].blocks[0]
+    with mlir_ir.InsertionPoint.at_block_begin(entry_block):
+        _flag = _tla_ops_gen.cross_flag(
+            _tla_type_bridge.cross_flag_type_get(ctx, mode), name, loc=loc
+        )
+    state.internal_cross_flags[(name, mode)] = _flag
+    return _flag
+
+
+@dsl_user_op
+def sync_all_aiv(
+    trigger_pipe: PipeLike = _runtime.pipes.ALL,
+    wait_pipe: PipeLike = _runtime.pipes.ALL,
+    *,
+    loc: mlir_ir.Location | None = None,
+) -> None:
+    """Directory: Sync Control
+
+    Description:
+        Synchronize all AIV cores that participate in the kernel.
+
+        Every AIV signals its arrival through a cross-core flag and then waits
+        for all peers, so the call is an all-core synchronization for the AIV
+        cores.
+
+        Parameters:
+        - `trigger_pipe` (`PipeLike`): Pipe that issues the arrival signal.
+          Optional, default `tla.pipes.ALL`; only `tla.pipes.MTE2`,
+          `tla.pipes.MTE3` and `tla.pipes.ALL` are supported.
+          `tla.pipes.ALL` first drains every pipe and signals from `MTE3`.
+        - `wait_pipe` (`PipeLike`): Pipe that waits for the peers. Optional,
+          default `tla.pipes.ALL`; only `tla.pipes.MTE2`, `tla.pipes.MTE3` and
+          `tla.pipes.ALL` are supported. `tla.pipes.ALL` waits on the scalar
+          pipe.
+
+        Constraints:
+        - Must be called inside a `@tla.kernel`-decorated kernel function.
+        - Must be called inside `tla.vector()`: valid in an AIV-only kernel and
+          in the vector part of a MIX kernel.
+        - Every AIV must call it the same number of times, in the same order,
+          and with the same pipe selection; otherwise the rendezvous never
+          completes.
+        - A MIX kernel that needs a cube/vector barrier uses `tla.sync_all()`
+          on both sides instead.
+
+        Example:
+        ```python
+        with tla.vector():
+            tla.sync_all_aiv()
+            # or pick the copy pipe that carries the data
+            tla.sync_all_aiv(tla.pipes.MTE3, tla.pipes.ALL)
+        ```
+    """
+    if not _runtime._has_enclosing_region("vector"):
+        raise TlaLoweringError("tla.sync_all_aiv must be called inside tla.vector()")
+
+    _require_frontend_state("sync_all_aiv")
+    trigger = _require_sync_all_aiv_pipe(
+        "sync_all_aiv", "trigger_pipe", trigger_pipe, 0
+    )
+    wait = _require_sync_all_aiv_pipe("sync_all_aiv", "wait_pipe", wait_pipe, 1)
+    _flag = _sync_all_flag("__tla_sync_all_inter_core_aiv_ready__", 0, loc=loc)
+    pipe_barrier(trigger, loc=loc)
+    cross_core_set_flag(_flag, "mte3" if trigger == "all" else trigger, loc=loc)
+    cross_core_wait_flag(_flag, "scalar" if wait == "all" else wait, loc=loc)
+
+
+@dsl_user_op
+def sync_all(*, loc: mlir_ir.Location | None = None) -> None:
+    """Directory: Sync Control
+
+    Description:
+        Synchronize the cube and vector cores of a MIX kernel.
+
+        Write one call on the cube side and one on the vector side. Both calls
+        are needed: the cube waits for every AIV to arrive and then releases
+        them, the vector core signals its arrival and waits for the release.
+
+        Parameters:
+        - None.
+
+        Constraints:
+        - Must be called inside a `@tla.kernel`-decorated kernel function.
+        - Only valid in a MIX kernel declared with `core_ratio`; an AIV-only
+          kernel uses `tla.sync_all_aiv()` instead.
+        - Must be called inside `tla.cube()` or `tla.vector()`; the cube call
+          pairs with the vector call of the same kernel.
+
+        Example:
+        ```python
+        @tla.kernel(core_ratio=tla.arch.C1V2)
+        def mixed(...):
+            with tla.cube():
+                ...
+                tla.sync_all()
+            with tla.vector():
+                tla.sync_all()
+                ...
+        ```
+    """
+    _require_frontend_state("sync_all")
+    state = _runtime._current_frontend_state()
+    if state is None or state.core_ratio is None:
+        raise TlaLoweringError(
+            "tla.sync_all synchronizes the cube and vector cores of a MIX "
+            "kernel; declare @tla.kernel(core_ratio=...) or use "
+            "tla.sync_all_aiv() in an AIV-only kernel"
+        )
+    in_cube = _runtime._has_enclosing_region("cube")
+    in_vector = _runtime._has_enclosing_region("vector")
+
+    intra_block_aiv_ready = _sync_all_flag(
+        "__tla_sync_all_intra_block_aiv_ready__", 2, loc=loc
+    )
+    inter_core_aic_ready = _sync_all_flag(
+        "__tla_sync_all_inter_core_aic_ready__", 0, loc=loc
+    )
+    intra_block_aic_ready = _sync_all_flag(
+        "__tla_sync_all_intra_block_aic_ready__", 2, loc=loc
+    )
+    if in_cube:
+        pipe_barrier("all", loc=loc)
+        cross_core_wait_flag(intra_block_aiv_ready, "scalar", loc=loc)
+        cross_core_set_flag(inter_core_aic_ready, "fix", loc=loc)
+        cross_core_wait_flag(inter_core_aic_ready, "scalar", loc=loc)
+        cross_core_set_flag(
+            intra_block_aic_ready,
+            "mte3" if state.core_ratio == (1, 1) else "scalar",
+            loc=loc,
+        )
+    elif in_vector:
+        pipe_barrier("all", loc=loc)
+        cross_core_set_flag(intra_block_aiv_ready, "mte3", loc=loc)
+        cross_core_wait_flag(intra_block_aic_ready, "scalar", loc=loc)
+    else:
+        raise TlaLoweringError(
+            "tla.sync_all must be called inside tla.cube() or tla.vector()"
+        )
 
 
 @dsl_user_op
@@ -17503,6 +17706,8 @@ __all__ = [
     "set_flag",
     "wait_flag",
     "pipe_barrier",
+    "sync_all",
+    "sync_all_aiv",
     "prof_start",
     "prof_end",
     "prof_scope",

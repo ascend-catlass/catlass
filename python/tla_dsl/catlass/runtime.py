@@ -432,6 +432,8 @@ _CORE_API_EXPORTS = (
     "set_flag",
     "wait_flag",
     "pipe_barrier",
+    "sync_all",
+    "sync_all_aiv",
     "prof_start",
     "prof_end",
     "prof_scope",

@@ -258,6 +258,22 @@ with tla.vector():
 完整可运行版本见
 [`cross_flag_two_way.py`](https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/dsl_tutorials/cross_flag_two_way/cross_flag_two_way.py)。
 
+### 全核同步：`tla.sync_all_aiv` 与 `tla.sync_all`
+
+两个入口做全核同步：
+
+| 接口 | 同步范围 | 合法位置 |
+| --- | --- | --- |
+| `tla.sync_all_aiv(trigger_pipe, wait_pipe)` | 参与本 kernel 的全部 AIV | `tla.vector()` 内；pipe 仅 `MTE2` / `MTE3` / `pipes.ALL` |
+| `tla.sync_all()` | MIX kernel 全部 AIC 与全部 AIV 双向同步 | `tla.cube()` 与 `tla.vector()` 各一条 |
+
+`tla.sync_all_aiv()` 让每个 AIV 发布到达信号，并等待其余 AIV 全部到达后放行；
+纯 AIV kernel 与 MIX kernel 的 vector 侧都用它。
+
+`tla.sync_all()` 分三段完成（AIC 等本核全部 AIV → 全部 AIC 之间 → AIV 等本核 AIC），
+因此 cube 侧与 vector 侧各写一条、成对出现；kernel 须声明 `core_ratio`。内部握手
+占用保留 flag 名 `__tla_sync_all_*`。
+
 ## 7. 资源互斥：`tla.mutex`
 
 `mutex` 与 flag 解决的是不同问题：

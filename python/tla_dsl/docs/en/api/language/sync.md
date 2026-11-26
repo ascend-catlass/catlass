@@ -267,6 +267,102 @@ with tla.vector():
 
 ---
 
+## `tla.sync_all_aiv`
+
+**Source:** [`catlass.core_api.sync_all_aiv`](../../../../catlass/core_api.py)
+
+Description:
+
+Synchronize all AIV cores that participate in the kernel.
+
+Every AIV signals its arrival through a cross-core flag and then waits
+for all peers, so the call is an all-core synchronization for the AIV
+cores.
+
+Prototype:
+
+```python
+tla.sync_all_aiv(trigger_pipe: PipeLike = tla.pipes.ALL, wait_pipe: PipeLike = tla.pipes.ALL) -> None
+```
+
+Parameters:
+
+- `trigger_pipe` (`PipeLike`): Pipe that issues the arrival signal.
+  Optional, default `tla.pipes.ALL`; only `tla.pipes.MTE2`,
+  `tla.pipes.MTE3` and `tla.pipes.ALL` are supported.
+  `tla.pipes.ALL` first drains every pipe and signals from `MTE3`.
+- `wait_pipe` (`PipeLike`): Pipe that waits for the peers. Optional,
+  default `tla.pipes.ALL`; only `tla.pipes.MTE2`, `tla.pipes.MTE3` and
+  `tla.pipes.ALL` are supported. `tla.pipes.ALL` waits on the scalar
+  pipe.
+
+Constraints:
+
+- Must be called inside a `@tla.kernel`-decorated kernel function.
+- Must be called inside `tla.vector()`: valid in an AIV-only kernel and
+  in the vector part of a MIX kernel.
+- Every AIV must call it the same number of times, in the same order,
+  and with the same pipe selection; otherwise the rendezvous never
+  completes.
+- A MIX kernel that needs a cube/vector barrier uses `tla.sync_all()`
+  on both sides instead.
+
+Example:
+
+```python
+with tla.vector():
+    tla.sync_all_aiv()
+    # or pick the copy pipe that carries the data
+    tla.sync_all_aiv(tla.pipes.MTE3, tla.pipes.ALL)
+```
+
+---
+
+## `tla.sync_all`
+
+**Source:** [`catlass.core_api.sync_all`](../../../../catlass/core_api.py)
+
+Description:
+
+Synchronize the cube and vector cores of a MIX kernel.
+
+Write one call on the cube side and one on the vector side. Both calls
+are needed: the cube waits for every AIV to arrive and then releases
+them, the vector core signals its arrival and waits for the release.
+
+Prototype:
+
+```python
+tla.sync_all() -> None
+```
+
+Parameters:
+
+- None.
+
+Constraints:
+
+- Must be called inside a `@tla.kernel`-decorated kernel function.
+- Only valid in a MIX kernel declared with `core_ratio`; an AIV-only
+  kernel uses `tla.sync_all_aiv()` instead.
+- Must be called inside `tla.cube()` or `tla.vector()`; the cube call
+  pairs with the vector call of the same kernel.
+
+Example:
+
+```python
+@tla.kernel(core_ratio=tla.arch.C1V2)
+def mixed(...):
+    with tla.cube():
+        ...
+        tla.sync_all()
+    with tla.vector():
+        tla.sync_all()
+        ...
+```
+
+---
+
 ## `tla.mutex`
 
 **Source:** [`catlass.core_api.mutex`](../../../../catlass/core_api.py)
