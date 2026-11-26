@@ -275,7 +275,7 @@ def Tla_ArchDcciCachelinesOp : Tla_Op<"arch.dcci_cachelines", [MemoryEffects<[Me
     dcache, ``gm_l2`` the GM-addressed lines (native OUT), and ``st_atomic``
     the lines used by scalar atomic stores. ``ub`` is rejected -- the native
     whole-UB form is AIV-only and depends on UB dcache being enabled through
-    CTRL[49], which no operation here does.
+    CTRL[49].
 
     ``tla-lower-scalar-ops`` rewrites this into ``hivm.dcci`` with mode
     ``all_cache_lines`` and the matching data cache kind. There is no address to
@@ -365,4 +365,18 @@ def Tla_ArchGetICachePrefetchStatusOp : Tla_Op<"arch.get_icache_prefetch_status"
   let results = (outs I64:$result);
   let hasVerifier = 1;
   let assemblyFormat = "attr-dict `->` type($result)";
+}
+
+// Explicit CTRL observations and updates are ordered, including across opaque calls.
+def Tla_ArchGetCtrlOp : Tla_Op<"arch.get_ctrl", []> {
+  let arguments = (ins I32Attr:$lo, I32Attr:$hi);
+  let results = (outs I64:$value);
+  let hasVerifier = 1;
+  let assemblyFormat = "attr-dict";
+}
+
+def Tla_ArchSetCtrlOp : Tla_Op<"arch.set_ctrl", []> {
+  let arguments = (ins I64:$bits, I64Attr:$mask);
+  let hasVerifier = 1;
+  let assemblyFormat = "$bits attr-dict";
 }

@@ -19,8 +19,6 @@ namespace {
 //   CTRL[56]    replaced by InitSoc mask_norm / vector_mask (no DSL API)
 //
 // Clients:
-//   tla.cast  sat_mode ∈ {SAT, NOSAT, UNKNOWN} → CTRL[60]=0
-//             (instruction sat operand must be honored; UNKNOWN lowers as NOSAT)
 //   tla.mmad / tla.mmad_mx compute_order → CTRL[51]
 //   tla.mmad hf32_mode → CTRL[46] + CTRL[47]
 //
@@ -32,14 +30,14 @@ namespace {
 //     edge), analyze the body, then mark those bits unknown again at the exit.
 //   Unknown bits force the next ensure to re-set.
 
-static constexpr unsigned OverrideSaturationBit = 60;
 static constexpr unsigned ComputeOrderBit = 51;
 static constexpr unsigned HF32ModeBit = 46;
 static constexpr unsigned HF32TransModeBit = 47;
 
-static constexpr unsigned kTrackedCtrlBits[] = {OverrideSaturationBit, ComputeOrderBit, HF32ModeBit, HF32TransModeBit};
-
-static constexpr unsigned kSatModeTraitIndex = 1;
+static constexpr unsigned Fp8InputModeBit = 45;
+static constexpr unsigned MaskModeBit = 56;
+static constexpr unsigned kTrackedCtrlBits[] = {
+    ComputeOrderBit, HF32ModeBit, HF32TransModeBit, Fp8InputModeBit, MaskModeBit, 6, 7, 8};
 
 enum class CtrlBitReq
 {
@@ -106,18 +104,6 @@ static std::optional<bool> getBitState(const CtrlState& state, unsigned bit)
     return it->second;
 }
 
-// Every cast that carries a sat_mode trait relies on the instruction sat
-// operand, so OverrideSaturation must be off. InitSoc leaves CTRL[60]=1.
-static void castCtrlReqs(::tla::CastOp castOp, BitReqs& reqs)
-{
-    ArrayRef<int32_t> trait = castOp.getTrait();
-    if (trait.size() <= kSatModeTraitIndex)
-        return;
-    // SAT / NOSAT / UNKNOWN all encode an instruction sat operand; UNKNOWN
-    // lowers as NOSAT. OverrideSaturation must be off for that operand to apply.
-    setBitReq(reqs, OverrideSaturationBit, /*enable=*/false);
-}
-
 static void mmadCtrlReqs(Operation* op, BitReqs& reqs)
 {
     auto orderAttr = op->getAttrOfType<::tla::ComputeOrderAttr>("compute_order");
@@ -135,12 +121,15 @@ static void mmadCtrlReqs(Operation* op, BitReqs& reqs)
     }
 }
 
+static bool isCtrlBoundary(Operation* op)
+{
+    return isa<ArchGetCtrlOp, ArchSetCtrlOp, CallExternOp, func::CallOp>(op);
+}
+
 static BitReqs reqOfOp(Operation* op)
 {
     BitReqs reqs;
-    if (auto castOp = dyn_cast<::tla::CastOp>(op))
-        castCtrlReqs(castOp, reqs);
-    else if (isa<::tla::MmadOp, ::tla::MmadMxOp>(op))
+    if (isa<::tla::MmadOp, ::tla::MmadMxOp>(op))
         mmadCtrlReqs(op, reqs);
     return reqs;
 }
@@ -225,34 +214,50 @@ static void mergeBranchStates(CtrlState& state, ArrayRef<CtrlState> exits)
     }
 }
 
-static void processBlock(Block& block, CtrlState& state, OpBuilder& builder);
+static void processBlock(Block& block, CtrlState& state, OpBuilder& builder, bool observesCtrl);
 
-static void processRegions(Operation* op, CtrlState& state, OpBuilder& builder)
+static void processRegions(Operation* op, CtrlState& state, OpBuilder& builder, bool observesCtrl)
 {
     for (Region& region : op->getRegions()) {
         for (Block& nested : region)
-            processBlock(nested, state, builder);
+            processBlock(nested, state, builder, observesCtrl);
     }
 }
 
-static void processStructuredOp(Operation* op, CtrlState& state, OpBuilder& builder)
+static void processStructuredOp(Operation* op, CtrlState& state, OpBuilder& builder, bool observesCtrl)
 {
+    // A read, explicit patch, or opaque call splits the valid hoisting interval.
+    bool localOnly = (observesCtrl && !isa<VecFuncOp>(op)) ||
+                     op->walk([](Operation* nested) {
+                           return isCtrlBoundary(nested) ? WalkResult::interrupt() : WalkResult::advance();
+                       }).wasInterrupted();
     BitReqs reqs;
-    for (Region& region : op->getRegions())
-        mergeBitReqs(reqs, reqOfRegion(region));
+    if (!localOnly) {
+        for (Region& region : op->getRegions())
+            mergeBitReqs(reqs, reqOfRegion(region));
+    }
+    bool mixed = hasMixedReq(reqs);
 
     // Mutually exclusive regions: never thread one branch's exit into another.
-    if (isa<scf::IfOp>(op) && hasMixedReq(reqs)) {
-        CtrlState entryState = state;
+    if (isa<scf::IfOp>(op) && (localOnly || mixed)) {
         SmallVector<CtrlState, 2> exits;
-        exits.reserve(op->getNumRegions());
         for (Region& region : op->getRegions()) {
-            CtrlState branchState = entryState;
-            for (Block& nested : region)
-                processBlock(nested, branchState, builder);
-            exits.push_back(std::move(branchState));
+            CtrlState branch = state;
+            for (Block& block : region)
+                processBlock(block, branch, builder, observesCtrl);
+            exits.push_back(std::move(branch));
         }
         mergeBranchStates(state, exits);
+        return;
+    }
+
+    if (localOnly) {
+        bool loop = isa<scf::ForOp, scf::WhileOp>(op);
+        if (loop)
+            state.clear();
+        processRegions(op, state, builder, observesCtrl);
+        if (loop)
+            state.clear();
         return;
     }
 
@@ -261,20 +266,20 @@ static void processStructuredOp(Operation* op, CtrlState& state, OpBuilder& buil
     //   establishes them and post-loop code can rely on a known value.
     // - Mark Mixed bits unknown at the header (back edge) and again at the exit.
     // Fully-uniform loops do not take this path (they hoist all bits below).
-    if (isa<scf::ForOp, scf::WhileOp>(op) && hasMixedReq(reqs)) {
+    if (isa<scf::ForOp, scf::WhileOp>(op) && mixed) {
         BitReqs uniformReqs = uniformReqsOf(reqs);
         if (!uniformReqs.empty())
             ensureReqs(op, uniformReqs, state, builder);
         invalidateMixedBits(state, reqs);
-        processRegions(op, state, builder);
+        processRegions(op, state, builder, observesCtrl);
         invalidateMixedBits(state, reqs);
         return;
     }
 
-    if (hasMixedReq(reqs)) {
+    if (mixed) {
         // Single-region containers (vector / cube / vec.func): straight-line
         // transitions inside; sequential state threading is correct.
-        processRegions(op, state, builder);
+        processRegions(op, state, builder, observesCtrl);
         return;
     }
 
@@ -287,22 +292,62 @@ static void processStructuredOp(Operation* op, CtrlState& state, OpBuilder& buil
         return;
     }
 
-    processRegions(op, state, builder);
+    processRegions(op, state, builder, observesCtrl);
 }
 
-static void processBlock(Block& block, CtrlState& state, OpBuilder& builder)
+static void processBlock(Block& block, CtrlState& state, OpBuilder& builder, bool observesCtrl)
 {
     for (Operation& opRef : llvm::make_early_inc_range(block)) {
         Operation* op = &opRef;
 
+        if (isa<CallExternOp, func::CallOp>(op)) {
+            state.clear();
+            continue;
+        }
+        if (isa<ArchSetCtrlOp>(op)) {
+            uint64_t mask = op->getAttrOfType<IntegerAttr>("mask").getValue().getZExtValue();
+            llvm::APInt bits;
+            bool constant = matchPattern(op->getOperand(0), m_ConstantInt(&bits));
+            for (auto bit : kTrackedCtrlBits)
+                if (mask & (UINT64_C(1) << bit))
+                    state[bit] = constant ? std::optional<bool>(bits[bit]) : std::nullopt;
+            continue;
+        }
         if (auto setCtrl = dyn_cast<hivm::SetCtrlOp>(op)) {
             if (isTrackedCtrlBit(setCtrl.getIdx()))
                 state[setCtrl.getIdx()] = setCtrl.getEnable();
             continue;
         }
 
+        if (observesCtrl) {
+            if (auto copy = dyn_cast<CopyOp>(op)) {
+                auto dst = cast<TlaTensorType>(copy.getDst().getType()).getPtr();
+                if (dst.getAddrspace() == ::AddressSpace::gm) {
+                    auto mode = op->getAttrOfType<AtomicModeAttr>("atomic_mode");
+                    bool plain = !mode || mode.getAtomicMode() == AtomicMode::none;
+                    if (plain && !(getBitState(state, 6) == false && getBitState(state, 7) == false &&
+                                   getBitState(state, 8) == false)) {
+                        builder.setInsertionPoint(op);
+                        auto none = hivm::AtomicKindAttr::get(builder.getContext(), hivm::AtomicKind::NONE);
+                        builder.create<hivm::SetAtomicOp>(op->getLoc(), none, TypeAttr::get(dst.getPointee()));
+                    }
+                    // An explicitly atomic copy also restores NONE after the transfer.
+                    for (unsigned bit : {6u, 7u, 8u})
+                        state[bit] = false;
+                }
+            }
+            // Vector bodies use per-element masks even after an explicit scalar CTRL write.
+            if (isa<VecFuncOp>(op))
+                ensureCtrlBit(op, MaskModeBit, false, state, builder);
+            if (auto mm = dyn_cast<MmadOp>(op)) {
+                Type lhs = cast<TlaTensorType>(mm.getLhs().getType()).getPtr().getPointee();
+                Type rhs = cast<TlaTensorType>(mm.getRhs().getType()).getPtr().getPointee();
+                if (isa<Float8E4M3FNType>(lhs) && isa<Float8E4M3FNType>(rhs))
+                    ensureCtrlBit(op, Fp8InputModeBit, false, state, builder);
+            }
+        }
         if (isStructuredCtrlContainer(op)) {
-            processStructuredOp(op, state, builder);
+            processStructuredOp(op, state, builder, observesCtrl);
             continue;
         }
 
@@ -314,11 +359,51 @@ static CtrlState initSocCtrlState()
 {
     // Matches InitSoc bulk CTRL reset (injected later by prologue).
     CtrlState state;
-    state[OverrideSaturationBit] = true;
+    for (unsigned bit : {6u, 7u, 8u})
+        state[bit] = false;
     state[ComputeOrderBit] = false;
     state[HF32ModeBit] = false;
     state[HF32TransModeBit] = false;
     return state;
+}
+
+static void writeMaskedCtrl(OpBuilder& b, Location loc, Value old, Value bits, uint64_t mask)
+{
+    Value keep = b.create<arith::ConstantIntOp>(loc, ~mask, 64);
+    Value select = b.create<arith::ConstantIntOp>(loc, mask, 64);
+    Value preserved = b.createOrFold<arith::AndIOp>(loc, old, keep);
+    Value update = b.createOrFold<arith::AndIOp>(loc, bits, select);
+    Value merged = b.createOrFold<arith::OrIOp>(loc, preserved, update);
+    if (mask & (UINT64_C(1) << 48)) {
+        b.create<ArchDcciCachelinesOp>(loc, ::DcciTarget::st_atomic);
+        b.create<hivm::PipeBarrierOp>(loc, hivm::PipeAttr::get(b.getContext(), hivm::PIPE::PIPE_ALL));
+    }
+    b.create<hivm::SetCtrlInstrOp>(loc, merged);
+}
+
+static void lowerExplicitCtrl(func::FuncOp func)
+{
+    func.walk<WalkOrder::PostOrder>([&](Operation* op) {
+        if (!isa<ArchGetCtrlOp, ArchSetCtrlOp>(op))
+            return;
+        OpBuilder b(op);
+        Location loc = op->getLoc();
+        Value old = b.create<hivm::GetCtrlInstrOp>(loc, b.getI64Type()).getResult();
+        if (auto get = dyn_cast<ArchGetCtrlOp>(op)) {
+            unsigned width = get.getHi() - get.getLo() + 1;
+            if (width < 64) {
+                Value shift = b.create<arith::ConstantIntOp>(loc, get.getLo(), 64);
+                Value mask = b.create<arith::ConstantIntOp>(loc, (UINT64_C(1) << width) - 1, 64);
+                old = b.createOrFold<arith::ShRUIOp>(loc, old, shift);
+                old = b.createOrFold<arith::AndIOp>(loc, old, mask);
+            }
+            get.getValue().replaceAllUsesWith(old);
+        } else {
+            uint64_t mask = op->getAttrOfType<IntegerAttr>("mask").getValue().getZExtValue();
+            writeMaskedCtrl(b, loc, old, op->getOperand(0), mask);
+        }
+        op->erase();
+    });
 }
 
 class TlaInsertImplicitCtrlPass : public PassWrapper<TlaInsertImplicitCtrlPass, OperationPass<ModuleOp>> {
@@ -340,7 +425,8 @@ public:
 
     void getDependentDialects(DialectRegistry& registry) const override
     {
-        registry.insert<hivm::HIVMDialect, ::tla::TlaDialect, scf::SCFDialect, func::FuncDialect>();
+        registry
+            .insert<arith::ArithDialect, hivm::HIVMDialect, ::tla::TlaDialect, scf::SCFDialect, func::FuncDialect>();
     }
 
     void runOnOperation() override
@@ -356,9 +442,16 @@ public:
             if (funcOp->hasAttr(kHivmVectorFunctionAttrName))
                 continue;
 
+            bool observesCtrl =
+                funcOp
+                    .walk([](Operation* op) {
+                        return isa<ArchGetCtrlOp, ArchSetCtrlOp>(op) ? WalkResult::interrupt() : WalkResult::advance();
+                    })
+                    .wasInterrupted();
             CtrlState state = initSocCtrlState();
             for (Block& block : funcOp.getBody())
-                processBlock(block, state, builder);
+                processBlock(block, state, builder, observesCtrl);
+            lowerExplicitCtrl(funcOp);
         }
     }
 };

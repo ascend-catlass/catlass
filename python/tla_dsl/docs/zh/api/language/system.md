@@ -318,7 +318,7 @@ tla.arch.dcci_cachelines(target: Any = None) -> None
 - 须在 `tla.cube()` 或 `tla.vector()` 内，且在 `tla.vec.func` 之外。
 - `target` 为编译期参数；不接受地址或行数。
 - `DcciTarget.UB` 被拒绝：原生整个 UB 的形式仅 AIV 可用，且依赖通过 CTRL[49]
-  启用 UB dcache，而 TLA 没有任何操作设置该位。
+  启用 UB dcache。
 - Ascend 950（架构 3510）。
 
 调用示例：
@@ -515,6 +515,85 @@ tla.arch.atomic_exch(ptr: Pointer, value: Any) -> Numeric
 ```python
 with tla.vector():
     old = tla.arch.atomic_exch(flag.ptr_with_coord, tla.UInt32(1))
+```
+
+---
+
+### `tla.arch.get_ctrl`
+
+**源码：** [`catlass.core_api.arch_get_ctrl`](../../../../catlass/core_api.py)
+
+功能说明：
+
+读取本核 CTRL 寄存器。默认读取完整快照；指定字段时，结果右对齐。
+
+函数原型：
+
+```python
+tla.arch.get_ctrl(*, start_bit: Any = 0, end_bit: Any = 63)
+```
+
+参数说明：
+
+- `start_bit`、`end_bit`：字段的起始位和结束位，默认分别为 0 和 63。
+
+返回值：
+
+- `UInt64`：完整快照或右对齐的字段值。
+
+约束说明：
+
+仅支持 Ascend 950（arch 3510）。须在 `tla.cube()` 或 `tla.vector()` 内、`tla.vec.func()` 外调用。两端均包含在内，且必须为编译期整数。
+
+调用示例：
+
+```python
+with tla.vector():
+    snapshot = tla.arch.get_ctrl()
+```
+
+---
+
+### `tla.arch.set_ctrl`
+
+**源码：** [`catlass.core_api.arch_set_ctrl`](../../../../catlass/core_api.py)
+
+功能说明：
+
+更新一个公开字段，或通过一次读改写更新 `tla.params.CTRLValue` 指定的多个字段。此次写入保留其他字段的原值。
+
+函数原型：
+
+```python
+tla.arch.set_ctrl(value: Any, *, start_bit: Any = None, end_bit: Any = None)
+```
+
+参数说明：
+
+- `value`：原始值（Python 整数、`Int64` 或 `UInt64`），或 `CTRLValue`。
+- `start_bit`、`end_bit`：原始值对应字段的起始位和结束位，两端均包含在内。
+
+返回值：
+
+- `None`。
+
+约束说明：
+
+仅支持 Ascend 950（arch 3510）。须在 `tla.cube()` 或 `tla.vector()` 内、`tla.vec.func()` 外调用。
+进入向量函数时，编译器将掩码模式 [56] 设为 ELEMENT_BITS。类型转换保留当前饱和策略 [60]。需要采用指令饱和设置时，须显式选择 USE_API。
+E4M3 矩阵输入可使编译器选择 E4M3 输入解释 [45]，向 GM 拷贝时可重置原子格式 [8:6]。
+MMAD 参数还控制计算顺序 [51] 和 HF32 设置 [46:47]，这些位不属于此接口的可写字段。
+
+原始值须在字段范围内并指定两端；使用 `CTRLValue` 时省略两端。写入位 48 前，编译器清理并无效化原子缓存域，然后执行全流水线屏障。
+支持原子格式 [8:6]、原子操作 [10:9]、FP8 输入解释 [45]、浮点饱和 [48]、UB 数据缓存 [49]、
+FP8 NaN 饱和 [50]、整数饱和 [53]、掩码模式 [56]、转换模式 [59] 和饱和策略 [60]。
+原子格式和原子操作的原始值必须是编译期整数。单比特字段接受运行时值 0 或 1。浮点饱和与 FP8 NaN 饱和的语义值 True 编码为 0。
+
+调用示例：
+
+```python
+with tla.vector():
+    tla.arch.set_ctrl(tla.params.CTRLValue(integer_saturation=True))
 ```
 
 ---

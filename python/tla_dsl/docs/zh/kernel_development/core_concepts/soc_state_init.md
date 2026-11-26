@@ -55,11 +55,10 @@ AIV **不**修改：padding（仅 AIC）。
 
 ## 与 DSL 接口相关的隐式 CTRL 设置
 
-入口 InitSoc 提供默认 CTRL。下列接口在语义依赖 CTRL 时，由编译器**自动**调整对应位；用户无需、也无法手写 CTRL 接口。若入口默认已满足该次调用的需求，则不会额外改写。同一段内连续相同需求、且中间不需要相反状态时，只会生效一次。
+入口 InitSoc 提供默认 CTRL。下列接口在语义依赖 CTRL 时，由编译器**自动**调整对应位。类型转换保留 CTRL[60]。采用指令饱和设置时，须显式选择 USE_API。若入口默认已满足该次调用的需求，则不会额外改写。同一段内连续相同需求、且中间不需要相反状态时，只会生效一次。
 
 | DSL 接口 | 隐式 CTRL 效果 |
 | --- | --- |
-| `tla.cast` / `CastParams.sat_mode`（SAT / NOSAT / UNKNOWN） | 清 CTRL[60]，使指令上的饱和操作数生效（入口默认 CTRL[60]=1 为全局覆盖） |
 | `tla.mmad` / `tla.mmad_mx` `compute_order=M_FIRST` | 需要 CTRL[51]=0（与入口默认一致，通常无需改写） |
 | `tla.mmad` / `tla.mmad_mx` `compute_order=N_FIRST` | 置 CTRL[51]=1 |
 | `tla.mmad` `hf32_mode=HF32_DISABLE` | 需要 CTRL[46]=0、CTRL[47]=0（与入口默认一致，通常无需改写） |
@@ -69,7 +68,7 @@ AIV **不**修改：padding（仅 AIC）。
 与上述接口无关、已由入口 InitSoc 覆盖的位：
 
 - **CTRL[48]**：bulk 中保留旧值；cast 在 CTRL[60]=0 后走指令饱和，不再依赖它
-- **CTRL[56]**：由 InitSoc 的 mask_norm / vector_mask 取代，无对应 DSL 参数
+- **CTRL[56]**：显式标量写入后，进入向量函数时选择 ELEMENT_BITS
 
 ---
 

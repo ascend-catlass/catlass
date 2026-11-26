@@ -14334,8 +14334,7 @@ def arch_dcci_cachelines(
           `tla.vec.func`.
         - `target` is compile-time; no address or line count is accepted.
         - `DcciTarget.UB` is rejected: the native whole-UB form is AIV-only and
-          depends on UB dcache being enabled through CTRL[49], which no TLA
-          operation sets.
+          depends on UB dcache being enabled through CTRL[49].
         - Ascend 950 (arch 3510).
 
         Example:
@@ -14358,8 +14357,7 @@ def arch_dcci_cachelines(
         _op_error(
             "arch.dcci_cachelines",
             "target DcciTarget.UB is not available: the native whole-UB form is "
-            "AIV-only and requires UB dcache enabled through CTRL[49], which no "
-            "TLA operation sets",
+            "AIV-only and requires UB dcache enabled through CTRL[49]",
         )
     ctx = loc.context if loc is not None else mlir_ir.Context()
     attr = mlir_ir.Attribute.parse(
@@ -14739,6 +14737,69 @@ def arch_atomic_exch(
         value,
         loc=loc,
     )
+
+
+@dsl_user_op
+def arch_get_ctrl(*, start_bit=0, end_bit=63, loc=None):
+    """Directory: System Variable Access / Architecture Helpers
+    Description:
+        Read the local Ascend 950 CTRL register as UInt64. The default returns
+        the full snapshot. A selected documented field is right-justified.
+    Parameters:
+        - `start_bit`, `end_bit`: first and last bits of the field, defaulting to 0 and 63.
+
+        Returns:
+
+        - `UInt64`: Full snapshot or right-justified field.
+    Constraints:
+        On Ascend 950 (arch 3510), call inside `tla.cube()` or `tla.vector()` and outside `tla.vec.func()`.
+        Bit endpoints are inclusive compile-time integers.
+    Example:
+        ```python
+        with tla.vector():
+            snapshot = tla.arch.get_ctrl()
+        ```
+    """
+    from .tla import _ctrl
+
+    return _ctrl.get_ctrl(start_bit=start_bit, end_bit=end_bit, loc=loc)
+
+
+@dsl_user_op
+def arch_set_ctrl(value, *, start_bit=None, end_bit=None, loc=None):
+    """Directory: System Variable Access / Architecture Helpers
+    Description:
+        Update one documented field or apply a multi-field `tla.params.CTRLValue`
+        patch in a single read-modify-write. Omitted fields retain their current values.
+    Parameters:
+        - `value`: raw Int64/UInt64 or Python integer, or a CTRLValue patch.
+        - `start_bit`, `end_bit`: inclusive endpoints for the raw form.
+
+        Returns:
+
+        - `None`.
+    Constraints:
+        On Ascend 950 (arch 3510), call inside `tla.cube()` or `tla.vector()` and outside `tla.vec.func()`.
+        Vector function entry selects ELEMENT_BITS [56]. Casts preserve the current saturation strategy [60]. Select USE_API explicitly to use instruction saturation.
+        E4M3 matrix inputs can select E4M3 interpretation [45], and GM copies can reset atomic format [8:6].
+        MMAD parameters also control compute order [51] and HF32 settings [46:47], which this setter does not expose.
+        Raw writes require both endpoints and a fitting integer. Use a semantic patch
+        without endpoints. Writes selecting bit 48 clean and invalidate the atomic cache domain
+        and issue an all-pipe barrier before updating CTRL.
+        The supported fields are atomic format [8:6], atomic operation [10:9],
+        FP8 input interpretation [45], floating saturation [48], UB dcache [49],
+        FP8 NaN saturation [50], integer saturation [53], mask mode [56],
+        conversion mode [59], and saturation strategy [60]. Raw atomic format and operation values must be compile-time
+        integers. One-bit fields accept runtime values of 0 or 1. For floating and FP8 NaN saturation, semantic True encodes zero.
+    Example:
+        ```python
+        with tla.vector():
+            tla.arch.set_ctrl(tla.params.CTRLValue(integer_saturation=True))
+        ```
+    """
+    from .tla import _ctrl
+
+    _ctrl.set_ctrl(value, start_bit=start_bit, end_bit=end_bit, loc=loc)
 
 
 @dsl_user_op
@@ -16298,6 +16359,8 @@ arch._set("bcnt1", arch_bcnt1)
 arch._set("clz", arch_clz)
 arch._set("sff0", arch_sff0)
 arch._set("sff1", arch_sff1)
+arch._set("get_ctrl", arch_get_ctrl)
+arch._set("set_ctrl", arch_set_ctrl)
 arch._set("block_idx", arch_block_idx)
 arch._set("sub_block_idx", arch_sub_block_idx)
 arch._set("block_num", arch_block_num)

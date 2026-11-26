@@ -161,6 +161,7 @@ def make_fp8_kernel(
         ready = tla.flag("ready", tla.arch.MTE2, tla.arch.VECTOR)
         done = tla.flag("done", tla.arch.VECTOR, tla.arch.MTE3)
         with tla.vector():
+            tla.arch.set_ctrl(tla.params.CTRLValue(saturation_strategy=tla.params.OverrideStrategy.USE_API))
             tla.copy(source_buffer, source)
             tla.copy(destination_buffer, destination)
             tla.set_flag(ready)

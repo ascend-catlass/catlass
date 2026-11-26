@@ -336,8 +336,7 @@ Constraints:
   `tla.vec.func`.
 - `target` is compile-time; no address or line count is accepted.
 - `DcciTarget.UB` is rejected: the native whole-UB form is AIV-only and
-  depends on UB dcache being enabled through CTRL[49], which no TLA
-  operation sets.
+  depends on UB dcache being enabled through CTRL[49].
 - Ascend 950 (arch 3510).
 
 Example:
@@ -566,6 +565,91 @@ Example:
 ```python
 with tla.vector():
     old = tla.arch.atomic_exch(flag.ptr_with_coord, tla.UInt32(1))
+```
+
+---
+
+### `tla.arch.get_ctrl`
+
+**Source:** [`catlass.core_api.arch_get_ctrl`](../../../../catlass/core_api.py)
+
+Description:
+
+Read the local Ascend 950 CTRL register as UInt64. The default returns
+the full snapshot. A selected documented field is right-justified.
+
+Prototype:
+
+```python
+tla.arch.get_ctrl(*, start_bit: Any = 0, end_bit: Any = 63)
+```
+
+Parameters:
+
+- `start_bit`, `end_bit`: first and last bits of the field, defaulting to 0 and 63.
+
+Returns:
+
+- `UInt64`: Full snapshot or right-justified field.
+
+Constraints:
+
+On Ascend 950 (arch 3510), call inside `tla.cube()` or `tla.vector()` and outside `tla.vec.func()`.
+Bit endpoints are inclusive compile-time integers.
+
+Example:
+
+```python
+with tla.vector():
+    snapshot = tla.arch.get_ctrl()
+```
+
+---
+
+### `tla.arch.set_ctrl`
+
+**Source:** [`catlass.core_api.arch_set_ctrl`](../../../../catlass/core_api.py)
+
+Description:
+
+Update one documented field or apply a multi-field `tla.params.CTRLValue`
+patch in a single read-modify-write. Omitted fields retain their current values.
+
+Prototype:
+
+```python
+tla.arch.set_ctrl(value: Any, *, start_bit: Any = None, end_bit: Any = None)
+```
+
+Parameters:
+
+- `value`: raw Int64/UInt64 or Python integer, or a CTRLValue patch.
+- `start_bit`, `end_bit`: inclusive endpoints for the raw form.
+
+Returns:
+
+- `None`.
+
+Constraints:
+
+On Ascend 950 (arch 3510), call inside `tla.cube()` or `tla.vector()` and outside `tla.vec.func()`.
+Vector function entry selects ELEMENT_BITS [56]. Casts preserve the current saturation strategy [60]. Select USE_API explicitly to use instruction saturation.
+E4M3 matrix inputs can select E4M3 interpretation [45], and GM copies can reset atomic format [8:6].
+MMAD parameters also control compute order [51] and HF32 settings [46:47], which this setter does not expose.
+Raw writes require both endpoints and a fitting integer. Use a semantic patch
+without endpoints. Writes selecting bit 48 clean and invalidate the atomic cache domain
+and issue an all-pipe barrier before updating CTRL.
+The supported fields are atomic format [8:6], atomic operation [10:9],
+FP8 input interpretation [45], floating saturation [48], UB dcache [49],
+FP8 NaN saturation [50], integer saturation [53], mask mode [56],
+conversion mode [59], and saturation strategy [60]. Raw atomic format and operation values must be compile-time
+integers. One-bit fields accept runtime values of 0 or 1. For floating and FP8 NaN saturation, semantic True encodes zero.
+
+Example:
+
+```python
+with tla.vector():
+    tla.arch.set_ctrl(tla.params.CTRLValue(integer_saturation=True))
 ```
 
 ---

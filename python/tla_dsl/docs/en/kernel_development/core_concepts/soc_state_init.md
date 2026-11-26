@@ -60,14 +60,12 @@ AIV does **not** change: padding (AIC only).
 ## Implicit CTRL updates for DSL APIs
 
 InitSoc supplies the entry CTRL defaults. When the following APIs depend on CTRL,
-the compiler **automatically** adjusts the relevant bits; there is no user-facing
-CTRL API. If the entry default already matches a call's need, nothing extra is
+the compiler **automatically** adjusts the relevant bits. Casts preserve CTRL[60]. Set the saturation strategy to USE_API for instruction-level saturation. If the entry default already matches a call's need, nothing extra is
 written. Repeated identical needs in the same region with no intervening opposite
 requirement take effect only once.
 
 | DSL API | Implicit CTRL effect |
 | --- | --- |
-| `tla.cast` / `CastParams.sat_mode` (SAT / NOSAT / UNKNOWN) | Clear CTRL[60] so the instruction sat operand applies (entry default CTRL[60]=1 is global override) |
 | `tla.mmad` / `tla.mmad_mx` `compute_order=M_FIRST` | Requires CTRL[51]=0 (matches entry default; usually no write) |
 | `tla.mmad` / `tla.mmad_mx` `compute_order=N_FIRST` | Set CTRL[51]=1 |
 | `tla.mmad` `hf32_mode=HF32_DISABLE` | Requires CTRL[46]=0 and CTRL[47]=0 (matches entry default; usually no write) |
@@ -77,7 +75,7 @@ requirement take effect only once.
 Bits unrelated to the APIs above (covered by entry InitSoc instead):
 
 - **CTRL[48]**: preserved by the bulk write; casts use instruction sat once CTRL[60]=0
-- **CTRL[56]**: superseded by InitSoc `mask_norm` / `vector_mask`; no DSL parameter
+- **CTRL[56]**: vector function entry selects ELEMENT_BITS after an explicit scalar write
 
 ---
 

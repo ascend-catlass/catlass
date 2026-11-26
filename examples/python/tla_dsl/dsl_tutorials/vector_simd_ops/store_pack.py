@@ -86,6 +86,11 @@ def store_pack(
     out_ub = _make_ub_tensor(out_gm, _OUTPUT_DTYPE)
 
     with tla.vector():
+        tla.arch.set_ctrl(
+            tla.params.CTRLValue(
+                saturation_strategy=tla.params.OverrideStrategy.USE_API
+            )
+        )
         tla.copy(a_ub, a_gm)
 
         tla.set_flag(ub_loaded)

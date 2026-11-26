@@ -869,14 +869,18 @@ mlir::LogicalResult ArchLoadBypassDcacheOp::verify()
     return mlir::success();
 }
 
+static mlir::LogicalResult verifyScalarArchPlacement(mlir::Operation* op)
+{
+    if (op->getParentOfType<VecFuncOp>() || (!op->getParentOfType<VectorOp>() && !op->getParentOfType<CubeOp>()))
+        return op->emitOpError("requires a scalar tla.vector or tla.cube region");
+    return mlir::success();
+}
+
 mlir::LogicalResult ArchDcachePrefetchOp::verify()
 {
     if (mlir::cast<PtrType>(getAddress().getType()).getAddrspace() != AddressSpace::gm)
         return emitOpError("requires a GM pointer");
-    if ((*this)->getParentOfType<VecFuncOp>() ||
-        (!(*this)->getParentOfType<VectorOp>() && !(*this)->getParentOfType<CubeOp>()))
-        return emitOpError("requires a scalar tla.vector or tla.cube region");
-    return mlir::success();
+    return verifyScalarArchPlacement(*this);
 }
 
 mlir::LogicalResult ArchDcciCachelinesOp::verify()
@@ -884,7 +888,7 @@ mlir::LogicalResult ArchDcciCachelinesOp::verify()
     if (getTarget() == ::DcciTarget::ub)
         return emitOpError(
             "target 'ub' is not available: the native whole-UB form is AIV-only and "
-            "requires UB dcache enabled through CTRL[49], which no TLA operation sets");
+            "requires UB dcache enabled through CTRL[49]");
     return mlir::success();
 }
 
@@ -924,6 +928,44 @@ mlir::LogicalResult ArchGetICachePrefetchStatusOp::verify()
     if (!getScalarICacheUnitLimit(getOperation()))
         return emitOpError("requires one scalar vector or cube region outside tla.vec.func");
     return mlir::success();
+}
+
+namespace {
+constexpr std::pair<unsigned, unsigned> ctrlFields[] = {{6, 8},   {9, 10},  {45, 45}, {48, 48}, {49, 49},
+                                                        {50, 50}, {53, 53}, {56, 56}, {59, 59}, {60, 60}};
+
+mlir::LogicalResult verifyCtrlMask(mlir::Operation* op, uint64_t selected, mlir::Value bits)
+{
+    if (!selected)
+        return op->emitOpError("requires a nonempty CTRL field mask");
+    uint64_t remaining = selected;
+    llvm::APInt constant;
+    bool known = mlir::matchPattern(bits, mlir::m_ConstantInt(&constant));
+    for (auto [lo, hi] : ctrlFields) {
+        uint64_t field = ((UINT64_C(1) << (hi - lo + 1)) - 1) << lo;
+        if ((remaining & field) != field)
+            continue;
+        if (known && (lo == 6 || lo == 9) && (constant.getZExtValue() & field) == field)
+            return op->emitOpError("reserved atomic field encoding");
+        remaining &= ~field;
+    }
+    if (remaining)
+        return op->emitOpError("mask must select only complete documented CTRL fields");
+    return verifyScalarArchPlacement(op);
+}
+} // namespace
+
+mlir::LogicalResult ArchGetCtrlOp::verify()
+{
+    if (!(getLo() == 0 && getHi() == 63) &&
+        !llvm::is_contained(ctrlFields, std::make_pair(unsigned(getLo()), unsigned(getHi()))))
+        return emitOpError("requires a documented CTRL field or the full register");
+    return verifyScalarArchPlacement(*this);
+}
+
+mlir::LogicalResult ArchSetCtrlOp::verify()
+{
+    return verifyCtrlMask(*this, getMask(), getBits());
 }
 
 mlir::LogicalResult ArchLaneIdxOp::verify()

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .base_dsl.typing import Bool
 
 from .base_dsl.typing import Int64
 from .types import TlaTensor
@@ -98,8 +101,7 @@ class DcciTarget(enum.IntEnum):
 
     ``UB`` is defined because it is the domain the hardware names, but
     ``tla.arch.dcci_cachelines`` rejects it: the native whole-UB form is
-    AIV-only and depends on UB dcache being enabled through CTRL[49], which no
-    TLA operation sets.
+    AIV-only and depends on UB dcache being enabled through CTRL[49].
     """
 
     ALL = 0
@@ -796,3 +798,51 @@ class DsbTarget(enum.IntEnum):
     GM = 1
     UB = 2
     SEQ = 3
+
+
+class AtomicFormat(enum.IntEnum):
+    DISABLED = 0
+    F32 = 1
+    F16 = 2
+    S16 = 3
+    S32 = 4
+    S8 = 5
+    BF16 = 6
+
+
+class AtomicOperation(enum.IntEnum):
+    ADD = 0
+    MAX = 1
+    MIN = 2
+
+
+class CTRLMaskMode(enum.IntEnum):
+    ELEMENT_BITS = 0
+    ELEMENT_COUNT = 1
+
+
+class ConversionMode(enum.IntEnum):
+    SATURATE = 0
+    TRUNCATE = 1
+
+
+class OverrideStrategy(enum.IntEnum):
+    USE_API = 0
+    USE_GLOBAL = 1
+
+
+@dataclass(frozen=True)
+class CTRLValue:
+    """Issuer-local CTRL patch. Omitted fields retain their current values."""
+
+    atomic_format: AtomicFormat | None = None
+    atomic_operation: AtomicOperation | None = None
+    fp8_as_hifloat8: bool | Bool | None = None
+    float_saturation: bool | Bool | None = None
+    ub_dcache: bool | Bool | None = None
+    fp8_nan_saturation: bool | Bool | None = None
+    integer_saturation: bool | Bool | None = None
+    # A scalar write is observable until vector function entry selects ELEMENT_BITS.
+    mask_mode: CTRLMaskMode | None = None
+    conversion_mode: ConversionMode | None = None
+    saturation_strategy: OverrideStrategy | None = None
