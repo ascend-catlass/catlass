@@ -93,7 +93,7 @@ python gen_data.py [batch] ["qSeqlenList"] ["kvSeqlenList"] [numHeads] [numBlock
 3. 切换到可执行文件的编译目录 `output/bin`，执行算子样例程序，输入 shape 需与第 2 步生成数据的 shape 一致。
 
     ```bash
-    cd ../../../output/bin
+    cd ../../output/bin
     ./19_mla 4 "1,2,3,4" "128,256,512,1024" 16 64 128
     ```
 

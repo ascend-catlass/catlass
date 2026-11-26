@@ -94,7 +94,7 @@ python gen_data.py [batch] [qSeqlen] [kvSeqlen] [numHeads] [kvHeads] [headSize] 
 3. 切换到可执行文件的编译目录 `output/bin`，执行算子样例程序，输入 shape 需与第 2 步生成数据的 shape 一致。
 
     ```bash
-    cd ../../../output/bin
+    cd ../../output/bin
     ./49_ascend950_flash_attention_infer 1 177 512 1 1 128 0 1 1 --dtype half --device 0
     ```
 

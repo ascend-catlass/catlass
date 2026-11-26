@@ -133,7 +133,7 @@ flash_attention_infer.py [-h] [--device DEVICE] [--dtype {fp16,bf16}]
 
 ### 执行示例
 
-1. 部署 CATLASS Python 环境后，进入 `python/tla_dsl` 目录（可参考[快速开始](../../../../../../../python/tla_dsl/docs/zh/quick_start.md)）。
+1. 部署 CATLASS Python 环境后，进入 CATLASS 仓库根目录（可参考[快速开始](../../../../../../../python/tla_dsl/docs/zh/quick_start.md)）。
 
 2. 执行算子样例程序：
 
