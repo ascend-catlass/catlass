@@ -38,6 +38,11 @@ _SUPPORTED = (
     (tla.UInt16, tla.UInt8),
     (tla.UInt32, tla.UInt16),
     (tla.UInt32, tla.UInt8),
+    (tla.Int16, tla.UInt8),
+    (tla.Int16, tla.UInt32),
+    (tla.Int32, tla.UInt8),
+    (tla.Int32, tla.UInt16),
+    (tla.UInt32, tla.Int16),
     (tla.UInt8, tla.Float16),
     (tla.Float16, tla.UInt8),
     (tla.UInt8, tla.Float32),
@@ -48,6 +53,7 @@ _SUPPORTED = (
 _FOUR_X = (
     (tla.UInt8, tla.UInt32),
     (tla.UInt32, tla.UInt8),
+    (tla.Int32, tla.UInt8),
     (tla.UInt8, tla.Float32),
 )
 
@@ -113,8 +119,10 @@ def test_every_unsigned_route_accepts_every_sat_and_round_mode(src, dst, sat, rn
 
 
 @pytest.mark.parametrize(("src", "dst"), _FOUR_X)
-@pytest.mark.parametrize("slot", tuple(tla.params.RegSlot))
-def test_all_four_pack_quarters_are_valid_on_a_4x_unsigned_cast(src, dst, slot) -> None:
+@pytest.mark.parametrize(
+    "slot", (tla.params.RegSlot.ONE, tla.params.RegSlot.TWO, tla.params.RegSlot.THREE)
+)
+def test_nondefault_pack_quarters_are_valid_on_a_4x_unsigned_cast(src, dst, slot) -> None:
     """A 4x step reads pp0..pp3, so TWO and THREE must survive the frontend.
 
     u8 -> f32 is included deliberately: it is composed, but its *first* leg is
@@ -130,6 +138,10 @@ def test_all_four_pack_quarters_are_valid_on_a_4x_unsigned_cast(src, dst, slot) 
         (tla.UInt16, tla.UInt32),
         (tla.UInt16, tla.UInt8),
         (tla.UInt32, tla.UInt16),
+        (tla.Int16, tla.UInt8),
+        (tla.Int16, tla.UInt32),
+        (tla.Int32, tla.UInt16),
+        (tla.UInt32, tla.Int16),
         (tla.UInt8, tla.Float16),
         (tla.Float16, tla.UInt8),
     ),
@@ -169,36 +181,20 @@ def test_pack_quarter_slots_are_refused_on_a_2x_unsigned_cast(src, dst, slot) ->
         # No unsigned type pairs with an fp8 format.
         (tla.UInt8, tla.Float8E4M3FN),
         (tla.Float8E4M3FN, tla.UInt8),
-    ),
-)
-def test_unreachable_unsigned_routes_are_refused(src, dst) -> None:
-    """Rejected at the API, not left to crash the backend."""
-    with pytest.raises(tla.TlaCoreAPIError, match="complete width lattice"):
-        _compile(src, dst, _DEFAULT)
-
-
-@pytest.mark.parametrize(
-    ("src", "dst"),
-    (
+        # Mixed signedness routes outside the supported pairs.
         (tla.UInt8, tla.Int32),
         (tla.UInt8, tla.Int16),
         (tla.UInt32, tla.Int8),
         (tla.Int8, tla.UInt32),
         (tla.Int8, tla.UInt16),
-        (tla.Int32, tla.UInt8),
-        (tla.Int16, tla.UInt8),
+        (tla.Int32, tla.UInt32),
+        # Unsigned integers have no same-type cast.
+        (tla.UInt8, tla.UInt8),
     ),
 )
-def test_mixed_signedness_is_refused(src, dst) -> None:
-    """A signed/unsigned pair would need an implicit reinterpretation of one end."""
-    with pytest.raises(tla.TlaCoreAPIError, match="matching signedness"):
-        _compile(src, dst, _DEFAULT)
-
-
-def test_same_width_unsigned_cast_is_refused() -> None:
-    """u8 -> u8 is a no-op, not an instruction."""
+def test_unsupported_unsigned_cast_is_refused(src, dst) -> None:
     with pytest.raises(tla.TlaCoreAPIError, match="complete width lattice"):
-        _compile(tla.UInt8, tla.UInt8, _DEFAULT)
+        _compile(src, dst, _DEFAULT)
 
 
 def test_signed_integer_routes_are_unchanged() -> None:

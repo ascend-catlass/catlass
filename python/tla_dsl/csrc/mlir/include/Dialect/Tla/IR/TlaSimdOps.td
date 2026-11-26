@@ -487,7 +487,8 @@ def Tla_CastOp : Tla_Op<"cast", [Pure]> {
     Convert a register-resident VectorSSA value from one element type to another
     (e.g. ``f32`` -> ``f16``, ``f32`` -> ``i32``). The ``trait`` attribute carries
     the cast knobs (rounding, saturation, register slot). An optional mask
-    predicates which lanes are converted.
+    predicates which source lanes are converted. Unselected destination lanes
+    are zeroed.
   }];
   let arguments = (ins Tla_VectorSSAType:$source, DenseI32ArrayAttr:$trait,
                        Optional<Tla_MaskSSAType>:$mask);

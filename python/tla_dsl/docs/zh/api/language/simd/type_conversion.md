@@ -22,58 +22,36 @@ Do not regenerate this file from a glossary.
 
 功能说明：
 
-将寄存器内的 vector 转换为另一种元素类型。
+将 `VectorSSA` 中的元素转换为 `dst_type`，返回以 `dst_type` 为元素类型的 `VectorSSA`。
 
-FP32→HiF8 支持 `CAST_ROUND`（最近舍入，中点远离零）和 `CAST_HYBRID`、
-`SAT`/`NOSAT` 和四个 register slot；结果 `j` 位于字节位置 `4*j + reg_slot`。
-HiF8→FP32 读取相同 slot，无需舍入。
-算术运算先转换为 Float32，查看编码使用 UInt8 bitcast。
-`CAST_HYBRID` 仅支持 FP32→HiF8，采用 CANN 原生混合舍入，
-结果不保证是最近的可表示值。FP32→HiF8 须显式指定 `CAST_ROUND` 或 `CAST_HYBRID`。
+| 源元素类型 | 目标元素类型 |
+| --- | --- |
+| `Float16` | `Float16`、`BFloat16`、`Float32`、`Float8E4M3FN`、`Float8E5M2`、`HiFloat8`、`Int4x2`、`Int8`、`Int16`、`Int32`、`UInt8` |
+| `BFloat16` | `Float16`、`BFloat16`、`Float32`、`Float8E4M3FN`、`Float8E5M2`、`Float8E8M0`、`Float4E2M1x2`、`Float4E1M2x2`、`Int32` |
+| `Float32` | `Float16`、`BFloat16`、`Float32`、`Float8E4M3FN`、`Float8E5M2`、`HiFloat8`、`Int16`、`Int32`、`Int64` |
+| `Float8E4M3FN`、`Float8E5M2` | `Float16`、`BFloat16`、`Float32` |
+| `HiFloat8` | `Float16`、`Float32` |
+| `Float8E8M0` | `BFloat16` |
+| `Float4E2M1x2`、`Float4E1M2x2` | `BFloat16` |
+| `Int4x2` | `Int16`、`Float16`、`BFloat16` |
+| `Int8` | `Int16`、`Int32`、`Float16` |
+| `Int16` | `Int4x2`、`Int32`、`UInt8`、`UInt32`、`Float16`、`Float32` |
+| `Int32` | `Int8`、`Int16`、`Int64`、`UInt8`、`UInt16`、`Float32` |
+| `Int64` | `Int32`、`Float32` |
+| `UInt8` | `UInt16`、`UInt32`、`Float16`、`Float32` |
+| `UInt16` | `UInt8`、`UInt32` |
+| `UInt32` | `UInt8`、`UInt16`、`Int16` |
 
-lowering 支持有符号整数 `tla.Int8` ~ `tla.Int64`、浮点 `tla.Float16` /
-`tla.BFloat16` / `tla.Float32`，以及两种 OCP fp8 格式 `tla.Float8E4M3FN` /
-`tla.Float8E5M2`。无符号整数仅支持已接入的可达转换路线；`tla.Bool`（i1）、
-`tla.Float64` 与 `tla.Float8E8M0` 会被拒绝。
+`Float16` 或 `Float32` 转为 `HiFloat8` 时，须指定 `CAST_ROUND`（最近舍入，中点远离零）
+或 `CAST_HYBRID`（混合舍入，结果可能偏离最近的可表示值）。
 
-`tla.Float16` 到 `tla.BFloat16` 使用一条直接转换指令，保留全部 lane，支持
-通用舍入模式（不含 HiF8 专用的 `CAST_HYBRID`）。`sat_mode` 必须为 `UNKNOWN`；
-由于指令没有饱和模式参数，`NOSAT` 和 `SAT` 均会被拒绝。对于这一等宽转换，`reg_slot` 的 `ZERO` 与 `ONE` 效果相同。
+`BFloat16` 转为 `Float8E8M0` 时提取指数位。正负零和次正规数编码为 `0x00`。
+正负无穷大固定饱和到最大有限缩放值 `0xfe`，NaN 编码为 `0xff`。反向转换时，`0x00` 解码为 `2**-127`
+（BF16 位型为 `0x0040`），`0xff` 解码为静默 NaN。
 
-fp8 操作数可与 `tla.Float32`、`tla.Float16`、`tla.BFloat16` 互相转换。其中只有
-f32 这一对是单条指令：f16 与 bf16 两对由 lowering 展开为经过 f32 的两次 cast，
-扩宽一侧精确、收窄一侧只舍入一次；`f8e5m2 -> f16` 则展开为一次整数扩宽加一次移位，
-因为这两种格式共享同一符号与指数字段——与经过 f32 的组合路径选出相同元素，但只需
-两条指令而非五条。fp8 之间没有重编码路径——两者指数范围不同，属于重量化而非
-cast——也没有 fp8 与整数之间的路径。
-
-同类型浮点 cast（`tla.Float16` -> `tla.Float16`、`tla.BFloat16` -> `tla.BFloat16`、
-`tla.Float32` -> `tla.Float32`）保留元素类型，逐 lane 重新舍入，降级为 AVE `vtrc`
-指令：只有 `round_mode` 到达指令，`sat_mode` 与 `reg_slot` 不产生任何效果。整数与
-fp8 格式没有同类型 cast。
-
-`CastParams.round_mode` 支持 `CAST_ROUND` / `CAST_FLOOR` / `CAST_CEIL` /
-`CAST_TRUNC` / `CAST_RINT` / `CAST_ODD` / `CAST_NONE`；`CAST_HYBRID` 仅支持
-FP32→HiF8。`CastParams` 默认使用 `CAST_NONE`。无损转换（如 `f16→f32`）
-省略舍入操作数。在支持且使用舍入模式的转换中，包括同类型浮点 cast，
-`CAST_NONE` 按 `CAST_RINT`（中点取偶）处理。
-
-`tla.Float4E2M1x2`、`tla.Float4E1M2x2` 的每个字节保存两个 FP4 数值，低半字节在前。
-Tensor 的 shape 和 offset 按数对计数。
-原生转换与 BFloat16 配对：128 个连续 BF16 值转换为 64 个数对字节，位于
-`4*j + reg_slot`。收窄固定饱和，接受 `SAT` 或 `UNKNOWN`；支持 `CAST_ROUND`
-（中点远离零）、`CAST_RINT`（中点取偶）、`CAST_NONE`（等同 `CAST_RINT`）、
-`CAST_FLOOR`、`CAST_CEIL` 和 `CAST_TRUNC`。
-
-收窄接受 128-lane BF16 源 mask，由偶数位置控制整个数对，奇数位置无效；也接受
-64-lane 数对 mask（`dtype=UInt32`），每位控制一对。扩宽使用 256-lane 字节 mask。
-被 mask 关闭的结果为零，两个方向均支持四个 slot。FP32 转换需要显式 DSL 组合；
-普通的 FP32→BF16→FP4 连续转换可能产生 double rounding。FP4x2 与逻辑四位 Tensor
-类型不同，不支持 SIMT 转换。
-
-`tla.Int4` 的源数据按每字节两个值打包。`Int4.to()` 可扩宽为 Int16、
-Float16 或 BFloat16，且必须使用 `CAST_NONE`，因为扩宽指令没有舍入操作数；
-其他目标类型需要显式组合转换路线。
+打包四位类型每字节存两个元素，第一个元素在低半字节。打包将第 `j` 对写入字节
+`4*j + reg_slot`，解包从同一位置读取。扩宽 `Int4x2` 时使用 `CAST_NONE`。
+`Float32` 经 `BFloat16` 转为打包 FP4 时，可能发生两次舍入。
 
 函数原型：
 
@@ -83,46 +61,35 @@ tla.VectorSSA.to(dst_type: Any, params: CastParams, mask: Any | None = None) -> 
 
 参数说明：
 
-- `dst_type`（`type[Numeric]`）：目标元素类型。必填。
-- `params`（`CastParams`）：舍入模式、饱和模式与寄存器 slot。必填。
-- `mask`（`MaskSSA | None`）：可选执行掩码；`None` 表示所有 lane 使能。选填，默认 `None`。
-  mask 按**源**元素域索引；BF16→FP4 使用上述偶数位置或显式数对 mask。
-  被 mask 关掉的元素对结果贡献为零。
+- `dst_type`（`type[Numeric]`）为表中列出的目标元素类型。
+- `params`（`CastParams`）为必填参数，用于设置舍入模式 `round_mode`、饱和模式 `sat_mode` 和寄存器槽位 `reg_slot`。
+- `mask`（`MaskSSA | None`）按源元素下标选择参与转换的元素。默认值 `None` 表示掩码全开。
+  未选中的目标元素置零。打包四位值时，使用 128 位源掩码的偶数位，或使用
+  `dtype=tla.UInt32` 创建 64 位数对掩码，每位选择一对元素。
 
 约束说明：
 
-- 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
-- 须在 `tla.vec.func()` 内调用。
-- 同类型浮点 cast 的 `sat_mode` 不允许 `SAT`（同类型 cast 从不饱和，
-  `UNKNOWN` 与 `NOSAT` 均可），`reg_slot` 必须为 `ZERO` 或 `ONE`：该转换没有
-  饱和参数，也没有 pack-quarter 选择子。
-- `reg_slot` 的 `TWO` 与 `THREE` 指向 pack 的四分之一，仅在位宽变化为 4 倍的整数
-  cast、直接的 fp8/HiF8<->f32 指令以及 BF16<->FP4x2 转换上合法。
-- `i4` 源仅支持 i16/f16/bf16 目标且必须使用 `CAST_NONE` 舍入；Int4 是源类型，不能作为 cast 目标。
-- 线程级标量 cast 在 `mode="simt"` 下使用 `Numeric.to`；本方法是 vector（AVE）
-  形态，始终需要 `CastParams`。
+- 在 `@tla.kernel` 函数的 `tla.vec.func(mode="simd")` 中调用。SIMT 标量转换使用 `Numeric.to`。
+- `reg_slot` 默认为 `RegSlot.ZERO`。位宽相差两倍且使用槽位选择时，`ZERO` 和 `ONE`
+  分别选择较窄类型一侧的偶数和奇数位置。打包四位转换、位宽相差四倍的整数转换、
+  `UInt8` 转 `Float32`，以及 `Float32` 与 `Float8E4M3FN`、`Float8E5M2` 或
+  `HiFloat8` 的互转，均可使用 `ZERO` 至 `THREE` 选择四个位置之一。
+- 对需要舍入且支持 `CAST_RINT` 的转换，默认的 `CAST_NONE` 按中点取偶舍入。
+  `BFloat16` 转 `Float16`、`Float16` 转 `Int32` 或 `Int4x2`、`Float32` 与 `Int64` 互转、
+  `BFloat16` 转打包 FP4 时均不可使用 `CAST_ODD`。
+- `Float16` 转 `BFloat16` 时，`sat_mode` 须设为 `SatMode.UNKNOWN`。
+  `BFloat16` 转打包 FP4 时固定饱和，须设为 `SatMode.UNKNOWN` 或 `SatMode.SAT`。
+  `Int16` 转 `UInt32` 时固定饱和。
+- `Float16`、`BFloat16`、`Float32` 转为自身类型时，对选中的元素舍入，保留原位置。
+  槽位用 `ZERO` 或 `ONE`，饱和保持关闭。
 
 调用示例：
 
 ```python
-trait = tla.params.CastParams(
-    reg_slot=tla.params.RegSlot.ZERO,
-    sat_mode=tla.params.SatMode.NOSAT,
-    round_mode=tla.params.RoundMode.CAST_ROUND,
-)
 with tla.vec.func(mode="simd"):
-    wide = narrow.to(tla.Float32, trait)
-    # f32 -> f32 配合 CAST_TRUNC：小数位向零舍入。
-    rounded = as_f32.to(tla.Float32, tla.params.CastParams(
-        reg_slot=tla.params.RegSlot.ZERO,
-        sat_mode=tla.params.SatMode.UNKNOWN,
-        round_mode=tla.params.RoundMode.CAST_TRUNC,
-    ))
-    # 此转换的默认 CAST_NONE 按 CAST_RINT 处理。
-    as_i32 = as_f32.to(tla.Int32, tla.params.CastParams(
-        reg_slot=tla.params.RegSlot.ZERO,
-        sat_mode=tla.params.SatMode.NOSAT,
-    ))
+    as_i32 = x_f32.to(tla.Int32, tla.params.CastParams())
+    to_hif8 = tla.params.CastParams(round_mode=tla.params.RoundMode.CAST_ROUND)
+    as_hif8 = x_f32.to(tla.HiFloat8, to_hif8)
 ```
 
 ---
@@ -140,7 +107,8 @@ with tla.vec.func(mode="simd"):
 
 支持 `f32`/`i32`/`u32`、`f16`/`bf16`/`i16`/`u16`、
 `i8`/`u8`/`f8e4m3fn`/`f8e5m2`/`hif8`/`f4e2m1x2`/`f4e1m2x2` 和 `i64`/`u64`。
-不支持 `tla.Bool`、`tla.Float8E8M0` 或逻辑四位 Tensor 类型。该操作不改变字节顺序
+`tla.Float8E8M0` 与 `tla.UInt8` 可以双向按位重解释，用于处理 E8M0 编码字节。
+不支持 `tla.Bool` 或逻辑四位 Tensor 类型。该操作不改变字节顺序
 或 register slot，也不压紧稀疏值。数值转换使用 `.to()`，布局变化使用显式重排。
 
 `i64`/`u64` 寄存器可通过 UB load、`tla.extern` 或 bitcast 获得。

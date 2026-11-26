@@ -1718,6 +1718,13 @@ def _cache_key(
     }
     if "tla.arch.get_system_cycle" in tlair_mlir:
         key_payload["system_counter_build"] = _system_counter_build_id()
+    # The generic TLAIR prints the cast and its operand and result types on one line.
+    if "!tla.f8e8m0" in tlair_mlir and any(
+        '"tla.cast"' in line and "!tla.f8e8m0" in line
+        for line in tlair_mlir.splitlines()
+    ):
+        # Covers the 0x00 decoding fix and saturation of BF16 infinities.
+        key_payload["e8m0_cast_revision"] = 2
     return hashlib.sha256(
         json.dumps(key_payload, sort_keys=True).encode("utf-8")
     ).hexdigest()[:16]

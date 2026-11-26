@@ -142,12 +142,11 @@ def _bad(
         # Bool is a register type but move-only; bitcast is refused before the
         # generic unsupported-destination path.
         (tla.Bool, "Bool VectorSSA is move-only"),
-        # E8M0 registers support byte-preserving transport, not bitcast.
-        (tla.Float8E8M0, "unsupported destination element type"),
+        (tla.Float8E8M0, "E8M0 register bitcast requires UInt8"),
     ],
     ids=["bool", "f8e8m0"],
 )
-def test_non_register_types_are_rejected(dst_type, message) -> None:
+def test_unsupported_bitcast_from_float32_is_rejected(dst_type, message) -> None:
     with pytest.raises(TlaCoreAPIError, match=message):
         _ = _lower(_bad, (_ub(tla.Float32, 64), _ub(tla.Float32, 64), dst_type, 64))
 

@@ -475,11 +475,8 @@ def Tla_SatModeEnum : Tla_I32Enum<"SatMode", "Cast saturation behaviour on overf
   Tla_SatMode_Nosat
 ]>;
 
-// RoundMode: rounding applied on precision loss (HIVM round_mode).
-// Codes 0-3 are frozen ABI for existing IR; 4-6 append AscendC CAST_NONE /
-// CAST_RINT / CAST_ODD. Code 7 adds HiF8-specific CAST_HYBRID.
-// CAST_NONE is a policy: lossless casts drop the round operand; lossy casts
-// lower as RINT (ties to even), matching AscendC.
+// RoundMode codes are stable in existing IR. CAST_NONE uses the conversion's
+// default behavior.
 def Tla_RoundMode_CastRound : I32EnumAttrCase<"cast_round", 0>;
 def Tla_RoundMode_CastFloor : I32EnumAttrCase<"cast_floor", 1>;
 def Tla_RoundMode_CastCeil : I32EnumAttrCase<"cast_ceil", 2>;
@@ -488,7 +485,7 @@ def Tla_RoundMode_CastNone : I32EnumAttrCase<"cast_none", 4>;
 def Tla_RoundMode_CastRint : I32EnumAttrCase<"cast_rint", 5>;
 def Tla_RoundMode_CastOdd : I32EnumAttrCase<"cast_odd", 6>;
 def Tla_RoundMode_CastHybrid : I32EnumAttrCase<"cast_hybrid", 7>;
-def Tla_RoundModeEnum : Tla_I32Enum<"RoundMode", "Cast rounding mode on precision loss.", [
+def Tla_RoundModeEnum : Tla_I32Enum<"RoundMode", "Register conversion rounding mode.", [
   Tla_RoundMode_CastRound,
   Tla_RoundMode_CastFloor,
   Tla_RoundMode_CastCeil,

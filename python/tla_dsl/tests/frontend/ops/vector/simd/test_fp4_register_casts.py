@@ -79,7 +79,7 @@ def test_fp4_widen_preserves_pair_count(compiler_tlair, dtype, slot):
 
 def test_fp4_narrow_rejects_a_byte_lane_mask(compiler_tlair):
     with pytest.raises(
-        TlaCoreAPIError, match="BF16 source mask or a 64-lane pair mask"
+        TlaCoreAPIError, match="128-lane source mask or a 64-lane pair mask"
     ):
         compiler_tlair(
             _kernel(tla.Float4E2M1x2, CastParams(sat_mode=SatMode.SAT), tla.UInt8),
@@ -137,7 +137,7 @@ def test_payloads_do_not_silently_gain_integer_arithmetic(compiler_tlair, dtype)
     ("rounding", "diagnostic"),
     [
         (RoundMode.CAST_ODD, "BF16->FP4x2 supports"),
-        (RoundMode.CAST_HYBRID, "CAST_HYBRID only supports Float32->HiFloat8"),
+        (RoundMode.CAST_HYBRID, "CAST_HYBRID only supports Float16/Float32->HiFloat8"),
     ],
 )
 def test_fp4_narrow_rejects_unsupported_rounding(

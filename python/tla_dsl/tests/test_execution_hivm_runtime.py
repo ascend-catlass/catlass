@@ -3278,6 +3278,7 @@ def test_counter_build_identity_only_invalidates_counter_kernels(monkeypatch, tm
     (stubs / "Vector" / "log.cpp").write_text("original source")
     for op in ("sub_abs", "axpy", "muls_cast"):
         (stubs / "Vector" / f"{op}.cpp").write_text("original source")
+    (stubs / "Vector" / "lowp_cast.cpp").write_text("cast")
     monkeypatch.setattr(
         bc_compile, "_resolve_paths", lambda: bc_compile.BCPaths(stubs, tmp_path, stubs)
     )
@@ -3497,7 +3498,30 @@ def _kernel_abi(
     )
 
 
-def test_online_cache_key_serializes_kernel_abi_version(monkeypatch, tmp_path) -> None:
+@pytest.mark.parametrize(
+    ("tlair_mlir", "has_e8m0_cast"),
+    [
+        ("module {}", False),
+        (
+            '%bytes = "tla.load"(%src) : (!tla.tensor) -> !tla.vector<256x!tla.f8e8m0>\n'
+            '%half = "tla.cast"(%float) : (!tla.vector<64xf32>) -> !tla.vector<128xf16>',
+            False,
+        ),
+        (
+            '%scale = "tla.cast"(%bytes) <{trait = array<i32: 0, 2, 4>}> '
+            ": (!tla.vector<256x!tla.f8e8m0>) -> !tla.vector<128xbf16>",
+            True,
+        ),
+        (
+            '%bytes = "tla.cast"(%scale) <{trait = array<i32: 0, 2, 4>}> '
+            ": (!tla.vector<128xbf16>) -> !tla.vector<256x!tla.f8e8m0>",
+            True,
+        ),
+    ],
+)
+def test_online_cache_key_serializes_kernel_abi_version(
+    monkeypatch, tmp_path, tlair_mlir, has_e8m0_cast
+) -> None:
     payloads: list[dict[str, object]] = []
     json_dumps = execution.json.dumps
 
@@ -3511,7 +3535,7 @@ def test_online_cache_key_serializes_kernel_abi_version(monkeypatch, tmp_path) -
 
     compile_option = execution.TlaCompileOption()
     execution._cache_key(
-        tlair_mlir="module {}",
+        tlair_mlir=tlair_mlir,
         entrypoint="kernel",
         compile_option=compile_option,
         compiler_bridge_path=tmp_path / "bridge.so",
@@ -3526,6 +3550,10 @@ def test_online_cache_key_serializes_kernel_abi_version(monkeypatch, tmp_path) -
 
     assert len(payloads) == 1
     assert payloads[0]["cache_abi_version"] == execution._ONLINE_CACHE_ABI_VERSION
+    if has_e8m0_cast:
+        assert payloads[0]["e8m0_cast_revision"] == 2
+    else:
+        assert "e8m0_cast_revision" not in payloads[0]
     assert "runtime_argument_tree_schemas" not in payloads[0]
     assert "runtime_argument_tree_protocol_version" not in payloads[0]
 

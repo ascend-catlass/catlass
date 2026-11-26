@@ -1,151 +1,74 @@
 // RUN: %tla_compile %s -o - --mlir-print-ir-after=tla-vector-region-simd 2>&1 | %filecheck %s
 
-// Pin CAST_NONE / CAST_RINT / CAST_ODD trait codes onto HIVM AVE round modes.
-// Trait layout: [reg_slot, sat_mode, round_mode]
-//   cast_round=0, cast_floor=1, cast_ceil=2, cast_trunc=3,
-//   cast_none=4, cast_rint=5, cast_odd=6
-//
-// CAST_NONE on a same-type (lossy re-round) path must become <rint>, matching
-// AscendC. CAST_NONE on a lossless f16->f32 widen still lowers to vextf with
-// no round operand. CAST_RINT / CAST_ODD pass through to HIVM RINT / ODD.
+!f32 = !tla.tensor<!tla.layout<!tla.shape<64>, !tla.stride<1>, !tla.shape<64>, RowMajor>, !tla.coord<0>, !tla.ptr<f32, ub, 4>>
+!f16 = !tla.tensor<!tla.layout<!tla.shape<128>, !tla.stride<1>, !tla.shape<128>, RowMajor>, !tla.coord<0>, !tla.ptr<f16, ub, 2>>
+!i32 = !tla.tensor<!tla.layout<!tla.shape<64>, !tla.stride<1>, !tla.shape<64>, RowMajor>, !tla.coord<0>, !tla.ptr<i32, ub, 4>>
 
-!s_f32 = !tla.tensor<!tla.layout<!tla.shape<64>, !tla.stride<1>, !tla.shape<64>, RowMajor>, !tla.coord<0>, !tla.ptr<f32, ub, 4>>
-!d_f32 = !tla.tensor<!tla.layout<!tla.shape<64>, !tla.stride<1>, !tla.shape<64>, RowMajor>, !tla.coord<0>, !tla.ptr<f32, ub, 4>>
-!s_f16 = !tla.tensor<!tla.layout<!tla.shape<128>, !tla.stride<1>, !tla.shape<128>, RowMajor>, !tla.coord<0>, !tla.ptr<f16, ub, 2>>
-!d_f16_as_f32 = !tla.tensor<!tla.layout<!tla.shape<64>, !tla.stride<1>, !tla.shape<64>, RowMajor>, !tla.coord<0>, !tla.ptr<f32, ub, 4>>
-!d_i32 = !tla.tensor<!tla.layout<!tla.shape<64>, !tla.stride<1>, !tla.shape<64>, RowMajor>, !tla.coord<0>, !tla.ptr<i32, ub, 4>>
+// CAST_NONE (4) and CAST_RINT (5) both lower to RINT when the cast rounds.
+// CHECK-LABEL: func.func @f32_rounding(
+// CHECK: ave.hir.vtrc %{{.*}}, <trunc>, %{{.*}} : vector<64xf32>, vector<256xi1>, vector<64xf32>
+// CHECK-COUNT-2: ave.hir.vtrc %{{.*}}, <rint>, %{{.*}} : vector<64xf32>, vector<256xi1>, vector<64xf32>
+// CHECK: ave.hir.vtruncf {{.*}}<odd>{{.*}} : vector<64xf32>, vector<128xf16>
+// CHECK: ave.hir.vtruncf {{.*}}<rint>{{.*}} : vector<64xf32>, vector<128xf16>
+// CHECK-COUNT-2: ave.hir.vfptosi {{.*}}<rint>{{.*}} : vector<64xf32>, vector<256xi1>, vector<64xi32>
+func.func @f32_rounding(
+    %input: memref<64xf32, #hivm.address_space<ub>>,
+    %f32_trunc: memref<64xf32, #hivm.address_space<ub>>,
+    %f32_rint: memref<64xf32, #hivm.address_space<ub>>,
+    %f32_default: memref<64xf32, #hivm.address_space<ub>>,
+    %f16_odd: memref<128xf16, #hivm.address_space<ub>>,
+    %f16_default: memref<128xf16, #hivm.address_space<ub>>,
+    %i32_rint: memref<64xi32, #hivm.address_space<ub>>,
+    %i32_default: memref<64xi32, #hivm.address_space<ub>>) {
+  %c0 = arith.constant 0 : index
+  %c1 = arith.constant 1 : index
+  %c64 = arith.constant 64 : index
+  %c128 = arith.constant 128 : index
+  %src = tla.tensor_desc %input shape [%c1, %c64, %c1, %c1] stride [%c64, %c1, %c1, %c1] origin_shape [%c1, %c64] coord [%c0, %c0] : memref<64xf32, #hivm.address_space<ub>> -> !f32
+  %out_f32_trunc = tla.tensor_desc %f32_trunc shape [%c1, %c64, %c1, %c1] stride [%c64, %c1, %c1, %c1] origin_shape [%c1, %c64] coord [%c0, %c0] : memref<64xf32, #hivm.address_space<ub>> -> !f32
+  %out_f32_rint = tla.tensor_desc %f32_rint shape [%c1, %c64, %c1, %c1] stride [%c64, %c1, %c1, %c1] origin_shape [%c1, %c64] coord [%c0, %c0] : memref<64xf32, #hivm.address_space<ub>> -> !f32
+  %out_f32_default = tla.tensor_desc %f32_default shape [%c1, %c64, %c1, %c1] stride [%c64, %c1, %c1, %c1] origin_shape [%c1, %c64] coord [%c0, %c0] : memref<64xf32, #hivm.address_space<ub>> -> !f32
+  %out_f16_odd = tla.tensor_desc %f16_odd shape [%c1, %c128, %c1, %c1] stride [%c128, %c1, %c1, %c1] origin_shape [%c1, %c128] coord [%c0, %c0] : memref<128xf16, #hivm.address_space<ub>> -> !f16
+  %out_f16_default = tla.tensor_desc %f16_default shape [%c1, %c128, %c1, %c1] stride [%c128, %c1, %c1, %c1] origin_shape [%c1, %c128] coord [%c0, %c0] : memref<128xf16, #hivm.address_space<ub>> -> !f16
+  %out_i32_rint = tla.tensor_desc %i32_rint shape [%c1, %c64, %c1, %c1] stride [%c64, %c1, %c1, %c1] origin_shape [%c1, %c64] coord [%c0, %c0] : memref<64xi32, #hivm.address_space<ub>> -> !i32
+  %out_i32_default = tla.tensor_desc %i32_default shape [%c1, %c64, %c1, %c1] stride [%c64, %c1, %c1, %c1] origin_shape [%c1, %c64] coord [%c0, %c0] : memref<64xi32, #hivm.address_space<ub>> -> !i32
+  "tla.vec.func"() ({
+    %value = tla.load %src : !f32 -> !tla.vector<64xf32>
+    %trunc = tla.cast %value, [0, 2, 3] : !tla.vector<64xf32> -> !tla.vector<64xf32>
+    %f32_even = tla.cast %value, [0, 2, 5] : !tla.vector<64xf32> -> !tla.vector<64xf32>
+    %f32_none = tla.cast %value, [0, 2, 4] : !tla.vector<64xf32> -> !tla.vector<64xf32>
+    %odd = tla.cast %value, [0, 2, 6] : !tla.vector<64xf32> -> !tla.vector<128xf16>
+    %f16_none = tla.cast %value, [0, 2, 4] : !tla.vector<64xf32> -> !tla.vector<128xf16>
+    %i32_even = tla.cast %value, [0, 2, 5] : !tla.vector<64xf32> -> !tla.vector<64xi32>
+    %i32_none = tla.cast %value, [0, 2, 4] : !tla.vector<64xf32> -> !tla.vector<64xi32>
+    tla.store %out_f32_trunc, %trunc : !f32, !tla.vector<64xf32>
+    tla.store %out_f32_rint, %f32_even : !f32, !tla.vector<64xf32>
+    tla.store %out_f32_default, %f32_none : !f32, !tla.vector<64xf32>
+    tla.store %out_f16_odd, %odd : !f16, !tla.vector<128xf16>
+    tla.store %out_f16_default, %f16_none : !f16, !tla.vector<128xf16>
+    tla.store %out_i32_rint, %i32_even : !i32, !tla.vector<64xi32>
+    tla.store %out_i32_default, %i32_none : !i32, !tla.vector<64xi32>
+  }) {mode = "simd"} : () -> ()
+  return
+}
 
-module {
-// CHECK-LABEL: func.func @f32_to_f32_none_is_rint
-// CHECK: ave.hir.vtrc %{{.*}}, <rint>, %{{.*}} : vector<64xf32>, vector<256xi1>, vector<64xf32>
-  func.func @f32_to_f32_none_is_rint(
-      %sm: memref<64xf32, #hivm.address_space<ub>>,
-      %dm: memref<64xf32, #hivm.address_space<ub>>) {
-    %c0 = arith.constant 0 : index
-    %c1 = arith.constant 1 : index
-    %cs = arith.constant 64 : index
-    %s = tla.tensor_desc %sm shape [%c1, %cs, %c1, %c1] stride [%cs, %c1, %c1, %c1] origin_shape [%c1, %cs] coord [%c0, %c0] : memref<64xf32, #hivm.address_space<ub>> -> !s_f32
-    %d = tla.tensor_desc %dm shape [%c1, %cs, %c1, %c1] stride [%cs, %c1, %c1, %c1] origin_shape [%c1, %cs] coord [%c0, %c0] : memref<64xf32, #hivm.address_space<ub>> -> !d_f32
-    "tla.vector"() ({
-      "tla.vec.func"() ({
-        %ss = "tla.make_shape"() : () -> !tla.shape<64>
-        %co = "tla.make_coord"() : () -> !tla.coord<0>
-        %st = "tla.tile_view"(%s, %ss, %co) : (!s_f32, !tla.shape<64>, !tla.coord<0>) -> !s_f32
-        %dt = "tla.tile_view"(%d, %ss, %co) : (!d_f32, !tla.shape<64>, !tla.coord<0>) -> !d_f32
-        %r = "tla.load"(%st) : (!s_f32) -> !tla.vector<64xf32>
-        // trait = [zero, nosat, cast_none]
-        %o = "tla.cast"(%r) <{trait = array<i32: 0, 2, 4>}> : (!tla.vector<64xf32>) -> !tla.vector<64xf32>
-        "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!d_f32, !tla.vector<64xf32>) -> ()
-      }) {mode = "simd"} : () -> ()
-    }) : () -> ()
-    return
-  }
-
-// CHECK-LABEL: func.func @f32_to_f32_rint
-// CHECK: ave.hir.vtrc %{{.*}}, <rint>, %{{.*}} : vector<64xf32>, vector<256xi1>, vector<64xf32>
-  func.func @f32_to_f32_rint(
-      %sm: memref<64xf32, #hivm.address_space<ub>>,
-      %dm: memref<64xf32, #hivm.address_space<ub>>) {
-    %c0 = arith.constant 0 : index
-    %c1 = arith.constant 1 : index
-    %cs = arith.constant 64 : index
-    %s = tla.tensor_desc %sm shape [%c1, %cs, %c1, %c1] stride [%cs, %c1, %c1, %c1] origin_shape [%c1, %cs] coord [%c0, %c0] : memref<64xf32, #hivm.address_space<ub>> -> !s_f32
-    %d = tla.tensor_desc %dm shape [%c1, %cs, %c1, %c1] stride [%cs, %c1, %c1, %c1] origin_shape [%c1, %cs] coord [%c0, %c0] : memref<64xf32, #hivm.address_space<ub>> -> !d_f32
-    "tla.vector"() ({
-      "tla.vec.func"() ({
-        %ss = "tla.make_shape"() : () -> !tla.shape<64>
-        %co = "tla.make_coord"() : () -> !tla.coord<0>
-        %st = "tla.tile_view"(%s, %ss, %co) : (!s_f32, !tla.shape<64>, !tla.coord<0>) -> !s_f32
-        %dt = "tla.tile_view"(%d, %ss, %co) : (!d_f32, !tla.shape<64>, !tla.coord<0>) -> !d_f32
-        %r = "tla.load"(%st) : (!s_f32) -> !tla.vector<64xf32>
-        // trait = [zero, nosat, cast_rint]
-        %o = "tla.cast"(%r) <{trait = array<i32: 0, 2, 5>}> : (!tla.vector<64xf32>) -> !tla.vector<64xf32>
-        "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!d_f32, !tla.vector<64xf32>) -> ()
-      }) {mode = "simd"} : () -> ()
-    }) : () -> ()
-    return
-  }
-
-// CAST_ODD is a hardware-supported mode on f32->f16 narrowing (vtruncf), not
-// on same-type vtrc / f32->i32.
-// CHECK-LABEL: func.func @f32_to_f16_odd
-// CHECK: ave.hir.vtruncf {{.*}}<odd>{{.*}} : vector<64xf32>
-  func.func @f32_to_f16_odd(
-      %sm: memref<64xf32, #hivm.address_space<ub>>,
-      %dm: memref<128xf16, #hivm.address_space<ub>>) {
-    %c0 = arith.constant 0 : index
-    %c1 = arith.constant 1 : index
-    %cs = arith.constant 64 : index
-    %cd = arith.constant 128 : index
-    %s = tla.tensor_desc %sm shape [%c1, %cs, %c1, %c1] stride [%cs, %c1, %c1, %c1] origin_shape [%c1, %cs] coord [%c0, %c0] : memref<64xf32, #hivm.address_space<ub>> -> !s_f32
-    %d = tla.tensor_desc %dm shape [%c1, %cd, %c1, %c1] stride [%cd, %c1, %c1, %c1] origin_shape [%c1, %cd] coord [%c0, %c0] : memref<128xf16, #hivm.address_space<ub>> -> !s_f16
-    "tla.vector"() ({
-      "tla.vec.func"() ({
-        %ss = "tla.make_shape"() : () -> !tla.shape<64>
-        %ds = "tla.make_shape"() : () -> !tla.shape<128>
-        %co = "tla.make_coord"() : () -> !tla.coord<0>
-        %st = "tla.tile_view"(%s, %ss, %co) : (!s_f32, !tla.shape<64>, !tla.coord<0>) -> !s_f32
-        %dt = "tla.tile_view"(%d, %ds, %co) : (!s_f16, !tla.shape<128>, !tla.coord<0>) -> !s_f16
-        %r = "tla.load"(%st) : (!s_f32) -> !tla.vector<64xf32>
-        // trait = [zero, nosat, cast_odd]
-        %o = "tla.cast"(%r) <{trait = array<i32: 0, 2, 6>}> : (!tla.vector<64xf32>) -> !tla.vector<128xf16>
-        "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!s_f16, !tla.vector<128xf16>) -> ()
-      }) {mode = "simd"} : () -> ()
-    }) : () -> ()
-    return
-  }
-
-// CHECK-LABEL: func.func @f32_to_i32_none_is_rint
-// CHECK: ave.hir.vfptosi {{.*}}<rint>{{.*}} : vector<64xf32>
-  func.func @f32_to_i32_none_is_rint(
-      %sm: memref<64xf32, #hivm.address_space<ub>>,
-      %dm: memref<64xi32, #hivm.address_space<ub>>) {
-    %c0 = arith.constant 0 : index
-    %c1 = arith.constant 1 : index
-    %cs = arith.constant 64 : index
-    %s = tla.tensor_desc %sm shape [%c1, %cs, %c1, %c1] stride [%cs, %c1, %c1, %c1] origin_shape [%c1, %cs] coord [%c0, %c0] : memref<64xf32, #hivm.address_space<ub>> -> !s_f32
-    %d = tla.tensor_desc %dm shape [%c1, %cs, %c1, %c1] stride [%cs, %c1, %c1, %c1] origin_shape [%c1, %cs] coord [%c0, %c0] : memref<64xi32, #hivm.address_space<ub>> -> !d_i32
-    "tla.vector"() ({
-      "tla.vec.func"() ({
-        %ss = "tla.make_shape"() : () -> !tla.shape<64>
-        %co = "tla.make_coord"() : () -> !tla.coord<0>
-        %st = "tla.tile_view"(%s, %ss, %co) : (!s_f32, !tla.shape<64>, !tla.coord<0>) -> !s_f32
-        %dt = "tla.tile_view"(%d, %ss, %co) : (!d_i32, !tla.shape<64>, !tla.coord<0>) -> !d_i32
-        %r = "tla.load"(%st) : (!s_f32) -> !tla.vector<64xf32>
-        // trait = [zero, nosat, cast_none]
-        %o = "tla.cast"(%r) <{trait = array<i32: 0, 2, 4>}> : (!tla.vector<64xf32>) -> !tla.vector<64xi32>
-        "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!d_i32, !tla.vector<64xi32>) -> ()
-      }) {mode = "simd"} : () -> ()
-    }) : () -> ()
-    return
-  }
-
-// Lossless widen: CAST_NONE is accepted and the round operand is dropped.
-// CHECK-LABEL: func.func @f16_to_f32_none_is_vextf
-// CHECK: ave.hir.vextf
+// CHECK-LABEL: func.func @f16_widen(
 // CHECK-NOT: ave.hir.vtrc
-  func.func @f16_to_f32_none_is_vextf(
-      %sm: memref<128xf16, #hivm.address_space<ub>>,
-      %dm: memref<64xf32, #hivm.address_space<ub>>) {
-    %c0 = arith.constant 0 : index
-    %c1 = arith.constant 1 : index
-    %cs = arith.constant 128 : index
-    %cd = arith.constant 64 : index
-    %s = tla.tensor_desc %sm shape [%c1, %cs, %c1, %c1] stride [%cs, %c1, %c1, %c1] origin_shape [%c1, %cs] coord [%c0, %c0] : memref<128xf16, #hivm.address_space<ub>> -> !s_f16
-    %d = tla.tensor_desc %dm shape [%c1, %cd, %c1, %c1] stride [%cd, %c1, %c1, %c1] origin_shape [%c1, %cd] coord [%c0, %c0] : memref<64xf32, #hivm.address_space<ub>> -> !d_f16_as_f32
-    "tla.vector"() ({
-      "tla.vec.func"() ({
-        %ss = "tla.make_shape"() : () -> !tla.shape<128>
-        %ds = "tla.make_shape"() : () -> !tla.shape<64>
-        %co = "tla.make_coord"() : () -> !tla.coord<0>
-        %st = "tla.tile_view"(%s, %ss, %co) : (!s_f16, !tla.shape<128>, !tla.coord<0>) -> !s_f16
-        %dt = "tla.tile_view"(%d, %ds, %co) : (!d_f16_as_f32, !tla.shape<64>, !tla.coord<0>) -> !d_f16_as_f32
-        %r = "tla.load"(%st) : (!s_f16) -> !tla.vector<128xf16>
-        // trait = [zero, nosat, cast_none]; vextf has no rnd operand
-        %o = "tla.cast"(%r) <{trait = array<i32: 0, 2, 4>}> : (!tla.vector<128xf16>) -> !tla.vector<64xf32>
-        "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!d_f16_as_f32, !tla.vector<64xf32>) -> ()
-      }) {mode = "simd"} : () -> ()
-    }) : () -> ()
-    return
-  }
+// CHECK: ave.hir.vextf %{{.*}}, <part_even>, %{{.*}} : vector<128xf16>, vector<64xf32>, vector<256xi1>
+// CHECK-NOT: ave.hir.vtrc
+func.func @f16_widen(
+    %input: memref<128xf16, #hivm.address_space<ub>>,
+    %output: memref<64xf32, #hivm.address_space<ub>>) {
+  %c0 = arith.constant 0 : index
+  %c1 = arith.constant 1 : index
+  %c64 = arith.constant 64 : index
+  %c128 = arith.constant 128 : index
+  %src = tla.tensor_desc %input shape [%c1, %c128, %c1, %c1] stride [%c128, %c1, %c1, %c1] origin_shape [%c1, %c128] coord [%c0, %c0] : memref<128xf16, #hivm.address_space<ub>> -> !f16
+  %dst = tla.tensor_desc %output shape [%c1, %c64, %c1, %c1] stride [%c64, %c1, %c1, %c1] origin_shape [%c1, %c64] coord [%c0, %c0] : memref<64xf32, #hivm.address_space<ub>> -> !f32
+  "tla.vec.func"() ({
+    %value = tla.load %src : !f16 -> !tla.vector<128xf16>
+    %wide = tla.cast %value, [0, 2, 4] : !tla.vector<128xf16> -> !tla.vector<64xf32>
+    tla.store %dst, %wide : !f32, !tla.vector<64xf32>
+  }) {mode = "simd"} : () -> ()
+  return
 }

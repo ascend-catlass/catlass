@@ -3,8 +3,8 @@
 // RUN: not %tla_compile %t.reverse.mlir -o %t.reverse 2>&1 | %filecheck %s
 // RUN: sed -e 's/128xf16/256x!tla.hif8/g' -e 's/0, 2, 7/0, 2, 2/' %s > %t.mode.mlir
 // RUN: not %tla_compile %t.mode.mlir -o %t.mode 2>&1 | %filecheck %s --check-prefix=MODE
-// CHECK: 'tla.cast' op CAST_HYBRID only supports Float32->HiFloat8
-// MODE: 'tla.cast' op FP32->HiF8 supports CAST_ROUND or CAST_HYBRID
+// CHECK: 'tla.cast' op CAST_HYBRID only supports Float16/Float32->HiFloat8
+// MODE: 'tla.cast' op conversion to HiFloat8 requires CAST_ROUND or CAST_HYBRID
 
 module {
   func.func @invalid_rounding(%source: !tla.vector<64xf32>) {

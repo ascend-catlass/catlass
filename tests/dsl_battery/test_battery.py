@@ -1274,13 +1274,24 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         "vector-cast-round-modes",
         [
             [
-                "end_to_end/cast_round_modes_op.py",
+                "end_to_end/register_casts_op.py",
+                "--case",
+                "round-modes",
                 "cast_round_modes",
                 "--shape",
                 "256",
                 *dev,
             ]
         ],
+    )
+    # BF16/E8M0 register conversions and the attention pScale byte layout.
+    yield (
+        "vector-cast-e8m0",
+        [["end_to_end/register_casts_op.py", "--case", "e8m0", *dev]],
+    )
+    yield (
+        "vector-cast-mixed-int",
+        [["end_to_end/register_casts_op.py", "--case", "mixed-int", *dev]],
     )
     # PACK4/UNPACK4 are UB distributions; keep their device guards outside tutorials.
     for fp8_case in ("layout", "e4m3", "e5m2"):
@@ -1305,6 +1316,10 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
                     ]
                 ],
             )
+    yield (
+        "vector-hif8-fp16",
+        [["end_to_end/hif8_op.py", "--case", "fp16", "--run", *dev]],
+    )
 
     for fp4_format in ("e2m1", "e1m2"):
         for fp4_case in ("native", "roundtrip", "composed", "slots"):
@@ -1330,12 +1345,16 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
     # Int4x2 route: cast Int4x2 to f16/bf16/i16 and Int4x2 -> f16 -> i8
     yield (
         "vector-i4-pack4",
-        [["end_to_end/i4_pack4_op.py", "--run", *dev]],
+        [["end_to_end/int4_casts_op.py", "--case", "widen", "--run", *dev]],
     )
 
     yield (
         "vector-i4-to-i8",
-        [["end_to_end/i4_to_i8_op.py", "--run", *dev]],
+        [["end_to_end/int4_casts_op.py", "--case", "to-i8", "--run", *dev]],
+    )
+    yield (
+        "vector-i4-narrow",
+        [["end_to_end/int4_casts_op.py", "--case", "narrow", "--run", *dev]],
     )
 
     # Same-width bit reinterpretation: the f32 round trips through i32 and u32

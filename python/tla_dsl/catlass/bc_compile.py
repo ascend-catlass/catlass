@@ -232,6 +232,7 @@ _CACHE_SOURCE_FILES = (
     "Cube/system_counter.cpp",
     "Vector/axpy.cpp",
     "Vector/log.cpp",
+    "Vector/lowp_cast.cpp",
     "Vector/muls_cast.cpp",
     "Vector/sub_abs.cpp",
     "Vector/system_counter.cpp",
@@ -250,7 +251,7 @@ def _bc_source_id(relative_paths: tuple[str, ...]) -> str:
 
 
 def compute_cache_key(ccec: Path) -> str:
-    """Key helper aggregates by version, compiler and counter source identity."""
+    """Key helper aggregates by version, compiler and tracked source identity."""
     revision = f"ar-spr-v1:b32-carry-v1:{_bc_source_id(_CACHE_SOURCE_FILES)}"
     return hashlib.sha256(
         f"{_catlass_version_id()}:{_ccec_id(ccec)}:{revision}:icache-prefetch-v1".encode()

@@ -2059,38 +2059,71 @@ mlir::LogicalResult CastOp::verify()
         return emitOpError("must be nested inside a tla.vec.func region");
     auto source = getSource().getType().getElementType();
     auto dest = getResult().getType().getElementType();
+    if (source.isSignlessInteger(16) && dest.isSignlessInteger(8))
+        return emitOpError("unsupported cast from Int16 to Int8");
     auto trait = getTrait();
-    if (trait.size() == 3 && trait[2] == static_cast<int32_t>(::RoundMode::cast_hybrid) &&
-        !(source.isF32() && mlir::isa<HiFloat8Type>(dest)))
-        return emitOpError("CAST_HYBRID only supports Float32->HiFloat8");
-    if (mlir::isa<::tla::HiFloat8Type>(source) || mlir::isa<::tla::HiFloat8Type>(dest)) {
-        if (trait.size() != 3 || trait[0] < 0 || trait[0] > 3 || trait[1] < 0 || trait[1] > 2 || trait[2] < 0 ||
-            !::symbolizeRoundMode(trait[2]))
-            return emitOpError("trait must contain valid register-slot, saturation and rounding codes");
-        if (!((source.isF32() && mlir::isa<HiFloat8Type>(dest)) || (mlir::isa<HiFloat8Type>(source) && dest.isF32())))
-            return emitOpError("HiFloat8 pairs with Float32; compose other routes explicitly");
-        if (mlir::isa<HiFloat8Type>(dest) && trait[2] != static_cast<int32_t>(::RoundMode::cast_round) &&
-            trait[2] != static_cast<int32_t>(::RoundMode::cast_hybrid))
-            return emitOpError("FP32->HiF8 supports CAST_ROUND or CAST_HYBRID");
+    if (trait.size() != 3 || !::symbolizeRegSlot(trait[0]) || !::symbolizeSatMode(trait[1]) ||
+        !::symbolizeRoundMode(trait[2]))
+        return emitOpError("trait must contain valid register-slot, saturation and rounding codes");
+    auto slot = static_cast<::RegSlot>(trait[0]);
+    auto round = static_cast<::RoundMode>(trait[2]);
+    bool quarterSlot = slot == ::RegSlot::two || slot == ::RegSlot::three;
+    bool toE8M0 = mlir::isa<Float8E8M0Type>(dest);
+    bool fromE8M0 = mlir::isa<Float8E8M0Type>(source);
+    if (toE8M0 || fromE8M0) {
+        if (!(toE8M0 && source.isBF16()) && !(fromE8M0 && dest.isBF16()))
+            return emitOpError("E8M0 pairs with BFloat16");
+        if (quarterSlot)
+            return emitOpError("BF16 <-> E8M0 requires slot ZERO or ONE");
+        return verifyMaskMatchesVector(getOperation(), getMask(), getSource().getType());
+    }
+    bool toHiF8 = mlir::isa<HiFloat8Type>(dest);
+    bool fromHiF8 = mlir::isa<HiFloat8Type>(source);
+    if (round == ::RoundMode::cast_hybrid && !((source.isF16() || source.isF32()) && toHiF8))
+        return emitOpError("CAST_HYBRID only supports Float16/Float32->HiFloat8");
+    if (round == ::RoundMode::cast_odd &&
+        ((source.isBF16() && dest.isF16()) || (source.isF16() && dest.isSignlessInteger(32)) ||
+         (source.isF32() && dest.isSignlessInteger(64)) || (source.isSignlessInteger(64) && dest.isF32())))
+        return emitOpError() << "CAST_ODD is unsupported for " << source << "->" << dest;
+    if (toHiF8 || fromHiF8) {
+        mlir::Type other = toHiF8 ? source : dest;
+        if (!other.isF16() && !other.isF32())
+            return emitOpError("HiFloat8 pairs with Float16 or Float32");
+        if (other.isF16() && quarterSlot)
+            return emitOpError("FP16 <-> HiFloat8 requires slot ZERO or ONE");
+        if (toHiF8 && round != ::RoundMode::cast_round && round != ::RoundMode::cast_hybrid)
+            return emitOpError("conversion to HiFloat8 requires CAST_ROUND or CAST_HYBRID");
+    }
+    if (mlir::isa<mlir::IntegerType>(source) && mlir::isa<mlir::IntegerType>(dest) &&
+        source.isUnsignedInteger() != dest.isUnsignedInteger()) {
+        bool packed = source.isSignlessInteger(32) && dest.isUnsignedInteger(8);
+        if (!packed && !(source.isSignlessInteger(16) && (dest.isUnsignedInteger(8) || dest.isUnsignedInteger(32))) &&
+            !(source.isSignlessInteger(32) && dest.isUnsignedInteger(16)) &&
+            !(source.isUnsignedInteger(32) && dest.isSignlessInteger(16)))
+            return emitOpError("unsupported mixed signedness cast from ") << source << " to " << dest;
+        if (!packed && quarterSlot)
+            return emitOpError("this mixed signedness cast requires slot ZERO or ONE");
+    }
+    if (isInt4PairType(dest)) {
+        if (!source.isSignlessInteger(16) && !source.isF16())
+            return emitOpError("Int4x2 narrows from Int16 or Float16");
+        if (source.isF16() && round == ::RoundMode::cast_odd)
+            return emitOpError("CAST_ODD is unsupported for Float16->Int4x2");
     }
     if (isFp4PairType(source) || isFp4PairType(dest)) {
-        if (trait.size() != 3 || trait[0] < 0 || trait[0] > 3 || trait[1] < 0 || trait[1] > 2 || trait[2] < 0 ||
-            !::symbolizeRoundMode(trait[2]))
-            return emitOpError("trait must contain valid register-slot, saturation and rounding codes");
         bool narrow = source.isBF16() && isFp4PairType(dest);
         if (!narrow && !(isFp4PairType(source) && dest.isBF16()))
             return emitOpError("FP4x2 pairs with BFloat16; compose other routes explicitly");
         if (narrow && trait[1] != 0 && trait[1] != 1)
             return emitOpError("BF16->FP4x2 requires SAT or UNKNOWN");
-        if (narrow && trait[2] == static_cast<int32_t>(::RoundMode::cast_odd))
+        if (narrow && round == ::RoundMode::cast_odd)
             return emitOpError(
                 "BF16->FP4x2 supports CAST_ROUND/CAST_FLOOR/CAST_CEIL/CAST_TRUNC/CAST_RINT/CAST_NONE only");
-        if (narrow) {
-            if (getMask() && getMask().getType().getPhysicalLanes() != 64 &&
-                getMask().getType().getPhysicalLanes() != 128)
-                return emitOpError("BF16->FP4x2 requires a 128-lane BF16 source mask or a 64-lane pair mask");
-            return mlir::success();
-        }
+    }
+    if (isInt4PairType(dest) || isFp4PairType(dest)) {
+        if (getMask() && getMask().getType().getPhysicalLanes() != 64 && getMask().getType().getPhysicalLanes() != 128)
+            return emitOpError("packed 4-bit narrowing requires a 128-lane source mask or a 64-lane pair mask");
+        return mlir::success();
     }
     return verifyMaskMatchesVector(getOperation(), getMask(), getSource().getType());
 }
@@ -2102,6 +2135,11 @@ mlir::LogicalResult BitCastOp::verify()
 
     VectorSSAType sourceType = getSource().getType();
     VectorSSAType resultType = getResult().getType();
+    auto source = sourceType.getElementType();
+    auto dest = resultType.getElementType();
+    if ((mlir::isa<Float8E8M0Type>(source) || mlir::isa<Float8E8M0Type>(dest)) && source != dest &&
+        !source.isUnsignedInteger(8) && !dest.isUnsignedInteger(8))
+        return emitOpError("E8M0 register bitcast requires UInt8");
     // Bool keeps an i1 IR identity but is move-only; do not treat i1 as a 1-bit
     // register lane for bitcast width math (AscendC storage is b8 / 1 byte).
     if (isBoolElementType(sourceType.getElementType()) || isBoolElementType(resultType.getElementType()))

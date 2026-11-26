@@ -50,26 +50,32 @@ def _kernel(params, masked=False, lanes=128):
     return k
 
 
-@pytest.mark.parametrize("round_mode", tuple(tla.params.RoundMode))
+@pytest.mark.parametrize(
+    "round_mode",
+    [mode for mode in tla.params.RoundMode if mode is not tla.params.RoundMode.CAST_HYBRID],
+)
 @pytest.mark.parametrize("reg_slot", (tla.params.RegSlot.ZERO, tla.params.RegSlot.ONE))
 @pytest.mark.parametrize("masked", (False, True))
-def test_half_to_bf16_round_mode_contract(
+def test_half_to_bf16_compiles_with_supported_rounding(
     round_mode, reg_slot, masked, isolated_compile_cache
 ):
     params = tla.params.CastParams(
         reg_slot=reg_slot, sat_mode=tla.params.SatMode.UNKNOWN, round_mode=round_mode
     )
-    if round_mode is tla.params.RoundMode.CAST_HYBRID:
-        with pytest.raises(
-            tla.TlaCoreAPIError, match="CAST_HYBRID only supports Float32->HiFloat8"
-        ):
-            _kernel(params, masked).dump_mlir(
-                type_args=(_gm(tla.Float16), _gm(tla.BFloat16))
-            )
-        return
     _kernel(params, masked).compile(
         type_args=(_gm(tla.Float16), _gm(tla.BFloat16)), options="--npu-arch 3510"
     )
+
+
+def test_half_to_bf16_rejects_hybrid_rounding():
+    params = tla.params.CastParams(
+        sat_mode=tla.params.SatMode.UNKNOWN,
+        round_mode=tla.params.RoundMode.CAST_HYBRID,
+    )
+    with pytest.raises(
+        tla.TlaCoreAPIError, match="CAST_HYBRID only supports Float16/Float32->HiFloat8"
+    ):
+        _kernel(params).dump_mlir(type_args=(_gm(tla.Float16), _gm(tla.BFloat16)))
 
 
 @pytest.mark.parametrize("lanes", (17, 128))

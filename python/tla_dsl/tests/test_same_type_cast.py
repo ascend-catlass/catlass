@@ -69,34 +69,35 @@ def _cast_kernel(dtype: type[tla.Numeric], params: tla.params.CastParams):
 
 
 def _compile(dtype: type[tla.Numeric], params: tla.params.CastParams) -> None:
-    _cast_kernel(dtype, params).dump_mlir(type_args=(_ub(dtype), _ub(dtype)))
-
-
-@pytest.mark.parametrize("dtype", _SAME_TYPE_FLOATS)
-def test_every_same_type_float_cast_compiles(dtype) -> None:
-    _compile(dtype, tla.params.CastParams())
+    ir = _cast_kernel(dtype, params).dump_mlir(type_args=(_ub(dtype), _ub(dtype)))
+    assert "tla.cast" in ir
 
 
 @pytest.mark.parametrize("dtype", _SAME_TYPE_FLOATS)
 @pytest.mark.parametrize("rnd", _ROUND_MODES)
 def test_every_same_type_float_cast_accepts_every_round_mode(dtype, rnd) -> None:
-    """The round mode is the only knob vtrc carries; every mode must be admitted."""
+    """The round mode is the only operand vtrc reads from CastParams."""
     _compile(dtype, tla.params.CastParams(round_mode=rnd))
 
 
 @pytest.mark.parametrize("dtype", _SAME_TYPE_FLOATS)
-@pytest.mark.parametrize("sat", (tla.params.SatMode.UNKNOWN, tla.params.SatMode.NOSAT))
-def test_same_type_float_cast_accepts_unsaturated_sat_modes(dtype, sat) -> None:
-    """UNKNOWN and NOSAT both say what vtrc does: no saturation at all."""
-    _compile(dtype, tla.params.CastParams(sat_mode=sat))
+def test_same_type_float_cast_accepts_unknown_saturation(dtype) -> None:
+    _compile(
+        dtype,
+        tla.params.CastParams(
+            sat_mode=tla.params.SatMode.UNKNOWN, round_mode=tla.params.RoundMode.CAST_RINT
+        ),
+    )
 
 
 @pytest.mark.parametrize("dtype", _SAME_TYPE_FLOATS)
-@pytest.mark.parametrize("slot", (tla.params.RegSlot.ZERO, tla.params.RegSlot.ONE))
-def test_same_type_float_cast_accepts_full_register_slots(dtype, slot) -> None:
-    """An equal-width cast reads the whole register, so ZERO and ONE are moot
-    but harmless -- same as f16 -> bf16."""
-    _compile(dtype, tla.params.CastParams(reg_slot=slot))
+def test_same_type_float_cast_accepts_slot_one(dtype) -> None:
+    _compile(
+        dtype,
+        tla.params.CastParams(
+            reg_slot=tla.params.RegSlot.ONE, round_mode=tla.params.RoundMode.CAST_RINT
+        ),
+    )
 
 
 @pytest.mark.parametrize("dtype", _SAME_TYPE_FLOATS)

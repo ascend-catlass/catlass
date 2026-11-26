@@ -30,6 +30,7 @@ from _lowp_reference import (
     hif8_hybrid_samples,
 )
 from fp8_pack4_op import GUARD, _assert_values, make_fp8_kernel
+from register_casts_op import check_masked_casts
 
 
 def make_slot_kernel(
@@ -37,11 +38,19 @@ def make_slot_kernel(
     *,
     narrow,
     active,
-    values_per_byte=1,
     round_mode=RoundMode.CAST_ROUND,
     saturate=False,
     sparse=False,
 ):
+    source_lanes = 64 if narrow else 256
+    mask_lanes = active if narrow else active * 4
+    destination_lanes = 256 if sparse else (active * 4 if narrow else active)
+    params = CastParams(
+        reg_slot=slot,
+        sat_mode=SatMode.SAT if saturate else SatMode.NOSAT,
+        round_mode=round_mode,
+    )
+
     @tla.kernel
     def convert(source: tla.Tensor, destination: tla.Tensor):
         source_ptr = tla.allocate(352, source.element_type, tla.AddressSpace.ub, 256)
@@ -55,20 +64,14 @@ def make_slot_kernel(
         source_tile = tla.make_tensor(
             source_ptr + GUARD,
             tla.make_layout(
-                tla.make_shape(64 * values_per_byte if narrow else 256),
+                tla.make_shape(source_lanes),
                 tla.make_stride(1),
             ),
         )
         destination_tile = tla.make_tensor(
             destination_ptr + GUARD,
             tla.make_layout(
-                tla.make_shape(
-                    256
-                    if sparse
-                    else active * 4
-                    if narrow
-                    else active * values_per_byte
-                ),
+                tla.make_shape(destination_lanes),
                 tla.make_stride(1),
             ),
         )
@@ -81,25 +84,14 @@ def make_slot_kernel(
             tla.set_flag(ready)
             tla.wait_flag(ready)
             with tla.vec.func(mode="simd"):
-                predicate, _ = tla.update_mask(
-                    active * values_per_byte if narrow else active * 4,
-                    dtype=source.element_type,
-                )
+                predicate, _ = tla.update_mask(mask_lanes, dtype=source.element_type)
                 if tla.const_expr(sparse):
                     predicate = tla.bitwise_and(
                         predicate,
                         tla.create_mask(dtype=source.element_type, pattern=tla.mask.M3),
                     )
                 values = source_tile.load().to(
-                    destination.element_type,
-                    CastParams(
-                        reg_slot=slot,
-                        sat_mode=SatMode.SAT
-                        if saturate or values_per_byte == 2
-                        else SatMode.NOSAT,
-                        round_mode=round_mode,
-                    ),
-                    predicate,
+                    destination.element_type, params, predicate
                 )
                 if tla.const_expr(narrow):
                     values = values.bitcast(tla.UInt8).bitcast(destination.element_type)
@@ -112,12 +104,7 @@ def make_slot_kernel(
     return convert
 
 
-def run(args):
-    if args.run:
-        import torch
-        import torch_npu  # noqa: F401 -- register the device backend
-
-        torch.npu.set_device(args.device)
+def run(args, torch):
     records = []
 
     def check(label, kernel, cases, source_dtype, destination_dtype):
@@ -142,7 +129,7 @@ def run(args):
         )
         entry = dict(case=label, kernel=str(compiled.kernel_binary_path), launches=0)
         print(f"case={label}", flush=True)
-        if args.run:
+        if torch is not None:
             source_device = torch.from_numpy(source_data.copy()).to(
                 f"npu:{args.device}"
             )
@@ -314,15 +301,97 @@ def run(args):
     return records
 
 
+def _run_fp16(args):
+    lanes = np.arange(128)
+    codes = np.tile(np.arange(256, dtype=np.uint8), (2, 1))
+    # Reverse the second register so each slot reaches all 256 encodings.
+    codes[1] = codes[1, ::-1]
+    slots = (RegSlot.ZERO, RegSlot.ONE)
+    cases = []
+    for position, slot in enumerate(slots):
+        indices = 2 * lanes + position
+        decoded = np.array(
+            [decode_hif8(int(code)) for code in codes[:, indices].ravel()],
+            dtype=np.float16,
+        ).reshape(2, 128)
+        expected = np.stack((decoded, np.where(indices % 3 == 0, decoded, 0)))
+        cases.append((CastParams(reg_slot=slot), tla.HiFloat8, expected))
+    compiled = check_masked_casts(
+        args.device, not args.run, tla.HiFloat8, tla.Float16, codes, cases
+    )
+    launches = int(args.run)
+    records = [
+        dict(
+            case="hif8-to-fp16",
+            kernel=str(compiled.kernel_binary_path),
+            launches=launches,
+        )
+    ]
+
+    # Both modes use nearest-away for the finite normal values here. Include
+    # exact HiF8 midpoints and signed infinities to distinguish saturation.
+    magnitudes = [0, 0.75, 1.0625, 1.1875, 1.3125, 1.5, 2.125, 3.875, 5.25, 7.5, 12.5]
+    samples = np.array(
+        [*magnitudes, *(-x for x in magnitudes), np.inf, -np.inf], np.float16
+    )
+    modes = (args.round_mode,) if args.round_mode else ("round", "hybrid")
+    for name in modes:
+        mode = RoundMode.CAST_HYBRID if name == "hybrid" else RoundMode.CAST_ROUND
+        inputs = samples
+        if mode is RoundMode.CAST_ROUND:
+            inputs = np.concatenate(
+                (samples, np.array([40928, 40960, 40992, -65504], np.float16))
+            )
+        source = np.resize(inputs, (3, 128))
+        cases = []
+        for sat in (SatMode.SAT, SatMode.NOSAT):
+            codes = np.array(
+                [
+                    encode_hif8_rna(float(v), saturate=sat is SatMode.SAT)
+                    for v in inputs
+                ],
+                dtype=np.uint8,
+            )
+            encoded = np.resize(codes, source.shape)
+            for position, slot in enumerate(slots):
+                expected = np.zeros((2, source.shape[0], 256), dtype=np.uint8)
+                expected[0, :, position::2] = encoded
+                expected[1, :, position::2] = np.where(lanes % 3 == 0, encoded, 0)
+                cases.append((CastParams(slot, sat, mode), tla.Float16, expected))
+        compiled = check_masked_casts(
+            args.device, not args.run, tla.Float16, tla.HiFloat8, source, cases
+        )
+        records.append(
+            dict(
+                case=f"fp16-to-hif8-{name}",
+                kernel=str(compiled.kernel_binary_path),
+                launches=launches,
+            )
+        )
+    return records
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--case", choices=("core", "slots", "masks"), default="core")
-    parser.add_argument("--round-mode", choices=("round", "hybrid"), default="round")
+    parser.add_argument(
+        "--case", choices=("core", "slots", "masks", "fp16"), default="core"
+    )
+    parser.add_argument(
+        "--round-mode",
+        choices=("round", "hybrid"),
+        help="Defaults to round for FP32 cases and both modes for the FP16 case.",
+    )
     parser.add_argument("--device", type=int, default=0)
     parser.add_argument("--run", action="store_true")
     parser.add_argument("--report", type=Path)
     args = parser.parse_args()
-    records = run(args)
+    torch = None
+    if args.run:
+        import torch
+        import torch_npu  # noqa: F401 -- register the device backend
+
+        torch.npu.set_device(args.device)
+    records = _run_fp16(args) if args.case == "fp16" else run(args, torch)
     if args.report:
         args.report.write_text(json.dumps(records, indent=2) + "\n")
     print(

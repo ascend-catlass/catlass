@@ -33,12 +33,12 @@ VECTOR_ELE = 256
 VL_ELE = 64
 LOOPS = (VECTOR_ELE + VL_ELE - 1) // VL_ELE
 ALL_DTYPES = ("i32", "i16")
-OUTPUT_DTYPES = ("i16", "i8")
+OUTPUT_DTYPES = ("i16", "u8")
 # AscendC Pack is same-type DistVST. Narrowing is a prior cast; PACK then
 # densifies the unpacked slots (MulCast / GenStoreL2 style).
 PACK_CONFIGS = {
     "i32": ("i16", StoreDist.DIST_PACK_B32),
-    "i16": ("i8", StoreDist.DIST_PACK_B16),
+    "i16": ("u8", StoreDist.DIST_PACK_B16),
 }
 
 # int↔int casts truncate; RegSlot.ZERO selects the even/low part for 2x narrow.
@@ -228,7 +228,7 @@ HARNESS = DirectVectorOpHarness(
     DirectVectorOpConfig(
         description=(
             "Cast-then-PACK densify: i32->i16/DIST_PACK_B32 and "
-            "i16->i8/DIST_PACK_B16 (AscendC same-type StoreAlign)."
+            "i16->u8/DIST_PACK_B16 (Ascend C same-type StoreAlign)."
         ),
         kernel=store_pack,
         all_dtypes=ALL_DTYPES,

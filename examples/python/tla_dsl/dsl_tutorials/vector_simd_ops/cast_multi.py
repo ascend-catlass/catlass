@@ -43,7 +43,7 @@ from vector_op_harness import (
 #   bf16 max  : mx  = max(c as bf16, d as bf16)  (part_odd)       -> f32
 #   bf16 min  : mn  = min(c as bf16, d as bf16)  (part_even)      -> f32
 #   i32 mul   : pr  = (trunc(a) as i32) * (floor(e) as i32)       -> f32
-#   int chain : ic  = float(trunc(a)) via i32->i16->i8->i16->i32 (2x steps),
+#   int chain : ic  = float(trunc(a)) via i32->i16->i32 (2x steps),
 #                     i32->i8->i32 (4x direct), and i16->f16 (int->float)
 #   i16 mul   : p16 = trunc(a) * trunc(c), computed at i16 width -> f32
 #   i8  add   : s8  = trunc(a) + trunc(b), computed at i8 width  -> f32
@@ -59,7 +59,7 @@ from vector_op_harness import (
 #               rounding is directly observable (1.5 -> 1.0): CAST_TRUNC on
 #               f32/bf16, CAST_FLOOR on f16.
 #
-# The integer chain exercises: i32<->i16 and i16<->i8 (2x, even/odd part),
+# The integer chain exercises i32<->i16 (2x, even/odd part),
 # i32<->i8 (4x, pack pattern), and i16->f16 (int->float). int<->int casts do not
 # round (truncation); the small positive values round-trip losslessly.
 VECTOR_ELE = 256
@@ -161,7 +161,7 @@ _TRAIT_TO_F32_INT = tla.params.CastParams(
 
 # --- integer-to-integer / integer-to-float chain traits ----------------------
 # int<->int casts do not round; round_mode is carried but ignored. The 2x width
-# steps (i32<->i16, i16<->i8) use the even/odd part; the 4x step (i32<->i8) uses
+# steps (i32<->i16) use the even/odd part; the 4x step (i32<->i8) uses
 # the pack pattern internally. Keep all these even/zeroing so a narrow followed
 # by the matching widen round-trips.
 _TRAIT_INT = tla.params.CastParams(
@@ -293,13 +293,11 @@ def cast_multi(
                 prod_f32 = (a_i * e_i).to(tla.Float32, _TRAIT_TO_F32_INT)
 
                 # integer narrow/widen chain, all routes computing float(trunc(a)):
-                #   2x chain : i32 -> i16 -> i8 -> i16 -> i32 -> f32
+                #   2x chain : i32 -> i16 -> i32 -> f32
                 #   4x direct: i32 -> i8 -> i32 -> f32, through every pack quarter
                 #   int->flt : i16 -> f16 -> f32
                 i16a = a_i.to(tla.Int16, _TRAIT_INT)  # i32 -> i16 (2x)
-                i8a = i16a.to(tla.Int8, _TRAIT_INT)  # i16 -> i8  (2x)
-                i16b = i8a.to(tla.Int16, _TRAIT_INT)  # i8  -> i16 (2x)
-                chain_i32 = i16b.to(tla.Int32, _TRAIT_INT)  # i16 -> i32 (2x)
+                chain_i32 = i16a.to(tla.Int32, _TRAIT_INT)  # i16 -> i32 (2x)
                 chain_f32 = chain_i32.to(tla.Float32, _TRAIT_TO_F32_INT)
 
                 # 4x i32 -> i8 -> i32 through each of the four pack quarters

@@ -229,7 +229,7 @@
 // }
 // END_FP4_E1M2
 
-// E8M0-ARITHMETIC: E8M0 arithmetic and register casts are unsupported
+// E8M0-ARITHMETIC: E8M0 arithmetic is unsupported
 // BEGIN_E8M0_ARITHMETIC
 // !s_f8e8m0 = !tla.tensor<!tla.layout<!tla.shape<512>, !tla.stride<1>, !tla.shape<512>, RowMajor>, !tla.coord<0>, !tla.ptr<!tla.f8e8m0, ub, 1>>
 // !d_f8e8m0 = !tla.tensor<!tla.layout<!tla.shape<256>, !tla.stride<1>, !tla.shape<256>, RowMajor>, !tla.coord<0>, !tla.ptr<!tla.f8e8m0, ub, 1>>

@@ -5,7 +5,7 @@ import pytest
 from catlass import tla
 from catlass._mlir import ir
 from catlass.core_api import TlaCoreAPIError
-from catlass.params import CastParams, LoadDist, NormalLoadParams, RoundMode
+from catlass.params import CastParams, LoadDist, NormalLoadParams, RegSlot, RoundMode
 from catlass.tla.runtime import make_fake_tensor
 from catlass.types import dtype_size_bits, dtype_size_bytes
 
@@ -33,7 +33,7 @@ def _kernel(dest_type, load_dist=None):
                 dst.store(
                     value.to(
                         dest_type,
-                        CastParams(round_mode=RoundMode.CAST_NONE),
+                        CastParams(),
                     )
                 )
 
@@ -92,7 +92,7 @@ def test_int4_unpack4_b8_fills_a_full_register(compiler_tlair):
     assert "!tla.vector<128xf16>" in cast_line
 
 
-def test_int4_requires_cast_none(compiler_tlair):
+def test_int4_widen_rejects_explicit_rounding(compiler_tlair):
     @tla.kernel
     def convert(src: tla.Tensor, dst: tla.Tensor):
         with tla.vector():  # noqa: SIM117 -- separate DSL regions
@@ -106,11 +106,33 @@ def test_int4_requires_cast_none(compiler_tlair):
         )
 
 
-def test_int4_is_not_a_cast_target(compiler_tlair):
-    with pytest.raises(TlaCoreAPIError, match="unsupported cast target dtype 'i4x2'"):
+@pytest.mark.parametrize("dtype", [tla.Int16, tla.Float16])
+@pytest.mark.parametrize("slot", list(RegSlot))
+@pytest.mark.parametrize("mask_dtype", [tla.UInt16, tla.UInt32])
+def test_int4_narrows_a_16_bit_pair(compiler_tlair, dtype, slot, mask_dtype):
+    rounding = RoundMode.CAST_RINT if dtype is tla.Float16 else RoundMode.CAST_NONE
+    params = CastParams(reg_slot=slot, round_mode=rounding)
+
+    @tla.kernel
+    def convert(src: tla.Tensor, dst: tla.Tensor):
+        with tla.vector():  # noqa: SIM117 -- keep separate vector and SIMD scopes
+            with tla.vec.func(mode="simd"):
+                mask = tla.create_mask(dtype=mask_dtype, pattern=tla.mask.M3)
+                dst.store(src.load().to(tla.Int4x2, params, mask))
+
+    ir_text = compiler_tlair(convert, type_args=(_ub(dtype, 128), _ub(tla.Int4x2, 256)))
+    (cast_line,) = [line for line in ir_text.splitlines() if '"tla.cast"' in line]
+    assert f"!tla.mask<{2048 // mask_dtype.width}>" in cast_line
+    assert "!tla.vector<?x!tla.i4x2>" in cast_line
+    slot_code, sat_code, round_code = params.codes()
+    assert f"trait = array<i32: {slot_code}, {sat_code}, {round_code}>" in cast_line
+
+
+def test_int4_rejects_unsupported_source_type(compiler_tlair):
+    with pytest.raises(TlaCoreAPIError, match="Int4x2 narrows from Int16 or Float16"):
         compiler_tlair(
             _kernel(tla.Int4x2),
-            type_args=(_ub(tla.Float16, 128), _ub(tla.Int4x2, 256)),
+            type_args=(_ub(tla.Float32, 64), _ub(tla.Int4x2, 256)),
         )
 
 

@@ -1,6 +1,6 @@
 // RUN: split-file %s %t
 // RUN: not %tla_compile %t/fp4-hybrid.mlir -o %t.out 2>&1 | %filecheck %s --check-prefix=HYBRID
-// HYBRID: CAST_HYBRID only supports Float32->HiFloat8
+// HYBRID: CAST_HYBRID only supports Float16/Float32->HiFloat8
 // RUN: not %tla_compile %t/fp4-mask.mlir -o %t.out 2>&1 | %filecheck %s --check-prefix=ERR0
 // RUN: not %tla_compile %t/fp4-nosat.mlir -o %t.out 2>&1 | %filecheck %s --check-prefix=ERR1
 // RUN: not %tla_compile %t/fp32-fp4.mlir -o %t.out 2>&1 | %filecheck %s --check-prefix=ERR2
@@ -8,7 +8,7 @@
 // RUN: not %tla_compile %t/fp4-wide-mask.mlir -o %t.out 2>&1 | %filecheck %s --check-prefix=ERR4
 // RUN: not %tla_compile %t/fp4-odd.mlir -o %t.out 2>&1 | %filecheck %s --check-prefix=ERR5
 
-// ERR0: BF16->FP4x2 requires a 128-lane BF16 source mask or a 64-lane pair mask
+// ERR0: packed 4-bit narrowing requires a 128-lane source mask or a 64-lane pair mask
 // ERR1: BF16->FP4x2 requires SAT
 // ERR2: FP4x2 pairs with BFloat16; compose other routes explicitly
 // ERR3: trait must contain valid register-slot

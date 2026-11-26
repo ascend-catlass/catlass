@@ -27,37 +27,17 @@ from .params import CastParams, RoundMode, SatMode
 # Element-type tokens the tla.cast lowering supports: signed ints, unsigned
 # ints and the AVE float set. Bool (i1) and Float64 (f64) are rejected by
 # VectorSSA.to.
-#
-# f8e8m0 is absent on purpose: it is a block-scale exponent, an opaque byte
-# converted by shifting rather than by a cast.
 _CAST_FP8_DTYPES = frozenset({"f8e4m3fn", "f8e5m2"})
 _FP4_PAIR_DTYPES = frozenset({"f4e2m1x2", "f4e1m2x2"})
-# Int4x2 pairs two signed int4 values per byte. Like FP4x2, the native cast
-# pairs each packed byte with a 16-bit destination lane.
+# Int4x2 pairs two signed int4 values per byte in a cast to or from 16-bit lanes.
+_INT4_CAST_SOURCES = frozenset({"i16", "f16"})
 _INT4_CAST_TARGETS = frozenset({"i16", "f16", "bf16"})
-# Element width per cast token, used to tell a 4x width step from a 2x one.
-_CAST_TOKEN_BITS = {
-    "i4x2": 8,
-    "i8": 8,
-    "i16": 16,
-    "i32": 32,
-    "i64": 64,
-    "u8": 8,
-    "u16": 16,
-    "u32": 32,
-    "u64": 64,
-    "f8e4m3fn": 8,
-    "f8e5m2": 8,
-    "hif8": 8,
-    "f4e2m1x2": 8,
-    "f4e1m2x2": 8,
-    "f16": 16,
-    "bf16": 16,
-    "f32": 32,
-}
+_HIF8_CAST_FLOAT_DTYPES = frozenset({"f16", "f32"})
 _CAST_UNSIGNED_DTYPES = frozenset({"u8", "u16", "u32", "u64"})
 _CAST_SUPPORTED_DTYPES = (
-    frozenset({"i8", "i16", "i32", "i64", "f16", "bf16", "f32", "hif8"})
+    frozenset(
+        {"i4x2", "i8", "i16", "i32", "i64", "f16", "bf16", "f32", "hif8", "f8e8m0"}
+    )
     | _CAST_UNSIGNED_DTYPES
     | _CAST_FP8_DTYPES
     | _FP4_PAIR_DTYPES
@@ -74,6 +54,11 @@ _CAST_UNSIGNED_ROUTES = frozenset(
         ("u16", "u8"),
         ("u32", "u16"),
         ("u32", "u8"),
+        ("i16", "u8"),
+        ("i16", "u32"),
+        ("i32", "u8"),
+        ("i32", "u16"),
+        ("u32", "i16"),
         ("u8", "f16"),
         ("f16", "u8"),
         ("u8", "f32"),
@@ -90,10 +75,8 @@ _CAST_SAME_TYPE_FLOAT_DTYPES = frozenset({"f16", "bf16", "f32"})
 # and valid bit counts; element widths may differ. HiF8 and FP4x2 values retain their
 # formats in TLA IR and use byte registers in native lowering.
 #
-# E8M0 registers support DINTLV_B8 / INTLV_B8 transport and normal stores;
-# register bitcasts remain unsupported. Logical FP4 types are also
-# excluded: their 4-bit values differ from byte registers holding two values
-# per lane.
+# E8M0 exposes its encoded bytes through UInt8. Logical FP4 types are
+# excluded: their 4-bit values differ from byte registers holding two values per lane.
 #
 # i64/u64 registers can come from supported UB loads, extern, or bitcast.
 # Tensor load/store and copy support depends on the distribution, mask, and
@@ -113,6 +96,7 @@ _BITCAST_ELEMENT_TYPES = frozenset(
         "f32",
         "f8e4m3fn",
         "f8e5m2",
+        "f8e8m0",
         "hif8",
         "f4e2m1x2",
         "f4e1m2x2",
@@ -259,9 +243,6 @@ _FP4_FORMATS = frozenset({"f4e2m1", "f4e1m2"})
 #: Packed fp4 elements per byte. The descriptor halving is exact only on a
 #: whole number of bytes, so this is the granularity the routes below require.
 _FP4_PER_BYTE = 2
-
-#: Packed int4 pair formats. Shape and offsets count these bytes.
-_INT4_FORMATS = frozenset({"i4x2"})
 
 #: The copy routes that stage packed fp4 through byte descriptors, and so
 #: carry the halving constraint below. These are exactly the routes whose
@@ -1163,93 +1144,80 @@ class VectorSSA(_RegisterSSA):
         """Directory: SIMD Vector Compute / Type Conversion
 
         Description:
-            Convert a register-resident vector to another element type.
+            Convert the elements of a `VectorSSA` to `dst_type` and return a
+            `VectorSSA` of that type.
 
-            Float32 -> HiFloat8 supports CAST_ROUND (nearest, ties away) and
-            CAST_HYBRID, SAT/NOSAT and four slots; result j occupies byte
-            4*j + reg_slot. HiFloat8 -> Float32 reads those slots without
-            rounding. Use Float32 for arithmetic or UInt8 bitcast to inspect
-            encoded bits. CAST_HYBRID is only supported for Float32 -> HiFloat8;
-            it follows CANN's native hybrid rounding and does not guarantee the
-            nearest representable value. Specify CAST_ROUND or CAST_HYBRID
-            explicitly for Float32 -> HiFloat8.
+            | Source element type | Destination element types |
+            | --- | --- |
+            | `Float16` | `Float16`, `BFloat16`, `Float32`, `Float8E4M3FN`, `Float8E5M2`, `HiFloat8`, `Int4x2`, `Int8`, `Int16`, `Int32`, `UInt8` |
+            | `BFloat16` | `Float16`, `BFloat16`, `Float32`, `Float8E4M3FN`, `Float8E5M2`, `Float8E8M0`, `Float4E2M1x2`, `Float4E1M2x2`, `Int32` |
+            | `Float32` | `Float16`, `BFloat16`, `Float32`, `Float8E4M3FN`, `Float8E5M2`, `HiFloat8`, `Int16`, `Int32`, `Int64` |
+            | `Float8E4M3FN`, `Float8E5M2` | `Float16`, `BFloat16`, `Float32` |
+            | `HiFloat8` | `Float16`, `Float32` |
+            | `Float8E8M0` | `BFloat16` |
+            | `Float4E2M1x2`, `Float4E1M2x2` | `BFloat16` |
+            | `Int4x2` | `Int16`, `Float16`, `BFloat16` |
+            | `Int8` | `Int16`, `Int32`, `Float16` |
+            | `Int16` | `Int4x2`, `Int32`, `UInt8`, `UInt32`, `Float16`, `Float32` |
+            | `Int32` | `Int8`, `Int16`, `Int64`, `UInt8`, `UInt16`, `Float32` |
+            | `Int64` | `Int32`, `Float32` |
+            | `UInt8` | `UInt16`, `UInt32`, `Float16`, `Float32` |
+            | `UInt16` | `UInt8`, `UInt32` |
+            | `UInt32` | `UInt8`, `UInt16`, `Int16` |
 
-            Float4E2M1x2 and Float4E1M2x2 store two FP4 values per byte,
-            low nibble first. Tensor shapes and offsets count packed pairs.
-            Native conversion pairs it with BFloat16: 128 consecutive BF16
-            values produce 64 pair bytes at positions `4*j + reg_slot`.
-            Narrowing supports SAT or UNKNOWN (fixed native saturation),
-            and CAST_ROUND (ties away),
-            CAST_RINT (ties even), CAST_NONE (same as CAST_RINT), CAST_FLOOR,
-            CAST_CEIL and CAST_TRUNC.
-            A source BF16 mask has 128 lanes; its even positions control
-            whole pairs and odd positions have no effect. A 64-lane pair
-            mask (`dtype=UInt32`) is also accepted, with one bit per pair.
-            Widening uses a 256-lane byte mask. Masked results
-            are zero. All four slots are supported. FP32 conversion requires
-            explicit DSL composition; a plain FP32->BF16->FP4 cast
-            can double-round. These packed register types are distinct from
-            logical four-bit Tensor types and do not support SIMT conversion.
+            Converting `Float16` or `Float32` to `HiFloat8` requires
+            `CAST_ROUND` (nearest, ties away from zero) or `CAST_HYBRID`.
+            Hybrid rounding can return a value other than the nearest
+            representable value.
 
-            Int4x2 sources are packed two per byte. `Int4x2.to()` widens to
-            Int16, Float16 or BFloat16 and requires `CAST_NONE`, because the
-            widening instruction has no rounding operand; other targets
-            require an explicit route.
+            `BFloat16` to `Float8E8M0` extracts the exponent bits. Zeros and
+            subnormal values of either sign encode as `0x00`. Infinities always
+            saturate to `0xfe`, the largest finite scale, and NaNs encode as
+            `0xff`. In the reverse direction, `0x00` decodes to
+            `2**-127` (BF16 bits `0x0040`), and `0xff` to a quiet NaN.
 
-            Parameters:
-            - `dst_type` (`type[Numeric]`): Element type to convert to. Required.
-            - `params` (`CastParams`): Rounding, saturation and register slot. Required.
-            - `mask` (`MaskSSA | None`): Optional execution mask; `None` means all lanes enabled. Optional, default `None`. The
-              mask is indexed in the **source** element domain; BF16-to-FP4
-              uses the even source positions or an explicit pair mask as
-              described above. A masked-off element
-              contributes zero to the result.
+            Packed 4-bit types store two elements per byte, with the first in
+            the low nibble. Packing writes pair `j` to byte `4*j + reg_slot`,
+            and unpacking reads the same layout. Use `CAST_NONE` when widening
+            `Int4x2`. Converting `Float32` to packed FP4 through `BFloat16`
+            can round twice.
 
-            Constraints:
-            - Must be called inside a `@tla.kernel`-decorated kernel function.
-            - Must be called inside `tla.vec.func()`.
-            - Supported targets: signed i8..i64, unsigned u8..u32 on reachable
-              routes, f16/bf16/f32, f8e4m3fn/f8e5m2, hif8 and FP4x2 pairs.
-              Not supported: bool, f64,
-              f8e8m0, fp8-to-fp8, fp8-to-integer.
-            - An `i4x2` source is accepted only with an i16/f16/bf16 target and
-              `CAST_NONE` rounding. Int4x2 is a source type, not a cast target.
-            - A same-type cast (`f16`->`f16`, `bf16`->`bf16`, `f32`->`f32`)
-              keeps the element type and re-rounds every lane: only `round_mode`
-              takes effect. Other same-type casts (integers, fp8) are not
-              supported. `sat_mode` `SAT` is refused (a same-type cast never
-              saturates), and `reg_slot` must be `ZERO` or `ONE`.
-            - `reg_slot` `TWO` and `THREE` name a pack quarter. They are valid
-              on a 4x integer cast, the direct fp8/HiF8<->f32 instruction,
-              and BF16<->FP4x2 conversion.
-            - `params.round_mode` accepts `CAST_ROUND` / `CAST_FLOOR` /
-              `CAST_CEIL` / `CAST_TRUNC` / `CAST_RINT` / `CAST_ODD` /
-              `CAST_NONE`. `CAST_HYBRID` is supported only for Float32 ->
-              HiFloat8. `CastParams` defaults to `CAST_NONE`. Lossless casts
-              omit the rounding operand. On supported routes that consume a
-              rounding mode, including same-type float casts, `CAST_NONE`
-              uses `CAST_RINT` (ties to even).
+        Parameters:
+            - `dst_type` (`type[Numeric]`): Destination element type from the table.
+            - `params` (`CastParams`): Required. Sets `round_mode`, `sat_mode`, and `reg_slot`.
+            - `mask` (`MaskSSA | None`): Selects source lanes. The default `None`
+              enables all mask positions. Unselected destination lanes are zero.
+              When packing 4-bit values,
+              use the even lanes of a 128-lane source mask or a 64-lane pair mask
+              created with `dtype=tla.UInt32`.
 
-            Example:
+        Constraints:
+            - Call in `tla.vec.func(mode="simd")` inside a `@tla.kernel` function.
+              For scalar conversions in SIMT mode, use `Numeric.to`.
+            - `reg_slot` defaults to `RegSlot.ZERO`. For twofold width changes
+              with a slot selector, `ZERO` and `ONE` select even and odd lanes
+              on the narrower side. `ZERO` through `THREE` select one of four
+              positions for packed 4-bit conversions, fourfold integer
+              conversions, `UInt8` to `Float32`, and conversions between
+              `Float32` and `Float8E4M3FN`, `Float8E5M2`, or `HiFloat8`.
+            - With the default `CAST_NONE`, conversions that round and support
+              `CAST_RINT` use ties-to-even rounding. `BFloat16` to `Float16`,
+              `Float16` to `Int32` or `Int4x2`, `Float32` and `Int64` in either
+              direction, and `BFloat16` to packed FP4 reject `CAST_ODD`.
+            - For `Float16` to `BFloat16`, set `sat_mode` to `SatMode.UNKNOWN`.
+              `BFloat16` to packed FP4 always saturates and requires
+              `SatMode.UNKNOWN` or `SatMode.SAT`. `Int16` to `UInt32` uses
+              fixed saturation.
+            - Same-type casts for `Float16`, `BFloat16`, and `Float32` round
+              selected elements in their original lanes. Use `ZERO` or `ONE`
+              and leave saturation disabled.
+
+        Example:
             ```python
-            trait = tla.params.CastParams(
-                reg_slot=tla.params.RegSlot.ZERO,
-                sat_mode=tla.params.SatMode.NOSAT,
-                round_mode=tla.params.RoundMode.CAST_ROUND,
-            )
             with tla.vec.func(mode="simd"):
-                wide = narrow.to(tla.Float32, trait)
-                # f32 -> f32 with CAST_TRUNC: fractional bits round toward zero.
-                rounded = as_f32.to(tla.Float32, tla.params.CastParams(
-                    reg_slot=tla.params.RegSlot.ZERO,
-                    sat_mode=tla.params.SatMode.UNKNOWN,
-                    round_mode=tla.params.RoundMode.CAST_TRUNC,
-                ))
-                # The default CAST_NONE uses CAST_RINT on this conversion.
-                as_i32 = as_f32.to(tla.Int32, tla.params.CastParams(
-                    reg_slot=tla.params.RegSlot.ZERO,
-                    sat_mode=tla.params.SatMode.NOSAT,
-                ))
+                as_i32 = x_f32.to(tla.Int32, tla.params.CastParams())
+                to_hif8 = tla.params.CastParams(round_mode=tla.params.RoundMode.CAST_ROUND)
+                as_hif8 = x_f32.to(tla.HiFloat8, to_hif8)
             ```
         """
         _require_category("cast", "operand", self, "vector_ssa", 0)
@@ -1267,10 +1235,9 @@ class VectorSSA(_RegisterSSA):
             _op_error(
                 "cast",
                 f"unsupported cast target dtype '{dst_type.dtype}': tla.cast "
-                f"supports signed integers (i8/i16/i32/i64), unsigned integers "
+                f"supports signed integers (i4x2/i8/i16/i32/i64), unsigned integers "
                 f"(u8/u16/u32/u64) and floats "
-                f"(f16/bf16/f32/f8e4m3fn/f8e5m2/hif8/f4e2m1x2/f4e1m2x2); bool, f64 and "
-                f"f8e8m0 are not supported",
+                f"(f16/bf16/f32/f8e4m3fn/f8e5m2/hif8/f4e2m1x2/f4e1m2x2/f8e8m0)",
             )
         if not isinstance(params, CastParams):
             _op_error(
@@ -1292,24 +1259,34 @@ class VectorSSA(_RegisterSSA):
                 "cast",
                 "Bool VectorSSA is move-only (load/store); cast is not supported",
             )
-        if params.round_mode is RoundMode.CAST_HYBRID and (src_token, dst_token) != (
-            "f32",
-            "hif8",
+        type_pair = (src_token, dst_token)
+        if type_pair == ("i16", "i8"):
+            _op_error("cast", "unsupported cast from Int16 to Int8")
+        e8m0_cast = type_pair in (("bf16", "f8e8m0"), ("f8e8m0", "bf16"))
+        if "f8e8m0" in type_pair and not e8m0_cast:
+            _op_error("cast", "E8M0 pairs with BFloat16")
+        if params.round_mode is RoundMode.CAST_HYBRID and not (
+            e8m0_cast or (src_token in _HIF8_CAST_FLOAT_DTYPES and dst_token == "hif8")
         ):
-            _op_error("cast", "CAST_HYBRID only supports Float32->HiFloat8")
+            _op_error("cast", "CAST_HYBRID only supports Float16/Float32->HiFloat8")
+        if params.round_mode is RoundMode.CAST_ODD and type_pair in (
+            ("bf16", "f16"),
+            ("f16", "i32"),
+            ("f32", "i64"),
+            ("i64", "f32"),
+        ):
+            _op_error("cast", f"CAST_ODD is unsupported for {src_token}->{dst_token}")
         if src_token == "hif8" or dst_token == "hif8":
-            if (src_token, dst_token) not in (("f32", "hif8"), ("hif8", "f32")):
-                _op_error(
-                    "cast",
-                    "HiFloat8 pairs with Float32; compose other routes explicitly",
-                )
+            other_token = dst_token if src_token == "hif8" else src_token
+            if other_token not in _HIF8_CAST_FLOAT_DTYPES:
+                _op_error("cast", "HiFloat8 pairs with Float16 or Float32")
             if dst_token == "hif8" and params.round_mode not in (
                 RoundMode.CAST_ROUND,
                 RoundMode.CAST_HYBRID,
             ):
                 _op_error(
                     "cast",
-                    "FP32->HiF8 supports CAST_ROUND or CAST_HYBRID",
+                    "conversion to HiFloat8 requires CAST_ROUND or CAST_HYBRID",
                 )
         fp4_narrow = src_token == "bf16" and dst_token in _FP4_PAIR_DTYPES
         if src_token in _FP4_PAIR_DTYPES or dst_token in _FP4_PAIR_DTYPES:
@@ -1320,23 +1297,22 @@ class VectorSSA(_RegisterSSA):
                     "cast",
                     "FP4x2 pairs with BFloat16; compose other routes explicitly",
                 )
-            if fp4_narrow and params.round_mode not in (
-                RoundMode.CAST_ROUND,
-                RoundMode.CAST_FLOOR,
-                RoundMode.CAST_CEIL,
-                RoundMode.CAST_TRUNC,
-                RoundMode.CAST_RINT,
-                RoundMode.CAST_NONE,
-            ):
+            if fp4_narrow and params.round_mode is RoundMode.CAST_ODD:
                 _op_error(
                     "cast",
-                    "BF16->FP4x2 supports CAST_ROUND/CAST_FLOOR/CAST_CEIL/CAST_TRUNC/CAST_RINT/CAST_NONE only",
+                    "BF16->FP4x2 supports CAST_ROUND/CAST_FLOOR/CAST_CEIL/"
+                    "CAST_TRUNC/CAST_RINT/CAST_NONE only",
                 )
             if fp4_narrow and params.sat_mode not in (SatMode.SAT, SatMode.UNKNOWN):
                 _op_error(
                     "cast",
                     "BF16->FP4x2 requires SAT or UNKNOWN; the native instruction always saturates",
                 )
+        if dst_token == "i4x2":
+            if src_token not in _INT4_CAST_SOURCES:
+                _op_error("cast", "Int4x2 narrows from Int16 or Float16")
+            if src_token == "f16" and params.round_mode is RoundMode.CAST_ODD:
+                _op_error("cast", "CAST_ODD is unsupported for Float16->Int4x2")
         if src_token == "i4x2":
             if dst_token not in _INT4_CAST_TARGETS:
                 _op_error(
@@ -1378,14 +1354,14 @@ class VectorSSA(_RegisterSSA):
             trait_attr = mlir_ir.DenseI32ArrayAttr.get(params.codes())
         mask_value = _as_value(mask) if mask is not None else None
         if mask_value is not None:
-            if fp4_narrow:
+            if fp4_narrow or dst_token == "i4x2":
                 if _mask_ssa_type_for_mlir_value(mask_value).physical_lanes not in (
                     64,
                     128,
                 ):
                     _op_error(
                         "cast",
-                        "BF16->FP4x2 requires a 128-lane BF16 source mask or a 64-lane pair mask (dtype=UInt32)",
+                        "packed 4-bit narrowing requires a 128-lane source mask or a 64-lane pair mask (dtype=UInt32)",
                     )
             else:
                 _require_mask_matches_vector("cast", mask_value, operand_value)
@@ -1417,10 +1393,11 @@ class VectorSSA(_RegisterSSA):
 
             Supported types are `f32`/`i32`/`u32`, `f16`/`bf16`/`i16`/`u16`,
             `i8`/`u8`/`f8e4m3fn`/`f8e5m2`/`hif8`/`f4e2m1x2`/`f4e1m2x2`, and
-            `i64`/`u64`. `tla.Bool`, `tla.Float8E8M0` and logical four-bit Tensor
-            types are rejected. This operation changes neither byte order nor
-            register slot and does not pack sparse values. Use `.to()` for
-            numeric conversion and explicit rearrangement for layout changes.
+            `i64`/`u64`. Float8E8M0 supports a UInt8 byte view in both directions.
+            Bool and logical four-bit Tensor types are rejected. This operation
+            changes neither byte order nor register slot and does not pack sparse
+            values. Use `.to()` for numeric conversion and explicit rearrangement
+            for layout changes.
 
             `i64`/`u64` registers can come from UB loads, `tla.extern`, or
             bitcast. Register staging supports aligned, full-width
@@ -1477,6 +1454,8 @@ class VectorSSA(_RegisterSSA):
                 )
         if dst_token == src_token:
             return self
+        if "f8e8m0" in (src_token, dst_token) and "u8" not in (src_token, dst_token):
+            _op_error("bitcast", "E8M0 register bitcast requires UInt8")
         src_bytes = dtype_size_bytes(src_token)
         dst_bytes = dtype_size_bytes(dst_token)
         valid_lanes = src_desc.valid_lanes
@@ -2496,10 +2475,10 @@ def _cast_result_descriptor(
     src_lanes = src_desc.valid_lanes
     if src_lanes is None:
         return TlaVectorSSATypeDescriptor(None, dst_token)
-    packed_narrow = (
-        src_desc.element_type in _INT4_FORMATS and dst_token in _INT4_CAST_TARGETS
+    packed_widen = (
+        src_desc.element_type == "i4x2" and dst_token in _INT4_CAST_TARGETS
     ) or (src_desc.element_type in _FP4_PAIR_DTYPES and dst_token == "bf16")
-    if packed_narrow:
+    if packed_widen:
         # One packed byte lane holds two 4-bit values and widens to two 16-bit
         # lanes. A cast reads one of four register slots, so the result is
         # 2 * ceil((src_lanes - slot) / 4).
@@ -13714,16 +13693,6 @@ def _require_unsigned_cast_route(src_token: str, dst_token: str) -> None:
     dst_unsigned = dst_token in _CAST_UNSIGNED_DTYPES
     if not src_unsigned and not dst_unsigned:
         return
-    src_signed_int = src_token.startswith("i")
-    dst_signed_int = dst_token.startswith("i")
-    if (src_unsigned and dst_signed_int) or (dst_unsigned and src_signed_int):
-        _op_error(
-            "cast",
-            f"unsupported cast '{src_token}'->'{dst_token}': tla.cast requires "
-            f"matching signedness, so a signed integer does not convert to or "
-            f"from an unsigned one; cast within one signedness, or reinterpret "
-            f"the bits explicitly",
-        )
     if (src_token, dst_token) not in _CAST_UNSIGNED_ROUTES:
         routes = ", ".join(f"{a}->{b}" for a, b in sorted(_CAST_UNSIGNED_ROUTES))
         _op_error(
@@ -13758,14 +13727,14 @@ def _require_reg_slot_reachable(src_token: str, dst_token: str, slot: RegSlot) -
             f"this equal-width conversion preserves all lanes and does not "
             f"select a pack quarter; use ZERO or ONE",
         )
-    src_bits = _CAST_TOKEN_BITS.get(src_token, 0)
-    dst_bits = _CAST_TOKEN_BITS.get(dst_token, 0)
+    src_bytes = dtype_size_bytes(src_token)
+    dst_bytes = dtype_size_bytes(dst_token)
     int_pair = (src_token.startswith("i") and dst_token.startswith("i")) or (
         src_token in _CAST_UNSIGNED_DTYPES and dst_token in _CAST_UNSIGNED_DTYPES
     )
     ratio = (
-        _builtins.max(src_bits, dst_bits) // _builtins.min(src_bits, dst_bits)
-        if src_bits and dst_bits
+        _builtins.max(src_bytes, dst_bytes) // _builtins.min(src_bytes, dst_bytes)
+        if src_bytes and dst_bytes
         else 0
     )
     fp8_f32_pair = (src_token in _CAST_FP8_DTYPES and dst_token == "f32") or (
@@ -13780,7 +13749,9 @@ def _require_reg_slot_reachable(src_token: str, dst_token: str, slot: RegSlot) -
     )
     if (
         (int_pair and ratio >= 4)
+        or (src_token, dst_token) == ("i32", "u8")
         or (src_token == "i4x2" and dst_token in _INT4_CAST_TARGETS)
+        or (dst_token == "i4x2" and src_token in _INT4_CAST_SOURCES)
         or fp8_f32_pair
         or u8_f32_pair
         or hif8_f32_pair

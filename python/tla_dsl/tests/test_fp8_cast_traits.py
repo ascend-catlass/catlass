@@ -129,25 +129,13 @@ def test_all_four_pack_quarters_are_valid_on_direct_fp8_f32(
 
 @pytest.mark.parametrize(
     "sat",
-    _SAT_MODES,
+    (tla.params.SatMode.SAT, tla.params.SatMode.UNKNOWN),
 )
-def test_every_sat_mode_is_accepted_on_an_fp8_narrow(sat) -> None:
+def test_fp8_narrow_accepts_default_rounding_with_sat_and_unknown(sat) -> None:
     _compile(
         tla.Float32,
         tla.Float8E4M3FN,
         tla.params.CastParams(sat_mode=sat),
-    )
-
-
-@pytest.mark.parametrize(
-    "rnd",
-    _ROUND_MODES,
-)
-def test_every_round_mode_is_accepted_on_an_fp8_narrow(rnd) -> None:
-    _compile(
-        tla.Float32,
-        tla.Float8E4M3FN,
-        tla.params.CastParams(round_mode=rnd),
     )
 
 

@@ -35,15 +35,20 @@ def _kernel(dest_type, params, mask_type=None):
     return convert
 
 
-@pytest.mark.parametrize("slot", list(RegSlot))
+_HIF8_FLOAT_SLOTS = [(tla.Float32, slot) for slot in RegSlot] + [
+    (tla.Float16, slot) for slot in (RegSlot.ZERO, RegSlot.ONE)
+]
+
+
+@pytest.mark.parametrize(("dtype", "slot"), _HIF8_FLOAT_SLOTS)
 @pytest.mark.parametrize("sat", [SatMode.NOSAT, SatMode.SAT])
 @pytest.mark.parametrize("round_mode", [RoundMode.CAST_ROUND, RoundMode.CAST_HYBRID])
-def test_hif8_narrow_is_a_register_cast(compiler_tlair, slot, sat, round_mode):
+def test_hif8_narrow_is_a_register_cast(compiler_tlair, dtype, slot, sat, round_mode):
     ir = compiler_tlair(
         _kernel(
             tla.HiFloat8, CastParams(reg_slot=slot, sat_mode=sat, round_mode=round_mode)
         ),
-        type_args=(_ub(tla.Float32, 64), _ub(tla.HiFloat8, 256)),
+        type_args=(_ub(dtype, 2048 // dtype.width), _ub(tla.HiFloat8, 256)),
     )
     (cast_line,) = [line for line in ir.splitlines() if '"tla.cast"' in line]
     slot_code = list(RegSlot).index(slot)
@@ -53,26 +58,41 @@ def test_hif8_narrow_is_a_register_cast(compiler_tlair, slot, sat, round_mode):
     assert "!tla.vector<?x!tla.hif8>" in cast_line
 
 
-@pytest.mark.parametrize("round_mode", [RoundMode.CAST_NONE, RoundMode.CAST_CEIL])
-def test_hif8_does_not_silently_change_rounding(compiler_tlair, round_mode):
-    with pytest.raises(TlaCoreAPIError, match="supports CAST_ROUND"):
+@pytest.mark.parametrize("src", [tla.Float16, tla.Float32])
+@pytest.mark.parametrize(
+    "round_mode", [RoundMode.CAST_NONE, RoundMode.CAST_RINT, RoundMode.CAST_CEIL]
+)
+def test_hif8_requires_explicit_round_or_hybrid(compiler_tlair, src, round_mode):
+    with pytest.raises(TlaCoreAPIError, match="requires CAST_ROUND"):
         compiler_tlair(
             _kernel(tla.HiFloat8, CastParams(round_mode=round_mode)),
-            type_args=(_ub(tla.Float32, 64), _ub(tla.HiFloat8, 256)),
+            type_args=(_ub(src, 2048 // src.width), _ub(tla.HiFloat8, 256)),
         )
 
 
-@pytest.mark.parametrize("slot", list(RegSlot))
-def test_hif8_widen_preserves_source_mask_domain(compiler_tlair, slot):
+@pytest.mark.parametrize(("dtype", "slot"), _HIF8_FLOAT_SLOTS)
+def test_hif8_widen_preserves_source_mask_domain(compiler_tlair, dtype, slot):
+    lanes = 2048 // dtype.width
+    params = CastParams(reg_slot=slot)
     ir = compiler_tlair(
-        _kernel(tla.Float32, CastParams(reg_slot=slot), tla.HiFloat8),
-        type_args=(_ub(tla.HiFloat8, 256), _ub(tla.Float32, 64)),
+        _kernel(dtype, params, tla.HiFloat8),
+        type_args=(_ub(tla.HiFloat8, 256), _ub(dtype, lanes)),
     )
     (cast_line,) = [line for line in ir.splitlines() if '"tla.cast"' in line]
-    slot_code = list(RegSlot).index(slot)
-    assert f"trait = array<i32: {slot_code}, 2, 4>" in cast_line
+    assert f"trait = array<i32: {', '.join(map(str, params.codes()))}>" in cast_line
     assert "!tla.mask<256>" in ir
-    assert "!tla.vector<64xf32>" in ir
+    assert f"!tla.vector<{lanes}x{dtype.dtype}>" in cast_line
+
+
+@pytest.mark.parametrize("src,dst", [(tla.Float16, tla.HiFloat8), (tla.HiFloat8, tla.Float16)])
+@pytest.mark.parametrize("slot", [RegSlot.TWO, RegSlot.THREE])
+def test_float16_hif8_rejects_quarter_slots(compiler_tlair, src, dst, slot):
+    params = CastParams(reg_slot=slot, round_mode=RoundMode.CAST_ROUND if src is tla.Float16 else RoundMode.CAST_NONE)
+    with pytest.raises(TlaCoreAPIError, match="pack quarter"):
+        compiler_tlair(
+            _kernel(dst, params),
+            type_args=(_ub(src, 2048 // src.width), _ub(dst, 2048 // dst.width)),
+        )
 
 
 @tla.kernel
@@ -101,7 +121,7 @@ def test_payloads_do_not_silently_gain_integer_arithmetic(compiler_tlair, dtype)
 )
 def test_hybrid_rejects_other_routes(compiler_tlair, source_type, destination_type):
     with pytest.raises(
-        TlaCoreAPIError, match="CAST_HYBRID only supports Float32->HiFloat8"
+        TlaCoreAPIError, match="CAST_HYBRID only supports Float16/Float32->HiFloat8"
     ):
         compiler_tlair(
             _kernel(destination_type, CastParams(round_mode=RoundMode.CAST_HYBRID)),

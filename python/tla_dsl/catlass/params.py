@@ -636,21 +636,22 @@ class SatMode(enum.Enum):
 
 
 class RoundMode(enum.Enum):
-    """Rounding applied on precision loss (AVE ``tla.cast`` / ``VectorSSA.to``).
+    """Rounding for register conversions in ``VectorSSA.to``.
 
-    ``CAST_NONE`` is the default for ``CastParams``. Lossless casts
-    drop the round operand; lossy casts lower as ``CAST_RINT``. ``CAST_HYBRID``
-    selects native hybrid rounding for Float32 -> HiFloat8 only.
+    The default ``CAST_NONE`` selects ``CAST_RINT`` on conversions that use a
+    rounding operand and support ties-to-even rounding. Conversions without
+    a rounding operand can use the default. Float16 or Float32 -> HiFloat8
+    requires an explicit ``CAST_ROUND`` or ``CAST_HYBRID``.
     """
 
     CAST_ROUND = "cast_round"  # round to nearest, tie away from zero
     CAST_FLOOR = "cast_floor"  # round toward -inf
     CAST_CEIL = "cast_ceil"  # round toward +inf
     CAST_TRUNC = "cast_trunc"  # round toward zero
-    CAST_NONE = "cast_none"  # AscendC CAST_NONE: lossless no-rnd / lossy RINT
+    CAST_NONE = "cast_none"  # default behavior of the conversion
     CAST_RINT = "cast_rint"  # round to nearest, tie to even (banker's)
     CAST_ODD = "cast_odd"  # Von Neumann rounding (round to odd)
-    CAST_HYBRID = "cast_hybrid"  # native HiF8 hybrid rounding (Float32 -> HiFloat8)
+    CAST_HYBRID = "cast_hybrid"  # native HiFloat8 narrowing
 
     def __str__(self) -> str:
         return self.value
@@ -705,7 +706,8 @@ class CastParams:
     Args:
         reg_slot: destination packed-register position (:class:`RegSlot`).
         sat_mode: overflow behaviour (:class:`SatMode`).
-        round_mode: rounding on precision loss (:class:`RoundMode`).
+        round_mode: register conversion rounding (:class:`RoundMode`).
+            Defaults to ``CAST_NONE``. See :class:`RoundMode` for its behavior.
     """
 
     reg_slot: RegSlot = RegSlot.ZERO

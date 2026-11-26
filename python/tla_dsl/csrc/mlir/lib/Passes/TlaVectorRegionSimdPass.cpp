@@ -1078,17 +1078,36 @@ static func::FuncOp getOrCreateVectorPackUnpackLibraryCall(
     return callee;
 }
 
-static std::string getHiFloat8CastLibraryCallName(Type srcElement, ArrayRef<int32_t> trait)
+static std::string getHiFloat8CastLibraryCallName(Type srcElement, Type dstElement, ArrayRef<int32_t> trait)
 {
     std::string name;
-    if (srcElement.isF32()) {
-        name = "lowp_cast_f32_to_hif8_";
+    if (isa<HiFloat8Type>(dstElement)) {
+        name = srcElement.isF16() ? "lowp_cast_f16_to_hif8_" : "lowp_cast_f32_to_hif8_";
         name += static_cast<::RoundMode>(trait[2]) == ::RoundMode::cast_hybrid ? "hybrid_" : "round_";
         name += static_cast<::SatMode>(trait[1]) == ::SatMode::sat ? "sat" : "nosat";
     } else {
-        name = "lowp_cast_hif8_to_f32";
+        name = dstElement.isF16() ? "lowp_cast_hif8_to_f16" : "lowp_cast_hif8_to_f32";
     }
     return name + "_slot" + std::to_string(trait[0]);
+}
+
+static StringRef getPacked4RoundSuffix(::RoundMode round)
+{
+    switch (round) {
+        case ::RoundMode::cast_round:
+            return "_round";
+        case ::RoundMode::cast_floor:
+            return "_floor";
+        case ::RoundMode::cast_ceil:
+            return "_ceil";
+        case ::RoundMode::cast_trunc:
+            return "_trunc";
+        case ::RoundMode::cast_none:
+        case ::RoundMode::cast_rint:
+            return "_rint";
+        default:
+            llvm_unreachable("packed 4-bit rounding mode must be verified before lowering");
+    }
 }
 
 static std::string getFp4CastLibraryCallName(Type srcElement, Type dstElement, ArrayRef<int32_t> trait)
@@ -1098,26 +1117,7 @@ static std::string getFp4CastLibraryCallName(Type srcElement, Type dstElement, A
     std::string format = isa<Float4E2M1x2Type>(pairType) ? "f4e2m1x2" : "f4e1m2x2";
     std::string name = narrow ? "lowp_cast_bf16_to_" + format : "lowp_cast_" + format + "_to_bf16";
     if (narrow) {
-        switch (static_cast<::RoundMode>(trait[2])) {
-            case ::RoundMode::cast_round:
-                name += "_round";
-                break;
-            case ::RoundMode::cast_floor:
-                name += "_floor";
-                break;
-            case ::RoundMode::cast_ceil:
-                name += "_ceil";
-                break;
-            case ::RoundMode::cast_trunc:
-                name += "_trunc";
-                break;
-            case ::RoundMode::cast_none:
-            case ::RoundMode::cast_rint:
-                name += "_rint";
-                break;
-            default:
-                llvm_unreachable("FP4 rounding mode must be verified before lowering");
-        }
+        name += getPacked4RoundSuffix(static_cast<::RoundMode>(trait[2])).str();
         name += "_sat";
     }
     return name + "_slot" + std::to_string(trait[0]);
@@ -1801,10 +1801,7 @@ static Value allTrueMaskFor(AutoFullPredicateCache& cache, Location loc, VectorT
     return cache.get(loc, semanticLanes);
 }
 
-// Map the tla.cast round mode onto the HIVM round_mode attribute.
-// CAST_NONE matches AscendC: when a path actually consumes rnd (lossy cast /
-// same-type vtrc / etc.) it becomes RINT; lossless widen paths such as
-// vextf ignore the attribute entirely and never call this for effect.
+// Casts that take this rounding operand use RINT for the default CAST_NONE.
 static hivm::RoundModeAttr mapCastRoundMode(OpBuilder& b, ::RoundMode mode)
 {
     hivm::RoundMode hv;
@@ -1829,7 +1826,7 @@ static hivm::RoundModeAttr mapCastRoundMode(OpBuilder& b, ::RoundMode mode)
             hv = hivm::RoundMode::ODD;
             break;
         default:
-            // HiF8 HYBRID is handled by the register helper, not HIVM rounding.
+            // The HiFloat8 register helper handles CAST_HYBRID.
             return {};
     }
     return hivm::RoundModeAttr::get(b.getContext(), hv);
@@ -1936,29 +1933,10 @@ static bool isSupportedCastElementType(Type t)
     if (auto f = dyn_cast<FloatType>(t))
         return f.getWidth() == 16 || f.getWidth() == 32 || isAveFloat8Type(t);
     if (auto i = dyn_cast<IntegerType>(t)) {
-        if (isBoolElementType(i))
-            return false;
         unsigned w = i.getWidth();
         return w == 4 || w == 8 || w == 16 || w == 32 || w == 64;
     }
     return false;
-}
-
-// Bitcast an integer vector between unsigned and signless of the same width.
-// AVE cast ops are typed on signless integers; unsigned VectorSSA stays
-// unsigned so Compare can select VCmpU*.
-static Value bitcastIntVectorSignedness(OpBuilder& b, Location loc, Value v, Type targetElem)
-{
-    auto srcTy = cast<VectorType>(v.getType());
-    if (srcTy.getElementType() == targetElem)
-        return v;
-    auto dstTy = VectorType::get(srcTy.getShape(), targetElem);
-    return b.create<mlir::vector::BitCastOp>(loc, dstTy, v).getResult();
-}
-
-static Type signlessIntOfWidth(MLIRContext* ctx, unsigned width)
-{
-    return IntegerType::get(ctx, width);
 }
 
 // Unsigned cast routes are an explicit short list (frontend
@@ -1981,14 +1959,11 @@ static FailureOr<Value> createUnsignedVectorCastResult(
 
     Value aveSrc = src;
     VectorType aveSrcTy = srcVecType;
-    if (sUnsigned) {
-        Type signless = signlessIntOfWidth(ctx, sb);
-        aveSrc = bitcastIntVectorSignedness(b, loc, src, signless);
-        aveSrcTy = cast<VectorType>(aveSrc.getType());
+    // AVE integer carriers are signless; the TLA types select signedness.
+    if (sUnsigned && !srcVecType.getElementType().isSignlessInteger(sb)) {
+        aveSrcTy = VectorType::get(srcVecType.getShape(), b.getIntegerType(sb));
+        aveSrc = b.create<mlir::vector::BitCastOp>(loc, aveSrcTy, src).getResult();
     }
-
-    // Keep the AVE region signless; signedness lives on the tla type.
-    auto wrapDst = [&](Value aveDst) -> Value { return aveDst; };
 
     if (sUnsigned && sb == 8 && tlaDstElem.isF32()) {
         Value gated = aveSrc;
@@ -2005,28 +1980,49 @@ static FailureOr<Value> createUnsignedVectorCastResult(
 
     if (sUnsigned && sb == 8 && tlaDstElem.isF16())
         return b.create<hivmave::VFUIntToFpOp>(loc, dstVecType, aveSrc, mask, hivm::RoundModeAttr(), part).getResult();
-    if (tlaSrcElem.isF16() && dUnsigned && db == 8) {
-        auto aveDstTy = VectorType::get(dstVecType.getShape(), signlessIntOfWidth(ctx, 8));
-        Value aveDst = b.create<hivmave::VFFpToUIntOp>(loc, aveDstTy, src, mask, rnd, sat, part).getResult();
-        return wrapDst(aveDst);
+    if (tlaSrcElem.isF16() && dUnsigned && db == 8)
+        return b.create<hivmave::VFFpToUIntOp>(loc, dstVecType, src, mask, rnd, sat, part).getResult();
+
+    if (sUnsigned != dUnsigned && isa<IntegerType>(tlaSrcElem) && isa<IntegerType>(tlaDstElem)) {
+        Value preg = castMaskToPregType(b, loc, mask, fullPregVecType(ctx));
+        if (dUnsigned && sb == 16 && db == 32) {
+            Value slot = b.create<arith::ConstantIntOp>(loc, static_cast<int64_t>(part.getValue()), 32);
+            return b.create<hivm_regbaseintrins::VcvtiiS162U32InstrOp>(loc, dstVecType, aveSrc, preg, slot).getResult();
+        }
+        Value saturation = b.create<arith::ConstantIntOp>(loc, sat.getValue() ? 1 : 0, 32);
+        if (dUnsigned && sb == 32 && db == 8) {
+            Value slot = b.create<arith::ConstantIntOp>(loc, static_cast<int64_t>(pp.getValue()), 32);
+            return b.create<hivm_regbaseintrins::VcvtiiS322U8InstrOp>(loc, dstVecType, aveSrc, preg, saturation, slot)
+                .getResult();
+        }
+        Value slot = b.create<arith::ConstantIntOp>(loc, static_cast<int64_t>(part.getValue()), 32);
+        if (dUnsigned && sb == 16 && db == 8)
+            return b.create<hivm_regbaseintrins::VcvtiiS162U8InstrOp>(loc, dstVecType, aveSrc, preg, saturation, slot)
+                .getResult();
+        if (dUnsigned && sb == 32 && db == 16)
+            return b.create<hivm_regbaseintrins::VcvtiiS322U16InstrOp>(loc, dstVecType, aveSrc, preg, saturation, slot)
+                .getResult();
+        if (sUnsigned && sb == 32 && db == 16)
+            return b.create<hivm_regbaseintrins::VcvtiiU322S16InstrOp>(loc, dstVecType, aveSrc, preg, saturation, slot)
+                .getResult();
+        return failure();
     }
 
     if (!sUnsigned || !dUnsigned)
         return failure();
 
-    auto aveDstTy = VectorType::get(dstVecType.getShape(), signlessIntOfWidth(ctx, db));
     if (db > sb) {
         if (db / sb >= 4)
-            return wrapDst(b.create<hivmave::VFExtUIOp>(loc, aveDstTy, aveSrc, mask, nullPart, pp).getResult());
-        return wrapDst(b.create<hivmave::VFExtUIOp>(loc, aveDstTy, aveSrc, mask, part, nullPP).getResult());
+            return b.create<hivmave::VFExtUIOp>(loc, dstVecType, aveSrc, mask, nullPart, pp).getResult();
+        return b.create<hivmave::VFExtUIOp>(loc, dstVecType, aveSrc, mask, part, nullPP).getResult();
     }
     if (db == sb)
         return failure();
 
     auto uni = hivm::UnsignedModeAttr::get(ctx, hivm::UnsignedMode::UI2UI);
     if (sb / db >= 4)
-        return wrapDst(b.create<hivmave::VFTruncIOp>(loc, aveDstTy, aveSrc, mask, sat, nullPart, pp, uni).getResult());
-    return wrapDst(b.create<hivmave::VFTruncIOp>(loc, aveDstTy, aveSrc, mask, sat, part, nullPP, uni).getResult());
+        return b.create<hivmave::VFTruncIOp>(loc, dstVecType, aveSrc, mask, sat, nullPart, pp, uni).getResult();
+    return b.create<hivmave::VFTruncIOp>(loc, dstVecType, aveSrc, mask, sat, part, nullPP, uni).getResult();
 }
 
 // Build the AVE op or regbase intrinsic for a tla.cast, dispatching by (src, dst) element kind.
@@ -2040,8 +2036,6 @@ static FailureOr<Value> createVectorCastResult(
     Type s = srcVecType.getElementType();
     Type d = dstVecType.getElementType();
     auto rnd = mapCastRoundMode(b, static_cast<::RoundMode>(trait[2]));
-    if (!rnd)
-        return emitError(loc, "unsupported rounding mode for native vector cast"), failure();
     BoolAttr sat = b.getBoolAttr(static_cast<::SatMode>(trait[1]) == ::SatMode::sat);
     auto part = mapCastPart(b, static_cast<::RegSlot>(trait[0]));
     auto pp = mapCastPP(b, static_cast<::RegSlot>(trait[0]));
@@ -2061,21 +2055,47 @@ static FailureOr<Value> createVectorCastResult(
         Value round = b.create<arith::ConstantIntOp>(loc, static_cast<int64_t>(rnd.getValue()), 32);
         return b.create<hivm_regbaseintrins::VcvtffF162BF16InstrOp>(loc, dstVecType, src, preg, round).getResult();
     }
+    if (s.isBF16() && d.isF16()) {
+        Value preg = castMaskToPregType(b, loc, mask, fullPregVecType(b.getContext()));
+        Value round = b.create<arith::ConstantIntOp>(loc, static_cast<int64_t>(rnd.getValue()), 32);
+        Value saturation = b.create<arith::ConstantIntOp>(loc, sat.getValue(), 32);
+        return b.create<hivm_regbaseintrins::VcvtffBF162F16InstrOp>(loc, dstVecType, src, preg, saturation, round)
+            .getResult();
+    }
 
     if (tlaSrcElem.isUnsignedInteger() || tlaDstElem.isUnsignedInteger())
         return createUnsignedVectorCastResult(
             b, fullMasks, loc, srcVecType, dstVecType, tlaSrcElem, tlaDstElem, src, mask, hasUserMask, part, pp, rnd,
             sat);
 
-    // fp8 pairs with f32 and nothing else. The AVE op definitions advertise a
-    // wider set -- vtruncf lists bf16/f16/f32 sources, vextf lists bf16/f16/f32
-    // results -- but HIVMAVEToAVEIntrin only ever builds VcvtffF322F8E4M3 /
-    // VcvtffF322F8E5M2 and VcvtffF8E4M32F32 / VcvtffF8E5M22F32. An f8 -> f16
-    // widen hits llvm_unreachable there, and, more dangerously, an f16 -> f8
-    // narrow does NOT: that path dispatches on the destination type alone, so
-    // it silently emits the F32-source instruction against f16 lanes. Refuse
-    // every non-f32 partner here rather than let that through. bf16/f16 reach
-    // fp8 by widening to f32 first, which is exact.
+    // The generic AVE lowering rewrites i64 casts into two-register library calls.
+    // Emit the single-register instructions for the 32xi64 representation.
+    if ((s.isSignlessInteger(64) && (d.isF32() || d.isSignlessInteger(32))) ||
+        (d.isSignlessInteger(64) && (s.isF32() || s.isSignlessInteger(32)))) {
+        Value preg = castMaskToPregType(b, loc, mask, fullPregVecType(b.getContext()));
+        Value regPart = b.create<arith::ConstantIntOp>(loc, static_cast<int64_t>(part.getValue()), 32);
+        if (s.isSignlessInteger(32))
+            return b.create<hivm_regbaseintrins::VcvtiiS322S64InstrOp>(loc, dstVecType, src, preg, regPart).getResult();
+        if (d.isSignlessInteger(32)) {
+            Value saturation = b.create<arith::ConstantIntOp>(loc, sat.getValue(), 32);
+            return b.create<hivm_regbaseintrins::VcvtiiS642S32InstrOp>(loc, dstVecType, src, preg, saturation, regPart)
+                .getResult();
+        }
+
+        Value round = b.create<arith::ConstantIntOp>(loc, static_cast<int64_t>(rnd.getValue()), 32);
+        if (s.isF32()) {
+            Value saturation = b.create<arith::ConstantIntOp>(loc, sat.getValue(), 32);
+            return b
+                .create<hivm_regbaseintrins::VcvtfiF322S64InstrOp>(
+                    loc, dstVecType, src, preg, round, saturation, regPart)
+                .getResult();
+        }
+        return b.create<hivm_regbaseintrins::VcvtifS642F32InstrOp>(loc, dstVecType, src, preg, round, regPart)
+            .getResult();
+    }
+
+    // Direct FP8 conversions use f32. The f16/bf16 routes use an exact
+    // E5M2-to-f16 bit conversion or compose instructions through f32.
     if (isAveFloat8Type(s) || isAveFloat8Type(d)) {
         Type partner = isAveFloat8Type(s) ? d : s;
         if (isAveFloat8Type(s) && isAveFloat8Type(d))
@@ -2195,20 +2215,21 @@ static FailureOr<Value> createVectorCastResult(
     // that would silently mean nothing).
     if (sFloat && dFloat && s == d)
         return b.create<hivmave::VFVtrcOp>(loc, dstVecType, src, rnd, mask).getResult();
-    // For same-width float<->int conversions the packed even/odd part does not
-    // apply (src and dst occupy the full register); pass a null part attribute,
-    // matching the arith->AVE lowering.
-    hivmave::VCVT_PartTypeAttr partOrNull = (sb == db) ? hivmave::VCVT_PartTypeAttr() : part;
-
     if (sFloat && dFloat) {
         if (db < sb)
             return b.create<hivmave::VFTruncFOp>(loc, dstVecType, src, mask, rnd, sat, part).getResult();
         // Widening float cast (e.g. f16 -> f32) takes no rounding/saturation.
         return b.create<hivmave::VFExtFOp>(loc, dstVecType, src, mask, part).getResult();
     }
-    if (sFloat && !dFloat)
+    if (sFloat) {
+        // The FP16 to Int32 instruction takes a part and a rounding mode.
+        if (s.isF16() && d.isSignlessInteger(32))
+            sat = {};
+        // Equal-width conversions use every lane and have no part selector.
+        auto partOrNull = sb == db ? hivmave::VCVT_PartTypeAttr() : part;
         return b.create<hivmave::VFFpToSIntOp>(loc, dstVecType, src, mask, rnd, sat, partOrNull).getResult();
-    if (!sFloat && dFloat) {
+    }
+    if (dFloat) {
         // int -> float: the ISA does not allow #rnd and #part together. A same-width
         // source carries the round mode (rounding may be needed, e.g. i32->f32); a
         // width-changing widen/narrow carries the even/odd part with no round mode
@@ -2220,7 +2241,7 @@ static FailureOr<Value> createVectorCastResult(
             return b.create<hivmave::VFSIntToFpOp>(loc, dstVecType, src, mask, rnd, part).getResult();
         return b.create<hivmave::VFSIntToFpOp>(loc, dstVecType, src, mask, hivm::RoundModeAttr(), part).getResult();
     }
-    // int -> int (signed). A 2x width step (e.g. i32<->i16, i16<->i8) uses the
+    // int -> int (signed). A 2x width step (e.g. i32<->i16) uses the
     // even/odd `part`; a 4x step (i32<->i8) uses the pack-pattern `pp` (PP0)
     // instead, matching the arith->AVE lowering. Integer casts do not round.
     auto uni = hivm::UnsignedModeAttr::get(b.getContext(), hivm::UnsignedMode::SI2SI);
@@ -3383,37 +3404,36 @@ static LogicalResult lowerCast(
     auto srcVecType = dyn_cast<VectorType>(src.getType());
     if (!srcVecType)
         return castOp.emitError("tla.cast source is not a vector value"), failure();
-    auto dstType = dyn_cast<::tla::VectorSSAType>(castOp.getResult().getType());
-    if (!dstType)
-        return castOp.emitError("expected !tla.vector result type"), failure();
-    auto dstLanesOr = getVectorLaneCount(dstType.getElementType());
+    Type tlaSrcElem = castOp.getSource().getType().getElementType();
+    Type tlaDstElem = castOp.getResult().getType().getElementType();
+    auto dstLanesOr = getVectorLaneCount(tlaDstElem);
     if (failed(dstLanesOr))
         return castOp.emitError("unsupported tla.cast destination element type"), failure();
-    Type tlaSrcElem = cast<::tla::VectorSSAType>(castOp.getSource().getType()).getElementType();
-    Type tlaDstElem = dstType.getElementType();
     if (isBoolVectorElement(tlaSrcElem) || isBoolVectorElement(tlaDstElem))
         return castOp.emitError(
                    "Bool VectorSSA is move-only (load/store); "
                    "cast is not supported"),
                failure();
     auto dstVecType = VectorType::get({*dstLanesOr}, aveVectorElementType(tlaDstElem));
+    auto trait = castOp.getTrait();
+    const bool toFp4 = isFp4PairType(tlaDstElem);
+    const bool toInt4 = isInt4PairType(tlaDstElem);
+    const bool hasUserMask = static_cast<bool>(castOp.getMask());
+    // Packed 4-bit narrowing uses one mask bit per pair by default.
+    const int64_t maskLanes = toFp4 || toInt4 ? 64 : srcVecType.getNumElements();
+    Value mask = hasUserMask ? valueMap.lookup(castOp.getMask()) : fullMasks.get(loc, maskLanes);
+    if (!mask)
+        return failure();
     if (isInt4PairType(tlaSrcElem)) {
-        // int4x2_t -> b16. The widening instruction has no rounding or
-        // saturation operand; only CAST_NONE is meaningful.
-        ArrayRef<int32_t> trait = castOp.getTrait();
-        if (trait.size() != 3)
-            return castOp.emitError("tla.cast trait must have 3 codes"), failure();
-        if (static_cast<::RoundMode>(trait[2]) != ::RoundMode::cast_none)
+        // int4x2_t -> b16 has no rounding or saturation operand.
+        auto round = static_cast<::RoundMode>(trait[2]);
+        if (round != ::RoundMode::cast_none)
             return castOp.emitError("Int4x2 source casts require CAST_NONE"), failure();
         bool toF16 = tlaDstElem.isF16();
         bool toBF16 = tlaDstElem.isBF16();
         bool toI16 = tlaDstElem.isSignlessInteger(16);
         if (!toF16 && !toBF16 && !toI16)
             return castOp.emitError("Int4x2 source only widens to f16/bf16/i16"), failure();
-        Value mask =
-            castOp.getMask() ? valueMap.lookup(castOp.getMask()) : fullMasks.get(loc, srcVecType.getNumElements());
-        if (!mask)
-            return failure();
         Value preg = castMaskToPregType(b, loc, mask, fullPregVecType(b.getContext()));
         Value pp = b.create<arith::ConstantIntOp>(loc, static_cast<int64_t>(trait[0]), 32);
         Value result;
@@ -3427,33 +3447,50 @@ static LogicalResult lowerCast(
         valueMap[castOp.getResult()] = result;
         return success();
     }
-    if (isa<::tla::HiFloat8Type>(tlaSrcElem) || isa<::tla::HiFloat8Type>(tlaDstElem)) {
-        std::string name = getHiFloat8CastLibraryCallName(tlaSrcElem, castOp.getTrait());
-        int64_t maskLanes = srcVecType.getNumElements();
-        Value mask = castOp.getMask() ? valueMap.lookup(castOp.getMask()) : fullMasks.get(loc, maskLanes);
-        if (!mask)
-            return failure();
-        SmallVector<Value> args{src, castMaskToPregType(b, loc, mask, fullPregVecType(b.getContext()))};
-        SmallVector<Type> inputTypes;
-        for (auto arg : args)
-            inputTypes.push_back(arg.getType());
-        auto callee = getOrCreateInlineAivLibraryCall(module, loc, inputTypes, dstVecType, name);
-        valueMap[castOp.getResult()] = b.create<func::CallOp>(loc, callee, args).getResult(0);
+    if (isa<::tla::Float8E8M0Type>(tlaDstElem)) {
+        // Clear the sign before extracting BF16 bits [14:7]. After the left
+        // shift, both infinities are 0xff00 and NaNs still have fraction bits.
+        auto bitsType = VectorType::get(srcVecType.getShape(), b.getI16Type());
+        Value bits = b.create<mlir::vector::BitCastOp>(loc, bitsType, src);
+        Value one = b.create<arith::ConstantIntOp>(loc, 1, 16);
+        Value eight = b.create<arith::ConstantIntOp>(loc, 8, 16);
+        Value sign = b.create<arith::ConstantOp>(loc, b.getI1Type(), b.getBoolAttr(false));
+        Value shifted = b.create<hivmave::VFShlsOp>(loc, bitsType, bits, one, mask, sign);
+        Value exponent = b.create<hivmave::VFShrsOp>(loc, bitsType, shifted, eight, mask, sign);
+        Value infinityBits = b.create<arith::ConstantIntOp>(loc, 0xff00, 16);
+        Value isInfinity = b.create<hivmave::VFCmpS>(
+            loc, fullPregVecType(b.getContext()), hivmave::CmpType::EQ, shifted, infinityBits, mask);
+        Value maxFinite = b.create<arith::ConstantIntOp>(loc, 0xfe, 16);
+        Value maxFiniteLanes = b.create<hivmave::VFBroadcastScalarOp>(loc, bitsType, maxFinite).getRes();
+        Value encoded = b.create<hivmave::VFSelectOp>(loc, bitsType, isInfinity, maxFiniteLanes, exponent);
+        auto part = mapCastPart(b, static_cast<::RegSlot>(trait[0]));
+        auto unsignedMode = hivm::UnsignedModeAttr::get(b.getContext(), hivm::UnsignedMode::UI2UI);
+        Value result = b.create<hivmave::VFTruncIOp>(
+            loc, dstVecType, encoded, mask, b.getBoolAttr(true), part, hivmave::VCVT_PPTypeAttr(), unsignedMode);
+        valueMap[castOp.getResult()] = result;
         return success();
     }
-    if (isFp4PairType(tlaSrcElem) || isFp4PairType(tlaDstElem)) {
-        bool narrow = tlaSrcElem.isBF16();
-        std::string name = getFp4CastLibraryCallName(tlaSrcElem, tlaDstElem, castOp.getTrait());
-        int64_t maskLanes = narrow ? 64 : srcVecType.getNumElements();
-        Value mask = castOp.getMask() ? valueMap.lookup(castOp.getMask()) : fullMasks.get(loc, maskLanes);
-        if (!mask)
-            return failure();
-        SmallVector<Value> args{src, castMaskToPregType(b, loc, mask, fullPregVecType(b.getContext()))};
-        SmallVector<Type> inputTypes;
-        for (auto arg : args)
-            inputTypes.push_back(arg.getType());
-        auto callee = getOrCreateInlineAivLibraryCall(module, loc, inputTypes, dstVecType, name);
-        valueMap[castOp.getResult()] = b.create<func::CallOp>(loc, callee, args).getResult(0);
+    std::string libraryCast;
+    if (isa<HiFloat8Type>(tlaSrcElem) || isa<HiFloat8Type>(tlaDstElem)) {
+        libraryCast = getHiFloat8CastLibraryCallName(tlaSrcElem, tlaDstElem, trait);
+    } else if (isFp4PairType(tlaSrcElem) || toFp4) {
+        libraryCast = getFp4CastLibraryCallName(tlaSrcElem, tlaDstElem, trait);
+    } else if (toInt4) {
+        // The Regbase and device LLVM definitions of the Int4x2 narrowing
+        // intrinsics disagree on their operand or result types.
+        libraryCast = tlaSrcElem.isF16() ? "lowp_cast_f16_to_i4x2" : "lowp_cast_i16_to_i4x2";
+        if (tlaSrcElem.isF16())
+            libraryCast += getPacked4RoundSuffix(static_cast<::RoundMode>(trait[2])).str();
+        libraryCast += static_cast<::SatMode>(trait[1]) == ::SatMode::sat ? "_sat_slot" : "_nosat_slot";
+        libraryCast += std::to_string(trait[0]);
+    } else if (isa<Float8E8M0Type>(tlaSrcElem)) {
+        libraryCast = "lowp_cast_e8m0_to_bf16_slot" + std::to_string(trait[0]);
+    }
+    if (!libraryCast.empty()) {
+        auto pregType = fullPregVecType(b.getContext());
+        Value preg = castMaskToPregType(b, loc, mask, pregType);
+        auto callee = getOrCreateInlineAivLibraryCall(module, loc, {srcVecType, pregType}, dstVecType, libraryCast);
+        valueMap[castOp.getResult()] = b.create<func::CallOp>(loc, callee, ValueRange{src, preg}).getResult(0);
         return success();
     }
     // Reject casts whose source or destination element type has no AVE cast path
@@ -3465,21 +3502,8 @@ static LogicalResult lowerCast(
                    "(u8/u16/u32) and floats (f16/bf16/f32) "
                    "are supported; bool and f64 are not"),
                failure();
-    ArrayRef<int32_t> trait = castOp.getTrait();
-    if (trait.size() != 3)
-        return castOp.emitError("tla.cast trait must have 3 codes"), failure();
-    // An optional mask predicates the source lanes of the AVE cast; all-true when
-    // none is given.
-    Value mask;
-    if (castOp.getMask()) {
-        mask = valueMap.lookup(castOp.getMask());
-        if (!mask)
-            return failure();
-    } else {
-        mask = allTrueMaskFor(fullMasks, loc, srcVecType, castOp.getSource().getType());
-    }
     auto result = createVectorCastResult(
-        b, fullMasks, loc, srcVecType, dstVecType, tlaSrcElem, tlaDstElem, trait, src, mask, (bool)castOp.getMask());
+        b, fullMasks, loc, srcVecType, dstVecType, tlaSrcElem, tlaDstElem, trait, src, mask, hasUserMask);
     if (failed(result))
         return castOp.emitError("unsupported tla.cast element type conversion"), failure();
     valueMap[castOp.getResult()] = *result;
@@ -5529,11 +5553,12 @@ static LogicalResult lowerNestedVectorOp(
     };
     if (llvm::any_of(op.getOperandTypes(), isE8M0Vector) || llvm::any_of(op.getResultTypes(), isE8M0Vector)) {
         // AscendC b8 transport (SupportBytes<1>→uint8_t): NORM / byte Dist /
-        // DINTLV_B8 / Block / UnAlign / UPDATE. Reject non-transport ops below.
+        // DINTLV_B8 / Block / UnAlign / UPDATE, BF16 exponent extraction and UInt8 byte views.
         if (!isa<
                 ::tla::LoadOp, ::tla::StoreOp, ::tla::LoadUpdateOp, ::tla::StoreUpdateOp, ::tla::LoadUnalignUpdateOp,
-                ::tla::StoreUnalignUpdateOp, ::tla::FullOp, scf::ForOp, scf::IfOp>(op)) {
-            return op.emitError("E8M0 arithmetic and register casts are unsupported; only transport is allowed");
+                ::tla::StoreUnalignUpdateOp, ::tla::FullOp, ::tla::CastOp, ::tla::BitCastOp, scf::ForOp, scf::IfOp>(
+                op)) {
+            return op.emitError("E8M0 arithmetic is unsupported; use a UInt8 register view for byte operations");
         }
     }
     bool hasHiFloat8 = llvm::any_of(

@@ -598,7 +598,7 @@ first mismatch=None
   - **`load_store_update.py`**（i8/u8/i16/u16/f16/bf16/i32/u32/f32）：`add`，`tile.load` / `tile.store` 的 `post_mode=update` 滑动窗口；VL=`256B/sizeof(T)`；默认 `post_update_stride=0` 按 tile extent(=VL) 前进；`--dynamic-extent` / `--stride-geoms` 仍以 f32 覆盖动态 extent 与 stride≠VL。循环 `yield` 的是按指针造好的 tile。i64/u64 Align UPDATE 由 frontend UT 覆盖（本 e2e 路径的 `make_tensor_like`/GM↔UB 暂不收 b64）。
   - **`load_store_block_update.py`**（f32 / f16）：`add`，`Block*Params(post_mode=update, block_stride=1)` 滑动窗口；`repeat_stride` 以 32B DataBlock 计（一整 VL = 8）。
   - **`load_store_unalign.py`**（f32 / f16 / bf16）：`add`，环内 `Unalign*Params(post_mode=update)`（默认 `post_update_stride=0`→`tile_extent`；有效步长须在 `(0, VL]`）；干净 for 上 Pre/Post 在环外；`--offset 1` 起点非 32 字节对齐；`--mode once` 只走一圈 UPDATE。
-  - **`store_pack.py`**（输入 i32/i16）：op `store_pack`，先 trunc cast 再同类型 PACK（AscendC MulCast/GenStoreL2）：i32→i16 + `DIST_PACK_B32`、i16→i8 + `DIST_PACK_B16`，将 unpacked 窄类型 lane 紧凑写入。
+  - **`store_pack.py`** 先截断再执行同类型 PACK 存储。`i32` 转 `i16` 时用 `DIST_PACK_B32`，`i16` 转 `u8` 时用 `DIST_PACK_B16`，将槽位中的窄类型元素紧凑写入。
 
 - 约束说明：
   - 支持的数据类型：
@@ -615,7 +615,7 @@ first mismatch=None
   - `load_us_b8_op.py`：仅 i8；仅写 `LOOPS*VL` lane，其余保留 sentinel。
   - `load_store_update.py`：`post_mode=update` 要求元素类型为 b8/b16/b32/b64（整数 i/u 与 f16/bf16/f32）、rank-1 origin 窗口、`DIST_NORM`；默认 `post_update_stride=0`（前进 tile extent）；显式 stride 须 `> 0`。
   - `load_store_block_update.py`：`post_mode=update` 要求 origin 窗口（`coord=0`）、`repeat_stride > 0`（DataBlock 单位）、`block_stride` 在 `[0, 65535]`。
-  - `store_pack.py`：输入 i32/i16，cast 到 i16/i8 后同宽 PACK；固定 256 元素。
+  - `store_pack.py` 处理 256 个 `i32` 或 `i16` 输入元素。
 
 - 执行示例：
 
