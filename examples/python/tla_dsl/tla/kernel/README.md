@@ -24,6 +24,7 @@
 |------|------|
 | [`flash_attention_infer/`](attention/flash_attention_infer/README.md) | FlashAttention 推理样例，覆盖 KV 分页寻址、causal mask、GQA 与尾块场景。 |
 | [`block_mean_attention_score/`](attention/block_mean_attention_score/README.md) | 按 16-token Query/Key 块计算平均注意力概率，支持动态有效长度与尾块。 |
+| [`flash_attention_score_batch_invariant/`](attention/flash_attention_score_batch_invariant/README.md) | 训练前向 FlashAttentionScore 样例，输出 `softmax_max` / `softmax_sum`，覆盖 BNSD/BSH/TND/BSND 与 sparse_mode 0/1/2/3，保证 batch 一致性。 |
 
 ## 卷积（conv）
 

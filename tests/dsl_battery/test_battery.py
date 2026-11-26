@@ -847,6 +847,43 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
             "--mask", "none", "--no-paged", "--kvseqlen", "224", *dev,
         ]],
     )
+    # flash_attention_score_batch_invariant takes --sparse as a compile-time
+    # specialization of one kernel: 0 compiles without any mask code; 1/2/3 open
+    # the mask path, where 1 reads a dense S1 x S2 mask from GM and 2/3 generate
+    # the causal mask on the vector side. The layouts are host pack/restore paths
+    # around that kernel, so one case each is enough.
+    # Only BNSD/BSND run the whole-batch vs per-batch bitwise check; BSH and TND
+    # skip it, and TND instead compares a packed run against per-sequence runs.
+    fa_score = (
+        "tla/kernel/attention/flash_attention_score_batch_invariant"
+        "/flash_attention_score_batch_invariant.py"
+    )
+    for layout, sparse in (
+        ("BNSD", "0"),
+        ("BSH", "0"),
+        ("BNSD", "1"),
+        ("BSND", "1"),
+        ("BNSD", "2"),
+        ("BNSD", "3"),
+    ):
+        yield (
+            f"flash-attention-score-batch-invariant-{layout.lower()}-s{sparse}",
+            [[fa_score, "--layout", layout, "--sparse", sparse, *dev]],
+        )
+    # Uneven per-sequence lengths: 629 and 1341 split across three batches, so
+    # the packed run is checked against per-sequence unpacked runs.
+    yield (
+        "flash-attention-score-batch-invariant-tnd-s3",
+        [[
+            fa_score, "--layout", "TND", "--sparse", "3",
+            "--batch", "3", "--qseqlen", "629", "--kvseqlen", "1341", *dev,
+        ]],
+    )
+    # fp16 compiles its own kernels (is_fp16 Constexpr), on the dense-mask path.
+    yield (
+        "flash-attention-score-batch-invariant-fp16-s1",
+        [[fa_score, "--dtype", "fp16", "--sparse", "1", *dev]],
+    )
     yield (
         "lazy-conditions",
         [["dsl_tutorials/lazy_conditions/lazy_conditions.py", *dev]],
