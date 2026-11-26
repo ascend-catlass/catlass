@@ -1,0 +1,13 @@
+// RUN: not %tla_compile %s -o - 2>&1 | %filecheck %s
+
+// The divisor, magic and shift are one width-sized problem. Each type is
+// individually i32/i64 by the ODS constraint, but mixing them is rejected so the
+// caller never receives a pair it could not feed back together.
+// CHECK: divisor, magic and shift must share one type
+
+module {
+  func.func @mixed_width(%d: i32) -> i64 {
+    %magic, %shift = tla.scalar_fast_div_divisor %d : i32 -> i64, i64
+    return %magic : i64
+  }
+}

@@ -1,0 +1,49 @@
+// RUN: split-file %s %t
+// RUN: not %tla_compile %t/divisor.mlir -o - 2>&1 | %filecheck %s --check-prefix=DIVISOR
+// RUN: not %tla_compile %t/div_shift.mlir -o - 2>&1 | %filecheck %s --check-prefix=SHIFT
+// RUN: not %tla_compile %t/div_dividend.mlir -o - 2>&1 | %filecheck %s --check-prefix=DIVIDEND
+// RUN: not %tla_compile %t/mod_divisor.mlir -o - 2>&1 | %filecheck %s --check-prefix=MODDIV
+
+// Constant operands that leave the algorithm's domain are rejected before the
+// bitcode's division-by-zero or out-of-range shift. A constant with the top bit
+// set is read as an unsigned value and fails the range.
+// DIVISOR: constant divisor must be in [1, 2147483647], got 0
+// SHIFT: constant shift must be in [0, 31], got 32
+// DIVIDEND: constant dividend must be in [0, 2147483647], got -1
+// MODDIV: constant divisor must be in [1, 2147483647], got 0
+
+//--- divisor.mlir
+module {
+  func.func @zero_divisor() {
+    %c0 = arith.constant 0 : i32
+    %m, %s = tla.scalar_fast_div_divisor %c0 : i32 -> i32, i32
+    return
+  }
+}
+
+//--- div_shift.mlir
+module {
+  func.func @shift_ge_width(%x: i32, %m: i32) -> i32 {
+    %c32 = arith.constant 32 : i32
+    %q = tla.scalar_simd_fast_div %x, %m, %c32 : i32, i32, i32 -> i32
+    return %q : i32
+  }
+}
+
+//--- div_dividend.mlir
+module {
+  func.func @negative_dividend(%m: i32, %s: i32) -> i32 {
+    %cneg = arith.constant -1 : i32
+    %q = tla.scalar_simd_fast_div %cneg, %m, %s : i32, i32, i32 -> i32
+    return %q : i32
+  }
+}
+
+//--- mod_divisor.mlir
+module {
+  func.func @mod_zero_divisor(%x: i32, %m: i32, %s: i32) -> i32 {
+    %c0 = arith.constant 0 : i32
+    %r = tla.scalar_simd_fast_mod %x, %c0, %m, %s : i32, i32, i32, i32 -> i32
+    return %r : i32
+  }
+}

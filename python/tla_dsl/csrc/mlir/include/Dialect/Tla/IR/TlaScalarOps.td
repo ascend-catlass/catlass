@@ -89,6 +89,96 @@ def Tla_ScalarRoundCastOp : Tla_Op<"scalar_round_cast", [Pure]> {
   }];
 }
 
+def Tla_ScalarFastDivDivisor : Tla_Op<"scalar_fast_div_divisor", [Pure]> {
+  let summary = "Precompute the magic/shift pair for fast unsigned division";
+  let description = [{
+    Compute ``(magic, shift)`` for a fixed, non-zero unsigned ``divisor``. This
+    is the asc-devkit/``asc_uintdiv`` pair, consumed by the SIMD fast-div ops as
+    ``(x + mulhi_w(x, magic)) >> shift``. ``divisor``, ``magic`` and ``shift``
+    all carry the same width: ``i32`` selects the 32-bit variant and ``i64`` the
+    64-bit one.
+
+    ``shift = ceil(log2(divisor))`` and ``magic = floor(2^N * (2^shift - divisor)
+    / divisor) + 1`` with ``N`` equal to the operand width. The 32-bit variant
+    evaluates that closed form directly; the 64-bit ``magic`` has no single
+    instruction and is produced by a software long division. Both use the
+    scalar unit's ``clz`` and ``bcnt1``.
+
+    This op is Ascend 950 (3510) only and runs on the scalar unit, so it must be
+    placed directly in a ``tla.cube()`` or ``tla.vector()`` region, outside
+    ``tla.vec.func``. The divisor must be positive and no larger than
+    ``INT32_MAX`` (``i32``) or ``INT64_MAX`` (``i64``); behavior outside that
+    range is undefined. Nothing in the IR computes a single intrinsic, so
+    ``tla-lower-scalar-ops`` rewrites this into two calls -- shift first, then
+    magic from ``(divisor, shift)`` -- to
+    ``_mlir_ciface_tla_fast_div_{shift,magic}_32`` or
+    ``_mlir_ciface_tla_fast_div_{shift,magic}_64`` from the scalar bitcode.
+  }];
+  let arguments = (ins AnyTypeOf<[I32, I64]>:$divisor);
+  let results = (outs AnyTypeOf<[I32, I64]>:$magic, AnyTypeOf<[I32, I64]>:$shift);
+  let hasVerifier = 1;
+  let assemblyFormat = [{
+    $divisor attr-dict `:` type($divisor) `->` type($magic) `,` type($shift)
+  }];
+}
+
+def Tla_ScalarSimdFastDiv : Tla_Op<"scalar_simd_fast_div", [Pure]> {
+  let summary = "SIMD-side fast unsigned division by a precomputed magic/shift";
+  let description = [{
+    Divide an unsigned ``dividend`` by a fixed divisor using the ``(magic,
+    shift)`` pair from ``tla.scalar_fast_div_divisor``:
+
+    ``quotient = (dividend + mulhi_W(dividend, magic)) >> shift``
+
+    This is the asc-devkit/``asc_uintdiv`` "add" form, not the bare
+    ``mulhi >> shift`` form. The dividend and the divisor obey the API range:
+    the dividend is at most ``INT32_MAX`` (``i32``) / ``INT64_MAX`` (``i64``),
+    which also keeps ``dividend + mulhi`` inside one N-bit word, and the divisor
+    is in ``[1, INT32_MAX]`` / ``[1, INT64_MAX]``. ``magic`` is the unsigned bit
+    pattern of the same width and may exceed ``INT_MAX`` (a valid divisor such
+    as 5 already does); ``shift`` is the precomputed shift amount.
+    ``dividend``, ``magic``, ``shift`` and the result must keep one width.
+
+    It runs on the scalar unit of the SIMD (AIV) core, so it must be placed
+    directly in ``tla.vector()`` (or ``tla.cube()``), outside ``tla.vec.func``.
+    ``tla-lower-scalar-ops`` rewrites it into
+    ``_mlir_ciface_tla_simd_fast_div_32`` / ``_64`` from the scalar bitcode,
+    which computes ``mulhi`` in software.
+  }];
+  let arguments = (ins AnyTypeOf<[I32, I64]>:$dividend,
+                       AnyTypeOf<[I32, I64]>:$magic,
+                       AnyTypeOf<[I32, I64]>:$shift);
+  let results = (outs AnyTypeOf<[I32, I64]>:$quotient);
+  let hasVerifier = 1;
+  let assemblyFormat = [{
+    $dividend `,` $magic `,` $shift attr-dict `:` type($dividend) `,` type($magic) `,` type($shift) `->` type($quotient)
+  }];
+}
+
+def Tla_ScalarSimdFastMod : Tla_Op<"scalar_simd_fast_mod", [Pure]> {
+  let summary = "SIMD-side fast unsigned remainder by a precomputed magic/shift";
+  let description = [{
+    Remainder of an unsigned ``dividend`` by a fixed ``divisor``. The quotient
+    is ``(dividend + mulhi_W(dividend, magic)) >> shift`` and the remainder is
+    ``dividend - quotient * divisor``.
+
+    Same width and placement, and the same dividend/divisor bounds, as
+    ``tla.scalar_simd_fast_div``. ``magic`` is the unsigned bit pattern of that
+    width (it may exceed ``INT_MAX``) and ``shift`` is the precomputed shift
+    amount; neither is subject to the dividend/divisor bound. Lowered to
+    ``_mlir_ciface_tla_simd_fast_mod_32`` / ``_64`` from the scalar bitcode.
+  }];
+  let arguments = (ins AnyTypeOf<[I32, I64]>:$dividend,
+                       AnyTypeOf<[I32, I64]>:$divisor,
+                       AnyTypeOf<[I32, I64]>:$magic,
+                       AnyTypeOf<[I32, I64]>:$shift);
+  let results = (outs AnyTypeOf<[I32, I64]>:$remainder);
+  let hasVerifier = 1;
+  let assemblyFormat = [{
+    $dividend `,` $divisor `,` $magic `,` $shift attr-dict `:` type($dividend) `,` type($divisor) `,` type($magic) `,` type($shift) `->` type($remainder)
+  }];
+}
+
 def Tla_ScalarBitOp : Tla_Op<"scalar_bit_op", [Pure]> {
   let summary = "Scalar uint64 bit-manipulation query";
   let description = [{

@@ -973,6 +973,18 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         [["end_to_end/u64_scalar_ops.py", *dev, "--batch-run"]],
     )
 
+    # --- end_to_end: fast unsigned division (magic/shift) and SIMD // / % ---
+    # Action1 precomputes the asc-devkit magic/shift pair; Action2 consumes it
+    # through the reflected operators, both per width (32-bit and 64-bit).
+    yield (
+        "fast-div-get-divisor",
+        [["end_to_end/fast_div_get_divisor.py", *dev]],
+    )
+    yield (
+        "fast-divmod-simd",
+        [["end_to_end/fast_divmod_simd.py", *dev]],
+    )
+
     # --- multi_core_splitk_matmul and tail_multi_core_splitk_matmul ---
     for script in ("multi_core_splitk_matmul.py", "tail_multi_core_splitk_matmul.py"):
         for m, n, k in MMAD_SHAPES + BIG_SHAPES:

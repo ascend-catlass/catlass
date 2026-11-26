@@ -292,3 +292,44 @@ import catlass.tla as tla
 tile_count = tla.ceil_div(129, 64)
 zero = tla.ceil_div(129, 0)
 ```
+
+---
+
+## `tla.fast_div_get_divisor`
+
+**源码：** [`catlass.core_api.fast_div_get_divisor`](../../../../catlass/core_api.py)
+
+功能说明：
+
+为固定除数 `divisor` 预计算无符号快速除法所需的 `FastDivDivisor`。返回对象提供 `magic`、`shift` 和归一化后的 `divisor_mlir`，应通过反射运算符使用：`x // fd` 计算 `(x + mulhi_w(x, magic)) >> shift`，`x % fd` 返回 `x - quotient * divisor`。商与余数均为与除数同宽的 `UInt32` / `UInt64`。
+
+当除数位于 `[1, INT32_MAX]`（`i32`）或 `[1, INT64_MAX]`（`i64`），且被除数不超过 `INT32_MAX` / `INT64_MAX` 时，预计算结果精确。除数必须非零且非负（即大于 0），`shift` 小于操作数位宽。运行期值不会做动态校验，须由调用方保证这些约束。`magic` 是同宽的无符号位模式，可能超过 `INT_MAX`；`shift` 是预计算得到的移位量。
+
+函数原型：
+
+```python
+tla.fast_div_get_divisor(divisor: Any) -> FastDivDivisor
+```
+
+参数说明：
+
+- `divisor`：`UInt32` / `UInt64` 标量、裸整数 SSA、运行期 kernel 标量参数或 Python `int`。`Numeric` 或 SSA 按位宽转换；Python `int` 按数值范围转换。
+
+约束说明：
+
+- 必须在 `@tla.kernel` 装饰的 kernel 函数内调用。
+- 必须位于 `tla.cube()` 或 `tla.vector()` 区域，且在 `tla.vec.func` 之外。
+- 除数必须非零、非负，且不超过 `INT32_MAX`（32 位变体）或 `INT64_MAX`（64 位变体）；大于 `INT32_MAX` 的 Python `int` 会选择 64 位变体。运行期值不做校验。
+- `shift` 小于操作数位宽（32 或 64 位）。
+- 后续 `x // fd` / `x % fd` 的被除数同样不得超过 `INT32_MAX` / `INT64_MAX`（运行期值由调用方保证）。
+- 仅支持 Ascend 950（3510）。
+
+调用示例：
+
+```python
+with tla.vector():
+    fd = tla.fast_div_get_divisor(divisor)
+    quotient = x // fd   # 反射 __rfloordiv__
+    remainder = x % fd   # 反射 __rmod__
+    magic, shift = fd.magic, fd.shift
+```

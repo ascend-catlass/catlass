@@ -1,0 +1,25 @@
+// RUN: split-file %s %t
+// RUN: not %tla_compile %t/div.mlir -o - 2>&1 | %filecheck %s --check-prefix=DIV
+// RUN: not %tla_compile %t/mod.mlir -o - 2>&1 | %filecheck %s --check-prefix=MOD
+
+// The dividend, the precomputed pair and the result form one width-sized
+// problem; mixing widths is rejected so the caller never feeds a pair into a
+// word of a different size.
+// DIV: dividend, magic, shift and quotient must share one type
+// MOD: dividend, divisor, magic, shift and remainder must share one type
+
+//--- div.mlir
+module {
+  func.func @bad(%x: i32, %m: i64, %s: i64) -> i64 {
+    %q = tla.scalar_simd_fast_div %x, %m, %s : i32, i64, i64 -> i64
+    return %q : i64
+  }
+}
+
+//--- mod.mlir
+module {
+  func.func @bad(%x: i32, %d: i32, %m: i64, %s: i64) -> i64 {
+    %r = tla.scalar_simd_fast_mod %x, %d, %m, %s : i32, i32, i64, i64 -> i64
+    return %r : i64
+  }
+}

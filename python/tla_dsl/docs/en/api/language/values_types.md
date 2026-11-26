@@ -297,3 +297,63 @@ import catlass.tla as tla
 tile_count = tla.ceil_div(129, 64)
 zero = tla.ceil_div(129, 0)
 ```
+
+---
+
+## `tla.fast_div_get_divisor`
+
+**Source:** [`catlass.core_api.fast_div_get_divisor`](../../../../catlass/core_api.py)
+
+Description:
+
+Precompute a `FastDivDivisor` for unsigned fast division by a fixed
+`divisor`. The returned object exposes `magic`, `shift` and the coerced
+`divisor_mlir`, and is consumed through the reflected operators:
+`x // fd` computes `(x + mulhi_w(x, magic)) >> shift`, and `x % fd`
+returns `x - quotient * divisor`. Both results are `UInt32` / `UInt64`
+values of the divisor's width.
+
+The precompute is exact for a divisor in `[1, INT32_MAX]` (`i32`) or
+`[1, INT64_MAX]` (`i64`) and dividends up to `INT32_MAX` / `INT64_MAX`.
+The divisor must be non-zero and non-negative (i.e. positive), and
+`shift` is below the operand width. No dynamic check is emitted for
+runtime values, so the caller must guarantee these. `magic` is the
+unsigned bit pattern of the same width and may exceed `INT_MAX`;
+`shift` is the precomputed shift amount.
+
+Prototype:
+
+```python
+tla.fast_div_get_divisor(divisor: Any) -> FastDivDivisor
+```
+
+Parameters:
+
+- `divisor`: a `UInt32` / `UInt64` scalar, a bare integer SSA, a runtime
+  kernel scalar argument, or a Python `int`. A `Numeric` or SSA is
+  converted by its bit width; a Python `int` is converted by its value
+  range.
+
+Constraints:
+
+- Must be called inside a `@tla.kernel`-decorated kernel function.
+- Must be placed in a `tla.cube()` or `tla.vector()` region, outside
+  `tla.vec.func`.
+- The divisor must be non-zero, non-negative, and no larger than
+  `INT32_MAX` (32-bit variant) or `INT64_MAX` (64-bit variant); a
+  Python `int` above `INT32_MAX` selects the 64-bit variant. Runtime
+  values are not checked.
+- `shift` is below the operand width (32 or 64 bits).
+- The dividend of a later `x // fd` / `x % fd` must also be at most
+  `INT32_MAX` / `INT64_MAX` (runtime values are the caller's contract).
+- Ascend 950 (3510) only.
+
+Example:
+
+```python
+with tla.vector():
+    fd = tla.fast_div_get_divisor(divisor)
+    quotient = x // fd   # reflected __rfloordiv__
+    remainder = x % fd   # reflected __rmod__
+    magic, shift = fd.magic, fd.shift
+```

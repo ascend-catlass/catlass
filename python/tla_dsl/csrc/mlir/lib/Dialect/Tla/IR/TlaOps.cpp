@@ -19,6 +19,7 @@
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/Matchers.h"
 #include "mlir/IR/OpImplementation.h"
+#include "llvm/ADT/APInt.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSwitch.h"
@@ -3371,6 +3372,103 @@ mlir::LogicalResult ScalarBitOp::verify()
         if (getMode() == mode)
             return mlir::success();
     return emitOpError() << "unsupported bit query \"" << getMode() << "\"";
+}
+
+namespace {
+
+// Value of an integer constant operand, or nullopt when it is runtime. The
+// signless carrier is read as an unsigned bit pattern: a constant with the top
+// bit set shows up negative and fails the ranges below, which is exactly the
+// out-of-domain case these unsigned ops must reject.
+std::optional<int64_t> scalarConstantInt(mlir::Value value)
+{
+    llvm::APInt constant;
+    if (mlir::matchPattern(value, mlir::m_ConstantInt(&constant)))
+        return constant.getSExtValue();
+    return std::nullopt;
+}
+
+int64_t fastDivUpperBound(mlir::Type type)
+{
+    return type.isInteger(32) ? static_cast<int64_t>(std::numeric_limits<int32_t>::max()) :
+                                std::numeric_limits<int64_t>::max();
+}
+
+mlir::LogicalResult verifyFastDivConstantRange(
+    mlir::Operation* op, mlir::Value value, int64_t low, int64_t high, llvm::StringRef what)
+{
+    std::optional<int64_t> constant = scalarConstantInt(value);
+    if (!constant)
+        return mlir::success();
+    if (*constant < low || *constant > high)
+        return op->emitOpError() << "constant " << what << " must be in [" << low << ", " << high << "], got "
+                                 << *constant;
+    return mlir::success();
+}
+
+} // namespace
+
+mlir::LogicalResult ScalarFastDivDivisor::verify()
+{
+    // The three values form one narrow or one wide problem: the magic and
+    // shift are produced in the same width as the divisor, and mixing widths
+    // would leave the caller with a pair it could not feed back together.
+    mlir::Type divisor = getDivisor().getType();
+    mlir::Type magic = getMagic().getType();
+    mlir::Type shift = getShift().getType();
+    if (!divisor.isInteger(32) && !divisor.isInteger(64))
+        return emitOpError() << "expects an i32 or i64 divisor, got " << divisor;
+    if (magic != divisor || shift != divisor)
+        return emitOpError() << "divisor, magic and shift must share one type, got " << divisor << ", " << magic
+                             << " and " << shift;
+    // A constant zero divisor would reach the bitcode's division-by-zero.
+    if (failed(verifyFastDivConstantRange(getOperation(), getDivisor(), 1, fastDivUpperBound(divisor), "divisor")))
+        return mlir::failure();
+    return mlir::success();
+}
+
+mlir::LogicalResult ScalarSimdFastDiv::verify()
+{
+    // One width-sized problem: the dividend, the precomputed pair and the
+    // quotient all belong to the same i32 or i64 domain.
+    mlir::Type dividend = getDividend().getType();
+    mlir::Type magic = getMagic().getType();
+    mlir::Type shift = getShift().getType();
+    mlir::Type quotient = getQuotient().getType();
+    if (!dividend.isInteger(32) && !dividend.isInteger(64))
+        return emitOpError() << "expects an i32 or i64 dividend, got " << dividend;
+    if (magic != dividend || shift != dividend || quotient != dividend)
+        return emitOpError() << "dividend, magic, shift and quotient must share one type, got " << dividend << ", "
+                             << magic << ", " << shift << " and " << quotient;
+    int64_t width = dividend.isInteger(32) ? 32 : 64;
+    if (failed(verifyFastDivConstantRange(getOperation(), getDividend(), 0, fastDivUpperBound(dividend), "dividend")))
+        return mlir::failure();
+    if (failed(verifyFastDivConstantRange(getOperation(), getShift(), 0, width - 1, "shift")))
+        return mlir::failure();
+    return mlir::success();
+}
+
+mlir::LogicalResult ScalarSimdFastMod::verify()
+{
+    mlir::Type dividend = getDividend().getType();
+    mlir::Type divisor = getDivisor().getType();
+    mlir::Type magic = getMagic().getType();
+    mlir::Type shift = getShift().getType();
+    mlir::Type remainder = getRemainder().getType();
+    if (!dividend.isInteger(32) && !dividend.isInteger(64))
+        return emitOpError() << "expects an i32 or i64 dividend, got " << dividend;
+    if (divisor != dividend || magic != dividend || shift != dividend || remainder != dividend)
+        return emitOpError() << "dividend, divisor, magic, shift and remainder must "
+                                "share one type, got "
+                             << dividend << ", " << divisor << ", " << magic << ", " << shift << " and " << remainder;
+    int64_t width = dividend.isInteger(32) ? 32 : 64;
+    if (failed(verifyFastDivConstantRange(getOperation(), getDividend(), 0, fastDivUpperBound(dividend), "dividend")))
+        return mlir::failure();
+    if (failed(verifyFastDivConstantRange(getOperation(), getDivisor(), 1, fastDivUpperBound(dividend), "divisor")))
+        return mlir::failure();
+    if (failed(verifyFastDivConstantRange(getOperation(), getShift(), 0, width - 1, "shift")))
+        return mlir::failure();
+    return mlir::success();
 }
 
 mlir::LogicalResult SimtCmpOp::verify()

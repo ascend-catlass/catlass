@@ -1980,24 +1980,25 @@ def _is_bool_like_pad_operand(value: Any) -> bool:
     return False
 
 
-def _as_signless_i64_ssa(
-    value: mlir_ir.Value, *, what: str, loc: mlir_ir.Location | None = None
+def _as_signless_int_ssa(
+    value: mlir_ir.Value,
+    width: int,
+    *,
+    what: str,
+    loc: mlir_ir.Location | None = None,
 ) -> mlir_ir.Value:
-    """Bridge an integer SSA value to signless ``i64``.
+    """Bridge an integer SSA value to the signless ``i<width>``.
 
-    Unsigned integers go uiN→iN via ``builtin.unrealized_conversion_cast`` then
-    ``arith.extui`` (or identity at width 64), never the signed ``arith.extsi``
-    path.
-    ``index`` is cast with ``arith.index_cast``. Rejects ``i1``; callers
-    that allow only one width should check ``IntegerType.width`` first.
+    ``arith.*`` only accepts signless integers, so an unsigned ``uiN`` first goes
+    through ``builtin.unrealized_conversion_cast`` to its signless carrier and is
+    then widened/narrowed. ``index`` is cast with ``arith.index_cast``. Rejects
+    ``i1``; callers that allow only one width should check ``IntegerType.width``
+    first.
     """
-    i64_type = mlir_ir.IntegerType.get_signless(64)
+    signless = mlir_ir.IntegerType.get_signless(width)
     if isinstance(value.type, mlir_ir.IndexType):
         return mlir_ir.Operation.create(
-            "arith.index_cast",
-            operands=[value],
-            results=[i64_type],
-            loc=loc,
+            "arith.index_cast", operands=[value], results=[signless], loc=loc
         ).results[0]
     if mlir_ir.IntegerType.isinstance(value.type):
         int_type = mlir_ir.IntegerType(value.type)
@@ -2007,37 +2008,37 @@ def _as_signless_i64_ssa(
                 "use a non-boolean integer (e.g. Int32/Int64)"
             )
         if int_type.is_unsigned:
-            # arith.* only accepts signless ints; uiN → iN via
+            # arith.* only accepts signless ints; uiN -> iN via
             # unrealized_conversion_cast (same pattern as debug print).
-            signless_n = mlir_ir.IntegerType.get_signless(int_type.width)
-            as_signless = mlir_ir.Operation.create(
+            carrier = mlir_ir.Operation.create(
                 "builtin.unrealized_conversion_cast",
                 operands=[value],
-                results=[signless_n],
+                results=[mlir_ir.IntegerType.get_signless(int_type.width)],
                 loc=loc,
             ).results[0]
-            if int_type.width == 64:
-                return as_signless
-            if int_type.width < 64:
-                return mlir_ir.Operation.create(
-                    "arith.extui",
-                    operands=[as_signless],
-                    results=[i64_type],
-                    loc=loc,
-                ).results[0]
-            raise TypeError(
-                f"{what} unsigned width {int_type.width} cannot widen to i64"
-            )
-        if int_type.width == 64:
+            if int_type.width == width:
+                return carrier
+            if int_type.width > width:
+                raise TypeError(
+                    f"{what} unsigned width {int_type.width} cannot narrow to {width}"
+                )
+            return mlir_ir.Operation.create(
+                "arith.extui", operands=[carrier], results=[signless], loc=loc
+            ).results[0]
+        if int_type.width == width:
             return value
-        cast_name = "arith.extsi" if int_type.width < 64 else "arith.trunci"
+        cast = "arith.extsi" if int_type.width < width else "arith.trunci"
         return mlir_ir.Operation.create(
-            cast_name,
-            operands=[value],
-            results=[i64_type],
-            loc=loc,
+            cast, operands=[value], results=[signless], loc=loc
         ).results[0]
-    raise TypeError(f"{what} expected i64-like integer SSA, got {value.type}")
+    raise TypeError(f"{what} expected an integer SSA value, got {value.type}")
+
+
+def _as_signless_i64_ssa(
+    value: mlir_ir.Value, *, what: str, loc: mlir_ir.Location | None = None
+) -> mlir_ir.Value:
+    """Bridge an integer SSA value to signless ``i64`` (width-64 specialization)."""
+    return _as_signless_int_ssa(value, 64, what=what, loc=loc)
 
 
 def _as_i64_copy_pad_operand(
@@ -16880,6 +16881,421 @@ def arch_sff1(value: Any, *, loc: mlir_ir.Location | None = None) -> Int64:
     return _emit_arch_bit_op("arch.sff1", "sff1", value, loc=loc)
 
 
+# Largest divisor the fast-division closed form / long division is defined on.
+_FAST_DIV_INT32_MAX = (1 << 31) - 1
+_FAST_DIV_INT64_MAX = (1 << 63) - 1
+# Diagnostics op-name for the reflected fast-div operators.
+_FAST_DIVMOD_OP = "fast_div_get_divisor"
+
+
+def _bare_int_ssa_width(value: mlir_ir.Value, *, op_name: str, what: str) -> int:
+    """Validate a bare integer SSA operand and return its bit width.
+
+    Mirrors ``_as_u64_bit_operand``'s handling of a raw ``mlir_ir.Value``: only
+    an integer type is meaningful here, and ``i1`` is never a scalar operand.
+    """
+    if isinstance(value.type, mlir_ir.IndexType):
+        _op_error(op_name, f"{what} must be an integer SSA, not index")
+    if not mlir_ir.IntegerType.isinstance(value.type):
+        _op_error(op_name, f"{what} must be an integer SSA, got {value.type}")
+    int_type = mlir_ir.IntegerType(value.type)
+    if int_type.width == 1:
+        _op_error(op_name, f"{what} must not be i1/bool")
+    return int_type.width
+
+
+def _wrap_bare_uint_ssa(
+    value: mlir_ir.Value, width: int, *, what: str, loc: mlir_ir.Location | None
+) -> Numeric:
+    """Wrap a bare integer SSA as ``UInt32`` / ``UInt64`` of ``width``.
+
+    A bare value carries no signedness, so it is read as an unsigned bit
+    pattern: first take a same-width signless carrier (bits unchanged), then
+    zero-extend with ``arith.extui`` to the target width.
+    """
+    if not mlir_ir.IntegerType.isinstance(value.type):
+        raise TypeError(f"{what} expected an integer SSA, got {value.type}")
+    src_width = mlir_ir.IntegerType(value.type).width
+    if src_width > width:
+        raise TypeError(f"{what} is {src_width}-bit, wider than the {width}-bit target")
+
+    signless_src_type = mlir_ir.IntegerType.get_signless(src_width)
+    if value.type == signless_src_type:
+        signless_src = value
+    else:
+        signless_src = mlir_ir.Operation.create(
+            "builtin.unrealized_conversion_cast",
+            operands=[value],
+            results=[signless_src_type],
+            loc=loc,
+        ).results[0]
+
+    if src_width != width:
+        signless_src = mlir_ir.Operation.create(
+            "arith.extui",
+            operands=[signless_src],
+            results=[mlir_ir.IntegerType.get_signless(width)],
+            loc=loc,
+        ).results[0]
+
+    target = UInt32 if width == 32 else UInt64
+    return target(_as_unsigned_view(signless_src, width, loc=loc))
+
+
+def _fast_div_divisor_numeric(divisor: Any, *, loc: mlir_ir.Location | None) -> Numeric:
+    """Coerce a fast-division divisor to ``UInt32`` or ``UInt64``.
+
+    A ``Numeric`` (host literal or runtime proxy) is converted by its bit width;
+    a Python ``int`` is converted by its value range. The 32-bit variant only
+    accepts divisors up to ``INT32_MAX`` and the 64-bit one up to ``INT64_MAX``,
+    which is the domain its closed form / long division is defined on. The
+    divisor must be positive.
+    """
+    if isinstance(divisor, bool) or isinstance(divisor, Bool):
+        _op_error("fast_div_get_divisor", "divisor must be an integer, not bool")
+    resolved = _resolve_bound_value(divisor)
+
+    if isinstance(resolved, Numeric):
+        if not type(resolved).is_integer:
+            _op_error(
+                "fast_div_get_divisor",
+                f"divisor must be an integer, got {type(resolved).__name__}",
+            )
+        if isinstance(resolved, Bool):
+            _op_error("fast_div_get_divisor", "divisor must be an integer, not Bool")
+        width = type(resolved).width
+        if width <= 32:
+            target, limit = UInt32, _FAST_DIV_INT32_MAX
+        elif width <= 64:
+            target, limit = UInt64, _FAST_DIV_INT64_MAX
+        else:
+            _op_error(
+                "fast_div_get_divisor",
+                f"divisor width {width} is wider than 64 bits",
+            )
+        host = resolved.value
+        if isinstance(host, int) and not isinstance(host, bool):
+            if not 1 <= host <= limit:
+                _op_error(
+                    "fast_div_get_divisor",
+                    f"divisor must be in [1, {limit}] for {target.__name__}, got {host}",
+                )
+            return target(host)
+        if isinstance(resolved, target):
+            # Already the requested unsigned width (runtime value / proxy).
+            return resolved
+        # Another integer width or signedness: keep the width, view it as
+        # unsigned. ``arith.bitcast`` rejects an unsigned result, so use the
+        # placeholder cast that the backend resolves to a no-op.
+        signless = _as_signless_int_ssa(
+            resolved.ir_value(loc=loc),
+            target.width,
+            what="fast_div_get_divisor divisor",
+            loc=loc,
+        )
+        return target(_as_unsigned_view(signless, target.width, loc=loc))
+
+    if isinstance(resolved, int) and not isinstance(resolved, bool):
+        if not 1 <= resolved <= _FAST_DIV_INT64_MAX:
+            _op_error(
+                "fast_div_get_divisor",
+                f"divisor must be in [1, {_FAST_DIV_INT64_MAX}], got {resolved}",
+            )
+        if resolved <= _FAST_DIV_INT32_MAX:
+            return UInt32(resolved)
+        return UInt64(resolved)
+
+    if isinstance(resolved, mlir_ir.Value):
+        value_width = _bare_int_ssa_width(
+            resolved, op_name="fast_div_get_divisor", what="divisor"
+        )
+        if value_width > 64:
+            _op_error(
+                "fast_div_get_divisor",
+                f"divisor width {value_width} is wider than 64 bits",
+            )
+        target_width = 32 if value_width <= 32 else 64
+        return _wrap_bare_uint_ssa(
+            resolved, target_width, what="fast_div_get_divisor divisor", loc=loc
+        )
+
+    _op_error(
+        "fast_div_get_divisor",
+        "divisor must be a UInt32/UInt64 scalar or a Python int, "
+        f"got {_type_name(divisor)}",
+    )
+
+
+def _as_unsigned_view(
+    value: mlir_ir.Value, width: int, *, loc: mlir_ir.Location | None = None
+) -> mlir_ir.Value:
+    """View a signless ``i<width>`` SSA value as its unsigned ``ui<width>``.
+
+    ``arith.bitcast`` does not accept an unsigned result type, so the same-bit
+    reinterpretation goes through the placeholder cast the backend elides.
+    """
+    unsigned = mlir_ir.IntegerType.get_unsigned(width)
+    if value.type == unsigned:
+        return value
+    return mlir_ir.Operation.create(
+        "builtin.unrealized_conversion_cast",
+        operands=[value],
+        results=[unsigned],
+        loc=loc,
+    ).results[0]
+
+
+def _numeric_to_signless_int(
+    value: Numeric, width: int, *, what: str, loc: mlir_ir.Location | None = None
+) -> mlir_ir.Value:
+    """Signless ``i<width>`` SSA for a Numeric (host literal or runtime value)."""
+    host = value.value
+    if isinstance(host, int) and not isinstance(host, bool):
+        return _const_i32(host, loc=loc) if width == 32 else _const_i64(host, loc=loc)
+    return _as_signless_int_ssa(value.ir_value(loc=loc), width, what=what, loc=loc)
+
+
+def _emit_fast_div_divisor(
+    divisor: Numeric, *, loc: mlir_ir.Location | None
+) -> tuple[mlir_ir.Value, mlir_ir.Value]:
+    """Emit ``tla.scalar_fast_div_divisor``; return the signless results.
+
+    The raw ``i<width>`` results are returned so the SIMD fast div/mod ops can
+    consume them without an unsigned round-trip; the public ``magic`` / ``shift``
+    properties wrap them as `UInt32` / `UInt64`.
+    """
+    width = type(divisor).width
+    int_type = mlir_ir.IntegerType.get_signless(width)
+    operand = _numeric_to_signless_int(
+        divisor, width, what="fast_div_get_divisor divisor", loc=loc
+    )
+    values = _tla_ops_gen.scalar_fast_div_divisor(int_type, int_type, operand, loc=loc)
+    return values[0], values[1]
+
+
+def _fast_div_dividend_numeric(
+    value: Any, width: int, *, loc: mlir_ir.Location | None
+) -> Numeric:
+    """Coerce a fast-division dividend to ``UInt32`` / ``UInt64``.
+
+    The dividend is forced to the divisor's width: a narrower integer widens, a
+    wider one is rejected. The asc-devkit algorithm is only exact while the
+    dividend is at most ``INT32_MAX`` (32-bit) / ``INT64_MAX`` (64-bit), which
+    also keeps ``dividend + mulhi`` from wrapping.
+    """
+    target = UInt32 if width == 32 else UInt64
+    limit = _FAST_DIV_INT32_MAX if width == 32 else _FAST_DIV_INT64_MAX
+    if isinstance(value, bool) or isinstance(value, Bool):
+        _op_error(_FAST_DIVMOD_OP, "dividend must be an integer, not bool")
+    resolved = _resolve_bound_value(value)
+
+    if isinstance(resolved, Numeric):
+        if not type(resolved).is_integer:
+            _op_error(
+                _FAST_DIVMOD_OP,
+                f"dividend must be an integer, got {type(resolved).__name__}",
+            )
+        if isinstance(resolved, Bool):
+            _op_error(_FAST_DIVMOD_OP, "dividend must be an integer, not Bool")
+        if type(resolved).width > width:
+            _op_error(
+                _FAST_DIVMOD_OP,
+                f"dividend is {type(resolved).width}-bit, wider than the "
+                f"{width}-bit divisor",
+            )
+        host = resolved.value
+        if isinstance(host, int) and not isinstance(host, bool):
+            if not 0 <= host <= limit:
+                _op_error(
+                    _FAST_DIVMOD_OP, f"dividend must be in [0, {limit}], got {host}"
+                )
+            return target(host)
+        if isinstance(resolved, target):
+            return resolved
+        signless = _as_signless_int_ssa(
+            resolved.ir_value(loc=loc),
+            width,
+            what="fast_divmod dividend",
+            loc=loc,
+        )
+        return target(_as_unsigned_view(signless, width, loc=loc))
+
+    if isinstance(resolved, int) and not isinstance(resolved, bool):
+        if not 0 <= resolved <= limit:
+            _op_error(
+                _FAST_DIVMOD_OP, f"dividend must be in [0, {limit}], got {resolved}"
+            )
+        return target(resolved)
+
+    if isinstance(resolved, mlir_ir.Value):
+        value_width = _bare_int_ssa_width(
+            resolved, op_name=_FAST_DIVMOD_OP, what="dividend"
+        )
+        if value_width > width:
+            _op_error(
+                _FAST_DIVMOD_OP,
+                f"dividend is {value_width}-bit, wider than the {width}-bit divisor",
+            )
+        return _wrap_bare_uint_ssa(
+            resolved, width, what="fast_divmod dividend", loc=loc
+        )
+
+    _op_error(
+        _FAST_DIVMOD_OP,
+        "dividend must be a UInt32/UInt64 scalar or a Python int, "
+        f"got {_type_name(value)}",
+    )
+
+
+class FastDivDivisor:
+    """A ``(magic, shift)`` pair for fast unsigned division by a fixed divisor.
+
+    This is the asc-devkit/``asc_uintdiv`` pair, so the consumer folds in the
+    dividend before the shift: ``(x + mulhi_w(x, magic)) >> shift``. Dropping
+    the add would need a different magic.
+
+    Construct it inside a ``tla.cube()`` or ``tla.vector()`` region (it runs on
+    the scalar unit). ``divisor_mlir`` keeps the coerced `UInt32` / `UInt64`
+    divisor; ``magic`` and ``shift`` are same-width `UInt32` / `UInt64` values.
+    """
+
+    def __init__(self, divisor: Any, *, loc: mlir_ir.Location | None = None) -> None:
+        _require_frontend_state("fast_div_get_divisor")
+        _require_core_region("fast_div_get_divisor")
+        self.divisor_mlir: Numeric = _fast_div_divisor_numeric(divisor, loc=loc)
+        width = type(self.divisor_mlir).width
+        target = UInt32 if width == 32 else UInt64
+        self._magic_ssa, self._shift_ssa = _emit_fast_div_divisor(
+            self.divisor_mlir, loc=loc
+        )
+        self._magic = target(_as_unsigned_view(self._magic_ssa, width, loc=loc))
+        self._shift = target(_as_unsigned_view(self._shift_ssa, width, loc=loc))
+
+    @property
+    def magic(self) -> Numeric:
+        """The multiplication factor, same width as `divisor_mlir`."""
+        return self._magic
+
+    @property
+    def shift(self) -> Numeric:
+        """The right-shift amount after `mulhi`, same width as `divisor_mlir`."""
+        return self._shift
+
+    @property
+    def divisor(self) -> Numeric:
+        """The coerced `UInt32` / `UInt64` divisor."""
+        return self.divisor_mlir
+
+    @dsl_user_op
+    def __rfloordiv__(
+        self, dividend: Any, *, loc: mlir_ir.Location | None = None
+    ) -> Numeric:
+        """Fast ``dividend // divisor`` using this pair (SIMD: ``x // fd``).
+
+        The dividend must fit the divisor's width and be at most ``INT32_MAX``
+        (32-bit) / ``INT64_MAX`` (64-bit), the domain the asc-devkit magic is
+        exact on. Returns a `UInt32` / `UInt64` quotient.
+        """
+        _require_frontend_state(_FAST_DIVMOD_OP)
+        _require_core_region(_FAST_DIVMOD_OP)
+        width = type(self.divisor_mlir).width
+        target = UInt32 if width == 32 else UInt64
+        value = _fast_div_dividend_numeric(dividend, width, loc=loc)
+        int_type = mlir_ir.IntegerType.get_signless(width)
+        quotient = _tla_ops_gen.scalar_simd_fast_div(
+            int_type,
+            _numeric_to_signless_int(
+                value, width, what="fast_divmod dividend", loc=loc
+            ),
+            self._magic_ssa,
+            self._shift_ssa,
+            loc=loc,
+        )
+        return target(_as_unsigned_view(quotient, width, loc=loc))
+
+    @dsl_user_op
+    def __rmod__(
+        self, dividend: Any, *, loc: mlir_ir.Location | None = None
+    ) -> Numeric:
+        """Fast ``dividend % divisor`` using this pair (SIMD: ``x % fd``).
+
+        Same dividend/divisor domain as ``__rfloordiv__``. Returns a `UInt32` /
+        `UInt64` remainder, computed as ``dividend - quotient * divisor``.
+        """
+        _require_frontend_state(_FAST_DIVMOD_OP)
+        _require_core_region(_FAST_DIVMOD_OP)
+        width = type(self.divisor_mlir).width
+        target = UInt32 if width == 32 else UInt64
+        value = _fast_div_dividend_numeric(dividend, width, loc=loc)
+        int_type = mlir_ir.IntegerType.get_signless(width)
+        remainder = _tla_ops_gen.scalar_simd_fast_mod(
+            int_type,
+            _numeric_to_signless_int(
+                value, width, what="fast_divmod dividend", loc=loc
+            ),
+            _numeric_to_signless_int(
+                self.divisor_mlir, width, what="fast_divmod divisor", loc=loc
+            ),
+            self._magic_ssa,
+            self._shift_ssa,
+            loc=loc,
+        )
+        return target(_as_unsigned_view(remainder, width, loc=loc))
+
+
+@dsl_user_op
+def fast_div_get_divisor(
+    divisor: Any, *, loc: mlir_ir.Location | None = None
+) -> FastDivDivisor:
+    """Directory: Scalar Compute
+
+    Description:
+        Precompute a `FastDivDivisor` for unsigned fast division by a fixed
+        `divisor`. The returned object exposes `magic`, `shift` and the coerced
+        `divisor_mlir`, and is consumed through the reflected operators:
+        `x // fd` computes `(x + mulhi_w(x, magic)) >> shift`, and `x % fd`
+        returns `x - quotient * divisor`. Both results are `UInt32` / `UInt64`
+        values of the divisor's width.
+
+        The precompute is exact for a divisor in `[1, INT32_MAX]` (`i32`) or
+        `[1, INT64_MAX]` (`i64`) and dividends up to `INT32_MAX` / `INT64_MAX`.
+        The divisor must be non-zero and non-negative (i.e. positive), and
+        `shift` is below the operand width. No dynamic check is emitted for
+        runtime values, so the caller must guarantee these. `magic` is the
+        unsigned bit pattern of the same width and may exceed `INT_MAX`;
+        `shift` is the precomputed shift amount.
+
+    Parameters:
+        - `divisor`: a `UInt32` / `UInt64` scalar, a bare integer SSA, a runtime
+          kernel scalar argument, or a Python `int`. A `Numeric` or SSA is
+          converted by its bit width; a Python `int` is converted by its value
+          range.
+
+    Constraints:
+        - Must be called inside a `@tla.kernel`-decorated kernel function.
+        - Must be placed in a `tla.cube()` or `tla.vector()` region, outside
+          `tla.vec.func`.
+        - The divisor must be non-zero, non-negative, and no larger than
+          `INT32_MAX` (32-bit variant) or `INT64_MAX` (64-bit variant); a
+          Python `int` above `INT32_MAX` selects the 64-bit variant. Runtime
+          values are not checked.
+        - `shift` is below the operand width (32 or 64 bits).
+        - The dividend of a later `x // fd` / `x % fd` must also be at most
+          `INT32_MAX` / `INT64_MAX` (runtime values are the caller's contract).
+        - Ascend 950 (3510) only.
+
+    Example:
+        ```python
+        with tla.vector():
+            fd = tla.fast_div_get_divisor(divisor)
+            quotient = x // fd   # reflected __rfloordiv__
+            remainder = x % fd   # reflected __rmod__
+            magic, shift = fd.magic, fd.shift
+        ```
+    """
+    return FastDivDivisor(divisor, loc=loc)
+
+
 @dsl_user_op
 def make_ptr(
     dtype: type[Numeric] | None,
@@ -17120,6 +17536,9 @@ _require_generated("arch_vote_any")
 _require_generated("arch_lanemask")
 _require_generated("arch_warp_reduce")
 _require_generated("scalar_bit_op")
+_require_generated("scalar_fast_div_divisor")
+_require_generated("scalar_simd_fast_div")
+_require_generated("scalar_simd_fast_mod")
 _require_generated("simt_add")
 _require_generated("simt_sub")
 _require_generated("simt_mul")
@@ -17687,6 +18106,7 @@ def prof_scope(*, loc: mlir_ir.Location | None = None) -> _ProfScope:
 __all__ = [
     "TlaCoreAPIError",
     "ceil_div",
+    "fast_div_get_divisor",
     "dsl_user_op",
     "arch",
     "mask",

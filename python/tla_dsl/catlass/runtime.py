@@ -412,6 +412,8 @@ def _internal_frontend_region(
 pipes = _Pipes()
 _CORE_API_EXPORTS = (
     "ceil_div",
+    "fast_div_get_divisor",
+    "FastDivDivisor",
     "dsl_user_op",
     "arch",
     "vec",

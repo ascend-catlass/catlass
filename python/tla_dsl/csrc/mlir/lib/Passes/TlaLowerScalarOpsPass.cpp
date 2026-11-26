@@ -135,6 +135,50 @@ static StringRef scalarBitOpCallee(StringRef mode)
         .Default(StringRef());
 }
 
+// tla.scalar_fast_div_divisor width -> bitcode helper pair. The two results
+// are produced by two scalar helpers rather than one packed struct: a
+// multi-result func.call lowers to a struct return, which does not survive the
+// scalar-unit device ABI. The width selects both the algorithm (closed form vs
+// software long division) and the helpers, so it cannot be collapsed.
+static StringRef scalarFastDivShiftCallee(mlir::Type divisorType)
+{
+    if (divisorType.isInteger(32))
+        return "_mlir_ciface_tla_fast_div_shift_32";
+    if (divisorType.isInteger(64))
+        return "_mlir_ciface_tla_fast_div_shift_64";
+    return StringRef();
+}
+
+static StringRef scalarFastDivMagicCallee(mlir::Type divisorType)
+{
+    if (divisorType.isInteger(32))
+        return "_mlir_ciface_tla_fast_div_magic_32";
+    if (divisorType.isInteger(64))
+        return "_mlir_ciface_tla_fast_div_magic_64";
+    return StringRef();
+}
+
+// tla.scalar_simd_fast_{div,mod} width -> bitcode helper. One scalar return
+// each, so the ordinary replaceWithHelperCall path applies; the SIMD side does
+// not use a hardware mulhi, the helper computes it in software.
+static StringRef scalarSimdFastDivCallee(mlir::Type dividendType)
+{
+    if (dividendType.isInteger(32))
+        return "_mlir_ciface_tla_simd_fast_div_32";
+    if (dividendType.isInteger(64))
+        return "_mlir_ciface_tla_simd_fast_div_64";
+    return StringRef();
+}
+
+static StringRef scalarSimdFastModCallee(mlir::Type dividendType)
+{
+    if (dividendType.isInteger(32))
+        return "_mlir_ciface_tla_simd_fast_mod_32";
+    if (dividendType.isInteger(64))
+        return "_mlir_ciface_tla_simd_fast_mod_64";
+    return StringRef();
+}
+
 // tla.arch.dcci_cachelines target -> HIVM data cache kind. The op's verifier
 // rejects `ub`, so only the three domains the DSL exposes can reach this; HIVM
 // itself has the kind either way, which is why the guard below is a diagnostic
@@ -397,6 +441,56 @@ public:
             if (callee.empty()) {
                 // The verifier rejects any other mode; this guards hand-written IR.
                 op.emitOpError() << "unsupported bit query \"" << op.getMode() << "\"";
+                return signalPassFailure();
+            }
+            if (failed(replaceWithHelperCall(op, callee)))
+                return signalPassFailure();
+        }
+
+        SmallVector<::tla::ScalarFastDivDivisor, 8> fastDivDivisors;
+        module.walk([&](::tla::ScalarFastDivDivisor op) { fastDivDivisors.push_back(op); });
+        for (::tla::ScalarFastDivDivisor op : fastDivDivisors) {
+            mlir::Type divisorType = op.getDivisor().getType();
+            StringRef shiftCallee = scalarFastDivShiftCallee(divisorType);
+            StringRef magicCallee = scalarFastDivMagicCallee(divisorType);
+            if (shiftCallee.empty() || magicCallee.empty()) {
+                // The verifier rejects a non-i32/i64 width; this guards hand-written IR.
+                op.emitOpError() << "expects an i32 or i64 divisor, got " << divisorType;
+                return signalPassFailure();
+            }
+            // Two scalar returns: shift first, then magic from (divisor, shift).
+            func::FuncOp shiftDecl =
+                getOrCreateHelper(module, shiftCallee, TypeRange{divisorType}, TypeRange{divisorType});
+            func::FuncOp magicDecl =
+                getOrCreateHelper(module, magicCallee, TypeRange{divisorType, divisorType}, TypeRange{divisorType});
+            OpBuilder builder(op);
+            auto shiftCall = builder.create<func::CallOp>(op.getLoc(), shiftDecl, ValueRange{op.getDivisor()});
+            auto magicCall = builder.create<func::CallOp>(
+                op.getLoc(), magicDecl, ValueRange{op.getDivisor(), shiftCall.getResult(0)});
+            op.getMagic().replaceAllUsesWith(magicCall.getResult(0));
+            op.getShift().replaceAllUsesWith(shiftCall.getResult(0));
+            op.erase();
+        }
+
+        SmallVector<::tla::ScalarSimdFastDiv, 8> simdFastDivs;
+        module.walk([&](::tla::ScalarSimdFastDiv op) { simdFastDivs.push_back(op); });
+        for (::tla::ScalarSimdFastDiv op : simdFastDivs) {
+            StringRef callee = scalarSimdFastDivCallee(op.getDividend().getType());
+            if (callee.empty()) {
+                // The verifier rejects a non-i32/i64 width; this guards hand-written IR.
+                op.emitOpError() << "expects an i32 or i64 dividend, got " << op.getDividend().getType();
+                return signalPassFailure();
+            }
+            if (failed(replaceWithHelperCall(op, callee)))
+                return signalPassFailure();
+        }
+
+        SmallVector<::tla::ScalarSimdFastMod, 8> simdFastMods;
+        module.walk([&](::tla::ScalarSimdFastMod op) { simdFastMods.push_back(op); });
+        for (::tla::ScalarSimdFastMod op : simdFastMods) {
+            StringRef callee = scalarSimdFastModCallee(op.getDividend().getType());
+            if (callee.empty()) {
+                op.emitOpError() << "expects an i32 or i64 dividend, got " << op.getDividend().getType();
                 return signalPassFailure();
             }
             if (failed(replaceWithHelperCall(op, callee)))
