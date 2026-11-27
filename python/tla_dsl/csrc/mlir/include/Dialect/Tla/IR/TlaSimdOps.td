@@ -946,14 +946,19 @@ def Tla_PackOp : Tla_Op<"pack", [Pure]> {
 }
 
 def Tla_UnpackOp : Tla_Op<"unpack", [Pure]> {
-  let summary = "Extend integer elements from the selected source half";
+  let summary = "Extend integer elements or predicates from the selected source half";
   let description = [{
     Reads the selected source half and widens integer elements. Signed
     integers sign-extend; unsigned integers zero-extend. Source and result
     must have matching signedness and the result element width is doubled.
+    For masks, expands the selected source half into a predicate with half
+    as many logical lanes.
   }];
-  let arguments = (ins Tla_VectorSSAType:$src, Tla_RegPartAttr:$part);
-  let results = (outs Tla_VectorSSAType:$result);
+  let arguments = (ins
+      AnyTypeOf<[Tla_VectorSSAType, Tla_MaskSSAType]>:$src,
+      Tla_RegPartAttr:$part);
+  let results = (outs
+      AnyTypeOf<[Tla_VectorSSAType, Tla_MaskSSAType]>:$result);
   let assemblyFormat = [{
     $src `,` $part attr-dict `:`
     qualified(type($src)) `->` qualified(type($result))

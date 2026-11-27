@@ -1257,6 +1257,10 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         [["end_to_end/unpack_op.py", *dev]],
     )
     yield (
+        "register-pack-unpack",
+        [["end_to_end/register_pack_unpack_op.py", *dev]],
+    )
+    yield (
         "vector-mask-select-op",
         [[
             "dsl_tutorials/vector_simd_ops/mask_select_op.py", "mask_select",

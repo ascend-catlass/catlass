@@ -4044,9 +4044,19 @@ static LogicalResult lowerPack(::tla::PackOp packOp, OpBuilder& b, ModuleOp modu
 static LogicalResult lowerUnpack(
     ::tla::UnpackOp unpackOp, OpBuilder& b, ModuleOp module, DenseMap<Value, Value>& valueMap)
 {
+    Location loc = unpackOp.getLoc();
     Value src = valueMap.lookup(unpackOp.getSrc());
     if (!src)
         return failure();
+    if (isa<::tla::MaskSSAType>(unpackOp.getSrc().getType())) {
+        int64_t partValue = unpackOp.getPart() == ::RegPart::high ? 1 : 0;
+        Value part = b.create<arith::ConstantIntOp>(loc, partValue, 32);
+        VectorType pregType = fullPregVecType(b.getContext());
+        Value pregSrc = castMaskToPregType(b, loc, src, pregType);
+        valueMap[unpackOp.getResult()] =
+            b.create<hivm_regbaseintrins::PunpackInstrOp>(loc, pregType, pregSrc, part).getResult();
+        return success();
+    }
     // Preserve TLA signedness in the symbol; CANN selects sign/zero extension.
     auto srcType = cast<::tla::VectorSSAType>(unpackOp.getSrc().getType());
     auto dstType = cast<::tla::VectorSSAType>(unpackOp.getResult().getType());
@@ -4055,9 +4065,8 @@ static LogicalResult lowerUnpack(
     if (failed(srcCtx) || failed(dstCtx))
         return failure();
     auto name = getVectorUnpackLibraryCallName(srcType.getElementType(), dstType.getElementType(), unpackOp.getPart());
-    auto callee =
-        getOrCreateVectorPackUnpackLibraryCall(module, unpackOp.getLoc(), srcCtx->vecType, dstCtx->vecType, name);
-    valueMap[unpackOp.getResult()] = b.create<func::CallOp>(unpackOp.getLoc(), callee, ValueRange{src}).getResult(0);
+    auto callee = getOrCreateVectorPackUnpackLibraryCall(module, loc, srcCtx->vecType, dstCtx->vecType, name);
+    valueMap[unpackOp.getResult()] = b.create<func::CallOp>(loc, callee, ValueRange{src}).getResult(0);
     return success();
 }
 

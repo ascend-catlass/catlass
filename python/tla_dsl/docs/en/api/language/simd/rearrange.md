@@ -21,7 +21,7 @@ Interleave / deinterleave and related lane reshuffles.
 Description:
 
 Pack a predicate value, or truncate integer vector elements to their
-low 8 or 16 bits and place them in the selected destination half.
+low 8, 16, or 32 bits and place them in the selected destination half.
 The other destination half of a vector is unspecified. The
 destination element type is derived from the source: the result is
 always unsigned, with half the source bit width.
@@ -42,8 +42,8 @@ Constraints:
 - Must be called inside a `@tla.kernel`-decorated kernel function.
 - Must be called inside `tla.vec.func(mode="simd")`.
 - Mask inputs support `mask<64> -> mask<128>` and `mask<128> -> mask<256>`.
-- Vector pairs (destination <- source): `UInt8 <- Int16/UInt16`, `UInt16 <- Int32/UInt32`. 64-bit sources (`Int64`/`UInt64`) are not supported.
-- Vector inputs must fill one 256Byte register (RegTraitNumOne); the result has twice as many lanes. RegTraitNumTwo is not representable by `VectorSSA`; CANN permits only LOW for that trait.
+- Vector pairs (destination <- source): `UInt8 <- Int16/UInt16`, `UInt16 <- Int32/UInt32`, `UInt32 <- Int64/UInt64`.
+- Vector inputs must fill one 256-byte register (RegTraitNumOne). The result has twice as many lanes. For 64-bit sources, AscendC Pack composes zero fill and deinterleave.
 - Vector form supports Ascend 950 (`--npu-arch 3510`) only. `LOW/HIGH` map to CANN `HighLowPart::LOWEST/HIGHEST`.
 
 Example:
@@ -62,7 +62,9 @@ with tla.vec.func(mode="simd"):
 
 Description:
 
-Extend integer elements from the selected source register half.
+Unpack predicates or extend integer elements from the selected source
+register half. For masks, expand the selected half into a predicate
+with half as many logical lanes.
 Signed types sign-extend; unsigned types zero-extend. The
 destination element type is derived from the source: the result
 keeps the source signedness, with twice the source bit width.
@@ -70,26 +72,27 @@ keeps the source signedness, with twice the source bit width.
 Prototype:
 
 ```python
-tla.unpack(src: VectorSSA, *, part: RegPart) -> VectorSSA
+tla.unpack(src: VectorSSA | MaskSSA, *, part: RegPart) -> VectorSSA | MaskSSA
 ```
 
 Parameters:
 
-- `src` (`VectorSSA`): Narrow integer source register. Required.
+- `src` (`VectorSSA | MaskSSA`): Source register value. Required.
 - `part` (`tla.RegPart`): Source half to read: `LOW` or `HIGH`. Required.
 
 Constraints:
 
 - Must be called inside a `@tla.kernel`-decorated kernel function and `tla.vec.func(mode="simd")`.
-- Pairs (destination <- source): `Int16 <- Int8`, `UInt16 <- UInt8`, `Int32 <- Int16`, `UInt32 <- UInt16`, `Int64 <- Int32`, `UInt64 <- UInt32`. 64-bit sources (`Int64`/`UInt64`) are not supported; 64-bit destinations reuse AscendC's composition (no native vunpack for that width).
-- Source and destination signedness must match. The result has half as many lanes.
-- Inputs must fill one 256Byte register (RegTraitNumOne). RegTraitNumTwo is not representable by `VectorSSA`; CANN permits only LOW for that trait.
+- Mask inputs support `mask<256> -> mask<128>` and `mask<128> -> mask<64>`.
+- Vector pairs (destination <- source): `Int16 <- Int8`, `UInt16 <- UInt8`, `Int32 <- Int16`, `UInt32 <- UInt16`, `Int64 <- Int32`, `UInt64 <- UInt32`.
+- Vector inputs must fill one 256-byte register (RegTraitNumOne). The result has half as many lanes and keeps the source signedness. For 64-bit results, AscendC UnPack composes sign or zero fill and interleave.
 - Supports Ascend 950 (`--npu-arch 3510`) only. `LOW/HIGH` map to CANN `HighLowPart::LOWEST/HIGHEST`.
 
 Example:
 
 ```python
 with tla.vec.func(mode="simd"):
+    mask_wide = tla.unpack(src_mask, part=tla.RegPart.LOW)
     wide = tla.unpack(src_reg, part=tla.RegPart.HIGH)
     wide64 = tla.unpack(src32_reg, part=tla.RegPart.LOW)  # Int32 -> Int64, sign extension
 ```

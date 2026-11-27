@@ -12,6 +12,8 @@ _PACK_VECTOR_PAIRS = [
     (tla.UInt16, tla.UInt8),
     (tla.Int32, tla.UInt16),
     (tla.UInt32, tla.UInt16),
+    (tla.Int64, tla.UInt32),
+    (tla.UInt64, tla.UInt32),
 ]
 _UNPACK_PAIRS = [
     (tla.Int8, tla.Int16),
@@ -21,10 +23,9 @@ _UNPACK_PAIRS = [
     (tla.Int32, tla.Int64),
     (tla.UInt32, tla.UInt64),
 ]
-_SIGNED_DTYPE = {8: tla.Int8, 16: tla.Int16, 32: tla.Int32, 64: tla.Int32}
-# 64-bit "storage" falls back to i32: tla.full does not support i64 (device
-# compilation crashes), and an equal-width i32 vector bitcast to the 64-bit
-# source type still exercises the pack rejection path.
+_SIGNED_DTYPE = {8: tla.Int8, 16: tla.Int16, 32: tla.Int32, 64: tla.Int64}
+# Build a full register of 32-bit lanes before bitcasting to 64-bit lanes.
+_FULL_DTYPE = {**_SIGNED_DTYPE, 64: tla.Int32}
 _PACK_CASES = [
     ("mask", tla.Int32, tla.Int16),
     ("mask", tla.Int16, tla.Int8),
@@ -60,7 +61,7 @@ def test_pack_emits_mlir(src_kind, src_dtype, dst_dtype, part) -> None:
     src_bits = int(src_dtype.dtype[1:])
     dst_bits = int(dst_dtype.dtype[1:])
     mlir = _pack_emit.dump_mlir(
-        type_args=(src_kind, src_dtype, dst_dtype, _SIGNED_DTYPE[src_bits], part)
+        type_args=(src_kind, src_dtype, dst_dtype, _FULL_DTYPE[src_bits], part)
     )
     (line,) = [line for line in mlir.splitlines() if "tla.pack" in line]
     assert f"<{part.value}>" in line
@@ -309,10 +310,7 @@ def _compile_inputs(src_dtype, dst_dtype):
     src_bits = int(src_dtype.dtype[1:])
     dst_bits = int(dst_dtype.dtype[1:])
     src_storage = _SIGNED_DTYPE[src_bits]
-    # 64-bit destinations use their real type as storage: the _SIGNED_DTYPE
-    # fallback (64 -> i32) only serves the source-rejection paths, where an
-    # equal-width bitcast still exercises the diagnostic.
-    dst_storage = _SIGNED_DTYPE[dst_bits] if dst_bits != 64 else dst_dtype
+    dst_storage = _SIGNED_DTYPE[dst_bits]
     src_lanes = 2048 // src_bits
     dst_lanes = 2048 // dst_bits
     tensors = tuple(
@@ -360,11 +358,9 @@ def test_unpack_compiles_to_kernel_object(
     assert compiled.kernel_binary_path.stat().st_size > 0
 
 
-@pytest.mark.parametrize("src", [tla.Int8, tla.UInt8, tla.Int64, tla.UInt64, tla.Float32])
+@pytest.mark.parametrize("src", [tla.Int8, tla.UInt8, tla.Float32])
 def test_pack_rejects_invalid_vector_source(src) -> None:
-    # pack only derives a destination for 16/32-bit integer sources; 64-bit
-    # sources are not supported (no native vpack/vunpack for that width).
-    storage = src if src is tla.Float32 else _SIGNED_DTYPE[int(src.dtype[1:])]
+    storage = src if src is tla.Float32 else _FULL_DTYPE[int(src.dtype[1:])]
     with pytest.raises(tla.TlaCoreAPIError, match="unsupported vector element type"):
         _pack_emit.dump_mlir(type_args=("vector", src, tla.UInt8, storage, tla.RegPart.LOW))
 
@@ -373,7 +369,7 @@ def test_pack_rejects_invalid_vector_source(src) -> None:
 def test_unpack_rejects_invalid_vector_source(src) -> None:
     # unpack only derives a destination for 8/16/32-bit integer sources; a
     # 64-bit source would need a 128-bit destination, which does not exist.
-    storage = src if src is tla.Float32 else _SIGNED_DTYPE[int(src.dtype[1:])]
+    storage = src if src is tla.Float32 else _FULL_DTYPE[int(src.dtype[1:])]
     with pytest.raises(tla.TlaCoreAPIError, match="unsupported vector element type"):
         _unpack_emit.dump_mlir(type_args=(src, tla.Int32, storage, tla.RegPart.LOW))
 
@@ -422,16 +418,27 @@ def test_unpack_rejects_fragments() -> None:
 
 
 @tla.kernel
-def _unpack_mask() -> None:
+def _unpack_mask(dtype: tla.Constexpr[type], part: tla.Constexpr[object]) -> None:
     with tla.vector():
         with tla.vec.func(mode="simd"):
-            source = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Int32)
-            tla.unpack(source, part=tla.RegPart.LOW)
+            source = tla.create_mask(pattern=tla.mask.H, dtype=dtype)
+            result = tla.unpack(source, part=part)
+            assert isinstance(result, MaskSSA)
 
 
-def test_unpack_rejects_mask() -> None:
-    with pytest.raises(tla.TlaCoreAPIError, match="expected vector_ssa"):
-        _unpack_mask.dump_mlir()
+@pytest.mark.parametrize(("dtype", "src_lanes"), [(tla.Int8, 256), (tla.Int16, 128)])
+@pytest.mark.parametrize("part", [tla.RegPart.LOW, tla.RegPart.HIGH])
+def test_unpack_mask_emits_mlir(dtype, src_lanes, part) -> None:
+    mlir = _unpack_mask.dump_mlir(type_args=(dtype, part))
+    (line,) = [line for line in mlir.splitlines() if "tla.unpack" in line]
+    assert f"<{part.value}>" in line
+    assert f"!tla.mask<{src_lanes}> -> !tla.mask<{src_lanes // 2}>" in line
+
+
+@pytest.mark.parametrize(("dtype", "lanes"), [(tla.Int32, 64), (tla.Int64, 32)])
+def test_unpack_rejects_unsupported_mask_width(dtype, lanes) -> None:
+    with pytest.raises(tla.TlaCoreAPIError, match=f"unsupported mask width {lanes}"):
+        _unpack_mask.dump_mlir(type_args=(dtype, tla.RegPart.LOW))
 
 
 @pytest.mark.parametrize(
@@ -439,6 +446,8 @@ def test_unpack_rejects_mask() -> None:
     [
         ("pack", "64xi32", "128xui16"),
         ("pack", "128xui16", "256xui8"),
+        ("pack", "32xi64", "64xui32"),
+        ("pack", "32xui64", "64xui32"),
         ("unpack", "256xi8", "128xi16"),
         ("unpack", "128xui16", "64xui32"),
         ("unpack", "64xi32", "32xi64"),

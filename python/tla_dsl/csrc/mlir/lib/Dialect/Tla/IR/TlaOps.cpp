@@ -1148,15 +1148,14 @@ mlir::LogicalResult PackOp::verify()
                 if (!mode.getValue().equals_insensitive("simd"))
                     return emitOpError("is only supported in tla.vec.func(mode='simd')");
 
-        // 64-bit sources are not supported: Ascend 950 has no native
-        // vpack for that width.
         auto srcInt = mlir::dyn_cast<mlir::IntegerType>(src.getElementType());
         auto dstInt = mlir::dyn_cast<mlir::IntegerType>(dst.getElementType());
-        if (!srcInt || !dstInt || !dstInt.isUnsigned() || (dstInt.getWidth() != 8 && dstInt.getWidth() != 16) ||
+        if (!srcInt || !dstInt || !dstInt.isUnsigned() ||
+            (dstInt.getWidth() != 8 && dstInt.getWidth() != 16 && dstInt.getWidth() != 32) ||
             srcInt.getWidth() != 2 * dstInt.getWidth())
             return emitOpError() << "unsupported vector element type pair " << src.getElementType() << " -> "
                                  << dst.getElementType()
-                                 << "; expected 16->8 or 32->16 integers with an unsigned result";
+                                 << "; expected 16->8, 32->16 or 64->32 integers with an unsigned result";
 
         // VectorSSAType caps values at one 256-byte register (RegTraitNumOne).
         // CANN RegTraitNumTwo supports LOW only, but is not represented here.
@@ -1189,8 +1188,24 @@ mlir::LogicalResult UnpackOp::verify()
             if (!mode.getValue().equals_insensitive("simd"))
                 return emitOpError("is only supported in tla.vec.func(mode='simd')");
 
+    if (auto src = mlir::dyn_cast<MaskSSAType>(getSrc().getType())) {
+        auto dst = mlir::dyn_cast<MaskSSAType>(getResult().getType());
+        if (!dst)
+            return emitOpError("requires source and result to both be VectorSSA or both be MaskSSA");
+        int64_t srcLanes = src.getPhysicalLanes();
+        int64_t resultLanes = dst.getPhysicalLanes();
+        if (srcLanes != 128 && srcLanes != 256)
+            return emitOpError() << "unsupported mask source width " << srcLanes << "; expected 128 or 256 lanes";
+        if (srcLanes != 2 * resultLanes)
+            return emitOpError() << "mask result must have half the source lane count, got source " << srcLanes
+                                 << " and result " << resultLanes;
+        return mlir::success();
+    }
+
     auto src = mlir::cast<VectorSSAType>(getSrc().getType());
-    auto dst = mlir::cast<VectorSSAType>(getResult().getType());
+    auto dst = mlir::dyn_cast<VectorSSAType>(getResult().getType());
+    if (!dst)
+        return emitOpError("requires source and result to both be VectorSSA or both be MaskSSA");
     // 64-bit destinations are legal (i32/u32 sources widen to i64/u64); the
     // AIV stubs compose them because Ascend 950 has no native vunpack for
     // that width. 64-bit sources would need a 128-bit destination and stay

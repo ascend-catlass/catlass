@@ -9,6 +9,26 @@
 !t64 = !tla.tensor<!tla.layout<!tla.shape<32>, !tla.stride<1>, !tla.shape<32>, RowMajor>, !tla.coord<0>, !tla.ptr<i64, ub, 8>>
 
 module {
+  func.func @pack_b64(%src_mem: memref<32xi64, #hivm.address_space<ub>>, %dst_mem: memref<64xi32, #hivm.address_space<ub>>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %sn = arith.constant 32 : index
+    %dn = arith.constant 64 : index
+    %src = tla.tensor_desc %src_mem shape [%c1, %sn, %c1, %c1] stride [%sn, %c1, %c1, %c1] origin_shape [%c1, %sn] coord [%c0, %c0] : memref<32xi64, #hivm.address_space<ub>> -> !t64
+    %dst = tla.tensor_desc %dst_mem shape [%c1, %dn, %c1, %c1] stride [%dn, %c1, %c1, %c1] origin_shape [%c1, %dn] coord [%c0, %c0] : memref<64xi32, #hivm.address_space<ub>> -> !t32
+    "tla.vec.func"() ({
+      %signed = tla.load %src : !t64 -> !tla.vector<32xi64>
+      %unsigned = tla.bitcast %signed : !tla.vector<32xi64> -> !tla.vector<32xui64>
+      %low = tla.pack %signed, <low> : !tla.vector<32xi64> -> !tla.vector<64xui32>
+      %high = tla.pack %unsigned, <high> : !tla.vector<32xui64> -> !tla.vector<64xui32>
+      %low_bits = tla.bitcast %low : !tla.vector<64xui32> -> !tla.vector<64xi32>
+      %high_bits = tla.bitcast %high : !tla.vector<64xui32> -> !tla.vector<64xi32>
+      tla.store %dst, %low_bits : !t32, !tla.vector<64xi32>
+      tla.store %dst, %high_bits : !t32, !tla.vector<64xi32>
+    }) {mode = "simd"} : () -> ()
+    return
+  }
+
   func.func @pack_i16_u8_low(%src_mem: memref<128xi16, #hivm.address_space<ub>>, %dst_mem: memref<256xi8, #hivm.address_space<ub>>) {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
@@ -335,6 +355,8 @@ module {
 
 }
 
+// CHECK-DAG: func.func private @pack_reg_uint32_t_int64_t_low(vector<32xi64>) -> vector<64xi32>
+// CHECK-DAG: func.func private @pack_reg_uint32_t_uint64_t_high(vector<32xi64>) -> vector<64xi32>
 // CHECK-DAG: func.func private @pack_reg_uint8_t_int16_t_low(vector<128xi16>) -> vector<256xi8>
 // CHECK-DAG: func.func private @pack_reg_uint8_t_int16_t_high(vector<128xi16>) -> vector<256xi8>
 // CHECK-DAG: func.func private @pack_reg_uint8_t_uint16_t_low(vector<128xi16>) -> vector<256xi8>
@@ -356,6 +378,8 @@ module {
 // CHECK-DAG: func.func private @unpack_reg_uint64_t_uint32_t_low(vector<64xi32>) -> vector<32xi64>
 // CHECK-DAG: func.func private @unpack_reg_uint64_t_uint32_t_high(vector<64xi32>) -> vector<32xi64>
 
+// CHECK: call @pack_reg_uint32_t_int64_t_low({{.*}}) : (vector<32xi64>) -> vector<64xi32>
+// CHECK: call @pack_reg_uint32_t_uint64_t_high({{.*}}) : (vector<32xi64>) -> vector<64xi32>
 // CHECK: call @pack_reg_uint8_t_int16_t_low({{.*}}) : (vector<128xi16>) -> vector<256xi8>
 // CHECK: call @pack_reg_uint8_t_int16_t_high({{.*}}) : (vector<128xi16>) -> vector<256xi8>
 // CHECK: call @pack_reg_uint8_t_uint16_t_low({{.*}}) : (vector<128xi16>) -> vector<256xi8>

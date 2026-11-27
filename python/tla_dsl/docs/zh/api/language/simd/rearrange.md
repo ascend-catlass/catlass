@@ -22,7 +22,7 @@ Do not regenerate this file from a glossary.
 
 功能说明：
 
-将 predicate 值打包到目标寄存器的低半区或高半区；对于整数 vector，截取每个源元素的低 8 或 16 位，写入所选目标半区。vector 另一半区的值未定义。目标元素类型由源类型推导：结果始终为无符号类型，位宽为源的一半。
+将谓词值打包到所选目标寄存器半区。对整数向量，截取每个源元素的低 8、16 或 32 位并写入所选半区，另一半区的值未定义。结果元素为无符号整数，位宽为源元素的一半。
 
 函数原型：
 
@@ -40,8 +40,8 @@ tla.pack(src: VectorSSA | MaskSSA, *, part: RegPart) -> VectorSSA | MaskSSA
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
 - 须在 `tla.vec.func(mode="simd")` 内调用。
 - Mask 输入支持 `mask<64> -> mask<128>` 和 `mask<128> -> mask<256>`。
-- Vector 类型对（目标 <- 源）：`UInt8 <- Int16/UInt16`、`UInt16 <- Int32/UInt32`。不支持 64 位源（`Int64`/`UInt64`）。
-- Vector 输入须填满一个 256Byte 寄存器（RegTraitNumOne），结果的 lane 数为源的两倍。`VectorSSA` 无法表示 RegTraitNumTwo；CANN 对该 trait 仅允许 LOW。
+- 向量类型对（目标 <- 源）包括 `UInt8 <- Int16/UInt16`、`UInt16 <- Int32/UInt32` 和 `UInt32 <- Int64/UInt64`。
+- 向量输入须填满一个 256 字节寄存器（`RegTraitNumOne`），结果的 lane 数为源的两倍。对于 64 位源，AscendC `Pack` 组合使用零填充和 `DeInterleave`。
 - Vector 形式仅支持 Ascend 950（`--npu-arch 3510`）。`LOW/HIGH` 对应 CANN 的 `HighLowPart::LOWEST/HIGHEST`。
 
 调用示例：
@@ -60,31 +60,32 @@ with tla.vec.func(mode="simd"):
 
 功能说明：
 
-读取源寄存器所选半区的整数元素并展宽。有符号类型执行符号扩展，无符号类型执行零扩展。目标元素类型由源类型推导：结果保留源的符号性，位宽为源的两倍。
+读取源寄存器所选半区。对谓词输入，将所选半区扩展为逻辑 lane 数减半的谓词。对整数向量，有符号类型执行符号扩展，无符号类型执行零扩展。结果保留源元素的符号性，位宽为源元素的两倍。
 
 函数原型：
 
 ```python
-tla.unpack(src: VectorSSA, *, part: RegPart) -> VectorSSA
+tla.unpack(src: VectorSSA | MaskSSA, *, part: RegPart) -> VectorSSA | MaskSSA
 ```
 
 参数说明：
 
-- `src`（`VectorSSA`）：窄整数源寄存器。必填。
+- `src`（`VectorSSA | MaskSSA`）：源寄存器值。必填。
 - `part`（`tla.RegPart`）：读取的源半区，支持 `LOW` 和 `HIGH`。必填。
 
 约束说明：
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体及 `tla.vec.func(mode="simd")` 内调用。
-- 类型对（目标 <- 源）：`Int16 <- Int8`、`UInt16 <- UInt8`、`Int32 <- Int16`、`UInt32 <- UInt16`、`Int64 <- Int32`、`UInt64 <- UInt32`。不支持 64 位源（`Int64`/`UInt64`，需要 128 位目标）；64 位目标复用 AscendC 的组合实现（该位宽没有原生 vunpack）。
-- 源和目标的符号性须一致，结果的 lane 数为源的一半。
-- 输入须填满一个 256Byte 寄存器（RegTraitNumOne）。`VectorSSA` 无法表示 RegTraitNumTwo；CANN 对该 trait 仅允许 LOW。
+- 谓词输入支持 `mask<256> -> mask<128>` 和 `mask<128> -> mask<64>`。
+- 向量类型对（目标 <- 源）包括 `Int16 <- Int8`、`UInt16 <- UInt8`、`Int32 <- Int16`、`UInt32 <- UInt16`、`Int64 <- Int32` 和 `UInt64 <- UInt32`。
+- 向量输入须填满一个 256 字节寄存器（`RegTraitNumOne`）。结果的 lane 数为源的一半，且保留源元素的符号性。对于 64 位结果，AscendC `UnPack` 组合使用符号位或零填充及 `Interleave`。
 - 仅支持 Ascend 950（`--npu-arch 3510`）。`LOW/HIGH` 对应 CANN 的 `HighLowPart::LOWEST/HIGHEST`。
 
 调用示例：
 
 ```python
 with tla.vec.func(mode="simd"):
+    mask_wide = tla.unpack(src_mask, part=tla.RegPart.LOW)
     wide = tla.unpack(src_reg, part=tla.RegPart.HIGH)
     wide64 = tla.unpack(src32_reg, part=tla.RegPart.LOW)  # Int32 -> Int64，符号扩展
 ```

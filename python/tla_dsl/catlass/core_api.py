@@ -11874,13 +11874,15 @@ _INTERLEAVE_ELEMENT_TYPES = frozenset(
 )
 
 
-# 64-bit sources are deliberately unsupported: unpack of an i64/u64 source
-# would need a 128-bit destination. 64-bit *destinations* (i32->i64, u32->u64)
-# are supported: Ascend 950 has no native vunpack for that width, so the AIV
-# stubs reuse AscendC's composition (sign/zero fill + Interleave).
 # Pack produces unsigned elements with half the source bit width.
-# Signed and unsigned source types share the same destination type.
-_VECTOR_PACK_DST_FOR_SRC = {"i16": "u8", "u16": "u8", "i32": "u16", "u32": "u16"}
+_VECTOR_PACK_DST_FOR_SRC = {
+    "i16": "u8",
+    "u16": "u8",
+    "i32": "u16",
+    "u32": "u16",
+    "i64": "u32",
+    "u64": "u32",
+}
 _VECTOR_UNPACK_DST_FOR_SRC = {
     "i8": "i16",
     "u8": "u16",
@@ -11902,7 +11904,7 @@ def pack(
 
     Description:
         Pack a predicate value, or truncate integer vector elements to their
-        low 8 or 16 bits and place them in the selected destination half.
+        low 8, 16, or 32 bits and place them in the selected destination half.
         The other destination half of a vector is unspecified. The
         destination element type is derived from the source: the result is
         always unsigned, with half the source bit width.
@@ -11915,8 +11917,8 @@ def pack(
         - Must be called inside a `@tla.kernel`-decorated kernel function.
         - Must be called inside `tla.vec.func(mode="simd")`.
         - Mask inputs support `mask<64> -> mask<128>` and `mask<128> -> mask<256>`.
-        - Vector pairs (destination <- source): `UInt8 <- Int16/UInt16`, `UInt16 <- Int32/UInt32`. 64-bit sources (`Int64`/`UInt64`) are not supported.
-        - Vector inputs must fill one 256Byte register (RegTraitNumOne); the result has twice as many lanes. RegTraitNumTwo is not representable by `VectorSSA`; CANN permits only LOW for that trait.
+        - Vector pairs (destination <- source): `UInt8 <- Int16/UInt16`, `UInt16 <- Int32/UInt32`, `UInt32 <- Int64/UInt64`.
+        - Vector inputs must fill one 256-byte register (RegTraitNumOne). The result has twice as many lanes. For 64-bit sources, AscendC Pack composes zero fill and deinterleave.
         - Vector form supports Ascend 950 (`--npu-arch 3510`) only. `LOW/HIGH` map to CANN `HighLowPart::LOWEST/HIGHEST`.
 
         Example:
@@ -11949,7 +11951,7 @@ def pack(
             _op_error(
                 "pack",
                 f"unsupported vector element type {src_desc.element_type}; "
-                "expected a 16/32-bit integer source",
+                "expected a 16/32/64-bit integer source",
             )
         if (
             src_desc.valid_lanes
@@ -11980,38 +11982,41 @@ def pack(
 
 @dsl_user_op
 def unpack(
-    src: VectorSSA,
+    src: VectorSSA | MaskSSA,
     *,
     part: RegPart,
     loc: mlir_ir.Location | None = None,
-) -> VectorSSA:
+) -> VectorSSA | MaskSSA:
     """Directory: SIMD Vector Compute / Data Rearrange
 
     Description:
-        Extend integer elements from the selected source register half.
+        Unpack predicates or extend integer elements from the selected source
+        register half. For masks, expand the selected half into a predicate
+        with half as many logical lanes.
         Signed types sign-extend; unsigned types zero-extend. The
         destination element type is derived from the source: the result
         keeps the source signedness, with twice the source bit width.
 
         Parameters:
-        - `src` (`VectorSSA`): Narrow integer source register. Required.
+        - `src` (`VectorSSA | MaskSSA`): Source register value. Required.
         - `part` (`tla.RegPart`): Source half to read: `LOW` or `HIGH`. Required.
 
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function and `tla.vec.func(mode="simd")`.
-        - Pairs (destination <- source): `Int16 <- Int8`, `UInt16 <- UInt8`, `Int32 <- Int16`, `UInt32 <- UInt16`, `Int64 <- Int32`, `UInt64 <- UInt32`. 64-bit sources (`Int64`/`UInt64`) are not supported; 64-bit destinations reuse AscendC's composition (no native vunpack for that width).
-        - Source and destination signedness must match. The result has half as many lanes.
-        - Inputs must fill one 256Byte register (RegTraitNumOne). RegTraitNumTwo is not representable by `VectorSSA`; CANN permits only LOW for that trait.
+        - Mask inputs support `mask<256> -> mask<128>` and `mask<128> -> mask<64>`.
+        - Vector pairs (destination <- source): `Int16 <- Int8`, `UInt16 <- UInt8`, `Int32 <- Int16`, `UInt32 <- UInt16`, `Int64 <- Int32`, `UInt64 <- UInt32`.
+        - Vector inputs must fill one 256-byte register (RegTraitNumOne). The result has half as many lanes and keeps the source signedness. For 64-bit results, AscendC UnPack composes sign or zero fill and interleave.
         - Supports Ascend 950 (`--npu-arch 3510`) only. `LOW/HIGH` map to CANN `HighLowPart::LOWEST/HIGHEST`.
 
         Example:
         ```python
         with tla.vec.func(mode="simd"):
+            mask_wide = tla.unpack(src_mask, part=tla.RegPart.LOW)
             wide = tla.unpack(src_reg, part=tla.RegPart.HIGH)
             wide64 = tla.unpack(src32_reg, part=tla.RegPart.LOW)  # Int32 -> Int64, sign extension
         ```
     """
-    _require_category("unpack", "src", src, "vector_ssa", 0)
+    _require_categories("unpack", "src", src, ("vector_ssa", "mask_ssa"), 0)
     if not isinstance(part, RegPart):
         _op_error("unpack", "expected tla.RegPart.LOW or tla.RegPart.HIGH")
     _require_frontend_state("unpack")
@@ -12020,6 +12025,22 @@ def unpack(
         _op_error("unpack", "is only supported in tla.vec.func(mode='simd')")
 
     src_value = _as_value(src)
+    context = src_value.type.context
+    part_attr = mlir_ir.Attribute.parse(f"#tla.reg_part<{part.value}>", context=context)
+    if _category(src) == "mask_ssa":
+        src_desc = _mask_ssa_type_for_mlir_value(src_value)
+        if src_desc.physical_lanes not in (128, 256):
+            _op_error(
+                "unpack",
+                f"unsupported mask width {src_desc.physical_lanes}; "
+                "supported source widths are 128 and 256",
+            )
+        result_desc = TlaMaskSSATypeDescriptor(src_desc.physical_lanes // 2)
+        result = _tla_ops_gen.unpack(
+            result_desc.to_mlir_type(context), src_value, part_attr, loc=loc
+        )
+        return MaskSSA(result)
+
     src_desc = _vector_ssa_type_for_mlir_value(src_value)
     dst_token = _VECTOR_UNPACK_DST_FOR_SRC.get(src_desc.element_type)
     if dst_token is None:
@@ -12034,8 +12055,6 @@ def unpack(
     ):
         _op_error("unpack", "requires full 256-byte vector registers (RegTraitNumOne)")
     result_desc = _full_vector_ssa_descriptor(dst_token)
-    context = src_value.type.context
-    part_attr = mlir_ir.Attribute.parse(f"#tla.reg_part<{part.value}>", context=context)
     result = _tla_ops_gen.unpack(
         result_desc.to_mlir_type(context), src_value, part_attr, loc=loc
     )
