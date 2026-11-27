@@ -48,7 +48,6 @@ def _double(src: tla.Tensor, out: tla.Tensor, modes: tla.Tensor, patch: tla.Cons
         tla.copy(a, src)
         tla.pipe_barrier(tla.pipes.ALL)
         tla.arch.set_ctrl(patch)
-        tla.arch.set_ctrl(tla.params.CTRLValue(mask_mode=tla.params.CTRLMaskMode.ELEMENT_COUNT))
         modes[0] = tla.arch.get_ctrl(start_bit=56, end_bit=56)
         with tla.vec.func(mode="simd"):
             value = a.load()
@@ -142,7 +141,7 @@ def main():
             )
             artifact = tla.compile(_double, *inputs, patch, options="--npu-arch 3510")
             artifact(*inputs, block_num=1)
-            if modes.cpu().tolist() != [1, 0]:
+            if modes.cpu().tolist() != [0, 0]:
                 raise AssertionError(f"Unexpected mask mode across vector entry: {modes.cpu().tolist()}")
             expected = torch.full(
                 (128,), saturated if saturate else normal, dtype=dtype

@@ -40,7 +40,7 @@ module {
 // CHECK-LABEL: func.func @explicit_ctrl_before_cast
 // CHECK: SET.CTRL
 // CHECK: GET.CTRL
-// CHECK: hivm.hir.set_ctrl false at ctrl[56]
+// CHECK-NOT: hivm.hir.set_ctrl {{.*}} at ctrl[56]
 // CHECK: "tla.vec.func"
   func.func @explicit_ctrl_before_cast(
       %sm: memref<64xf32, #hivm.address_space<ub>>,
@@ -52,8 +52,8 @@ module {
     %s = tla.tensor_desc %sm shape [%c1, %cs, %c1, %c1] stride [%cs, %c1, %c1, %c1] origin_shape [%c1, %cs] coord [%c0, %c0] : memref<64xf32, #hivm.address_space<ub>> -> !s_f32
     %d = tla.tensor_desc %dm shape [%c1, %cd, %c1, %c1] stride [%cd, %c1, %c1, %c1] origin_shape [%c1, %cd] coord [%c0, %c0] : memref<256xf8E4M3FN, #hivm.address_space<ub>> -> !d_e4m3
     "tla.vector"() ({
-      %bits = arith.constant 1224979098644774912 : i64
-      tla.arch.set_ctrl %bits {mask = 1224979098644774912 : i64}
+      %bits = arith.constant 1152921504606846976 : i64
+      tla.arch.set_ctrl %bits {mask = 1152921504606846976 : i64}
       %mode = tla.arch.get_ctrl {lo = 56 : i32, hi = 56 : i32}
       "tla.vec.func"() ({
         %ss = "tla.make_shape"() : () -> !tla.shape<64>

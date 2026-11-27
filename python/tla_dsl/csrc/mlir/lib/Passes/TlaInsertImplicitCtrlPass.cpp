@@ -35,9 +35,8 @@ static constexpr unsigned HF32ModeBit = 46;
 static constexpr unsigned HF32TransModeBit = 47;
 
 static constexpr unsigned Fp8InputModeBit = 45;
-static constexpr unsigned MaskModeBit = 56;
 static constexpr unsigned kTrackedCtrlBits[] = {
-    ComputeOrderBit, HF32ModeBit, HF32TransModeBit, Fp8InputModeBit, MaskModeBit, 6, 7, 8};
+    ComputeOrderBit, HF32ModeBit, HF32TransModeBit, Fp8InputModeBit, 6, 7, 8};
 
 enum class CtrlBitReq
 {
@@ -336,9 +335,6 @@ static void processBlock(Block& block, CtrlState& state, OpBuilder& builder, boo
                         state[bit] = false;
                 }
             }
-            // Vector bodies use per-element masks even after an explicit scalar CTRL write.
-            if (isa<VecFuncOp>(op))
-                ensureCtrlBit(op, MaskModeBit, false, state, builder);
             if (auto mm = dyn_cast<MmadOp>(op)) {
                 Type lhs = cast<TlaTensorType>(mm.getLhs().getType()).getPtr().getPointee();
                 Type rhs = cast<TlaTensorType>(mm.getRhs().getType()).getPtr().getPointee();

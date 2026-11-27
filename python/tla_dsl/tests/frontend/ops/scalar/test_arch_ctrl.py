@@ -21,7 +21,7 @@ def _patch(value: tla.Constexpr):
         tla.arch.set_ctrl(tla.params.CTRLValue(integer_saturation=value))
 
 
-@pytest.mark.parametrize("lo,hi", [(0, 63), (6, 8), (9, 10), (45, 45), (60, 60)])
+@pytest.mark.parametrize("lo,hi", [(0, 63), (6, 8), (9, 10), (45, 45), (56, 56), (60, 60)])
 def test_field_read(lo, hi):
     assert "tla.arch.get_ctrl" in _get.dump_mlir(type_args=(lo, hi))
 
@@ -33,7 +33,7 @@ def test_invalid_field(lo, hi):
 
 
 @pytest.mark.parametrize(
-    "value,lo,hi", [(7, 6, 8), (3, 9, 10), (2, 48, 48), (0, 0, 63)]
+    "value,lo,hi", [(7, 6, 8), (3, 9, 10), (2, 48, 48), (0, 0, 63), (1, 56, 56)]
 )
 def test_invalid_write(value, lo, hi):
     with pytest.raises(Exception, match="arch.set_ctrl"):
@@ -80,7 +80,6 @@ def _semantic(patch: tla.Constexpr):
         ("ub_dcache", True, 49, 49, 1),
         ("fp8_nan_saturation", True, 50, 50, 0),
         ("integer_saturation", False, 53, 53, 0),
-        ("mask_mode", tla.params.CTRLMaskMode.ELEMENT_COUNT, 56, 56, 1),
         ("conversion_mode", tla.params.ConversionMode.TRUNCATE, 59, 59, 1),
         ("saturation_strategy", tla.params.OverrideStrategy.USE_API, 60, 60, 0),
     ],
@@ -167,4 +166,22 @@ def test_ctrl_ir_requires_scalar_region(in_vf, name, statement):
             "module { func.func @invalid() { %bits = arith.constant 0 : i64 "
             + statement
             + " return } }"
+        )
+
+
+def test_mask_mode_patch_rejected():
+    with pytest.raises(TypeError, match="mask_mode"):
+        tla.params.CTRLValue(mask_mode=1)
+
+
+@pytest.mark.parametrize("mask", [1 << 56, (1 << 56) | (1 << 60)])
+def test_mask_mode_ir_write_rejected(mask):
+    from catlass._mlir import ir
+
+    with ir.Context(), pytest.raises(ir.MLIRError, match="mask must select only complete documented CTRL fields"):
+        ir.Module.parse(
+            'module { func.func @invalid() { "tla.vector"() ({ '
+            '%bits = arith.constant 0 : i64 '
+            f'tla.arch.set_ctrl %bits {{mask = {mask} : i64}}'
+            ' }) : () -> () return } }'
         )

@@ -75,7 +75,7 @@ requirement take effect only once.
 Bits unrelated to the APIs above (covered by entry InitSoc instead):
 
 - **CTRL[48]**: preserved by the bulk write; casts use instruction sat once CTRL[60]=0
-- **CTRL[56]**: vector function entry selects ELEMENT_BITS after an explicit scalar write
+- **CTRL[56]**: mask mode is read-only through the CTRL API
 
 ---
 

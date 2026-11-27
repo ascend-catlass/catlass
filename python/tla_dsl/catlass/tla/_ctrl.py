@@ -20,7 +20,6 @@ _FIELDS = {
     "ub_dcache": (49, 49, bool, False),
     "fp8_nan_saturation": (50, 50, bool, True),
     "integer_saturation": (53, 53, bool, False),
-    "mask_mode": (56, 56, params.CTRLMaskMode, False),
     "conversion_mode": (59, 59, params.ConversionMode, False),
     "saturation_strategy": (60, 60, params.OverrideStrategy, False),
 }
@@ -34,7 +33,7 @@ def _placement(name):
 def _range(name, lo, hi, *, snapshot=False):
     if not all(isinstance(v, int) and not isinstance(v, bool) for v in (lo, hi)):
         _op_error(name, "start_bit and end_bit must be compile-time integers")
-    if snapshot and (lo, hi) == (0, 63):
+    if snapshot and (lo, hi) in ((0, 63), (56, 56)):
         return
     if not any((lo, hi) == field[:2] for field in _FIELDS.values()):
         _op_error(name, "select one complete documented CTRL field")

@@ -633,7 +633,7 @@ Returns:
 Constraints:
 
 On Ascend 950 (arch 3510), call inside `tla.cube()` or `tla.vector()` and outside `tla.vec.func()`.
-Vector function entry selects ELEMENT_BITS [56]. Casts preserve the current saturation strategy [60]. Select USE_API explicitly to use instruction saturation.
+Mask mode [56] is read-only. Casts preserve the current saturation strategy [60]. Select USE_API explicitly to use instruction saturation.
 E4M3 matrix inputs can select E4M3 interpretation [45], and GM copies can reset atomic format [8:6].
 MMAD parameters also control compute order [51] and HF32 settings [46:47], which this setter does not expose.
 Raw writes require both endpoints and a fitting integer. Use a semantic patch
@@ -641,7 +641,7 @@ without endpoints. Writes selecting bit 48 clean and invalidate the atomic cache
 and issue an all-pipe barrier before updating CTRL.
 The supported fields are atomic format [8:6], atomic operation [10:9],
 FP8 input interpretation [45], floating saturation [48], UB dcache [49],
-FP8 NaN saturation [50], integer saturation [53], mask mode [56],
+FP8 NaN saturation [50], integer saturation [53],
 conversion mode [59], and saturation strategy [60]. Raw atomic format and operation values must be compile-time
 integers. One-bit fields accept runtime values of 0 or 1. For floating and FP8 NaN saturation, semantic True encodes zero.
 

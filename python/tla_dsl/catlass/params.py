@@ -818,11 +818,6 @@ class AtomicOperation(enum.IntEnum):
     MIN = 2
 
 
-class CTRLMaskMode(enum.IntEnum):
-    ELEMENT_BITS = 0
-    ELEMENT_COUNT = 1
-
-
 class ConversionMode(enum.IntEnum):
     SATURATE = 0
     TRUNCATE = 1
@@ -844,7 +839,5 @@ class CTRLValue:
     ub_dcache: bool | Bool | None = None
     fp8_nan_saturation: bool | Bool | None = None
     integer_saturation: bool | Bool | None = None
-    # A scalar write is observable until vector function entry selects ELEMENT_BITS.
-    mask_mode: CTRLMaskMode | None = None
     conversion_mode: ConversionMode | None = None
     saturation_strategy: OverrideStrategy | None = None

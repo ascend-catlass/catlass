@@ -68,7 +68,7 @@ AIV **不**修改：padding（仅 AIC）。
 与上述接口无关、已由入口 InitSoc 覆盖的位：
 
 - **CTRL[48]**：bulk 中保留旧值；cast 在 CTRL[60]=0 后走指令饱和，不再依赖它
-- **CTRL[56]**：显式标量写入后，进入向量函数时选择 ELEMENT_BITS
+- **CTRL[56]**：CTRL 接口仅支持读取掩码模式
 
 ---
 

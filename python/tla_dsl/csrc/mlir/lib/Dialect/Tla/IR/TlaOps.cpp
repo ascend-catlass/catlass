@@ -940,7 +940,7 @@ mlir::LogicalResult ArchGetICachePrefetchStatusOp::verify()
 
 namespace {
 constexpr std::pair<unsigned, unsigned> ctrlFields[] = {{6, 8},   {9, 10},  {45, 45}, {48, 48}, {49, 49},
-                                                        {50, 50}, {53, 53}, {56, 56}, {59, 59}, {60, 60}};
+                                                        {50, 50}, {53, 53}, {59, 59}, {60, 60}};
 
 mlir::LogicalResult verifyCtrlMask(mlir::Operation* op, uint64_t selected, mlir::Value bits)
 {
@@ -965,7 +965,7 @@ mlir::LogicalResult verifyCtrlMask(mlir::Operation* op, uint64_t selected, mlir:
 
 mlir::LogicalResult ArchGetCtrlOp::verify()
 {
-    if (!(getLo() == 0 && getHi() == 63) &&
+    if (!(getLo() == 0 && getHi() == 63) && !(getLo() == 56 && getHi() == 56) &&
         !llvm::is_contained(ctrlFields, std::make_pair(unsigned(getLo()), unsigned(getHi()))))
         return emitOpError("requires a documented CTRL field or the full register");
     return verifyScalarArchPlacement(*this);
