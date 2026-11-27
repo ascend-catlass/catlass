@@ -41,7 +41,6 @@ void registerTlaPasses()
     registerTlaCubeRegionPass();
     registerTlaFinalizeMemrefPass();
     registerTlaPrologueEpiloguePass();
-    registerTlaInsertImplicitCtrlPass();
     registerTlaLowerProfilingPass();
     registerTlaLowerAVEToRegbaseIntrinsPass();
     registerTlaLowerScalarOpsPass();
@@ -69,10 +68,6 @@ void buildTlaPipeline(OpPassManager& pm)
     pm.addPass(createTlaLowerTensorDescPass());
     // Lower all GM scalar accesses from the materialized descriptor form.
     pm.addPass(createTlaLowerScalarAccessPass());
-    // Before copy lowering and SIMD outlining: coalesced implicit SetCtrl for all CTRL-dependent
-    // DSL ops (cast sat_mode, mmad compute_order / hf32_mode, …) against InitSoc
-    // defaults; no-op when the required bit already matches.
-    pm.addPass(createTlaInsertImplicitCtrlPass());
     pm.addPass(createTlaVectorRegionSimtPass());
     pm.addPass(createTlaVectorRegionSimdPass());
     pm.addPass(createTlaCubeRegionPass());

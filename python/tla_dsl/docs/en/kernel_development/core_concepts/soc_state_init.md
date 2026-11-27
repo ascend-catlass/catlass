@@ -30,7 +30,7 @@ Applies to: Ascend 950.
 
 | Order | Action | State changed / effect |
 | --- | --- | --- |
-| 1 | Disable stream atomic mode | Atomic mode = none; later GM stores without atomic semantics overwrite instead of accumulate |
+| 1 | Disable stream atomic mode | GM stores overwrite while atomic mode is disabled |
 | 2 | Normalize mask mode | Mask working mode = normal |
 | 3 | Reset dequant default scale | Default scale = 1 (half); affects dequant / related cast paths that use this default |
 | 4 | Bulk CTRL reset | Whole-register write `0x1000000000000008 \| (old CTRL & bit48)`: **CTRL[60]=1**, **CTRL[48]=previous (0 or 1)**, **CTRL[3]=1**, other bits 0 |
@@ -45,7 +45,7 @@ AIC does **not** change: vector mask or UB↔OUT loop-mode parameters.
 
 | Order | Action | State changed / effect |
 | --- | --- | --- |
-| 1 | Disable stream atomic mode | Atomic mode = none; normal UB→GM stores overwrite |
+| 1 | Disable stream atomic mode | UB→GM stores overwrite while atomic mode is disabled |
 | 2 | Normalize mask mode | Mask working mode = normal |
 | 3 | Reset dequant default scale | Default scale = 1 (half) |
 | 4 | Bulk CTRL reset | Same as AIC: CTRL[60]=1; CTRL[48] preserved; other bits rewritten from the constant |
@@ -59,23 +59,31 @@ AIV does **not** change: padding (AIC only).
 
 ## Implicit CTRL updates for DSL APIs
 
-InitSoc supplies the entry CTRL defaults. When the following APIs depend on CTRL,
-the compiler **automatically** adjusts the relevant bits. Casts preserve CTRL[60]. Set the saturation strategy to USE_API for instruction-level saturation. If the entry default already matches a call's need, nothing extra is
-written. Repeated identical needs in the same region with no intervening opposite
-requirement take effect only once.
+The compiler configures the relevant CTRL bits from the arguments to `tla.mmad`
+and `tla.mmad_mx`. It can write a uniform setting once after kernel entry
+initialization. When a setting varies, the compiler writes it before each MMAD.
+In functions that access CTRL explicitly or contain calls that may modify CTRL,
+each MMAD sets the bits it needs.
 
 | DSL API | Implicit CTRL effect |
 | --- | --- |
-| `tla.mmad` / `tla.mmad_mx` `compute_order=M_FIRST` | Requires CTRL[51]=0 (matches entry default; usually no write) |
+| `tla.mmad` / `tla.mmad_mx` `compute_order=M_FIRST` | Clear CTRL[51] |
 | `tla.mmad` / `tla.mmad_mx` `compute_order=N_FIRST` | Set CTRL[51]=1 |
-| `tla.mmad` `hf32_mode=HF32_DISABLE` | Requires CTRL[46]=0 and CTRL[47]=0 (matches entry default; usually no write) |
+| `tla.mmad` `hf32_mode=HF32_DISABLE` | Clear CTRL[46] and CTRL[47] |
 | `tla.mmad` `hf32_mode=HF32_NEAREST_ZERO` | Set CTRL[46]=1 and CTRL[47]=1 |
-| `tla.mmad` `hf32_mode=HF32_NEAREST_EVEN` | Set CTRL[46]=1; leave CTRL[47]=0 |
+| `tla.mmad` `hf32_mode=HF32_NEAREST_EVEN` | Set CTRL[46]=1 and clear CTRL[47] |
 
-Bits unrelated to the APIs above (covered by entry InitSoc instead):
+`tla.cast` preserves the current saturation strategy (CTRL[60]). To use the
+instruction's saturation mode, explicitly select `USE_API` with
+`tla.arch.set_ctrl`. Under the global saturation strategy, CTRL[48] retains its
+pre-initialization value until explicitly written.
 
-- **CTRL[48]**: preserved by the bulk write; casts use instruction sat once CTRL[60]=0
-- **CTRL[56]**: mask mode is read-only through the CTRL API
+In functions that access CTRL explicitly, plain `tla.mmad` with two E4M3 inputs
+selects E4M3 interpretation (CTRL[45]).
+
+Copies to GM with the default `atomic_mode=NONE` use the current atomic state.
+If you enable atomic writes with `tla.arch.set_ctrl`, set
+`atomic_format=AtomicFormat.DISABLED` before an overwrite.
 
 ---
 

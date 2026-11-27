@@ -33,7 +33,7 @@ def _query(out: tla.Tensor, cube: tla.Constexpr):
 
 
 @tla.kernel
-def _double(src: tla.Tensor, out: tla.Tensor, modes: tla.Tensor, patch: tla.Constexpr):
+def _double(src: tla.Tensor, out: tla.Tensor, patch: tla.Constexpr):
     a = tla.make_tensor_like(
         tla.allocate(128, src.element_type, tla.AddressSpace.ub, 256),
         src,
@@ -48,12 +48,11 @@ def _double(src: tla.Tensor, out: tla.Tensor, modes: tla.Tensor, patch: tla.Cons
         tla.copy(a, src)
         tla.pipe_barrier(tla.pipes.ALL)
         tla.arch.set_ctrl(patch)
-        modes[0] = tla.arch.get_ctrl(start_bit=56, end_bit=56)
         with tla.vec.func(mode="simd"):
             value = a.load()
             b.store(value + value)
-        modes[1] = tla.arch.get_ctrl(start_bit=56, end_bit=56)
         tla.pipe_barrier(tla.pipes.ALL)
+        tla.arch.set_ctrl(tla.params.CTRLValue(atomic_format=tla.params.AtomicFormat.DISABLED))
         tla.copy(out, b)
         tla.pipe_barrier(tla.pipes.ALL)
 
@@ -128,10 +127,9 @@ def main():
         src = torch.full((128,), value, dtype=dtype, device="npu")
         for saturate in (False, True):
             out = torch.full_like(src, 17)
-            modes = torch.full((2,), 2, dtype=torch.uint64).npu()
             inputs = [
                 from_dlpack(t, layout_tag=tla.arch.RowMajor)
-                for t in (src, out, modes)
+                for t in (src, out)
             ]
             patch = tla.params.CTRLValue(
                 float_saturation=saturate if fp else None,
@@ -141,8 +139,6 @@ def main():
             )
             artifact = tla.compile(_double, *inputs, patch, options="--npu-arch 3510")
             artifact(*inputs, block_num=1)
-            if modes.cpu().tolist() != [0, 0]:
-                raise AssertionError(f"Unexpected mask mode across vector entry: {modes.cpu().tolist()}")
             expected = torch.full(
                 (128,), saturated if saturate else normal, dtype=dtype
             )

@@ -19,7 +19,6 @@ add_library(TlaPasses
   TlaTensorToMemref.cpp
   TlaLowerFlagBarrierToHivmPass.cpp
   TlaPrologueEpiloguePass.cpp
-  TlaInsertImplicitCtrlPass.cpp
   TlaLowerProfilingPass.cpp
   TlaLowerAVEToRegbaseIntrinsPass.cpp
   TlaVectorRegionCommon.cpp

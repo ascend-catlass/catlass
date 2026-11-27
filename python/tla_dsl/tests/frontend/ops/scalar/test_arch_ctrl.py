@@ -21,12 +21,12 @@ def _patch(value: tla.Constexpr):
         tla.arch.set_ctrl(tla.params.CTRLValue(integer_saturation=value))
 
 
-@pytest.mark.parametrize("lo,hi", [(0, 63), (6, 8), (9, 10), (45, 45), (56, 56), (60, 60)])
+@pytest.mark.parametrize("lo,hi", [(0, 63), (6, 8), (9, 10), (45, 45), (60, 60)])
 def test_field_read(lo, hi):
     assert "tla.arch.get_ctrl" in _get.dump_mlir(type_args=(lo, hi))
 
 
-@pytest.mark.parametrize("lo,hi", [(0, 0), (6, 7), (63, 0), (False, 63)])
+@pytest.mark.parametrize("lo,hi", [(0, 0), (6, 7), (56, 56), (63, 0), (False, 63)])
 def test_invalid_field(lo, hi):
     with pytest.raises(Exception, match="arch.get_ctrl"):
         _get.dump_mlir(type_args=(lo, hi))
@@ -169,19 +169,29 @@ def test_ctrl_ir_requires_scalar_region(in_vf, name, statement):
         )
 
 
-def test_mask_mode_patch_rejected():
-    with pytest.raises(TypeError, match="mask_mode"):
-        tla.params.CTRLValue(mask_mode=1)
-
-
-@pytest.mark.parametrize("mask", [1 << 56, (1 << 56) | (1 << 60)])
-def test_mask_mode_ir_write_rejected(mask):
+@pytest.mark.parametrize(
+    "statement,diagnostic",
+    [
+        (
+            "%v = tla.arch.get_ctrl {lo = 56 : i32, hi = 56 : i32}",
+            "requires a documented CTRL field or the full register",
+        ),
+        *[
+            (
+                f"tla.arch.set_ctrl %bits {{mask = {mask} : i64}}",
+                "mask must select only complete documented CTRL fields",
+            )
+            for mask in (1 << 56, (1 << 56) | (1 << 60))
+        ],
+    ],
+)
+def test_unsupported_ctrl_field_ir(statement, diagnostic):
     from catlass._mlir import ir
 
-    with ir.Context(), pytest.raises(ir.MLIRError, match="mask must select only complete documented CTRL fields"):
+    with ir.Context(), pytest.raises(ir.MLIRError, match=diagnostic):
         ir.Module.parse(
             'module { func.func @invalid() { "tla.vector"() ({ '
             '%bits = arith.constant 0 : i64 '
-            f'tla.arch.set_ctrl %bits {{mask = {mask} : i64}}'
-            ' }) : () -> () return } }'
+            + statement
+            + ' }) : () -> () return } }'
         )

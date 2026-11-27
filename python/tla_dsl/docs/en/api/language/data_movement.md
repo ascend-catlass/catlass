@@ -77,7 +77,11 @@ Constraints:
 - Copy size follows each tile's `origin_shape`.
 - UB-to-GM and L0C-to-GM copies accept
   `params.atomic_mode`. Use `AtomicMode.ADD`, `MAX`, or `MIN` to combine
-  this write with the old GM value. The default, `NONE`, overwrites it.
+  this write with the old GM value. The copy disables atomic writes
+  after an explicitly requested operation. The default, `NONE`, uses
+  the current CTRL atomic state. Kernel entry disables atomic writes.
+  When enabling atomic writes with `tla.arch.set_ctrl`, set
+  `atomic_format=AtomicFormat.DISABLED` before a copy that must overwrite GM.
   The GM element type must be i8, i16, i32, f16, bf16, or f32 for atomic
   writes. For L0C, conversion, quantization, and ReLU take effect before
   the atomic operation.

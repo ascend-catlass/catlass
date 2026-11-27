@@ -1,5 +1,5 @@
 // Casts preserve the saturation strategy selected by the caller.
-// RUN: %tla_compile %s -o /dev/null --mlir-print-ir-after=tla-insert-implicit-ctrl 2>&1 | %filecheck %s --implicit-check-not="hivm.hir.set_ctrl {{.*}} at ctrl[60]"
+// RUN: %tla_compile %s -o - | %filecheck %s --implicit-check-not="hivm.hir.set_ctrl {{.*}} at ctrl[60]" --implicit-check-not="hivm.intr.hivm.SET.CTRL"
 
 !s_f32 = !tla.tensor<!tla.layout<!tla.shape<64>, !tla.stride<1>, !tla.shape<64>, RowMajor>, !tla.coord<0>, !tla.ptr<f32, ub, 4>>
 !d_e4m3 = !tla.tensor<!tla.layout<!tla.shape<256>, !tla.stride<1>, !tla.shape<256>, RowMajor>, !tla.coord<0>, !tla.ptr<f8E4M3FN, ub, 1>>
@@ -7,9 +7,9 @@
 module {
 
 // CHECK-LABEL: func.func @two_sat_casts
-// CHECK: "tla.vector"()
-// CHECK-NEXT: "tla.vec.func"()
-// CHECK-NOT: hivm.hir.set_ctrl {{.*}} at ctrl[60]
+// CHECK: call @vector_region_0
+// CHECK-LABEL: func.func private @vector_region_0
+// CHECK-COUNT-2: vcvtff.f322f8e4m3.x
   func.func @two_sat_casts(
       %sm: memref<64xf32, #hivm.address_space<ub>>,
       %dm: memref<256xf8E4M3FN, #hivm.address_space<ub>>) {
@@ -40,8 +40,9 @@ module {
 // CHECK-LABEL: func.func @explicit_ctrl_before_cast
 // CHECK: SET.CTRL
 // CHECK: GET.CTRL
-// CHECK-NOT: hivm.hir.set_ctrl {{.*}} at ctrl[56]
-// CHECK: "tla.vec.func"
+// CHECK: call @vector_region_1
+// CHECK-LABEL: func.func private @vector_region_1
+// CHECK-COUNT-2: vcvtff.f322f8e4m3.x
   func.func @explicit_ctrl_before_cast(
       %sm: memref<64xf32, #hivm.address_space<ub>>,
       %dm: memref<256xf8E4M3FN, #hivm.address_space<ub>>) {
@@ -54,7 +55,7 @@ module {
     "tla.vector"() ({
       %bits = arith.constant 1152921504606846976 : i64
       tla.arch.set_ctrl %bits {mask = 1152921504606846976 : i64}
-      %mode = tla.arch.get_ctrl {lo = 56 : i32, hi = 56 : i32}
+      %strategy = tla.arch.get_ctrl {lo = 60 : i32, hi = 60 : i32}
       "tla.vec.func"() ({
         %ss = "tla.make_shape"() : () -> !tla.shape<64>
         %ds = "tla.make_shape"() : () -> !tla.shape<256>
@@ -73,9 +74,9 @@ module {
   }
 
 // CHECK-LABEL: func.func @nosat_preserves_strategy
-// CHECK: "tla.vector"()
-// CHECK-NEXT: "tla.vec.func"()
-// CHECK-NOT: hivm.hir.set_ctrl {{.*}} at ctrl[60]
+// CHECK: call @vector_region_2
+// CHECK-LABEL: func.func private @vector_region_2
+// CHECK: vcvtff.f322f8e4m3.x
   func.func @nosat_preserves_strategy(
       %sm: memref<64xf32, #hivm.address_space<ub>>,
       %dm: memref<256xf8E4M3FN, #hivm.address_space<ub>>) {
@@ -102,10 +103,10 @@ module {
   }
 
 // CHECK-LABEL: func.func @sat_inside_loop
-// CHECK: "tla.vector"()
-// CHECK-NEXT: "tla.vec.func"()
-// CHECK: scf.for
-// CHECK-NOT: hivm.hir.set_ctrl {{.*}} at ctrl[60]
+// CHECK: call @vector_region_3
+// CHECK-LABEL: func.func private @vector_region_3
+// CHECK: cf.cond_br
+// CHECK: vcvtff.f322f8e4m3.x
   func.func @sat_inside_loop(
       %sm: memref<64xf32, #hivm.address_space<ub>>,
       %dm: memref<256xf8E4M3FN, #hivm.address_space<ub>>) {

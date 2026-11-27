@@ -81,7 +81,7 @@ public:
             StringLiteral callee = isAiv ? kInitSocStateCalleeAiv : kInitSocStateCalleeAic;
             func::FuncOp initSoc = getOrCreateInitSocStateDecl(module, callee, *coreType);
 
-            // Kernel entry: InitSocState only (no extra CTRL[60]/[48]/[56] writes).
+            // Run InitSocState before any kernel code.
             builder.setInsertionPointToStart(&entry);
             builder.create<func::CallOp>(loc, initSoc, ValueRange{});
 

@@ -26,7 +26,7 @@ nav_order: 45
 
 | 顺序 | 初始化动作 | 修改的状态 / 效果 |
 | --- | --- | --- |
-| 1 | 关闭随路原子模式 | 原子模式设为 none；后续未声明原子语义的 GM 写按覆盖执行，不会累加 |
+| 1 | 关闭随路原子模式 | 原子模式关闭时，GM 写入覆盖原值 |
 | 2 | Mask 模式归一 | Mask 工作模式设为 normal |
 | 3 | 反量化默认 scale | 默认 scale 置为 1（half）；影响依赖该默认值的反量化 / 相关 cast 路径 |
 | 4 | bulk CTRL 复位 | 整寄存器赋值 `0x1000000000000008 \| (旧CTRL & bit48)`：**CTRL[60]=1**，**CTRL[48]=旧值（0 或 1）**，**CTRL[3]=1**，其余位为 0 |
@@ -41,7 +41,7 @@ AIC **不**修改：向量 mask、UB↔OUT loop-mode 参数。
 
 | 顺序 | 初始化动作 | 修改的状态 / 效果 |
 | --- | --- | --- |
-| 1 | 关闭随路原子模式 | 原子模式设为 none；普通 UB→GM 写为覆盖而非累加 |
+| 1 | 关闭随路原子模式 | 原子模式关闭时，UB→GM 写入覆盖原值 |
 | 2 | Mask 模式归一 | Mask 工作模式设为 normal |
 | 3 | 反量化默认 scale | 默认 scale 置为 1（half） |
 | 4 | bulk CTRL 复位 | 同 AIC：CTRL[60]=1；CTRL[48] 保留旧值；其余位按常量重写 |
@@ -55,20 +55,21 @@ AIV **不**修改：padding（仅 AIC）。
 
 ## 与 DSL 接口相关的隐式 CTRL 设置
 
-入口 InitSoc 提供默认 CTRL。下列接口在语义依赖 CTRL 时，由编译器**自动**调整对应位。类型转换保留 CTRL[60]。采用指令饱和设置时，须显式选择 USE_API。若入口默认已满足该次调用的需求，则不会额外改写。同一段内连续相同需求、且中间不需要相反状态时，只会生效一次。
+编译器根据 `tla.mmad` 和 `tla.mmad_mx` 的参数配置相应的 CTRL 位。函数内取值一致的设置可在入口初始化之后写入一次。取值不一致时，在各条 MMAD 前写入。函数存在显式 CTRL 访问或可能修改 CTRL 的调用时，各条 MMAD 分别设置所需的位。
 
 | DSL 接口 | 隐式 CTRL 效果 |
 | --- | --- |
-| `tla.mmad` / `tla.mmad_mx` `compute_order=M_FIRST` | 需要 CTRL[51]=0（与入口默认一致，通常无需改写） |
+| `tla.mmad` / `tla.mmad_mx` `compute_order=M_FIRST` | 清 CTRL[51] |
 | `tla.mmad` / `tla.mmad_mx` `compute_order=N_FIRST` | 置 CTRL[51]=1 |
-| `tla.mmad` `hf32_mode=HF32_DISABLE` | 需要 CTRL[46]=0、CTRL[47]=0（与入口默认一致，通常无需改写） |
+| `tla.mmad` `hf32_mode=HF32_DISABLE` | 清 CTRL[46] 和 CTRL[47] |
 | `tla.mmad` `hf32_mode=HF32_NEAREST_ZERO` | 置 CTRL[46]=1、CTRL[47]=1 |
-| `tla.mmad` `hf32_mode=HF32_NEAREST_EVEN` | 置 CTRL[46]=1；CTRL[47] 保持 0 |
+| `tla.mmad` `hf32_mode=HF32_NEAREST_EVEN` | 置 CTRL[46]=1，清 CTRL[47] |
 
-与上述接口无关、已由入口 InitSoc 覆盖的位：
+`tla.cast` 保留当前饱和策略（CTRL[60]）。要使用指令的饱和模式，请通过 `tla.arch.set_ctrl` 显式选择 `USE_API`。使用全局饱和策略时，CTRL[48] 保留入口初始化前的值，直到显式写入。
 
-- **CTRL[48]**：bulk 中保留旧值；cast 在 CTRL[60]=0 后走指令饱和，不再依赖它
-- **CTRL[56]**：CTRL 接口仅支持读取掩码模式
+在显式访问 CTRL 的函数中，两个输入均为 E4M3 的 `tla.mmad` 选择 E4M3 输入格式（CTRL[45]）。
+
+使用默认 `atomic_mode=NONE` 的 GM 拷贝沿用当前原子状态。通过 `tla.arch.set_ctrl` 开启原子写入后，若要覆盖 GM 原值，须先设置 `atomic_format=AtomicFormat.DISABLED`。
 
 ---
 

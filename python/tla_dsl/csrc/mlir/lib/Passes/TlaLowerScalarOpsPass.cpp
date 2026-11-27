@@ -1,5 +1,5 @@
 // Lower the TLA scalar ops that have no MLIR op of their own: the scalar unit's
-// conversion instructions, data synchronization barriers, cache maintenance,
+// conversion instructions, data synchronization barriers, cache maintenance, CTRL
 // and AR access.
 //
 // Why these need a lowering at all, when tla.sqrt does not: math.sqrt and
@@ -44,6 +44,43 @@
 namespace tla {
 
 namespace {
+
+static void lowerCtrlAccess(ModuleOp module)
+{
+    module.walk([](ArchGetCtrlOp op) {
+        OpBuilder builder(op);
+        Location loc = op.getLoc();
+        Value value = builder.create<hivm::GetCtrlInstrOp>(loc, builder.getI64Type());
+        unsigned width = op.getHi() - op.getLo() + 1;
+        if (width < 64) {
+            Value shift = builder.create<arith::ConstantIntOp>(loc, op.getLo(), 64);
+            Value mask = builder.create<arith::ConstantIntOp>(loc, (UINT64_C(1) << width) - 1, 64);
+            value = builder.createOrFold<arith::ShRUIOp>(loc, value, shift);
+            value = builder.createOrFold<arith::AndIOp>(loc, value, mask);
+        }
+        op.getValue().replaceAllUsesWith(value);
+        op.erase();
+    });
+    module.walk([](ArchSetCtrlOp op) {
+        OpBuilder builder(op);
+        Location loc = op.getLoc();
+        uint64_t mask = op.getMask();
+        Value old = builder.create<hivm::GetCtrlInstrOp>(loc, builder.getI64Type());
+        Value keep = builder.create<arith::ConstantIntOp>(loc, ~mask, 64);
+        Value select = builder.create<arith::ConstantIntOp>(loc, mask, 64);
+        Value preserved = builder.createOrFold<arith::AndIOp>(loc, old, keep);
+        Value update = builder.createOrFold<arith::AndIOp>(loc, op.getBits(), select);
+        Value merged = builder.createOrFold<arith::OrIOp>(loc, preserved, update);
+        // Changing floating saturation requires flushing the atomic cache first.
+        if (mask & (UINT64_C(1) << 48)) {
+            builder.create<hivm::DCCIOp>(
+                loc, hivm::DCCIMode::ALL_CACHE_LINES, hivm::DataCacheKind::ATOMIC, /*ptr=*/Value());
+            builder.create<hivm::PipeBarrierOp>(loc, hivm::PipeAttr::get(builder.getContext(), hivm::PIPE::PIPE_ALL));
+        }
+        builder.create<hivm::SetCtrlInstrOp>(loc, merged);
+        op.erase();
+    });
+}
 
 // ALWAYS_INLINE keeps the linked helper from staying a real call. The core type
 // is the helper's own: a scalar-unit instruction exists on both cores and is
@@ -272,7 +309,7 @@ public:
     }
     StringRef getDescription() const override
     {
-        return "Lower TLA scalar conversion, cache maintenance, AR and trap operations";
+        return "Lower TLA scalar conversion, cache maintenance, CTRL, AR and trap operations";
     }
 
     void getDependentDialects(DialectRegistry& registry) const override
@@ -285,6 +322,7 @@ public:
         ModuleOp module = getOperation();
         if (failed(lowerScalarICacheOps(module)))
             return signalPassFailure();
+        lowerCtrlAccess(module);
 
         SmallVector<::tla::ScalarRoundCastOp, 8> roundCasts;
         module.walk([&](::tla::ScalarRoundCastOp op) { roundCasts.push_back(op); });

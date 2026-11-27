@@ -1,9 +1,6 @@
-// Control-flow regressions for tla-insert-implicit-ctrl (keep minimal):
-// - scf.if Mixed arms fork from the same entry state.
-// - Mixed for hoists Uniform bits (zero-trip safe); Mixed bits stay inside.
+// Mixed HF32 modes are applied at the call site in each branch and loop iteration.
 //
-// RUN: %tla_compile %s -o /dev/null --mlir-print-ir-after=tla-insert-implicit-ctrl 2>&1 | %filecheck %s --check-prefix=IF
-// RUN: %tla_compile %s -o /dev/null --mlir-print-ir-after=tla-insert-implicit-ctrl 2>&1 | %filecheck %s --check-prefix=POST
+// RUN: %tla_compile %s -o /dev/null --mlir-print-ir-after=tla-cube-region 2>&1 | %filecheck %s --check-prefixes=IF,POST
 
 !l1 = !tla.tensor<!tla.layout<!tla.shape<32,32>, !tla.stride<32,1>, !tla.shape<32,32>, RowMajor>, !tla.coord<0,0>, !tla.ptr<f32, l1, 512>>
 !l0a = !tla.tensor<!tla.layout<!tla.shape<(16,2),(8,4)>, !tla.stride<(8,128),(1,256)>, !tla.shape<32,32>, zN>, !tla.coord<0,0>, !tla.ptr<f32, l0a, 512>>
@@ -12,15 +9,17 @@
 
 module {
 
-// then: NEAREST_ZERO; else: NEAREST_EVEN — else must still set [46] from entry.
+// Each arm selects its own HF32 rounding.
 // IF-LABEL: func.func @mmad_hf32_if_mixed
+// IF-NOT: hivm.hir.set_ctrl {{.*}} at ctrl[46]
 // IF: scf.if
 // IF: hivm.hir.set_ctrl true at ctrl[46]
-// IF: hivm.hir.set_ctrl true at ctrl[47]
-// IF: tla.mmad
+// IF-NEXT: hivm.hir.set_ctrl true at ctrl[47]
+// IF-NEXT: func.call @mmad_float_float_float
 // IF: } else {
 // IF: hivm.hir.set_ctrl true at ctrl[46]
-// IF: tla.mmad
+// IF-NEXT: hivm.hir.set_ctrl false at ctrl[47]
+// IF-NEXT: func.call @mmad_float_float_float
   tla.func @mmad_hf32_if_mixed(%cond: i1) {
     %0 = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<f32, l1, 512>
     %1 = tla.make_shape -> !tla.shape<32,32>
@@ -46,16 +45,20 @@ module {
     tla.return
   }
 
-// Mixed NZ+NE: hoist uniform [46]; [47] Mixed inside; post-loop NE still correct after zero-trip.
+// The post-loop MMAD selects its mode even after a zero-trip loop.
 // POST-LABEL: func.func @mmad_hf32_for_mixed_then_post
-// POST: hivm.hir.set_ctrl true at ctrl[46]
+// POST-NOT: hivm.hir.set_ctrl {{.*}} at ctrl[46]
 // POST: scf.for
-// POST: hivm.hir.set_ctrl true at ctrl[47]
-// POST: tla.mmad
-// POST: hivm.hir.set_ctrl false at ctrl[47]
-// POST: tla.mmad
-// POST: hivm.hir.set_ctrl false at ctrl[47]
-// POST: tla.mmad
+// POST: hivm.hir.set_ctrl true at ctrl[46]
+// POST-NEXT: hivm.hir.set_ctrl true at ctrl[47]
+// POST-NEXT: func.call @mmad_float_float_float
+// POST: hivm.hir.set_ctrl true at ctrl[46]
+// POST-NEXT: hivm.hir.set_ctrl false at ctrl[47]
+// POST-NEXT: func.call @mmad_float_float_float
+// POST: }
+// POST: hivm.hir.set_ctrl true at ctrl[46]
+// POST-NEXT: hivm.hir.set_ctrl false at ctrl[47]
+// POST-NEXT: call @mmad_float_float_float
   tla.func @mmad_hf32_for_mixed_then_post(%lb: index, %ub: index, %step: index) {
     %0 = tla.alloc_ptr{size_bytes = 4096} -> !tla.ptr<f32, l1, 512>
     %1 = tla.make_shape -> !tla.shape<32,32>

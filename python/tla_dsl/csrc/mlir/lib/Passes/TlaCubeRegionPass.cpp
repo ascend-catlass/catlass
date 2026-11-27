@@ -43,26 +43,52 @@ static StringRef fp4CppType(Type elementType)
     return ::llvm::isa<::tla::Float4E1M2Type>(elementType) ? "float4_e1m2x2_t" : "float4_e2m1x2_t";
 }
 
+static void setMmadComputeOrder(OpBuilder& builder, Location loc, ComputeOrder order)
+{
+    builder.create<hivm::SetCtrlOp>(loc, order == ComputeOrder::N_FIRST, 51);
+}
+
+static void setMmadHF32Mode(OpBuilder& builder, Location loc, HF32Mode mode)
+{
+    builder.create<hivm::SetCtrlOp>(loc, mode != HF32Mode::HF32_DISABLE, 46);
+    builder.create<hivm::SetCtrlOp>(loc, mode == HF32Mode::HF32_NEAREST_ZERO, 47);
+}
+
+template <typename AttrTy>
+static AttrTy getUniformMmadAttr(ArrayRef<Operation*> ops, StringRef name)
+{
+    AttrTy uniform;
+    for (Operation* op : ops) {
+        AttrTy attr = op->getAttrOfType<AttrTy>(name);
+        if (!attr)
+            continue;
+        if (uniform && uniform != attr)
+            return {};
+        uniform = attr;
+    }
+    return uniform;
+}
+
 // Shared by tla.mmad and tla.mmad_mx: the two ops differ only in whether the
 // L0 operands carry an attached e8m0 scale block, and that is a property of the
 // route, not of a type -- the callee is `mmad_*` or `mmadmx_*` accordingly, and
 // mmad.cpp maps those prefixes to GemmMmad and GemmMmadMx. The operand list,
 // shape contract and descriptor handling are identical.
-//
-// CTRL[51]/[46]/[47] for compute_order / hf32_mode are owned by
-// TlaInsertImplicitCtrlPass (coalesced against InitSoc defaults); this pattern
-// only emits the runtime call.
 template <typename MmadOpTy>
 struct LowerTlaMmadPatternImpl : public OpRewritePattern<MmadOpTy> {
     static constexpr bool kIsMx = std::is_same_v<MmadOpTy, ::tla::MmadMxOp>;
 
     LowerTlaMmadPatternImpl(
         MLIRContext* ctx, DenseMap<Value, TensorDescriptor>& tensorDescriptorByValue,
-        SmallVectorImpl<Operation*>& toErase, DenseMap<Value, Value>& loweredMemrefByValue)
+        SmallVectorImpl<Operation*>& toErase, DenseMap<Value, Value>& loweredMemrefByValue, bool hasUniformOrder,
+        bool hasUniformHF32, bool hasExplicitCtrl)
         : OpRewritePattern<MmadOpTy>(ctx),
           tensorDescriptorByValue(tensorDescriptorByValue),
           toErase(toErase),
-          loweredMemrefByValue(loweredMemrefByValue)
+          loweredMemrefByValue(loweredMemrefByValue),
+          hasUniformOrder(hasUniformOrder),
+          hasUniformHF32(hasUniformHF32),
+          hasExplicitCtrl(hasExplicitCtrl)
     {}
 
     LogicalResult matchAndRewrite(MmadOpTy op, PatternRewriter& rewriter) const override
@@ -374,6 +400,15 @@ struct LowerTlaMmadPatternImpl : public OpRewritePattern<MmadOpTy> {
             operands.push_back(rewriter.create<arith::ConstantOp>(op.getLoc(), rewriter.getBoolAttr(isGemv)));
         if (biasValue)
             operands.push_back(*biasRuntime);
+        if (!hasUniformOrder)
+            setMmadComputeOrder(rewriter, op.getLoc(), op.getComputeOrder().getValue());
+        if constexpr (!kIsMx) {
+            if (!hasUniformHF32)
+                setMmadHF32Mode(rewriter, op.getLoc(), op.getHf32Mode().getValue());
+            // An explicit CTRL patch may select HF8 interpretation for these inputs.
+            if (hasExplicitCtrl && lhsInfo->elementType.isFloat8E4M3FN() && rhsInfo->elementType.isFloat8E4M3FN())
+                rewriter.create<hivm::SetCtrlOp>(op.getLoc(), /*enable=*/false, 45);
+        }
         rewriter.create<func::CallOp>(op.getLoc(), callee, operands);
         toErase.push_back(op.getOperation());
         return success();
@@ -383,6 +418,9 @@ private:
     DenseMap<Value, TensorDescriptor>& tensorDescriptorByValue;
     SmallVectorImpl<Operation*>& toErase;
     DenseMap<Value, Value>& loweredMemrefByValue;
+    bool hasUniformOrder;
+    bool hasUniformHF32;
+    bool hasExplicitCtrl;
 };
 
 using LowerTlaMmadPattern = LowerTlaMmadPatternImpl<::tla::MmadOp>;
@@ -1082,6 +1120,22 @@ public:
     LogicalResult runOnCubeFunction(func::FuncOp funcOp)
     {
         Operation* root = funcOp.getOperation();
+        const bool hasExplicitCtrl = funcOp
+                                         .walk([](Operation* op) {
+                                             if (isa<ArchGetCtrlOp, ArchSetCtrlOp>(op))
+                                                 return WalkResult::interrupt();
+                                             return WalkResult::advance();
+                                         })
+                                         .wasInterrupted();
+        // Scalar CTRL reads can observe the order of updates. Opaque calls can
+        // also clobber CTRL, so set modes at each MMAD when either is present.
+        const bool hasOpaqueCalls = funcOp
+                                        .walk([](Operation* op) {
+                                            if (isa<func::CallOp, CallExternOp>(op))
+                                                return WalkResult::interrupt();
+                                            return WalkResult::advance();
+                                        })
+                                        .wasInterrupted();
         SmallVector<Operation*, 8> toErase;
         ::tla::TlaTensorMemrefLowering lowering;
         auto& tensorDescriptorByValue = lowering.descriptorByValue;
@@ -1170,16 +1224,29 @@ public:
                 return failure();
         }
 
-        // Lower tla.mmad / tla.mmad_mx. CTRL for compute_order / hf32_mode is
-        // inserted earlier by TlaInsertImplicitCtrlPass.
-        LowerTlaMmadPattern lowerMmad(&getContext(), tensorDescriptorByValue, toErase, lowering.loweredMemrefByValue);
-        LowerTlaMmadMxPattern lowerMmadMx(
-            &getContext(), tensorDescriptorByValue, toErase, lowering.loweredMemrefByValue);
         SmallVector<Operation*, 16> mmadOps;
         root->walk([&](Operation* op) {
             if (llvm::isa<::tla::MmadOp, ::tla::MmadMxOp>(op))
                 mmadOps.push_back(op);
         });
+        ComputeOrderAttr uniformOrder;
+        HF32ModeAttr uniformHF32;
+        if (!hasExplicitCtrl && !hasOpaqueCalls && !mmadOps.empty()) {
+            uniformOrder = getUniformMmadAttr<ComputeOrderAttr>(mmadOps, "compute_order");
+            uniformHF32 = getUniformMmadAttr<HF32ModeAttr>(mmadOps, "hf32_mode");
+            OpBuilder builder = OpBuilder::atBlockBegin(&funcOp.getBody().front());
+            if (uniformOrder)
+                setMmadComputeOrder(builder, funcOp.getLoc(), uniformOrder.getValue());
+            if (uniformHF32)
+                setMmadHF32Mode(builder, funcOp.getLoc(), uniformHF32.getValue());
+        }
+
+        LowerTlaMmadPattern lowerMmad(
+            &getContext(), tensorDescriptorByValue, toErase, lowering.loweredMemrefByValue,
+            static_cast<bool>(uniformOrder), static_cast<bool>(uniformHF32), hasExplicitCtrl);
+        LowerTlaMmadMxPattern lowerMmadMx(
+            &getContext(), tensorDescriptorByValue, toErase, lowering.loweredMemrefByValue,
+            static_cast<bool>(uniformOrder), /*hasUniformHF32=*/false, hasExplicitCtrl);
         for (Operation* op : mmadOps) {
             if (!op->getBlock())
                 continue;

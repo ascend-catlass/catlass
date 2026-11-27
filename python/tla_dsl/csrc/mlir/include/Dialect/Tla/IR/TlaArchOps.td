@@ -225,9 +225,8 @@ def Tla_ArchShuffleOp : Tla_Op<"arch.shuffle",
   }];
 }
 
-// InitSocState is NOT a user-facing TLA op. ``tla-prologue-epilogue`` injects
-// ``func.call @_mlir_ciface_tla_init_soc_state`` (Scalar BC → AscendC::InitSocState)
-// at every HACC entry (InitSoc only; no extra CTRL[60]/[48]/[56]). No public API.
+// ``tla-prologue-epilogue`` calls the core-specific InitSocState bitcode helper
+// at every HACC entry.
 
 // Active-set dependent: leave effects unknown to prevent CSE across divergent
 // control flow as well as speculation. NoMemoryEffect alone would allow CSE.

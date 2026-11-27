@@ -913,29 +913,31 @@ mlir::LogicalResult ArchDcciCachelinesOp::verify()
 
 // Before core-region flattening, the enclosing region identifies the issuer.
 // After flattening, the split function carries the concrete core type.
-static int64_t getScalarICacheUnitLimit(mlir::Operation* op)
+static std::optional<mlir::hivm::TFuncCoreType> getScalarArchCoreType(mlir::Operation* op)
 {
     if (op->getParentOfType<VecFuncOp>())
-        return 0;
+        return std::nullopt;
     bool aiv = bool(op->getParentOfType<VectorOp>());
     bool aic = bool(op->getParentOfType<CubeOp>());
-    if (aiv || aic)
-        return aiv == aic ? 0 : (aiv ? 7 : 15);
+    if (aiv != aic)
+        return aiv ? mlir::hivm::TFuncCoreType::AIV : mlir::hivm::TFuncCoreType::AIC;
+    if (aiv && aic)
+        return std::nullopt;
     if (auto func = op->getParentOfType<mlir::func::FuncOp>()) {
         auto issuer = func->getAttrOfType<mlir::hivm::TFuncCoreTypeAttr>(mlir::hivm::TFuncCoreTypeAttr::name);
-        if (issuer && issuer.getFuncCoreType() == mlir::hivm::TFuncCoreType::AIV)
-            return 7;
-        if (issuer && issuer.getFuncCoreType() == mlir::hivm::TFuncCoreType::AIC)
-            return 15;
+        if (issuer && (issuer.getFuncCoreType() == mlir::hivm::TFuncCoreType::AIV ||
+                       issuer.getFuncCoreType() == mlir::hivm::TFuncCoreType::AIC))
+            return issuer.getFuncCoreType();
     }
-    return 0;
+    return std::nullopt;
 }
 
 mlir::LogicalResult ArchICachePrefetchOp::verify()
 {
-    int64_t limit = getScalarICacheUnitLimit(getOperation());
-    if (!limit)
+    auto coreType = getScalarArchCoreType(getOperation());
+    if (!coreType)
         return emitOpError("requires one scalar vector or cube region outside tla.vec.func");
+    int64_t limit = *coreType == mlir::hivm::TFuncCoreType::AIV ? 7 : 15;
     int64_t units = getPrefetchUnitsAttr().getInt();
     if (units < 1 || units > limit)
         return emitOpError() << "prefetch_units must be in [1, " << limit << "]";
@@ -944,7 +946,7 @@ mlir::LogicalResult ArchICachePrefetchOp::verify()
 
 mlir::LogicalResult ArchGetICachePrefetchStatusOp::verify()
 {
-    if (!getScalarICacheUnitLimit(getOperation()))
+    if (!getScalarArchCoreType(getOperation()))
         return emitOpError("requires one scalar vector or cube region outside tla.vec.func");
     return mlir::success();
 }
@@ -952,6 +954,13 @@ mlir::LogicalResult ArchGetICachePrefetchStatusOp::verify()
 namespace {
 constexpr std::pair<unsigned, unsigned> ctrlFields[] = {{6, 8},   {9, 10},  {45, 45}, {48, 48}, {49, 49},
                                                         {50, 50}, {53, 53}, {59, 59}, {60, 60}};
+
+mlir::LogicalResult verifyScalarCtrlPlacement(mlir::Operation* op)
+{
+    if (!getScalarArchCoreType(op))
+        return op->emitOpError("requires a scalar tla.vector or tla.cube region");
+    return mlir::success();
+}
 
 mlir::LogicalResult verifyCtrlMask(mlir::Operation* op, uint64_t selected, mlir::Value bits)
 {
@@ -970,16 +979,16 @@ mlir::LogicalResult verifyCtrlMask(mlir::Operation* op, uint64_t selected, mlir:
     }
     if (remaining)
         return op->emitOpError("mask must select only complete documented CTRL fields");
-    return verifyScalarArchPlacement(op);
+    return verifyScalarCtrlPlacement(op);
 }
 } // namespace
 
 mlir::LogicalResult ArchGetCtrlOp::verify()
 {
-    if (!(getLo() == 0 && getHi() == 63) && !(getLo() == 56 && getHi() == 56) &&
+    if (!(getLo() == 0 && getHi() == 63) &&
         !llvm::is_contained(ctrlFields, std::make_pair(unsigned(getLo()), unsigned(getHi()))))
         return emitOpError("requires a documented CTRL field or the full register");
-    return verifyScalarArchPlacement(*this);
+    return verifyScalarCtrlPlacement(*this);
 }
 
 mlir::LogicalResult ArchSetCtrlOp::verify()

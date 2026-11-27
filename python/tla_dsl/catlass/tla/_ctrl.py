@@ -33,7 +33,7 @@ def _placement(name):
 def _range(name, lo, hi, *, snapshot=False):
     if not all(isinstance(v, int) and not isinstance(v, bool) for v in (lo, hi)):
         _op_error(name, "start_bit and end_bit must be compile-time integers")
-    if snapshot and (lo, hi) in ((0, 63), (56, 56)):
+    if snapshot and (lo, hi) == (0, 63):
         return
     if not any((lo, hi) == field[:2] for field in _FIELDS.values()):
         _op_error(name, "select one complete documented CTRL field")

@@ -70,7 +70,10 @@ tla.copy(dst: Tensor, src: Tensor, params: CopyParams | None = None, *, scale: T
 - 拷贝大小按各 tile 的 `origin_shape`。
 - UB 到 GM 和 L0C 到 GM 的搬运可通过 `params.atomic_mode`
   指定本次写回的运算。`AtomicMode.ADD`、`MAX`、`MIN` 分别将写入值与 GM 旧值相加、
-  取最大值或取最小值。默认的 `NONE` 直接覆盖旧值。原子写回支持的 GM 元素类型为
+  取最大值或取最小值。显式指定上述操作时，拷贝在写回后关闭原子写入。
+  默认的 `NONE` 沿用当前 CTRL 原子状态。Kernel 入口关闭原子写入。
+  若通过 `tla.arch.set_ctrl` 开启原子写入，须先设置 `atomic_format=AtomicFormat.DISABLED`，再执行需要覆盖 GM 原值的拷贝。
+  原子写回支持的 GM 元素类型为
   i8、i16、i32、f16、bf16 和 f32。L0C 搬出的值先经过所选的类型转换、量化或 ReLU，再参与原子运算。
   UB 到 GM 搬运可省略 `params`，或传入 `CopyUbToGmParams`。该参数对象的
   `atomic_mode` 必须是 `AtomicMode` 枚举成员，默认值为 `AtomicMode.NONE`。

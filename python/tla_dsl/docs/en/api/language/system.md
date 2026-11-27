@@ -671,8 +671,10 @@ Returns:
 Constraints:
 
 On Ascend 950 (arch 3510), call inside `tla.cube()` or `tla.vector()` and outside `tla.vec.func()`.
-Mask mode [56] is read-only. Casts preserve the current saturation strategy [60]. Select USE_API explicitly to use instruction saturation.
-E4M3 matrix inputs can select E4M3 interpretation [45], and GM copies can reset atomic format [8:6].
+Casts preserve the current saturation strategy [60]. Select `USE_API` explicitly to use instruction saturation.
+E4M3 matrix inputs can select E4M3 interpretation [45].
+GM copies with the default `atomic_mode=NONE` use the current CTRL atomic state.
+Set `atomic_format=AtomicFormat.DISABLED` to disable atomics enabled by this API.
 MMAD parameters also control compute order [51] and HF32 settings [46:47], which this setter does not expose.
 Raw writes require both endpoints and a fitting integer. Use a semantic patch
 without endpoints. Writes selecting bit 48 clean and invalidate the atomic cache domain

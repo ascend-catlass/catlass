@@ -616,8 +616,9 @@ tla.arch.set_ctrl(value: Any, *, start_bit: Any = None, end_bit: Any = None)
 约束说明：
 
 仅支持 Ascend 950（arch 3510）。须在 `tla.cube()` 或 `tla.vector()` 内、`tla.vec.func()` 外调用。
-掩码模式 [56] 为只读字段。类型转换保留当前饱和策略 [60]。需要采用指令饱和设置时，须显式选择 USE_API。
-E4M3 矩阵输入可使编译器选择 E4M3 输入解释 [45]，向 GM 拷贝时可重置原子格式 [8:6]。
+类型转换保留当前饱和策略 [60]。需要采用指令饱和设置时，须显式选择 `USE_API`。
+E4M3 矩阵输入可使编译器选择 E4M3 输入解释 [45]。
+使用默认 `atomic_mode=NONE` 的 GM 拷贝沿用当前 CTRL 原子状态。通过此接口开启原子写入后，可设置 `atomic_format=AtomicFormat.DISABLED` 关闭。
 MMAD 参数还控制计算顺序 [51] 和 HF32 设置 [46:47]，这些位不属于此接口的可写字段。
 
 原始值须在字段范围内并指定两端；使用 `CTRLValue` 时省略两端。写入位 48 前，编译器清理并无效化原子缓存域，然后执行全流水线屏障。

@@ -11,11 +11,9 @@ def Tla_MmadOp : Tla_Op<"mmad", []> {
     Perform a matrix multiply-accumulate on tensor views. Must be nested inside a
     ``tla.cube`` region.
 
-    ``compute_order`` / ``hf32_mode`` are always supplied by the frontend.
-    ``TlaInsertImplicitCtrlPass`` emits coalesced ``hivm.set_ctrl`` for
-    ``CTRL[51]`` (``M_FIRST``/``N_FIRST``) and ``CTRL[46]``/``CTRL[47]``
-    (HF32 enable / rounding select). Requirements that already match the
-    InitSoc defaults are registered but do not insert.
+    Cube lowering configures ``CTRL[51]`` from ``compute_order`` and
+    ``CTRL[46]``/``CTRL[47]`` from ``hf32_mode``. Uniform settings can be
+    applied once at function entry.
 
     The ``lhs`` layout selects the form of the same instruction: a 1-D
     ``VectorLayout`` row is the GEMV form, a ``zN`` matrix tile the normal 2-D
