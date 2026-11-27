@@ -225,8 +225,8 @@ module {
         %src_tile = tla.tensor_desc %src shape [%c1, %c64, %c1, %c1] stride [%c64, %c1, %c1, %c1] origin_shape [%c1, %c64] coord [%c0, %c0] : memref<64xf32, #hivm.address_space<ub>> -> !fvec
         %dst_tile = tla.tensor_desc %dst shape [%c1, %c64, %c1, %c1] stride [%c64, %c1, %c1, %c1] origin_shape [%c1, %c64] coord [%c0, %c0] : memref<64xf32, #hivm.address_space<ub>> -> !fvec
         %a = tla.load %src_tile : !fvec -> !tla.vector<64xf32>
-        %narrow = tla.cast %a, [0, 0, 0] : !tla.vector<64xf32> -> !tla.vector<?xf16>
-        %wide = tla.cast %narrow, [0, 0, 0] : !tla.vector<?xf16> -> !tla.vector<?xf32>
+        %narrow = tla.cast %a, [0, 2, 0] : !tla.vector<64xf32> -> !tla.vector<?xf16>
+        %wide = tla.cast %narrow, [0, 0, 4] : !tla.vector<?xf16> -> !tla.vector<?xf32>
         tla.store %dst_tile, %wide : !fvec, !tla.vector<?xf32>
       }) {mode = "simd"} : () -> ()
     }) : () -> ()

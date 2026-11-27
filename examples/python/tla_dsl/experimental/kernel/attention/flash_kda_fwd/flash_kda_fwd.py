@@ -111,11 +111,7 @@ def load_bf16_f32(tile):
         tla.params.NormalLoadParams(load_dist=tla.params.LoadDist.DIST_UNPACK_B16)
     ).to(
         tla.Float32,
-        tla.params.CastParams(
-            reg_slot=tla.params.RegSlot.ZERO,
-            sat_mode=tla.params.SatMode.NOSAT,
-            round_mode=tla.params.RoundMode.CAST_RINT,
-        ),
+        tla.params.CastParams(),
     )
 
 
@@ -195,11 +191,7 @@ def prepare_beta_input(raw, converted, valid, pitch):
                     )
                     value = raw_value.to(
                         tla.Float32,
-                        tla.params.CastParams(
-                            reg_slot=tla.params.RegSlot.ZERO,
-                            sat_mode=tla.params.SatMode.NOSAT,
-                            round_mode=tla.params.RoundMode.CAST_RINT,
-                        ),
+                        tla.params.CastParams(),
                     )
                 at(converted, row, 1).store(
                     value,
@@ -322,11 +314,7 @@ def gate_row(raw, row, rate, dt, mode, lower_bound):
     if tla.const_expr(raw.ptr.dtype == tla.Float32):
         value = cast_bf16(at(raw, row * 64, 64).load()).to(
             tla.Float32,
-            tla.params.CastParams(
-                reg_slot=tla.params.RegSlot.ZERO,
-                sat_mode=tla.params.SatMode.NOSAT,
-                round_mode=tla.params.RoundMode.CAST_RINT,
-            ),
+            tla.params.CastParams(),
         )
     else:
         value = load_bf16_f32(at(raw, row * 64, 64))
@@ -550,11 +538,7 @@ def persistent_negative_t(kkt, beta, negative, packed, aiv):
                 )
                 restored = half.to(
                     tla.Float32,
-                    tla.params.CastParams(
-                        reg_slot=tla.params.RegSlot.ZERO,
-                        sat_mode=tla.params.SatMode.NOSAT,
-                        round_mode=tla.params.RoundMode.CAST_RINT,
-                    ),
+                    tla.params.CastParams(),
                 )
                 at(negative, row * 64, 64).store(restored, mask=full)
                 compact, ignored = tla.deinterleave(half, half)
@@ -4644,19 +4628,11 @@ def pack_persistent_panel(
                         )
                         qv = qb.to(
                             tla.Float32,
-                            tla.params.CastParams(
-                                reg_slot=tla.params.RegSlot.ZERO,
-                                sat_mode=tla.params.SatMode.NOSAT,
-                                round_mode=tla.params.RoundMode.CAST_RINT,
-                            ),
+                            tla.params.CastParams(),
                         )
                         kv = kb.to(
                             tla.Float32,
-                            tla.params.CastParams(
-                                reg_slot=tla.params.RegSlot.ZERO,
-                                sat_mode=tla.params.SatMode.NOSAT,
-                                round_mode=tla.params.RoundMode.CAST_RINT,
-                            ),
+                            tla.params.CastParams(),
                         )
                     gate = at(g, logical * 64, 64).load()
                     reference = at(

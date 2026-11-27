@@ -487,16 +487,8 @@ H_GROUPS = 1
 INPUT_DTYPE = tla.BFloat16
 INPUT_DTYPE_NAME = "bfloat16"
 RNE_PASSES = 1
-_CAST_WIDEN = tla.params.CastParams(
-    reg_slot=tla.params.RegSlot.ZERO,
-    sat_mode=tla.params.SatMode.NOSAT,
-    round_mode=tla.params.RoundMode.CAST_ROUND,
-)
-_CAST_WIDEN_ODD = tla.params.CastParams(
-    reg_slot=tla.params.RegSlot.ONE,
-    sat_mode=tla.params.SatMode.NOSAT,
-    round_mode=tla.params.RoundMode.CAST_ROUND,
-)
+_CAST_WIDEN = tla.params.CastParams()
+_CAST_WIDEN_ODD = tla.params.CastParams(reg_slot=tla.params.RegSlot.ONE)
 _CAST_TO_INPUT_EVEN = tla.params.CastParams(
     reg_slot=tla.params.RegSlot.ZERO,
     sat_mode=tla.params.SatMode.NOSAT,

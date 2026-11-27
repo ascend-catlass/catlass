@@ -65,7 +65,8 @@ _CAST_ODD = tla.params.CastParams(
     sat_mode=tla.params.SatMode.NOSAT,
     round_mode=tla.params.RoundMode.CAST_ROUND,
 )
-_CAST_NONE = tla.params.CastParams()
+_CAST_WIDEN_EVEN = tla.params.CastParams()
+_CAST_WIDEN_ODD = tla.params.CastParams(reg_slot=tla.params.RegSlot.ONE)
 _LOAD_UNPACK16 = tla.params.NormalLoadParams(
     load_dist=tla.params.LoadDist.DIST_UNPACK_B16
 )
@@ -128,8 +129,8 @@ def _norm_head(
 ):
     """RMSNorm + weight + bias for one head, written back as bf16."""
     x = tla.tile_view(src, tla.make_shape(head_dim), tla.make_coord(in_head)).load()
-    x_even = x.to(tla.Float32, _CAST_EVEN)
-    x_odd = x.to(tla.Float32, _CAST_ODD)
+    x_even = x.to(tla.Float32, _CAST_WIDEN_EVEN)
+    x_odd = x.to(tla.Float32, _CAST_WIDEN_ODD)
 
     squares = tla.add(tla.mul(x_even, x_even), tla.mul(x_odd, x_odd))
     square_sum = tla.full(
@@ -182,12 +183,12 @@ def _norm_rope_full(
     x0 = (
         tla.tile_view(src, tla.make_shape(lanes), tla.make_coord(in_tile))
         .load(_LOAD_UNPACK16)
-        .to(tla.Float32, _CAST_NONE)
+        .to(tla.Float32, _CAST_WIDEN_EVEN)
     )
     x1 = (
         tla.tile_view(src, tla.make_shape(lanes), tla.make_coord(in_tile + 1))
         .load(_LOAD_UNPACK16)
-        .to(tla.Float32, _CAST_NONE)
+        .to(tla.Float32, _CAST_WIDEN_EVEN)
     )
 
     squares = tla.add(tla.mul(x0, x0), tla.mul(x1, x1))
@@ -203,8 +204,8 @@ def _norm_rope_full(
         n0 = tla.add(n0, b0)
         n1 = tla.add(n1, b1)
 
-    n0 = n0.to(tla.BFloat16, _CAST_EVEN).to(tla.Float32, _CAST_NONE)
-    n1 = n1.to(tla.BFloat16, _CAST_EVEN).to(tla.Float32, _CAST_NONE)
+    n0 = n0.to(tla.BFloat16, _CAST_EVEN).to(tla.Float32, _CAST_WIDEN_EVEN)
+    n1 = n1.to(tla.BFloat16, _CAST_EVEN).to(tla.Float32, _CAST_WIDEN_EVEN)
     o0 = tla.sub(tla.mul(n0, cos_v), tla.mul(n1, sin_v))
     o1 = tla.add(tla.mul(n1, cos_v), tla.mul(n0, sin_v))
 
@@ -226,8 +227,14 @@ def _rope_head(dst, head, head_dim, half, cos_even, cos_odd, sin_even, sin_odd):
     x1 = tla.tile_view(dst, tla.make_shape(half), tla.make_coord(first)).load()
     x2 = tla.tile_view(dst, tla.make_shape(half), tla.make_coord(first + 1)).load()
 
-    x1_even, x1_odd = x1.to(tla.Float32, _CAST_EVEN), x1.to(tla.Float32, _CAST_ODD)
-    x2_even, x2_odd = x2.to(tla.Float32, _CAST_EVEN), x2.to(tla.Float32, _CAST_ODD)
+    x1_even, x1_odd = (
+        x1.to(tla.Float32, _CAST_WIDEN_EVEN),
+        x1.to(tla.Float32, _CAST_WIDEN_ODD),
+    )
+    x2_even, x2_odd = (
+        x2.to(tla.Float32, _CAST_WIDEN_EVEN),
+        x2.to(tla.Float32, _CAST_WIDEN_ODD),
+    )
 
     low_even = tla.sub(tla.mul(x1_even, cos_even), tla.mul(x2_even, sin_even))
     low_odd = tla.sub(tla.mul(x1_odd, cos_odd), tla.mul(x2_odd, sin_odd))
@@ -249,10 +256,10 @@ def _weight_parity(ub_weight, ub_bias, head_shape):
     weight = tla.tile_view(ub_weight, head_shape, tla.make_coord(0)).load()
     bias = tla.tile_view(ub_bias, head_shape, tla.make_coord(0)).load()
     return (
-        weight.to(tla.Float32, _CAST_EVEN),
-        weight.to(tla.Float32, _CAST_ODD),
-        bias.to(tla.Float32, _CAST_EVEN),
-        bias.to(tla.Float32, _CAST_ODD),
+        weight.to(tla.Float32, _CAST_WIDEN_EVEN),
+        weight.to(tla.Float32, _CAST_WIDEN_ODD),
+        bias.to(tla.Float32, _CAST_WIDEN_EVEN),
+        bias.to(tla.Float32, _CAST_WIDEN_ODD),
     )
 
 
@@ -260,10 +267,10 @@ def _cos_sin_parity(ub_cos_sin, row, half_shape):
     cos = tla.tile_view(ub_cos_sin, half_shape, tla.make_coord(row * 2)).load()
     sin = tla.tile_view(ub_cos_sin, half_shape, tla.make_coord(row * 2 + 1)).load()
     return (
-        cos.to(tla.Float32, _CAST_EVEN),
-        cos.to(tla.Float32, _CAST_ODD),
-        sin.to(tla.Float32, _CAST_EVEN),
-        sin.to(tla.Float32, _CAST_ODD),
+        cos.to(tla.Float32, _CAST_WIDEN_EVEN),
+        cos.to(tla.Float32, _CAST_WIDEN_ODD),
+        sin.to(tla.Float32, _CAST_WIDEN_EVEN),
+        sin.to(tla.Float32, _CAST_WIDEN_ODD),
     )
 
 
@@ -460,7 +467,7 @@ def split_qkv_rmsnorm_rope_kernel(
                                         tla.make_coord(0),
                                     )
                                     .load(_LOAD_UNPACK16)
-                                    .to(tla.Float32, _CAST_NONE)
+                                    .to(tla.Float32, _CAST_WIDEN_EVEN)
                                 )
                                 fqw1 = (
                                     tla.tile_view(
@@ -469,7 +476,7 @@ def split_qkv_rmsnorm_rope_kernel(
                                         tla.make_coord(1),
                                     )
                                     .load(_LOAD_UNPACK16)
-                                    .to(tla.Float32, _CAST_NONE)
+                                    .to(tla.Float32, _CAST_WIDEN_EVEN)
                                 )
                                 fkw0 = (
                                     tla.tile_view(
@@ -478,7 +485,7 @@ def split_qkv_rmsnorm_rope_kernel(
                                         tla.make_coord(0),
                                     )
                                     .load(_LOAD_UNPACK16)
-                                    .to(tla.Float32, _CAST_NONE)
+                                    .to(tla.Float32, _CAST_WIDEN_EVEN)
                                 )
                                 fkw1 = (
                                     tla.tile_view(
@@ -487,7 +494,7 @@ def split_qkv_rmsnorm_rope_kernel(
                                         tla.make_coord(1),
                                     )
                                     .load(_LOAD_UNPACK16)
-                                    .to(tla.Float32, _CAST_NONE)
+                                    .to(tla.Float32, _CAST_WIDEN_EVEN)
                                 )
                                 fqb0 = fqw0
                                 fqb1 = fqw1
@@ -501,7 +508,7 @@ def split_qkv_rmsnorm_rope_kernel(
                                             tla.make_coord(0),
                                         )
                                         .load(_LOAD_UNPACK16)
-                                        .to(tla.Float32, _CAST_NONE)
+                                        .to(tla.Float32, _CAST_WIDEN_EVEN)
                                     )
                                     fqb1 = (
                                         tla.tile_view(
@@ -510,7 +517,7 @@ def split_qkv_rmsnorm_rope_kernel(
                                             tla.make_coord(1),
                                         )
                                         .load(_LOAD_UNPACK16)
-                                        .to(tla.Float32, _CAST_NONE)
+                                        .to(tla.Float32, _CAST_WIDEN_EVEN)
                                     )
                                     fkb0 = (
                                         tla.tile_view(
@@ -519,7 +526,7 @@ def split_qkv_rmsnorm_rope_kernel(
                                             tla.make_coord(0),
                                         )
                                         .load(_LOAD_UNPACK16)
-                                        .to(tla.Float32, _CAST_NONE)
+                                        .to(tla.Float32, _CAST_WIDEN_EVEN)
                                     )
                                     fkb1 = (
                                         tla.tile_view(
@@ -528,7 +535,7 @@ def split_qkv_rmsnorm_rope_kernel(
                                             tla.make_coord(1),
                                         )
                                         .load(_LOAD_UNPACK16)
-                                        .to(tla.Float32, _CAST_NONE)
+                                        .to(tla.Float32, _CAST_WIDEN_EVEN)
                                     )
                                 fcos = (
                                     tla.tile_view(
@@ -537,7 +544,7 @@ def split_qkv_rmsnorm_rope_kernel(
                                         tla.make_coord(proc_row * 2),
                                     )
                                     .load(_LOAD_UNPACK16)
-                                    .to(tla.Float32, _CAST_NONE)
+                                    .to(tla.Float32, _CAST_WIDEN_EVEN)
                                 )
                                 fsin = (
                                     tla.tile_view(
@@ -546,7 +553,7 @@ def split_qkv_rmsnorm_rope_kernel(
                                         tla.make_coord(proc_row * 2 + 1),
                                     )
                                     .load(_LOAD_UNPACK16)
-                                    .to(tla.Float32, _CAST_NONE)
+                                    .to(tla.Float32, _CAST_WIDEN_EVEN)
                                 )
                                 for fq_head in tla.range(q_heads):
                                     _norm_rope_full(
@@ -713,28 +720,28 @@ def split_qkv_rmsnorm_rope_kernel(
                                     ub_q_weight, tla.make_shape(64), tla.make_coord(0)
                                 )
                                 .load(_LOAD_UNPACK16)
-                                .to(tla.Float32, _CAST_NONE)
+                                .to(tla.Float32, _CAST_WIDEN_EVEN)
                             )
                             tfqw1 = (
                                 tla.tile_view(
                                     ub_q_weight, tla.make_shape(64), tla.make_coord(1)
                                 )
                                 .load(_LOAD_UNPACK16)
-                                .to(tla.Float32, _CAST_NONE)
+                                .to(tla.Float32, _CAST_WIDEN_EVEN)
                             )
                             tfkw0 = (
                                 tla.tile_view(
                                     ub_k_weight, tla.make_shape(64), tla.make_coord(0)
                                 )
                                 .load(_LOAD_UNPACK16)
-                                .to(tla.Float32, _CAST_NONE)
+                                .to(tla.Float32, _CAST_WIDEN_EVEN)
                             )
                             tfkw1 = (
                                 tla.tile_view(
                                     ub_k_weight, tla.make_shape(64), tla.make_coord(1)
                                 )
                                 .load(_LOAD_UNPACK16)
-                                .to(tla.Float32, _CAST_NONE)
+                                .to(tla.Float32, _CAST_WIDEN_EVEN)
                             )
                             tfqb0 = tfqw0
                             tfqb1 = tfqw1
@@ -748,7 +755,7 @@ def split_qkv_rmsnorm_rope_kernel(
                                         tla.make_coord(0),
                                     )
                                     .load(_LOAD_UNPACK16)
-                                    .to(tla.Float32, _CAST_NONE)
+                                    .to(tla.Float32, _CAST_WIDEN_EVEN)
                                 )
                                 tfqb1 = (
                                     tla.tile_view(
@@ -757,7 +764,7 @@ def split_qkv_rmsnorm_rope_kernel(
                                         tla.make_coord(1),
                                     )
                                     .load(_LOAD_UNPACK16)
-                                    .to(tla.Float32, _CAST_NONE)
+                                    .to(tla.Float32, _CAST_WIDEN_EVEN)
                                 )
                                 tfkb0 = (
                                     tla.tile_view(
@@ -766,7 +773,7 @@ def split_qkv_rmsnorm_rope_kernel(
                                         tla.make_coord(0),
                                     )
                                     .load(_LOAD_UNPACK16)
-                                    .to(tla.Float32, _CAST_NONE)
+                                    .to(tla.Float32, _CAST_WIDEN_EVEN)
                                 )
                                 tfkb1 = (
                                     tla.tile_view(
@@ -775,7 +782,7 @@ def split_qkv_rmsnorm_rope_kernel(
                                         tla.make_coord(1),
                                     )
                                     .load(_LOAD_UNPACK16)
-                                    .to(tla.Float32, _CAST_NONE)
+                                    .to(tla.Float32, _CAST_WIDEN_EVEN)
                                 )
                             tfcos = (
                                 tla.tile_view(
@@ -784,7 +791,7 @@ def split_qkv_rmsnorm_rope_kernel(
                                     tla.make_coord(0),
                                 )
                                 .load(_LOAD_UNPACK16)
-                                .to(tla.Float32, _CAST_NONE)
+                                .to(tla.Float32, _CAST_WIDEN_EVEN)
                             )
                             tfsin = (
                                 tla.tile_view(
@@ -793,7 +800,7 @@ def split_qkv_rmsnorm_rope_kernel(
                                     tla.make_coord(1),
                                 )
                                 .load(_LOAD_UNPACK16)
-                                .to(tla.Float32, _CAST_NONE)
+                                .to(tla.Float32, _CAST_WIDEN_EVEN)
                             )
                             for tfq_head in tla.range(q_heads):
                                 _norm_rope_full(

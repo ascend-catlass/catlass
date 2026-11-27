@@ -1048,7 +1048,6 @@ def fused_kernel(
                                             tla.Float32,
                                             tla.params.CastParams(
                                                 reg_slot=tla.params.RegSlot.ZERO,
-                                                sat_mode=tla.params.SatMode.NOSAT,
                                                 round_mode=tla.params.RoundMode.CAST_ROUND,
                                             ),
                                             m_src,
@@ -1277,7 +1276,6 @@ def fused_kernel(
                                             tla.Float32,
                                             tla.params.CastParams(
                                                 reg_slot=tla.params.RegSlot.ZERO,
-                                                sat_mode=tla.params.SatMode.NOSAT,
                                                 round_mode=tla.params.RoundMode.CAST_ROUND,
                                             ),
                                             m_src,
@@ -2442,7 +2440,6 @@ def reduce_epi(
                                             tla.Float32,
                                             tla.params.CastParams(
                                                 reg_slot=tla.params.RegSlot.ZERO,
-                                                sat_mode=tla.params.SatMode.NOSAT,
                                                 round_mode=tla.params.RoundMode.CAST_ROUND,
                                             ),
                                             m_src,
@@ -2671,7 +2668,6 @@ def reduce_epi(
                                             tla.Float32,
                                             tla.params.CastParams(
                                                 reg_slot=tla.params.RegSlot.ZERO,
-                                                sat_mode=tla.params.SatMode.NOSAT,
                                                 round_mode=tla.params.RoundMode.CAST_ROUND,
                                             ),
                                             m_src,

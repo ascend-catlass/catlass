@@ -267,7 +267,12 @@ def test_dense_to_a_bare_fp8_stays_a_plain_cast() -> None:
     def k(src: tla.Tensor, dst: tla.Tensor) -> None:
         with tla.vector():
             with tla.vec.func(mode="simd"):
-                dst.store(src.load().to(tla.Float8E4M3FN, tla.params.CastParams()))
+                dst.store(
+                    src.load().to(
+                        tla.Float8E4M3FN,
+                        tla.params.CastParams(sat_mode=tla.params.SatMode.NOSAT),
+                    )
+                )
 
     text = str(k.dump_mlir(type_args=(_ub(tla.Float32, 64), _ub(tla.Float8E4M3FN, 64))))
     assert "tla.cast" in text

@@ -29,7 +29,7 @@ module {
       %dst1_tile = "tla.tile_view"(%dst1, %shape64, %coord) : (!fvec, !tla.shape<64>, !tla.coord<0>) -> !fvec
       %v0, %v1 = tla.load %src_tile {load_dist = #tla.load_dist<dintlv_b32>} : !fsrc -> !tla.vector<64xf32>, !tla.vector<64xf32>
       %encoded = "tla.cast"(%v0) <{trait = array<i32: 0, 1, 0>}> : (!tla.vector<64xf32>) -> !tla.vector<256x!tla.hif8>
-      %decoded = "tla.cast"(%encoded) <{trait = array<i32: 0, 0, 0>}> : (!tla.vector<256x!tla.hif8>) -> !tla.vector<64xf32>
+      %decoded = "tla.cast"(%encoded) <{trait = array<i32: 0, 0, 4>}> : (!tla.vector<256x!tla.hif8>) -> !tla.vector<64xf32>
       tla.store %dst0_tile, %decoded : !fvec, !tla.vector<64xf32>
       tla.store %dst1_tile, %v1 : !fvec, !tla.vector<64xf32>
     }) : () -> ()
@@ -55,7 +55,7 @@ module {
       %dst_tile = "tla.tile_view"(%dst, %shape64, %coord) : (!fvec, !tla.shape<64>, !tla.coord<0>) -> !fvec
       %first, %second = tla.load %src_tile {load_dist = #tla.load_dist<dintlv_b32>} : !fsrc -> !tla.vector<64xf32>, !tla.vector<64xf32>
       %encoded = "tla.cast"(%first) <{trait = array<i32: 0, 1, 0>}> : (!tla.vector<64xf32>) -> !tla.vector<256x!tla.hif8>
-      %decoded = "tla.cast"(%encoded) <{trait = array<i32: 0, 0, 0>}> : (!tla.vector<256x!tla.hif8>) -> !tla.vector<64xf32>
+      %decoded = "tla.cast"(%encoded) <{trait = array<i32: 0, 0, 4>}> : (!tla.vector<256x!tla.hif8>) -> !tla.vector<64xf32>
       tla.store %dst_tile, %decoded : !fvec, !tla.vector<64xf32>
     }) : () -> ()
     return

@@ -34,9 +34,9 @@ func.func @f32_rounding(
   %out_i32_default = tla.tensor_desc %i32_default shape [%c1, %c64, %c1, %c1] stride [%c64, %c1, %c1, %c1] origin_shape [%c1, %c64] coord [%c0, %c0] : memref<64xi32, #hivm.address_space<ub>> -> !i32
   "tla.vec.func"() ({
     %value = tla.load %src : !f32 -> !tla.vector<64xf32>
-    %trunc = tla.cast %value, [0, 2, 3] : !tla.vector<64xf32> -> !tla.vector<64xf32>
-    %f32_even = tla.cast %value, [0, 2, 5] : !tla.vector<64xf32> -> !tla.vector<64xf32>
-    %f32_none = tla.cast %value, [0, 2, 4] : !tla.vector<64xf32> -> !tla.vector<64xf32>
+    %trunc = tla.cast %value, [0, 0, 3] : !tla.vector<64xf32> -> !tla.vector<64xf32>
+    %f32_even = tla.cast %value, [0, 0, 5] : !tla.vector<64xf32> -> !tla.vector<64xf32>
+    %f32_none = tla.cast %value, [0, 0, 4] : !tla.vector<64xf32> -> !tla.vector<64xf32>
     %odd = tla.cast %value, [0, 2, 6] : !tla.vector<64xf32> -> !tla.vector<128xf16>
     %f16_none = tla.cast %value, [0, 2, 4] : !tla.vector<64xf32> -> !tla.vector<128xf16>
     %i32_even = tla.cast %value, [0, 2, 5] : !tla.vector<64xf32> -> !tla.vector<64xi32>
@@ -67,7 +67,7 @@ func.func @f16_widen(
   %dst = tla.tensor_desc %output shape [%c1, %c64, %c1, %c1] stride [%c64, %c1, %c1, %c1] origin_shape [%c1, %c64] coord [%c0, %c0] : memref<64xf32, #hivm.address_space<ub>> -> !f32
   "tla.vec.func"() ({
     %value = tla.load %src : !f16 -> !tla.vector<128xf16>
-    %wide = tla.cast %value, [0, 2, 4] : !tla.vector<128xf16> -> !tla.vector<64xf32>
+    %wide = tla.cast %value, [0, 0, 4] : !tla.vector<128xf16> -> !tla.vector<64xf32>
     tla.store %dst, %wide : !f32, !tla.vector<64xf32>
   }) {mode = "simd"} : () -> ()
   return

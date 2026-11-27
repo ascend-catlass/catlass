@@ -11,9 +11,8 @@
 """Self-contained MXFP8 block sparse attention for Ascend 950.
 
 All production kernels, input-norm checks, layout adaptation, and dispatch
-live in this file. Every pipeline stage is TLA; no AscendC extern source is
-compiled. Dependencies: CATLASS DSL, PyTorch, and torch_npu. No sibling
-source files are read at runtime.
+live in this file. TLA implements each pipeline stage. The example requires
+CATLASS DSL, PyTorch, and torch_npu.
 """
 
 import math
@@ -138,7 +137,11 @@ def _mx_prob_value(scores, row, snap, maskh):
     # The fused form is tla.arch.sub_exp(_mx_load_row(scores, row), snap, mask=maskh).
     diff = tla.sub(_mx_load_row(scores, row), snap, mask=maskh)
     exp_f16 = tla.exp(diff, mask=maskh)
-    return exp_f16.to(tla.Float32, tla.params.CastParams(), mask=maskh)
+    return exp_f16.to(
+        tla.Float32,
+        tla.params.CastParams(),
+        mask=maskh,
+    )
 
 
 @tla.jit
@@ -178,26 +181,27 @@ def _mx_softmax_encode(score, prob, maximum, scratch, cols):
             sat_mode=tla.params.SatMode.NOSAT,
             round_mode=tla.params.RoundMode.CAST_FLOOR,
         )
-        plain = tla.params.CastParams(sat_mode=tla.params.SatMode.NOSAT)
+        plain = tla.params.CastParams()
+        narrow = tla.params.CastParams(sat_mode=tla.params.SatMode.NOSAT)
         e4 = tla.params.CastParams(
             reg_slot=tla.params.RegSlot.ZERO,
             sat_mode=tla.params.SatMode.SAT,
-            round_mode=tla.params.RoundMode.CAST_ROUND,
+            round_mode=tla.params.RoundMode.CAST_RINT,
         )
         e4b = tla.params.CastParams(
             reg_slot=tla.params.RegSlot.ONE,
             sat_mode=tla.params.SatMode.SAT,
-            round_mode=tla.params.RoundMode.CAST_ROUND,
+            round_mode=tla.params.RoundMode.CAST_RINT,
         )
         e4c = tla.params.CastParams(
             reg_slot=tla.params.RegSlot.TWO,
             sat_mode=tla.params.SatMode.SAT,
-            round_mode=tla.params.RoundMode.CAST_ROUND,
+            round_mode=tla.params.RoundMode.CAST_RINT,
         )
         e4d = tla.params.CastParams(
             reg_slot=tla.params.RegSlot.THREE,
             sat_mode=tla.params.SatMode.SAT,
-            round_mode=tla.params.RoundMode.CAST_ROUND,
+            round_mode=tla.params.RoundMode.CAST_RINT,
         )
         # Byte b of a packed four-row block belongs to key row b // 32 and
         # query b % 32; the second plane repeats the block 128 bytes later.
@@ -253,7 +257,7 @@ def _mx_softmax_encode(score, prob, maximum, scratch, cols):
             current = tla.max(current, ef, mask=mf)
             # Shift this group's probabilities up to 2**7.8 for E4M3.
             snap = tla.mul(
-                tla.sub(ef.to(tla.Float16, plain, mask=mf), bias, mask=mh),
+                tla.sub(ef.to(tla.Float16, narrow, mask=mf), bias, mask=mh),
                 ln2,
                 mask=mh,
             )
@@ -4289,7 +4293,7 @@ def _mx_row_norm(xp, sp, op, count):
     outt = _mx_vector_tile(op, 64)
     with tla.vec.func():
         mf = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
-        plain = tla.params.CastParams(sat_mode=tla.params.SatMode.NOSAT)
+        plain = tla.params.CastParams()
         brc = tla.params.NormalLoadParams(load_dist=tla.params.LoadDist.DIST_BRC_B32)
         unpack = tla.params.NormalLoadParams(
             load_dist=tla.params.LoadDist.DIST_UNPACK4_B8

@@ -60,17 +60,23 @@ out_merge = tla.where(mask, result, previous)
 | 取较小值 | `tla.min(a, b, mask=mask)` | `[1, 2, 92, 93]` |
 | 填入 7 | `tla.full(7.0, dtype=tla.Float32, mask=mask)` | `[7, 7, 92, 93]` |
 | 复制源元素 | `a` | `[1, 2, 92, 93]` |
-| f32 转 i32 | `a.to(tla.Int32, ROUND_EVEN, mask=mask)` | `[1, 2, 92, 93]`（i32） |
+| f32 转 i32 | `a.to(tla.Int32, ROUND_EVEN_NOSAT, mask=mask)` | `[1, 2, 92, 93]`（i32） |
 | i32 转 f32 | `a.to(tla.Float32, ROUND_EVEN, mask=mask)` | `[1.0, 2.0, 92.0, 93.0]`（f32） |
 
 其他运算传入掩码后如何处理未选中位置，见对应接口的参数说明。例如，`tla.relu` 和 `tla.prelu` 的 `mask` 行为见[向量算术接口](../../../../../../python/tla_dsl/docs/zh/api/language/simd/arithmetic.md)。
 
 复制一行的完整写法是 `tla.where(mask, a, previous)`。掩码选中哪里，就从源向量 `a` 复制哪里的值。
 
-类型转换后，传给 `tla.where` 的两个向量要有相同的元素类型和长度。例如，f32 转 i32 后要给未选中位置补零，就用 `tla.full(0, dtype=tla.Int32)` 生成整数零向量。表中的 `ROUND_EVEN` 是这两个转换共用的舍入设置：
+类型转换后，传给 `tla.where` 的两个向量要有相同的元素类型和长度。例如，f32 转 i32 后要给未选中位置补零，就用 `tla.full(0, dtype=tla.Int32)` 生成整数零向量。两个转换都使用 `CAST_RINT`。f32 转 i32 显式指定 `NOSAT`，i32 转 f32 使用默认的 `UNKNOWN`。
 
 ```python
-ROUND_EVEN = tla.params.CastParams(round_mode=tla.params.RoundMode.CAST_RINT)
+ROUND_EVEN = tla.params.CastParams(
+    round_mode=tla.params.RoundMode.CAST_RINT,
+)
+ROUND_EVEN_NOSAT = tla.params.CastParams(
+    sat_mode=tla.params.SatMode.NOSAT,
+    round_mode=tla.params.RoundMode.CAST_RINT,
+)
 ```
 
 ## 归约与写回

@@ -90,12 +90,7 @@ def _kernel(dtype):
                     )
                     accumulator = accumulator + tla.where(tail_keep, ones, zeros)
                 total = accumulator.reduce(tla.ReductionOp.ADD, mask=full)
-                count.store(
-                    total.to(
-                        tla.UInt32,
-                        tla.params.CastParams(reg_slot=tla.params.RegSlot.ZERO),
-                    )
-                )
+                count.store(total.to(tla.UInt32, tla.params.CastParams()))
             tla.pipe_barrier(tla.pipes.ALL)
             tla.copy(output, storage)
             tla.copy(result_count, count)

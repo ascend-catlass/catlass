@@ -1,0 +1,34 @@
+// RUN: sed -n '/BEGIN-F32$/,/END-F32$/p' %s | not %tla_compile - -o %t.out 2>&1 | %filecheck %s --check-prefix=F32
+// RUN: sed -n '/BEGIN-E4M3$/,/END-E4M3$/p' %s | not %tla_compile - -o %t.out 2>&1 | %filecheck %s --check-prefix=E4M3
+// RUN: sed -n '/BEGIN-E5M2$/,/END-E5M2$/p' %s | not %tla_compile - -o %t.out 2>&1 | %filecheck %s --check-prefix=E5M2
+
+// F32: CAST_ODD is unsupported for 'f32'->'bf16'
+// E4M3: 'f8E4M3FN'->'bf16' requires CAST_NONE and SatMode.UNKNOWN
+// E5M2: 'f8E5M2'->'bf16' requires CAST_NONE and SatMode.UNKNOWN
+
+// BEGIN-F32
+func.func @bad(%v: !tla.vector<64xf32>) {
+  "tla.vec.func"() ({
+    %r = tla.cast %v, [0, 2, 6] : !tla.vector<64xf32> -> !tla.vector<128xbf16>
+  }) {mode = "simd"} : () -> ()
+  return
+}
+// END-F32
+
+// BEGIN-E4M3
+func.func @bad(%v: !tla.vector<256xf8E4M3FN>) {
+  "tla.vec.func"() ({
+    %r = tla.cast %v, [0, 0, 6] : !tla.vector<256xf8E4M3FN> -> !tla.vector<128xbf16>
+  }) {mode = "simd"} : () -> ()
+  return
+}
+// END-E4M3
+
+// BEGIN-E5M2
+func.func @bad(%v: !tla.vector<256xf8E5M2>) {
+  "tla.vec.func"() ({
+    %r = tla.cast %v, [0, 0, 6] : !tla.vector<256xf8E5M2> -> !tla.vector<128xbf16>
+  }) {mode = "simd"} : () -> ()
+  return
+}
+// END-E5M2

@@ -64,6 +64,7 @@ VL_ELE = 64  # fp32 vector length (256 B / 4 B)
 MIN_F = -3.4028234663852886e38
 POS_INF = 3.0e38
 _CAST_NONE = tla.params.CastParams()
+_CAST_TO_INT32 = tla.params.CastParams(sat_mode=tla.params.SatMode.NOSAT)
 UB_BYTES = 262144
 MAX_K = VL_ELE
 
@@ -451,7 +452,7 @@ def moe_route_kernel(
                         # 省掉 host 侧的一次 device cast。
                         tla.tile_view(
                             ub_pif[bi], tla.make_shape(1, VL_ELE), tla.make_coord(0, 0)
-                        ).store(packed_i.to(tla.Int32, _CAST_NONE, mask))
+                        ).store(packed_i.to(tla.Int32, _CAST_TO_INT32, mask))
                         # 打包结果下一步要被标量单元读出来算专家行地址，先保证
                         # vector store 对后续标量读可见。
                         tla.local_mem_bar(

@@ -13,9 +13,9 @@
 One CATLASS DSL AIC/AIV mixed kernel fuses QK GEMM, online softmax in
 FP32, E4M3FN P quantization and PV GEMM. Q/K are pre-quantized INT8 with
 per-128 query and per-64 key scales; V is pre-quantized E4M3FN with a
-per-channel scale. Every pipeline stage is TLA (register-level SIMD
-included); no AscendC extern source is compiled. Dependencies: CATLASS
-DSL, PyTorch, and torch_npu.
+per-channel scale. TLA implements each pipeline stage, including
+register-level SIMD. The example requires CATLASS DSL, PyTorch,
+and torch_npu.
 """
 
 import catlass.tla as tla
@@ -108,6 +108,7 @@ def sage_attention_kernel(
     pv_dtype = v.ptr.dtype
     out_dtype = out.ptr.dtype
     cast = tla.params.CastParams()
+    narrow = tla.params.CastParams(sat_mode=tla.params.SatMode.NOSAT)
     bcast = tla.params.NormalLoadParams(load_dist=tla.params.LoadDist.DIST_BRC_B32)
     us = tla.params.UnalignStoreParams()
     split = tla.params.CopyL0C2DstParams(l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M)
@@ -510,22 +511,22 @@ def sage_attention_kernel(
                             trait0 = tla.params.CastParams(
                                 reg_slot=tla.params.RegSlot.ZERO,
                                 sat_mode=tla.params.SatMode.NOSAT,
-                                round_mode=tla.params.RoundMode.CAST_ROUND,
+                                round_mode=tla.params.RoundMode.CAST_RINT,
                             )
                             trait1 = tla.params.CastParams(
                                 reg_slot=tla.params.RegSlot.ONE,
                                 sat_mode=tla.params.SatMode.NOSAT,
-                                round_mode=tla.params.RoundMode.CAST_ROUND,
+                                round_mode=tla.params.RoundMode.CAST_RINT,
                             )
                             trait2 = tla.params.CastParams(
                                 reg_slot=tla.params.RegSlot.TWO,
                                 sat_mode=tla.params.SatMode.NOSAT,
-                                round_mode=tla.params.RoundMode.CAST_ROUND,
+                                round_mode=tla.params.RoundMode.CAST_RINT,
                             )
                             trait3 = tla.params.CastParams(
                                 reg_slot=tla.params.RegSlot.THREE,
                                 sat_mode=tla.params.SatMode.NOSAT,
-                                round_mode=tla.params.RoundMode.CAST_ROUND,
+                                round_mode=tla.params.RoundMode.CAST_RINT,
                             )
                             traits = [trait0, trait1, trait2, trait3]
                             neg = tla.full(-3.0e38, dtype=tla.Float32)
@@ -770,7 +771,7 @@ def sage_attention_kernel(
                                     yu, tla.make_shape(1, 64), tla.make_coord(yr, yd)
                                 ).store(y)
                             else:
-                                yh = y.to(out_dtype, cast)
+                                yh = y.to(out_dtype, narrow)
                                 ypck, unused_y = tla.deinterleave(yh, yh)
                                 tla.tile_view(
                                     yu, tla.make_shape(1, 64), tla.make_coord(yr, yd)

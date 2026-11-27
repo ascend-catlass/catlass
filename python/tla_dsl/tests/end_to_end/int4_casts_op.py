@@ -67,12 +67,21 @@ def make_kernel(dst_dtype):
                     NormalLoadParams(load_dist=LoadDist.DIST_UNPACK4_B8)
                 )
                 if tla.const_expr(dst_dtype is tla.Int8):
-                    half = expanded.to(tla.Float16, CastParams())
+                    half = expanded.to(
+                        tla.Float16, CastParams()
+                    )
                     dst_tile.store(
-                        half.to(tla.Int8, CastParams(round_mode=RoundMode.CAST_RINT))
+                        half.to(
+                            tla.Int8,
+                            CastParams(
+                                sat_mode=SatMode.NOSAT, round_mode=RoundMode.CAST_RINT
+                            ),
+                        )
                     )
                 else:
-                    dst_tile.store(expanded.to(dst_dtype, CastParams()))
+                    dst_tile.store(
+                        expanded.to(dst_dtype, CastParams())
+                    )
             tla.set_flag(done)
             tla.wait_flag(done)
             tla.copy(destination, dst_tile)

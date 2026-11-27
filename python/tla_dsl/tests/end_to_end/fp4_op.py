@@ -32,7 +32,6 @@ from catlass.params import (
     NormalStoreParams,
     RegSlot,
     RoundMode,
-    SatMode,
     StoreDist,
 )
 from catlass.tla.runtime import from_dlpack, make_fake_tensor
@@ -95,14 +94,10 @@ def make_roundtrip_kernel(fp4_dtype):
                 bf16_values = source_tile.load()
                 fp4_pairs = bf16_values.to(
                     fp4_dtype,
-                    CastParams(
-                        round_mode=RoundMode.CAST_RINT,
-                        sat_mode=SatMode.SAT,
-                        reg_slot=RegSlot.ZERO,
-                    ),
+                    CastParams(round_mode=RoundMode.CAST_RINT, reg_slot=RegSlot.ZERO),
                 )
                 bf16_restored = fp4_pairs.to(
-                    tla.BFloat16, CastParams(reg_slot=RegSlot.ZERO)
+                    tla.BFloat16, CastParams()
                 )
                 # Slot zero has one pair byte in every four register bytes.
                 packed_tile.store(

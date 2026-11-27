@@ -46,7 +46,10 @@ def gm_view(x, offset, rows, cols, pitch):
     )
 
 
-COMPONENT_CAST = tla.params.CastParams(round_mode=tla.params.RoundMode.CAST_ROUND)
+COMPONENT_CAST = tla.params.CastParams(
+    sat_mode=tla.params.SatMode.NOSAT, round_mode=tla.params.RoundMode.CAST_ROUND
+)
+WIDEN_CAST = tla.params.CastParams()
 
 PACK16 = tla.params.NormalStoreParams(store_dist=tla.params.StoreDist.DIST_PACK_B32)
 
@@ -59,9 +62,7 @@ def component_high(value):
 def store_components(value, high, low):
     # Clamp only the high component; keep the original value in the residual.
     hi = component_high(value)
-    lo = (value - hi.to(tla.Float32, tla.params.CastParams())).to(
-        tla.BFloat16, COMPONENT_CAST
-    )
+    lo = (value - hi.to(tla.Float32, WIDEN_CAST)).to(tla.BFloat16, COMPONENT_CAST)
     high.store(hi, PACK16)
     low.store(lo, PACK16)
 
@@ -109,22 +110,22 @@ FIRST32 = tla.params.NormalStoreParams(
     store_dist=tla.params.StoreDist.DIST_FIRST_ELEMENT_B32
 )
 
-ZERO_CAST = tla.params.CastParams(round_mode=tla.params.RoundMode.CAST_ROUND)
+ZERO_CAST = tla.params.CastParams(
+    sat_mode=tla.params.SatMode.NOSAT, round_mode=tla.params.RoundMode.CAST_ROUND
+)
 
 UNPACK16 = tla.params.NormalLoadParams(load_dist=tla.params.LoadDist.DIST_UNPACK_B16)
 
 
 def read_f32(x, bf16):
     if bf16:
-        return x.load(UNPACK16).to(tla.Float32, tla.params.CastParams())
+        return x.load(UNPACK16).to(tla.Float32, WIDEN_CAST)
     return x.load()
 
 
 def store_native_pair(value, high, low, row):
     hi = component_high(value)
-    lo = (value - hi.to(tla.Float32, tla.params.CastParams())).to(
-        tla.BFloat16, COMPONENT_CAST
-    )
+    lo = (value - hi.to(tla.Float32, WIDEN_CAST)).to(tla.BFloat16, COMPONENT_CAST)
     native_hi, unused_hi = tla.deinterleave(hi, hi)
     native_lo, unused_lo = tla.deinterleave(lo, lo)
     active = tla.create_mask(pattern=tla.mask.VL64, dtype=tla.BFloat16)
@@ -290,7 +291,7 @@ def s0_kt(ub, lp, slot, kt0, kt1, endout, f, mtx_stage):
             row = 63 - reverse
             value = read_f32(sub(kr, row, 0, 1, 64), True) * suffix
             hi = component_high(value)
-            lo = (value - hi.to(tla.Float32, tla.params.CastParams())).to(
+            lo = (value - hi.to(tla.Float32, WIDEN_CAST)).to(
                 tla.BFloat16, COMPONENT_CAST
             )
             sub(high, row, 0, 1, 64).store(hi, PACK16)
@@ -1592,9 +1593,9 @@ def cube_group(
 
 def triplet(value):
     high = component_high(value)
-    residual = value - high.to(tla.Float32, tla.params.CastParams())
+    residual = value - high.to(tla.Float32, WIDEN_CAST)
     middle = residual.to(tla.BFloat16, COMPONENT_CAST)
-    low = (residual - middle.to(tla.Float32, tla.params.CastParams())).to(
+    low = (residual - middle.to(tla.Float32, WIDEN_CAST)).to(
         tla.BFloat16, COMPONENT_CAST
     )
     return high, middle, low
@@ -1705,9 +1706,7 @@ def encode_delta(ub, lp, block, width, mtx_delta):
 
 def store_native_components(value, high, low, row, part, width):
     hi = component_high(value)
-    lo = (value - hi.to(tla.Float32, tla.params.CastParams())).to(
-        tla.BFloat16, COMPONENT_CAST
-    )
+    lo = (value - hi.to(tla.Float32, WIDEN_CAST)).to(tla.BFloat16, COMPONENT_CAST)
     packed_hi, unused_hi = tla.deinterleave(hi, hi)
     packed_lo, unused_lo = tla.deinterleave(lo, lo)
     active = tla.create_mask(
@@ -2060,7 +2059,7 @@ def encode_state_pair(ub, block):
             current = previous * gate + increment
             sub(hold, 0, row * 32, 1, 64).store(current)
             hi = component_high(current)
-            lo = (current - hi.to(tla.Float32, tla.params.CastParams())).to(
+            lo = (current - hi.to(tla.Float32, WIDEN_CAST)).to(
                 tla.BFloat16, COMPONENT_CAST
             )
             store_two_bf16_rows(hi, high, row, 2048, 64, first, second)
@@ -2118,7 +2117,6 @@ def bf16_rne(value):
     short = result.to(
         tla.Int16,
         tla.params.CastParams(
-            round_mode=tla.params.RoundMode.CAST_TRUNC,
             sat_mode=tla.params.SatMode.NOSAT,
             reg_slot=tla.params.RegSlot.ZERO,
         ),

@@ -17,7 +17,7 @@ func.func @extract_exponents(%in: memref<128xbf16, #hivm.address_space<ub>>,
     %v = tla.load %s : !source -> !tla.vector<128xbf16>
     %p = "tla.create_mask"() {pattern = "VL3", dtype = bf16} : () -> !tla.mask<128>
     %odd = tla.cast %v, [1, 0, 4] : !tla.vector<128xbf16> -> !tla.vector<?x!tla.f8e8m0>
-    %even = tla.cast %v, [0, 1, 3] mask %p : !tla.vector<128xbf16> mask !tla.mask<128> -> !tla.vector<?x!tla.f8e8m0>
+    %even = tla.cast %v, [0, 0, 4] mask %p : !tla.vector<128xbf16> mask !tla.mask<128> -> !tla.vector<?x!tla.f8e8m0>
     tla.store %d_odd, %odd : !dest, !tla.vector<?x!tla.f8e8m0>
     tla.store %d_even, %even : !dest, !tla.vector<?x!tla.f8e8m0>
   }) {mode = "simd"} : () -> ()

@@ -560,6 +560,10 @@ def _cast_slot(slot):
     )
 
 
+def _widen_slot(slot):
+    return tla.params.CastParams(reg_slot=slot)
+
+
 def _emit_group(ub_s, ub_o, row, group, val, preg, output_mask, cast_pack, pack_store):
     """Apply the group scale and store in the attention input dtype."""
     brc = tla.params.NormalLoadParams(load_dist=tla.params.LoadDist.DIST_BRC_B32)
@@ -589,7 +593,9 @@ def _store_dequant_rope(ub_r, ub_o, row, fp32_mask, output_mask, cast, pack):
             load_dist=tla.params.LoadDist.DIST_UNPACK_B16
         )
         bf16_mask = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.BFloat16)
-        expanded = source.load(params=unpack).to(tla.Float32, cast, mask=bf16_mask)
+        expanded = source.load(params=unpack).to(
+            tla.Float32, _widen_slot(tla.params.RegSlot.ZERO), mask=bf16_mask
+        )
         target.store(
             expanded.to(ub_o.ptr.dtype, cast, mask=fp32_mask),
             pack,
@@ -680,10 +686,10 @@ def dequant_kv_records(
                 output_mask = tla.create_mask(
                     pattern=tla.mask.ALL, dtype=ub_o.ptr.dtype
                 )
-                cast0 = _cast_slot(tla.params.RegSlot.ZERO)
-                cast1 = _cast_slot(tla.params.RegSlot.ONE)
-                cast2 = _cast_slot(tla.params.RegSlot.TWO)
-                cast3 = _cast_slot(tla.params.RegSlot.THREE)
+                cast0 = _widen_slot(tla.params.RegSlot.ZERO)
+                cast1 = _widen_slot(tla.params.RegSlot.ONE)
+                cast2 = _widen_slot(tla.params.RegSlot.TWO)
+                cast3 = _widen_slot(tla.params.RegSlot.THREE)
                 cast_pack = _cast_slot(tla.params.RegSlot.ZERO)
                 pack_store = tla.params.NormalStoreParams(
                     store_dist=tla.params.StoreDist.DIST_PACK_B32
@@ -864,10 +870,10 @@ def dequant_kv_pages(
                 output_mask = tla.create_mask(
                     pattern=tla.mask.ALL, dtype=ub_o.ptr.dtype
                 )
-                cast0 = _cast_slot(tla.params.RegSlot.ZERO)
-                cast1 = _cast_slot(tla.params.RegSlot.ONE)
-                cast2 = _cast_slot(tla.params.RegSlot.TWO)
-                cast3 = _cast_slot(tla.params.RegSlot.THREE)
+                cast0 = _widen_slot(tla.params.RegSlot.ZERO)
+                cast1 = _widen_slot(tla.params.RegSlot.ONE)
+                cast2 = _widen_slot(tla.params.RegSlot.TWO)
+                cast3 = _widen_slot(tla.params.RegSlot.THREE)
                 cast_pack = _cast_slot(tla.params.RegSlot.ZERO)
                 pack_store = tla.params.NormalStoreParams(
                     store_dist=tla.params.StoreDist.DIST_PACK_B32
@@ -1015,10 +1021,10 @@ def _dv_block(
             m8 = tla.create_mask(pattern=tla.mask.ALL, dtype=gm_nope.ptr.dtype)
             preg = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
             output_mask = tla.create_mask(pattern=tla.mask.ALL, dtype=ub_o.ptr.dtype)
-            cast0 = _cast_slot(tla.params.RegSlot.ZERO)
-            cast1 = _cast_slot(tla.params.RegSlot.ONE)
-            cast2 = _cast_slot(tla.params.RegSlot.TWO)
-            cast3 = _cast_slot(tla.params.RegSlot.THREE)
+            cast0 = _widen_slot(tla.params.RegSlot.ZERO)
+            cast1 = _widen_slot(tla.params.RegSlot.ONE)
+            cast2 = _widen_slot(tla.params.RegSlot.TWO)
+            cast3 = _widen_slot(tla.params.RegSlot.THREE)
             cast_pack = _cast_slot(tla.params.RegSlot.ZERO)
             pack_store = tla.params.NormalStoreParams(
                 store_dist=tla.params.StoreDist.DIST_PACK_B32
@@ -6302,7 +6308,7 @@ def _emit_group_rec(
     sb = tla.get_tile(
         ub_rec_bf, tla.make_coord(row, scale_col + group), tla.make_shape(1, 1)
     ).load(params=brc16)
-    scale = sb.to(tla.Float32, cast_pack, mask=preg_b16)
+    scale = sb.to(tla.Float32, _widen_slot(tla.params.RegSlot.ZERO), mask=preg_b16)
     scaled = tla.mul(val, scale, mask=preg)
     tla.get_tile(
         ub_o, tla.make_coord(row, group * GROUP_SIZE), tla.make_shape(1, GROUP_SIZE)
@@ -6317,10 +6323,10 @@ def _dequant_rec_block(ub_rec, ub_rec_bf, ub_o, rec_dtype, rows, m_rec, m_out):
         preg = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
         preg_b16 = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.BFloat16)
         brc16 = tla.params.NormalLoadParams(load_dist=tla.params.LoadDist.DIST_BRC_B16)
-        cast0 = _cast_slot(tla.params.RegSlot.ZERO)
-        cast1 = _cast_slot(tla.params.RegSlot.ONE)
-        cast2 = _cast_slot(tla.params.RegSlot.TWO)
-        cast3 = _cast_slot(tla.params.RegSlot.THREE)
+        cast0 = _widen_slot(tla.params.RegSlot.ZERO)
+        cast1 = _widen_slot(tla.params.RegSlot.ONE)
+        cast2 = _widen_slot(tla.params.RegSlot.TWO)
+        cast3 = _widen_slot(tla.params.RegSlot.THREE)
         cast_pack = _cast_slot(tla.params.RegSlot.ZERO)
         pack_store = tla.params.NormalStoreParams(
             store_dist=tla.params.StoreDist.DIST_PACK_B32

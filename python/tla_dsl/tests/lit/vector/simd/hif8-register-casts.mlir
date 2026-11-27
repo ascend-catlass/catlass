@@ -1,5 +1,7 @@
 // RUN: %tla_compile %s --mlir-print-ir-after=tla-vector-region-simd -o %t 2>&1 | %filecheck %s
-// RUN: sed -e 's/array<i32: 0, 1, 0>/array<i32: 2, 2, 0>/' -e 's/array<i32: 3, 0, 0>/array<i32: 1, 0, 0>/' %s > %t.slots.mlir
+// RUN: sed 's/array<i32: 0, 1, 0>/array<i32: 0, 1, 4>/' %s > %t.default.mlir
+// RUN: %tla_compile %t.default.mlir --mlir-print-ir-after=tla-vector-region-simd -o %t.default 2>&1 | %filecheck %s
+// RUN: sed -e 's/array<i32: 0, 1, 0>/array<i32: 2, 2, 0>/' -e 's/array<i32: 3, 0, 4>/array<i32: 1, 0, 4>/' %s > %t.slots.mlir
 // RUN: %tla_compile %t.slots.mlir --mlir-print-ir-after=tla-vector-region-simd -o %t.slots 2>&1 | %filecheck %s --check-prefix=ALTERNATE
 
 // RUN: sed 's/array<i32: 0, 1, 0>/array<i32: 0, 1, 7>/' %s > %t.hybrid.mlir
@@ -37,7 +39,7 @@ module {
     %d = tla.tensor_desc %dm shape [%c1, %cd, %c1, %c1] stride [%cd, %c1, %c1, %c1] origin_shape [%c1, %cd] coord [%c0, %c0] : memref<64xf32, #hivm.address_space<ub>> -> !d_hif8_to_f32
     "tla.vec.func"() ({
       %v = tla.load %s : !s_hif8_to_f32 -> !tla.vector<256x!tla.hif8>
-      %r = "tla.cast"(%v) <{trait = array<i32: 3, 0, 0>}> : (!tla.vector<256x!tla.hif8>) -> !tla.vector<64xf32>
+      %r = "tla.cast"(%v) <{trait = array<i32: 3, 0, 4>}> : (!tla.vector<256x!tla.hif8>) -> !tla.vector<64xf32>
       tla.store %d, %r : !d_hif8_to_f32, !tla.vector<64xf32>
     }) {mode = "simd"} : () -> ()
     return

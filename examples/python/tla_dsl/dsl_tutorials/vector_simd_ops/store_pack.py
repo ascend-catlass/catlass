@@ -34,19 +34,14 @@ VL_ELE = 64
 LOOPS = (VECTOR_ELE + VL_ELE - 1) // VL_ELE
 ALL_DTYPES = ("i32", "i16")
 OUTPUT_DTYPES = ("i16", "u8")
-# AscendC Pack is same-type DistVST. Narrowing is a prior cast; PACK then
-# densifies the unpacked slots (MulCast / GenStoreL2 style).
+# Each packed store writes the narrowed elements contiguously.
 PACK_CONFIGS = {
     "i32": ("i16", StoreDist.DIST_PACK_B32),
     "i16": ("u8", StoreDist.DIST_PACK_B16),
 }
 
-# int↔int casts truncate; RegSlot.ZERO selects the even/low part for 2x narrow.
-_CAST_NARROW = CastParams(
-    reg_slot=RegSlot.ZERO,
-    sat_mode=SatMode.NOSAT,
-    round_mode=RoundMode.CAST_TRUNC,
-)
+# RegSlot.ZERO places the low bits in the even lanes of a 2x narrowing cast.
+_CAST_NARROW = CastParams(reg_slot=RegSlot.ZERO, sat_mode=SatMode.NOSAT)
 
 _KERNEL_DTYPE = tla.Int32
 _KERNEL_TORCH_DTYPE = None
@@ -188,11 +183,10 @@ def _make_inputs(args: Any, dtype_name: str, torch: Any) -> tuple[Any, ...]:
 
 
 def _expected(_op_name: str, inputs: tuple[Any, ...]) -> Any:
-    """Host reference for cast-then-PACK densify.
+    """Host reference for narrowing followed by a packed store.
 
-    AscendC path: narrow with trunc cast (unpacked slots), then same-type PACK
-    writes contiguous narrow elements. The harness buffer is input-dtype sized;
-    little-endian reinterpret packs consecutive narrow values into wide slots::
+    The harness buffer uses the input dtype. The reference combines
+    consecutive narrow elements into each little-endian output word::
 
         input  (i32):  a[2k]        a[2k+1]
                        +-----------+-----------+
@@ -227,8 +221,8 @@ def _expected(_op_name: str, inputs: tuple[Any, ...]) -> Any:
 HARNESS = DirectVectorOpHarness(
     DirectVectorOpConfig(
         description=(
-            "Cast-then-PACK densify: i32->i16/DIST_PACK_B32 and "
-            "i16->u8/DIST_PACK_B16 (Ascend C same-type StoreAlign)."
+            "Narrow and store contiguous elements with DIST_PACK_B32 for i32 to i16 "
+            "and DIST_PACK_B16 for i16 to u8."
         ),
         kernel=store_pack,
         all_dtypes=ALL_DTYPES,

@@ -5,7 +5,14 @@ import pytest
 from catlass import tla
 from catlass._mlir import ir
 from catlass.core_api import TlaCoreAPIError
-from catlass.params import CastParams, LoadDist, NormalLoadParams, RegSlot, RoundMode
+from catlass.params import (
+    CastParams,
+    LoadDist,
+    NormalLoadParams,
+    RegSlot,
+    RoundMode,
+    SatMode,
+)
 from catlass.tla.runtime import make_fake_tensor
 from catlass.types import dtype_size_bits, dtype_size_bytes
 
@@ -97,9 +104,14 @@ def test_int4_widen_rejects_explicit_rounding(compiler_tlair):
     def convert(src: tla.Tensor, dst: tla.Tensor):
         with tla.vector():  # noqa: SIM117 -- separate DSL regions
             with tla.vec.func(mode="simd"):
-                dst.store(src.load().to(tla.Float16, CastParams(round_mode=RoundMode.CAST_RINT)))
+                dst.store(
+                    src.load().to(
+                        tla.Float16,
+                        CastParams(round_mode=RoundMode.CAST_RINT),
+                    )
+                )
 
-    with pytest.raises(TlaCoreAPIError, match="require CAST_NONE"):
+    with pytest.raises(TlaCoreAPIError, match="requires CAST_NONE"):
         compiler_tlair(
             convert,
             type_args=(_ub(tla.Int4x2, 256), _ub(tla.Float16, 128)),
@@ -111,7 +123,7 @@ def test_int4_widen_rejects_explicit_rounding(compiler_tlair):
 @pytest.mark.parametrize("mask_dtype", [tla.UInt16, tla.UInt32])
 def test_int4_narrows_a_16_bit_pair(compiler_tlair, dtype, slot, mask_dtype):
     rounding = RoundMode.CAST_RINT if dtype is tla.Float16 else RoundMode.CAST_NONE
-    params = CastParams(reg_slot=slot, round_mode=rounding)
+    params = CastParams(reg_slot=slot, sat_mode=SatMode.NOSAT, round_mode=rounding)
 
     @tla.kernel
     def convert(src: tla.Tensor, dst: tla.Tensor):

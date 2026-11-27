@@ -29,10 +29,12 @@ VECTOR_ELE = NUM_CHUNKS * VL_ELE
 ALL_DTYPES = ("f32",)
 _HALF_ULP_AT_ONE = 2.0**-11
 
-_TRAIT_NONE = tla.params.CastParams()
-_TRAIT_RINT = tla.params.CastParams(round_mode=tla.params.RoundMode.CAST_RINT)
-_TRAIT_ROUND = tla.params.CastParams(round_mode=tla.params.RoundMode.CAST_ROUND)
-_TRAIT_ODD = tla.params.CastParams(round_mode=tla.params.RoundMode.CAST_ODD)
+_TRAIT_EXACT = CastParams()
+_TRAIT_NOSAT = CastParams(sat_mode=SatMode.NOSAT)
+_TRAIT_RINT = CastParams(sat_mode=SatMode.NOSAT, round_mode=RoundMode.CAST_RINT)
+_TRAIT_ROUND = CastParams(sat_mode=SatMode.NOSAT, round_mode=RoundMode.CAST_ROUND)
+_TRAIT_ODD = CastParams(sat_mode=SatMode.NOSAT, round_mode=RoundMode.CAST_ODD)
+_TRAIT_INT32_FLOAT32 = tla.params.CastParams(round_mode=tla.params.RoundMode.CAST_ROUND)
 
 
 @tla.kernel
@@ -61,10 +63,16 @@ def cast_round_modes_op(
             for i in tla.range(NUM_CHUNKS):
                 a_v = _chunk(a_ub, i).load()
                 # The rounded integers are small enough for exact Float32 output.
-                rint = a_v.to(tla.Int32, _TRAIT_RINT).to(tla.Float32, _TRAIT_ROUND)
-                default = a_v.to(tla.Int32, _TRAIT_NONE).to(tla.Float32, _TRAIT_ROUND)
-                rounded = a_v.to(tla.Int32, _TRAIT_ROUND).to(tla.Float32, _TRAIT_ROUND)
-                odd = a_v.to(tla.Float16, _TRAIT_ODD).to(tla.Float32, _TRAIT_NONE)
+                rint = a_v.to(tla.Int32, _TRAIT_RINT).to(
+                    tla.Float32, _TRAIT_INT32_FLOAT32
+                )
+                default = a_v.to(tla.Int32, _TRAIT_NOSAT).to(
+                    tla.Float32, _TRAIT_INT32_FLOAT32
+                )
+                rounded = a_v.to(tla.Int32, _TRAIT_ROUND).to(
+                    tla.Float32, _TRAIT_INT32_FLOAT32
+                )
+                odd = a_v.to(tla.Float16, _TRAIT_ODD).to(tla.Float32, _TRAIT_EXACT)
                 _chunk(rint_ub, i).store(rint)
                 _chunk(default_ub, i).store(default)
                 _chunk(round_ub, i).store(rounded)
@@ -362,6 +370,7 @@ def _run_e8m0(device, torch):
 # Signed carriers are used for UInt16/UInt32 because device transfers need
 # only the bits, while the TLA tensor descriptor supplies the real dtype.
 _CARRIERS = {
+    tla.Int8: np.int8,
     tla.Int16: np.int16,
     tla.Int32: np.int32,
     tla.UInt8: np.uint8,
@@ -476,8 +485,10 @@ def check_masked_casts(device, compile_only, src_type, dst_type, source, cases):
 
 def _run_mixed_int(device, compile_only):
     routes = (
+        (tla.Int16, tla.Int8, np.int16, np.int8),
         (tla.Int16, tla.UInt8, np.int16, np.uint8),
         (tla.Int16, tla.UInt32, np.int16, np.uint32),
+        (tla.Int32, tla.Int8, np.int32, np.int8),
         (tla.Int32, tla.UInt8, np.int32, np.uint8),
         (tla.Int32, tla.UInt16, np.int32, np.uint16),
         (tla.UInt32, tla.Int16, np.uint32, np.int16),
@@ -493,7 +504,12 @@ def _run_mixed_int(device, compile_only):
         source = np.resize(np.array(values, dtype=src_dtype), (3, src_lanes))
         widen = src_lanes > dst_lanes
         stride = max(src_lanes, dst_lanes) // min(src_lanes, dst_lanes)
-        saturation_modes = (SatMode.UNKNOWN,) if widen else (SatMode.SAT, SatMode.NOSAT)
+        if dst_type is tla.Int8:
+            saturation_modes = (SatMode.NOSAT,)
+        elif widen:
+            saturation_modes = (SatMode.UNKNOWN,)
+        else:
+            saturation_modes = (SatMode.SAT, SatMode.NOSAT)
         cases = []
         for position, slot in enumerate(tuple(RegSlot)[:stride]):
             indices = position + stride * np.arange(min(src_lanes, dst_lanes))

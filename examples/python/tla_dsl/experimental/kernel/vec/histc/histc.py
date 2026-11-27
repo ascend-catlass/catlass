@@ -48,21 +48,19 @@ _CAST_FLOOR = tla.params.CastParams(
     sat_mode=tla.params.SatMode.NOSAT,
     round_mode=tla.params.RoundMode.CAST_FLOOR,
 )
-_CAST_TRUNC = tla.params.CastParams(
+_CAST_INT8 = tla.params.CastParams(
     reg_slot=tla.params.RegSlot.ZERO,
     sat_mode=tla.params.SatMode.NOSAT,
-    round_mode=tla.params.RoundMode.CAST_TRUNC,
 )
 _CAST_RINT = tla.params.CastParams(
     reg_slot=tla.params.RegSlot.ZERO,
-    sat_mode=tla.params.SatMode.NOSAT,
     round_mode=tla.params.RoundMode.CAST_RINT,
 )
-_CAST_F16 = tla.params.CastParams(
+_CAST_OUTPUT = tla.params.CastParams(
     reg_slot=tla.params.RegSlot.ZERO,
-    sat_mode=tla.params.SatMode.NOSAT,
     round_mode=tla.params.RoundMode.CAST_NONE,
 )
+_CAST_OUTPUT_F16 = tla.params.CastParams(sat_mode=tla.params.SatMode.NOSAT)
 _PACK4 = tla.params.NormalStoreParams(store_dist=tla.params.StoreDist.DIST_PACK4_B32)
 _HIST_BIN0 = tla.params.HistogramsParams(
     mode=tla.params.HistogramsBinType.BIN0,
@@ -119,11 +117,7 @@ def _load_f32_f16(x_tile, sub):
     slot = tla.params.RegSlot.ZERO if sub % 2 == 0 else tla.params.RegSlot.ONE
     return reg.to(
         tla.Float32,
-        tla.params.CastParams(
-            reg_slot=slot,
-            sat_mode=tla.params.SatMode.NOSAT,
-            round_mode=tla.params.RoundMode.CAST_NONE,
-        ),
+        tla.params.CastParams(reg_slot=slot, round_mode=tla.params.RoundMode.CAST_NONE),
     )
 
 
@@ -138,7 +132,6 @@ def _load_f32(x_tile, sub, is_f16):
             tla.Float32,
             tla.params.CastParams(
                 reg_slot=slot,
-                sat_mode=tla.params.SatMode.NOSAT,
                 round_mode=tla.params.RoundMode.CAST_NONE,
             ),
         )
@@ -164,7 +157,7 @@ def _emit_keys(
     快路径：`t = (x - lo) * bins / delta` 一次算出浮点桶位，`floor` 取整后
     `min(k, bins-1)` 把 `t == bins`（即 `x == max`）并入最后一桶；`t < 0` 或
     `t > bins` 直接置哨兵键 `TRASH`，因此不需要在 SIMD region 内做动态 mask。
-    i8 用 `CAST_TRUNC` 截断（值域 0..255），最后 `DIST_PACK4_B32` 一次落 256B。
+    使用 `CAST_NONE + NOSAT` 保留键的低 8 位，最后用 `DIST_PACK4_B32` 一次写入 256B。
 
     多趟窗口（bins > 255）时 `single=False`：先把桶号减去本趟 `base`，落在
     `[0, 255)` 之外的（`hi_c != raw`）置哨兵，保证每趟只统计自己那 255 列。
@@ -199,7 +192,7 @@ def _emit_keys(
                 base=(group_index * 4 + sub) * 64, order="increase", dtype=tla.Int32
             )
             k = tla.where(tla.cmp(lane, valid_v, mode="lt"), k, trash)
-        k8 = k.to(tla.Int8, _CAST_TRUNC)
+        k8 = k.to(tla.Int8, _CAST_INT8)
         tla.tile_view(
             ub_keys, tla.make_shape(64), tla.make_coord(group_index * 4 + sub)
         ).store(k8, _PACK4)
@@ -253,10 +246,11 @@ def _store_acc_f32(ub_acc, ub_out, nreg=4):
 
 def _cast_to_out(ub_acc, ub_out, nreg, dtype_out):
     """f32 累加器按输出 dtype 一次 cast 写回 UB。"""
+    params = _CAST_OUTPUT_F16 if dtype_out is tla.Float16 else _CAST_OUTPUT
     for i in range(nreg):
         reg = tla.tile_view(ub_acc, tla.make_shape(64), tla.make_coord(i)).load()
         tla.tile_view(ub_out, tla.make_shape(64), tla.make_coord(i)).store(
-            reg.to(dtype_out, _CAST_F16)
+            reg.to(dtype_out, params)
         )
 
 

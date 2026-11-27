@@ -22,7 +22,7 @@ module {
     %d = tla.tensor_desc %dm shape [%c1, %cd, %c1, %c1] stride [%cd, %c1, %c1, %c1] origin_shape [%c1, %cd] coord [%c0, %c0] : memref<256xi8, #hivm.address_space<ub>> -> !d_bf16_to_f4e2m1x2
     "tla.vec.func"() ({
       %v = tla.load %s : !s_bf16_to_f4e2m1x2 -> !tla.vector<128xbf16>
-      %r = "tla.cast"(%v) <{trait = array<i32: 2, 1, 4>}> : (!tla.vector<128xbf16>) -> !tla.vector<256x!tla.f4e2m1x2>
+      %r = "tla.cast"(%v) <{trait = array<i32: 2, 0, 4>}> : (!tla.vector<128xbf16>) -> !tla.vector<256x!tla.f4e2m1x2>
       tla.store %d, %r : !d_bf16_to_f4e2m1x2, !tla.vector<256x!tla.f4e2m1x2>
     }) {mode = "simd"} : () -> ()
     return
@@ -36,7 +36,7 @@ module {
     %d = tla.tensor_desc %dm shape [%c1, %cd, %c1, %c1] stride [%cd, %c1, %c1, %c1] origin_shape [%c1, %cd] coord [%c0, %c0] : memref<128xbf16, #hivm.address_space<ub>> -> !d_f4e2m1x2_to_bf16
     "tla.vec.func"() ({
       %v = tla.load %s : !s_f4e2m1x2_to_bf16 -> !tla.vector<256x!tla.f4e2m1x2>
-      %r = "tla.cast"(%v) <{trait = array<i32: 2, 0, 0>}> : (!tla.vector<256x!tla.f4e2m1x2>) -> !tla.vector<128xbf16>
+      %r = "tla.cast"(%v) <{trait = array<i32: 2, 0, 4>}> : (!tla.vector<256x!tla.f4e2m1x2>) -> !tla.vector<128xbf16>
       tla.store %d, %r : !d_f4e2m1x2_to_bf16, !tla.vector<128xbf16>
     }) {mode = "simd"} : () -> ()
     return
@@ -50,7 +50,7 @@ module {
     %d = tla.tensor_desc %dm shape [%c1, %cd, %c1, %c1] stride [%cd, %c1, %c1, %c1] origin_shape [%c1, %cd] coord [%c0, %c0] : memref<256xi8, #hivm.address_space<ub>> -> !d_bf16_to_f4e1m2x2
     "tla.vec.func"() ({
       %v = tla.load %s : !s_bf16_to_f4e1m2x2 -> !tla.vector<128xbf16>
-      %r = "tla.cast"(%v) <{trait = array<i32: 1, 1, 3>}> : (!tla.vector<128xbf16>) -> !tla.vector<256x!tla.f4e1m2x2>
+      %r = "tla.cast"(%v) <{trait = array<i32: 1, 0, 3>}> : (!tla.vector<128xbf16>) -> !tla.vector<256x!tla.f4e1m2x2>
       tla.store %d, %r : !d_bf16_to_f4e1m2x2, !tla.vector<256x!tla.f4e1m2x2>
     }) {mode = "simd"} : () -> ()
     return
@@ -64,7 +64,7 @@ module {
     %d = tla.tensor_desc %dm shape [%c1, %cd, %c1, %c1] stride [%cd, %c1, %c1, %c1] origin_shape [%c1, %cd] coord [%c0, %c0] : memref<128xbf16, #hivm.address_space<ub>> -> !d_f4e1m2x2_to_bf16
     "tla.vec.func"() ({
       %v = tla.load %s : !s_f4e1m2x2_to_bf16 -> !tla.vector<256x!tla.f4e1m2x2>
-      %r = "tla.cast"(%v) <{trait = array<i32: 1, 0, 0>}> : (!tla.vector<256x!tla.f4e1m2x2>) -> !tla.vector<128xbf16>
+      %r = "tla.cast"(%v) <{trait = array<i32: 1, 0, 4>}> : (!tla.vector<256x!tla.f4e1m2x2>) -> !tla.vector<128xbf16>
       tla.store %d, %r : !d_f4e1m2x2_to_bf16, !tla.vector<128xbf16>
     }) {mode = "simd"} : () -> ()
     return

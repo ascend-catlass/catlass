@@ -50,7 +50,7 @@ def _kernel(dest_type, params, mask_type=None):
 def test_fp4_narrow_accepts_native_modes_and_pair_mask(
     compiler_tlair, dtype, slot, rounding
 ):
-    params = CastParams(reg_slot=slot, sat_mode=SatMode.SAT, round_mode=rounding)
+    params = CastParams(reg_slot=slot, round_mode=rounding)
     ir = compiler_tlair(
         _kernel(dtype, params, tla.UInt32),
         type_args=(_ub(tla.BFloat16, 128), _ub(dtype, 256)),
@@ -58,7 +58,7 @@ def test_fp4_narrow_accepts_native_modes_and_pair_mask(
     (cast_line,) = [line for line in ir.splitlines() if '"tla.cast"' in line]
     slot_code = list(RegSlot).index(slot)
     round_code = params.codes()[2]
-    assert f"trait = array<i32: {slot_code}, 1, {round_code}>" in cast_line
+    assert f"trait = array<i32: {slot_code}, 0, {round_code}>" in cast_line
     assert f"!tla.vector<?x!tla.{dtype.dtype}>" in cast_line
     assert "!tla.mask<64>" in ir
 
@@ -67,12 +67,14 @@ def test_fp4_narrow_accepts_native_modes_and_pair_mask(
 @pytest.mark.parametrize("slot", list(RegSlot))
 def test_fp4_widen_preserves_pair_count(compiler_tlair, dtype, slot):
     ir = compiler_tlair(
-        _kernel(tla.BFloat16, CastParams(reg_slot=slot), dtype),
+        _kernel(
+            tla.BFloat16, CastParams(reg_slot=slot), dtype
+        ),
         type_args=(_ub(dtype, 256), _ub(tla.BFloat16, 128)),
     )
     (cast_line,) = [line for line in ir.splitlines() if '"tla.cast"' in line]
     slot_code = list(RegSlot).index(slot)
-    assert f"trait = array<i32: {slot_code}, 2, 4>" in cast_line
+    assert f"trait = array<i32: {slot_code}, 0, 4>" in cast_line
     assert "!tla.vector<128xbf16>" in cast_line
     assert "!tla.mask<256>" in ir
 
@@ -82,7 +84,7 @@ def test_fp4_narrow_rejects_a_byte_lane_mask(compiler_tlair):
         TlaCoreAPIError, match="128-lane source mask or a 64-lane pair mask"
     ):
         compiler_tlair(
-            _kernel(tla.Float4E2M1x2, CastParams(sat_mode=SatMode.SAT), tla.UInt8),
+            _kernel(tla.Float4E2M1x2, CastParams(), tla.UInt8),
             type_args=(_ub(tla.BFloat16, 128), _ub(tla.Float4E2M1x2, 256)),
         )
 
@@ -102,10 +104,11 @@ def test_fp4_native_saturation_accepts_source_and_pair_masks(
     assert "trait = array<i32: 0, 0, 4>" in ir
 
 
-def test_fp4_narrow_rejects_nosat(compiler_tlair):
-    with pytest.raises(TlaCoreAPIError, match="requires SAT"):
+@pytest.mark.parametrize("sat_mode", (SatMode.NOSAT, SatMode.SAT))
+def test_fp4_narrow_rejects_explicit_sat_mode(compiler_tlair, sat_mode):
+    with pytest.raises(TlaCoreAPIError, match="requires SatMode.UNKNOWN"):
         compiler_tlair(
-            _kernel(tla.Float4E2M1x2, CastParams()),
+            _kernel(tla.Float4E2M1x2, CastParams(sat_mode=sat_mode)),
             type_args=(_ub(tla.BFloat16, 128), _ub(tla.Float4E2M1x2, 256)),
         )
 
@@ -145,7 +148,7 @@ def test_fp4_narrow_rejects_unsupported_rounding(
 ):
     with pytest.raises(TlaCoreAPIError, match=diagnostic):
         compiler_tlair(
-            _kernel(dtype, CastParams(sat_mode=SatMode.SAT, round_mode=rounding)),
+            _kernel(dtype, CastParams(round_mode=rounding)),
             type_args=(_ub(tla.BFloat16, 128), _ub(dtype, 256)),
         )
 

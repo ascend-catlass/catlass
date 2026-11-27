@@ -45,10 +45,14 @@ def make_slot_kernel(
     source_lanes = 64 if narrow else 256
     mask_lanes = active if narrow else active * 4
     destination_lanes = 256 if sparse else (active * 4 if narrow else active)
-    params = CastParams(
-        reg_slot=slot,
-        sat_mode=SatMode.SAT if saturate else SatMode.NOSAT,
-        round_mode=round_mode,
+    params = (
+        CastParams(
+            reg_slot=slot,
+            sat_mode=SatMode.SAT if saturate else SatMode.NOSAT,
+            round_mode=round_mode,
+        )
+        if narrow
+        else CastParams(reg_slot=slot)
     )
 
     @tla.kernel
@@ -207,7 +211,7 @@ def run(args, torch):
             cases.append((source, initial, expected, np.ones(352, bool)))
         check(
             "decode-all-codes",
-            make_fp8_kernel(tla.HiFloat8, 256, narrow=False, cast_params=CastParams()),
+            make_fp8_kernel(tla.HiFloat8, 256, narrow=False),
             cases,
             tla.HiFloat8,
             tla.Float32,
@@ -229,7 +233,7 @@ def run(args, torch):
                 255,
                 narrow=True,
                 stride=2,
-                cast_params=CastParams(round_mode=round_mode),
+                cast_params=CastParams(sat_mode=SatMode.NOSAT, round_mode=round_mode),
             ),
             cases,
             tla.Float32,
@@ -315,7 +319,13 @@ def _run_fp16(args):
             dtype=np.float16,
         ).reshape(2, 128)
         expected = np.stack((decoded, np.where(indices % 3 == 0, decoded, 0)))
-        cases.append((CastParams(reg_slot=slot), tla.HiFloat8, expected))
+        cases.append(
+            (
+                CastParams(reg_slot=slot),
+                tla.HiFloat8,
+                expected,
+            )
+        )
     compiled = check_masked_casts(
         args.device, not args.run, tla.HiFloat8, tla.Float16, codes, cases
     )

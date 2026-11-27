@@ -1230,7 +1230,6 @@ def gmm_swiglu_mx_quant_kernel(
                                                     round_mode=tla.params.RoundMode.CAST_RINT,
                                                 )).to(tla.Float32, tla.params.CastParams(
                                                     reg_slot=tla.params.RegSlot.ZERO,
-                                                    sat_mode=tla.params.SatMode.NOSAT,
                                                     round_mode=tla.params.RoundMode.CAST_NONE,
                                                 ))
                                                 s_bf16 = tla.shift_right(s_bf.bitcast(tla.Int32), 16)

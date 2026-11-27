@@ -26,13 +26,6 @@
 // 64-bit unsigned end outright. (i64 differs -- unreachable as a tile, but
 // reachable as a register value through the signed i32 -> i64 widen.)
 //
-// One route is not what its widths suggest:
-//
-//   u8 -> f32 has no instruction at all. It is composed as vcvtii.u82u32
-//   followed by vcvtif.s322f32 -- the signed int->float leg, which is exact
-//   because a widened u8 is 0..255, far inside the positive i32 range. Both
-//   legs are pinned, so collapsing it to a single bogus instruction fails here.
-//
 // u8 -> u32 and u32 -> u8 are 4x steps and carry the pack pattern pp0..pp3
 // rather than the 2x even/odd part, so one case runs with reg_slot THREE to
 // keep the quarter-selecting form covered.
@@ -56,11 +49,12 @@
 !d_u8_to_f16 = !tla.tensor<!tla.layout<!tla.shape<128>, !tla.stride<1>, !tla.shape<128>, RowMajor>, !tla.coord<0>, !tla.ptr<f16, ub, 2>>
 !s_f16_to_u8 = !tla.tensor<!tla.layout<!tla.shape<128>, !tla.stride<1>, !tla.shape<128>, RowMajor>, !tla.coord<0>, !tla.ptr<f16, ub, 2>>
 !d_f16_to_u8 = !tla.tensor<!tla.layout<!tla.shape<256>, !tla.stride<1>, !tla.shape<256>, RowMajor>, !tla.coord<0>, !tla.ptr<ui8, ub, 1>>
-!s_u8_to_f32 = !tla.tensor<!tla.layout<!tla.shape<256>, !tla.stride<1>, !tla.shape<256>, RowMajor>, !tla.coord<0>, !tla.ptr<ui8, ub, 1>>
-!d_u8_to_f32 = !tla.tensor<!tla.layout<!tla.shape<64>, !tla.stride<1>, !tla.shape<64>, RowMajor>, !tla.coord<0>, !tla.ptr<f32, ub, 4>>
 // Unsigned max/min/reduce: same signed-twin risk once AVE vectors are signless.
 !u16_vec = !tla.tensor<!tla.layout<!tla.shape<128>, !tla.stride<1>, !tla.shape<128>, RowMajor>, !tla.coord<0>, !tla.ptr<ui16, ub, 2>>
 !u16_vec1 = !tla.tensor<!tla.layout<!tla.shape<1>, !tla.stride<1>, !tla.shape<1>, RowMajor>, !tla.coord<0>, !tla.ptr<ui16, ub, 2>>
+
+!s_u8_to_f32 = !tla.tensor<!tla.layout<!tla.shape<256>, !tla.stride<1>, !tla.shape<256>, RowMajor>, !tla.coord<0>, !tla.ptr<ui8, ub, 1>>
+!d_u8_to_f32 = !tla.tensor<!tla.layout<!tla.shape<64>, !tla.stride<1>, !tla.shape<64>, RowMajor>, !tla.coord<0>, !tla.ptr<f32, ub, 4>>
 
 module {
 // CHECK-LABEL: func.func @u8_to_u16
@@ -84,7 +78,7 @@ module {
         %dt = "tla.tile_view"(%d, %ds, %co) : (!d_u8_to_u16, !tla.shape<128>, !tla.coord<0>) -> !d_u8_to_u16
         %r = "tla.load"(%st) : (!s_u8_to_u16) -> !tla.vector<256xui8>
         // trait = [reg_slot, sat_mode, round_mode]
-        %o = "tla.cast"(%r) <{trait = array<i32: 0, 0, 0>}> : (!tla.vector<256xui8>) -> !tla.vector<128xui16>
+        %o = "tla.cast"(%r) <{trait = array<i32: 0, 0, 4>}> : (!tla.vector<256xui8>) -> !tla.vector<128xui16>
         "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!d_u8_to_u16, !tla.vector<128xui16>) -> ()
       }) {mode = "simd"} : () -> ()
     }) : () -> ()
@@ -112,7 +106,7 @@ module {
         %dt = "tla.tile_view"(%d, %ds, %co) : (!d_u16_to_u32, !tla.shape<64>, !tla.coord<0>) -> !d_u16_to_u32
         %r = "tla.load"(%st) : (!s_u16_to_u32) -> !tla.vector<128xui16>
         // trait = [reg_slot, sat_mode, round_mode]
-        %o = "tla.cast"(%r) <{trait = array<i32: 0, 0, 0>}> : (!tla.vector<128xui16>) -> !tla.vector<64xui32>
+        %o = "tla.cast"(%r) <{trait = array<i32: 0, 0, 4>}> : (!tla.vector<128xui16>) -> !tla.vector<64xui32>
         "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!d_u16_to_u32, !tla.vector<64xui32>) -> ()
       }) {mode = "simd"} : () -> ()
     }) : () -> ()
@@ -140,7 +134,7 @@ module {
         %dt = "tla.tile_view"(%d, %ds, %co) : (!d_u8_to_u32, !tla.shape<64>, !tla.coord<0>) -> !d_u8_to_u32
         %r = "tla.load"(%st) : (!s_u8_to_u32) -> !tla.vector<256xui8>
         // trait = [reg_slot, sat_mode, round_mode]
-        %o = "tla.cast"(%r) <{trait = array<i32: 0, 0, 0>}> : (!tla.vector<256xui8>) -> !tla.vector<64xui32>
+        %o = "tla.cast"(%r) <{trait = array<i32: 0, 0, 4>}> : (!tla.vector<256xui8>) -> !tla.vector<64xui32>
         "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!d_u8_to_u32, !tla.vector<64xui32>) -> ()
       }) {mode = "simd"} : () -> ()
     }) : () -> ()
@@ -168,7 +162,7 @@ module {
         %dt = "tla.tile_view"(%d, %ds, %co) : (!d_u8_to_u32_slot_three, !tla.shape<64>, !tla.coord<0>) -> !d_u8_to_u32_slot_three
         %r = "tla.load"(%st) : (!s_u8_to_u32_slot_three) -> !tla.vector<256xui8>
         // trait = [reg_slot, sat_mode, round_mode]
-        %o = "tla.cast"(%r) <{trait = array<i32: 3, 0, 0>}> : (!tla.vector<256xui8>) -> !tla.vector<64xui32>
+        %o = "tla.cast"(%r) <{trait = array<i32: 3, 0, 4>}> : (!tla.vector<256xui8>) -> !tla.vector<64xui32>
         "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!d_u8_to_u32_slot_three, !tla.vector<64xui32>) -> ()
       }) {mode = "simd"} : () -> ()
     }) : () -> ()
@@ -195,7 +189,7 @@ module {
         %dt = "tla.tile_view"(%d, %ds, %co) : (!d_u16_to_u8, !tla.shape<256>, !tla.coord<0>) -> !d_u16_to_u8
         %r = "tla.load"(%st) : (!s_u16_to_u8) -> !tla.vector<128xui16>
         // trait = [reg_slot, sat_mode, round_mode]
-        %o = "tla.cast"(%r) <{trait = array<i32: 0, 0, 0>}> : (!tla.vector<128xui16>) -> !tla.vector<256xui8>
+        %o = "tla.cast"(%r) <{trait = array<i32: 0, 2, 4>}> : (!tla.vector<128xui16>) -> !tla.vector<256xui8>
         "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!d_u16_to_u8, !tla.vector<256xui8>) -> ()
       }) {mode = "simd"} : () -> ()
     }) : () -> ()
@@ -222,7 +216,7 @@ module {
         %dt = "tla.tile_view"(%d, %ds, %co) : (!d_u32_to_u16, !tla.shape<128>, !tla.coord<0>) -> !d_u32_to_u16
         %r = "tla.load"(%st) : (!s_u32_to_u16) -> !tla.vector<64xui32>
         // trait = [reg_slot, sat_mode, round_mode]
-        %o = "tla.cast"(%r) <{trait = array<i32: 0, 0, 0>}> : (!tla.vector<64xui32>) -> !tla.vector<128xui16>
+        %o = "tla.cast"(%r) <{trait = array<i32: 0, 2, 4>}> : (!tla.vector<64xui32>) -> !tla.vector<128xui16>
         "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!d_u32_to_u16, !tla.vector<128xui16>) -> ()
       }) {mode = "simd"} : () -> ()
     }) : () -> ()
@@ -249,7 +243,7 @@ module {
         %dt = "tla.tile_view"(%d, %ds, %co) : (!d_u32_to_u8, !tla.shape<256>, !tla.coord<0>) -> !d_u32_to_u8
         %r = "tla.load"(%st) : (!s_u32_to_u8) -> !tla.vector<64xui32>
         // trait = [reg_slot, sat_mode, round_mode]
-        %o = "tla.cast"(%r) <{trait = array<i32: 0, 0, 0>}> : (!tla.vector<64xui32>) -> !tla.vector<256xui8>
+        %o = "tla.cast"(%r) <{trait = array<i32: 0, 2, 4>}> : (!tla.vector<64xui32>) -> !tla.vector<256xui8>
         "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!d_u32_to_u8, !tla.vector<256xui8>) -> ()
       }) {mode = "simd"} : () -> ()
     }) : () -> ()
@@ -277,7 +271,7 @@ module {
         %dt = "tla.tile_view"(%d, %ds, %co) : (!d_u8_to_f16, !tla.shape<128>, !tla.coord<0>) -> !d_u8_to_f16
         %r = "tla.load"(%st) : (!s_u8_to_f16) -> !tla.vector<256xui8>
         // trait = [reg_slot, sat_mode, round_mode]
-        %o = "tla.cast"(%r) <{trait = array<i32: 0, 0, 0>}> : (!tla.vector<256xui8>) -> !tla.vector<128xf16>
+        %o = "tla.cast"(%r) <{trait = array<i32: 0, 0, 4>}> : (!tla.vector<256xui8>) -> !tla.vector<128xf16>
         "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!d_u8_to_f16, !tla.vector<128xf16>) -> ()
       }) {mode = "simd"} : () -> ()
     }) : () -> ()
@@ -305,7 +299,7 @@ module {
         %dt = "tla.tile_view"(%d, %ds, %co) : (!d_f16_to_u8, !tla.shape<256>, !tla.coord<0>) -> !d_f16_to_u8
         %r = "tla.load"(%st) : (!s_f16_to_u8) -> !tla.vector<128xf16>
         // trait = [reg_slot, sat_mode, round_mode]
-        %o = "tla.cast"(%r) <{trait = array<i32: 0, 0, 0>}> : (!tla.vector<128xf16>) -> !tla.vector<256xui8>
+        %o = "tla.cast"(%r) <{trait = array<i32: 0, 2, 0>}> : (!tla.vector<128xf16>) -> !tla.vector<256xui8>
         "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!d_f16_to_u8, !tla.vector<256xui8>) -> ()
       }) {mode = "simd"} : () -> ()
     }) : () -> ()
@@ -313,6 +307,7 @@ module {
   }
 
 // CHECK-LABEL: func.func @u8_to_f32
+// CHECK: ave.hir.vand
 // CHECK: ave.hir.vextui %{{.*}} {pp = #ave.vcvt_pp_type<pp0>} : vector<256xi8>, vector<64xi32>
 // CHECK: ave.hir.vsitofp %{{.*}} : vector<64xi32>, vector<256xi1>, vector<64xf32>
 // CHECK-NOT: ave.hir.vuitofp
@@ -333,8 +328,9 @@ module {
         %st = "tla.tile_view"(%s, %ss, %co) : (!s_u8_to_f32, !tla.shape<256>, !tla.coord<0>) -> !s_u8_to_f32
         %dt = "tla.tile_view"(%d, %ds, %co) : (!d_u8_to_f32, !tla.shape<64>, !tla.coord<0>) -> !d_u8_to_f32
         %r = "tla.load"(%st) : (!s_u8_to_f32) -> !tla.vector<256xui8>
+        %mask = "tla.create_mask"() {pattern = "M3", dtype = ui8} : () -> !tla.mask<256>
         // trait = [reg_slot, sat_mode, round_mode]
-        %o = "tla.cast"(%r) <{trait = array<i32: 0, 0, 0>}> : (!tla.vector<256xui8>) -> !tla.vector<64xf32>
+        %o = "tla.cast"(%r, %mask) <{trait = array<i32: 0, 0, 4>}> : (!tla.vector<256xui8>, !tla.mask<256>) -> !tla.vector<64xf32>
         "tla.store"(%dt, %o) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>}> : (!d_u8_to_f32, !tla.vector<64xf32>) -> ()
       }) {mode = "simd"} : () -> ()
     }) : () -> ()

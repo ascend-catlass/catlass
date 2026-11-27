@@ -655,11 +655,14 @@ class SatMode(enum.Enum):
     is AVE's saturating-narrow behaviour rather than anything specific to fp8 --
     ``f32 -> f16`` does the same -- so use ``NOSAT`` where NaNs must survive.
 
-    BF16-to-FP4 narrowing always saturates: it accepts ``SAT`` or ``UNKNOWN``
-    and rejects ``NOSAT``.
+    Exact conversions and conversions without a saturation operand require
+    ``UNKNOWN``. BF16-to-FP4 narrowing always saturates and also requires
+    ``UNKNOWN``. The API keeps ``UNKNOWN`` as a placeholder and does not map
+    it to ``SAT`` or ``NOSAT``. Specify a supported mode explicitly on
+    conversions with an API saturation option.
     """
 
-    UNKNOWN = "unknown"  # native/default behavior; fixed-saturation FP4 stays saturated
+    UNKNOWN = "unknown"
     SAT = "sat"
     NOSAT = "nosat"
 
@@ -670,10 +673,9 @@ class SatMode(enum.Enum):
 class RoundMode(enum.Enum):
     """Rounding for register conversions in ``VectorSSA.to``.
 
-    The default ``CAST_NONE`` selects ``CAST_RINT`` on conversions that use a
-    rounding operand and support ties-to-even rounding. Conversions without
-    a rounding operand can use the default. Float16 or Float32 -> HiFloat8
-    requires an explicit ``CAST_ROUND`` or ``CAST_HYBRID``.
+    The default ``CAST_NONE`` selects ``CAST_RINT`` on conversions that accept
+    it and ``CAST_ROUND`` for Float16 or Float32 to HiFloat8. Conversions with
+    fixed rounding behavior use ``CAST_NONE`` as a placeholder.
     """
 
     CAST_ROUND = "cast_round"  # round to nearest, tie away from zero
@@ -737,13 +739,15 @@ class CastParams:
 
     Args:
         reg_slot: destination packed-register position (:class:`RegSlot`).
-        sat_mode: overflow behaviour (:class:`SatMode`).
+        sat_mode: overflow behaviour (:class:`SatMode`). Defaults to
+            ``UNKNOWN``. Conversions with configurable saturation require an
+            explicit supported mode.
         round_mode: register conversion rounding (:class:`RoundMode`).
             Defaults to ``CAST_NONE``. See :class:`RoundMode` for its behavior.
     """
 
     reg_slot: RegSlot = RegSlot.ZERO
-    sat_mode: SatMode = SatMode.NOSAT
+    sat_mode: SatMode = SatMode.UNKNOWN
     round_mode: RoundMode = RoundMode.CAST_NONE
 
     def codes(self) -> list[int]:

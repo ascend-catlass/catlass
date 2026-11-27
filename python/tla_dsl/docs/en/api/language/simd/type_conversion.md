@@ -23,40 +23,117 @@ Description:
 Convert the elements of a `VectorSSA` to `dst_type` and return a
 `VectorSSA` of that type.
 
-| Source element type | Destination element types |
+### Supported conversions
+
+| Source type | Destination types |
 | --- | --- |
 | `Float16` | `Float16`, `BFloat16`, `Float32`, `Float8E4M3FN`, `Float8E5M2`, `HiFloat8`, `Int4x2`, `Int8`, `Int16`, `Int32`, `UInt8` |
 | `BFloat16` | `Float16`, `BFloat16`, `Float32`, `Float8E4M3FN`, `Float8E5M2`, `Float8E8M0`, `Float4E2M1x2`, `Float4E1M2x2`, `Int32` |
 | `Float32` | `Float16`, `BFloat16`, `Float32`, `Float8E4M3FN`, `Float8E5M2`, `HiFloat8`, `Int16`, `Int32`, `Int64` |
-| `Float8E4M3FN`, `Float8E5M2` | `Float16`, `BFloat16`, `Float32` |
+| `Float8E4M3FN` | `Float16`, `BFloat16`, `Float32` |
+| `Float8E5M2` | `Float16`, `BFloat16`, `Float32` |
 | `HiFloat8` | `Float16`, `Float32` |
 | `Float8E8M0` | `BFloat16` |
-| `Float4E2M1x2`, `Float4E1M2x2` | `BFloat16` |
+| `Float4E2M1x2` | `BFloat16` |
+| `Float4E1M2x2` | `BFloat16` |
 | `Int4x2` | `Int16`, `Float16`, `BFloat16` |
 | `Int8` | `Int16`, `Int32`, `Float16` |
-| `Int16` | `Int4x2`, `Int32`, `UInt8`, `UInt32`, `Float16`, `Float32` |
+| `Int16` | `Int4x2`, `Int8`, `Int32`, `UInt8`, `UInt32`, `Float16`, `Float32` |
 | `Int32` | `Int8`, `Int16`, `Int64`, `UInt8`, `UInt16`, `Float32` |
 | `Int64` | `Int32`, `Float32` |
 | `UInt8` | `UInt16`, `UInt32`, `Float16`, `Float32` |
 | `UInt16` | `UInt8`, `UInt32` |
 | `UInt32` | `UInt8`, `UInt16`, `Int16` |
 
-Converting `Float16` or `Float32` to `HiFloat8` requires
-`CAST_ROUND` (nearest, ties away from zero) or `CAST_HYBRID`.
-Hybrid rounding can return a value other than the nearest
-representable value.
+### Rounding modes
 
-`BFloat16` to `Float8E8M0` extracts the exponent bits. Zeros and
-subnormal values of either sign encode as `0x00`. Infinities always
-saturate to `0xfe`, the largest finite scale, and NaNs encode as
-`0xff`. In the reverse direction, `0x00` decodes to
-`2**-127` (BF16 bits `0x0040`), and `0xff` to a quiet NaN.
+The `round_mode` parameter takes a `RoundMode` value and defaults to `CAST_NONE`.
+These rounding rules apply to finite values within the destination type's range.
 
-Packed 4-bit types store two elements per byte, with the first in
-the low nibble. Packing writes pair `j` to byte `4*j + reg_slot`,
-and unpacking reads the same layout. Use `CAST_NONE` when widening
-`Int4x2`. Converting `Float32` to packed FP4 through `BFloat16`
-can round twice.
+| Floating-point conversion | Values to round to | `CAST_RINT` at a midpoint |
+| --- | --- | --- |
+| Same type (`Float16`, `BFloat16`, or `Float32`) | Round to an integer value and keep the original floating-point type. | Choose the even integer. For `Float32` → `Float32`, `2.5` becomes `2.0` and `3.5` becomes `4.0`. |
+| Different precisions when rounding is needed | Round to a value that the destination floating-point type can represent. | Choose the value whose binary significand ends in `0`. For `Float32` → `Float16`, `256.375` is exactly halfway between adjacent `Float16` values `256.25` and `256.5`. Their binary significands end in `01` and `10`, so the result is `256.5`. |
+
+| Mode | How it rounds |
+| --- | --- |
+| `CAST_NONE` | Uses the default rounding rule for the conversion. |
+| `CAST_RINT` | Picks the nearest candidate value. At a midpoint, rounds to even. When converting to an integer type, `2.5` becomes `2` and `3.5` becomes `4`. |
+| `CAST_ROUND` | Picks the nearest candidate value. At a midpoint, picks the one farther from zero. When converting to an integer, 2.5 becomes 3 and -2.5 becomes -3. |
+| `CAST_FLOOR` | Rounds down. When converting to an integer, 1.25 becomes 1 and -1.25 becomes -2. |
+| `CAST_CEIL` | Rounds up. When converting to an integer, 1.25 becomes 2 and -1.25 becomes -1. |
+| `CAST_TRUNC` | Rounds toward zero. When converting to an integer, 1.75 becomes 1 and -1.75 becomes -1. |
+| `CAST_ODD` | Keeps values that the destination type can represent exactly. If the conversion loses precision, it truncates toward zero and sets the lowest retained bit to 1. |
+| `CAST_HYBRID` | When converting to `HiFloat8`, uses `CAST_ROUND` for some input ranges. In other ranges, bits of the input determine whether to round away from zero. The result can differ from the nearest representable value. |
+
+### Default rounding with `CAST_NONE`
+
+| Conversion | Rounding when `round_mode` is omitted or set to `CAST_NONE` |
+| --- | --- |
+| Conversions that support `CAST_RINT` | Uses `CAST_RINT`, including for rounding to an integer value in the same floating-point type. |
+| `Float16`, `Float32` → `HiFloat8` | Uses `CAST_ROUND`. |
+| `Float8E4M3FN` → `Float16`, `BFloat16`<br>`Float8E5M2` → `BFloat16`<br>`UInt8` → `Float32` | Set the API parameter to `CAST_NONE`. The last instruction uses `CAST_RINT` and converts finite input values exactly. |
+| Other directions that allow only `CAST_NONE` | Use `CAST_NONE` as a placeholder. The conversion follows a fixed rule. |
+
+### Saturation modes
+
+The `sat_mode` parameter takes a `SatMode` value and defaults to `UNKNOWN`.
+
+| Mode | Meaning |
+| --- | --- |
+| `SatMode.UNKNOWN` | A placeholder for conversions where the caller cannot choose a saturation mode. The API does not map `UNKNOWN` to `SAT` or `NOSAT`. If a conversion requires an explicit mode, `UNKNOWN` causes a compile-time error. |
+| `SatMode.SAT` | If the result is outside the destination type's finite range, returns the nearest bound. |
+| `SatMode.NOSAT` | Uses the conversion's non-saturating rule for out-of-range results. |
+
+To apply the `SAT` or `NOSAT` specified in `CastParams`, you must set
+`CTRLValue.saturation_strategy` to `OverrideStrategy.USE_API`. This is a
+global setting for the vector core. Call `tla.arch.set_ctrl()` once inside
+`tla.vector()`, before entering the first `tla.vec.func(mode="simd")` that
+uses the setting. Subsequent casts in the kernel on that core use the same
+setting until `saturation_strategy` changes.
+
+```python
+with tla.vector():
+    tla.arch.set_ctrl(
+        tla.params.CTRLValue(
+            saturation_strategy=tla.params.OverrideStrategy.USE_API
+        )
+    )
+```
+
+With `OverrideStrategy.USE_GLOBAL`, the `conversion_mode` and saturation
+settings in `CTRLValue` must select behavior allowed for the conversion
+in the table below. `CastParams` must still satisfy the table's constraints.
+An incompatible global setting can produce incorrect results even when
+the cast compiles.
+
+### Allowed modes by conversion
+
+For each arrow, every source type on the left can convert to every destination type on the right.
+A direction marked (composite) uses more than one instruction to convert the value.
+
+| Conversion | Allowed `round_mode` | Allowed `sat_mode` |
+| --- | --- | --- |
+| `Float16`, `BFloat16` → `Float8E4M3FN`, `Float8E5M2` (composite)<br>`Float32` → `Float8E4M3FN`, `Float8E5M2` | `CAST_NONE`, `CAST_RINT` | `SAT`, `NOSAT` |
+| `Float16`, `Float32` → `HiFloat8` | `CAST_NONE`, `CAST_ROUND`, `CAST_HYBRID` | `SAT`, `NOSAT` |
+| `Float16` → `Int4x2`, `Int8`, `Int16`, `UInt8`<br>`BFloat16` → `Float16`, `Int32`<br>`Float32` → `BFloat16`, `Int16`, `Int32`, `Int64` | `CAST_NONE`, `CAST_RINT`, `CAST_ROUND`, `CAST_FLOOR`, `CAST_CEIL`, `CAST_TRUNC` | `SAT`, `NOSAT` |
+| `Float32` → `Float16` | `CAST_NONE`, `CAST_RINT`, `CAST_ROUND`, `CAST_FLOOR`, `CAST_CEIL`, `CAST_TRUNC`, `CAST_ODD` | `SAT`, `NOSAT` |
+| `Int16` → `Int4x2`, `UInt8`<br>`Int32` → `Int16`, `UInt8`, `UInt16`<br>`Int64` → `Int32`<br>`UInt16` → `UInt8`<br>`UInt32` → `Int16`, `UInt8`, `UInt16` | `CAST_NONE` | `SAT`, `NOSAT` |
+| `Int16`, `Int32` → `Int8` | `CAST_NONE` | `NOSAT` |
+| `Float16` → `Float16`, `BFloat16`, `Int32`<br>`BFloat16` → `BFloat16`, `Float4E2M1x2`, `Float4E1M2x2`<br>`Float32`, `Int32`, `Int64` → `Float32`<br>`Int16` → `Float16` | `CAST_NONE`, `CAST_RINT`, `CAST_ROUND`, `CAST_FLOOR`, `CAST_CEIL`, `CAST_TRUNC` | `UNKNOWN` |
+| `Float16`, `BFloat16`, `Int16` → `Float32`<br>`Float8E4M3FN`, `Float8E5M2` → `Float16`, `BFloat16` (composite)<br>`Float8E4M3FN`, `Float8E5M2` → `Float32`<br>`HiFloat8` → `Float16`, `Float32`<br>`BFloat16` → `Float8E8M0` (composite)<br>`Float8E8M0` → `BFloat16` (composite)<br>`Float4E2M1x2`, `Float4E1M2x2` → `BFloat16`<br>`Int4x2` → `Int16`, `Float16`, `BFloat16`<br>`Int8` → `Int16`, `Int32`, `Float16`<br>`Int16` → `Int32`, `UInt32`<br>`Int32` → `Int64`<br>`UInt8` → `UInt16`, `UInt32`, `Float16`<br>`UInt8` → `Float32` (composite)<br>`UInt16` → `UInt32` | `CAST_NONE` | `UNKNOWN` |
+
+The `BFloat16` to `Float8E8M0` conversion encodes positive and negative
+infinity as `0xfe`, the largest finite scale. It encodes NaN as `0xff`.
+
+### Register slot
+
+`reg_slot` defaults to `RegSlot.ZERO`.
+
+| Conversion | Allowed `reg_slot` | Position |
+| --- | --- | --- |
+| Packed 4-bit conversions<br>Integer conversions where one type is four times as wide as the other<br>`UInt8` → `Float32`<br>`Float32` ↔ `Float8E4M3FN`, `Float8E5M2`, `HiFloat8` | `ZERO`, `ONE`, `TWO`, `THREE` | Positions 0 through 3 on the narrower side of the conversion. |
+| Other supported conversions | `ZERO`, `ONE` | When a conversion uses two slots, `ZERO` selects even positions and `ONE` selects odd positions on the narrower side. |
 
 Prototype:
 
@@ -66,43 +143,39 @@ tla.VectorSSA.to(dst_type: Any, params: CastParams, mask: Any | None = None) -> 
 
 Parameters:
 
-- `dst_type` (`type[Numeric]`): Destination element type from the table.
+- `dst_type` (`type[Numeric]`): Target type from the supported conversion table.
 - `params` (`CastParams`): Required. Sets `round_mode`, `sat_mode`, and `reg_slot`.
-- `mask` (`MaskSSA | None`): Selects source lanes. The default `None`
-  enables all mask positions. Unselected destination lanes are zero.
-  When packing 4-bit values,
-  use the even lanes of a 128-lane source mask or a 64-lane pair mask
-  created with `dtype=tla.UInt32`.
+- `mask` (`MaskSSA | None`): Selects the source positions to convert. The default
+  `None` enables all mask positions. The conversion fills unselected destination
+  positions with zero. When packing 4-bit values, the even positions of a mask
+  for 128 source elements select the pairs. You can also create a mask with
+  `dtype=tla.UInt32`. Each of its 64 positions selects one pair.
 
 Constraints:
 
+- Use a type pair from the supported conversions and choose the modes in the
+  table for that direction. Invalid combinations raise a compile-time error.
 - Call in `tla.vec.func(mode="simd")` inside a `@tla.kernel` function.
   For scalar conversions in SIMT mode, use `Numeric.to`.
-- `reg_slot` defaults to `RegSlot.ZERO`. For twofold width changes
-  with a slot selector, `ZERO` and `ONE` select even and odd lanes
-  on the narrower side. `ZERO` through `THREE` select one of four
-  positions for packed 4-bit conversions, fourfold integer
-  conversions, `UInt8` to `Float32`, and conversions between
-  `Float32` and `Float8E4M3FN`, `Float8E5M2`, or `HiFloat8`.
-- With the default `CAST_NONE`, conversions that round and support
-  `CAST_RINT` use ties-to-even rounding. `BFloat16` to `Float16`,
-  `Float16` to `Int32` or `Int4x2`, `Float32` and `Int64` in either
-  direction, and `BFloat16` to packed FP4 reject `CAST_ODD`.
-- For `Float16` to `BFloat16`, set `sat_mode` to `SatMode.UNKNOWN`.
-  `BFloat16` to packed FP4 always saturates and requires
-  `SatMode.UNKNOWN` or `SatMode.SAT`. `Int16` to `UInt32` uses
-  fixed saturation.
-- Same-type casts for `Float16`, `BFloat16`, and `Float32` round
-  selected elements in their original lanes. Use `ZERO` or `ONE`
-  and leave saturation disabled.
+
+In this `@tla.kernel` example, `i16_ub` holds 128 `Int16` elements
+and `fp32_ub` holds 64 `Float32` elements. Both tensors are in UB.
 
 Example:
 
 ```python
-with tla.vec.func(mode="simd"):
-    as_i32 = x_f32.to(tla.Int32, tla.params.CastParams())
-    to_hif8 = tla.params.CastParams(round_mode=tla.params.RoundMode.CAST_ROUND)
-    as_hif8 = x_f32.to(tla.HiFloat8, to_hif8)
+with tla.vector():
+    tla.arch.set_ctrl(
+        tla.params.CTRLValue(
+            saturation_strategy=tla.params.OverrideStrategy.USE_API
+        )
+    )
+    with tla.vec.func(mode="simd"):
+        x_i16 = i16_ub.load()
+        narrow = tla.params.CastParams(sat_mode=tla.params.SatMode.NOSAT)
+        as_i8 = x_i16.to(tla.Int8, narrow)
+        as_f32 = x_i16.to(tla.Float32, tla.params.CastParams())
+        as_hif8 = fp32_ub.load().to(tla.HiFloat8, narrow)
 ```
 
 ---

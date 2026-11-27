@@ -1,0 +1,56 @@
+// RUN: sed -n '/BEGIN-F16-I8$/,/END-F16-I8$/p' %s | not %tla_compile - -o %t.out 2>&1 | %filecheck %s --check-prefix=F16-I8
+// RUN: sed -n '/BEGIN-F16-I32$/,/END-F16-I32$/p' %s | not %tla_compile - -o %t.out 2>&1 | %filecheck %s --check-prefix=F16-I32
+// RUN: sed -n '/BEGIN-I16-I8$/,/END-I16-I8$/p' %s | not %tla_compile - -o %t.out 2>&1 | %filecheck %s --check-prefix=I16-I8
+// RUN: sed -n '/BEGIN-F32-F32$/,/END-F32-F32$/p' %s | not %tla_compile - -o %t.out 2>&1 | %filecheck %s --check-prefix=F32-F32
+// RUN: sed -n '/BEGIN-UNKNOWN-SAT$/,/END-UNKNOWN-SAT$/p' %s | not %tla_compile - -o %t.out 2>&1 | %filecheck %s --check-prefix=UNKNOWN-SAT
+
+// F16-I8: CAST_ODD is unsupported for 'f16'->'i8'
+// F16-I32: 'f16'->'i32' requires SatMode.UNKNOWN
+// I16-I8: 'i16'->'i8' requires CAST_NONE
+// F32-F32: CAST_ODD is unsupported for 'f32'->'f32'
+// UNKNOWN-SAT: 'f32'->'f16' requires explicit SatMode.SAT or SatMode.NOSAT
+
+// BEGIN-F16-I8
+func.func @bad(%v: !tla.vector<128xf16>) {
+  "tla.vec.func"() ({
+    %r = tla.cast %v, [0, 0, 6] : !tla.vector<128xf16> -> !tla.vector<256xi8>
+  }) {mode = "simd"} : () -> ()
+  return
+}
+// END-F16-I8
+
+// BEGIN-F16-I32
+func.func @bad(%v: !tla.vector<128xf16>) {
+  "tla.vec.func"() ({
+    %r = tla.cast %v, [0, 2, 4] : !tla.vector<128xf16> -> !tla.vector<64xi32>
+  }) {mode = "simd"} : () -> ()
+  return
+}
+// END-F16-I32
+
+// BEGIN-I16-I8
+func.func @bad(%v: !tla.vector<128xi16>) {
+  "tla.vec.func"() ({
+    %r = tla.cast %v, [0, 2, 5] : !tla.vector<128xi16> -> !tla.vector<256xi8>
+  }) {mode = "simd"} : () -> ()
+  return
+}
+// END-I16-I8
+
+// BEGIN-F32-F32
+func.func @bad(%v: !tla.vector<64xf32>) {
+  "tla.vec.func"() ({
+    %r = tla.cast %v, [0, 0, 6] : !tla.vector<64xf32> -> !tla.vector<64xf32>
+  }) {mode = "simd"} : () -> ()
+  return
+}
+// END-F32-F32
+
+// BEGIN-UNKNOWN-SAT
+func.func @bad(%v: !tla.vector<64xf32>) {
+  "tla.vec.func"() ({
+    %r = tla.cast %v, [0, 0, 4] : !tla.vector<64xf32> -> !tla.vector<128xf16>
+  }) {mode = "simd"} : () -> ()
+  return
+}
+// END-UNKNOWN-SAT

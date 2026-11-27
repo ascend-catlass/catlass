@@ -51,9 +51,11 @@ def fp32_to_fp4(first, second, dtype: tla.Constexpr, params: tla.Constexpr):
 @tla.jit
 def fp4_to_fp32(pairs):
     """Decode 64 FP4 pair bytes at slot zero into two dense FP32 registers."""
-    dense = pairs.to(tla.BFloat16, CastParams())
-    even = dense.to(tla.Float32, CastParams(reg_slot=RegSlot.ZERO))
-    odd = dense.to(tla.Float32, CastParams(reg_slot=RegSlot.ONE))
+    even_params = CastParams()
+    odd_params = CastParams(reg_slot=RegSlot.ONE)
+    dense = pairs.to(tla.BFloat16, even_params)
+    even = dense.to(tla.Float32, even_params)
+    odd = dense.to(tla.Float32, odd_params)
     return tla.interleave(even, odd)
 
 

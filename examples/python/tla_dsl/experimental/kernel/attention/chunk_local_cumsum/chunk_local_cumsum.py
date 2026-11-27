@@ -117,11 +117,7 @@ INPUT_DTYPE_NAME = "float16"
 HAS_SCALE = False
 SCALE_VALUE = 1.0
 
-_CAST_WIDEN = tla.params.CastParams(
-    reg_slot=tla.params.RegSlot.ZERO,
-    sat_mode=tla.params.SatMode.NOSAT,
-    round_mode=tla.params.RoundMode.CAST_ROUND,
-)
+_CAST_WIDEN = tla.params.CastParams()
 
 
 def _allocate_bytes(size_bytes: int, alignment: int, mem_scope: Any) -> Any:

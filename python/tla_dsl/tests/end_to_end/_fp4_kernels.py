@@ -20,7 +20,7 @@ from catlass.params import (
     LoadDist,
     NormalLoadParams,
     NormalStoreParams,
-    SatMode,
+    RoundMode,
     StoreDist,
 )
 from _fp4_reference import decode_fp4, nearest_code
@@ -40,7 +40,9 @@ def make_native_kernel(
     compute_type = tla.BFloat16
     values_per_register = 128
     byte_count = element_count // 2
-    cast_params = CastParams(sat_mode=SatMode.SAT, round_mode=rounding)
+    cast_params = CastParams(
+        round_mode=rounding if direction == "narrow" else RoundMode.CAST_NONE,
+    )
     load_params = NormalLoadParams(load_dist=LoadDist.DIST_UNPACK4_B8)
     store_params = NormalStoreParams(store_dist=StoreDist.DIST_PACK4_B32)
 
@@ -218,7 +220,7 @@ def make_composed_kernel(
     float_capacity = GUARD + row_count * float_pitch + 64
     byte_capacity = GUARD + row_count * byte_pitch + 64
     inv_scale = 1.0 / scale
-    params = CastParams(sat_mode=SatMode.SAT, round_mode=rounding_mode)
+    params = CastParams(round_mode=rounding_mode)
     unpack = NormalLoadParams(load_dist=LoadDist.DIST_UNPACK4_B8)
     pack = NormalStoreParams(store_dist=StoreDist.DIST_PACK4_B32)
 
@@ -472,10 +474,7 @@ def make_slot_kernel(
                     )
                 values = source_tile.load().to(
                     destination.element_type,
-                    CastParams(
-                        reg_slot=slot,
-                        sat_mode=SatMode.SAT,
-                    ),
+                    CastParams(reg_slot=slot),
                     predicate,
                 )
                 if tla.const_expr(narrow):

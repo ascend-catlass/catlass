@@ -28,12 +28,10 @@ so each compiled variant serves every row count:
   vector region.
 
 f32 chunks are 64 lanes (one full register).  f16 / bf16 use a 128-element
-chunk and split every chunk into its even and odd source lanes with
-``CastParams(reg_slot=ZERO/ONE)``: the widening cast reads only one parity of
-the 128-lane source register, so both parities are widened, accumulated in f32,
-and recombined.  A narrowing cast writes its values into one parity of a
-128-slot f16 register (the other parity becomes zero), so the two narrowed
-halves are added before the store, which restores the contiguous layout.
+chunk. Widen the even and odd source lanes with ``RegSlot.ZERO`` and
+``RegSlot.ONE``. Accumulate each parity in f32, then recombine the results.
+Each narrowing cast writes one parity of a 128-slot register and zeros the
+other. Add the two narrowed halves before storing them contiguously.
 
 Axis and precision are specialized at compile time. The dtype of the bound input
 tensor controls UB allocations and casts for all three supported dtypes.
@@ -151,7 +149,8 @@ def reduce_mean_kernel(
                                 total.to(
                                     dtype,
                                     tla.params.CastParams(
-                                        reg_slot=tla.params.RegSlot.ZERO
+                                        reg_slot=tla.params.RegSlot.ZERO,
+                                        sat_mode=tla.params.SatMode.NOSAT,
                                     ),
                                 )
                             )
@@ -226,7 +225,10 @@ def reduce_mean_kernel(
                         z_tail_ub.store(
                             total2.to(
                                 dtype,
-                                tla.params.CastParams(reg_slot=tla.params.RegSlot.ZERO),
+                                tla.params.CastParams(
+                                    reg_slot=tla.params.RegSlot.ZERO,
+                                    sat_mode=tla.params.SatMode.NOSAT,
+                                ),
                             )
                         )
                     else:
@@ -417,11 +419,17 @@ def reduce_mean_kernel(
                         if tla.const_expr(is_lowp):
                             ze = tla.mul(acc_ub.load(), inv).to(
                                 dtype,
-                                tla.params.CastParams(reg_slot=tla.params.RegSlot.ZERO),
+                                tla.params.CastParams(
+                                    reg_slot=tla.params.RegSlot.ZERO,
+                                    sat_mode=tla.params.SatMode.NOSAT,
+                                ),
                             )
                             zo = tla.mul(acc_o_ub.load(), inv).to(
                                 dtype,
-                                tla.params.CastParams(reg_slot=tla.params.RegSlot.ONE),
+                                tla.params.CastParams(
+                                    reg_slot=tla.params.RegSlot.ONE,
+                                    sat_mode=tla.params.SatMode.NOSAT,
+                                ),
                             )
                             z_ub.store(tla.add(ze, zo))
                         else:

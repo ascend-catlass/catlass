@@ -1182,7 +1182,6 @@ def _qsa_indexer_mixed_topk_stage(
                             )
                             cast_i16_to_f16 = tla.params.CastParams(
                                 reg_slot=tla.params.RegSlot.ZERO,
-                                sat_mode=tla.params.SatMode.NOSAT,
                                 round_mode=tla.params.RoundMode.CAST_ROUND,
                             )
                             high_threshold_register = tla.tile_view(

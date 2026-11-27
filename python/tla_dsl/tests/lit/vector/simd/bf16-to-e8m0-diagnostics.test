@@ -2,15 +2,18 @@
 // RUN: not %tla_compile %t/slot.mlir -o %t.out 2>&1 | %filecheck %s --check-prefix=SLOT
 // RUN: not %tla_compile %t/mask.mlir -o %t.out 2>&1 | %filecheck %s --check-prefix=MASK
 // RUN: not %tla_compile %t/view.mlir -o %t.out 2>&1 | %filecheck %s --check-prefix=VIEW
+// RUN: not %tla_compile %t/round.mlir -o %t.out 2>&1 | %filecheck %s --check-prefix=PARAMS
+// RUN: not %tla_compile %t/sat.mlir -o %t.out 2>&1 | %filecheck %s --check-prefix=PARAMS
 
 // SLOT: BF16 <-> E8M0 requires slot ZERO or ONE
 // MASK: mask has 256 predicate lanes, expected 128
 // VIEW: E8M0 register bitcast requires UInt8
+// PARAMS: requires CAST_NONE and SatMode.UNKNOWN
 
 //--- slot.mlir
 func.func @bad(%v: !tla.vector<128xbf16>) {
   "tla.vec.func"() ({
-    %r = tla.cast %v, [2, 1, 3] : !tla.vector<128xbf16> -> !tla.vector<?x!tla.f8e8m0>
+    %r = tla.cast %v, [2, 0, 4] : !tla.vector<128xbf16> -> !tla.vector<?x!tla.f8e8m0>
   }) {mode = "simd"} : () -> ()
   return
 }
@@ -18,7 +21,7 @@ func.func @bad(%v: !tla.vector<128xbf16>) {
 //--- mask.mlir
 func.func @bad(%v: !tla.vector<128xbf16>, %p: !tla.mask<256>) {
   "tla.vec.func"() ({
-    %r = tla.cast %v, [0, 1, 3] mask %p : !tla.vector<128xbf16> mask !tla.mask<256> -> !tla.vector<?x!tla.f8e8m0>
+    %r = tla.cast %v, [0, 0, 4] mask %p : !tla.vector<128xbf16> mask !tla.mask<256> -> !tla.vector<?x!tla.f8e8m0>
   }) {mode = "simd"} : () -> ()
   return
 }
@@ -27,6 +30,22 @@ func.func @bad(%v: !tla.vector<128xbf16>, %p: !tla.mask<256>) {
 func.func @bad(%v: !tla.vector<256x!tla.f8e8m0>) {
   "tla.vec.func"() ({
     %r = "tla.bitcast"(%v) : (!tla.vector<256x!tla.f8e8m0>) -> !tla.vector<64xf32>
+  }) {mode = "simd"} : () -> ()
+  return
+}
+
+//--- round.mlir
+func.func @bad(%v: !tla.vector<128xbf16>) {
+  "tla.vec.func"() ({
+    %r = tla.cast %v, [0, 0, 7] : !tla.vector<128xbf16> -> !tla.vector<?x!tla.f8e8m0>
+  }) {mode = "simd"} : () -> ()
+  return
+}
+
+//--- sat.mlir
+func.func @bad(%v: !tla.vector<128xbf16>) {
+  "tla.vec.func"() ({
+    %r = tla.cast %v, [1, 1, 4] : !tla.vector<128xbf16> -> !tla.vector<?x!tla.f8e8m0>
   }) {mode = "simd"} : () -> ()
   return
 }

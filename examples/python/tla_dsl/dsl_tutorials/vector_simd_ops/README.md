@@ -476,13 +476,15 @@ first mismatch=None
   |------|------|------|
   | `reg_slot`（`tla.params.RegSlot`） | `ZERO` / `ONE` | 2x 宽度转换（如 f32→f16、i32↔i16）落到的寄存器位置：`ZERO`=`part_even`（偶位）、`ONE`=`part_odd`（奇位） |
   | | `ZERO` / `ONE` / `TWO` / `THREE` | 4x 宽度转换（如 i32↔i8）的 pack 象限：`ZERO`=pp0、`ONE`=pp1、`TWO`=pp2、`THREE`=pp3 |
-  | `sat_mode`（`tla.params.SatMode`） | `NOSAT` / `SAT` / `UNKNOWN` | 溢出行为（AVE `sat`）：不饱和 / 饱和 / 未指定（当前 lowering 按不饱和处理） |
+  | `sat_mode`（`tla.params.SatMode`） | `NOSAT` / `SAT` / `UNKNOWN` | 不饱和 / 饱和 / 占位。`UNKNOWN` 不会自动映射为 `SAT` 或 `NOSAT`。 |
   | `round_mode`（`tla.params.RoundMode`） | `CAST_ROUND` | 就近取整，平局远离 0 |
   | | `CAST_FLOOR` | 向 -∞ 取整 |
   | | `CAST_CEIL` | 向 +∞ 取整 |
   | | `CAST_TRUNC` | 向 0 取整（截断） |
+  | | `CAST_RINT` | 就近取整，平局取偶 |
+  | | `CAST_NONE` | 在支持 `CAST_RINT` 的舍入路径上按中点取偶。精确转换和整数收窄使用此值。 |
 
-  默认组合为 `CastParams(reg_slot=RegSlot.ZERO, sat_mode=SatMode.NOSAT, round_mode=RoundMode.CAST_ROUND)`。
+  `CastParams()` 默认使用 `ZERO`、`UNKNOWN` 和 `CAST_NONE`。各转换方向的可选模式见[转换模式总表](../../../../../python/tla_dsl/docs/zh/api/language/simd/type_conversion.md#转换模式总表)。
 
 - 约束说明：
   - 支持的数据类型：
@@ -493,7 +495,7 @@ first mismatch=None
 
   - `cast_multi.py`：输入/输出均为 f32，转换在内核内部进行；固定 256 元素 / 4 chunk；默认 atol 1e-2。
   - 浮点→浮点收窄（f32→f16/bf16）的 `round_mode` 为亚 ULP 舍入；本示例输入可精确表示，故该处舍入不改变结果。
-  - 整数舍入（trunc/floor）在浮点→整数转换上可观测；`sat_mode=UNKNOWN` 被放在浮点→浮点转换上以避免影响数值。
+  - 浮点转整数时可观察 `CAST_TRUNC` 和 `CAST_FLOOR` 的差异。整数收窄使用 `CAST_NONE`。
 
 - 执行示例：
 

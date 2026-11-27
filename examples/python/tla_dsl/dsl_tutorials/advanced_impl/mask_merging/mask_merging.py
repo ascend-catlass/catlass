@@ -16,7 +16,13 @@ import catlass.tla as tla
 
 
 LANES = 64
-ROUND_EVEN = tla.params.CastParams(round_mode=tla.params.RoundMode.CAST_RINT)
+ROUND_EVEN = tla.params.CastParams(
+    round_mode=tla.params.RoundMode.CAST_RINT,
+)
+ROUND_EVEN_NOSAT = tla.params.CastParams(
+    sat_mode=tla.params.SatMode.NOSAT,
+    round_mode=tla.params.RoundMode.CAST_RINT,
+)
 OPERATIONS = ("add", "max", "min", "full", "move", "to_i32", "to_f32")
 
 
@@ -33,7 +39,7 @@ def selected_value(op, a, b, mask):
     if op == "min":
         return tla.min(a, b, mask=mask)
     if op == "to_i32":
-        return a.to(tla.Int32, ROUND_EVEN, mask=mask)
+        return a.to(tla.Int32, ROUND_EVEN_NOSAT, mask=mask)
     if op == "to_f32":
         return a.to(tla.Float32, ROUND_EVEN, mask=mask)
     return a  # Move selects the source directly.

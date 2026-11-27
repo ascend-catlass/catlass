@@ -35,22 +35,22 @@ def _p_store64(p_reg, ub_p, row, chunk):
     cast0 = tla.params.CastParams(
         reg_slot=tla.params.RegSlot.ZERO,
         sat_mode=tla.params.SatMode.NOSAT,
-        round_mode=tla.params.RoundMode.CAST_ROUND,
+        round_mode=tla.params.RoundMode.CAST_RINT,
     )
     cast1 = tla.params.CastParams(
         reg_slot=tla.params.RegSlot.ONE,
         sat_mode=tla.params.SatMode.NOSAT,
-        round_mode=tla.params.RoundMode.CAST_ROUND,
+        round_mode=tla.params.RoundMode.CAST_RINT,
     )
     cast2 = tla.params.CastParams(
         reg_slot=tla.params.RegSlot.TWO,
         sat_mode=tla.params.SatMode.NOSAT,
-        round_mode=tla.params.RoundMode.CAST_ROUND,
+        round_mode=tla.params.RoundMode.CAST_RINT,
     )
     cast3 = tla.params.CastParams(
         reg_slot=tla.params.RegSlot.THREE,
         sat_mode=tla.params.SatMode.NOSAT,
-        round_mode=tla.params.RoundMode.CAST_ROUND,
+        round_mode=tla.params.RoundMode.CAST_RINT,
     )
     even, odd = tla.deinterleave(p_reg, p_reg)
     ee, eo = tla.deinterleave(even, even)

@@ -52,7 +52,11 @@ def _kernel(params, masked=False, lanes=128):
 
 @pytest.mark.parametrize(
     "round_mode",
-    [mode for mode in tla.params.RoundMode if mode is not tla.params.RoundMode.CAST_HYBRID],
+    [
+        mode
+        for mode in tla.params.RoundMode
+        if mode not in (tla.params.RoundMode.CAST_HYBRID, tla.params.RoundMode.CAST_ODD)
+    ],
 )
 @pytest.mark.parametrize("reg_slot", (tla.params.RegSlot.ZERO, tla.params.RegSlot.ONE))
 @pytest.mark.parametrize("masked", (False, True))
@@ -89,7 +93,7 @@ def test_half_to_bf16_preserves_valid_lanes(lanes):
 @pytest.mark.parametrize("sat_mode", (tla.params.SatMode.NOSAT, tla.params.SatMode.SAT))
 def test_half_to_bf16_rejects_explicit_sat_mode(sat_mode):
     with pytest.raises(
-        tla.TlaCoreAPIError, match="f16->bf16 cast only supports UNKNOWN sat_mode"
+        tla.TlaCoreAPIError, match=r"f16->bf16 requires SatMode\.UNKNOWN"
     ):
         _kernel(tla.params.CastParams(sat_mode=sat_mode)).dump_mlir(
             type_args=(_gm(tla.Float16), _gm(tla.BFloat16))

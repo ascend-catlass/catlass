@@ -154,7 +154,6 @@ def quant_matmul_gelu_kernel(
     # ---- cast preset ----
     cast_i32_to_f32 = tla.params.CastParams(
         reg_slot=tla.params.RegSlot.ZERO,
-        sat_mode=tla.params.SatMode.NOSAT,
         round_mode=tla.params.RoundMode.CAST_ROUND,
     )
     if tla.const_expr(dtype_d != DTYPE_EPI):

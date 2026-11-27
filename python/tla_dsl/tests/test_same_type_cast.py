@@ -8,9 +8,8 @@ from catlass.tla.runtime import make_fake_tensor
 # The same-type float casts: f16->f16, bf16->bf16, f32->f32. Each one keeps its
 # element type and re-rounds every lane through the AVE vtrc op, so only the
 # round mode reaches the instruction. These tests pin the frontend gate: which
-# same-type pairs are admitted, that SAT (and any same-type non-float pair) is
-# refused with a diagnostic instead of a backend fatal error, and that the
-# pack-quarter slots stay honest on an equal-width conversion.
+# same-type pairs are admitted, which parameters vtrc supports, and that the
+# pack-quarter slots are rejected on an equal-width conversion.
 #
 # The other same-type pairs are not a matter of taste: the lowering would reach
 # HIVMAVEToAVEIntrin with no instruction for them and die with a fatal
@@ -38,7 +37,6 @@ _ROUND_MODES = (
     tla.params.RoundMode.CAST_TRUNC,
     tla.params.RoundMode.CAST_NONE,
     tla.params.RoundMode.CAST_RINT,
-    tla.params.RoundMode.CAST_ODD,
 )
 
 
@@ -75,29 +73,21 @@ def _compile(dtype: type[tla.Numeric], params: tla.params.CastParams) -> None:
 
 @pytest.mark.parametrize("dtype", _SAME_TYPE_FLOATS)
 @pytest.mark.parametrize("rnd", _ROUND_MODES)
-def test_every_same_type_float_cast_accepts_every_round_mode(dtype, rnd) -> None:
+def test_same_type_float_cast_accepts_supported_rounding(dtype, rnd) -> None:
     """The round mode is the only operand vtrc reads from CastParams."""
     _compile(dtype, tla.params.CastParams(round_mode=rnd))
 
 
 @pytest.mark.parametrize("dtype", _SAME_TYPE_FLOATS)
-def test_same_type_float_cast_accepts_unknown_saturation(dtype) -> None:
-    _compile(
-        dtype,
-        tla.params.CastParams(
-            sat_mode=tla.params.SatMode.UNKNOWN, round_mode=tla.params.RoundMode.CAST_RINT
-        ),
-    )
+def test_same_type_float_cast_rejects_odd_rounding(dtype) -> None:
+    params = tla.params.CastParams(round_mode=tla.params.RoundMode.CAST_ODD)
+    with pytest.raises(tla.TlaCoreAPIError, match="CAST_ODD is unsupported"):
+        _compile(dtype, params)
 
 
 @pytest.mark.parametrize("dtype", _SAME_TYPE_FLOATS)
 def test_same_type_float_cast_accepts_slot_one(dtype) -> None:
-    _compile(
-        dtype,
-        tla.params.CastParams(
-            reg_slot=tla.params.RegSlot.ONE, round_mode=tla.params.RoundMode.CAST_RINT
-        ),
-    )
+    _compile(dtype, tla.params.CastParams(reg_slot=tla.params.RegSlot.ONE))
 
 
 @pytest.mark.parametrize("dtype", _SAME_TYPE_FLOATS)
@@ -109,11 +99,10 @@ def test_pack_quarter_slots_are_refused_on_a_same_type_cast(dtype, slot) -> None
 
 
 @pytest.mark.parametrize("dtype", _SAME_TYPE_FLOATS)
-def test_saturating_same_type_cast_is_refused(dtype) -> None:
-    """SAT promises clamping that vtrc cannot deliver; refuse it rather than
-    silently drop the knob."""
-    with pytest.raises(tla.TlaCoreAPIError, match="never saturates"):
-        _compile(dtype, tla.params.CastParams(sat_mode=tla.params.SatMode.SAT))
+@pytest.mark.parametrize("sat", (tla.params.SatMode.SAT, tla.params.SatMode.NOSAT))
+def test_same_type_float_cast_requires_unknown_saturation(dtype, sat) -> None:
+    with pytest.raises(tla.TlaCoreAPIError, match="requires SatMode.UNKNOWN"):
+        _compile(dtype, tla.params.CastParams(sat_mode=sat))
 
 
 @pytest.mark.parametrize(

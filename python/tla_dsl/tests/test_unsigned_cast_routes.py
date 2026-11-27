@@ -30,23 +30,23 @@ _LANES = {
     tla.Float8E4M3FN: 256,
 }
 
-# Every route the lowering can emit, as (src, dst).
-_SUPPORTED = (
-    (tla.UInt8, tla.UInt16),
-    (tla.UInt16, tla.UInt32),
-    (tla.UInt8, tla.UInt32),
+_INTEGER_NARROWS = (
     (tla.UInt16, tla.UInt8),
     (tla.UInt32, tla.UInt16),
     (tla.UInt32, tla.UInt8),
     (tla.Int16, tla.UInt8),
-    (tla.Int16, tla.UInt32),
     (tla.Int32, tla.UInt8),
     (tla.Int32, tla.UInt16),
     (tla.UInt32, tla.Int16),
-    (tla.UInt8, tla.Float16),
-    (tla.Float16, tla.UInt8),
-    (tla.UInt8, tla.Float32),
 )
+
+_UNSIGNED_WIDENS = (
+    (tla.UInt8, tla.UInt16),
+    (tla.UInt16, tla.UInt32),
+    (tla.UInt8, tla.UInt32),
+    (tla.UInt8, tla.Float16),
+)
+_UNSIGNED_NARROWS = (*_INTEGER_NARROWS, (tla.Float16, tla.UInt8))
 
 # The 4x integer steps, where reg_slot names a pack quarter rather than an
 # even/odd part, so all four slots must be accepted.
@@ -54,13 +54,11 @@ _FOUR_X = (
     (tla.UInt8, tla.UInt32),
     (tla.UInt32, tla.UInt8),
     (tla.Int32, tla.UInt8),
-    (tla.UInt8, tla.Float32),
 )
 
 _SAT_MODES = (
     tla.params.SatMode.NOSAT,
     tla.params.SatMode.SAT,
-    tla.params.SatMode.UNKNOWN,
 )
 _ROUND_MODES = (
     tla.params.RoundMode.CAST_ROUND,
@@ -69,6 +67,7 @@ _ROUND_MODES = (
     tla.params.RoundMode.CAST_TRUNC,
 )
 _DEFAULT = tla.params.CastParams()
+_NOSAT = tla.params.CastParams(sat_mode=tla.params.SatMode.NOSAT)
 
 
 def _ub(dtype: type[tla.Numeric]) -> tla.Tensor:
@@ -106,15 +105,26 @@ def _compile(src_dtype, dst_dtype, params) -> None:
     )
 
 
-@pytest.mark.parametrize(("src", "dst"), _SUPPORTED)
+@pytest.mark.parametrize(("src", "dst"), (*_UNSIGNED_NARROWS, *_UNSIGNED_WIDENS))
 def test_every_supported_unsigned_route_compiles(src, dst) -> None:
-    _compile(src, dst, _DEFAULT)
+    params = _NOSAT if (src, dst) in _UNSIGNED_NARROWS else _DEFAULT
+    _compile(src, dst, params)
 
 
-@pytest.mark.parametrize(("src", "dst"), _SUPPORTED)
-@pytest.mark.parametrize("sat", _SAT_MODES)
-@pytest.mark.parametrize("rnd", _ROUND_MODES)
-def test_every_unsigned_route_accepts_every_sat_and_round_mode(src, dst, sat, rnd) -> None:
+@pytest.mark.parametrize(
+    ("src", "dst", "sat", "rnd"),
+    tuple(
+        (src, dst, sat, rnd)
+        for src, dst in _UNSIGNED_NARROWS
+        for sat in _SAT_MODES
+        for rnd in (
+            (tla.params.RoundMode.CAST_NONE,)
+            if (src, dst) in _INTEGER_NARROWS
+            else _ROUND_MODES
+        )
+    ),
+)
+def test_unsigned_route_accepts_supported_cast_modes(src, dst, sat, rnd) -> None:
     _compile(src, dst, tla.params.CastParams(sat_mode=sat, round_mode=rnd))
 
 
@@ -122,13 +132,30 @@ def test_every_unsigned_route_accepts_every_sat_and_round_mode(src, dst, sat, rn
 @pytest.mark.parametrize(
     "slot", (tla.params.RegSlot.ONE, tla.params.RegSlot.TWO, tla.params.RegSlot.THREE)
 )
-def test_nondefault_pack_quarters_are_valid_on_a_4x_unsigned_cast(src, dst, slot) -> None:
-    """A 4x step reads pp0..pp3, so TWO and THREE must survive the frontend.
+def test_nondefault_pack_quarters_are_valid_on_a_4x_unsigned_cast(
+    src, dst, slot
+) -> None:
+    """A 4x step reads pp0..pp3, so TWO and THREE must survive the frontend."""
+    sat = tla.params.SatMode.UNKNOWN if src is tla.UInt8 else tla.params.SatMode.NOSAT
+    _compile(src, dst, tla.params.CastParams(reg_slot=slot, sat_mode=sat))
 
-    u8 -> f32 is included deliberately: it is composed, but its *first* leg is
-    the 4x u8 -> u32 widen, so the slot still names a quarter.
-    """
-    _compile(src, dst, tla.params.CastParams(reg_slot=slot))
+
+@pytest.mark.parametrize("slot", tuple(tla.params.RegSlot))
+def test_uint8_to_float32_accepts_all_pack_quarters(slot) -> None:
+    _compile(
+        tla.UInt8,
+        tla.Float32,
+        tla.params.CastParams(reg_slot=slot),
+    )
+
+
+@pytest.mark.parametrize("slot", (tla.params.RegSlot.ZERO, tla.params.RegSlot.ONE))
+def test_int16_to_uint32_accepts_even_and_odd_slots(slot) -> None:
+    _compile(
+        tla.Int16,
+        tla.UInt32,
+        tla.params.CastParams(reg_slot=slot),
+    )
 
 
 @pytest.mark.parametrize(
@@ -149,8 +176,13 @@ def test_nondefault_pack_quarters_are_valid_on_a_4x_unsigned_cast(src, dst, slot
 @pytest.mark.parametrize("slot", (tla.params.RegSlot.TWO, tla.params.RegSlot.THREE))
 def test_pack_quarter_slots_are_refused_on_a_2x_unsigned_cast(src, dst, slot) -> None:
     """A 2x step carries an even/odd part, where TWO and THREE would act as ZERO."""
+    sat = (
+        tla.params.SatMode.NOSAT
+        if (src, dst) in _UNSIGNED_NARROWS
+        else tla.params.SatMode.UNKNOWN
+    )
     with pytest.raises(tla.TlaCoreAPIError, match="pack quarter"):
-        _compile(src, dst, tla.params.CastParams(reg_slot=slot))
+        _compile(src, dst, tla.params.CastParams(reg_slot=slot, sat_mode=sat))
 
 
 @pytest.mark.parametrize(
@@ -197,17 +229,16 @@ def test_unsupported_unsigned_cast_is_refused(src, dst) -> None:
         _compile(src, dst, _DEFAULT)
 
 
-def test_signed_integer_routes_are_unchanged() -> None:
-    """The existing signed lattice must not have been narrowed by the above."""
+def test_signed_integer_routes_compile() -> None:
     for src, dst in (
         (tla.Int8, tla.Int16),
         (tla.Int16, tla.Int32),
         (tla.Int8, tla.Int32),
-        (tla.Int32, tla.Int8),
         (tla.Int32, tla.Float32),
-        (tla.Float32, tla.Int32),
     ):
         _compile(src, dst, _DEFAULT)
+    _compile(tla.Int32, tla.Int8, _NOSAT)
+    _compile(tla.Float32, tla.Int32, _NOSAT)
 
 
 @pytest.mark.parametrize("dtype", (tla.UInt8, tla.UInt16, tla.UInt32))

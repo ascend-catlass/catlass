@@ -131,10 +131,15 @@ def make_fp8_kernel(
     padded = (count + 63) // 64 * 64
     source_capacity = GUARD + padded * (stride if narrow else 1) + 64
     destination_capacity = GUARD + padded + 64
-    cast = cast_params or CastParams(
-        round_mode=RoundMode.CAST_RINT,
-        sat_mode=SatMode.SAT if saturate else SatMode.NOSAT,
-    )
+    if cast_params is None:
+        cast_params = (
+            CastParams(
+                round_mode=RoundMode.CAST_RINT,
+                sat_mode=SatMode.SAT if saturate else SatMode.NOSAT,
+            )
+            if narrow
+            else CastParams()
+        )
 
     @tla.kernel
     def convert(source: tla.Tensor, destination: tla.Tensor):
@@ -184,7 +189,7 @@ def make_fp8_kernel(
                         else:
                             values = input_tile.load()
                         output_tile.store(
-                            values.to(dtype, cast),
+                            values.to(dtype, cast_params),
                             NormalStoreParams(store_dist=StoreDist.DIST_PACK4_B32),
                         )
                     else:
@@ -194,7 +199,7 @@ def make_fp8_kernel(
                         codes = input_tile.load(
                             NormalLoadParams(load_dist=LoadDist.DIST_UNPACK4_B8)
                         )
-                        output_tile.store(codes.to(tla.Float32, cast))
+                        output_tile.store(codes.to(tla.Float32, cast_params))
             tla.set_flag(done)
             tla.wait_flag(done)
             tla.copy(destination, destination_buffer)

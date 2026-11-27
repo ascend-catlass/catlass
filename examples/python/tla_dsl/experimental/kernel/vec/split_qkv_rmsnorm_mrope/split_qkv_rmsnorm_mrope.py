@@ -133,11 +133,7 @@ def split_qkv_rmsnorm_mrope_kernel(
     weights_mutex = tla.mutex(resource="ub_weights", id=3)
     unpack = tla.params.NormalLoadParams(load_dist=tla.params.LoadDist.DIST_UNPACK_B16)
     pack = tla.params.NormalStoreParams(store_dist=tla.params.StoreDist.DIST_PACK_B32)
-    cast = tla.params.CastParams(
-        reg_slot=tla.params.RegSlot.ZERO,
-        sat_mode=tla.params.SatMode.NOSAT,
-        round_mode=tla.params.RoundMode.CAST_ROUND,
-    )
+    cast = tla.params.CastParams()
     with tla.vector():
         # Q/K parameters are immutable for the whole invocation and private per AIV.
         weights_mutex.lock(pipe=tla.pipes.MTE2)

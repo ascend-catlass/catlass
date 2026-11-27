@@ -806,6 +806,7 @@ def _finalize_impl(
                 tla.BFloat16,
                 tla.params.CastParams(
                     reg_slot=tla.params.RegSlot.ZERO,
+                    sat_mode=tla.params.SatMode.NOSAT,
                     round_mode=tla.params.RoundMode.CAST_ROUND,
                 ),
             )
@@ -813,6 +814,7 @@ def _finalize_impl(
                 tla.BFloat16,
                 tla.params.CastParams(
                     reg_slot=tla.params.RegSlot.ZERO,
+                    sat_mode=tla.params.SatMode.NOSAT,
                     round_mode=tla.params.RoundMode.CAST_ROUND,
                 ),
             )

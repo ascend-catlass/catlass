@@ -201,6 +201,8 @@ def block_sparse_attention_backward_kernel(
         sat_mode=tla.params.SatMode.SAT,
         round_mode=tla.params.RoundMode.CAST_ROUND,
     )
+    widen_zero = tla.params.CastParams()
+    widen_one = tla.params.CastParams(reg_slot=tla.params.RegSlot.ONE)
 
     with tla.cube():
         if tla.const_expr(direct_pds == 0):
@@ -477,13 +479,13 @@ def block_sparse_attention_backward_kernel(
                             tla.make_coord(cache_row, c0),
                         ).load()
                         do_odd = do_cache_row.to(
-                            tla.Float32, cast_zero, mask=compute_mask
+                            tla.Float32, widen_zero, mask=compute_mask
                         )
                         do_even = do_cache_row.to(
-                            tla.Float32, cast_one, mask=compute_mask
+                            tla.Float32, widen_one, mask=compute_mask
                         )
-                        o_odd = o_cache_row.to(tla.Float32, cast_zero, mask=io_mask)
-                        o_even = o_cache_row.to(tla.Float32, cast_one, mask=io_mask)
+                        o_odd = o_cache_row.to(tla.Float32, widen_zero, mask=io_mask)
+                        o_even = o_cache_row.to(tla.Float32, widen_one, mask=io_mask)
                         dot_odd = tla.mul(do_odd, o_odd, mask=f32_mask).reduce(
                             tla.ReductionOp.ADD, mask=f32_mask
                         )

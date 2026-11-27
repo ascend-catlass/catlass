@@ -625,14 +625,34 @@ with tla.vec.func(mode="simd"):
     y_ub.store(y_reg, tla.params.UnalignStoreParams())
     y_ub.store(y_reg, tla.params.NormalStoreParams(
         store_dist=tla.params.StoreDist.DIST_FIRST_ELEMENT_B16))
-    # fp32_reg：64 个 FP32 lane；fp8_ub：64 个 Float8E4M3FN 元素。
-    # fp8_ub 的实际起始地址按 32 字节对齐。
-    fp8_reg = fp32_reg.to(tla.Float8E4M3FN, tla.params.CastParams(
-        round_mode=tla.params.RoundMode.CAST_RINT,
-        sat_mode=tla.params.SatMode.SAT,
-        reg_slot=tla.params.RegSlot.ZERO))
-    fp8_ub.store(fp8_reg, tla.params.NormalStoreParams(
-        store_dist=tla.params.StoreDist.DIST_PACK4_B32))
+```
+
+FP8 打包写回示例中，`fp32_ub` 包含 64 个 `Float32` 元素。
+`fp8_ub` 包含 64 个 `Float8E4M3FN` 元素，起始地址按 32 字节对齐。
+`USE_API` 使转换采用 `SatMode.SAT`。
+
+```python
+with tla.vector():
+    tla.arch.set_ctrl(
+        tla.params.CTRLValue(
+            saturation_strategy=tla.params.OverrideStrategy.USE_API
+        )
+    )
+    with tla.vec.func(mode="simd"):
+        fp8_reg = fp32_ub.load().to(
+            tla.Float8E4M3FN,
+            tla.params.CastParams(
+                round_mode=tla.params.RoundMode.CAST_RINT,
+                sat_mode=tla.params.SatMode.SAT,
+                reg_slot=tla.params.RegSlot.ZERO,
+            ),
+        )
+        fp8_ub.store(
+            fp8_reg,
+            tla.params.NormalStoreParams(
+                store_dist=tla.params.StoreDist.DIST_PACK4_B32
+            ),
+        )
 ```
 
 - 单向量对齐 `POST_MODE_UPDATE` 支持 NORM、PACK 和 FIRST_ELEMENT 分布，类型约束见上文。

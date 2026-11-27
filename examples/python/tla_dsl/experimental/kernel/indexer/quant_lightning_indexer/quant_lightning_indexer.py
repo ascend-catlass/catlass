@@ -318,7 +318,6 @@ def qli_scores(
                 )
                 w_cast_wide = tla.params.CastParams(
                     reg_slot=tla.params.RegSlot.ZERO,
-                    sat_mode=tla.params.SatMode.NOSAT,
                     round_mode=tla.params.RoundMode.CAST_NONE,
                 )
                 w_mask_f, _ = tla.update_mask(64, tla.Float32)
@@ -375,7 +374,6 @@ def qli_scores(
                         )
                         cast_wide = tla.params.CastParams(
                             reg_slot=tla.params.RegSlot.ZERO,
-                            sat_mode=tla.params.SatMode.NOSAT,
                             round_mode=tla.params.RoundMode.CAST_NONE,
                         )
                         pack_store = tla.params.NormalStoreParams(

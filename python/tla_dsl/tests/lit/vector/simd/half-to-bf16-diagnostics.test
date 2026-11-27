@@ -1,7 +1,7 @@
 // RUN: not %tla_compile %s -o %t 2>&1 | %filecheck %s
 // RUN: sed 's/trait = array<i32: 0, 1, 0>/trait = array<i32: 0, 2, 0>/' %s > %t.nosat.mlir
 // RUN: not %tla_compile %t.nosat.mlir -o %t 2>&1 | %filecheck %s
-// CHECK: f16->bf16 cast only supports UNKNOWN sat_mode
+// CHECK: 'f16'->'bf16' requires SatMode.UNKNOWN
 
 !src = !tla.tensor<!tla.layout<!tla.shape<128>, !tla.stride<1>, !tla.shape<128>, RowMajor>, !tla.coord<0>, !tla.ptr<f16, ub, 2>>
 !dst = !tla.tensor<!tla.layout<!tla.shape<128>, !tla.stride<1>, !tla.shape<128>, RowMajor>, !tla.coord<0>, !tla.ptr<bf16, ub, 2>>

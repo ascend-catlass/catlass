@@ -31,19 +31,11 @@ def _convert(dst_type, params, mask_type=None):
     return kernel
 
 
-@pytest.mark.parametrize(
-    "params,mask_type",
-    [
-        (CastParams(), None),
-        (CastParams(reg_slot=RegSlot.ONE), tla.BFloat16),
-        (
-            CastParams(RegSlot.ZERO, SatMode.SAT, RoundMode.CAST_TRUNC),
-            tla.BFloat16,
-        ),
-    ],
-)
-def test_bf16_exponent_cast(compiler_tlair, params, mask_type):
+@pytest.mark.parametrize("slot", (RegSlot.ZERO, RegSlot.ONE))
+@pytest.mark.parametrize("mask_type", (None, tla.BFloat16))
+def test_bf16_exponent_cast(compiler_tlair, slot, mask_type):
     dst = _ub(tla.Float8E8M0, 256)
+    params = CastParams(reg_slot=slot)
     ir = compiler_tlair(
         _convert(tla.Float8E8M0, params, mask_type),
         type_args=(_ub(tla.BFloat16, 128), dst),
@@ -54,6 +46,32 @@ def test_bf16_exponent_cast(compiler_tlair, params, mask_type):
         operands.append("!tla.mask<128>")
     assert f"({', '.join(operands)}) -> !tla.vector<?x!tla.f8e8m0>" in cast
     assert f"trait = array<i32: {', '.join(map(str, params.codes()))}>" in cast
+
+
+@pytest.mark.parametrize(
+    "sat_mode,round_mode",
+    [
+        *(
+            (SatMode.UNKNOWN, mode)
+            for mode in RoundMode
+            if mode is not RoundMode.CAST_NONE
+        ),
+        (SatMode.SAT, RoundMode.CAST_NONE),
+        (SatMode.NOSAT, RoundMode.CAST_NONE),
+    ],
+)
+def test_bf16_exponent_cast_requires_none_and_unknown(
+    compiler_tlair, sat_mode, round_mode
+):
+    params = CastParams(sat_mode=sat_mode, round_mode=round_mode)
+    with pytest.raises(
+        tla.TlaCoreAPIError,
+        match=r"bf16->f8e8m0 requires CAST_NONE and SatMode\.UNKNOWN",
+    ):
+        compiler_tlair(
+            _convert(tla.Float8E8M0, params),
+            type_args=(_ub(tla.BFloat16, 128), _ub(tla.Float8E8M0, 256)),
+        )
 
 
 @pytest.mark.parametrize(

@@ -154,7 +154,7 @@ module {
       "tla.vec.func"() ({
         %a = tla.load %lhs : !lhs4 -> !tla.vector<3xf16>
         %b_loaded = tla.load %rhs : !rhs4 -> !tla.vector<64xf32>
-        %b = tla.cast %b_loaded, [0, 0, 0] : !tla.vector<64xf32> -> !tla.vector<?xf16>
+        %b = tla.cast %b_loaded, [0, 2, 0] : !tla.vector<64xf32> -> !tla.vector<?xf16>
         %mask = "tla.create_mask"() {pattern = "ALL", dtype = f16} : () -> !tla.mask<128>
         %part0 = tla.exp_sub %a, %b mask %mask part 0 : !tla.vector<3xf16>, !tla.vector<?xf16> mask !tla.mask<128> -> !tla.vector<64xf32>
         %part1 = tla.exp_sub %a, %b mask %mask part 1 : !tla.vector<3xf16>, !tla.vector<?xf16> mask !tla.mask<128> -> !tla.vector<64xf32>
@@ -238,9 +238,9 @@ module {
     "tla.vector"() ({
       "tla.vec.func"() ({
         %a_loaded = tla.load %lhs : !lhs7 -> !tla.vector<64xf32>
-        %a = tla.cast %a_loaded, [0, 0, 0] : !tla.vector<64xf32> -> !tla.vector<?xf16>
+        %a = tla.cast %a_loaded, [0, 2, 0] : !tla.vector<64xf32> -> !tla.vector<?xf16>
         %b_loaded = tla.load %rhs : !rhs7 -> !tla.vector<64xf32>
-        %b = tla.cast %b_loaded, [0, 0, 0] : !tla.vector<64xf32> -> !tla.vector<?xf16>
+        %b = tla.cast %b_loaded, [0, 2, 0] : !tla.vector<64xf32> -> !tla.vector<?xf16>
         %mask = "tla.create_mask"() {pattern = "ALL", dtype = f16} : () -> !tla.mask<128>
         %part0 = tla.exp_sub %a, %b mask %mask part 0 : !tla.vector<?xf16>, !tla.vector<?xf16> mask !tla.mask<128> -> !tla.vector<64xf32>
         %part1 = tla.exp_sub %a, %b mask %mask part 1 : !tla.vector<?xf16>, !tla.vector<?xf16> mask !tla.mask<128> -> !tla.vector<64xf32>

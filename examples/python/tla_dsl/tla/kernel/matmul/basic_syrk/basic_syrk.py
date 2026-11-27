@@ -39,12 +39,7 @@ UB_SIZE = 248 * 1024  # Ascend 950 (arch.hpp Ascend950::UB_SIZE)
 L0C_SIZE = 256 * 1024  # Ascend 950 (arch.hpp Ascend950::L0C_SIZE)
 CHUNK_SLOTS = 4
 
-# Residual conversion to FP32 uses round-to-nearest-even without saturation.
-_CAST_ROUND_EVEN = tla.params.CastParams(
-    reg_slot=tla.params.RegSlot.ZERO,
-    sat_mode=tla.params.SatMode.NOSAT,
-    round_mode=tla.params.RoundMode.CAST_ROUND,
-)
+_CAST_WIDEN = tla.params.CastParams()
 
 
 @dataclass(frozen=True)
@@ -207,7 +202,7 @@ def _chunk_strip(
             )
             res_val = r_chunk.load(
                 NormalLoadParams(load_dist=LoadDist.DIST_UNPACK_B16)
-            ).to(tla.Float32, _CAST_ROUND_EVEN)
+            ).to(tla.Float32, _CAST_WIDEN)
             acc = tla.add(acc, tla.mul(res_val, beta, mask=tail), mask=tail)
     if add_diagonal:
         offset = tla.arange(col_j * lanes, dtype=tla.Int32) - (row_base + row_i)

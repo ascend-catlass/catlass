@@ -51,11 +51,7 @@ _KERNEL_SHAPE = (VECTOR_ELE,)
 # Widen-in-place to f32. Used for both the i32 exponent field (a small positive
 # integer, so exact in f32) and the f16 round-trip results below, hence the
 # neutral name: the trait describes the destination, not one source type.
-_TRAIT_WIDEN_F32 = tla.params.CastParams(
-    reg_slot=tla.params.RegSlot.ZERO,
-    sat_mode=tla.params.SatMode.NOSAT,
-    round_mode=tla.params.RoundMode.CAST_ROUND,
-)
+_TRAIT_WIDEN_F32 = tla.params.CastParams()
 
 # f32 -> f16 narrow, even lane. The inputs are exact in f16, so the narrow is
 # lossless and the 16-bit round trips below stay exact identities.

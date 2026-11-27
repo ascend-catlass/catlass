@@ -1,4 +1,5 @@
 // RUN: %tla_compile %s -o - | %filecheck %s --implicit-check-not=_mlir_ciface_cast_
+// RUN: sed 's/\[1, 1, 7\]/[1, 1, 4]/' %s | %tla_compile - -o - | %filecheck %s --check-prefix=HIF8-DEFAULT
 
 !bf16_reg = !tla.tensor<!tla.layout<!tla.shape<128>, !tla.stride<1>, !tla.shape<128>, RowMajor>, !tla.coord<0>, !tla.ptr<bf16, ub, 32>>
 !f16_reg = !tla.tensor<!tla.layout<!tla.shape<128>, !tla.stride<1>, !tla.shape<128>, RowMajor>, !tla.coord<0>, !tla.ptr<f16, ub, 32>>
@@ -60,7 +61,7 @@ module {
       %mask64 = "tla.create_mask"() {pattern = "VL3", dtype = i64} : () -> !tla.mask<32>
       // Traits are [register slot, saturation mode, rounding mode].
       %bh = "tla.cast"(%b, %mask16) <{trait = array<i32: 0, 1, 1>}> : (!tla.vector<128xbf16>, !tla.mask<128>) -> !tla.vector<128xf16>
-      %hi = "tla.cast"(%h) <{trait = array<i32: 1, 2, 3>}> : (!tla.vector<128xf16>) -> !tla.vector<64xi32>
+      %hi = "tla.cast"(%h) <{trait = array<i32: 1, 0, 3>}> : (!tla.vector<128xf16>) -> !tla.vector<64xi32>
       %fl = "tla.cast"(%f) <{trait = array<i32: 1, 1, 2>}> : (!tla.vector<64xf32>) -> !tla.vector<32xi64>
       %lf = "tla.cast"(%l, %mask64) <{trait = array<i32: 0, 0, 0>}> : (!tla.vector<32xi64>, !tla.mask<32>) -> !tla.vector<?xf32>
       %il = "tla.cast"(%i) <{trait = array<i32: 0, 0, 4>}> : (!tla.vector<64xi32>) -> !tla.vector<32xi64>
@@ -103,6 +104,7 @@ module {
   // CHECK: call @lowp_cast_i16_to_i4x2_sat_slot3(%[[S16]], %[[ALL32]]) : (vector<128xi16>, vector<256xi1>) -> vector<256xi8>
   // CHECK: call @lowp_cast_f16_to_i4x2_floor_nosat_slot2(%[[F16]], %[[PAIR_MASK]]) : (vector<128xf16>, vector<256xi1>) -> vector<256xi8>
   // CHECK: call @lowp_cast_f16_to_hif8_hybrid_sat_slot1(%[[F16]], %[[ALL16]]) : (vector<128xf16>, vector<256xi1>) -> vector<256xi8>
+  // HIF8-DEFAULT: call @lowp_cast_f16_to_hif8_round_sat_slot1
   // CHECK: call @lowp_cast_hif8_to_f16_slot1(%[[HIF8]], %[[ALL8]]) : (vector<256xi8>, vector<256xi1>) -> vector<128xf16>
   // CHECK: call @lowp_cast_e8m0_to_bf16_slot1(%[[E8M0]], %[[SPARSE8]]) : (vector<256xi8>, vector<256xi1>) -> vector<128xbf16>
   func.func @additional_casts(

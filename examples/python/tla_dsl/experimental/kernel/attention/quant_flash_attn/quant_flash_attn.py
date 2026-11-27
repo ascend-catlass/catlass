@@ -67,29 +67,29 @@ def _p_store64(p_reg, ub_p_zN, row, chunk):
     """64 个 FP32 -> 64 个 E4M3 字节写入 RowMajor P（单级 4x 窄化）。
 
     4x 槽位语义（实测）：slot s 产生 dst[4j+s] = cast(src[j])；两次 deinterleave
-    拆出 mod-4 四组再分别 cast、or 合并得稠密 64 字节。exp 输出为超越数，无精确
-    平局点，CAST_ROUND 与 torch RNE 一致；分母在量化前已求。
+    拆出 mod-4 四组再分别转换，按位或合并为连续的 64 字节。FP8 转换使用
+    CAST_RINT，舍入到最近的可表示值，中点取偶。分母在量化前计算。
     """
     full_f32 = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
     cast0 = tla.params.CastParams(
         reg_slot=tla.params.RegSlot.ZERO,
         sat_mode=tla.params.SatMode.NOSAT,
-        round_mode=tla.params.RoundMode.CAST_ROUND,
+        round_mode=tla.params.RoundMode.CAST_RINT,
     )
     cast1 = tla.params.CastParams(
         reg_slot=tla.params.RegSlot.ONE,
         sat_mode=tla.params.SatMode.NOSAT,
-        round_mode=tla.params.RoundMode.CAST_ROUND,
+        round_mode=tla.params.RoundMode.CAST_RINT,
     )
     cast2 = tla.params.CastParams(
         reg_slot=tla.params.RegSlot.TWO,
         sat_mode=tla.params.SatMode.NOSAT,
-        round_mode=tla.params.RoundMode.CAST_ROUND,
+        round_mode=tla.params.RoundMode.CAST_RINT,
     )
     cast3 = tla.params.CastParams(
         reg_slot=tla.params.RegSlot.THREE,
         sat_mode=tla.params.SatMode.NOSAT,
-        round_mode=tla.params.RoundMode.CAST_ROUND,
+        round_mode=tla.params.RoundMode.CAST_RINT,
     )
     e, o = tla.deinterleave(p_reg, p_reg)
     ee, eo = tla.deinterleave(e, e)

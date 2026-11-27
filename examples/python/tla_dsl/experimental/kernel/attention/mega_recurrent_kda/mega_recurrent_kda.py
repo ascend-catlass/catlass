@@ -34,11 +34,7 @@ def load_bf64(tile):
     )
     return value.to(
         tla.Float32,
-        tla.params.CastParams(
-            reg_slot=tla.params.RegSlot.ZERO,
-            sat_mode=tla.params.SatMode.NOSAT,
-            round_mode=tla.params.RoundMode.CAST_ROUND,
-        ),
+        tla.params.CastParams(),
     )
 
 
@@ -243,11 +239,7 @@ def broadcast_bf16(base, index):
     )
     return v.to(
         tla.Float32,
-        tla.params.CastParams(
-            reg_slot=tla.params.RegSlot.ZERO,
-            sat_mode=tla.params.SatMode.NOSAT,
-            round_mode=tla.params.RoundMode.CAST_ROUND,
-        ),
+        tla.params.CastParams(),
     )
 
 
