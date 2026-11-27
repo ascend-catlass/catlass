@@ -26,6 +26,7 @@ import catlass.tla as tla
 import torch
 import torch_npu  # noqa: F401
 from catlass.tla.runtime import from_dlpack
+from catlass.types import dtype_size_bytes
 
 from helpers import SwizzleParams, TilingParams
 
@@ -63,6 +64,28 @@ def _random_current_m(m_val: int, g_val: int) -> tuple[int, ...]:
     for i in range(1, g_val):
         out.append(prefix[i] - prefix[i - 1])
     return tuple(out)
+
+
+def grouped_matmul_golden(a, b, current_ms, dtype_c):
+    """Float32 reference for grouped matmul slice-M, rounded through ``dtype_c``.
+
+    ``a`` is ``(m, k)``, ``b`` is ``(G*K, N)`` and ``current_ms`` gives the row
+    height of each group. Rows past the group sum stay zero.
+    """
+    m, k = a.shape
+    n = b.shape[1]
+    valid_rows = sum(current_ms)
+    ref = torch.zeros(m, n, dtype=torch.float32)
+    offset = 0
+    for g, current_m in enumerate(current_ms):
+        if current_m > 0:
+            ref[offset : offset + current_m] = (
+                a[offset : offset + current_m].float() @ b[g * k : (g + 1) * k].float()
+            )
+        offset += current_m
+    if dtype_c in (torch.float16, torch.bfloat16):
+        ref[:valid_rows] = ref[:valid_rows].to(dtype_c).float()
+    return ref
 
 
 @tla.kernel
@@ -175,8 +198,9 @@ def grouped_matmul_slice_m_kernel(
                     if tla.const_expr(LAYOUT_C_IS_COL)
                     else tla.arch.RowMajor
                 )
+
                 gm_a_group = tla.make_tensor(
-                    gm_a.ptr + m_start * gm_a.stride[0],
+                    gm_a.ptr + m_start.to(tla.Int64) * gm_a.stride[0].to(tla.Int64),
                     tla.make_layout(
                         tla.make_shape(current_m, k_dim),
                         tla.make_stride(gm_a.stride[0], gm_a.stride[1]),
@@ -185,7 +209,10 @@ def grouped_matmul_slice_m_kernel(
                     ),
                 )
                 gm_b_group = tla.make_tensor(
-                    gm_b.ptr + g * k_dim * gm_b.stride[0],
+                    gm_b.ptr
+                    + g.to(tla.Int64)
+                    * k_dim.to(tla.Int64)
+                    * gm_b.stride[0].to(tla.Int64),
                     tla.make_layout(
                         tla.make_shape(k_dim, n_dim),
                         tla.make_stride(gm_b.stride[0], gm_b.stride[1]),
@@ -194,7 +221,7 @@ def grouped_matmul_slice_m_kernel(
                     ),
                 )
                 gm_c_group = tla.make_tensor(
-                    gm_c.ptr + m_start * gm_c.stride[0],
+                    gm_c.ptr + m_start.to(tla.Int64) * gm_c.stride[0].to(tla.Int64),
                     tla.make_layout(
                         tla.make_shape(current_m, n_dim),
                         tla.make_stride(gm_c.stride[0], gm_c.stride[1]),
@@ -477,20 +504,20 @@ def run(args: argparse.Namespace) -> int:
     LAYOUT_C_IS_COL = False
 
     torch.npu.set_device(args.device)
+    torch.manual_seed(0)
     print(
         f"--- groups=({args.groups}) mnk=({args.m},{args.n},{args.k}) "
         f"layout={args.layout_a}/{args.layout_b} "
         f"dtype={args.dtype_a}/{args.dtype_b}/{args.dtype_c} "
         f"group_mode={args.group_mode} ---"
     )
-    torch.manual_seed(0)
+
+    if args.dtype_a != args.dtype_b:
+        raise SystemExit("grouped_matmul_slice_m requires --dtype-a == --dtype-b")
     dtypes = {"f16": torch.float16, "bf16": torch.bfloat16, "f32": torch.float32}
     dtype_a = dtypes[args.dtype_a]
     dtype_b = dtypes[args.dtype_b]
     dtype_c = dtypes[args.dtype_c]
-
-    # Match previously tuned L1/L0 K tiles for this example.
-    tiling = TilingParams(l1_tk=256, l0_tk=64)
     swizzle_dir = 0 if (args.m // args.groups) >= args.n else 1
     swizzle = SwizzleParams(SWIZZLE_DIRECTION=swizzle_dir, SWIZZLE_OFFSET=3)
 
@@ -507,17 +534,7 @@ def run(args: argparse.Namespace) -> int:
         - 5.0
     )
     c = torch.full((args.m, args.n), -7.0, dtype=dtype_c, device="cpu")
-    ref = torch.zeros(args.m, args.n, dtype=torch.float32)
-    offset = 0
-    for g, current_m in enumerate(current_ms):
-        if current_m > 0:
-            ref[offset : offset + current_m] = (
-                a[offset : offset + current_m].float()
-                @ b[g * args.k : (g + 1) * args.k].float()
-            )
-        offset += current_m
-    if dtype_c in (torch.float16, torch.bfloat16):
-        ref[:valid_rows] = ref[:valid_rows].to(dtype_c).float()
+    ref = grouped_matmul_golden(a, b, current_ms, dtype_c)
 
     a = (
         a.contiguous() if args.layout_a == "row" else a.permute(1, 0).contiguous()
@@ -535,6 +552,10 @@ def run(args: argparse.Namespace) -> int:
         group_list, layout_tag=tla.arch.RowMajor
     ).mark_compact_shape_dynamic(0)
 
+    tiling = TilingParams(
+        l1_tk=512 // dtype_size_bytes(dtype_a),
+        l0_tk=128 // dtype_size_bytes(dtype_b),
+    )
     artifact = tla.compile(
         grouped_matmul_slice_m_kernel,
         a_tensor,

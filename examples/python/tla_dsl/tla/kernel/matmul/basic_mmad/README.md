@@ -112,7 +112,7 @@
 
 说明：
 
-- `A`/`B` 均为 `float32` 类型时，建议 `K` 小于 2048 以避免绝对误差超阈值（[阈值标准](https://gitcode.com/Ascend/ATK/blob/master/skill/atk-quality-guard/references/experimental_standard.md#22-%E6%B7%B7%E5%90%88%E5%AE%B9%E5%B7%AE%E9%98%88%E5%80%BC%E8%A1%A8)）上限。
+- `A`/`B` 均为 `float32` 类型时，建议 `K` 小于 1024 以避免绝对误差超阈值（[阈值标准](https://gitcode.com/Ascend/ATK/blob/master/skill/atk-quality-guard/references/experimental_standard.md#22-%E6%B7%B7%E5%90%88%E5%AE%B9%E5%B7%AE%E9%98%88%E5%80%BC%E8%A1%A8)）上限。
 - 为避免误差累加和计算超时，建议矩阵的 M/N/K 轴不超过 122880，且在 GM 上总的分配不超过 10 GiB（即 `M*K*sizeof(DTYPE_A) + K*N*sizeof(DTYPE_B) + M*N*sizeof(DTYPE_C) <= 10 GiB`）。
 - `A`/`B` 为 fp8 时两种编码可以混用（如 `f8e4m3fn × f8e5m2`），输出类型必须为 `f32`。
 - hif8 路由要求 A/B 均为 `hif8` 且 C 为 `f32`。
