@@ -32,12 +32,17 @@ DTYPES = {
     "u16": tla.UInt16,
     "i32": tla.Int32,
     "u32": tla.UInt32,
+    "i64": tla.Int64,
+    "u64": tla.UInt64,
 }
 
 
 def make_kernel(dtype, *, masked, source_lanes, sparse=False, iterations=1):
     lanes = 2048 // dtype.width
     capacity = GUARD + lanes + GUARD
+    # Stage short B64 registers through their 32-bit words.
+    use_word_tiles = dtype.width == 64 and source_lanes < lanes
+    tile_lanes = 2 * source_lanes if use_word_tiles else source_lanes
 
     @tla.kernel
     def compute(
@@ -59,18 +64,23 @@ def make_kernel(dtype, *, masked, source_lanes, sparse=False, iterations=1):
         right_ub = tla.make_tensor_like(right_ptr, right, tla.arch.RowMajor)
         out_ub = tla.make_tensor_like(out_ptr, destination, tla.arch.RowMajor)
         saved_ub = tla.make_tensor_like(saved_ptr, saved, tla.arch.RowMajor)
-        layout = tla.make_layout(tla.make_shape(source_lanes), tla.make_stride(1))
-        acc_tile = tla.make_tensor(acc_ptr + GUARD, layout)
-        left_tile = tla.make_tensor(left_ptr + GUARD, layout)
-        right_tile = tla.make_tensor(right_ptr + GUARD, layout)
-        output_tile = tla.make_tensor(
-            out_ptr + GUARD,
-            tla.make_layout(tla.make_shape(source_lanes), tla.make_stride(1)),
-        )
-        old_tile = tla.make_tensor(
-            saved_ptr + GUARD,
-            tla.make_layout(tla.make_shape(source_lanes), tla.make_stride(1)),
-        )
+        acc_base = acc_ptr + GUARD
+        left_base = left_ptr + GUARD
+        right_base = right_ptr + GUARD
+        out_base = out_ptr + GUARD
+        saved_base = saved_ptr + GUARD
+        if tla.const_expr(use_word_tiles):
+            acc_base = tla.recast_ptr(acc_base, dtype=tla.Int32)
+            left_base = tla.recast_ptr(left_base, dtype=tla.Int32)
+            right_base = tla.recast_ptr(right_base, dtype=tla.Int32)
+            out_base = tla.recast_ptr(out_base, dtype=tla.Int32)
+            saved_base = tla.recast_ptr(saved_base, dtype=tla.Int32)
+        layout = tla.make_layout(tla.make_shape(tile_lanes), tla.make_stride(1))
+        acc_tile = tla.make_tensor(acc_base, layout)
+        left_tile = tla.make_tensor(left_base, layout)
+        right_tile = tla.make_tensor(right_base, layout)
+        output_tile = tla.make_tensor(out_base, layout)
+        old_tile = tla.make_tensor(saved_base, layout)
         ready = tla.flag("ready", tla.pipes.MTE2, tla.pipes.VECTOR)
         done = tla.flag("done", tla.pipes.VECTOR, tla.pipes.MTE3)
         with tla.vector():
@@ -85,6 +95,10 @@ def make_kernel(dtype, *, masked, source_lanes, sparse=False, iterations=1):
                 acc = acc_tile.load()
                 lhs = left_tile.load()
                 rhs = right_tile.load()
+                if tla.const_expr(use_word_tiles):
+                    acc = acc.bitcast(dtype)
+                    lhs = lhs.bitcast(dtype)
+                    rhs = rhs.bitcast(dtype)
                 if tla.const_expr(masked):
                     active, _ = tla.update_mask(count, dtype=dtype)
                     if tla.const_expr(sparse):
@@ -101,9 +115,13 @@ def make_kernel(dtype, *, masked, source_lanes, sparse=False, iterations=1):
                             result = tla.arch.mul_inplace_add(
                                 result, lhs, rhs, mask=step_mask
                             )
-                output_tile.store(result)
                 # Old acc is used after the operation to test preservation.
-                old_tile.store(acc)
+                if tla.const_expr(use_word_tiles):
+                    output_tile.store(result.bitcast(tla.Int32))
+                    old_tile.store(acc.bitcast(tla.Int32))
+                else:
+                    output_tile.store(result)
+                    old_tile.store(acc)
             tla.set_flag(done)
             tla.wait_flag(done)
             tla.copy(destination, out_ub)
@@ -138,7 +156,7 @@ def reference(accumulator, left, right, token):
             (int(a) + int(b) * int(c)) % modulus
             for a, b, c in zip(accumulator.tolist(), left.tolist(), right.tolist())
         ]
-        if token.startswith("i"):
+        if torch.iinfo(accumulator.dtype).min < 0:
             half = modulus >> 1
             rows = [value - modulus if value >= half else value for value in rows]
         return torch.tensor(rows, dtype=accumulator.dtype)
@@ -169,6 +187,9 @@ def main():
         "u16": torch.uint16,
         "i32": torch.int32,
         "u32": torch.uint32,
+        "i64": torch.int64,
+        # DLPack binds the same 64-bit storage as tla.UInt64 below.
+        "u64": torch.int64,
     }[token]
     torch.npu.set_device(args.device)
     device = f"npu:{args.device}"
@@ -177,16 +198,19 @@ def main():
     rows = []
     # Reuse each compiled object with updated values/counts. A physical full
     # output store checks ZEROING; no output mask can hide inactive lanes.
-    for kind, source_lanes, iterations in (
+    cases = [
         ("default", lanes, 1),
         ("tail", 13, 1),
         ("prefix", lanes, 1),
         ("sparse", lanes, 1),
         ("flow", lanes, 3),
-    ):
+    ]
+    if dtype.width == 64:
+        cases.append(("masked-tail", 13, 1))
+    for kind, source_lanes, iterations in cases:
         kernel = make_kernel(
             dtype,
-            masked=kind in ("prefix", "sparse"),
+            masked=kind in ("prefix", "sparse", "masked-tail"),
             source_lanes=source_lanes,
             sparse=kind == "sparse",
             iterations=iterations,
@@ -194,14 +218,28 @@ def main():
         compiled = None
         for repeat in range(2 if kind != "prefix" else 3):
             generator = np.random.default_rng(3510 + repeat)
-            values = [
-                torch.tensor(generator.integers(-40, 40, capacity), dtype=torch.float32)
-                for _ in range(3)
-            ]
-            if token.startswith("u"):
-                values = [value.abs() for value in values]
-            source_cpu = [value.to(torch_dtype) for value in values]
-            if token.startswith(("i", "u")):
+            if dtype.width == 64:
+                # Exercise the low-word carry, cross products and 64-bit wrap.
+                edges = (
+                    [0xFFFF_FFFF, 0x7FFF_FFFF_FFFF_FFFF, 0x8000_0000_0000_0000],
+                    [1, 0xFFFF_FFFF_FFFF_FFFF, 0xFFFF_FFFF],
+                    [1, 0xFFFF_FFFE_0000_0003, 0xFFFF_FFFF],
+                )
+                source_cpu = []
+                for edge in edges:
+                    raw = generator.bit_generator.random_raw(capacity)
+                    raw[GUARD : GUARD + len(edge)] = edge
+                    source_cpu.append(torch.from_numpy(raw).view(torch_dtype))
+            else:
+                values = [
+                    torch.tensor(generator.integers(-40, 40, capacity), dtype=torch.float32)
+                    for _ in range(3)
+                ]
+                if token.startswith("u"):
+                    values = [value.abs() for value in values]
+                source_cpu = [value.to(torch_dtype) for value in values]
+
+            if dtype.width < 64 and token.startswith(("i", "u")):
                 bits = int(token[1:])
                 source_cpu[0][GUARD] = (1 << (bits - (token[0] == "i"))) - 1
                 source_cpu[1][GUARD] = 2
@@ -212,7 +250,7 @@ def main():
                     source_cpu[1][GUARD + 1 + offset] = value
                     source_cpu[2][GUARD + 1 + offset] = value
 
-            else:
+            elif token.startswith("f") or token == "bf16":
                 mantissa = {"f32": 23, "f16": 10, "bf16": 7}[token]
                 special = [
                     0.0,

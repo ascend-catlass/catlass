@@ -52,23 +52,26 @@ def _tensor(dtype, lanes=64):
         tla.UInt16,
         tla.Int32,
         tla.UInt32,
+        tla.Int64,
+        tla.UInt64,
     ],
 )
 @pytest.mark.parametrize("masked", [False, True])
-def test_emits_native_operation(dtype, masked):
-    source = _tensor(dtype)
-    text = _compute.dump_mlir(type_args=(source, source, source, 64, dtype, masked))
+def test_emits_mul_inplace_add(dtype, masked):
+    lanes = min(64, 2048 // dtype.width)
+    source = _tensor(dtype, lanes)
+    text = _compute.dump_mlir(type_args=(source, source, source, lanes, dtype, masked))
     (line,) = [line for line in text.splitlines() if "tla.mul_inplace_add" in line]
     assert (" mask " in line) is masked
     assert "tla.mul " not in text and "tla.add " not in text
 
 
-@pytest.mark.parametrize("dtype", [tla.Int8, tla.Int64, tla.UInt64, tla.Float8E4M3FN])
+@pytest.mark.parametrize("dtype", [tla.Int8, tla.Float8E4M3FN])
 def test_rejects_unsupported_types(dtype):
     source = _tensor(dtype, 32)
     message = (
         rf"unsupported mul_inplace_add element type {dtype.dtype}; "
-        r"supported element types are bf16, f16, f32, i16, i32, u16, u32"
+        r"supported element types are bf16, f16, f32, i16, i32, i64, u16, u32, u64"
     )
     with pytest.raises(tla.TlaCoreAPIError, match=message):
         _ = _compute.dump_mlir(type_args=(source, source, source, 32, dtype, False))

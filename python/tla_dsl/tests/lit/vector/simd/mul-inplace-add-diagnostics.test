@@ -44,8 +44,8 @@
 // }
 // END_LANES
 
-// WIDTH: unsupported element type {{.*}}i8{{.*}}; supported element types are bf16, f16, f32, i16, i32, ui16, ui32
-// SIGNED: unsupported element type {{.*}}si16{{.*}}; supported element types are bf16, f16, f32, i16, i32, ui16, ui32
+// WIDTH: unsupported element type {{.*}}i8{{.*}}; supported element types are bf16, f16, f32, i16, i32, i64, ui16, ui32, ui64
+// SIGNED: unsupported element type {{.*}}si16{{.*}}; supported element types are bf16, f16, f32, i16, i32, i64, ui16, ui32, ui64
 // BEGIN_WIDTH
 // module {
 //   func.func @invalid(%acc: !tla.vector<64xi8>, %lhs: !tla.vector<64xi8>, %rhs: !tla.vector<64xi8>, %mask: !tla.mask<64>) {

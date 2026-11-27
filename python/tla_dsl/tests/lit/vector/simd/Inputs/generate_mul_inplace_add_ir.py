@@ -4,10 +4,11 @@ import argparse
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
-    "dtype", choices=("f16", "bf16", "f32", "i16", "ui16", "i32", "ui32")
+    "dtype", choices=("f16", "bf16", "f32", "i16", "ui16", "i32", "ui32", "i64", "ui64")
 )
 dtype = parser.parse_args().dtype
-lanes = 128 if dtype in ("f16", "bf16", "i16", "ui16") else 64
+bits = 16 if dtype == "bf16" else int(dtype.lstrip("fiu"))
+lanes = 2048 // bits
 
 print(
     f"""!ub = memref<{lanes}x{dtype}, #hivm.address_space<ub>>

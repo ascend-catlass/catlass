@@ -234,6 +234,7 @@ _CACHE_SOURCE_FILES = (
     "Vector/axpy.cpp",
     "Vector/log.cpp",
     "Vector/lowp_cast.cpp",
+    "Vector/mul_inplace_add.cpp",
     "Vector/muls_cast.cpp",
     "Vector/sub_abs.cpp",
     "Vector/system_counter.cpp",

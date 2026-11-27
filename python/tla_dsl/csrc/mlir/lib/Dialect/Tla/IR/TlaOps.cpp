@@ -1901,9 +1901,10 @@ mlir::LogicalResult MulInplaceAddOp::verify()
     mlir::Type element = type.getElementType();
     auto integer = mlir::dyn_cast<mlir::IntegerType>(element);
     if (!element.isF16() && !element.isBF16() && !element.isF32() &&
-        !(integer && !integer.isSigned() && (integer.getWidth() == 16 || integer.getWidth() == 32)))
+        !(integer && !integer.isSigned() &&
+          (integer.getWidth() == 16 || integer.getWidth() == 32 || integer.getWidth() == 64)))
         return emitOpError("unsupported element type ")
-               << element << "; supported element types are bf16, f16, f32, i16, i32, ui16, ui32";
+               << element << "; supported element types are bf16, f16, f32, i16, i32, i64, ui16, ui32, ui64";
     return verifyMaskMatchesVector(getOperation(), getMask(), type);
 }
 

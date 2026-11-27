@@ -5976,6 +5976,15 @@ static LogicalResult lowerNestedVectorOp(
                          allTrueMaskFor(fullMasks, loc, type, mulInplaceAddOp.getAccumulator().getType());
         if (!mask)
             return mulInplaceAddOp.emitError("mul_inplace_add failed to materialize mask");
+        auto accumulatorType = cast<::tla::VectorSSAType>(mulInplaceAddOp.getAccumulator().getType());
+        Type element = accumulatorType.getElementType();
+        if (element.isInteger(64)) {
+            Value preg = limitMaskToValidLanes(b, loc, mask, mulInplaceAddOp.getAccumulator(), fullMasks);
+            StringRef symbol = element.isUnsignedInteger(64) ? "tla_mul_inplace_add_u64" : "tla_mul_inplace_add_i64";
+            valueMap[mulInplaceAddOp.getResult()] = createInlineB64Call(
+                b, loc, module, symbol, {type, type, type, preg.getType()}, type, {accumulator, lhs, rhs, preg});
+            return success();
+        }
         // VMULA's first operand is the old destination (the addend).
         valueMap[mulInplaceAddOp.getResult()] = b.create<hivmave::VFMulaOp>(loc, type, accumulator, lhs, rhs, mask);
         return success();

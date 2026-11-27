@@ -344,9 +344,10 @@ def Tla_MulsCastOp : Tla_Op<"muls_cast", [Pure]> {
 }
 
 def Tla_MulInplaceAddOp : Tla_Op<"mul_inplace_add", [Pure]> {
-  let summary = "Fused vector multiply-add with an accumulator addend";
+  let summary = "Vector multiply-add with an accumulator addend";
   let description = [{
-    Computes accumulator + lhs * rhs in one fused operation.
+    Computes accumulator + lhs * rhs. Floating-point results are rounded once.
+    Integer results wrap to the input element width.
     Inputs and result have the same type and valid lane count. Masked-out
     result lanes are zero. The accumulator is an SSA input, not mutated storage.
   }];

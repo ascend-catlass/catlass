@@ -629,7 +629,7 @@ tla.arch.mul_inplace_add(accumulator: VectorSSA, lhs: VectorSSA, rhs: VectorSSA,
 
 - 须在 `@tla.kernel` 和 `tla.vec.func(mode="simd")` 内调用。
 - 三个输入的元素类型和有效 lane 数须相同。
-- 支持 `Float16`、`BFloat16`、`Float32`、`Int16`、`UInt16`、`Int32` 和 `UInt32`。
+- 支持 `Float16`、`BFloat16`、`Float32`、`Int16`、`UInt16`、`Int32`、`UInt32`、`Int64` 和 `UInt64`。在 Ascend 950 上，64 位类型使用软件仿真。
 - 连续累加时，如果某个位置本次未被掩码选中，下次再选中时会从零开始累加。要保留该位置原来的累加值，可在下一次调用前使用 `tla.where(mask, result, accumulator)`。
 
 调用示例：

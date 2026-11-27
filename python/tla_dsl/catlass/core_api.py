@@ -455,7 +455,7 @@ def _check_select_element_type_supported(op_name: str, element_type: str) -> Non
 
 
 _SUPPORTED_MUL_INPLACE_ADD_ELEMENT_TYPES = frozenset(
-    {"bf16", "f16", "f32", "i16", "i32", "u16", "u32"}
+    {"bf16", "f16", "f32", "i16", "i32", "i64", "u16", "u32", "u64"}
 )
 
 
@@ -12941,8 +12941,9 @@ def arch_mul_inplace_add(
         Constraints:
         - Must be called inside `@tla.kernel` and `tla.vec.func(mode="simd")`.
         - All three inputs must have the same element type and valid lane count.
-        - Supports `Float16`, `BFloat16`, `Float32`, `Int16`, `UInt16`, `Int32`
-          and `UInt32`.
+        - Supports `Float16`, `BFloat16`, `Float32`, `Int16`, `UInt16`, `Int32`,
+          `UInt32`, `Int64`, and `UInt64`. The 64-bit types use software
+          emulation on Ascend 950.
         - When chaining calls, a lane masked off in one call starts from zero
           if a later call selects it again. To keep its previous sum, use
           `tla.where(mask, result, accumulator)` before the next call.

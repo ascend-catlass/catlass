@@ -81,7 +81,7 @@ nav_order: 5
 | [`tla.arch.inplace_mul_add`](language/simd/arithmetic.md#tlaarchinplace_mul_add) | 融合计算 `dst * multiplier + addend`。 | SIMD 寄存器；未选中的结果 lane 为零。 |
 | [`tla.add`](language/simd/arithmetic.md#tlaadd)、[`tla.sub`](language/simd/arithmetic.md#tlasub)、[`tla.mul`](language/simd/arithmetic.md#tlamul)、[`tla.div`](language/simd/arithmetic.md#tladiv) | 逐元素算术。 | Kernel / Vector；SIMD 使用 `VectorSSA`，SIMT 使用逐线程 `Numeric` 标量；mask 只作用于向量形态。 |
 | [`tla.arch.axpy`](language/simd/arithmetic.md#tlaarchaxpy)、[`tla.arch.sub_abs`](language/simd/arithmetic.md#tlaarchsub_abs)、[`tla.arch.muls_cast`](language/simd/arithmetic.md#tlaarchmuls_cast) | 计算标量乘加、差值绝对值或乘后转 FP16。 | Kernel / Vector / SIMD。 |
-| [`tla.arch.mul_inplace_add`](language/simd/arithmetic.md#tlaarchmul_inplace_add) | 融合计算 `accumulator + lhs * rhs`。 | SIMD 寄存器；未选中的结果 lane 为零。 |
+| [`tla.arch.mul_inplace_add`](language/simd/arithmetic.md#tlaarchmul_inplace_add) | 计算 `accumulator + lhs * rhs`。 | SIMD 寄存器。未选中的结果 lane 为零。 |
 | [`tla.max`](language/simd/arithmetic.md#tlamax)、[`tla.min`](language/simd/arithmetic.md#tlamin) | 逐元素最大值或最小值。 | Kernel / Vector；SIMD 向量与 SIMT 标量形态各有 dtype 规则。 |
 | [`tla.exp`](language/simd/arithmetic.md#tlaexp)、[`tla.log`](language/simd/arithmetic.md#tlalog)、[`tla.sqrt`](language/simd/arithmetic.md#tlasqrt)、[`tla.abs`](language/simd/arithmetic.md#tlaabs) | 一元数学运算。 | Kernel / Vector；SIMD 使用向量，SIMT 使用标量。标量 `exp` / `log` 仅 SIMT 可用。`tla.log` 可通过 `mode=tla.params.LogAlgo.*` 选择 Flush-To-Zero（默认）或次正规数处理。 |
 | [`tla.arch.sub_exp`](language/simd/arithmetic.md#tlaarchsub_exp) | 使用原生 ExpSub 指令逐元素计算 `exp(fp32(lhs) - fp32(rhs))`。 | Kernel / Vector / SIMD，接收同为 FP16 或同为 FP32 的向量，返回 FP32 向量。 |
