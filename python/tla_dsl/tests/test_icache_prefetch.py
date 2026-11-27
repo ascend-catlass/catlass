@@ -27,7 +27,13 @@ def _vf_status(mode: tla.Constexpr):
 
 
 @pytest.mark.parametrize(
-    "kernel, units, core", [(_vector_prefetch, 7, "aiv"), (_cube_prefetch, 15, "aic")]
+    "kernel, units, core",
+    [
+        (_vector_prefetch, 0, "aiv"),
+        (_vector_prefetch, 7, "aiv"),
+        (_cube_prefetch, 0, "aic"),
+        (_cube_prefetch, 15, "aic"),
+    ],
 )
 def test_scalar_icache_frontend(kernel, units, core):
     from catlass._mlir import ir
@@ -45,9 +51,10 @@ def test_scalar_icache_frontend(kernel, units, core):
 @pytest.mark.parametrize(
     "kernel, units",
     [
-        (_vector_prefetch, 0),
+        (_vector_prefetch, -1),
         (_vector_prefetch, True),
         (_vector_prefetch, 8),
+        (_cube_prefetch, -1),
         (_cube_prefetch, 16),
     ],
 )

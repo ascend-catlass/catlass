@@ -14837,7 +14837,10 @@ def arch_icache_prefetch(prefetch_units: int, *, loc=None) -> None:
         - *`prefetch_units`*: Compile-time Python integer in 2 KiB units.
     Constraints:
         - Call from a scalar `tla.vector()` or `tla.cube()` region inside a kernel.
-        - Vector accepts 1 to 7 units. Cube accepts 1 to 15 units.
+        - The requested length must be strictly less than the issuing core's
+          instruction-cache capacity. The AIV has a 16 KiB instruction cache, so
+          `tla.vector()` accepts 0 to 7 units. The AIC has a 32 KiB instruction
+          cache, so `tla.cube()` accepts 0 to 15 units.
     Example:
     ```python
     with tla.vector():
@@ -14846,10 +14849,10 @@ def arch_icache_prefetch(prefetch_units: int, *, loc=None) -> None:
     """
     _require_scalar_icache_region("arch.icache_prefetch")
     limit = 7 if _runtime._has_enclosing_region("vector") else 15
-    if type(prefetch_units) is not int or not 1 <= prefetch_units <= limit:
+    if type(prefetch_units) is not int or not 0 <= prefetch_units <= limit:
         _op_error(
             "arch.icache_prefetch",
-            f"prefetch_units must be a Python int in [1, {limit}]",
+            f"prefetch_units must be a Python int in [0, {limit}]",
         )
     _tla_ops_gen.arch_icache_prefetch(prefetch_units, loc=loc)
 

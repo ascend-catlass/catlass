@@ -174,8 +174,10 @@ sid = tla.arch.sub_block_idx()
 
 `tla.arch.icache_prefetch(prefetch_units)` 在 Ascend 950 上从调用点的
 程序计数器地址预取指令。长度参数为编译期 Python 整数，单位为 2 KiB。
-标量 Vector 区域支持 1～7，标量 Cube 区域支持 1～15。两个接口均须在
-Kernel 内使用，并且不支持 SIMD 或 SIMT Vector 函数区域。
+请求的预取长度必须严格小于当前核的指令缓存容量。AIV 的指令缓存容量为
+16 KiB，因此标量 `tla.vector()` 区域支持 0～7 个单位。AIC 的指令缓存容量为
+32 KiB，因此标量 `tla.cube()` 区域支持 0～15 个单位。
+两个接口均须在 Kernel 内使用，并且不支持 SIMD 或 SIMT Vector 函数区域。
 
 `tla.arch.get_icache_prefetch_status()` 读取当前核的预取状态。
 返回 `tla.Int64`，可在运行期分支中与 `tla.params.ICachePrefetchStatus.COMPLETE`（0）或

@@ -939,8 +939,8 @@ mlir::LogicalResult ArchICachePrefetchOp::verify()
         return emitOpError("requires one scalar vector or cube region outside tla.vec.func");
     int64_t limit = *coreType == mlir::hivm::TFuncCoreType::AIV ? 7 : 15;
     int64_t units = getPrefetchUnitsAttr().getInt();
-    if (units < 1 || units > limit)
-        return emitOpError() << "prefetch_units must be in [1, " << limit << "]";
+    if (units < 0 || units > limit)
+        return emitOpError() << "prefetch_units must be in [0, " << limit << "]";
     return mlir::success();
 }
 

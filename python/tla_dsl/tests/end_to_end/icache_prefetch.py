@@ -28,7 +28,7 @@ def prefetch(
 ):
     if cube:
         with tla.cube():
-            if cube_units:
+            if cube_units is not None:
                 tla.arch.icache_prefetch(cube_units)
                 poll_status(out, 0)
             else:
@@ -36,7 +36,7 @@ def prefetch(
     if vector:
         with tla.vector():
             subblock = tla.arch.sub_block_idx() if cube else 0
-            if vector_units:
+            if vector_units is not None:
                 tla.arch.icache_prefetch(vector_units)
                 poll_status(out, 16 + 16 * subblock)
             else:
@@ -54,12 +54,15 @@ def main():
     args = parser.parse_args()
     torch.npu.set_device(args.device)
     cases = (
-        (True, False, 1, 0),
-        (True, False, 15, 0),
-        (False, True, 0, 1),
-        (False, True, 0, 7),
-        (True, True, 15, 0),
-        (True, True, 0, 7),
+        (True, False, 0, None),
+        (True, False, 1, None),
+        (True, False, 15, None),
+        (False, True, None, 0),
+        (False, True, None, 1),
+        (False, True, None, 7),
+        (True, True, 15, None),
+        (True, True, None, 7),
+        (True, True, 0, 0),
         (True, True, 1, 1),
     )
     for cube, vector, cube_units, vector_units in cases:
@@ -75,7 +78,7 @@ def main():
                 active = cube if offset == 0 else vector and (offset == 16 or cube)
                 units = cube_units if offset == 0 else vector_units
                 observed = values[offset : offset + 16]
-                if active and units:
+                if active and units is not None:
                     statuses = observed[:8]
                     if any(code not in (0, 1) for code in statuses):
                         raise RuntimeError(

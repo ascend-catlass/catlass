@@ -1790,7 +1790,10 @@ Parameters:
 Constraints:
 
 - Call from a scalar `tla.vector()` or `tla.cube()` region inside a kernel.
-- Vector accepts 1 to 7 units. Cube accepts 1 to 15 units.
+- The requested length must be strictly less than the issuing core's
+  instruction-cache capacity. The AIV has a 16 KiB instruction cache, so
+  `tla.vector()` accepts 0 to 7 units. The AIC has a 32 KiB instruction
+  cache, so `tla.cube()` accepts 0 to 15 units.
 
 Example:
 
