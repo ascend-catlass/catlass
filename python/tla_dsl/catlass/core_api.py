@@ -5201,17 +5201,15 @@ def print(*args: object, **kwargs: object) -> None:
         - **`kwargs`** (`object`): Keyword arguments are not accepted; passing any raises an error. Optional.
 
         Constraints:
-        - Call inside a `@tla.kernel` function, within `tla.cube()` / `tla.vector()` or their SIMD/SIMT `tla.vec.func` regions. Prints in these scopes can coexist; output order across threads, cores and channels is unspecified.
-        - Supported dtypes are `f16`, `f32`, `i8`, `i16`, `i32`, `u8`, `u16`, and `u32`.
-        - Strings must be compile-time ASCII strings. Format strings accept at most eight `{}` scalar fields; `{{` and `}}` print literal braces.
-        - Outside `vec.func`, Cube supports GM/L1/L0C Tensors and Vector supports GM/UB Tensors. SIMD supports scalars, registers and UB Tensors; SIMT supports per-thread scalars and statically shaped GM/UB Tensors.
-        - GM/UB Tensors must be rank 1 or 2. Printing reads consecutive elements from the view starting address, without following strides or rearranging layouts. The caller ensures the data is ready and the contiguous memory is readable.
-        - `length` is an integer element count. Omit it for a static Tensor only when all elements fit one call. Static lengths must be positive and within the view and per-call limits. Runtime length handling differs by execution mode; see the Printing Guide.
-        - A register defaults to its compile-time valid element count, or its physical capacity when that count is dynamic. Explicit lengths are bounded by physical capacity; uninitialized elements have unspecified values.
-        - L1 requires Cube placement, a 32-byte-aligned zN/nZ dense prefix with a 32-byte C0 dimension, and at most 8 elements. L0C requires Cube placement, L0Clayout and one 32-byte-aligned 16x16 view (256 elements). L1 and L0C printing cannot coexist in one kernel; L0A/L0B are unsupported.
-        - SIMD orders print reads against preceding/subsequent Vector stores. SIMT printing does not synchronize threads; shared UB requires block-wide synchronization. Other algorithm dependencies remain the caller's responsibility.
-        - Printing adds buffer, transfer and stream-synchronization costs. Remove calls before performance measurements; runtime conditions can retain these costs.
-        - See the [Printing Guide](../kernel_development/evaluation/print.md) for per-call limits, alignment, runtime lengths, synchronization examples, log capacity, truncation and error recovery.
+        - Call inside `tla.cube()` / `tla.vector()` or their SIMD/SIMT `tla.vec.func` regions; output order across threads, cores and channels is unspecified.
+        - Supported dtypes are `f16`, `f32`, `i8`, `i16`, `i32`, `u8`, `u16` and `u32`. Cube prints GM/L1/L0C Tensors, outer Vector prints GM/UB Tensors, SIMD prints scalars, registers and UB Tensors, and SIMT prints per-thread scalars and statically shaped GM/UB Tensors.
+        - Strings must be host-side `str` values with ASCII characters only and no NUL bytes. A format string accepts at most eight empty `{}` fields, whose count must equal the number of arguments; format specifiers, indexes and names such as `{:d}`, `{0}` and `{name}` are rejected. `{{`/`}}` print literal braces and `%` prints literally.
+        - GM/UB Tensors are rank 1 or 2; printing reads a contiguous prefix from the view start and ignores strides. The caller ensures the data is ready and readable.
+        - `length` is an integer element count, omitted only for a static Tensor whose elements all fit one call. A register defaults to its valid element count, or its physical capacity when that count is dynamic.
+        - L1 requires Cube placement, a 32-byte-aligned zN/nZ dense prefix with a 32-byte C0 dimension, and at most 8 elements; L0C requires Cube placement, L0Clayout and a 32-byte-aligned 16x16 view (256 elements). L1 and L0C cannot be combined, and L0A/L0B are unsupported.
+        - SIMD orders print reads against preceding/subsequent Vector stores. SIMT printing does not synchronize threads; shared UB requires a block-wide barrier. Other dependencies remain the caller's responsibility.
+        - Printing adds buffer, transfer and stream-synchronization costs; remove calls before performance measurements.
+        - Per-call limits, alignment, runtime length handling, synchronization examples, log capacity, truncation and error recovery are described in the Printing Guide.
 
         Example:
         ```python
@@ -13510,8 +13508,7 @@ def squeeze(
         this count in a dedicated internal register. Before the count is
         overwritten, the caller must call `store` with
         `UnalignStoreParams(post_mode=POST_MODE_UPDATE_NBYTES)` to write the
-        intended data to the destination. For an example, see
-        [`Tensor.store`](language/data_movement.md#tlatensorstore).
+        intended data to the destination. For an example, see `Tensor.store`.
 
         Example:
         ```python

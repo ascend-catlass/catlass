@@ -57,7 +57,13 @@ The code above shows three forms of scalar printing:
 2. `tla.print("Hello world")`: Prints a plain string.
 3. `tla.print("tile={} ...", ...)`: Uses formatted printing for runtime values such as `block_linear`, `block_row`, and `block_col`.
 
-Plain strings and format strings must be compile-time ASCII strings. A format string accepts at most eight `{}` scalar fields; `{{` and `}}` print literal braces.
+Plain strings and format strings must be host-side `str` values containing ASCII characters only and no NUL bytes; violations fail compilation with `format string must contain ASCII only` or `format string must not contain embedded NUL`. Further format string restrictions:
+
+- A format string accepts at most eight `{}` scalar fields, and the field count must match the number of following positional arguments.
+- Fields must be empty `{}`; a format specifier, index or name such as `{:d}`, `{:.3f}`, `{0}` or `{name}` fails compilation with `unsupported format field`.
+- `{{` and `}}` print literal braces, and a lone `{` or `}` fails compilation with `malformed format string`.
+- `%` prints literally.
+
 A complete SIMD formatted record is limited to 2024 bytes, including its header, argument slots, string terminator and alignment. Larger records produce a compile-time error.
 
 ### Tensor Printing

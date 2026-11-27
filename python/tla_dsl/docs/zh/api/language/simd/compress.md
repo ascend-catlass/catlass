@@ -44,7 +44,7 @@ tla.squeeze(src: VectorSSA, mask: MaskSSA, *, record_nbytes: bool = False) -> Ve
 
 `record_nbytes=True` 时，记录的字节数等于保留元素个数乘以单个元素的字节数，这个记录在内部专有寄存器中。
 用户需要保证在计数被覆盖前，以 `UnalignStoreParams(post_mode=POST_MODE_UPDATE_NBYTES)` 调用 `store` 将预期的数据写到目的区。
-具体使用示例参考 [`Tensor.store`](../data_movement.md#tlatensorstore)。
+具体使用示例参考 `Tensor.store`。
 
 调用示例：
 

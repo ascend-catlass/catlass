@@ -1,86 +1,52 @@
 ---
 name: catlass-docs-translation
-description: Update CATLASS Markdown translations with a Git-only incremental workflow. Run it after any source Markdown change to list the paired English documents and line ranges that must be synced.
+description: Translate the English documentation changes that correspond to the current Git diff. Run it after changing Markdown under docs/zh/** so the paired English documents are updated in the same branch and PR.
 ---
 
 # CATLASS Docs Translation
 
-Follow the root [`AGENTS.md`](../../../AGENTS.md) for repository terminology and writing conventions. This skill owns the translation workflow.
+Follow the root [`AGENTS.md`](../../../AGENTS.md) for repository terminology and writing conventions.
 
-## Sync target discovery
+## Workflow
 
-Run this before translating, for every source Markdown change (uncommitted working tree or committed).
-
-1. Get the changed hunks with source line numbers:
+1. Get the diff to translate:
 
    ```bash
    git diff --unified=0 HEAD -- 'docs/zh/**/*.md'                    # working tree
    git diff --unified=0 upstream/master...HEAD -- 'docs/zh/**/*.md'  # committed
    ```
 
-2. Map each changed file to its paired target with the pair rules in step 6 of the workflow below.
-3. Expand each hunk to the aligned block of the same kind in the target (heading section, paragraph, continuous list, table, or fenced code block) and report its line range. When no aligned block exists, report `unaligned, needs human review` and change nothing.
-4. Report the list as a table, one row per hunk: source lines, target lines, and what changed.
+2. Map each changed file to its English pair. Repository convention is `docs/zh/**` ↔ `docs/en/**`; elsewhere use an established same-directory pair (`name.md` ↔ `name_en.md`, `README.md` ↔ `README_en.md`). A nested `AGENTS.md` may override the direction; for example, `python/tla_dsl/docs/en/api/**` is the source for its paired `python/tla_dsl/docs/zh/api/**`. Inspect neighbouring files for nonstandard layouts; do not invent a target path.
 
-   | Source change                  | Target to sync                | Summary                       |
-   | ------------------------------ | ----------------------------- | ----------------------------- |
-   | `docs/zh/...:109-122`          | `docs/en/...:109-122`         | fenced `cmake` blocks, `ASC`  |
+3. Translate by block. Expand each changed hunk to its complete Markdown block (heading section, paragraph, continuous list, table, or fenced code block) and update the corresponding block in the English document. Change nothing outside those blocks.
 
-An empty list means no translation work. A non-empty list is the exact edit scope: touch only those target lines, then report the same table with the synced rows marked done.
+   - New block in Chinese: add it in English at the aligned position, including any heading the Chinese block introduces.
+   - Deleted block in Chinese: delete the corresponding English block.
+   - No aligned English block and the alignment is ambiguous: leave the target untouched and report it for human review.
 
-## Git-only incremental workflow
+4. Translate in full, never condensed. The English block must carry everything the Chinese block carries: every sentence, list item, table row and column, note, image, image alt text, and code line. A Chinese addition must appear in English; do not summarize or drop details. If the target is marked generated, auto-generated, or “do not edit manually”, change its generator instead of the file.
 
-Git history is the sole translation state. Do not create a configuration file, metadata repository, hash cache, document annotation, or translation harness.
+5. Point every link at its English target:
 
-1. A translation becomes **ready** only after its reviewed change is merged in a commit containing this fixed trailer:
+   - relative link into `docs/zh/**` → the same path under `docs/en/**`
+   - `name.md` → `name_en.md`, `README.md` → `README_en.md`
+   - `#anchor` → the anchor of the matching English heading, taken from that heading's actual text, for example `#-软硬件配套说明` → `#-software-and-hardware-requirements`; never transliterate an anchor by hand
+   - external page → its English edition when one exists (`hiascend.com/en/...`), otherwise keep the original URL; never invent one
+   - images follow the same rule, with English alt text
+   - when no English counterpart exists, keep the original link and report it
 
-   ```text
-   Translation-Ready: true
-   ```
+6. Complete the surrounding structure:
 
-   The marked merged commit itself is the baseline. For an existing target, find the most recent marked commit that changes that target; for a new target, the first marked merged translation commit establishes its baseline. Do not store or copy a source hash.
+   - a new Chinese document needs its English file and an entry in the English index or table of contents (`docs/en/README.md`, `README_en.md`, a section list) wherever the Chinese document was added to its index
+   - a renamed or deleted document needs the same change in the English index and in English links that point at it
+   - keep the link text in English; do not leave a Chinese label pointing at an English page
 
-2. Fetch upstream and derive work solely from the source delta:
+7. Self-check the diff:
 
    ```bash
-   git fetch upstream master
-   git log --format='%H%n%B' -- <target.md>  # find Translation-Ready: true
-   git diff --unified=0 <ready-commit>..upstream/master -- <source.md>
+   python scripts/check_md_links.py <changed English files>
    ```
 
-3. Expand every changed hunk to its complete Markdown block: heading section, paragraph, continuous list, table, or fenced code block. Only update paired target blocks for those hunks. Existing target blocks outside the hunk are immutable.
+   Reject and fix anything that fails these checks: Chinese prose left in the English block; a link or anchor still pointing at Chinese content; content dropped or summarized; a broken link or anchor; an edit outside the translated blocks.
 
-4. An empty target may receive a first full translation. For a non-empty target, establish source/target block alignment before writing. If alignment is ambiguous, leave it unchanged and report it for human review; never replace the whole document to force alignment. When a source block changed after the last `Translation-Ready` commit, always inspect its current target block, even if the target was edited later. Target modification time, target commit time, or the mere existence of target changes is never evidence that translation is complete.
-
-5. If the current target block appears to be a manual translation, assess it against the changed source block for completeness, technical meaning, terminology, links, and Markdown structure. When it passes that review, retain it and do not machine-translate or rewrite it; record that it was accepted as an existing manual translation. If it does not pass, translate only the aligned block.
-
-6. Discover pairs from repository convention: `docs/zh/**` maps to `docs/en/**`; elsewhere use an established same-directory pair such as `name.md` and `name_en.md`. A nested `AGENTS.md` may explicitly override the source direction; for example, `python/tla_dsl/docs/en/api/**` is the English source for its paired `python/tla_dsl/docs/zh/api/**` reference. Inspect neighbouring files for nonstandard layouts; do not invent a target path or parallel directory.
-
-7. Skip files marked generated, auto-generated, or “do not edit manually”; change their generator only when the task explicitly includes it. Use any caller-approved translation executor in bounded file or section units.
-
-8. Review the resulting Git diff: reject residual Chinese in English prose, links newly pointed at Chinese docs, altered anchors, changed generated-file notices, and changes outside approved translation blocks. Split PRs by requested scope. Put `Translation-Ready: true` in the PR description; GitCode carries that description into the merged commit body. The source branch commit should carry the same trailer, but the merged commit marker is authoritative.
-
-## Branch and PR contract
-
-- Create every translation branch from the reviewed upstream base as `agent-translation/<scope>`, where `<scope>` is a short kebab-case directory or document scope. Do not use generic `codex/` or model-specific branch names.
-- Every translation PR title must begin with `[AI Skill Translation]`, followed by the conventional type and concise scope. For example: `[AI Skill Translation] docs(tla_dsl): update print guide`.
-- The PR body must state that it was produced with `catlass-docs-translation`, list the translated files, and end with `Translation-Ready: true`. Do not put the marker in the title.
-
-Use this body shape:
-
-```markdown
-## AI skill translation
-
-Produced with `catlass-docs-translation`.
-
-## Scope
-
-- `<translated-file>`
-
-## Validation
-
-- Reviewed the scoped Markdown diff
-- Checked links and residual Chinese prose
-
-Translation-Ready: true
-```
+8. Commit the English changes together with the Chinese change and open the PR from the same branch.

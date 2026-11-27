@@ -13,7 +13,7 @@ CATLASS，提供高性能矩阵乘类算子基础模板与示例。
 | `catlass-example-to-torch-intf` | 将 catlass 示例迁移为 PyTorch extension 接口。            | `.agents/skills/catlass-example-to-torch-intf/` |
 | `catlass-tile-level-ut`         | 为 Gemm/Tile 拷贝组件（CopyGmToL1 等及 TLA 变体）编写单元测试。 | `.agents/skills/catlass-tile-level-ut/`         |
 | `catlass-docs-review`          | 审查文档语言与用词问题（术语、错别字、模糊量化、规格来源、数值单位），改文档后触发。 | `.agents/skills/catlass-docs-review/`           |
-| `catlass-docs-translation`      | 改动文档后先判定待同步的英文文档与行号，再按 Git 增量更新。 | `.agents/skills/catlass-docs-translation/`      |
+| `catlass-docs-translation`      | 改动文档后按本次 Git diff 翻译对应的英文文档。            | `.agents/skills/catlass-docs-translation/`      |
 | `catlass-docs-consistency`      | 检测文档与代码一致性：静态检查构建目标、运行参数、路径、include 与 API 符号，也可按代际上板执行文档命令。 | `.agents/skills/catlass-docs-consistency/`      |
 
 ## 文档改动后的语言审查
@@ -26,11 +26,13 @@ CATLASS，提供高性能矩阵乘类算子基础模板与示例。
 
 ## 文档改动后的英文同步
 
-修改 `docs/zh/**` 下的 Markdown 后，提交前调用 `catlass-docs-translation` skill，先输出待同步清单（每条为「英文文档 + 行号区间 + 改动摘要」），再按 skill 的块粒度增量翻译。
+修改 `docs/zh/**` 下的 Markdown 后，提交前调用 `catlass-docs-translation` skill，用 `git diff` 取得本次改动，按 skill 的块粒度翻译对应的英文文档，并与中文改动放在同一分支、同一 PR 中提交。
 
-- 清单为空即无需同步；清单非空而未同步，不得提交。
+- 无对应英文改动即无需同步；有改动而未同步，不得提交。
 - 配对关系由 skill 按仓库约定判定（`docs/zh/**` ↔ `docs/en/**`，非标准布局查同目录配对文件），不另建映射表。
-- 行号取改动 hunk 展开后的完整 Markdown 块（标题节、段落、连续列表、表格、围栏代码块）在英文文档中的对应区间。
+- 英文块须完整承载中文块的句子、列表项、表格行列、图注、代码行，不得删减或概括。
+- 链接与锚点须指向英文目标：`docs/zh/**` → `docs/en/**`，`name.md` → `name_en.md`，`README.md` → `README_en.md`，中文标题锚点换成对应英文标题锚点；外部页面有英文版时改用英文版，没有则保留原链接，不得臆造。
+- 新增、重命名或删除中文文档时，同步英文文件及英文索引（`docs/en/README.md`、`README_en.md` 等目录或章节列表）中的对应条目。
 
 ## 文档术语与写作规范
 

@@ -57,7 +57,13 @@ CATLASS Python 提供 `tla.print` 接口，用于在 kernel 内部进行调试�
 2. `tla.print("Hello world")`：打印纯字符串。
 3. `tla.print("tile={} ...", ...)`：格式化打印 `block_linear`、`block_row` 和 `block_col` 等运行时值。
 
-纯字符串和格式串须为编译期 ASCII 字符串，格式串最多包含 8 个 `{}` 标量字段；`{{`、`}}` 输出花括号。
+纯字符串和格式串须为 host 侧 `str`，仅含 ASCII 字符且不含 NUL 字节，否则在编译期报错（`format string must contain ASCII only`、`format string must not contain embedded NUL`）。格式串的其余限制如下：
+
+- 最多包含 8 个 `{}` 标量字段，字段数须与后续位置参数个数一致。
+- 字段只支持空 `{}`；`{:d}`、`{:.3f}`、`{0}`、`{name}` 等带格式说明符、索引或名称的写法在编译期报错 `unsupported format field`。
+- `{{`、`}}` 输出花括号，单独出现的 `{` 或 `}` 在编译期报错 `malformed format string`。
+- `%` 按字面输出。
+
 SIMD 格式化打印的完整记录最多为 2024 字节，包含记录头、参数槽、字符串结束符和对齐开销，超限在编译时报错。
 
 ### Tensor 打印

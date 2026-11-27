@@ -48,8 +48,7 @@ elements times the size of each element in bytes. Hardware records
 this count in a dedicated internal register. Before the count is
 overwritten, the caller must call `store` with
 `UnalignStoreParams(post_mode=POST_MODE_UPDATE_NBYTES)` to write the
-intended data to the destination. For an example, see
-[`Tensor.store`](../../language/data_movement.md#tlatensorstore).
+intended data to the destination. For an example, see `Tensor.store`.
 
 Example:
 
