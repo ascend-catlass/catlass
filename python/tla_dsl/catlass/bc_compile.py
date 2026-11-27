@@ -232,6 +232,7 @@ _CACHE_SOURCE_FILES = (
     "Cube/system_counter.cpp",
     "Vector/arange_reg.cpp",
     "Vector/axpy.cpp",
+    "Vector/basic_arithmetic.cpp",
     "Vector/log.cpp",
     "Vector/lowp_cast.cpp",
     "Vector/mul_inplace_add.cpp",

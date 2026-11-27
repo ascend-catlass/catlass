@@ -3255,7 +3255,9 @@ def test_tool_metadata_fingerprint_unavailable_binary(tmp_path, symlink_loop) ->
     assert execution._tool_metadata_fingerprint(binary) == "missing"
 
 
-def test_counter_build_identity_only_invalidates_counter_kernels(monkeypatch, tmp_path):
+def test_bc_build_identity_invalidates_counter_and_b64_arithmetic_kernels(
+    monkeypatch, tmp_path
+):
     from catlass import bc_compile
 
     tools = tmp_path / "bin"
@@ -3275,6 +3277,7 @@ def test_counter_build_identity_only_invalidates_counter_kernels(monkeypatch, tm
     for core in ("Cube", "Vector"):
         (stubs / core).mkdir(parents=True)
         (stubs / core / "system_counter.cpp").write_text("original source")
+    (stubs / "Vector" / "basic_arithmetic.cpp").write_text("original source")
     (stubs / "Vector" / "log.cpp").write_text("original source")
     for op in ("arange_reg", "sub_abs", "axpy", "mul_inplace_add", "muls_cast"):
         (stubs / "Vector" / f"{op}.cpp").write_text("original source")
@@ -3284,12 +3287,29 @@ def test_counter_build_identity_only_invalidates_counter_kernels(monkeypatch, tm
     )
     ordinary = execution._cache_key(tlair_mlir="module {}", **kwargs)
     counter = execution._cache_key(tlair_mlir="tla.arch.get_system_cycle", **kwargs)
+    signed = '"tla.adds"(%x, %s) : (!tla.vector<32xi64>, i64) -> !tla.vector<32xi64>'
+    unsigned = '"tla.bitwise_not"(%x) : (!tla.vector<?xui64>) -> !tla.vector<?xui64>'
+    load = '"tla.load"(%src) : (!tla.tensor<...>) -> !tla.vector<32xi64>'
+    scalar = '"arith.addi"(%a, %b) : (i64, i64) -> i64'
+    before = {
+        ir: execution._cache_key(tlair_mlir=ir, **kwargs)
+        for ir in (signed, unsigned, load, scalar)
+    }
+    (stubs / "Vector" / "basic_arithmetic.cpp").write_text("changed arithmetic")
+    assert execution._cache_key(tlair_mlir=signed, **kwargs) != before[signed]
+    assert execution._cache_key(tlair_mlir=unsigned, **kwargs) != before[unsigned]
+    assert execution._cache_key(tlair_mlir=load, **kwargs) == before[load]
+    assert execution._cache_key(tlair_mlir=scalar, **kwargs) == before[scalar]
+    after_arithmetic_change = execution._cache_key(
+        tlair_mlir="tla.arch.get_system_cycle", **kwargs
+    )
+    assert after_arithmetic_change != counter
     (stubs / "Cube" / "system_counter.cpp").write_text("changed source")
     assert execution._cache_key(tlair_mlir="module {}", **kwargs) == ordinary
     after_source_change = execution._cache_key(
         tlair_mlir="tla.arch.get_system_cycle", **kwargs
     )
-    assert after_source_change != counter
+    assert after_source_change != after_arithmetic_change
     ccec.write_bytes(b"a different compiler")
     assert execution._cache_key(tlair_mlir="module {}", **kwargs) == ordinary
     assert (

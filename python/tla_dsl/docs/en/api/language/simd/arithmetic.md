@@ -238,6 +238,9 @@ Constraints:
 
 - Must be called inside a `@tla.kernel`-decorated kernel function.
 - Must be called inside `tla.vec.func()`.
+- The vector form accepts `f16/f32` and signed integers of width 8, 16, 32, or 64 bits.
+- A 64-bit vector occupies one 256-byte register and has at most 32 valid lanes.
+- The vector form zeros masked-off lanes.
 - Inside a `tla.vec.func(mode="simt")` region a scalar operand emits the
   per-thread `tla.simt_abs`; outside one `tla.abs` on a scalar is
   rejected. The Python builtin `abs(x)` on a `Numeric` works in either
@@ -276,6 +279,8 @@ Constraints:
 
 - Must be called inside a `@tla.kernel`-decorated kernel function.
 - Must be called inside `tla.vec.func()`.
+- The vector form accepts `f16/f32` and signed integers of width 8, 16, 32, or 64 bits.
+- A 64-bit vector occupies one 256-byte register and has at most 32 valid lanes.
 
 Example:
 
@@ -430,6 +435,10 @@ Constraints:
 
 - Must be called inside a `@tla.kernel`-decorated kernel function.
 - Must be called inside `tla.vec.func()`; supports vector–vector and vector–scalar.
+- Both forms accept `f16/bf16/f32` and signed or unsigned 8/16/32/64-bit integers.
+- A 64-bit vector occupies one 256-byte register and has at most 32 valid lanes.
+- In the vector–scalar form, a typed scalar must match the vector element type.
+  Python literals are materialized in the vector element type.
 
 Example:
 
@@ -471,6 +480,10 @@ Constraints:
 
 - Must be called inside a `@tla.kernel`-decorated kernel function.
 - Must be called inside `tla.vec.func()`.
+- Both forms accept `f16/bf16/f32` and signed or unsigned 8/16/32/64-bit integers.
+- A 64-bit vector occupies one 256-byte register and has at most 32 valid lanes.
+- In the vector–scalar form, a typed scalar must match the vector element type.
+  Python literals are materialized in the vector element type.
 
 Example:
 
@@ -553,6 +566,10 @@ Constraints:
 
 - Must be called inside a `@tla.kernel`-decorated kernel function.
 - Must be called inside `tla.vec.func()`.
+- Both forms accept `f16/bf16/f32` and signed or unsigned 16/32/64-bit integers.
+- A 64-bit vector occupies one 256-byte register and has at most 32 valid lanes.
+- In the vector–scalar form, a typed scalar must match the vector element type.
+  Python literals are materialized in the vector element type.
 
 Example:
 
@@ -889,6 +906,10 @@ Constraints:
   scalar form of the vector op.
 - The per-thread form needs both operands of the same type, and rejects
   unsigned integers and `Bool`; use signed integers or floats.
+- The vector–vector and vector–scalar forms accept `f16/bf16/f32` and signed or unsigned 8/16/32/64-bit integers.
+- A 64-bit vector occupies one 256-byte register and has at most 32 valid lanes.
+- In the vector–scalar form, a typed scalar must match the vector element type.
+  Python literals are materialized in the vector element type.
 
 Example:
 
@@ -928,6 +949,10 @@ Constraints:
   scalar form of the vector op.
 - The per-thread form needs both operands of the same type, and rejects
   unsigned integers and `Bool`; use signed integers or floats.
+- The vector–vector and vector–scalar forms accept `f16/bf16/f32` and signed or unsigned 8/16/32/64-bit integers.
+- A 64-bit vector occupies one 256-byte register and has at most 32 valid lanes.
+- In the vector–scalar form, a typed scalar must match the vector element type.
+  Python literals are materialized in the vector element type.
 
 Example:
 
@@ -963,6 +988,10 @@ Constraints:
 
 - Must be called inside a `@tla.kernel`-decorated kernel function.
 - Must be called inside `tla.vec.func()`.
+- Both forms accept `f16/f32` and signed or unsigned 16/32/64-bit integers.
+- A 64-bit vector occupies one 256-byte register and has at most 32 valid lanes.
+- In the vector–scalar form, a typed scalar must match the vector element type.
+  Python literals are materialized in the vector element type.
 
 Example:
 

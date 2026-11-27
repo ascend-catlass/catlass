@@ -35,6 +35,7 @@ def helper_build(tmp_path: Path, monkeypatch):
             "muls_cast",
             "system_counter",
             "log",
+            "basic_arithmetic",
         ),
         # Shared core-agnostic stubs, compiled once per core type and linked
         # into both meta-op bitcodes (see bc_compile._SHARED_SUBDIRS).
@@ -84,17 +85,19 @@ def test_build_variants_preserves_print_order_and_compiles_components_once(
         "dma\nmmad\nsystem_counter\ndata_sync_barrier\n"
     )
     assert (cache / "meta_op.aiv.c310.bc").read_text() == (
-        "data_sync_barrier\narange_reg\naxpy\ndata_sync_barrier_ub\ndma\nlog\nlowp_cast\n"
+        "data_sync_barrier\narange_reg\naxpy\nbasic_arithmetic\n"
+        "data_sync_barrier_ub\ndma\nlog\nlowp_cast\n"
         "mul_inplace_add\nmuls_cast\nsub_abs\nsystem_counter\nvdiv\n"
     )
     assert (cache / "meta_op.aic.print.c310.bc").read_text() == (
         "debug_tunnel\ndma\nmmad\nprint_tensor\nprintf\nsystem_counter\ndata_sync_barrier\n"
     )
     assert (cache / "meta_op.aiv.print.c310.bc").read_text() == (
-        "data_sync_barrier\narange_reg\naxpy\ndata_sync_barrier_ub\ndma\nlog\nlowp_cast\n"
+        "data_sync_barrier\narange_reg\naxpy\nbasic_arithmetic\n"
+        "data_sync_barrier_ub\ndma\nlog\nlowp_cast\n"
         "mul_inplace_add\nmuls_cast\nprint_tensor\nprintf\nsub_abs\nsystem_counter\nvdiv\nvf_print\n"
     )
-    assert len(compiled) == len(set(compiled)) == 22
+    assert len(compiled) == len(set(compiled)) == 23
     # The shared scalar stub is compiled once per core type, not per variant;
     # the ub helper is AIV-only (same-name-different-body hazard, see
     # bc/Vector/data_sync_barrier_ub.cpp).
@@ -112,12 +115,19 @@ def test_build_variants_preserves_print_order_and_compiles_components_once(
 
     # Both aggregates reuse their existing outputs during an ordinary rebuild.
     bc_compile.init()
-    assert len(compiled) == 22
+    assert len(compiled) == 23
 
 
 @pytest.mark.parametrize(
     "filename",
-    ["system_counter.cpp", "sub_abs.cpp", "axpy.cpp", "mul_inplace_add.cpp", "muls_cast.cpp"],
+    [
+        "system_counter.cpp",
+        "sub_abs.cpp",
+        "axpy.cpp",
+        "mul_inplace_add.cpp",
+        "muls_cast.cpp",
+        "basic_arithmetic.cpp",
+    ],
 )
 def test_helper_edit_invalidates_helper_cache(helper_build, filename):
     cfg, compiled = helper_build
@@ -126,7 +136,7 @@ def test_helper_edit_invalidates_helper_cache(helper_build, filename):
     source.write_text("changed helper implementation")
     second = bc_compile.init()
     assert first != second
-    assert len(compiled) == 44
+    assert len(compiled) == 46
     assert (second / "meta_op.aiv.c310.bc").is_file()
 
 
@@ -194,5 +204,5 @@ def test_force_rebuild_replaces_legacy_aggregate_without_removing_kernel_cache(
     )
     assert not (cache / "stale_component.aic.c310.bc").exists()
     assert kernel_binary.read_bytes() == b"existing compiled kernel"
-    assert len(compiled) == len(set(compiled)) == 22
+    assert len(compiled) == len(set(compiled)) == 23
     bc_compile.check_bc(bc_dir=cache)

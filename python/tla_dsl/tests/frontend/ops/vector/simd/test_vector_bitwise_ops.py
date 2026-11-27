@@ -40,10 +40,13 @@ def _mask_bitwise_kernel(src: tla.Tensor, dst: tla.Tensor) -> None:
             dst_tile.store(tla.where(xor_mask, tmp2, zero), mask=all_mask)
 
 
+_REG_BITWISE_LANES = 64
+
+
 @tla.kernel
 def _vector_ssa_bitwise_unary_kernel(src: tla.Tensor, dst: tla.Tensor) -> None:
-    src_tile = tla.tile_view(src, tla.make_shape(64), tla.make_coord(0))
-    dst_tile = tla.tile_view(dst, tla.make_shape(64), tla.make_coord(0))
+    src_tile = tla.tile_view(src, tla.make_shape(_REG_BITWISE_LANES), tla.make_coord(0))
+    dst_tile = tla.tile_view(dst, tla.make_shape(_REG_BITWISE_LANES), tla.make_coord(0))
     with tla.vector():
         with tla.vec.func(mode="simd"):
             reg = src_tile.load()
@@ -55,9 +58,9 @@ def _vector_ssa_bitwise_unary_kernel(src: tla.Tensor, dst: tla.Tensor) -> None:
 def _vector_ssa_bitwise_binary_kernel(
     src0: tla.Tensor, src1: tla.Tensor, dst: tla.Tensor
 ) -> None:
-    src0_tile = tla.tile_view(src0, tla.make_shape(64), tla.make_coord(0))
-    src1_tile = tla.tile_view(src1, tla.make_shape(64), tla.make_coord(0))
-    dst_tile = tla.tile_view(dst, tla.make_shape(64), tla.make_coord(0))
+    src0_tile = tla.tile_view(src0, tla.make_shape(_REG_BITWISE_LANES), tla.make_coord(0))
+    src1_tile = tla.tile_view(src1, tla.make_shape(_REG_BITWISE_LANES), tla.make_coord(0))
+    dst_tile = tla.tile_view(dst, tla.make_shape(_REG_BITWISE_LANES), tla.make_coord(0))
     with tla.vector():
         with tla.vec.func(mode="simd"):
             reg0 = src0_tile.load()
@@ -97,15 +100,15 @@ def _mixed_signed_unsigned_kernel(src0: tla.Tensor, src1: tla.Tensor, dst: tla.T
 
 
 def _tensor_args(
-    dtype: type[tla.Numeric] = tla.Float32, count: int = 2
+    dtype: type[tla.Numeric] = tla.Float32, count: int = 2, lanes: int = 64
 ) -> tuple[tla.Tensor, ...]:
     return tuple(
         make_fake_tensor(
             dtype,
-            (64,),
+            (lanes,),
             (1,),
             addrspace=tla.AddressSpace.ub,
-            origin_shape=(64,),
+            origin_shape=(lanes,),
             layout_tag=tla.arch.RowMajor,
         )
         for _ in range(count)
@@ -148,10 +151,16 @@ def test_bitwise_mask_is_optional_keyword_only(
         op(*positional_args)
 
 
-_REG_BITWISE_UNARY_DTYPES = (tla.Float16, tla.Float32, tla.Int32, tla.Int16, tla.Int8)
+_REG_BITWISE_UNARY_DTYPES = (
+    tla.Float16, tla.Float32, tla.Int8, tla.Int16, tla.Int32, tla.Int64,
+    tla.UInt8, tla.UInt16, tla.UInt32, tla.UInt64,
+)
 _REG_BITWISE_BINARY_DTYPES = (
     tla.Float16,
     tla.BFloat16,
+    tla.Bool,
+    tla.Int64,
+    tla.UInt64,
     tla.Float32,
     tla.Int32,
     tla.Int16,
@@ -182,10 +191,11 @@ def test_vector_ssa_bitwise_bindings_and_public_ops_emit_mlir(
     kernel: object,
     tensor_count: int,
 ) -> None:
-    global _REG_BITWISE_DTYPE
+    global _REG_BITWISE_DTYPE, _REG_BITWISE_LANES
     _REG_BITWISE_DTYPE = dtype
+    _REG_BITWISE_LANES = 32 if dtype.width == 64 else 64
     assert hasattr(tla_ops_gen, binding_name)
-    assert op_name in kernel.dump_mlir(type_args=_tensor_args(dtype, tensor_count))
+    assert op_name in kernel.dump_mlir(type_args=_tensor_args(dtype, tensor_count, _REG_BITWISE_LANES))
 
 @pytest.mark.parametrize(
     ("dtype", "element_type"),

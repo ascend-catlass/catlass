@@ -117,7 +117,9 @@ tla.bitwise_not(operand: VectorSSA | MaskSSA, *, mask: MaskSSA | None = None) ->
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
 - 须在 `tla.vec.func()` 内调用。
+- vector 操作数支持 8、16、32、64 位有符号或无符号整数、`f16/f32` 和打包 FP4。
 - `f4e2m1x2` / `f4e1m2x2` 向量每个 lane 为一个字节、携带一对 FP4，`mask` 以数对为单位选择。
+- 64 位向量占用一个 256 字节寄存器，最多有 32 个有效通道。
 
 调用示例：
 
@@ -152,8 +154,9 @@ tla.bitwise_and(src0_reg: VectorSSA | MaskSSA, src1_reg: VectorSSA | MaskSSA, *,
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
 - 须在 `tla.vec.func()` 内调用。
-- Vector 源操作数的元素类型须为 f16、bf16、f32、i32、i16、i8、u8、u16、u32、f4e2m1x2 或 f4e1m2x2。
+- vector 操作数支持 `Bool`、8、16、32、64 位有符号或无符号整数、`f16/bf16/f32` 和打包 FP4。
 - `f4e2m1x2` / `f4e1m2x2` 向量每个 lane 为一个字节、携带一对 FP4，`mask` 以数对为单位选择。
+- 64 位向量占用一个 256 字节寄存器，最多有 32 个有效通道。
 
 调用示例：
 
@@ -188,8 +191,9 @@ tla.bitwise_or(src0_reg: VectorSSA | MaskSSA, src1_reg: VectorSSA | MaskSSA, *, 
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
 - 须在 `tla.vec.func()` 内调用。
-- Vector 源操作数的元素类型须为 f16、bf16、f32、i32、i16、i8、u8、u16、u32、f4e2m1x2 或 f4e1m2x2。
+- vector 操作数支持 `Bool`、8、16、32、64 位有符号或无符号整数、`f16/bf16/f32` 和打包 FP4。
 - `f4e2m1x2` / `f4e1m2x2` 向量每个 lane 为一个字节、携带一对 FP4，`mask` 以数对为单位选择。
+- 64 位向量占用一个 256 字节寄存器，最多有 32 个有效通道。
 
 调用示例：
 
@@ -224,8 +228,9 @@ tla.bitwise_xor(src0_reg: VectorSSA | MaskSSA, src1_reg: VectorSSA | MaskSSA, *,
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
 - 须在 `tla.vec.func()` 内调用。
-- Vector 源操作数的元素类型须为 f16、bf16、f32、i32、i16、i8、u8、u16、u32、f4e2m1x2 或 f4e1m2x2。
+- vector 操作数支持 `Bool`、8、16、32、64 位有符号或无符号整数、`f16/bf16/f32` 和打包 FP4。
 - `f4e2m1x2` / `f4e1m2x2` 向量每个 lane 为一个字节、携带一对 FP4，`mask` 以数对为单位选择。
+- 64 位向量占用一个 256 字节寄存器，最多有 32 个有效通道。
 
 调用示例：
 

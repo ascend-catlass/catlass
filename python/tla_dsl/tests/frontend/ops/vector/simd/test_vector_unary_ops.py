@@ -160,12 +160,12 @@ def test_vector_unary_missing_operand_is_rejected() -> None:
         (
             unary_bf16_abs_kernel,
             tla.BFloat16,
-            "requires f16/f32 or i8/i16/i32 element type",
+            "requires f16/f32 or i8/i16/i32/i64 element type",
         ),
         (
             unary_bf16_neg_kernel,
             tla.BFloat16,
-            "requires f16/f32 or i8/i16/i32 element type",
+            "requires f16/f32 or i8/i16/i32/i64 element type",
         ),
     ),
 )

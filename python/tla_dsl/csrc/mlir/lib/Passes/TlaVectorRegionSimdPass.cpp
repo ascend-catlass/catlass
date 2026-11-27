@@ -817,12 +817,13 @@ static LogicalResult validateVectorUnaryElementType(Operation* op, VectorUnaryIn
             }
             if (auto intType = dyn_cast<IntegerType>(elementType)) {
                 unsigned width = intType.getWidth();
-                if (width == 8 || width == 16 || width == 32)
+                if (width == 8 || width == 16 || width == 32 || width == 64)
                     return success();
-                return op->emitError() << "tla." << info.name << " requires i8, i16, or i32 element type, got "
-                                       << elementType;
+                return op->emitError() << "tla." << info.name
+                                       << " requires an 8/16/32/64-bit integer element type, got " << elementType;
             }
-            return op->emitError() << "tla." << info.name << " requires f16/f32 or i8/i16/i32 element type, got "
+            return op->emitError() << "tla." << info.name
+                                   << " requires f16/f32 or an 8/16/32/64-bit integer element type, got "
                                    << elementType;
     }
     return failure();
@@ -2695,8 +2696,11 @@ static FailureOr<Value> materializeVectorScalarValue(
     // intrinsic ABI rather than the source vector element type.
     if (info.kind == VectorBinaryKind::ShiftLeft || info.kind == VectorBinaryKind::ShiftRight)
         return scalar;
-    // Match the AVE (signless) ABI; ctx.elementType may still be unsigned.
-    auto castScalar = castScalarForVectorElement(scalar, aveVectorElementType(ctx.elementType));
+    // An unsigned scalar of the element type needs only a signless ABI carrier.
+    Type carrierType = aveVectorElementType(ctx.elementType);
+    if (scalar.getType() == ctx.elementType && ctx.elementType.isUnsignedInteger())
+        return b.create<UnrealizedConversionCastOp>(scalar.getLoc(), carrierType, scalar).getResult(0);
+    auto castScalar = castScalarForVectorElement(scalar, carrierType);
     if (failed(castScalar))
         return failure();
     return *castScalar;
@@ -2722,8 +2726,10 @@ static FailureOr<Value> createVectorScalarBinaryResult(
     if (info.kind == VectorBinaryKind::Relu)
         return b.create<hivmave::VFLRelusOp>(loc, ctx.vecType, lhs, scalar, mask).getResult();
 
-    if (info.kind == VectorBinaryKind::Add || info.kind == VectorBinaryKind::Mul ||
-        info.kind == VectorBinaryKind::Max || info.kind == VectorBinaryKind::Min) {
+    // AVE scalar ALU ops do not accept bf16. Broadcast it into a register
+    // and use the vector op, which has a bf16 encoding.
+    if (!ctx.elementType.isBF16() && (info.kind == VectorBinaryKind::Add || info.kind == VectorBinaryKind::Mul ||
+                                      info.kind == VectorBinaryKind::Max || info.kind == VectorBinaryKind::Min)) {
         if (info.kind == VectorBinaryKind::Add)
             return b.create<hivmave::VFAddsOp>(loc, ctx.vecType, lhs, scalar, mask).getResult();
         if (info.kind == VectorBinaryKind::Mul)
@@ -3792,6 +3798,25 @@ static Value lowerShift64(
     return b.create<func::CallOp>(loc, callee, ValueRange{lhs, amount, preg}).getResult(0);
 }
 
+static Value unpackB64Mask(OpBuilder& b, Location loc, Value mask);
+
+// The bitcode helpers take the native b64 predicate. An omitted mask
+// starts as PGE.b32 because AVE has no PGE.b64.
+static Value callB64Arithmetic(
+    OpBuilder& b, Location loc, ModuleOp module, StringRef mnemonic, Type elementType, ValueRange data, Value mask,
+    bool hasExplicitMask)
+{
+    auto vecType = cast<VectorType>(data.front().getType());
+    Value preg = hasExplicitMask ? castMaskToPregType(b, loc, mask, fullPregVecType(b.getContext())) :
+                                   unpackB64Mask(b, loc, mask);
+    auto name = (Twine("tla_") + mnemonic + (isUnsignedInt(elementType) ? "_u64" : "_i64")).str();
+    SmallVector<Value, 3> args(data.begin(), data.end());
+    args.push_back(preg);
+    SmallVector<Type, 3> inputTypes(ValueRange(args).getTypes());
+    auto callee = getOrCreateInlineAivLibraryCall(module, loc, inputTypes, vecType, name);
+    return b.create<func::CallOp>(loc, callee, args).getResult(0);
+}
+
 static LogicalResult lowerVectorBinary(
     Operation& op, const VectorOpInfo* info, OpBuilder& b, ModuleOp module, DenseMap<Value, Value>& valueMap,
     AutoFullPredicateCache& fullMasks)
@@ -3800,8 +3825,10 @@ static LogicalResult lowerVectorBinary(
     if (op.getNumResults() != 1)
         return failure();
     TlaBinaryOperands operands = info->operands;
+    bool isBitwise = info->kind == VectorBinaryKind::And || info->kind == VectorBinaryKind::Or ||
+                     info->kind == VectorBinaryKind::Xor;
     if (auto tlaVec = dyn_cast<::tla::VectorSSAType>(operands.lhs.getType());
-        tlaVec && isBoolVectorElement(tlaVec.getElementType()))
+        tlaVec && isBoolVectorElement(tlaVec.getElementType()) && !isBitwise)
         return op.emitError(
                    "Bool VectorSSA is move-only (load/store); "
                    "arithmetic is not supported"),
@@ -3832,6 +3859,9 @@ static LogicalResult lowerVectorBinary(
         result = createInt64Max(b, loc, module, opVecType, lhs, rhs, mask, static_cast<bool>(operands.mask));
     else if (isShift(info->kind) && opVecType.getElementType().isInteger(64))
         result = lowerShift64(b, loc, module, *info, lhs, rhs, mask);
+    else if (opVecType.getElementType().isInteger(64) && isa<IntegerType>(elementType))
+        result = callB64Arithmetic(
+            b, loc, module, info->mnemonic, elementType, {lhs, rhs}, mask, static_cast<bool>(operands.mask));
     else
         result = createVectorBinaryResult(
             b, loc, info->kind, operands.lhs.getType(), opVecType.getElementType(), opVecType, lhs, rhs, mask);
@@ -3878,6 +3908,13 @@ static LogicalResult lowerVectorScalarBinary(
     }
     if (isShift(info->kind) && opCtx->elementType.isInteger(64)) {
         valueMap[op.getResult(0)] = lowerShift64(b, loc, module, *info, lhs, *scalarOr, mask);
+        return success();
+    }
+    if (opCtx->vecType.getElementType().isInteger(64) && isa<IntegerType>(opCtx->elementType) &&
+        !(info->kind == VectorBinaryKind::Max && opCtx->elementType.isSignlessInteger(64))) {
+        valueMap[op.getResult(0)] = callB64Arithmetic(
+            b, loc, module, info->mnemonic, opCtx->elementType, {lhs, *scalarOr}, mask,
+            static_cast<bool>(operands.mask));
         return success();
     }
     auto result = createVectorScalarBinaryResult(b, loc, module, *info, *opCtx, lhs, *scalarOr, mask);
@@ -4542,6 +4579,16 @@ static LogicalResult lowerVectorUnary(
     if (auto logOp = dyn_cast<::tla::LogOp>(op)) {
         if (auto algo = logOp.getLogAlgoAttr(); algo && algo.getValue() == LogAlgo::subnormal)
             return lowerVectorLogSubnormal(logOp, operand, operandVecType, mask, b, module, valueMap);
+    }
+    Type elementType = tlaElementOr(tlaOperandType, operandVecType.getElementType());
+    if (operandVecType.getElementType().isInteger(64) && isa<IntegerType>(elementType) &&
+        info->kind != VectorUnaryKind::Relu) {
+        if (isUnsignedInt(elementType) && info->kind != VectorUnaryKind::Not)
+            return op.emitError("requires a signed 64-bit integer element type");
+        StringRef mnemonic = info->kind == VectorUnaryKind::Abs && operands.mask ? "abs_zeroing" : info->name;
+        valueMap[op.getResult(0)] =
+            callB64Arithmetic(b, loc, module, mnemonic, elementType, {operand}, mask, static_cast<bool>(operands.mask));
+        return success();
     }
     Value result = createVectorUnaryResult(
         b, loc, module, info->kind, tlaOperandType, operandVecType, operand, mask, static_cast<bool>(operands.mask));

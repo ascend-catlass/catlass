@@ -1352,6 +1352,10 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
             f"vector-{op}",
             [["end_to_end/compound_compute_ops.py", "--op", op, *dev]],
         )
+    yield (
+        "vector-basic-arithmetic-logical",
+        [["end_to_end/basic_arithmetic_logical.py", *dev]],
+    )
     # CAST_NONE / CAST_RINT / CAST_ODD: lossy NONE equals RINT, lossless NONE
     # widen drops rnd, f32->f16 ODD. Script under python/tla_dsl/tests/end_to_end/.
     yield (

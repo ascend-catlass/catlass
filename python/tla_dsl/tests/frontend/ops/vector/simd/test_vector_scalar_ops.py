@@ -95,6 +95,63 @@ def test_vector_scalar_accepts_numeric_ssa() -> None:
     assert "tla.scalar_load" in mlir or "memref.load" in mlir or "tla.load" in mlir
 
 
+@tla.kernel
+def vector_scalar_typed_rhs(
+    lhs: tla.Tensor,
+    scalar_buf: tla.Tensor,
+    op: tla.Constexpr[Callable],
+    use_literal: tla.Constexpr[bool],
+) -> None:
+    tile = tla.tile_view(lhs, tla.make_shape(32), tla.make_coord(0))
+    with tla.vector():
+        with tla.vec.func(mode="simd"):
+            if tla.const_expr(use_literal):
+                op(tile.load(), tla.Float16(0.5))
+            else:
+                op(tile.load(), scalar_buf[0])
+
+
+@pytest.mark.parametrize("op", [tla.add, tla.sub, tla.mul, tla.div, tla.max, tla.min])
+@pytest.mark.parametrize("dtype", [tla.Int32, tla.UInt16, tla.Float32])
+@pytest.mark.parametrize("use_literal", [False, True])
+def test_vector_scalar_arithmetic_requires_matching_typed_scalar(op, dtype, use_literal):
+    with pytest.raises(
+        tla.TlaCoreAPIError, match=f"rhs has type f16, expected {dtype.dtype}"
+    ):
+        vector_scalar_typed_rhs.dump_mlir(
+            type_args=(
+                _vector_tensor(dtype),
+                _vector_tensor(tla.Float16),
+                op,
+                use_literal,
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    ("op", "dtype", "scalar_dtype"),
+    [
+        (tla.add, tla.Int32, tla.Int16),
+        (tla.max, tla.Int64, tla.Int16),
+        (tla.add, tla.UInt64, tla.UInt32),
+        (tla.add, tla.BFloat16, tla.Float32),
+    ],
+)
+def test_vector_scalar_arithmetic_rejects_mismatched_integer_widths_and_bf16(
+    op, dtype, scalar_dtype
+):
+    error = f"rhs has type {scalar_dtype.dtype}, expected {dtype.dtype}"
+    with pytest.raises(tla.TlaCoreAPIError, match=error):
+        vector_scalar_typed_rhs.dump_mlir(
+            type_args=(
+                _vector_tensor(dtype),
+                _vector_tensor(scalar_dtype),
+                op,
+                False,
+            )
+        )
+
+
 def test_vector_scalar_symbols_are_exported() -> None:
     for symbol in ("add", "sub", "mul", "max", "min", "div"):
         assert callable(getattr(tla, symbol))

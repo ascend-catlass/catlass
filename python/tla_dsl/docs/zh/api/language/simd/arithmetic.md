@@ -217,6 +217,9 @@ tla.abs(operand: VectorSSA | Numeric, *, mask: MaskSSA | None = None) -> VectorS
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
 - vector 形态须在 `tla.vec.func()` 内调用。
+- vector 形态支持 `f16/f32` 和 8、16、32、64 位有符号整数。
+- 64 位向量占用一个 256 字节寄存器，最多有 32 个有效通道。
+- vector 形态将掩码未启用的通道置零。
 - 在 `tla.vec.func(mode="simt")` 区域内，标量操作数生成逐线程
   `tla.simt_abs`；区域外对标量调用 `tla.abs` 会被拒绝。Python 内建 `abs(x)`
   在两种位置均可用：SIMT 区域内为 `tla.simt_abs`，其余位置为 `math.absf`。
@@ -254,6 +257,8 @@ tla.neg(operand: VectorSSA, *, mask: MaskSSA | None = None) -> VectorSSA
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
 - 须在 `tla.vec.func()` 内调用。
+- 支持 `f16/f32` 和 8、16、32、64 位有符号整数。
+- 64 位向量占用一个 256 字节寄存器，最多有 32 个有效通道。
 
 调用示例：
 
@@ -405,6 +410,9 @@ tla.add(lhs: VectorSSA | Numeric | bool | int | float, rhs: VectorSSA | Numeric 
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
 - 须在 `tla.vec.func()` 内调用；支持 vector–vector 与 vector–scalar。
+- vector–vector 和 vector–scalar 形态均支持 `f16/bf16/f32` 和 8、16、32、64 位有符号或无符号整数。
+- 64 位向量占用一个 256 字节寄存器，最多有 32 个有效通道。
+- 向量–标量形式要求带类型的标量与向量元素类型一致。Python 字面量按向量元素类型生成。
 
 调用示例：
 
@@ -446,6 +454,9 @@ tla.sub(lhs: VectorSSA | Numeric | bool | int | float, rhs: VectorSSA | Numeric 
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
 - 须在 `tla.vec.func()` 内调用。
+- vector–vector 和 vector–scalar 形态均支持 `f16/bf16/f32` 和 8、16、32、64 位有符号或无符号整数。
+- 64 位向量占用一个 256 字节寄存器，最多有 32 个有效通道。
+- 向量–标量形式要求带类型的标量与向量元素类型一致。Python 字面量按向量元素类型生成。
 
 调用示例：
 
@@ -523,6 +534,9 @@ tla.mul(lhs: VectorSSA | Numeric | bool | int | float, rhs: VectorSSA | Numeric 
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
 - 须在 `tla.vec.func()` 内调用。
+- vector–vector 和 vector–scalar 形态均支持 `f16/bf16/f32` 和 16、32、64 位有符号或无符号整数。
+- 64 位向量占用一个 256 字节寄存器，最多有 32 个有效通道。
+- 向量–标量形式要求带类型的标量与向量元素类型一致。Python 字面量按向量元素类型生成。
 
 调用示例：
 
@@ -770,6 +784,9 @@ tla.max(lhs: VectorSSA | Numeric | bool | int | float, rhs: VectorSSA | Numeric 
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
 - 须在 `tla.vec.func()` 内调用。
+- vector–vector 和 vector–scalar 形态均支持 `f16/bf16/f32` 和 8、16、32、64 位有符号或无符号整数。
+- 64 位向量占用一个 256 字节寄存器，最多有 32 个有效通道。
+- 向量–标量形式要求带类型的标量与向量元素类型一致。Python 字面量按向量元素类型生成。
 
 调用示例：
 
@@ -804,6 +821,9 @@ tla.min(lhs: VectorSSA | Numeric | bool | int | float, rhs: VectorSSA | Numeric 
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
 - 须在 `tla.vec.func()` 内调用。
+- vector–vector 和 vector–scalar 形态均支持 `f16/bf16/f32` 和 8、16、32、64 位有符号或无符号整数。
+- 64 位向量占用一个 256 字节寄存器，最多有 32 个有效通道。
+- 向量–标量形式要求带类型的标量与向量元素类型一致。Python 字面量按向量元素类型生成。
 
 调用示例：
 
@@ -839,6 +859,9 @@ tla.div(lhs: VectorSSA | Numeric | bool | int | float, rhs: VectorSSA | Numeric 
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
 - 须在 `tla.vec.func()` 内调用。
+- vector–vector 和 vector–scalar 形态均支持 `f16/f32` 和 16、32、64 位有符号或无符号整数。
+- 64 位向量占用一个 256 字节寄存器，最多有 32 个有效通道。
+- 向量–标量形式要求带类型的标量与向量元素类型一致。Python 字面量按向量元素类型生成。
 
 调用示例：
 

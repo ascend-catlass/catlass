@@ -11188,8 +11188,26 @@ def _emit_vector_scalar_binary(
             op_name,
             "Bool VectorSSA is move-only (load/store); arithmetic is not supported",
         )
+    dtype = lhs_desc.element_type
+    element_type = lhs_desc.element_mlir_type(lhs_value.type.context)
+    if (
+        op_name in {"add", "sub", "mul", "div", "max", "min"}
+        and rhs_num.dtype != dtype
+        and not isinstance(_resolve_bound_value(rhs), (int, float))
+    ):
+        _op_error(op_name, f"rhs has type {rhs_num.dtype}, expected {dtype}")
+    unsigned = (
+        mlir_ir.IntegerType.isinstance(element_type)
+        and mlir_ir.IntegerType(element_type).is_unsigned
+    )
     rhs_value = _numeric_ir_value_for_element_type(
-        op_name, rhs_num, lhs_desc.element_mlir_type(lhs_value.type.context), loc=loc
+        op_name,
+        rhs_num,
+        element_type,
+        # Unsigned literals use the same-width signless carrier. Runtime
+        # unsigned values keep their type until the SIMD lowering.
+        normalize_unsigned=unsigned and isinstance(rhs_num.value, (int, float)),
+        loc=loc,
     )
     mask_value = _as_value(mask) if mask is not None else None
     if mask_value is not None:
@@ -11352,11 +11370,13 @@ def _emit_vector_shift(
 
 
 _FLOAT_UNARY_ELEMENT_TYPES = frozenset({"f16", "f32"})
-_INTEGER_ABS_ELEMENT_TYPES = frozenset({"i8", "i16", "i32"})
+_INTEGER_ABS_ELEMENT_TYPES = frozenset({"i8", "i16", "i32", "i64"})
 _ABS_ELEMENT_TYPES = _FLOAT_UNARY_ELEMENT_TYPES | _INTEGER_ABS_ELEMENT_TYPES
 # Packed FP4 pair carriers are byte-sized, so bitwise ops handle them exactly
 # like the integer carriers: both nibbles of a lane travel together.
-_BITWISE_UNARY_TYPES = _ABS_ELEMENT_TYPES | _FP4_PAIR_DTYPES
+_BITWISE_UNARY_TYPES = (
+    _ABS_ELEMENT_TYPES | _FP4_PAIR_DTYPES | {"u8", "u16", "u32", "u64"}
+)
 
 
 def _emit_vector_unary(
@@ -11397,7 +11417,7 @@ def _emit_vector_unary(
     elif op_name in {"abs", "neg"} and element_type not in _ABS_ELEMENT_TYPES:
         _op_error(
             op_name,
-            f"tla.{op_name} requires f16/f32 or i8/i16/i32 element type, "
+            f"tla.{op_name} requires f16/f32 or i8/i16/i32/i64 element type, "
             f"got {element_type}",
         )
     mask_value = _as_value(mask) if mask is not None else None
@@ -11840,6 +11860,9 @@ Description:
     Constraints:
     - Must be called inside a `@tla.kernel`-decorated kernel function.
     - Must be called inside `tla.vec.func()`.
+    - The vector form accepts `f16/f32` and signed integers of width 8, 16, 32, or 64 bits.
+    - A 64-bit vector occupies one 256-byte register and has at most 32 valid lanes.
+    - The vector form zeros masked-off lanes.
     - Inside a `tla.vec.func(mode="simt")` region a scalar operand emits the
       per-thread `tla.simt_abs`; outside one `tla.abs` on a scalar is
       rejected. The Python builtin `abs(x)` on a `Numeric` works in either
@@ -11867,6 +11890,8 @@ Description:
     Constraints:
     - Must be called inside a `@tla.kernel`-decorated kernel function.
     - Must be called inside `tla.vec.func()`.
+    - The vector form accepts `f16/f32` and signed integers of width 8, 16, 32, or 64 bits.
+    - A 64-bit vector occupies one 256-byte register and has at most 32 valid lanes.
 
     Example:
     ```python
@@ -12509,7 +12534,10 @@ def bitwise_not(
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function.
         - Must be called inside `tla.vec.func()`.
+        - Vector operands accept signed or unsigned 8/16/32/64-bit integers,
+          `f16/f32`, and packed FP4 pairs.
         - `f4e2m1x2` / `f4e1m2x2` vectors carry one FP4 pair per lane; a `mask` selects whole pairs.
+        - A 64-bit vector occupies one 256-byte register and has at most 32 valid lanes.
 
         Example:
         ```python
@@ -12547,6 +12575,10 @@ def add(
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function.
         - Must be called inside `tla.vec.func()`; supports vector–vector and vector–scalar.
+        - Both forms accept `f16/bf16/f32` and signed or unsigned 8/16/32/64-bit integers.
+        - A 64-bit vector occupies one 256-byte register and has at most 32 valid lanes.
+        - In the vector–scalar form, a typed scalar must match the vector element type.
+          Python literals are materialized in the vector element type.
 
         Example:
         ```python
@@ -12594,6 +12626,10 @@ def sub(
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function.
         - Must be called inside `tla.vec.func()`.
+        - Both forms accept `f16/bf16/f32` and signed or unsigned 8/16/32/64-bit integers.
+        - A 64-bit vector occupies one 256-byte register and has at most 32 valid lanes.
+        - In the vector–scalar form, a typed scalar must match the vector element type.
+          Python literals are materialized in the vector element type.
 
         Example:
         ```python
@@ -12701,6 +12737,10 @@ def mul(
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function.
         - Must be called inside `tla.vec.func()`.
+        - Both forms accept `f16/bf16/f32` and signed or unsigned 16/32/64-bit integers.
+        - A 64-bit vector occupies one 256-byte register and has at most 32 valid lanes.
+        - In the vector–scalar form, a typed scalar must match the vector element type.
+          Python literals are materialized in the vector element type.
 
         Example:
         ```python
@@ -13177,6 +13217,10 @@ def _vector_max(
           scalar form of the vector op.
         - The per-thread form needs both operands of the same type, and rejects
           unsigned integers and `Bool`; use signed integers or floats.
+        - The vector–vector and vector–scalar forms accept `f16/bf16/f32` and signed or unsigned 8/16/32/64-bit integers.
+        - A 64-bit vector occupies one 256-byte register and has at most 32 valid lanes.
+        - In the vector–scalar form, a typed scalar must match the vector element type.
+          Python literals are materialized in the vector element type.
 
         Example:
         ```python
@@ -13222,6 +13266,10 @@ def _vector_min(
           scalar form of the vector op.
         - The per-thread form needs both operands of the same type, and rejects
           unsigned integers and `Bool`; use signed integers or floats.
+        - The vector–vector and vector–scalar forms accept `f16/bf16/f32` and signed or unsigned 8/16/32/64-bit integers.
+        - A 64-bit vector occupies one 256-byte register and has at most 32 valid lanes.
+        - In the vector–scalar form, a typed scalar must match the vector element type.
+          Python literals are materialized in the vector element type.
 
         Example:
         ```python
@@ -13267,6 +13315,10 @@ def div(
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function.
         - Must be called inside `tla.vec.func()`.
+        - Both forms accept `f16/f32` and signed or unsigned 16/32/64-bit integers.
+        - A 64-bit vector occupies one 256-byte register and has at most 32 valid lanes.
+        - In the vector–scalar form, a typed scalar must match the vector element type.
+          Python literals are materialized in the vector element type.
 
         Example:
         ```python
@@ -13878,8 +13930,8 @@ def _emit_bitwise_unary(
     if element_type not in _BITWISE_UNARY_TYPES:
         _op_error(
             op_name,
-            f"tla.{op_name} requires f16/f32, i8/i16/i32 or an FP4 pair "
-            f"(f4e2m1x2/f4e1m2x2) element type, got {element_type}",
+            f"requires a signed or unsigned 8/16/32/64-bit integer, f16/f32, "
+            f"or an FP4 pair element type, got {element_type}",
         )
     result = emitter(
         operand_value.type,
@@ -13926,11 +13978,6 @@ def _emit_bitwise_binary(
     else:
         src0_desc = _vector_ssa_type_for_mlir_value(src0_value)
         src1_desc = _vector_ssa_type_for_mlir_value(src1_value)
-        if is_bool_element_type(src0_desc.element_type):
-            _op_error(
-                op_name,
-                "Bool VectorSSA is move-only (load/store); arithmetic is not supported",
-            )
         if src1_desc.element_type != src0_desc.element_type:
             _op_error(
                 op_name,
@@ -14076,8 +14123,10 @@ def bitwise_and(
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function.
         - Must be called inside `tla.vec.func()`.
-        - Vector source elements must be f16, bf16, f32, i32, i16, i8, u8, u16, u32, f4e2m1x2, or f4e1m2x2.
+        - Vector operands accept `Bool`, signed or unsigned 8/16/32/64-bit integers,
+          `f16/bf16/f32`, and packed FP4 pairs.
         - `f4e2m1x2` / `f4e1m2x2` vectors carry one FP4 pair per lane; a `mask` selects whole pairs.
+        - A 64-bit vector occupies one 256-byte register and has at most 32 valid lanes.
 
         Example:
         ```python
@@ -14116,8 +14165,10 @@ def bitwise_or(
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function.
         - Must be called inside `tla.vec.func()`.
-        - Vector source elements must be f16, bf16, f32, i32, i16, i8, u8, u16, u32, f4e2m1x2, or f4e1m2x2.
+        - Vector operands accept `Bool`, signed or unsigned 8/16/32/64-bit integers,
+          `f16/bf16/f32`, and packed FP4 pairs.
         - `f4e2m1x2` / `f4e1m2x2` vectors carry one FP4 pair per lane; a `mask` selects whole pairs.
+        - A 64-bit vector occupies one 256-byte register and has at most 32 valid lanes.
 
         Example:
         ```python
@@ -14156,8 +14207,10 @@ def bitwise_xor(
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function.
         - Must be called inside `tla.vec.func()`.
-        - Vector source elements must be f16, bf16, f32, i32, i16, i8, u8, u16, u32, f4e2m1x2, or f4e1m2x2.
+        - Vector operands accept `Bool`, signed or unsigned 8/16/32/64-bit integers,
+          `f16/bf16/f32`, and packed FP4 pairs.
         - `f4e2m1x2` / `f4e1m2x2` vectors carry one FP4 pair per lane; a `mask` selects whole pairs.
+        - A 64-bit vector occupies one 256-byte register and has at most 32 valid lanes.
 
         Example:
         ```python

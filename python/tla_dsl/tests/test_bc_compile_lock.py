@@ -34,6 +34,7 @@ def fake_build(tmp_path: Path, monkeypatch):
         (stubs / subdir).mkdir(parents=True)
         (stubs / subdir / "dma.cpp").write_text("dma")
         (stubs / subdir / "system_counter.cpp").write_text("counter")
+    (stubs / "Vector" / "basic_arithmetic.cpp").write_text("arithmetic")
     (stubs / "Vector" / "log.cpp").write_text("log")
     for op in ("arange_reg", "sub_abs", "axpy", "mul_inplace_add", "muls_cast"):
         (stubs / "Vector" / f"{op}.cpp").write_text(op)
@@ -364,6 +365,7 @@ def test_icache_aggregate_rebuilds_preexisting_counter_cache(fake_build):
     assert set(aiv.read_text().splitlines()) == {
         "arange_reg",
         "sub_abs",
+        "arithmetic",
         "axpy",
         "cast",
         "counter",

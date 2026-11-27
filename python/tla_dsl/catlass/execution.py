@@ -1718,6 +1718,13 @@ def _cache_key(
     }
     if "tla.arch.get_system_cycle" in tlair_mlir:
         key_payload["system_counter_build"] = _system_counter_build_id()
+    elif re.search(
+        r'"tla\.(?:abs|neg|adds?|subs?|muls?|divs?|mins?|bitwise_(?:and|or|xor|not))"'
+        r"\([^\n]*!tla\.vector<(?:[0-9]+|\?)xu?i64>"
+        r'|"tla\.maxs?"\([^\n]*!tla\.vector<(?:[0-9]+|\?)xui64>',
+        tlair_mlir,
+    ):
+        key_payload["b64_vector_helper_build"] = _system_counter_build_id()
     # The generic TLAIR prints the cast and its operand and result types on one line.
     if "!tla.f8e8m0" in tlair_mlir and any(
         '"tla.cast"' in line and "!tla.f8e8m0" in line

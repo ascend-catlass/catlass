@@ -120,7 +120,10 @@ Constraints:
 
 - Must be called inside a `@tla.kernel`-decorated kernel function.
 - Must be called inside `tla.vec.func()`.
+- Vector operands accept signed or unsigned 8/16/32/64-bit integers,
+  `f16/f32`, and packed FP4 pairs.
 - `f4e2m1x2` / `f4e1m2x2` vectors carry one FP4 pair per lane; a `mask` selects whole pairs.
+- A 64-bit vector occupies one 256-byte register and has at most 32 valid lanes.
 
 Example:
 
@@ -155,8 +158,10 @@ Constraints:
 
 - Must be called inside a `@tla.kernel`-decorated kernel function.
 - Must be called inside `tla.vec.func()`.
-- Vector source elements must be f16, bf16, f32, i32, i16, i8, u8, u16, u32, f4e2m1x2, or f4e1m2x2.
+- Vector operands accept `Bool`, signed or unsigned 8/16/32/64-bit integers,
+  `f16/bf16/f32`, and packed FP4 pairs.
 - `f4e2m1x2` / `f4e1m2x2` vectors carry one FP4 pair per lane; a `mask` selects whole pairs.
+- A 64-bit vector occupies one 256-byte register and has at most 32 valid lanes.
 
 Example:
 
@@ -191,8 +196,10 @@ Constraints:
 
 - Must be called inside a `@tla.kernel`-decorated kernel function.
 - Must be called inside `tla.vec.func()`.
-- Vector source elements must be f16, bf16, f32, i32, i16, i8, u8, u16, u32, f4e2m1x2, or f4e1m2x2.
+- Vector operands accept `Bool`, signed or unsigned 8/16/32/64-bit integers,
+  `f16/bf16/f32`, and packed FP4 pairs.
 - `f4e2m1x2` / `f4e1m2x2` vectors carry one FP4 pair per lane; a `mask` selects whole pairs.
+- A 64-bit vector occupies one 256-byte register and has at most 32 valid lanes.
 
 Example:
 
@@ -227,8 +234,10 @@ Constraints:
 
 - Must be called inside a `@tla.kernel`-decorated kernel function.
 - Must be called inside `tla.vec.func()`.
-- Vector source elements must be f16, bf16, f32, i32, i16, i8, u8, u16, u32, f4e2m1x2, or f4e1m2x2.
+- Vector operands accept `Bool`, signed or unsigned 8/16/32/64-bit integers,
+  `f16/bf16/f32`, and packed FP4 pairs.
 - `f4e2m1x2` / `f4e1m2x2` vectors carry one FP4 pair per lane; a `mask` selects whole pairs.
+- A 64-bit vector occupies one 256-byte register and has at most 32 valid lanes.
 
 Example:
 
