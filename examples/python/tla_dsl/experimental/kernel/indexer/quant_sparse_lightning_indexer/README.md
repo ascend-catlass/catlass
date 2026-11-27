@@ -1,10 +1,10 @@
-# QuantSparseLightningIndexerDsl Example Readme
+# QuantSparseLightningIndexer Example Readme
 
 ## 功能说明
 
 - 算子功能：对打包 MXFP4 Q/K 执行稀疏 Lightning Indexer 打分，在 candidate
   8-token block 中完成 TND/PA_BBND 寻址、可见性裁剪、32-head 加权 ReLU 归约和
-  确定性 TopK。入口为 `quant_sparse_lightning_indexer_dsl.py` 的 `run` 函数。
+  确定性 TopK。入口为 `quant_sparse_lightning_indexer.py` 的 `run` 函数。
 - 计算公式：记 `Q_s[i,h]`、`K_s[j]` 为 E8M0 scale，`W[i,h]` 为 head 权重，
   `candidate(i)` 为 query `i` 的有效 candidate token 集合：
 
@@ -28,22 +28,24 @@
 
 ## 代码组织
 
-`quant_sparse_lightning_indexer_dsl.py` 同时包含 Device kernel 和 host 调用入口：
+`quant_sparse_lightning_indexer.py` 同时包含 Device kernel 和 host 调用入口：
 
 | 组件 | 说明 |
 | ---- | ---- |
-| `prepare_candidates_kernel` | 在 UB bitmap 中去重 candidate block，生成升序 block 列表和连续 packed-K token 视图。 |
-| `qk_kernel` / `qk2_kernel` | 使用 MX MMAD 计算单行或两行 query 的 QK，L1/L0/L0C 由显式 mutex 管理。 |
-| `reduce_topk_kernel` | 32-head 顺序 BF16 加权归约、可见性过滤和确定性 TopK。 |
-| `reduce_chunk_topk_kernel` | 对大 TopK shape 按 token chunk 并行归约和排序。 |
+| `prepare_metadata_kernel` | 在 row-private UB bitmap 中去重 candidate block，并用并行前缀扫描生成升序 block 列表、有效 token 视图和每行 token 数。 |
+| `pack_candidates_kernel` | 根据去重后的 metadata 将 TND 或 PA_BBND K 及其 scale 物化为连续 packed-K row workspace。 |
+| `qk_kernel` / `qk2_stream_kernel` | 使用 MX MMAD 计算单行或两行 query 的 QK；L1、L0 和 L0C/Fixpipe 生命周期由三个粗粒度 mutex 管理。 |
+| `reduce_topk_kernel` | 处理单 chunk 的 32-head BF16 加权归约、可见性过滤和确定性 TopK。 |
+| `reduce_chunk_topk_kernel` | 对大 TopK shape 按 token chunk 并行归约和 packed-key 排序；完全空 padding chunk 跳过排序网络。 |
 | `merge_topk_kernel` / `merge_stage_topk_kernel` | 保留 top-K 前缀的串行或分层并行 merge。 |
 | `run` | 校验 host 参数，复用 workspace/compiled artifact，并按 shape 选择 kernel 组合。 |
 
 主要性能设计：
 
-- candidate 去重不依赖全局排序，并在同一 row 内按 AIV split 并行物化 packed-K。
-- 两行 query 合并到一次 QK launch，使两个 row 共享同一次 Cube wave。
-- 大 TopK 先并行生成 chunk TopK，再执行 top-K-preserving merge tree。
+- candidate metadata 与 packed-K 物化拆为两个并行阶段，避免每个 pack split 重复重建 bitmap；metadata 使用 64-thread 并行前缀扫描。
+- 两行 query 合并到一次 QK launch；Q、K 和 MX scale 的 L1/L0 staging 保持单次物化，并由粗粒度 mutex 控制跨 pipe 生命周期。
+- 大 TopK 先并行生成 packed-key chunk TopK，再执行 top-K-preserving merge tree；小 TopK 使用容量裁剪后的短叶排序树。
+- 全 padding chunk 的 key 已经有序，因此直接物化而不执行 bitonic 排序网络。
 - host 侧缓存 shape-stable workspace、DLPack binding template 和 compiled artifact。
 
 ## 参数说明
@@ -104,7 +106,7 @@ PYTHONPATH=examples/python/tla_dsl/experimental/kernel/indexer:$PYTHONPATH pytho
 import torch
 import torch_npu  # noqa: F401
 
-from quant_sparse_lightning_indexer_dsl.quant_sparse_lightning_indexer_dsl import run
+from quant_sparse_lightning_indexer.quant_sparse_lightning_indexer import run
 
 rows = 3
 key_length = 65
