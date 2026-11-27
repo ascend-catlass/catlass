@@ -52,6 +52,12 @@ def store_pack_b64(src: tla.Tensor, dst: tla.Tensor) -> None:
     ("dist", "source_dtype", "dest_dtype", "extent"),
     (
         (StoreDist.DIST_NORM, tla.Float32, tla.Float32, 64),
+        (StoreDist.DIST_NORM_B8, tla.UInt8, tla.UInt8, 256),
+        (StoreDist.DIST_NORM_B8, tla.UInt16, tla.UInt16, 128),
+        (StoreDist.DIST_NORM_B16, tla.UInt16, tla.UInt16, 128),
+        (StoreDist.DIST_NORM_B16, tla.UInt32, tla.UInt32, 64),
+        (StoreDist.DIST_NORM_B32, tla.UInt32, tla.UInt32, 64),
+        (StoreDist.DIST_NORM_B32, tla.UInt64, tla.UInt64, 32),
         # AscendC same-type natural packs (geometry 1).
         (StoreDist.DIST_PACK_B32, tla.Float32, tla.Float32, 64),
         (StoreDist.DIST_PACK_B32, tla.Int32, tla.Int32, 64),
@@ -86,6 +92,28 @@ def test_store_dist_emits_tlair(
     assert "tla.store" in mlir
     if dist != StoreDist.DIST_NORM:
         assert f"#tla.store_dist<{dist}>" in mlir
+
+
+@pytest.mark.parametrize(
+    ("dist", "source_dtype", "dest_dtype"),
+    (
+        (StoreDist.DIST_NORM_B16, tla.UInt8, tla.UInt8),
+        (StoreDist.DIST_NORM_B32, tla.UInt16, tla.UInt16),
+        (StoreDist.DIST_NORM_B8, tla.UInt32, tla.Int32),
+    ),
+)
+def test_explicit_norm_requires_compatible_types(
+    compiler_tlair: Any, dist: str, source_dtype: type[tla.Numeric], dest_dtype: type[tla.Numeric]
+) -> None:
+    with pytest.raises(TlaLoweringError, match="requires matching source and destination types"):
+        compiler_tlair(
+            store_dist,
+            type_args=(
+                _ub_tensor(source_dtype),
+                _ub_tensor(dest_dtype),
+                dist,
+            ),
+        )
 
 
 def test_store_pack_b32_f16_post_cast_layout(compiler_tlair: Any) -> None:

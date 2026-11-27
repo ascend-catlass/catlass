@@ -221,6 +221,9 @@ class MaskLoadDist:
 
 class StoreDist:
     DIST_NORM = "norm"
+    DIST_NORM_B8 = "norm_b8"
+    DIST_NORM_B16 = "norm_b16"
+    DIST_NORM_B32 = "norm_b32"
     DIST_PACK_B32 = "pack_b32"
     DIST_PACK_B16 = "pack_b16"
     DIST_PACK4_B32 = "pack4_b32"
@@ -237,6 +240,7 @@ class MaskStoreDist:
     """Mask store distribution modes."""
 
     DIST_NORM = "norm"
+    DIST_PACK = "mask_pack"
 
 
 class StoreParams:
@@ -307,13 +311,18 @@ class BlockStoreParams(StoreParams):
 
 @dataclass
 class MaskStoreParams(StoreParams):
-    """Store the full 32-byte mask register to a 32-byte-aligned UB address.
+    """Store a mask register to aligned UB.
 
-    The logical mask lane count must equal ``256 / sizeof(T)`` for the
-    destination element type.
+    ``DIST_NORM`` writes 32 bytes. In NORMAL mode its logical lane count
+    matches ``256 / sizeof(T)`` for the destination element type.
+    ``DIST_PACK`` writes the bits at even positions to 16 bytes.
+    In UPDATE mode ``post_update_stride`` is a byte count and the store
+    returns the next tile. A stride of zero keeps the current address.
     """
 
     store_dist: str = MaskStoreDist.DIST_NORM
+    post_mode: str = PostMode.POST_MODE_NORMAL
+    post_update_stride: Any = 0
 
 
 @dataclass
@@ -405,9 +414,14 @@ class MaskLoadParams(LoadParams):
     - ``DIST_NORM``: bit-packed mask load (default)
     - ``DIST_US``: bit upsample (VL/16 → VL/8)
     - ``DIST_DS``: bit downsample (VL/4 → VL/8)
+
+    In UPDATE mode ``post_update_stride`` is in bytes and the load returns
+    ``(mask, next_tile)``. A stride of zero keeps the current address.
     """
 
     load_dist: str = MaskLoadDist.DIST_NORM
+    post_mode: str = PostMode.POST_MODE_NORMAL
+    post_update_stride: Any = 0
 
 
 @dataclass

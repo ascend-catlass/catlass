@@ -93,15 +93,15 @@ def make_layout_kernel(
                         )
                 else:
                     values = source_tile.load()
+                    if tla.const_expr(not registers):
+                        values = values.bitcast(tla.UInt8)
                     if tla.const_expr(registers):
                         values = tla.pack(
                             tla.pack(values, part=tla.RegPart.LOW), part=tla.RegPart.LOW
                         )
                         destination_tile.store(values)
                     elif tla.const_expr(explicit):
-                        selected, _ = tla.update_mask(
-                            count * (32 // bits), dtype=source.element_type
-                        )
+                        selected, _ = tla.update_mask(count * 4, dtype=tla.UInt8)
                         if tla.const_expr(sparse):
                             selected = tla.bitwise_and(
                                 selected,

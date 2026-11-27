@@ -356,7 +356,7 @@ with tla.cube():
 函数原型：
 
 ```python
-tla.Tensor.load(params: LoadParams | None = None) -> MaskSSA | VectorSSA | tuple[VectorSSA, VectorSSA] | tuple[VectorSSA | tuple[VectorSSA, VectorSSA], _Tensor]
+tla.Tensor.load(params: LoadParams | None = None, *, mask: MaskSSA | None = None) -> MaskSSA | VectorSSA | tuple[VectorSSA, VectorSSA] | tuple[MaskSSA | VectorSSA | tuple[VectorSSA, VectorSSA], _Tensor]
 ```
 
 参数说明：
@@ -373,9 +373,9 @@ tla.Tensor.load(params: LoadParams | None = None) -> MaskSSA | VectorSSA | tuple
       | `DIST_NORM` | 默认连续载入 |
       | `DIST_BRC_B8` | 单个 b8 元素广播到全部 256 个 lane |
       | `DIST_BRC_B32` | 单个 b32 元素广播到全部 lane |
-      | `DIST_DINTLV_B8` | 读取 512 字节，偶数和奇数下标的 b8 元素分别填充两个 256-lane 向量 |
-      | `DIST_DINTLV_B16` | 读取 512 字节；返回两个 128-lane b16 寄存器，依次保存偶数、奇数位置的元素 |
-      | `DIST_DINTLV_B32` | 按 32 位字解交织，返回两个向量。支持 f32/i32/u32，UPDATE 时也支持 i64/u64/f64。 |
+      | `DIST_DINTLV_B8` | 对 512 字节解交织，返回两个保持源元素类型的向量（b8 类型为 256 lane，`UInt16` 为 128 lane） |
+      | `DIST_DINTLV_B16` | 对 512 字节解交织，返回两个 128-lane b16 向量或两个 64-lane `UInt32` 向量 |
+      | `DIST_DINTLV_B32` | 按 32 位字解交织，返回两个向量。支持 f32/i32/u32 和 i64/u64/f64。 |
       | `DIST_US_B8` / `DIST_US_B16` | 2 倍上采样 |
       | `DIST_DS_B8` / `DIST_DS_B16` | 读取 512 字节，每隔一个 b8/b16 元素保留一个，填充一个完整向量 |
       | `DIST_BRC_B16` | 单个 b16 元素广播 |
@@ -413,17 +413,27 @@ tla.Tensor.load(params: LoadParams | None = None) -> MaskSSA | VectorSSA | tuple
       | `DIST_US` | bit 上采样 |
       | `DIST_DS` | bit 下采样 |
 
+    - `post_mode`（`str`）：`POST_MODE_NORMAL` 或 `POST_MODE_UPDATE`。
+    - `post_update_stride`（`Any`）：MaskReg UPDATE 的非负步长，单位为字节。
+      默认值为 `0`，载入掩码后返回同一地址的 tile。
+- `mask`（`MaskSSA | None`）：`BlockLoadParams` 在两种 post 模式下均可使用的谓词。
+  32 字节 DataBlock 内只要有一个元素启用，就载入整块。只有块内全部元素被屏蔽时，
+  对应的结果块才置零。每个启用块的全部 32 字节都须在 UB 内可读。默认 `None` 启用全部块。
+
 约束说明：
 
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
 - 须在 `tla.vec.func(mode="simd")` 内调用；源 tile 须位于 UB。
 - 实际读取范围须位于可用 UB 地址空间内。
 - Mask 载入 `DIST_NORM` 要求 UB 元素类型为 b8/b16/b32/b64 标量。
-- 带位宽后缀的分布模式要求对应的元素存储位宽，`DIST_DINTLV_B32` 在 UPDATE 时也支持 b64。
-  b8 包含 Bool 和以单字节存储的编码。`DIST_BLK` 支持 b8/b16/b32。
-  单向量 b64 载入可使用 `DIST_NORM` 或完整 32 lane 的 `UnalignLoadParams` 载入。
+- 带位宽后缀的分布模式通常使用对应的元素存储位宽。对齐载入还支持 `UInt32` 搭配
+  `DIST_BRC_B8/B16` 或 `DIST_DINTLV_B16`、`UInt8` 搭配 `DIST_UNPACK_B16`、
+  `UInt16` 搭配 `DIST_DINTLV_B8`，以及 b64 搭配 `DIST_DINTLV_B32`。
+  搬运按分布指定的位宽执行，坐标和结果向量沿用源元素类型。
+  `DIST_BLK` 支持 b8/b16/b32。单向量 b64 载入可使用 `DIST_NORM` 或完整 32 lane 的
+  `UnalignLoadParams` 载入。
 - `DIST_DINTLV_B8` 支持 i8/u8/f8E4M3FN/f8E5M2/HiFloat8/E8M0 和打包类型
-  Float4E2M1x2/Float4E1M2x2。每个寄存器容纳
+  Float4E2M1x2/Float4E1M2x2/Int4x2。每个寄存器容纳
   256 个单字节元素，一次载入读取 `2 * 256 = 512` 字节，返回两个保持源元素类型的
   完整向量，依次保存偶数、奇数位置的元素。例如输入 `[a0, a1, a2, a3, ...]`
   对应输出 `[a0, a2, ...]` 和 `[a1, a3, ...]`。实际读取地址须按 32 字节
@@ -432,6 +442,9 @@ tla.Tensor.load(params: LoadParams | None = None) -> MaskSSA | VectorSSA | tuple
   半字节的顺序；每个结果包含 256 个打包元素，即 512 个 FP4 值。E8M0 按原始字节搬运，包括 0xFF NaN 编码；
   结果可通过普通对齐 store 写回，不支持算术和寄存器类型转换。不支持逻辑（未打包）
   FP4。Bool 按 b8 move-only 搬运（与 i8 相同）。
+- 使用 `UInt16` 时，`DIST_DINTLV_B8` 从按 32 字节对齐的地址读取 256 个
+  `UInt16` 元素（共 512 字节），将低字节打包到第一个 128-lane `UInt16` 向量，将高字节
+  打包到第二个向量。tile 坐标以 `UInt16` 元素为单位。
 - `DIST_DINTLV_B16` 的实际读取地址须按 32 字节对齐。
 - `DIST_UNPACK4_B8` 要求 1 字节元素，实际读取地址须按 32 字节对齐。
 - `DIST_BRC_B8` / `DIST_DS_B8` / `DIST_UNPACK_B8` 支持
@@ -451,9 +464,9 @@ tla.Tensor.load(params: LoadParams | None = None) -> MaskSSA | VectorSSA | tuple
 - 掩码载入字节偏移对齐（UB 字节地址 `base + offset×sizeof(T)`）：
   `DIST_NORM` → `VL/8`；`DIST_US` → `VL/16`；`DIST_DS` → `min(32, VL/4)`。
   VL=256 时为 32B / 16B / 32B。
-- 单向量对齐 `POST_MODE_UPDATE` 使用 `DIST_NORM`，支持的元素位宽为
-  b8/b16/b32/b64（Bool、有符号和无符号整数、FP8、HiFloat8、E8M0、FP4x2、
-  f16、bf16、f32 和 f64）。返回 `(vector, next_tile)`。
+- 单向量对齐 `POST_MODE_UPDATE` 支持 `DIST_NORM`、广播、上采样、下采样、展开和
+  DataBlock 广播分布，返回 `(vector, next_tile)`。`DIST_NORM` 也支持打包的 `Int4x2`
+  和 b64 类型。MaskReg UPDATE 返回 `(mask, next_tile)`。
   在 `tla.vec.func` 内须用 `tla.range` 赋回 `next_tile`（`while` 尚不支持嵌在
   `vec.func` 内）。窗口须已是原点窗（`coord=0`）；用 `tile_view`（或等价方式）
   切出所需 tile，UPDATE 不会自动折非零坐标。`NormalLoadParams`：
@@ -525,14 +538,15 @@ tla.Tensor.store(value: VectorSSA | MaskSSA | tuple[VectorSSA, VectorSSA], param
 
       | 取值 | 含义 |
       | --- | --- |
-      | `DIST_NORM` | 默认连续写回 |
+      | `DIST_NORM` | 按元素类型选择位宽并连续写回 |
+      | `DIST_NORM_B8/B16/B32` | 显式选择硬件写回位宽 |
       | `DIST_PACK_B16` | AscendC 同类型 PK_B16（b16→b16，或先验 cast 后的 b8→b8） |
       | `DIST_PACK_B32` | AscendC 同类型 PK_B32（b32→b32，或先验 cast 后的 b16→b16） |
       | `DIST_PACK_B64` | 写入 i64、u64 或 f64 lane 的低 32 位 |
       | `DIST_PACK4_B32` | 按 mask，将寄存器字节位置 0、4、…、252 写到 UB 字节位置 0、1、…、63 |
-      | `DIST_INTLV_B8` | 将两个 b8 寄存器交织写入连续目标元素 |
-      | `DIST_INTLV_B16` | 将两个 b16 寄存器交织 |
-      | `DIST_INTLV_B32` | 按 32 位字交织两个向量。支持 f32/i32/u32，UPDATE 时也支持 i64/u64/f64。 |
+      | `DIST_INTLV_B8` | 按字节交织两个向量 |
+      | `DIST_INTLV_B16` | 按 16 位字交织两个向量 |
+      | `DIST_INTLV_B32` | 按 32 位字交织两个向量，包括 i64/u64/f64 向量 |
       | `DIST_FIRST_ELEMENT_B8` | 仅写 lane 0（1 字节） |
       | `DIST_FIRST_ELEMENT_B16` | 仅写 lane 0（2 字节） |
       | `DIST_FIRST_ELEMENT_B32` | 仅写 lane 0（4 字节） |
@@ -556,8 +570,10 @@ tla.Tensor.store(value: VectorSSA | MaskSSA | tuple[VectorSSA, VectorSSA], param
     - `repeat_stride`（`Any`）：仅在 `POST_MODE_UPDATE` 时用作推进步长
       （32B 块单位）。默认 `0`。
   - `MaskStoreParams`：
-    - `store_dist`（`str`）：`tla.params.MaskStoreDist` token。默认
-      `DIST_NORM`。
+    - `store_dist`（`str`）：`DIST_NORM` 写回 MaskReg。`DIST_PACK` 保留偶数位置的位，写入 16 字节。
+    - `post_mode`（`str`）：`POST_MODE_NORMAL` 或 `POST_MODE_UPDATE`。
+    - `post_update_stride`（`Any`）：MaskReg UPDATE 的非负步长，单位为字节。
+      默认值为 `0`，写回掩码后返回同一地址的 tile。
   - `dst.store(mask, tla.params.UnalignMaskStoreParams())` 将 `mask` 中每个 lane 的值用一位表示，
     打包写入 `dst` 指向的一维连续 UB 窗口（`coord=0`）。
     b16 写入 16 字节，要求 `dst` 起始地址按 16 字节对齐。
@@ -576,19 +592,25 @@ tla.Tensor.store(value: VectorSSA | MaskSSA | tuple[VectorSSA, VectorSSA], param
 - 须在 `@tla.kernel` 装饰的 kernel 函数体内调用。
 - 须在 `tla.vec.func(mode="simd")` 内调用；目标 tile 须位于 UB。
 
-**`POST_MODE_NORMAL` 模式**
-
-- `DIST_PACK4_B32` 支持源和目标均为相同的 4 字节元素类型，也支持 1、2 或 4 字节
-  源元素搭配 1 字节目标元素。该模式向按 32 字节对齐的地址最多写入 64 字节。
+- 显式 `DIST_NORM_B8/B16/B32` 要求源向量与 UB tile 的元素类型一致。对于 8、16、32 位元素，
+  写回位宽可等于或小于元素位宽。指令按所选写回位宽读取原始谓词位，也适用于显式传入的
+  `mask=`。例如 B16 读取第 0、2、4 等位。使用较窄分布时，按元素位宽生成的默认谓词
+  只原位写回各有效元素的低位。对 `UInt32`，默认谓词使用第 0、4、8 等位，因此 B16
+  写回每个有效 `UInt32` 元素的低 16 位。仅置位元素位宽有效位的显式谓词效果相同。
+  从 UB 读出的谓词若设置了其他位，也可能启用元素内的其他写回位置。
+  对于 64 位元素，`DIST_NORM_B32` 写回每个有效元素的两个 32 位字。
+- `DIST_PACK4_B32` 在两种 post 模式下均要求源和目标的元素类型相同，支持 1、2 或 4 字节元素。
+  将较宽寄存器的原始字节写回 UB 时，可先用 `bitcast` 将寄存器重解释为与目标相同的字节类型，例如 `UInt8`。
+  该模式向按 32 字节对齐的地址最多写入 64 字节。
   处理 FP32→FP8 结果时，写回前使用 `RegSlot.ZERO` 将转换结果放入寄存器字节位置
   0、4、…、252。
 - `DIST_PACK_B16`、`DIST_PACK_B32` 和 `DIST_PACK_B64` 要求源和目标元素类型匹配。
   B16 支持 1 字节或 2 字节元素，B32 支持 2 字节或 4 字节元素，B64 支持 8 字节元素。
   每个目标元素可容纳两个有效源 lane。
 - `DIST_INTLV_B8` / `DIST_INTLV_B16` / `DIST_INTLV_B32` 要求 `value` 为
-  同类型满 VL 双向量二元组，且与目标元素类型匹配。B8 支持 Bool/i8/u8/f8*/hif8/e8m0/fp4x2。
-  B16 支持 f16/bf16/i16/u16。B32 支持 f32/i32/u32，UPDATE 时也支持 i64/u64/f64。
-  拒绝谓词 `mask`。
+  同类型满 VL 双向量二元组，且与目标元素类型匹配。在 NORMAL 模式下，
+  `DIST_INTLV_B8` 也接受 `UInt16`，`DIST_INTLV_B16` 也接受 `UInt32`。
+  这些模式拒绝谓词 `mask`。
 - first-element 模式要求被写值与目标 tile 的元素宽度匹配后缀
   （b8 → 1 字节，b16 → 2 字节，b32 → 4 字节）；传入谓词 `mask` 会报错。
 - `UnalignStoreParams` 在 NORMAL 模式下按目标有效长度写回，最多写入一个向量的元素。
@@ -610,8 +632,8 @@ with tla.vec.func(mode="simd"):
         store_dist=tla.params.StoreDist.DIST_PACK4_B32))
 ```
 
-- 单向量对齐 `POST_MODE_UPDATE` 使用 `DIST_NORM`，源和目标元素类型匹配，
-  位宽为 b8/b16/b32/b64。返回下一个窗口。在
+- 单向量对齐 `POST_MODE_UPDATE` 支持 NORM、PACK 和 FIRST_ELEMENT 分布，类型约束见上文。
+  返回下一个窗口。在
   `tla.vec.func` 内须用 `tla.range` 赋回。与 UPDATE `load` 相同：调用前须为
   原点窗（`coord=0`）。`NormalStoreParams`：默认 `post_update_stride=0` 按
   `tile_extent`（`origin_shape`）推进；显式 stride 与填充解耦。

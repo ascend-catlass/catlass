@@ -95,11 +95,12 @@ static Value castToLiveUbPtr(OpBuilder& b, Location loc, Value newPtr, Type ubPt
 
 /// Emit ``llvm.hivm.vldsx1.post.*`` and return ``{vec, newPtr}``.
 static FailureOr<std::pair<Value, Value>> emitVldsx1Post(
-    OpBuilder& b, Location loc, Value ptr, Value strideElems, Type elemType, Type vecTy)
+    OpBuilder& b, Location loc, Value ptr, Value strideElems, Type elemType, Type vecTy,
+    hivmave::LoadDist distribution = hivmave::LoadDist::NORM, bool post = true)
 {
     Value byteOff = strideElemsToByteOffI32(b, loc, strideElems, elemType);
-    Value dist = b.create<arith::ConstantIntOp>(loc, /*value=*/0, /*width=*/32);
-    Value postEn = b.create<arith::ConstantIntOp>(loc, /*value=*/1, /*width=*/32);
+    Value dist = b.create<arith::ConstantIntOp>(loc, static_cast<uint32_t>(distribution), 32);
+    Value postEn = b.create<arith::ConstantIntOp>(loc, post, 32);
     Type ubPtrTy = getUbPtrType(b.getContext());
     Type structTy = LLVM::LLVMStructType::getLiteral(b.getContext(), {vecTy, ubPtrTy});
     Operation* op = nullptr;
@@ -159,14 +160,16 @@ static FailureOr<std::pair<Value, Value>> emitVldsx1Post(
 
 /// Emit Align ``vstsx1.post`` and return HW ``newPtr``.
 static FailureOr<Value> emitVstsx1Post(
-    OpBuilder& b, Location loc, Value src, Value ptr, Value strideElems, Value preg, Type elemType)
+    OpBuilder& b, Location loc, Value src, Value ptr, Value strideElems, Value preg, Type elemType,
+    std::optional<hivmave::StoreDist> distribution = std::nullopt, bool post = true, Type destElem = {})
 {
-    Value byteOff = strideElemsToByteOffI32(b, loc, strideElems, elemType);
+    Value byteOff = strideElemsToByteOffI32(b, loc, strideElems, destElem ? destElem : elemType);
     // DistVST NORM_B8/B16/B32 encodes 0/1/2; b64 uses the b32 carrier.
     const int64_t elemBytes = elementStorageBytes(elemType);
     const int64_t normDist = elemBytes == 1 ? 0 : elemBytes == 2 ? 1 : 2;
-    Value dist = b.create<arith::ConstantIntOp>(loc, normDist, /*width=*/32);
-    Value postEn = b.create<arith::ConstantIntOp>(loc, /*value=*/1, /*width=*/32);
+    Value dist =
+        b.create<arith::ConstantIntOp>(loc, distribution ? static_cast<uint32_t>(*distribution) : normDist, 32);
+    Value postEn = b.create<arith::ConstantIntOp>(loc, post, 32);
     Type ubPtrTy = getUbPtrType(b.getContext());
     Operation* op = nullptr;
     if (isAlignPostByteAliasElem(elemType)) {
@@ -473,6 +476,12 @@ static hivmave::LoadDist mapTlaLoadDistToAve(::LoadDist dist)
 static hivmave::StoreDist mapTlaStoreDistToAve(::StoreDist dist)
 {
     switch (dist) {
+        case ::StoreDist::norm_b8:
+            return hivmave::StoreDist::NORM_B8;
+        case ::StoreDist::norm_b16:
+            return hivmave::StoreDist::NORM_B16;
+        case ::StoreDist::norm_b32:
+            return hivmave::StoreDist::NORM_B32;
         case ::StoreDist::pack_b32:
             return hivmave::StoreDist::PK_B32;
         case ::StoreDist::pack_b16:
@@ -1435,16 +1444,16 @@ static LogicalResult emitVstsx2Intlv(
 {
     Value constantZero = b.create<arith::ConstantIntOp>(loc, 0, 32);
     Value distribution = b.create<arith::ConstantIntOp>(loc, static_cast<uint32_t>(pattern), 32);
-    switch (pattern) {
-        case hivmave::StoreDist::INTLV_B8:
+    switch (cast<VectorType>(data0.getType()).getElementTypeBitWidth()) {
+        case 8:
             b.create<hivm_regbaseintrins::Vstsx2V256B8InstrOp>(
                 loc, data0, data1, ubPtr, constantZero, distribution, constantZero, mask);
             return success();
-        case hivmave::StoreDist::INTLV_B16:
+        case 16:
             b.create<hivm_regbaseintrins::Vstsx2V128B16InstrOp>(
                 loc, data0, data1, ubPtr, constantZero, distribution, constantZero, mask);
             return success();
-        case hivmave::StoreDist::INTLV_B32:
+        case 32:
             b.create<hivm_regbaseintrins::Vstsx2V64B32InstrOp>(
                 loc, data0, data1, ubPtr, constantZero, distribution, constantZero, mask);
             return success();
@@ -2942,6 +2951,36 @@ static FailureOr<Value> resolveEffectiveUbPtr(
 // ops; scf control flow and index arithmetic are carried verbatim. Each op
 // derives its own vector/mask width from its operands or result element type,
 // so a single region may mix element widths (e.g. across tla.cast).
+static func::FuncOp getOrCreateMaskTransferCall(
+    ModuleOp module, Location loc, StringRef name, TypeRange args, TypeRange results)
+{
+    if (auto existing = module.lookupSymbol<func::FuncOp>(name))
+        return existing;
+    OpBuilder moduleBuilder(module.getBodyRegion());
+    auto callee = moduleBuilder.create<func::FuncOp>(loc, name, FunctionType::get(module.getContext(), args, results));
+    annotateDataBlockCopyUpdateLibraryCall(callee);
+    return callee;
+}
+
+static Value emitMaskStore(
+    OpBuilder& b, Location loc, ModuleOp module, Value addr, Value mask, Value stride, bool packed, bool post)
+{
+    StringRef name = post ? (packed ? "_mlir_ciface_mask_store_pack_update" : "_mlir_ciface_mask_store_update") :
+                            "_mlir_ciface_mask_store_pack";
+    SmallVector<Value> args{addr, castMaskToPregType(b, loc, mask, fullPregVecType(b.getContext()))};
+    if (post)
+        args.push_back(::tla::castToI32(b, loc, stride));
+    SmallVector<Type> argTypes;
+    for (Value arg : args)
+        argTypes.push_back(arg.getType());
+    SmallVector<Type> results;
+    if (post)
+        results.push_back(addr.getType());
+    auto callee = getOrCreateMaskTransferCall(module, loc, name, argTypes, results);
+    auto call = b.create<func::CallOp>(loc, callee, args);
+    return post ? call.getResult(0) : Value{};
+}
+
 static LogicalResult lowerLoad(
     ::tla::LoadOp loadOp, OpBuilder& b, ModuleOp module, DenseMap<Value, Value>& valueMap,
     AutoFullPredicateCache& fullMasks)
@@ -3022,21 +3061,39 @@ static LogicalResult lowerLoad(
     bool isBoolLoad = isBoolVectorElement(sourceType.getElementType()) ||
                       (isa<::tla::VectorSSAType>(loadOp.getResult().getType()) &&
                        isBoolVectorElement(cast<::tla::VectorSSAType>(loadOp.getResult().getType()).getElementType()));
+    Type semanticElem = cast<::tla::TlaTensorType>(loadOp.getSource().getType()).getPtr().getPointee();
+    if ((semanticElem.isUnsignedInteger(32) &&
+         (pattern == hivmave::LoadDist::BRC_B8 || pattern == hivmave::LoadDist::BRC_B16)) ||
+        (semanticElem.isUnsignedInteger(8) && pattern == hivmave::LoadDist::UNPK_B16)) {
+        auto addr = memrefByteAddrI64(b, loc, source);
+        if (failed(addr))
+            return loadOp.emitError("distributed load requires an effective UB address"), failure();
+        auto loaded =
+            emitVldsx1Post(b, loc, intToUbPtr(b, loc, *addr), zero, semanticElem, opCtx->vecType, pattern, false);
+        if (failed(loaded))
+            return failure();
+        valueMap[loadOp.getResult()] = loaded->first;
+        return success();
+    }
     if (pattern == hivmave::LoadDist::DINTLV_B8) {
-        // Encoded byte types use i8 carriers; select from the original TLA type.
-        Type elementType = cast<::tla::TlaTensorType>(loadOp.getSource().getType()).getPtr().getPointee();
-        auto meta = b.create<mlir::memref::ExtractStridedMetadataOp>(loc, source);
-        Value basePtr = b.create<mlir::memref::ExtractAlignedPointerAsIndexOp>(loc, meta.getBaseBuffer());
-        // Preserve the complete view offset; every supported element is one byte.
-        Value byteAddr = b.create<arith::AddIOp>(loc, basePtr, meta.getOffset());
-        Value ptr = intToUbPtr(b, loc, byteAddr);
+        // The memref can erase signedness and low-precision encodings.
+        Type elementType = semanticElem;
+        auto byteAddr = memrefByteAddrI64(b, loc, source);
+        if (failed(byteAddr))
+            return loadOp.emitError("failed to compute DINTLV_B8 source address"), failure();
+        Value ptr = intToUbPtr(b, loc, *byteAddr);
         Type pairType = LLVM::LLVMStructType::getLiteral(b.getContext(), {opCtx->vecType, opCtx->vecType});
         Value pair;
-        // Bool (i1) and signed/signless i8 share the s8 dual load; u8 uses u8.
-        if (elementType.isInteger(8) || isBoolElementType(elementType)) {
+        if (elementType.isUnsignedInteger(16) || elementType.isInteger(8) || isBoolElementType(elementType) ||
+            isInt4PairType(elementType)) {
             Value constantZero = b.create<arith::ConstantIntOp>(loc, 0, 32);
             Value distribution = b.create<arith::ConstantIntOp>(loc, static_cast<uint32_t>(pattern), 32);
-            if (elementType.isInteger(8) && elementType.isUnsignedInteger())
+            // Ascend C uses the u16 mover with the byte deinterleave distribution.
+            if (elementType.isUnsignedInteger(16))
+                pair = b.create<hivm_regbaseintrins::Vldsx2V128U16InstrOp>(
+                            loc, pairType, ptr, constantZero, distribution, constantZero)
+                           .getResult();
+            else if (elementType.isUnsignedInteger(8))
                 pair = b.create<hivm_regbaseintrins::Vldsx2V256U8InstrOp>(
                             loc, pairType, ptr, constantZero, distribution, constantZero)
                            .getResult();
@@ -3077,23 +3134,22 @@ static LogicalResult lowerLoad(
         // unconverted when its consumer is a register helper call. Emit the
         // same native intrinsic here, with the complete view offset, so the
         // load composes directly with either native ops or helpers.
-        auto metadata = b.create<mlir::memref::ExtractStridedMetadataOp>(loc, source);
-        Value base = b.create<mlir::memref::ExtractAlignedPointerAsIndexOp>(loc, metadata.getBaseBuffer());
-        Value elementBytes =
-            b.create<arith::ConstantIndexOp>(loc, sourceType.getElementType().getIntOrFloatBitWidth() / 8);
-        Value offset = b.create<arith::MulIOp>(loc, metadata.getOffset(), elementBytes);
-        Value address = b.create<arith::AddIOp>(loc, base, offset);
-        Value pointer = intToUbPtr(b, loc, ::tla::castValueToI64(b, loc, address));
+        auto addr = memrefByteAddrI64(b, loc, source);
+        if (failed(addr))
+            return loadOp.emitError("failed to compute DINTLV source address"), failure();
+        Value pointer = intToUbPtr(b, loc, *addr);
         Value constantZero = b.create<arith::ConstantIntOp>(loc, 0, 32);
         Value distribution = b.create<arith::ConstantIntOp>(loc, static_cast<uint32_t>(pattern), 32);
-        auto pairType = LLVM::LLVMStructType::getLiteral(b.getContext(), {opCtx->vecType, opCtx->vecType});
-        Value pair;
         Type elemTy = sourceType.getElementType();
+        bool usesB32Carrier = isAlignB64Elem(elemTy);
+        auto vectorType = usesB32Carrier ? dualTransferCarrierType(b.getContext(), 4) : opCtx->vecType;
+        auto pairType = LLVM::LLVMStructType::getLiteral(b.getContext(), {vectorType, vectorType});
+        Value pair;
         if (elemTy.isF32()) {
             pair = b.create<hivm_regbaseintrins::Vldsx2V64F32InstrOp>(
                         loc, pairType, pointer, constantZero, distribution, constantZero)
                        .getResult();
-        } else if (elemTy.isInteger(32)) {
+        } else if (elemTy.isInteger(32) || usesB32Carrier) {
             // AscendC DINTLV_B32: b32 deinterleave (i32/u32 share u32 mover).
             pair = b.create<hivm_regbaseintrins::Vldsx2V64U32InstrOp>(
                         loc, pairType, pointer, constantZero, distribution, constantZero)
@@ -3112,8 +3168,14 @@ static LogicalResult lowerLoad(
                         loc, pairType, pointer, constantZero, distribution, constantZero)
                        .getResult();
         }
-        valueMap[loadOp.getResult()] = b.create<LLVM::ExtractValueOp>(loc, pair, 0);
-        valueMap[r2] = b.create<LLVM::ExtractValueOp>(loc, pair, 1);
+        auto extract = [&](int64_t index) -> Value {
+            Value reg = b.create<LLVM::ExtractValueOp>(loc, pair, index);
+            if (!usesB32Carrier)
+                return reg;
+            return b.create<mlir::vector::BitCastOp>(loc, opCtx->vecType, reg).getResult();
+        };
+        valueMap[loadOp.getResult()] = extract(0);
+        valueMap[r2] = extract(1);
         return success();
     }
     // Strided block load (vsldb): lower through a library call like the
@@ -3141,8 +3203,14 @@ static LogicalResult lowerLoad(
         // The gather reads all 8 DataBlocks, so the predicate is all-true;
         // build it via PgePattern::ALL like the other no-mask lowerings
         // (a dense<true> arith constant is not selectable in bisheng).
-        Value allTrue = allTrueMaskFor(fullMasks, loc, opCtx->vecType, loadOp.getResult().getType());
-        auto call = b.create<func::CallOp>(loc, callee, ValueRange{loadSrc, blockStrideVal, repeatStrideVal, allTrue});
+        Value predicate = loadOp.getMask() ?
+                              valueMap.lookup(loadOp.getMask()) :
+                              allTrueMaskFor(fullMasks, loc, opCtx->vecType, loadOp.getResult().getType());
+        if (!predicate)
+            return failure();
+        predicate = castMaskToPregType(b, loc, predicate, fullPregVecType(b.getContext()));
+        auto call =
+            b.create<func::CallOp>(loc, callee, ValueRange{loadSrc, blockStrideVal, repeatStrideVal, predicate});
         Value loaded = call.getResult(0);
         if (viaBytes)
             loaded = b.create<mlir::vector::BitCastOp>(loc, opCtx->vecType, loaded).getResult();
@@ -3223,6 +3291,28 @@ static LogicalResult lowerLoadUpdate(
     Type tlaSrcElem = sourceType.getElementType();
     if (auto tlaTensor = dyn_cast<::tla::TlaTensorType>(loadOp.getSource().getType()))
         tlaSrcElem = tlaTensor.getPtr().getPointee();
+    if (isa<::tla::MaskSSAType>(loadOp.getResult().getType())) {
+        auto addr = resolveEffectiveUbPtr(loadOp.getSource(), b, loc, valueMap);
+        Value stride = lookupOrCloneScalarValue(b, loadOp.getPostUpdateStride(), valueMap);
+        if (failed(addr) || !stride)
+            return loadOp.emitError("failed to materialize MaskSSA UPDATE load operands"), failure();
+        auto dist = loadOp.getLoadDist() ? loadOp.getLoadDist()->getLoadDist() : ::LoadDist::norm;
+        StringRef name = dist == ::LoadDist::us ? "_mlir_ciface_mask_load_us_update" :
+                         dist == ::LoadDist::ds ? "_mlir_ciface_mask_load_ds_update" :
+                                                  "_mlir_ciface_mask_load_update";
+        auto retptrType = LLVM::LLVMPointerType::get(b.getContext());
+        auto slot = fullMasks.createRetptrSlot(b, loc, retptrType, b.getI64Type());
+        if (failed(slot))
+            return loadOp.emitError("failed to allocate MaskSSA UPDATE load result slot"), failure();
+        auto pregType = fullPregVecType(b.getContext());
+        auto callee =
+            getOrCreateMaskTransferCall(module, loc, name, {addr->getType(), b.getI32Type(), retptrType}, {pregType});
+        auto call = b.create<func::CallOp>(loc, callee, ValueRange{*addr, ::tla::castToI32(b, loc, stride), *slot});
+        valueMap[loadOp.getResult()] = call.getResult(0);
+        Value next = b.create<LLVM::LoadOp>(loc, b.getI64Type(), *slot);
+        mapUpdateNextPtrI64(loadOp.getNextPtr(), next, valueMap);
+        return success();
+    }
     Type tlaResultElem = tlaSrcElem;
     if (auto tlaVec = dyn_cast<::tla::VectorSSAType>(loadOp.getResult().getType()))
         tlaResultElem = tlaVec.getElementType();
@@ -3254,8 +3344,12 @@ static LogicalResult lowerLoadUpdate(
         Type resultVecType = viaBytes ? byteRegisterTypeFor(opCtx->vecType) : Type(opCtx->vecType);
         auto callee = getOrCreateLoadUpdateRetptrLibraryCall(
             module, loc, resultVecType, ("_mlir_ciface_load_with_stride_post_update_retptr_" + suffix));
-        Value allTrue = allTrueMaskFor(fullMasks, loc, opCtx->vecType, loadOp.getResult().getType());
-        Value preg = castMaskToPregType(b, loc, allTrue, fullPregVecType(b.getContext()));
+        Value predicate = loadOp.getMask() ?
+                              valueMap.lookup(loadOp.getMask()) :
+                              allTrueMaskFor(fullMasks, loc, opCtx->vecType, loadOp.getResult().getType());
+        if (!predicate)
+            return failure();
+        Value preg = castMaskToPregType(b, loc, predicate, fullPregVecType(b.getContext()));
         auto slotOr = fullMasks.createRetptrSlot(b, loc, LLVM::LLVMPointerType::get(b.getContext()), b.getI64Type());
         if (failed(slotOr))
             return loadOp.emitError("failed to allocate load_update retptr slot in outlined func entry"), failure();
@@ -3292,10 +3386,11 @@ static LogicalResult lowerLoadUpdate(
         mapUpdateNextPtrI64(loadOp.getNextPtr(), b.create<LLVM::PtrToIntOp>(loc, b.getI64Type(), next), valueMap);
         return success();
     }
-    Type elemTy = sourceType.getElementType();
-    FailureOr<std::pair<Value, Value>> emitted = emitVldsx1Post(b, loc, *ptrOr, stride, elemTy, opCtx->vecType);
+    auto dist =
+        loadOp.getLoadDist() ? mapTlaLoadDistToAve(loadOp.getLoadDist()->getLoadDist()) : hivmave::LoadDist::NORM;
+    auto emitted = emitVldsx1Post(b, loc, *ptrOr, stride, tlaSrcElem, opCtx->vecType, dist);
     if (failed(emitted))
-        return loadOp.emitError("unsupported element type for tla.load_update: ") << elemTy, failure();
+        return loadOp.emitError("unsupported element type for tla.load_update: ") << tlaSrcElem, failure();
     valueMap[loadOp.getResult()] = emitted->first;
     mapUpdateNextPtrI64(
         loadOp.getNextPtr(), b.create<LLVM::PtrToIntOp>(loc, b.getI64Type(), emitted->second), valueMap);
@@ -4687,6 +4782,13 @@ static LogicalResult lowerStore(
 
     // MaskSSA source: 1/2/4/8-byte UB ← i1 memref view ← masked_store <NORM_B8>.
     if (isa<::tla::MaskSSAType>(storeOp.getSource().getType())) {
+        if (storeOp.getStoreDist() && storeOp.getStoreDist()->getStoreDist() == ::StoreDist::mask_pack) {
+            auto addr = memrefByteAddrI64(b, loc, dest);
+            if (failed(addr))
+                return storeOp.emitError("failed to compute MaskSSA store address"), failure();
+            emitMaskStore(b, loc, module, intToUbPtr(b, loc, *addr), source, {}, true, false);
+            return success();
+        }
         auto maskType = cast<::tla::MaskSSAType>(storeOp.getSource().getType());
         int64_t lanes = maskType.getPhysicalLanes();
         auto i1MemrefOr = materializeI1MaskMemrefFromUb(b, loc, dest, lanes);
@@ -4743,7 +4845,8 @@ static LogicalResult lowerStore(
         return failure();
 
     auto dist = storeOp.getStoreDist() ? storeOp.getStoreDist()->getStoreDist() : ::StoreDist::norm;
-    if (isB64 && dist == ::StoreDist::norm) {
+    int64_t normBytes = ::tla::getExplicitNormStoreBytes(dist);
+    if (isB64 && (dist == ::StoreDist::norm || dist == ::StoreDist::norm_b32)) {
         auto words = VectorType::get({64}, b.getI32Type());
         source = b.create<mlir::vector::BitCastOp>(loc, words, source).getResult();
         if (mask) {
@@ -4785,20 +4888,16 @@ static LogicalResult lowerStore(
             Value source2Val = valueMap.lookup(storeOp.getSource2());
             if (!source2Val)
                 return failure();
-            int64_t elemBytes = elementStorageBytes(tlaStoreElem);
-            if (elemBytes != 1 && elemBytes != 2 && elemBytes != 4)
-                return storeOp.emitError("unsupported element type for intlv store"), failure();
-            Value data0 = bitcastToIntlvCarrier(b, loc, source, elemBytes);
-            Value data1 = bitcastToIntlvCarrier(b, loc, source2Val, elemBytes);
+            int64_t carrierBytes = std::min<int64_t>(elementStorageBytes(tlaStoreElem), 4);
+            Value data0 = bitcastToIntlvCarrier(b, loc, source, carrierBytes);
+            Value data1 = bitcastToIntlvCarrier(b, loc, source2Val, carrierBytes);
             if (!data0 || !data1)
                 return storeOp.emitError("intlv store sources are not vectors"), failure();
-            auto metadata = b.create<mlir::memref::ExtractStridedMetadataOp>(loc, storeDest);
-            Value base = b.create<mlir::memref::ExtractAlignedPointerAsIndexOp>(loc, metadata.getBaseBuffer());
-            Value elementBytes = b.create<arith::ConstantIndexOp>(loc, elemBytes);
-            Value offset = b.create<arith::MulIOp>(loc, metadata.getOffset(), elementBytes);
-            Value address = b.create<arith::AddIOp>(loc, base, offset);
-            Value pointer = intToUbPtr(b, loc, ::tla::castValueToI64(b, loc, address));
-            Value mask = fullMasks.get(loc, opCtx->lanes);
+            auto addr = memrefByteAddrI64(b, loc, storeDest);
+            if (failed(addr))
+                return storeOp.emitError("failed to compute INTLV store address"), failure();
+            Value pointer = intToUbPtr(b, loc, *addr);
+            Value mask = fullMasks.get(loc, 256 / carrierBytes);
             if (failed(emitVstsx2Intlv(b, loc, pattern, data0, data1, pointer, mask)))
                 return storeOp.emitError("unexpected dual store_dist"), failure();
             return success();
@@ -4847,6 +4946,15 @@ static LogicalResult lowerStore(
             Value pregMask = storeOp.getMask() ? castMaskToPregType(b, loc, mask, fullPregVecType(b.getContext())) :
                                                  unpackB64Mask(b, loc, mask);
             emitVstsx1PackB64(b, loc, source, pointer, pregMask);
+        } else if (normBytes && normBytes < elementStorageBytes(tlaStoreElem)) {
+            auto addr = memrefByteAddrI64(b, loc, storeDest);
+            if (failed(addr))
+                return storeOp.emitError("failed to compute explicit NORM store address"), failure();
+            Value preg = castMaskToPregType(b, loc, mask, fullPregVecType(b.getContext()));
+            auto pattern = mapTlaStoreDistToAve(dist);
+            if (failed(emitVstsx1Post(
+                    b, loc, source, intToUbPtr(b, loc, *addr), zero, preg, tlaStoreElem, pattern, false)))
+                return failure();
         } else if (storeDistAttr && storeDistAttr->getStoreDist() != ::StoreDist::norm) {
             // Bool uses the i8 UB view (storeDest) for b8 Dist / FIRST_ELEMENT.
             hivmave::StoreDist pattern = mapTlaStoreDistToAve(storeDistAttr->getStoreDist());
@@ -4868,6 +4976,16 @@ static LogicalResult lowerStoreUpdate(
     Value source = valueMap.lookup(storeOp.getSource());
     if (!dest || !source)
         return failure();
+    auto storeDist = storeOp.getStoreDist() ? storeOp.getStoreDist()->getStoreDist() : ::StoreDist::norm;
+    if (isa<::tla::MaskSSAType>(storeOp.getSource().getType())) {
+        auto addr = resolveEffectiveUbPtr(storeOp.getDest(), b, loc, valueMap);
+        Value stride = lookupOrCloneScalarValue(b, storeOp.getPostUpdateStride(), valueMap);
+        if (failed(addr) || !stride)
+            return storeOp.emitError("failed to materialize MaskSSA UPDATE store operands"), failure();
+        Value next = emitMaskStore(b, loc, module, *addr, source, stride, storeDist == ::StoreDist::mask_pack, true);
+        mapUpdateNextPtrI64(storeOp.getNextPtr(), b.create<LLVM::PtrToIntOp>(loc, b.getI64Type(), next), valueMap);
+        return success();
+    }
     auto sourceTy = dyn_cast<VectorType>(source.getType());
     if (!sourceTy)
         return failure();
@@ -4912,12 +5030,16 @@ static LogicalResult lowerStoreUpdate(
     if (failed(opCtx))
         return failure();
     bool generatedMaskNeedsB64Punpack = false;
+    auto geometry = getPackedStorePredicateGeometry(storeDist, tlaStoreElem, tlaDestElem);
+    if (!geometry)
+        return storeOp.emitError("unsupported UPDATE store predicate geometry"), failure();
+    int64_t multiplier = geometry->sourcePredicateLanesPerDestElement;
     if (storeOp.getMask()) {
         mask = valueMap.lookup(storeOp.getMask());
         if (!mask)
             return failure();
     } else if (auto destStaticLanes = getStaticTlaTensorValidLaneCount(storeOp.getDest())) {
-        int64_t activeLanes = *destStaticLanes >= opCtx->lanes ? opCtx->lanes : *destStaticLanes;
+        int64_t activeLanes = std::min(std::min(*destStaticLanes, opCtx->lanes) * multiplier, opCtx->lanes);
         if (activeLanes == opCtx->lanes)
             mask = fullMasks.get(loc, opCtx->lanes);
         else {
@@ -4929,7 +5051,12 @@ static LogicalResult lowerStoreUpdate(
         auto destLanes = getTlaTensorValidLaneCount(b, loc, storeOp.getDest(), valueMap);
         if (failed(destLanes))
             return failure();
-        mask = createPredicatePlt(b, loc, opCtx->maskVecType, opCtx->lanes, *destLanes).getRes();
+        Value active = *destLanes;
+        if (multiplier != 1) {
+            Value scale = b.create<arith::ConstantIndexOp>(loc, multiplier);
+            active = b.create<arith::MulIOp>(loc, active, scale);
+        }
+        mask = createPredicatePlt(b, loc, opCtx->maskVecType, opCtx->lanes, active).getRes();
         generatedMaskNeedsB64Punpack = isAlignB64Elem(sourceTy.getElementType());
     }
     VectorType pregVecType = fullPregVecType(b.getContext());
@@ -4977,7 +5104,11 @@ static LogicalResult lowerStoreUpdate(
         stride = lookupOrCloneScalarValue(b, storeOp.getPostUpdateStride(), valueMap);
     if (!stride)
         return storeOp.emitError("failed to materialize post_update_stride in vector helper"), failure();
-    FailureOr<Value> newPtrOr = emitVstsx1Post(b, loc, source, *ptrOr, stride, pregMask, tlaStoreElem);
+    std::optional<hivmave::StoreDist> distribution;
+    if (storeDist != ::StoreDist::norm)
+        distribution = mapTlaStoreDistToAve(storeDist);
+    auto newPtrOr =
+        emitVstsx1Post(b, loc, source, *ptrOr, stride, pregMask, tlaStoreElem, distribution, true, tlaDestElem);
     if (failed(newPtrOr))
         return storeOp.emitError("unsupported element type for tla.store_update: ") << tlaStoreElem, failure();
     mapUpdateNextPtrI64(storeOp.getNextPtr(), b.create<LLVM::PtrToIntOp>(loc, b.getI64Type(), *newPtrOr), valueMap);

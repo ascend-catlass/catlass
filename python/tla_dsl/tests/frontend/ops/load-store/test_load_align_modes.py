@@ -149,7 +149,7 @@ def test_load_align_requires_ub(
 
 
 @pytest.mark.parametrize("mode,types,source_extent,lanes", _MODES)
-def test_load_align_rejects_post_update(
+def test_load_align_emits_post_update(
     compiler_tlair: Any, mode: str, types, source_extent: int, lanes: int
 ) -> None:
     @tla.kernel
@@ -163,11 +163,9 @@ def test_load_align_rejects_post_update(
                     )
                 )
 
-    with pytest.raises(
-        UnsupportedExecutionLowering,
-        match=f"post_mode=update with load_dist='{mode}' is not supported yet",
-    ):
-        compiler_tlair(update, type_args=(_tensor(types[0][0], source_extent),))
+    ir = compiler_tlair(update, type_args=(_tensor(types[0][0], source_extent),))
+    assert '"tla.load_update"' in ir
+    assert f"#tla.load_dist<{mode}>" in ir
 
 
 def test_mask_downsample_remains_a_mask_load(compiler_tlair: Any) -> None:

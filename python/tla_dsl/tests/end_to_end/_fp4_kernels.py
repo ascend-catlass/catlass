@@ -98,9 +98,7 @@ def make_native_kernel(
                         storage, tla.make_shape(64), tla.make_coord(packet)
                     )
                     if tla.const_expr(direction == "narrow"):
-                        encoded = (
-                            values.load().to(fp4_dtype, cast_params).bitcast(tla.UInt8)
-                        )
+                        encoded = values.load().to(fp4_dtype, cast_params)
                         if tla.const_expr(element_count % values_per_register == 0):
                             packed_tile.store(encoded, store_params, mask=full_bytes)
                         else:

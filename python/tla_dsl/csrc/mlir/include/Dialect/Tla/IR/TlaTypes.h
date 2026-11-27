@@ -192,6 +192,20 @@ struct PackedStorePredicateGeometry {
     int64_t sourcePredicateLanesPerDestElement;
 };
 
+inline int64_t getExplicitNormStoreBytes(::StoreDist dist)
+{
+    switch (dist) {
+        case ::StoreDist::norm_b8:
+            return 1;
+        case ::StoreDist::norm_b16:
+            return 2;
+        case ::StoreDist::norm_b32:
+            return 4;
+        default:
+            return 0;
+    }
+}
+
 /// Return the supported non-NORM store predicate geometry for ``storeDist``.
 ///
 /// PACK_B16/B32/B64 write the lower half of each hardware lane. For a
@@ -209,17 +223,18 @@ inline std::optional<PackedStorePredicateGeometry> getPackedStorePredicateGeomet
     int64_t sourceBits = elementStorageBits(sourceElementType);
     int64_t destBits = elementStorageBits(destElementType);
     if (sourceElementType == destElementType) {
+        if (int64_t normBits = getExplicitNormStoreBytes(storeDist) * 8) {
+            if ((normBits <= sourceBits && sourceBits <= 32) || (normBits == 32 && sourceBits == 64))
+                return PackedStorePredicateGeometry{1};
+        }
         if ((storeDist == ::StoreDist::pack_b16 && (sourceBits == 8 || sourceBits == 16)) ||
             (storeDist == ::StoreDist::pack_b32 && (sourceBits == 16 || sourceBits == 32)) ||
             (storeDist == ::StoreDist::pack_b64 && sourceBits == 64))
             return PackedStorePredicateGeometry{2};
-        if (storeDist == ::StoreDist::pack4_b32 && sourceBits == 32)
+        if (storeDist == ::StoreDist::pack4_b32 && (sourceBits == 8 || sourceBits == 16 || sourceBits == 32))
             return PackedStorePredicateGeometry{4};
     }
 
-    if (storeDist == ::StoreDist::pack4_b32 && destBits == 8 &&
-        (sourceBits == 8 || sourceBits == 16 || sourceBits == 32))
-        return PackedStorePredicateGeometry{32 / sourceBits};
     if ((storeDist == ::StoreDist::first_element_b8 && sourceBits == 8 && destBits == 8) ||
         (storeDist == ::StoreDist::first_element_b16 && sourceBits == 16 && destBits == 16) ||
         (storeDist == ::StoreDist::first_element_b32 && sourceBits == 32 && destBits == 32))

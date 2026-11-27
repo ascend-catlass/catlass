@@ -3,11 +3,11 @@
 !s_byte = !tla.tensor<!tla.layout<!tla.shape<256>, !tla.stride<1>, !tla.shape<256>, RowMajor>, !tla.coord<0>, !tla.ptr<i8, ub, 32>>
 !d_byte = !tla.tensor<!tla.layout<!tla.shape<13>, !tla.stride<1>, !tla.shape<13>, RowMajor>, !tla.coord<0>, !tla.ptr<i8, ub, 32>>
 !s_half = !tla.tensor<!tla.layout<!tla.shape<128>, !tla.stride<1>, !tla.shape<128>, RowMajor>, !tla.coord<0>, !tla.ptr<i16, ub, 32>>
-!d_half = !tla.tensor<!tla.layout<!tla.shape<13>, !tla.stride<1>, !tla.shape<13>, RowMajor>, !tla.coord<0>, !tla.ptr<i8, ub, 32>>
+!d_half = !tla.tensor<!tla.layout<!tla.shape<13>, !tla.stride<1>, !tla.shape<13>, RowMajor>, !tla.coord<0>, !tla.ptr<i16, ub, 32>>
 !s_word = !tla.tensor<!tla.layout<!tla.shape<64>, !tla.stride<1>, !tla.shape<64>, RowMajor>, !tla.coord<0>, !tla.ptr<i32, ub, 32>>
-!d_word = !tla.tensor<!tla.layout<!tla.shape<13>, !tla.stride<1>, !tla.shape<13>, RowMajor>, !tla.coord<0>, !tla.ptr<i8, ub, 32>>
+!d_word = !tla.tensor<!tla.layout<!tla.shape<13>, !tla.stride<1>, !tla.shape<13>, RowMajor>, !tla.coord<0>, !tla.ptr<i32, ub, 32>>
 !s_full = !tla.tensor<!tla.layout<!tla.shape<256>, !tla.stride<1>, !tla.shape<256>, RowMajor>, !tla.coord<0>, !tla.ptr<f8E5M2, ub, 32>>
-!d_full = !tla.tensor<!tla.layout<!tla.shape<64>, !tla.stride<1>, !tla.shape<64>, RowMajor>, !tla.coord<0>, !tla.ptr<i8, ub, 32>>
+!d_full = !tla.tensor<!tla.layout<!tla.shape<64>, !tla.stride<1>, !tla.shape<64>, RowMajor>, !tla.coord<0>, !tla.ptr<f8E5M2, ub, 32>>
 !us_e4m3 = !tla.tensor<!tla.layout<!tla.shape<64>, !tla.stride<1>, !tla.shape<64>, RowMajor>, !tla.coord<0>, !tla.ptr<f8E4M3FN, ub, 32>>
 !ud_e4m3 = !tla.tensor<!tla.layout<!tla.shape<256>, !tla.stride<1>, !tla.shape<256>, RowMajor>, !tla.coord<0>, !tla.ptr<f8E4M3FN, ub, 32>>
 
@@ -39,17 +39,17 @@ module {
 
 // CHECK-LABEL: func.func @pack4_half
 // CHECK-LABEL: func.func private @vector_region_
-// CHECK: %[[N_HALF:.*]] = arith.constant 26 : index
+// CHECK: %[[N_HALF:.*]] = arith.constant 52 : index
 // CHECK: ave.hir.plt %[[N_HALF]]
 // CHECK: ave.hir.masked_store <PK4_B32>
 // CHECK-SAME: vector<128xi16>
-  func.func @pack4_half(%sm: memref<128xi16, #hivm.address_space<ub>>, %dm: memref<13xi8, #hivm.address_space<ub>>) {
+  func.func @pack4_half(%sm: memref<128xi16, #hivm.address_space<ub>>, %dm: memref<13xi16, #hivm.address_space<ub>>) {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
     %cs = arith.constant 128 : index
     %cd = arith.constant 13 : index
     %s = tla.tensor_desc %sm shape [%c1, %cs, %c1, %c1] stride [%cs, %c1, %c1, %c1] origin_shape [%c1, %cs] coord [%c0, %c0] : memref<128xi16, #hivm.address_space<ub>> -> !s_half
-    %d = tla.tensor_desc %dm shape [%c1, %cd, %c1, %c1] stride [%cd, %c1, %c1, %c1] origin_shape [%c1, %cd] coord [%c0, %c0] : memref<13xi8, #hivm.address_space<ub>> -> !d_half
+    %d = tla.tensor_desc %dm shape [%c1, %cd, %c1, %c1] stride [%cd, %c1, %c1, %c1] origin_shape [%c1, %cd] coord [%c0, %c0] : memref<13xi16, #hivm.address_space<ub>> -> !d_half
     "tla.vec.func"() ({
       %ss = "tla.make_shape"() : () -> !tla.shape<128>
       %ds = "tla.make_shape"() : () -> !tla.shape<13>
@@ -64,17 +64,17 @@ module {
 
 // CHECK-LABEL: func.func @pack4_word
 // CHECK-LABEL: func.func private @vector_region_
-// CHECK: %[[N_WORD:.*]] = arith.constant 13 : index
+// CHECK: %[[N_WORD:.*]] = arith.constant 52 : index
 // CHECK: ave.hir.plt %[[N_WORD]]
 // CHECK: ave.hir.masked_store <PK4_B32>
 // CHECK-SAME: vector<64xi32>
-  func.func @pack4_word(%sm: memref<64xi32, #hivm.address_space<ub>>, %dm: memref<13xi8, #hivm.address_space<ub>>) {
+  func.func @pack4_word(%sm: memref<64xi32, #hivm.address_space<ub>>, %dm: memref<13xi32, #hivm.address_space<ub>>) {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
     %cs = arith.constant 64 : index
     %cd = arith.constant 13 : index
     %s = tla.tensor_desc %sm shape [%c1, %cs, %c1, %c1] stride [%cs, %c1, %c1, %c1] origin_shape [%c1, %cs] coord [%c0, %c0] : memref<64xi32, #hivm.address_space<ub>> -> !s_word
-    %d = tla.tensor_desc %dm shape [%c1, %cd, %c1, %c1] stride [%cd, %c1, %c1, %c1] origin_shape [%c1, %cd] coord [%c0, %c0] : memref<13xi8, #hivm.address_space<ub>> -> !d_word
+    %d = tla.tensor_desc %dm shape [%c1, %cd, %c1, %c1] stride [%cd, %c1, %c1, %c1] origin_shape [%c1, %cd] coord [%c0, %c0] : memref<13xi32, #hivm.address_space<ub>> -> !d_word
     "tla.vec.func"() ({
       %ss = "tla.make_shape"() : () -> !tla.shape<64>
       %ds = "tla.make_shape"() : () -> !tla.shape<13>
@@ -92,13 +92,13 @@ module {
 // CHECK-NOT: ave.hir.plt
 // CHECK: ave.hir.masked_store <PK4_B32>
 // CHECK-SAME: vector<256xf8E5M2>
-  func.func @pack4_full(%sm: memref<256xf8E5M2, #hivm.address_space<ub>>, %dm: memref<64xi8, #hivm.address_space<ub>>) {
+  func.func @pack4_full(%sm: memref<256xf8E5M2, #hivm.address_space<ub>>, %dm: memref<64xf8E5M2, #hivm.address_space<ub>>) {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
     %cs = arith.constant 256 : index
     %cd = arith.constant 64 : index
     %s = tla.tensor_desc %sm shape [%c1, %cs, %c1, %c1] stride [%cs, %c1, %c1, %c1] origin_shape [%c1, %cs] coord [%c0, %c0] : memref<256xf8E5M2, #hivm.address_space<ub>> -> !s_full
-    %d = tla.tensor_desc %dm shape [%c1, %cd, %c1, %c1] stride [%cd, %c1, %c1, %c1] origin_shape [%c1, %cd] coord [%c0, %c0] : memref<64xi8, #hivm.address_space<ub>> -> !d_full
+    %d = tla.tensor_desc %dm shape [%c1, %cd, %c1, %c1] stride [%cd, %c1, %c1, %c1] origin_shape [%c1, %cd] coord [%c0, %c0] : memref<64xf8E5M2, #hivm.address_space<ub>> -> !d_full
     "tla.vec.func"() ({
       %ss = "tla.make_shape"() : () -> !tla.shape<256>
       %ds = "tla.make_shape"() : () -> !tla.shape<64>

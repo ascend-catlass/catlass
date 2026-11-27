@@ -129,7 +129,7 @@ def dynamic_quant_kernel(
 
                     # Each clipped code fits in INT8, so storing its low byte is exact.
                     tla.tile_view(ub_q, tile_shape, coord).store(
-                        q_int, pack_int8, mask=mask
+                        q_int.bitcast(tla.Int8), pack_int8
                     )
                     tla.tile_view(ub_deq, tile_shape, coord).store(
                         tla.mul(q_float, scale_vec, mask=mask)

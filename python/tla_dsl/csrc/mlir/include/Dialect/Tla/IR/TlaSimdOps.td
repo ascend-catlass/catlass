@@ -838,8 +838,10 @@ def Tla_LoadOp : Tla_Op<"load", []> {
       elements), requiring aligned access. The b16 variant, ``dintlv_b16``,
       reads 512 bytes into two 128-lane b16 registers through native ``vldsx2``
       intrinsics and also requires aligned access. ``dintlv_b8`` reads
-      512 bytes into two 256-lane b8 registers and requires aligned access.
-      i8/u8 use native ``vldsx2`` intrinsics; f8E4M3FN/f8E5M2/HiFloat8/E8M0
+      512 bytes and requires aligned access. Byte types produce two 256-lane
+      registers. For ui16, it packs the low and high input bytes into two
+      128-lane ui16 registers. i8/u8/ui16 use native ``vldsx2`` intrinsics.
+      f8E4M3FN/f8E5M2/HiFloat8/E8M0
       and packed Float4E2M1x2/Float4E1M2x2 retain typed Ascend C
       ``LoadAlign`` helpers. HiFloat8, E8M0 and FP4x2 have i8 IR carriers,
       distinct from the native f8 vectors used by standard FP8. FP4x2
@@ -873,6 +875,7 @@ def Tla_LoadOp : Tla_Op<"load", []> {
     Must be nested inside a ``tla.vec.func`` region.
   }];
   let arguments = (ins Tla_TensorType:$source,
+                       Optional<Tla_MaskSSAType>:$mask,
                        OptionalAttr<I32Attr>:$block_stride,
                        OptionalAttr<I32Attr>:$repeat_stride,
                        OptionalAttr<Tla_LoadDistAttr>:$load_dist,
@@ -881,8 +884,8 @@ def Tla_LoadOp : Tla_Op<"load", []> {
   let results = (outs AnyTypeOf<[Tla_VectorSSAType, Tla_MaskSSAType]>:$result,
                       Optional<Tla_VectorSSAType>:$result2);
   let assemblyFormat = [{
-    $source attr-dict `:`
-    type($source) `->` qualified(type($result)) (`,` qualified(type($result2))^)?
+    $source (`mask` $mask^)? attr-dict `:`
+    type($source) (`mask` qualified(type($mask))^)? `->` qualified(type($result)) (`,` qualified(type($result2))^)?
   }];
   let hasVerifier = 1;
 }
@@ -969,7 +972,7 @@ def Tla_UnpackOp : Tla_Op<"unpack", [Pure]> {
   let hasVerifier = 1;
 }
 
-def Tla_LoadUpdateOp : Tla_Op<"load_update", []> {
+def Tla_LoadUpdateOp : Tla_Op<"load_update", [AttrSizedOperandSegments]> {
   let summary = "PostMode UPDATE load (aligned or DATA_BLOCK_COPY)";
   let description = [{
     UB load with AscendC ``POST_MODE_UPDATE``. Results are the loaded
@@ -990,15 +993,17 @@ def Tla_LoadUpdateOp : Tla_Op<"load_update", []> {
   let arguments = (ins Tla_TensorType:$source,
                        Tla_IntegerOrIndexType:$post_update_stride,
                        Optional<Tla_IntegerOrIndexType>:$block_stride,
+                       Optional<Tla_MaskSSAType>:$mask,
                        OptionalAttr<Tla_LoadDistAttr>:$load_dist);
-  let results = (outs Tla_VectorSSAType:$result,
+  let results = (outs AnyTypeOf<[Tla_VectorSSAType, Tla_MaskSSAType]>:$result,
                       Optional<Tla_VectorSSAType>:$result2,
                       Tla_PtrType:$next_ptr);
   let assemblyFormat = [{
     $source `post_update_stride` $post_update_stride
-    (`block_stride` $block_stride^)? attr-dict `:`
+    (`block_stride` $block_stride^)? (`mask` $mask^)? attr-dict `:`
     type($source) `post_update_stride` qualified(type($post_update_stride))
     (`block_stride` qualified(type($block_stride))^)?
+    (`mask` qualified(type($mask))^)?
     `->` qualified(type($result)) (`second` qualified(type($result2))^)?
     `,` qualified(type($next_ptr))
   }];
@@ -1024,7 +1029,7 @@ def Tla_StoreUpdateOp : Tla_Op<"store_update", [AttrSizedOperandSegments]> {
     UnAlign UPDATE is not this op.
   }];
   let arguments = (ins Tla_TensorType:$dest,
-                       Tla_VectorSSAType:$source,
+                       AnyTypeOf<[Tla_VectorSSAType, Tla_MaskSSAType]>:$source,
                        Tla_IntegerOrIndexType:$post_update_stride,
                        Optional<Tla_MaskSSAType>:$mask,
                        Optional<Tla_IntegerOrIndexType>:$block_stride,

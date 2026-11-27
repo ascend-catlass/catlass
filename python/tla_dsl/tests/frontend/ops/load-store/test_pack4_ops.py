@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from catlass import tla
-from catlass.execution_lowering import TlaLoweringError, UnsupportedExecutionLowering
+from catlass.execution_lowering import TlaLoweringError
 from catlass.params import (
     LoadDist,
     NormalLoadParams,
@@ -65,7 +65,7 @@ def test_unpack4_rejects_non_byte_storage(compiler_tlair, dtype):
 
 
 @pytest.mark.parametrize(
-    "source, lanes",
+    "dtype, lanes",
     [
         (tla.Int8, 256),
         (tla.Int16, 128),
@@ -74,13 +74,13 @@ def test_unpack4_rejects_non_byte_storage(compiler_tlair, dtype):
         (tla.Float8E5M2, 256),
     ],
 )
-def test_pack4_accepts_byte_halfword_and_word_registers(compiler_tlair, source, lanes):
-    ir = compiler_tlair(_pack, type_args=(_ub(source, lanes), _ub(tla.UInt8, 13)))
+def test_pack4_accepts_matching_element_types(compiler_tlair, dtype, lanes):
+    ir = compiler_tlair(_pack, type_args=(_ub(dtype, lanes), _ub(dtype, 13)))
     assert "#tla.store_dist<pack4_b32>" in ir
 
 
 @pytest.mark.parametrize("dest", [tla.Int16, tla.Float32])
-def test_pack4_rejects_non_byte_destination(compiler_tlair, dest):
+def test_pack4_rejects_mismatched_wide_destination(compiler_tlair, dest):
     with pytest.raises(TlaLoweringError, match="DIST_PACK4_B32 requires"):
         compiler_tlair(_pack, type_args=(_ub(tla.Int32, 64), _ub(dest, 64)))
 
@@ -113,19 +113,21 @@ def _pack_update(source: tla.Tensor, destination: tla.Tensor):
             )
 
 
+@pytest.mark.parametrize("kernel", [_pack, _pack_update])
+@pytest.mark.parametrize("dest", [tla.Bool, tla.UInt8])
+def test_pack4_rejects_mismatched_byte_destination(compiler_tlair, kernel, dest):
+    with pytest.raises(
+        (tla.TlaCoreAPIError, TlaLoweringError),
+        match="element types must match|requires matching",
+    ):
+        compiler_tlair(kernel, type_args=(_ub(tla.Float32, 64), _ub(dest, 64)))
+
+
 @pytest.mark.parametrize(
-    "kernel, diagnostic",
-    [
-        (
-            _unpack_update,
-            "post_mode=update with load_dist='unpack4_b8' is not supported yet",
-        ),
-        (
-            _pack_update,
-            "post_mode=update with store_dist='pack4_b32' is not supported yet",
-        ),
-    ],
+    "kernel, op, distribution",
+    [(_unpack_update, "load", "unpack4_b8"), (_pack_update, "store", "pack4_b32")],
 )
-def test_pack4_modes_reject_post_update(compiler_tlair, kernel, diagnostic):
-    with pytest.raises(UnsupportedExecutionLowering, match=diagnostic):
-        compiler_tlair(kernel, type_args=(_ub(tla.UInt8, 256), _ub(tla.UInt8, 256)))
+def test_pack4_modes_emit_post_update(compiler_tlair, kernel, op, distribution):
+    ir = compiler_tlair(kernel, type_args=(_ub(tla.UInt8, 256), _ub(tla.UInt8, 256)))
+    assert f'"tla.{op}_update"' in ir
+    assert f"#tla.{op}_dist<{distribution}>" in ir

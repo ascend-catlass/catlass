@@ -2,7 +2,7 @@
 // RUN: sed -n '/^\/\/ BEGIN_FP4_E2M1$/,/^\/\/ END_FP4_E2M1$/p' %s | sed '1d;$d;s|^// ||' > %t.FP4_E2M1.mlir && not %tla_compile %t.FP4_E2M1.mlir -o %t 2>&1 | %filecheck %s --check-prefix=FP4-E2M1
 // RUN: sed -n '/^\/\/ BEGIN_FP4_E1M2$/,/^\/\/ END_FP4_E1M2$/p' %s | sed '1d;$d;s|^// ||' > %t.FP4_E1M2.mlir && not %tla_compile %t.FP4_E1M2.mlir -o %t 2>&1 | %filecheck %s --check-prefix=FP4-E1M2
 // RUN: sed -n '/^\/\/ BEGIN_SOURCE_I16$/,/^\/\/ END_SOURCE_I16$/p' %s | sed '1d;$d;s|^// ||' > %t.SOURCE_I16.mlir && not %tla_compile %t.SOURCE_I16.mlir -o %t 2>&1 | %filecheck %s --check-prefix=SOURCE-I16
-// RUN: sed -n '/^\/\/ BEGIN_SOURCE_UI16$/,/^\/\/ END_SOURCE_UI16$/p' %s | sed '1d;$d;s|^// ||' > %t.SOURCE_UI16.mlir && not %tla_compile %t.SOURCE_UI16.mlir -o %t 2>&1 | %filecheck %s --check-prefix=SOURCE-UI16
+// RUN: sed -n '/^\/\/ BEGIN_RESULT_UI16_LANES$/,/^\/\/ END_RESULT_UI16_LANES$/p' %s | sed '1d;$d;s|^// ||' > %t.RESULT_UI16_LANES.mlir && not %tla_compile %t.RESULT_UI16_LANES.mlir -o %t 2>&1 | %filecheck %s --check-prefix=RESULT-UI16-LANES
 // RUN: sed -n '/^\/\/ BEGIN_SOURCE_UI32$/,/^\/\/ END_SOURCE_UI32$/p' %s | sed '1d;$d;s|^// ||' > %t.SOURCE_UI32.mlir && not %tla_compile %t.SOURCE_UI32.mlir -o %t 2>&1 | %filecheck %s --check-prefix=SOURCE-UI32
 // RUN: sed -n '/^\/\/ BEGIN_RESULT_LANES$/,/^\/\/ END_RESULT_LANES$/p' %s | sed '1d;$d;s|^// ||' > %t.RESULT_LANES.mlir && not %tla_compile %t.RESULT_LANES.mlir -o %t 2>&1 | %filecheck %s --check-prefix=RESULT-LANES
 // RUN: sed -n '/^\/\/ BEGIN_RESULT_SOURCE_TYPE$/,/^\/\/ END_RESULT_SOURCE_TYPE$/p' %s | sed '1d;$d;s|^// ||' > %t.RESULT_SOURCE_TYPE.mlir && not %tla_compile %t.RESULT_SOURCE_TYPE.mlir -o %t 2>&1 | %filecheck %s --check-prefix=RESULT-SOURCE-TYPE
@@ -117,7 +117,7 @@
 // END_MASK
 
 // SOURCE-I16: dintlv_b8 requires a 1-byte source element type
-// SOURCE-UI16: dintlv_b8 requires a 1-byte source element type
+// RESULT-UI16-LANES: dintlv_b8 requires two identical full 128-lane vectors matching the source type
 // SOURCE-UI32: dintlv_b8 requires a 1-byte source element type
 // RESULT-LANES: dintlv_b8 requires two identical full 256-lane vectors matching the source type
 // RESULT-SOURCE-TYPE: dintlv_b8 requires two identical full 256-lane vectors matching the source type
@@ -138,7 +138,7 @@
 // }
 // END_SOURCE_I16
 
-// BEGIN_SOURCE_UI16
+// BEGIN_RESULT_UI16_LANES
 // !source = !tla.tensor<!tla.layout<!tla.shape<512>, !tla.stride<1>, !tla.shape<512>, RowMajor>, !tla.coord<0>, !tla.ptr<ui16, ub, 1>>
 // module {
 //   func.func @invalid_load(%s: memref<512xui16, #hivm.address_space<ub>>) {
@@ -147,12 +147,12 @@
 //     %c512 = arith.constant 512 : index
 //     %src = tla.tensor_desc %s shape [%c1, %c512, %c1, %c1] stride [%c512, %c1, %c1, %c1] origin_shape [%c1, %c512] coord [%c0, %c0] : memref<512xui16, #hivm.address_space<ub>> -> !source
 //     "tla.vec.func"() ({
-//       %v0, %v1 = tla.load %src {load_dist = #tla.load_dist<dintlv_b8>} : !source -> !tla.vector<128xui16>, !tla.vector<128xui16>
+//       %v0, %v1 = tla.load %src {load_dist = #tla.load_dist<dintlv_b8>} : !source -> !tla.vector<64xui16>, !tla.vector<64xui16>
 //     }) : () -> ()
 //     return
 //   }
 // }
-// END_SOURCE_UI16
+// END_RESULT_UI16_LANES
 
 // BEGIN_SOURCE_UI32
 // !source = !tla.tensor<!tla.layout<!tla.shape<512>, !tla.stride<1>, !tla.shape<512>, RowMajor>, !tla.coord<0>, !tla.ptr<ui32, ub, 1>>

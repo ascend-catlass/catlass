@@ -214,9 +214,10 @@ def Tla_LoadDistAttr : Tla_EnumAttr<"LoadDist", "load_dist"> {
   let assemblyFormat = "`<` params `>`";
   let description = [{
     Broadcast/load distribution pattern for tla.load.
-    ``dintlv_b8`` reads 512 b8 elements from a 32-byte-aligned UB
-    address and separates even/odd elements into two full 256-lane
-    registers of the source type; requires two matching results.
+    ``dintlv_b8`` reads 512 bytes from a 32-byte-aligned UB address and
+    separates even/odd bytes into two full registers of the source type.
+    Each result has 256 lanes for byte types or 128 lanes for ui16 in
+    ``tla.load``.
     ``dintlv_b16`` / ``dintlv_b32`` are dual-destination de-interleave
     loads (even/odd elements into two vector registers); require a second
     result. ``dintlv_b16`` reads 256 b16 elements (512 bytes) from a
@@ -277,6 +278,10 @@ def Tla_StoreDist_PackB64 : I32EnumAttrCase<"pack_b64", 7>;
 def Tla_StoreDist_IntlvB8 : I32EnumAttrCase<"intlv_b8", 8>;
 def Tla_StoreDist_IntlvB16 : I32EnumAttrCase<"intlv_b16", 9>;
 def Tla_StoreDist_IntlvB32 : I32EnumAttrCase<"intlv_b32", 10>;
+def Tla_StoreDist_NormB8 : I32EnumAttrCase<"norm_b8", 11>;
+def Tla_StoreDist_NormB16 : I32EnumAttrCase<"norm_b16", 12>;
+def Tla_StoreDist_NormB32 : I32EnumAttrCase<"norm_b32", 13>;
+def Tla_StoreDist_MaskPack : I32EnumAttrCase<"mask_pack", 14>;
 def Tla_StoreDistEnum : Tla_I32Enum<"StoreDist", "Store distribution for tla.store.", [
   Tla_StoreDist_Norm,
   Tla_StoreDist_PackB32,
@@ -288,7 +293,11 @@ def Tla_StoreDistEnum : Tla_I32Enum<"StoreDist", "Store distribution for tla.sto
   Tla_StoreDist_PackB64,
   Tla_StoreDist_IntlvB8,
   Tla_StoreDist_IntlvB16,
-  Tla_StoreDist_IntlvB32
+  Tla_StoreDist_IntlvB32,
+  Tla_StoreDist_NormB8,
+  Tla_StoreDist_NormB16,
+  Tla_StoreDist_NormB32,
+  Tla_StoreDist_MaskPack
 ]>;
 def Tla_StoreDistAttr : Tla_EnumAttr<"StoreDist", "store_dist"> {
   let parameters = (ins EnumParameter<Tla_StoreDistEnum>:$store_dist);
@@ -302,9 +311,9 @@ def Tla_StoreDistAttr : Tla_EnumAttr<"StoreDist", "store_dist"> {
        consecutive 32-bit slots. The register and UB destination must have
        the same element type (i64, u64, or f64).
      - DIST_PACK4_B32: Store the low byte of each 32-bit register slot to
-       consecutive b8 destination elements at a 32-byte-aligned address.
-       Supports b8/b16/b32 sources; the predicate is in the source lane
-       domain. Byte positions 0,4,...,252 contain the payload. This does
+       consecutive bytes at a 32-byte-aligned address. Requires matching
+       b8/b16/b32 source and destination element types. The predicate is in
+       the source lane domain. Byte positions 0,4,...,252 contain the payload. This does
        not combine separate FP4 nibbles into a byte.
      - DIST_FIRST_ELEMENT_B8/B16/B32 (AscendC ``DIST_FIRST_ELEMENT_*`` / HIVMAVE
        ``ONEPT_B*``): element store that ignores the mask and writes only the

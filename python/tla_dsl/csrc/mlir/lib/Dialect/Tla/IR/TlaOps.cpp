@@ -1658,6 +1658,26 @@ TLA_VERIFY_MASKED_VECTOR_OPERAND(NegOp)
 
 #undef TLA_VERIFY_MASKED_VECTOR_OPERAND
 
+static int64_t getIntlvWidth(::StoreDist dist)
+{
+    switch (dist) {
+        case ::StoreDist::intlv_b8:
+            return 1;
+        case ::StoreDist::intlv_b16:
+            return 2;
+        case ::StoreDist::intlv_b32:
+            return 4;
+        default:
+            return 0;
+    }
+}
+
+static bool isFirstElementStore(::StoreDist dist)
+{
+    return dist == ::StoreDist::first_element_b8 || dist == ::StoreDist::first_element_b16 ||
+           dist == ::StoreDist::first_element_b32;
+}
+
 mlir::LogicalResult StoreOp::verify()
 {
     if (!hasEnclosingRegion<VecFuncOp>(getOperation()))
@@ -1671,8 +1691,9 @@ mlir::LogicalResult StoreOp::verify()
     if (mlir::isa<MaskSSAType>(getSource().getType())) {
         if (getMask())
             return emitOpError("predicate mask is not supported when storing !tla.mask");
-        if (getSource2() || getStoreDist() || getBlockStride())
-            return emitOpError("second source, store_dist and block_stride are not supported when storing !tla.mask");
+        if (getSource2() || getBlockStride() ||
+            (getStoreDist() && getStoreDist()->getStoreDist() != ::StoreDist::mask_pack))
+            return emitOpError("MaskSSA store only supports the mask_pack distribution");
         if (getUnalignedUbAccess())
             return emitOpError("unaligned_ub_access is not supported when storing !tla.mask");
         // AscendC StoreAlign<__ubuf__ T*, MaskReg>: SupportBytes<T,1,2,4,8>;
@@ -1710,13 +1731,15 @@ mlir::LogicalResult StoreOp::verify()
     if (auto storeDist = getStoreDist()) {
         ::StoreDist dist = storeDist->getStoreDist();
         bool isNormal = dist == ::StoreDist::norm;
-        bool isFirstElement = dist == ::StoreDist::first_element_b8 || dist == ::StoreDist::first_element_b16 ||
-                              dist == ::StoreDist::first_element_b32;
-        bool isIntlv =
-            dist == ::StoreDist::intlv_b8 || dist == ::StoreDist::intlv_b16 || dist == ::StoreDist::intlv_b32;
-        // AscendC pack_* is same-type DistVST (T == ActualT). Only pack4_b32
-        // still remaps numeric widths in the DSL model.
-        bool remapsElementWidth = dist == ::StoreDist::pack4_b32;
+        bool isFirstElement = isFirstElementStore(dist);
+        int64_t intlvWidth = getIntlvWidth(dist);
+        bool isIntlv = intlvWidth != 0;
+        if (dist == ::StoreDist::mask_pack)
+            return emitOpError("mask_pack requires a MaskSSA source");
+        if (getExplicitNormStoreBytes(dist) &&
+            !getPackedStorePredicateGeometry(dist, sourceElementType, destElementType))
+            return emitOpError("explicit NORM store requires matching element types that support the store width");
+        // AscendC packed StoreAlign requires T == ActualT.
         bool isPack = dist == ::StoreDist::pack_b16 || dist == ::StoreDist::pack_b32 || dist == ::StoreDist::pack_b64 ||
                       dist == ::StoreDist::pack4_b32;
         if (!isNormal && isUnaligned)
@@ -1745,24 +1768,22 @@ mlir::LogicalResult StoreOp::verify()
             int64_t expectedLanes = 256 / elemBytes;
             if (vectorSource.getValidLanes() != expectedLanes)
                 return emitOpError("intlv store_dist requires two identical full VL vectors");
-            if (dist == ::StoreDist::intlv_b8 && elemBytes != 1)
-                return emitOpError("intlv_b8 requires a 1-byte element type");
-            if (dist == ::StoreDist::intlv_b16 && elemBytes != 2)
-                return emitOpError("intlv_b16 requires a 2-byte element type");
-            if (dist == ::StoreDist::intlv_b32 && elemBytes != 4)
-                return emitOpError("intlv_b32 requires a 4-byte element type");
+            if (elemBytes != intlvWidth && !(intlvWidth == 1 && sourceElementType.isUnsignedInteger(16)) &&
+                !(intlvWidth == 2 && sourceElementType.isUnsignedInteger(32)) && !(intlvWidth == 4 && elemBytes == 8))
+                return emitOpError() << stringifyStoreDist(dist) << " requires a " << intlvWidth
+                                     << "-byte element type";
         } else if (source2) {
             return emitOpError("second source is only valid with intlv_b8/intlv_b16/intlv_b32 store_dist");
         }
 
-        if (isPack && !remapsElementWidth && vectorSource.getElementType() != destElementType &&
+        if (isPack && vectorSource.getElementType() != destElementType &&
             elementStorageBytes(vectorSource.getElementType()) == elementStorageBytes(destElementType))
             return emitOpError() << stringifyStoreDist(dist)
                                  << " requires matching source and destination element types";
 
         // Pack / first_element / intlv always need a supported source→dest
         // pairing, including when an explicit mask is present.
-        if ((isPack || isFirstElement || isIntlv) &&
+        if ((isPack || isFirstElement) &&
             !getPackedStorePredicateGeometry(dist, vectorSource.getElementType(), destElementType)) {
             return emitOpError() << "unsupported " << stringifyStoreDist(dist)
                                  << " source/destination element widths: source "
@@ -1770,8 +1791,8 @@ mlir::LogicalResult StoreOp::verify()
                                  << " bits, destination " << getBitSizeOfFixedWidthScalarType(destElementType)
                                  << " bits; supported layouts are pack_b16 16->16 or 8->8, "
                                     "pack_b32 32->32 or 16->16, pack_b64 64->64, "
-                                    "pack4_b32 {8,16,32}->8 or 32->32, first_element_b8 8->8, "
-                                    "first_element_b16 16->16, first_element_b32 32->32, and same-width intlv_*";
+                                    "pack4_b32 matching 8/16/32-bit types, first_element_b8 8->8, "
+                                    "first_element_b16 16->16, and first_element_b32 32->32";
         }
         // NORM / same-width pack / first_element: only Bool mismatches are
         // rejected here so historical same-width signedness differences
@@ -2333,6 +2354,64 @@ mlir::LogicalResult PairWiseOp::verify()
     return verifyMaskMatchesVector(getOperation(), getMask(), sourceType);
 }
 
+static int64_t getLoadDistWidth(::LoadDist dist, mlir::Type sourceElem)
+{
+    switch (dist) {
+        case ::LoadDist::brc_b8:
+        case ::LoadDist::us_b8:
+        case ::LoadDist::ds_b8:
+        case ::LoadDist::unpack_b8:
+        case ::LoadDist::unpack4_b8:
+        case ::LoadDist::dintlv_b8:
+            return 1;
+        case ::LoadDist::brc_b16:
+        case ::LoadDist::us_b16:
+        case ::LoadDist::ds_b16:
+        case ::LoadDist::unpack_b16:
+        case ::LoadDist::e2b_b16:
+        case ::LoadDist::dintlv_b16:
+            return 2;
+        case ::LoadDist::brc_b32:
+        case ::LoadDist::unpack_b32:
+        case ::LoadDist::e2b_b32:
+        case ::LoadDist::dintlv_b32:
+            return 4;
+        case ::LoadDist::blk: {
+            int64_t bytes = elementStorageBytes(sourceElem);
+            return bytes == 1 || bytes == 2 || bytes == 4 ? bytes : 0;
+        }
+        default:
+            return 0;
+    }
+}
+
+static int64_t getDintlvWidth(::LoadDist dist)
+{
+    switch (dist) {
+        case ::LoadDist::dintlv_b8:
+            return 1;
+        case ::LoadDist::dintlv_b16:
+            return 2;
+        case ::LoadDist::dintlv_b32:
+            return 4;
+        default:
+            return 0;
+    }
+}
+
+static bool isLoadDistElementSupported(::LoadDist dist, mlir::Type elem, int64_t width)
+{
+    if (width <= 0)
+        return false;
+    if (elementStorageBytes(elem) == width)
+        return true;
+    return (elem.isUnsignedInteger(32) &&
+            (dist == ::LoadDist::brc_b8 || dist == ::LoadDist::brc_b16 || dist == ::LoadDist::dintlv_b16)) ||
+           (elem.isUnsignedInteger(16) && dist == ::LoadDist::dintlv_b8) ||
+           (elem.isUnsignedInteger(8) && dist == ::LoadDist::unpack_b16) ||
+           (dist == ::LoadDist::dintlv_b32 && elementStorageBytes(elem) == 8);
+}
+
 mlir::LogicalResult LoadOp::verify()
 {
     if (!hasEnclosingRegion<VecFuncOp>(getOperation()))
@@ -2344,6 +2423,8 @@ mlir::LogicalResult LoadOp::verify()
     if (sourceType.getPtr().getAddrspace() != AddressSpace::ub)
         return emitOpError("source !tla.tensor must be in ub address space");
 
+    if (getMask() && !getBlockStride())
+        return emitOpError("load predicate requires block_stride");
     if (auto maskResult = mlir::dyn_cast<MaskSSAType>(getResult().getType())) {
         if (getResult2())
             return emitOpError("second result is not valid when loading !tla.mask");
@@ -2367,14 +2448,18 @@ mlir::LogicalResult LoadOp::verify()
         return emitOpError("result must be !tla.vector or !tla.mask");
 
     auto vectorResult = mlir::cast<VectorSSAType>(getResult().getType());
+    if (failed(verifyMaskMatchesVector(getOperation(), getMask(), vectorResult)))
+        return mlir::failure();
     if (vectorResult.getElementType().isF64() && vectorResult.getValidLanes() != 32)
         return emitOpError("f64 register load requires a full 256-byte vector register (32 lanes)");
     if (sourceType.getPtr().getPointee().isInteger(64) || sourceType.getPtr().getPointee().isF64() ||
         vectorResult.getElementType().isInteger(64) || vectorResult.getElementType().isF64()) {
         if (vectorResult.getElementType() != sourceType.getPtr().getPointee())
             return emitOpError("64-bit register load requires matching element types");
-        if ((getLoadDist() && getLoadDist()->getLoadDist() != LoadDist::norm) || getBlockStride())
-            return emitOpError("64-bit register load requires NORM distribution");
+        if ((getLoadDist() && getLoadDist()->getLoadDist() != LoadDist::norm &&
+             getLoadDist()->getLoadDist() != LoadDist::dintlv_b32) ||
+            getBlockStride())
+            return emitOpError("64-bit register load requires NORM or DINTLV_B32 distribution");
         if (getUnalignedUbAccess().value_or(false) && vectorResult.getValidLanes() != 32)
             return emitOpError("64-bit unaligned load requires a full 256-byte vector register (32 lanes)");
     }
@@ -2397,55 +2482,26 @@ mlir::LogicalResult LoadOp::verify()
     }
 
     auto dist = getLoadDist() ? getLoadDist()->getLoadDist() : ::LoadDist::norm;
-    const bool dual = dist == ::LoadDist::dintlv_b8 || dist == ::LoadDist::dintlv_b16 || dist == ::LoadDist::dintlv_b32;
+    const bool dual = getDintlvWidth(dist) != 0;
     if (dual && !getResult2())
         return emitOpError() << "load_dist " << stringifyLoadDist(dist) << " requires a second !tla.vector result";
     if (!dual && getResult2())
         return emitOpError("second result is only valid as !tla.vector with a dintlv_b8/b16/b32 load_dist");
-    if (dist == ::LoadDist::dintlv_b8 && isInt4PairType(sourceType.getPtr().getPointee()))
-        return emitOpError("dintlv_b8 does not support Int4x2 register pairs");
+    auto sourceElem = sourceType.getPtr().getPointee();
 
-    int64_t width;
-    switch (dist) {
-        case ::LoadDist::norm:
-            return mlir::success();
-        case ::LoadDist::brc_b8:
-        case ::LoadDist::us_b8:
-        case ::LoadDist::ds_b8:
-        case ::LoadDist::unpack_b8:
-        case ::LoadDist::unpack4_b8:
-        case ::LoadDist::dintlv_b8:
-            width = 1;
-            break;
-        case ::LoadDist::brc_b16:
-        case ::LoadDist::us_b16:
-        case ::LoadDist::ds_b16:
-        case ::LoadDist::unpack_b16:
-        case ::LoadDist::e2b_b16:
-        case ::LoadDist::dintlv_b16:
-            width = 2;
-            break;
-        case ::LoadDist::brc_b32:
-        case ::LoadDist::unpack_b32:
-        case ::LoadDist::e2b_b32:
-        case ::LoadDist::dintlv_b32:
-            width = 4;
-            break;
-        case ::LoadDist::blk:
-            width = elementStorageBytes(sourceType.getPtr().getPointee());
-            if (width != 1 && width != 2 && width != 4)
-                return emitOpError("blk requires a 1/2/4-byte source element type");
-            break;
-        default:
-            return emitOpError("load_dist must be a vector distribution");
-    }
+    if (dist == ::LoadDist::norm)
+        return mlir::success();
+    int64_t width = getLoadDistWidth(dist, sourceElem);
+    if (width == 0)
+        return emitOpError(
+            dist == ::LoadDist::blk ? "blk requires a 1/2/4-byte source element type" :
+                                      "load_dist must be a vector distribution");
     if (getUnalignedUbAccess().value_or(false))
         return emitOpError() << "load_dist " << stringifyLoadDist(dist) << " requires aligned UB access";
-    auto sourceElem = sourceType.getPtr().getPointee();
     const int64_t sourceBytes = elementStorageBytes(sourceElem);
-    if (sourceBytes != width)
+    if (!isLoadDistElementSupported(dist, sourceElem, width))
         return emitOpError() << stringifyLoadDist(dist) << " requires a " << width << "-byte source element type";
-    const int64_t lanes = 256 / width;
+    const int64_t lanes = 256 / sourceBytes;
     if (dual && (getResult2().getType() != vectorResult || vectorResult.getElementType() != sourceElem ||
                  vectorResult.getValidLanes() != lanes))
         return emitOpError() << stringifyLoadDist(dist) << " requires two identical full " << lanes
@@ -2456,14 +2512,15 @@ mlir::LogicalResult LoadOp::verify()
     return mlir::success();
 }
 
-static mlir::LogicalResult verifyUpdateStride(mlir::Operation* op, mlir::Value stride)
+static mlir::LogicalResult verifyUpdateStride(mlir::Operation* op, mlir::Value stride, bool allowZero = false)
 {
     if (!stride)
         return op->emitOpError("requires post_update_stride");
     if (auto constantOp = stride.getDefiningOp<mlir::arith::ConstantOp>()) {
         if (auto intAttr = mlir::dyn_cast<mlir::IntegerAttr>(constantOp.getValue())) {
-            if (intAttr.getInt() <= 0)
-                return op->emitOpError("post_update_stride must be > 0");
+            if (intAttr.getInt() < (allowZero ? 0 : 1))
+                return op->emitOpError(
+                    allowZero ? "post_update_stride must be >= 0" : "post_update_stride must be > 0");
         }
     }
     return mlir::success();
@@ -2691,11 +2748,11 @@ static std::optional<int64_t> getDualUpdateTensorResidue(mlir::Value tensor, mli
 
 static mlir::LogicalResult verifyDualUpdate(
     mlir::Operation* op, mlir::Value window, int64_t distBytes, mlir::Type elem, VectorSSAType first,
-    mlir::Value second, mlir::Value stride)
+    mlir::Value second, mlir::Value stride, bool remapped = false)
 {
     int64_t elemBytes = elementStorageBytes(elem);
     bool usesB32Carrier = distBytes == 4 && (elem.isInteger(64) || elem.isF64());
-    if (elemBytes != distBytes && !usesB32Carrier)
+    if (elemBytes != distBytes && !usesB32Carrier && !remapped)
         return op->emitOpError("dual UPDATE distribution does not match the element width");
     if (!second || second.getType() != first || first.getValidLanes() != 256 / elemBytes)
         return op->emitOpError("dual UPDATE requires two identical full VL vectors");
@@ -2715,34 +2772,40 @@ mlir::LogicalResult LoadUpdateOp::verify()
         return emitOpError("source must be !tla.tensor");
     if (sourceType.getPtr().getAddrspace() != AddressSpace::ub)
         return emitOpError("source !tla.tensor must be in ub address space");
-    auto resultVec = mlir::dyn_cast<VectorSSAType>(getResult().getType());
-    if (!resultVec)
-        return emitOpError("result must be !tla.vector");
     mlir::Type srcElem = sourceType.getPtr().getPointee();
+    auto dist = getLoadDist() ? getLoadDist()->getLoadDist() : ::LoadDist::norm;
+    if (mlir::isa<MaskSSAType>(getResult().getType())) {
+        int64_t bytes = elementStorageBytes(srcElem);
+        if (getResult2() || getBlockStride() || getMask() || (bytes != 1 && bytes != 2 && bytes != 4 && bytes != 8) ||
+            (dist != ::LoadDist::norm && dist != ::LoadDist::us && dist != ::LoadDist::ds))
+            return emitOpError("MaskSSA UPDATE load requires aligned norm|us|ds on b8/b16/b32/b64 UB");
+        if (failed(verifyUpdateStride(getOperation(), getPostUpdateStride(), /*allowZero=*/true)))
+            return mlir::failure();
+        return verifyUpdatePtr(getOperation(), getNextPtr(), srcElem);
+    }
+    auto resultVec = mlir::cast<VectorSSAType>(getResult().getType());
     if (resultVec.getElementType() != srcElem)
         return emitOpError("load_update source and result element types must match");
-    if (auto dist = getLoadDist()) {
-        if (getBlockStride())
-            return emitOpError("load_dist is mutually exclusive with block_stride");
-        int64_t distBytes;
-        switch (dist->getLoadDist()) {
-            case ::LoadDist::dintlv_b8:
-                distBytes = 1;
-                break;
-            case ::LoadDist::dintlv_b16:
-                distBytes = 2;
-                break;
-            case ::LoadDist::dintlv_b32:
-                distBytes = 4;
-                break;
-            default:
-                return emitOpError("load_update load_dist must be a DINTLV distribution");
-        }
+    if (getMask() && !getBlockStride())
+        return emitOpError("load predicate requires block_stride");
+    if (getMask() && failed(verifyMaskMatchesVector(getOperation(), getMask(), resultVec)))
+        return mlir::failure();
+    if (getLoadDist() && getBlockStride())
+        return emitOpError("load_dist is mutually exclusive with block_stride");
+    if (int64_t distBytes = getDintlvWidth(dist)) {
+        bool remapped = isLoadDistElementSupported(dist, srcElem, distBytes);
         if (failed(verifyDualUpdate(
-                getOperation(), getSource(), distBytes, srcElem, resultVec, getResult2(), getPostUpdateStride())))
+                getOperation(), getSource(), distBytes, srcElem, resultVec, getResult2(), getPostUpdateStride(),
+                remapped)))
             return mlir::failure();
     } else if (getResult2()) {
         return emitOpError("second vector result requires a DINTLV load_dist");
+    } else if (dist != ::LoadDist::norm) {
+        int64_t width = getLoadDistWidth(dist, srcElem);
+        if (!isLoadDistElementSupported(dist, srcElem, width))
+            return emitOpError("load_update distribution does not match the element width");
+        if (resultVec.getValidLanes() != 256 / elementStorageBytes(srcElem))
+            return emitOpError("distributed load_update requires a full VL vector");
     }
     if (failed(verifyOptionalBlockStride(getOperation(), getBlockStride())))
         return mlir::failure();
@@ -2764,36 +2827,38 @@ mlir::LogicalResult StoreUpdateOp::verify()
         return emitOpError("dest must be !tla.tensor");
     if (destType.getPtr().getAddrspace() != AddressSpace::ub)
         return emitOpError("dest !tla.tensor must be in ub address space");
-    auto sourceVec = mlir::dyn_cast<VectorSSAType>(getSource().getType());
-    if (!sourceVec)
-        return emitOpError("source must be !tla.vector");
     mlir::Type destElem = destType.getPtr().getPointee();
-    if (sourceVec.getElementType() != destElem)
+    auto dist = getStoreDist() ? getStoreDist()->getStoreDist() : ::StoreDist::norm;
+    if (mlir::isa<MaskSSAType>(getSource().getType())) {
+        int64_t bytes = elementStorageBytes(destElem);
+        if (getSource2() || getBlockStride() || getMask() || (bytes != 1 && bytes != 2 && bytes != 4 && bytes != 8) ||
+            (dist != ::StoreDist::norm && dist != ::StoreDist::mask_pack))
+            return emitOpError("MaskSSA UPDATE store requires aligned norm|mask_pack on b8/b16/b32/b64 UB");
+        if (failed(verifyUpdateStride(getOperation(), getPostUpdateStride(), /*allowZero=*/true)))
+            return mlir::failure();
+        return verifyUpdatePtr(getOperation(), getNextPtr(), destElem);
+    }
+    auto sourceVec = mlir::cast<VectorSSAType>(getSource().getType());
+    mlir::Type srcElem = sourceVec.getElementType();
+    if (srcElem != destElem)
         return emitOpError("store_update source and destination element types must match");
-    if (auto dist = getStoreDist()) {
-        if (getBlockStride())
-            return emitOpError("store_dist is mutually exclusive with block_stride");
+    if (dist == ::StoreDist::mask_pack)
+        return emitOpError("mask_pack requires a MaskSSA source");
+    if (getStoreDist() && getBlockStride())
+        return emitOpError("store_dist is mutually exclusive with block_stride");
+    if (int64_t distBytes = getIntlvWidth(dist)) {
         if (getMask())
             return emitOpError("predicate mask is not supported with intlv store_dist");
-        int64_t distBytes;
-        switch (dist->getStoreDist()) {
-            case ::StoreDist::intlv_b8:
-                distBytes = 1;
-                break;
-            case ::StoreDist::intlv_b16:
-                distBytes = 2;
-                break;
-            case ::StoreDist::intlv_b32:
-                distBytes = 4;
-                break;
-            default:
-                return emitOpError("store_update store_dist must be an INTLV distribution");
-        }
         if (failed(verifyDualUpdate(
                 getOperation(), getDest(), distBytes, destElem, sourceVec, getSource2(), getPostUpdateStride())))
             return mlir::failure();
     } else if (getSource2()) {
         return emitOpError("second vector source requires an INTLV store_dist");
+    } else if (dist != ::StoreDist::norm) {
+        if (!getPackedStorePredicateGeometry(dist, srcElem, destElem))
+            return emitOpError("store_update distribution does not match the element widths");
+        if (isFirstElementStore(dist) && getMask())
+            return emitOpError("predicate mask is not supported with first_element store_dist");
     }
     if (failed(verifyOptionalBlockStride(getOperation(), getBlockStride())))
         return mlir::failure();
@@ -2805,7 +2870,7 @@ mlir::LogicalResult StoreUpdateOp::verify()
     }
     if (failed(verifyUpdatePtr(getOperation(), getNextPtr(), destElem)))
         return mlir::failure();
-    return verifyMaskMatchesVector(getOperation(), getMask(), getSource().getType());
+    return verifyMaskMatchesVector(getOperation(), getMask(), sourceVec);
 }
 
 static mlir::LogicalResult verifyUnalignUbTensor(mlir::Operation* op, mlir::Value tensor, llvm::StringRef name)

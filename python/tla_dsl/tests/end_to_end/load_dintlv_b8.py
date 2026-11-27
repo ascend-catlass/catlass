@@ -24,6 +24,7 @@ _FP4_DTYPES = ("Float4E2M1x2", "Float4E1M2x2")
 _DTYPES = (
     "Int8",
     "UInt8",
+    "UInt16",
     "Float8E4M3FN",
     "Float8E5M2",
     "HiFloat8",
@@ -67,14 +68,15 @@ def golden_bytes(source, iterations, offset):
 
 def make_kernel(type_name, iterations):
     dtype = getattr(tla, type_name)
+    element_bytes = 2 if dtype is tla.UInt16 else 1
     distribution = LoadDist.DIST_DINTLV_B8
     source_stride = 512
     output_stride = 512
     source_capacity = iterations * source_stride + 128
     output_capacity = iterations * output_stride
-    source_stride_elements = source_stride
-    output_stride_elements = output_stride
-    register_elements = 256
+    source_stride_elements = source_stride // element_bytes
+    output_stride_elements = output_stride // element_bytes
+    register_elements = 256 // element_bytes
 
     @tla.kernel
     def transfer(
@@ -91,10 +93,10 @@ def make_kernel(type_name, iterations):
         typed_source_ptr = tla.recast_ptr(source_ptr, dtype=dtype)
         typed_output_ptr = tla.recast_ptr(output_ptr, dtype=dtype)
         source_layout = tla.make_layout(
-            tla.make_shape(source_capacity), tla.make_stride(1)
+            tla.make_shape(source_capacity // element_bytes), tla.make_stride(1)
         )
         output_layout = tla.make_layout(
-            tla.make_shape(output_capacity), tla.make_stride(1)
+            tla.make_shape(output_capacity // element_bytes), tla.make_stride(1)
         )
         ready = tla.flag("ready", tla.pipes.MTE2, tla.pipes.VECTOR)
         done = tla.flag("done", tla.pipes.VECTOR, tla.pipes.MTE3)
@@ -137,6 +139,7 @@ def make_kernel(type_name, iterations):
 
 
 def run_case(type_name, iterations, device, *, compile_only=False):
+    element_bytes = 2 if type_name == "UInt16" else 1
     source_bytes = iterations * 512 + 128
     output_bytes = iterations * 512
 
@@ -186,7 +189,7 @@ def run_case(type_name, iterations, device, *, compile_only=False):
             source_view,
             output_view,
             tla.Int16(iterations),
-            tla.Int32(offset),
+            tla.Int32(offset // element_bytes),
             block_num=1,
         )
         torch.npu.synchronize(device)
