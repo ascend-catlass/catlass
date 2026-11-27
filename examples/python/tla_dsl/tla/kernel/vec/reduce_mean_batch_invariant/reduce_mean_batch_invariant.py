@@ -90,11 +90,11 @@ def reduce_mean_kernel(
                 )
                 x_ub = tla.make_tensor_like(x_ptr, x_gm, tla.arch.RowMajor)
                 z_ub = tla.make_tensor_like(z_ptr, z_gm, tla.arch.RowMajor)
-                loaded.lock(pipe=tla.arch.MTE2)
+                loaded.lock(pipe=tla.pipes.MTE2)
                 tla.copy(x_ub, x_gm)
-                loaded.unlock(pipe=tla.arch.MTE2)
-                loaded.lock(pipe=tla.arch.VECTOR)
-                stored.lock(pipe=tla.arch.VECTOR)
+                loaded.unlock(pipe=tla.pipes.MTE2)
+                loaded.lock(pipe=tla.pipes.VECTOR)
+                stored.lock(pipe=tla.pipes.VECTOR)
                 for r in tla.range(0, row_tile, 1):
                     with tla.vec.func(mode="simd"):
                         acc = tla.full(0.0, tla.Float32)
@@ -157,11 +157,11 @@ def reduce_mean_kernel(
                             )
                         else:
                             z_row.store(total)
-                stored.unlock(pipe=tla.arch.VECTOR)
-                loaded.unlock(pipe=tla.arch.VECTOR)
-                stored.lock(pipe=tla.arch.MTE3)
+                stored.unlock(pipe=tla.pipes.VECTOR)
+                loaded.unlock(pipe=tla.pipes.VECTOR)
+                stored.lock(pipe=tla.pipes.MTE3)
                 tla.copy(z_gm, z_ub)
-                stored.unlock(pipe=tla.arch.MTE3)
+                stored.unlock(pipe=tla.pipes.MTE3)
                 tla.pipe_barrier(tla.pipes.ALL)
             for tail_row in tla.range(
                 full_rows + tla.arch.block_idx(), rows, tla.arch.block_num()
@@ -174,11 +174,11 @@ def reduce_mean_kernel(
                 )
                 x_tail_ub = tla.make_tensor_like(x_ptr, x_tail_gm, tla.arch.RowMajor)
                 z_tail_ub = tla.make_tensor_like(z_ptr, z_tail_gm, tla.arch.RowMajor)
-                loaded.lock(pipe=tla.arch.MTE2)
+                loaded.lock(pipe=tla.pipes.MTE2)
                 tla.copy(x_tail_ub, x_tail_gm)
-                loaded.unlock(pipe=tla.arch.MTE2)
-                loaded.lock(pipe=tla.arch.VECTOR)
-                stored.lock(pipe=tla.arch.VECTOR)
+                loaded.unlock(pipe=tla.pipes.MTE2)
+                loaded.lock(pipe=tla.pipes.VECTOR)
+                stored.lock(pipe=tla.pipes.VECTOR)
                 with tla.vec.func(mode="simd"):
                     acc2 = tla.full(0.0, tla.Float32)
                     zero2 = tla.full(0.0, tla.Float32)
@@ -231,11 +231,11 @@ def reduce_mean_kernel(
                         )
                     else:
                         z_tail_ub.store(total2)
-                stored.unlock(pipe=tla.arch.VECTOR)
-                loaded.unlock(pipe=tla.arch.VECTOR)
-                stored.lock(pipe=tla.arch.MTE3)
+                stored.unlock(pipe=tla.pipes.VECTOR)
+                loaded.unlock(pipe=tla.pipes.VECTOR)
+                stored.lock(pipe=tla.pipes.MTE3)
                 tla.copy(z_tail_gm, z_tail_ub)
-                stored.unlock(pipe=tla.arch.MTE3)
+                stored.unlock(pipe=tla.pipes.MTE3)
                 tla.pipe_barrier(tla.pipes.ALL)
             tla.pipe_barrier(tla.pipes.ALL)
     else:
@@ -298,10 +298,10 @@ def reduce_mean_kernel(
                             tla.make_shape(tile_rows, chunk),
                         )
                         x_ub = tla.make_tensor_like(x_ptr, x_gm, tla.arch.RowMajor)
-                        loaded.lock(pipe=tla.arch.MTE2)
+                        loaded.lock(pipe=tla.pipes.MTE2)
                         tla.copy(x_ub, x_gm)
-                        loaded.unlock(pipe=tla.arch.MTE2)
-                        loaded.lock(pipe=tla.arch.VECTOR)
+                        loaded.unlock(pipe=tla.pipes.MTE2)
+                        loaded.lock(pipe=tla.pipes.VECTOR)
                         with tla.vec.func(mode="simd"):
                             if tla.const_expr(is_lowp):
                                 rest = n - c
@@ -350,7 +350,7 @@ def reduce_mean_kernel(
                             acc_ub.store(acc)
                             if tla.const_expr(is_lowp):
                                 acc_o_ub.store(acc_o)
-                        loaded.unlock(pipe=tla.arch.VECTOR)
+                        loaded.unlock(pipe=tla.pipes.VECTOR)
                         tla.pipe_barrier(tla.pipes.ALL)
                     for tail_row in tla.range(full_rows, rows_per_batch, 1):
                         x_tail_gm = tla.get_tile(
@@ -361,10 +361,10 @@ def reduce_mean_kernel(
                         x_tail_ub = tla.make_tensor_like(
                             x_ptr, x_tail_gm, tla.arch.RowMajor
                         )
-                        loaded.lock(pipe=tla.arch.MTE2)
+                        loaded.lock(pipe=tla.pipes.MTE2)
                         tla.copy(x_tail_ub, x_tail_gm)
-                        loaded.unlock(pipe=tla.arch.MTE2)
-                        loaded.lock(pipe=tla.arch.VECTOR)
+                        loaded.unlock(pipe=tla.pipes.MTE2)
+                        loaded.lock(pipe=tla.pipes.VECTOR)
                         with tla.vec.func(mode="simd"):
                             if tla.const_expr(is_lowp):
                                 rest2 = n - c
@@ -410,9 +410,9 @@ def reduce_mean_kernel(
                                     tla.where(tail2, x_tail_ub.load(), zero2),
                                 )
                                 acc_ub.store(acc2)
-                        loaded.unlock(pipe=tla.arch.VECTOR)
+                        loaded.unlock(pipe=tla.pipes.VECTOR)
                         tla.pipe_barrier(tla.pipes.ALL)
-                    stored.lock(pipe=tla.arch.VECTOR)
+                    stored.lock(pipe=tla.pipes.VECTOR)
                     with tla.vec.func(mode="simd"):
                         if tla.const_expr(is_lowp):
                             ze = tla.mul(acc_ub.load(), inv).to(
@@ -426,10 +426,10 @@ def reduce_mean_kernel(
                             z_ub.store(tla.add(ze, zo))
                         else:
                             z_ub.store(tla.mul(acc_ub.load(), inv))
-                    stored.unlock(pipe=tla.arch.VECTOR)
-                    stored.lock(pipe=tla.arch.MTE3)
+                    stored.unlock(pipe=tla.pipes.VECTOR)
+                    stored.lock(pipe=tla.pipes.MTE3)
                     tla.copy(z_gm, z_ub)
-                    stored.unlock(pipe=tla.arch.MTE3)
+                    stored.unlock(pipe=tla.pipes.MTE3)
                     tla.pipe_barrier(tla.pipes.ALL)
             tla.pipe_barrier(tla.pipes.ALL)
 
