@@ -93,6 +93,18 @@ MIXED_FIXPIPE_SHAPES = (
 VADD_DTYPES = ("i8", "i16", "i32", "f16", "f32")
 VADD_MODES = ("", "--use-mutex", "--use-mutex-with", "--use-atomic-add")
 
+#: (axis, ((batch, m, n), ...)) for the batch-invariant reduce_mean sample.
+#: axis=2 stages whole rows, so ``n`` fixes both the 32 B row padding and how
+#: many rows fit in one UB tile: ``129`` pads the staged stride while a row tail
+#: spills out of the last full tile, and ``3x7x17`` leaves ``full_rows`` at zero
+#: so every row goes through the per-row tail loop. The axis=1 path walks
+#: column chunks of 64 lanes (f32) or 128 (f16/bf16): ``64`` is exactly one f32
+#: chunk, ``127`` is a short one, and ``m=65`` exercises the 32-row tile tail.
+REDUCE_MEAN_SHAPES = (
+    ("2", (("8", "512", "2048"), ("4", "33", "129"), ("3", "7", "17"))),
+    ("1", (("6", "1024", "2048"), ("3", "65", "127"), ("2", "200", "64"))),
+)
+
 COMPARE_MASK_OPS = (
     "vector_vector_lt", "vector_vector_le", "vector_vector_gt", "vector_vector_ge",
     "vector_vector_eq", "vector_vector_ne", "vector_scalar_gt", "vector_scalar_ge",
@@ -577,6 +589,20 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         "sync-data-sync-barrier",
         [["end_to_end/data_sync_barrier.py", *dev]],
     )
+
+    # --- reduce_mean_batch_invariant: axis x dtype over the ragged paths ---
+    for axis, shapes in REDUCE_MEAN_SHAPES:
+        for dtype in ("f32", "f16", "bf16"):
+            for batch, m, n in shapes:
+                yield (
+                    f"reduce-mean-axis{axis}-{dtype}-{batch}x{m}x{n}",
+                    [[
+                        "tla/kernel/vec/reduce_mean_batch_invariant/"
+                        "reduce_mean_batch_invariant.py",
+                        "--axis", axis, "--dtype", dtype,
+                        "--batch", batch, "--m", m, "--n", n, *dev,
+                    ]],
+                )
 
     # --- extern_op: user-provided Ascend C functions called from TLA kernels ---
     yield (

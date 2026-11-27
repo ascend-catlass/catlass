@@ -43,6 +43,7 @@
 | 样例 | 概述 |
 |------|------|
 | [`basic_vadd/`](vec/basic_vadd/README.md) | 不涉及 Cube 的纯 Vector 算子：向量加法，含 flag 同步、mutex、atomic_add 变体。 |
+| [`reduce_mean_batch_invariant/`](vec/reduce_mean_batch_invariant/README.md) | 纯 Vector 归约：`[batch, m, n]` 沿 `axis ∈ {1, 2}` 求均值，覆盖 `float32` / `float16` / `bfloat16`，输出与 `batch` 划分逐位无关。 |
 
 ## 运行方式
 
