@@ -553,8 +553,8 @@ def run(args: argparse.Namespace) -> int:
     ).mark_compact_shape_dynamic(0)
 
     tiling = TilingParams(
-        l1_tk=512 // dtype_size_bytes(dtype_a),
-        l0_tk=128 // dtype_size_bytes(dtype_b),
+        l1_tk=512 // dtype_size_bytes(args.dtype_a),
+        l0_tk=128 // dtype_size_bytes(args.dtype_b),
     )
     artifact = tla.compile(
         grouped_matmul_slice_m_kernel,
