@@ -16,7 +16,7 @@ def ascend950_a8w4_grouped_mx_matmul(
     Computes grouped MX matmul ``C = (MxScaleA * A_fp8) @ (MxScaleB * B_fp4)``
     sliced on M. A is float8_e4m3fn (RowMajor, shared across groups). B is the
     packed FP4 prologue (int8 bytes, Weight4BitnZ layout, per group). Scales are
-    float8_e8m0fnu. Output is FP32 — the kernel accumulates in float.
+    float8_e8m0fnu. Output is FP16, matching example 74; the kernel accumulates in float.
 
     Args:
         mat1: Left input (float8_e4m3fn), shape ``(M, K)``. ``M`` is the total
@@ -31,7 +31,7 @@ def ascend950_a8w4_grouped_mx_matmul(
             ``(G, N, mxScaleAlignedK/2, 2)``.
 
     Returns:
-        FP32 output tensor with shape ``(M, N)``.
+        FP16 output tensor with shape ``(M, N)``.
     """
     return torch.ops.catlass.ascend950_a8w4_grouped_mx_matmul(
         mat1, mat2, groupList, mx_scale_a, mx_scale_b

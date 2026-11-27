@@ -32,7 +32,7 @@ using A8W4GroupedKernelFn = void (*)(
  * Grouped MX A8W4 matmul: C = (MxScaleA * A_fp8) @ (MxScaleB * B_fp4), sliced on M.
  * A is shared across groups (float8_e4m3fn, RowMajor M×K). B is the packed FP4
  * prologue (int8 bytes, Weight4BitnZ layout, per group). Scales are float8_e8m0fnu.
- * Output is FP32 (M×N) — the kernel accumulates in float per the CType convention.
+ * Output is FP16 (M×N), matching example 74; accumulation remains FP32.
  */
 template <A8W4GroupedKernelFn KernelFunc>
 struct A8W4GroupedMxMatmulLike {
@@ -119,7 +119,7 @@ struct A8W4GroupedMxMatmulLike {
         // ── TParams (compile-time JIT parameters) ──
         tParams.element["A"] = TorchDtypeToAclDtype(mat1.scalar_type());
         tParams.element["B"] = test_utils::TypeCast<std::string, aclDataType>("float4_e2m1fn_x2");
-        tParams.element["C"] = ACL_FLOAT;
+        tParams.element["C"] = ACL_FLOAT16;
         tParams.element["MX_SCALE"] = test_utils::TypeCast<std::string, aclDataType>("float8_e8m0fnu");
         tParams.transpose["A"] = false;
         tParams.transpose["B"] = true;
@@ -144,7 +144,7 @@ struct A8W4GroupedMxMatmulLike {
         params.inputAddr[3] = static_cast<uint8_t*>(const_cast<void*>(mx_scale_a.storage().data()));
         params.inputAddr[4] = static_cast<uint8_t*>(const_cast<void*>(mx_scale_b.storage().data()));
 
-        OutputType output = GetOutputTensor({params.m, params.n}, torch::kFloat32);
+        OutputType output = GetOutputTensor({params.m, params.n}, torch::kFloat16);
         params.outputAddr.resize(1);
         params.outputAddr[0] = static_cast<uint8_t*>(const_cast<void*>(output.storage().data()));
 

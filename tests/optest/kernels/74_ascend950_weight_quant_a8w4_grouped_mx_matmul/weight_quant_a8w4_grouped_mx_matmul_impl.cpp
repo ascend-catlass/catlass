@@ -50,9 +50,8 @@ using ElementA = CATLASS_JIT_ELEMENT_A;
 using ElementPrologueB = CATLASS_JIT_ELEMENT_B;
 using ElementB = float8_e4m3_t;
 using ElementMxScale = CATLASS_JIT_ELEMENT_MX_SCALE;
-// The accumulator type is fixed because the JIT output dtype describes the
-// tensor interface, not the internal workspace representation.
-using ElementC = float;
+// Match example 74's FP16 output; BlockMmad keeps FP32 accumulation.
+using ElementC = half;
 using ElementBias = void;
 using ElementGroupList = int64_t;
 

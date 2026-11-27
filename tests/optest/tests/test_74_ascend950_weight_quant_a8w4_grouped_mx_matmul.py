@@ -62,7 +62,7 @@ def test_ascend950_a8w4_grouped_mx_matmul(group_sizes, n, k):
 
     # Output shape / dtype / device
     assert result.shape == (m, n)
-    assert result.dtype == torch.float32
+    assert result.dtype == torch.float16
     assert result.device.type == "npu"
 
     torch_npu.npu.synchronize()
