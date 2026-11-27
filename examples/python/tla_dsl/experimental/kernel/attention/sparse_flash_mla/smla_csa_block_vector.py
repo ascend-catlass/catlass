@@ -25,12 +25,12 @@ from smla_csa_common import (
     INIT_POP_ELE,
     KV_BLOCK,
     KV_COPY_IN,
+    KV_NZ_PITCH,
     KV_UNIT,
     MIN_F,
     Q_ROWS,
+    STATE_SLOT_STRIDE,
     V_SEGS,
-    mutex_lock,
-    mutex_unlock,
     static_range,
 )
 
@@ -69,18 +69,23 @@ def init_output_gm(
     ub = tla.make_tensor(
         src, tla.make_layout(tla.make_shape(pop_ele), tla.make_stride(1))
     )
-    mutex_lock(sync.m_init, tla.pipes.VECTOR)
+    # OT：SetFlag<MTE3_V>(SYNC_ID); WaitFlag<MTE3_V>(SYNC_ID)
+    tla.set_flag(sync.init_mte3_v)
+    tla.wait_flag(sync.init_mte3_v)
     with tla.vec.func(mode="simd"):
         zero = tla.full(0.0, dtype=fill_dtype)
+        zmask, _ = tla.update_mask(VL, dtype=fill_dtype)
         # AscendC::Duplicate(popBuffer, initValue, POP_BUF_ELE_SIZE)
         for c in tla.range(pop_ele // VL):
             tla.tile_view(ub, tla.make_shape(VL), tla.make_coord(c)).store(
                 zero,
                 params=tla.params.UnalignStoreParams(),
+                mask=zmask,
             )
         tla.local_mem_bar(tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD)
-    mutex_unlock(sync.m_init, tla.pipes.VECTOR)
-    mutex_lock(sync.m_init, tla.pipes.MTE3)
+    # OT：SetFlag<V_MTE3>(SYNC_ID); WaitFlag<V_MTE3>(SYNC_ID)
+    tla.set_flag(sync.init_v_mte3)
+    tla.wait_flag(sync.init_v_mte3)
     loop_cnt = total_elem // pop_ele
     tail = total_elem - loop_cnt * pop_ele
     for i in tla.range(loop_cnt):
@@ -96,9 +101,8 @@ def init_output_gm(
             tla.make_layout(tla.make_shape(tail), tla.make_stride(1)),
         )
         tla.copy(gm_tail, tla.tile_view(ub, tla.make_shape(tail), tla.make_coord(0)))
-    mutex_unlock(sync.m_init, tla.pipes.MTE3)
-    mutex_lock(sync.m_init, tla.pipes.VECTOR)
-    mutex_unlock(sync.m_init, tla.pipes.VECTOR)
+    tla.set_flag(sync.init_mte3_v)
+    tla.wait_flag(sync.init_mte3_v)
 
 
 def _lse_total_len(total_output, total_lse, head_dim):
@@ -228,8 +232,9 @@ def _dm(bufs, rows, slot=0):
     # staged max/sum 全为未初始化 UB 垃圾，merge 链自 tile 2 起全污染
     # （#004 ratio 0.3138 / #007 ratio 0.00017 的根因）。rows 为 8 的倍数时
     # Align8(rows)==rows，槽址逐位不变（#001/005/008 等已过例不受扰动）。
+    _stride = STATE_SLOT_STRIDE if bufs.opt_vec else _bc_rows8(rows)
     return tla.make_tensor(
-        bufs.ub_dm + slot * _bc_rows8(rows),
+        bufs.ub_dm + slot * _stride,
         tla.make_layout(tla.make_shape(rows), tla.make_stride(1)),
     )
 
@@ -240,8 +245,9 @@ def _sum(bufs, rows, slot=0):
     # (P末)%2 与 vec_init(T 首) 重灌槽 (T首)%2 = (P末+1)%2 异槽不互踩；
     # vec1(x-1) 读改写槽 (x-1)%2。分配/寻址同 _dm（槽距 Align8(rows)，见
     # _dm 内 F11·bc 修注释：slot*rows 与 rows8 读方错位是 #004/#007 根因）。
+    _stride = STATE_SLOT_STRIDE if bufs.opt_vec else _bc_rows8(rows)
     return tla.make_tensor(
-        bufs.ub_sum + slot * _bc_rows8(rows),
+        bufs.ub_sum + slot * _stride,
         tla.make_layout(tla.make_shape(rows), tla.make_stride(1)),
     )
 
@@ -256,8 +262,9 @@ def _max(bufs, rows, slot=0):
     # 调用方默认）偏移 0，指令流不变。分配/寻址同 _dm/_sum（槽距
     # Align8(rows)：rows ∈ {1,4} 时 slot*rows 与 bc_stage/dbg 的 rows8 读方
     # 错位，是 #004/#007 bc=1 全错的根因，Iter F11-bc2 修复）。
+    _stride = STATE_SLOT_STRIDE if bufs.opt_vec else _bc_rows8(rows)
     return tla.make_tensor(
-        bufs.ub_max + slot * _bc_rows8(rows),
+        bufs.ub_max + slot * _stride,
         tla.make_layout(tla.make_shape(rows), tla.make_stride(1)),
     )
 
@@ -284,6 +291,7 @@ def vec_init_from_sinks(
     slot_sum=0,
     slot_max=0,
     clear_o: tla.Constexpr[int] = 1,
+    sink_reuse: tla.Constexpr[int] = 0,
 ):
     """每 task 初值：max=sinks，sum=1.0（R16）。
 
@@ -315,11 +323,17 @@ def vec_init_from_sinks(
             sinks.ptr, tla.make_layout(tla.make_shape(sink_len), tla.make_stride(1))
         )
         if has_sinks == 1:
-            mutex_lock(sync.m_sink, tla.pipes.MTE2)
+            sync.m_sink.lock(pipe=tla.pipes.MTE2)
             if sink_cap == 0:
                 # m 为奇数时第二子块没有实义行（OT secondHalfMRealSize=0），
                 # 其 sink 偏移会越界，钳回本 task 的首行以免读穿 sinks。
                 s_off = sink_off + sub * rows
+                if sink_reuse == 1:
+                    # E3（TOK2）：m=2*head_num、rows=head_num，行 0..rows-1 与
+                    # rows..m-1 分属两个 token，但 sink 索引都是 token 内 head
+                    # 号 0..head_num-1，两个子块复用同一段 sinks（不按 sub 偏移，
+                    # 否则 AIV1 会越界读 sinks[head_num..]）。
+                    s_off = sink_off
                 if sub * rows >= m:
                     s_off = sink_off
                 gm_sink = tla.make_tensor(
@@ -330,8 +344,8 @@ def vec_init_from_sinks(
             else:
                 # 整条 sinks 一次搬入（起点 0、长度 32B 对齐），逐行取由下游完成。
                 tla.copy(ub_sink, gm_sink_all)
-            mutex_unlock(sync.m_sink, tla.pipes.MTE2)
-        mutex_lock(sync.m_sink, tla.pipes.VECTOR)
+            sync.m_sink.unlock(pipe=tla.pipes.MTE2)
+        sync.m_sink.lock(pipe=tla.pipes.VECTOR)
         # F11·bc：max 重灌槽 slot_max = 宿主 tile（T 首）的 xg%2——与 sum 重灌
         # 槽同键；bc=1 块首的 reinit 也写本 tile 槽（见 bc_reinit_stats）。
         ub_max = _max(bufs, rows, slot_max)
@@ -351,44 +365,87 @@ def vec_init_from_sinks(
                 tla.make_shape(rows, HEAD_DIM), tla.make_stride(HEAD_DIM, 1)
             ),
         )
+        ub_sink_vl = tla.make_tensor(
+            bufs.ub_sink, tla.make_layout(tla.make_shape(VL), tla.make_stride(1))
+        )
+        ub_max_vl = tla.make_tensor(
+            bufs.ub_max + slot_max * STATE_SLOT_STRIDE,
+            tla.make_layout(tla.make_shape(VL), tla.make_stride(1)),
+        )
+        ub_sum_vl = tla.make_tensor(
+            bufs.ub_sum + slot_sum * STATE_SLOT_STRIDE,
+            tla.make_layout(tla.make_shape(VL), tla.make_stride(1)),
+        )
         with tla.vec.func(mode="simd"):
             preg = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
+            one_mask, _ = tla.update_mask(1, dtype=tla.Float32)
             brc = tla.params.NormalLoadParams(
                 load_dist=tla.params.LoadDist.DIST_BRC_B32
             )
             zero = tla.full(0.0, dtype=tla.Float32)
             one = tla.full(1.0, dtype=tla.Float32)
             minreg = tla.full(MIN_F, dtype=tla.Float32)
-            for r in tla.range(rows):
-                ub_max_r = tla.tile_view(ub_max, tla.make_shape(1), tla.make_coord(r))
-                ub_sum_r = tla.tile_view(ub_sum, tla.make_shape(1), tla.make_coord(r))
+            if tla.const_expr(bufs.opt_vec and clear_o == 0 and sink_cap == 0):
+                rmask, _ = tla.update_mask(rows, dtype=tla.Float32)
+                ub_max_v = tla.tile_view(
+                    ub_max_vl, tla.make_shape(VL), tla.make_coord(0)
+                )
+                ub_sum_v = tla.tile_view(
+                    ub_sum_vl, tla.make_shape(VL), tla.make_coord(0)
+                )
                 if has_sinks == 1:
-                    # 奇数 G：UB 里是整条 sinks，行号 = goIdx + sub*rows + r
-                    # （OT sinksOffset = goIdx + subBlockIdx*firstHalfMRealSize）。
-                    # 偶数 G：UB 里已按 sub*rows 偏移，取第 r 行。
-                    sink_row = (sink_off + sub * rows + r) if sink_cap > 0 else r
-                    ub_sink_r = tla.tile_view(
-                        ub_sink, tla.make_shape(1), tla.make_coord(sink_row)
+                    ub_sink_v = tla.tile_view(
+                        ub_sink_vl, tla.make_shape(VL), tla.make_coord(0)
                     )
-                    ub_max_r.store(
-                        ub_sink_r.load(params=brc),
-                        params=tla.params.UnalignStoreParams(),
-                    )
-                    ub_sum_r.store(one, params=tla.params.UnalignStoreParams())
+                    ub_max_v.store(ub_sink_v.load(), mask=rmask)
+                    ub_sum_v.store(one, mask=rmask)
                 else:
-                    ub_max_r.store(
-                        minreg,
-                        params=tla.params.UnalignStoreParams(),
+                    ub_max_v.store(minreg, mask=rmask)
+                    ub_sum_v.store(zero, mask=rmask)
+                tla.local_mem_bar(
+                    tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD
+                )
+            else:
+                for r in tla.range(rows):
+                    ub_max_r = tla.tile_view(
+                        ub_max, tla.make_shape(1), tla.make_coord(r)
                     )
-                    ub_sum_r.store(zero, params=tla.params.UnalignStoreParams())
-                if clear_o == 1:
-                    for c in tla.range(HEAD_DIM // VL):
-                        ub_o_c = tla.tile_view(
-                            ub_o, tla.make_shape(1, VL), tla.make_coord(r, c)
+                    ub_sum_r = tla.tile_view(
+                        ub_sum, tla.make_shape(1), tla.make_coord(r)
+                    )
+                    if has_sinks == 1:
+                        # 奇数 G：UB 里是整条 sinks，行号 = goIdx + sub*rows + r
+                        # （OT sinksOffset = goIdx + subBlockIdx*firstHalfMRealSize）。
+                        # 偶数 G：UB 里已按 sub*rows 偏移，取第 r 行。
+                        sink_row = (sink_off + sub * rows + r) if sink_cap > 0 else r
+                        ub_sink_r = tla.tile_view(
+                            ub_sink, tla.make_shape(1), tla.make_coord(sink_row)
                         )
-                        ub_o_c.store(zero, mask=preg)
+                        ub_max_r.store(
+                            ub_sink_r.load(params=brc),
+                            params=tla.params.UnalignStoreParams(),
+                            mask=one_mask,
+                        )
+                        ub_sum_r.store(
+                            one, params=tla.params.UnalignStoreParams(), mask=one_mask
+                        )
+                    else:
+                        ub_max_r.store(
+                            minreg,
+                            params=tla.params.UnalignStoreParams(),
+                            mask=one_mask,
+                        )
+                        ub_sum_r.store(
+                            zero, params=tla.params.UnalignStoreParams(), mask=one_mask
+                        )
+                    if clear_o == 1:
+                        for c in tla.range(HEAD_DIM // VL):
+                            ub_o_c = tla.tile_view(
+                                ub_o, tla.make_shape(1, VL), tla.make_coord(r, c)
+                            )
+                            ub_o_c.store(zero, mask=preg)
             tla.local_mem_bar(tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD)
-        mutex_unlock(sync.m_sink, tla.pipes.VECTOR)
+        sync.m_sink.unlock(pipe=tla.pipes.VECTOR)
 
 
 @tla.jit
@@ -405,6 +462,7 @@ def process_vec1(
     preload: tla.Constexpr[int] = 0,
     slot_sum_rd=0,
     slot_max_rd=0,
+    tail_n2=-1,
 ):
     """softmax(update 分支) + P CAST_ROUND 写 L1。
 
@@ -447,21 +505,52 @@ def process_vec1(
         # AIC 单核程序序 bmm2(x-2)（读槽 x%2 的 MTE1 LoadDataToL0A）→ … →
         # bmm1(x)，MTE1 队列 FIFO ⇒ bmm2(x-2) 的 P 读完成早于 bmm1(x) 的
         # SET ⇒ vec1(x) 的 MTE3 写不踩。领先量上界 2 tile 由该链封顶。
-        mutex_lock(sync.m_p, tla.pipes.VECTOR)
+        sync.m_p.lock(pipe=tla.pipes.VECTOR)
 
-        n0 = tail_n
+        # E3（TOK2）：一个 task 的 m 行由两个 token 拼成，AIV0 处理 token A
+        # （行 0..rows-1）、AIV1 处理 token B（行 rows..2rows-1），两半的有效列数
+        # 各自独立。tail_n2 缺省 -1 表示单 token 实例：tn 恒等于 tail_n，
+        # 指令流与改前逐条一致。
+        tn = tail_n
+        if tail_n2 >= 0:
+            if sub == 0:
+                tn = tail_n
+            if sub == 1:
+                tn = tail_n2
+        n0 = tn
         if n0 > VL:
             n0 = tla.as_numeric(VL)
-        n1 = tail_n - VL
+        n1 = tn - VL
         if n1 > VL:
             n1 = tla.as_numeric(VL)
         if n1 < 0:
             n1 = tla.as_numeric(0)
+        ub_max_rd_vl = tla.make_tensor(
+            bufs.ub_max + slot_max_rd * STATE_SLOT_STRIDE,
+            tla.make_layout(tla.make_shape(VL), tla.make_stride(1)),
+        )
+        ub_max_wr_vl = tla.make_tensor(
+            bufs.ub_max + slot_s * STATE_SLOT_STRIDE,
+            tla.make_layout(tla.make_shape(VL), tla.make_stride(1)),
+        )
+        ub_sum_rd_vl = tla.make_tensor(
+            bufs.ub_sum + slot_sum_rd * STATE_SLOT_STRIDE,
+            tla.make_layout(tla.make_shape(VL), tla.make_stride(1)),
+        )
+        ub_sum_wr_vl = tla.make_tensor(
+            bufs.ub_sum + slot_s * STATE_SLOT_STRIDE,
+            tla.make_layout(tla.make_shape(VL), tla.make_stride(1)),
+        )
+        ub_dm_wr_vl = tla.make_tensor(
+            bufs.ub_dm + slot_s * STATE_SLOT_STRIDE,
+            tla.make_layout(tla.make_shape(VL), tla.make_stride(1)),
+        )
         with tla.vec.func(mode="simd"):
             preg = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
             preg_b16 = tla.create_mask(pattern=tla.mask.ALL, dtype=dtype_in)
             preg0, _ = tla.update_mask(n0, dtype=tla.Float32)
             preg1, _ = tla.update_mask(n1, dtype=tla.Float32)
+            one_mask, _ = tla.update_mask(1, dtype=tla.Float32)
             minreg = tla.full(MIN_F, dtype=tla.Float32)
             cast_zero = tla.params.CastParams(
                 reg_slot=tla.params.RegSlot.ZERO,
@@ -485,205 +574,311 @@ def process_vec1(
             # s2RealSizeUpdate=s2RealSize 使第三路 OR 不引入新情形（§26.6）。
             # ① 臂语句与交付 c520323d 逐条相同（回归门：Dur / aiv_vec 不动）。
             # 注：条件必须内联在 if 处——DSL 不接受先赋给 Python 变量的动态条件。
-            if tail_n == KV_BLOCK:
-                # === 臂① EQ_128_SFA：交付原文 ===
-                # ---- pass 1: scale + mask + running max ----
-                for r in tla.range(rows):
-                    s0 = tla.tile_view(
-                        ub_s, tla.make_shape(1, VL), tla.make_coord(r, 0)
-                    )
-                    s1 = tla.tile_view(
-                        ub_s, tla.make_shape(1, VL), tla.make_coord(r, 1)
-                    )
-                    v0 = tla.mul(s0.load(), scale, mask=preg)
-                    v1 = tla.mul(s1.load(), scale, mask=preg)
-                    v0 = tla.where(preg0, v0, minreg)
-                    v1 = tla.where(preg1, v1, minreg)
-                    s0.store(v0, mask=preg)
-                    s1.store(v1, mask=preg)
-                    tmax = tla.max(v0, v1, mask=preg).reduce(
-                        tla.ReductionOp.MAX, mask=preg
-                    )
-                    ub_max_r = tla.tile_view(
-                        ub_max, tla.make_shape(1), tla.make_coord(r)
-                    )
-                    ub_dm_r = tla.tile_view(ub_dm, tla.make_shape(1), tla.make_coord(r))
-                    # F11·bc：old_max 读读槽（max(x-1) 或重灌槽），new_max 写写槽。
-                    old_max = tla.tile_view(
-                        ub_max_rd, tla.make_shape(1), tla.make_coord(r)
-                    ).load(params=brc)
-                    new_max = tla.max(old_max, tmax, mask=preg)
-                    ub_max_r.store(
-                        new_max,
-                        params=tla.params.UnalignStoreParams(),
-                    )
-                    ub_dm_r.store(
-                        tla.exp(tla.sub(old_max, new_max, mask=preg), mask=preg),
-                        params=tla.params.UnalignStoreParams(),
-                    )
-                tla.local_mem_bar(
-                    tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD
+            if tla.const_expr(bufs.opt_vec):
+                # Native CATLASS-DSL 4-row interleaved single-pass softmax:
+                # DIST_DINTLV_B32 splits even/odd lanes directly so cast_zero|cast_one
+                # produces packed [0..127] without VSELR; tla.full broadcasts reduced max
+                # in-register without a UB round-trip.
+                rmask, _ = tla.update_mask(rows, dtype=tla.Float32)
+                dintlv = tla.params.NormalLoadParams(
+                    load_dist=tla.params.LoadDist.DIST_DINTLV_B32
                 )
-                # ---- pass 2: exp(x - max), sum, cast -> P ----
-                # T2b：值构造 = 两个 64 宽分片分别 cast 到 ZERO/ONE 槽（spread 成
-                # [lo0,hi0,lo1,hi1,...] 交错对，v1 探针 mode0 数据段实测）→ Or →
-                # 寄存器 gather（vselr，perm = [0,2,...,126,1,3,...,127] 把交错对
-                # 拉直为 0..127 同序；v1 探针 mode3 的 group0/1/7 数据段与期望逐值
-                # 一致）→ 128 宽块存（vsstb / DATA_BLOCK_COPY，OT CastStoreExp128
-                # StoreAlign<T2,DATA_BLOCK_COPY> 同一条指令形态）。
-                # 【未验证】整缓冲哨兵判据（v2 探针灌 -1 后 exact=buf 全对）待
-                # 设备恢复后确认；store 目标已按参考规范改 zN 视图 +
-                # stride[1][1]//shape[1][0] 推导 block_stride。tsum 数值语义逐字
-                # 不变（rec0 + rec1 同序）。
-                preg_i = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Int16)
-                v = tla.arange(base=0, order="increase", dtype=tla.Int16)
-                hi_sel = tla.shift_right(v, 6, mask=preg_i)
-                perm_u = tla.sub(
-                    tla.mul(v, 2, mask=preg_i),
-                    tla.mul(hi_sel, 127, mask=preg_i),
-                    mask=preg_i,
-                ).bitcast(tla.UInt16)
-                # block_stride 单位 = 16 el DataBlock，由 zN 视图布局推导
-                # （参考 basic_mixed_store_zN.py:150-152 同式），不手填：
-                # rows=32 时 = 512//16 = 32；rows=17 时 pad16 到 32 行仍 = 32。
+                ust = tla.params.UnalignStoreParams()
                 block_store = tla.params.BlockStoreParams(
                     block_stride=ub_p.stride[1][1] // ub_p.shape[1][0]
                 )
-                for r2 in tla.range(rows):
-                    ub_max_b = tla.tile_view(
-                        ub_max, tla.make_shape(1), tla.make_coord(r2)
-                    )
-                    ub_sum_b = tla.tile_view(
-                        ub_sum, tla.make_shape(1), tla.make_coord(r2)
-                    )
-                    ub_dm_b = tla.tile_view(
-                        ub_dm, tla.make_shape(1), tla.make_coord(r2)
-                    )
-                    mx = ub_max_b.load(params=brc)
-                    dm = ub_dm_b.load(params=brc)
-                    # KV_BLOCK=128 = 两个 64 宽分片：各 exp -> sum 累加 tsum，
-                    # cast ZERO/ONE 槽后 Or + gather 拉直，块存进组布局 ub_p。
-                    ps0 = tla.tile_view(
-                        ub_s, tla.make_shape(1, VL), tla.make_coord(r2, 0)
-                    )
-                    e0 = tla.exp(tla.sub(ps0.load(), mx, mask=preg), mask=preg)
-                    rec0 = e0.reduce(tla.ReductionOp.ADD, mask=preg)
-                    ps1 = tla.tile_view(
-                        ub_s, tla.make_shape(1, VL), tla.make_coord(r2, 1)
-                    )
-                    e1 = tla.exp(tla.sub(ps1.load(), mx, mask=preg), mask=preg)
-                    rec1 = e1.reduce(tla.ReductionOp.ADD, mask=preg)
-                    # sum 结合序与交付树逐字一致：两个 64 宽分片各自 reduce、
-                    # 再标量相加。lse 沿用同一个 tsum ⇒ lse 用的 sum 与 out
-                    # 归一化分母逐位相同（out 已对 OT 逐位，故 lse 的 log(sum)
-                    # 输入也逐位）。不用 OT vf 的 Add(even,odd)+单次 Reduce 序：
-                    # 该序与交付树序不同，一旦替换会同时改动 out 分母。
-                    tsum = tla.add(rec0, rec1, mask=preg)
-                    d0 = e0.to(dtype_in, cast_zero, mask=preg)
-                    d1 = e1.to(dtype_in, cast_one, mask=preg)
-                    merged = tla.bitwise_or(d0, d1, mask=preg_b16)
-                    tight = tla.gather(merged, perm_u)
-                    tla.tile_view(
-                        ub_p, tla.make_shape(1, KV_BLOCK), tla.make_coord(r2, 0)
-                    ).store(tight, params=block_store)
-                    old_sum = tla.tile_view(
-                        ub_sum_rd, tla.make_shape(1), tla.make_coord(r2)
-                    ).load(params=brc)
-                    new_sum = tla.add(tla.mul(old_sum, dm, mask=preg), tsum, mask=preg)
-                    ub_sum_b.store(
-                        new_sum,
-                        params=tla.params.UnalignStoreParams(),
-                    )
+                old_max_vec = tla.tile_view(
+                    ub_max_rd_vl, tla.make_shape(VL), tla.make_coord(0)
+                ).load()
+                old_sum_vec = tla.tile_view(
+                    ub_sum_rd_vl, tla.make_shape(VL), tla.make_coord(0)
+                ).load()
+                tla.local_mem_bar(
+                    tla.params.MemType.VEC_LOAD, tla.params.MemType.VEC_STORE
+                )
+                if tn == KV_BLOCK:
+                    n4 = rows // 4
+                    for g in tla.range(n4):
+                        r0 = g * 4
+                        r1 = r0 + 1
+                        r2 = r0 + 2
+                        r3 = r0 + 3
+                        e0, o0 = tla.tile_view(
+                            ub_s, tla.make_shape(1, KV_BLOCK), tla.make_coord(r0, 0)
+                        ).load(dintlv)
+                        om0 = tla.tile_view(
+                            ub_max_rd, tla.make_shape(1), tla.make_coord(r0)
+                        ).load(params=brc)
+                        e1, o1 = tla.tile_view(
+                            ub_s, tla.make_shape(1, KV_BLOCK), tla.make_coord(r1, 0)
+                        ).load(dintlv)
+                        om1 = tla.tile_view(
+                            ub_max_rd, tla.make_shape(1), tla.make_coord(r1)
+                        ).load(params=brc)
+                        e2, o2 = tla.tile_view(
+                            ub_s, tla.make_shape(1, KV_BLOCK), tla.make_coord(r2, 0)
+                        ).load(dintlv)
+                        om2 = tla.tile_view(
+                            ub_max_rd, tla.make_shape(1), tla.make_coord(r2)
+                        ).load(params=brc)
+                        e3, o3 = tla.tile_view(
+                            ub_s, tla.make_shape(1, KV_BLOCK), tla.make_coord(r3, 0)
+                        ).load(dintlv)
+                        om3 = tla.tile_view(
+                            ub_max_rd, tla.make_shape(1), tla.make_coord(r3)
+                        ).load(params=brc)
+
+                        e0 = tla.mul(e0, scale, mask=preg)
+                        o0 = tla.mul(o0, scale, mask=preg)
+                        e1 = tla.mul(e1, scale, mask=preg)
+                        o1 = tla.mul(o1, scale, mask=preg)
+                        e2 = tla.mul(e2, scale, mask=preg)
+                        o2 = tla.mul(o2, scale, mask=preg)
+                        e3 = tla.mul(e3, scale, mask=preg)
+                        o3 = tla.mul(o3, scale, mask=preg)
+
+                        m0 = tla.max(
+                            om0,
+                            tla.full(
+                                tla.max(e0, o0, mask=preg).reduce(
+                                    tla.ReductionOp.MAX, mask=preg
+                                ),
+                                dtype=tla.Float32,
+                            ),
+                            mask=preg,
+                        )
+                        m1 = tla.max(
+                            om1,
+                            tla.full(
+                                tla.max(e1, o1, mask=preg).reduce(
+                                    tla.ReductionOp.MAX, mask=preg
+                                ),
+                                dtype=tla.Float32,
+                            ),
+                            mask=preg,
+                        )
+                        m2 = tla.max(
+                            om2,
+                            tla.full(
+                                tla.max(e2, o2, mask=preg).reduce(
+                                    tla.ReductionOp.MAX, mask=preg
+                                ),
+                                dtype=tla.Float32,
+                            ),
+                            mask=preg,
+                        )
+                        m3 = tla.max(
+                            om3,
+                            tla.full(
+                                tla.max(e3, o3, mask=preg).reduce(
+                                    tla.ReductionOp.MAX, mask=preg
+                                ),
+                                dtype=tla.Float32,
+                            ),
+                            mask=preg,
+                        )
+
+                        tla.tile_view(
+                            ub_max, tla.make_shape(1), tla.make_coord(r0)
+                        ).store(m0, params=ust, mask=one_mask)
+                        tla.tile_view(
+                            ub_max, tla.make_shape(1), tla.make_coord(r1)
+                        ).store(m1, params=ust, mask=one_mask)
+                        tla.tile_view(
+                            ub_max, tla.make_shape(1), tla.make_coord(r2)
+                        ).store(m2, params=ust, mask=one_mask)
+                        tla.tile_view(
+                            ub_max, tla.make_shape(1), tla.make_coord(r3)
+                        ).store(m3, params=ust, mask=one_mask)
+
+                        e0 = tla.exp(tla.sub(e0, m0, mask=preg), mask=preg)
+                        o0 = tla.exp(tla.sub(o0, m0, mask=preg), mask=preg)
+                        e1 = tla.exp(tla.sub(e1, m1, mask=preg), mask=preg)
+                        o1 = tla.exp(tla.sub(o1, m1, mask=preg), mask=preg)
+                        e2 = tla.exp(tla.sub(e2, m2, mask=preg), mask=preg)
+                        o2 = tla.exp(tla.sub(o2, m2, mask=preg), mask=preg)
+                        e3 = tla.exp(tla.sub(e3, m3, mask=preg), mask=preg)
+                        o3 = tla.exp(tla.sub(o3, m3, mask=preg), mask=preg)
+
+                        s0 = tla.add(e0, o0, mask=preg).reduce(
+                            tla.ReductionOp.ADD, mask=preg
+                        )
+                        s1 = tla.add(e1, o1, mask=preg).reduce(
+                            tla.ReductionOp.ADD, mask=preg
+                        )
+                        s2 = tla.add(e2, o2, mask=preg).reduce(
+                            tla.ReductionOp.ADD, mask=preg
+                        )
+                        s3 = tla.add(e3, o3, mask=preg).reduce(
+                            tla.ReductionOp.ADD, mask=preg
+                        )
+
+                        tla.tile_view(
+                            ub_p, tla.make_shape(1, KV_BLOCK), tla.make_coord(r0, 0)
+                        ).store(
+                            tla.bitwise_or(
+                                e0.to(dtype_in, cast_zero, mask=preg),
+                                o0.to(dtype_in, cast_one, mask=preg),
+                                mask=preg_b16,
+                            ),
+                            params=block_store,
+                        )
+                        tla.tile_view(
+                            ub_p, tla.make_shape(1, KV_BLOCK), tla.make_coord(r1, 0)
+                        ).store(
+                            tla.bitwise_or(
+                                e1.to(dtype_in, cast_zero, mask=preg),
+                                o1.to(dtype_in, cast_one, mask=preg),
+                                mask=preg_b16,
+                            ),
+                            params=block_store,
+                        )
+                        tla.tile_view(
+                            ub_p, tla.make_shape(1, KV_BLOCK), tla.make_coord(r2, 0)
+                        ).store(
+                            tla.bitwise_or(
+                                e2.to(dtype_in, cast_zero, mask=preg),
+                                o2.to(dtype_in, cast_one, mask=preg),
+                                mask=preg_b16,
+                            ),
+                            params=block_store,
+                        )
+                        tla.tile_view(
+                            ub_p, tla.make_shape(1, KV_BLOCK), tla.make_coord(r3, 0)
+                        ).store(
+                            tla.bitwise_or(
+                                e3.to(dtype_in, cast_zero, mask=preg),
+                                o3.to(dtype_in, cast_one, mask=preg),
+                                mask=preg_b16,
+                            ),
+                            params=block_store,
+                        )
+
+                        tla.tile_view(
+                            ub_sum, tla.make_shape(1), tla.make_coord(r0)
+                        ).store(s0, params=ust, mask=one_mask)
+                        tla.tile_view(
+                            ub_sum, tla.make_shape(1), tla.make_coord(r1)
+                        ).store(s1, params=ust, mask=one_mask)
+                        tla.tile_view(
+                            ub_sum, tla.make_shape(1), tla.make_coord(r2)
+                        ).store(s2, params=ust, mask=one_mask)
+                        tla.tile_view(
+                            ub_sum, tla.make_shape(1), tla.make_coord(r3)
+                        ).store(s3, params=ust, mask=one_mask)
+                    for rt in tla.range(rows - n4 * 4):
+                        r = n4 * 4 + rt
+                        et, ot = tla.tile_view(
+                            ub_s, tla.make_shape(1, KV_BLOCK), tla.make_coord(r, 0)
+                        ).load(dintlv)
+                        omt = tla.tile_view(
+                            ub_max_rd, tla.make_shape(1), tla.make_coord(r)
+                        ).load(params=brc)
+                        et = tla.mul(et, scale, mask=preg)
+                        ot = tla.mul(ot, scale, mask=preg)
+                        mt = tla.max(
+                            omt,
+                            tla.full(
+                                tla.max(et, ot, mask=preg).reduce(
+                                    tla.ReductionOp.MAX, mask=preg
+                                ),
+                                dtype=tla.Float32,
+                            ),
+                            mask=preg,
+                        )
+                        tla.tile_view(
+                            ub_max, tla.make_shape(1), tla.make_coord(r)
+                        ).store(mt, params=ust, mask=one_mask)
+                        et = tla.exp(tla.sub(et, mt, mask=preg), mask=preg)
+                        ot = tla.exp(tla.sub(ot, mt, mask=preg), mask=preg)
+                        st = tla.add(et, ot, mask=preg).reduce(
+                            tla.ReductionOp.ADD, mask=preg
+                        )
+                        tla.tile_view(
+                            ub_p, tla.make_shape(1, KV_BLOCK), tla.make_coord(r, 0)
+                        ).store(
+                            tla.bitwise_or(
+                                et.to(dtype_in, cast_zero, mask=preg),
+                                ot.to(dtype_in, cast_one, mask=preg),
+                                mask=preg_b16,
+                            ),
+                            params=block_store,
+                        )
+                        tla.tile_view(
+                            ub_sum, tla.make_shape(1), tla.make_coord(r)
+                        ).store(st, params=ust, mask=one_mask)
+                else:
+                    n_even = (tn + 1) // 2
+                    n_odd = tn // 2
+                    mask_even, _ = tla.update_mask(n_even, dtype=tla.Float32)
+                    mask_odd, _ = tla.update_mask(n_odd, dtype=tla.Float32)
+                    for r in tla.range(rows):
+                        el, ol = tla.tile_view(
+                            ub_s, tla.make_shape(1, KV_BLOCK), tla.make_coord(r, 0)
+                        ).load(dintlv)
+                        oml = tla.tile_view(
+                            ub_max_rd, tla.make_shape(1), tla.make_coord(r)
+                        ).load(params=brc)
+                        el = tla.where(mask_even, tla.mul(el, scale, mask=preg), minreg)
+                        ol = tla.where(mask_odd, tla.mul(ol, scale, mask=preg), minreg)
+                        ml = tla.max(
+                            oml,
+                            tla.full(
+                                tla.max(el, ol, mask=preg).reduce(
+                                    tla.ReductionOp.MAX, mask=preg
+                                ),
+                                dtype=tla.Float32,
+                            ),
+                            mask=preg,
+                        )
+                        tla.tile_view(
+                            ub_max, tla.make_shape(1), tla.make_coord(r)
+                        ).store(ml, params=ust, mask=one_mask)
+                        el = tla.exp(tla.sub(el, ml, mask=preg), mask=preg)
+                        ol = tla.exp(tla.sub(ol, ml, mask=preg), mask=preg)
+                        sl = tla.add(el, ol, mask=preg).reduce(
+                            tla.ReductionOp.ADD, mask=preg
+                        )
+                        tla.tile_view(
+                            ub_p, tla.make_shape(1, KV_BLOCK), tla.make_coord(r, 0)
+                        ).store(
+                            tla.bitwise_or(
+                                el.to(dtype_in, cast_zero, mask=preg),
+                                ol.to(dtype_in, cast_one, mask=preg),
+                                mask=preg_b16,
+                            ),
+                            params=block_store,
+                        )
+                        tla.tile_view(
+                            ub_sum, tla.make_shape(1), tla.make_coord(r)
+                        ).store(sl, params=ust, mask=one_mask)
+                tla.local_mem_bar(
+                    tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD
+                )
+                new_max_vec = tla.tile_view(
+                    ub_max_wr_vl, tla.make_shape(VL), tla.make_coord(0)
+                ).load()
+                dm_vec = tla.exp(
+                    tla.sub(old_max_vec, new_max_vec, mask=rmask), mask=rmask
+                )
+                tla.tile_view(ub_dm_wr_vl, tla.make_shape(VL), tla.make_coord(0)).store(
+                    dm_vec, mask=rmask
+                )
+                row_sum_vec = tla.tile_view(
+                    ub_sum_wr_vl, tla.make_shape(VL), tla.make_coord(0)
+                ).load()
+                new_sum_vec = tla.add(
+                    tla.mul(old_sum_vec, dm_vec, mask=rmask), row_sum_vec, mask=rmask
+                )
+                tla.tile_view(
+                    ub_sum_wr_vl, tla.make_shape(VL), tla.make_coord(0)
+                ).store(new_sum_vec, mask=rmask)
                 tla.local_mem_bar(
                     tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD
                 )
             else:
-                if tail_n <= VL:
-                    # === 臂② GT_0_AND_LTE_64_SFA：第二分片整段跳过 ===
-                    # ---- 臂② pass 1：单分片（OT Impl64 :51-58，第二分片整段跳过）----
-                    for r in tla.range(rows):
-                        s0 = tla.tile_view(
-                            ub_s, tla.make_shape(1, VL), tla.make_coord(r, 0)
-                        )
-                        v0 = tla.mul(s0.load(), scale, mask=preg)
-                        v0 = tla.where(preg0, v0, minreg)
-                        s0.store(v0, mask=preg)
-                        tmax = v0.reduce(tla.ReductionOp.MAX, mask=preg)
-                        ub_max_r = tla.tile_view(
-                            ub_max, tla.make_shape(1), tla.make_coord(r)
-                        )
-                        ub_dm_r = tla.tile_view(
-                            ub_dm, tla.make_shape(1), tla.make_coord(r)
-                        )
-                        old_max = tla.tile_view(
-                            ub_max_rd, tla.make_shape(1), tla.make_coord(r)
-                        ).load(params=brc)
-                        new_max = tla.max(old_max, tmax, mask=preg)
-                        ub_max_r.store(
-                            new_max,
-                            params=tla.params.UnalignStoreParams(),
-                        )
-                        ub_dm_r.store(
-                            tla.exp(tla.sub(old_max, new_max, mask=preg), mask=preg),
-                            params=tla.params.UnalignStoreParams(),
-                        )
-                    tla.local_mem_bar(
-                        tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD
-                    )
-                    # ---- 臂② pass 2：单分片 exp/sum/cast + gather ----
-                    # P 仍按满 128 宽块存（高半 = gather 天然给的 0）：OT 的 64 宽 H 掩码存
-                    # 在 OT 侧安全只因 cube K=s2RealSize；我方 bmm2 的 K 恒 128，若只写
-                    # 64 宽会把陈旧高半算进 O（§26.6）。
-                    preg_i = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Int16)
-                    v = tla.arange(base=0, order="increase", dtype=tla.Int16)
-                    hi_sel = tla.shift_right(v, 6, mask=preg_i)
-                    perm_u = tla.sub(
-                        tla.mul(v, 2, mask=preg_i),
-                        tla.mul(hi_sel, 127, mask=preg_i),
-                        mask=preg_i,
-                    ).bitcast(tla.UInt16)
-                    block_store = tla.params.BlockStoreParams(
-                        block_stride=ub_p.stride[1][1] // ub_p.shape[1][0]
-                    )
-                    for r2 in tla.range(rows):
-                        ub_max_b = tla.tile_view(
-                            ub_max, tla.make_shape(1), tla.make_coord(r2)
-                        )
-                        ub_sum_b = tla.tile_view(
-                            ub_sum, tla.make_shape(1), tla.make_coord(r2)
-                        )
-                        ub_dm_b = tla.tile_view(
-                            ub_dm, tla.make_shape(1), tla.make_coord(r2)
-                        )
-                        mx = ub_max_b.load(params=brc)
-                        dm = ub_dm_b.load(params=brc)
-                        ps0 = tla.tile_view(
-                            ub_s, tla.make_shape(1, VL), tla.make_coord(r2, 0)
-                        )
-                        e0 = tla.exp(tla.sub(ps0.load(), mx, mask=preg), mask=preg)
-                        rec0 = e0.reduce(tla.ReductionOp.ADD, mask=preg)
-                        d0 = e0.to(dtype_in, cast_zero, mask=preg)
-                        tight = tla.gather(d0, perm_u)
-                        tla.tile_view(
-                            ub_p, tla.make_shape(1, KV_BLOCK), tla.make_coord(r2, 0)
-                        ).store(tight, params=block_store)
-                        old_sum = tla.tile_view(
-                            ub_sum_rd, tla.make_shape(1), tla.make_coord(r2)
-                        ).load(params=brc)
-                        new_sum = tla.add(
-                            tla.mul(old_sum, dm, mask=preg), rec0, mask=preg
-                        )
-                        ub_sum_b.store(
-                            new_sum,
-                            params=tla.params.UnalignStoreParams(),
-                        )
-                    tla.local_mem_bar(
-                        tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD
-                    )
-                else:
-                    # === 臂③ GT_64_AND_LTE_128_SFA：低半满 64 道不 Select
-                    # （OT TailScaleStoreMax128 :86-101 低半 preg_all），
-                    # 高半按 n-64 掩码 + Select；pass2 与臂①同一形态。===
+                if tn == KV_BLOCK:
+                    # === 臂① EQ_128_SFA：交付原文 ===
                     # ---- pass 1: scale + mask + running max ----
                     for r in tla.range(rows):
                         s0 = tla.tile_view(
@@ -694,6 +889,7 @@ def process_vec1(
                         )
                         v0 = tla.mul(s0.load(), scale, mask=preg)
                         v1 = tla.mul(s1.load(), scale, mask=preg)
+                        v0 = tla.where(preg0, v0, minreg)
                         v1 = tla.where(preg1, v1, minreg)
                         s0.store(v0, mask=preg)
                         s1.store(v1, mask=preg)
@@ -714,10 +910,12 @@ def process_vec1(
                         ub_max_r.store(
                             new_max,
                             params=tla.params.UnalignStoreParams(),
+                            mask=one_mask,
                         )
                         ub_dm_r.store(
                             tla.exp(tla.sub(old_max, new_max, mask=preg), mask=preg),
                             params=tla.params.UnalignStoreParams(),
+                            mask=one_mask,
                         )
                     tla.local_mem_bar(
                         tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD
@@ -771,7 +969,11 @@ def process_vec1(
                         )
                         e1 = tla.exp(tla.sub(ps1.load(), mx, mask=preg), mask=preg)
                         rec1 = e1.reduce(tla.ReductionOp.ADD, mask=preg)
-                        # 同 arm ①：交付树的 sum 结合序（两分片各自 reduce + 标量加）
+                        # sum 结合序与交付树逐字一致：两个 64 宽分片各自 reduce、
+                        # 再标量相加。lse 沿用同一个 tsum ⇒ lse 用的 sum 与 out
+                        # 归一化分母逐位相同（out 已对 OT 逐位，故 lse 的 log(sum)
+                        # 输入也逐位）。不用 OT vf 的 Add(even,odd)+单次 Reduce 序：
+                        # 该序与交付树序不同，一旦替换会同时改动 out 分母。
                         tsum = tla.add(rec0, rec1, mask=preg)
                         d0 = e0.to(dtype_in, cast_zero, mask=preg)
                         d1 = e1.to(dtype_in, cast_one, mask=preg)
@@ -789,10 +991,217 @@ def process_vec1(
                         ub_sum_b.store(
                             new_sum,
                             params=tla.params.UnalignStoreParams(),
+                            mask=one_mask,
                         )
                     tla.local_mem_bar(
                         tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD
                     )
+                else:
+                    if tn <= VL:
+                        # === 臂② GT_0_AND_LTE_64_SFA：第二分片整段跳过 ===
+                        # ---- 臂② pass 1：单分片（OT Impl64 :51-58，第二分片整段跳过）----
+                        for r in tla.range(rows):
+                            s0 = tla.tile_view(
+                                ub_s, tla.make_shape(1, VL), tla.make_coord(r, 0)
+                            )
+                            v0 = tla.mul(s0.load(), scale, mask=preg)
+                            v0 = tla.where(preg0, v0, minreg)
+                            s0.store(v0, mask=preg)
+                            tmax = v0.reduce(tla.ReductionOp.MAX, mask=preg)
+                            ub_max_r = tla.tile_view(
+                                ub_max, tla.make_shape(1), tla.make_coord(r)
+                            )
+                            ub_dm_r = tla.tile_view(
+                                ub_dm, tla.make_shape(1), tla.make_coord(r)
+                            )
+                            old_max = tla.tile_view(
+                                ub_max_rd, tla.make_shape(1), tla.make_coord(r)
+                            ).load(params=brc)
+                            new_max = tla.max(old_max, tmax, mask=preg)
+                            ub_max_r.store(
+                                new_max,
+                                params=tla.params.UnalignStoreParams(),
+                                mask=one_mask,
+                            )
+                            ub_dm_r.store(
+                                tla.exp(
+                                    tla.sub(old_max, new_max, mask=preg), mask=preg
+                                ),
+                                params=tla.params.UnalignStoreParams(),
+                                mask=one_mask,
+                            )
+                        tla.local_mem_bar(
+                            tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD
+                        )
+                        # ---- 臂② pass 2：单分片 exp/sum/cast + gather ----
+                        # P 仍按满 128 宽块存（高半 = gather 天然给的 0）：OT 的 64 宽 H 掩码存
+                        # 在 OT 侧安全只因 cube K=s2RealSize；我方 bmm2 的 K 恒 128，若只写
+                        # 64 宽会把陈旧高半算进 O（§26.6）。
+                        preg_i = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Int16)
+                        v = tla.arange(base=0, order="increase", dtype=tla.Int16)
+                        hi_sel = tla.shift_right(v, 6, mask=preg_i)
+                        perm_u = tla.sub(
+                            tla.mul(v, 2, mask=preg_i),
+                            tla.mul(hi_sel, 127, mask=preg_i),
+                            mask=preg_i,
+                        ).bitcast(tla.UInt16)
+                        block_store = tla.params.BlockStoreParams(
+                            block_stride=ub_p.stride[1][1] // ub_p.shape[1][0]
+                        )
+                        for r2 in tla.range(rows):
+                            ub_max_b = tla.tile_view(
+                                ub_max, tla.make_shape(1), tla.make_coord(r2)
+                            )
+                            ub_sum_b = tla.tile_view(
+                                ub_sum, tla.make_shape(1), tla.make_coord(r2)
+                            )
+                            ub_dm_b = tla.tile_view(
+                                ub_dm, tla.make_shape(1), tla.make_coord(r2)
+                            )
+                            mx = ub_max_b.load(params=brc)
+                            dm = ub_dm_b.load(params=brc)
+                            ps0 = tla.tile_view(
+                                ub_s, tla.make_shape(1, VL), tla.make_coord(r2, 0)
+                            )
+                            e0 = tla.exp(tla.sub(ps0.load(), mx, mask=preg), mask=preg)
+                            rec0 = e0.reduce(tla.ReductionOp.ADD, mask=preg)
+                            d0 = e0.to(dtype_in, cast_zero, mask=preg)
+                            tight = tla.gather(d0, perm_u)
+                            tla.tile_view(
+                                ub_p, tla.make_shape(1, KV_BLOCK), tla.make_coord(r2, 0)
+                            ).store(tight, params=block_store)
+                            old_sum = tla.tile_view(
+                                ub_sum_rd, tla.make_shape(1), tla.make_coord(r2)
+                            ).load(params=brc)
+                            new_sum = tla.add(
+                                tla.mul(old_sum, dm, mask=preg), rec0, mask=preg
+                            )
+                            ub_sum_b.store(
+                                new_sum,
+                                params=tla.params.UnalignStoreParams(),
+                                mask=one_mask,
+                            )
+                        tla.local_mem_bar(
+                            tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD
+                        )
+                    else:
+                        # === 臂③ GT_64_AND_LTE_128_SFA：低半满 64 道不 Select
+                        # （OT TailScaleStoreMax128 :86-101 低半 preg_all），
+                        # 高半按 n-64 掩码 + Select；pass2 与臂①同一形态。===
+                        # ---- pass 1: scale + mask + running max ----
+                        for r in tla.range(rows):
+                            s0 = tla.tile_view(
+                                ub_s, tla.make_shape(1, VL), tla.make_coord(r, 0)
+                            )
+                            s1 = tla.tile_view(
+                                ub_s, tla.make_shape(1, VL), tla.make_coord(r, 1)
+                            )
+                            v0 = tla.mul(s0.load(), scale, mask=preg)
+                            v1 = tla.mul(s1.load(), scale, mask=preg)
+                            v1 = tla.where(preg1, v1, minreg)
+                            s0.store(v0, mask=preg)
+                            s1.store(v1, mask=preg)
+                            tmax = tla.max(v0, v1, mask=preg).reduce(
+                                tla.ReductionOp.MAX, mask=preg
+                            )
+                            ub_max_r = tla.tile_view(
+                                ub_max, tla.make_shape(1), tla.make_coord(r)
+                            )
+                            ub_dm_r = tla.tile_view(
+                                ub_dm, tla.make_shape(1), tla.make_coord(r)
+                            )
+                            # F11·bc：old_max 读读槽（max(x-1) 或重灌槽），new_max 写写槽。
+                            old_max = tla.tile_view(
+                                ub_max_rd, tla.make_shape(1), tla.make_coord(r)
+                            ).load(params=brc)
+                            new_max = tla.max(old_max, tmax, mask=preg)
+                            ub_max_r.store(
+                                new_max,
+                                params=tla.params.UnalignStoreParams(),
+                                mask=one_mask,
+                            )
+                            ub_dm_r.store(
+                                tla.exp(
+                                    tla.sub(old_max, new_max, mask=preg), mask=preg
+                                ),
+                                params=tla.params.UnalignStoreParams(),
+                                mask=one_mask,
+                            )
+                        tla.local_mem_bar(
+                            tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD
+                        )
+                        # ---- pass 2: exp(x - max), sum, cast -> P ----
+                        # T2b：值构造 = 两个 64 宽分片分别 cast 到 ZERO/ONE 槽（spread 成
+                        # [lo0,hi0,lo1,hi1,...] 交错对，v1 探针 mode0 数据段实测）→ Or →
+                        # 寄存器 gather（vselr，perm = [0,2,...,126,1,3,...,127] 把交错对
+                        # 拉直为 0..127 同序；v1 探针 mode3 的 group0/1/7 数据段与期望逐值
+                        # 一致）→ 128 宽块存（vsstb / DATA_BLOCK_COPY，OT CastStoreExp128
+                        # StoreAlign<T2,DATA_BLOCK_COPY> 同一条指令形态）。
+                        # 【未验证】整缓冲哨兵判据（v2 探针灌 -1 后 exact=buf 全对）待
+                        # 设备恢复后确认；store 目标已按参考规范改 zN 视图 +
+                        # stride[1][1]//shape[1][0] 推导 block_stride。tsum 数值语义逐字
+                        # 不变（rec0 + rec1 同序）。
+                        preg_i = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Int16)
+                        v = tla.arange(base=0, order="increase", dtype=tla.Int16)
+                        hi_sel = tla.shift_right(v, 6, mask=preg_i)
+                        perm_u = tla.sub(
+                            tla.mul(v, 2, mask=preg_i),
+                            tla.mul(hi_sel, 127, mask=preg_i),
+                            mask=preg_i,
+                        ).bitcast(tla.UInt16)
+                        # block_stride 单位 = 16 el DataBlock，由 zN 视图布局推导
+                        # （参考 basic_mixed_store_zN.py:150-152 同式），不手填：
+                        # rows=32 时 = 512//16 = 32；rows=17 时 pad16 到 32 行仍 = 32。
+                        block_store = tla.params.BlockStoreParams(
+                            block_stride=ub_p.stride[1][1] // ub_p.shape[1][0]
+                        )
+                        for r2 in tla.range(rows):
+                            ub_max_b = tla.tile_view(
+                                ub_max, tla.make_shape(1), tla.make_coord(r2)
+                            )
+                            ub_sum_b = tla.tile_view(
+                                ub_sum, tla.make_shape(1), tla.make_coord(r2)
+                            )
+                            ub_dm_b = tla.tile_view(
+                                ub_dm, tla.make_shape(1), tla.make_coord(r2)
+                            )
+                            mx = ub_max_b.load(params=brc)
+                            dm = ub_dm_b.load(params=brc)
+                            # KV_BLOCK=128 = 两个 64 宽分片：各 exp -> sum 累加 tsum，
+                            # cast ZERO/ONE 槽后 Or + gather 拉直，块存进组布局 ub_p。
+                            ps0 = tla.tile_view(
+                                ub_s, tla.make_shape(1, VL), tla.make_coord(r2, 0)
+                            )
+                            e0 = tla.exp(tla.sub(ps0.load(), mx, mask=preg), mask=preg)
+                            rec0 = e0.reduce(tla.ReductionOp.ADD, mask=preg)
+                            ps1 = tla.tile_view(
+                                ub_s, tla.make_shape(1, VL), tla.make_coord(r2, 1)
+                            )
+                            e1 = tla.exp(tla.sub(ps1.load(), mx, mask=preg), mask=preg)
+                            rec1 = e1.reduce(tla.ReductionOp.ADD, mask=preg)
+                            # 同 arm ①：交付树的 sum 结合序（两分片各自 reduce + 标量加）
+                            tsum = tla.add(rec0, rec1, mask=preg)
+                            d0 = e0.to(dtype_in, cast_zero, mask=preg)
+                            d1 = e1.to(dtype_in, cast_one, mask=preg)
+                            merged = tla.bitwise_or(d0, d1, mask=preg_b16)
+                            tight = tla.gather(merged, perm_u)
+                            tla.tile_view(
+                                ub_p, tla.make_shape(1, KV_BLOCK), tla.make_coord(r2, 0)
+                            ).store(tight, params=block_store)
+                            old_sum = tla.tile_view(
+                                ub_sum_rd, tla.make_shape(1), tla.make_coord(r2)
+                            ).load(params=brc)
+                            new_sum = tla.add(
+                                tla.mul(old_sum, dm, mask=preg), tsum, mask=preg
+                            )
+                            ub_sum_b.store(
+                                new_sum,
+                                params=tla.params.UnalignStoreParams(),
+                                mask=one_mask,
+                            )
+                        tla.local_mem_bar(
+                            tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD
+                        )
         # S 已消费，归还 FIX
         tla.cross_core_set_flag(sync.s_free, tla.pipes.VECTOR, aiv_id=0)
         tla.cross_core_set_flag(sync.s_free, tla.pipes.VECTOR, aiv_id=1)
@@ -820,12 +1229,37 @@ def process_vec1(
         l1p_rows = tla.tile_view(
             l1p, tla.make_shape(rows, KV_BLOCK), tla.make_coord(sub, 0)
         )
-        mutex_unlock(sync.m_p, tla.pipes.VECTOR)
-        mutex_lock(sync.m_p, tla.pipes.MTE3)
+        sync.m_p.unlock(pipe=tla.pipes.VECTOR)
+        sync.m_p.lock(pipe=tla.pipes.MTE3)
+        tla.set_flag(sync.p_data_ready)
+        tla.wait_flag(sync.p_data_ready)
         tla.copy(l1p_rows, ub_p)
-        mutex_unlock(sync.m_p, tla.pipes.MTE3)
+        sync.m_p.unlock(pipe=tla.pipes.MTE3)
         tla.cross_core_set_flag(sync.p_ready, tla.pipes.MTE3, aiv_id=0)
         tla.cross_core_set_flag(sync.p_ready, tla.pipes.MTE3, aiv_id=1)
+
+
+@tla.jit
+def fd_unit_guard(sync):
+    """E6 修：FD 单元切换的 V 侧 WAR 闸门。
+
+    每个 FD 执行单元末，`fd_store_partial` 用 m_o16 的 MTE3 阶段把 ub_o 与
+    运行统计槽读走。下一单元的首个 vec1/vec2 会在同一 UB 上重写（同核多 unit
+    时）。非 FD 路径由 `bmm2_data_copy_out` 自身的 lock(VECTOR) 兜住；FD 路径
+    原先没有对应闸门，MTE3 读与下一单元的 V 写可重叠。
+
+    实测形态：在 28 核上跑 #021 S=6（30 unit）、#028 S=4（60 unit）、
+    #022 S=2（64 unit）、#026 S=2（40 unit）时，上一单元的部分量被下一单元
+    的 vec 写污染（matched_ratio 0.47~0.99；task0 的行段最明显）。加闸门后
+    全部 1.0。闸门只需在「上一单元 fd_store 已发出」与「本单元第一个危险 V
+    写」之间建序，故由 kernel 在 fd_store_partial 之后、同一个 body 里调用
+    一次（每个单元边界一次，不是每 tile 一次）。
+
+    FD_SPLITS==1 实例不调用本函数，指令流与 base 一致。
+    """
+    with tla.vector():
+        sync.m_o16.lock(pipe=tla.pipes.VECTOR)
+        sync.m_o16.unlock(pipe=tla.pipes.VECTOR)
 
 
 @tla.jit
@@ -928,6 +1362,316 @@ def process_vec2_seg(sync, bufs, seg, m, rows, dtype_in, fresh=0, slot_dm=0):
             tla.cross_core_set_flag(sync.o_free, tla.pipes.VECTOR, aiv_id=1)
 
 
+@tla.jit
+def process_vec2_full_opt(
+    sync,
+    bufs,
+    out_tensor,
+    task,
+    m,
+    rows,
+    dtype_in,
+    fresh,
+    is_last,
+    slot_dm=0,
+    o16_aliased: tla.Constexpr[bool] = False,
+):
+    """Fused PV accumulation + optional last-tile normalize & L2-bypass copy_out."""
+    with tla.vector():
+        sub = tla.arch.sub_block_idx()
+        dm_ptr = bufs.ub_dm + slot_dm * STATE_SLOT_STRIDE
+        sum_ptr = bufs.ub_sum + slot_dm * STATE_SLOT_STRIDE
+        m_o16 = sync.m_o16
+        ub_o_t = tla.make_tensor(
+            bufs.ub_o,
+            tla.make_layout(tla.make_shape(rows * HEAD_DIM), tla.make_stride(1)),
+        )
+        ub_ot_t = tla.make_tensor(
+            bufs.ub_otmp_full,
+            tla.make_layout(tla.make_shape(rows * HEAD_DIM), tla.make_stride(1)),
+        )
+        ub_o16_t = tla.make_tensor(
+            bufs.ub_o16,
+            tla.make_layout(
+                tla.make_shape(rows, HEAD_DIM), tla.make_stride(HEAD_DIM, 1)
+            ),
+        )
+        ub_dm_t = tla.make_tensor(
+            dm_ptr, tla.make_layout(tla.make_shape(rows), tla.make_stride(1))
+        )
+        ub_sum_t = tla.make_tensor(
+            sum_ptr, tla.make_layout(tla.make_shape(rows), tla.make_stride(1))
+        )
+        tla.cross_core_wait_flag(sync.o_ready, tla.pipes.VECTOR, aiv_id=0)
+        tla.cross_core_wait_flag(sync.o_ready, tla.pipes.VECTOR, aiv_id=1)
+
+        if is_last:
+            m_o16.lock(pipe=tla.pipes.VECTOR)
+            with tla.vec.func(mode="simd"):
+                preg = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
+                preg_b16 = tla.create_mask(pattern=tla.mask.ALL, dtype=dtype_in)
+                one_vec = tla.full(1.0, dtype=tla.Float32)
+                brc = tla.params.NormalLoadParams(
+                    load_dist=tla.params.LoadDist.DIST_BRC_B32
+                )
+                ld_u = tla.params.NormalLoadParams(
+                    post_mode=tla.params.PostMode.POST_MODE_UPDATE
+                )
+                cast_zero = tla.params.CastParams(
+                    reg_slot=tla.params.RegSlot.ZERO,
+                    sat_mode=tla.params.SatMode.SAT,
+                    round_mode=tla.params.RoundMode.CAST_ROUND,
+                )
+                pack_store = tla.params.NormalStoreParams(
+                    store_dist=tla.params.StoreDist.DIST_PACK_B32
+                )
+                o_rd = tla.tile_view(ub_o_t, tla.make_shape(VL), tla.make_coord(0))
+                ot_rd = tla.tile_view(ub_ot_t, tla.make_shape(VL), tla.make_coord(0))
+                if fresh:
+                    for r in tla.range(rows):
+                        den_r = tla.tile_view(
+                            ub_sum_t, tla.make_shape(1), tla.make_coord(r)
+                        ).load(params=brc)
+                        inv_r = tla.div(one_vec, den_r, mask=preg)
+                        a0, o_rd = o_rd.load(ld_u)
+                        a1, o_rd = o_rd.load(ld_u)
+                        a2, o_rd = o_rd.load(ld_u)
+                        a3, o_rd = o_rd.load(ld_u)
+                        c0 = tla.mul(a0, inv_r, mask=preg).to(
+                            dtype_in, cast_zero, mask=preg
+                        )
+                        c1 = tla.mul(a1, inv_r, mask=preg).to(
+                            dtype_in, cast_zero, mask=preg
+                        )
+                        c2 = tla.mul(a2, inv_r, mask=preg).to(
+                            dtype_in, cast_zero, mask=preg
+                        )
+                        c3 = tla.mul(a3, inv_r, mask=preg).to(
+                            dtype_in, cast_zero, mask=preg
+                        )
+                        a4, o_rd = o_rd.load(ld_u)
+                        a5, o_rd = o_rd.load(ld_u)
+                        a6, o_rd = o_rd.load(ld_u)
+                        a7, o_rd = o_rd.load(ld_u)
+                        tla.tile_view(
+                            ub_o16_t, tla.make_shape(1, VL), tla.make_coord(r, 0)
+                        ).store(c0, pack_store, mask=preg_b16)
+                        tla.tile_view(
+                            ub_o16_t, tla.make_shape(1, VL), tla.make_coord(r, 1)
+                        ).store(c1, pack_store, mask=preg_b16)
+                        tla.tile_view(
+                            ub_o16_t, tla.make_shape(1, VL), tla.make_coord(r, 2)
+                        ).store(c2, pack_store, mask=preg_b16)
+                        tla.tile_view(
+                            ub_o16_t, tla.make_shape(1, VL), tla.make_coord(r, 3)
+                        ).store(c3, pack_store, mask=preg_b16)
+                        c4 = tla.mul(a4, inv_r, mask=preg).to(
+                            dtype_in, cast_zero, mask=preg
+                        )
+                        c5 = tla.mul(a5, inv_r, mask=preg).to(
+                            dtype_in, cast_zero, mask=preg
+                        )
+                        c6 = tla.mul(a6, inv_r, mask=preg).to(
+                            dtype_in, cast_zero, mask=preg
+                        )
+                        c7 = tla.mul(a7, inv_r, mask=preg).to(
+                            dtype_in, cast_zero, mask=preg
+                        )
+                        tla.tile_view(
+                            ub_o16_t, tla.make_shape(1, VL), tla.make_coord(r, 4)
+                        ).store(c4, pack_store, mask=preg_b16)
+                        tla.tile_view(
+                            ub_o16_t, tla.make_shape(1, VL), tla.make_coord(r, 5)
+                        ).store(c5, pack_store, mask=preg_b16)
+                        tla.tile_view(
+                            ub_o16_t, tla.make_shape(1, VL), tla.make_coord(r, 6)
+                        ).store(c6, pack_store, mask=preg_b16)
+                        tla.tile_view(
+                            ub_o16_t, tla.make_shape(1, VL), tla.make_coord(r, 7)
+                        ).store(c7, pack_store, mask=preg_b16)
+                else:
+                    for r in tla.range(rows):
+                        den_r = tla.tile_view(
+                            ub_sum_t, tla.make_shape(1), tla.make_coord(r)
+                        ).load(params=brc)
+                        inv_r = tla.div(one_vec, den_r, mask=preg)
+                        dm_r = tla.tile_view(
+                            ub_dm_t, tla.make_shape(1), tla.make_coord(r)
+                        ).load(params=brc)
+                        a0, o_rd = o_rd.load(ld_u)
+                        t0, ot_rd = ot_rd.load(ld_u)
+                        a1, o_rd = o_rd.load(ld_u)
+                        t1, ot_rd = ot_rd.load(ld_u)
+                        a2, o_rd = o_rd.load(ld_u)
+                        t2, ot_rd = ot_rd.load(ld_u)
+                        a3, o_rd = o_rd.load(ld_u)
+                        t3, ot_rd = ot_rd.load(ld_u)
+                        c0 = tla.mul(
+                            tla.add(tla.mul(a0, dm_r, mask=preg), t0, mask=preg),
+                            inv_r,
+                            mask=preg,
+                        ).to(dtype_in, cast_zero, mask=preg)
+                        c1 = tla.mul(
+                            tla.add(tla.mul(a1, dm_r, mask=preg), t1, mask=preg),
+                            inv_r,
+                            mask=preg,
+                        ).to(dtype_in, cast_zero, mask=preg)
+                        c2 = tla.mul(
+                            tla.add(tla.mul(a2, dm_r, mask=preg), t2, mask=preg),
+                            inv_r,
+                            mask=preg,
+                        ).to(dtype_in, cast_zero, mask=preg)
+                        c3 = tla.mul(
+                            tla.add(tla.mul(a3, dm_r, mask=preg), t3, mask=preg),
+                            inv_r,
+                            mask=preg,
+                        ).to(dtype_in, cast_zero, mask=preg)
+                        a4, o_rd = o_rd.load(ld_u)
+                        t4, ot_rd = ot_rd.load(ld_u)
+                        a5, o_rd = o_rd.load(ld_u)
+                        t5, ot_rd = ot_rd.load(ld_u)
+                        a6, o_rd = o_rd.load(ld_u)
+                        t6, ot_rd = ot_rd.load(ld_u)
+                        a7, o_rd = o_rd.load(ld_u)
+                        t7, ot_rd = ot_rd.load(ld_u)
+                        tla.tile_view(
+                            ub_o16_t, tla.make_shape(1, VL), tla.make_coord(r, 0)
+                        ).store(c0, pack_store, mask=preg_b16)
+                        tla.tile_view(
+                            ub_o16_t, tla.make_shape(1, VL), tla.make_coord(r, 1)
+                        ).store(c1, pack_store, mask=preg_b16)
+                        tla.tile_view(
+                            ub_o16_t, tla.make_shape(1, VL), tla.make_coord(r, 2)
+                        ).store(c2, pack_store, mask=preg_b16)
+                        tla.tile_view(
+                            ub_o16_t, tla.make_shape(1, VL), tla.make_coord(r, 3)
+                        ).store(c3, pack_store, mask=preg_b16)
+                        c4 = tla.mul(
+                            tla.add(tla.mul(a4, dm_r, mask=preg), t4, mask=preg),
+                            inv_r,
+                            mask=preg,
+                        ).to(dtype_in, cast_zero, mask=preg)
+                        c5 = tla.mul(
+                            tla.add(tla.mul(a5, dm_r, mask=preg), t5, mask=preg),
+                            inv_r,
+                            mask=preg,
+                        ).to(dtype_in, cast_zero, mask=preg)
+                        c6 = tla.mul(
+                            tla.add(tla.mul(a6, dm_r, mask=preg), t6, mask=preg),
+                            inv_r,
+                            mask=preg,
+                        ).to(dtype_in, cast_zero, mask=preg)
+                        c7 = tla.mul(
+                            tla.add(tla.mul(a7, dm_r, mask=preg), t7, mask=preg),
+                            inv_r,
+                            mask=preg,
+                        ).to(dtype_in, cast_zero, mask=preg)
+                        tla.tile_view(
+                            ub_o16_t, tla.make_shape(1, VL), tla.make_coord(r, 4)
+                        ).store(c4, pack_store, mask=preg_b16)
+                        tla.tile_view(
+                            ub_o16_t, tla.make_shape(1, VL), tla.make_coord(r, 5)
+                        ).store(c5, pack_store, mask=preg_b16)
+                        tla.tile_view(
+                            ub_o16_t, tla.make_shape(1, VL), tla.make_coord(r, 6)
+                        ).store(c6, pack_store, mask=preg_b16)
+                        tla.tile_view(
+                            ub_o16_t, tla.make_shape(1, VL), tla.make_coord(r, 7)
+                        ).store(c7, pack_store, mask=preg_b16)
+                tla.local_mem_bar(
+                    tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD
+                )
+            m_o16.unlock(pipe=tla.pipes.VECTOR)
+            # When o16_aliased=True, ub_o16 aliases ub_otmp_full (not ub_o), so ub_o is
+            # immediately free on PIPE_V for the next token's tile 0 (dst_is_o=True).
+            tla.cross_core_set_flag(sync.o_free, tla.pipes.VECTOR, aiv_id=0)
+            tla.cross_core_set_flag(sync.o_free, tla.pipes.VECTOR, aiv_id=1)
+            m_o16.lock(pipe=tla.pipes.MTE3)
+            if sub * rows < m:
+                gm_o = tla.make_tensor(
+                    out_tensor.ptr + task * (m * HEAD_DIM) + (sub * rows * HEAD_DIM),
+                    tla.make_layout_with_tag(
+                        (1, rows * HEAD_DIM), dtype_in, tla.arch.RowMajor
+                    ),
+                )
+                ub_o16_1d = tla.make_tensor(
+                    bufs.ub_o16,
+                    tla.make_layout_with_tag(
+                        (1, rows * HEAD_DIM), dtype_in, tla.arch.RowMajor
+                    ),
+                )
+                tla.copy(gm_o, ub_o16_1d, cache_policy=tla.params.CachePolicy.DISABLE)
+            m_o16.unlock(pipe=tla.pipes.MTE3)
+        else:
+            if fresh:
+                if tla.const_expr(o16_aliased):
+                    # Hardware MTE3 FIFO ensures prior token's copy_out from ub_o16
+                    # (= ub_otmp_full[0:32KB]) completes before tile 1 writes ub_otmp_full.
+                    tla.cross_core_set_flag(sync.o_free, tla.pipes.MTE3, aiv_id=0)
+                    tla.cross_core_set_flag(sync.o_free, tla.pipes.MTE3, aiv_id=1)
+                else:
+                    tla.cross_core_set_flag(sync.o_free, tla.pipes.VECTOR, aiv_id=0)
+                    tla.cross_core_set_flag(sync.o_free, tla.pipes.VECTOR, aiv_id=1)
+            else:
+                with tla.vec.func(mode="simd"):
+                    preg = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
+                    brc = tla.params.NormalLoadParams(
+                        load_dist=tla.params.LoadDist.DIST_BRC_B32
+                    )
+                    ld_u = tla.params.NormalLoadParams(
+                        post_mode=tla.params.PostMode.POST_MODE_UPDATE
+                    )
+                    st_u = tla.params.NormalStoreParams(
+                        post_mode=tla.params.PostMode.POST_MODE_UPDATE
+                    )
+                    o_rd = tla.tile_view(ub_o_t, tla.make_shape(VL), tla.make_coord(0))
+                    o_wr = tla.tile_view(ub_o_t, tla.make_shape(VL), tla.make_coord(0))
+                    ot_rd = tla.tile_view(
+                        ub_ot_t, tla.make_shape(VL), tla.make_coord(0)
+                    )
+                    for r in tla.range(rows):
+                        dm_r = tla.tile_view(
+                            ub_dm_t, tla.make_shape(1), tla.make_coord(r)
+                        ).load(params=brc)
+                        a0, o_rd = o_rd.load(ld_u)
+                        t0, ot_rd = ot_rd.load(ld_u)
+                        a1, o_rd = o_rd.load(ld_u)
+                        t1, ot_rd = ot_rd.load(ld_u)
+                        a2, o_rd = o_rd.load(ld_u)
+                        t2, ot_rd = ot_rd.load(ld_u)
+                        a3, o_rd = o_rd.load(ld_u)
+                        t3, ot_rd = ot_rd.load(ld_u)
+                        r0 = tla.add(tla.mul(a0, dm_r, mask=preg), t0, mask=preg)
+                        r1 = tla.add(tla.mul(a1, dm_r, mask=preg), t1, mask=preg)
+                        r2 = tla.add(tla.mul(a2, dm_r, mask=preg), t2, mask=preg)
+                        r3 = tla.add(tla.mul(a3, dm_r, mask=preg), t3, mask=preg)
+                        a4, o_rd = o_rd.load(ld_u)
+                        t4, ot_rd = ot_rd.load(ld_u)
+                        a5, o_rd = o_rd.load(ld_u)
+                        t5, ot_rd = ot_rd.load(ld_u)
+                        a6, o_rd = o_rd.load(ld_u)
+                        t6, ot_rd = ot_rd.load(ld_u)
+                        a7, o_rd = o_rd.load(ld_u)
+                        t7, ot_rd = ot_rd.load(ld_u)
+                        o_wr = o_wr.store(r0, st_u, mask=preg)
+                        o_wr = o_wr.store(r1, st_u, mask=preg)
+                        o_wr = o_wr.store(r2, st_u, mask=preg)
+                        o_wr = o_wr.store(r3, st_u, mask=preg)
+                        r4 = tla.add(tla.mul(a4, dm_r, mask=preg), t4, mask=preg)
+                        r5 = tla.add(tla.mul(a5, dm_r, mask=preg), t5, mask=preg)
+                        r6 = tla.add(tla.mul(a6, dm_r, mask=preg), t6, mask=preg)
+                        r7 = tla.add(tla.mul(a7, dm_r, mask=preg), t7, mask=preg)
+                        o_wr = o_wr.store(r4, st_u, mask=preg)
+                        o_wr = o_wr.store(r5, st_u, mask=preg)
+                        o_wr = o_wr.store(r6, st_u, mask=preg)
+                        o_wr = o_wr.store(r7, st_u, mask=preg)
+                    tla.local_mem_bar(
+                        tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD
+                    )
+                tla.cross_core_set_flag(sync.o_free, tla.pipes.VECTOR, aiv_id=0)
+                tla.cross_core_set_flag(sync.o_free, tla.pipes.VECTOR, aiv_id=1)
+
+
 # ---------------------------------------------------------------------------
 # F3 batch-consistency（IS_BATCH_CONSISTENCY=1 实例专用，仅 swa kernel 调用；
 # =0 实例 IR 不含下列任何一条）。OT 锚点：
@@ -968,14 +1712,15 @@ def bc_reinit_stats(bufs, rows, slot=0):
         ub_max = _max(bufs, rows, slot)
         ub_sum = _sum(bufs, rows, slot)
         with tla.vec.func(mode="simd"):
+            one_mask, _ = tla.update_mask(1, dtype=tla.Float32)
             zero = tla.full(0.0, dtype=tla.Float32)
             minreg = tla.full(MIN_F, dtype=tla.Float32)
             for r in tla.range(rows):
                 tla.tile_view(ub_max, tla.make_shape(1), tla.make_coord(r)).store(
-                    minreg, params=tla.params.UnalignStoreParams()
+                    minreg, params=tla.params.UnalignStoreParams(), mask=one_mask
                 )
                 tla.tile_view(ub_sum, tla.make_shape(1), tla.make_coord(r)).store(
-                    zero, params=tla.params.UnalignStoreParams()
+                    zero, params=tla.params.UnalignStoreParams(), mask=one_mask
                 )
             tla.local_mem_bar(tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD)
 
@@ -1034,11 +1779,9 @@ def bc_stage_cur(sync, bufs, bc_ws, rows, slot=0):
         slot_ws = tla.arch.block_idx() * 2 + tla.arch.sub_block_idx()
         rows8 = _bc_rows8(rows)
         base = slot_ws * _bc_slot_stride(rows)
-        # V 侧归一化/合并的 store 完成 -> MTE3 才能拷出。
-        mutex_lock(sync.m_bc_stage, tla.pipes.VECTOR)
-        mutex_unlock(sync.m_bc_stage, tla.pipes.VECTOR)
-        mutex_lock(sync.m_bc_stage, tla.pipes.MTE3)
-        mutex_lock(sync.m_bc_ws, tla.pipes.MTE3)
+        # V 侧归一化/合并的 store 完成 -> MTE3 才能拷出（p_data_ready 屏障同款）
+        tla.set_flag(sync.bc_v3m)
+        tla.wait_flag(sync.bc_v3m)
         gm_o = tla.make_tensor(
             bc_ws.ptr + base,
             tla.make_layout(
@@ -1064,11 +1807,10 @@ def bc_stage_cur(sync, bufs, bc_ws, rows, slot=0):
             tla.make_layout(tla.make_shape(rows8), tla.make_stride(1)),
         )
         tla.copy(gm_sum, _sum(bufs, rows8, slot))
-        # 三笔 copy 完成后释放 workspace 与 UB。
-        mutex_unlock(sync.m_bc_ws, tla.pipes.MTE3)
-        mutex_unlock(sync.m_bc_stage, tla.pipes.MTE3)
-        mutex_lock(sync.m_bc_stage, tla.pipes.VECTOR)
-        mutex_unlock(sync.m_bc_stage, tla.pipes.VECTOR)
+        # MTE3 管道序：set 在三笔 copy 之后 => 槽全部落 GM 才置起
+        tla.set_flag(sync.bc_m3m2)  # 供下一 tile merge 的 MTE2 读（MTE3->MTE2）
+        tla.set_flag(sync.bc_m3v)  # MTE3 完成 -> V 返回（源 UB 复用安全）
+        tla.wait_flag(sync.bc_m3v)
 
 
 @tla.jit
@@ -1085,7 +1827,7 @@ def bc_merge_seg(sync, bufs, bc_ws, rows, seg, rows8, base):
     同步：bc_v2m 信用（V 读完上一段 ub_bc_prev -> 本段 MTE2 才能覆写；init 预置
     1）-> bc_m2v 屏障对（拷入完成 -> V 读）-> 段尾归还 bc_v2m。
     """
-    mutex_lock(sync.m_bc_prev, tla.pipes.MTE2)
+    tla.wait_flag(sync.bc_v2m)
     gm_seg = tla.make_tensor(
         bc_ws.ptr + base + seg * D_CHUNK,
         tla.make_layout(tla.make_shape(rows, D_CHUNK), tla.make_stride(HEAD_DIM, 1)),
@@ -1097,8 +1839,8 @@ def bc_merge_seg(sync, bufs, bc_ws, rows, seg, rows8, base):
         ),
         gm_seg,
     )
-    mutex_unlock(sync.m_bc_prev, tla.pipes.MTE2)
-    mutex_lock(sync.m_bc_prev, tla.pipes.VECTOR)
+    tla.set_flag(sync.bc_m2v)
+    tla.wait_flag(sync.bc_m2v)
     with tla.vec.func(mode="simd"):
         preg = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
         brc = tla.params.NormalLoadParams(load_dist=tla.params.LoadDist.DIST_BRC_B32)
@@ -1133,7 +1875,7 @@ def bc_merge_seg(sync, bufs, bc_ws, rows, seg, rows8, base):
                     mask=preg,
                 )
         tla.local_mem_bar(tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD)
-    mutex_unlock(sync.m_bc_prev, tla.pipes.VECTOR)
+    tla.set_flag(sync.bc_v2m)
 
 
 @tla.jit
@@ -1164,7 +1906,7 @@ def bc_merge_prev(sync, bufs, bc_ws, rows, slot=0):
         ub_max = _max(bufs, rows, slot)
         ub_sum = _sum(bufs, rows, slot)
         # ---- 等 stage 拷出完成（MTE3->MTE2），MTE2 拷入 prev max/sum ----
-        mutex_lock(sync.m_bc_ws, tla.pipes.MTE2)
+        tla.wait_flag(sync.bc_m3m2)
         gm_max = tla.make_tensor(
             bc_ws.ptr + base + rows * HEAD_DIM,
             tla.make_layout(tla.make_shape(rows8), tla.make_stride(1)),
@@ -1175,14 +1917,15 @@ def bc_merge_prev(sync, bufs, bc_ws, rows, slot=0):
         )
         tla.copy(ub_bc_max, gm_max)
         tla.copy(ub_bc_sum, gm_sum)
-        mutex_unlock(sync.m_bc_ws, tla.pipes.MTE2)
-        mutex_lock(sync.m_bc_prev, tla.pipes.VECTOR)
+        tla.set_flag(sync.bc_m2v)
+        tla.wait_flag(sync.bc_m2v)
         # ---- V 逐行 merge 权重；merged_lse/1.0 回写 ub_max/ub_sum ----
         with tla.vec.func(mode="simd"):
             preg = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
             brc = tla.params.NormalLoadParams(
                 load_dist=tla.params.LoadDist.DIST_BRC_B32
             )
+            one_mask, _ = tla.update_mask(1, dtype=tla.Float32)
             one = tla.full(1.0, dtype=tla.Float32)
             ub_bc_w = _stats(bufs.ub_bc_w, rows8 * 2)
             for r in tla.range(rows):
@@ -1208,22 +1951,21 @@ def bc_merge_prev(sync, bufs, bc_ws, rows, slot=0):
                 w_c = tla.div(num_c, z_sum, mask=preg)
                 merged_lse = tla.add(tla.log(z_sum, mask=preg), m_new, mask=preg)
                 tla.tile_view(ub_max, tla.make_shape(1), tla.make_coord(r)).store(
-                    merged_lse, params=tla.params.UnalignStoreParams()
+                    merged_lse, params=tla.params.UnalignStoreParams(), mask=one_mask
                 )
                 tla.tile_view(ub_sum, tla.make_shape(1), tla.make_coord(r)).store(
-                    one, params=tla.params.UnalignStoreParams()
+                    one, params=tla.params.UnalignStoreParams(), mask=one_mask
                 )
                 tla.tile_view(ub_bc_w, tla.make_shape(1), tla.make_coord(r)).store(
-                    w_p, params=tla.params.UnalignStoreParams()
+                    w_p, params=tla.params.UnalignStoreParams(), mask=one_mask
                 )
                 tla.tile_view(
                     ub_bc_w, tla.make_shape(1), tla.make_coord(rows8 + r)
-                ).store(w_c, params=tla.params.UnalignStoreParams())
+                ).store(w_c, params=tla.params.UnalignStoreParams(), mask=one_mask)
             tla.local_mem_bar(tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD)
         # ---- per-seg prevO 拷入 + 加权合并（静态展开 4 段）----
         # 各段 vec.func 尾部自带 VEC_STORE->VEC_LOAD bar（覆盖 ub_o 段 store ->
         # 下一段 load 与终局 copyout 的 load），段外不能再发 local_mem_bar。
-        mutex_unlock(sync.m_bc_prev, tla.pipes.VECTOR)
         for seg in (0, 1, 2, 3):
             bc_merge_seg(sync, bufs, bc_ws, rows, seg, rows8, base)
 
@@ -1269,7 +2011,7 @@ def bmm2_data_copy_out(
         # F11：归一化分母读 sum 槽 slot_sum = (P末)%2（宿主 tile 的 xg%2）；
         # 同 body 先发的 vec_init(T首=P末+1) 重灌异槽，不互踩。
         ub_sum = _sum(bufs, rows, slot_sum)
-        mutex_lock(sync.m_o16, tla.pipes.VECTOR)
+        sync.m_o16.lock(pipe=tla.pipes.VECTOR)
         with tla.vec.func(mode="simd"):
             preg = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
             preg_b16 = tla.create_mask(pattern=tla.mask.ALL, dtype=dtype_in)
@@ -1307,8 +2049,8 @@ def bmm2_data_copy_out(
                         mask=preg_b16,
                     )
             tla.local_mem_bar(tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD)
-        mutex_unlock(sync.m_o16, tla.pipes.VECTOR)
-        mutex_lock(sync.m_o16, tla.pipes.MTE3)
+        sync.m_o16.unlock(pipe=tla.pipes.VECTOR)
+        sync.m_o16.lock(pipe=tla.pipes.MTE3)
         if odd_mode == 0:
             # OT firstHalfMRealSize=(m+1)/2、secondHalf=m-firstHalf：m 为奇数时第二子块
             # 行数为 0（m=1 即 h=1 用例），不能写 GM —— 否则会覆盖下一个 token 的首行。
@@ -1342,7 +2084,7 @@ def bmm2_data_copy_out(
                     ub_o16, tla.make_shape(1, HEAD_DIM), tla.make_coord(r, c0)
                 )
                 tla.copy(gm_r, src_r)
-        mutex_unlock(sync.m_o16, tla.pipes.MTE3)
+        sync.m_o16.unlock(pipe=tla.pipes.MTE3)
 
 
 @tla.jit
@@ -1379,9 +2121,9 @@ def lse_copy_out(
         # bmm2_data_copy_out 之后），下一写者是 vec1(tile+2)（本槽下一迭代的
         # 下一轮），落盘后由 lse_mte3_v（MTE3→V）挡到搬完再继续（WAR）。
         ub_lse = _dm(bufs, rows, slot)
-        mutex_lock(sync.m_lse, tla.pipes.VECTOR)
         with tla.vec.func(mode="simd"):
             preg = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
+            one_mask, _ = tla.update_mask(1, dtype=tla.Float32)
             brc = tla.params.NormalLoadParams(
                 load_dist=tla.params.LoadDist.DIST_BRC_B32
             )
@@ -1397,10 +2139,11 @@ def lse_copy_out(
                 tla.tile_view(ub_lse, tla.make_shape(1), tla.make_coord(r)).store(
                     val,
                     params=tla.params.UnalignStoreParams(),
+                    mask=one_mask,
                 )
             tla.local_mem_bar(tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD)
-        mutex_unlock(sync.m_lse, tla.pipes.VECTOR)
-        mutex_lock(sync.m_lse, tla.pipes.MTE3)
+        tla.set_flag(sync.lse_v_mte3)
+        tla.wait_flag(sync.lse_v_mte3)
         base = task * m if row_base is None else row_base
         if valid_rows is None and m % 2 == 0:
             # 偶数 m：两个子块各 rows 行，整块搬（与 OT 每子块一次 DataCopyPad 同形）
@@ -1425,10 +2168,568 @@ def lse_copy_out(
                 )
                 src_r = tla.tile_view(ub_lse, tla.make_shape(1), tla.make_coord(r))
                 tla.copy(gm_r, src_r)
-        # WAR：dm 本槽下一次被 vec1 改写前，先等这次落盘搬完。
-        mutex_unlock(sync.m_lse, tla.pipes.MTE3)
-        mutex_lock(sync.m_lse, tla.pipes.VECTOR)
-        mutex_unlock(sync.m_lse, tla.pipes.VECTOR)
+        # WAR：dm 本槽下一次被 vec1 改写前，先等这次落盘搬完（MTE3→V 事件）
+        tla.set_flag(sync.lse_mte3_v)
+        tla.wait_flag(sync.lse_mte3_v)
+
+
+# ---------------------------------------------------------------------------
+# E4：FlashDecoding（KV 维分片 + 部分 softmax 归并；竞品 process_cube 的
+# fd_start/fd_end 等价结构）
+#
+# 单元 = (task, split)，split 处理 task 的全局 tile 区间
+#   [split*ceil(T/S), min((split+1)*ceil(T/S), T))
+# （ori 与 cmp tile 同属一个全局 tile 序，按同一比例切分）。每个单元把
+# 「未归一化 O（fp32）+ running max + running sum」写 GM workspace；全核屏障
+# 后归并（数学见 fd_merge_task）。局部量不含 sinks（单元初值走 has_sinks=0 的
+# (MIN_F, 0)），sink 只在归并里加一次。
+#
+# 归并按 D 维分摊：一个 (task, part) 归并项只处理 512/MRG 列；MRG>1 时同一
+# task 的 O 累加分布到 MRG 个核（小 task 数场景填满空闲核）。
+# ---------------------------------------------------------------------------
+# 统计块宽度 = 整 VL（fp32 64 列）：UB 向量 load 必须是整 VL 宽。rows8<=32 时
+# 尾部是未写区，归并侧用 tail mask 屏蔽。
+FD_STAT_SLOT = 64
+
+
+def fd_unit_stride(m, slot=FD_STAT_SLOT):
+    """每个 unit 的 fp32 槽宽：[O m*HEAD_DIM][4 x slot 统计块]"""
+    return m * HEAD_DIM + 4 * slot
+
+
+@tla.jit
+def fd_store_partial(sync, bufs, ws_fd, unit, m, rows, dtype_in, slot_sum=0, store_o=1):
+    """单元末落部分量：未归一化 O（fp32）+ max + sum。
+
+    GM 每 unit 一块（fp32 元素，长度 = fd_unit_stride）：
+      [O: m x HEAD_DIM 行主序]
+      [sub0 max: slot][sub0 sum: slot][sub1 max: slot][sub1 sum: slot]
+    每个 AIV 子块只写自己的 rows 行与 rows8 个统计元素（其余 slot 尾部未写，
+    归并侧 tail mask 屏蔽）。O 不做归一化（归并统一除）。
+
+    E9：store_o=0（运行期标量，anchor 单元）时只写统计、不写 O —— anchor 的
+    未归一化 O 留在 ub_o，由该核在屏障后自己归并（fd_merge_task own_in_ub）。
+    """
+    rows8 = (rows + 7) // 8 * 8
+    slot = FD_STAT_SLOT
+    stride = fd_unit_stride(m, slot)
+    base = unit * stride
+    with tla.vector():
+        sub = tla.arch.sub_block_idx()
+        ub_o = tla.make_tensor(
+            bufs.ub_o,
+            tla.make_layout(
+                tla.make_shape(rows, HEAD_DIM), tla.make_stride(HEAD_DIM, 1)
+            ),
+        )
+        _fd_st_stride = STATE_SLOT_STRIDE if bufs.opt_vec else _bc_rows8(rows)
+        ub_max8 = _stats(bufs.ub_max + slot_sum * _fd_st_stride, rows8)
+        ub_sum8 = _stats(bufs.ub_sum + slot_sum * _fd_st_stride, rows8)
+        # V 程序序标记：空的 lock/unlock 位于本 tile 的 vec2 之后，MTE3 取得
+        # 同一 mutex 即保证 O/统计已写定（与 bmm2_data_copy_out 共用 m_o16）。
+        sync.m_o16.lock(pipe=tla.pipes.VECTOR)
+        sync.m_o16.unlock(pipe=tla.pipes.VECTOR)
+        sync.m_o16.lock(pipe=tla.pipes.MTE3)
+        if store_o == 1:
+            # 修（F10）：AIV 两子块行数 rows = m - m//2（前半）。m=1（h=1 的 CSA）时
+            # sub1 的有效行数为 0，`sub*rows == m`；原实现仍无条件写 rows 行 O，
+            # dst 偏移 base + sub*rows*HEAD_DIM == base + m*HEAD_DIM 正好压在本 unit
+            # 的 partial 统计区（max/sum）上：sub1 用未写的 ub_o 覆盖 sub0 的
+            # max/sum，归并侧 s_i 全 0 被剔除 → 输出整行 0；最后一个 unit 还会
+            # 越界写 256 个 fp32。守卫 `sub*rows < m` 与 bmm2_data_copy_out 同义。
+            # m 在追踪期是 constexpr 推导出的 Python int：偶数 m 下 sub*rows < m
+            # 恒真，这里按奇偶**追踪期折叠**，偶数 m 实例（全部官方 CSA FD 例）
+            # 的指令流与改前逐字一致，零性能影响。
+            # 注：本守卫只覆盖 `sub*rows >= m`（即 m=1 的 sub1）；更大的奇数 m
+            # 与 bmm2_data_copy_out 一样仍按前半行数整块搬，不在本次范围。
+            o_dst = tla.make_tensor(
+                ws_fd.ptr + base + sub * rows * HEAD_DIM,
+                tla.make_layout(
+                    tla.make_shape(rows, HEAD_DIM),
+                    tla.make_stride(HEAD_DIM, 1),
+                ),
+            )
+            if m % 2 == 0:
+                tla.copy(o_dst, ub_o)
+            else:
+                if sub * rows < m:
+                    tla.copy(o_dst, ub_o)
+        tla.copy(
+            tla.make_tensor(
+                ws_fd.ptr + base + m * HEAD_DIM + sub * 2 * slot,
+                tla.make_layout(tla.make_shape(rows8), tla.make_stride(1)),
+            ),
+            ub_max8,
+        )
+        tla.copy(
+            tla.make_tensor(
+                ws_fd.ptr + base + m * HEAD_DIM + sub * 2 * slot + slot,
+                tla.make_layout(tla.make_shape(rows8), tla.make_stride(1)),
+            ),
+            ub_sum8,
+        )
+        sync.m_o16.unlock(pipe=tla.pipes.MTE3)
+
+
+def _stat2d(ptr, slot):
+    """统计块的 2-D (1, slot) 视图（整 VL load 的合法形态）。"""
+    return tla.make_tensor(
+        ptr, tla.make_layout(tla.make_shape(1, slot), tla.make_stride(slot, 1))
+    )
+
+
+@tla.jit
+def fd_merge_task(
+    sync,
+    bufs,
+    ws_fd,
+    sinks,
+    out_tensor,
+    lse_tensor,
+    task,
+    part,
+    m,
+    rows,
+    dtype_in,
+    splits: tla.Constexpr[int],
+    mrg: tla.Constexpr[int],
+    has_sinks: tla.Constexpr[int],
+    enable_lse: tla.Constexpr[int],
+    sink_reuse: tla.Constexpr[int] = 0,
+    own_in_ub: tla.Constexpr[int] = 0,
+    vec_stats: tla.Constexpr[int] = 0,
+    splits_ws: tla.Constexpr[int] = 0,
+):
+    """split-0 与 D 分片归并（task 的 part 段，两个 AIV 子块各写自己的 rows）。
+
+    设各 split 的局部 max m_i、sum s_i、未归一化 O_i：
+      M = max(max_i, sink)；w_i = exp(m_i - M)；
+      den = Σ w_i s_i + exp(sink - M)；O = Σ w_i O_i / den；
+      lse = log(den) + M。
+    空 split（无有效 tile，GM 由 host 清零 ⇒ s_i=0）用 s_i>0 判定并从 M 剔除，
+    避免其未写的 max 参与 max。den=max(den,1) 只作用于「全空」边界（非空时
+    某 split 的 max 项 exp(0)=1 且 s_i>=1 ⇒ den>=1），不改变有效结果。
+    精度：max/sum/O 全 fp32，最终 cast 一次（严格不低于串行实现）。
+    """
+    rows8 = (rows + 7) // 8 * 8
+    slot = FD_STAT_SLOT
+    stride = fd_unit_stride(m, slot)
+    # E10：ws 槽步长（每 task 的 split 数上界）与本次实际归并的 split 数
+    # 解耦：归并项表可对「只有 1 个 split」的 task 用 splits=1 读，避免读空槽。
+    nws = splits if splits_ws == 0 else splits_ws
+    base0 = task * nws * stride
+    dlen = HEAD_DIM // mrg
+    col0 = part * dlen
+    o_max = 0
+    o_sum = splits * slot
+    o_e = 2 * splits * slot
+    o_den = 3 * splits * slot
+    o_sink = (3 * splits + 1) * slot
+    with tla.vector():
+        sub = tla.arch.sub_block_idx()
+        # ---- MTE2：各 split 的 max/sum（+ sink 本子块的 rows 行）----
+        # 同步一律走 m_o16 mutex（MTE2/V/MTE3 三段交接），不新增事件 id：CSA
+        # 非 PA 实例的 (dst,id) 已被索引环/搬运链占满，借用 bc_* 会与其别名。
+        sync.m_o16.lock(pipe=tla.pipes.MTE2)
+        for i in static_range(splits):
+            ubase = base0 + i * stride + m * HEAD_DIM + sub * 2 * slot
+            tla.copy(
+                _stat2d(bufs.ub_fd_stats + o_max + i * slot, slot),
+                _stat2d(ws_fd.ptr + ubase, slot),
+            )
+            tla.copy(
+                _stat2d(bufs.ub_fd_stats + o_sum + i * slot, slot),
+                _stat2d(ws_fd.ptr + ubase + slot, slot),
+            )
+        if tla.const_expr(has_sinks == 1):
+            # TOK2 两个 token 共用同一段 sinks（sink_reuse=1，按 token 内 head 号）；
+            # 其余按 sub*rows 取本子块行。
+            tla.copy(
+                _stats(bufs.ub_fd_stats + o_sink, rows),
+                tla.make_tensor(
+                    sinks.ptr + (0 if sink_reuse == 1 else sub * rows),
+                    tla.make_layout(tla.make_shape(rows), tla.make_stride(1)),
+                ),
+            )
+        sync.m_o16.unlock(pipe=tla.pipes.MTE2)
+        # 块视图（1-D 元素视图，逐行 shape(1)+brc 读取——与 bc_merge_prev 同款）
+        ub_mx1 = tuple(
+            _stats(bufs.ub_fd_stats + o_max + i * slot, slot)
+            for i in static_range(splits)
+        )
+        ub_sm1 = tuple(
+            _stats(bufs.ub_fd_stats + o_sum + i * slot, slot)
+            for i in static_range(splits)
+        )
+        ub_ee = tuple(
+            _stats(bufs.ub_fd_stats + o_e + i * slot, slot)
+            for i in static_range(splits)
+        )
+        ub_den_t = _stats(bufs.ub_fd_stats + o_den, slot)
+        ub_sink_t = _stats(bufs.ub_fd_stats + o_sink, slot)
+        ub_max0 = _max(bufs, rows, 0)
+        ub_sum0 = _sum(bufs, rows, 0)
+        # ---- V：M / w_i / den（逐行 broadcast）----
+        sync.m_o16.lock(pipe=tla.pipes.VECTOR)
+        with tla.vec.func(mode="simd"):
+            preg = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
+            one_mask, _ = tla.update_mask(1, dtype=tla.Float32)
+            brc = tla.params.NormalLoadParams(
+                load_dist=tla.params.LoadDist.DIST_BRC_B32
+            )
+            ustore = tla.params.UnalignStoreParams()
+            minreg = tla.full(MIN_F, dtype=tla.Float32)
+            zero = tla.full(0.0, dtype=tla.Float32)
+            one = tla.full(1.0, dtype=tla.Float32)
+            if tla.const_expr(vec_stats == 1):
+                # E10：统计段跨行向量化。rows <= VL（FP32）时每个 split 的
+                # max/sum 槽就是一段连续 rows 行的向量，一条 V 指令即可覆盖
+                # 全部行；tail mask 屏蔽 rows 之后的未写区。数学过程与逐行版
+                # 完全一致（同一 alive 判据、同一 max/exp/den 次序），只是把
+                # 行维从标量循环改成向量 lanes。ub_ee 仍按行供 O 段 BRC 读。
+                tail, _ = tla.update_mask(rows, dtype=tla.Float32)
+                mrun = minreg
+                for i in static_range(splits):
+                    mx = ub_mx1[i].load()
+                    sm = ub_sm1[i].load()
+                    alive = tla.cmp(sm, zero, mode="gt", mask=tail)
+                    meff = tla.where(alive, mx, minreg)
+                    mrun = tla.max(mrun, meff, mask=tail)
+                if tla.const_expr(has_sinks == 1):
+                    sk = ub_sink_t.load()
+                    mrun = tla.max(mrun, sk, mask=tail)
+                den = zero
+                for i in static_range(splits):
+                    mx = ub_mx1[i].load()
+                    sm = ub_sm1[i].load()
+                    alive = tla.cmp(sm, zero, mode="gt", mask=tail)
+                    meff = tla.where(alive, mx, minreg)
+                    ei = tla.exp(tla.sub(meff, mrun, mask=tail), mask=tail)
+                    ei = tla.where(alive, ei, zero)
+                    ub_ee[i].store(ei, mask=tail)
+                    den = tla.add(den, tla.mul(ei, sm, mask=tail), mask=tail)
+                if tla.const_expr(has_sinks == 1):
+                    sk = ub_sink_t.load()
+                    den = tla.add(
+                        den,
+                        tla.exp(tla.sub(sk, mrun, mask=tail), mask=tail),
+                        mask=tail,
+                    )
+                den = tla.max(den, one, mask=tail)
+                ub_den_t.store(den, mask=tail)
+                ub_max0.store(mrun, mask=tail)
+                ub_sum0.store(den, mask=tail)
+            else:
+                for r in tla.range(rows):
+                    mrun = minreg
+                    for i in static_range(splits):
+                        mx = tla.tile_view(
+                            ub_mx1[i], tla.make_shape(1), tla.make_coord(r)
+                        ).load(params=brc)
+                        sm = tla.tile_view(
+                            ub_sm1[i], tla.make_shape(1), tla.make_coord(r)
+                        ).load(params=brc)
+                        alive = tla.cmp(sm, zero, mode="gt", mask=preg)
+                        meff = tla.where(alive, mx, minreg)
+                        mrun = tla.max(mrun, meff, mask=preg)
+                    if tla.const_expr(has_sinks == 1):
+                        sk1 = tla.tile_view(
+                            ub_sink_t, tla.make_shape(1), tla.make_coord(r)
+                        ).load(params=brc)
+                        mrun = tla.max(mrun, sk1, mask=preg)
+                    den = zero
+                    for i in static_range(splits):
+                        mx = tla.tile_view(
+                            ub_mx1[i], tla.make_shape(1), tla.make_coord(r)
+                        ).load(params=brc)
+                        sm = tla.tile_view(
+                            ub_sm1[i], tla.make_shape(1), tla.make_coord(r)
+                        ).load(params=brc)
+                        alive = tla.cmp(sm, zero, mode="gt", mask=preg)
+                        meff = tla.where(alive, mx, minreg)
+                        ei = tla.exp(tla.sub(meff, mrun, mask=preg), mask=preg)
+                        ei = tla.where(alive, ei, zero)
+                        tla.tile_view(
+                            ub_ee[i], tla.make_shape(1), tla.make_coord(r)
+                        ).store(ei, params=ustore, mask=one_mask)
+                        den = tla.add(den, tla.mul(ei, sm, mask=preg), mask=preg)
+                    if tla.const_expr(has_sinks == 1):
+                        sk2 = tla.tile_view(
+                            ub_sink_t, tla.make_shape(1), tla.make_coord(r)
+                        ).load(params=brc)
+                        den = tla.add(
+                            den,
+                            tla.exp(tla.sub(sk2, mrun, mask=preg), mask=preg),
+                            mask=preg,
+                        )
+                    den = tla.max(den, one, mask=preg)
+                    tla.tile_view(ub_den_t, tla.make_shape(1), tla.make_coord(r)).store(
+                        den, params=ustore, mask=one_mask
+                    )
+                    tla.tile_view(ub_max0, tla.make_shape(1), tla.make_coord(r)).store(
+                        mrun, params=ustore, mask=one_mask
+                    )
+                    tla.tile_view(ub_sum0, tla.make_shape(1), tla.make_coord(r)).store(
+                        den, params=ustore, mask=one_mask
+                    )
+            tla.local_mem_bar(tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD)
+        sync.m_o16.unlock(pipe=tla.pipes.VECTOR)
+        # ---- E14：anchor 单趟归并（split0 在 ub_o，split1 落 otmp）----
+        # 数学次序与逐 split 版逐元素一致：w0*O0 + w1*O1 后统一除 den、CAST 一次；
+        # 省掉 acc 的两次整块 UB 往返与独立 cast 遍历（每块 12 -> 8 条 vec op）。
+        # 视图构造放在分支内：非锚点路径（#021/#022/#028）的 MLIR 因此逐条不变。
+        if tla.const_expr(own_in_ub == 1 and splits == 2 and mrg == 1):
+            ub_o16 = tla.make_tensor(
+                bufs.ub_o16,
+                tla.make_layout_with_tag((rows, HEAD_DIM), dtype_in, tla.arch.RowMajor),
+            )
+            o16p = tla.make_tensor(
+                bufs.ub_o16,
+                tla.make_layout(
+                    tla.make_shape(rows, dlen),
+                    tla.make_stride(dlen, 1),
+                    layoutTag=tla.arch.RowMajor,
+                ),
+            )
+            # O1 = 非 anchor 段的部分量（O0 已在 ub_o，不再落盘/读回）。
+            sync.m_o16.lock(pipe=tla.pipes.MTE2)
+            ub_o1 = tla.make_tensor(
+                bufs.ub_otmp_full,
+                tla.make_layout(tla.make_shape(rows, dlen), tla.make_stride(dlen, 1)),
+            )
+            tla.copy(
+                ub_o1,
+                tla.make_tensor(
+                    ws_fd.ptr + base0 + stride + sub * rows * HEAD_DIM + col0,
+                    tla.make_layout(
+                        tla.make_shape(rows, dlen), tla.make_stride(HEAD_DIM, 1)
+                    ),
+                ),
+            )
+            sync.m_o16.unlock(pipe=tla.pipes.MTE2)
+            sync.m_o16.lock(pipe=tla.pipes.VECTOR)
+            with tla.vec.func(mode="simd"):
+                preg = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
+                preg_b16 = tla.create_mask(pattern=tla.mask.ALL, dtype=dtype_in)
+                brc = tla.params.NormalLoadParams(
+                    load_dist=tla.params.LoadDist.DIST_BRC_B32
+                )
+                cast_zero = tla.params.CastParams(
+                    reg_slot=tla.params.RegSlot.ZERO,
+                    sat_mode=tla.params.SatMode.SAT,
+                    round_mode=tla.params.RoundMode.CAST_ROUND,
+                )
+                pack_store = tla.params.NormalStoreParams(
+                    store_dist=tla.params.StoreDist.DIST_PACK_B32
+                )
+                ub_o0 = tla.make_tensor(
+                    bufs.ub_o,
+                    tla.make_layout(
+                        tla.make_shape(rows, dlen), tla.make_stride(dlen, 1)
+                    ),
+                )
+                for r in tla.range(rows):
+                    e0 = tla.tile_view(
+                        ub_ee[0], tla.make_shape(1), tla.make_coord(r)
+                    ).load(params=brc)
+                    e1 = tla.tile_view(
+                        ub_ee[1], tla.make_shape(1), tla.make_coord(r)
+                    ).load(params=brc)
+                    den_r = tla.tile_view(
+                        ub_den_t, tla.make_shape(1), tla.make_coord(r)
+                    ).load(params=brc)
+                    for c in tla.range(dlen // VL):
+                        s0 = tla.tile_view(
+                            ub_o0, tla.make_shape(1, VL), tla.make_coord(r, c)
+                        )
+                        s1 = tla.tile_view(
+                            ub_o1, tla.make_shape(1, VL), tla.make_coord(r, c)
+                        )
+                        d16 = tla.tile_view(
+                            o16p, tla.make_shape(1, VL), tla.make_coord(r, c)
+                        )
+                        acc = tla.add(
+                            tla.mul(e0, s0.load(), mask=preg),
+                            tla.mul(e1, s1.load(), mask=preg),
+                            mask=preg,
+                        )
+                        d16.store(
+                            tla.div(acc, den_r, mask=preg).to(
+                                dtype_in, cast_zero, mask=preg
+                            ),
+                            pack_store,
+                            mask=preg_b16,
+                        )
+                tla.local_mem_bar(
+                    tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD
+                )
+            sync.m_o16.unlock(pipe=tla.pipes.VECTOR)
+        else:
+            # ---- 逐 split 载入 O_i 的本 D 段，acc += w_i * O_i ----
+            for i in static_range(splits):
+                if tla.const_expr(own_in_ub == 1 and i == 0):
+                    # E9：本核就是该 task 的 anchor —— split 0 的未归一化 O 已在
+                    # ub_o 里（fd_store_partial store_o=0 跳过落盘），直接当源用，
+                    # 省一次 128KB 的 GM 往返。MRG 恒 1 时 dlen==HEAD_DIM，视图
+                    # 与实际布局逐元素一致。
+                    ub_o2 = tla.make_tensor(
+                        bufs.ub_o,
+                        tla.make_layout(
+                            tla.make_shape(rows, dlen), tla.make_stride(dlen, 1)
+                        ),
+                    )
+                else:
+                    # MTE2 取锁 = V 已读完上一 split 的 ub_o（WAR），同时与 V 段互斥。
+                    sync.m_o16.lock(pipe=tla.pipes.MTE2)
+                    ub_o2 = tla.make_tensor(
+                        bufs.ub_o,
+                        tla.make_layout(
+                            tla.make_shape(rows, dlen), tla.make_stride(dlen, 1)
+                        ),
+                    )
+                    tla.copy(
+                        ub_o2,
+                        tla.make_tensor(
+                            ws_fd.ptr
+                            + base0
+                            + i * stride
+                            + sub * rows * HEAD_DIM
+                            + col0,
+                            tla.make_layout(
+                                tla.make_shape(rows, dlen), tla.make_stride(HEAD_DIM, 1)
+                            ),
+                        ),
+                    )
+                    sync.m_o16.unlock(pipe=tla.pipes.MTE2)
+                sync.m_o16.lock(pipe=tla.pipes.VECTOR)
+                with tla.vec.func(mode="simd"):
+                    preg = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
+                    brc = tla.params.NormalLoadParams(
+                        load_dist=tla.params.LoadDist.DIST_BRC_B32
+                    )
+                    # 本 part 的列段视图：UB 根指针 + 静态形状（无动态 tile 坐标）
+                    acc2 = tla.make_tensor(
+                        bufs.ub_otmp_full,
+                        tla.make_layout(
+                            tla.make_shape(rows, dlen), tla.make_stride(dlen, 1)
+                        ),
+                    )
+                    for r in tla.range(rows):
+                        w = tla.tile_view(
+                            ub_ee[i], tla.make_shape(1), tla.make_coord(r)
+                        ).load(params=brc)
+                        for c in tla.range(dlen // VL):
+                            dst = tla.tile_view(
+                                acc2, tla.make_shape(1, VL), tla.make_coord(r, c)
+                            )
+                            src = tla.tile_view(
+                                ub_o2, tla.make_shape(1, VL), tla.make_coord(r, c)
+                            )
+                            val = tla.mul(w, src.load(), mask=preg)
+                            if i == 0:
+                                dst.store(val, mask=preg)
+                            else:
+                                dst.store(
+                                    tla.add(dst.load(), val, mask=preg), mask=preg
+                                )
+                    tla.local_mem_bar(
+                        tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD
+                    )
+                sync.m_o16.unlock(pipe=tla.pipes.VECTOR)
+            # ---- O/den -> out（CAST_ROUND 一次；与 bmm2_data_copy_out 同款）----
+            ub_o16 = tla.make_tensor(
+                bufs.ub_o16,
+                tla.make_layout_with_tag((rows, HEAD_DIM), dtype_in, tla.arch.RowMajor),
+            )
+            o16p = tla.make_tensor(
+                bufs.ub_o16,
+                tla.make_layout(
+                    tla.make_shape(rows, dlen),
+                    tla.make_stride(dlen, 1),
+                    layoutTag=tla.arch.RowMajor,
+                ),
+            )
+            sync.m_o16.lock(pipe=tla.pipes.VECTOR)
+            with tla.vec.func(mode="simd"):
+                preg = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
+                preg_b16 = tla.create_mask(pattern=tla.mask.ALL, dtype=dtype_in)
+                brc = tla.params.NormalLoadParams(
+                    load_dist=tla.params.LoadDist.DIST_BRC_B32
+                )
+                cast_zero = tla.params.CastParams(
+                    reg_slot=tla.params.RegSlot.ZERO,
+                    sat_mode=tla.params.SatMode.SAT,
+                    round_mode=tla.params.RoundMode.CAST_ROUND,
+                )
+                pack_store = tla.params.NormalStoreParams(
+                    store_dist=tla.params.StoreDist.DIST_PACK_B32
+                )
+                acc3 = tla.make_tensor(
+                    bufs.ub_otmp_full,
+                    tla.make_layout(
+                        tla.make_shape(rows, dlen), tla.make_stride(dlen, 1)
+                    ),
+                )
+                for rf in tla.range(rows):
+                    den_r = tla.tile_view(
+                        ub_den_t, tla.make_shape(1), tla.make_coord(rf)
+                    ).load(params=brc)
+                    for cf in tla.range(dlen // VL):
+                        srcf = tla.tile_view(
+                            acc3, tla.make_shape(1, VL), tla.make_coord(rf, cf)
+                        )
+                        d16f = tla.tile_view(
+                            o16p, tla.make_shape(1, VL), tla.make_coord(rf, cf)
+                        )
+                        d16f.store(
+                            tla.div(srcf.load(), den_r, mask=preg).to(
+                                dtype_in, cast_zero, mask=preg
+                            ),
+                            pack_store,
+                            mask=preg_b16,
+                        )
+                tla.local_mem_bar(
+                    tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD
+                )
+            sync.m_o16.unlock(pipe=tla.pipes.VECTOR)
+        sync.m_o16.lock(pipe=tla.pipes.MTE3)
+        if sub * rows < m:
+            if tla.const_expr(mrg == 1):
+                # 整宽：直接用根视图（避免动态 coord 的 tile copy 走偏）。
+                tla.copy(
+                    tla.make_tensor(
+                        out_tensor.ptr + task * (m * HEAD_DIM) + sub * rows * HEAD_DIM,
+                        tla.make_layout_with_tag(
+                            (rows, HEAD_DIM), dtype_in, tla.arch.RowMajor
+                        ),
+                    ),
+                    ub_o16,
+                )
+            else:
+                tla.copy(
+                    tla.make_tensor(
+                        out_tensor.ptr
+                        + task * (m * HEAD_DIM)
+                        + sub * rows * HEAD_DIM
+                        + col0,
+                        tla.make_layout(
+                            tla.make_shape(rows, dlen),
+                            tla.make_stride(HEAD_DIM, 1),
+                        ),
+                    ),
+                    o16p,
+                )
+        sync.m_o16.unlock(pipe=tla.pipes.MTE3)
+    # E6 修（#026 启用 FD 时编译失败）：lse_copy_out 自带 `with tla.vector()`，
+    # 不能嵌在 fd_merge_task 的 vector 作用域内（前端禁止 cube/vector 嵌套）。
+    # 归并已把合并后的 max/sum 写进 slot 0（ub_max0/ub_sum0），在作用域外调用
+    # 语义相同（同核程序序），指令流其余部分不变。
+    if tla.const_expr(enable_lse == 1):
+        # lse 与 D 分段无关，只由 part 0 写一次。
+        if part == 0:
+            lse_copy_out(
+                sync, bufs, lse_tensor, task, m, rows, slot=0, row_base=task * m
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -1638,6 +2939,65 @@ def verify_trace_closed(owner):
     if _TRACE_STAGE and _TRACE_EMITS == 0:
         raise TraceFidelityError(
             f"[{owner}] 共享槽臂已开启，但整次追踪一次也没发射到 gather"
+        )
+
+
+# ---------------------------------------------------------------------------
+# PA 页数学的追踪期常量（R42 步一）
+#
+# `@tla.jit` 的标量参数不带 Constexpr 性（见上方 1567 行），所以 PA 的
+# block_size / stride / topk_value_mode 若沿形参读取，会在 IR 里留下运行期
+# divsi、乘法和动态 if。PA block size 是 2 的幂（host `_vectorize_flag` 的前置，
+# 但 `_pa_pairwise_fill` 只在 kv_layout==2 时被调用），这里改由模块级 Python
+# 常量承载：kernel 体首（configure_trace 附近）用 constexpr 值调用一次
+# `configure_pa(...)`，gather 只读这些常量 ⇒ `//2^k` 折叠成 shift、
+# topk 分支在追踪期折叠、phys*stride 变成常量乘。
+# 形参保留只为兼容现有调用点，`_pa_pairwise_fill` 不再读取它们。
+# ---------------------------------------------------------------------------
+_PA_BLOCK_SIZE = 0
+_PA_BLOCK_SHIFT = -1
+_PA_STRIDE = 0
+_PA_TOPK_MODE = 1
+
+
+def configure_pa(pa_block_size, pa_stride, topk_value_mode):
+    """把 kernel 的 constexpr PA 参数折叠成追踪期常量（每次编译必须调用一次）。"""
+    global _PA_BLOCK_SIZE, _PA_BLOCK_SHIFT, _PA_STRIDE, _PA_TOPK_MODE
+    _PA_BLOCK_SIZE = int(pa_block_size)
+    _PA_STRIDE = int(pa_stride)
+    _PA_TOPK_MODE = int(topk_value_mode)
+    if _PA_BLOCK_SIZE > 0 and (_PA_BLOCK_SIZE & (_PA_BLOCK_SIZE - 1)) == 0:
+        _PA_BLOCK_SHIFT = _PA_BLOCK_SIZE.bit_length() - 1
+    else:
+        # 非 2 的幂只在非 PA 实例出现（此时 PA gather 不会被追踪）；
+        # 若真被追踪则显式报错，避免静默走错误的除法口径。
+        _PA_BLOCK_SHIFT = -1
+
+
+def require_pa_configured(site):
+    """PA 页数学常量必须是有效 2 的幂；在进入 tla.vector() 之前断言。"""
+    if _PA_BLOCK_SHIFT < 0:
+        raise TraceFidelityError(
+            f"{site} 的 PA 常量未配置：block_size={_PA_BLOCK_SIZE}、"
+            f"stride={_PA_STRIDE}（需在 kernel 体首调用 configure_pa）"
+        )
+
+
+def require_pa_page_aligned(pa_block_size, pa_stride, owner):
+    """OS/OCS 的 ori/cmp 两段共用一份追踪期常量：两段口径必须一致。"""
+    if _PA_BLOCK_SIZE == 0:
+        # 非 PA 实例：gather_kv_rows_pa_pairwise 不会被追踪，无需校验。
+        return
+    if int(pa_block_size) != _PA_BLOCK_SIZE or int(pa_stride) != _PA_STRIDE:
+        raise TraceFidelityError(
+            f"[{owner}] ori/cmp 的 PA 页口径不一致："
+            f"configure_pa=({_PA_BLOCK_SIZE}, {_PA_STRIDE})，"
+            f"另一段=({int(pa_block_size)}, {int(pa_stride)})；"
+            "共用追踪期常量要求 block_size/pa_stride 相同"
+        )
+    if _PA_BLOCK_SHIFT < 0:
+        raise TraceFidelityError(
+            f"[{owner}] PA block_size={_PA_BLOCK_SIZE} 不是 2 的幂，无法折叠成移位"
         )
 
 
@@ -2138,7 +3498,7 @@ def get_kv_phy_addr_for_kv_type(
         # 0) V -> S 信用（init_sync 在 =1 实例预置 1 个）：MTE2 页表拷入与标量
         #    idx 写都由 S 流发起，这一对屏障同时覆盖 ub_phy_bt / ub_phy_idx
         #    的跨 task 复用（上一轮 VF 消费完才允许本轮写）。
-        mutex_lock(sync.m_phy_vs, tla.pipes.SCALAR)
+        tla.wait_flag(sync.phy_vs)
         # tla.allocate 返回的是指针：tile_view / __setitem__ 都要求 Tensor，
         # 先按容量包成 1-D UB Tensor 视图（容量 ≥ 任何被消费的下标）。
         ub_idx_t = tla.make_tensor(
@@ -2162,19 +3522,15 @@ def get_kv_phy_addr_for_kv_type(
         )
         # 1) 暂存：PA 先拷页表行（OT CopyPaTableToUb），再拷 idx 行
         #    （OT CopySparseIdxToUb）
-        mutex_lock(sync.m_phy_m2v, tla.pipes.MTE2)
         if kv_layout == 2:
             copy_pa_table_to_ub(ub_bt_t, bt, bt_seq * bt_max, bt_max)
-        mutex_unlock(sync.m_phy_m2v, tla.pipes.MTE2)
-        mutex_lock(sync.m_phy_s2v, tla.pipes.SCALAR)
         copy_sparse_idx_to_ub(ub_idx_t, idx, table_row * idx_row_width, ncols)
-        mutex_unlock(sync.m_phy_s2v, tla.pipes.SCALAR)
-        mutex_unlock(sync.m_phy_vs, tla.pipes.SCALAR)
         # 2) ready 屏障：S -> V（标量 UB idx 写完成）与 MTE2 -> V（页表拷入
         #    完成）是两条独立生产流，VF 读 ub_idx / ub_bt 前各等一对
-        mutex_lock(sync.m_phy_m2v, tla.pipes.VECTOR)
-        mutex_lock(sync.m_phy_s2v, tla.pipes.VECTOR)
-        mutex_lock(sync.m_phy_v_mte3, tla.pipes.VECTOR)
+        tla.set_flag(sync.phy_s2v)
+        tla.set_flag(sync.phy_m2v)
+        tla.wait_flag(sync.phy_m2v)
+        tla.wait_flag(sync.phy_s2v)
         # 3) VF：每 128 列一轮写 ub_phy_addr
         n_chunks = (ncols + PHY_ELEMS_PER_LOOP - 1) // PHY_ELEMS_PER_LOOP
         if kv_layout == 2:
@@ -2208,22 +3564,18 @@ def get_kv_phy_addr_for_kv_type(
                 HEAD_DIM,
             )
         # 4) V -> MTE3 屏障（OT KVADDR_READY）+ V -> S 信用归还
-        mutex_unlock(sync.m_phy_s2v, tla.pipes.VECTOR)
-        mutex_unlock(sync.m_phy_m2v, tla.pipes.VECTOR)
-        mutex_unlock(sync.m_phy_v_mte3, tla.pipes.VECTOR)
-        mutex_lock(sync.m_phy_v_mte3, tla.pipes.MTE3)
-        mutex_lock(sync.m_phy_m3s, tla.pipes.MTE3)
+        tla.set_flag(sync.phy_v_mte3)
+        tla.set_flag(sync.phy_vs)
+        tla.wait_flag(sync.phy_v_mte3)
         # 5) MTE3 拷出（OT CopyPhyAddrToGm）：GM 行偏移 = table_row*aligned_cols
         #    （int64 元素），OT 为 (bS1Idx+s1Idx)*alignedSparseBlockCount
         copy_phy_addr_to_gm(ub_addr_t, phy_table, table_row * aligned_cols, ncols)
         # 6) MTE3 -> V 屏障（OT KVADDR_FREE）：拷出完成后 ub_phy_addr 才能复用；
         #    MTE3 -> S 屏障：表行落 GM 后标量流才能读（缺它即 errcode 95 根因）
-        mutex_unlock(sync.m_phy_m3s, tla.pipes.MTE3)
-        mutex_lock(sync.m_phy_m3s, tla.pipes.SCALAR)
-        mutex_unlock(sync.m_phy_m3s, tla.pipes.SCALAR)
-        mutex_unlock(sync.m_phy_v_mte3, tla.pipes.MTE3)
-        mutex_lock(sync.m_phy_v_mte3, tla.pipes.VECTOR)
-        mutex_unlock(sync.m_phy_v_mte3, tla.pipes.VECTOR)
+        tla.set_flag(sync.phy_m3v)
+        tla.set_flag(sync.phy_m3s)
+        tla.wait_flag(sync.phy_m3v)
+        tla.wait_flag(sync.phy_m3s)
 
 
 @tla.jit
@@ -2376,7 +3728,7 @@ def gather_kv_rows(
                 # 信用等待必须在 GM->UB 之前：放在 16 次拷入之后不管用，
                 # 上一块的 UB->GM 还在读，本块的 GM->UB 已经把行盖掉了
                 # （实测表现为暂存槽里混进后一块的行）。
-                mutex_lock(sync.m_kv0, tla.pipes.MTE2)
+                tla.wait_flag(sync.kv_mte3_mte2_0)
                 for i in static_range(KV_UNIT):
                     line = line0 + i
                     if line > n_rows - 1:
@@ -2418,8 +3770,8 @@ def gather_kv_rows(
                         ),
                         gm_row,
                     )
-                mutex_unlock(sync.m_kv0, tla.pipes.MTE2)
-                mutex_lock(sync.m_kv0, tla.pipes.MTE3)
+                tla.set_flag(sync.kv_mte2_mte3_0)
+                tla.wait_flag(sync.kv_mte2_mte3_0)
                 gm_chunk = tla.make_tensor(
                     ws.ptr + ws_base + slot * slot_stride + line0 * HEAD_DIM,
                     tla.make_layout(
@@ -2434,7 +3786,7 @@ def gather_kv_rows(
                         ub_kv, tla.make_shape(rows_out, HEAD_DIM), tla.make_coord(0, 0)
                     ),
                 )
-                mutex_unlock(sync.m_kv0, tla.pipes.MTE3)
+                tla.set_flag(sync.kv_mte3_mte2_0)
             else:
                 ub_kv = tla.make_tensor(
                     bufs.ub_kv1,
@@ -2444,7 +3796,7 @@ def gather_kv_rows(
                         layoutTag=tla.arch.RowMajor,
                     ),
                 )
-                mutex_lock(sync.m_kv1, tla.pipes.MTE2)
+                tla.wait_flag(sync.kv_mte3_mte2_1)
                 for i in static_range(KV_UNIT):
                     line = line0 + i
                     if line > n_rows - 1:
@@ -2486,8 +3838,8 @@ def gather_kv_rows(
                         ),
                         gm_row,
                     )
-                mutex_unlock(sync.m_kv1, tla.pipes.MTE2)
-                mutex_lock(sync.m_kv1, tla.pipes.MTE3)
+                tla.set_flag(sync.kv_mte2_mte3_1)
+                tla.wait_flag(sync.kv_mte2_mte3_1)
                 gm_chunk = tla.make_tensor(
                     ws.ptr + ws_base + slot * slot_stride + line0 * HEAD_DIM,
                     tla.make_layout(
@@ -2502,11 +3854,359 @@ def gather_kv_rows(
                         ub_kv, tla.make_shape(rows_out, HEAD_DIM), tla.make_coord(0, 0)
                     ),
                 )
-                mutex_unlock(sync.m_kv1, tla.pipes.MTE3)
+                tla.set_flag(sync.kv_mte3_mte2_1)
         if announce:
             # 伙伴核读本核象限的跨核可见性由 **AIC 侧的全核会合**（pair_rendezvous）
             # 保证，AIV 侧不需要额外 PipeBarrier<ALL>：实测加了它 Dur 117→126.8
             # （mte2 30.6→37.9），且当时并未修好逐位（根因是预算整核只初始化一次）。
+            tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=0)
+            tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=1)
+
+
+# E23: rot2 multi-vector-register rotation + pitch17 (VSSTB block_stride=17).
+# E15/E17 的逐对 VLDI->VSSTB 因复用同一 V0 形成串行链（61.2 GB/s/核）。
+# 这里用 2 组 V0/V1 与 2 条在飞 VLDI（post-increment #64 = 1024 元素）：
+# 反汇编为 `VLDI V0,[S64],#64,#0,#1; VLDI V1,[S65],#64,#0,#1; VSSTB V0; VSSTB V1`，
+# 实测 121.2 GB/s/核。目的布局 pitch17（块距 272 元素 = 544 B）避开 pitch16 的
+# UB bank 冲突（pitch16 时同等指令只有 47.9 GB/s/核）。
+_E17_KV_NZ_SRC = r"""
+#include <cstdint>
+#include "c_api/asc_simd.h"
+
+extern "C" {
+__aicore__ __attribute__((always_inline)) void kv_nz_vsstb_p16(
+    uint64_t src_ub, uint64_t dst_ub) {
+  __ubuf__ bfloat16_t* s = reinterpret_cast<__ubuf__ bfloat16_t*>(src_ub);
+  __ubuf__ bfloat16_t* d = reinterpret_cast<__ubuf__ bfloat16_t*>(dst_ub);
+  vector_bool mask = asc_create_mask_b16(PAT_ALL);
+#pragma unroll
+  for (int q = 0; q < 4; ++q) {
+    __ubuf__ bfloat16_t* sp0 = s + q * 128;
+    __ubuf__ bfloat16_t* sp1 = sp0 + 512;
+    __ubuf__ bfloat16_t* dp0 = d + q * 2176;
+    __ubuf__ bfloat16_t* dp1 = dp0 + 16;
+#pragma unroll
+    for (int rr = 0; rr < 8; ++rr) {
+      vector_bfloat16_t v0, v1;
+      vlds(v0, sp0, 1024, NORM, POST_UPDATE);
+      vlds(v1, sp1, 1024, NORM, POST_UPDATE);
+      asc_storealign(dp0, v0, 17, 0, mask);
+      asc_storealign(dp1, v1, 17, 0, mask);
+      dp0 += 32;
+      dp1 += 32;
+    }
+  }
+}
+} // extern "C"
+"""
+
+
+@tla.extern(source=_E17_KV_NZ_SRC)
+def kv_nz_vsstb_p16(
+    src_ub: tla.Pointer[tla.BFloat16, tla.AddressSpace.ub],
+    dst_ub: tla.Pointer[tla.BFloat16, tla.AddressSpace.ub],
+) -> None: ...
+
+
+@tla.jit
+def _ub_zero_tail_rows(ub_kv_ptr, n_rows, my_start, chunk_id: tla.Constexpr[int]):
+    """Zero tail padding rows [rv..16) locally in UB via native SIMD.
+
+    Replaces repeated GM MTE2 reads from the single 1 KB _kv_zero address, which
+    caused severe 64-AIV L2 bank contention on small-H/tail-heavy CSA workloads,
+    while preserving 0*NaN safety for masked KV positions.
+    """
+    if n_rows < KV_BLOCK:
+        line0 = my_start + chunk_id * KV_UNIT
+        rv = n_rows - line0
+        if rv < 0:
+            rv = tla.as_numeric(0)
+        if rv < KV_UNIT:
+            z_t = tla.make_tensor(
+                tla.recast_ptr(ub_kv_ptr, dtype=tla.Float32),
+                tla.make_layout(
+                    tla.make_shape(KV_UNIT, HEAD_DIM // 2),
+                    tla.make_stride(HEAD_DIM // 2, 1),
+                ),
+            )
+            with tla.vec.func(mode="simd"):
+                preg = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
+                z = tla.full(0.0, dtype=tla.Float32)
+                for r in tla.range(KV_UNIT - rv):
+                    rr = rv + r
+                    tla.tile_view(
+                        z_t, tla.make_shape(1, VL), tla.make_coord(rr, 0)
+                    ).store(z, mask=preg)
+                    tla.tile_view(
+                        z_t, tla.make_shape(1, VL), tla.make_coord(rr, 1)
+                    ).store(z, mask=preg)
+                    tla.tile_view(
+                        z_t, tla.make_shape(1, VL), tla.make_coord(rr, 2)
+                    ).store(z, mask=preg)
+                    tla.tile_view(
+                        z_t, tla.make_shape(1, VL), tla.make_coord(rr, 3)
+                    ).store(z, mask=preg)
+                tla.local_mem_bar(
+                    tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD
+                )
+
+
+@tla.jit
+def kv_nz_vsstb_p16_u8(src_ub, dst_ub):
+    """Native CATLASS-DSL 16x512 ND->zN transpose with pitch=17 via post-update VLDS/VSSTB."""
+    s_ptr = tla.recast_ptr(src_ub, dtype=tla.BFloat16)
+    d_ptr = tla.recast_ptr(dst_ub, dtype=tla.BFloat16)
+    s0_t = tla.make_tensor(
+        s_ptr, tla.make_layout(tla.make_shape(16 * HEAD_DIM), tla.make_stride(1))
+    )
+    s1_t = tla.make_tensor(
+        s_ptr + 128,
+        tla.make_layout(tla.make_shape(16 * HEAD_DIM - 128), tla.make_stride(1)),
+    )
+    s2_t = tla.make_tensor(
+        s_ptr + 256,
+        tla.make_layout(tla.make_shape(16 * HEAD_DIM - 256), tla.make_stride(1)),
+    )
+    s3_t = tla.make_tensor(
+        s_ptr + 384,
+        tla.make_layout(tla.make_shape(16 * HEAD_DIM - 384), tla.make_stride(1)),
+    )
+    d0_t = tla.make_tensor(
+        d_ptr, tla.make_layout(tla.make_shape(2176), tla.make_stride(1))
+    )
+    d1_t = tla.make_tensor(
+        d_ptr + 2176, tla.make_layout(tla.make_shape(2176), tla.make_stride(1))
+    )
+    d2_t = tla.make_tensor(
+        d_ptr + 4352, tla.make_layout(tla.make_shape(2176), tla.make_stride(1))
+    )
+    d3_t = tla.make_tensor(
+        d_ptr + 6528, tla.make_layout(tla.make_shape(2176), tla.make_stride(1))
+    )
+    with tla.vec.func(mode="simd"):
+        mask = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.BFloat16)
+        ld_u = tla.params.NormalLoadParams(
+            post_mode=tla.params.PostMode.POST_MODE_UPDATE,
+            post_update_stride=HEAD_DIM,
+        )
+        st_u = tla.params.BlockStoreParams(
+            block_stride=KV_NZ_PITCH,
+            post_mode=tla.params.PostMode.POST_MODE_UPDATE,
+            repeat_stride=1,
+        )
+        sp0 = tla.tile_view(s0_t, tla.make_shape(VL_B16), tla.make_coord(0))
+        sp1 = tla.tile_view(s1_t, tla.make_shape(VL_B16), tla.make_coord(0))
+        sp2 = tla.tile_view(s2_t, tla.make_shape(VL_B16), tla.make_coord(0))
+        sp3 = tla.tile_view(s3_t, tla.make_shape(VL_B16), tla.make_coord(0))
+        dp0 = tla.tile_view(d0_t, tla.make_shape(VL_B16), tla.make_coord(0))
+        dp1 = tla.tile_view(d1_t, tla.make_shape(VL_B16), tla.make_coord(0))
+        dp2 = tla.tile_view(d2_t, tla.make_shape(VL_B16), tla.make_coord(0))
+        dp3 = tla.tile_view(d3_t, tla.make_shape(VL_B16), tla.make_coord(0))
+        a0, sp0 = sp0.load(ld_u)
+        a1, sp1 = sp1.load(ld_u)
+        a2, sp2 = sp2.load(ld_u)
+        a3, sp3 = sp3.load(ld_u)
+        for _ in static_range(7):
+            b0, sp0 = sp0.load(ld_u)
+            dp0 = dp0.store(a0, st_u, mask=mask)
+            b1, sp1 = sp1.load(ld_u)
+            dp1 = dp1.store(a1, st_u, mask=mask)
+            b2, sp2 = sp2.load(ld_u)
+            dp2 = dp2.store(a2, st_u, mask=mask)
+            b3, sp3 = sp3.load(ld_u)
+            dp3 = dp3.store(a3, st_u, mask=mask)
+            a0, sp0 = sp0.load(ld_u)
+            dp0 = dp0.store(b0, st_u, mask=mask)
+            a1, sp1 = sp1.load(ld_u)
+            dp1 = dp1.store(b1, st_u, mask=mask)
+            a2, sp2 = sp2.load(ld_u)
+            dp2 = dp2.store(b2, st_u, mask=mask)
+            a3, sp3 = sp3.load(ld_u)
+            dp3 = dp3.store(b3, st_u, mask=mask)
+        b0, sp0 = sp0.load(ld_u)
+        dp0 = dp0.store(a0, st_u, mask=mask)
+        b1, sp1 = sp1.load(ld_u)
+        dp1 = dp1.store(a1, st_u, mask=mask)
+        b2, sp2 = sp2.load(ld_u)
+        dp2 = dp2.store(a2, st_u, mask=mask)
+        b3, sp3 = sp3.load(ld_u)
+        dp3 = dp3.store(a3, st_u, mask=mask)
+        dp0 = dp0.store(b0, st_u, mask=mask)
+        dp1 = dp1.store(b1, st_u, mask=mask)
+        dp2 = dp2.store(b2, st_u, mask=mask)
+        dp3 = dp3.store(b3, st_u, mask=mask)
+
+
+@tla.jit
+def gather_kv_rows_pa_l1(
+    sync,
+    bufs,
+    kv_tensor,
+    idx,
+    token_row,
+    width,
+    base_line,
+    n_rows,
+    slot,
+    dtype,
+    block_table,
+    bt_seq,
+    bt_max,
+    pa_block_size,
+    pa_stride,
+    topk_value_mode,
+    announce: bool = True,
+):
+    """E17：PA cmp KV 由 AIV gather 到 UB(ND) -> extern VSSTB 换形到 UB zN(pitch16)
+    -> MTE3 写入本核 L1 K 槽 band（zN(128,512)）。
+
+    数据面（每 AIV 子块，16 行 band）与同步见 RUNLOG §2/§3：
+      wait kv_v_m2X（ND 可写）-> MTE2 页数学填 ND -> set kv_nd_vX
+      -> V: wait kvz_free + wait kv_nd_vX -> extern 换形 -> set kv_v_m2X + set kvz_v2m3
+      -> MTE3: wait kvz_v2m3 -> copy UB(zN) -> L1(zN) band -> set kvz_free
+    页数学/寻址与 `gather_kv_rows_pa_pairwise` 逐字相同（复用 `_pa_pairwise_fill`），
+    唯一区别是落位从 GM 暂存槽改成 L1 K 槽的 zN band；AIC 不再搬 cmp KV。
+    2 块 ND ping-pong（ub_kv0/1），1 块 zN 暂存（ub_kvz）。
+    """
+    require_configured("gather_kv_rows_pa_pairwise")
+    require_pa_configured("gather_kv_rows_pa_pairwise")
+    if _TRACE_STAGE:
+        require_share("gather_kv_rows_pa_pairwise")
+    with tla.vector():
+        sub = tla.arch.sub_block_idx()
+        # 16 行对齐的子块切分：band 是 zN 的写入单位（否则两 AIV 踩同一 band）。
+        # 生产 A/B 的 cmp 是 64/128 行，两 AIV 各 32/64 行，与 base 同。
+        first = ((n_rows + 1) // 2 + KV_UNIT - 1) // KV_UNIT * KV_UNIT
+        if first > n_rows:
+            first = n_rows
+        my_start = 0
+        my_rows = first
+        if sub == 1:
+            my_start = first
+            my_rows = n_rows - first
+        n_chunks = (my_rows + KV_UNIT - 1) // KV_UNIT
+        pair_zero = tla.Int64(0)
+        pair_one = tla.Int64(1)
+        pair_hi = tla.Int64(1073741824)
+        # L1 K 槽 zN 视图（与 cube.l1_v_tensor 同布局；V≡K 复用同一批字节）。
+        slot_zn = tla.make_tensor(
+            bufs.l1_k + slot * (HEAD_DIM * KV_BLOCK),
+            tla.make_layout_with_tag((KV_BLOCK, HEAD_DIM), dtype, tla.arch.zN),
+        )
+        # E23: UB 目的为 pitch17 的 zNUnAlign(17,512)：块距 = 17*16 = 272 元素
+        # （544 B），避开 pitch16（512 B）的 UB bank 冲突。zNUnAlign 关闭 M 轴
+        # fractal 对齐，按 rows*elems_per_c0 推导块距，正好是 272。
+        ub_zn_base = tla.make_tensor(
+            bufs.ub_kvz,
+            tla.make_layout(
+                tla.make_shape(KV_NZ_PITCH, HEAD_DIM),
+                tla.make_stride(HEAD_DIM, 1),
+                layoutTag=tla.arch.RowMajor,
+            ),
+        )
+        ub_zn = tla.make_tensor_like(bufs.ub_kvz, ub_zn_base, tla.arch.zNUnAlign)
+        # 只拷真实 16 行（第 17 行是每个 16 列块的 pad datablock）。
+        ub_zn_band = tla.tile_view(
+            ub_zn, tla.make_shape(KV_UNIT, HEAD_DIM), tla.make_coord(0, 0)
+        )
+        for c in tla.range(n_chunks):
+            line0 = my_start + c * KV_UNIT
+            if c % 2 == 0:
+                ub_kv = tla.make_tensor(
+                    bufs.ub_kv0,
+                    tla.make_layout(
+                        tla.make_shape(KV_UNIT, HEAD_DIM),
+                        tla.make_stride(HEAD_DIM, 1),
+                        layoutTag=tla.arch.RowMajor,
+                    ),
+                )
+                tla.wait_flag(sync.kv_v_m20)  # MTE2：ND 缓冲可写
+                _pa_pairwise_fill(
+                    ub_kv,
+                    bufs.ub_kv0,
+                    kv_tensor,
+                    idx,
+                    token_row,
+                    width,
+                    base_line,
+                    n_rows,
+                    line0,
+                    block_table,
+                    bt_seq,
+                    bt_max,
+                    pa_block_size,
+                    pa_stride,
+                    topk_value_mode,
+                    pair_zero,
+                    pair_one,
+                    pair_hi,
+                )
+                tla.set_flag(sync.kv_nd_v0)  # MTE2 -> V：ND 已填好
+                tla.wait_flag(sync.kvz_free)  # V：zN 缓冲可写（首个 band 预置 1）
+                tla.wait_flag(sync.kv_nd_v0)  # V：ND 已填好
+                with tla.vec.func(mode="simd"):
+                    kv_nz_vsstb_p16(bufs.ub_kv0, bufs.ub_kvz)
+                tla.set_flag(sync.kv_v_m20)  # V -> MTE2：ND 已读完
+                tla.set_flag(sync.kvz_v2m3)  # V -> MTE3：zN 已写完
+                tla.wait_flag(sync.kvz_v2m3)  # MTE3：zN 就绪
+                tla.copy(
+                    tla.tile_view(
+                        slot_zn,
+                        tla.make_shape(KV_UNIT, HEAD_DIM),
+                        tla.make_coord(line0 // KV_UNIT, 0),
+                    ),
+                    ub_zn_band,
+                )
+                tla.set_flag(sync.kvz_free)  # MTE3 -> V：zN 已读完
+            else:
+                ub_kv = tla.make_tensor(
+                    bufs.ub_kv1,
+                    tla.make_layout(
+                        tla.make_shape(KV_UNIT, HEAD_DIM),
+                        tla.make_stride(HEAD_DIM, 1),
+                        layoutTag=tla.arch.RowMajor,
+                    ),
+                )
+                tla.wait_flag(sync.kv_v_m21)
+                _pa_pairwise_fill(
+                    ub_kv,
+                    bufs.ub_kv1,
+                    kv_tensor,
+                    idx,
+                    token_row,
+                    width,
+                    base_line,
+                    n_rows,
+                    line0,
+                    block_table,
+                    bt_seq,
+                    bt_max,
+                    pa_block_size,
+                    pa_stride,
+                    topk_value_mode,
+                    pair_zero,
+                    pair_one,
+                    pair_hi,
+                )
+                tla.set_flag(sync.kv_nd_v1)
+                tla.wait_flag(sync.kvz_free)
+                tla.wait_flag(sync.kv_nd_v1)
+                with tla.vec.func(mode="simd"):
+                    kv_nz_vsstb_p16(bufs.ub_kv1, bufs.ub_kvz)
+                tla.set_flag(sync.kv_v_m21)
+                tla.set_flag(sync.kvz_v2m3)
+                tla.wait_flag(sync.kvz_v2m3)
+                tla.copy(
+                    tla.tile_view(
+                        slot_zn,
+                        tla.make_shape(KV_UNIT, HEAD_DIM),
+                        tla.make_coord(line0 // KV_UNIT, 0),
+                    ),
+                    ub_zn_band,
+                )
+                tla.set_flag(sync.kvz_free)
+        if announce:
+            # 编译器按 sub_block_idx 给两条 set 加 guard；每个 AIV 只发自己那条。
             tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=0)
             tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=1)
 
@@ -2557,6 +4257,7 @@ def gather_kv_rows_pa_pairwise(
     此时会出现跨全局偶数行的 pair，OT 的子块切分同样如此）。
     """
     require_configured("gather_kv_rows_pa_pairwise")
+    require_pa_configured("gather_kv_rows_pa_pairwise")
     if _TRACE_STAGE:
         require_share("gather_kv_rows_pa_pairwise")
     with tla.vector():
@@ -2607,7 +4308,7 @@ def gather_kv_rows_pa_pairwise(
                         layoutTag=tla.arch.RowMajor,
                     ),
                 )
-                mutex_lock(sync.m_kv0, tla.pipes.MTE2)
+                tla.wait_flag(sync.kv_mte3_mte2_0)
                 _pa_pairwise_fill(
                     ub_kv,
                     bufs.ub_kv0,
@@ -2628,8 +4329,8 @@ def gather_kv_rows_pa_pairwise(
                     pair_one,
                     pair_hi,
                 )
-                mutex_unlock(sync.m_kv0, tla.pipes.MTE2)
-                mutex_lock(sync.m_kv0, tla.pipes.MTE3)
+                tla.set_flag(sync.kv_mte2_mte3_0)
+                tla.wait_flag(sync.kv_mte2_mte3_0)
                 gm_chunk = tla.make_tensor(
                     ws.ptr + ws_base + slot * slot_stride + line0 * HEAD_DIM,
                     tla.make_layout(
@@ -2644,7 +4345,7 @@ def gather_kv_rows_pa_pairwise(
                         ub_kv, tla.make_shape(rows_out, HEAD_DIM), tla.make_coord(0, 0)
                     ),
                 )
-                mutex_unlock(sync.m_kv0, tla.pipes.MTE3)
+                tla.set_flag(sync.kv_mte3_mte2_0)
             else:
                 ub_kv = tla.make_tensor(
                     bufs.ub_kv1,
@@ -2654,7 +4355,7 @@ def gather_kv_rows_pa_pairwise(
                         layoutTag=tla.arch.RowMajor,
                     ),
                 )
-                mutex_lock(sync.m_kv1, tla.pipes.MTE2)
+                tla.wait_flag(sync.kv_mte3_mte2_1)
                 _pa_pairwise_fill(
                     ub_kv,
                     bufs.ub_kv1,
@@ -2675,8 +4376,8 @@ def gather_kv_rows_pa_pairwise(
                     pair_one,
                     pair_hi,
                 )
-                mutex_unlock(sync.m_kv1, tla.pipes.MTE2)
-                mutex_lock(sync.m_kv1, tla.pipes.MTE3)
+                tla.set_flag(sync.kv_mte2_mte3_1)
+                tla.wait_flag(sync.kv_mte2_mte3_1)
                 gm_chunk = tla.make_tensor(
                     ws.ptr + ws_base + slot * slot_stride + line0 * HEAD_DIM,
                     tla.make_layout(
@@ -2691,14 +4392,14 @@ def gather_kv_rows_pa_pairwise(
                         ub_kv, tla.make_shape(rows_out, HEAD_DIM), tla.make_coord(0, 0)
                     ),
                 )
-                mutex_unlock(sync.m_kv1, tla.pipes.MTE3)
+                tla.set_flag(sync.kv_mte3_mte2_1)
         if announce:
             tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=0)
             tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=1)
 
 
 @tla.jit
-def _pa_pairwise_fill(
+def _pa_pairwise_fill_tail(
     ub_kv,
     ub_base,
     kv_tensor,
@@ -2718,7 +4419,11 @@ def _pa_pairwise_fill(
     pair_one,
     pair_hi,
 ):
-    """一个 16 行块的 GM->UB：逐 8 行块读 8 个偏移，再按 OT 成对搬运。"""
+    """尾块的 16 行块填充（R42 步二后仅 `line0 + 16 > n_rows` 时走这里）。
+
+    保留原有 3/4 臂：逐行 validity（`src_raw < 0` / 越界行）、两行都无效不搬、
+    `blockCount = 1 + v1`、`|Δ|` 越界回落 CopyInSingleKv×2。
+    """
     for blk in static_range(KV_UNIT // 8):
         blk_base = 8 * blk
         # GetRealCmpS2Idx（:340-386）：8 条地址背靠背读完；尾块无效项 = -1
@@ -2735,15 +4440,18 @@ def _pa_pairwise_fill(
             # 注：合并成无分支算式实测更亏（+1.37 µs，#32），保留短分支。
             if src < 0:
                 src = 0
-            blk_i = src // pa_block_size
-            off_i = src - blk_i * pa_block_size
+            # R42 步一：页号用追踪期常量做算术 —— block size 是 2 的幂，
+            # `//block_size` 折叠成 `>>shift`；topk 模式与 pa_stride 也是常量。
+            # 形参 pa_block_size/pa_stride/topk_value_mode 仅为兼容调用点保留。
+            blk_i = src >> _PA_BLOCK_SHIFT
+            off_i = src - blk_i * _PA_BLOCK_SIZE
             # TOPK_INDEX_MODE 查页表；TOPK_OFFSET_MODE 索引值即物理块号（:441-447）
             phys = blk_i
-            if topk_value_mode == 1:
+            if _PA_TOPK_MODE == 1:
                 phys = block_table[bt_seq * bt_max + blk_i]
                 if phys < 0:
                     phys = 0
-            off = phys * pa_stride + off_i * HEAD_DIM
+            off = phys * _PA_STRIDE + off_i * HEAD_DIM
             # GetkeyOffset：s2Idx < 0 ⇒ -1；尾块越界行 tokenData 保持 -1
             if src_raw < 0:
                 off = -1
@@ -2816,6 +4524,129 @@ def _pa_pairwise_fill(
                             gm_row_b,
                         )
             # 两行都无效：OT return（剩余对同样无效），不搬、保留 UB 残留
+
+
+@tla.jit
+def _pa_pairwise_fill_full(
+    ub_base,
+    kv_tensor,
+    idx,
+    token_row,
+    width,
+    base_line,
+    line0,
+    block_table,
+    bt_seq,
+    bt_max,
+    pair_zero,
+    pair_one,
+):
+    """满块快路（R42 步二）：本块 16 行全部有效（`line0+16 <= n_rows`）。
+
+    满块内不再出现 `s2Idx < 0` 与越界行，因此去掉 validity 计算与
+    CopyInSingleKv×2 回落：每对只做 2 次 idx 读 + min/max 选起址 + 1 条
+    `pair_gm_to_ub(blockCount=2)`。与慢路在满块上逐位同义：
+      - 起址取较小地址、步长 |Δoff|*2-1024（降序对在 UB 内两行交换）；
+      - 页表读在满块内恒定非负，不再夹 0（OT GetkeyOffset 也不夹）。
+    满块地址差远小于描述符上界（phys < 2^31 / stride 为页字节数），
+    不再保留 slow 路的 `pair_stride < pair_hi` 分支。
+    """
+    for blk in static_range(KV_UNIT // 8):
+        blk_base = 8 * blk
+        addr_t = ()
+        for ai in static_range(8):
+            line = line0 + blk_base + ai
+            src = idx[token_row * width + base_line + line]
+            blk_i = src >> _PA_BLOCK_SHIFT
+            off_i = src - blk_i * _PA_BLOCK_SIZE
+            phys = blk_i
+            if _PA_TOPK_MODE == 1:
+                phys = block_table[bt_seq * bt_max + blk_i]
+            addr_t = addr_t + ((phys * _PA_STRIDE + off_i * HEAD_DIM).to(tla.Int64),)
+        for p in static_range(4):
+            row_a = blk_base + 2 * p
+            off0 = addr_t[2 * p]
+            off1 = addr_t[2 * p + 1]
+            pair_delta = off1 - off0
+            c_desc = (pair_delta < pair_zero).to(tla.Int64)
+            pair_abs = pair_delta * (pair_one - c_desc - c_desc)
+            pair_base = off0 + c_desc * pair_delta
+            pair_stride = pair_abs * tla.Int64(_PAIR_ELEM_BYTES) - tla.Int64(
+                HEAD_DIM * _PAIR_ELEM_BYTES
+            )
+            pair_gm_to_ub(
+                tla.recast_ptr(kv_tensor.ptr + pair_base, dtype=tla.UInt8),
+                tla.recast_ptr(ub_base, dtype=tla.UInt8),
+                HEAD_DIM * _PAIR_ELEM_BYTES,
+                pair_stride,
+                tla.Int64(row_a * HEAD_DIM * _PAIR_ELEM_BYTES),
+                tla.Int64(2),
+            )
+
+
+@tla.jit
+def _pa_pairwise_fill(
+    ub_kv,
+    ub_base,
+    kv_tensor,
+    idx,
+    token_row,
+    width,
+    base_line,
+    n_rows,
+    line0,
+    block_table,
+    bt_seq,
+    bt_max,
+    pa_block_size,
+    pa_stride,
+    topk_value_mode,
+    pair_zero,
+    pair_one,
+    pair_hi,
+):
+    """16 行块填充的分派（R42 步二）：满块走单臂快路，尾块保留 3/4 臂。
+
+    追踪期常量（`_PA_BLOCK_SHIFT/_PA_STRIDE/_PA_TOPK_MODE`）由 kernel 体首的
+    `configure_pa(...)` 写入；形参 pa_block_size/pa_stride/topk_value_mode 仅为
+    兼容调用点保留。
+    """
+    if line0 + KV_UNIT <= n_rows:
+        _pa_pairwise_fill_full(
+            ub_base,
+            kv_tensor,
+            idx,
+            token_row,
+            width,
+            base_line,
+            line0,
+            block_table,
+            bt_seq,
+            bt_max,
+            pair_zero,
+            pair_one,
+        )
+    else:
+        _pa_pairwise_fill_tail(
+            ub_kv,
+            ub_base,
+            kv_tensor,
+            idx,
+            token_row,
+            width,
+            base_line,
+            n_rows,
+            line0,
+            block_table,
+            bt_seq,
+            bt_max,
+            pa_block_size,
+            pa_stride,
+            topk_value_mode,
+            pair_zero,
+            pair_one,
+            pair_hi,
+        )
 
 
 @tla.jit
@@ -2894,7 +4725,7 @@ def gather_kv_rows_vec(
                         layoutTag=tla.arch.RowMajor,
                     ),
                 )
-                mutex_lock(sync.m_kv0, tla.pipes.MTE2)
+                tla.wait_flag(sync.kv_mte3_mte2_0)
                 if _SPARSE_BLOCK_SIZE == 1:
                     # F31 ①c：OT 原形是**两段叠加**，不是二选一：
                     #   GetRealS2Addr 每 8 行块先整块读 8 个地址
@@ -3019,8 +4850,8 @@ def gather_kv_rows_vec(
                             ),
                             gm_row,
                         )
-                mutex_unlock(sync.m_kv0, tla.pipes.MTE2)
-                mutex_lock(sync.m_kv0, tla.pipes.MTE3)
+                tla.set_flag(sync.kv_mte2_mte3_0)
+                tla.wait_flag(sync.kv_mte2_mte3_0)
                 gm_chunk = tla.make_tensor(
                     ws.ptr + ws_base + slot * slot_stride + line0 * HEAD_DIM,
                     tla.make_layout(
@@ -3035,7 +4866,7 @@ def gather_kv_rows_vec(
                         ub_kv, tla.make_shape(rows_out, HEAD_DIM), tla.make_coord(0, 0)
                     ),
                 )
-                mutex_unlock(sync.m_kv0, tla.pipes.MTE3)
+                tla.set_flag(sync.kv_mte3_mte2_0)
             else:
                 ub_kv = tla.make_tensor(
                     bufs.ub_kv1,
@@ -3045,7 +4876,7 @@ def gather_kv_rows_vec(
                         layoutTag=tla.arch.RowMajor,
                     ),
                 )
-                mutex_lock(sync.m_kv1, tla.pipes.MTE2)
+                tla.wait_flag(sync.kv_mte3_mte2_1)
                 if _SPARSE_BLOCK_SIZE == 1:
                     # F31 ①c：同 kv0 分支（读 8 地址 → 4 条合并拷贝，ub_kv1 目标）
                     for blk in static_range(KV_UNIT // 8):
@@ -3160,8 +4991,8 @@ def gather_kv_rows_vec(
                             ),
                             gm_row,
                         )
-                mutex_unlock(sync.m_kv1, tla.pipes.MTE2)
-                mutex_lock(sync.m_kv1, tla.pipes.MTE3)
+                tla.set_flag(sync.kv_mte2_mte3_1)
+                tla.wait_flag(sync.kv_mte2_mte3_1)
                 gm_chunk = tla.make_tensor(
                     ws.ptr + ws_base + slot * slot_stride + line0 * HEAD_DIM,
                     tla.make_layout(
@@ -3176,11 +5007,776 @@ def gather_kv_rows_vec(
                         ub_kv, tla.make_shape(rows_out, HEAD_DIM), tla.make_coord(0, 0)
                     ),
                 )
-                mutex_unlock(sync.m_kv1, tla.pipes.MTE3)
+                tla.set_flag(sync.kv_mte3_mte2_1)
         if announce:
             # 伙伴核读本核象限的跨核可见性由 **AIC 侧的全核会合**（pair_rendezvous）
             # 保证，AIV 侧不需要额外 PipeBarrier<ALL>：实测加了它 Dur 117→126.8
             # （mte2 30.6→37.9），且当时并未修好逐位（根因是预算整核只初始化一次）。
+            tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=0)
+            tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=1)
+
+
+# ---------------------------------------------------------------------------
+# TND/BSND 16-row Burst Gather (Arm 1: ws, Arm 2: direct AIV->L1)
+# ---------------------------------------------------------------------------
+_TND_BURST_SRC = r"""
+#include <cstdint>
+#include "c_api/asc_simd.h"
+
+extern "C" {
+
+__aicore__ __attribute__((always_inline)) void tnd_gather_tail_rows_ub_l2_1(
+    uint64_t kv_gm_addr,
+    uint64_t ub_kv_addr,
+    uint64_t ub_idx_addr,
+    uint64_t kv_zero_addr,
+    int64_t row_base,
+    int64_t rows_valid) {
+  __gm__ uint8_t* kv_base = reinterpret_cast<__gm__ uint8_t*>(kv_gm_addr);
+  (void)kv_zero_addr;
+  int32_t rv = static_cast<int32_t>(rows_valid);
+  if (rv <= 0) return;
+  __ubuf__ uint8_t* ub_base = reinterpret_cast<__ubuf__ uint8_t*>(ub_kv_addr);
+  __ubuf__ int32_t* idx_ptr = reinterpret_cast<__ubuf__ int32_t*>(ub_idx_addr);
+  uint64_t base_u = static_cast<uint64_t>(row_base);
+#pragma unroll
+  for (int p = 0; p < 8; ++p) {
+    int32_t a = 2 * p;
+    int32_t b = a + 1;
+    if (b < rv) {
+      int32_t i0 = idx_ptr[a];
+      int32_t i1 = idx_ptr[b];
+      uint64_t r0 = base_u + static_cast<uint64_t>((i0 < 0) ? 0 : i0);
+      uint64_t r1 = base_u + static_cast<uint64_t>((i1 < 0) ? 0 : i1);
+      uint64_t lo = (r0 < r1) ? r0 : r1;
+      uint64_t hi = (r0 < r1) ? r1 : r0;
+      uint64_t src_off = lo << 10;
+      uint64_t src_stride = (hi - lo) << 10;
+      copy_gm_to_ubuf_align_v2(
+          reinterpret_cast<__ubuf__ bfloat16_t*>(ub_base + p * 2048),
+          reinterpret_cast<__gm__ bfloat16_t*>(kv_base + src_off),
+          0, 2, 1024, 0, 0, false, static_cast<uint8_t>(1), src_stride, 1024);
+    } else if (a < rv) {
+      int32_t i0 = idx_ptr[a];
+      uint64_t r0 = base_u + static_cast<uint64_t>((i0 < 0) ? 0 : i0);
+      copy_gm_to_ubuf_align_v2(
+          reinterpret_cast<__ubuf__ bfloat16_t*>(ub_base + p * 2048),
+          reinterpret_cast<__gm__ bfloat16_t*>(kv_base + (r0 << 10)),
+          0, 1, 1024, 0, 0, false, static_cast<uint8_t>(1), 0, 0);
+    }
+  }
+}
+
+__aicore__ __attribute__((always_inline)) void pa_gather_16rows_mlp2_l2_1(
+    uint64_t kv_gm_addr, uint64_t bt_row_addr, uint64_t ub_kv_addr, uint64_t ub_idx_addr,
+    int64_t pa_block_shift, int64_t pa_block_mask, int64_t pa_stride_bytes, int64_t topk_mode) {
+  __gm__ uint8_t* __restrict__ kv_base = reinterpret_cast<__gm__ uint8_t*>(kv_gm_addr);
+  __gm__ int32_t* __restrict__ bt_row = reinterpret_cast<__gm__ int32_t*>(bt_row_addr);
+  __ubuf__ uint8_t* __restrict__ dst_p = reinterpret_cast<__ubuf__ uint8_t*>(ub_kv_addr);
+  __ubuf__ int32_t* __restrict__ idx_ptr = reinterpret_cast<__ubuf__ int32_t*>(ub_idx_addr);
+  uint32_t sh = static_cast<uint32_t>(pa_block_shift);
+  uint32_t msk = static_cast<uint32_t>(pa_block_mask);
+  uint64_t sb = static_cast<uint64_t>(pa_stride_bytes);
+  bool use_bt = (topk_mode == 1);
+#pragma clang loop unroll(disable)
+  for (int q = 0; q < 4; ++q) {
+    int32_t i0 = idx_ptr[0], i1 = idx_ptr[1], i2 = idx_ptr[2], i3 = idx_ptr[3];
+    idx_ptr += 4;
+    uint32_t a0 = static_cast<uint32_t>((i0 < 0) ? 0 : i0);
+    uint32_t a1 = static_cast<uint32_t>((i1 < 0) ? 0 : i1);
+    uint32_t a2 = static_cast<uint32_t>((i2 < 0) ? 0 : i2);
+    uint32_t a3 = static_cast<uint32_t>((i3 < 0) ? 0 : i3);
+    int32_t p0, p1, p2, p3;
+    if (use_bt) {
+      p0 = bt_row[a0 >> sh]; p1 = bt_row[a1 >> sh];
+      p2 = bt_row[a2 >> sh]; p3 = bt_row[a3 >> sh];
+      p0 = (p0 < 0) ? 0 : p0; p1 = (p1 < 0) ? 0 : p1;
+      p2 = (p2 < 0) ? 0 : p2; p3 = (p3 < 0) ? 0 : p3;
+    } else {
+      p0 = static_cast<int32_t>(a0 >> sh); p1 = static_cast<int32_t>(a1 >> sh);
+      p2 = static_cast<int32_t>(a2 >> sh); p3 = static_cast<int32_t>(a3 >> sh);
+    }
+    uint64_t off0 = static_cast<uint64_t>(p0) * sb + (static_cast<uint64_t>(a0 & msk) << 10);
+    uint64_t off1 = static_cast<uint64_t>(p1) * sb + (static_cast<uint64_t>(a1 & msk) << 10);
+    uint64_t lo0 = (off0 < off1) ? off0 : off1;
+    uint64_t hi0 = (off0 < off1) ? off1 : off0;
+    copy_gm_to_ubuf_align_v2(
+        reinterpret_cast<__ubuf__ bfloat16_t*>(dst_p),
+        reinterpret_cast<__gm__ bfloat16_t*>(kv_base + lo0),
+        0, 2, 1024, 0, 0, false, static_cast<uint8_t>(1), hi0 - lo0, 1024);
+
+    uint64_t off2 = static_cast<uint64_t>(p2) * sb + (static_cast<uint64_t>(a2 & msk) << 10);
+    uint64_t off3 = static_cast<uint64_t>(p3) * sb + (static_cast<uint64_t>(a3 & msk) << 10);
+    uint64_t lo1 = (off2 < off3) ? off2 : off3;
+    uint64_t hi1 = (off2 < off3) ? off3 : off2;
+    copy_gm_to_ubuf_align_v2(
+        reinterpret_cast<__ubuf__ bfloat16_t*>(dst_p + 2048),
+        reinterpret_cast<__gm__ bfloat16_t*>(kv_base + lo1),
+        0, 2, 1024, 0, 0, false, static_cast<uint8_t>(1), hi1 - lo1, 1024);
+    dst_p += 4096;
+  }
+}
+
+__aicore__ __attribute__((always_inline)) void pa_gather_tail_rows_ub_l2_1(
+    uint64_t kv_gm_addr, uint64_t bt_row_addr, uint64_t ub_kv_addr, uint64_t ub_idx_addr,
+    uint64_t kv_zero_addr, int64_t pa_block_shift, int64_t pa_block_mask,
+    int64_t pa_stride_bytes, int64_t topk_mode, int64_t rows_valid) {
+  __gm__ uint8_t* __restrict__ kv_base = reinterpret_cast<__gm__ uint8_t*>(kv_gm_addr);
+  (void)kv_zero_addr;
+  int32_t rv = static_cast<int32_t>(rows_valid);
+  if (rv <= 0) return;
+  __gm__ int32_t* __restrict__ bt_row = reinterpret_cast<__gm__ int32_t*>(bt_row_addr);
+  __ubuf__ uint8_t* __restrict__ dst_p = reinterpret_cast<__ubuf__ uint8_t*>(ub_kv_addr);
+  __ubuf__ int32_t* __restrict__ idx_ptr = reinterpret_cast<__ubuf__ int32_t*>(ub_idx_addr);
+  uint32_t sh = static_cast<uint32_t>(pa_block_shift);
+  uint32_t msk = static_cast<uint32_t>(pa_block_mask);
+  uint64_t sb = static_cast<uint64_t>(pa_stride_bytes);
+  bool use_bt = (topk_mode == 1);
+#pragma clang loop unroll(disable)
+  for (int p = 0; p < 8; ++p) {
+    int32_t a = 2 * p;
+    int32_t b = a + 1;
+    if (b < rv) {
+      int32_t i0 = idx_ptr[a];
+      int32_t i1 = idx_ptr[b];
+      uint32_t a0 = static_cast<uint32_t>((i0 < 0) ? 0 : i0);
+      uint32_t a1 = static_cast<uint32_t>((i1 < 0) ? 0 : i1);
+      int32_t p0 = use_bt ? bt_row[a0 >> sh] : static_cast<int32_t>(a0 >> sh);
+      int32_t p1 = use_bt ? bt_row[a1 >> sh] : static_cast<int32_t>(a1 >> sh);
+      p0 = (p0 < 0) ? 0 : p0;
+      p1 = (p1 < 0) ? 0 : p1;
+      uint64_t off0 = static_cast<uint64_t>(p0) * sb + (static_cast<uint64_t>(a0 & msk) << 10);
+      uint64_t off1 = static_cast<uint64_t>(p1) * sb + (static_cast<uint64_t>(a1 & msk) << 10);
+      uint64_t lo = (off0 < off1) ? off0 : off1;
+      uint64_t hi = (off0 < off1) ? off1 : off0;
+      copy_gm_to_ubuf_align_v2(
+          reinterpret_cast<__ubuf__ bfloat16_t*>(dst_p),
+          reinterpret_cast<__gm__ bfloat16_t*>(kv_base + lo),
+          0, 2, 1024, 0, 0, false, static_cast<uint8_t>(1), hi - lo, 1024);
+    } else if (a < rv) {
+      int32_t i0 = idx_ptr[a];
+      uint32_t a0 = static_cast<uint32_t>((i0 < 0) ? 0 : i0);
+      int32_t p0 = use_bt ? bt_row[a0 >> sh] : static_cast<int32_t>(a0 >> sh);
+      p0 = (p0 < 0) ? 0 : p0;
+      uint64_t off0 = static_cast<uint64_t>(p0) * sb + (static_cast<uint64_t>(a0 & msk) << 10);
+      copy_gm_to_ubuf_align_v2(
+          reinterpret_cast<__ubuf__ bfloat16_t*>(dst_p),
+          reinterpret_cast<__gm__ bfloat16_t*>(kv_base + off0),
+          0, 1, 1024, 0, 0, false, static_cast<uint8_t>(1), 0, 0);
+    }
+    dst_p += 2048;
+  }
+}
+
+__aicore__ __attribute__((always_inline)) void tnd_gather_16rows_mlp4_l2_1(
+    uint64_t kv_gm_addr, uint64_t ub_kv_addr, uint64_t ub_idx_addr, int64_t row_base) {
+  __gm__ uint8_t* __restrict__ kv_base =
+      reinterpret_cast<__gm__ uint8_t*>(kv_gm_addr) + (static_cast<uint64_t>(row_base) << 10);
+  __ubuf__ uint8_t* __restrict__ dst_p = reinterpret_cast<__ubuf__ uint8_t*>(ub_kv_addr);
+  __ubuf__ int32_t* __restrict__ idx_ptr = reinterpret_cast<__ubuf__ int32_t*>(ub_idx_addr);
+#pragma clang loop unroll(disable)
+  for (int h = 0; h < 2; ++h) {
+    int64_t i0 = idx_ptr[0], i1 = idx_ptr[1], i2 = idx_ptr[2], i3 = idx_ptr[3];
+    int64_t i4 = idx_ptr[4], i5 = idx_ptr[5], i6 = idx_ptr[6], i7 = idx_ptr[7];
+    idx_ptr += 8;
+    int64_t a0 = (i0 < 0) ? 0 : i0, a1 = (i1 < 0) ? 0 : i1;
+    int64_t a2 = (i2 < 0) ? 0 : i2, a3 = (i3 < 0) ? 0 : i3;
+    int64_t a4 = (i4 < 0) ? 0 : i4, a5 = (i5 < 0) ? 0 : i5;
+    int64_t a6 = (i6 < 0) ? 0 : i6, a7 = (i7 < 0) ? 0 : i7;
+    int64_t lo0 = (a0 < a1) ? a0 : a1, hi0 = (a0 < a1) ? a1 : a0;
+    int64_t lo1 = (a2 < a3) ? a2 : a3, hi1 = (a2 < a3) ? a3 : a2;
+    int64_t lo2 = (a4 < a5) ? a4 : a5, hi2 = (a4 < a5) ? a5 : a4;
+    int64_t lo3 = (a6 < a7) ? a6 : a7, hi3 = (a6 < a7) ? a7 : a6;
+    copy_gm_to_ubuf_align_v2(
+        reinterpret_cast<__ubuf__ bfloat16_t*>(dst_p),
+        reinterpret_cast<__gm__ bfloat16_t*>(kv_base + (static_cast<uint64_t>(lo0) << 10)),
+        0, 2, 1024, 0, 0, false, static_cast<uint8_t>(1), static_cast<uint64_t>(hi0 - lo0) << 10, 1024);
+    copy_gm_to_ubuf_align_v2(
+        reinterpret_cast<__ubuf__ bfloat16_t*>(dst_p + 2048),
+        reinterpret_cast<__gm__ bfloat16_t*>(kv_base + (static_cast<uint64_t>(lo1) << 10)),
+        0, 2, 1024, 0, 0, false, static_cast<uint8_t>(1), static_cast<uint64_t>(hi1 - lo1) << 10, 1024);
+    copy_gm_to_ubuf_align_v2(
+        reinterpret_cast<__ubuf__ bfloat16_t*>(dst_p + 4096),
+        reinterpret_cast<__gm__ bfloat16_t*>(kv_base + (static_cast<uint64_t>(lo2) << 10)),
+        0, 2, 1024, 0, 0, false, static_cast<uint8_t>(1), static_cast<uint64_t>(hi2 - lo2) << 10, 1024);
+    copy_gm_to_ubuf_align_v2(
+        reinterpret_cast<__ubuf__ bfloat16_t*>(dst_p + 6144),
+        reinterpret_cast<__gm__ bfloat16_t*>(kv_base + (static_cast<uint64_t>(lo3) << 10)),
+        0, 2, 1024, 0, 0, false, static_cast<uint8_t>(1), static_cast<uint64_t>(hi3 - lo3) << 10, 1024);
+    dst_p += 8192;
+  }
+}
+
+} // extern "C"
+"""
+
+
+@tla.extern(source=_TND_BURST_SRC, name="tnd_gather_tail_rows_ub_l2_1")
+def tnd_gather_tail_rows_ub_l2_1(
+    kv_gm: tla.Pointer[tla.UInt8, tla.AddressSpace.gm],
+    ub_kv: tla.Pointer[tla.UInt8, tla.AddressSpace.ub],
+    ub_idx: tla.Pointer[tla.Int32, tla.AddressSpace.ub],
+    kv_zero: tla.Pointer[tla.UInt8, tla.AddressSpace.gm],
+    row_base: tla.Int64,
+    rows_valid: tla.Int64,
+) -> None: ...
+
+
+@tla.extern(source=_TND_BURST_SRC, name="pa_gather_16rows_mlp2_l2_1")
+def _pa_gather_16rows_mlp2_l2_1(
+    kv_gm: tla.Pointer[tla.UInt8, tla.AddressSpace.gm],
+    bt_row: tla.Pointer[tla.Int32, tla.AddressSpace.gm],
+    ub_kv: tla.Pointer[tla.UInt8, tla.AddressSpace.ub],
+    ub_idx: tla.Pointer[tla.Int32, tla.AddressSpace.ub],
+    pa_block_shift: tla.Int64,
+    pa_block_mask: tla.Int64,
+    pa_stride_bytes: tla.Int64,
+    topk_mode: tla.Int64,
+) -> None: ...
+
+
+@tla.extern(source=_TND_BURST_SRC, name="pa_gather_tail_rows_ub_l2_1")
+def _pa_gather_tail_rows_ub_l2_1(
+    kv_gm: tla.Pointer[tla.UInt8, tla.AddressSpace.gm],
+    bt_row: tla.Pointer[tla.Int32, tla.AddressSpace.gm],
+    ub_kv: tla.Pointer[tla.UInt8, tla.AddressSpace.ub],
+    ub_idx: tla.Pointer[tla.Int32, tla.AddressSpace.ub],
+    kv_zero: tla.Pointer[tla.UInt8, tla.AddressSpace.gm],
+    pa_block_shift: tla.Int64,
+    pa_block_mask: tla.Int64,
+    pa_stride_bytes: tla.Int64,
+    topk_mode: tla.Int64,
+    rows_valid: tla.Int64,
+) -> None: ...
+
+
+@tla.extern(source=_TND_BURST_SRC, name="tnd_gather_16rows_mlp4_l2_1")
+def _tnd_gather_16rows_mlp4_l2_1(
+    kv_gm: tla.Pointer[tla.UInt8, tla.AddressSpace.gm],
+    ub_kv: tla.Pointer[tla.UInt8, tla.AddressSpace.ub],
+    ub_idx: tla.Pointer[tla.Int32, tla.AddressSpace.ub],
+    row_base: tla.Int64,
+) -> None: ...
+
+
+@tla.jit
+def _pa_l1_gather_chunk_hoisted(
+    bufs,
+    kv_tensor,
+    bt_row_ptr,
+    kv_zero,
+    ub_kv_ptr,
+    my_start,
+    ring_base,
+    n_rows,
+    chunk_id: tla.Constexpr[int],
+):
+    sh = tla.Int64(_PA_BLOCK_SHIFT)
+    msk = tla.Int64(_PA_BLOCK_SIZE - 1)
+    sb = tla.Int64(_PA_STRIDE * 2)
+    tm = tla.Int64(_PA_TOPK_MODE)
+    if n_rows == KV_BLOCK:
+        _pa_gather_16rows_mlp2_l2_1(
+            tla.recast_ptr(kv_tensor.ptr, dtype=tla.UInt8),
+            bt_row_ptr,
+            tla.recast_ptr(ub_kv_ptr, dtype=tla.UInt8),
+            bufs.ub_idx_ring + (ring_base + chunk_id * KV_UNIT),
+            sh,
+            msk,
+            sb,
+            tm,
+        )
+    else:
+        line0 = my_start + chunk_id * KV_UNIT
+        rv = n_rows - line0
+        if rv < 0:
+            rv = tla.as_numeric(0)
+        if rv > KV_UNIT:
+            rv = tla.as_numeric(KV_UNIT)
+        _pa_gather_tail_rows_ub_l2_1(
+            tla.recast_ptr(kv_tensor.ptr, dtype=tla.UInt8),
+            bt_row_ptr,
+            tla.recast_ptr(ub_kv_ptr, dtype=tla.UInt8),
+            bufs.ub_idx_ring + (ring_base + chunk_id * KV_UNIT),
+            tla.recast_ptr(kv_zero.ptr, dtype=tla.UInt8),
+            sh,
+            msk,
+            sb,
+            tm,
+            rv.to(tla.Int64),
+        )
+
+
+@tla.jit
+def pa_l1_s3_stage25_full(
+    sync,
+    bufs,
+    kv_tensor,
+    kv_zero,
+    block_table,
+    token_row,
+    idx_width,
+    bt_seq,
+    bt_max,
+    base_line,
+    n_rows,
+    idx_slot,
+):
+    """PA R2 Stage 2.5 (after vec1): wait idx -> MTE2(0,1) -> VSSTB(0,1) -> MTE2(2,3) -> release idx."""
+    with tla.vector():
+        sub = tla.arch.sub_block_idx()
+        my_start = sub * 64
+        if n_rows > my_start:
+            if idx_slot == 0:
+                tla.wait_flag(sync.idx_m2s0)
+            else:
+                tla.wait_flag(sync.idx_m2s1)
+        a0_abs = token_row * idx_width + base_line + my_start
+        rem = a0_abs - (a0_abs // 8) * 8
+        ring_base = idx_slot * IDX_RING_STRIDE + rem
+        bt_row_ptr = block_table.ptr + bt_seq * bt_max
+
+        tla.wait_flag(sync.kv_v_m20)
+        _pa_l1_gather_chunk_hoisted(
+            bufs,
+            kv_tensor,
+            bt_row_ptr,
+            kv_zero,
+            bufs.ub_kv0,
+            my_start,
+            ring_base,
+            n_rows,
+            0,
+        )
+        tla.set_flag(sync.kv_nd_v0)
+
+        tla.wait_flag(sync.kv_v_m21)
+        _pa_l1_gather_chunk_hoisted(
+            bufs,
+            kv_tensor,
+            bt_row_ptr,
+            kv_zero,
+            bufs.ub_kv1,
+            my_start,
+            ring_base,
+            n_rows,
+            1,
+        )
+        tla.set_flag(sync.kv_nd_v1)
+
+        tla.wait_flag(sync.kvz_free)
+        tla.wait_flag(sync.kv_nd_v0)
+        _ub_zero_tail_rows(bufs.ub_kv0, n_rows, my_start, 0)
+        kv_nz_vsstb_p16_u8(
+            tla.recast_ptr(bufs.ub_kv0, dtype=tla.UInt8),
+            tla.recast_ptr(bufs.ub_kvz, dtype=tla.UInt8),
+        )
+        tla.set_flag(sync.kv_v_m20)
+        tla.set_flag(sync.kvz_v2m3)
+        tla.wait_flag(sync.kv_v_m20)
+        _pa_l1_gather_chunk_hoisted(
+            bufs,
+            kv_tensor,
+            bt_row_ptr,
+            kv_zero,
+            bufs.ub_kv0,
+            my_start,
+            ring_base,
+            n_rows,
+            2,
+        )
+        tla.set_flag(sync.kv_nd_v0)
+
+        tla.wait_flag(sync.kvz_free1)
+        tla.wait_flag(sync.kv_nd_v1)
+        _ub_zero_tail_rows(bufs.ub_kv1, n_rows, my_start, 1)
+        kv_nz_vsstb_p16_u8(
+            tla.recast_ptr(bufs.ub_kv1, dtype=tla.UInt8),
+            tla.recast_ptr(bufs.ub_kvz1, dtype=tla.UInt8),
+        )
+        tla.set_flag(sync.kv_v_m21)
+        tla.set_flag(sync.kvz_v2m3_1)
+        tla.wait_flag(sync.kv_v_m21)
+        _pa_l1_gather_chunk_hoisted(
+            bufs,
+            kv_tensor,
+            bt_row_ptr,
+            kv_zero,
+            bufs.ub_kv1,
+            my_start,
+            ring_base,
+            n_rows,
+            3,
+        )
+        tla.set_flag(sync.kv_nd_v1)
+
+        if n_rows > my_start:
+            if idx_slot == 0:
+                tla.set_flag(sync.idx_s2m0)
+            else:
+                tla.set_flag(sync.idx_s2m1)
+
+
+@tla.jit
+def _tnd_l1_dma_idx(sync, bufs, idx, token_row, idx_width, base_line, n_rows, idx_slot):
+    sub = tla.arch.sub_block_idx()
+    my_start = sub * 64
+    if n_rows == KV_BLOCK:
+        a0_abs = token_row * idx_width + base_line + my_start
+        rem = a0_abs - (a0_abs // 8) * 8
+        a0 = a0_abs - rem
+        need = rem + 64
+        if idx_slot == 0:
+            tla.wait_flag(sync.idx_s2m0)
+        else:
+            tla.wait_flag(sync.idx_s2m1)
+        tla.copy(
+            tla.tile_view(
+                tla.make_tensor(
+                    bufs.ub_idx_ring + idx_slot * IDX_RING_STRIDE,
+                    tla.make_layout(
+                        tla.make_shape(IDX_RING_STRIDE),
+                        tla.make_stride(1),
+                    ),
+                ),
+                tla.make_shape(need),
+                tla.make_coord(0),
+            ),
+            tla.make_tensor(
+                idx.ptr + a0,
+                tla.make_layout(
+                    tla.make_shape(need),
+                    tla.make_stride(1),
+                ),
+            ),
+        )
+        if idx_slot == 0:
+            tla.set_flag(sync.idx_m2s0)
+        else:
+            tla.set_flag(sync.idx_m2s1)
+    else:
+        my_valid = n_rows - my_start
+        if my_valid < 0:
+            my_valid = tla.as_numeric(0)
+        if my_valid > 64:
+            my_valid = tla.as_numeric(64)
+        if my_valid > 0:
+            a0_abs = token_row * idx_width + base_line + my_start
+            rem = a0_abs - (a0_abs // 8) * 8
+            a0 = a0_abs - rem
+            cover = ((my_valid + 7) // 8) * 8
+            room = idx_width - (base_line + my_start)
+            if cover > room:
+                cover = room
+            need = rem + cover
+            if idx_slot == 0:
+                tla.wait_flag(sync.idx_s2m0)
+            else:
+                tla.wait_flag(sync.idx_s2m1)
+            tla.copy(
+                tla.tile_view(
+                    tla.make_tensor(
+                        bufs.ub_idx_ring + idx_slot * IDX_RING_STRIDE,
+                        tla.make_layout(
+                            tla.make_shape(IDX_RING_STRIDE),
+                            tla.make_stride(1),
+                        ),
+                    ),
+                    tla.make_shape(need),
+                    tla.make_coord(0),
+                ),
+                tla.make_tensor(
+                    idx.ptr + a0,
+                    tla.make_layout(
+                        tla.make_shape(need),
+                        tla.make_stride(1),
+                    ),
+                ),
+            )
+            if idx_slot == 0:
+                tla.set_flag(sync.idx_m2s0)
+            else:
+                tla.set_flag(sync.idx_m2s1)
+
+
+@tla.jit
+def _tnd_l1_gather_chunk_hoisted(
+    bufs,
+    kv_tensor,
+    kv_zero,
+    ub_kv_ptr,
+    my_start,
+    ring_base,
+    row_base_i64,
+    n_rows,
+    chunk_id: tla.Constexpr[int],
+):
+    if n_rows == KV_BLOCK:
+        _tnd_gather_16rows_mlp4_l2_1(
+            tla.recast_ptr(kv_tensor.ptr, dtype=tla.UInt8),
+            tla.recast_ptr(ub_kv_ptr, dtype=tla.UInt8),
+            bufs.ub_idx_ring + (ring_base + chunk_id * KV_UNIT),
+            row_base_i64,
+        )
+    else:
+        line0 = my_start + chunk_id * KV_UNIT
+        rv = n_rows - line0
+        if rv < 0:
+            rv = tla.as_numeric(0)
+        if rv > KV_UNIT:
+            rv = tla.as_numeric(KV_UNIT)
+        tnd_gather_tail_rows_ub_l2_1(
+            tla.recast_ptr(kv_tensor.ptr, dtype=tla.UInt8),
+            tla.recast_ptr(ub_kv_ptr, dtype=tla.UInt8),
+            bufs.ub_idx_ring + (ring_base + chunk_id * KV_UNIT),
+            tla.recast_ptr(kv_zero.ptr, dtype=tla.UInt8),
+            row_base_i64,
+            rv.to(tla.Int64),
+        )
+
+
+@tla.jit
+def tnd_l1_s3_stage0_async(
+    sync, bufs, idx, token_row, idx_width, base_line, n_rows, idx_slot
+):
+    """R2 SCHED=3 Stage 0: async idx DMA only (zero scalar wait before vec1)."""
+    with tla.vector():
+        _tnd_l1_dma_idx(
+            sync, bufs, idx, token_row, idx_width, base_line, n_rows, idx_slot
+        )
+
+
+@tla.jit
+def tnd_l1_s3_stage25_full(
+    sync,
+    bufs,
+    kv_tensor,
+    kv_zero,
+    token_row,
+    idx_width,
+    row_base,
+    base_line,
+    n_rows,
+    idx_slot,
+):
+    """R2 SCHED=3 Stage 2.5 (after vec1): wait idx -> MTE2(0,1) -> VSSTB(0,1) -> MTE2(2,3) -> release idx."""
+    with tla.vector():
+        sub = tla.arch.sub_block_idx()
+        my_start = sub * 64
+        if n_rows > my_start:
+            if idx_slot == 0:
+                tla.wait_flag(sync.idx_m2s0)
+            else:
+                tla.wait_flag(sync.idx_m2s1)
+        a0_abs = token_row * idx_width + base_line + my_start
+        rem = a0_abs - (a0_abs // 8) * 8
+        ring_base = idx_slot * IDX_RING_STRIDE + rem
+        row_base_i64 = row_base.to(tla.Int64)
+
+        tla.wait_flag(sync.kv_v_m20)
+        _tnd_l1_gather_chunk_hoisted(
+            bufs,
+            kv_tensor,
+            kv_zero,
+            bufs.ub_kv0,
+            my_start,
+            ring_base,
+            row_base_i64,
+            n_rows,
+            0,
+        )
+        tla.set_flag(sync.kv_nd_v0)
+
+        tla.wait_flag(sync.kv_v_m21)
+        _tnd_l1_gather_chunk_hoisted(
+            bufs,
+            kv_tensor,
+            kv_zero,
+            bufs.ub_kv1,
+            my_start,
+            ring_base,
+            row_base_i64,
+            n_rows,
+            1,
+        )
+        tla.set_flag(sync.kv_nd_v1)
+
+        tla.wait_flag(sync.kvz_free)
+        tla.wait_flag(sync.kv_nd_v0)
+        _ub_zero_tail_rows(bufs.ub_kv0, n_rows, my_start, 0)
+        kv_nz_vsstb_p16_u8(
+            tla.recast_ptr(bufs.ub_kv0, dtype=tla.UInt8),
+            tla.recast_ptr(bufs.ub_kvz, dtype=tla.UInt8),
+        )
+        tla.set_flag(sync.kv_v_m20)
+        tla.set_flag(sync.kvz_v2m3)
+        tla.wait_flag(sync.kv_v_m20)
+        _tnd_l1_gather_chunk_hoisted(
+            bufs,
+            kv_tensor,
+            kv_zero,
+            bufs.ub_kv0,
+            my_start,
+            ring_base,
+            row_base_i64,
+            n_rows,
+            2,
+        )
+        tla.set_flag(sync.kv_nd_v0)
+
+        tla.wait_flag(sync.kvz_free1)
+        tla.wait_flag(sync.kv_nd_v1)
+        _ub_zero_tail_rows(bufs.ub_kv1, n_rows, my_start, 1)
+        kv_nz_vsstb_p16_u8(
+            tla.recast_ptr(bufs.ub_kv1, dtype=tla.UInt8),
+            tla.recast_ptr(bufs.ub_kvz1, dtype=tla.UInt8),
+        )
+        tla.set_flag(sync.kv_v_m21)
+        tla.set_flag(sync.kvz_v2m3_1)
+        tla.wait_flag(sync.kv_v_m21)
+        _tnd_l1_gather_chunk_hoisted(
+            bufs,
+            kv_tensor,
+            kv_zero,
+            bufs.ub_kv1,
+            my_start,
+            ring_base,
+            row_base_i64,
+            n_rows,
+            3,
+        )
+        tla.set_flag(sync.kv_nd_v1)
+
+        if n_rows > my_start:
+            if idx_slot == 0:
+                tla.set_flag(sync.idx_s2m0)
+            else:
+                tla.set_flag(sync.idx_s2m1)
+
+
+@tla.jit
+def tnd_l1_s3_stage4a(sync, bufs, slot, dtype):
+    """R2 Split Stage 4a: drain bands 0 & 1 to L1 immediately upon kv_free (BEFORE vec2)."""
+    with tla.vector():
+        sub = tla.arch.sub_block_idx()
+        band0 = sub * 4
+        slot_zn = tla.make_tensor(
+            bufs.l1_k + slot * (HEAD_DIM * KV_BLOCK),
+            tla.make_layout_with_tag((KV_BLOCK, HEAD_DIM), dtype, tla.arch.zN),
+        )
+        ub_zn_base0 = tla.make_tensor(
+            bufs.ub_kvz,
+            tla.make_layout(
+                tla.make_shape(KV_NZ_PITCH, HEAD_DIM),
+                tla.make_stride(HEAD_DIM, 1),
+                layoutTag=tla.arch.RowMajor,
+            ),
+        )
+        ub_zn0 = tla.make_tensor_like(bufs.ub_kvz, ub_zn_base0, tla.arch.zNUnAlign)
+        ub_zn_band0 = tla.tile_view(
+            ub_zn0, tla.make_shape(KV_UNIT, HEAD_DIM), tla.make_coord(0, 0)
+        )
+        ub_zn_base1 = tla.make_tensor(
+            bufs.ub_kvz1,
+            tla.make_layout(
+                tla.make_shape(KV_NZ_PITCH, HEAD_DIM),
+                tla.make_stride(HEAD_DIM, 1),
+                layoutTag=tla.arch.RowMajor,
+            ),
+        )
+        ub_zn1 = tla.make_tensor_like(bufs.ub_kvz1, ub_zn_base1, tla.arch.zNUnAlign)
+        ub_zn_band1 = tla.tile_view(
+            ub_zn1, tla.make_shape(KV_UNIT, HEAD_DIM), tla.make_coord(0, 0)
+        )
+        tla.wait_flag(sync.kvz_v2m3)
+        tla.copy(
+            tla.tile_view(
+                slot_zn, tla.make_shape(KV_UNIT, HEAD_DIM), tla.make_coord(band0, 0)
+            ),
+            ub_zn_band0,
+        )
+        tla.set_flag(sync.kvz_free)
+        tla.wait_flag(sync.kvz_v2m3_1)
+        tla.copy(
+            tla.tile_view(
+                slot_zn, tla.make_shape(KV_UNIT, HEAD_DIM), tla.make_coord(band0 + 1, 0)
+            ),
+            ub_zn_band1,
+        )
+        tla.set_flag(sync.kvz_free1)
+
+
+@tla.jit
+def tnd_l1_s3_stage4b(sync, bufs, slot, dtype, n_rows=KV_BLOCK, announce: bool = True):
+    """R2 Split Stage 4b: VSSTB+drain bands 2 & 3 + announce kv_stage_ready (AFTER vec2)."""
+    with tla.vector():
+        sub = tla.arch.sub_block_idx()
+        my_start = sub * 64
+        band0 = sub * 4
+        slot_zn = tla.make_tensor(
+            bufs.l1_k + slot * (HEAD_DIM * KV_BLOCK),
+            tla.make_layout_with_tag((KV_BLOCK, HEAD_DIM), dtype, tla.arch.zN),
+        )
+        ub_zn_base0 = tla.make_tensor(
+            bufs.ub_kvz,
+            tla.make_layout(
+                tla.make_shape(KV_NZ_PITCH, HEAD_DIM),
+                tla.make_stride(HEAD_DIM, 1),
+                layoutTag=tla.arch.RowMajor,
+            ),
+        )
+        ub_zn0 = tla.make_tensor_like(bufs.ub_kvz, ub_zn_base0, tla.arch.zNUnAlign)
+        ub_zn_band0 = tla.tile_view(
+            ub_zn0, tla.make_shape(KV_UNIT, HEAD_DIM), tla.make_coord(0, 0)
+        )
+        ub_zn_base1 = tla.make_tensor(
+            bufs.ub_kvz1,
+            tla.make_layout(
+                tla.make_shape(KV_NZ_PITCH, HEAD_DIM),
+                tla.make_stride(HEAD_DIM, 1),
+                layoutTag=tla.arch.RowMajor,
+            ),
+        )
+        ub_zn1 = tla.make_tensor_like(bufs.ub_kvz1, ub_zn_base1, tla.arch.zNUnAlign)
+        ub_zn_band1 = tla.tile_view(
+            ub_zn1, tla.make_shape(KV_UNIT, HEAD_DIM), tla.make_coord(0, 0)
+        )
+        tla.wait_flag(sync.kvz_free)
+        tla.wait_flag(sync.kv_nd_v0)
+        _ub_zero_tail_rows(bufs.ub_kv0, n_rows, my_start, 2)
+        kv_nz_vsstb_p16_u8(
+            tla.recast_ptr(bufs.ub_kv0, dtype=tla.UInt8),
+            tla.recast_ptr(bufs.ub_kvz, dtype=tla.UInt8),
+        )
+        tla.set_flag(sync.kv_v_m20)
+        tla.set_flag(sync.kvz_v2m3)
+        tla.wait_flag(sync.kvz_v2m3)
+        tla.copy(
+            tla.tile_view(
+                slot_zn, tla.make_shape(KV_UNIT, HEAD_DIM), tla.make_coord(band0 + 2, 0)
+            ),
+            ub_zn_band0,
+        )
+        tla.set_flag(sync.kvz_free)
+
+        tla.wait_flag(sync.kvz_free1)
+        tla.wait_flag(sync.kv_nd_v1)
+        _ub_zero_tail_rows(bufs.ub_kv1, n_rows, my_start, 3)
+        kv_nz_vsstb_p16_u8(
+            tla.recast_ptr(bufs.ub_kv1, dtype=tla.UInt8),
+            tla.recast_ptr(bufs.ub_kvz1, dtype=tla.UInt8),
+        )
+        tla.set_flag(sync.kv_v_m21)
+        tla.set_flag(sync.kvz_v2m3_1)
+        tla.wait_flag(sync.kvz_v2m3_1)
+        tla.copy(
+            tla.tile_view(
+                slot_zn, tla.make_shape(KV_UNIT, HEAD_DIM), tla.make_coord(band0 + 3, 0)
+            ),
+            ub_zn_band1,
+        )
+        tla.set_flag(sync.kvz_free1)
+        if announce:
             tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=0)
             tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=1)
 
@@ -3289,9 +5885,9 @@ def gather_kv_rows_ring(
         need = rem + cover
         if n_chunks > 0:
             if idx_slot == 0:
-                mutex_lock(sync.m_idx0, tla.pipes.MTE2)
+                tla.wait_flag(sync.idx_s2m0)
             else:
-                mutex_lock(sync.m_idx1, tla.pipes.MTE2)
+                tla.wait_flag(sync.idx_s2m1)
             tla.copy(
                 tla.tile_view(
                     tla.make_tensor(
@@ -3313,11 +5909,11 @@ def gather_kv_rows_ring(
                 ),
             )
             if idx_slot == 0:
-                mutex_unlock(sync.m_idx0, tla.pipes.MTE2)
-                mutex_lock(sync.m_idx0, tla.pipes.SCALAR)
+                tla.set_flag(sync.idx_m2s0)
+                tla.wait_flag(sync.idx_m2s0)
             else:
-                mutex_unlock(sync.m_idx1, tla.pipes.MTE2)
-                mutex_lock(sync.m_idx1, tla.pipes.SCALAR)
+                tla.set_flag(sync.idx_m2s1)
+                tla.wait_flag(sync.idx_m2s1)
         # 整环 1-D 视图 + 槽内基址（读下标 = ring_o + 行号，恒 >= 0）
         ring_t = tla.make_tensor(
             bufs.ub_idx_ring,
@@ -3351,7 +5947,7 @@ def gather_kv_rows_ring(
                     ),
                 )
                 # [T1-0a 摘除区：起点] UB->ws 信用（上一块 MTE3 写回完成）
-                mutex_lock(sync.m_kv0, tla.pipes.MTE2)
+                tla.wait_flag(sync.kv_mte3_mte2_0)
                 # T1-0a 摘除区：[终点]（本块 gather 的 UB 缓冲本块内独占）
                 for blk in static_range(KV_UNIT // 8):
                     blk_base = 8 * blk
@@ -3438,8 +6034,8 @@ def gather_kv_rows_ring(
                                 tla.Int64(1),
                             )
                 # ==== [T1-0a 摘除区：起点] UB -> ws 暂存（GM 中转）====
-                mutex_unlock(sync.m_kv0, tla.pipes.MTE2)
-                mutex_lock(sync.m_kv0, tla.pipes.MTE3)
+                tla.set_flag(sync.kv_mte2_mte3_0)
+                tla.wait_flag(sync.kv_mte2_mte3_0)
                 gm_chunk = tla.make_tensor(
                     ws.ptr + ws_base + slot * slot_stride + line0 * HEAD_DIM,
                     tla.make_layout(
@@ -3454,7 +6050,7 @@ def gather_kv_rows_ring(
                         ub_kv, tla.make_shape(rows_out, HEAD_DIM), tla.make_coord(0, 0)
                     ),
                 )
-                mutex_unlock(sync.m_kv0, tla.pipes.MTE3)
+                tla.set_flag(sync.kv_mte3_mte2_0)
                 # ==== [T1-0a 摘除区：终点] ====
             else:
                 ub_kv = tla.make_tensor(
@@ -3466,7 +6062,7 @@ def gather_kv_rows_ring(
                     ),
                 )
                 # [T1-0a 摘除区：起点] UB->ws 信用
-                mutex_lock(sync.m_kv1, tla.pipes.MTE2)
+                tla.wait_flag(sync.kv_mte3_mte2_1)
                 # T1-0a 摘除区：[终点]
                 for blk in static_range(KV_UNIT // 8):
                     blk_base = 8 * blk
@@ -3548,8 +6144,8 @@ def gather_kv_rows_ring(
                                 tla.Int64(1),
                             )
                 # ==== [T1-0a 摘除区：起点] UB -> ws 暂存（GM 中转）====
-                mutex_unlock(sync.m_kv1, tla.pipes.MTE2)
-                mutex_lock(sync.m_kv1, tla.pipes.MTE3)
+                tla.set_flag(sync.kv_mte2_mte3_1)
+                tla.wait_flag(sync.kv_mte2_mte3_1)
                 gm_chunk = tla.make_tensor(
                     ws.ptr + ws_base + slot * slot_stride + line0 * HEAD_DIM,
                     tla.make_layout(
@@ -3564,14 +6160,303 @@ def gather_kv_rows_ring(
                         ub_kv, tla.make_shape(rows_out, HEAD_DIM), tla.make_coord(0, 0)
                     ),
                 )
-                mutex_unlock(sync.m_kv1, tla.pipes.MTE3)
+                tla.set_flag(sync.kv_mte3_mte2_1)
                 # ==== [T1-0a 摘除区：终点] ====
         # 本 tile 的标量读全部发出 -> 归还该槽的 free 信用（WAR）
         if n_chunks > 0:
             if idx_slot == 0:
-                mutex_unlock(sync.m_idx0, tla.pipes.SCALAR)
+                tla.set_flag(sync.idx_s2m0)
             else:
-                mutex_unlock(sync.m_idx1, tla.pipes.SCALAR)
+                tla.set_flag(sync.idx_s2m1)
         if announce:
             tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=0)
             tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=1)
+
+
+@tla.jit
+def wait_kv_free(sync):
+    """R42：AIV 等本 cmp tile 的 L1 槽可写（cross AIC MTE1 -> AIV MTE3）。
+
+    只在 cmp tile 且 x>=3 时消费（见 kernel 站点 4）；AIC 只在"后继 tile 是
+    cmp"时归还（smla_csa_block_cube.release_k 的 free_tok）。两边条数恒等：
+    每个 cmp tile 一收一发。x<3 的槽在本核从未被占用，无需信用。
+    """
+    with tla.vector():
+        tla.cross_core_wait_flag(sync.kv_free, tla.pipes.MTE3, aiv_id=0)
+        tla.cross_core_wait_flag(sync.kv_free, tla.pipes.MTE3, aiv_id=1)
+
+
+@tla.jit
+def gather_kv_rows_l1(
+    sync,
+    bufs,
+    kv_tensor,
+    idx,
+    token_row,
+    idx_width,
+    row_base,
+    base_line,
+    n_rows,
+    slot,
+    idx_slot,
+    dtype,
+    dense: bool = False,
+):
+    """R42：cmp 稀疏 gather 由 AIV 直写本核 L1 槽（不再经 GM 暂存槽）。
+
+    `dense`（新增，ori 稠密臂）：True 时本 tile 是 ori 连续窗口，没有索引行，
+    行地址 = (row_base + base_line + line)*HEAD_DIM（与 cube.load_k 同式），
+    其余数据面/同步与 cmp 臂完全一致。`dense` 是 Python bool，追踪期折叠，
+    不产生运行期判据；False 时指令流与 cmp-only 形态一致。
+
+    数据面（每个 16 行 band）：
+      cmp：GM 8 条 pair 拷贝（2 行/条，与 gather_kv_rows_ring 同形）-> UB(ND, ub_kv0)
+      ori：GM 一条 16x512 块拷贝（行连续，尾 band 按 n_rows 截断）-> UB(ND)
+      两者 -> 一条 UB(RowMajor) -> L1(zN) 拷贝（MTE3 硬件 ND->NZ）
+    AIC 侧不再有 MTE2 的 KV 搬运：它在 bmm1 里只等 `kv_stage_ready`（AIV->AIC）。
+    实测（022）：软件 VF 重排版 aiv_vec=275us、硬件转换版 aiv_mte3=352us，
+    两者都把 Dur 推到 494/638us（步二 218.6），故 KV_L1_DIRECT 默认 False。
+
+    与 `gather_kv_rows_ring` 的差异：
+      - 子块切分按 16 行对齐（zN band 以 16 行为发散单位；否则 AIV0 尾 band 与
+        AIV1 首 band 是同一 band，两核踩写）。行集合不变，只改工作量分配。
+      - 目的端从 ws(GM) 换成 L1 槽；`wait kv_free` 由调用方在每 tile 统一发
+        （ori tile 也要消费信用），本函数只做 band 级 ND/zN WAR。
+      - 索引仍来自 UB 2 槽环（T1-1），地址 = (row_base + idx) * HEAD_DIM。
+
+    band 级同步（本 AIV 的 intra 环，见 common.declare_sync 的 need_kv_ring）：
+      wait kv_nd_free（MTE3->MTE2：上一 band 的 L1 copy 已读完 ND）
+      -> MTE2 填 ND -> set kv_a_loaded（MTE2->MTE3）
+      -> wait kv_a_loaded -> MTE3 copy UB(ND)->L1(zN) -> set kv_nd_free
+    """
+    require_configured("gather_kv_rows_vec")
+    if _TRACE_STAGE:
+        require_share("gather_kv_rows_vec")
+    with tla.vector():
+        sub = tla.arch.sub_block_idx()
+        # 16 行对齐的子块起点：AIV0 拿 ceil(CeilDiv(n,2)/16)*16 行，AIV1 拿其余。
+        first = ((n_rows + 1) // 2 + KV_UNIT - 1) // KV_UNIT * KV_UNIT
+        if first > n_rows:
+            first = n_rows
+        my_start = 0
+        my_rows = first
+        if sub == 1:
+            my_start = first
+            my_rows = n_rows - first
+        n_chunks = (my_rows + KV_UNIT - 1) // KV_UNIT
+        # ---- 索引行 DMA（每 tile 一次；2 槽环按 x%2 轮转）----
+        # 稠密窗口没有索引行：本段（含 idx_m2s/idx_s2m）在 dense=True 的
+        # 特化里一条不发（Python 折叠，不占指令）。前端语法层仍把 `dense` 当
+        # 动态 if（要求 if 后使用的变量先初始化），故 ring_t/ring_o/last_row
+        # 在此预置（dense=True 特化下不使用，语义不变）。
+        ring_t = tla.make_tensor(
+            bufs.ub_idx_ring,
+            tla.make_layout(
+                tla.make_shape(IDX_RING_SLOTS * IDX_RING_STRIDE),
+                tla.make_stride(1),
+            ),
+        )
+        ring_o = idx_slot * IDX_RING_STRIDE - my_start
+        last_row = n_rows - 1
+        if not dense:
+            a0_abs = token_row * idx_width + base_line + my_start
+            rem = a0_abs - (a0_abs // 8) * 8  # 行内 8 元素（32 B）相位
+            a0 = a0_abs - rem  # 32 B 对齐的源基址
+            cover = n_chunks * KV_UNIT
+            if cover > my_rows:
+                cover = my_rows
+            cover = ((cover + 7) // 8) * 8
+            room = idx_width - (base_line + my_start)
+            if cover > room:
+                cover = room
+            need = rem + cover
+            if n_chunks > 0:
+                if idx_slot == 0:
+                    tla.wait_flag(sync.idx_s2m0)
+                else:
+                    tla.wait_flag(sync.idx_s2m1)
+                tla.copy(
+                    tla.tile_view(
+                        tla.make_tensor(
+                            bufs.ub_idx_ring + idx_slot * IDX_RING_STRIDE,
+                            tla.make_layout(
+                                tla.make_shape(IDX_RING_STRIDE),
+                                tla.make_stride(1),
+                            ),
+                        ),
+                        tla.make_shape(need),
+                        tla.make_coord(0),
+                    ),
+                    tla.make_tensor(
+                        idx.ptr + a0,
+                        tla.make_layout(
+                            tla.make_shape(need),
+                            tla.make_stride(1),
+                        ),
+                    ),
+                )
+                if idx_slot == 0:
+                    tla.set_flag(sync.idx_m2s0)
+                    tla.wait_flag(sync.idx_m2s0)
+                else:
+                    tla.set_flag(sync.idx_m2s1)
+                    tla.wait_flag(sync.idx_m2s1)
+            # 整环 1-D 视图 + 槽内基址（读下标 = ring_o + 行号，恒 >= 0）
+            # ring_t 已在 if 之前建好（前端语法层要求），此处不再重复创建
+            ring_o = idx_slot * IDX_RING_STRIDE + rem - my_start
+            last_row = my_start + cover - 1
+            if last_row > n_rows - 1:
+                last_row = n_rows - 1
+        # L1 槽 zN 视图（与 cube.l1_v_tensor 同布局；元素偏移 = slot*HEAD_DIM*KV_BLOCK）
+        slot_zn = tla.make_tensor(
+            bufs.l1_k + slot * (HEAD_DIM * KV_BLOCK),
+            tla.make_layout_with_tag((KV_BLOCK, HEAD_DIM), dtype, tla.arch.zN),
+        )
+        # ND 中转（16 行 RowMajor，固定 ub_kv0）。ND->NZ 由 MTE3 的
+        # UB(RowMajor)->L1(zN) 硬件转换完成，不再需要 ub_kvz / 软件 VF。
+        ub_kv = tla.make_tensor(
+            bufs.ub_kv0,
+            tla.make_layout(
+                tla.make_shape(KV_UNIT, HEAD_DIM),
+                tla.make_stride(HEAD_DIM, 1),
+                layoutTag=tla.arch.RowMajor,
+            ),
+        )
+        for c in tla.range(n_chunks):
+            line0 = my_start + c * KV_UNIT
+            tla.wait_flag(sync.kv_nd_free)  # V->MTE2：ND 可写（c=0 用预置）
+            if dense:
+                # 步 A：ori 稠密窗口的行在 GM 连续，一条 16x512 的块拷贝即可
+                # （尾 band 用运行期 cnt 截断到 n_rows，绝不越界读 GM）。
+                cnt = KV_UNIT
+                if line0 + KV_UNIT > n_rows:
+                    cnt = n_rows - line0
+                gm_band = tla.make_tensor(
+                    kv_tensor.ptr + (row_base + base_line + line0) * HEAD_DIM,
+                    tla.make_layout(
+                        tla.make_shape(cnt, HEAD_DIM),
+                        tla.make_stride(HEAD_DIM, 1),
+                        layoutTag=tla.arch.RowMajor,
+                    ),
+                )
+                tla.copy(
+                    tla.tile_view(
+                        ub_kv,
+                        tla.make_shape(cnt, HEAD_DIM),
+                        tla.make_coord(0, 0),
+                    ),
+                    gm_band,
+                )
+            else:
+                for blk in static_range(KV_UNIT // 8):
+                    blk_base = 8 * blk
+                    addr_t = ()
+                    for ai in static_range(8):
+                        aline = line0 + blk_base + ai
+                        if aline > last_row:
+                            aline = last_row
+                        if aline < 0:
+                            aline = 0
+                        # 前端语法层要求 if 之后使用的变量先初始化（dense 为 Python
+                        # bool，追踪期折叠；初值不使用）。
+                        v = tla.as_numeric(0)
+                        if dense:
+                            v = base_line + aline
+                        else:
+                            v = ring_t[ring_o + aline]
+                            if v < 0:
+                                v = 0
+                        addr_t = addr_t + (
+                            (row_base + v).to(tla.Int64) * tla.Int64(HEAD_DIM),
+                        )
+                    pair_lo = tla.Int64(HEAD_DIM)
+                    pair_hi = tla.Int64(1073741824)
+                    pair_zero = tla.Int64(0)
+                    for p in static_range(4):
+                        row_a = blk_base + 2 * p
+                        off_a = addr_t[2 * p]
+                        off_b = addr_t[2 * p + 1]
+                        pair_delta = off_b - off_a
+                        valid_a = row_a <= n_rows - 1 - line0
+                        valid_b = valid_a and row_a + 1 <= n_rows - 1 - line0
+                        if valid_b and pair_delta >= pair_lo and pair_delta < pair_hi:
+                            pair_gm_to_ub(
+                                tla.recast_ptr(kv_tensor.ptr + off_a, dtype=tla.UInt8),
+                                tla.recast_ptr(bufs.ub_kv0, dtype=tla.UInt8),
+                                HEAD_DIM * _PAIR_ELEM_BYTES,
+                                pair_delta * tla.Int64(_PAIR_ELEM_BYTES)
+                                - tla.Int64(HEAD_DIM * _PAIR_ELEM_BYTES),
+                                tla.Int64(row_a * HEAD_DIM * _PAIR_ELEM_BYTES),
+                                tla.Int64(2),
+                            )
+                        elif (
+                            valid_b
+                            and pair_zero - pair_delta >= pair_lo
+                            and pair_zero - pair_delta < pair_hi
+                        ):
+                            pair_gm_to_ub(
+                                tla.recast_ptr(kv_tensor.ptr + off_b, dtype=tla.UInt8),
+                                tla.recast_ptr(bufs.ub_kv0, dtype=tla.UInt8),
+                                HEAD_DIM * _PAIR_ELEM_BYTES,
+                                (pair_zero - pair_delta) * tla.Int64(_PAIR_ELEM_BYTES)
+                                - tla.Int64(HEAD_DIM * _PAIR_ELEM_BYTES),
+                                tla.Int64(row_a * HEAD_DIM * _PAIR_ELEM_BYTES),
+                                tla.Int64(2),
+                            )
+                        elif valid_b:
+                            for ri in static_range(2):
+                                row_off = addr_t[2 * p + ri]
+                                gm_row = tla.make_tensor(
+                                    kv_tensor.ptr + row_off,
+                                    tla.make_layout(
+                                        tla.make_shape(1, HEAD_DIM),
+                                        tla.make_stride(HEAD_DIM, 1),
+                                        layoutTag=tla.arch.RowMajor,
+                                    ),
+                                )
+                                tla.copy(
+                                    tla.tile_view(
+                                        ub_kv,
+                                        tla.make_shape(1, HEAD_DIM),
+                                        tla.make_coord(row_a + ri, 0),
+                                    ),
+                                    gm_row,
+                                )
+                        elif valid_a:
+                            pair_gm_to_ub(
+                                tla.recast_ptr(kv_tensor.ptr + off_a, dtype=tla.UInt8),
+                                tla.recast_ptr(bufs.ub_kv0, dtype=tla.UInt8),
+                                HEAD_DIM * _PAIR_ELEM_BYTES,
+                                pair_zero,
+                                tla.Int64(row_a * HEAD_DIM * _PAIR_ELEM_BYTES),
+                                tla.Int64(1),
+                            )
+            # ==== UB(ND) --MTE3--> L1 zN band（硬件 ND->NZ）====
+            # ("ub","RowMajor","l1","zN") 是已注册的 vector copy 路由：MTE3 的
+            # DataCopy 直接做 ND->NZ。R42 用软件 VF 逐行 x4 quarter 重排，022
+            # 实测该 VF 单管 275us（Ori copy 占绝对多数时把 Dur 从 218 推到
+            # 494）；改为硬件转换后 VF 段整段删除。
+            tla.set_flag(sync.kv_a_loaded)  # MTE2 -> MTE3：ND band 已填好
+            tla.wait_flag(sync.kv_a_loaded)
+            tla.copy(
+                tla.tile_view(
+                    slot_zn,
+                    tla.make_shape(KV_UNIT, HEAD_DIM),
+                    tla.make_coord(line0 // KV_UNIT, 0),
+                ),
+                ub_kv,
+            )
+            # MTE3 -> MTE2：ND 已被 MTE3 读完，MTE2 可预取下一 band。
+            # set 与 copy 同管（MTE3）、程序序在 copy 之后，天然是读完回执。
+            tla.set_flag(sync.kv_nd_free)
+        # 本 tile 的标量读全部发出 -> 归还索引槽 free 信用（WAR；dense 无索引环）
+        if not dense:
+            if n_chunks > 0:
+                if idx_slot == 0:
+                    tla.set_flag(sync.idx_s2m0)
+                else:
+                    tla.set_flag(sync.idx_s2m1)
+        # 本 AIV 的 KV 半区已写进 L1 槽：通知 AIC（bmm1 的 MTE1 等本 flag）。
+        # set 挂 MTE3：与上面的 L1 band copy 同管，程序序保证 copy 先发。
+        tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=0)
+        tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=1)

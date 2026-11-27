@@ -69,6 +69,8 @@ def sparse_flash_mla_swa_kernel(
     lse: tla.Tensor,  # [T*H] fp32 softmax_lse（enable_lse=0 时传 1 元素占位）
     tiling: tla.Tensor,  # [4] int32 预留（compiled-in 常量走 Constexpr）
     bc_ws: tla.Tensor,  # F3 staging（每 AIV 一槽 fp32；=0 传 1 元素占位）
+    ptab: tla.Tensor,  # F3 长序列逐任务标量表（use_ptab=0 时 1 元素占位）
+    kv_zero: tla.Tensor,  # F19：常零 GM 源（[KV_BLOCK, D]，只读；KV tail 清零）
     softmax_scale: tla.Float32,
     head_num: tla.Constexpr[int],
     head_dim: tla.Constexpr[int],
@@ -84,6 +86,7 @@ def sparse_flash_mla_swa_kernel(
     has_sinks: tla.Constexpr[int],
     enable_lse: tla.Constexpr[int],  # R37：softmax_lse 落盘开关
     is_batch_consistency: tla.Constexpr[int],  # F3：OT tiling key 第 7 位
+    use_ptab: tla.Constexpr[int],  # F3：长序列逐任务标量表开关
 ) -> None:
     c0 = 0
     c1 = 1
@@ -204,111 +207,134 @@ def sparse_flash_mla_swa_kernel(
         kv_row0 = cu_kv[seq] + start_idx
         g_off = (task - tok * g_split) * m
 
-        # ---- 闸门③ 前缀游走（O(K)，AIC/AIV 冗余执行、数值一致；动态循环
-        # 标量 loop-carry 已上板证实）----
-        # g_k/g_total 累加 + 快照 P（ct<task 的第一个真实任务）、PP（第二个）、
-        # NX（ct>task 的第一个真实任务）与 any_after（尾排空判据）。空任务
-        # （num_tiles==0）不占 tile 也不占 body，P/PP/NX 自动跳过（OT :451-453
-        # 同位语义）。
-        g_k = tla.as_numeric(0)
-        g_total = tla.as_numeric(0)
-        any_after = 0
-        nx_done = 0
-        p_task = task0
-        p_nt = 1
-        p_vis = KV_BLOCK
-        p_bbn = 1
-        p_goff = 0
-        pp_task = task0
-        pp_nt = 1
-        pp_vis = KV_BLOCK
-        pp_bbn = 1
-        pp_goff = 0
-        nx_task = task0
-        for ct in tla.range(task0, total_tasks, q_bn):
-            ct_tok = ct // g_split
-            ct_seq = tla.as_numeric(0)
-            ct_rowq = ct_tok
-            # 内层用动态 tla.range、目标名避开宿主任务体的 bb（头部 static 循环
-            # 同名目标会把 bb 误判成本环 carry，读点在 num_seqs==1 时未绑定 →
-            # UnboundLocalError；bb 在本体内是死变量，改名即消除）。cu_q[cbb]
-            # 动态标量读与 cu_q[seq]（任务头）同型。
-            for cbb in tla.range(1, num_seqs):
-                if ct_tok >= cu_q[cbb]:
-                    ct_seq = cbb
-                    ct_rowq = ct_tok - cu_q[cbb]
-            ct_qlen = cu_q[ct_seq + 1] - cu_q[ct_seq]
-            ct_kvlen = cu_kv[ct_seq + 1] - cu_kv[ct_seq]
-            ct_coff = ct_kvlen - ct_qlen
-            ct_next = ct_kvlen
-            ct_pre = ct_qlen
-            if ori_mask_mode == 3:
-                ct_next = ct_coff
+        # ---- 闸门③ 前缀信息：ptab 查表 / 旧前缀游走 ----
+        n_task = (task - task0) // q_bn
+        if tla.const_expr(use_ptab == 1):
+            # F3 长序列：host 侧用与下方同式的整数运算一次算好，逐任务只做 13
+            # 次标量读。取代原先每任务从 task0 步进 q_bn 游走到 task 的
+            # O((N/q_bn)^2) 标量扫描（ext100 长序列 8~20x 劣化的真实墙：
+            # aic/aiv scalar 占 Dur 的 88%~97%，而 MAC 仅 3.6%~7.7%）。
+            _ti = n_task * q_bn + task0
+            _pb = _ti * 13
+            g_k = ptab[_pb]
+            p_task = ptab[_pb + 1]
+            p_nt = ptab[_pb + 2]
+            p_vis = ptab[_pb + 3]
+            p_bbn = ptab[_pb + 4]
+            p_goff = ptab[_pb + 5]
+            pp_task = ptab[_pb + 6]
+            pp_nt = ptab[_pb + 7]
+            pp_vis = ptab[_pb + 8]
+            pp_bbn = ptab[_pb + 9]
+            pp_goff = ptab[_pb + 10]
+            nx_task = ptab[_pb + 11]
+            any_after = ptab[_pb + 12]
+            nx_done = any_after
+        else:
+            # ---- 闸门③ 前缀游走（O(K)，AIC/AIV 冗余执行、数值一致；动态循环
+            # 标量 loop-carry 已上板证实）----
+            # g_k/g_total 累加 + 快照 P（ct<task 的第一个真实任务）、PP（第二个）、
+            # NX（ct>task 的第一个真实任务）与 any_after（尾排空判据）。空任务
+            # （num_tiles==0）不占 tile 也不占 body，P/PP/NX 自动跳过（OT :451-453
+            # 同位语义）。
+            g_k = tla.as_numeric(0)
+            g_total = tla.as_numeric(0)
+            any_after = 0
+            nx_done = 0
+            p_task = task0
+            p_nt = 1
+            p_vis = KV_BLOCK
+            p_bbn = 1
+            p_goff = 0
+            pp_task = task0
+            pp_nt = 1
+            pp_vis = KV_BLOCK
+            pp_bbn = 1
+            pp_goff = 0
+            nx_task = task0
+            for ct in tla.range(task0, total_tasks, q_bn):
+                ct_tok = ct // g_split
+                ct_seq = tla.as_numeric(0)
+                ct_rowq = ct_tok
+                # 内层用动态 tla.range、目标名避开宿主任务体的 bb（头部 static 循环
+                # 同名目标会把 bb 误判成本环 carry，读点在 num_seqs==1 时未绑定 →
+                # UnboundLocalError；bb 在本体内是死变量，改名即消除）。cu_q[cbb]
+                # 动态标量读与 cu_q[seq]（任务头）同型。
+                for cbb in tla.range(1, num_seqs):
+                    if ct_tok >= cu_q[cbb]:
+                        ct_seq = cbb
+                        ct_rowq = ct_tok - cu_q[cbb]
+                ct_qlen = cu_q[ct_seq + 1] - cu_q[ct_seq]
+                ct_kvlen = cu_kv[ct_seq + 1] - cu_kv[ct_seq]
+                ct_coff = ct_kvlen - ct_qlen
+                ct_next = ct_kvlen
                 ct_pre = ct_qlen
-            elif ori_mask_mode == 4:
-                if ori_win_left == -1:
+                if ori_mask_mode == 3:
+                    ct_next = ct_coff
                     ct_pre = ct_qlen
-                else:
-                    ct_pre = ori_win_left - ct_coff
-                if ori_win_right == -1:
-                    ct_next = ct_kvlen
-                else:
-                    ct_next = ct_coff + ori_win_right
-                if ct_pre > ct_qlen:
-                    ct_pre = ct_qlen
-            ct_end = ct_rowq + ct_next + 1
-            if ct_end < 0:
-                ct_end = tla.as_numeric(0)
-            if ct_end > ct_kvlen:
-                ct_end = ct_kvlen
-            ct_start = ct_rowq - ct_pre
-            if ct_start < 0:
-                ct_start = tla.as_numeric(0)
-            if ct_start > ct_kvlen:
-                ct_start = ct_kvlen
-            ct_vis = ct_end - ct_start
-            if ct_vis < 0:
-                ct_vis = tla.as_numeric(0)
-            ct_nt = (ct_vis + KV_BLOCK - 1) // KV_BLOCK
-            ct_rrb = (ct_vis + 31) // 32
-            ct_rb = ((ct_rrb + 127) // 128) * 128
-            ct_bbn = ct_rb // 128
-            if ct_rb == 0:
-                ct_bbn = tla.as_numeric(1)
-            ct_goff = (ct - ct_tok * g_split) * m
-            g_total = g_total + ct_nt
-            if ct < task:
-                g_k = g_k + ct_nt
-                if ct_nt > 0:
-                    # P/PP 滚动记录（last-wins）：P=最近非空前驱、PP=次近非空
-                    # （OT prevTask/prevPrevTask 同语义）。初版 first-wins 锁死
-                    # 会把 P 钉在最早前驱（通常 task0），stage1/stage2 的 i<c
-                    # 跨任务站点 owner 键随之坍缩到 task0——copy_out/dump 键全
-                    # 错而数据路径正确（#008 clamp=2 dump 取证：站点数据与键
-                    # 分家，cos=1.0000 闭环）。x>=c 守卫保证站点只在 g_k>=c 时
-                    # 出现，此刻 P/PP 必已被滚动覆盖，初值不参与语义。
-                    pp_task = p_task
-                    pp_nt = p_nt
-                    pp_vis = p_vis
-                    pp_bbn = p_bbn
-                    pp_goff = p_goff
-                    p_task = ct
-                    p_nt = ct_nt
-                    p_vis = ct_vis
-                    p_bbn = ct_bbn
-                    p_goff = ct_goff
-            if ct > task:
-                if ct_nt > 0:
-                    any_after = 1
-                    if nx_done == 0:
-                        nx_task = ct
-                        nx_done = 1
+                elif ori_mask_mode == 4:
+                    if ori_win_left == -1:
+                        ct_pre = ct_qlen
+                    else:
+                        ct_pre = ori_win_left - ct_coff
+                    if ori_win_right == -1:
+                        ct_next = ct_kvlen
+                    else:
+                        ct_next = ct_coff + ori_win_right
+                    if ct_pre > ct_qlen:
+                        ct_pre = ct_qlen
+                ct_end = ct_rowq + ct_next + 1
+                if ct_end < 0:
+                    ct_end = tla.as_numeric(0)
+                if ct_end > ct_kvlen:
+                    ct_end = ct_kvlen
+                ct_start = ct_rowq - ct_pre
+                if ct_start < 0:
+                    ct_start = tla.as_numeric(0)
+                if ct_start > ct_kvlen:
+                    ct_start = ct_kvlen
+                ct_vis = ct_end - ct_start
+                if ct_vis < 0:
+                    ct_vis = tla.as_numeric(0)
+                ct_nt = (ct_vis + KV_BLOCK - 1) // KV_BLOCK
+                ct_rrb = (ct_vis + 31) // 32
+                ct_rb = ((ct_rrb + 127) // 128) * 128
+                ct_bbn = ct_rb // 128
+                if ct_rb == 0:
+                    ct_bbn = tla.as_numeric(1)
+                ct_goff = (ct - ct_tok * g_split) * m
+                g_total = g_total + ct_nt
+                if ct < task:
+                    g_k = g_k + ct_nt
+                    if ct_nt > 0:
+                        # P/PP 滚动记录（last-wins）：P=最近非空前驱、PP=次近非空
+                        # （OT prevTask/prevPrevTask 同语义）。初版 first-wins 锁死
+                        # 会把 P 钉在最早前驱（通常 task0），stage1/stage2 的 i<c
+                        # 跨任务站点 owner 键随之坍缩到 task0——copy_out/dump 键全
+                        # 错而数据路径正确（#008 clamp=2 dump 取证：站点数据与键
+                        # 分家，cos=1.0000 闭环）。x>=c 守卫保证站点只在 g_k>=c 时
+                        # 出现，此刻 P/PP 必已被滚动覆盖，初值不参与语义。
+                        pp_task = p_task
+                        pp_nt = p_nt
+                        pp_vis = p_vis
+                        pp_bbn = p_bbn
+                        pp_goff = p_goff
+                        p_task = ct
+                        p_nt = ct_nt
+                        p_vis = ct_vis
+                        p_bbn = ct_bbn
+                        p_goff = ct_goff
+                if ct > task:
+                    if ct_nt > 0:
+                        any_after = 1
+                        if nx_done == 0:
+                            nx_task = ct
+                            nx_done = 1
 
         # 闸门②（OT l1QBufId 每任务 +qHalfNum=2 游标，csa_block_cube_arch35.h
         # :425）：本核第 n 个真实任务占 {2n, 2n+1} mod 3 两半槽。Q 环只在真实
         # 任务上推进（装 Q 的站点见头装与 stage1 末尾预取；空任务既不装也不
         # 释放，n 按任务序派生——空任务槽位闲置无害）。
-        n_task = (task - task0) // q_bn
         q_two_n = n_task + n_task
         q_slot_a = q_two_n - (q_two_n // 3) * 3
         q_two_n1 = q_two_n + 1
@@ -382,9 +408,22 @@ def sparse_flash_mla_swa_kernel(
                         ori_pa_stride,
                         ori_pa_max_blocks,
                         ori_pa_pages,
+                        kv_zero.ptr,
+                        1,
                     )
                 else:
-                    load_k(sync, bufs, kv, kv_row0, i, n_load0, slot_k0, dtype_in)
+                    load_k(
+                        sync,
+                        bufs,
+                        kv,
+                        kv_row0,
+                        i,
+                        n_load0,
+                        slot_k0,
+                        dtype_in,
+                        kv_zero.ptr,
+                        1,
+                    )
             # ---- stage 1：tile x-1 的 vec1（AIV）与 bmm1（AIC）。owner 二选一
             # （i>=1 本任务 local j1=i-1；i==0 → x-1 = G_T-1 = P 末 tile，is_last
             # 恒真——本任务自己的末 tile 在下一真实任务的首 body 或 drain 落到

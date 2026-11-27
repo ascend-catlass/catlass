@@ -22,16 +22,6 @@ def static_range(start, stop=None):
     return tuple(builtins.range(int(start), int(stop)))
 
 
-@tla.jit
-def mutex_lock(mutex, pipe):
-    mutex.lock(pipe=pipe)
-
-
-@tla.jit
-def mutex_unlock(mutex, pipe):
-    mutex.unlock(pipe=pipe)
-
-
 # ---------------------------------------------------------------- 全核屏障
 # F27 补（#046 间歇性非逐位）：对照 OT csa_kernel_arch35.h:444-449
 #   if constexpr (IS_VEC_S2PHYADDR) { AscendC::SyncAll<false>(); }
@@ -77,6 +67,74 @@ def sync_all_cores_aic() -> None: ...
 def sync_all_cores_aiv() -> None: ...
 
 
+_AIC_EXT_SRC = r"""
+#include "kernel_operator.h"
+
+extern "C" {
+[aicore] __attribute__((always_inline)) void aic_init_loop3_para() {
+  set_loop3_para(1ULL);
+  AscendC::PipeBarrier<PIPE_FIX>();
+}
+
+[aicore] __attribute__((always_inline)) void aic_fix_l0c_to_ub_uf3(
+    uint64_t dst_ub_addr,
+    uint64_t src_l0c_addr,
+    int32_t n_size,
+    int32_t m_size,
+    int32_t dst_stride,
+    int32_t src_stride) {
+  __ubuf__ float* dst = reinterpret_cast<__ubuf__ float*>(dst_ub_addr);
+  __cc__ float* src = reinterpret_cast<__cc__ float*>(src_l0c_addr);
+  copy_matrix_cc_to_ub(
+      dst, src,
+      (uint8_t)0, (uint16_t)n_size, (uint16_t)m_size,
+      (uint32_t)dst_stride, (uint16_t)src_stride,
+      (uint8_t)1, false, (uint8_t)0, (uint8_t)3,
+      (uint64_t)0, (uint8_t)0, false, true,
+      (uint64_t)0, (uint8_t)0, false, false, (uint8_t)0,
+      false, false, false, false, false, false);
+}
+
+[aicore] __attribute__((always_inline)) void aic_nd2nz_k4_cm1(
+    uint64_t l1_dst_addr, uint64_t gm_src_addr, int32_t n_load) {
+  uint64_t para = 1ULL | (1ULL << 16) | (128ULL << 32);
+  set_mte2_nz_para(para);
+  #pragma unroll
+  for (int c = 0; c < 4; ++c) {
+    copy_gm_to_cbuf_multi_nd2nz(
+        reinterpret_cast<__cbuf__ half*>(l1_dst_addr + static_cast<uint64_t>(c) * 32768ULL),
+        reinterpret_cast<__gm__ half*>(gm_src_addr + static_cast<uint64_t>(c) * 256ULL),
+        (uint8_t)0, (uint64_t)1024, (uint8_t)1,
+        (uint16_t)n_load, (uint16_t)128, (uint64_t)0, false);
+  }
+}
+}
+"""
+
+
+@tla.extern(source=_AIC_EXT_SRC, name="aic_init_loop3_para")
+def aic_init_loop3_para() -> None: ...
+
+
+@tla.extern(source=_AIC_EXT_SRC, name="aic_fix_l0c_to_ub_uf3")
+def aic_fix_l0c_to_ub_uf3(
+    dst: tla.Pointer[tla.Float32, tla.AddressSpace.ub],
+    src: tla.Pointer[tla.Float32, tla.AddressSpace.l0c],
+    n_size: tla.Int32,
+    m_size: tla.Int32,
+    dst_stride: tla.Int32,
+    src_stride: tla.Int32,
+) -> None: ...
+
+
+@tla.extern(source=_AIC_EXT_SRC, name="aic_nd2nz_k4_cm1")
+def aic_nd2nz_k4_cm1(
+    dst: tla.Pointer[tla.UInt8, tla.AddressSpace.l1],
+    src: tla.Pointer[tla.UInt8, tla.AddressSpace.gm],
+    n_load: tla.Int32,
+) -> None: ...
+
+
 # ---------------------------------------------------------------- 固定 tile
 HEAD_DIM = 512  # dSize
 Q_ROWS = 64  # Cube 的 M tile 上限（tiling.h:536 mBaseSize_）
@@ -88,6 +146,24 @@ Q_HALF = 256  # dSize >> 1（qHalfNum=2）
 KV_SLOTS = 3  # v0Res 3 槽环
 P_SLOTS = 2  # l1P[2]
 L0_SLOTS = 2
+
+# ---- 步 B：L0A/L0B 4 槽 + D=64 tiling（竞品 N64 形态）----
+# 竞品参数：L0A ring 4、L0B slots 4、D_F32_TILES=8（512/64）。
+#   QK：8 个 D=64 chunk，L0A=(m,64) 8KB、L0B=(64,128) 16KB → 4 槽恰满
+#       L0A 32KB / L0B 64KB（与原来 2×(16KB/32KB) 占用相同）。
+#   PV：K(=s2=128) 拆 2 个 64 chunk；P=(m,64)、V=(64,128)，P 两片常驻
+#       l0a0/l0a1 供 4 个 N 段复用，V 按 (seg*2+kc)%4 轮转 4 槽。
+# 开关默认 False：步 A（ori AIV->L1）先在唯一基准上验证；置 True 启用步 B。
+L0_D64 = False
+STATE_SLOT_STRIDE = 64  # 64 fp32 = 256 B (1 VL, 256B aligned per state slot)
+L0_AB_SLOTS = 4 if L0_D64 else 2
+L0_D = 64 if L0_D64 else D_CHUNK
+L0_D_CHUNKS = HEAD_DIM // L0_D  # 8（D=64）/ 4（D=128）
+
+# R42：AIV 直写 L1 的 UB zN 暂存行距（竞品 kv_out_ub 的 17 行 pitch：16 行数据
+# + 1 行 padding，见 CSA_KERNEL_SPEC.md §2）。只影响 UB 内部布局；L1 目的端仍是
+# 标准 zN(HEAD_DIM, KV_BLOCK)（nZ 视图与之一一对应）。
+KV_NZ_PITCH = 17
 
 KV_UNIT = 16  # OT KV_PROCESS_UNIT：每次 UB->GM 拷出 16 行
 KV_COPY_IN = 8  # OT KV_COPYIN_UNIT：每次 GM->UB 搬入 8 行
@@ -126,8 +202,12 @@ class Sync:
     # 位已被占满，无法按槽各开一对），信用化——q_l0a_free init 预置 3 信用、
     # load_q wait x2、bmm1 末 tile set x2，每任务收发各 2 平衡；槽隔离由寻址
     # （3 槽连续基址 + 游标）与程序序保证（见 cube.load_q / iterate_bmm1 注）。
-    q_l1_ready: object  # MTE2 -> MTE1
-    q_l0a_free: object  # MTE1 -> MTE2
+    q_l1_ready: object  # MTE2 -> MTE1 (slot 0)
+    q_l0a_free: object  # MTE1 -> MTE2 (slot 0)
+    q_l1_ready1: object  # MTE2 -> MTE1 (slot 1, opt_q_pre3)
+    q_l1_ready2: object  # MTE2 -> MTE1 (slot 2, opt_q_pre3)
+    q_l0a_free1: object  # MTE1 -> MTE2 (slot 1, opt_q_pre3)
+    q_l0a_free2: object  # MTE1 -> MTE2 (slot 2, opt_q_pre3)
     k_l1_ready0: object
     k_l1_ready1: object
     k_l1_ready2: object
@@ -154,6 +234,32 @@ class Sync:
     kv_mte2_mte3_1: object
     kv_mte3_mte2_0: object
     kv_mte3_mte2_1: object
+    # R42（need_kv_ring 实例；其余实例为 None，不产生 flag op）：cmp 段 AIV 直写
+    # L1 槽的 band 级 / tile 级同步。
+    #   kv_a_loaded : MTE2 -> V   ，ND band 已填好
+    #   kvz_v2m3    : V -> MTE3   ，zN band 已写完
+    #   kvz_free    : MTE3 -> V   ，zN 已被 L1 copy 读完（预置 1）
+    #   kv_nd_free  : V -> MTE2   ，ND 已被 VF 读完（预置 1）
+    #   kv_free     : cross AIC MTE1 -> AIV MTE3，cmp tile 的 L1 槽可写
+    #                 （"后继条件"信用：AIC 只在后继 tile 是 cmp 时归还，AIV
+    #                  也只在 cmp 且 x>=3 时消费；不预置，x<3 的槽本核未用过）
+    kv_a_loaded: object
+    kvz_v2m3: object
+    kvz_free: object
+    kvz_v2m3_1: object
+    kvz_free1: object
+    kv_nd_free: object
+    kv_free: object
+    # E17（need_pa_l1 实例；其余 None）：PA cmp 段 AIV gather -> extern 换形 -> L1。
+    # 与 R42 的区别是 ND->zN 由 VECTOR 的 extern VSSTB 完成（不再是 MTE3 硬件
+    # ND->NZ），因此 ND 的"填好/读完"以 VECTOR 为对端，2 块 ND ping-pong 各一套。
+    #   kv_nd_v{0,1} : MTE2 -> VECTOR，ND band 已填好
+    #   kv_v_m2{0,1} : VECTOR -> MTE2，ND band 已被 extern 读完（预置 1）
+    # zN 的 kvz_v2m3 / kvz_free 与 R42 复用（V->MTE3 / MTE3->V）。
+    kv_nd_v0: object
+    kv_nd_v1: object
+    kv_v_m20: object
+    kv_v_m21: object
     # 输出清零（OT: INNERCORE_INITOUT_MTE3_V = 0，MTE3_V / V_MTE3 同 id 双向）
     init_mte3_v: object
     init_v_mte3: object
@@ -237,29 +343,14 @@ class Sync:
     ab_ready1: object
     ab_free0: object
     ab_free1: object
-    m_q_l1: object
-    m_k_l1_0: object
-    m_k_l1_1: object
-    m_k_l1_2: object
-    m_s_l0c0: object
-    m_s_l0c1: object
-    m_lse: object
-    m_kv0: object
-    m_kv1: object
-    m_idx0: object
-    m_idx1: object
-    m_ab0: object
-    m_ab1: object
-    m_phy_m2v: object
-    m_phy_s2v: object
-    m_phy_v_mte3: object
-    m_phy_m3v: object
-    m_phy_m3s: object
-    m_phy_vs: object
-    m_bc_stage: object
-    m_bc_prev: object
-    m_bc_ws: object
-    m_init: object
+    # 步 B（L0_D64）：4 槽 AB flag 对的槽 2/3。dst=CUBE 预算 0..5 已用，
+    # 槽 2/3 取 6/7；dst=MTE1 同为 6/7。非 L0_D64 实例为 None（不发出）。
+    ab_ready2: object
+    ab_ready3: object
+    ab_free2: object
+    ab_free3: object
+    ab_p_ready: object
+    ab_p_free: object
     # F27：IS_SPLIT_G 的核间 MTE2 屏障（OT csa_kernel_arch35.h:347-348/:357-358 的
     # CrossCoreSetFlag<0,PIPE_MTE2>(15) / CrossCoreWaitFlag<0,PIPE_MTE2>(15)）。
     # mode=0 = FFTS 全核屏障（AscendC SyncAll<false> 语义：每个核 set 自己的到达位、
@@ -272,6 +363,12 @@ class Sync:
     # 与 s2_mte2 同 mode，但 s2_mte2 的 set/wait 都在 MTE2 上 —— 探针实测那**不是**
     # 会合（见 smla_csa_block_cube.pair_rendezvous）。
     s2_rendezvous: object
+    # CSA-only optimization flags (default False so SWA/HCA/OS/OCS stay untouched)
+    opt_cube64: bool = False
+    opt_cube128: bool = False
+    opt_l2m: bool = False
+    opt_q_pre3: bool = False
+    q_l2_bypass: bool = False
 
 
 @dataclass
@@ -286,6 +383,13 @@ class Bufs:
     l0a1: object
     l0b0: object
     l0b1: object
+    # 步 B（L0_D64）：第 3/4 槽（L0A (Q_ROWS,64) 8KB、L0B (64,KV_BLOCK) 16KB）。
+    # 非 L0_D64 实例为 None（不分配）。
+    l0a2: object
+    l0a3: object
+    l0a_p: object
+    l0b2: object
+    l0b3: object
     l0c_s: object
     l0c_o: object  # F17 步骤 B：O 单槽 128 KB（Q_ROWS*HEAD_DIM fp32），
     # 4 个 N 窗口 mmad 各占 seg*(m*D_CHUNK) 线性段；
@@ -303,6 +407,10 @@ class Bufs:
     ub_dm: object
     ub_kv0: object  # 稀疏 gather 的 UB 中转（KV_UNIT 行 x HEAD_DIM，ping-pong）
     ub_kv1: object
+    # R42（kv_ring=True 实例）：AIV 直写 L1 前的 UB zN 暂存（KV_NZ_PITCH 行 pitch，
+    # 17 x 512 dtype = 17,408 B）；其余实例为 None（不产生 allocate op）。
+    ub_kvz: object
+    ub_kvz1: object
     ub_init: object  # F4 输出清零的 DUPLICATE 中转（OT: ATTEN_OUT_POP_BUF）
     ub_init_lse: object  # F4 LSE 清零的 DUPLICATE 中转（OT: LSE_POP_BUF，fp32）
     # F2 phy-addr 表生成的 UB 暂存（OT: sparseIdxUb / blkTableUb / kvPhyAddrUb）
@@ -319,6 +427,13 @@ class Bufs:
     ub_bc_max: object  # staged prev lse（align8(rows) fp32，OT blockMaxUb slot0）
     ub_bc_sum: object  # staged prev sum（align8(rows) fp32，OT blockSumUb slot0）
     ub_bc_w: object  # 合并权重 [w_prev | w_cur]（2*align8(rows) fp32）
+    # E4（FlashDecoding KV 分片）merge 暂存：[(2*SPLITS+2)*rows8] fp32。
+    # 仅 fd_splits>1 实例分配；=1 实例为 None（不产生 allocate op ⇒ UB 字节表
+    # 与改前逐字节一致）。
+    ub_fd_stats: object
+    # CSA-only optimization flags (default False so SWA/HCA/OS/OCS stay untouched)
+    opt_cube64: bool = False
+    opt_vec: bool = False
 
 
 @tla.jit
@@ -359,6 +474,14 @@ def declare_sync(
     need_rendezvous: bool = False,
     need_idx_ring: bool = False,
     need_lse_war: bool = False,
+    need_kv_ring: bool = False,
+    need_pa_l1: bool = False,
+    need_kvz_db: bool = False,
+    opt_cube64: bool = False,
+    opt_cube128: bool = False,
+    opt_l2m: bool = False,
+    q_l2_bypass: bool = False,
+    q_pre3_hint: bool = False,
 ) -> Sync:
     """声明同步对象。
 
@@ -366,6 +489,10 @@ def declare_sync(
     need_idx_ring（T1-1 r10）：非 PA 去表实例的索引环事件对。默认 False ⇒
     不创建任何新 flag（F44-A6：未用的 flag 也会改变追踪结果）。PA 控制臂因此
     与改前逐字节一致。
+    need_kv_ring（R42）：cmp 段 AIV 直写 L1 槽的实例。GM 中转的 kv_m2m3/kv_m3m2
+    两族在此实例里为 None（腾出 dst=MTE3 0/1、dst=MTE2 4/5），另建 band 级
+    4 条 intra + 1 条 cross；k_l1_ready/k_l0b_free 两族**保留**（ori 仍由 AIC
+    直读，需要 MTE2->MTE1 / MTE1->MTE2 的原生握手）。
     """
 
     def cross(name, mode=4):
@@ -405,6 +532,26 @@ def declare_sync(
         #   dst=MTE1 补充（F10 步骤 2）：ab_free 4-5（AB 槽 CUBE→MTE1）
         q_l1_ready=tla.flag("smla_q_l1_ready", tla.pipes.MTE2, tla.pipes.MTE1, id=0),
         q_l0a_free=tla.flag("smla_q_l0a_free", tla.pipes.MTE1, tla.pipes.MTE2, id=0),
+        q_l1_ready1=(
+            tla.flag("smla_q_l1_ready1", tla.pipes.MTE2, tla.pipes.MTE1, id=4)
+            if (opt_cube64 and q_pre3_hint)
+            else None
+        ),
+        q_l1_ready2=(
+            tla.flag("smla_q_l1_ready2", tla.pipes.MTE2, tla.pipes.MTE1, id=5)
+            if (opt_cube64 and q_pre3_hint)
+            else None
+        ),
+        q_l0a_free1=(
+            tla.flag("smla_q_l0a_free1", tla.pipes.MTE1, tla.pipes.MTE2, id=4)
+            if (opt_cube64 and q_pre3_hint)
+            else None
+        ),
+        q_l0a_free2=(
+            tla.flag("smla_q_l0a_free2", tla.pipes.MTE1, tla.pipes.MTE2, id=5)
+            if (opt_cube64 and q_pre3_hint)
+            else None
+        ),
         k_l1_ready0=tla.flag("smla_k_l1_ready0", tla.pipes.MTE2, tla.pipes.MTE1, id=1),
         k_l1_ready1=tla.flag("smla_k_l1_ready1", tla.pipes.MTE2, tla.pipes.MTE1, id=2),
         k_l1_ready2=tla.flag("smla_k_l1_ready2", tla.pipes.MTE2, tla.pipes.MTE1, id=3),
@@ -428,10 +575,93 @@ def declare_sync(
             if need_lse_war
             else None
         ),
-        kv_mte2_mte3_0=tla.flag("smla_kv_m2m3_0", tla.pipes.MTE2, tla.pipes.MTE3, id=0),
-        kv_mte2_mte3_1=tla.flag("smla_kv_m2m3_1", tla.pipes.MTE2, tla.pipes.MTE3, id=1),
-        kv_mte3_mte2_0=tla.flag("smla_kv_m3m2_0", tla.pipes.MTE3, tla.pipes.MTE2, id=4),
-        kv_mte3_mte2_1=tla.flag("smla_kv_m3m2_1", tla.pipes.MTE3, tla.pipes.MTE2, id=5),
+        # R42：need_kv_ring 实例不再经 GM 中转，m2m3/m3m2 两族不声明
+        # （dst=MTE3 的 0/1、dst=MTE2 的 4/5 随之空出，见下面的新 flag）。
+        kv_mte2_mte3_0=(
+            tla.flag("smla_kv_m2m3_0", tla.pipes.MTE2, tla.pipes.MTE3, id=0)
+            if not need_kv_ring
+            else None
+        ),
+        kv_mte2_mte3_1=(
+            tla.flag("smla_kv_m2m3_1", tla.pipes.MTE2, tla.pipes.MTE3, id=1)
+            if not need_kv_ring
+            else None
+        ),
+        kv_mte3_mte2_0=(
+            tla.flag("smla_kv_m3m2_0", tla.pipes.MTE3, tla.pipes.MTE2, id=4)
+            if not need_kv_ring
+            else None
+        ),
+        kv_mte3_mte2_1=(
+            tla.flag("smla_kv_m3m2_1", tla.pipes.MTE3, tla.pipes.MTE2, id=5)
+            if not need_kv_ring
+            else None
+        ),
+        # R42 band 级 4 条 intra：dst=V 取 1（MTE2->V）与 2（MTE3->V）——CSA
+        # ring 实例不使用 phy_m2v(1)/phy_s2v(2)（索引走环、无物理表），也未启用
+        # bc（bc_m2v 3 / bc_m3v 5 仅 swa kernel set/wait）；dst=MTE3 取 0（m2m3
+        # 已腾出）；dst=MTE2 取 4（m3m2 已腾出）。dst=V 的 6 留给 lse_mte3_v
+        # （#026 enable_lse=1），不得占用。
+        # R42+步 A 修订：ND->NZ 改由 MTE3 的 ("ub","RowMajor","l1","zN") 硬件
+        # 转换完成（软件 VF 在 022 上单管 275us，是 Dur 回退的根因）。
+        #   kv_a_loaded : MTE2 -> MTE3 ，ND band 已填好（MTE3 等它再 copy）
+        #   kv_nd_free  : MTE3 -> MTE2 ，MTE3 已读完 ND band（MTE2 可预取）
+        # kvz_* 两条保留声明但不再 set/wait（zN 暂存退役）。
+        kv_a_loaded=(
+            tla.flag("smla_kv_a_loaded", tla.pipes.MTE2, tla.pipes.MTE3, id=1)
+            if need_kv_ring
+            else None
+        ),
+        kvz_v2m3=(
+            tla.flag("smla_kvz_v2m3", tla.pipes.VECTOR, tla.pipes.MTE3, id=0)
+            if (need_kv_ring or need_pa_l1)
+            else None
+        ),
+        kvz_free=(
+            tla.flag("smla_kvz_free", tla.pipes.MTE3, tla.pipes.VECTOR, id=2)
+            if (need_kv_ring or need_pa_l1)
+            else None
+        ),
+        kvz_v2m3_1=(
+            tla.flag("smla_kvz_v2m3_1", tla.pipes.VECTOR, tla.pipes.MTE3, id=1)
+            if need_kvz_db
+            else None
+        ),
+        kvz_free1=(
+            tla.flag("smla_kvz_free1", tla.pipes.MTE3, tla.pipes.VECTOR, id=4)
+            if need_kvz_db
+            else None
+        ),
+        # E17：PA 直写 L1 的 ND band 级 intra（2 块 ping-pong）。id 选取见
+        # RUNLOG §3：dst=VECTOR 的 7 空闲、3 由 bc_m2v 占位但 PA CSA 从不 set/wait；
+        # dst=MTE2 的 4/5 在 need_kv_ring(或本实例)下 kv_m3m2 为 None，空出。
+        kv_nd_v0=(
+            tla.flag("smla_kv_nd_v0", tla.pipes.MTE2, tla.pipes.VECTOR, id=7)
+            if need_pa_l1
+            else None
+        ),
+        kv_nd_v1=(
+            tla.flag("smla_kv_nd_v1", tla.pipes.MTE2, tla.pipes.VECTOR, id=3)
+            if need_pa_l1
+            else None
+        ),
+        kv_v_m20=(
+            tla.flag("smla_kv_v_m2_0", tla.pipes.VECTOR, tla.pipes.MTE2, id=4)
+            if need_pa_l1
+            else None
+        ),
+        kv_v_m21=(
+            tla.flag("smla_kv_v_m2_1", tla.pipes.VECTOR, tla.pipes.MTE2, id=5)
+            if need_pa_l1
+            else None
+        ),
+        kv_nd_free=(
+            tla.flag("smla_kv_nd_free", tla.pipes.MTE3, tla.pipes.MTE2, id=4)
+            if need_kv_ring
+            else None
+        ),
+        # cross：AIC MTE1 -> AIV MTE3（L1 槽 WAR 的归还，每 tile 1 token/AIV）
+        kv_free=(cross("smla_kv_free") if need_kv_ring else None),
         init_mte3_v=tla.flag(
             "smla_init_mte3_v", tla.pipes.MTE3, tla.pipes.VECTOR, id=0
         ),
@@ -480,10 +710,59 @@ def declare_sync(
         # F10 步骤 2：AB 槽 flag 对（dst=CUBE 已用 0-3 → 4/5；dst=MTE1 已用
         # 0-3 → 4/5）。ab_ready：MTE1→CUBE（数据就绪）；ab_free：CUBE→MTE1
         # （槽释放）。L0A/L0B 合并单 bufferId（A/B 成对）。
-        ab_ready0=tla.flag("smla_ab_ready0", tla.pipes.MTE1, tla.pipes.CUBE, id=4),
-        ab_ready1=tla.flag("smla_ab_ready1", tla.pipes.MTE1, tla.pipes.CUBE, id=5),
-        ab_free0=tla.flag("smla_ab_free0", tla.pipes.CUBE, tla.pipes.MTE1, id=4),
-        ab_free1=tla.flag("smla_ab_free1", tla.pipes.CUBE, tla.pipes.MTE1, id=5),
+        ab_ready0=tla.flag(
+            "smla_ab_ready0",
+            tla.pipes.MTE1,
+            tla.pipes.CUBE,
+            id=(0 if opt_cube64 else 4),
+        ),
+        ab_ready1=tla.flag(
+            "smla_ab_ready1",
+            tla.pipes.MTE1,
+            tla.pipes.CUBE,
+            id=(1 if opt_cube64 else 5),
+        ),
+        ab_free0=tla.flag(
+            "smla_ab_free0", tla.pipes.CUBE, tla.pipes.MTE1, id=(0 if opt_cube64 else 4)
+        ),
+        ab_free1=tla.flag(
+            "smla_ab_free1", tla.pipes.CUBE, tla.pipes.MTE1, id=(1 if opt_cube64 else 5)
+        ),
+        ab_ready2=(
+            tla.flag("smla_ab_ready2", tla.pipes.MTE1, tla.pipes.CUBE, id=2)
+            if opt_cube64
+            else None
+        ),
+        ab_ready3=(
+            tla.flag("smla_ab_ready3", tla.pipes.MTE1, tla.pipes.CUBE, id=3)
+            if opt_cube64
+            else None
+        ),
+        ab_free2=(
+            tla.flag("smla_ab_free2", tla.pipes.CUBE, tla.pipes.MTE1, id=2)
+            if opt_cube64
+            else None
+        ),
+        ab_free3=(
+            tla.flag("smla_ab_free3", tla.pipes.CUBE, tla.pipes.MTE1, id=3)
+            if opt_cube64
+            else None
+        ),
+        ab_p_ready=(
+            tla.flag("smla_ab_p_ready", tla.pipes.MTE1, tla.pipes.CUBE, id=4)
+            if opt_cube64
+            else None
+        ),
+        ab_p_free=(
+            tla.flag("smla_ab_p_free", tla.pipes.CUBE, tla.pipes.MTE1, id=4)
+            if opt_cube64
+            else None
+        ),
+        opt_cube64=opt_cube64,
+        opt_cube128=opt_cube128,
+        opt_l2m=opt_l2m,
+        opt_q_pre3=(opt_cube64 and q_pre3_hint),
+        q_l2_bypass=q_l2_bypass,
         # F27：IS_SPLIT_G 核间 MTE2 屏障（全核，mode=0；无 aiv_id）
         s2_mte2=cross("smla_s2_mte2", mode=0),
         m_l0a0=tla.mutex("smla_l0a0", id=0),
@@ -496,29 +775,6 @@ def declare_sync(
         # L0C O 双槽互斥：cube(mm) 侧与 fix 侧用同一 id，才能形成 MMAD->FIX 依赖
         m_l0c_o0=tla.mutex("smla_l0c_o0", id=7),
         m_l0c_o1=tla.mutex("smla_l0c_o1", id=8),
-        m_q_l1=tla.mutex("smla_q_l1", id=9),
-        m_k_l1_0=tla.mutex("smla_k_l1_0", id=10),
-        m_k_l1_1=tla.mutex("smla_k_l1_1", id=11),
-        m_k_l1_2=tla.mutex("smla_k_l1_2", id=12),
-        m_s_l0c0=tla.mutex("smla_s_l0c0", id=13),
-        m_s_l0c1=tla.mutex("smla_s_l0c1", id=14),
-        m_lse=tla.mutex("smla_lse", id=15),
-        m_kv0=tla.mutex("smla_kv0", id=16),
-        m_kv1=tla.mutex("smla_kv1", id=17),
-        m_idx0=tla.mutex("smla_idx0", id=18),
-        m_idx1=tla.mutex("smla_idx1", id=19),
-        m_ab0=tla.mutex("smla_ab0", id=20),
-        m_ab1=tla.mutex("smla_ab1", id=21),
-        m_phy_m2v=tla.mutex("smla_phy_m2v", id=22),
-        m_phy_s2v=tla.mutex("smla_phy_s2v", id=23),
-        m_phy_v_mte3=tla.mutex("smla_phy_v_mte3", id=24),
-        m_phy_m3v=tla.mutex("smla_phy_m3v", id=25),
-        m_phy_m3s=tla.mutex("smla_phy_m3s", id=26),
-        m_phy_vs=tla.mutex("smla_phy_vs", id=27),
-        m_bc_stage=tla.mutex("smla_bc_stage", id=28),
-        m_bc_prev=tla.mutex("smla_bc_prev", id=29),
-        m_bc_ws=tla.mutex("smla_bc_ws", id=30),
-        m_init=tla.mutex("smla_init", id=31),
     )
 
 
@@ -530,6 +786,7 @@ def init_sync(
     pre_bc: bool = False,
     pre_l0c2: bool = False,
     pre_idx_ring: bool = False,
+    pre_kv_ring: bool = False,
 ) -> None:
     """预置 flag：等价于 cube_local_buffer.h 的初始 SetFlag 与 smla 的 prodlogue。
 
@@ -545,13 +802,92 @@ def init_sync(
     got OpResult）。非 swa kernel 不调用 init_sync_preload，指令流与改前逐条
     一致。信用推演（AIC 可超前 AIV 至多 2 tile）见 ITERATIONS.md Iter 23 F6 节。
     """
+    with tla.cube():
+        # 闸门②变体 B（二分定位）：信用恢复原始握手 x1（寻址/合并保留）。
+        tla.set_flag(sync.q_l0a_free)
+        if tla.const_expr(sync.opt_q_pre3):
+            tla.set_flag(sync.q_l0a_free1)
+            tla.set_flag(sync.q_l0a_free2)
+        if tla.const_expr(sync.opt_cube64):
+            aic_init_loop3_para()
+        tla.set_flag(sync.k_l0b_free0)
+        tla.set_flag(sync.k_l0b_free1)
+        tla.set_flag(sync.k_l0b_free2)
+        # F10 步骤 2：AB 槽释放信用预置（OT cube_local_buffer.h:70-71 的
+        # SetFlag<M_MTE1>(0)/(1) 同款；L0A/L0B 合并单 bufferId，每槽 1 份）。
+        tla.set_flag(sync.ab_free0)
+        tla.set_flag(sync.ab_free1)
+        if tla.const_expr(sync.opt_cube128):
+            # 2-slot L0A/L0B ring (ab_free0/1 already seeded above) + dedicated l0a_p
+            tla.set_flag(sync.ab_p_free)
+        elif tla.const_expr(sync.opt_cube64):
+            # 4 independent 1-bit hardware flags for L0A/L0B slots 0..3 + 1 for l0a_p
+            tla.set_flag(sync.ab_free2)
+            tla.set_flag(sync.ab_free3)
+            tla.set_flag(sync.ab_p_free)
+        elif tla.const_expr(L0_D64):
+            tla.set_flag(sync.ab_free0)
+            tla.set_flag(sync.ab_free0)
+            tla.set_flag(sync.ab_free0)
+        tla.set_flag(sync.s_fix_done)
+        if pre_l0c2:
+            # F10 步骤 1（仅 swa preload 实例传 True）：S L0C 槽 1 的首个信用。
+            # 槽平衡与槽 0 相同：bmm1(tile t) wait 槽 t%2、fixpipe(t) 后 set 槽 t%2，
+            # 首两个 tile 各消费 1 个预置信用。静态 bool 分支（pre_bc 同款），非
+            # preload 实例不发出，指令流不变。
+            tla.set_flag(sync.s_fix_done1)
+        tla.set_flag(sync.o_fix_done0)
+        tla.set_flag(sync.o_fix_done1)
     with tla.vector():
         # gather 的 UB 复用信用（MTE3->MTE2），ping-pong 两块各一份
+        # R42：need_kv_ring 实例这两族为 None（不走 GM 中转），跳过预置。
+        if not pre_kv_ring:
+            tla.set_flag(sync.kv_mte3_mte2_0)
+            tla.set_flag(sync.kv_mte3_mte2_1)
+        if pre_phy_vs:
+            tla.set_flag(sync.phy_vs)
+        if pre_idx_ring:
+            # T1-1：两个槽各预置 1 个 free 信用（首个整环 DMA 的 wait 有信用可
+            # 消费，此后每轮标量读完后归还）。对应竞品 ring 的初始可写状态
+            # （N:448-455 无显式同步，本仓显式补齐，同 W27b 的 a_idx_free 预置）。
+            tla.set_flag(sync.idx_s2m0)
+            tla.set_flag(sync.idx_s2m1)
+        if pre_bc:
+            tla.set_flag(sync.bc_v2m)
         tla.cross_core_set_flag(sync.s_free, tla.pipes.VECTOR, aiv_id=0)
         tla.cross_core_set_flag(sync.s_free, tla.pipes.VECTOR, aiv_id=1)
         if not defer_ofree:
             tla.cross_core_set_flag(sync.o_free, tla.pipes.VECTOR, aiv_id=0)
             tla.cross_core_set_flag(sync.o_free, tla.pipes.VECTOR, aiv_id=1)
+
+
+@tla.jit
+def init_sync_kv_ring(sync: Sync, pa_l1: bool = False, kvz_db: bool = False) -> None:
+    """R42：AIV 直写 L1 槽的流水信用预置；init_sync 之后调用。
+
+    - kv_free（cross，AIC MTE1 -> AIV MTE3）：**不预置**。信用改为"后继条件"
+      发送：AIC 在 body x 的站点 3 释放 tile x-3 时，只有当**同 body 的后继
+      tile x 存在且是 cmp** 才 set 一个 token；AIV 也只在 tile x 是 cmp 且
+      x>=3 时消费。两边条数恒等（每 cmp tile 一收一发），且 x<3 的槽在本核
+      从未被用过，无需等待。ori tile（占多数）完全不碰该 flag。
+    - kvz_free / kv_nd_free：zN 暂存退役后只用 kv_nd_free。首个 band 之前没有
+      生产者，需要 1 个在途 token，否则第一个 band 的 MTE2 wait 永久阻塞。
+      不能多于 1（多一个会提前覆写 ND，属静默踩写）。
+
+    单独成函数（不并进 init_sync 的 if 分支）：cross set 落在动态 `if` 边界时
+    flag 会被物化成 OpResult 而被 cross_core_set_flag 拒收。
+    """
+    with tla.vector():
+        if pa_l1:
+            # E17：2 块 ND 各 1 个可写信用；zN 暂存 1 个可写信用（首个 band
+            # 之前没有生产者）。都恰 1 个，多了会提前覆写（静默踩写）。
+            tla.set_flag(sync.kv_v_m20)
+            tla.set_flag(sync.kv_v_m21)
+            tla.set_flag(sync.kvz_free)
+            if kvz_db:
+                tla.set_flag(sync.kvz_free1)
+        else:
+            tla.set_flag(sync.kv_nd_free)
 
 
 @tla.jit
@@ -581,6 +917,14 @@ def alloc_buffers(
     bc=0,
     preload=False,
     idx_ring=False,
+    kv_ring=False,
+    pa_l1=False,
+    alias_o16=False,
+    kvz_db=False,
+    fd_splits=1,
+    opt_cube64: bool = False,
+    opt_cube128: bool = False,
+    opt_vec: bool = False,
 ) -> Bufs:
     """按 OT 的字节表分配（SPACE-DIFF.md §1-§3）。
 
@@ -610,12 +954,53 @@ def alloc_buffers(
     l1_k = tla.allocate(
         KV_SLOTS * HEAD_DIM * KV_BLOCK, dtype_in, tla.AddressSpace.l1, 512
     )
-    # ---- L0A 32,768 B：Q 段 + P ----
-    l0a0 = tla.allocate(Q_ROWS * D_CHUNK, dtype_in, tla.AddressSpace.l0a, 512)
-    l0a1 = tla.allocate(Q_ROWS * D_CHUNK, dtype_in, tla.AddressSpace.l0a, 512)
-    # ---- L0B 65,536 B：K 段 / V 段 ----
-    l0b0 = tla.allocate(D_CHUNK * KV_BLOCK, dtype_in, tla.AddressSpace.l0b, 512)
-    l0b1 = tla.allocate(D_CHUNK * KV_BLOCK, dtype_in, tla.AddressSpace.l0b, 512)
+    # ---- L0A (64 KB on Ascend 950) & L0B (64 KB) ----
+    if tla.const_expr(opt_cube128):
+        # Small-M (m <= 32): 2 x (32,128) = 16 KB L0A Q ring + 1 x (32,128) = 8 KB
+        # dedicated l0a_p (total 24 KB <= 64 KB L0A) + 2 x (128,128) = 64 KB L0B ring.
+        # Halves MMAD (16 -> 8) and FixPipe (9 -> 5) launches per tile.
+        l0a0 = tla.allocate(32 * D_CHUNK, dtype_in, tla.AddressSpace.l0a, 512)
+        l0a1 = tla.allocate(32 * D_CHUNK, dtype_in, tla.AddressSpace.l0a, 512)
+        l0a2 = None
+        l0a3 = None
+        l0a_p = tla.allocate(32 * KV_BLOCK, dtype_in, tla.AddressSpace.l0a, 512)
+        l0b0 = tla.allocate(D_CHUNK * KV_BLOCK, dtype_in, tla.AddressSpace.l0b, 512)
+        l0b1 = tla.allocate(D_CHUNK * KV_BLOCK, dtype_in, tla.AddressSpace.l0b, 512)
+        l0b2 = None
+        l0b3 = None
+    elif tla.const_expr(opt_cube64):
+        # Track 2: 4 x (64,64) = 32 KB for bmm1 Q ring + 1 x (64,128) = 16 KB
+        # dedicated l0a_p for bmm2 P (total 48 KB <= 64 KB L0A, zero bmm1/bmm2 WAR).
+        # L0B: 4 x (64,128) = 64 KB exact capacity (shared 4-slot ring for K and V).
+        l0a0 = tla.allocate(Q_ROWS * 64, dtype_in, tla.AddressSpace.l0a, 512)
+        l0a1 = tla.allocate(Q_ROWS * 64, dtype_in, tla.AddressSpace.l0a, 512)
+        l0a2 = tla.allocate(Q_ROWS * 64, dtype_in, tla.AddressSpace.l0a, 512)
+        l0a3 = tla.allocate(Q_ROWS * 64, dtype_in, tla.AddressSpace.l0a, 512)
+        l0a_p = tla.allocate(Q_ROWS * KV_BLOCK, dtype_in, tla.AddressSpace.l0a, 512)
+        l0b0 = tla.allocate(64 * KV_BLOCK, dtype_in, tla.AddressSpace.l0b, 512)
+        l0b1 = tla.allocate(64 * KV_BLOCK, dtype_in, tla.AddressSpace.l0b, 512)
+        l0b2 = tla.allocate(64 * KV_BLOCK, dtype_in, tla.AddressSpace.l0b, 512)
+        l0b3 = tla.allocate(64 * KV_BLOCK, dtype_in, tla.AddressSpace.l0b, 512)
+    elif tla.const_expr(L0_D64):
+        l0a0 = tla.allocate(Q_ROWS * L0_D, dtype_in, tla.AddressSpace.l0a, 512)
+        l0a1 = tla.allocate(Q_ROWS * L0_D, dtype_in, tla.AddressSpace.l0a, 512)
+        l0a2 = tla.allocate(Q_ROWS * L0_D, dtype_in, tla.AddressSpace.l0a, 512)
+        l0a3 = tla.allocate(Q_ROWS * L0_D, dtype_in, tla.AddressSpace.l0a, 512)
+        l0a_p = None
+        l0b0 = tla.allocate(L0_D * KV_BLOCK, dtype_in, tla.AddressSpace.l0b, 512)
+        l0b1 = tla.allocate(L0_D * KV_BLOCK, dtype_in, tla.AddressSpace.l0b, 512)
+        l0b2 = tla.allocate(L0_D * KV_BLOCK, dtype_in, tla.AddressSpace.l0b, 512)
+        l0b3 = tla.allocate(L0_D * KV_BLOCK, dtype_in, tla.AddressSpace.l0b, 512)
+    else:
+        l0a0 = tla.allocate(Q_ROWS * D_CHUNK, dtype_in, tla.AddressSpace.l0a, 512)
+        l0a1 = tla.allocate(Q_ROWS * D_CHUNK, dtype_in, tla.AddressSpace.l0a, 512)
+        l0a2 = None
+        l0a3 = None
+        l0a_p = None
+        l0b0 = tla.allocate(D_CHUNK * KV_BLOCK, dtype_in, tla.AddressSpace.l0b, 512)
+        l0b1 = tla.allocate(D_CHUNK * KV_BLOCK, dtype_in, tla.AddressSpace.l0b, 512)
+        l0b2 = None
+        l0b3 = None
     # ---- L0C 262,144 B：S + O 双槽 ----
     # F10 步骤 1：swa preload 实例的 S 槽扩成连续双槽（OT INNERCORE_L0C GetNext
     # ring(2) 同款，65,536 B；L0C 合计 131,072 B < 262,144 上限）；其余实例单槽，
@@ -651,10 +1036,18 @@ def alloc_buffers(
     # < 262,144（验证形态，见账本 F17 节）。
     ub_otmp_full = tla.allocate(half * HEAD_DIM, tla.Float32, tla.AddressSpace.ub, 256)
     ub_o = tla.allocate(half * HEAD_DIM, tla.Float32, tla.AddressSpace.ub, 256)
-    ub_o16 = tla.allocate(half * HEAD_DIM, dtype_in, tla.AddressSpace.ub, 256)
+    ub_o16 = (
+        tla.recast_ptr(
+            ub_otmp_full if opt_vec else ub_o,
+            dtype=dtype_in,
+        )
+        if alias_o16
+        else tla.allocate(half * HEAD_DIM, dtype_in, tla.AddressSpace.ub, 256)
+    )
     # sinks：偶数 G 按 rows；奇数 G 存整条（host 补齐到 8 元素/32B 倍数）
     sink_len = half if sink_cap is None else sink_cap
-    ub_sink = tla.allocate(sink_len, tla.Float32, tla.AddressSpace.ub, 256)
+    _sink_alloc = max(sink_len, STATE_SLOT_STRIDE) if opt_vec else sink_len
+    ub_sink = tla.allocate(_sink_alloc, tla.Float32, tla.AddressSpace.ub, 256)
     # F11·bc：max 双槽（OT softmaxMaxBufs[multiCoreIdxMod2] 双槽先例，账本
     # F10/F11 节「softmaxSum/MaxBufs[2] 双槽是核私有工作区」记录）。bc=0 时
     # max 只有 vec1 链 + vec_init 读改写，单槽即可；bc=1 时块末 tile 的
@@ -663,8 +1056,9 @@ def alloc_buffers(
     # 才跑 merge(t)）——单槽下 lse_c 读到 max(t+1)。双槽链与 sum 同键
     # xg%2：vec1(t) 读 (t-1)%2 写 t%2、reinit/vec_init 重灌 t%2、merge(t)
     # 就地 RMW 槽 t%2。非 preload 实例（串行调用方）单槽不变。
+    _state_el = STATE_SLOT_STRIDE if opt_vec else half
     ub_max = tla.allocate(
-        half * (2 if preload else 1), tla.Float32, tla.AddressSpace.ub, 256
+        _state_el * (2 if preload else 1), tla.Float32, tla.AddressSpace.ub, 256
     )
     # F11：sum 双槽（OT softmaxSumBufs[2] 同构）——bmm2_data_copy_out 就地
     # 用 ub_sum 归一化（div(src,den) 回写），交换后同 body 的 vec_init(T 首)
@@ -672,7 +1066,7 @@ def alloc_buffers(
     # task 全对）。槽键 xg%2 与 dm 同：vec1(x-1) 写槽 (x-1)%2、copy_out(P 末)
     # 读槽 (P末)%2、vec_init(T首=P末+1) 重灌异槽。非 preload 实例单槽不变。
     ub_sum = tla.allocate(
-        half * (2 if preload else 1), tla.Float32, tla.AddressSpace.ub, 256
+        _state_el * (2 if preload else 1), tla.Float32, tla.AddressSpace.ub, 256
     )
     # F11：dm 双槽（OT softmaxExpBufs[2]，taskIdMod2 = 全局 tile 序 %2 同键，
     # sparse_flash_mla_csa_block_vector_arch35.h:316/:1423-1425 连续分配先例
@@ -680,11 +1074,39 @@ def alloc_buffers(
     # vec1(x-1) 写 dm(x-1) 与 vec2(x-2) 读 dm(x-2) 相邻 tile 奇偶交替，
     # 单缓冲会互相覆盖；非 preload 实例（串行调用方）单槽不变。
     ub_dm = tla.allocate(
-        half * (2 if preload else 1), tla.Float32, tla.AddressSpace.ub, 256
+        _state_el * (2 if preload else 1), tla.Float32, tla.AddressSpace.ub, 256
     )
     # 稀疏 gather 中转：2 x 16 行 x HEAD_DIM（OT stage0OutBufs[2]，KV_PROCESS_UNIT）
     ub_kv0 = tla.allocate(KV_UNIT * HEAD_DIM, dtype_in, tla.AddressSpace.ub, 256)
-    ub_kv1 = tla.allocate(KV_UNIT * HEAD_DIM, dtype_in, tla.AddressSpace.ub, 256)
+    # R42：kv_ring 实例只用 ub_kv0 作 ND 中转（zN 走 ub_kvz），GM 中转路径整段
+    # 不发射 ⇒ ub_kv1 不分配（省出 16,384 B 给 ub_kvz 的 17 行 pitch）。
+    ub_kv1 = (
+        tla.allocate(KV_UNIT * HEAD_DIM, dtype_in, tla.AddressSpace.ub, 256)
+        if ((not kv_ring) or pa_l1)
+        else None
+    )
+    # E23：PA 直写改用 pitch=17（zNUnAlign，块距 272 元素 = 544 B）以避开
+    # pitch16（512 B 块距）在 UB 上的 bank 冲突；实测换形 47.9 -> 121.2 GB/s/核。
+    ub_kvz = (
+        tla.allocate(
+            KV_NZ_PITCH * HEAD_DIM,
+            dtype_in,
+            tla.AddressSpace.ub,
+            256,
+        )
+        if (kv_ring or pa_l1)
+        else None
+    )
+    ub_kvz1 = (
+        tla.allocate(
+            KV_NZ_PITCH * HEAD_DIM,
+            dtype_in,
+            tla.AddressSpace.ub,
+            256,
+        )
+        if kvz_db
+        else None
+    )
     # F4 清零中转（OT: ATTEN_OUT_POP_BUF / LSE_POP_BUF，各 32 KiB；
     # 这里取 INIT_POP_ELE 元素的更小粒度，见 smla_csa_block_vector.py 的偏离说明）
     ub_init = tla.allocate(INIT_POP_ELE, dtype_in, tla.AddressSpace.ub, 256)
@@ -719,14 +1141,35 @@ def alloc_buffers(
     ub_bc_max = tla.allocate(bc_cap8, tla.Float32, tla.AddressSpace.ub, 256)
     ub_bc_sum = tla.allocate(bc_cap8, tla.Float32, tla.AddressSpace.ub, 256)
     ub_bc_w = tla.allocate(bc_cap8 * 2, tla.Float32, tla.AddressSpace.ub, 256)
+    # E4：FD merge 暂存（仅 fd_splits>1 分配；=1 为 None，UB 字节表不变）。
+    # 布局（按 AIV 子块，rows8=Align8(rows)）：
+    #   [max_i: S*rows8][sum_i: S*rows8][e_i: S*rows8][den: rows8][sink: rows8]
+    fd_cap8 = ((half + 7) // 8) * 8
+    # 统计块宽度 = max(Align8(rows), 64)：UB 整向量 load 需 VL(fp32)=64 宽。
+    fd_cap8 = ((fd_cap8 + 63) // 64) * 64
+    ub_fd_stats = (
+        tla.allocate(
+            (3 * fd_splits + 2) * fd_cap8 + 256,
+            tla.Float32,
+            tla.AddressSpace.ub,
+            256,
+        )
+        if fd_splits > 1
+        else None
+    )
     return Bufs(
         l1_p=l1_p,
         l1_q=l1_q,
         l1_k=l1_k,
         l0a0=l0a0,
         l0a1=l0a1,
+        l0a2=l0a2,
+        l0a3=l0a3,
+        l0a_p=l0a_p,
         l0b0=l0b0,
         l0b1=l0b1,
+        l0b2=l0b2,
+        l0b3=l0b3,
         l0c_s=l0c_s,
         l0c_o=l0c_o,
         ub_s=ub_s,
@@ -740,6 +1183,8 @@ def alloc_buffers(
         ub_dm=ub_dm,
         ub_kv0=ub_kv0,
         ub_kv1=ub_kv1,
+        ub_kvz=ub_kvz,
+        ub_kvz1=ub_kvz1,
         ub_init=ub_init,
         ub_init_lse=ub_init_lse,
         ub_phy_idx=ub_phy_idx,
@@ -750,4 +1195,7 @@ def alloc_buffers(
         ub_bc_max=ub_bc_max,
         ub_bc_sum=ub_bc_sum,
         ub_bc_w=ub_bc_w,
+        ub_fd_stats=ub_fd_stats,
+        opt_cube64=opt_cube64,
+        opt_vec=opt_vec,
     )

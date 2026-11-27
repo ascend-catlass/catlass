@@ -84,6 +84,8 @@ def sparse_flash_mla_hca_kernel(
     out: tla.Tensor,  # [T*H, D]
     lse: tla.Tensor,  # [T*H] fp32 softmax_lse（enable_lse=0 时传 1 元素占位）
     tiling: tla.Tensor,  # [4] int32 预留
+    ptab: tla.Tensor,  # F3 长序列逐任务标量表（use_ptab=0 时 1 元素占位）
+    kv_zero: tla.Tensor,  # F19：常零 GM 源（[KV_BLOCK, D]，只读；KV tail 清零）
     softmax_scale: tla.Float32,
     head_num: tla.Constexpr[int],
     head_dim: tla.Constexpr[int],
@@ -104,6 +106,7 @@ def sparse_flash_mla_hca_kernel(
     g_split: tla.Constexpr[int],
     has_sinks: tla.Constexpr[int],
     enable_lse: tla.Constexpr[int],  # R37：softmax_lse 落盘开关
+    use_ptab: tla.Constexpr[int],  # F3：长序列逐任务标量表开关
 ) -> None:
     c1 = 1
     c2 = 2
@@ -296,9 +299,22 @@ def sparse_flash_mla_hca_kernel(
                             ori_pa_stride,
                             ori_pa_max_blocks,
                             ori_pa_pages,
+                            kv_zero.ptr,
+                            1,
                         )
                     else:
-                        load_k(sync, bufs, ori_kv, kv_row0, t, n_load, slot, dtype_in)
+                        load_k(
+                            sync,
+                            bufs,
+                            ori_kv,
+                            kv_row0,
+                            t,
+                            n_load,
+                            slot,
+                            dtype_in,
+                            kv_zero.ptr,
+                            1,
+                        )
                 else:
                     ct2 = t - n_ori_tiles
                     if cmp_pa_block_size > 0:
@@ -316,10 +332,21 @@ def sparse_flash_mla_hca_kernel(
                             cmp_pa_stride,
                             cmp_pa_max_blocks,
                             cmp_pa_pages,
+                            kv_zero.ptr,
+                            1,
                         )
                     else:
                         load_k(
-                            sync, bufs, cmp_kv, cmp_row0, ct2, n_load, slot, dtype_in
+                            sync,
+                            bufs,
+                            cmp_kv,
+                            cmp_row0,
+                            ct2,
+                            n_load,
+                            slot,
+                            dtype_in,
+                            kv_zero.ptr,
+                            1,
                         )
                 iterate_bmm1(sync, bufs, slot, m, t + 1 == n_tiles, t == 0, dtype_in)
                 process_vec1(sync, bufs, softmax_scale, n_valid, m, rows, dtype_in)
@@ -371,70 +398,76 @@ def sparse_flash_mla_hca_kernel(
             # ≈2/task_len：015/018 为 64 tile/任务 ≈3%，016 为 8 tile/任务
             # ≈25%——预注册预期 016 本版吃不满，见 F21e §2）。
             # 槽键控全部全局 gtile（K %3、S/P/dm %2）：g_k = 本核在 task 之前
-            # 的真实 tile 总数，由 O(K) 前缀游走重算（swa 同款，AIC/AIV 冗余
-            # 执行、数值一致；不用外层 loop-carry——无上板先例，F7 R7 推演见
-            # ITERATIONS.md）。
-            g_k = tla.as_numeric(0)
-            for ct in tla.range(task0, total_tasks, q_bn):
-                ct_tok = ct // g_split
-                ct_seq = tla.as_numeric(0)
-                ct_rowq = ct_tok
-                # 目标名避开宿主任务体的 bb（swa 同款：头部 static 循环同名
-                # 目标会把 bb 误判成本环 carry）。
-                for cbb in tla.range(1, num_seqs):
-                    if ct_tok >= cu_q[cbb]:
-                        ct_seq = cbb
-                        ct_rowq = ct_tok - cu_q[cbb]
-                ct_qlen = cu_q[ct_seq + 1] - cu_q[ct_seq]
-                ct_kvlen = cu_kv[ct_seq + 1] - cu_kv[ct_seq]
-                ct_cmplen = cu_cmp[ct_seq + 1] - cu_cmp[ct_seq]
-                ct_coff = ct_kvlen - ct_qlen
-                ct_next = ct_kvlen
-                ct_pre = ct_qlen
-                if ori_mask_mode == 3:
-                    ct_next = ct_coff
+            # 的真实 tile 总数。F3 长序列走 host 逐任务标量表（ptab，O(1) 读）；
+            # 小规模保持原 O(K) 前缀游走（官方 50 的 HCA 全部 N<=1024）。
+            n_task = (task - task0) // q_bn
+            if tla.const_expr(use_ptab == 1):
+                # F3：ext100 长序列的墙是 aic/aiv scalar（0456 占 Dur 95.6%），
+                # 来源就是下面这段每任务重算的 O((N/q_bn)^2) 游走；host 侧用
+                # 同式整数运算一次算好本核 tile 前缀，kernel 只查一次表。
+                _ti = n_task * q_bn + task0
+                g_k = ptab[_ti * 13]
+            else:
+                g_k = tla.as_numeric(0)
+                for ct in tla.range(task0, total_tasks, q_bn):
+                    ct_tok = ct // g_split
+                    ct_seq = tla.as_numeric(0)
+                    ct_rowq = ct_tok
+                    # 目标名避开宿主任务体的 bb（swa 同款：头部 static 循环同名
+                    # 目标会把 bb 误判成本环 carry）。
+                    for cbb in tla.range(1, num_seqs):
+                        if ct_tok >= cu_q[cbb]:
+                            ct_seq = cbb
+                            ct_rowq = ct_tok - cu_q[cbb]
+                    ct_qlen = cu_q[ct_seq + 1] - cu_q[ct_seq]
+                    ct_kvlen = cu_kv[ct_seq + 1] - cu_kv[ct_seq]
+                    ct_cmplen = cu_cmp[ct_seq + 1] - cu_cmp[ct_seq]
+                    ct_coff = ct_kvlen - ct_qlen
+                    ct_next = ct_kvlen
                     ct_pre = ct_qlen
-                elif ori_mask_mode == 4:
-                    if ori_win_left == -1:
+                    if ori_mask_mode == 3:
+                        ct_next = ct_coff
                         ct_pre = ct_qlen
-                    else:
-                        ct_pre = ori_win_left - ct_coff
-                    if ori_win_right == -1:
-                        ct_next = ct_kvlen
-                    else:
-                        ct_next = ct_coff + ori_win_right
-                    if ct_pre > ct_qlen:
-                        ct_pre = ct_qlen
-                ct_end = ct_rowq + ct_next + 1
-                if ct_end < 0:
-                    ct_end = tla.as_numeric(0)
-                if ct_end > ct_kvlen:
-                    ct_end = ct_kvlen
-                ct_start = ct_rowq - ct_pre
-                if ct_start < 0:
-                    ct_start = tla.as_numeric(0)
-                if ct_start > ct_kvlen:
-                    ct_start = ct_kvlen
-                ct_ori_lines = ct_end - ct_start
-                if ct_ori_lines < 0:
-                    ct_ori_lines = tla.as_numeric(0)
-                ct_n_ori = (ct_ori_lines + KV_BLOCK - 1) // KV_BLOCK
-                ct_ncmp_next = ct_cmplen * cmp_ratio
-                if cmp_mask_mode != 0:
-                    ct_ncmp_next = ct_cmplen * cmp_ratio + resid[ct_seq] - ct_qlen
-                ct_cmp_end = (ct_rowq + 1 + ct_ncmp_next) // cmp_ratio
-                if ct_cmp_end < 0:
-                    ct_cmp_end = tla.as_numeric(0)
-                if ct_cmp_end > ct_cmplen:
-                    ct_cmp_end = ct_cmplen
-                ct_n_cmp = (ct_cmp_end + KV_BLOCK - 1) // KV_BLOCK
-                if ct < task:
-                    g_k = g_k + ct_n_ori + ct_n_cmp
+                    elif ori_mask_mode == 4:
+                        if ori_win_left == -1:
+                            ct_pre = ct_qlen
+                        else:
+                            ct_pre = ori_win_left - ct_coff
+                        if ori_win_right == -1:
+                            ct_next = ct_kvlen
+                        else:
+                            ct_next = ct_coff + ori_win_right
+                        if ct_pre > ct_qlen:
+                            ct_pre = ct_qlen
+                    ct_end = ct_rowq + ct_next + 1
+                    if ct_end < 0:
+                        ct_end = tla.as_numeric(0)
+                    if ct_end > ct_kvlen:
+                        ct_end = ct_kvlen
+                    ct_start = ct_rowq - ct_pre
+                    if ct_start < 0:
+                        ct_start = tla.as_numeric(0)
+                    if ct_start > ct_kvlen:
+                        ct_start = ct_kvlen
+                    ct_ori_lines = ct_end - ct_start
+                    if ct_ori_lines < 0:
+                        ct_ori_lines = tla.as_numeric(0)
+                    ct_n_ori = (ct_ori_lines + KV_BLOCK - 1) // KV_BLOCK
+                    ct_ncmp_next = ct_cmplen * cmp_ratio
+                    if cmp_mask_mode != 0:
+                        ct_ncmp_next = ct_cmplen * cmp_ratio + resid[ct_seq] - ct_qlen
+                    ct_cmp_end = (ct_rowq + 1 + ct_ncmp_next) // cmp_ratio
+                    if ct_cmp_end < 0:
+                        ct_cmp_end = tla.as_numeric(0)
+                    if ct_cmp_end > ct_cmplen:
+                        ct_cmp_end = ct_cmplen
+                    ct_n_cmp = (ct_cmp_end + KV_BLOCK - 1) // KV_BLOCK
+                    if ct < task:
+                        g_k = g_k + ct_n_ori + ct_n_cmp
 
             # 闸门② Q 槽序（swa 同款：本核第 n 个真实任务占 {2n,2n+1} mod 3
             # 两半槽；空任务不装不释、槽位闲置）。任务内流水版 Q 在任务头装
             # （无跨任务预取，深度 1 握手 wait x1 / 末 tile bmm1 set x1）。
-            n_task = (task - task0) // q_bn
             q_two_n = n_task + n_task
             q_slot_a = q_two_n - (q_two_n // 3) * 3
             q_two_n1 = q_two_n + 1
@@ -468,7 +501,16 @@ def sparse_flash_mla_hca_kernel(
                         if n_load0 > KV_BLOCK:
                             n_load0 = tla.as_numeric(KV_BLOCK)
                         load_k(
-                            sync, bufs, ori_kv, kv_row0, i, n_load0, slot_k0, dtype_in
+                            sync,
+                            bufs,
+                            ori_kv,
+                            kv_row0,
+                            i,
+                            n_load0,
+                            slot_k0,
+                            dtype_in,
+                            kv_zero.ptr,
+                            1,
                         )
                     else:
                         n_load0 = cmp_len - (i - n_ori_tiles) * KV_BLOCK
@@ -485,6 +527,8 @@ def sparse_flash_mla_hca_kernel(
                             n_load0,
                             slot_k0,
                             dtype_in,
+                            kv_zero.ptr,
+                            1,
                         )
                 # ---- stage 1：tile i-1 的 vec1（AIV）与 bmm1（AIC）----
                 if i >= c1:

@@ -49,6 +49,7 @@ from smla_csa_block_vector import (
     clean_output,
     bmm2_data_copy_out,
     configure_trace,
+    configure_pa,
     gather_kv_rows,
     gather_kv_rows_pa_pairwise,
     gather_kv_rows_ring,
@@ -99,6 +100,9 @@ def sparse_flash_mla_ori_sparse_kernel(
     # （OT FA_S2_MAX_NUM，host 计算；g_split==1 时不读）
     ws: tla.Tensor,  # 稀疏 gather 的 GM 暂存槽：WS_BLOCKS * KV_SLOTS * 128 * 512
     ori_phy: tla.Tensor,  # F2：ori 段物理地址表 [T*ori_phy_width] int64（=0 时 1 元素占位）
+    # D2/E13：task 参数表（int32，TP_STRIDE 项/task）。TP_ON==0 时 1 元素占位。
+    tp: tla.Tensor,
+    kv_zero: tla.Tensor,  # F19：常零 GM 源（[KV_BLOCK, D]，只读；KV tail 清零）
     softmax_scale: tla.Float32,
     head_num: tla.Constexpr[int],
     head_dim: tla.Constexpr[int],
@@ -119,6 +123,12 @@ def sparse_flash_mla_ori_sparse_kernel(
     kv_layout: tla.Constexpr[int],
     is_vec_s2phyaddr: tla.Constexpr[int],
     ori_phy_width: tla.Constexpr[int],  # Align128(idx_width)，表行宽（int64 元素）
+    # D2/E13：needInit 由 host 按 kernel 原式逐 token 精确算出后以 Constexpr 下传
+    # （==0 时 clean_output 与入口全核屏障整段折叠；见 host _os_task_need_init）。
+    NEED_INIT: tla.Constexpr[int],
+    # D2/E13：1 = task 参数表驱动（去掉循环内 cu_q/cu_kv/topk 的串行标量读）；
+    # host 只在值域可打包时置 1；0 时指令流与改前一致。
+    TP_ON: tla.Constexpr[int],
 ) -> None:
     dtype_in = q.ptr.dtype
     # IS_SPLIT_G（OT: tiling splitG = gSize > 64，common/smla_kernel_common_arch35.h:273-277）：
@@ -134,6 +144,8 @@ def sparse_flash_mla_ori_sparse_kernel(
 
     # 共用 gather 的 kernel 必须经同一入口（F45）：OS 不实现共享槽臂，显式声明 False。
     configure_trace(g_split, False, False, KV_SLOTS, "os")
+    # R42 步一：PA 页数学的追踪期常量（OS 只有 ori 段）
+    configure_pa(ori_pa_block_size, ori_pa_stride, topk_value_mode)
 
     # T1-1（r10）：非 PA 去表实例（kv_layout 是 Constexpr ⇒ Python 折叠）
     # r12：PA（kv_layout==2）改走内联页数学 + OT 成对落位，不再建表/读表
@@ -159,8 +171,10 @@ def sparse_flash_mla_ori_sparse_kernel(
         pre_idx_ring=idx_ring_on,
     )
     init_sync_preload(sync)
-    # F4（OT csa_kernel_arch35.h:165 CleanOutput）：ORI_SPARSE 恒 needInit=1
-    need_init = compute_need_init(cu_q, cu_kv, num_seqs, ori_mask_mode, 1)
+    # F4（OT csa_kernel_arch35.h:165 CleanOutput）：ORI_SPARSE 原恒 needInit=1。
+    # D2/E13：host 逐 task 精确复算「每个输出行都会被主循环写一次」，全写时
+    # NEED_INIT=0 ⇒ clean_output 折叠；任一 task 0 tile 时 host 置 1，走原路径。
+    need_init = NEED_INIT
     clean_output(
         sync,
         bufs,
@@ -178,17 +192,13 @@ def sparse_flash_mla_ori_sparse_kernel(
     # 核开始写 O 之前全部完成，否则迟到的 init 会把其它核已写好的行清 0——
     # 正控已逐元素复现、且加上本屏障后正控不再生效（ITERATIONS.md §4.12）。
     # 条件与 OT 相同：IS_VEC_S2PHYADDR=1 无条件；否则 needInit=1 时同步。
-    if is_vec_s2phyaddr == 1:
+    # D2/E13：needInit==0 时没有任何核做 init 清零，入口全核屏障无保护对象
+    # （屏障只为「清零 vs 其它核写 O」的跨核可见性），故按 need_init 折叠。
+    if need_init == 1:
         with tla.cube():
             sync_all_cores_aic()
         with tla.vector():
             sync_all_cores_aiv()
-    else:
-        if need_init == 1:
-            with tla.cube():
-                sync_all_cores_aic()
-            with tla.vector():
-                sync_all_cores_aiv()
 
     total_tasks = cu_q[num_seqs] * g_split
     task0 = tla.arch.block_idx()
@@ -257,73 +267,84 @@ def sparse_flash_mla_ori_sparse_kernel(
         if step < n_steps:
             # ---- 定位 (seq, row)；稀疏索引按 token 行 tok = task // g_split ----
             tok = task // g_split
-            rowq = tok
-            for bb in static_range(1, num_seqs):
-                if tok >= cu_q[bb]:
-                    seq = bb
-                    rowq = tok - cu_q[bb]
-            q_len = cu_q[seq + 1] - cu_q[seq]
-            kv_len = cu_kv[seq + 1] - cu_kv[seq]
-
-            # ---- ori 可见区间（kvcache.h:96-114 ComputeParamBatch + :378-388）----
-            # cubeSOuterOffset ≡ rowq，s1RealSize ≡ 1：
-            #   end   ← clip(rowq + nextTokensPerBatchOri + 1, 0, kv_len)
-            #   start ← clip(rowq - preTokensPerBatchOri,     0, kv_len)
-            # pre/next 按 oriMaskMode 分支（与 OT 同式，不自行化简）：
-            #   mode 3（RightDownCausal）：next = kv-q, pre = q
-            #   mode 4（Band）：pre = (win_left==-1) ? q : win_left-(kv-q)，再 Min(pre,q)
-            #                   next = (win_right==-1) ? kv : (kv-q)+win_right
-            #   mode 0（full）：next = kv, pre = q
-            causal_offset = kv_len - q_len
-            next_tok = kv_len  # mode 0（full）默认值
-            pre_tok = q_len
-            if ori_mask_mode == 3:
-                next_tok = causal_offset
-                pre_tok = q_len
-            elif ori_mask_mode == 4:
-                if ori_win_left == -1:
-                    pre_tok = q_len
-                else:
-                    pre_tok = ori_win_left - causal_offset
-                if ori_win_right == -1:
-                    next_tok = kv_len
-                else:
-                    next_tok = causal_offset + ori_win_right
-                if pre_tok > q_len:
-                    pre_tok = q_len
+            if tla.const_expr(TP_ON == 1):
+                # D2/E13：task 参数表（host 按本 kernel 原式逐 token 算好并打包）：
+                # 去掉 seq 扫描与 cu_q/cu_kv/topk 的串行 GM 标量读。
+                tb = task * 8
+                w0 = tp[tb]
+                w1 = tp[tb + 1]
+                seq = w0 - (w0 // 65536) * 65536
+                n_tiles = w0 // 65536
+                lines = w1 - (w1 // 65536) * 65536
+                kv_row0 = tp[tb + 3]
             else:
-                next_tok = kv_len
+                rowq = tok
+                for bb in static_range(1, num_seqs):
+                    if tok >= cu_q[bb]:
+                        seq = bb
+                        rowq = tok - cu_q[bb]
+                q_len = cu_q[seq + 1] - cu_q[seq]
+                kv_len = cu_kv[seq + 1] - cu_kv[seq]
+
+                # ---- ori 可见区间（kvcache.h:96-114 ComputeParamBatch + :378-388）----
+                # cubeSOuterOffset ≡ rowq，s1RealSize ≡ 1：
+                #   end   ← clip(rowq + nextTokensPerBatchOri + 1, 0, kv_len)
+                #   start ← clip(rowq - preTokensPerBatchOri,     0, kv_len)
+                # pre/next 按 oriMaskMode 分支（与 OT 同式，不自行化简）：
+                #   mode 3（RightDownCausal）：next = kv-q, pre = q
+                #   mode 4（Band）：pre = (win_left==-1) ? q : win_left-(kv-q)，再 Min(pre,q)
+                #                   next = (win_right==-1) ? kv : (kv-q)+win_right
+                #   mode 0（full）：next = kv, pre = q
+                causal_offset = kv_len - q_len
+                next_tok = kv_len  # mode 0（full）默认值
                 pre_tok = q_len
-            end_idx = rowq + next_tok + 1
-            if end_idx < 0:
-                end_idx = tla.as_numeric(0)
-            if end_idx > kv_len:
-                end_idx = kv_len
-            start_idx = rowq - pre_tok
-            if start_idx < 0:
-                start_idx = tla.as_numeric(0)
-            if start_idx > kv_len:
-                start_idx = kv_len
-            range_len = end_idx - start_idx
-            if range_len < 0:
-                range_len = tla.as_numeric(0)
+                if ori_mask_mode == 3:
+                    next_tok = causal_offset
+                    pre_tok = q_len
+                elif ori_mask_mode == 4:
+                    if ori_win_left == -1:
+                        pre_tok = q_len
+                    else:
+                        pre_tok = ori_win_left - causal_offset
+                    if ori_win_right == -1:
+                        next_tok = kv_len
+                    else:
+                        next_tok = causal_offset + ori_win_right
+                    if pre_tok > q_len:
+                        pre_tok = q_len
+                else:
+                    next_tok = kv_len
+                    pre_tok = q_len
+                end_idx = rowq + next_tok + 1
+                if end_idx < 0:
+                    end_idx = tla.as_numeric(0)
+                if end_idx > kv_len:
+                    end_idx = kv_len
+                start_idx = rowq - pre_tok
+                if start_idx < 0:
+                    start_idx = tla.as_numeric(0)
+                if start_idx > kv_len:
+                    start_idx = kv_len
+                range_len = end_idx - start_idx
+                if range_len < 0:
+                    range_len = tla.as_numeric(0)
 
-            # ---- 行数：Min(rangeLen, Min(topk, idxWidth))，再 Min(actualS2OriSize) ----
-            sparse_count = ori_topk[tok]
-            if sparse_count > idx_width:
-                sparse_count = tla.as_numeric(idx_width)
-            if sparse_count < 0:
-                sparse_count = tla.as_numeric(0)
-            lines = range_len
-            if lines > sparse_count:
-                lines = sparse_count
-            if lines > kv_len:
-                lines = kv_len
-            if lines < 0:
-                lines = tla.as_numeric(0)
-            n_tiles = (lines + KV_BLOCK - 1) // KV_BLOCK
+                # ---- 行数：Min(rangeLen, Min(topk, idxWidth))，再 Min(actualS2OriSize) ----
+                sparse_count = ori_topk[tok]
+                if sparse_count > idx_width:
+                    sparse_count = tla.as_numeric(idx_width)
+                if sparse_count < 0:
+                    sparse_count = tla.as_numeric(0)
+                lines = range_len
+                if lines > sparse_count:
+                    lines = sparse_count
+                if lines > kv_len:
+                    lines = kv_len
+                if lines < 0:
+                    lines = tla.as_numeric(0)
+                n_tiles = (lines + KV_BLOCK - 1) // KV_BLOCK
 
-            kv_row0 = cu_kv[seq]
+                kv_row0 = cu_kv[seq]
 
         # ---- 本 task 的 body 数：真实 task = n_tiles；哨兵步 = PRELOAD_NUM
         #      （空核不补，避免越界 load）----
@@ -460,6 +481,8 @@ def sparse_flash_mla_ori_sparse_kernel(
                         r1_nload,
                         slot_k1,
                         dtype_in,
+                        kv_zero.ptr,
+                        1,
                     )
                 else:
                     if g_split == 2:

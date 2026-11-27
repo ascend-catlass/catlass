@@ -64,6 +64,8 @@ from smla_csa_block_vector import (
     clean_output,
     bmm2_data_copy_out,
     lse_copy_out,
+    configure_pa,
+    require_pa_page_aligned,
     gather_kv_rows,
     gather_kv_rows_pa_pairwise,
     gather_kv_rows_ring,
@@ -82,8 +84,6 @@ from smla_csa_common import (
     declare_sync,
     init_sync,
     init_sync_preload,
-    mutex_lock,
-    mutex_unlock,
     static_range,
     sync_all_cores_aic,
     sync_all_cores_aiv,
@@ -127,6 +127,9 @@ def sparse_flash_mla_ori_cmp_sparse_kernel(
     ws: tla.Tensor,  # WS_BLOCKS * KV_SLOTS * 128 * 512
     ori_phy: tla.Tensor,  # F2：ori 段物理地址表 [T*ori_phy_width] int64（=0 时 1 元素占位）
     cmp_phy: tla.Tensor,  # F2：cmp 段物理地址表 [T*cmp_phy_width] int64（=0 时 1 元素占位）
+    # D2/E13：task 参数表（int32，TP_STRIDE 项/task）。TP_ON==0 时 1 元素占位。
+    tp: tla.Tensor,
+    kv_zero: tla.Tensor,  # F19：常零 GM 源（[KV_BLOCK, D]，只读；KV tail 清零）
     softmax_scale: tla.Float32,
     head_num: tla.Constexpr[int],
     head_dim: tla.Constexpr[int],
@@ -157,6 +160,12 @@ def sparse_flash_mla_ori_cmp_sparse_kernel(
     is_vec_s2phyaddr: tla.Constexpr[int],
     ori_phy_width: tla.Constexpr[int],  # Align128(ori_idx_width)，表行宽（int64 元素）
     cmp_phy_width: tla.Constexpr[int],  # Align128(cmp_idx_width)，表行宽（int64 元素）
+    # D2/E13：needInit 由 host 按 kernel 原式逐 token 精确算出后以 Constexpr 下传
+    # （==0 时 clean_output 与入口全核屏障整段折叠；见 host _os_task_need_init）。
+    NEED_INIT: tla.Constexpr[int],
+    # D2/E13：1 = task 参数表驱动（去掉循环内 cu_q/cu_kv/cu_cmp/topk/resid 的
+    # 串行标量读）；host 只在值域可打包时置 1；0 时指令流与改前一致。
+    TP_ON: tla.Constexpr[int],
 ) -> None:
     dtype_in = q.ptr.dtype
     # IS_SPLIT_G（OT: tiling splitG = gSize > 64，common/smla_kernel_common_arch35.h:273-277）：
@@ -179,6 +188,10 @@ def sparse_flash_mla_ori_cmp_sparse_kernel(
     # 参与 task 映射（task // g_split 等），那类用法不是类选择，保留原样。
     _PAIRED = g_split == 2
     _PAIRED = _bv.configure_trace(g_split, _PAIRED, _PAIRED, KV_SLOTS, "ocs")
+    # R42 步一：PA 页数学的追踪期常量。OCS 的 ori/cmp 两段共用一份常量，
+    # 两段 block_size/pa_stride 必须一致（当前所有 PA 用例均为 16 页 × 8192 步长）。
+    configure_pa(ori_pa_block_size, ori_pa_stride, topk_value_mode)
+    require_pa_page_aligned(cmp_pa_block_size, cmp_pa_stride, "ocs")
 
     # T1-1（r10）：非 PA 去表实例。kv_layout 是 Constexpr ⇒ 此处为 Python 折叠，
     # 不产生运行期判据。
@@ -214,8 +227,10 @@ def sparse_flash_mla_ori_cmp_sparse_kernel(
         pre_idx_ring=idx_ring_on,
     )
     init_sync_preload(sync)
-    # F4（OT csa_kernel_arch35.h:165 CleanOutput）：ORI_CMP_SPARSE 恒 needInit=1
-    need_init = compute_need_init(cu_q, cu_kv, num_seqs, ori_mask_mode, 1)
+    # F4（OT csa_kernel_arch35.h:165 CleanOutput）：ORI_CMP_SPARSE 原恒 needInit=1。
+    # D2/E13：host 逐 task 精确复算「每个输出行都会被主循环写一次」，全写时
+    # NEED_INIT=0 ⇒ clean_output 折叠；任一 task 0 tile 时 host 置 1，走原路径。
+    need_init = NEED_INIT
     clean_output(
         sync,
         bufs,
@@ -234,17 +249,13 @@ def sparse_flash_mla_ori_cmp_sparse_kernel(
     # 核开始写 O 之前全部完成，否则迟到的 init 会把其它核已写好的行清 0——
     # 正控已逐元素复现、且加屏障后正控不再生效（ITERATIONS.md §4.12）。
     # 条件与 OT 相同：IS_VEC_S2PHYADDR=1 无条件；否则 needInit=1 时同步。
-    if is_vec_s2phyaddr == 1:
+    # D2/E13：needInit==0 时没有任何核做 init 清零，入口全核屏障无保护对象
+    # （屏障只为「清零 vs 其它核写 O」的跨核可见性），故按 need_init 折叠。
+    if need_init == 1:
         with tla.cube():
             sync_all_cores_aic()
         with tla.vector():
             sync_all_cores_aiv()
-    else:
-        if need_init == 1:
-            with tla.cube():
-                sync_all_cores_aic()
-            with tla.vector():
-                sync_all_cores_aiv()
 
     total_tasks = cu_q[num_seqs] * g_split
     task0 = tla.arch.block_idx()
@@ -379,87 +390,102 @@ def sparse_flash_mla_ori_cmp_sparse_kernel(
         if step < n_steps:
             # ---- 定位 (seq, row)；稀疏索引/topk 按 token 行（tok），不是 G 半区 ----
             tok = task // g_split
-            rowq = tok
-            for bb in static_range(1, num_seqs):
-                if tok >= cu_q[bb]:
-                    seq = bb
-                    rowq = tok - cu_q[bb]
-            q_len = cu_q[seq + 1] - cu_q[seq]
-            kv_len = cu_kv[seq + 1] - cu_kv[seq]
-            cmp_len = cu_cmp[seq + 1] - cu_cmp[seq]
+            if tla.const_expr(TP_ON == 1):
+                # D2/E13：task 参数表（host 按本 kernel 原式逐 token 算好并打包）：
+                # 去掉 seq 扫描与 cu_q/cu_kv/cu_cmp/topk/resid 的串行 GM 标量读。
+                tb = task * 8
+                w0 = tp[tb]
+                w1 = tp[tb + 1]
+                w2 = tp[tb + 2]
+                seq = w0 - (w0 // 65536) * 65536
+                n_tiles = w0 // 65536
+                ori_lines = w1 - (w1 // 65536) * 65536
+                n_ori_tiles = w1 // 65536
+                cmp_lines = w2 - (w2 // 65536) * 65536
+                kv_row0 = tp[tb + 3]
+                cmp_row0 = tp[tb + 4]
+            else:
+                rowq = tok
+                for bb in static_range(1, num_seqs):
+                    if tok >= cu_q[bb]:
+                        seq = bb
+                        rowq = tok - cu_q[bb]
+                q_len = cu_q[seq + 1] - cu_q[seq]
+                kv_len = cu_kv[seq + 1] - cu_kv[seq]
+                cmp_len = cu_cmp[seq + 1] - cu_cmp[seq]
 
-            # ---- ori 可见区间（ComputeParamBatch :96-114，逐式照搬）----
-            causal_offset = kv_len - q_len
-            next_tok = kv_len  # mode 0（full）默认值
-            pre_tok = q_len
-            if ori_mask_mode == 3:
-                next_tok = causal_offset
+                # ---- ori 可见区间（ComputeParamBatch :96-114，逐式照搬）----
+                causal_offset = kv_len - q_len
+                next_tok = kv_len  # mode 0（full）默认值
                 pre_tok = q_len
-            elif ori_mask_mode == 4:
-                if ori_win_left == -1:
+                if ori_mask_mode == 3:
+                    next_tok = causal_offset
                     pre_tok = q_len
-                else:
-                    pre_tok = ori_win_left - causal_offset
-                if ori_win_right == -1:
-                    next_tok = kv_len
-                else:
-                    next_tok = causal_offset + ori_win_right
-                if pre_tok > q_len:
-                    pre_tok = q_len
-            end_idx = rowq + next_tok + 1
-            if end_idx < 0:
-                end_idx = tla.as_numeric(0)
-            if end_idx > kv_len:
-                end_idx = kv_len
-            start_idx = rowq - pre_tok
-            if start_idx < 0:
-                start_idx = tla.as_numeric(0)
-            if start_idx > kv_len:
-                start_idx = kv_len
-            range_len = end_idx - start_idx
-            if range_len < 0:
-                range_len = tla.as_numeric(0)
+                elif ori_mask_mode == 4:
+                    if ori_win_left == -1:
+                        pre_tok = q_len
+                    else:
+                        pre_tok = ori_win_left - causal_offset
+                    if ori_win_right == -1:
+                        next_tok = kv_len
+                    else:
+                        next_tok = causal_offset + ori_win_right
+                    if pre_tok > q_len:
+                        pre_tok = q_len
+                end_idx = rowq + next_tok + 1
+                if end_idx < 0:
+                    end_idx = tla.as_numeric(0)
+                if end_idx > kv_len:
+                    end_idx = kv_len
+                start_idx = rowq - pre_tok
+                if start_idx < 0:
+                    start_idx = tla.as_numeric(0)
+                if start_idx > kv_len:
+                    start_idx = kv_len
+                range_len = end_idx - start_idx
+                if range_len < 0:
+                    range_len = tla.as_numeric(0)
 
-            # ---- ori 行数（ORI_CMP_SPARSE 分支：start=0，end=Min(...)）----
-            ori_count = ori_topk[tok]
-            if ori_count > ori_idx_width:
-                ori_count = tla.as_numeric(ori_idx_width)
-            if ori_count < 0:
-                ori_count = tla.as_numeric(0)
-            ori_lines = range_len
-            if ori_lines > ori_count:
-                ori_lines = ori_count
-            if ori_lines > kv_len:
-                ori_lines = kv_len
-            if ori_lines < 0:
-                ori_lines = tla.as_numeric(0)
-            n_ori_tiles = (ori_lines + KV_BLOCK - 1) // KV_BLOCK
+                # ---- ori 行数（ORI_CMP_SPARSE 分支：start=0，end=Min(...)）----
+                ori_count = ori_topk[tok]
+                if ori_count > ori_idx_width:
+                    ori_count = tla.as_numeric(ori_idx_width)
+                if ori_count < 0:
+                    ori_count = tla.as_numeric(0)
+                ori_lines = range_len
+                if ori_lines > ori_count:
+                    ori_lines = ori_count
+                if ori_lines > kv_len:
+                    ori_lines = kv_len
+                if ori_lines < 0:
+                    ori_lines = tla.as_numeric(0)
+                n_ori_tiles = (ori_lines + KV_BLOCK - 1) // KV_BLOCK
 
-            # ---- cmp 行数（:86-93 + :410-420）----
-            cmp_count = cmp_topk[tok]
-            if cmp_count > cmp_idx_width:
-                cmp_count = tla.as_numeric(cmp_idx_width)
-            if cmp_count < 0:
-                cmp_count = tla.as_numeric(0)
-            # nextTokensPerBatchCmp（kvcache.h:86-93）：
-            #   cmpMaskMode == 0 → actualS2CmpSize * cmpRatio（不减 q_len、不加 resid）
-            #   否则            → actualS2CmpSize*cmpRatio + resid - actualS1Size
-            next_cmp = cmp_len * cmp_ratio  # cmpMaskMode == 0 的默认值
-            if cmp_mask_mode != 0:
-                next_cmp = cmp_len * cmp_ratio + resid[seq] - q_len
-            cmp_end = (rowq + 1 + next_cmp) // cmp_ratio
-            if cmp_end < 0:
-                cmp_end = tla.as_numeric(0)
-            if cmp_end > cmp_len:
-                cmp_end = cmp_len
-            cmp_lines = cmp_end
-            if cmp_lines > cmp_count:
-                cmp_lines = cmp_count
-            n_cmp_tiles = (cmp_lines + KV_BLOCK - 1) // KV_BLOCK
+                # ---- cmp 行数（:86-93 + :410-420）----
+                cmp_count = cmp_topk[tok]
+                if cmp_count > cmp_idx_width:
+                    cmp_count = tla.as_numeric(cmp_idx_width)
+                if cmp_count < 0:
+                    cmp_count = tla.as_numeric(0)
+                # nextTokensPerBatchCmp（kvcache.h:86-93）：
+                #   cmpMaskMode == 0 → actualS2CmpSize * cmpRatio（不减 q_len、不加 resid）
+                #   否则            → actualS2CmpSize*cmpRatio + resid - actualS1Size
+                next_cmp = cmp_len * cmp_ratio  # cmpMaskMode == 0 的默认值
+                if cmp_mask_mode != 0:
+                    next_cmp = cmp_len * cmp_ratio + resid[seq] - q_len
+                cmp_end = (rowq + 1 + next_cmp) // cmp_ratio
+                if cmp_end < 0:
+                    cmp_end = tla.as_numeric(0)
+                if cmp_end > cmp_len:
+                    cmp_end = cmp_len
+                cmp_lines = cmp_end
+                if cmp_lines > cmp_count:
+                    cmp_lines = cmp_count
+                n_cmp_tiles = (cmp_lines + KV_BLOCK - 1) // KV_BLOCK
 
-            n_tiles = n_ori_tiles + n_cmp_tiles
-            kv_row0 = cu_kv[seq]
-            cmp_row0 = cu_cmp[seq]
+                n_tiles = n_ori_tiles + n_cmp_tiles
+                kv_row0 = cu_kv[seq]
+                cmp_row0 = cu_cmp[seq]
 
             # F29（路径 A）：ori / cmp 两段表行已在 prologue 的 Init 阶段由全体
             # AIV 分摊生成、并过一个块屏障（见函数头 total_tasks 之前），
@@ -705,6 +731,8 @@ def sparse_flash_mla_ori_cmp_sparse_kernel(
                         r1_nload,
                         slot_k1,
                         dtype_in,
+                        kv_zero.ptr,
+                        1,
                     )
                 else:
                     if _PAIRED:
@@ -891,13 +919,10 @@ def sparse_flash_mla_ori_cmp_sparse_kernel(
     # `sparse_flash_mla_csa_block_vector_arch35.h:1515` 的
     # `FreeEvent ... WaitFlag<HardEvent::MTE3_V>(INNERCORE_STAGE2)`：set 落在
     # MTE3 管（排在所有已发出拷贝之后），wait 在 V 管消费，核退出前等到它。
-    # CATLASS 2.2.1 的 mutex id 仅支持 0..31，本 kernel 的资源集合已全部占用。
-    # 此处复用 m_init(id=31)：输出初始化在主循环前已完成且 lock/unlock 配平，
-    # 退出阶段可安全借它完成 MTE3 -> V 排空，避免与 Q/S 的 mutex 共享 id。
+    # 复用 init_mte3_v（MTE3->V，id 0，主循环内无其它使用，set/wait 成对自洽）。
     with tla.vector():
-        sync.m_init.lock(pipe=tla.pipes.MTE3)
-        sync.m_init.unlock(pipe=tla.pipes.MTE3)
-        sync.m_init.lock(pipe=tla.pipes.VECTOR)
+        tla.set_flag(sync.init_mte3_v)
+        tla.wait_flag(sync.init_mte3_v)
 
     # ---- 追踪期闭合校验（F45）：承诺开共享臂却一次没发射 ⇒ 编译失败 ----
     _bv.verify_trace_closed("ocs")
