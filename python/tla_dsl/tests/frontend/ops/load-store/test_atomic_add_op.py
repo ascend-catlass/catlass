@@ -95,17 +95,17 @@ def atomic_add_ub2gm_direct_arg(ub_tensor: tla.Tensor, gm_tensor: tla.Tensor) ->
 
 
 @tla.kernel
-def atomic_l0c2gm(
-    gm_tensor: tla.Tensor, mode: tla.Constexpr[tla.params.AtomicMode]
+def atomic_l0c_writeback(
+    dst_tensor: tla.Tensor, mode: tla.Constexpr[tla.params.AtomicMode]
 ) -> None:
     _m, _n = 32, 32
     l0c_ptr = tla.allocate(_m * _n, tla.Float32, tla.AddressSpace.l0c, 1024)
-    l0c_tensor = tla.make_tensor_like(l0c_ptr, gm_tensor, tla.arch.L0Clayout)
+    l0c_tensor = tla.make_tensor_like(l0c_ptr, dst_tensor, tla.arch.L0Clayout)
     l0c_tile = tla.tile_view(l0c_tensor, tla.make_shape(_m, _n), tla.make_coord(0, 0))
-    gm_tile = tla.tile_view(gm_tensor, tla.make_shape(_m, _n), tla.make_coord(0, 0))
+    dst_tile = tla.tile_view(dst_tensor, tla.make_shape(_m, _n), tla.make_coord(0, 0))
     with tla.cube():
         tla.copy(
-            gm_tile,
+            dst_tile,
             l0c_tile,
             tla.params.CopyL0C2DstParams(unit_flag=0b11, atomic_mode=mode),
         )
@@ -146,23 +146,6 @@ def ub2gm_with_default_params(ub: tla.Tensor, gm: tla.Tensor) -> None:
         tla.copy(gm, ub, tla.params.CopyUbToGmParams())
 
 
-@tla.kernel
-def gm2ub_atomic_false(
-    gm_tensor: tla.Tensor,
-    ub_tensor: tla.Tensor,
-    mode: tla.Constexpr[tla.params.AtomicMode],
-) -> None:
-    _vec_len = 64
-    x_gm = tla.tile_view(gm_tensor, tla.make_shape(_vec_len), tla.make_coord(0))
-    x_ub = tla.tile_view(ub_tensor, tla.make_shape(_vec_len), tla.make_coord(0))
-    with tla.vector():
-        tla.copy(
-            x_ub,
-            x_gm,
-            tla.params.CopyUbToGmParams(atomic_mode=mode),
-        )
-
-
 ATOMIC_MODES = (
     tla.params.AtomicMode.ADD,
     tla.params.AtomicMode.MAX,
@@ -195,12 +178,26 @@ def test_atomic_add_ub2gm_direct_arg(compiler_tlair: Any) -> None:
 @pytest.mark.parametrize("dtype", (tla.Float32, tla.Float16, tla.BFloat16))
 def test_atomic_l0c2gm(compiler_tlair: Any, mode, dtype) -> None:
     mlir = compiler_tlair(
-        atomic_l0c2gm,
+        atomic_l0c_writeback,
         type_args=(_gm_tensor(dtype=dtype, shape=(32, 32)), mode),
     )
 
     assert "tla.copy" in mlir
     assert f"atomic_mode = #tla.atomic_mode<{mode.value}>" in mlir
+
+
+def test_atomic_l0c2ub_rejected() -> None:
+    ub = make_fake_tensor(
+        tla.Float32,
+        (32, 32),
+        (32, 1),
+        addrspace=tla.AddressSpace.ub,
+        layout_tag=tla.arch.RowMajor,
+    )
+    with pytest.raises(
+        TlaLoweringError, match="the dst location should only be GM but got ub"
+    ):
+        atomic_l0c_writeback.dump_mlir(type_args=(ub, tla.params.AtomicMode.ADD))
 
 
 @pytest.mark.parametrize("dtype", (tla.Int32, tla.UInt8))
@@ -233,12 +230,6 @@ def test_ub2gm_params_without_atomic_mode(compiler_tlair, kernel, extra_args):
     mlir = compiler_tlair(kernel, type_args=(_ub_tensor(), _gm_tensor(), *extra_args))
     assert "tla.copy" in mlir
     assert "atomic_mode" not in mlir
-
-
-@pytest.mark.parametrize("mode", ATOMIC_MODES)
-def test_atomic_gm2ub_rejected(mode) -> None:
-    with pytest.raises(TlaLoweringError, match="the dst location should only be GM"):
-        gm2ub_atomic_false.dump_mlir(type_args=(_gm_tensor(), _ub_tensor(), mode))
 
 
 @pytest.mark.parametrize("mode", ATOMIC_MODES)

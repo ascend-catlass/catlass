@@ -63,7 +63,9 @@ def Tla_CopyOp : Tla_Op<"copy", []> {
     Optional ``params`` is either ``!tla.copy_l0c2dst_params`` (L0C→dst fixpipe
     knobs) or ``!tla.copy_pad_params`` (GM→UB DataCopyPad). The two are mutually
     exclusive by route. Pad lowering appends
-    ``pad_enable,left,right,value_bits`` after ``gmCachePolicy`` on GM→UB stubs.
+    ``pad_enable,left,right,value_bits`` after ``gmCachePolicy`` on normal GM→UB stubs.
+
+    ``compact`` selects packed UB rows on the Ascend 950 RowMajor GM↔UB routes.
 
     A microscaling (MX) L1->L0A/L0B load is ``tla.copy_mx``, which carries the
     operand's e8m0 scale block. The frontend spells that as ``tla.copy`` with a
@@ -75,7 +77,8 @@ def Tla_CopyOp : Tla_Op<"copy", []> {
     Optional<AnyTypeOf<[Tla_CopyL0C2DstParamsType, Tla_CopyPadParamsType]>>:$params,
     OptionalAttr<Tla_AtomicModeAttr>:$atomic_mode,
     OptionalAttr<Tla_CachePolicyAttr>:$src_cache_policy,
-    OptionalAttr<Tla_CachePolicyAttr>:$dst_cache_policy);
+    OptionalAttr<Tla_CachePolicyAttr>:$dst_cache_policy,
+    UnitAttr:$compact);
   let assemblyFormat = [{
     $dst `,` $src (`,` $params^)? attr-dict `:`
     qualified(type($dst)) `,` qualified(type($src)) (`,` qualified(type($params))^)?

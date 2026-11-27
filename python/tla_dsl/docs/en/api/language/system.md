@@ -438,6 +438,44 @@ def read_first(src: tla.Tensor, dst: tla.Tensor):
 
 ---
 
+### `tla.arch.store_bypass_dcache`
+
+**Source:** [`catlass.core_api.arch_store_bypass_dcache`](../../../../catlass/core_api.py)
+
+Description:
+
+Write one Int32 GM scalar while bypassing DCache.
+
+Prototype:
+
+```python
+tla.arch.store_bypass_dcache(ptr: Pointer, value: IndexLike) -> None
+```
+
+Parameters:
+
+- `ptr` (`Pointer`): GM pointer to the element to write.
+- `value` (`IndexLike`): Integer scalar converted to Int32.
+
+Constraints:
+
+- On Ascend 950, call inside `tla.cube()` or `tla.vector()` and outside
+  `tla.vec.func()`.
+- The pointer must name a valid, naturally aligned Int32 GM element.
+- Before publishing a ready word, wait for the producing pipe when
+  required, such as MTE3→SCALAR on AIV or FIX→SCALAR on AIC.
+
+Example:
+
+```python
+@tla.kernel
+def write_first(dst: tla.Tensor):
+    with tla.vector():
+        tla.arch.store_bypass_dcache(dst.ptr_with_coord, 1)
+```
+
+---
+
 ### `tla.arch.atomic_add`
 
 **Source:** [`catlass.core_api.arch_atomic_add`](../../../../catlass/core_api.py)

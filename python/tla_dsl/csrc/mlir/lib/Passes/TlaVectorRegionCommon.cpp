@@ -13,6 +13,7 @@
 #include "mlir/Dialect/Vector/IR/VectorOps.h"
 #include "mlir/IR/Dominance.h"
 #include "mlir/IR/IRMapping.h"
+#include "mlir/IR/Matchers.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
 #include <algorithm>
@@ -140,6 +141,50 @@ public:
             return rewriter.notifyMatchFailure(
                 copyOp, "unsupported tla.copy route (vector pass handles gm<->ub and ub->l1)");
 
+        if (copyOp.getCompact()) {
+            auto constant = [](Value value) -> std::optional<int64_t> {
+                llvm::APInt bits;
+                if (matchPattern(value, m_ConstantInt(&bits)))
+                    return bits.getSExtValue();
+                return std::nullopt;
+            };
+            auto equal = [&](Value lhs, Value rhs) {
+                // The layout builder may cast the same dynamic extent
+                // separately for the shape and stride.
+                auto lhsCast = lhs.getDefiningOp<arith::IndexCastOp>();
+                auto rhsCast = rhs.getDefiningOp<arith::IndexCastOp>();
+                if (lhsCast && rhsCast && lhs.getType() == rhs.getType() && lhsCast.getIn() == rhsCast.getIn())
+                    return true;
+                auto lhsConstant = constant(lhs);
+                return lhs == rhs || (lhsConstant && lhsConstant == constant(rhs));
+            };
+            if (constant(srcDesc.stride[1]) != 1 || constant(dstDesc.stride[1]) != 1)
+                return copyOp.emitOpError("compact requires src and dst column strides of 1");
+            if (!equal(srcDesc.originShape[0], dstDesc.originShape[0]) ||
+                !equal(srcDesc.originShape[1], dstDesc.originShape[1]))
+                return copyOp.emitOpError("compact requires matching valid src and dst extents");
+            bool ubToGm = srcDesc.addrspace == "ub";
+            const TensorDescriptor& ubDesc = ubToGm ? srcDesc : dstDesc;
+            const TensorDescriptor& gmDesc = ubToGm ? dstDesc : srcDesc;
+            if (!equal(ubDesc.stride[0], ubDesc.originShape[1]))
+                return copyOp.emitOpError("compact requires the UB row stride to equal the valid row width");
+            auto columns = constant(gmDesc.originShape[1]);
+            auto gmStride = constant(gmDesc.stride[0]);
+            if (columns && gmStride && *gmStride < *columns)
+                return copyOp.emitOpError("compact requires the GM row stride to cover the valid row width");
+            if (::tla::isPackedFp4Type(srcDesc.elementType)) {
+                auto isEven = [](std::optional<int64_t> value) { return value && *value % 2 == 0; };
+                if (!isEven(columns) || !isEven(gmStride) || !isEven(constant(srcDesc.coord[1])) ||
+                    !isEven(constant(dstDesc.coord[1])))
+                    return copyOp.emitOpError(
+                        "compact FP4 copy requires statically even row width, row strides and column coordinates");
+            }
+            auto rows = constant(srcDesc.originShape[0]);
+            if (rows && (*rows < 0 || *rows > std::numeric_limits<uint16_t>::max()))
+                return copyOp.emitOpError("compact row count exceeds the DMA block count range");
+            calleeName += "_compact";
+        }
+
         auto buildRuntimeMemref = [&](const TensorDescriptor& desc) -> FailureOr<Value> {
             FailureOr<Value> baseMemref = ::tla::getOrMaterializeDescriptorBaseMemref(
                 rewriter, copyOp.getLoc(), desc, copyOp.getOperation(), loweredMemrefByValue);
@@ -164,8 +209,9 @@ public:
         operands.append(payload.begin(), payload.end());
         ::tla::appendGmCachePolicyOperand(
             rewriter, copyOp.getLoc(), copyOp, srcDesc.addrspace, dstDesc.addrspace, operandTypes, operands);
-        ::tla::appendGmToUbPadOperands(
-            rewriter, copyOp.getLoc(), copyOp, srcDesc.addrspace, dstDesc.addrspace, operandTypes, operands);
+        if (!copyOp.getCompact())
+            ::tla::appendGmToUbPadOperands(
+                rewriter, copyOp.getLoc(), copyOp, srcDesc.addrspace, dstDesc.addrspace, operandTypes, operands);
         auto callee = ::tla::getOrCreateRuntimeCall(copyOp->getParentOfType<ModuleOp>(), calleeName, operandTypes);
 
         emitCopyRuntimeCall(rewriter, copyOp, callee, operands, *dstRuntimeMemref);

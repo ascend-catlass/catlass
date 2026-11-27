@@ -373,19 +373,18 @@ set/wait pairs; a `dsb` cannot replace them, and getting this wrong reads stale 
 with no compile error. The barrier does not participate in `auto_sync`, and each barrier
 blocks the scalar pipeline until the domain drains, so keep it out of hot inner loops.
 
-For cross-core GM handoff, use the officially prescribed pattern: the producer
-bypass-writes the data, then `dsb(GM)`, then bypass-writes the sync flag; the
-consumer spin-polls the flag with bypass reads and reads the data through bypass
-reads as well. The "visible to other cores" guarantee of `dsb` applies to GM
-accesses that bypass the D-cache (`WriteGmBypassDCache` / `ReadGmBypassDCache`,
-wrappable with `tla.extern`; a runnable case lives in
-`tests/end_to_end/data_sync_barrier.py`):
+The cross-core visibility guarantee of `dsb(GM)` applies to GM accesses that **bypass
+the D-cache**. The producer writes an Int32 value with `tla.arch.store_bypass_dcache`,
+waits for that GM write to complete, then publishes the ready flag. The consumer can
+poll the flag with `tla.arch.load_bypass_dcache` and read the data with the same API
+once it sees the ready value. See `tests/end_to_end/data_sync_barrier.py` for a
+runnable two-core example.
 
 ```python
 with tla.vector():
-    bypass_write(src.ptr, 1, data)  # user extern: WriteGmBypassDCache
-    tla.data_sync_barrier(tla.params.DsbTarget.GM)  # wait earlier GM writes out
-    bypass_write(src.ptr, 0, flag)  # only then publish the sync flag
+    tla.arch.store_bypass_dcache(src.ptr + 1, data)
+    tla.data_sync_barrier(tla.params.DsbTarget.GM)
+    tla.arch.store_bypass_dcache(src.ptr, flag)
 ```
 
 Ordinary scalar-pipe GM writes stay invisible to other engines and other cores

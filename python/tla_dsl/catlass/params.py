@@ -411,8 +411,22 @@ class MaskLoadParams(LoadParams):
 
 
 @dataclass
+class CopyGmToUbParams(CopyParams):
+    """Load packed UB rows with `compact=True` on Ascend 950."""
+
+    compact: bool = False
+
+    def _validate(self):
+        if not isinstance(self.compact, bool):
+            raise TypeError("CopyGmToUbParams.compact must be a bool")
+
+
+@dataclass
 class CopyUbToGmParams(CopyParams):
+    """Select packed UB rows with `compact=True` on Ascend 950."""
+
     atomic_mode: AtomicMode = AtomicMode.NONE
+    compact: bool = False
 
     def _validate(self):
         cls_name = type(self).__name__
@@ -420,6 +434,10 @@ class CopyUbToGmParams(CopyParams):
             raise ValueError(
                 f"{cls_name}.atomic_mode must be one of {tuple(AtomicMode)}"
             )
+        if not isinstance(self.compact, bool):
+            raise TypeError(f"{cls_name}.compact must be a bool")
+        if self.compact and self.atomic_mode != AtomicMode.NONE:
+            raise ValueError("compact copy does not support atomic writeback")
 
 
 def _copy_pad_static_nonzero_padding_value(value: Any) -> bool:

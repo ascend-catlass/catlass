@@ -556,10 +556,10 @@ tla.data_sync_barrier(domain: DsbTarget) -> None
 
 ```python
 with tla.vector():
-    # 官方跨核形态：旁路写数据 → 等待 GM 域 → 旁路写同步标记；
-    # 消费者旁路轮询标记后再旁路读数据。完整样例见
-    # tests/end_to_end/data_sync_barrier.py。
-    bypass_write(src.ptr, 1, data)  # 用户 extern：WriteGmBypassDCache
+    # src 中有两个 Int32 元素。消费者可用 tla.arch.load_bypass_dcache
+    # 轮询 src.ptr 处的标志，观察到就绪值后，用同一接口读取 src.ptr + 1 处的数据。
+    # 可运行示例见 tests/end_to_end/data_sync_barrier.py。
+    tla.arch.store_bypass_dcache(src.ptr + 1, data)
     tla.data_sync_barrier(tla.params.DsbTarget.GM)
-    bypass_write(src.ptr, 0, flag)  # 用户 extern：WriteGmBypassDCache
+    tla.arch.store_bypass_dcache(src.ptr, flag)
 ```

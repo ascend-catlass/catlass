@@ -35,14 +35,15 @@ tla.copy(dst: Tensor, src: Tensor, params: CopyParams | None = None, *, scale: T
 - `dst`（`Tensor`）：目的 tile。必填。
 - `src`（`Tensor`）：源 tile。必填。
 - `params`（`CopyParams | None`）：通路参数：`CopyL0C2DstParams`、
-  `CopyUbToGmParams` 或 `CopyPadParams`。默认 `None`（精确字节拷贝 /
+  `CopyGmToUbParams`、`CopyUbToGmParams` 或 `CopyPadParams`。默认 `None`（精确字节拷贝 /
   无 pad / fixpipe 默认行为）。
   - `CopyL0C2DstParams`：L0C → GM/L1/UB 的 fixpipe 选项（`unit_flag`、
     `relu_enable`、`quant_mode`、`quant_scale`、`quant_offset`、
     `quant_tensor`、`l0c2ub_mode`、`atomic_mode`）。支持组合见下方
     Cube fixpipe 通路表。
-  - `CopyUbToGmParams`：UB → GM 写回选项。字段：`atomic_mode`
-    （`AtomicMode`，默认 `NONE`）。
+  - `CopyGmToUbParams`：GM → UB 载入选项。`compact=True` 将目的端各行紧密排列。
+  - `CopyUbToGmParams`：UB → GM 写回选项。字段为 `compact`（`bool`，默认
+    `False`）和 `atomic_mode`（`AtomicMode`，默认 `NONE`）。
   - `CopyPadParams`：开启 DataCopyPad（`isPad=true`；GM→UB 或
     GM→L1 VectorLayout→VectorLayout）。支持的通路与 dtype 见下方
     CopyPad 通路表。可选字段（可同时设置，各自默认 `0`）：
@@ -95,6 +96,12 @@ tla.copy(dst: Tensor, src: Tensor, params: CopyParams | None = None, *, scale: T
   为正、按 32 字节对齐且不超过 65535 个 32 字节块。E8M0 源矩阵间距必须保持指数对。
   运行时几何参数须满足相同约束。调用方提供足够底层存储，并保证目的矩阵互不重叠；
   允许交错 NZ 布局。
+- 在 Ascend 950 上，`CopyGmToUbParams(compact=True)` 将行紧密载入 UB，
+  `CopyUbToGmParams(compact=True)` 从 UB 写回紧密排列的行。两种模式都要求源和目的
+  为有效尺寸、元素类型一致的 RowMajor tile。支持的元素类型见对应通路。
+  两端列 stride 均须为 1，UB 行 stride 须等于有效行宽，GM 行 stride 可以更大。
+  使用运行时几何参数时，调用方须保证 GM 行 stride 覆盖有效行宽，且有效尺寸可在一次
+  DMA 请求中搬运。compact 载入的 UB 目的地址须按 32 字节对齐。
 - packed fp4 在搬运前转换描述符的通路（GM→UB、UB→GM 与 UB→L1）按字节
   搬运：两个 fp4 元素共用一个字节，因此各 tile 最内层的 `origin_shape`、
   最内层起始坐标，以及转换时被折半的 stride，三者均须为偶数，任一为奇数

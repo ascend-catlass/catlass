@@ -340,16 +340,16 @@ set/wait 对，`dsb` 不能替代它们；用错不会报编译错误，只会�
 该屏障不参与 `auto_sync`，且每次屏障都会阻塞标量流水直至该域排空，请放在热点
 内层循环之外。
 
-跨核 GM 数据交接用官方推荐形态：生产者旁路写数据 → `dsb(GM)` → 旁路写同步标记；
-消费者用旁路读自旋轮询该标记，确认后再用旁路读读取数据。`dsb` 的「对其他核可见」
-保证针对**绕过 D-cache** 的 GM 访问（`WriteGmBypassDCache` / `ReadGmBypassDCache`，
-可用 `tla.extern` 包裹，可运行样例见 `tests/end_to_end/data_sync_barrier.py`）：
+`dsb(GM)` 的跨核可见性保证适用于**绕过 D-cache** 的 GM 访问。下例中，生产者用
+`tla.arch.store_bypass_dcache` 写入一个 Int32 数据，等待该次 GM 写完成后，再写入就绪标志。
+消费者可用 `tla.arch.load_bypass_dcache` 轮询标志，观察到就绪值后，用同一接口读取数据。
+可运行的双核示例见 `tests/end_to_end/data_sync_barrier.py`。
 
 ```python
 with tla.vector():
-    bypass_write(src.ptr, 1, data)  # 用户 extern：WriteGmBypassDCache
-    tla.data_sync_barrier(tla.params.DsbTarget.GM)  # 先等此前的 GM 写落盘
-    bypass_write(src.ptr, 0, flag)  # 再发布同步标记
+    tla.arch.store_bypass_dcache(src.ptr + 1, data)
+    tla.data_sync_barrier(tla.params.DsbTarget.GM)
+    tla.arch.store_bypass_dcache(src.ptr, flag)
 ```
 
 普通标量 GM 写在内核期内对其他引擎与其他核不可见；V-pipe 的 UB 写也不被

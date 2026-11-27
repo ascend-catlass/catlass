@@ -347,6 +347,12 @@ public:
             op.erase();
         }
 
+        SmallVector<::tla::ArchStoreBypassDcacheOp, 8> bypassStores;
+        module.walk([&](::tla::ArchStoreBypassDcacheOp op) { bypassStores.push_back(op); });
+        for (::tla::ArchStoreBypassDcacheOp op : bypassStores)
+            if (failed(replaceWithHelperCall(op, "_mlir_ciface_tla_store_bypass_dcache_i32")))
+                return signalPassFailure();
+
         SmallVector<::tla::ArchDcciCachelineOp, 8> cachelines;
         module.walk([&](::tla::ArchDcciCachelineOp op) { cachelines.push_back(op); });
         for (::tla::ArchDcciCachelineOp op : cachelines) {

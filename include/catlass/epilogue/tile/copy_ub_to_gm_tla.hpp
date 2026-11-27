@@ -71,8 +71,8 @@ struct CopyUb2GmTla<
     CATLASS_DEVICE
     CopyUb2GmTla() = default;
 
-    template <class TensorDst, class TensorSrc>
-    CATLASS_DEVICE void operator()(TensorDst const& dstTensor, TensorSrc const& srcTensor)
+    template <class TensorDst, class TensorSrc, bool Compact = false>
+    CATLASS_DEVICE void operator()(TensorDst const& dstTensor, TensorSrc const& srcTensor, tla::Bool<Compact> = {})
     {
         static_assert(
             tla::detail::isRowMajor<typename TensorSrc::Layout>::value &&
@@ -81,13 +81,21 @@ struct CopyUb2GmTla<
             "The input parameters do not match. TensorSrc must be UB and RowMajor, "
             "while TensorDst must be GM and RowMajor");
 
-        const uint32_t blockLen = ElementsToBytes<ElementSrc>(tla::get<1>(dstTensor.originShape()));
+        const auto rows = tla::get<0>(dstTensor.originShape());
+        const auto columns = tla::get<1>(dstTensor.originShape());
+        const uint32_t blockLen = ElementsToBytes<ElementSrc>(columns);
+        if constexpr (Compact) {
+            static_assert(std::is_same_v<ElementSrc, ElementDst>, "Compact UB -> GM requires matching element types");
+            if (rows == 0 || columns == 0)
+                return;
+        }
+
         const int64_t dstStride =
             ElementsToBytes<ElementSrc, int64_t>(tla::get<0>(dstTensor.stride())) - static_cast<int64_t>(blockLen);
 
-        AscendC::DataCopyExtParams dataCopyParams(
-            tla::get<0>(dstTensor.originShape()), blockLen,
-            (tla::get<0>(srcTensor.stride()) - tla::get<1>(dstTensor.originShape())) / ELE_NUM_PER_BLK, dstStride, 0);
+        // Compact consumes exactly blockLen bytes per UB row.
+        const int64_t srcStride = Compact ? 0 : (tla::get<0>(srcTensor.stride()) - columns) / ELE_NUM_PER_BLK;
+        AscendC::DataCopyExtParams dataCopyParams(rows, blockLen, srcStride, dstStride, 0);
 
         auto dstOffset = dstTensor.layout()(dstTensor.coord());
         auto srcOffset = srcTensor.layout()(srcTensor.coord());
@@ -96,13 +104,26 @@ struct CopyUb2GmTla<
                           ElementSrc, float8_e4m3_t, float8_e5m2_t, float8_e8m0_t, hifloat8_t, float4_e2m1x2_t,
                           float4_e1m2x2_t>) {
             // data()[offset] already turns the fp4 element offset into a byte offset before the cast.
-            AscendC::DataCopyPad(
+            copyRows<Compact>(
                 dstTensor.data()[dstOffset].template ReinterpretCast<uint8_t>(),
                 srcTensor.data()[srcOffset].template ReinterpretCast<uint8_t>(), dataCopyParams);
         } else {
-            AscendC::DataCopyPad(dstTensor.data()[dstOffset], srcTensor.data()[srcOffset], dataCopyParams);
+            copyRows<Compact>(dstTensor.data()[dstOffset], srcTensor.data()[srcOffset], dataCopyParams);
         }
     };
+
+private:
+    template <bool Compact, class T>
+    CATLASS_DEVICE static void copyRows(
+        const AscendC::GlobalTensor<T>& dst, const AscendC::LocalTensor<T>& src,
+        const AscendC::DataCopyExtParams& params)
+    {
+        if constexpr (Compact) {
+            AscendC::DataCopyPad<T, AscendC::PaddingMode::Compact>(dst, src, params);
+        } else {
+            AscendC::DataCopyPad(dst, src, params);
+        }
+    }
 };
 
 /// Partial specialization for Ascend950, Vector in and Vector out.

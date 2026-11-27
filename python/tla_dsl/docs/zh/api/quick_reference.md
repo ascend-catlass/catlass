@@ -110,7 +110,7 @@ nav_order: 5
 | [`tla.sync_all`](language/sync.md#tlasync_all) | 同步 MIX kernel 的 AIC 与全部 AIV。 | Kernel / Cube 或 Vector；仅 MIX kernel（声明 `core_ratio`）；cube 与 vector 两侧各写一条并配对。 |
 | [`tla.mutex`](language/sync.md#tlamutex)、[`tla.mutex_guard`](language/sync.md#tlamutex_guard)、[`tla.mutex_lock`](language/sync.md#tlamutex_lock)、[`tla.mutex_unlock`](language/sync.md#tlamutex_unlock) | 以显式加锁或作用域 guard 保护命名资源。 | Kernel / Cube 或 Vector；guard 块须产生 `copy` 或 `mmad`，且不得显式加锁或解锁。 |
 | [`tla.local_mem_bar`](language/sync.md#tlalocal_mem_bar) | 在本地存储类型之间排序访问。 | Kernel / Vector / SIMD；须在 `tla.vec.func` 内并使用受支持的 `MemType` 组合；SIMT 不可用。 |
-| [`tla.data_sync_barrier`](language/sync.md#tladata_sync_barrier) | 等待指定存储域（GM / UB）此前发出的访存完成。 | Kernel / Cube 或 Vector；不得在 `tla.vec.func` 内；`tla.cube()` 内拒绝 `UB`；只覆盖 GM 与 UB，不含 L1/L0 Buffer。跨核可见性仅对绕过 D-cache 的 GM 访问成立（`WriteGmBypassDCache` 经 `tla.extern`）。 |
+| [`tla.data_sync_barrier`](language/sync.md#tladata_sync_barrier) | 等待指定存储域（GM / UB）此前发出的访存完成。 | Kernel / Cube 或 Vector；不得在 `tla.vec.func` 内；`tla.cube()` 内拒绝 `UB`；只覆盖 GM 与 UB，不含 L1/L0 Buffer。跨核可见性适用于绕过 D-cache 的 GM 访问，如 `tla.arch.store_bypass_dcache` 和 `tla.arch.load_bypass_dcache`。 |
 | [`tla.arch.sync_threads`](language/system.md#tlaarchsync_threads) | 同步一个 SIMT block 内的线程。 | Kernel / Vector / SIMT；所有线程都须到达 barrier；它不是跨核或 pipe barrier。 |
 
 ### 资源与调试

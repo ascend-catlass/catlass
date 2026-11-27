@@ -63,14 +63,19 @@ CATLASS_DEVICE void copyGMToUB(
     }
 }
 
-template <class ArchTag, LayoutTag SrcLayout, LayoutTag DstLayout, typename T>
+template <class ArchTag, LayoutTag SrcLayout, LayoutTag DstLayout, typename T, bool Compact = false>
 CATLASS_DEVICE void copyUBToGM(
     memref_t<__ubuf__ T, 1>* src, memref_t<__gm__ T, 2>* dst, const TensorDesc& srcDesc, const TensorDesc& dstDesc,
     int64_t gmCachePolicy = kCachePolicyNormal)
 {
     auto srcTensor = makeUBTensor<SrcLayout, T>(src, srcDesc);
     auto dstTensor = makeGMTensor<DstLayout, T>(dst, dstDesc, gmCachePolicy);
-    Catlass::Epilogue::Tile::CopyUb2GmTla<ArchTag, decltype(srcTensor), decltype(dstTensor)>{}(dstTensor, srcTensor);
+    Catlass::Epilogue::Tile::CopyUb2GmTla<ArchTag, decltype(srcTensor), decltype(dstTensor)> copyUb2Gm;
+    if constexpr (Compact) {
+        copyUb2Gm(dstTensor, srcTensor, tla::Bool<true>{});
+    } else {
+        copyUb2Gm(dstTensor, srcTensor);
+    }
 }
 
 // UB -> UB. dst RowMajor lowers to MOV.UB.TO.UB; dst ColumnMajor is an
@@ -180,6 +185,38 @@ REGISTER_GM_TO_UB(RowMajor, RowMajor, hifloat8_t)
 // like int8_t. Symbol suffix is ``bool`` (copyRuntimeElemSuffix).
 REGISTER_GM_TO_UB(RowMajor, RowMajor, bool)
 
+#define REGISTER_COMPACT_GM_TO_UB(DType)                                                                              \
+    [aicore] __attribute__((always_inline)) void _mlir_ciface_copy_gm_RowMajor_to_ub_RowMajor_##DType##_compact(      \
+        memref_t<__gm__ DType, 2>* src, memref_t<__ubuf__ DType, 1>* dst, DESC_ABI_PARAMS(src), DESC_ABI_PARAMS(dst), \
+        int64_t gmCachePolicy)                                                                                        \
+    {                                                                                                                 \
+        auto srcTensor = makeGMTensor<LayoutTag::RowMajor, DType>(src, TENSOR_DESC_12(src), gmCachePolicy);           \
+        auto dstTensor = makeUBTensor<LayoutTag::RowMajor, DType>(dst, TENSOR_DESC_12(dst));                          \
+        Catlass::Epilogue::Tile::CopyGm2UbTla<Catlass::Arch::Ascend950, decltype(srcTensor), decltype(dstTensor)>{}(  \
+            dstTensor, srcTensor, tla::Bool<true>{});                                                                 \
+    }
+
+REGISTER_COMPACT_GM_TO_UB(float)
+REGISTER_COMPACT_GM_TO_UB(half)
+REGISTER_COMPACT_GM_TO_UB(bf16)
+REGISTER_COMPACT_GM_TO_UB(int8_t)
+REGISTER_COMPACT_GM_TO_UB(uint8_t)
+REGISTER_COMPACT_GM_TO_UB(int16_t)
+REGISTER_COMPACT_GM_TO_UB(uint16_t)
+REGISTER_COMPACT_GM_TO_UB(int32_t)
+REGISTER_COMPACT_GM_TO_UB(uint32_t)
+REGISTER_COMPACT_GM_TO_UB(int64_t)
+REGISTER_COMPACT_GM_TO_UB(uint64_t)
+REGISTER_COMPACT_GM_TO_UB(double)
+REGISTER_COMPACT_GM_TO_UB(fp8_e4m3fn_t)
+REGISTER_COMPACT_GM_TO_UB(fp8_e5m2_t)
+REGISTER_COMPACT_GM_TO_UB(float4_e2m1x2_t)
+REGISTER_COMPACT_GM_TO_UB(float4_e1m2x2_t)
+REGISTER_COMPACT_GM_TO_UB(float8_e8m0_t)
+REGISTER_COMPACT_GM_TO_UB(hifloat8_t)
+REGISTER_COMPACT_GM_TO_UB(bool)
+#undef REGISTER_COMPACT_GM_TO_UB
+
 REGISTER_UB_TO_GM(RowMajor, RowMajor, float)
 REGISTER_UB_TO_GM(RowMajor, RowMajor, half)
 REGISTER_UB_TO_GM(RowMajor, RowMajor, bf16)
@@ -217,6 +254,36 @@ REGISTER_UB_TO_GM(VectorLayout, VectorLayout, fp8_e5m2_t)
 REGISTER_UB_TO_GM(VectorLayout, VectorLayout, float4_e2m1x2_t)
 REGISTER_UB_TO_GM(VectorLayout, VectorLayout, float4_e1m2x2_t)
 REGISTER_UB_TO_GM(VectorLayout, VectorLayout, hifloat8_t)
+
+#define REGISTER_COMPACT_UB_TO_GM(DType)                                                                              \
+    [aicore] __attribute__((always_inline)) void _mlir_ciface_copy_ub_RowMajor_to_gm_RowMajor_##DType##_compact(      \
+        memref_t<__ubuf__ DType, 1>* src, memref_t<__gm__ DType, 2>* dst, DESC_ABI_PARAMS(src), DESC_ABI_PARAMS(dst), \
+        int64_t gmCachePolicy)                                                                                        \
+    {                                                                                                                 \
+        copyUBToGM<Catlass::Arch::Ascend950, LayoutTag::RowMajor, LayoutTag::RowMajor, DType, true>(                  \
+            src, dst, TENSOR_DESC_12(src), TENSOR_DESC_12(dst), gmCachePolicy);                                       \
+    }
+
+REGISTER_COMPACT_UB_TO_GM(float)
+REGISTER_COMPACT_UB_TO_GM(half)
+REGISTER_COMPACT_UB_TO_GM(bf16)
+REGISTER_COMPACT_UB_TO_GM(int8_t)
+REGISTER_COMPACT_UB_TO_GM(uint8_t)
+REGISTER_COMPACT_UB_TO_GM(int16_t)
+REGISTER_COMPACT_UB_TO_GM(uint16_t)
+REGISTER_COMPACT_UB_TO_GM(int32_t)
+REGISTER_COMPACT_UB_TO_GM(uint32_t)
+REGISTER_COMPACT_UB_TO_GM(int64_t)
+REGISTER_COMPACT_UB_TO_GM(uint64_t)
+REGISTER_COMPACT_UB_TO_GM(double)
+REGISTER_COMPACT_UB_TO_GM(fp8_e4m3fn_t)
+REGISTER_COMPACT_UB_TO_GM(fp8_e5m2_t)
+REGISTER_COMPACT_UB_TO_GM(float4_e2m1x2_t)
+REGISTER_COMPACT_UB_TO_GM(float4_e1m2x2_t)
+REGISTER_COMPACT_UB_TO_GM(float8_e8m0_t)
+REGISTER_COMPACT_UB_TO_GM(hifloat8_t)
+REGISTER_COMPACT_UB_TO_GM(bool)
+#undef REGISTER_COMPACT_UB_TO_GM
 
 REGISTER_UB_TO_UB(RowMajor, RowMajor, float)
 REGISTER_UB_TO_UB(RowMajor, RowMajor, half)

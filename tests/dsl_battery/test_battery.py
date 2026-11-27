@@ -717,6 +717,7 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         "gm-ub-copy-pad",
         [["end_to_end/gm_ub_copy_pad.py", *dev]],
     )
+    yield "gm-ub-compact-copy", [["end_to_end/gm_ub_compact_copy.py", *dev]]
 
     # --- scalar dcache maintenance: dcci_cacheline / dcci_cachelines / dci ---
     # Each case dirties one GM word from the kernel and the host reads it back,

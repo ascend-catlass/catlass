@@ -594,11 +594,10 @@ Example:
 
 ```python
 with tla.vector():
-    # Official cross-core pattern: bypass-write the data, wait the GM
-    # domain out, then bypass-write the sync flag; the consumer spin-
-    # polls the flag with bypass reads. See
-    # tests/end_to_end/data_sync_barrier.py.
-    bypass_write(src.ptr, 1, data)  # user extern: WriteGmBypassDCache
+    # src holds two Int32 words. The consumer can poll the flag at
+    # src.ptr with tla.arch.load_bypass_dcache, then read the data
+    # at src.ptr + 1 with the same API. See tests/end_to_end/data_sync_barrier.py.
+    tla.arch.store_bypass_dcache(src.ptr + 1, data)
     tla.data_sync_barrier(tla.params.DsbTarget.GM)
-    bypass_write(src.ptr, 0, flag)  # user extern: WriteGmBypassDCache
+    tla.arch.store_bypass_dcache(src.ptr, flag)
 ```

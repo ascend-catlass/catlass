@@ -860,9 +860,8 @@ static constexpr int64_t kMaxSimtThreadsPerBlock = 2048;
 // field's index: the hardware keeps its low 5 bits and discards the rest.
 static constexpr int64_t kWarpSize = 32;
 
-mlir::LogicalResult ArchLoadBypassDcacheOp::verify()
+static mlir::LogicalResult verifyDcacheBypassPlacement(mlir::Operation* op)
 {
-    auto* op = getOperation();
     bool inCube = hasEnclosing<CubeOp>(op);
     bool inVector = hasEnclosing<VectorOp>(op);
     if (!inCube && !inVector && !isInLoweredFunc(op))
@@ -871,10 +870,22 @@ mlir::LogicalResult ArchLoadBypassDcacheOp::verify()
         return op->emitOpError("mixed cube/vector placement is unsupported");
     if (hasEnclosing<VecFuncOp>(op))
         return op->emitOpError("requires scalar core code outside tla.vec.func");
+    return mlir::success();
+}
+
+mlir::LogicalResult ArchLoadBypassDcacheOp::verify()
+{
+    if (mlir::failed(verifyDcacheBypassPlacement(getOperation())))
+        return mlir::failure();
     auto resultType = mlir::cast<mlir::IntegerType>(getResult().getType());
     if (!llvm::is_contained(llvm::ArrayRef<unsigned>{8, 16, 32, 64}, resultType.getWidth()))
         return emitOpError("result must be an 8-, 16-, 32-, or 64-bit integer");
     return mlir::success();
+}
+
+mlir::LogicalResult ArchStoreBypassDcacheOp::verify()
+{
+    return verifyDcacheBypassPlacement(getOperation());
 }
 
 static mlir::LogicalResult verifyScalarArchPlacement(mlir::Operation* op)
@@ -3283,6 +3294,29 @@ mlir::LogicalResult CopyOp::verify()
 
     // Validate atomic_mode attribute when present.
     auto atomicModeAttr = getAtomicModeAttr();
+    if (getCompact()) {
+        if (!((src == AddressSpace::gm && dst == AddressSpace::ub) ||
+              (src == AddressSpace::ub && dst == AddressSpace::gm)))
+            return emitOpError("compact requires GM -> UB or UB -> GM");
+        if (srcTy.getLayout().getLayoutTag() != LayoutTag::RowMajor ||
+            dstTy.getLayout().getLayoutTag() != LayoutTag::RowMajor)
+            return emitOpError("compact requires RowMajor src and dst");
+        auto srcElement = srcTy.getPtr().getPointee();
+        auto integer = mlir::dyn_cast<mlir::IntegerType>(srcElement);
+        bool supportedInteger =
+            integer &&
+            (integer.getWidth() == 1 ||
+             (!integer.isSigned() && llvm::is_contained(llvm::ArrayRef<unsigned>{8, 16, 32, 64}, integer.getWidth())));
+        bool supportedFloat = srcElement.isF16() || srcElement.isBF16() || srcElement.isF32() || srcElement.isF64() ||
+                              srcElement.isFloat8E4M3FN() || srcElement.isFloat8E5M2();
+        if (!(supportedInteger || supportedFloat || isTlaCustomElementType(srcElement)) ||
+            srcElement != dstTy.getPtr().getPointee())
+            return emitOpError("compact requires matching element types supported by RowMajor GM/UB copies");
+        if (getParams())
+            return emitOpError("compact copy does not accept a padding parameter operand");
+        if (atomicModeAttr && atomicModeAttr.getAtomicMode() != AtomicMode::none)
+            return emitOpError("compact copy does not support atomic writeback");
+    }
     if (atomicModeAttr && atomicModeAttr.getAtomicMode() != AtomicMode::none) {
         if (dst != AddressSpace::gm)
             return emitOpError("atomic operation requires dst to be in GM address space");

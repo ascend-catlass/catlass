@@ -167,6 +167,7 @@ from .params import (
     RegSlot,
     HF32Mode,
     ComputeOrder,
+    CopyGmToUbParams,
     CopyL0C2DstParams,
     CopyPadParams,
     CopyParams,
@@ -8096,13 +8097,16 @@ def copy(
         - `dst` (`Tensor`): Destination tile. Required.
         - `src` (`Tensor`): Source tile. Required.
         - `params` (`CopyParams | None`): Path-specific params:
-          `CopyL0C2DstParams`, `CopyUbToGmParams`, or `CopyPadParams`.
+          `CopyL0C2DstParams`, `CopyGmToUbParams`, `CopyUbToGmParams`, or `CopyPadParams`.
           Default `None` (exact-byte copy / no pad / default fixpipe).
           - `CopyL0C2DstParams`: L0C → GM/L1/UB fixpipe options
             (`unit_flag`, `relu_enable`, `quant_mode`, `quant_scale`,
             `quant_offset`, `quant_tensor`, `l0c2ub_mode`, `atomic_mode`).
             See the Cube fixpipe table for supported combinations.
-          - `CopyUbToGmParams`: UB → GM writeback options. Field:
+          - `CopyGmToUbParams`: GM → UB load options. Set `compact=True`
+            to pack the destination rows.
+          - `CopyUbToGmParams`: UB → GM writeback options. Fields:
+            `compact` (`bool`, default `False`) and
             `atomic_mode` (`AtomicMode`, default `NONE`).
           - `CopyPadParams`: enables DataCopyPad (`isPad=true`) on GM→UB or
             GM→L1 VectorLayout→VectorLayout (cube). Supported routes/dtypes
@@ -8172,6 +8176,15 @@ def copy(
           must preserve exponent pairs. Runtime geometry must satisfy the same
           constraints. The caller supplies enough backing storage and disjoint
           destination matrices; interleaved NZ layouts are permitted.
+        - On Ascend 950, `CopyGmToUbParams(compact=True)` loads packed UB
+          rows and `CopyUbToGmParams(compact=True)` stores packed UB rows.
+          Both require matching RowMajor tile extents and element types.
+          Use the element types listed for the corresponding RowMajor route.
+          Both column strides must be 1. The UB row stride must equal the
+          valid row width. The GM row stride can be larger. For runtime geometry,
+          the caller ensures the GM row stride covers the valid width and the
+          extents fit one DMA request. For a compact load, use a 32-byte-aligned
+          UB destination address.
         - Packed fp4 is staged as bytes on the routes that convert the
           descriptor before copying -- GM->UB, UB->GM and UB->L1 -- so each
           tile's innermost `origin_shape`, its innermost origin coordinate and
@@ -8390,6 +8403,23 @@ def copy(
         src_step = src_desc.stride[0]
         if src_dtype == "f8e8m0" and src_step is not None and src_step % 2:
             _op_error("copy", "E8M0 source batch stride must preserve exponent pairs")
+
+    compact = False
+    if isinstance(params, (CopyGmToUbParams, CopyUbToGmParams)):
+        try:
+            params._validate()
+        except (TypeError, ValueError) as exc:
+            _op_error("copy", str(exc))
+        expected_route = (
+            ("gm", "ub") if isinstance(params, CopyGmToUbParams) else ("ub", "gm")
+        )
+        if _route != expected_route:
+            direction = " -> ".join(expected_route).upper()
+            _op_error("copy", f"{type(params).__name__} requires {direction}")
+        compact = params.compact
+    if compact:
+        if src_layout != "RowMajor" or dst_layout != "RowMajor":
+            _op_error("copy", "compact requires RowMajor src and dst")
 
     if _route[0] == "l0c":
         if params is None:
@@ -8759,11 +8789,9 @@ def copy(
                 "copy",
                 f"UB-to-GM copy expects CopyUbToGmParams, got {type(params).__name__}",
             )
-        try:
-            params._validate()
-        except ValueError as exc:
-            _op_error("copy", str(exc))
-    elif params is not None and not isinstance(params, CopyL0C2DstParams):
+    elif params is not None and not isinstance(
+        params, (CopyGmToUbParams, CopyL0C2DstParams)
+    ):
         # Reject unknown CopyParams subclasses early when they lack atomic_mode.
         if not hasattr(params, "atomic_mode") and _route[0] != "l0c":
             _op_error(
@@ -8807,6 +8835,8 @@ def copy(
         _route, cache_policy
     )
     copy_attrs: dict[str, Any] = {}
+    if compact:
+        copy_attrs["compact"] = True
     # Non-NORMAL policies are only returned for GM endpoints by the helper above.
     if src_cache_policy != CachePolicy.NORMAL:
         copy_attrs["src_cache_policy"] = mlir_ir.Attribute.parse(
@@ -9706,13 +9736,12 @@ def data_sync_barrier(
         Example:
         ```python
         with tla.vector():
-            # Official cross-core pattern: bypass-write the data, wait the GM
-            # domain out, then bypass-write the sync flag; the consumer spin-
-            # polls the flag with bypass reads. See
-            # tests/end_to_end/data_sync_barrier.py.
-            bypass_write(src.ptr, 1, data)  # user extern: WriteGmBypassDCache
+            # src holds two Int32 words. The consumer can poll the flag at
+            # src.ptr with tla.arch.load_bypass_dcache, then read the data
+            # at src.ptr + 1 with the same API. See tests/end_to_end/data_sync_barrier.py.
+            tla.arch.store_bypass_dcache(src.ptr + 1, data)
             tla.data_sync_barrier(tla.params.DsbTarget.GM)
-            bypass_write(src.ptr, 0, flag)  # user extern: WriteGmBypassDCache
+            tla.arch.store_bypass_dcache(src.ptr, flag)
         ```
     """
     _require_frontend_state("data_sync_barrier")
@@ -15104,8 +15133,8 @@ def arch_dci(*, loc: mlir_ir.Location | None = None) -> None:
     _tla_ops_gen.arch_dci(loc=loc)
 
 
-def _bypass_load_alignment(pointer: _Pointer) -> int:
-    """Conservatively check the alignment of a pointer used by a bypass load."""
+def _bypass_dcache_alignment(pointer: _Pointer) -> int:
+    """Conservatively check the alignment of a pointer used by a DCache bypass access."""
     alignment = pointer.alignment
     constant_byte_offset = 0
     value = pointer.value
@@ -15191,13 +15220,68 @@ def arch_load_bypass_dcache(
         64,
     ):
         _op_error(name, "ptr must point to an 8-, 16-, 32-, or 64-bit integer")
-    if _bypass_load_alignment(pointer) < pointee.width // 8:
+    if _bypass_dcache_alignment(pointer) < pointee.width // 8:
         _op_error(name, "ptr must be naturally aligned for its pointee type")
     byte_address = _tla_ops_gen.ptrtoint(
         mlir_ir.IntegerType.get_signless(64), pointer.value, loc=loc
     )
     result = _tla_ops_gen.arch_load_bypass_dcache(pointee, byte_address, loc=loc)
     return Numeric.from_mlir_type(pointee)(result)
+
+
+@dsl_user_op
+def arch_store_bypass_dcache(
+    ptr: Pointer, value: IndexLike, *, loc: mlir_ir.Location | None = None
+) -> None:
+    """Directory: System Variable Access / Architecture Helpers
+
+    Description:
+        Write one Int32 GM scalar while bypassing DCache.
+
+    Parameters:
+        - `ptr` (`Pointer`): GM pointer to the element to write.
+        - `value` (`IndexLike`): Integer scalar converted to Int32.
+
+    Constraints:
+        - On Ascend 950, call inside `tla.cube()` or `tla.vector()` and outside
+          `tla.vec.func()`.
+        - The pointer must name a valid, naturally aligned Int32 GM element.
+        - Before publishing a ready word, wait for the producing pipe when
+          required, such as MTE3→SCALAR on AIV or FIX→SCALAR on AIC.
+
+    Example:
+        ```python
+        @tla.kernel
+        def write_first(dst: tla.Tensor):
+            with tla.vector():
+                tla.arch.store_bypass_dcache(dst.ptr_with_coord, 1)
+        ```
+    """
+    name = "arch.store_bypass_dcache"
+    _require_frontend_state(name)
+    _require_core_region(name)
+    _require_category(name, "ptr", ptr, "pointer", 0)
+    pointer = _coerce_pointer_arg(ptr)
+    if pointer.addrspace != AddressSpace.gm:
+        _op_error(name, "ptr must point to GM")
+    if pointer.dtype != Int32:
+        _op_error(name, "ptr must point to an Int32 element")
+    if _bypass_dcache_alignment(pointer) < 4:
+        _op_error(name, "ptr must be naturally aligned for its pointee type")
+
+    try:
+        scalar = as_numeric(_resolve_bound_value(value))
+    except (TypeError, ValueError):
+        _op_error(name, "value must be an integer scalar")
+    if not type(scalar).is_integer:
+        _op_error(name, "value must be an integer scalar")
+
+    byte_address = _tla_ops_gen.ptrtoint(
+        mlir_ir.IntegerType.get_signless(64), pointer.value, loc=loc
+    )
+    _tla_ops_gen.arch_store_bypass_dcache(
+        byte_address, scalar.to(Int32, loc=loc).ir_value(loc=loc), loc=loc
+    )
 
 
 # --- SIMD scalar atomics ---------------------------------------------------
@@ -17556,6 +17640,7 @@ _require_generated("simd_atomic_exch")
 _require_generated("arch_get_ar")
 _require_generated("arch_clear_ar")
 _require_generated("arch_load_bypass_dcache")
+_require_generated("arch_store_bypass_dcache")
 _require_generated("inttoptr")
 _require_generated("recast_ptr")
 
@@ -17566,6 +17651,7 @@ arch._set("dcci_cacheline", arch_dcci_cacheline)
 arch._set("dcci_cachelines", arch_dcci_cachelines)
 arch._set("dci", arch_dci)
 arch._set("load_bypass_dcache", arch_load_bypass_dcache)
+arch._set("store_bypass_dcache", arch_store_bypass_dcache)
 arch._set("atomic_exch", arch_atomic_exch)
 arch._set("bcnt0", arch_bcnt0)
 arch._set("bcnt1", arch_bcnt1)

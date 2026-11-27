@@ -12,18 +12,15 @@
 
 AIV-only kernel over two blocks (`--block-num 2`), split by `tla.arch.block_idx()`:
 
-- Block 0 (producer): `WriteGmBypassDCache` the data, then the built-in
+- Block 0 (producer): write the data with `tla.arch.store_bypass_dcache`, then use
   `tla.data_sync_barrier(DsbTarget.GM)` -- the ISA `dsb` that blocks subsequent GM
   writes until the earlier one is visible to other cores -- then bypass-write
   the sync flag.
-- Block 1 (consumer): spin on a bypass read of the flag (the spin lives in the
-  user stub, mirroring the official example's `while (true)` poll), then read
-  the data and write `2 * data` through a bypass write.
+- Block 1 (consumer): poll the flag with bypass reads, then read the data
+  and write `2 * data` through a bypass write.
 
-The bypass D-cache primitives come from AscendC via `tla.extern` (the DSL does
-not expose them as built-ins yet; `TlaLowerScalarOpsPass` reserves a slot for a
-D-cache bypass store). The consumer's poll carries the cross-block handshake --
-no cross flags involved, so there is no handshake race to mask the barrier.
+The consumer polls through an independent AscendC extern. It leaves the
+output at its initial value if the producer fails to publish the flag.
 
 Scope note: the case verifies the officially prescribed pattern end to end, not
 that `dsb` is load-bearing on this silicon -- measured on Ascend 950PR,
@@ -43,40 +40,21 @@ OP_SOURCE_CODES = r"""
 #include <cstdint>
 #include "kernel_operator.h"
 
-constexpr int32_t DATA_VALUE = 1234;
 constexpr int32_t SYNC_FLAG = 777;
 
-extern "C" {
-
-__aicore__ __attribute__((always_inline)) void tla_user_bypass_write_i32(
-    uint64_t gm_addr, int32_t index, int32_t value) {
-  AscendC::WriteGmBypassDCache<int32_t>(
-      reinterpret_cast<__gm__ int32_t *>(gm_addr) + index, value);
-}
-
-// Official example's consumer: poll the GM flag with bypass reads, then read
-// the data and write it back -- all bypassing the D-cache.
-__aicore__ __attribute__((noinline)) void tla_user_wait_flag_read_copy(
+extern "C" __aicore__ __attribute__((noinline)) void tla_user_wait_flag_read_copy(
     uint64_t src_addr, uint64_t dst_addr) {
   __gm__ int32_t *src = reinterpret_cast<__gm__ int32_t *>(src_addr);
-  while (true) {
+  for (int i = 0; i < 1000000; ++i) {
     if (AscendC::ReadGmBypassDCache<int32_t>(src) == SYNC_FLAG) {
-      break;
+      int32_t v = AscendC::ReadGmBypassDCache<int32_t>(src + 1);
+      AscendC::WriteGmBypassDCache<int32_t>(
+          reinterpret_cast<__gm__ int32_t *>(dst_addr), 2 * v);
+      return;
     }
   }
-  int32_t v = AscendC::ReadGmBypassDCache<int32_t>(src + 1);
-  AscendC::WriteGmBypassDCache<int32_t>(
-      reinterpret_cast<__gm__ int32_t *>(dst_addr), 2 * v);
 }
-
-} // extern "C"
 """
-
-
-@tla.extern(name="tla_user_bypass_write_i32", source=OP_SOURCE_CODES)
-def bypass_write(
-    dst: tla.Pointer[tla.Int32, tla.AddressSpace.gm], index: tla.Int32, value: tla.Int32
-) -> None: ...
 
 
 @tla.extern(name="tla_user_wait_flag_read_copy", source=OP_SOURCE_CODES)
@@ -93,9 +71,9 @@ def data_sync_barrier_demo(src: tla.Tensor, dst: tla.Tensor) -> None:
         if bid == 0:
             # Producer: bypass-write the data, wait the GM domain out so the
             # write is visible to other cores, then bypass-write the flag.
-            bypass_write(src.ptr, 1, DATA_VALUE)
+            tla.arch.store_bypass_dcache(src.ptr + 1, DATA_VALUE)
             tla.data_sync_barrier(tla.params.DsbTarget.GM)
-            bypass_write(src.ptr, 0, SYNC_FLAG)
+            tla.arch.store_bypass_dcache(src.ptr, SYNC_FLAG)
         if bid == 1:
             # Consumer: spin on the bypass-read flag, then read the data.
             wait_flag_read_copy(src.ptr, dst.ptr)

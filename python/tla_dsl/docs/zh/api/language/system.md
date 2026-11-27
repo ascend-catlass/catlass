@@ -411,6 +411,42 @@ def read_first(src: tla.Tensor, dst: tla.Tensor):
 
 ---
 
+### `tla.arch.store_bypass_dcache`
+
+**源码：** [`catlass.core_api.arch_store_bypass_dcache`](../../../../catlass/core_api.py)
+
+功能说明：
+
+绕过 DCache，向 GM 写入一个 Int32 标量。
+
+函数原型：
+
+```python
+tla.arch.store_bypass_dcache(ptr: Pointer, value: IndexLike) -> None
+```
+
+参数说明：
+
+- `ptr`（`Pointer`）：指向待写入元素的 GM 指针。
+- `value`（`IndexLike`）：转换为 Int32 的整数标量。
+
+约束：
+
+- 在 Ascend 950 上，须在 `tla.cube()` 或 `tla.vector()` 内调用，并位于 `tla.vec.func()` 外。
+- 指针须指向有效且自然对齐的 Int32 GM 元素。
+- 发布就绪标志前，按需等待生产端流水完成，例如 AIV 上的 MTE3→SCALAR，或 AIC 上的 FIX→SCALAR。
+
+示例：
+
+```python
+@tla.kernel
+def write_first(dst: tla.Tensor):
+    with tla.vector():
+        tla.arch.store_bypass_dcache(dst.ptr_with_coord, 1)
+```
+
+---
+
 ### `tla.arch.atomic_add`
 
 **源码：** [`catlass.core_api.arch_atomic_add`](../../../../catlass/core_api.py)

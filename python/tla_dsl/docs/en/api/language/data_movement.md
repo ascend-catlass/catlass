@@ -34,13 +34,16 @@ Parameters:
 - `dst` (`Tensor`): Destination tile. Required.
 - `src` (`Tensor`): Source tile. Required.
 - `params` (`CopyParams | None`): Path-specific params:
-  `CopyL0C2DstParams`, `CopyUbToGmParams`, or `CopyPadParams`.
+  `CopyL0C2DstParams`, `CopyGmToUbParams`, `CopyUbToGmParams`, or `CopyPadParams`.
   Default `None` (exact-byte copy / no pad / default fixpipe).
   - `CopyL0C2DstParams`: L0C → GM/L1/UB fixpipe options
     (`unit_flag`, `relu_enable`, `quant_mode`, `quant_scale`,
     `quant_offset`, `quant_tensor`, `l0c2ub_mode`, `atomic_mode`).
     See the Cube fixpipe table for supported combinations.
-  - `CopyUbToGmParams`: UB → GM writeback options. Field:
+  - `CopyGmToUbParams`: GM → UB load options. Set `compact=True`
+    to pack the destination rows.
+  - `CopyUbToGmParams`: UB → GM writeback options. Fields:
+    `compact` (`bool`, default `False`) and
     `atomic_mode` (`AtomicMode`, default `NONE`).
   - `CopyPadParams`: enables DataCopyPad (`isPad=true`) on GM→UB or
     GM→L1 VectorLayout→VectorLayout (cube). Supported routes/dtypes
@@ -111,6 +114,15 @@ Constraints:
   must preserve exponent pairs. Runtime geometry must satisfy the same
   constraints. The caller supplies enough backing storage and disjoint
   destination matrices; interleaved NZ layouts are permitted.
+- On Ascend 950, `CopyGmToUbParams(compact=True)` loads packed UB
+  rows and `CopyUbToGmParams(compact=True)` stores packed UB rows.
+  Both require matching RowMajor tile extents and element types.
+  Use the element types listed for the corresponding RowMajor route.
+  Both column strides must be 1. The UB row stride must equal the
+  valid row width. The GM row stride can be larger. For runtime geometry,
+  the caller ensures the GM row stride covers the valid width and the
+  extents fit one DMA request. For a compact load, use a 32-byte-aligned
+  UB destination address.
 - Packed fp4 is staged as bytes on the routes that convert the
   descriptor before copying -- GM->UB, UB->GM and UB->L1 -- so each
   tile's innermost `origin_shape`, its innermost origin coordinate and
