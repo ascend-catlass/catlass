@@ -141,6 +141,11 @@ def stage_down_streamk(
         else:
             l1a1_ptr = l1a0_ptr + stage_a
             l1b1_ptr = l1b0_ptr + stage_b
+    elif tla.const_expr(buf_unified):
+        # The unified allocation passes the same base for A and B.
+        # Give B its own region even when ping-pong does not fit.
+        l1b0_ptr = l1a0_ptr + stage_a
+        l1b1_ptr = l1b0_ptr
     use_l1_pp = tla.const_expr((not L1_SINGLE) or can_split)
     l1_tk_step = _tiling.l1_tk
 
