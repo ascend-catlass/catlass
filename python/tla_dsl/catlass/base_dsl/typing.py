@@ -8,6 +8,7 @@ import operator
 import struct
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from functools import partial
 from typing import (
     Any,
     Callable,
@@ -499,6 +500,144 @@ def _emit_scalar_cast(cast_name, src, dst_ty, loc):
     return mlir_ir.Operation.create(
         cast_name, operands=[src], results=[dst_ty], loc=loc
     ).results[0]
+
+
+def _round_f32_to_bf16_bits(source, loc):
+    from catlass._mlir.dialects import arith
+
+    i32 = mlir_ir.IntegerType.get_signless(32)
+    constant = partial(arith.constant, i32, loc=loc)
+    bits = arith.bitcast(i32, source, loc=loc)
+    shift = constant(16)
+    upper = arith.shrui(bits, shift, loc=loc)
+    # A midpoint increments only when the last retained bit is odd.
+    odd = arith.andi(upper, constant(1), loc=loc)
+    bias = arith.addi(constant(0x7FFF), odd, loc=loc)
+    rounded = arith.addi(bits, bias, loc=loc)
+    rounded_upper = arith.shrui(rounded, shift, loc=loc)
+
+    # Encode all FP32 NaNs as BF16 0x7fff.
+    magnitude = arith.andi(bits, constant(0x7FFFFFFF), loc=loc)
+    is_nan = arith.cmpi(
+        arith.CmpIPredicate.ugt, magnitude, constant(0x7F800000), loc=loc
+    )
+    result = arith.select(is_nan, constant(0x7FFF), rounded_upper, loc=loc)
+    return arith.trunci(mlir_ir.IntegerType.get_signless(16), result, loc=loc)
+
+
+def _decode_hif8_bits(bits, loc):
+    from catlass._mlir.dialects import arith
+
+    constant = partial(arith.constant, bits.type, loc=loc)
+    zero, one = constant(0), constant(1)
+    magnitude = arith.andi(bits, constant(0x7F), loc=loc)
+    # Select the sign mask explicitly. BiSheng can drop a shifted sign bit
+    # when it hoists the decode of a captured scalar out of a SIMD function.
+    is_negative = arith.cmpi(arith.CmpIPredicate.uge, bits, constant(0x80), loc=loc)
+    fp32_sign = arith.select(is_negative, constant(0x80000000), zero, loc=loc)
+
+    def below(limit):
+        return arith.cmpi(arith.CmpIPredicate.ult, magnitude, constant(limit), loc=loc)
+
+    # The leading bits of the magnitude specify the exponent layout.
+    below16, below32, below64, below96 = below(16), below(32), below(64), below(96)
+    mantissa_width = arith.select(below96, constant(2), one, loc=loc)
+    mantissa_width = arith.select(below64, constant(3), mantissa_width, loc=loc)
+    exponent_sign_bit = arith.select(below96, constant(4), constant(8), loc=loc)
+    exponent_sign_bit = arith.select(below64, constant(2), exponent_sign_bit, loc=loc)
+    exponent_sign_bit = arith.select(below32, one, exponent_sign_bit, loc=loc)
+
+    exponent_field = arith.shrui(magnitude, mantissa_width, loc=loc)
+    exponent_sign = arith.andi(exponent_field, exponent_sign_bit, loc=loc)
+    exponent_is_negative = arith.cmpi(
+        arith.CmpIPredicate.ne, exponent_sign, zero, loc=loc
+    )
+    exponent_mask = arith.subi(exponent_sign_bit, one, loc=loc)
+    exponent_low = arith.andi(exponent_field, exponent_mask, loc=loc)
+    # The sign bit occupies the position of the implicit 1 in the exponent's magnitude.
+    exponent_abs = arith.ori(exponent_low, exponent_sign_bit, loc=loc)
+    exponent_bias = constant(127)
+    negative_exponent = arith.subi(exponent_bias, exponent_abs, loc=loc)
+    positive_exponent = arith.addi(exponent_bias, exponent_abs, loc=loc)
+    biased_exponent = arith.select(
+        exponent_is_negative, negative_exponent, positive_exponent, loc=loc
+    )
+    biased_exponent = arith.select(below16, exponent_bias, biased_exponent, loc=loc)
+
+    mantissa_mask = arith.shli(one, mantissa_width, loc=loc)
+    mantissa_mask = arith.subi(mantissa_mask, one, loc=loc)
+    mantissa = arith.andi(magnitude, mantissa_mask, loc=loc)
+    exponent_shift = constant(23)
+    mantissa_shift = arith.subi(exponent_shift, mantissa_width, loc=loc)
+    fp32_mantissa = arith.shli(mantissa, mantissa_shift, loc=loc)
+    fp32_exponent = arith.shli(biased_exponent, exponent_shift, loc=loc)
+    normal = arith.ori(fp32_exponent, fp32_mantissa, loc=loc)
+
+    # Nonzero subnormals encode the exponent as magnitude - 23.
+    subnormal_exponent = arith.addi(magnitude, constant(127 - 23), loc=loc)
+    subnormal = arith.shli(subnormal_exponent, exponent_shift, loc=loc)
+    fp32_magnitude = arith.select(below(8), subnormal, normal, loc=loc)
+    is_inf = arith.cmpi(arith.CmpIPredicate.eq, magnitude, constant(0x6F), loc=loc)
+    fp32_magnitude = arith.select(is_inf, constant(0x7F800000), fp32_magnitude, loc=loc)
+    signed = arith.ori(fp32_sign, fp32_magnitude, loc=loc)
+
+    # Zero magnitude is either +0 (0x00) or NaN (0x80).
+    is_zero = arith.cmpi(arith.CmpIPredicate.eq, bits, zero, loc=loc)
+    magnitude_is_zero = arith.cmpi(arith.CmpIPredicate.eq, magnitude, zero, loc=loc)
+    zero_or_nan = arith.select(is_zero, zero, constant(0x7FFFFFFF), loc=loc)
+    return arith.select(magnitude_is_zero, zero_or_nan, signed, loc=loc)
+
+
+def _decode_packed_fp4_bits(bits, is_e2m1, loc):
+    from catlass._mlir.dialects import arith
+
+    constant = partial(arith.constant, bits.type, loc=loc)
+    magnitude = arith.andi(bits, constant(7), loc=loc)
+    sign = arith.andi(bits, constant(8), loc=loc)
+    fp32_sign = arith.shli(sign, constant(28), loc=loc)
+    half = constant(0x3F000000)
+    shifted = arith.shli(magnitude, constant(22), loc=loc)
+    if is_e2m1:
+        # Normal magnitudes add the two exponent bits and one mantissa bit to the FP32 encoding of 0.5.
+        minimum = half
+        decoded = arith.addi(half, shifted, loc=loc)
+    else:
+        # Codes 2 and 3 encode 0.5 and 0.75. Codes 4–7 encode 1.0 to 1.75.
+        # Build each range with integer ops and its own FP32 mantissa shift.
+        minimum = constant(0x3E800000)
+        subnormal = arith.addi(minimum, shifted, loc=loc)
+        normal_shifted = arith.shli(magnitude, constant(21), loc=loc)
+        normal = arith.addi(half, normal_shifted, loc=loc)
+        is_normal = arith.cmpi(arith.CmpIPredicate.uge, magnitude, constant(4), loc=loc)
+        decoded = arith.select(is_normal, normal, subnormal, loc=loc)
+    is_minimum = arith.cmpi(arith.CmpIPredicate.eq, magnitude, constant(1), loc=loc)
+    decoded = arith.select(is_minimum, minimum, decoded, loc=loc)
+    zero = constant(0)
+    is_zero = arith.cmpi(arith.CmpIPredicate.eq, magnitude, zero, loc=loc)
+    fp32_magnitude = arith.select(is_zero, zero, decoded, loc=loc)
+    return arith.ori(fp32_sign, fp32_magnitude, loc=loc)
+
+
+def _emit_low_precision_scalar_cast(source, source_dtype, result_type, loc):
+    from catlass._mlir.dialects import arith
+
+    i32 = mlir_ir.IntegerType.get_signless(32)
+    if source_dtype is Float32:
+        result_bits = _round_f32_to_bf16_bits(source, loc)
+    elif source_dtype is BFloat16:
+        bits = arith.bitcast(mlir_ir.IntegerType.get_signless(16), source, loc=loc)
+        extended = arith.extui(i32, bits, loc=loc)
+        result_bits = arith.shli(extended, arith.constant(i32, 16, loc=loc), loc=loc)
+    else:
+        bits = arith.extui(i32, source, loc=loc)
+        if source_dtype is HiFloat8:
+            result_bits = _decode_hif8_bits(bits, loc)
+        else:
+            result_bits = _decode_packed_fp4_bits(
+                bits, source_dtype is Float4E2M1x2, loc
+            )
+
+    return arith.bitcast(result_type, result_bits, loc=loc)
 
 
 class NumericMeta(DslType):
@@ -1152,6 +1291,16 @@ class Numeric(metaclass=NumericMeta, is_abstract=True):
               `Numeric` bases.
             - Use `tla.params.ScalarRoundMode` here; do not pass
               `tla.params.RoundMode`.
+            - For device scalars outside SIMT regions, `Float32` to `BFloat16`
+              always rounds to nearest, ties to even. Every NaN maps to
+              `0x7FFF`, discarding its sign and payload. `BFloat16` to `Float32`
+              preserves the sign, exponent, and fraction bits.
+            - Outside SIMT regions, device casts from `HiFloat8`,
+              `Float4E1M2x2`, or `Float4E2M1x2` to `Float32` require a scalar
+              read with `tensor[i]`. Other device sources raise `TypeError`.
+              A packed FP4 cast decodes the low 4 bits of the byte. The high
+              4 bits hold the second FP4 value and are skipped.
+            - These five conversions require `round_mode=None`.
             - Unsupported source/target pairs raise `TypeError`.
 
             Example:
@@ -1215,6 +1364,27 @@ class Numeric(metaclass=NumericMeta, is_abstract=True):
         dst_ty = _scalar_mlir_type(dtype)
         if str(src.type) == str(dst_ty):
             return dtype(src)
+        if (src_ty is Float32 and dtype is BFloat16) or (
+            dtype is Float32
+            and (src_ty is BFloat16 or src_ty in _BYTE_ENCODED_SCALAR_DTYPES)
+        ):
+            from ..runtime import _in_simt_vec_func
+
+            if not _in_simt_vec_func():
+                if src_ty in _BYTE_ENCODED_SCALAR_DTYPES:
+                    from catlass._mlir.dialects.tla import ScalarLoadOp
+
+                    owner = src.owner
+                    load = (
+                        owner.opview if isinstance(owner, mlir_ir.Operation) else None
+                    )
+                    storage = load.storage if isinstance(load, ScalarLoadOp) else None
+                    if storage is None:
+                        raise TypeError(
+                            f"{src_ty.__name__} to Float32 requires a scalar tensor load"
+                        )
+                    src = storage
+                return dtype(_emit_low_precision_scalar_cast(src, src_ty, dst_ty, loc))
         if src_ty.is_integer and dtype.is_integer:
             if dtype.width == src_ty.width:
                 return self.bitcast(dtype, loc=loc)
@@ -1790,6 +1960,9 @@ class Float4E1M2x2(
 
     Like Float4E2M1x2, shapes and offsets count pairs, not 4-bit elements.
     """
+
+
+_BYTE_ENCODED_SCALAR_DTYPES = (HiFloat8, Float4E1M2x2, Float4E2M1x2)
 
 
 class Float4E2M1(

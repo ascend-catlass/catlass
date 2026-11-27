@@ -104,6 +104,13 @@ tla.Numeric.to(dtype: Any, *, round_mode: Any = None) -> Any
 - 产出 Python 标量时，`dtype` 须为具体 `Numeric` 子类，不能是抽象的
   `Integer` / `Float` / `Numeric`。
 - 此处使用 `tla.params.ScalarRoundMode`；不要传入 `tla.params.RoundMode`。
+- 在 SIMT 区域外，设备端标量从 `Float32` 转为 `BFloat16` 时固定按最近值舍入，
+  中点取偶。所有 NaN 都转换为 `0x7FFF`，原有符号和载荷被丢弃。
+  `BFloat16` 转为 `Float32` 时保留符号位、指数位和尾数位。
+- 在 SIMT 区域外，将设备端 `HiFloat8`、`Float4E1M2x2` 或 `Float4E2M1x2`
+  转为 `Float32` 时，源值必须是通过 `tensor[i]` 读取的标量。传入其他设备端值会抛出
+  `TypeError`。打包 FP4 转换解码字节的低 4 位，跳过高 4 位中的第二个 FP4 值。
+- 这五条转换要求 `round_mode=None`。
 - 不支持的源/目标组合会抛出 `TypeError`。
 
 调用示例：

@@ -10,7 +10,7 @@ from catlass._mlir.dialects import tla as _tla_ops_gen  # type: ignore[import-no
 from .. import _tla_type_bridge
 from .. import runtime as _runtime
 from ..base_dsl.op import dsl_user_op
-from ..base_dsl.typing import Bool, Numeric
+from ..base_dsl.typing import Bool, Numeric, _BYTE_ENCODED_SCALAR_DTYPES
 from ..params import LoadDist, LoadParams, PostMode, StoreDist, StoreParams
 from .typing import Tensor as TensorABC
 
@@ -2173,32 +2173,34 @@ class _Tensor(TensorABC):
         )
 
         elem_type = parent.element_mlir_type()
+        is_bool = (
+            mlir_ir.IntegerType.isinstance(elem_type)
+            and mlir_ir.IntegerType(elem_type).width == 1
+        )
+        dtype = Bool if is_bool else Numeric.from_mlir_type(elem_type)
         # Per-thread element access inside a SIMT region is its own op: it is
         # lowered against the outlined vector function's memref parameter rather
         # than through the general descriptor view.
-        emit_load = (
-            _tla_ops_gen.simt_load
-            if _runtime._in_simt_vec_func()
-            else _tla_ops_gen.scalar_load
-        )
-        result = emit_load(
-            elem_type,
-            source_value,
-            index_values,
-            loc=loc,
-        )
+        in_simt = _runtime._in_simt_vec_func()
+        if in_simt:
+            result = _tla_ops_gen.simt_load(
+                elem_type, source_value, index_values, loc=loc
+            )
+        else:
+            storage_type = (
+                mlir_ir.IntegerType.get_signless(8)
+                if dtype in _BYTE_ENCODED_SCALAR_DTYPES
+                else None
+            )
+            result = _tla_ops_gen.ScalarLoadOp(
+                elem_type, storage_type, source_value, index_values, loc=loc
+            ).result
         if str(result.type) != str(elem_type):
             raise TlaLoweringError(
                 f"tla scalar element load result type mismatch: expected {elem_type}, "
                 f"got {result.type}"
             )
-        # Bool / i1 loads: Bool Numeric (``if tensor[i]`` via coerce).
-        if mlir_ir.IntegerType.isinstance(elem_type):
-            int_ty = mlir_ir.IntegerType(elem_type)
-            if int_ty.width == 1:
-                return Bool(result)
-        dtype = Numeric.from_mlir_type(elem_type)
-        if _runtime._in_simt_vec_func() and dtype.is_integer and not dtype.signed:
+        if in_simt and dtype.is_integer and not dtype.signed and not is_bool:
             result = mlir_ir.Operation.create(
                 "builtin.unrealized_conversion_cast",
                 operands=[result],

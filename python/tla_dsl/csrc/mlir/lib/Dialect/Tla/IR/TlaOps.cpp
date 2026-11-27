@@ -4201,6 +4201,8 @@ static mlir::LogicalResult verifyScalarTensorAccess(
 
 mlir::LogicalResult ScalarLoadOp::verify()
 {
+    if (getStorage() && !mlir::isa<HiFloat8Type, Float4E1M2x2Type, Float4E2M1x2Type>(getResult().getType()))
+        return emitOpError("i8 storage result requires a HiF8 or packed FP4 element");
     return verifyScalarTensorAccess(
         getOperation(), getSource().getType(), getIndices(), getResult().getType(), "source !tla.tensor");
 }

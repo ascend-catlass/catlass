@@ -120,6 +120,11 @@ private:
             if (failed(view))
                 return failure();
             Value loaded = builder.create<mlir::memref::LoadOp>(op.getLoc(), *view, indices);
+            if (Value storage = op.getStorage()) {
+                if (loaded.getType() != storage.getType())
+                    return op.emitOpError("expected an i8 storage load");
+                storage.replaceAllUsesWith(loaded);
+            }
             op.getResult().replaceAllUsesWith(loaded);
             op.erase();
         }

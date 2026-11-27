@@ -33,6 +33,19 @@ from fp8_pack4_op import GUARD, _assert_values, make_fp8_kernel
 from register_casts_op import check_masked_casts
 
 
+@tla.kernel
+def decode_captured_hif8(source: tla.Tensor, destination: tla.Tensor) -> None:
+    ptr = tla.allocate(64, tla.Float32, tla.AddressSpace.ub, 256)
+    output = tla.make_tensor_like(ptr, destination, tla.arch.RowMajor)
+    with tla.vector():
+        value = source[0]
+        with tla.vec.func(mode="simd"):
+            output.store(tla.full(value.to(tla.Float32), tla.Float32))
+        tla.pipe_barrier(tla.pipes.ALL)
+        tla.copy(destination, output)
+        tla.pipe_barrier(tla.pipes.ALL)
+
+
 def make_slot_kernel(
     slot,
     *,
@@ -213,6 +226,22 @@ def run(args, torch):
             "decode-all-codes",
             make_fp8_kernel(tla.HiFloat8, 256, narrow=False),
             cases,
+            tla.HiFloat8,
+            tla.Float32,
+        )
+        initial = np.full(64, -7.125, np.float32)
+        check(
+            "decode-captured-scalar",
+            decode_captured_hif8,
+            [
+                (
+                    np.array([code], dtype=np.uint8),
+                    initial,
+                    np.full(64, decode_hif8(code), np.float32),
+                    np.ones(64, bool),
+                )
+                for code in (0x40, 0xC0, 0x81, 0xEF)
+            ],
             tla.HiFloat8,
             tla.Float32,
         )

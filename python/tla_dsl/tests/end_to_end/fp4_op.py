@@ -55,6 +55,28 @@ ROUNDING = {
 }
 
 
+@tla.kernel
+def decode_e1m2_ub_loop(source: tla.Tensor, destination: tla.Tensor) -> None:
+    input_ptr = tla.allocate(256, tla.Float4E1M2x2, tla.AddressSpace.ub, 256)
+    output_ptr = tla.allocate(320, tla.Float32, tla.AddressSpace.ub, 256)
+    ub_input = tla.make_tensor_like(input_ptr, source, tla.arch.RowMajor)
+    ub_output = tla.make_tensor_like(output_ptr, destination, tla.arch.RowMajor)
+    side = tla.make_tensor(
+        output_ptr + 256, tla.make_layout(tla.make_shape(64), tla.make_stride(1))
+    )
+    with tla.vector():
+        tla.copy(ub_input, source)
+        tla.pipe_barrier(tla.pipes.ALL)
+        with tla.vec.func(mode="simd"):
+            for i in tla.range(256):
+                ub_output[i] = ub_input[i].to(tla.Float32)
+            # The vector store ensures the scalar loop is outlined.
+            side.store(tla.full(7.0, tla.Float32))
+        tla.pipe_barrier(tla.pipes.ALL)
+        tla.copy(destination, ub_output)
+        tla.pipe_barrier(tla.pipes.ALL)
+
+
 def make_roundtrip_kernel(fp4_dtype):
     """One BF16 register -> packed E1M2/E2M1 -> one BF16 register."""
 
@@ -273,6 +295,17 @@ def run(args):
                     types,
                     cases,
                 )
+        if args.format == "e1m2":
+            source = np.arange(256, dtype=np.uint8)
+            initial = np.full(320, -7.0, dtype=np.float32)
+            expected = np.full_like(initial, 7.0)
+            expected[:256] = np.asarray(book, dtype=np.float32)[source & 15]
+            check(
+                "e1m2-decode-ub-scalar-loop",
+                [(decode_e1m2_ub_loop, (0, 1))],
+                [dtype, tla.Float32],
+                [([source, initial], [source, expected])],
+            )
     elif args.case == "roundtrip":
         source, packed_initial, packed_expected = make_reference_data(
             args.format, "narrow", 128, 192, 128, "even"
