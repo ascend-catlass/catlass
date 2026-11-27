@@ -230,6 +230,7 @@ def _ccec_id(ccec: Path) -> str:
 
 _CACHE_SOURCE_FILES = (
     "Cube/system_counter.cpp",
+    "Vector/arange_reg.cpp",
     "Vector/axpy.cpp",
     "Vector/log.cpp",
     "Vector/lowp_cast.cpp",

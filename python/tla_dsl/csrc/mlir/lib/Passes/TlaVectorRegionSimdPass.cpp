@@ -3664,6 +3664,13 @@ static LogicalResult lowerArange(
         return arangeOp.emitError("tla.arange start type ")
                    << start.getType() << " does not match vector element type " << resultElem,
                failure();
+    if (resultElem.isInteger(64)) {
+        // The device compiler cannot legalize a B64 VCI result.
+        StringRef callee = vciType == hivmave::VCIType::INCREASE ? "arange_int64_increase" : "arange_int64_decrease";
+        valueMap[arangeOp.getResult()] =
+            createInlineB64Call(b, loc, module, callee, {resultElem}, opCtx->vecType, {start});
+        return success();
+    }
     valueMap[arangeOp.getResult()] = b.create<hivmave::VFVCIOp>(loc, opCtx->vecType, start, vciAttr).getRes();
     return success();
 }

@@ -35,7 +35,7 @@ def fake_build(tmp_path: Path, monkeypatch):
         (stubs / subdir / "dma.cpp").write_text("dma")
         (stubs / subdir / "system_counter.cpp").write_text("counter")
     (stubs / "Vector" / "log.cpp").write_text("log")
-    for op in ("sub_abs", "axpy", "muls_cast"):
+    for op in ("arange_reg", "sub_abs", "axpy", "muls_cast"):
         (stubs / "Vector" / f"{op}.cpp").write_text(op)
     (stubs / "Vector" / "lowp_cast.cpp").write_text("cast")
     ccec = tmp_path / "ccec"
@@ -216,17 +216,18 @@ def test_ar_stubs_invalidate_the_previous_bitcode_cache(fake_build, monkeypatch)
         assert symbol not in (previous_cache / aggregate).read_text()
 
 
-def test_updated_lowp_cast_stubs_rebuild_the_bitcode_cache(fake_build):
+@pytest.mark.parametrize("stub", ["lowp_cast", "arange_reg"])
+def test_updated_stubs_rebuild_the_bitcode_cache(fake_build, stub):
     cfg, compiled = fake_build
     first = bc_compile.autobuild_on_import()
     compiled.clear()
-    (cfg.paths.bc_stubs / "Vector" / "lowp_cast.cpp").write_text("updated cast")
+    (cfg.paths.bc_stubs / "Vector" / f"{stub}.cpp").write_text(f"updated {stub}")
 
     second = bc_compile.autobuild_on_import()
 
     assert second == _cache(cfg)
     assert second != first
-    assert ("aiv", "lowp_cast") in compiled
+    assert ("aiv", stub) in compiled
 
 
 def test_autobuild_defers_to_the_bc_compile_cli(fake_build, monkeypatch):
@@ -361,6 +362,7 @@ def test_icache_aggregate_rebuilds_preexisting_counter_cache(fake_build):
     assert ("aiv", "icache") in compiled
     assert set(aic.read_text().splitlines()) == {"dma", "counter", "icache_status"}
     assert set(aiv.read_text().splitlines()) == {
+        "arange_reg",
         "sub_abs",
         "axpy",
         "cast",

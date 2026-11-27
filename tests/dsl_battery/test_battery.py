@@ -1201,6 +1201,10 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
         [["end_to_end/arange_edge_op.py", *dev, "--block-num", "1"]],
     )
     yield (
+        "vector-arange-int64",
+        [["end_to_end/arange_int64_op.py", *dev]],
+    )
+    yield (
         "vector-interleave-op",
         [[
             "dsl_tutorials/vector_simd_ops/interleave_op.py", "--batch-run", "interleave", "deinterleave",

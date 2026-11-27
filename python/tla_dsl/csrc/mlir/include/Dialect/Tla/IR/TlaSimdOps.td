@@ -125,7 +125,10 @@ def Tla_ArangeOp : Tla_Op<"arange", [Pure]> {
     With ``order = increase``(default), lane ``i`` holds ``base + i`` (i.e. ``start``, ``start + 1``, ...).
     With ``order = decrease``, lane ``i`` holds ``base + VL - 1 - i`` (i.e. ``start + VL - 1``, ``start + VL - 2``, ..., ``start``).
 
-    Lowers to AVE ``vci`` with ``INCREASE`` / ``DECREASE`` mode.
+    8-, 16-, and 32-bit integer results lower to AVE ``vci`` with
+    ``INCREASE`` / ``DECREASE`` mode. 64-bit integer results use AIV bitcode
+    and occupy a single register. For descending i64, the bitcode widens
+    32-bit offsets and adds the 64-bit base.
 
     ``start`` is the integral lane base. For a floating-point result it keeps the
     matching integer width (``f16`` -> ``i16``, ``f32`` -> ``i32``) and must be a
