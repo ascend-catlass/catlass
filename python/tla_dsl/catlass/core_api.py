@@ -6687,6 +6687,11 @@ _COPY_CUBE_ROUTES = {
 
 _COPY_VECTOR_ROUTES = {("gm", "ub"), ("ub", "gm"), ("ub", "l1"), ("ub", "ub")}
 
+_DISABLED_COPY_ROUTES_C1V1 = {
+    ("l0c", "ub"),
+    ("l1", "ub"),
+}
+
 # Data types of the Ascend C LoadDataWithStride operands and their L1 staging copy.
 _IMG2COL_L0B_DTYPES = ("f16", "bf16", "f32", "i32", "u32")
 _IMG2COL_L0A_DTYPES = (*_IMG2COL_L0B_DTYPES, "i8", "u8", "hif8", "f8e4m3fn", "f8e5m2")
@@ -8219,6 +8224,9 @@ def copy(
           exactly one element per channel of the destination tile, ``originShape[1]``
           after `tile_view` cropping. When both lengths are static, a mismatch
           fails compilation.
+        - Under `@tla.kernel(core_ratio=tla.arch.C1V1)` (Ascend 950 CV 1:1),
+          `L0C`→`UB` and `L1`→`UB` are rejected. Copy `L0C`->`UB` through `GM` instead:
+          `L0C`→`GM` and then `GM`→`UB`.
         - L0C→UB 1-byte destinations (`i8`/`u8`/`f8e4m3fn`/`hif8`): Fixpipe
           always RoundUp's the write axis (RowMajor `N` / ColumnMajor `M`)
           to a 32-element block, independent of `unit_flag`. Static UB pitch
@@ -8344,6 +8352,17 @@ def copy(
         _runtime._require_enclosing_region("copy", "vector")
     else:
         _op_error("copy", f"Hardware unsupported copy route {_route}")
+
+    # CV 1:1 owns its data paths: with `core_ratio=tla.arch.C1V1` these routes
+    # stay closed.
+    if _route in _DISABLED_COPY_ROUTES_C1V1:
+        _state = _runtime._current_frontend_state()
+        if _state is not None and _state.core_ratio == (1, 1):
+            _op_error(
+                "copy",
+                f"copy route {_route[0]} -> {_route[1]} is disabled under "
+                "core_ratio=tla.arch.C1V1 on Ascend 950.",
+            )
 
     # Read dtype/addrspace from MLIR descriptors; runtime argument proxies do
     # not expose Python .dtype / .addrspace attributes.

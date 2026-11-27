@@ -126,6 +126,9 @@ tla.copy(dst: Tensor, src: Tensor, params: CopyParams | None = None, *, scale: T
   每个元素携带一个输出通道内全部元素共享的反量化参数，因此长度须与目的
   tile 通道数精确一致（`tile_view` 裁剪后的 `originShape[1]`）。两侧长度
   均为静态时不相等即编译报错。
+- `@tla.kernel(core_ratio=tla.arch.C1V1)`（Ascend 950 CV 1:1）下拒绝
+  `L0C`→`UB` 与 `L1`→`UB` 通路：`L0C`→`UB` 改为经 `GM` 搬运，先
+  `L0C`→`GM`，再 `GM`→`UB`。
 - L0C→UB 的 1-byte 目的（`i8`/`u8`/`f8e4m3fn`/`hif8`）：Fixpipe **不论**
   `unit_flag` 都会把写出维（RowMajor 的 `N` / ColumnMajor 的 `M`）按块长
   上取整到 32 元素。静态 UB 行距须 `>= RoundUp(写出维, 32)`（RowMajor 的

@@ -157,6 +157,9 @@ Constraints:
   exactly one element per channel of the destination tile, ``originShape[1]``
   after `tile_view` cropping. When both lengths are static, a mismatch
   fails compilation.
+- Under `@tla.kernel(core_ratio=tla.arch.C1V1)` (Ascend 950 CV 1:1),
+  `L0C`→`UB` and `L1`→`UB` are rejected. Copy `L0C`->`UB` through `GM` instead:
+  `L0C`→`GM` and then `GM`→`UB`.
 - L0C→UB 1-byte destinations (`i8`/`u8`/`f8e4m3fn`/`hif8`): Fixpipe
   always RoundUp's the write axis (RowMajor `N` / ColumnMajor `M`)
   to a 32-element block, independent of `unit_flag`. Static UB pitch
