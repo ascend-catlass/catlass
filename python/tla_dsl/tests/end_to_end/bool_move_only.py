@@ -23,8 +23,8 @@ VECTOR_ELE = 256
 
 @tla.kernel
 def bool_move_all(mem_in: tla.Tensor, mem_out: tla.Tensor) -> None:
-    ub_loaded = tla.flag("ub_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    vec_done = tla.flag("vec_done", tla.arch.VECTOR, tla.arch.MTE3)
+    ub_loaded = tla.flag("ub_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    vec_done = tla.flag("vec_done", tla.pipes.VECTOR, tla.pipes.MTE3)
     gm_in = tla.tile_view(mem_in, tla.make_shape(VECTOR_ELE), tla.make_coord(0))
     gm_out = tla.tile_view(mem_out, tla.make_shape(VECTOR_ELE), tla.make_coord(0))
     ub_in = tla.make_tensor_like(
@@ -55,8 +55,8 @@ def bool_move_all(mem_in: tla.Tensor, mem_out: tla.Tensor) -> None:
 
 @tla.kernel
 def bool_move_half(mem_in: tla.Tensor, mem_out: tla.Tensor) -> None:
-    ub_loaded = tla.flag("ub_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    vec_done = tla.flag("vec_done", tla.arch.VECTOR, tla.arch.MTE3)
+    ub_loaded = tla.flag("ub_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    vec_done = tla.flag("vec_done", tla.pipes.VECTOR, tla.pipes.MTE3)
     gm_in = tla.tile_view(mem_in, tla.make_shape(VECTOR_ELE), tla.make_coord(0))
     gm_out = tla.tile_view(mem_out, tla.make_shape(VECTOR_ELE), tla.make_coord(0))
     ub_in = tla.make_tensor_like(

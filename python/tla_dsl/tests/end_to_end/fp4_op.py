@@ -83,8 +83,8 @@ def make_roundtrip_kernel(fp4_dtype):
             restored_ptr + GUARD,
             tla.make_layout(tla.make_shape(128), tla.make_stride(1)),
         )
-        loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.VECTOR)
-        done = tla.flag("done", tla.arch.VECTOR, tla.arch.MTE3)
+        loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+        done = tla.flag("done", tla.pipes.VECTOR, tla.pipes.MTE3)
         with tla.vector():
             tla.copy(source_buffer, source)
             tla.copy(packed_buffer, packed)
@@ -137,8 +137,8 @@ def make_dintlv_kernel(dtype):
         second_tile = tla.make_tensor(
             second_ptr + GUARD, tla.make_layout(tla.make_shape(127), tla.make_stride(1))
         )
-        ready = tla.flag("ready", tla.arch.MTE2, tla.arch.VECTOR)
-        done = tla.flag("done", tla.arch.VECTOR, tla.arch.MTE3)
+        ready = tla.flag("ready", tla.pipes.MTE2, tla.pipes.VECTOR)
+        done = tla.flag("done", tla.pipes.VECTOR, tla.pipes.MTE3)
         with tla.vector():
             tla.copy(source_ub, source)
             tla.copy(first_ub, first)

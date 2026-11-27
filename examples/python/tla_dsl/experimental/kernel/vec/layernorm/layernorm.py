@@ -186,10 +186,10 @@ def layernorm_kernel(
         # w/b are resident for the whole block, so they are fetched once and the
         # mutex only has to cover the first (and only) MTE2 -> VECTOR hand-off.
         if tla.const_expr(HAS_AFFINE == 1):
-            wb_mutex.lock(pipe=tla.arch.MTE2)
+            wb_mutex.lock(pipe=tla.pipes.MTE2)
             tla.copy(ub_w, gm_w)
             tla.copy(ub_b, gm_b)
-            wb_mutex.unlock(pipe=tla.arch.MTE2)
+            wb_mutex.unlock(pipe=tla.pipes.MTE2)
 
         # Software pipeline: the three stages below are issued back to back for
         # every buffer, and the mutexes (not program order) decide when a stage
@@ -203,13 +203,13 @@ def layernorm_kernel(
                     gm_tile_x = tla.make_tensor(gm_x.ptr + tile_off, gm_layout)
                     gm_tile_y = tla.make_tensor(gm_y.ptr + tile_off, gm_layout)
 
-                    tile_mutex[bi].lock(pipe=tla.arch.MTE2)
+                    tile_mutex[bi].lock(pipe=tla.pipes.MTE2)
                     tla.copy(ub_tile[bi], gm_tile_x)
-                    tile_mutex[bi].unlock(pipe=tla.arch.MTE2)
+                    tile_mutex[bi].unlock(pipe=tla.pipes.MTE2)
 
-                    tile_mutex[bi].lock(pipe=tla.arch.VECTOR)
+                    tile_mutex[bi].lock(pipe=tla.pipes.VECTOR)
                     if tla.const_expr(HAS_AFFINE == 1):
-                        wb_mutex.lock(pipe=tla.arch.VECTOR)
+                        wb_mutex.lock(pipe=tla.pipes.VECTOR)
                     with tla.vec.func(mode="simd"):
                         mask = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
                         tail_mask = None
@@ -541,12 +541,12 @@ def layernorm_kernel(
                                     tail_mask,
                                 )
                     if tla.const_expr(HAS_AFFINE == 1):
-                        wb_mutex.unlock(pipe=tla.arch.VECTOR)
-                    tile_mutex[bi].unlock(pipe=tla.arch.VECTOR)
+                        wb_mutex.unlock(pipe=tla.pipes.VECTOR)
+                    tile_mutex[bi].unlock(pipe=tla.pipes.VECTOR)
 
-                    tile_mutex[bi].lock(pipe=tla.arch.MTE3)
+                    tile_mutex[bi].lock(pipe=tla.pipes.MTE3)
                     tla.copy(gm_tile_y, ub_tile[bi])
-                    tile_mutex[bi].unlock(pipe=tla.arch.MTE3)
+                    tile_mutex[bi].unlock(pipe=tla.pipes.MTE3)
 
         tla.pipe_barrier(tla.pipes.ALL)
 

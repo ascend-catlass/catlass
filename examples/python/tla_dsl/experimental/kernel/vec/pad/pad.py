@@ -155,31 +155,31 @@ def pad_kernel(
         # 性能设计点：pad 缓冲只填一次；行宽为 VL_ELE 的整数倍，vector store
         # 始终满足 32 B 对齐。无对应 padding 的一侧完全不分配额外 pipe 工作。
         if tla.const_expr(PL != 0):
-            mtx_lpad.lock(pipe=tla.arch.VECTOR)
+            mtx_lpad.lock(pipe=tla.pipes.VECTOR)
             with tla.vec.func(mode="simd"):
                 pv = tla.full(PADV, dtype=tla.Float32)
                 for fi in tla.range(BR * PLA // VL_ELE):
                     tla.tile_view(
                         ub_lfill, tla.make_shape(1, VL_ELE), tla.make_coord(0, fi)
                     ).store(pv)
-            mtx_lpad.unlock(pipe=tla.arch.VECTOR)
+            mtx_lpad.unlock(pipe=tla.pipes.VECTOR)
 
         if tla.const_expr(PR != 0):
-            mtx_rpad.lock(pipe=tla.arch.VECTOR)
+            mtx_rpad.lock(pipe=tla.pipes.VECTOR)
             with tla.vec.func(mode="simd"):
                 pv = tla.full(PADV, dtype=tla.Float32)
                 for fj in tla.range(BR * PRA // VL_ELE):
                     tla.tile_view(
                         ub_rfill, tla.make_shape(1, VL_ELE), tla.make_coord(0, fj)
                     ).store(pv)
-            mtx_rpad.unlock(pipe=tla.arch.VECTOR)
+            mtx_rpad.unlock(pipe=tla.pipes.VECTOR)
 
         # 消费者锁覆盖整个只读生命周期，而不是每个行组重复加锁/解锁。
         # MTE3 会等到对应 VECTOR unlock 后才读取已填好的 pad 缓冲。
         if tla.const_expr(PL != 0):
-            mtx_lpad.lock(pipe=tla.arch.MTE3)
+            mtx_lpad.lock(pipe=tla.pipes.MTE3)
         if tla.const_expr(PR != 0):
-            mtx_rpad.lock(pipe=tla.arch.MTE3)
+            mtx_rpad.lock(pipe=tla.pipes.MTE3)
 
         # ---- 双槽流水：每个 block 每次登记两个行组 ----
         # 先为两个槽提交 MTE2 load，再依次提交 MTE3 三段写。不同槽使用独立
@@ -196,7 +196,7 @@ def pad_kernel(
                 if local_pair * 2 + slot < group_count:
                     stage = ub0 if slot == 0 else ub1
                     mtx_stage = mtx_stage0 if slot == 0 else mtx_stage1
-                    mtx_stage.lock(pipe=tla.arch.MTE2)
+                    mtx_stage.lock(pipe=tla.pipes.MTE2)
                     tla.copy(
                         stage,
                         tla.make_tensor(
@@ -204,14 +204,14 @@ def pad_kernel(
                             ub_lay,
                         ),
                     )
-                    mtx_stage.unlock(pipe=tla.arch.MTE2)
+                    mtx_stage.unlock(pipe=tla.pipes.MTE2)
 
             for slot in tla.range_constexpr(2):
                 b = group_begin + local_pair * 2 + slot
                 if local_pair * 2 + slot < group_count:
                     stage = ub0 if slot == 0 else ub1
                     mtx_stage = mtx_stage0 if slot == 0 else mtx_stage1
-                    mtx_stage.lock(pipe=tla.arch.MTE3)
+                    mtx_stage.lock(pipe=tla.pipes.MTE3)
                     tla.copy(
                         tla.make_tensor(
                             gm_dst.ptr
@@ -239,12 +239,12 @@ def pad_kernel(
                             ),
                             ub_rb,
                         )
-                    mtx_stage.unlock(pipe=tla.arch.MTE3)
+                    mtx_stage.unlock(pipe=tla.pipes.MTE3)
 
         # ---- 尾行：只处理 M % BR 行；各核交错领取，避免少数核串行收尾 ----
         if tla.const_expr(tail != 0):
             for t in tla.range(gid, tail, aiv_num):
-                mtx_stage0.lock(pipe=tla.arch.MTE2)
+                mtx_stage0.lock(pipe=tla.pipes.MTE2)
                 tla.copy(
                     ub_row,
                     tla.make_tensor(
@@ -253,8 +253,8 @@ def pad_kernel(
                         row_lay,
                     ),
                 )
-                mtx_stage0.unlock(pipe=tla.arch.MTE2)
-                mtx_stage0.lock(pipe=tla.arch.MTE3)
+                mtx_stage0.unlock(pipe=tla.pipes.MTE2)
+                mtx_stage0.lock(pipe=tla.pipes.MTE3)
                 tla.copy(
                     tla.make_tensor(
                         gm_dst.ptr
@@ -289,12 +289,12 @@ def pad_kernel(
                             ub_rfill, tla.make_shape(1, RS), tla.make_coord(0, 0)
                         ),
                     )
-                mtx_stage0.unlock(pipe=tla.arch.MTE3)
+                mtx_stage0.unlock(pipe=tla.pipes.MTE3)
 
         if tla.const_expr(PR != 0):
-            mtx_rpad.unlock(pipe=tla.arch.MTE3)
+            mtx_rpad.unlock(pipe=tla.pipes.MTE3)
         if tla.const_expr(PL != 0):
-            mtx_lpad.unlock(pipe=tla.arch.MTE3)
+            mtx_lpad.unlock(pipe=tla.pipes.MTE3)
 
 
 # ======================================================================================

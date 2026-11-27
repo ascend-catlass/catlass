@@ -205,24 +205,24 @@ def matmul_exp_scale_ub_kernel(
                     gm_b_p = _b_tile(gm_w, c0, nt, n_ext)
                     l1_a_p = tla.make_tensor_like(l1a0_ptr, gm_a_p, tla.arch.zN)
                     l1_b_p = tla.make_tensor_like(l1b0_ptr, gm_b_p, tla.arch.nZ)
-                    mutex_l1a0.lock(pipe=tla.arch.MTE2)
-                    mutex_l1b0.lock(pipe=tla.arch.MTE2)
+                    mutex_l1a0.lock(pipe=tla.pipes.MTE2)
+                    mutex_l1b0.lock(pipe=tla.pipes.MTE2)
                     tla.copy(l1_a_p, gm_a_p)
                     tla.copy(l1_b_p, gm_b_p)
-                    mutex_l1a0.unlock(pipe=tla.arch.MTE2)
-                    mutex_l1b0.unlock(pipe=tla.arch.MTE2)
+                    mutex_l1a0.unlock(pipe=tla.pipes.MTE2)
+                    mutex_l1b0.unlock(pipe=tla.pipes.MTE2)
 
                     # L0C is free only after the previous tile's fixpipe has consumed it.
-                    mutex_l0c.lock(pipe=tla.arch.CUBE)
+                    mutex_l0c.lock(pipe=tla.pipes.CUBE)
 
                     buf = tla.as_numeric(c0)
                     for kt in tla.range(c0, k_tiles, c1):
                         if buf == c0:
-                            mutex_l1a0.lock(pipe=tla.arch.MTE1)
-                            mutex_l1b0.lock(pipe=tla.arch.MTE1)
+                            mutex_l1a0.lock(pipe=tla.pipes.MTE1)
+                            mutex_l1b0.lock(pipe=tla.pipes.MTE1)
                         else:
-                            mutex_l1a1.lock(pipe=tla.arch.MTE1)
-                            mutex_l1b1.lock(pipe=tla.arch.MTE1)
+                            mutex_l1a1.lock(pipe=tla.pipes.MTE1)
+                            mutex_l1b1.lock(pipe=tla.pipes.MTE1)
 
                         # Prefetch the next K tile into the other stage.
                         if kt + c1 < k_tiles:
@@ -241,19 +241,19 @@ def matmul_exp_scale_ub_kernel(
                                 next_b_ptr, gm_b_n, tla.arch.nZ
                             )
                             if buf == c0:
-                                mutex_l1a1.lock(pipe=tla.arch.MTE2)
-                                mutex_l1b1.lock(pipe=tla.arch.MTE2)
+                                mutex_l1a1.lock(pipe=tla.pipes.MTE2)
+                                mutex_l1b1.lock(pipe=tla.pipes.MTE2)
                             else:
-                                mutex_l1a0.lock(pipe=tla.arch.MTE2)
-                                mutex_l1b0.lock(pipe=tla.arch.MTE2)
+                                mutex_l1a0.lock(pipe=tla.pipes.MTE2)
+                                mutex_l1b0.lock(pipe=tla.pipes.MTE2)
                             tla.copy(l1_a_n, gm_a_n)
                             tla.copy(l1_b_n, gm_b_n)
                             if buf == c0:
-                                mutex_l1a1.unlock(pipe=tla.arch.MTE2)
-                                mutex_l1b1.unlock(pipe=tla.arch.MTE2)
+                                mutex_l1a1.unlock(pipe=tla.pipes.MTE2)
+                                mutex_l1b1.unlock(pipe=tla.pipes.MTE2)
                             else:
-                                mutex_l1a0.unlock(pipe=tla.arch.MTE2)
-                                mutex_l1b0.unlock(pipe=tla.arch.MTE2)
+                                mutex_l1a0.unlock(pipe=tla.pipes.MTE2)
+                                mutex_l1b0.unlock(pipe=tla.pipes.MTE2)
 
                         cur_a_ptr = l1a0_ptr if buf == c0 else l1a1_ptr
                         cur_b_ptr = l1b0_ptr if buf == c0 else l1b1_ptr
@@ -274,21 +274,21 @@ def matmul_exp_scale_ub_kernel(
                         )
                         l0_a_p = tla.make_tensor_like(l0a0_ptr, l1_a_p0, tla.arch.zN)
                         l0_b_p = tla.make_tensor_like(l0b0_ptr, l1_b_p0, tla.arch.nZ)
-                        mutex_l0a0.lock(pipe=tla.arch.MTE1)
-                        mutex_l0b0.lock(pipe=tla.arch.MTE1)
+                        mutex_l0a0.lock(pipe=tla.pipes.MTE1)
+                        mutex_l0b0.lock(pipe=tla.pipes.MTE1)
                         tla.copy(l0_a_p, l1_a_p0)
                         tla.copy(l0_b_p, l1_b_p0)
-                        mutex_l0a0.unlock(pipe=tla.arch.MTE1)
-                        mutex_l0b0.unlock(pipe=tla.arch.MTE1)
+                        mutex_l0a0.unlock(pipe=tla.pipes.MTE1)
+                        mutex_l0b0.unlock(pipe=tla.pipes.MTE1)
 
                         lbuf = tla.as_numeric(c0)
                         for sk in tla.range(c0, SUB_K, c1):
                             if lbuf == c0:
-                                mutex_l0a0.lock(pipe=tla.arch.CUBE)
-                                mutex_l0b0.lock(pipe=tla.arch.CUBE)
+                                mutex_l0a0.lock(pipe=tla.pipes.CUBE)
+                                mutex_l0b0.lock(pipe=tla.pipes.CUBE)
                             else:
-                                mutex_l0a1.lock(pipe=tla.arch.CUBE)
-                                mutex_l0b1.lock(pipe=tla.arch.CUBE)
+                                mutex_l0a1.lock(pipe=tla.pipes.CUBE)
+                                mutex_l0b1.lock(pipe=tla.pipes.CUBE)
 
                             # Next-chunk views are pure metadata and built unconditionally;
                             # only the guarded copy below touches them.
@@ -312,19 +312,19 @@ def matmul_exp_scale_ub_kernel(
                             )
                             if sk + c1 < SUB_K:
                                 if lbuf == c0:
-                                    mutex_l0a1.lock(pipe=tla.arch.MTE1)
-                                    mutex_l0b1.lock(pipe=tla.arch.MTE1)
+                                    mutex_l0a1.lock(pipe=tla.pipes.MTE1)
+                                    mutex_l0b1.lock(pipe=tla.pipes.MTE1)
                                 else:
-                                    mutex_l0a0.lock(pipe=tla.arch.MTE1)
-                                    mutex_l0b0.lock(pipe=tla.arch.MTE1)
+                                    mutex_l0a0.lock(pipe=tla.pipes.MTE1)
+                                    mutex_l0b0.lock(pipe=tla.pipes.MTE1)
                                 tla.copy(l0_a_n, l1_a_q)
                                 tla.copy(l0_b_n, l1_b_q)
                                 if lbuf == c0:
-                                    mutex_l0a1.unlock(pipe=tla.arch.MTE1)
-                                    mutex_l0b1.unlock(pipe=tla.arch.MTE1)
+                                    mutex_l0a1.unlock(pipe=tla.pipes.MTE1)
+                                    mutex_l0b1.unlock(pipe=tla.pipes.MTE1)
                                 else:
-                                    mutex_l0a0.unlock(pipe=tla.arch.MTE1)
-                                    mutex_l0b0.unlock(pipe=tla.arch.MTE1)
+                                    mutex_l0a0.unlock(pipe=tla.pipes.MTE1)
+                                    mutex_l0b0.unlock(pipe=tla.pipes.MTE1)
 
                             cur_l0a_ptr = l0a0_ptr if lbuf == c0 else l0a1_ptr
                             cur_l0b_ptr = l0b0_ptr if lbuf == c0 else l0b1_ptr
@@ -354,26 +354,26 @@ def matmul_exp_scale_ub_kernel(
                             )
 
                             if lbuf == c0:
-                                mutex_l0a0.unlock(pipe=tla.arch.CUBE)
-                                mutex_l0b0.unlock(pipe=tla.arch.CUBE)
+                                mutex_l0a0.unlock(pipe=tla.pipes.CUBE)
+                                mutex_l0b0.unlock(pipe=tla.pipes.CUBE)
                             else:
-                                mutex_l0a1.unlock(pipe=tla.arch.CUBE)
-                                mutex_l0b1.unlock(pipe=tla.arch.CUBE)
+                                mutex_l0a1.unlock(pipe=tla.pipes.CUBE)
+                                mutex_l0b1.unlock(pipe=tla.pipes.CUBE)
                             lbuf = c1 - lbuf
 
                         if buf == c0:
-                            mutex_l1a0.unlock(pipe=tla.arch.MTE1)
-                            mutex_l1b0.unlock(pipe=tla.arch.MTE1)
+                            mutex_l1a0.unlock(pipe=tla.pipes.MTE1)
+                            mutex_l1b0.unlock(pipe=tla.pipes.MTE1)
                         else:
-                            mutex_l1a1.unlock(pipe=tla.arch.MTE1)
-                            mutex_l1b1.unlock(pipe=tla.arch.MTE1)
+                            mutex_l1a1.unlock(pipe=tla.pipes.MTE1)
+                            mutex_l1b1.unlock(pipe=tla.pipes.MTE1)
                         buf = c1 - buf
 
                     # Hand the fp32 tile to the two AIV halves.  unit_flag=3 closes the
                     # accumulation chain so the fixpipe observes a complete tile.
-                    mutex_l0c.unlock(pipe=tla.arch.CUBE)
-                    mutex_l0c.lock(pipe=tla.arch.FIX)
-                    tla.cross_core_wait_flag(exchange, tla.arch.FIX)
+                    mutex_l0c.unlock(pipe=tla.pipes.CUBE)
+                    mutex_l0c.lock(pipe=tla.pipes.FIX)
+                    tla.cross_core_wait_flag(exchange, tla.pipes.FIX)
                     tla.copy(
                         ub_c_fix,
                         l0_c,
@@ -382,8 +382,8 @@ def matmul_exp_scale_ub_kernel(
                             l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M,
                         ),
                     )
-                    tla.cross_core_set_flag(exchange, tla.arch.FIX)
-                    mutex_l0c.unlock(pipe=tla.arch.FIX)
+                    tla.cross_core_set_flag(exchange, tla.pipes.FIX)
+                    mutex_l0c.unlock(pipe=tla.pipes.FIX)
 
     # ---------------------------------------------------------------- vector
     with tla.vector():
@@ -416,7 +416,7 @@ def matmul_exp_scale_ub_kernel(
         )
 
         # Open the exchange so the first fixpipe hand-off can proceed.
-        tla.cross_core_set_flag(exchange, tla.arch.VECTOR)
+        tla.cross_core_set_flag(exchange, tla.pipes.VECTOR)
 
         # The vector region advances with the same block_idx / block_num and the
         # same two passes as the cube region (block_num is the cube core count);
@@ -449,7 +449,7 @@ def matmul_exp_scale_ub_kernel(
                     mt = task // tiles_per_row
                     nt = task - mt * tiles_per_row + nt_off
                     row0 = mt * BM + sub * HALF
-                    tla.cross_core_wait_flag(exchange, tla.arch.VECTOR)
+                    tla.cross_core_wait_flag(exchange, tla.pipes.VECTOR)
 
                     # One thread per row: a 4-byte pitch is not a legal DMA tile, so the
                     # per-row scalars are read as scalars.
@@ -460,7 +460,7 @@ def matmul_exp_scale_ub_kernel(
                     tla.pipe_barrier(tla.pipes.ALL)
 
                     # ---- payload: per-row epilogue, replace as a whole --------------
-                    mutex_out.lock(pipe=tla.arch.VECTOR)
+                    mutex_out.lock(pipe=tla.pipes.VECTOR)
                     with tla.vec.func(mode="simd"):
                         store_lanes = tla.create_mask(
                             pattern=tla.mask.ALL, dtype=tla.BFloat16
@@ -495,7 +495,7 @@ def matmul_exp_scale_ub_kernel(
                                     pack_store,
                                     mask=store_lanes,
                                 )
-                    mutex_out.unlock(pipe=tla.arch.VECTOR)
+                    mutex_out.unlock(pipe=tla.pipes.VECTOR)
                     # ---- end of payload ----------------------------------------------
 
                     tla.pipe_barrier(tla.pipes.ALL)
@@ -512,12 +512,12 @@ def matmul_exp_scale_ub_kernel(
                             tla.make_shape(HALF, v_real), tla.make_stride(v, 1)
                         ),
                     )
-                    mutex_out.lock(pipe=tla.arch.MTE3)
+                    mutex_out.lock(pipe=tla.pipes.MTE3)
                     tla.copy(gm_y_half, ub_y)
-                    mutex_out.unlock(pipe=tla.arch.MTE3)
+                    mutex_out.unlock(pipe=tla.pipes.MTE3)
                     tla.pipe_barrier(tla.pipes.ALL)
                     # Hand the fp32 staging half back to the fixpipe.
-                    tla.cross_core_set_flag(exchange, tla.arch.VECTOR)
+                    tla.cross_core_set_flag(exchange, tla.pipes.VECTOR)
 
 
 # ======================================================================================

@@ -85,13 +85,13 @@ def simt_mixed(
     gm_mid: tla.Tensor,
     gm_out: tla.Tensor,
 ) -> None:
-    l1_loaded = tla.flag("l1_loaded", tla.arch.MTE2, tla.arch.MTE1)
-    l0_loaded = tla.flag("l0_loaded", tla.arch.MTE1, tla.arch.CUBE)
-    mmad_done = tla.flag("mmad_done", tla.arch.CUBE, tla.arch.FIX)
+    l1_loaded = tla.flag("l1_loaded", tla.pipes.MTE2, tla.pipes.MTE1)
+    l0_loaded = tla.flag("l0_loaded", tla.pipes.MTE1, tla.pipes.CUBE)
+    mmad_done = tla.flag("mmad_done", tla.pipes.CUBE, tla.pipes.FIX)
 
-    ub_loaded = tla.flag("ub_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    vec_done = tla.flag("vec_done", tla.arch.VECTOR, tla.arch.MTE3)
-    simt_done = tla.flag("simt_done", tla.arch.VECTOR, tla.arch.MTE3)
+    ub_loaded = tla.flag("ub_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    vec_done = tla.flag("vec_done", tla.pipes.VECTOR, tla.pipes.MTE3)
+    simt_done = tla.flag("simt_done", tla.pipes.VECTOR, tla.pipes.MTE3)
 
     fix_done = tla.cross_flag("fix_done")
 
@@ -161,7 +161,7 @@ def simt_mixed(
             ),
         )
 
-        tla.cross_core_set_flag(fix_done, tla.arch.FIX)
+        tla.cross_core_set_flag(fix_done, tla.pipes.FIX)
         tla.pipe_barrier(tla.pipes.ALL)
 
     with tla.vector():
@@ -198,7 +198,7 @@ def simt_mixed(
         tla.wait_flag(ub_loaded)
 
         # The SIMD stage reads c from UB, so wait for the fixpipe first.
-        tla.cross_core_wait_flag(fix_done, tla.arch.VECTOR)
+        tla.cross_core_wait_flag(fix_done, tla.pipes.VECTOR)
 
         # ---- SIMD: mid = c + addend_simd, whole-vector, entirely in UB ----
         for row_tile in tla.range(0, SIMD_ROWS // REG_TILE_M, 1):

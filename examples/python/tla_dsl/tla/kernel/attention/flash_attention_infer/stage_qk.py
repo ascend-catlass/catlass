@@ -95,50 +95,52 @@ def _read_tiling(tilingInt, tilingScale, head_dim):
 def _declare_flags():
     """flag 声明。"""
     # --- L1->L0 完成 -> GM->L1 可开始 ---
-    q_l0a_data_ready = tla.flag("q_l0a_data_ready", tla.arch.MTE1, tla.arch.MTE2)
-    k_l0b_data_ready_0 = tla.flag("k_l0b_data_ready_0", tla.arch.MTE1, tla.arch.MTE2)
-    k_l0b_data_ready_1 = tla.flag("k_l0b_data_ready_1", tla.arch.MTE1, tla.arch.MTE2)
-    v_l0b_data_ready_0 = tla.flag("v_l0b_data_ready_0", tla.arch.MTE1, tla.arch.MTE2)
-    v_l0b_data_ready_1 = tla.flag("v_l0b_data_ready_1", tla.arch.MTE1, tla.arch.MTE2)
+    q_l0a_data_ready = tla.flag("q_l0a_data_ready", tla.pipes.MTE1, tla.pipes.MTE2)
+    k_l0b_data_ready_0 = tla.flag("k_l0b_data_ready_0", tla.pipes.MTE1, tla.pipes.MTE2)
+    k_l0b_data_ready_1 = tla.flag("k_l0b_data_ready_1", tla.pipes.MTE1, tla.pipes.MTE2)
+    v_l0b_data_ready_0 = tla.flag("v_l0b_data_ready_0", tla.pipes.MTE1, tla.pipes.MTE2)
+    v_l0b_data_ready_1 = tla.flag("v_l0b_data_ready_1", tla.pipes.MTE1, tla.pipes.MTE2)
     # --- CUBE MMAD 完成 -> L1->L0 可开始 ---
-    l0a_available_0 = tla.flag("l0a_available_0", tla.arch.CUBE, tla.arch.MTE1)
-    l0a_available_1 = tla.flag("l0a_available_1", tla.arch.CUBE, tla.arch.MTE1)
-    l0b_available_0 = tla.flag("l0b_available_0", tla.arch.CUBE, tla.arch.MTE1)
-    l0b_available_1 = tla.flag("l0b_available_1", tla.arch.CUBE, tla.arch.MTE1)
+    l0a_available_0 = tla.flag("l0a_available_0", tla.pipes.CUBE, tla.pipes.MTE1)
+    l0a_available_1 = tla.flag("l0a_available_1", tla.pipes.CUBE, tla.pipes.MTE1)
+    l0b_available_0 = tla.flag("l0b_available_0", tla.pipes.CUBE, tla.pipes.MTE1)
+    l0b_available_1 = tla.flag("l0b_available_1", tla.pipes.CUBE, tla.pipes.MTE1)
     # --- FIX (L0C->UB) 完成 -> CUBE 可开始 ---
-    l0c_available_0 = tla.flag("l0c_available_0", tla.arch.FIX, tla.arch.CUBE)
-    l0c_available_1 = tla.flag("l0c_available_1", tla.arch.FIX, tla.arch.CUBE)
-    l0c_available_2 = tla.flag("l0c_available_2", tla.arch.FIX, tla.arch.CUBE)
-    l0c_available_3 = tla.flag("l0c_available_3", tla.arch.FIX, tla.arch.CUBE)
+    l0c_available_0 = tla.flag("l0c_available_0", tla.pipes.FIX, tla.pipes.CUBE)
+    l0c_available_1 = tla.flag("l0c_available_1", tla.pipes.FIX, tla.pipes.CUBE)
+    l0c_available_2 = tla.flag("l0c_available_2", tla.pipes.FIX, tla.pipes.CUBE)
+    l0c_available_3 = tla.flag("l0c_available_3", tla.pipes.FIX, tla.pipes.CUBE)
     # --- GM->L1 加载完成 -> L1->L0 可开始 ---
-    q_l1_data_ready = tla.flag("q_l1_data_ready", tla.arch.MTE2, tla.arch.MTE1)
-    k_l1_data_ready_0 = tla.flag("k_l1_data_ready_0", tla.arch.MTE2, tla.arch.MTE1)
-    k_l1_data_ready_1 = tla.flag("k_l1_data_ready_1", tla.arch.MTE2, tla.arch.MTE1)
-    v_l1_data_ready_0 = tla.flag("v_l1_data_ready_0", tla.arch.MTE2, tla.arch.MTE1)
-    v_l1_data_ready_1 = tla.flag("v_l1_data_ready_1", tla.arch.MTE2, tla.arch.MTE1)
+    q_l1_data_ready = tla.flag("q_l1_data_ready", tla.pipes.MTE2, tla.pipes.MTE1)
+    k_l1_data_ready_0 = tla.flag("k_l1_data_ready_0", tla.pipes.MTE2, tla.pipes.MTE1)
+    k_l1_data_ready_1 = tla.flag("k_l1_data_ready_1", tla.pipes.MTE2, tla.pipes.MTE1)
+    v_l1_data_ready_0 = tla.flag("v_l1_data_ready_0", tla.pipes.MTE2, tla.pipes.MTE1)
+    v_l1_data_ready_1 = tla.flag("v_l1_data_ready_1", tla.pipes.MTE2, tla.pipes.MTE1)
     # --- L1->L0 完成 -> CUBE 可开始 ---
-    l0a_data_ready_0 = tla.flag("l0a_data_ready_0", tla.arch.MTE1, tla.arch.CUBE)
-    l0a_data_ready_1 = tla.flag("l0a_data_ready_1", tla.arch.MTE1, tla.arch.CUBE)
-    l0b_data_ready_0 = tla.flag("l0b_data_ready_0", tla.arch.MTE1, tla.arch.CUBE)
-    l0b_data_ready_1 = tla.flag("l0b_data_ready_1", tla.arch.MTE1, tla.arch.CUBE)
+    l0a_data_ready_0 = tla.flag("l0a_data_ready_0", tla.pipes.MTE1, tla.pipes.CUBE)
+    l0a_data_ready_1 = tla.flag("l0a_data_ready_1", tla.pipes.MTE1, tla.pipes.CUBE)
+    l0b_data_ready_0 = tla.flag("l0b_data_ready_0", tla.pipes.MTE1, tla.pipes.CUBE)
+    l0b_data_ready_1 = tla.flag("l0b_data_ready_1", tla.pipes.MTE1, tla.pipes.CUBE)
     # --- CUBE MMAD 完成 -> FIX (L0C -> UB) 可开始 ---
-    l0c_data_ready_0 = tla.flag("l0c_data_ready_0", tla.arch.CUBE, tla.arch.FIX)
-    l0c_data_ready_1 = tla.flag("l0c_data_ready_1", tla.arch.CUBE, tla.arch.FIX)
-    l0c_data_ready_2 = tla.flag("l0c_data_ready_2", tla.arch.CUBE, tla.arch.FIX)
-    l0c_data_ready_3 = tla.flag("l0c_data_ready_3", tla.arch.CUBE, tla.arch.FIX)
+    l0c_data_ready_0 = tla.flag("l0c_data_ready_0", tla.pipes.CUBE, tla.pipes.FIX)
+    l0c_data_ready_1 = tla.flag("l0c_data_ready_1", tla.pipes.CUBE, tla.pipes.FIX)
+    l0c_data_ready_2 = tla.flag("l0c_data_ready_2", tla.pipes.CUBE, tla.pipes.FIX)
+    l0c_data_ready_3 = tla.flag("l0c_data_ready_3", tla.pipes.CUBE, tla.pipes.FIX)
     # --- VECTOR 完成 -> gm -> UB ---
-    vec_ready_mte2_0 = tla.flag("vec_ready_mte2_0", tla.arch.VECTOR, tla.arch.MTE2)
-    vec_ready_mte2_1 = tla.flag("vec_ready_mte2_1", tla.arch.VECTOR, tla.arch.MTE2)
+    vec_ready_mte2_0 = tla.flag("vec_ready_mte2_0", tla.pipes.VECTOR, tla.pipes.MTE2)
+    vec_ready_mte2_1 = tla.flag("vec_ready_mte2_1", tla.pipes.VECTOR, tla.pipes.MTE2)
     # --- mask2index
-    mte3_ready_mask_0 = tla.flag("mte3_ready_mask_0", tla.arch.MTE3, tla.arch.VECTOR)
-    mte3_ready_mask_1 = tla.flag("mte3_ready_mask_1", tla.arch.MTE3, tla.arch.VECTOR)
+    mte3_ready_mask_0 = tla.flag("mte3_ready_mask_0", tla.pipes.MTE3, tla.pipes.VECTOR)
+    mte3_ready_mask_1 = tla.flag("mte3_ready_mask_1", tla.pipes.MTE3, tla.pipes.VECTOR)
     # --- softmax
-    ub_p_available_0 = tla.flag("ub_p_available_0", tla.arch.MTE3, tla.arch.VECTOR)
-    ub_p_available_1 = tla.flag("ub_p_available_1", tla.arch.MTE3, tla.arch.VECTOR)
+    ub_p_available_0 = tla.flag("ub_p_available_0", tla.pipes.MTE3, tla.pipes.VECTOR)
+    ub_p_available_1 = tla.flag("ub_p_available_1", tla.pipes.MTE3, tla.pipes.VECTOR)
     # --- rescale
-    mte3_ready_rescale = tla.flag("mte3_ready_rescale", tla.arch.MTE3, tla.arch.VECTOR)
-    ub_p_data_ready_0 = tla.flag("ub_p_data_ready_0", tla.arch.VECTOR, tla.arch.MTE3)
-    ub_p_data_ready_1 = tla.flag("ub_p_data_ready_1", tla.arch.VECTOR, tla.arch.MTE3)
+    mte3_ready_rescale = tla.flag(
+        "mte3_ready_rescale", tla.pipes.MTE3, tla.pipes.VECTOR
+    )
+    ub_p_data_ready_0 = tla.flag("ub_p_data_ready_0", tla.pipes.VECTOR, tla.pipes.MTE3)
+    ub_p_data_ready_1 = tla.flag("ub_p_data_ready_1", tla.pipes.VECTOR, tla.pipes.MTE3)
     ub_s_cross_ready_0 = tla.cross_flag("ub_s_cross_ready_0")
     ub_s_cross_ready_1 = tla.cross_flag("ub_s_cross_ready_1")
     ub_otmp_cross_ready_0 = tla.cross_flag("ub_otmp_cross_ready_0")
@@ -209,9 +211,9 @@ def _init_flags(sync):
         tla.set_flag(sync.l0c_available_1)
         tla.set_flag(sync.l0c_available_2)
         tla.set_flag(sync.l0c_available_3)
-        tla.cross_core_set_flag(sync.ub_p_cross_ready_0, tla.arch.MTE1)
-        tla.cross_core_set_flag(sync.ub_p_cross_ready_1, tla.arch.MTE1)
-        tla.cross_core_set_flag(sync.ub_p_cross_ready_2, tla.arch.MTE1)
+        tla.cross_core_set_flag(sync.ub_p_cross_ready_0, tla.pipes.MTE1)
+        tla.cross_core_set_flag(sync.ub_p_cross_ready_1, tla.pipes.MTE1)
+        tla.cross_core_set_flag(sync.ub_p_cross_ready_2, tla.pipes.MTE1)
     with tla.vector():
         tla.set_flag(sync.vec_ready_mte2_0)
         tla.set_flag(sync.vec_ready_mte2_1)
@@ -220,10 +222,10 @@ def _init_flags(sync):
         tla.set_flag(sync.ub_p_available_0)
         tla.set_flag(sync.ub_p_available_1)
         tla.set_flag(sync.mte3_ready_rescale)
-        tla.cross_core_set_flag(sync.ub_s_cross_ready_0, tla.arch.VECTOR)
-        tla.cross_core_set_flag(sync.ub_s_cross_ready_1, tla.arch.VECTOR)
-        tla.cross_core_set_flag(sync.ub_otmp_cross_ready_0, tla.arch.VECTOR)
-        tla.cross_core_set_flag(sync.ub_otmp_cross_ready_1, tla.arch.VECTOR)
+        tla.cross_core_set_flag(sync.ub_s_cross_ready_0, tla.pipes.VECTOR)
+        tla.cross_core_set_flag(sync.ub_s_cross_ready_1, tla.pipes.VECTOR)
+        tla.cross_core_set_flag(sync.ub_otmp_cross_ready_0, tla.pipes.VECTOR)
+        tla.cross_core_set_flag(sync.ub_otmp_cross_ready_1, tla.pipes.VECTOR)
 
 
 @tla.jit
@@ -539,9 +541,9 @@ def _qk_cube_stage(
             tla.set_flag(sync.l0b_available_1)
         # ---- fixPipe：L0C(fp32) -> UB(fp16 S) ----
         if ubSBufId == 0:
-            tla.cross_core_wait_flag(sync.ub_s_cross_ready_0, tla.arch.FIX)
+            tla.cross_core_wait_flag(sync.ub_s_cross_ready_0, tla.pipes.FIX)
         else:
-            tla.cross_core_wait_flag(sync.ub_s_cross_ready_1, tla.arch.FIX)
+            tla.cross_core_wait_flag(sync.ub_s_cross_ready_1, tla.pipes.FIX)
         if l0CBufId == 0:
             tla.set_flag(sync.l0c_data_ready_0)  # CUBE_FIX
             tla.wait_flag(sync.l0c_data_ready_0)  # CUBE_FIX
@@ -558,8 +560,8 @@ def _qk_cube_stage(
         else:
             tla.set_flag(sync.l0c_available_1)
         if ubSBufId == 0:
-            tla.cross_core_set_flag(sync.ub_s_cross_ready_0, tla.arch.FIX)
+            tla.cross_core_set_flag(sync.ub_s_cross_ready_0, tla.pipes.FIX)
         else:
-            tla.cross_core_set_flag(sync.ub_s_cross_ready_1, tla.arch.FIX)
+            tla.cross_core_set_flag(sync.ub_s_cross_ready_1, tla.pipes.FIX)
         if gatheredKvSTileIdx == kvSLoopNum - 1:
             tla.set_flag(sync.q_l0a_data_ready)  # MTE1_MTE2

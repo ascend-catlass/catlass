@@ -368,8 +368,8 @@ def _selectable_binary(
 ) -> None:
     """``gm_c = gm_a + gm_b`` or ``gm_a - gm_b``, chosen at compile time."""
     n_ele = gm_a.origin_shape[0]
-    ub_loaded = tla.flag("ub_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    vec_done = tla.flag("vec_done", tla.arch.VECTOR, tla.arch.MTE3)
+    ub_loaded = tla.flag("ub_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    vec_done = tla.flag("vec_done", tla.pipes.VECTOR, tla.pipes.MTE3)
 
     ub_ptr_a = tla.allocate(VECTOR_ELE, tla.Float32, tla.AddressSpace.ub, 256)
     ub_ptr_b = tla.allocate(VECTOR_ELE, tla.Float32, tla.AddressSpace.ub, 256)

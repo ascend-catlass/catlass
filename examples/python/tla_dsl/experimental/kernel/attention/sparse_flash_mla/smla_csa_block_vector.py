@@ -69,7 +69,7 @@ def init_output_gm(
     ub = tla.make_tensor(
         src, tla.make_layout(tla.make_shape(pop_ele), tla.make_stride(1))
     )
-    mutex_lock(sync.m_init, tla.arch.VECTOR)
+    mutex_lock(sync.m_init, tla.pipes.VECTOR)
     with tla.vec.func(mode="simd"):
         zero = tla.full(0.0, dtype=fill_dtype)
         # AscendC::Duplicate(popBuffer, initValue, POP_BUF_ELE_SIZE)
@@ -79,8 +79,8 @@ def init_output_gm(
                 params=tla.params.UnalignStoreParams(),
             )
         tla.local_mem_bar(tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD)
-    mutex_unlock(sync.m_init, tla.arch.VECTOR)
-    mutex_lock(sync.m_init, tla.arch.MTE3)
+    mutex_unlock(sync.m_init, tla.pipes.VECTOR)
+    mutex_lock(sync.m_init, tla.pipes.MTE3)
     loop_cnt = total_elem // pop_ele
     tail = total_elem - loop_cnt * pop_ele
     for i in tla.range(loop_cnt):
@@ -96,9 +96,9 @@ def init_output_gm(
             tla.make_layout(tla.make_shape(tail), tla.make_stride(1)),
         )
         tla.copy(gm_tail, tla.tile_view(ub, tla.make_shape(tail), tla.make_coord(0)))
-    mutex_unlock(sync.m_init, tla.arch.MTE3)
-    mutex_lock(sync.m_init, tla.arch.VECTOR)
-    mutex_unlock(sync.m_init, tla.arch.VECTOR)
+    mutex_unlock(sync.m_init, tla.pipes.MTE3)
+    mutex_lock(sync.m_init, tla.pipes.VECTOR)
+    mutex_unlock(sync.m_init, tla.pipes.VECTOR)
 
 
 def _lse_total_len(total_output, total_lse, head_dim):
@@ -315,7 +315,7 @@ def vec_init_from_sinks(
             sinks.ptr, tla.make_layout(tla.make_shape(sink_len), tla.make_stride(1))
         )
         if has_sinks == 1:
-            mutex_lock(sync.m_sink, tla.arch.MTE2)
+            mutex_lock(sync.m_sink, tla.pipes.MTE2)
             if sink_cap == 0:
                 # m 为奇数时第二子块没有实义行（OT secondHalfMRealSize=0），
                 # 其 sink 偏移会越界，钳回本 task 的首行以免读穿 sinks。
@@ -330,8 +330,8 @@ def vec_init_from_sinks(
             else:
                 # 整条 sinks 一次搬入（起点 0、长度 32B 对齐），逐行取由下游完成。
                 tla.copy(ub_sink, gm_sink_all)
-            mutex_unlock(sync.m_sink, tla.arch.MTE2)
-        mutex_lock(sync.m_sink, tla.arch.VECTOR)
+            mutex_unlock(sync.m_sink, tla.pipes.MTE2)
+        mutex_lock(sync.m_sink, tla.pipes.VECTOR)
         # F11·bc：max 重灌槽 slot_max = 宿主 tile（T 首）的 xg%2——与 sum 重灌
         # 槽同键；bc=1 块首的 reinit 也写本 tile 槽（见 bc_reinit_stats）。
         ub_max = _max(bufs, rows, slot_max)
@@ -388,7 +388,7 @@ def vec_init_from_sinks(
                         )
                         ub_o_c.store(zero, mask=preg)
             tla.local_mem_bar(tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD)
-        mutex_unlock(sync.m_sink, tla.arch.VECTOR)
+        mutex_unlock(sync.m_sink, tla.pipes.VECTOR)
 
 
 @tla.jit
@@ -439,15 +439,15 @@ def process_vec1(
         # 同键）；vec2(xg2) 读槽 slot_dm = xg2 % 2——相邻 tile 奇偶交替，
         # 源序交换后 vec1(x-1) 写与 vec2(x-2) 读不再互踩。
         ub_dm = _dm(bufs, rows, slot_s)
-        tla.cross_core_wait_flag(sync.s_ready, tla.arch.VECTOR, aiv_id=0)
-        tla.cross_core_wait_flag(sync.s_ready, tla.arch.VECTOR, aiv_id=1)
+        tla.cross_core_wait_flag(sync.s_ready, tla.pipes.VECTOR, aiv_id=0)
+        tla.cross_core_wait_flag(sync.s_ready, tla.pipes.VECTOR, aiv_id=1)
         # F14 步骤 A（裁决采纳）：去除 p_free 回执（OT IterateBmm2Impl 对
         # l1PBuffers 单向 + 双槽 slack，无 C→V credit）。踩写安全链：vec1(x)
         # 写槽 x%2 前必 WAIT s_ready ← bmm1(x) 的 SET（FIX，S fixpipe 后）；
         # AIC 单核程序序 bmm2(x-2)（读槽 x%2 的 MTE1 LoadDataToL0A）→ … →
         # bmm1(x)，MTE1 队列 FIFO ⇒ bmm2(x-2) 的 P 读完成早于 bmm1(x) 的
         # SET ⇒ vec1(x) 的 MTE3 写不踩。领先量上界 2 tile 由该链封顶。
-        mutex_lock(sync.m_p, tla.arch.VECTOR)
+        mutex_lock(sync.m_p, tla.pipes.VECTOR)
 
         n0 = tail_n
         if n0 > VL:
@@ -794,8 +794,8 @@ def process_vec1(
                         tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD
                     )
         # S 已消费，归还 FIX
-        tla.cross_core_set_flag(sync.s_free, tla.arch.VECTOR, aiv_id=0)
-        tla.cross_core_set_flag(sync.s_free, tla.arch.VECTOR, aiv_id=1)
+        tla.cross_core_set_flag(sync.s_free, tla.pipes.VECTOR, aiv_id=0)
+        tla.cross_core_set_flag(sync.s_free, tla.pipes.VECTOR, aiv_id=1)
         # ---- UB P -> L1 P（两个 AIV 各写 M 的一半）----
         # T2b：zN->zN copy（参考 basic_mixed_store_zN.py:174-181 同款：
         # L1 侧 parent zN + tile_view 半行，src 为 zN 视图，MTE3 按
@@ -820,12 +820,12 @@ def process_vec1(
         l1p_rows = tla.tile_view(
             l1p, tla.make_shape(rows, KV_BLOCK), tla.make_coord(sub, 0)
         )
-        mutex_unlock(sync.m_p, tla.arch.VECTOR)
-        mutex_lock(sync.m_p, tla.arch.MTE3)
+        mutex_unlock(sync.m_p, tla.pipes.VECTOR)
+        mutex_lock(sync.m_p, tla.pipes.MTE3)
         tla.copy(l1p_rows, ub_p)
-        mutex_unlock(sync.m_p, tla.arch.MTE3)
-        tla.cross_core_set_flag(sync.p_ready, tla.arch.MTE3, aiv_id=0)
-        tla.cross_core_set_flag(sync.p_ready, tla.arch.MTE3, aiv_id=1)
+        mutex_unlock(sync.m_p, tla.pipes.MTE3)
+        tla.cross_core_set_flag(sync.p_ready, tla.pipes.MTE3, aiv_id=0)
+        tla.cross_core_set_flag(sync.p_ready, tla.pipes.MTE3, aiv_id=1)
 
 
 @tla.jit
@@ -866,8 +866,8 @@ def process_vec2_seg(sync, bufs, seg, m, rows, dtype_in, fresh=0, slot_dm=0):
         # F17 步骤 B：o_ready 由 fixpipe 每 tile 发一次（原每段一次），只在
         # seg0 等待；seg1-3 与 seg0 同流程序，无需再等。
         if seg == 0:
-            tla.cross_core_wait_flag(sync.o_ready, tla.arch.VECTOR, aiv_id=0)
-            tla.cross_core_wait_flag(sync.o_ready, tla.arch.VECTOR, aiv_id=1)
+            tla.cross_core_wait_flag(sync.o_ready, tla.pipes.VECTOR, aiv_id=0)
+            tla.cross_core_wait_flag(sync.o_ready, tla.pipes.VECTOR, aiv_id=1)
         with tla.vec.func(mode="simd"):
             preg = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
             brc = tla.params.NormalLoadParams(
@@ -924,8 +924,8 @@ def process_vec2_seg(sync, bufs, seg, m, rows, dtype_in, fresh=0, slot_dm=0):
         # 的 4 段读全部完成才允许下一 tile 的 fixpipe 覆盖写；init_sync 预置
         # x2 供首 tile 的 fixpipe）。
         if seg == 3:
-            tla.cross_core_set_flag(sync.o_free, tla.arch.VECTOR, aiv_id=0)
-            tla.cross_core_set_flag(sync.o_free, tla.arch.VECTOR, aiv_id=1)
+            tla.cross_core_set_flag(sync.o_free, tla.pipes.VECTOR, aiv_id=0)
+            tla.cross_core_set_flag(sync.o_free, tla.pipes.VECTOR, aiv_id=1)
 
 
 # ---------------------------------------------------------------------------
@@ -1035,10 +1035,10 @@ def bc_stage_cur(sync, bufs, bc_ws, rows, slot=0):
         rows8 = _bc_rows8(rows)
         base = slot_ws * _bc_slot_stride(rows)
         # V 侧归一化/合并的 store 完成 -> MTE3 才能拷出。
-        mutex_lock(sync.m_bc_stage, tla.arch.VECTOR)
-        mutex_unlock(sync.m_bc_stage, tla.arch.VECTOR)
-        mutex_lock(sync.m_bc_stage, tla.arch.MTE3)
-        mutex_lock(sync.m_bc_ws, tla.arch.MTE3)
+        mutex_lock(sync.m_bc_stage, tla.pipes.VECTOR)
+        mutex_unlock(sync.m_bc_stage, tla.pipes.VECTOR)
+        mutex_lock(sync.m_bc_stage, tla.pipes.MTE3)
+        mutex_lock(sync.m_bc_ws, tla.pipes.MTE3)
         gm_o = tla.make_tensor(
             bc_ws.ptr + base,
             tla.make_layout(
@@ -1065,10 +1065,10 @@ def bc_stage_cur(sync, bufs, bc_ws, rows, slot=0):
         )
         tla.copy(gm_sum, _sum(bufs, rows8, slot))
         # 三笔 copy 完成后释放 workspace 与 UB。
-        mutex_unlock(sync.m_bc_ws, tla.arch.MTE3)
-        mutex_unlock(sync.m_bc_stage, tla.arch.MTE3)
-        mutex_lock(sync.m_bc_stage, tla.arch.VECTOR)
-        mutex_unlock(sync.m_bc_stage, tla.arch.VECTOR)
+        mutex_unlock(sync.m_bc_ws, tla.pipes.MTE3)
+        mutex_unlock(sync.m_bc_stage, tla.pipes.MTE3)
+        mutex_lock(sync.m_bc_stage, tla.pipes.VECTOR)
+        mutex_unlock(sync.m_bc_stage, tla.pipes.VECTOR)
 
 
 @tla.jit
@@ -1085,7 +1085,7 @@ def bc_merge_seg(sync, bufs, bc_ws, rows, seg, rows8, base):
     同步：bc_v2m 信用（V 读完上一段 ub_bc_prev -> 本段 MTE2 才能覆写；init 预置
     1）-> bc_m2v 屏障对（拷入完成 -> V 读）-> 段尾归还 bc_v2m。
     """
-    mutex_lock(sync.m_bc_prev, tla.arch.MTE2)
+    mutex_lock(sync.m_bc_prev, tla.pipes.MTE2)
     gm_seg = tla.make_tensor(
         bc_ws.ptr + base + seg * D_CHUNK,
         tla.make_layout(tla.make_shape(rows, D_CHUNK), tla.make_stride(HEAD_DIM, 1)),
@@ -1097,8 +1097,8 @@ def bc_merge_seg(sync, bufs, bc_ws, rows, seg, rows8, base):
         ),
         gm_seg,
     )
-    mutex_unlock(sync.m_bc_prev, tla.arch.MTE2)
-    mutex_lock(sync.m_bc_prev, tla.arch.VECTOR)
+    mutex_unlock(sync.m_bc_prev, tla.pipes.MTE2)
+    mutex_lock(sync.m_bc_prev, tla.pipes.VECTOR)
     with tla.vec.func(mode="simd"):
         preg = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
         brc = tla.params.NormalLoadParams(load_dist=tla.params.LoadDist.DIST_BRC_B32)
@@ -1133,7 +1133,7 @@ def bc_merge_seg(sync, bufs, bc_ws, rows, seg, rows8, base):
                     mask=preg,
                 )
         tla.local_mem_bar(tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD)
-    mutex_unlock(sync.m_bc_prev, tla.arch.VECTOR)
+    mutex_unlock(sync.m_bc_prev, tla.pipes.VECTOR)
 
 
 @tla.jit
@@ -1164,7 +1164,7 @@ def bc_merge_prev(sync, bufs, bc_ws, rows, slot=0):
         ub_max = _max(bufs, rows, slot)
         ub_sum = _sum(bufs, rows, slot)
         # ---- 等 stage 拷出完成（MTE3->MTE2），MTE2 拷入 prev max/sum ----
-        mutex_lock(sync.m_bc_ws, tla.arch.MTE2)
+        mutex_lock(sync.m_bc_ws, tla.pipes.MTE2)
         gm_max = tla.make_tensor(
             bc_ws.ptr + base + rows * HEAD_DIM,
             tla.make_layout(tla.make_shape(rows8), tla.make_stride(1)),
@@ -1175,8 +1175,8 @@ def bc_merge_prev(sync, bufs, bc_ws, rows, slot=0):
         )
         tla.copy(ub_bc_max, gm_max)
         tla.copy(ub_bc_sum, gm_sum)
-        mutex_unlock(sync.m_bc_ws, tla.arch.MTE2)
-        mutex_lock(sync.m_bc_prev, tla.arch.VECTOR)
+        mutex_unlock(sync.m_bc_ws, tla.pipes.MTE2)
+        mutex_lock(sync.m_bc_prev, tla.pipes.VECTOR)
         # ---- V 逐行 merge 权重；merged_lse/1.0 回写 ub_max/ub_sum ----
         with tla.vec.func(mode="simd"):
             preg = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
@@ -1223,7 +1223,7 @@ def bc_merge_prev(sync, bufs, bc_ws, rows, slot=0):
         # ---- per-seg prevO 拷入 + 加权合并（静态展开 4 段）----
         # 各段 vec.func 尾部自带 VEC_STORE->VEC_LOAD bar（覆盖 ub_o 段 store ->
         # 下一段 load 与终局 copyout 的 load），段外不能再发 local_mem_bar。
-        mutex_unlock(sync.m_bc_prev, tla.arch.VECTOR)
+        mutex_unlock(sync.m_bc_prev, tla.pipes.VECTOR)
         for seg in (0, 1, 2, 3):
             bc_merge_seg(sync, bufs, bc_ws, rows, seg, rows8, base)
 
@@ -1269,7 +1269,7 @@ def bmm2_data_copy_out(
         # F11：归一化分母读 sum 槽 slot_sum = (P末)%2（宿主 tile 的 xg%2）；
         # 同 body 先发的 vec_init(T首=P末+1) 重灌异槽，不互踩。
         ub_sum = _sum(bufs, rows, slot_sum)
-        mutex_lock(sync.m_o16, tla.arch.VECTOR)
+        mutex_lock(sync.m_o16, tla.pipes.VECTOR)
         with tla.vec.func(mode="simd"):
             preg = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
             preg_b16 = tla.create_mask(pattern=tla.mask.ALL, dtype=dtype_in)
@@ -1307,8 +1307,8 @@ def bmm2_data_copy_out(
                         mask=preg_b16,
                     )
             tla.local_mem_bar(tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD)
-        mutex_unlock(sync.m_o16, tla.arch.VECTOR)
-        mutex_lock(sync.m_o16, tla.arch.MTE3)
+        mutex_unlock(sync.m_o16, tla.pipes.VECTOR)
+        mutex_lock(sync.m_o16, tla.pipes.MTE3)
         if odd_mode == 0:
             # OT firstHalfMRealSize=(m+1)/2、secondHalf=m-firstHalf：m 为奇数时第二子块
             # 行数为 0（m=1 即 h=1 用例），不能写 GM —— 否则会覆盖下一个 token 的首行。
@@ -1342,7 +1342,7 @@ def bmm2_data_copy_out(
                     ub_o16, tla.make_shape(1, HEAD_DIM), tla.make_coord(r, c0)
                 )
                 tla.copy(gm_r, src_r)
-        mutex_unlock(sync.m_o16, tla.arch.MTE3)
+        mutex_unlock(sync.m_o16, tla.pipes.MTE3)
 
 
 @tla.jit
@@ -1379,7 +1379,7 @@ def lse_copy_out(
         # bmm2_data_copy_out 之后），下一写者是 vec1(tile+2)（本槽下一迭代的
         # 下一轮），落盘后由 lse_mte3_v（MTE3→V）挡到搬完再继续（WAR）。
         ub_lse = _dm(bufs, rows, slot)
-        mutex_lock(sync.m_lse, tla.arch.VECTOR)
+        mutex_lock(sync.m_lse, tla.pipes.VECTOR)
         with tla.vec.func(mode="simd"):
             preg = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
             brc = tla.params.NormalLoadParams(
@@ -1399,8 +1399,8 @@ def lse_copy_out(
                     params=tla.params.UnalignStoreParams(),
                 )
             tla.local_mem_bar(tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD)
-        mutex_unlock(sync.m_lse, tla.arch.VECTOR)
-        mutex_lock(sync.m_lse, tla.arch.MTE3)
+        mutex_unlock(sync.m_lse, tla.pipes.VECTOR)
+        mutex_lock(sync.m_lse, tla.pipes.MTE3)
         base = task * m if row_base is None else row_base
         if valid_rows is None and m % 2 == 0:
             # 偶数 m：两个子块各 rows 行，整块搬（与 OT 每子块一次 DataCopyPad 同形）
@@ -1426,9 +1426,9 @@ def lse_copy_out(
                 src_r = tla.tile_view(ub_lse, tla.make_shape(1), tla.make_coord(r))
                 tla.copy(gm_r, src_r)
         # WAR：dm 本槽下一次被 vec1 改写前，先等这次落盘搬完。
-        mutex_unlock(sync.m_lse, tla.arch.MTE3)
-        mutex_lock(sync.m_lse, tla.arch.VECTOR)
-        mutex_unlock(sync.m_lse, tla.arch.VECTOR)
+        mutex_unlock(sync.m_lse, tla.pipes.MTE3)
+        mutex_lock(sync.m_lse, tla.pipes.VECTOR)
+        mutex_unlock(sync.m_lse, tla.pipes.VECTOR)
 
 
 # ---------------------------------------------------------------------------
@@ -2138,7 +2138,7 @@ def get_kv_phy_addr_for_kv_type(
         # 0) V -> S 信用（init_sync 在 =1 实例预置 1 个）：MTE2 页表拷入与标量
         #    idx 写都由 S 流发起，这一对屏障同时覆盖 ub_phy_bt / ub_phy_idx
         #    的跨 task 复用（上一轮 VF 消费完才允许本轮写）。
-        mutex_lock(sync.m_phy_vs, tla.arch.SCALAR)
+        mutex_lock(sync.m_phy_vs, tla.pipes.SCALAR)
         # tla.allocate 返回的是指针：tile_view / __setitem__ 都要求 Tensor，
         # 先按容量包成 1-D UB Tensor 视图（容量 ≥ 任何被消费的下标）。
         ub_idx_t = tla.make_tensor(
@@ -2162,19 +2162,19 @@ def get_kv_phy_addr_for_kv_type(
         )
         # 1) 暂存：PA 先拷页表行（OT CopyPaTableToUb），再拷 idx 行
         #    （OT CopySparseIdxToUb）
-        mutex_lock(sync.m_phy_m2v, tla.arch.MTE2)
+        mutex_lock(sync.m_phy_m2v, tla.pipes.MTE2)
         if kv_layout == 2:
             copy_pa_table_to_ub(ub_bt_t, bt, bt_seq * bt_max, bt_max)
-        mutex_unlock(sync.m_phy_m2v, tla.arch.MTE2)
-        mutex_lock(sync.m_phy_s2v, tla.arch.SCALAR)
+        mutex_unlock(sync.m_phy_m2v, tla.pipes.MTE2)
+        mutex_lock(sync.m_phy_s2v, tla.pipes.SCALAR)
         copy_sparse_idx_to_ub(ub_idx_t, idx, table_row * idx_row_width, ncols)
-        mutex_unlock(sync.m_phy_s2v, tla.arch.SCALAR)
-        mutex_unlock(sync.m_phy_vs, tla.arch.SCALAR)
+        mutex_unlock(sync.m_phy_s2v, tla.pipes.SCALAR)
+        mutex_unlock(sync.m_phy_vs, tla.pipes.SCALAR)
         # 2) ready 屏障：S -> V（标量 UB idx 写完成）与 MTE2 -> V（页表拷入
         #    完成）是两条独立生产流，VF 读 ub_idx / ub_bt 前各等一对
-        mutex_lock(sync.m_phy_m2v, tla.arch.VECTOR)
-        mutex_lock(sync.m_phy_s2v, tla.arch.VECTOR)
-        mutex_lock(sync.m_phy_v_mte3, tla.arch.VECTOR)
+        mutex_lock(sync.m_phy_m2v, tla.pipes.VECTOR)
+        mutex_lock(sync.m_phy_s2v, tla.pipes.VECTOR)
+        mutex_lock(sync.m_phy_v_mte3, tla.pipes.VECTOR)
         # 3) VF：每 128 列一轮写 ub_phy_addr
         n_chunks = (ncols + PHY_ELEMS_PER_LOOP - 1) // PHY_ELEMS_PER_LOOP
         if kv_layout == 2:
@@ -2208,22 +2208,22 @@ def get_kv_phy_addr_for_kv_type(
                 HEAD_DIM,
             )
         # 4) V -> MTE3 屏障（OT KVADDR_READY）+ V -> S 信用归还
-        mutex_unlock(sync.m_phy_s2v, tla.arch.VECTOR)
-        mutex_unlock(sync.m_phy_m2v, tla.arch.VECTOR)
-        mutex_unlock(sync.m_phy_v_mte3, tla.arch.VECTOR)
-        mutex_lock(sync.m_phy_v_mte3, tla.arch.MTE3)
-        mutex_lock(sync.m_phy_m3s, tla.arch.MTE3)
+        mutex_unlock(sync.m_phy_s2v, tla.pipes.VECTOR)
+        mutex_unlock(sync.m_phy_m2v, tla.pipes.VECTOR)
+        mutex_unlock(sync.m_phy_v_mte3, tla.pipes.VECTOR)
+        mutex_lock(sync.m_phy_v_mte3, tla.pipes.MTE3)
+        mutex_lock(sync.m_phy_m3s, tla.pipes.MTE3)
         # 5) MTE3 拷出（OT CopyPhyAddrToGm）：GM 行偏移 = table_row*aligned_cols
         #    （int64 元素），OT 为 (bS1Idx+s1Idx)*alignedSparseBlockCount
         copy_phy_addr_to_gm(ub_addr_t, phy_table, table_row * aligned_cols, ncols)
         # 6) MTE3 -> V 屏障（OT KVADDR_FREE）：拷出完成后 ub_phy_addr 才能复用；
         #    MTE3 -> S 屏障：表行落 GM 后标量流才能读（缺它即 errcode 95 根因）
-        mutex_unlock(sync.m_phy_m3s, tla.arch.MTE3)
-        mutex_lock(sync.m_phy_m3s, tla.arch.SCALAR)
-        mutex_unlock(sync.m_phy_m3s, tla.arch.SCALAR)
-        mutex_unlock(sync.m_phy_v_mte3, tla.arch.MTE3)
-        mutex_lock(sync.m_phy_v_mte3, tla.arch.VECTOR)
-        mutex_unlock(sync.m_phy_v_mte3, tla.arch.VECTOR)
+        mutex_unlock(sync.m_phy_m3s, tla.pipes.MTE3)
+        mutex_lock(sync.m_phy_m3s, tla.pipes.SCALAR)
+        mutex_unlock(sync.m_phy_m3s, tla.pipes.SCALAR)
+        mutex_unlock(sync.m_phy_v_mte3, tla.pipes.MTE3)
+        mutex_lock(sync.m_phy_v_mte3, tla.pipes.VECTOR)
+        mutex_unlock(sync.m_phy_v_mte3, tla.pipes.VECTOR)
 
 
 @tla.jit
@@ -2376,7 +2376,7 @@ def gather_kv_rows(
                 # 信用等待必须在 GM->UB 之前：放在 16 次拷入之后不管用，
                 # 上一块的 UB->GM 还在读，本块的 GM->UB 已经把行盖掉了
                 # （实测表现为暂存槽里混进后一块的行）。
-                mutex_lock(sync.m_kv0, tla.arch.MTE2)
+                mutex_lock(sync.m_kv0, tla.pipes.MTE2)
                 for i in static_range(KV_UNIT):
                     line = line0 + i
                     if line > n_rows - 1:
@@ -2418,8 +2418,8 @@ def gather_kv_rows(
                         ),
                         gm_row,
                     )
-                mutex_unlock(sync.m_kv0, tla.arch.MTE2)
-                mutex_lock(sync.m_kv0, tla.arch.MTE3)
+                mutex_unlock(sync.m_kv0, tla.pipes.MTE2)
+                mutex_lock(sync.m_kv0, tla.pipes.MTE3)
                 gm_chunk = tla.make_tensor(
                     ws.ptr + ws_base + slot * slot_stride + line0 * HEAD_DIM,
                     tla.make_layout(
@@ -2434,7 +2434,7 @@ def gather_kv_rows(
                         ub_kv, tla.make_shape(rows_out, HEAD_DIM), tla.make_coord(0, 0)
                     ),
                 )
-                mutex_unlock(sync.m_kv0, tla.arch.MTE3)
+                mutex_unlock(sync.m_kv0, tla.pipes.MTE3)
             else:
                 ub_kv = tla.make_tensor(
                     bufs.ub_kv1,
@@ -2444,7 +2444,7 @@ def gather_kv_rows(
                         layoutTag=tla.arch.RowMajor,
                     ),
                 )
-                mutex_lock(sync.m_kv1, tla.arch.MTE2)
+                mutex_lock(sync.m_kv1, tla.pipes.MTE2)
                 for i in static_range(KV_UNIT):
                     line = line0 + i
                     if line > n_rows - 1:
@@ -2486,8 +2486,8 @@ def gather_kv_rows(
                         ),
                         gm_row,
                     )
-                mutex_unlock(sync.m_kv1, tla.arch.MTE2)
-                mutex_lock(sync.m_kv1, tla.arch.MTE3)
+                mutex_unlock(sync.m_kv1, tla.pipes.MTE2)
+                mutex_lock(sync.m_kv1, tla.pipes.MTE3)
                 gm_chunk = tla.make_tensor(
                     ws.ptr + ws_base + slot * slot_stride + line0 * HEAD_DIM,
                     tla.make_layout(
@@ -2502,13 +2502,13 @@ def gather_kv_rows(
                         ub_kv, tla.make_shape(rows_out, HEAD_DIM), tla.make_coord(0, 0)
                     ),
                 )
-                mutex_unlock(sync.m_kv1, tla.arch.MTE3)
+                mutex_unlock(sync.m_kv1, tla.pipes.MTE3)
         if announce:
             # 伙伴核读本核象限的跨核可见性由 **AIC 侧的全核会合**（pair_rendezvous）
             # 保证，AIV 侧不需要额外 PipeBarrier<ALL>：实测加了它 Dur 117→126.8
             # （mte2 30.6→37.9），且当时并未修好逐位（根因是预算整核只初始化一次）。
-            tla.cross_core_set_flag(sync.kv_stage_ready, tla.arch.MTE3, aiv_id=0)
-            tla.cross_core_set_flag(sync.kv_stage_ready, tla.arch.MTE3, aiv_id=1)
+            tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=0)
+            tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=1)
 
 
 @tla.jit
@@ -2607,7 +2607,7 @@ def gather_kv_rows_pa_pairwise(
                         layoutTag=tla.arch.RowMajor,
                     ),
                 )
-                mutex_lock(sync.m_kv0, tla.arch.MTE2)
+                mutex_lock(sync.m_kv0, tla.pipes.MTE2)
                 _pa_pairwise_fill(
                     ub_kv,
                     bufs.ub_kv0,
@@ -2628,8 +2628,8 @@ def gather_kv_rows_pa_pairwise(
                     pair_one,
                     pair_hi,
                 )
-                mutex_unlock(sync.m_kv0, tla.arch.MTE2)
-                mutex_lock(sync.m_kv0, tla.arch.MTE3)
+                mutex_unlock(sync.m_kv0, tla.pipes.MTE2)
+                mutex_lock(sync.m_kv0, tla.pipes.MTE3)
                 gm_chunk = tla.make_tensor(
                     ws.ptr + ws_base + slot * slot_stride + line0 * HEAD_DIM,
                     tla.make_layout(
@@ -2644,7 +2644,7 @@ def gather_kv_rows_pa_pairwise(
                         ub_kv, tla.make_shape(rows_out, HEAD_DIM), tla.make_coord(0, 0)
                     ),
                 )
-                mutex_unlock(sync.m_kv0, tla.arch.MTE3)
+                mutex_unlock(sync.m_kv0, tla.pipes.MTE3)
             else:
                 ub_kv = tla.make_tensor(
                     bufs.ub_kv1,
@@ -2654,7 +2654,7 @@ def gather_kv_rows_pa_pairwise(
                         layoutTag=tla.arch.RowMajor,
                     ),
                 )
-                mutex_lock(sync.m_kv1, tla.arch.MTE2)
+                mutex_lock(sync.m_kv1, tla.pipes.MTE2)
                 _pa_pairwise_fill(
                     ub_kv,
                     bufs.ub_kv1,
@@ -2675,8 +2675,8 @@ def gather_kv_rows_pa_pairwise(
                     pair_one,
                     pair_hi,
                 )
-                mutex_unlock(sync.m_kv1, tla.arch.MTE2)
-                mutex_lock(sync.m_kv1, tla.arch.MTE3)
+                mutex_unlock(sync.m_kv1, tla.pipes.MTE2)
+                mutex_lock(sync.m_kv1, tla.pipes.MTE3)
                 gm_chunk = tla.make_tensor(
                     ws.ptr + ws_base + slot * slot_stride + line0 * HEAD_DIM,
                     tla.make_layout(
@@ -2691,10 +2691,10 @@ def gather_kv_rows_pa_pairwise(
                         ub_kv, tla.make_shape(rows_out, HEAD_DIM), tla.make_coord(0, 0)
                     ),
                 )
-                mutex_unlock(sync.m_kv1, tla.arch.MTE3)
+                mutex_unlock(sync.m_kv1, tla.pipes.MTE3)
         if announce:
-            tla.cross_core_set_flag(sync.kv_stage_ready, tla.arch.MTE3, aiv_id=0)
-            tla.cross_core_set_flag(sync.kv_stage_ready, tla.arch.MTE3, aiv_id=1)
+            tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=0)
+            tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=1)
 
 
 @tla.jit
@@ -2894,7 +2894,7 @@ def gather_kv_rows_vec(
                         layoutTag=tla.arch.RowMajor,
                     ),
                 )
-                mutex_lock(sync.m_kv0, tla.arch.MTE2)
+                mutex_lock(sync.m_kv0, tla.pipes.MTE2)
                 if _SPARSE_BLOCK_SIZE == 1:
                     # F31 ①c：OT 原形是**两段叠加**，不是二选一：
                     #   GetRealS2Addr 每 8 行块先整块读 8 个地址
@@ -3019,8 +3019,8 @@ def gather_kv_rows_vec(
                             ),
                             gm_row,
                         )
-                mutex_unlock(sync.m_kv0, tla.arch.MTE2)
-                mutex_lock(sync.m_kv0, tla.arch.MTE3)
+                mutex_unlock(sync.m_kv0, tla.pipes.MTE2)
+                mutex_lock(sync.m_kv0, tla.pipes.MTE3)
                 gm_chunk = tla.make_tensor(
                     ws.ptr + ws_base + slot * slot_stride + line0 * HEAD_DIM,
                     tla.make_layout(
@@ -3035,7 +3035,7 @@ def gather_kv_rows_vec(
                         ub_kv, tla.make_shape(rows_out, HEAD_DIM), tla.make_coord(0, 0)
                     ),
                 )
-                mutex_unlock(sync.m_kv0, tla.arch.MTE3)
+                mutex_unlock(sync.m_kv0, tla.pipes.MTE3)
             else:
                 ub_kv = tla.make_tensor(
                     bufs.ub_kv1,
@@ -3045,7 +3045,7 @@ def gather_kv_rows_vec(
                         layoutTag=tla.arch.RowMajor,
                     ),
                 )
-                mutex_lock(sync.m_kv1, tla.arch.MTE2)
+                mutex_lock(sync.m_kv1, tla.pipes.MTE2)
                 if _SPARSE_BLOCK_SIZE == 1:
                     # F31 ①c：同 kv0 分支（读 8 地址 → 4 条合并拷贝，ub_kv1 目标）
                     for blk in static_range(KV_UNIT // 8):
@@ -3160,8 +3160,8 @@ def gather_kv_rows_vec(
                             ),
                             gm_row,
                         )
-                mutex_unlock(sync.m_kv1, tla.arch.MTE2)
-                mutex_lock(sync.m_kv1, tla.arch.MTE3)
+                mutex_unlock(sync.m_kv1, tla.pipes.MTE2)
+                mutex_lock(sync.m_kv1, tla.pipes.MTE3)
                 gm_chunk = tla.make_tensor(
                     ws.ptr + ws_base + slot * slot_stride + line0 * HEAD_DIM,
                     tla.make_layout(
@@ -3176,13 +3176,13 @@ def gather_kv_rows_vec(
                         ub_kv, tla.make_shape(rows_out, HEAD_DIM), tla.make_coord(0, 0)
                     ),
                 )
-                mutex_unlock(sync.m_kv1, tla.arch.MTE3)
+                mutex_unlock(sync.m_kv1, tla.pipes.MTE3)
         if announce:
             # 伙伴核读本核象限的跨核可见性由 **AIC 侧的全核会合**（pair_rendezvous）
             # 保证，AIV 侧不需要额外 PipeBarrier<ALL>：实测加了它 Dur 117→126.8
             # （mte2 30.6→37.9），且当时并未修好逐位（根因是预算整核只初始化一次）。
-            tla.cross_core_set_flag(sync.kv_stage_ready, tla.arch.MTE3, aiv_id=0)
-            tla.cross_core_set_flag(sync.kv_stage_ready, tla.arch.MTE3, aiv_id=1)
+            tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=0)
+            tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=1)
 
 
 @tla.jit
@@ -3289,9 +3289,9 @@ def gather_kv_rows_ring(
         need = rem + cover
         if n_chunks > 0:
             if idx_slot == 0:
-                mutex_lock(sync.m_idx0, tla.arch.MTE2)
+                mutex_lock(sync.m_idx0, tla.pipes.MTE2)
             else:
-                mutex_lock(sync.m_idx1, tla.arch.MTE2)
+                mutex_lock(sync.m_idx1, tla.pipes.MTE2)
             tla.copy(
                 tla.tile_view(
                     tla.make_tensor(
@@ -3313,11 +3313,11 @@ def gather_kv_rows_ring(
                 ),
             )
             if idx_slot == 0:
-                mutex_unlock(sync.m_idx0, tla.arch.MTE2)
-                mutex_lock(sync.m_idx0, tla.arch.SCALAR)
+                mutex_unlock(sync.m_idx0, tla.pipes.MTE2)
+                mutex_lock(sync.m_idx0, tla.pipes.SCALAR)
             else:
-                mutex_unlock(sync.m_idx1, tla.arch.MTE2)
-                mutex_lock(sync.m_idx1, tla.arch.SCALAR)
+                mutex_unlock(sync.m_idx1, tla.pipes.MTE2)
+                mutex_lock(sync.m_idx1, tla.pipes.SCALAR)
         # 整环 1-D 视图 + 槽内基址（读下标 = ring_o + 行号，恒 >= 0）
         ring_t = tla.make_tensor(
             bufs.ub_idx_ring,
@@ -3351,7 +3351,7 @@ def gather_kv_rows_ring(
                     ),
                 )
                 # [T1-0a 摘除区：起点] UB->ws 信用（上一块 MTE3 写回完成）
-                mutex_lock(sync.m_kv0, tla.arch.MTE2)
+                mutex_lock(sync.m_kv0, tla.pipes.MTE2)
                 # T1-0a 摘除区：[终点]（本块 gather 的 UB 缓冲本块内独占）
                 for blk in static_range(KV_UNIT // 8):
                     blk_base = 8 * blk
@@ -3438,8 +3438,8 @@ def gather_kv_rows_ring(
                                 tla.Int64(1),
                             )
                 # ==== [T1-0a 摘除区：起点] UB -> ws 暂存（GM 中转）====
-                mutex_unlock(sync.m_kv0, tla.arch.MTE2)
-                mutex_lock(sync.m_kv0, tla.arch.MTE3)
+                mutex_unlock(sync.m_kv0, tla.pipes.MTE2)
+                mutex_lock(sync.m_kv0, tla.pipes.MTE3)
                 gm_chunk = tla.make_tensor(
                     ws.ptr + ws_base + slot * slot_stride + line0 * HEAD_DIM,
                     tla.make_layout(
@@ -3454,7 +3454,7 @@ def gather_kv_rows_ring(
                         ub_kv, tla.make_shape(rows_out, HEAD_DIM), tla.make_coord(0, 0)
                     ),
                 )
-                mutex_unlock(sync.m_kv0, tla.arch.MTE3)
+                mutex_unlock(sync.m_kv0, tla.pipes.MTE3)
                 # ==== [T1-0a 摘除区：终点] ====
             else:
                 ub_kv = tla.make_tensor(
@@ -3466,7 +3466,7 @@ def gather_kv_rows_ring(
                     ),
                 )
                 # [T1-0a 摘除区：起点] UB->ws 信用
-                mutex_lock(sync.m_kv1, tla.arch.MTE2)
+                mutex_lock(sync.m_kv1, tla.pipes.MTE2)
                 # T1-0a 摘除区：[终点]
                 for blk in static_range(KV_UNIT // 8):
                     blk_base = 8 * blk
@@ -3548,8 +3548,8 @@ def gather_kv_rows_ring(
                                 tla.Int64(1),
                             )
                 # ==== [T1-0a 摘除区：起点] UB -> ws 暂存（GM 中转）====
-                mutex_unlock(sync.m_kv1, tla.arch.MTE2)
-                mutex_lock(sync.m_kv1, tla.arch.MTE3)
+                mutex_unlock(sync.m_kv1, tla.pipes.MTE2)
+                mutex_lock(sync.m_kv1, tla.pipes.MTE3)
                 gm_chunk = tla.make_tensor(
                     ws.ptr + ws_base + slot * slot_stride + line0 * HEAD_DIM,
                     tla.make_layout(
@@ -3564,14 +3564,14 @@ def gather_kv_rows_ring(
                         ub_kv, tla.make_shape(rows_out, HEAD_DIM), tla.make_coord(0, 0)
                     ),
                 )
-                mutex_unlock(sync.m_kv1, tla.arch.MTE3)
+                mutex_unlock(sync.m_kv1, tla.pipes.MTE3)
                 # ==== [T1-0a 摘除区：终点] ====
         # 本 tile 的标量读全部发出 -> 归还该槽的 free 信用（WAR）
         if n_chunks > 0:
             if idx_slot == 0:
-                mutex_unlock(sync.m_idx0, tla.arch.SCALAR)
+                mutex_unlock(sync.m_idx0, tla.pipes.SCALAR)
             else:
-                mutex_unlock(sync.m_idx1, tla.arch.SCALAR)
+                mutex_unlock(sync.m_idx1, tla.pipes.SCALAR)
         if announce:
-            tla.cross_core_set_flag(sync.kv_stage_ready, tla.arch.MTE3, aiv_id=0)
-            tla.cross_core_set_flag(sync.kv_stage_ready, tla.arch.MTE3, aiv_id=1)
+            tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=0)
+            tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=1)

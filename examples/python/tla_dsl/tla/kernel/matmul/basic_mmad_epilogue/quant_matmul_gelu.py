@@ -241,7 +241,7 @@ def quant_matmul_gelu_kernel(
             l0_c = tla.make_tensor_like(l0c_ptr, gm_workspace_by_core)
 
             if tla.const_expr(not ENABLE_UNIT_FLAG):
-                mutex_l0c.lock(pipe=tla.arch.CUBE)
+                mutex_l0c.lock(pipe=tla.pipes.CUBE)
             for k_l1 in k_l1_range:
                 gm_a_l1 = tla.tile_view(
                     gm_a_by_core,
@@ -261,24 +261,24 @@ def quant_matmul_gelu_kernel(
                     l1b0_ptr if (l1_buf_idx == c0) else l1b1_ptr, gm_b_l1
                 )
                 if l1_buf_idx == c0:
-                    mutex_l1a0.lock(pipe=tla.arch.MTE2)
+                    mutex_l1a0.lock(pipe=tla.pipes.MTE2)
                 else:
-                    mutex_l1a1.lock(pipe=tla.arch.MTE2)
+                    mutex_l1a1.lock(pipe=tla.pipes.MTE2)
                 tla.copy(l1_a, gm_a_l1)
                 if l1_buf_idx == c0:
-                    mutex_l1a0.unlock(pipe=tla.arch.MTE2)
+                    mutex_l1a0.unlock(pipe=tla.pipes.MTE2)
                 else:
-                    mutex_l1a1.unlock(pipe=tla.arch.MTE2)
+                    mutex_l1a1.unlock(pipe=tla.pipes.MTE2)
 
                 if l1_buf_idx == c0:
-                    mutex_l1b0.lock(pipe=tla.arch.MTE2)
+                    mutex_l1b0.lock(pipe=tla.pipes.MTE2)
                 else:
-                    mutex_l1b1.lock(pipe=tla.arch.MTE2)
+                    mutex_l1b1.lock(pipe=tla.pipes.MTE2)
                 tla.copy(l1_b, gm_b_l1)
                 if l1_buf_idx == c0:
-                    mutex_l1b0.unlock(pipe=tla.arch.MTE2)
+                    mutex_l1b0.unlock(pipe=tla.pipes.MTE2)
                 else:
-                    mutex_l1b1.unlock(pipe=tla.arch.MTE2)
+                    mutex_l1b1.unlock(pipe=tla.pipes.MTE2)
 
                 k_l0_count = (l1_a.origin_shape[1] + _tiling.l0_tk - 1) // _tiling.l0_tk
                 k_l0_range = tla.range(c0, k_l0_count, c1)
@@ -302,47 +302,47 @@ def quant_matmul_gelu_kernel(
                         l0b0_ptr if (l0_buf_idx == c0) else l0b1_ptr, l1_b_l0
                     )
                     if l0_buf_idx == c0:
-                        mutex_l0a0.lock(pipe=tla.arch.MTE1)
+                        mutex_l0a0.lock(pipe=tla.pipes.MTE1)
                     else:
-                        mutex_l0a1.lock(pipe=tla.arch.MTE1)
+                        mutex_l0a1.lock(pipe=tla.pipes.MTE1)
                     if l1_buf_idx == c0:
-                        mutex_l1a0.lock(pipe=tla.arch.MTE1)
+                        mutex_l1a0.lock(pipe=tla.pipes.MTE1)
                     else:
-                        mutex_l1a1.lock(pipe=tla.arch.MTE1)
+                        mutex_l1a1.lock(pipe=tla.pipes.MTE1)
                     tla.copy(l0_a, l1_a_l0)
                     if l0_buf_idx == c0:
-                        mutex_l0a0.unlock(pipe=tla.arch.MTE1)
+                        mutex_l0a0.unlock(pipe=tla.pipes.MTE1)
                     else:
-                        mutex_l0a1.unlock(pipe=tla.arch.MTE1)
+                        mutex_l0a1.unlock(pipe=tla.pipes.MTE1)
                     if l1_buf_idx == c0:
-                        mutex_l1a0.unlock(pipe=tla.arch.MTE1)
+                        mutex_l1a0.unlock(pipe=tla.pipes.MTE1)
                     else:
-                        mutex_l1a1.unlock(pipe=tla.arch.MTE1)
+                        mutex_l1a1.unlock(pipe=tla.pipes.MTE1)
 
                     if l0_buf_idx == c0:
-                        mutex_l0b0.lock(pipe=tla.arch.MTE1)
+                        mutex_l0b0.lock(pipe=tla.pipes.MTE1)
                     else:
-                        mutex_l0b1.lock(pipe=tla.arch.MTE1)
+                        mutex_l0b1.lock(pipe=tla.pipes.MTE1)
                     if l1_buf_idx == c0:
-                        mutex_l1b0.lock(pipe=tla.arch.MTE1)
+                        mutex_l1b0.lock(pipe=tla.pipes.MTE1)
                     else:
-                        mutex_l1b1.lock(pipe=tla.arch.MTE1)
+                        mutex_l1b1.lock(pipe=tla.pipes.MTE1)
                     tla.copy(l0_b, l1_b_l0)
                     if l0_buf_idx == c0:
-                        mutex_l0b0.unlock(pipe=tla.arch.MTE1)
+                        mutex_l0b0.unlock(pipe=tla.pipes.MTE1)
                     else:
-                        mutex_l0b1.unlock(pipe=tla.arch.MTE1)
+                        mutex_l0b1.unlock(pipe=tla.pipes.MTE1)
                     if l1_buf_idx == c0:
-                        mutex_l1b0.unlock(pipe=tla.arch.MTE1)
+                        mutex_l1b0.unlock(pipe=tla.pipes.MTE1)
                     else:
-                        mutex_l1b1.unlock(pipe=tla.arch.MTE1)
+                        mutex_l1b1.unlock(pipe=tla.pipes.MTE1)
 
                     if l0_buf_idx == c0:
-                        mutex_l0a0.lock(pipe=tla.arch.CUBE)
-                        mutex_l0b0.lock(pipe=tla.arch.CUBE)
+                        mutex_l0a0.lock(pipe=tla.pipes.CUBE)
+                        mutex_l0b0.lock(pipe=tla.pipes.CUBE)
                     else:
-                        mutex_l0a1.lock(pipe=tla.arch.CUBE)
-                        mutex_l0b1.lock(pipe=tla.arch.CUBE)
+                        mutex_l0a1.lock(pipe=tla.pipes.CUBE)
+                        mutex_l0b1.lock(pipe=tla.pipes.CUBE)
 
                     unit_flag = 0
                     if tla.const_expr(ENABLE_UNIT_FLAG):
@@ -353,23 +353,23 @@ def quant_matmul_gelu_kernel(
                     init_c = True if k_l1 == 0 and k_l0 == 0 else False
                     tla.mmad(l0_c, l0_a, l0_b, init_c=init_c, unit_flag=unit_flag)
                     if l0_buf_idx == c0:
-                        mutex_l0b0.unlock(pipe=tla.arch.CUBE)
-                        mutex_l0a0.unlock(pipe=tla.arch.CUBE)
+                        mutex_l0b0.unlock(pipe=tla.pipes.CUBE)
+                        mutex_l0a0.unlock(pipe=tla.pipes.CUBE)
                     else:
-                        mutex_l0b1.unlock(pipe=tla.arch.CUBE)
-                        mutex_l0a1.unlock(pipe=tla.arch.CUBE)
+                        mutex_l0b1.unlock(pipe=tla.pipes.CUBE)
+                        mutex_l0a1.unlock(pipe=tla.pipes.CUBE)
                     l0_buf_idx = c1 - l0_buf_idx
                 l1_buf_idx = c1 - l1_buf_idx
 
             # FixPipe: write L0C tile to GM workspace (full tile, no SPLIT_M).
             if tla.const_expr(not ENABLE_UNIT_FLAG):
-                mutex_l0c.unlock(pipe=tla.arch.CUBE)
-                mutex_l0c.lock(pipe=tla.arch.FIX)
+                mutex_l0c.unlock(pipe=tla.pipes.CUBE)
+                mutex_l0c.lock(pipe=tla.pipes.FIX)
                 tla.copy(
                     gm_workspace_by_core,
                     l0_c,
                 )
-                mutex_l0c.unlock(pipe=tla.arch.FIX)
+                mutex_l0c.unlock(pipe=tla.pipes.FIX)
             else:
                 tla.copy(
                     gm_workspace_by_core,
@@ -378,12 +378,12 @@ def quant_matmul_gelu_kernel(
                 )
 
             # Notify AIV that this MN tile is ready in GM workspace; reverse every REVERSE_DEPTH tiles.
-            tla.cross_core_set_flag(aic_finish, tla.arch.FIX)
+            tla.cross_core_set_flag(aic_finish, tla.pipes.FIX)
             per_core_tile_idx = (
                 block_linear - tla.arch.block_idx()
             ) // tla.arch.block_num()
             if (per_core_tile_idx + 1) % REVERSE_DEPTH == 0:
-                tla.cross_core_wait_flag(aic_finish_rv, tla.arch.FIX)
+                tla.cross_core_wait_flag(aic_finish_rv, tla.pipes.FIX)
 
         tla.pipe_barrier(tla.pipes.ALL)
 
@@ -437,12 +437,12 @@ def quant_matmul_gelu_kernel(
 
             # Wait until AIC has written this tile to GM workspace (MTE2).
             # Every REVERSE_DEPTH tiles, set the reverse cross-core flag.
-            tla.cross_core_wait_flag(aic_finish, tla.arch.MTE2)
+            tla.cross_core_wait_flag(aic_finish, tla.pipes.MTE2)
             per_core_tile_idx = (
                 block_linear - tla.arch.block_idx()
             ) // tla.arch.block_num()
             if (per_core_tile_idx + 1) % REVERSE_DEPTH == 0:
-                tla.cross_core_set_flag(aic_finish_rv, tla.arch.MTE2)
+                tla.cross_core_set_flag(aic_finish_rv, tla.pipes.MTE2)
 
             gm_workspace_by_core = tla.tile_view(
                 gm_wks,
@@ -513,18 +513,18 @@ def quant_matmul_gelu_kernel(
 
                     # Load the accumulator, then compute into the output slot.
                     if use_ub_stage1:
-                        mutex_ub_acc1.lock(pipe=tla.arch.MTE2)
+                        mutex_ub_acc1.lock(pipe=tla.pipes.MTE2)
                     else:
-                        mutex_ub_acc0.lock(pipe=tla.arch.MTE2)
+                        mutex_ub_acc0.lock(pipe=tla.pipes.MTE2)
                     tla.copy(ub_acc, gm_c_tile)
                     if use_ub_stage1:
-                        mutex_ub_acc1.unlock(pipe=tla.arch.MTE2)
-                        mutex_ub_acc1.lock(pipe=tla.arch.VECTOR)
-                        mutex_ub_out1.lock(pipe=tla.arch.VECTOR)
+                        mutex_ub_acc1.unlock(pipe=tla.pipes.MTE2)
+                        mutex_ub_acc1.lock(pipe=tla.pipes.VECTOR)
+                        mutex_ub_out1.lock(pipe=tla.pipes.VECTOR)
                     else:
-                        mutex_ub_acc0.unlock(pipe=tla.arch.MTE2)
-                        mutex_ub_acc0.lock(pipe=tla.arch.VECTOR)
-                        mutex_ub_out0.lock(pipe=tla.arch.VECTOR)
+                        mutex_ub_acc0.unlock(pipe=tla.pipes.MTE2)
+                        mutex_ub_acc0.lock(pipe=tla.pipes.VECTOR)
+                        mutex_ub_out0.lock(pipe=tla.pipes.VECTOR)
 
                     with tla.vec.func(mode="simd"):
                         for row_i in tla.range(c0, tile_rows, c1):
@@ -570,18 +570,18 @@ def quant_matmul_gelu_kernel(
                                     result_chunk.store(out, mask=tail)
 
                     if use_ub_stage1:
-                        mutex_ub_out1.unlock(pipe=tla.arch.VECTOR)
-                        mutex_ub_acc1.unlock(pipe=tla.arch.VECTOR)
-                        mutex_ub_out1.lock(pipe=tla.arch.MTE3)
+                        mutex_ub_out1.unlock(pipe=tla.pipes.VECTOR)
+                        mutex_ub_acc1.unlock(pipe=tla.pipes.VECTOR)
+                        mutex_ub_out1.lock(pipe=tla.pipes.MTE3)
                     else:
-                        mutex_ub_out0.unlock(pipe=tla.arch.VECTOR)
-                        mutex_ub_acc0.unlock(pipe=tla.arch.VECTOR)
-                        mutex_ub_out0.lock(pipe=tla.arch.MTE3)
+                        mutex_ub_out0.unlock(pipe=tla.pipes.VECTOR)
+                        mutex_ub_acc0.unlock(pipe=tla.pipes.VECTOR)
+                        mutex_ub_out0.lock(pipe=tla.pipes.MTE3)
                     tla.copy(gm_d_tile, ub_result)
                     if use_ub_stage1:
-                        mutex_ub_out1.unlock(pipe=tla.arch.MTE3)
+                        mutex_ub_out1.unlock(pipe=tla.pipes.MTE3)
                     else:
-                        mutex_ub_out0.unlock(pipe=tla.arch.MTE3)
+                        mutex_ub_out0.unlock(pipe=tla.pipes.MTE3)
 
                     if tla.const_expr(EVG_UB_STAGES >= 2):
                         ub_stage_idx = c1 - ub_stage_idx
@@ -622,18 +622,18 @@ def quant_matmul_gelu_kernel(
                         )
 
                         if use_ub_stage1:
-                            mutex_ub_acc1.lock(pipe=tla.arch.MTE2)
+                            mutex_ub_acc1.lock(pipe=tla.pipes.MTE2)
                         else:
-                            mutex_ub_acc0.lock(pipe=tla.arch.MTE2)
+                            mutex_ub_acc0.lock(pipe=tla.pipes.MTE2)
                         tla.copy(ub_acc, gm_c_tile)
                         if use_ub_stage1:
-                            mutex_ub_acc1.unlock(pipe=tla.arch.MTE2)
-                            mutex_ub_acc1.lock(pipe=tla.arch.VECTOR)
-                            mutex_ub_out1.lock(pipe=tla.arch.VECTOR)
+                            mutex_ub_acc1.unlock(pipe=tla.pipes.MTE2)
+                            mutex_ub_acc1.lock(pipe=tla.pipes.VECTOR)
+                            mutex_ub_out1.lock(pipe=tla.pipes.VECTOR)
                         else:
-                            mutex_ub_acc0.unlock(pipe=tla.arch.MTE2)
-                            mutex_ub_acc0.lock(pipe=tla.arch.VECTOR)
-                            mutex_ub_out0.lock(pipe=tla.arch.VECTOR)
+                            mutex_ub_acc0.unlock(pipe=tla.pipes.MTE2)
+                            mutex_ub_acc0.lock(pipe=tla.pipes.VECTOR)
+                            mutex_ub_out0.lock(pipe=tla.pipes.VECTOR)
 
                         with tla.vec.func(mode="simd"):
                             for r_i in tla.range(c0, tile_rows, c1):
@@ -685,18 +685,18 @@ def quant_matmul_gelu_kernel(
                                         result_chunk.store(out, mask=tail)
 
                         if use_ub_stage1:
-                            mutex_ub_out1.unlock(pipe=tla.arch.VECTOR)
-                            mutex_ub_acc1.unlock(pipe=tla.arch.VECTOR)
-                            mutex_ub_out1.lock(pipe=tla.arch.MTE3)
+                            mutex_ub_out1.unlock(pipe=tla.pipes.VECTOR)
+                            mutex_ub_acc1.unlock(pipe=tla.pipes.VECTOR)
+                            mutex_ub_out1.lock(pipe=tla.pipes.MTE3)
                         else:
-                            mutex_ub_out0.unlock(pipe=tla.arch.VECTOR)
-                            mutex_ub_acc0.unlock(pipe=tla.arch.VECTOR)
-                            mutex_ub_out0.lock(pipe=tla.arch.MTE3)
+                            mutex_ub_out0.unlock(pipe=tla.pipes.VECTOR)
+                            mutex_ub_acc0.unlock(pipe=tla.pipes.VECTOR)
+                            mutex_ub_out0.lock(pipe=tla.pipes.MTE3)
                         tla.copy(gm_d_tile, ub_result)
                         if use_ub_stage1:
-                            mutex_ub_out1.unlock(pipe=tla.arch.MTE3)
+                            mutex_ub_out1.unlock(pipe=tla.pipes.MTE3)
                         else:
-                            mutex_ub_out0.unlock(pipe=tla.arch.MTE3)
+                            mutex_ub_out0.unlock(pipe=tla.pipes.MTE3)
 
                     if tla.const_expr(EVG_UB_STAGES >= 2):
                         ub_stage_idx = c1 - ub_stage_idx

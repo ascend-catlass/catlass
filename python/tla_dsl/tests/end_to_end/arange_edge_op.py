@@ -47,7 +47,7 @@ def arange_f16_increase(dst: tla.Tensor) -> None:
     out = tla.tile_view(dst, tla.make_shape(F16_ELE), tla.make_coord(0))
     ub_ptr = tla.allocate(F16_ELE, tla.Float16, tla.AddressSpace.ub, 256)
     ub = tla.make_tensor_like(ub_ptr, out, tla.arch.RowMajor)
-    vec_done = tla.flag("vec_done", tla.arch.VECTOR, tla.arch.MTE3)
+    vec_done = tla.flag("vec_done", tla.pipes.VECTOR, tla.pipes.MTE3)
     with tla.vector():
         with tla.vec.func(mode="simd"):
             tla.tile_view(ub, tla.make_shape(F16_ELE), tla.make_coord(0)).store(
@@ -63,7 +63,7 @@ def arange_f16_decrease(dst: tla.Tensor) -> None:
     out = tla.tile_view(dst, tla.make_shape(F16_ELE), tla.make_coord(0))
     ub_ptr = tla.allocate(F16_ELE, tla.Float16, tla.AddressSpace.ub, 256)
     ub = tla.make_tensor_like(ub_ptr, out, tla.arch.RowMajor)
-    vec_done = tla.flag("vec_done", tla.arch.VECTOR, tla.arch.MTE3)
+    vec_done = tla.flag("vec_done", tla.pipes.VECTOR, tla.pipes.MTE3)
     with tla.vector():
         with tla.vec.func(mode="simd"):
             tla.tile_view(ub, tla.make_shape(F16_ELE), tla.make_coord(0)).store(
@@ -79,7 +79,7 @@ def arange_f32_increase(dst: tla.Tensor) -> None:
     out = tla.tile_view(dst, tla.make_shape(F32_ELE), tla.make_coord(0))
     ub_ptr = tla.allocate(F32_ELE, tla.Float32, tla.AddressSpace.ub, 256)
     ub = tla.make_tensor_like(ub_ptr, out, tla.arch.RowMajor)
-    vec_done = tla.flag("vec_done", tla.arch.VECTOR, tla.arch.MTE3)
+    vec_done = tla.flag("vec_done", tla.pipes.VECTOR, tla.pipes.MTE3)
     with tla.vector():
         with tla.vec.func(mode="simd"):
             tla.tile_view(ub, tla.make_shape(F32_ELE), tla.make_coord(0)).store(
@@ -95,7 +95,7 @@ def arange_f32_decrease(dst: tla.Tensor) -> None:
     out = tla.tile_view(dst, tla.make_shape(F32_ELE), tla.make_coord(0))
     ub_ptr = tla.allocate(F32_ELE, tla.Float32, tla.AddressSpace.ub, 256)
     ub = tla.make_tensor_like(ub_ptr, out, tla.arch.RowMajor)
-    vec_done = tla.flag("vec_done", tla.arch.VECTOR, tla.arch.MTE3)
+    vec_done = tla.flag("vec_done", tla.pipes.VECTOR, tla.pipes.MTE3)
     with tla.vector():
         with tla.vec.func(mode="simd"):
             tla.tile_view(ub, tla.make_shape(F32_ELE), tla.make_coord(0)).store(

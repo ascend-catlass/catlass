@@ -105,11 +105,11 @@ def nll_loss_kernel(
             gm_out = tla.make_tensor(gm_loss.ptr + r.to(tla.Int64), one_layout)
 
             if tla.const_expr(FROM_LOGITS == 1):
-                x_mutex.lock(pipe=tla.arch.MTE2)
+                x_mutex.lock(pipe=tla.pipes.MTE2)
                 tla.copy(ub_x, gm_row)
-                x_mutex.unlock(pipe=tla.arch.MTE2)
-                x_mutex.lock(pipe=tla.arch.VECTOR)
-            loss_mutex.lock(pipe=tla.arch.VECTOR)
+                x_mutex.unlock(pipe=tla.pipes.MTE2)
+                x_mutex.lock(pipe=tla.pipes.VECTOR)
+            loss_mutex.lock(pipe=tla.pipes.VECTOR)
             with tla.vec.func(mode="simd"):
                 mask = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
                 tail_mask = None
@@ -191,13 +191,13 @@ def nll_loss_kernel(
                     )
 
                 ub_loss.store(loss.reduce(tla.ReductionOp.MAX, mask=mask))
-            loss_mutex.unlock(pipe=tla.arch.VECTOR)
+            loss_mutex.unlock(pipe=tla.pipes.VECTOR)
             if tla.const_expr(FROM_LOGITS == 1):
-                x_mutex.unlock(pipe=tla.arch.VECTOR)
+                x_mutex.unlock(pipe=tla.pipes.VECTOR)
 
-            loss_mutex.lock(pipe=tla.arch.MTE3)
+            loss_mutex.lock(pipe=tla.pipes.MTE3)
             tla.copy(gm_out, ub_loss)
-            loss_mutex.unlock(pipe=tla.arch.MTE3)
+            loss_mutex.unlock(pipe=tla.pipes.MTE3)
             buf_idx = tla.as_numeric(1) - buf_idx
 
         tla.pipe_barrier(tla.pipes.ALL)

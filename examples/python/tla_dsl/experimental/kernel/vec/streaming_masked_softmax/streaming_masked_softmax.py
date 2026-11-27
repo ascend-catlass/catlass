@@ -98,18 +98,18 @@ def streaming_masked_softmax_kernel(
             # Short-row fast path: one GM read, then max, exp/sum and normalize
             # all reuse the resident UB row.
             if tla.const_expr(row_resident):
-                mutex_x.lock(pipe=tla.arch.MTE2)
+                mutex_x.lock(pipe=tla.pipes.MTE2)
                 tla.copy(ub_x, gm_row_x)
-                mutex_x.unlock(pipe=tla.arch.MTE2)
+                mutex_x.unlock(pipe=tla.pipes.MTE2)
                 if tla.const_expr(HAS_ADD == 1):
                     gm_row_add = tla.make_tensor(gm_add.ptr + row_off, chunk_layout)
-                    mutex_add.lock(pipe=tla.arch.MTE2)
+                    mutex_add.lock(pipe=tla.pipes.MTE2)
                     tla.copy(ub_add, gm_row_add)
-                    mutex_add.unlock(pipe=tla.arch.MTE2)
+                    mutex_add.unlock(pipe=tla.pipes.MTE2)
 
-                mutex_x.lock(pipe=tla.arch.VECTOR)
+                mutex_x.lock(pipe=tla.pipes.VECTOR)
                 if tla.const_expr(HAS_ADD == 1):
-                    mutex_add.lock(pipe=tla.arch.VECTOR)
+                    mutex_add.lock(pipe=tla.pipes.VECTOR)
                 with tla.vec.func(mode="simd"):
                     full = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
                     running_max = tla.full(min_float, dtype=tla.Float32)
@@ -184,14 +184,14 @@ def streaming_masked_softmax_kernel(
                         row_xc_3.store(tla.mul(row_xc_3.load(), inv_sum, mask=full))
 
                 if tla.const_expr(HAS_ADD == 1):
-                    mutex_add.unlock(pipe=tla.arch.VECTOR)
-                mutex_x.unlock(pipe=tla.arch.VECTOR)
+                    mutex_add.unlock(pipe=tla.pipes.VECTOR)
+                mutex_x.unlock(pipe=tla.pipes.VECTOR)
 
                 # MTE3 owns x until the output copy drains. The following row
                 # can refill the buffer immediately after this unlock.
-                mutex_x.lock(pipe=tla.arch.MTE3)
+                mutex_x.lock(pipe=tla.pipes.MTE3)
                 tla.copy(gm_row_y, ub_x)
-                mutex_x.unlock(pipe=tla.arch.MTE3)
+                mutex_x.unlock(pipe=tla.pipes.MTE3)
 
             else:
                 # Long-row pass 1: build online row max/sum over fixed slices.
@@ -204,21 +204,21 @@ def streaming_masked_softmax_kernel(
                         gm_x.ptr + row_off + first_chunk * CHUNK,
                         chunk_layout,
                     )
-                    mutex_x.lock(pipe=tla.arch.MTE2)
+                    mutex_x.lock(pipe=tla.pipes.MTE2)
                     tla.copy(ub_x, first_gm_chunk_x)
-                    mutex_x.unlock(pipe=tla.arch.MTE2)
+                    mutex_x.unlock(pipe=tla.pipes.MTE2)
                     if tla.const_expr(HAS_ADD == 1):
                         first_gm_chunk_add = tla.make_tensor(
                             gm_add.ptr + row_off + first_chunk * CHUNK,
                             chunk_layout,
                         )
-                        mutex_add.lock(pipe=tla.arch.MTE2)
+                        mutex_add.lock(pipe=tla.pipes.MTE2)
                         tla.copy(ub_add, first_gm_chunk_add)
-                        mutex_add.unlock(pipe=tla.arch.MTE2)
+                        mutex_add.unlock(pipe=tla.pipes.MTE2)
 
-                    mutex_x.lock(pipe=tla.arch.VECTOR)
+                    mutex_x.lock(pipe=tla.pipes.VECTOR)
                     if tla.const_expr(HAS_ADD == 1):
-                        mutex_add.lock(pipe=tla.arch.VECTOR)
+                        mutex_add.lock(pipe=tla.pipes.VECTOR)
                     with tla.vec.func(mode="simd"):
                         first_full = tla.create_mask(
                             pattern=tla.mask.ALL, dtype=tla.Float32
@@ -314,8 +314,8 @@ def streaming_masked_softmax_kernel(
                         ub_sum.store(first_new_sum)
 
                     if tla.const_expr(HAS_ADD == 1):
-                        mutex_add.unlock(pipe=tla.arch.VECTOR)
-                    mutex_x.unlock(pipe=tla.arch.VECTOR)
+                        mutex_add.unlock(pipe=tla.pipes.VECTOR)
+                    mutex_x.unlock(pipe=tla.pipes.VECTOR)
 
                 # Pass 1 tail: process 64-lane blocks and narrow only the last
                 # reduction. Every tail block updates the running statistics.
@@ -324,21 +324,21 @@ def streaming_masked_softmax_kernel(
                     gm_tail_x = tla.make_tensor(
                         gm_x.ptr + row_off + tail_offset, tail_dma_layout
                     )
-                    mutex_x.lock(pipe=tla.arch.MTE2)
+                    mutex_x.lock(pipe=tla.pipes.MTE2)
                     tla.copy(tail_x_dma, gm_tail_x)
-                    mutex_x.unlock(pipe=tla.arch.MTE2)
+                    mutex_x.unlock(pipe=tla.pipes.MTE2)
                     if tla.const_expr(HAS_ADD == 1):
                         gm_tail_add = tla.make_tensor(
                             gm_add.ptr + row_off + tail_offset,
                             tail_dma_layout,
                         )
-                        mutex_add.lock(pipe=tla.arch.MTE2)
+                        mutex_add.lock(pipe=tla.pipes.MTE2)
                         tla.copy(tail_a_dma, gm_tail_add)
-                        mutex_add.unlock(pipe=tla.arch.MTE2)
+                        mutex_add.unlock(pipe=tla.pipes.MTE2)
 
-                    mutex_x.lock(pipe=tla.arch.VECTOR)
+                    mutex_x.lock(pipe=tla.pipes.VECTOR)
                     if tla.const_expr(HAS_ADD == 1):
-                        mutex_add.lock(pipe=tla.arch.VECTOR)
+                        mutex_add.lock(pipe=tla.pipes.VECTOR)
                     with tla.vec.func(mode="simd"):
                         full = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
                         running_max = ub_max.load()
@@ -400,8 +400,8 @@ def streaming_masked_softmax_kernel(
                         ub_sum.store(running_sum)
 
                     if tla.const_expr(HAS_ADD == 1):
-                        mutex_add.unlock(pipe=tla.arch.VECTOR)
-                    mutex_x.unlock(pipe=tla.arch.VECTOR)
+                        mutex_add.unlock(pipe=tla.pipes.VECTOR)
+                    mutex_x.unlock(pipe=tla.pipes.VECTOR)
 
                 # Long-row pass 2: re-read each slice and normalize with the
                 # final stats. The output alias avoids any probability buffer.
@@ -414,21 +414,21 @@ def streaming_masked_softmax_kernel(
                         gm_y.ptr + row_off + second_chunk * CHUNK,
                         chunk_layout,
                     )
-                    mutex_x.lock(pipe=tla.arch.MTE2)
+                    mutex_x.lock(pipe=tla.pipes.MTE2)
                     tla.copy(ub_x, second_gm_chunk_x)
-                    mutex_x.unlock(pipe=tla.arch.MTE2)
+                    mutex_x.unlock(pipe=tla.pipes.MTE2)
                     if tla.const_expr(HAS_ADD == 1):
                         second_gm_chunk_add = tla.make_tensor(
                             gm_add.ptr + row_off + second_chunk * CHUNK,
                             chunk_layout,
                         )
-                        mutex_add.lock(pipe=tla.arch.MTE2)
+                        mutex_add.lock(pipe=tla.pipes.MTE2)
                         tla.copy(ub_add, second_gm_chunk_add)
-                        mutex_add.unlock(pipe=tla.arch.MTE2)
+                        mutex_add.unlock(pipe=tla.pipes.MTE2)
 
-                    mutex_x.lock(pipe=tla.arch.VECTOR)
+                    mutex_x.lock(pipe=tla.pipes.VECTOR)
                     if tla.const_expr(HAS_ADD == 1):
-                        mutex_add.lock(pipe=tla.arch.VECTOR)
+                        mutex_add.lock(pipe=tla.pipes.VECTOR)
                     with tla.vec.func(mode="simd"):
                         second_full = tla.create_mask(
                             pattern=tla.mask.ALL, dtype=tla.Float32
@@ -476,12 +476,12 @@ def streaming_masked_softmax_kernel(
                             )
 
                     if tla.const_expr(HAS_ADD == 1):
-                        mutex_add.unlock(pipe=tla.arch.VECTOR)
-                    mutex_x.unlock(pipe=tla.arch.VECTOR)
+                        mutex_add.unlock(pipe=tla.pipes.VECTOR)
+                    mutex_x.unlock(pipe=tla.pipes.VECTOR)
 
-                    mutex_x.lock(pipe=tla.arch.MTE3)
+                    mutex_x.lock(pipe=tla.pipes.MTE3)
                     tla.copy(second_gm_chunk_y, ub_x)
-                    mutex_x.unlock(pipe=tla.arch.MTE3)
+                    mutex_x.unlock(pipe=tla.pipes.MTE3)
 
                 # Pass 2 tail: normalize the same 64-lane blocks and copy only
                 # the valid TAIL elements back to GM.
@@ -493,21 +493,21 @@ def streaming_masked_softmax_kernel(
                     gm_tail_y = tla.make_tensor(
                         gm_y.ptr + row_off + tail_offset, tail_dma_layout
                     )
-                    mutex_x.lock(pipe=tla.arch.MTE2)
+                    mutex_x.lock(pipe=tla.pipes.MTE2)
                     tla.copy(tail_x_dma, gm_tail_x)
-                    mutex_x.unlock(pipe=tla.arch.MTE2)
+                    mutex_x.unlock(pipe=tla.pipes.MTE2)
                     if tla.const_expr(HAS_ADD == 1):
                         gm_tail_add = tla.make_tensor(
                             gm_add.ptr + row_off + tail_offset,
                             tail_dma_layout,
                         )
-                        mutex_add.lock(pipe=tla.arch.MTE2)
+                        mutex_add.lock(pipe=tla.pipes.MTE2)
                         tla.copy(tail_a_dma, gm_tail_add)
-                        mutex_add.unlock(pipe=tla.arch.MTE2)
+                        mutex_add.unlock(pipe=tla.pipes.MTE2)
 
-                    mutex_x.lock(pipe=tla.arch.VECTOR)
+                    mutex_x.lock(pipe=tla.pipes.VECTOR)
                     if tla.const_expr(HAS_ADD == 1):
-                        mutex_add.lock(pipe=tla.arch.VECTOR)
+                        mutex_add.lock(pipe=tla.pipes.VECTOR)
                     with tla.vec.func(mode="simd"):
                         full = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
                         row_max = ub_max.load()
@@ -543,12 +543,12 @@ def streaming_masked_softmax_kernel(
                             )
 
                     if tla.const_expr(HAS_ADD == 1):
-                        mutex_add.unlock(pipe=tla.arch.VECTOR)
-                    mutex_x.unlock(pipe=tla.arch.VECTOR)
+                        mutex_add.unlock(pipe=tla.pipes.VECTOR)
+                    mutex_x.unlock(pipe=tla.pipes.VECTOR)
 
-                    mutex_x.lock(pipe=tla.arch.MTE3)
+                    mutex_x.lock(pipe=tla.pipes.MTE3)
                     tla.copy(gm_tail_y, tail_x_dma)
-                    mutex_x.unlock(pipe=tla.arch.MTE3)
+                    mutex_x.unlock(pipe=tla.pipes.MTE3)
 
 
 _SYNC_ALL_SOURCE = r"""
@@ -645,19 +645,19 @@ def streaming_softmax_split_kernel(
                 CHUNK
             )
             split_x_gm_1 = tla.make_tensor(gm_x.ptr + split_off_1, chunk_layout)
-            mutex_x.lock(pipe=tla.arch.MTE2)
+            mutex_x.lock(pipe=tla.pipes.MTE2)
             tla.copy(ub_x, split_x_gm_1)
-            mutex_x.unlock(pipe=tla.arch.MTE2)
+            mutex_x.unlock(pipe=tla.pipes.MTE2)
             if tla.const_expr(HAS_ADD == 1):
                 split_add_gm_1 = tla.make_tensor(gm_add.ptr + split_off_1, chunk_layout)
-                mutex_add.lock(pipe=tla.arch.MTE2)
+                mutex_add.lock(pipe=tla.pipes.MTE2)
                 tla.copy(ub_add, split_add_gm_1)
-                mutex_add.unlock(pipe=tla.arch.MTE2)
+                mutex_add.unlock(pipe=tla.pipes.MTE2)
 
-            mutex_x.lock(pipe=tla.arch.VECTOR)
+            mutex_x.lock(pipe=tla.pipes.VECTOR)
             if tla.const_expr(HAS_ADD == 1):
-                mutex_add.lock(pipe=tla.arch.VECTOR)
-            mutex_stat.lock(pipe=tla.arch.VECTOR)
+                mutex_add.lock(pipe=tla.pipes.VECTOR)
+            mutex_stat.lock(pipe=tla.pipes.VECTOR)
             with tla.vec.func(mode="simd"):
                 split_full_1 = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
                 split_chunk_max_1 = tla.full(min_float, dtype=tla.Float32)
@@ -717,9 +717,9 @@ def streaming_softmax_split_kernel(
                 ub_stat_sum_one.store(split_sum_b_1)
 
             if tla.const_expr(HAS_ADD == 1):
-                mutex_add.unlock(pipe=tla.arch.VECTOR)
-            mutex_x.unlock(pipe=tla.arch.VECTOR)
-            mutex_stat.unlock(pipe=tla.arch.VECTOR)
+                mutex_add.unlock(pipe=tla.pipes.VECTOR)
+            mutex_x.unlock(pipe=tla.pipes.VECTOR)
+            mutex_stat.unlock(pipe=tla.pipes.VECTOR)
 
             split_row_offset_stats_1 = split_row_1.to(tla.Int64) * tla.Int64(
                 padded_parts
@@ -733,10 +733,10 @@ def streaming_softmax_split_kernel(
             split_sum_gm_1 = tla.make_tensor(
                 gm_partial.ptr + split_sum_offset_1, scalar_layout
             )
-            mutex_stat.lock(pipe=tla.arch.MTE3)
+            mutex_stat.lock(pipe=tla.pipes.MTE3)
             tla.copy(split_max_gm_1, ub_stat_max_one)
             tla.copy(split_sum_gm_1, ub_stat_sum_one)
-            mutex_stat.unlock(pipe=tla.arch.MTE3)
+            mutex_stat.unlock(pipe=tla.pipes.MTE3)
 
         tla.pipe_barrier(tla.pipes.ALL)
         streaming_tla_sync_all()
@@ -757,10 +757,10 @@ def streaming_softmax_split_kernel(
                 split_block_max_gm_3 = tla.make_tensor(
                     gm_partial.ptr + split_stat_base_3, vector_layout
                 )
-                mutex_part.lock(pipe=tla.arch.MTE2)
+                mutex_part.lock(pipe=tla.pipes.MTE2)
                 tla.copy(ub_load_max, split_block_max_gm_3)
-                mutex_part.unlock(pipe=tla.arch.MTE2)
-                mutex_part.lock(pipe=tla.arch.VECTOR)
+                mutex_part.unlock(pipe=tla.pipes.MTE2)
+                mutex_part.lock(pipe=tla.pipes.VECTOR)
                 with tla.vec.func(mode="simd"):
                     split_remain_3 = parts - split_sb_3 * vl_ele
                     split_valid_3 = (
@@ -779,7 +779,7 @@ def streaming_softmax_split_kernel(
                         mask=tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32),
                     )
                     ub_row_max.store(split_max_3)
-                mutex_part.unlock(pipe=tla.arch.VECTOR)
+                mutex_part.unlock(pipe=tla.pipes.VECTOR)
 
             for split_sb_4 in tla.range(0, stat_blocks, 1):
                 split_stat_base_4 = split_row_3.to(tla.Int64) * tla.Int64(
@@ -794,11 +794,11 @@ def streaming_softmax_split_kernel(
                 split_block_sum_gm_4 = tla.make_tensor(
                     gm_partial.ptr + split_stat_sum_base_4, vector_layout
                 )
-                mutex_part.lock(pipe=tla.arch.MTE2)
+                mutex_part.lock(pipe=tla.pipes.MTE2)
                 tla.copy(ub_load_max, split_block_max_gm_4)
                 tla.copy(ub_load_sum, split_block_sum_gm_4)
-                mutex_part.unlock(pipe=tla.arch.MTE2)
-                mutex_part.lock(pipe=tla.arch.VECTOR)
+                mutex_part.unlock(pipe=tla.pipes.MTE2)
+                mutex_part.lock(pipe=tla.pipes.VECTOR)
                 with tla.vec.func(mode="simd"):
                     split_remain_4 = parts - split_sb_4 * vl_ele
                     split_valid_4 = (
@@ -831,9 +831,9 @@ def streaming_softmax_split_kernel(
                         mask=split_full_4,
                     )
                     ub_row_sum.store(split_sum_4)
-                mutex_part.unlock(pipe=tla.arch.VECTOR)
+                mutex_part.unlock(pipe=tla.pipes.VECTOR)
 
-            mutex_stat.lock(pipe=tla.arch.VECTOR)
+            mutex_stat.lock(pipe=tla.pipes.VECTOR)
             with tla.vec.func(mode="simd"):
                 final_one, _ = tla.update_mask(1, dtype=tla.Float32)
                 final_full = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
@@ -849,7 +849,7 @@ def streaming_softmax_split_kernel(
                         dtype=tla.Float32,
                     )
                 )
-            mutex_stat.unlock(pipe=tla.arch.VECTOR)
+            mutex_stat.unlock(pipe=tla.pipes.VECTOR)
 
             split_final_max_gm = tla.make_tensor(
                 gm_partial.ptr + tla.Int64(final_base) + split_row_3.to(tla.Int64),
@@ -861,10 +861,10 @@ def streaming_softmax_split_kernel(
                 + split_row_3.to(tla.Int64),
                 scalar_layout,
             )
-            mutex_stat.lock(pipe=tla.arch.MTE3)
+            mutex_stat.lock(pipe=tla.pipes.MTE3)
             tla.copy(split_final_max_gm, ub_stat_max_one)
             tla.copy(split_final_sum_gm, ub_stat_sum_one)
-            mutex_stat.unlock(pipe=tla.arch.MTE3)
+            mutex_stat.unlock(pipe=tla.pipes.MTE3)
 
         tla.pipe_barrier(tla.pipes.ALL)
         streaming_tla_sync_all()
@@ -889,26 +889,26 @@ def streaming_softmax_split_kernel(
                 + split_row_5.to(tla.Int64),
                 scalar_layout,
             )
-            mutex_stat.lock(pipe=tla.arch.MTE2)
+            mutex_stat.lock(pipe=tla.pipes.MTE2)
             tla.copy(ub_stat_max_one, split_final_max_gm_5)
             tla.copy(ub_stat_sum_one, split_final_sum_gm_5)
-            mutex_stat.unlock(pipe=tla.arch.MTE2)
+            mutex_stat.unlock(pipe=tla.pipes.MTE2)
 
             split_x_gm_5 = tla.make_tensor(gm_x.ptr + split_off_5, chunk_layout)
             split_y_gm_5 = tla.make_tensor(gm_y.ptr + split_off_5, chunk_layout)
-            mutex_x.lock(pipe=tla.arch.MTE2)
+            mutex_x.lock(pipe=tla.pipes.MTE2)
             tla.copy(ub_x, split_x_gm_5)
-            mutex_x.unlock(pipe=tla.arch.MTE2)
+            mutex_x.unlock(pipe=tla.pipes.MTE2)
             if tla.const_expr(HAS_ADD == 1):
                 split_add_gm_5 = tla.make_tensor(gm_add.ptr + split_off_5, chunk_layout)
-                mutex_add.lock(pipe=tla.arch.MTE2)
+                mutex_add.lock(pipe=tla.pipes.MTE2)
                 tla.copy(ub_add, split_add_gm_5)
-                mutex_add.unlock(pipe=tla.arch.MTE2)
+                mutex_add.unlock(pipe=tla.pipes.MTE2)
 
-            mutex_stat.lock(pipe=tla.arch.VECTOR)
-            mutex_x.lock(pipe=tla.arch.VECTOR)
+            mutex_stat.lock(pipe=tla.pipes.VECTOR)
+            mutex_x.lock(pipe=tla.pipes.VECTOR)
             if tla.const_expr(HAS_ADD == 1):
-                mutex_add.lock(pipe=tla.arch.VECTOR)
+                mutex_add.lock(pipe=tla.pipes.VECTOR)
             with tla.vec.func(mode="simd"):
                 split_full_5 = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
                 split_one_5, _ = tla.update_mask(1, dtype=tla.Float32)
@@ -958,13 +958,13 @@ def streaming_softmax_split_kernel(
                     )
 
             if tla.const_expr(HAS_ADD == 1):
-                mutex_add.unlock(pipe=tla.arch.VECTOR)
-            mutex_x.unlock(pipe=tla.arch.VECTOR)
-            mutex_stat.unlock(pipe=tla.arch.VECTOR)
+                mutex_add.unlock(pipe=tla.pipes.VECTOR)
+            mutex_x.unlock(pipe=tla.pipes.VECTOR)
+            mutex_stat.unlock(pipe=tla.pipes.VECTOR)
 
-            mutex_x.lock(pipe=tla.arch.MTE3)
+            mutex_x.lock(pipe=tla.pipes.MTE3)
             tla.copy(split_y_gm_5, ub_x)
-            mutex_x.unlock(pipe=tla.arch.MTE3)
+            mutex_x.unlock(pipe=tla.pipes.MTE3)
 
 
 VL_ELE = 64

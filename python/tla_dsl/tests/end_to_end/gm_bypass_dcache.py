@@ -16,9 +16,9 @@ def read_after_dma_write(
     target: tla.Tensor, replacement: tla.Tensor, observed: tla.Tensor
 ):
     scratch_ptr = tla.allocate(32, tla.Int32, tla.AddressSpace.ub, 32)
-    loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.MTE3)
-    cached = tla.flag("cached", tla.arch.SCALAR, tla.arch.MTE3)
-    written = tla.flag("written", tla.arch.MTE3, tla.arch.SCALAR)
+    loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.MTE3)
+    cached = tla.flag("cached", tla.pipes.SCALAR, tla.pipes.MTE3)
+    written = tla.flag("written", tla.pipes.MTE3, tla.pipes.SCALAR)
     with tla.vector():
         scratch = tla.make_tensor(
             scratch_ptr,

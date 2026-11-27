@@ -26,9 +26,9 @@ def timed_vector_add(
     b_ptr = tla.allocate(64, tla.Float32, tla.AddressSpace.ub, 256)
     a = tla.make_tensor_like(a_ptr, a_gm, tla.arch.RowMajor)
     b = tla.make_tensor_like(b_ptr, b_gm, tla.arch.RowMajor)
-    ready = tla.flag("inputs_ready", tla.arch.MTE2, tla.arch.VECTOR)
-    done = tla.flag("output_ready", tla.arch.VECTOR, tla.arch.MTE3)
-    retired = tla.flag("vector_retired", tla.arch.VECTOR, tla.arch.SCALAR)
+    ready = tla.flag("inputs_ready", tla.pipes.MTE2, tla.pipes.VECTOR)
+    done = tla.flag("output_ready", tla.pipes.VECTOR, tla.pipes.MTE3)
+    retired = tla.flag("vector_retired", tla.pipes.VECTOR, tla.pipes.SCALAR)
     with tla.vector():
         tla.copy(a, a_gm)
         tla.copy(b, b_gm)

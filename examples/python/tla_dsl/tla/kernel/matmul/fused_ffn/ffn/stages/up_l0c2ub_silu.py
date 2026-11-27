@@ -143,26 +143,26 @@ def _cv_wait_aic(
     """AIV CrossCoreWait AIC on PIPE_V. One channel per sub (CPP mode=4)."""
     if tla.const_expr(ID0_ONLY):
         if aiv_sub == 0:
-            tla.cross_core_wait_flag(aic0, tla.arch.VECTOR, aiv_id=0)
+            tla.cross_core_wait_flag(aic0, tla.pipes.VECTOR, aiv_id=0)
         else:
-            tla.cross_core_wait_flag(aic0, tla.arch.VECTOR, aiv_id=1)
+            tla.cross_core_wait_flag(aic0, tla.pipes.VECTOR, aiv_id=1)
     else:
         cid = (count // _CV_COUNT_ID_MAX) % _CV_COUNT_FLAG
         if cid == 0:
             if aiv_sub == 0:
-                tla.cross_core_wait_flag(aic0, tla.arch.VECTOR, aiv_id=0)
+                tla.cross_core_wait_flag(aic0, tla.pipes.VECTOR, aiv_id=0)
             else:
-                tla.cross_core_wait_flag(aic0, tla.arch.VECTOR, aiv_id=1)
+                tla.cross_core_wait_flag(aic0, tla.pipes.VECTOR, aiv_id=1)
         elif cid == 1:
             if aiv_sub == 0:
-                tla.cross_core_wait_flag(aic1, tla.arch.VECTOR, aiv_id=0)
+                tla.cross_core_wait_flag(aic1, tla.pipes.VECTOR, aiv_id=0)
             else:
-                tla.cross_core_wait_flag(aic1, tla.arch.VECTOR, aiv_id=1)
+                tla.cross_core_wait_flag(aic1, tla.pipes.VECTOR, aiv_id=1)
         else:
             if aiv_sub == 0:
-                tla.cross_core_wait_flag(aic2, tla.arch.VECTOR, aiv_id=0)
+                tla.cross_core_wait_flag(aic2, tla.pipes.VECTOR, aiv_id=0)
             else:
-                tla.cross_core_wait_flag(aic2, tla.arch.VECTOR, aiv_id=1)
+                tla.cross_core_wait_flag(aic2, tla.pipes.VECTOR, aiv_id=1)
 
 
 @tla.jit
@@ -360,66 +360,66 @@ def stage_up_l0c2ub_silu(
     # Explicit ids: Up ~drain → Down reuses same HW events (CPP sequential
     # BlockMmad lifetimes).
     l1_0_data_ready = tla.flag(
-        _fp + "_l1_0_data_ready", tla.arch.MTE2, tla.arch.MTE1, id=0
+        _fp + "_l1_0_data_ready", tla.pipes.MTE2, tla.pipes.MTE1, id=0
     )
     l1_0_available = tla.flag(
-        _fp + "_l1_0_available", tla.arch.MTE1, tla.arch.MTE2, id=0
+        _fp + "_l1_0_available", tla.pipes.MTE1, tla.pipes.MTE2, id=0
     )
     # Credit-only (CPP SECOND/THIRD); never Wait in the L1 loop.
     l1_2_available = tla.flag(
-        _fp + "_l1_2_available", tla.arch.MTE1, tla.arch.MTE2, id=2
+        _fp + "_l1_2_available", tla.pipes.MTE1, tla.pipes.MTE2, id=2
     )
     l1_3_available = tla.flag(
-        _fp + "_l1_3_available", tla.arch.MTE1, tla.arch.MTE2, id=3
+        _fp + "_l1_3_available", tla.pipes.MTE1, tla.pipes.MTE2, id=3
     )
     if tla.const_expr(_dual_phase):
         # Single-buffer loop: alias slot-1 → slot-0. ID 1 still primed in ctor
         # via a distinct SoftFlag (CPP always Sets FIRST_FLAG).
         l1_1_data_ready = l1_0_data_ready
         l1_1_available = l1_0_available
-        l1_1_ctor = tla.flag(_fp + "_l1_1_ctor", tla.arch.MTE1, tla.arch.MTE2, id=1)
+        l1_1_ctor = tla.flag(_fp + "_l1_1_ctor", tla.pipes.MTE1, tla.pipes.MTE2, id=1)
     else:
         l1_1_data_ready = tla.flag(
-            _fp + "_l1_1_data_ready", tla.arch.MTE2, tla.arch.MTE1, id=1
+            _fp + "_l1_1_data_ready", tla.pipes.MTE2, tla.pipes.MTE1, id=1
         )
         l1_1_available = tla.flag(
-            _fp + "_l1_1_available", tla.arch.MTE1, tla.arch.MTE2, id=1
+            _fp + "_l1_1_available", tla.pipes.MTE1, tla.pipes.MTE2, id=1
         )
         l1_1_ctor = l1_1_available
     l0_0_available = tla.flag(
-        _fp + "_l0_0_available", tla.arch.CUBE, tla.arch.MTE1, id=6
+        _fp + "_l0_0_available", tla.pipes.CUBE, tla.pipes.MTE1, id=6
     )
     l0_0_data_ready = tla.flag(
-        _fp + "_l0_0_data_ready", tla.arch.MTE1, tla.arch.CUBE, id=6
+        _fp + "_l0_0_data_ready", tla.pipes.MTE1, tla.pipes.CUBE, id=6
     )
     if tla.const_expr(_dual_phase):
         l0_1_available = l0_0_available
         l0_1_data_ready = l0_0_data_ready
-        l0_1_ctor = tla.flag(_fp + "_l0_1_ctor", tla.arch.CUBE, tla.arch.MTE1, id=7)
+        l0_1_ctor = tla.flag(_fp + "_l0_1_ctor", tla.pipes.CUBE, tla.pipes.MTE1, id=7)
     else:
         l0_1_available = tla.flag(
-            _fp + "_l0_1_available", tla.arch.CUBE, tla.arch.MTE1, id=7
+            _fp + "_l0_1_available", tla.pipes.CUBE, tla.pipes.MTE1, id=7
         )
         l0_1_data_ready = tla.flag(
-            _fp + "_l0_1_data_ready", tla.arch.MTE1, tla.arch.CUBE, id=7
+            _fp + "_l0_1_data_ready", tla.pipes.MTE1, tla.pipes.CUBE, id=7
         )
         l0_1_ctor = l0_1_available
     # CPP ctor always Sets FIX_M(0) and FIX_M(1) (even if dbL0C=1 at runtime).
     _l0c_db = tla.const_expr(_tiling.l0c_db > 1)
     _l0c_slot_elems = _tiling.l0_tm * _tiling.l0_tn
     l0c0_data_ready = tla.flag(
-        _fp + "_l0c0_data_ready", tla.arch.CUBE, tla.arch.FIX, id=0
+        _fp + "_l0c0_data_ready", tla.pipes.CUBE, tla.pipes.FIX, id=0
     )
     l0c0_available = tla.flag(
-        _fp + "_l0c0_available", tla.arch.FIX, tla.arch.CUBE, id=0
+        _fp + "_l0c0_available", tla.pipes.FIX, tla.pipes.CUBE, id=0
     )
     # id=1 always allocated (ctor/dtor). Loop only toggles it when dbL0C=2;
     # when dbL0C=1 the loop stays on slot0 (CPP still primes FIX_M(1)).
     l0c1_data_ready = tla.flag(
-        _fp + "_l0c1_data_ready", tla.arch.CUBE, tla.arch.FIX, id=1
+        _fp + "_l0c1_data_ready", tla.pipes.CUBE, tla.pipes.FIX, id=1
     )
     l0c1_available = tla.flag(
-        _fp + "_l0c1_available", tla.arch.FIX, tla.arch.CUBE, id=1
+        _fp + "_l0c1_available", tla.pipes.FIX, tla.pipes.CUBE, id=1
     )
     # Cube BT SoftFlags come from the kernel (shared Up↔Down; SoftFlag budget).
 
@@ -431,23 +431,25 @@ def stage_up_l0c2ub_silu(
     _ub_pp_sf = tla.const_expr(use_out_pp)
 
     # ---- UB SoftFlags: CPP self-fences id=0; optional out-PP on 1/2 ----
-    mte3_v_fence = tla.flag(_fp + "_mte3_v_fence", tla.arch.MTE3, tla.arch.VECTOR, id=0)
+    mte3_v_fence = tla.flag(
+        _fp + "_mte3_v_fence", tla.pipes.MTE3, tla.pipes.VECTOR, id=0
+    )
     ub_out0_data_ready = tla.flag(
-        _fp + "_ub_out0_data_ready", tla.arch.VECTOR, tla.arch.MTE3, id=0
+        _fp + "_ub_out0_data_ready", tla.pipes.VECTOR, tla.pipes.MTE3, id=0
     )
     if tla.const_expr(_ub_pp_sf):
         ub_out0_available = tla.flag(
-            _fp + "_ub_out0_available", tla.arch.MTE3, tla.arch.VECTOR, id=1
+            _fp + "_ub_out0_available", tla.pipes.MTE3, tla.pipes.VECTOR, id=1
         )
         if tla.const_expr(_dual_phase):
             ub_out1_data_ready = ub_out0_data_ready
             ub_out1_available = ub_out0_available
         else:
             ub_out1_data_ready = tla.flag(
-                _fp + "_ub_out1_data_ready", tla.arch.VECTOR, tla.arch.MTE3, id=1
+                _fp + "_ub_out1_data_ready", tla.pipes.VECTOR, tla.pipes.MTE3, id=1
             )
             ub_out1_available = tla.flag(
-                _fp + "_ub_out1_available", tla.arch.MTE3, tla.arch.VECTOR, id=2
+                _fp + "_ub_out1_available", tla.pipes.MTE3, tla.pipes.VECTOR, id=2
             )
     else:
         # Alias to V_MTE3(0) so dead branches type-check; never Wait/Set as credit.
@@ -456,7 +458,7 @@ def stage_up_l0c2ub_silu(
         ub_out1_available = ub_out0_data_ready
     # SwiGLU dual: MTE2 gate load → VECTOR silu*up (CPP FusionSwiglu MTE2_V).
     if tla.const_expr(ACT == ACT_SWIGLU_DUAL):
-        gate_mte2_v = tla.flag(_fp + "_gate_mte2_v", tla.arch.MTE2, tla.arch.VECTOR)
+        gate_mte2_v = tla.flag(_fp + "_gate_mte2_v", tla.pipes.MTE2, tla.pipes.VECTOR)
     else:
         gate_mte2_v = ub_out0_data_ready
 
@@ -668,7 +670,7 @@ def stage_up_l0c2ub_silu(
         # CPP enableCVSync + count: false/0 until first tile; then countId=count/15%3.
         enable_cv_sync = runtime_zero
         cv_count = runtime_zero
-        _wp = tla.arch.FIX  # AIC waits aiv_finish on FIX (CPP default)
+        _wp = tla.pipes.FIX  # AIC waits aiv_finish on FIX (CPP default)
         # Allow with mTail: runtime still gates next_task < main_tiles so we
         # only prefetch full→full (rem splits have hetero M/N geometry).
         block_range = tla.range(block_idx, expanded, block_num)
@@ -856,7 +858,7 @@ def stage_up_l0c2ub_silu(
                     aic_finish1,
                     aic_finish2,
                     cv_count,
-                    tla.arch.FIX,
+                    tla.pipes.FIX,
                     _cv_id0_only,
                 )
                 enable_cv_sync = c1
@@ -1474,7 +1476,7 @@ def stage_up_l0c2ub_silu(
                     aic_finish1,
                     aic_finish2,
                     cv_count,
-                    tla.arch.FIX,
+                    tla.pipes.FIX,
                     _cv_id0_only,
                 )
                 enable_cv_sync = c1
@@ -1616,7 +1618,7 @@ def stage_up_l0c2ub_silu(
                     aiv_finish2,
                     cv_count,
                     aiv_sub_idx,
-                    tla.arch.MTE3,
+                    tla.pipes.MTE3,
                     _cv_id0_only,
                 )
             else:
@@ -2223,7 +2225,7 @@ def stage_up_l0c2ub_silu(
                     aiv_finish2,
                     cv_count,
                     aiv_sub_idx,
-                    tla.arch.MTE3,
+                    tla.pipes.MTE3,
                     _cv_id0_only,
                 )
 

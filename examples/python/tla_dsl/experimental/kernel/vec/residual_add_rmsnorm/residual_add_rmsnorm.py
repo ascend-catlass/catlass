@@ -163,9 +163,9 @@ def residual_add_rmsnorm_kernel(
     with tla.vector():
         if tile_begin < n_tiles:
             if tla.const_expr(HAS_AFFINE == 1):
-                weight_mutex.lock(pipe=tla.arch.MTE2)
+                weight_mutex.lock(pipe=tla.pipes.MTE2)
                 tla.copy(ub_weight, gm_weight)
-                weight_mutex.unlock(pipe=tla.arch.MTE2)
+                weight_mutex.unlock(pipe=tla.pipes.MTE2)
 
             # Issue one group of independent buffers at a time. Mutex waits are
             # pipe-local, so MTE2 can fill the next buffer while VECTOR processes
@@ -185,14 +185,14 @@ def residual_add_rmsnorm_kernel(
                             gm_output.ptr + tile_offset, gm_tile_layout
                         )
 
-                        tile_mutex[bi].lock(pipe=tla.arch.MTE2)
+                        tile_mutex[bi].lock(pipe=tla.pipes.MTE2)
                         tla.copy(ub_x[bi], gm_x_tile)
                         tla.copy(ub_residual[bi], gm_residual_tile)
-                        tile_mutex[bi].unlock(pipe=tla.arch.MTE2)
+                        tile_mutex[bi].unlock(pipe=tla.pipes.MTE2)
 
-                        tile_mutex[bi].lock(pipe=tla.arch.VECTOR)
+                        tile_mutex[bi].lock(pipe=tla.pipes.VECTOR)
                         if tla.const_expr(HAS_AFFINE == 1):
-                            weight_mutex.lock(pipe=tla.arch.VECTOR)
+                            weight_mutex.lock(pipe=tla.pipes.VECTOR)
 
                         with tla.vec.func(mode="simd"):
                             mask = tla.create_mask(
@@ -296,12 +296,12 @@ def residual_add_rmsnorm_kernel(
                                     x_tail_scale.store(scaled_tail)
 
                         if tla.const_expr(HAS_AFFINE == 1):
-                            weight_mutex.unlock(pipe=tla.arch.VECTOR)
-                        tile_mutex[bi].unlock(pipe=tla.arch.VECTOR)
+                            weight_mutex.unlock(pipe=tla.pipes.VECTOR)
+                        tile_mutex[bi].unlock(pipe=tla.pipes.VECTOR)
 
-                        tile_mutex[bi].lock(pipe=tla.arch.MTE3)
+                        tile_mutex[bi].lock(pipe=tla.pipes.MTE3)
                         tla.copy(gm_output_tile, ub_x[bi])
-                        tile_mutex[bi].unlock(pipe=tla.arch.MTE3)
+                        tile_mutex[bi].unlock(pipe=tla.pipes.MTE3)
 
         tla.pipe_barrier(tla.pipes.ALL)
 

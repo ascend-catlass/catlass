@@ -63,8 +63,8 @@ _CAST = tla.params.CastParams(
 
 @tla.kernel
 def fp8_full_lanes(gm_in: tla.Tensor, gm_out: tla.Tensor) -> None:
-    loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    done = tla.flag("done", tla.arch.VECTOR, tla.arch.MTE3)
+    loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    done = tla.flag("done", tla.pipes.VECTOR, tla.pipes.MTE3)
     ub_in = tla.make_tensor_like(
         tla.allocate(N, tla.Float16, tla.AddressSpace.ub, 256), gm_in, tla.arch.RowMajor
     )
@@ -90,8 +90,8 @@ def fp8_full_lanes(gm_in: tla.Tensor, gm_out: tla.Tensor) -> None:
 @tla.kernel
 def fp8_dense_widen(gm_in: tla.Tensor, gm_out: tla.Tensor) -> None:
     """Widen a dense fp8 register to f16 -- one cast, nothing to cancel."""
-    loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    done = tla.flag("done", tla.arch.VECTOR, tla.arch.MTE3)
+    loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    done = tla.flag("done", tla.pipes.VECTOR, tla.pipes.MTE3)
     ub_in = tla.make_tensor_like(
         tla.allocate(2 * N, _FP8, tla.AddressSpace.ub, 256), gm_in, tla.arch.RowMajor
     )
@@ -122,8 +122,8 @@ def make_masked_widen(slot):
 
     @tla.kernel
     def fp8_masked_widen(gm_in: tla.Tensor, gm_out: tla.Tensor) -> None:
-        loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.VECTOR)
-        done = tla.flag("done", tla.arch.VECTOR, tla.arch.MTE3)
+        loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+        done = tla.flag("done", tla.pipes.VECTOR, tla.pipes.MTE3)
         ub_in = tla.make_tensor_like(
             tla.allocate(2 * N, _FP8, tla.AddressSpace.ub, 256),
             gm_in,

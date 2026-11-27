@@ -143,7 +143,7 @@ def alloc_ptr_kernel(mem_a: tla.Tensor) -> None:
 
 @tla.kernel
 def bad_flag_name(x: int) -> None:
-    tla.flag(x, tla.arch.MTE2, tla.arch.VECTOR)
+    tla.flag(x, tla.pipes.MTE2, tla.pipes.VECTOR)
 
 @tla.kernel
 def bad_allocate_unknown_addrspace(mem_a: tla.Tensor) -> None:

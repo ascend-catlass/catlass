@@ -178,7 +178,7 @@ def rope_kv_cache_kernel(
                         start = last_start
 
                     # --- MTE2: 整组搬入（每张量一次连续 DMA，1–4 KB）---------
-                    m_in[slot].lock(pipe=tla.arch.MTE2)
+                    m_in[slot].lock(pipe=tla.pipes.MTE2)
                     tla.copy(
                         ub_q[slot],
                         tla.get_tile(gm_q, tla.make_coord(start, 0), group_q),
@@ -191,11 +191,11 @@ def rope_kv_cache_kernel(
                         ub_sin[slot],
                         tla.get_tile(gm_sin, tla.make_coord(start, 0), group_cs),
                     )
-                    m_in[slot].unlock(pipe=tla.arch.MTE2)
+                    m_in[slot].unlock(pipe=tla.pipes.MTE2)
 
                     # K/V 只经 UB 中转、由 MTE3 直接散播，因此与 MTE3 共用 m_kv：
                     # 下一轮 MTE2 覆盖同槽前，必然等到上一轮 MTE3 读完。
-                    m_kv[slot].lock(pipe=tla.arch.MTE2)
+                    m_kv[slot].lock(pipe=tla.pipes.MTE2)
                     tla.copy(
                         ub_k[slot],
                         tla.get_tile(gm_k, tla.make_coord(start, 0), group_kv),
@@ -204,13 +204,13 @@ def rope_kv_cache_kernel(
                         ub_v[slot],
                         tla.get_tile(gm_v, tla.make_coord(start, 0), group_kv),
                     )
-                    m_kv[slot].unlock(pipe=tla.arch.MTE2)
+                    m_kv[slot].unlock(pipe=tla.pipes.MTE2)
 
                     # --- VECTOR: 逐 head/逐 64 lane 旋转 ---------------------
                     # lo 在 [h*D + c*chunk)，hi 在 [h*D + half + c*chunk)，两段都连续，
                     # 直接 load 成同宽 lane 做 4 乘 2 加减；cos/sin 只按 (row, c) 读。
-                    m_in[slot].lock(pipe=tla.arch.VECTOR)
-                    m_out[slot].lock(pipe=tla.arch.VECTOR)
+                    m_in[slot].lock(pipe=tla.pipes.VECTOR)
+                    m_out[slot].lock(pipe=tla.pipes.VECTOR)
                     with tla.vec.func(mode="simd"):
                         for row in tla.range_constexpr(rows):
                             for h in tla.range_constexpr(HQ):
@@ -248,20 +248,20 @@ def rope_kv_cache_kernel(
                                         tla.make_coord(row, col + half),
                                         lane,
                                     ).store(out_hi)
-                    m_out[slot].unlock(pipe=tla.arch.VECTOR)
-                    m_in[slot].unlock(pipe=tla.arch.VECTOR)
+                    m_out[slot].unlock(pipe=tla.pipes.VECTOR)
+                    m_in[slot].unlock(pipe=tla.pipes.VECTOR)
 
                     # --- MTE3: 整组写回 Q，再逐 token 散播 K/V ---------------
                     # Q 一次连续 DMA 写完整组；K/V 目标行由 slot 决定，只能按行
                     # 各发一次 1 KB 级的 UB→GM 拷贝，但仍在 MTE3 上与 Q 重叠。
-                    m_out[slot].lock(pipe=tla.arch.MTE3)
+                    m_out[slot].lock(pipe=tla.pipes.MTE3)
                     tla.copy(
                         tla.get_tile(gm_q_out, tla.make_coord(start, 0), group_q),
                         ub_qo[slot],
                     )
-                    m_out[slot].unlock(pipe=tla.arch.MTE3)
+                    m_out[slot].unlock(pipe=tla.pipes.MTE3)
 
-                    m_kv[slot].lock(pipe=tla.arch.MTE3)
+                    m_kv[slot].lock(pipe=tla.pipes.MTE3)
                     for row in tla.range_constexpr(rows):
                         dst = gm_slot[start + row].to(tla.Int32)
                         if dst >= zero:
@@ -277,7 +277,7 @@ def rope_kv_cache_kernel(
                                     ub_v[slot], tla.make_coord(row, 0), row_kv
                                 ),
                             )
-                    m_kv[slot].unlock(pipe=tla.arch.MTE3)
+                    m_kv[slot].unlock(pipe=tla.pipes.MTE3)
 
         tla.pipe_barrier(tla.pipes.ALL)
 

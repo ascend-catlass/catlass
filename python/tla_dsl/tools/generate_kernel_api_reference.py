@@ -375,8 +375,8 @@ DIRECTORY_SECTIONS: list[tuple[str, str]] = [
     ),
     (
         "System Variable Access",
-        "Architecture attributes on `tla.arch` / `tla.AddressSpace` "
-        "(layout tags, pipes, on-chip address spaces, block helpers).",
+        "Layout tags and block helpers on `tla.arch`, pipe identifiers on "
+        "`tla.pipes`, and on-chip address spaces on `tla.AddressSpace`.",
     ),
     (
         "System Variable Access / Layout Tags",
@@ -415,31 +415,31 @@ DIRECTORY_SECTIONS: list[tuple[str, str]] = [
     ),
     (
         "System Variable Access / Pipes",
-        "Pipe identifiers under `tla.arch`, used by `flag` / `pipe_barrier` / "
+        "Pipe identifiers under `tla.pipes`, used by `flag` / `pipe_barrier` / "
         "`mutex_*` / cross-core sync.\n"
         "\n"
-        "**Source:** [`catlass.core_api.arch`](../../../catlass/core_api.py)\n"
+        "**Source:** [`catlass.runtime.pipes`](../../../catlass/runtime.py)\n"
         "\n"
         "| Pipe | Role |\n"
         "|---|---|\n"
-        "| `tla.arch.SCALAR` | Scalar pipe |\n"
-        "| `tla.arch.VECTOR` | Vector pipe |\n"
-        "| `tla.arch.CUBE` | Cube pipe |\n"
-        "| `tla.arch.MTE1` | MTE1 |\n"
-        "| `tla.arch.MTE2` | MTE2 |\n"
-        "| `tla.arch.MTE3` | MTE3 |\n"
-        "| `tla.arch.FIX` | Fixpipe |\n"
+        "| `tla.pipes.SCALAR` | Scalar pipe |\n"
+        "| `tla.pipes.VECTOR` | Vector pipe |\n"
+        "| `tla.pipes.CUBE` | Cube pipe |\n"
+        "| `tla.pipes.MTE1` | MTE1 |\n"
+        "| `tla.pipes.MTE2` | MTE2 |\n"
+        "| `tla.pipes.MTE3` | MTE3 |\n"
+        "| `tla.pipes.FIX` | Fixpipe |\n"
+        "| `tla.pipes.ALL` | All pipes for `pipe_barrier` |\n"
         "\n"
         "Constraints:\n"
         "\n"
         "- Available pipes depend on the enclosing `tla.cube()` / `tla.vector()` "
         "region; see each sync API's Constraints.\n"
-        "- `ALL` is not exposed on `tla.arch` for these APIs.\n"
         "\n"
         "Example:\n"
         "\n"
         "```python\n"
-        "pipe = tla.arch.MTE2\n"
+        "pipe = tla.pipes.MTE2\n"
         "```",
     ),
     (

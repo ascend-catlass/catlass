@@ -62,7 +62,7 @@ def vector_layout_gm_to_l1_copy(
 ) -> None:
     """GM VectorLayout -> L1 VectorLayout, then print L1 as one u32 C0."""
     l1_ptr = tla.allocate(n_elems, dtype, tla.AddressSpace.l1, 512)
-    copied = tla.flag("vl_gm_l1_copied", tla.arch.MTE2, tla.arch.MTE1)
+    copied = tla.flag("vl_gm_l1_copied", tla.pipes.MTE2, tla.pipes.MTE1)
     with tla.cube():
         l1 = tla.make_tensor_like(l1_ptr, gm_src, tla.arch.VectorLayout)
         tla.copy(l1, gm_src)

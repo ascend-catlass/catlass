@@ -31,8 +31,8 @@ def cross_flag_two_way(
     aic_to_aiv = tla.cross_flag("aic_to_aiv", mode=4)
     aiv_to_aic = tla.cross_flag("aiv_to_aic", mode=4)
 
-    ub_loaded = tla.flag("ub_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    vec_done = tla.flag("vec_done", tla.arch.VECTOR, tla.arch.MTE3)
+    ub_loaded = tla.flag("ub_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    vec_done = tla.flag("vec_done", tla.pipes.VECTOR, tla.pipes.MTE3)
 
     x_ub_ptr = tla.allocate(COLS, tla.Float32, tla.AddressSpace.ub, 256)
     y_ub_ptr = tla.allocate(COLS, tla.Float32, tla.AddressSpace.ub, 256)
@@ -40,24 +40,24 @@ def cross_flag_two_way(
 
     with tla.cube():
         # Phase 1: make one token available to each physical AIV.
-        tla.cross_core_set_flag(aic_to_aiv, tla.arch.FIX, aiv_id=0)
-        tla.cross_core_set_flag(aic_to_aiv, tla.arch.FIX, aiv_id=1)
+        tla.cross_core_set_flag(aic_to_aiv, tla.pipes.FIX, aiv_id=0)
+        tla.cross_core_set_flag(aic_to_aiv, tla.pipes.FIX, aiv_id=1)
 
         # Phase 2: do not release either AIV until both have acknowledged.
-        tla.cross_core_wait_flag(aiv_to_aic, tla.arch.FIX, aiv_id=0)
-        tla.cross_core_wait_flag(aiv_to_aic, tla.arch.FIX, aiv_id=1)
+        tla.cross_core_wait_flag(aiv_to_aic, tla.pipes.FIX, aiv_id=0)
+        tla.cross_core_wait_flag(aiv_to_aic, tla.pipes.FIX, aiv_id=1)
 
         # Phase 3: a second counter increment releases each AIV to store.
-        tla.cross_core_set_flag(aic_to_aiv, tla.arch.FIX, aiv_id=0)
-        tla.cross_core_set_flag(aic_to_aiv, tla.arch.FIX, aiv_id=1)
+        tla.cross_core_set_flag(aic_to_aiv, tla.pipes.FIX, aiv_id=0)
+        tla.cross_core_set_flag(aic_to_aiv, tla.pipes.FIX, aiv_id=1)
         tla.pipe_barrier(tla.pipes.ALL)
 
     with tla.vector():
         aiv_id = tla.arch.sub_block_idx()
 
         # Compiler-generated guards make AIV0 consume only id 0 and AIV1 only id 1.
-        tla.cross_core_wait_flag(aic_to_aiv, tla.arch.VECTOR, aiv_id=0)
-        tla.cross_core_wait_flag(aic_to_aiv, tla.arch.VECTOR, aiv_id=1)
+        tla.cross_core_wait_flag(aic_to_aiv, tla.pipes.VECTOR, aiv_id=0)
+        tla.cross_core_wait_flag(aic_to_aiv, tla.pipes.VECTOR, aiv_id=1)
 
         x_gm = tla.tile_view(x, tla.make_shape(1, COLS), tla.make_coord(aiv_id, 0))
         y_gm = tla.tile_view(y, tla.make_shape(1, COLS), tla.make_coord(aiv_id, 0))
@@ -75,12 +75,12 @@ def cross_flag_two_way(
             out_ub.store(x_ub.load() + y_ub.load())
 
         # Each AIV independently acknowledges that its row is ready.
-        tla.cross_core_set_flag(aiv_to_aic, tla.arch.VECTOR, aiv_id=0)
-        tla.cross_core_set_flag(aiv_to_aic, tla.arch.VECTOR, aiv_id=1)
+        tla.cross_core_set_flag(aiv_to_aic, tla.pipes.VECTOR, aiv_id=0)
+        tla.cross_core_set_flag(aiv_to_aic, tla.pipes.VECTOR, aiv_id=1)
 
         # Consume the second token only after AIC has observed both acknowledgements.
-        tla.cross_core_wait_flag(aic_to_aiv, tla.arch.VECTOR, aiv_id=0)
-        tla.cross_core_wait_flag(aic_to_aiv, tla.arch.VECTOR, aiv_id=1)
+        tla.cross_core_wait_flag(aic_to_aiv, tla.pipes.VECTOR, aiv_id=0)
+        tla.cross_core_wait_flag(aic_to_aiv, tla.pipes.VECTOR, aiv_id=1)
 
         tla.set_flag(vec_done)
         tla.wait_flag(vec_done)

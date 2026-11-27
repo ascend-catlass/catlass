@@ -122,25 +122,25 @@ def ms_main_kernel(
                     )
                     l1_a_p = tla.make_tensor_like(l1a0_ptr, gm_a_p, tla.arch.zN)
                     l1_b_p = tla.make_tensor_like(l1b0_ptr, gm_b_p, tla.arch.zN)
-                    mutex_l1a0.lock(pipe=tla.arch.MTE2)
-                    mutex_l1b0.lock(pipe=tla.arch.MTE2)
+                    mutex_l1a0.lock(pipe=tla.pipes.MTE2)
+                    mutex_l1b0.lock(pipe=tla.pipes.MTE2)
                     tla.copy(l1_a_p, gm_a_p)
                     tla.copy(l1_b_p, gm_b_p)
-                    mutex_l1a0.unlock(pipe=tla.arch.MTE2)
-                    mutex_l1b0.unlock(pipe=tla.arch.MTE2)
+                    mutex_l1a0.unlock(pipe=tla.pipes.MTE2)
+                    mutex_l1b0.unlock(pipe=tla.pipes.MTE2)
 
                     # First MAC of this V tile must not start before the previous
                     # tile's L0C->UB copy has consumed L0C.
-                    mutex_l0c.lock(pipe=tla.arch.CUBE)
+                    mutex_l0c.lock(pipe=tla.pipes.CUBE)
 
                     buf = tla.as_numeric(c0)
                     for hb in tla.range(c0, h_tiles, c1):
                         if buf == c0:
-                            mutex_l1a0.lock(pipe=tla.arch.MTE1)
-                            mutex_l1b0.lock(pipe=tla.arch.MTE1)
+                            mutex_l1a0.lock(pipe=tla.pipes.MTE1)
+                            mutex_l1b0.lock(pipe=tla.pipes.MTE1)
                         else:
-                            mutex_l1a1.lock(pipe=tla.arch.MTE1)
-                            mutex_l1b1.lock(pipe=tla.arch.MTE1)
+                            mutex_l1a1.lock(pipe=tla.pipes.MTE1)
+                            mutex_l1b1.lock(pipe=tla.pipes.MTE1)
 
                         # Prefetch the next K tile into the other stage.
                         if hb + c1 < h_tiles:
@@ -163,19 +163,19 @@ def ms_main_kernel(
                                 next_b_ptr, gm_b_n, tla.arch.zN
                             )
                             if buf == c0:
-                                mutex_l1a1.lock(pipe=tla.arch.MTE2)
-                                mutex_l1b1.lock(pipe=tla.arch.MTE2)
+                                mutex_l1a1.lock(pipe=tla.pipes.MTE2)
+                                mutex_l1b1.lock(pipe=tla.pipes.MTE2)
                             else:
-                                mutex_l1a0.lock(pipe=tla.arch.MTE2)
-                                mutex_l1b0.lock(pipe=tla.arch.MTE2)
+                                mutex_l1a0.lock(pipe=tla.pipes.MTE2)
+                                mutex_l1b0.lock(pipe=tla.pipes.MTE2)
                             tla.copy(l1_a_n, gm_a_n)
                             tla.copy(l1_b_n, gm_b_n)
                             if buf == c0:
-                                mutex_l1a1.unlock(pipe=tla.arch.MTE2)
-                                mutex_l1b1.unlock(pipe=tla.arch.MTE2)
+                                mutex_l1a1.unlock(pipe=tla.pipes.MTE2)
+                                mutex_l1b1.unlock(pipe=tla.pipes.MTE2)
                             else:
-                                mutex_l1a0.unlock(pipe=tla.arch.MTE2)
-                                mutex_l1b0.unlock(pipe=tla.arch.MTE2)
+                                mutex_l1a0.unlock(pipe=tla.pipes.MTE2)
+                                mutex_l1b0.unlock(pipe=tla.pipes.MTE2)
 
                         cur_a_ptr = l1a0_ptr if buf == c0 else l1a1_ptr
                         cur_b_ptr = l1b0_ptr if buf == c0 else l1b1_ptr
@@ -198,21 +198,21 @@ def ms_main_kernel(
                         )
                         l0_a_p = tla.make_tensor_like(l0a0_ptr, l1_a_p0, tla.arch.zN)
                         l0_b_p = tla.make_tensor_like(l0b0_ptr, l1_b_p0, tla.arch.nZ)
-                        mutex_l0a0.lock(pipe=tla.arch.MTE1)
-                        mutex_l0b0.lock(pipe=tla.arch.MTE1)
+                        mutex_l0a0.lock(pipe=tla.pipes.MTE1)
+                        mutex_l0b0.lock(pipe=tla.pipes.MTE1)
                         tla.copy(l0_a_p, l1_a_p0)
                         tla.copy(l0_b_p, l1_b_p0)
-                        mutex_l0a0.unlock(pipe=tla.arch.MTE1)
-                        mutex_l0b0.unlock(pipe=tla.arch.MTE1)
+                        mutex_l0a0.unlock(pipe=tla.pipes.MTE1)
+                        mutex_l0b0.unlock(pipe=tla.pipes.MTE1)
 
                         lbuf = tla.as_numeric(c0)
                         for sk in tla.range(c0, k_sub, c1):
                             if lbuf == c0:
-                                mutex_l0a0.lock(pipe=tla.arch.CUBE)
-                                mutex_l0b0.lock(pipe=tla.arch.CUBE)
+                                mutex_l0a0.lock(pipe=tla.pipes.CUBE)
+                                mutex_l0b0.lock(pipe=tla.pipes.CUBE)
                             else:
-                                mutex_l0a1.lock(pipe=tla.arch.CUBE)
-                                mutex_l0b1.lock(pipe=tla.arch.CUBE)
+                                mutex_l0a1.lock(pipe=tla.pipes.CUBE)
+                                mutex_l0b1.lock(pipe=tla.pipes.CUBE)
 
                             # Next-chunk views are built unconditionally (they are pure
                             # metadata); only the guarded copy below touches them.
@@ -236,19 +236,19 @@ def ms_main_kernel(
                             )
                             if sk + c1 < k_sub:
                                 if lbuf == c0:
-                                    mutex_l0a1.lock(pipe=tla.arch.MTE1)
-                                    mutex_l0b1.lock(pipe=tla.arch.MTE1)
+                                    mutex_l0a1.lock(pipe=tla.pipes.MTE1)
+                                    mutex_l0b1.lock(pipe=tla.pipes.MTE1)
                                 else:
-                                    mutex_l0a0.lock(pipe=tla.arch.MTE1)
-                                    mutex_l0b0.lock(pipe=tla.arch.MTE1)
+                                    mutex_l0a0.lock(pipe=tla.pipes.MTE1)
+                                    mutex_l0b0.lock(pipe=tla.pipes.MTE1)
                                 tla.copy(l0_a_n, l1_a_q)
                                 tla.copy(l0_b_n, l1_b_q)
                                 if lbuf == c0:
-                                    mutex_l0a1.unlock(pipe=tla.arch.MTE1)
-                                    mutex_l0b1.unlock(pipe=tla.arch.MTE1)
+                                    mutex_l0a1.unlock(pipe=tla.pipes.MTE1)
+                                    mutex_l0b1.unlock(pipe=tla.pipes.MTE1)
                                 else:
-                                    mutex_l0a0.unlock(pipe=tla.arch.MTE1)
-                                    mutex_l0b0.unlock(pipe=tla.arch.MTE1)
+                                    mutex_l0a0.unlock(pipe=tla.pipes.MTE1)
+                                    mutex_l0b0.unlock(pipe=tla.pipes.MTE1)
 
                             cur_l0a_ptr = l0a0_ptr if lbuf == c0 else l0a1_ptr
                             cur_l0b_ptr = l0b0_ptr if lbuf == c0 else l0b1_ptr
@@ -275,26 +275,26 @@ def ms_main_kernel(
                                 l0_c, l0_a, l0_b, init_c=init_c, unit_flag=unit_flag
                             )
                             if lbuf == c0:
-                                mutex_l0a0.unlock(pipe=tla.arch.CUBE)
-                                mutex_l0b0.unlock(pipe=tla.arch.CUBE)
+                                mutex_l0a0.unlock(pipe=tla.pipes.CUBE)
+                                mutex_l0b0.unlock(pipe=tla.pipes.CUBE)
                             else:
-                                mutex_l0a1.unlock(pipe=tla.arch.CUBE)
-                                mutex_l0b1.unlock(pipe=tla.arch.CUBE)
+                                mutex_l0a1.unlock(pipe=tla.pipes.CUBE)
+                                mutex_l0b1.unlock(pipe=tla.pipes.CUBE)
                             lbuf = c1 - lbuf
 
                         if buf == c0:
-                            mutex_l1a0.unlock(pipe=tla.arch.MTE1)
-                            mutex_l1b0.unlock(pipe=tla.arch.MTE1)
+                            mutex_l1a0.unlock(pipe=tla.pipes.MTE1)
+                            mutex_l1b0.unlock(pipe=tla.pipes.MTE1)
                         else:
-                            mutex_l1a1.unlock(pipe=tla.arch.MTE1)
-                            mutex_l1b1.unlock(pipe=tla.arch.MTE1)
+                            mutex_l1a1.unlock(pipe=tla.pipes.MTE1)
+                            mutex_l1b1.unlock(pipe=tla.pipes.MTE1)
                         buf = c1 - buf
 
                     # L0C (fp32 [BM, BN]) -> both AIV UB halves.  unit_flag=3 closes
                     # the accumulation chain so FixPipe observes a complete tile.
-                    mutex_l0c.unlock(pipe=tla.arch.CUBE)
-                    mutex_l0c.lock(pipe=tla.arch.FIX)
-                    tla.cross_core_wait_flag(exchange, tla.arch.FIX)
+                    mutex_l0c.unlock(pipe=tla.pipes.CUBE)
+                    mutex_l0c.lock(pipe=tla.pipes.FIX)
+                    tla.cross_core_wait_flag(exchange, tla.pipes.FIX)
                     tla.copy(
                         ub_z_full,
                         l0_c,
@@ -303,8 +303,8 @@ def ms_main_kernel(
                             l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M,
                         ),
                     )
-                    tla.cross_core_set_flag(exchange, tla.arch.FIX)
-                    mutex_l0c.unlock(pipe=tla.arch.FIX)
+                    tla.cross_core_set_flag(exchange, tla.pipes.FIX)
+                    mutex_l0c.unlock(pipe=tla.pipes.FIX)
 
     with tla.vector():
         sub = tla.arch.sub_block_idx()
@@ -322,7 +322,7 @@ def ms_main_kernel(
         )
 
         # Open the exchange so the first FixPipe hand-off can proceed.
-        tla.cross_core_set_flag(exchange, tla.arch.VECTOR)
+        tla.cross_core_set_flag(exchange, tla.pipes.VECTOR)
 
         for blk in tla.range(tla.arch.block_idx(), total_blocks, tla.arch.block_num()):
             seg = blk // grid_m
@@ -359,9 +359,9 @@ def ms_main_kernel(
                     # Take the mutex before the cross-core wait and release it
                     # right after, so both ub_z readers below are ordered after
                     # the fixpipe tile is complete.
-                    mutex_z.lock(pipe=tla.arch.VECTOR)
-                    tla.cross_core_wait_flag(exchange, tla.arch.VECTOR)
-                    mutex_z.unlock(pipe=tla.arch.VECTOR)
+                    mutex_z.lock(pipe=tla.pipes.VECTOR)
+                    tla.cross_core_wait_flag(exchange, tla.pipes.VECTOR)
+                    mutex_z.unlock(pipe=tla.pipes.VECTOR)
 
                     # Persist the raw fp32 GEMM tile for the normalize pass.  The
                     # DMA only reads ub_z, so it overlaps the statistics pass, and
@@ -496,7 +496,7 @@ def ms_main_kernel(
                             ).store(new_sum, tla.params.UnalignStoreParams())
 
                     tla.pipe_barrier(tla.pipes.ALL)
-                    tla.cross_core_set_flag(exchange, tla.arch.VECTOR)
+                    tla.cross_core_set_flag(exchange, tla.pipes.VECTOR)
 
                 # Publish this segment's partial statistics.  Fresh names keep the
                 # dynamic-loop def/use checker happy (names defined inside the tile

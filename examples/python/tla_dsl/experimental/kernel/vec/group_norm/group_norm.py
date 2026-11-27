@@ -359,10 +359,10 @@ def group_norm_kernel(
         # VECTOR lock is taken inside the row loop, so the first row waits for
         # the copy and every later one finds the mutex already open.
         if tla.const_expr(HAS_AFFINE == 1):
-            wb_mutex.lock(pipe=tla.arch.MTE2)
+            wb_mutex.lock(pipe=tla.pipes.MTE2)
             tla.copy(ub_w, gm_w)
             tla.copy(ub_b, gm_b)
-            wb_mutex.unlock(pipe=tla.arch.MTE2)
+            wb_mutex.unlock(pipe=tla.pipes.MTE2)
 
         # Software pipeline: the three stages are issued back to back for every
         # buffer and the mutexes (not program order) decide when a stage runs, so
@@ -379,13 +379,13 @@ def group_norm_kernel(
                         gm_row_x = tla.make_tensor(gm_x.ptr + off, gm_layout)
                         gm_row_y = tla.make_tensor(gm_y.ptr + off, gm_layout)
 
-                    row_mutex[bi].lock(pipe=tla.arch.MTE2)
+                    row_mutex[bi].lock(pipe=tla.pipes.MTE2)
                     tla.copy(ub_row[bi], gm_row_x)
-                    row_mutex[bi].unlock(pipe=tla.arch.MTE2)
+                    row_mutex[bi].unlock(pipe=tla.pipes.MTE2)
 
-                    row_mutex[bi].lock(pipe=tla.arch.VECTOR)
+                    row_mutex[bi].lock(pipe=tla.pipes.VECTOR)
                     if tla.const_expr(HAS_AFFINE == 1):
-                        wb_mutex.lock(pipe=tla.arch.VECTOR)
+                        wb_mutex.lock(pipe=tla.pipes.VECTOR)
                     with tla.vec.func(mode="simd"):
                         mask = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
                         tail_mask = None
@@ -591,12 +591,12 @@ def group_norm_kernel(
                             for k3 in tla.range(n_chunk_pad):
                                 _normalize(row_map[bi], k3, mean, rstd, mask, swish_on)
                     if tla.const_expr(HAS_AFFINE == 1):
-                        wb_mutex.unlock(pipe=tla.arch.VECTOR)
-                    row_mutex[bi].unlock(pipe=tla.arch.VECTOR)
+                        wb_mutex.unlock(pipe=tla.pipes.VECTOR)
+                    row_mutex[bi].unlock(pipe=tla.pipes.VECTOR)
 
-                    row_mutex[bi].lock(pipe=tla.arch.MTE3)
+                    row_mutex[bi].lock(pipe=tla.pipes.MTE3)
                     tla.copy(gm_row_y, ub_row[bi])
-                    row_mutex[bi].unlock(pipe=tla.arch.MTE3)
+                    row_mutex[bi].unlock(pipe=tla.pipes.MTE3)
 
         tla.pipe_barrier(tla.pipes.ALL)
 

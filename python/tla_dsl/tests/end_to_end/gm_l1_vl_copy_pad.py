@@ -43,7 +43,7 @@ _ALIGN = 512
 @tla.kernel
 def gm_l1_vl_pad_then_print(gm_src: tla.Tensor) -> None:
     l1_ptr = tla.allocate(_DST_ELEMS, tla.Float32, tla.AddressSpace.l1, _ALIGN)
-    copied = tla.flag("vl_pad_copied", tla.arch.MTE2, tla.arch.MTE1)
+    copied = tla.flag("vl_pad_copied", tla.pipes.MTE2, tla.pipes.MTE1)
     with tla.cube():
         l1 = tla.make_tensor(
             l1_ptr,

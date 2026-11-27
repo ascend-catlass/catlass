@@ -21,18 +21,18 @@ from catlass import tla
 
 
 def cube_publish(cf):
-    tla.cross_core_set_flag(cf, tla.arch.FIX, aiv_id=0)
-    tla.cross_core_set_flag(cf, tla.arch.FIX, aiv_id=1)
+    tla.cross_core_set_flag(cf, tla.pipes.FIX, aiv_id=0)
+    tla.cross_core_set_flag(cf, tla.pipes.FIX, aiv_id=1)
 
 
 def cube_set(cf):
-    tla.cross_core_set_flag(cf, tla.arch.MTE1, aiv_id=0)
-    tla.cross_core_set_flag(cf, tla.arch.MTE1, aiv_id=1)
+    tla.cross_core_set_flag(cf, tla.pipes.MTE1, aiv_id=0)
+    tla.cross_core_set_flag(cf, tla.pipes.MTE1, aiv_id=1)
 
 
 def cube_wait(cf):
-    tla.cross_core_wait_flag(cf, tla.arch.MTE1, aiv_id=0)
-    tla.cross_core_wait_flag(cf, tla.arch.MTE1, aiv_id=1)
+    tla.cross_core_wait_flag(cf, tla.pipes.MTE1, aiv_id=0)
+    tla.cross_core_wait_flag(cf, tla.pipes.MTE1, aiv_id=1)
 
 
 def gm_view(x, offset, rows, cols, pitch):
@@ -82,7 +82,7 @@ def export_w(whout, wlout, ub, f, mtx_w):
     result = tensor(ub + 140 * 256, 32, 128)
     high = tensor(ub + 156 * 256, 32, 128, tla.BFloat16)
     low = tensor(ub + 164 * 256, 32, 128, tla.BFloat16)
-    mtx_w.lock(pipe=tla.arch.VECTOR)
+    mtx_w.lock(pipe=tla.pipes.VECTOR)
     with tla.vec.func(mode="simd"):
         for row in tla.range(32):
             for part in tla.range_constexpr(2):
@@ -95,14 +95,14 @@ def export_w(whout, wlout, ub, f, mtx_w):
                     sub(high, row, part * 64, 1, 64),
                     sub(low, row, part * 64, 1, 64),
                 )
-    mtx_w.unlock(pipe=tla.arch.VECTOR)
+    mtx_w.unlock(pipe=tla.pipes.VECTOR)
     off = tla.Int64(f) * tla.Int64(8192) + tla.Int64(
         tla.arch.sub_block_idx()
     ) * tla.Int64(4096)
-    mtx_w.lock(pipe=tla.arch.MTE3)
+    mtx_w.lock(pipe=tla.pipes.MTE3)
     tla.copy(gm_view(whout, off, 32, 128, 128), high)
     tla.copy(gm_view(wlout, off, 32, 128, 128), low)
-    mtx_w.unlock(pipe=tla.arch.MTE3)
+    mtx_w.unlock(pipe=tla.pipes.MTE3)
 
 
 FIRST32 = tla.params.NormalStoreParams(
@@ -146,7 +146,7 @@ def s0_bg(k, b, ub, lp, koff, boff, valid, slot, b_bf16, mtx_raw, mtx_stage):
     high = tensor(ub + 72 * 256, 1, 4096, tla.BFloat16)
     low = tensor(ub + 80 * 256, 1, 4096, tla.BFloat16)
     control = tensor(ub + 173 * 256, 1, 64)
-    mtx_raw.lock(pipe=tla.arch.VECTOR)
+    mtx_raw.lock(pipe=tla.pipes.VECTOR)
     if valid < 64:
         with tla.vec.func(mode="simd"):
             zero = tla.full(0.0, tla.Float32)
@@ -160,18 +160,18 @@ def s0_bg(k, b, ub, lp, koff, boff, valid, slot, b_bf16, mtx_raw, mtx_stage):
                     )
                 else:
                     sub(br, pad_row, 0, 1, 64).store(zero)
-    mtx_raw.unlock(pipe=tla.arch.VECTOR)
+    mtx_raw.unlock(pipe=tla.pipes.VECTOR)
     # Q/G and K/B intentionally share raw storage. Q reads must finish.
-    mtx_raw.lock(pipe=tla.arch.MTE2)
+    mtx_raw.lock(pipe=tla.pipes.MTE2)
     tla.copy(
         sub(kr, 0, 0, valid, 64), gm_view(k, koff + tla.Int64(col), valid, 64, 128)
     )
     tla.copy(
         sub(br, 0, 0, valid, 64), gm_view(b, boff + tla.Int64(col), valid, 64, 128)
     )
-    mtx_raw.unlock(pipe=tla.arch.MTE2)
-    mtx_raw.lock(pipe=tla.arch.VECTOR)
-    mtx_stage.lock(pipe=tla.arch.VECTOR)
+    mtx_raw.unlock(pipe=tla.pipes.MTE2)
+    mtx_raw.lock(pipe=tla.pipes.VECTOR)
+    mtx_stage.lock(pipe=tla.pipes.VECTOR)
     with tla.vec.func(mode="simd"):
         largest = tla.full(0.0, tla.Float32)
         for bg_row in tla.range(64):
@@ -188,12 +188,12 @@ def s0_bg(k, b, ub, lp, koff, boff, valid, slot, b_bf16, mtx_raw, mtx_stage):
         sub(control, 0, slot * 4 + 2, 1, 1).store(
             largest.reduce(tla.ReductionOp.MAX, mask=mask), FIRST32
         )
-    mtx_stage.unlock(pipe=tla.arch.VECTOR)
-    mtx_raw.unlock(pipe=tla.arch.VECTOR)
+    mtx_stage.unlock(pipe=tla.pipes.VECTOR)
+    mtx_raw.unlock(pipe=tla.pipes.VECTOR)
     original_dest = tensor(lp + (368 + 32 * slot) * 256, 64, 128, tag=tla.arch.zN)
     high_dest = tensor(lp + (184 * slot + 32) * 256, 64, 128, tla.BFloat16, tla.arch.zN)
     low_dest = tensor(lp + (184 * slot + 48) * 256, 64, 128, tla.BFloat16, tla.arch.zN)
-    mtx_stage.lock(pipe=tla.arch.MTE3)
+    mtx_stage.lock(pipe=tla.pipes.MTE3)
     tla.copy(
         sub(original_dest, 0, col, 64, 64),
         tensor(ub + 56 * 256, 64, 64, tag=tla.arch.zN),
@@ -206,13 +206,13 @@ def s0_bg(k, b, ub, lp, koff, boff, valid, slot, b_bf16, mtx_raw, mtx_stage):
         sub(low_dest, 0, col, 64, 64),
         tensor(ub + 80 * 256, 64, 64, tla.BFloat16, tla.arch.zN),
     )
-    mtx_stage.unlock(pipe=tla.arch.MTE3)
+    mtx_stage.unlock(pipe=tla.pipes.MTE3)
 
 
 @tla.jit
 def _safe_tile(ub, lp, slot, value, mtx_stage):
     flag = tensor(ub + 136 * 256, 16, 8)
-    mtx_stage.lock(pipe=tla.arch.VECTOR)
+    mtx_stage.lock(pipe=tla.pipes.VECTOR)
     with tla.vec.func(mode="simd"):
         zero = tla.full(0.0, tla.Float32)
         for flag_row in tla.range(1, 16):
@@ -221,11 +221,11 @@ def _safe_tile(ub, lp, slot, value, mtx_stage):
         sub(flag, 0, 0, 1, 8).store(
             tla.where(tla.cmp(indices, 0, "eq"), tla.full(value, tla.Float32), zero)
         )
-    mtx_stage.unlock(pipe=tla.arch.VECTOR)
+    mtx_stage.unlock(pipe=tla.pipes.VECTOR)
     bridge = tensor(lp + (slot * 184 + 128) * 256, 16, 16, tag=tla.arch.zN)
-    mtx_stage.lock(pipe=tla.arch.MTE3)
+    mtx_stage.lock(pipe=tla.pipes.MTE3)
     tla.copy(sub(bridge, 0, tla.arch.sub_block_idx() * 8, 16, 8), flag)
-    mtx_stage.unlock(pipe=tla.arch.MTE3)
+    mtx_stage.unlock(pipe=tla.pipes.MTE3)
 
 
 @tla.jit
@@ -236,16 +236,16 @@ def s0_ki(ub, lp, slot, mtx_stage, mtx_vs):
     control = tensor(ub + 173 * 256, 1, 64)
     high = tensor(ub + 56 * 256, 1, 4096, tla.BFloat16)
     low = tensor(ub + 64 * 256, 1, 4096, tla.BFloat16)
-    mtx_vs.lock(pipe=tla.arch.VECTOR)
-    mtx_vs.unlock(pipe=tla.arch.VECTOR)
-    mtx_vs.lock(pipe=tla.arch.SCALAR)
+    mtx_vs.lock(pipe=tla.pipes.VECTOR)
+    mtx_vs.unlock(pipe=tla.pipes.VECTOR)
+    mtx_vs.lock(pipe=tla.pipes.SCALAR)
     safe = (
         (control[0, slot * 4] >= tla.Float32(2**-16))
         & (control[0, slot * 4 + 1] <= tla.Float32(2**30))
         & (control[0, slot * 4 + 2] <= tla.Float32(2**30))
     )
-    mtx_vs.unlock(pipe=tla.arch.SCALAR)
-    mtx_stage.lock(pipe=tla.arch.VECTOR)
+    mtx_vs.unlock(pipe=tla.pipes.SCALAR)
+    mtx_stage.lock(pipe=tla.pipes.VECTOR)
     if safe:
         with tla.vec.func(mode="simd"):
             for inv_row in tla.range(64):
@@ -257,10 +257,10 @@ def s0_ki(ub, lp, slot, mtx_stage, mtx_vs):
             zero = tla.full(0.0, tla.Float32)
             for inv_zero_row in tla.range(64):
                 store_native_pair(zero, high, low, inv_zero_row)
-    mtx_stage.unlock(pipe=tla.arch.VECTOR)
+    mtx_stage.unlock(pipe=tla.pipes.VECTOR)
     high_dest = tensor(lp + (184 * slot + 64) * 256, 64, 128, tla.BFloat16, tla.arch.zN)
     low_dest = tensor(lp + (184 * slot + 80) * 256, 64, 128, tla.BFloat16, tla.arch.zN)
-    mtx_stage.lock(pipe=tla.arch.MTE3)
+    mtx_stage.lock(pipe=tla.pipes.MTE3)
     tla.copy(
         sub(high_dest, 0, col, 64, 64),
         tensor(ub + 56 * 256, 64, 64, tla.BFloat16, tla.arch.zN),
@@ -269,7 +269,7 @@ def s0_ki(ub, lp, slot, mtx_stage, mtx_vs):
         sub(low_dest, 0, col, 64, 64),
         tensor(ub + 64 * 256, 64, 64, tla.BFloat16, tla.arch.zN),
     )
-    mtx_stage.unlock(pipe=tla.arch.MTE3)
+    mtx_stage.unlock(pipe=tla.pipes.MTE3)
     if safe:
         _safe_tile(ub, lp, slot, 1.0, mtx_stage)
     else:
@@ -283,7 +283,7 @@ def s0_kt(ub, lp, slot, kt0, kt1, endout, f, mtx_stage):
     decay = tensor(ub + 40 * 256, 64, 64)
     high = tensor(ub + 72 * 256, 64, 64, tla.BFloat16)
     low = tensor(ub + 80 * 256, 64, 64, tla.BFloat16)
-    mtx_stage.lock(pipe=tla.arch.VECTOR)
+    mtx_stage.lock(pipe=tla.pipes.VECTOR)
     with tla.vec.func(mode="simd"):
         suffix = tla.full(1.0, tla.Float32)
         for reverse in tla.range_constexpr(64):
@@ -296,10 +296,10 @@ def s0_kt(ub, lp, slot, kt0, kt1, endout, f, mtx_stage):
             sub(high, row, 0, 1, 64).store(hi, PACK16)
             sub(low, row, 0, 1, 64).store(lo, PACK16)
             suffix = suffix * sub(decay, row, 0, 1, 64).load()
-    mtx_stage.unlock(pipe=tla.arch.VECTOR)
+    mtx_stage.unlock(pipe=tla.pipes.VECTOR)
     off = tla.Int64(f) * tla.Int64(8192) + tla.Int64(col)
     end = tensor(ub + 172 * 256 + slot * 128, 1, 128)
-    mtx_stage.lock(pipe=tla.arch.MTE3)
+    mtx_stage.lock(pipe=tla.pipes.MTE3)
     tla.copy(
         gm_view(kt0, off, 64, 64, 128), tensor(ub + 72 * 256, 64, 64, tla.BFloat16)
     )
@@ -310,7 +310,7 @@ def s0_kt(ub, lp, slot, kt0, kt1, endout, f, mtx_stage):
         gm_view(endout, tla.Int64(f) * tla.Int64(128) + tla.Int64(col), 1, 64, 128),
         sub(end, 0, col, 1, 64),
     )
-    mtx_stage.unlock(pipe=tla.arch.MTE3)
+    mtx_stage.unlock(pipe=tla.pipes.MTE3)
 
 
 @tla.jit
@@ -324,7 +324,7 @@ def s0_qg(q, g, qout, ub, lp, qoff, goff, valid, slot, g_bf16, f, mtx_raw, mtx_s
     native = tensor(ub + 176 * 256, 1, 4096, tla.BFloat16)
     end = tensor(ub + 172 * 256 + slot * 128, 1, 128)
     control = tensor(ub + 173 * 256, 1, 64)
-    mtx_raw.lock(pipe=tla.arch.VECTOR)
+    mtx_raw.lock(pipe=tla.pipes.VECTOR)
     if valid < 64:
         with tla.vec.func(mode="simd"):
             zero = tla.full(0.0, tla.Float32)
@@ -338,17 +338,17 @@ def s0_qg(q, g, qout, ub, lp, qoff, goff, valid, slot, g_bf16, f, mtx_raw, mtx_s
                     )
                 else:
                     sub(gr, pad_row, 0, 1, 64).store(zero)
-    mtx_raw.unlock(pipe=tla.arch.VECTOR)
-    mtx_raw.lock(pipe=tla.arch.MTE2)
+    mtx_raw.unlock(pipe=tla.pipes.VECTOR)
+    mtx_raw.lock(pipe=tla.pipes.MTE2)
     tla.copy(
         sub(qr, 0, 0, valid, 64), gm_view(q, qoff + tla.Int64(col), valid, 64, 128)
     )
     tla.copy(
         sub(gr, 0, 0, valid, 64), gm_view(g, goff + tla.Int64(col), valid, 64, 128)
     )
-    mtx_raw.unlock(pipe=tla.arch.MTE2)
-    mtx_raw.lock(pipe=tla.arch.VECTOR)
-    mtx_stage.lock(pipe=tla.arch.VECTOR)
+    mtx_raw.unlock(pipe=tla.pipes.MTE2)
+    mtx_raw.lock(pipe=tla.pipes.VECTOR)
+    mtx_stage.lock(pipe=tla.pipes.VECTOR)
     with tla.vec.func(mode="simd"):
         for exp_row in tla.range(64):
             gate = read_f32(sub(gr, exp_row, 0, 1, 64), g_bf16)
@@ -379,11 +379,11 @@ def s0_qg(q, g, qout, ub, lp, qoff, goff, valid, slot, g_bf16, f, mtx_raw, mtx_s
         sub(control, 0, slot * 4 + 1, 1, 1).store(
             largest.reduce(tla.ReductionOp.MAX, mask=mask), FIRST32
         )
-    mtx_stage.unlock(pipe=tla.arch.VECTOR)
-    mtx_raw.unlock(pipe=tla.arch.VECTOR)
+    mtx_stage.unlock(pipe=tla.pipes.VECTOR)
+    mtx_raw.unlock(pipe=tla.pipes.VECTOR)
     off = tla.Int64(f) * tla.Int64(8192) + tla.Int64(col)
     dest = tensor(lp + slot * 184 * 256, 64, 128, tla.BFloat16, tla.arch.zN)
-    mtx_stage.lock(pipe=tla.arch.MTE3)
+    mtx_stage.lock(pipe=tla.pipes.MTE3)
     tla.copy(
         sub(dest, 0, col, 64, 64),
         tensor(ub + 176 * 256, 64, 64, tla.BFloat16, tla.arch.zN),
@@ -391,7 +391,7 @@ def s0_qg(q, g, qout, ub, lp, qoff, goff, valid, slot, g_bf16, f, mtx_raw, mtx_s
     tla.copy(
         gm_view(qout, off, 64, 64, 128), tensor(ub + 56 * 256, 64, 64, tla.BFloat16)
     )
-    mtx_stage.unlock(pipe=tla.arch.MTE3)
+    mtx_stage.unlock(pipe=tla.pipes.MTE3)
 
 
 @tla.jit
@@ -477,28 +477,28 @@ def prepare_w(ub, lp, ap, bp, cp, slot, mtx_l0a, mtx_l0b, mtx_l0c, mtx_l1):
     a = tensor(ap, 64, 64, tag=tla.arch.zN)
     b = tensor(bp, 64, 128, tag=tla.arch.nZ)
     c = tensor(cp, 64, 128, tag=tla.arch.L0Clayout)
-    mtx_l0a.lock(pipe=tla.arch.MTE1)
-    mtx_l0b.lock(pipe=tla.arch.MTE1)
-    mtx_l1.lock(pipe=tla.arch.MTE1)
+    mtx_l0a.lock(pipe=tla.pipes.MTE1)
+    mtx_l0b.lock(pipe=tla.pipes.MTE1)
+    mtx_l1.lock(pipe=tla.pipes.MTE1)
     tla.copy(a, tensor(lp + (slot * 184 + 164) * 256, 64, 64, tag=tla.arch.zN))
     tla.copy(b, tensor(lp + (368 + 32 * slot) * 256, 64, 128, tag=tla.arch.zN))
-    mtx_l1.unlock(pipe=tla.arch.MTE1)
-    mtx_l0a.unlock(pipe=tla.arch.MTE1)
-    mtx_l0b.unlock(pipe=tla.arch.MTE1)
-    mtx_l0a.lock(pipe=tla.arch.CUBE)
-    mtx_l0b.lock(pipe=tla.arch.CUBE)
-    mtx_l0c.lock(pipe=tla.arch.CUBE)
+    mtx_l1.unlock(pipe=tla.pipes.MTE1)
+    mtx_l0a.unlock(pipe=tla.pipes.MTE1)
+    mtx_l0b.unlock(pipe=tla.pipes.MTE1)
+    mtx_l0a.lock(pipe=tla.pipes.CUBE)
+    mtx_l0b.lock(pipe=tla.pipes.CUBE)
+    mtx_l0c.lock(pipe=tla.pipes.CUBE)
     tla.mmad(c, a, b, init_c=True, hf32_mode=tla.params.HF32Mode.HF32_DISABLE)
-    mtx_l0c.unlock(pipe=tla.arch.CUBE)
-    mtx_l0a.unlock(pipe=tla.arch.CUBE)
-    mtx_l0b.unlock(pipe=tla.arch.CUBE)
-    mtx_l0c.lock(pipe=tla.arch.FIX)
+    mtx_l0c.unlock(pipe=tla.pipes.CUBE)
+    mtx_l0a.unlock(pipe=tla.pipes.CUBE)
+    mtx_l0b.unlock(pipe=tla.pipes.CUBE)
+    mtx_l0c.lock(pipe=tla.pipes.FIX)
     tla.copy(
         tensor(ub + 140 * 256, 64, 128),
         c,
         tla.params.CopyL0C2DstParams(l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M),
     )
-    mtx_l0c.unlock(pipe=tla.arch.FIX)
+    mtx_l0c.unlock(pipe=tla.pipes.FIX)
 
 
 def prepare_component_mmad(
@@ -516,7 +516,7 @@ def prepare_component_mmad(
 ):
     """C64xK128 times K128xN64 with two BF16 planes of 16 KiB each."""
     c = tensor(cp, 64, 64, tag=tla.arch.L0Clayout)
-    mtx_l0c.lock(pipe=tla.arch.CUBE)
+    mtx_l0c.lock(pipe=tla.pipes.CUBE)
     for term in tla.range_constexpr(terms):
         left_part = term // 2
         right_part = term % 2
@@ -530,14 +530,14 @@ def prepare_component_mmad(
         )
         a = tensor(ap, 64, 128, tla.BFloat16, tla.arch.zN)
         b = tensor(bp, 128, 64, tla.BFloat16, tla.arch.nZ)
-        mtx_l0a.lock(pipe=tla.arch.MTE1)
-        mtx_l0b.lock(pipe=tla.arch.MTE1)
+        mtx_l0a.lock(pipe=tla.pipes.MTE1)
+        mtx_l0b.lock(pipe=tla.pipes.MTE1)
         tla.copy(a, lhs)
         tla.copy(b, rhs)
-        mtx_l0a.unlock(pipe=tla.arch.MTE1)
-        mtx_l0b.unlock(pipe=tla.arch.MTE1)
-        mtx_l0a.lock(pipe=tla.arch.CUBE)
-        mtx_l0b.lock(pipe=tla.arch.CUBE)
+        mtx_l0a.unlock(pipe=tla.pipes.MTE1)
+        mtx_l0b.unlock(pipe=tla.pipes.MTE1)
+        mtx_l0a.lock(pipe=tla.pipes.CUBE)
+        mtx_l0b.lock(pipe=tla.pipes.CUBE)
         tla.mmad(
             c,
             a,
@@ -545,9 +545,9 @@ def prepare_component_mmad(
             init_c=(init_first and term == 0),
             hf32_mode=tla.params.HF32Mode.HF32_DISABLE,
         )
-        mtx_l0a.unlock(pipe=tla.arch.CUBE)
-        mtx_l0b.unlock(pipe=tla.arch.CUBE)
-    mtx_l0c.unlock(pipe=tla.arch.CUBE)
+        mtx_l0a.unlock(pipe=tla.pipes.CUBE)
+        mtx_l0b.unlock(pipe=tla.pipes.CUBE)
+    mtx_l0c.unlock(pipe=tla.pipes.CUBE)
 
 
 @tla.jit
@@ -567,7 +567,7 @@ def s1_scores(ub, lp, ap, bp, cp, slot, mtx_l0a, mtx_l0b, mtx_l0c):
             mtx_l0c,
             1 if product == 0 else 3,
         )
-        mtx_l0c.lock(pipe=tla.arch.FIX)
+        mtx_l0c.lock(pipe=tla.pipes.FIX)
         tla.copy(
             score,
             c,
@@ -582,25 +582,25 @@ def s1_scores(ub, lp, ap, bp, cp, slot, mtx_l0a, mtx_l0b, mtx_l0c):
                 l0c2ub_mode=tla.params.L0C2UBMode.NO_SPLIT_VEC_1
             ),
         )
-        mtx_l0c.unlock(pipe=tla.arch.FIX)
+        mtx_l0c.unlock(pipe=tla.pipes.FIX)
     fa = tensor(ap, 16, 16, tag=tla.arch.zN)
     fb = tensor(bp, 16, 16, tag=tla.arch.nZ)
     fc = tensor(cp, 16, 16, tag=tla.arch.L0Clayout)
-    mtx_l0a.lock(pipe=tla.arch.MTE1)
-    mtx_l0b.lock(pipe=tla.arch.MTE1)
+    mtx_l0a.lock(pipe=tla.pipes.MTE1)
+    mtx_l0b.lock(pipe=tla.pipes.MTE1)
     tla.copy(fa, tensor(lp + (slot * 184 + 128) * 256, 16, 16, tag=tla.arch.zN))
     tla.copy(fb, tensor(lp + (slot * 184 + 128) * 256, 16, 16, tag=tla.arch.nZ))
-    mtx_l0a.unlock(pipe=tla.arch.MTE1)
-    mtx_l0b.unlock(pipe=tla.arch.MTE1)
-    mtx_l0a.lock(pipe=tla.arch.CUBE)
-    mtx_l0b.lock(pipe=tla.arch.CUBE)
-    mtx_l0c.lock(pipe=tla.arch.CUBE)
+    mtx_l0a.unlock(pipe=tla.pipes.MTE1)
+    mtx_l0b.unlock(pipe=tla.pipes.MTE1)
+    mtx_l0a.lock(pipe=tla.pipes.CUBE)
+    mtx_l0b.lock(pipe=tla.pipes.CUBE)
+    mtx_l0c.lock(pipe=tla.pipes.CUBE)
     tla.mmad(fc, fa, fb, init_c=True, hf32_mode=tla.params.HF32Mode.HF32_DISABLE)
-    mtx_l0c.unlock(pipe=tla.arch.CUBE)
-    mtx_l0a.unlock(pipe=tla.arch.CUBE)
-    mtx_l0b.unlock(pipe=tla.arch.CUBE)
+    mtx_l0c.unlock(pipe=tla.pipes.CUBE)
+    mtx_l0a.unlock(pipe=tla.pipes.CUBE)
+    mtx_l0b.unlock(pipe=tla.pipes.CUBE)
     flags = tensor(ub + 136 * 256, 16, 16)
-    mtx_l0c.lock(pipe=tla.arch.FIX)
+    mtx_l0c.lock(pipe=tla.pipes.FIX)
     tla.copy(
         flags,
         fc,
@@ -611,7 +611,7 @@ def s1_scores(ub, lp, ap, bp, cp, slot, mtx_l0a, mtx_l0b, mtx_l0c):
         fc,
         tla.params.CopyL0C2DstParams(l0c2ub_mode=tla.params.L0C2UBMode.NO_SPLIT_VEC_1),
     )
-    mtx_l0c.unlock(pipe=tla.arch.FIX)
+    mtx_l0c.unlock(pipe=tla.pipes.FIX)
 
 
 BROADCAST32 = tla.params.NormalLoadParams(load_dist=tla.params.LoadDist.DIST_BRC_B32)
@@ -624,7 +624,7 @@ def s2_leaves(ub, lp, slot, mtx_leaf):
     row0 = tla.arch.sub_block_idx() * 32
     native_lower = tensor(ub + 176 * 256, 1, 4096)
     native_inverse = tensor(ub + 192 * 256, 1, 2048)
-    mtx_leaf.lock(pipe=tla.arch.VECTOR)
+    mtx_leaf.lock(pipe=tla.pipes.VECTOR)
     with tla.vec.func(mode="simd"):
         tla.local_mem_bar(tla.params.MemType.VEC_LOAD, tla.params.MemType.VEC_STORE)
         indices = tla.arange(0, dtype=tla.Int32)
@@ -673,8 +673,8 @@ def s2_leaves(ub, lp, slot, mtx_leaf):
                     ),
                     tla.params.BlockStoreParams(block_stride=64),
                 )
-    mtx_leaf.unlock(pipe=tla.arch.VECTOR)
-    mtx_leaf.lock(pipe=tla.arch.MTE3)
+    mtx_leaf.unlock(pipe=tla.pipes.VECTOR)
+    mtx_leaf.lock(pipe=tla.pipes.MTE3)
     if row0 == 0:
         tla.copy(
             tensor(lp + (slot * 184 + 148) * 256, 64, 64, tag=tla.arch.zN),
@@ -684,7 +684,7 @@ def s2_leaves(ub, lp, slot, mtx_leaf):
     tla.copy(
         sub(dest, row0, 0, 32, 64), tensor(ub + 192 * 256, 32, 64, tag=tla.arch.zN)
     )
-    mtx_leaf.unlock(pipe=tla.arch.MTE3)
+    mtx_leaf.unlock(pipe=tla.pipes.MTE3)
 
 
 @tla.jit
@@ -703,11 +703,11 @@ def s2_scores(
     aq = tensor(ub + 88 * 256, 64, 64)
     lower = tensor(ub + 104 * 256, 64, 64)
     flags = tensor(ub + 136 * 256, 16, 16)
-    mtx_vs.lock(pipe=tla.arch.VECTOR)
-    mtx_vs.unlock(pipe=tla.arch.VECTOR)
-    mtx_vs.lock(pipe=tla.arch.SCALAR)
+    mtx_vs.lock(pipe=tla.pipes.VECTOR)
+    mtx_vs.unlock(pipe=tla.pipes.VECTOR)
+    mtx_vs.lock(pipe=tla.pipes.SCALAR)
     safe = flags[0, 0] == tla.Float32(2.0)
-    mtx_vs.unlock(pipe=tla.arch.SCALAR)
+    mtx_vs.unlock(pipe=tla.pipes.SCALAR)
     if not safe:
         # The preceding W export may still read 140--172 KiB on MTE3.
         # The next work's prefix/decay/control have separate, live storage.
@@ -740,7 +740,7 @@ def s2_scores(
         br = tensor(ub + 192 * 256, 64, 128, tla.BFloat16 if b_bf16 else tla.Float32)
         gr = tensor(ub + 140 * 256, 64, 128, tla.BFloat16 if g_bf16 else tla.Float32)
         decay = tensor(ub + 140 * 256, 64, 128)
-        mtx_raw.lock(pipe=tla.arch.VECTOR)
+        mtx_raw.lock(pipe=tla.pipes.VECTOR)
         if valid < 64:
             with tla.vec.func(mode="simd"):
                 fallback_zero = tla.full(0.0, tla.Float32)
@@ -764,14 +764,14 @@ def s2_scores(
                             )
                         else:
                             sub(gr, pad_row, pad_part * 64, 1, 64).store(fallback_zero)
-        mtx_raw.unlock(pipe=tla.arch.VECTOR)
-        mtx_raw.lock(pipe=tla.arch.MTE2)
+        mtx_raw.unlock(pipe=tla.pipes.VECTOR)
+        mtx_raw.lock(pipe=tla.pipes.MTE2)
         tla.copy(sub(kr, 0, 0, valid, 128), gm_view(k, qoff, valid, 128, 128))
         tla.copy(sub(qr, 0, 0, valid, 128), gm_view(q, qoff, valid, 128, 128))
         tla.copy(sub(br, 0, 0, valid, 128), gm_view(b, boff, valid, 128, 128))
         tla.copy(sub(gr, 0, 0, valid, 128), gm_view(g, goff, valid, 128, 128))
-        mtx_raw.unlock(pipe=tla.arch.MTE2)
-        mtx_raw.lock(pipe=tla.arch.VECTOR)
+        mtx_raw.unlock(pipe=tla.pipes.MTE2)
+        mtx_raw.lock(pipe=tla.pipes.VECTOR)
         with tla.vec.func(mode="simd"):
             for reverse_row in tla.range(64):
                 gate_row = 63 - reverse_row
@@ -828,7 +828,7 @@ def s2_scores(
                     tla.local_mem_bar(
                         tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD
                     )
-        mtx_raw.unlock(pipe=tla.arch.VECTOR)
+        mtx_raw.unlock(pipe=tla.pipes.VECTOR)
     with tla.vec.func(mode="simd"):
         indices = tla.arange(0, dtype=tla.Int32)
         zeros = tla.full(0.0, tla.Float32)
@@ -853,26 +853,26 @@ def s3_inverse_products(lp, ap, bp, cp, slot, mtx_l0a, mtx_l0b, mtx_l0c, mtx_l1)
         a = tensor(ap, 16, 16, tag=tla.arch.zN)
         b = tensor(bp, 16, 16, tag=tla.arch.nZ)
         c = tensor(cp, 16, 16, tag=tla.arch.L0Clayout)
-        mtx_l1.lock(pipe=tla.arch.MTE1)
-        mtx_l0a.lock(pipe=tla.arch.MTE1)
-        mtx_l0b.lock(pipe=tla.arch.MTE1)
+        mtx_l1.lock(pipe=tla.pipes.MTE1)
+        mtx_l0a.lock(pipe=tla.pipes.MTE1)
+        mtx_l0b.lock(pipe=tla.pipes.MTE1)
         tla.copy(a, sub(inverse, start + 16, start + 16, 16, 16))
         tla.copy(b, sub(lower, start + 16, start, 16, 16))
-        mtx_l0a.unlock(pipe=tla.arch.MTE1)
-        mtx_l0b.unlock(pipe=tla.arch.MTE1)
-        mtx_l1.unlock(pipe=tla.arch.MTE1)
-        mtx_l0a.lock(pipe=tla.arch.CUBE)
-        mtx_l0b.lock(pipe=tla.arch.CUBE)
-        mtx_l0c.lock(pipe=tla.arch.CUBE)
+        mtx_l0a.unlock(pipe=tla.pipes.MTE1)
+        mtx_l0b.unlock(pipe=tla.pipes.MTE1)
+        mtx_l1.unlock(pipe=tla.pipes.MTE1)
+        mtx_l0a.lock(pipe=tla.pipes.CUBE)
+        mtx_l0b.lock(pipe=tla.pipes.CUBE)
+        mtx_l0c.lock(pipe=tla.pipes.CUBE)
         tla.mmad(c, a, b, init_c=True, hf32_mode=tla.params.HF32Mode.HF32_DISABLE)
-        mtx_l0c.unlock(pipe=tla.arch.CUBE)
-        mtx_l0a.unlock(pipe=tla.arch.CUBE)
-        mtx_l0b.unlock(pipe=tla.arch.CUBE)
-        mtx_l0c.lock(pipe=tla.arch.FIX)
-        mtx_l1.lock(pipe=tla.arch.FIX)
+        mtx_l0c.unlock(pipe=tla.pipes.CUBE)
+        mtx_l0a.unlock(pipe=tla.pipes.CUBE)
+        mtx_l0b.unlock(pipe=tla.pipes.CUBE)
+        mtx_l0c.lock(pipe=tla.pipes.FIX)
+        mtx_l1.lock(pipe=tla.pipes.FIX)
         tla.copy(sub(y, pair * 16, pair * 16, 16, 16), c)
-        mtx_l1.unlock(pipe=tla.arch.FIX)
-        mtx_l0c.unlock(pipe=tla.arch.FIX)
+        mtx_l1.unlock(pipe=tla.pipes.FIX)
+        mtx_l0c.unlock(pipe=tla.pipes.FIX)
 
 
 @tla.jit
@@ -884,28 +884,28 @@ def s4_merge_pairs(lp, ap, bp, cp, slot, aout, f, mtx_l0a, mtx_l0b, mtx_l0c, mtx
         a = tensor(ap, 16, 16, tag=tla.arch.zN)
         b = tensor(bp, 16, 16, tag=tla.arch.nZ)
         c = tensor(cp, 16, 16, tag=tla.arch.L0Clayout)
-        mtx_l1.lock(pipe=tla.arch.MTE1)
-        mtx_l0a.lock(pipe=tla.arch.MTE1)
-        mtx_l0b.lock(pipe=tla.arch.MTE1)
+        mtx_l1.lock(pipe=tla.pipes.MTE1)
+        mtx_l0a.lock(pipe=tla.pipes.MTE1)
+        mtx_l0b.lock(pipe=tla.pipes.MTE1)
         tla.copy(a, sub(y, pair * 16, pair * 16, 16, 16))
         tla.copy(b, sub(inverse, start, start, 16, 16))
-        mtx_l0a.unlock(pipe=tla.arch.MTE1)
-        mtx_l0b.unlock(pipe=tla.arch.MTE1)
-        mtx_l1.unlock(pipe=tla.arch.MTE1)
-        mtx_l0a.lock(pipe=tla.arch.CUBE)
-        mtx_l0b.lock(pipe=tla.arch.CUBE)
-        mtx_l0c.lock(pipe=tla.arch.CUBE)
+        mtx_l0a.unlock(pipe=tla.pipes.MTE1)
+        mtx_l0b.unlock(pipe=tla.pipes.MTE1)
+        mtx_l1.unlock(pipe=tla.pipes.MTE1)
+        mtx_l0a.lock(pipe=tla.pipes.CUBE)
+        mtx_l0b.lock(pipe=tla.pipes.CUBE)
+        mtx_l0c.lock(pipe=tla.pipes.CUBE)
         tla.mmad(c, a, b, init_c=True, hf32_mode=tla.params.HF32Mode.HF32_DISABLE)
-        mtx_l0c.unlock(pipe=tla.arch.CUBE)
-        mtx_l0a.unlock(pipe=tla.arch.CUBE)
-        mtx_l0b.unlock(pipe=tla.arch.CUBE)
+        mtx_l0c.unlock(pipe=tla.pipes.CUBE)
+        mtx_l0a.unlock(pipe=tla.pipes.CUBE)
+        mtx_l0b.unlock(pipe=tla.pipes.CUBE)
         offset = tla.Int64(f) * tla.Int64(4096) + tla.Int64((start + 16) * 64 + start)
-        mtx_l0c.lock(pipe=tla.arch.FIX)
-        mtx_l1.lock(pipe=tla.arch.FIX)
+        mtx_l0c.lock(pipe=tla.pipes.FIX)
+        mtx_l1.lock(pipe=tla.pipes.FIX)
         tla.copy(sub(inverse, start + 16, start, 16, 16), c)
         tla.copy(gm_view(aout, offset, 16, 16, 64), c)
-        mtx_l1.unlock(pipe=tla.arch.FIX)
-        mtx_l0c.unlock(pipe=tla.arch.FIX)
+        mtx_l1.unlock(pipe=tla.pipes.FIX)
+        mtx_l0c.unlock(pipe=tla.pipes.FIX)
 
 
 @tla.jit
@@ -916,26 +916,26 @@ def s5_inverse_product(lp, ap, bp, cp, slot, mtx_l0a, mtx_l0b, mtx_l0c, mtx_l1):
     a = tensor(ap, 32, 32, tag=tla.arch.zN)
     b = tensor(bp, 32, 32, tag=tla.arch.nZ)
     c = tensor(cp, 32, 32, tag=tla.arch.L0Clayout)
-    mtx_l1.lock(pipe=tla.arch.MTE1)
-    mtx_l0a.lock(pipe=tla.arch.MTE1)
-    mtx_l0b.lock(pipe=tla.arch.MTE1)
+    mtx_l1.lock(pipe=tla.pipes.MTE1)
+    mtx_l0a.lock(pipe=tla.pipes.MTE1)
+    mtx_l0b.lock(pipe=tla.pipes.MTE1)
     tla.copy(a, sub(inverse, 32, 32, 32, 32))
     tla.copy(b, sub(lower, 32, 0, 32, 32))
-    mtx_l0a.unlock(pipe=tla.arch.MTE1)
-    mtx_l0b.unlock(pipe=tla.arch.MTE1)
-    mtx_l1.unlock(pipe=tla.arch.MTE1)
-    mtx_l0a.lock(pipe=tla.arch.CUBE)
-    mtx_l0b.lock(pipe=tla.arch.CUBE)
-    mtx_l0c.lock(pipe=tla.arch.CUBE)
+    mtx_l0a.unlock(pipe=tla.pipes.MTE1)
+    mtx_l0b.unlock(pipe=tla.pipes.MTE1)
+    mtx_l1.unlock(pipe=tla.pipes.MTE1)
+    mtx_l0a.lock(pipe=tla.pipes.CUBE)
+    mtx_l0b.lock(pipe=tla.pipes.CUBE)
+    mtx_l0c.lock(pipe=tla.pipes.CUBE)
     tla.mmad(c, a, b, init_c=True, hf32_mode=tla.params.HF32Mode.HF32_DISABLE)
-    mtx_l0c.unlock(pipe=tla.arch.CUBE)
-    mtx_l0a.unlock(pipe=tla.arch.CUBE)
-    mtx_l0b.unlock(pipe=tla.arch.CUBE)
-    mtx_l0c.lock(pipe=tla.arch.FIX)
-    mtx_l1.lock(pipe=tla.arch.FIX)
+    mtx_l0c.unlock(pipe=tla.pipes.CUBE)
+    mtx_l0a.unlock(pipe=tla.pipes.CUBE)
+    mtx_l0b.unlock(pipe=tla.pipes.CUBE)
+    mtx_l0c.lock(pipe=tla.pipes.FIX)
+    mtx_l1.lock(pipe=tla.pipes.FIX)
     tla.copy(y, c)
-    mtx_l1.unlock(pipe=tla.arch.FIX)
-    mtx_l0c.unlock(pipe=tla.arch.FIX)
+    mtx_l1.unlock(pipe=tla.pipes.FIX)
+    mtx_l0c.unlock(pipe=tla.pipes.FIX)
 
 
 @tla.jit
@@ -945,45 +945,45 @@ def s6_merge_inverse(lp, ap, bp, cp, slot, aout, f, mtx_l0a, mtx_l0b, mtx_l0c, m
     a = tensor(ap, 32, 32, tag=tla.arch.zN)
     b = tensor(bp, 32, 32, tag=tla.arch.nZ)
     c = tensor(cp, 32, 32, tag=tla.arch.L0Clayout)
-    mtx_l1.lock(pipe=tla.arch.MTE1)
-    mtx_l0a.lock(pipe=tla.arch.MTE1)
-    mtx_l0b.lock(pipe=tla.arch.MTE1)
+    mtx_l1.lock(pipe=tla.pipes.MTE1)
+    mtx_l0a.lock(pipe=tla.pipes.MTE1)
+    mtx_l0b.lock(pipe=tla.pipes.MTE1)
     tla.copy(a, y)
     tla.copy(b, sub(inverse, 0, 0, 32, 32))
-    mtx_l0a.unlock(pipe=tla.arch.MTE1)
-    mtx_l0b.unlock(pipe=tla.arch.MTE1)
-    mtx_l1.unlock(pipe=tla.arch.MTE1)
-    mtx_l0a.lock(pipe=tla.arch.CUBE)
-    mtx_l0b.lock(pipe=tla.arch.CUBE)
-    mtx_l0c.lock(pipe=tla.arch.CUBE)
+    mtx_l0a.unlock(pipe=tla.pipes.MTE1)
+    mtx_l0b.unlock(pipe=tla.pipes.MTE1)
+    mtx_l1.unlock(pipe=tla.pipes.MTE1)
+    mtx_l0a.lock(pipe=tla.pipes.CUBE)
+    mtx_l0b.lock(pipe=tla.pipes.CUBE)
+    mtx_l0c.lock(pipe=tla.pipes.CUBE)
     tla.mmad(c, a, b, init_c=True, hf32_mode=tla.params.HF32Mode.HF32_DISABLE)
-    mtx_l0c.unlock(pipe=tla.arch.CUBE)
-    mtx_l0a.unlock(pipe=tla.arch.CUBE)
-    mtx_l0b.unlock(pipe=tla.arch.CUBE)
-    mtx_l0c.lock(pipe=tla.arch.FIX)
-    mtx_l1.lock(pipe=tla.arch.FIX)
+    mtx_l0c.unlock(pipe=tla.pipes.CUBE)
+    mtx_l0a.unlock(pipe=tla.pipes.CUBE)
+    mtx_l0b.unlock(pipe=tla.pipes.CUBE)
+    mtx_l0c.lock(pipe=tla.pipes.FIX)
+    mtx_l1.lock(pipe=tla.pipes.FIX)
     tla.copy(sub(inverse, 32, 0, 32, 32), c)
     tla.copy(
         gm_view(aout, tla.Int64(f) * tla.Int64(4096) + tla.Int64(2048), 32, 32, 64), c
     )
-    mtx_l1.unlock(pipe=tla.arch.FIX)
-    mtx_l0c.unlock(pipe=tla.arch.FIX)
+    mtx_l1.unlock(pipe=tla.pipes.FIX)
+    mtx_l0c.unlock(pipe=tla.pipes.FIX)
 
 
 @tla.jit
 def vector_set(cf):
     if tla.arch.sub_block_idx() == 0:
-        tla.cross_core_set_flag(cf, tla.arch.MTE3, aiv_id=0)
+        tla.cross_core_set_flag(cf, tla.pipes.MTE3, aiv_id=0)
     else:
-        tla.cross_core_set_flag(cf, tla.arch.MTE3, aiv_id=1)
+        tla.cross_core_set_flag(cf, tla.pipes.MTE3, aiv_id=1)
 
 
 @tla.jit
 def vector_wait(cf):
     if tla.arch.sub_block_idx() == 0:
-        tla.cross_core_wait_flag(cf, tla.arch.VECTOR, aiv_id=0)
+        tla.cross_core_wait_flag(cf, tla.pipes.VECTOR, aiv_id=0)
     else:
-        tla.cross_core_wait_flag(cf, tla.arch.VECTOR, aiv_id=1)
+        tla.cross_core_wait_flag(cf, tla.pipes.VECTOR, aiv_id=1)
 
 
 @tla.kernel
@@ -1250,7 +1250,7 @@ def recurrent_component_mmad(
     init_first=False,
 ):
     c = tensor(cp, 64, width, tag=tla.arch.L0Clayout)
-    mtx_l0c.lock(pipe=tla.arch.CUBE)
+    mtx_l0c.lock(pipe=tla.pipes.CUBE)
     for term in tla.range_constexpr(terms):
         lhs = tensor(
             lhs_ptr + (term // 2) * 16 * 256, 64, 128, tla.BFloat16, tla.arch.zN
@@ -1264,14 +1264,14 @@ def recurrent_component_mmad(
         )
         a = tensor(ap, 64, 128, tla.BFloat16, tla.arch.zN)
         b = tensor(bp, 128, width, tla.BFloat16, tla.arch.nZ)
-        mtx_l0a.lock(pipe=tla.arch.MTE1)
-        mtx_l0b.lock(pipe=tla.arch.MTE1)
+        mtx_l0a.lock(pipe=tla.pipes.MTE1)
+        mtx_l0b.lock(pipe=tla.pipes.MTE1)
         tla.copy(a, lhs)
         tla.copy(b, rhs)
-        mtx_l0a.unlock(pipe=tla.arch.MTE1)
-        mtx_l0b.unlock(pipe=tla.arch.MTE1)
-        mtx_l0a.lock(pipe=tla.arch.CUBE)
-        mtx_l0b.lock(pipe=tla.arch.CUBE)
+        mtx_l0a.unlock(pipe=tla.pipes.MTE1)
+        mtx_l0b.unlock(pipe=tla.pipes.MTE1)
+        mtx_l0a.lock(pipe=tla.pipes.CUBE)
+        mtx_l0b.lock(pipe=tla.pipes.CUBE)
         tla.mmad(
             c,
             a,
@@ -1279,9 +1279,9 @@ def recurrent_component_mmad(
             init_c=(init_first and term == 0),
             hf32_mode=tla.params.HF32Mode.HF32_DISABLE,
         )
-        mtx_l0a.unlock(pipe=tla.arch.CUBE)
-        mtx_l0b.unlock(pipe=tla.arch.CUBE)
-    mtx_l0c.unlock(pipe=tla.arch.CUBE)
+        mtx_l0a.unlock(pipe=tla.pipes.CUBE)
+        mtx_l0b.unlock(pipe=tla.pipes.CUBE)
+    mtx_l0c.unlock(pipe=tla.pipes.CUBE)
 
 
 @tla.jit
@@ -1302,35 +1302,35 @@ def compute_output(ub, lp, ap, bp, cp, slot, width, mtx_l0a, mtx_l0b, mtx_l0c, m
     )
     a = tensor(ap, 64, 64, tag=tla.arch.zN)
     b = tensor(bp, 64, width, tag=tla.arch.nZ)
-    mtx_l0a.lock(pipe=tla.arch.MTE1)
-    mtx_l0b.lock(pipe=tla.arch.MTE1)
+    mtx_l0a.lock(pipe=tla.pipes.MTE1)
+    mtx_l0b.lock(pipe=tla.pipes.MTE1)
     tla.copy(a, tensor(lp + (slot * 128 + 96) * 256, 64, 64, tag=tla.arch.zN))
-    mtx_l1.lock(pipe=tla.arch.MTE1)
+    mtx_l1.lock(pipe=tla.pipes.MTE1)
     tla.copy(b, tensor(lp + (384 + 32 * slot) * 256, 64, width, tag=tla.arch.zN))
-    mtx_l1.unlock(pipe=tla.arch.MTE1)
-    mtx_l0a.unlock(pipe=tla.arch.MTE1)
-    mtx_l0b.unlock(pipe=tla.arch.MTE1)
-    mtx_l0a.lock(pipe=tla.arch.CUBE)
-    mtx_l0b.lock(pipe=tla.arch.CUBE)
-    mtx_l0c.lock(pipe=tla.arch.CUBE)
+    mtx_l1.unlock(pipe=tla.pipes.MTE1)
+    mtx_l0a.unlock(pipe=tla.pipes.MTE1)
+    mtx_l0b.unlock(pipe=tla.pipes.MTE1)
+    mtx_l0a.lock(pipe=tla.pipes.CUBE)
+    mtx_l0b.lock(pipe=tla.pipes.CUBE)
+    mtx_l0c.lock(pipe=tla.pipes.CUBE)
     tla.mmad(c, a, b, init_c=False, hf32_mode=tla.params.HF32Mode.HF32_NEAREST_EVEN)
-    mtx_l0c.unlock(pipe=tla.arch.CUBE)
-    mtx_l0a.unlock(pipe=tla.arch.CUBE)
-    mtx_l0b.unlock(pipe=tla.arch.CUBE)
-    mtx_l0c.lock(pipe=tla.arch.FIX)
+    mtx_l0c.unlock(pipe=tla.pipes.CUBE)
+    mtx_l0a.unlock(pipe=tla.pipes.CUBE)
+    mtx_l0b.unlock(pipe=tla.pipes.CUBE)
+    mtx_l0c.lock(pipe=tla.pipes.FIX)
     tla.copy(
         tensor(ub + 208 * 256, 64, width),
         c,
         tla.params.CopyL0C2DstParams(l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M),
     )
-    mtx_l0c.unlock(pipe=tla.arch.FIX)
+    mtx_l0c.unlock(pipe=tla.pipes.FIX)
 
 
 @tla.jit
 def compute_state_product(ub, lp, ap, bp, cp, slot, width, mtx_l0a, mtx_l0b, mtx_l0c):
     # Both Kt and all three delta planes remain resident through all five terms.
-    mtx_l0a.lock(pipe=tla.arch.MTE1)
-    mtx_l0b.lock(pipe=tla.arch.MTE1)
+    mtx_l0a.lock(pipe=tla.pipes.MTE1)
+    mtx_l0b.lock(pipe=tla.pipes.MTE1)
     for plane in tla.range_constexpr(3):
         if plane < 2:
             left = tensor(ap + plane * 16 * 256, 128, 64, tla.BFloat16, tla.arch.zN)
@@ -1357,11 +1357,11 @@ def compute_state_product(ub, lp, ap, bp, cp, slot, width, mtx_l0a, mtx_l0b, mtx
                 tla.arch.zN,
             ),
         )
-    mtx_l0a.unlock(pipe=tla.arch.MTE1)
-    mtx_l0b.unlock(pipe=tla.arch.MTE1)
-    mtx_l0a.lock(pipe=tla.arch.CUBE)
-    mtx_l0b.lock(pipe=tla.arch.CUBE)
-    mtx_l0c.lock(pipe=tla.arch.CUBE)
+    mtx_l0a.unlock(pipe=tla.pipes.MTE1)
+    mtx_l0b.unlock(pipe=tla.pipes.MTE1)
+    mtx_l0a.lock(pipe=tla.pipes.CUBE)
+    mtx_l0b.lock(pipe=tla.pipes.CUBE)
+    mtx_l0c.lock(pipe=tla.pipes.CUBE)
     c = tensor(cp + 32 * 256, 128, width, tag=tla.arch.L0Clayout)
     for term in tla.range_constexpr(4):
         a = tensor(ap + (term // 2) * 16 * 256, 128, 64, tla.BFloat16, tla.arch.zN)
@@ -1374,16 +1374,16 @@ def compute_state_product(ub, lp, ap, bp, cp, slot, width, mtx_l0a, mtx_l0b, mtx
     a0 = tensor(ap, 128, 64, tla.BFloat16, tla.arch.zN)
     b2 = tensor(bp + 2 * (width // 8) * 256, 64, width, tla.BFloat16, tla.arch.nZ)
     tla.mmad(c, a0, b2, init_c=False, hf32_mode=tla.params.HF32Mode.HF32_DISABLE)
-    mtx_l0c.unlock(pipe=tla.arch.CUBE)
-    mtx_l0a.unlock(pipe=tla.arch.CUBE)
-    mtx_l0b.unlock(pipe=tla.arch.CUBE)
-    mtx_l0c.lock(pipe=tla.arch.FIX)
+    mtx_l0c.unlock(pipe=tla.pipes.CUBE)
+    mtx_l0a.unlock(pipe=tla.pipes.CUBE)
+    mtx_l0b.unlock(pipe=tla.pipes.CUBE)
+    mtx_l0c.lock(pipe=tla.pipes.FIX)
     tla.copy(
         tensor(ub + 176 * 256, 128, width),
         c,
         tla.params.CopyL0C2DstParams(l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M),
     )
-    mtx_l0c.unlock(pipe=tla.arch.FIX)
+    mtx_l0c.unlock(pipe=tla.pipes.FIX)
 
 
 @tla.jit
@@ -1391,19 +1391,19 @@ def compute_u(lp, ap, bp, cp, slot, width, mtx_l0a, mtx_l0b, mtx_l0c):
     a = tensor(ap, 64, 64, tag=tla.arch.zN)
     b = tensor(bp, 64, width, tag=tla.arch.nZ)
     c = tensor(cp, 64, width, tag=tla.arch.L0Clayout)
-    mtx_l0a.lock(pipe=tla.arch.MTE1)
-    mtx_l0b.lock(pipe=tla.arch.MTE1)
+    mtx_l0a.lock(pipe=tla.pipes.MTE1)
+    mtx_l0b.lock(pipe=tla.pipes.MTE1)
     tla.copy(a, tensor(lp + (slot * 128 + 112) * 256, 64, 64, tag=tla.arch.zN))
     tla.copy(b, tensor(lp + (320 + 32 * slot) * 256, 64, width, tag=tla.arch.zN))
-    mtx_l0a.unlock(pipe=tla.arch.MTE1)
-    mtx_l0b.unlock(pipe=tla.arch.MTE1)
-    mtx_l0a.lock(pipe=tla.arch.CUBE)
-    mtx_l0b.lock(pipe=tla.arch.CUBE)
-    mtx_l0c.lock(pipe=tla.arch.CUBE)
+    mtx_l0a.unlock(pipe=tla.pipes.MTE1)
+    mtx_l0b.unlock(pipe=tla.pipes.MTE1)
+    mtx_l0a.lock(pipe=tla.pipes.CUBE)
+    mtx_l0b.lock(pipe=tla.pipes.CUBE)
+    mtx_l0c.lock(pipe=tla.pipes.CUBE)
     tla.mmad(c, a, b, init_c=True, hf32_mode=tla.params.HF32Mode.HF32_DISABLE)
-    mtx_l0c.unlock(pipe=tla.arch.CUBE)
-    mtx_l0a.unlock(pipe=tla.arch.CUBE)
-    mtx_l0b.unlock(pipe=tla.arch.CUBE)
+    mtx_l0c.unlock(pipe=tla.pipes.CUBE)
+    mtx_l0a.unlock(pipe=tla.pipes.CUBE)
+    mtx_l0b.unlock(pipe=tla.pipes.CUBE)
 
 
 def factor_index(head, block, length, hk, hv, hf):
@@ -1417,7 +1417,7 @@ def factor_index(head, block, length, hk, hv, hf):
 
 @tla.jit
 def load_factors(qg, kt0, kt1, aq, ainv, wh, wl, lp, f, slot, mtx_fac):
-    mtx_fac.lock(pipe=tla.arch.MTE2)
+    mtx_fac.lock(pipe=tla.pipes.MTE2)
     base = lp + slot * 128 * 256
     off = tla.Int64(f) * tla.Int64(8192)
     soff = tla.Int64(f) * tla.Int64(4096)
@@ -1447,15 +1447,15 @@ def load_factors(qg, kt0, kt1, aq, ainv, wh, wl, lp, f, slot, mtx_fac):
         tensor(base + 112 * 256, 64, 64, tag=tla.arch.zN),
         gm_view(ainv, soff, 64, 64, 64),
     )
-    mtx_fac.unlock(pipe=tla.arch.MTE2)
+    mtx_fac.unlock(pipe=tla.pipes.MTE2)
 
 
 @tla.jit
 def predict(lp, ap, bp, cp, slot, width, mtx_l0a, mtx_l0b, mtx_l0c):
     # Keep both planes in L0 until all four consumers finish. P may reuse
     # the upper B bank only after the final CUBE -> MTE1 acknowledgement.
-    mtx_l0a.lock(pipe=tla.arch.MTE1)
-    mtx_l0b.lock(pipe=tla.arch.MTE1)
+    mtx_l0a.lock(pipe=tla.pipes.MTE1)
+    mtx_l0b.lock(pipe=tla.pipes.MTE1)
     for plane in tla.range_constexpr(2):
         a = tensor(ap + plane * 16 * 256, 64, 128, tla.BFloat16, tla.arch.zN)
         b = tensor(
@@ -1481,11 +1481,11 @@ def predict(lp, ap, bp, cp, slot, width, mtx_l0a, mtx_l0b, mtx_l0c):
                 tla.arch.zN,
             ),
         )
-    mtx_l0a.unlock(pipe=tla.arch.MTE1)
-    mtx_l0b.unlock(pipe=tla.arch.MTE1)
-    mtx_l0a.lock(pipe=tla.arch.CUBE)
-    mtx_l0b.lock(pipe=tla.arch.CUBE)
-    mtx_l0c.lock(pipe=tla.arch.CUBE)
+    mtx_l0a.unlock(pipe=tla.pipes.MTE1)
+    mtx_l0b.unlock(pipe=tla.pipes.MTE1)
+    mtx_l0a.lock(pipe=tla.pipes.CUBE)
+    mtx_l0b.lock(pipe=tla.pipes.CUBE)
+    mtx_l0c.lock(pipe=tla.pipes.CUBE)
     c = tensor(cp, 64, width, tag=tla.arch.L0Clayout)
     for term in tla.range_constexpr(4):
         left = tensor(ap + (term // 2) * 16 * 256, 64, 128, tla.BFloat16, tla.arch.zN)
@@ -1495,24 +1495,24 @@ def predict(lp, ap, bp, cp, slot, width, mtx_l0a, mtx_l0b, mtx_l0c):
         tla.mmad(
             c, left, right, init_c=False, hf32_mode=tla.params.HF32Mode.HF32_DISABLE
         )
-    mtx_l0c.unlock(pipe=tla.arch.CUBE)
-    mtx_l0a.unlock(pipe=tla.arch.CUBE)
-    mtx_l0b.unlock(pipe=tla.arch.CUBE)
+    mtx_l0c.unlock(pipe=tla.pipes.CUBE)
+    mtx_l0a.unlock(pipe=tla.pipes.CUBE)
+    mtx_l0b.unlock(pipe=tla.pipes.CUBE)
 
 
 @tla.jit
 def publish_delta(ub, lp, cp, slot, width, mtx_l0c, mtx_l1):
     source = tensor(cp, 64, width, tag=tla.arch.L0Clayout)
-    mtx_l0c.lock(pipe=tla.arch.FIX)
-    mtx_l1.lock(pipe=tla.arch.FIX)
+    mtx_l0c.lock(pipe=tla.pipes.FIX)
+    mtx_l1.lock(pipe=tla.pipes.FIX)
     tla.copy(tensor(lp + (384 + 32 * slot) * 256, 64, width, tag=tla.arch.zN), source)
     tla.copy(
         tensor(ub + 176 * 256, 64, width),
         source,
         tla.params.CopyL0C2DstParams(l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M),
     )
-    mtx_l1.unlock(pipe=tla.arch.FIX)
-    mtx_l0c.unlock(pipe=tla.arch.FIX)
+    mtx_l1.unlock(pipe=tla.pipes.FIX)
+    mtx_l0c.unlock(pipe=tla.pipes.FIX)
 
 
 @tla.jit
@@ -1554,9 +1554,9 @@ def cube_group(
     for block in tla.range(blocks):
         slot = block % 2
         if slot == 0:
-            mtx_fac0.lock(pipe=tla.arch.MTE1)
+            mtx_fac0.lock(pipe=tla.pipes.MTE1)
         else:
-            mtx_fac1.lock(pipe=tla.arch.MTE1)
+            mtx_fac1.lock(pipe=tla.pipes.MTE1)
         if block + 1 < blocks:
             nf = factor_index(head, block + 1, length, hk, hv, hf)
             if slot == 0:
@@ -1582,9 +1582,9 @@ def cube_group(
         )
         cube_publish(hflag)
         if slot == 0:
-            mtx_fac0.unlock(pipe=tla.arch.MTE1)
+            mtx_fac0.unlock(pipe=tla.pipes.MTE1)
         else:
-            mtx_fac1.unlock(pipe=tla.arch.MTE1)
+            mtx_fac1.unlock(pipe=tla.pipes.MTE1)
     cube_wait(hflag)
     tla.pipe_barrier(tla.pipes.ALL)
     cube_set(done)
@@ -1629,7 +1629,7 @@ def encode_delta_v128(ub, lp, block, width, mtx_delta):
     high = tensor(raw, 1, 4096, tla.BFloat16)
     middle = tensor(raw + 8 * 256, 1, 4096, tla.BFloat16)
     low = tensor(raw + 16 * 256, 1, 4096, tla.BFloat16)
-    mtx_delta.lock(pipe=tla.arch.VECTOR)
+    mtx_delta.lock(pipe=tla.pipes.VECTOR)
     with tla.vec.func(mode="simd"):
         for encode_row in tla.range(32):
             for encode_part in tla.range_constexpr((width + 63) // 64):
@@ -1639,9 +1639,9 @@ def encode_delta_v128(ub, lp, block, width, mtx_delta):
                 store_native_triplet(
                     value, high, middle, low, encode_row, encode_part, width
                 )
-    mtx_delta.unlock(pipe=tla.arch.VECTOR)
+    mtx_delta.unlock(pipe=tla.pipes.VECTOR)
     row0 = tla.arch.sub_block_idx() * 32
-    mtx_delta.lock(pipe=tla.arch.MTE3)
+    mtx_delta.lock(pipe=tla.pipes.MTE3)
     for plane in tla.range_constexpr(3):
         dest = tensor(
             lp + (448 + plane * (width // 8)) * 256,
@@ -1654,7 +1654,7 @@ def encode_delta_v128(ub, lp, block, width, mtx_delta):
             sub(dest, row0, 0, 32, width),
             tensor(raw + plane * 8 * 256, 32, width, tla.BFloat16, tla.arch.zN),
         )
-    mtx_delta.unlock(pipe=tla.arch.MTE3)
+    mtx_delta.unlock(pipe=tla.pipes.MTE3)
 
 
 def store_two_bf16_rows(encoded, dest, row, prefix_elements, stride, first, second):
@@ -1675,7 +1675,7 @@ def encode_delta(ub, lp, block, width, mtx_delta):
         high = tensor(raw, 1, 8192, tla.BFloat16)
         middle = tensor(raw + 8 * 256, 1, 8192, tla.BFloat16)
         low = tensor(raw + 16 * 256, 1, 8192, tla.BFloat16)
-        mtx_delta.lock(pipe=tla.arch.VECTOR)
+        mtx_delta.lock(pipe=tla.pipes.VECTOR)
         with tla.vec.func(mode="simd"):
             first = tla.create_mask(pattern=tla.mask.VL32, dtype=tla.BFloat16)
             second = tla.bitwise_xor(
@@ -1687,9 +1687,9 @@ def encode_delta(ub, lp, block, width, mtx_delta):
                 store_two_bf16_rows(hi, high, pair * 2, 1024, 32, first, second)
                 store_two_bf16_rows(mid, middle, pair * 2, 1024, 32, first, second)
                 store_two_bf16_rows(lo, low, pair * 2, 1024, 32, first, second)
-        mtx_delta.unlock(pipe=tla.arch.VECTOR)
+        mtx_delta.unlock(pipe=tla.pipes.VECTOR)
         row0 = tla.arch.sub_block_idx() * 32
-        mtx_delta.lock(pipe=tla.arch.MTE3)
+        mtx_delta.lock(pipe=tla.pipes.MTE3)
         for plane in tla.range_constexpr(3):
             dest = tensor(
                 lp + (448 + plane * 4) * 256, 64, 32, tla.BFloat16, tla.arch.zN
@@ -1698,7 +1698,7 @@ def encode_delta(ub, lp, block, width, mtx_delta):
                 sub(dest, row0, 0, 32, 32),
                 tensor(raw + (plane * 8 + 2) * 256, 32, 32, tla.BFloat16, tla.arch.zN),
             )
-        mtx_delta.unlock(pipe=tla.arch.MTE3)
+        mtx_delta.unlock(pipe=tla.pipes.MTE3)
     else:
         encode_delta_v128(ub, lp, block, width, mtx_delta)
 
@@ -1737,11 +1737,11 @@ def initialize_state(
         off = (tla.Int64(head) * tla.Int64(128) + tla.Int64(row0)) * tla.Int64(
             128
         ) + tla.Int64(vcol)
-        mtx_raw.lock(pipe=tla.arch.MTE2)
+        mtx_raw.lock(pipe=tla.pipes.MTE2)
         tla.copy(hold, gm_view(initial, off, 64, width, 128))
-        mtx_raw.unlock(pipe=tla.arch.MTE2)
-        mtx_raw.lock(pipe=tla.arch.VECTOR)
-        mtx_init.lock(pipe=tla.arch.VECTOR)
+        mtx_raw.unlock(pipe=tla.pipes.MTE2)
+        mtx_raw.lock(pipe=tla.pipes.VECTOR)
+        mtx_init.lock(pipe=tla.pipes.VECTOR)
         with tla.vec.func(mode="simd"):
             for init_row in tla.range(64):
                 for init_part in tla.range_constexpr((width + 63) // 64):
@@ -1751,10 +1751,10 @@ def initialize_state(
                     store_native_components(
                         value, high, low, init_row, init_part, width
                     )
-        mtx_init.unlock(pipe=tla.arch.VECTOR)
-        mtx_raw.unlock(pipe=tla.arch.VECTOR)
+        mtx_init.unlock(pipe=tla.pipes.VECTOR)
+        mtx_raw.unlock(pipe=tla.pipes.VECTOR)
     else:
-        mtx_init.lock(pipe=tla.arch.VECTOR)
+        mtx_init.lock(pipe=tla.pipes.VECTOR)
         with tla.vec.func(mode="simd"):
             zeros = tla.full(0.0, tla.Float32)
             for zero_row in tla.range(64):
@@ -1763,12 +1763,12 @@ def initialize_state(
                     store_native_components(
                         zeros, high, low, zero_row, zero_part, width
                     )
-        mtx_init.unlock(pipe=tla.arch.VECTOR)
+        mtx_init.unlock(pipe=tla.pipes.VECTOR)
     dest_high = tensor(lp + 256 * 256, 128, width, tla.BFloat16, tla.arch.zN)
     dest_low = tensor(
         lp + (256 + width // 4) * 256, 128, width, tla.BFloat16, tla.arch.zN
     )
-    mtx_init.lock(pipe=tla.arch.MTE3)
+    mtx_init.lock(pipe=tla.pipes.MTE3)
     tla.copy(
         sub(dest_high, row0, 0, 64, width),
         tensor(ub + 144 * 256, 64, width, tla.BFloat16, tla.arch.zN),
@@ -1777,7 +1777,7 @@ def initialize_state(
         sub(dest_low, row0, 0, 64, width),
         tensor(ub + 160 * 256, 64, width, tla.BFloat16, tla.arch.zN),
     )
-    mtx_init.unlock(pipe=tla.arch.MTE3)
+    mtx_init.unlock(pipe=tla.pipes.MTE3)
 
 
 @tla.jit
@@ -1808,7 +1808,7 @@ def load_values_pair(
     vr = tensor(raw, 64, width, tla.BFloat16)
     wr = tensor(raw + 16 * 256, 64, width, tla.BFloat16 if w_bf16 else tla.Float32)
     end = tensor(ub + 232 * 256 + slot * 128, 1, 128)
-    mtx_raw.lock(pipe=tla.arch.VECTOR)
+    mtx_raw.lock(pipe=tla.pipes.VECTOR)
     if valid < 64:
         with tla.vec.func(mode="simd"):
             zeros = tla.full(0.0, tla.Float32)
@@ -1823,8 +1823,8 @@ def load_values_pair(
                         )
                     else:
                         sub(wr, pad_row, pad_part * 64, 1, lanes).store(zeros)
-    mtx_raw.unlock(pipe=tla.arch.VECTOR)
-    mtx_raw.lock(pipe=tla.arch.MTE2)
+    mtx_raw.unlock(pipe=tla.pipes.VECTOR)
+    mtx_raw.lock(pipe=tla.pipes.MTE2)
     tla.copy(
         sub(end, 0, key0, 1, 64),
         gm_view(end_gm, tla.Int64(f) * tla.Int64(128) + tla.Int64(key0), 1, 64, 128),
@@ -1834,12 +1834,12 @@ def load_values_pair(
     ) * tla.Int64(128) + tla.Int64(vcol)
     tla.copy(sub(vr, 0, 0, valid, width), gm_view(v, off, valid, width, 128))
     tla.copy(sub(wr, 0, 0, valid, width), gm_view(w, off, valid, width, 128))
-    mtx_raw.unlock(pipe=tla.arch.MTE2)
-    mtx_raw.lock(pipe=tla.arch.VECTOR)
+    mtx_raw.unlock(pipe=tla.pipes.MTE2)
+    mtx_raw.lock(pipe=tla.pipes.VECTOR)
     v_flat = tensor(raw, 1, 8192, tla.BFloat16)
     w_flat = tensor(raw + 16 * 256, 1, 8192, tla.BFloat16 if w_bf16 else tla.Float32)
     native_staging = tensor(ub + 92 * 256, 1, 4096)
-    mtx_stage.lock(pipe=tla.arch.VECTOR)
+    mtx_stage.lock(pipe=tla.pipes.VECTOR)
     with tla.vec.func(mode="simd"):
         first = tla.create_mask(pattern=tla.mask.VL32, dtype=tla.Float32)
         second = tla.bitwise_xor(
@@ -1855,14 +1855,14 @@ def load_values_pair(
             sub(native_staging, 0, (pair * 2 + 1) * 8, 1, 64).store(
                 result, tla.params.BlockStoreParams(block_stride=32), mask=second
             )
-    mtx_stage.unlock(pipe=tla.arch.VECTOR)
-    mtx_raw.unlock(pipe=tla.arch.VECTOR)
+    mtx_stage.unlock(pipe=tla.pipes.VECTOR)
+    mtx_raw.unlock(pipe=tla.pipes.VECTOR)
     dest = tensor(lp + (320 + 32 * slot) * 256, 64, width, tag=tla.arch.zN)
-    mtx_stage.lock(pipe=tla.arch.MTE3)
+    mtx_stage.lock(pipe=tla.pipes.MTE3)
     tla.copy(
         sub(dest, row0, 0, 32, width), tensor(ub + 96 * 256, 32, width, tag=tla.arch.zN)
     )
-    mtx_stage.unlock(pipe=tla.arch.MTE3)
+    mtx_stage.unlock(pipe=tla.pipes.MTE3)
 
 
 @tla.jit
@@ -1893,7 +1893,7 @@ def load_values_v128(
     vr = tensor(raw, 64, width, tla.BFloat16)
     wr = tensor(raw + 16 * 256, 64, width, tla.BFloat16 if w_bf16 else tla.Float32)
     end = tensor(ub + 232 * 256 + slot * 128, 1, 128)
-    mtx_raw.lock(pipe=tla.arch.VECTOR)
+    mtx_raw.lock(pipe=tla.pipes.VECTOR)
     if valid < 64:
         with tla.vec.func(mode="simd"):
             zeros = tla.full(0.0, tla.Float32)
@@ -1908,8 +1908,8 @@ def load_values_v128(
                         )
                     else:
                         sub(wr, pad_row, pad_part * 64, 1, lanes).store(zeros)
-    mtx_raw.unlock(pipe=tla.arch.VECTOR)
-    mtx_raw.lock(pipe=tla.arch.MTE2)
+    mtx_raw.unlock(pipe=tla.pipes.VECTOR)
+    mtx_raw.lock(pipe=tla.pipes.MTE2)
     tla.copy(
         sub(end, 0, key0, 1, 64),
         gm_view(end_gm, tla.Int64(f) * tla.Int64(128) + tla.Int64(key0), 1, 64, 128),
@@ -1919,12 +1919,12 @@ def load_values_v128(
     ) * tla.Int64(128) + tla.Int64(vcol)
     tla.copy(sub(vr, 0, 0, valid, width), gm_view(v, off, valid, width, 128))
     tla.copy(sub(wr, 0, 0, valid, width), gm_view(w, off, valid, width, 128))
-    mtx_raw.unlock(pipe=tla.arch.MTE2)
-    mtx_raw.lock(pipe=tla.arch.VECTOR)
+    mtx_raw.unlock(pipe=tla.pipes.MTE2)
+    mtx_raw.lock(pipe=tla.pipes.VECTOR)
     v_flat = tensor(raw, 1, 8192, tla.BFloat16)
     w_flat = tensor(raw + 16 * 256, 1, 8192, tla.BFloat16 if w_bf16 else tla.Float32)
     native_staging = tensor(ub + 96 * 256, 1, 4096)
-    mtx_stage.lock(pipe=tla.arch.VECTOR)
+    mtx_stage.lock(pipe=tla.pipes.VECTOR)
     with tla.vec.func(mode="simd"):
         for row in tla.range(32):
             for part in tla.range_constexpr((width + 63) // 64):
@@ -1946,14 +1946,14 @@ def load_values_v128(
                     target.store(
                         value * weight, tla.params.BlockStoreParams(block_stride=32)
                     )
-    mtx_stage.unlock(pipe=tla.arch.VECTOR)
-    mtx_raw.unlock(pipe=tla.arch.VECTOR)
+    mtx_stage.unlock(pipe=tla.pipes.VECTOR)
+    mtx_raw.unlock(pipe=tla.pipes.VECTOR)
     dest = tensor(lp + (320 + 32 * slot) * 256, 64, width, tag=tla.arch.zN)
-    mtx_stage.lock(pipe=tla.arch.MTE3)
+    mtx_stage.lock(pipe=tla.pipes.MTE3)
     tla.copy(
         sub(dest, row0, 0, 32, width), tensor(ub + 96 * 256, 32, width, tag=tla.arch.zN)
     )
-    mtx_stage.unlock(pipe=tla.arch.MTE3)
+    mtx_stage.unlock(pipe=tla.pipes.MTE3)
 
 
 @tla.jit
@@ -2073,17 +2073,17 @@ def update_state(
 ):
     key0 = tla.arch.sub_block_idx() * 64
     hold = tensor(ub + 112 * 256, 64, width)
-    mtx_state.lock(pipe=tla.arch.VECTOR)
+    mtx_state.lock(pipe=tla.pipes.VECTOR)
     if width == 32:
         encode_state_pair(ub, block)
     else:
         encode_state(ub, width, block)
-    mtx_state.unlock(pipe=tla.arch.VECTOR)
+    mtx_state.unlock(pipe=tla.pipes.VECTOR)
     next_high = tensor(lp + 256 * 256, 128, width, tla.BFloat16, tla.arch.zN)
     next_low = tensor(
         lp + (256 + width // 4) * 256, 128, width, tla.BFloat16, tla.arch.zN
     )
-    mtx_state.lock(pipe=tla.arch.MTE3)
+    mtx_state.lock(pipe=tla.pipes.MTE3)
     tla.copy(
         sub(next_high, key0, 0, 64, width),
         tensor(ub + 144 * 256, 64, width, tla.BFloat16, tla.arch.zN),
@@ -2098,7 +2098,7 @@ def update_state(
                 tla.Int64(head) * tla.Int64(128) + tla.Int64(key0)
             ) * tla.Int64(128) + tla.Int64(vcol)
             tla.copy(gm_view(final_state, state_offset, 64, width, 128), hold)
-    mtx_state.unlock(pipe=tla.arch.MTE3)
+    mtx_state.unlock(pipe=tla.pipes.MTE3)
 
 
 def bf16_rne(value):
@@ -2161,13 +2161,13 @@ def encode_output(ub, width, block, scale):
 def write_output(out, ub, head, vcol, width, block, length, scale, mtx_out):
     row0 = tla.arch.sub_block_idx() * 32
     output = tensor(ub + 224 * 256, 32, width, tla.BFloat16)
-    mtx_out.lock(pipe=tla.arch.VECTOR)
+    mtx_out.lock(pipe=tla.pipes.VECTOR)
     encode_output(ub, width, block, scale)
-    mtx_out.unlock(pipe=tla.arch.VECTOR)
+    mtx_out.unlock(pipe=tla.pipes.VECTOR)
     valid = length - block * 64 - row0
     if valid > 32:
         valid = 32
-    mtx_out.lock(pipe=tla.arch.MTE3)
+    mtx_out.lock(pipe=tla.pipes.MTE3)
     if valid > 0:
         offset = (
             tla.Int64(head) * tla.Int64(length)
@@ -2177,7 +2177,7 @@ def write_output(out, ub, head, vcol, width, block, length, scale, mtx_out):
         tla.copy(
             gm_view(out, offset, valid, width, 128), sub(output, 0, 0, valid, width)
         )
-    mtx_out.unlock(pipe=tla.arch.MTE3)
+    mtx_out.unlock(pipe=tla.pipes.MTE3)
 
 
 @tla.jit

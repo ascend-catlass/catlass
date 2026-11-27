@@ -104,17 +104,17 @@ def basic_mixed_fixpipe_per_channel_kernel(
 
     # Two flags per stage buffer: "data is there" and "buffer is free again".
     # The ``free`` side is seeded before the loop and drained after it.
-    l1_full = tla.flag("l1_full", tla.arch.MTE2, tla.arch.MTE1)
-    l1_free = tla.flag("l1_free", tla.arch.MTE1, tla.arch.MTE2)
-    l0_full = tla.flag("l0_full", tla.arch.MTE1, tla.arch.CUBE)
-    l0_free = tla.flag("l0_free", tla.arch.CUBE, tla.arch.MTE1)
+    l1_full = tla.flag("l1_full", tla.pipes.MTE2, tla.pipes.MTE1)
+    l1_free = tla.flag("l1_free", tla.pipes.MTE1, tla.pipes.MTE2)
+    l0_full = tla.flag("l0_full", tla.pipes.MTE1, tla.pipes.CUBE)
+    l0_free = tla.flag("l0_free", tla.pipes.CUBE, tla.pipes.MTE1)
     # The cross flags below are only waited on after the MMAD, too late for L0C;
     # this intra-core flag is what keeps the next MMAD off the accumulator.
-    l0c_available = tla.flag("l0c_available", tla.arch.FIX, tla.arch.CUBE)
+    l0c_available = tla.flag("l0c_available", tla.pipes.FIX, tla.pipes.CUBE)
     # The dequant tile is one run per block, so MTE2 rewrites it every iteration
     # and FIX reads it: same full/free pair as any staged buffer.
-    quant_full = tla.flag("quant_full", tla.arch.MTE2, tla.arch.FIX)
-    quant_free = tla.flag("quant_free", tla.arch.FIX, tla.arch.MTE2)
+    quant_full = tla.flag("quant_full", tla.pipes.MTE2, tla.pipes.FIX)
+    quant_free = tla.flag("quant_free", tla.pipes.FIX, tla.pipes.MTE2)
 
     # One flag pair for both AIVs. mode 4 keeps a separate counter per AIV, so
     # ``aiv_id`` on each crossing picks the channel -- a shared counter (mode 2)
@@ -216,7 +216,7 @@ def basic_mixed_fixpipe_per_channel_kernel(
 
             # Even blocks belong to vec0, odd ones to vec1.
             if block_linear % 2 == 0:
-                tla.cross_core_wait_flag(fix_ready, tla.arch.FIX, aiv_id=0)
+                tla.cross_core_wait_flag(fix_ready, tla.pipes.FIX, aiv_id=0)
                 tla.copy(
                     ub_c,
                     l0_c,
@@ -230,9 +230,9 @@ def basic_mixed_fixpipe_per_channel_kernel(
                 )
                 tla.set_flag(l0c_available)
                 tla.set_flag(quant_free)
-                tla.cross_core_set_flag(fix_done, tla.arch.FIX, aiv_id=0)
+                tla.cross_core_set_flag(fix_done, tla.pipes.FIX, aiv_id=0)
             else:
-                tla.cross_core_wait_flag(fix_ready, tla.arch.FIX, aiv_id=1)
+                tla.cross_core_wait_flag(fix_ready, tla.pipes.FIX, aiv_id=1)
                 tla.copy(
                     ub_c,
                     l0_c,
@@ -246,11 +246,11 @@ def basic_mixed_fixpipe_per_channel_kernel(
                 )
                 tla.set_flag(l0c_available)
                 tla.set_flag(quant_free)
-                tla.cross_core_set_flag(fix_done, tla.arch.FIX, aiv_id=1)
+                tla.cross_core_set_flag(fix_done, tla.pipes.FIX, aiv_id=1)
 
         # One credit per channel, standing in for an already-spent "UB is free".
-        tla.cross_core_wait_flag(fix_ready, tla.arch.FIX, aiv_id=0)
-        tla.cross_core_wait_flag(fix_ready, tla.arch.FIX, aiv_id=1)
+        tla.cross_core_wait_flag(fix_ready, tla.pipes.FIX, aiv_id=0)
+        tla.cross_core_wait_flag(fix_ready, tla.pipes.FIX, aiv_id=1)
         tla.wait_flag(l1_free)
         tla.wait_flag(l0_free)
         tla.wait_flag(l0c_available)
@@ -265,9 +265,9 @@ def basic_mixed_fixpipe_per_channel_kernel(
         # MTE3, the pipe that drains UB to GM, keeps every "UB is free" on one
         # pipe: the set then orders against that AIV's own MTE3 stores.
         if vec_idx == c0:
-            tla.cross_core_set_flag(fix_ready, tla.arch.MTE3, aiv_id=0)
+            tla.cross_core_set_flag(fix_ready, tla.pipes.MTE3, aiv_id=0)
         else:
-            tla.cross_core_set_flag(fix_ready, tla.arch.MTE3, aiv_id=1)
+            tla.cross_core_set_flag(fix_ready, tla.pipes.MTE3, aiv_id=1)
 
         block_range = tla.range(
             tla.arch.block_idx(), total_blocks, tla.arch.block_num()
@@ -318,14 +318,14 @@ def basic_mixed_fixpipe_per_channel_kernel(
             # this store still reads it.
             if vec_idx == c0:
                 if block_linear % 2 == c0:
-                    tla.cross_core_wait_flag(fix_done, tla.arch.MTE3, aiv_id=0)
+                    tla.cross_core_wait_flag(fix_done, tla.pipes.MTE3, aiv_id=0)
                     tla.copy(gm_out, ub_src)
-                    tla.cross_core_set_flag(fix_ready, tla.arch.MTE3, aiv_id=0)
+                    tla.cross_core_set_flag(fix_ready, tla.pipes.MTE3, aiv_id=0)
             else:
                 if block_linear % 2 == 1:
-                    tla.cross_core_wait_flag(fix_done, tla.arch.MTE3, aiv_id=1)
+                    tla.cross_core_wait_flag(fix_done, tla.pipes.MTE3, aiv_id=1)
                     tla.copy(gm_out, ub_src)
-                    tla.cross_core_set_flag(fix_ready, tla.arch.MTE3, aiv_id=1)
+                    tla.cross_core_set_flag(fix_ready, tla.pipes.MTE3, aiv_id=1)
 
         tla.pipe_barrier(tla.pipes.ALL)
 

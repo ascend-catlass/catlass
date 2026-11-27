@@ -176,24 +176,32 @@ def stage_down_streamk(
     # unlike Basic — or the independent schedule hangs). Map the 4 L1 flags
     # onto ctor IDs 0..3; L0 A/B onto 4/5 + WithoutQue 6/7. Bias trio is
     # parked at L1 id=4 / L0 id=0 in the kernel (does not collide).
-    l1a0_data_ready = tla.flag("sk_l1a0_data_ready", tla.arch.MTE2, tla.arch.MTE1, id=0)
-    l1a1_data_ready = tla.flag("sk_l1a1_data_ready", tla.arch.MTE2, tla.arch.MTE1, id=1)
-    l1b0_data_ready = tla.flag("sk_l1b0_data_ready", tla.arch.MTE2, tla.arch.MTE1, id=2)
-    l1b1_data_ready = tla.flag("sk_l1b1_data_ready", tla.arch.MTE2, tla.arch.MTE1, id=3)
-    l1a0_available = tla.flag("sk_l1a0_available", tla.arch.MTE1, tla.arch.MTE2, id=0)
-    l1a1_available = tla.flag("sk_l1a1_available", tla.arch.MTE1, tla.arch.MTE2, id=1)
-    l1b0_available = tla.flag("sk_l1b0_available", tla.arch.MTE1, tla.arch.MTE2, id=2)
-    l1b1_available = tla.flag("sk_l1b1_available", tla.arch.MTE1, tla.arch.MTE2, id=3)
-    l0a0_available = tla.flag("sk_l0a0_available", tla.arch.CUBE, tla.arch.MTE1, id=6)
-    l0a1_available = tla.flag("sk_l0a1_available", tla.arch.CUBE, tla.arch.MTE1, id=7)
-    l0b0_available = tla.flag("sk_l0b0_available", tla.arch.CUBE, tla.arch.MTE1, id=4)
-    l0b1_available = tla.flag("sk_l0b1_available", tla.arch.CUBE, tla.arch.MTE1, id=5)
+    l1a0_data_ready = tla.flag(
+        "sk_l1a0_data_ready", tla.pipes.MTE2, tla.pipes.MTE1, id=0
+    )
+    l1a1_data_ready = tla.flag(
+        "sk_l1a1_data_ready", tla.pipes.MTE2, tla.pipes.MTE1, id=1
+    )
+    l1b0_data_ready = tla.flag(
+        "sk_l1b0_data_ready", tla.pipes.MTE2, tla.pipes.MTE1, id=2
+    )
+    l1b1_data_ready = tla.flag(
+        "sk_l1b1_data_ready", tla.pipes.MTE2, tla.pipes.MTE1, id=3
+    )
+    l1a0_available = tla.flag("sk_l1a0_available", tla.pipes.MTE1, tla.pipes.MTE2, id=0)
+    l1a1_available = tla.flag("sk_l1a1_available", tla.pipes.MTE1, tla.pipes.MTE2, id=1)
+    l1b0_available = tla.flag("sk_l1b0_available", tla.pipes.MTE1, tla.pipes.MTE2, id=2)
+    l1b1_available = tla.flag("sk_l1b1_available", tla.pipes.MTE1, tla.pipes.MTE2, id=3)
+    l0a0_available = tla.flag("sk_l0a0_available", tla.pipes.CUBE, tla.pipes.MTE1, id=6)
+    l0a1_available = tla.flag("sk_l0a1_available", tla.pipes.CUBE, tla.pipes.MTE1, id=7)
+    l0b0_available = tla.flag("sk_l0b0_available", tla.pipes.CUBE, tla.pipes.MTE1, id=4)
+    l0b1_available = tla.flag("sk_l0b1_available", tla.pipes.CUBE, tla.pipes.MTE1, id=5)
     # Self-fence after A+B L0 copy; must NOT share WithoutQue 6/7 (or SK
     # L0 A/B available 4/5) — concurrent Set/Wait would corrupt credits.
     l0_ab_data_ready = tla.flag(
-        "sk_l0_ab_data_ready", tla.arch.MTE1, tla.arch.CUBE, id=1
+        "sk_l0_ab_data_ready", tla.pipes.MTE1, tla.pipes.CUBE, id=1
     )
-    l0c_available = tla.flag("sk_l0c_available", tla.arch.FIX, tla.arch.CUBE, id=0)
+    l0c_available = tla.flag("sk_l0c_available", tla.pipes.FIX, tla.pipes.CUBE, id=0)
     # Cube BT SoftFlags come from the kernel (shared Up↔Down; SoftFlag budget).
     # AIC→AIV handoff (mode 2) plus an all-AIV barrier (mode 0).
     aic_finish = tla.cross_flag("ffn_sk_aic_finish", mode=2)
@@ -220,15 +228,15 @@ def stage_down_streamk(
     aiv_out_ub = tla.make_tensor(aiv_out_ptr, aiv_ub_layout)
 
     # Per AIV-sub SoftFlags (MIX 1:2): dual subs must not share.
-    aiv_loaded_s0 = tla.flag("sk_aiv_loaded_s0", tla.arch.MTE2, tla.arch.VECTOR, id=0)
-    aiv_loaded_s1 = tla.flag("sk_aiv_loaded_s1", tla.arch.MTE2, tla.arch.VECTOR, id=1)
+    aiv_loaded_s0 = tla.flag("sk_aiv_loaded_s0", tla.pipes.MTE2, tla.pipes.VECTOR, id=0)
+    aiv_loaded_s1 = tla.flag("sk_aiv_loaded_s1", tla.pipes.MTE2, tla.pipes.VECTOR, id=1)
     # V→MTE2: required between Add and the next GM→UB when streaming
     # remaining K banks one-by-one (pre-pack_v2 aiv_v2m; pack_v2 wave-0
     # needs only one MTE2_V so it omits this).
-    aiv_v2m_s0 = tla.flag("sk_aiv_v2m_s0", tla.arch.VECTOR, tla.arch.MTE2, id=0)
-    aiv_v2m_s1 = tla.flag("sk_aiv_v2m_s1", tla.arch.VECTOR, tla.arch.MTE2, id=1)
-    aiv_done_s0 = tla.flag("sk_aiv_done_s0", tla.arch.VECTOR, tla.arch.MTE3, id=0)
-    aiv_done_s1 = tla.flag("sk_aiv_done_s1", tla.arch.VECTOR, tla.arch.MTE3, id=1)
+    aiv_v2m_s0 = tla.flag("sk_aiv_v2m_s0", tla.pipes.VECTOR, tla.pipes.MTE2, id=0)
+    aiv_v2m_s1 = tla.flag("sk_aiv_v2m_s1", tla.pipes.VECTOR, tla.pipes.MTE2, id=1)
+    aiv_done_s0 = tla.flag("sk_aiv_done_s0", tla.pipes.VECTOR, tla.pipes.MTE3, id=0)
+    aiv_done_s1 = tla.flag("sk_aiv_done_s1", tla.pipes.VECTOR, tla.pipes.MTE3, id=1)
 
     with tla.cube():
         tla.set_flag(l1a0_available)
@@ -257,7 +265,7 @@ def stage_down_streamk(
 
         # Idle cores: release paired AIV; still drain SoftFlags at end.
         if block_idx >= get_block_num:
-            tla.cross_core_set_flag(aic_finish, tla.arch.FIX)
+            tla.cross_core_set_flag(aic_finish, tla.pipes.FIX)
         else:
             tile_range = tla.range(block_idx, tile_num, used)
             for tile_idx in tile_range:
@@ -596,7 +604,7 @@ def stage_down_streamk(
 
                 # Last tile for this core → wake AIV (PIPE_FIX).
                 if tmp + used >= tile_num:
-                    tla.cross_core_set_flag(aic_finish, tla.arch.FIX)
+                    tla.cross_core_set_flag(aic_finish, tla.pipes.FIX)
 
         tla.wait_flag(l1a0_available)
         tla.wait_flag(l1a1_available)
@@ -613,9 +621,9 @@ def stage_down_streamk(
 
     with tla.vector():
         # Wait for the paired AIC, then for every AIC through the all-AIV barrier.
-        tla.cross_core_wait_flag(aic_finish, tla.arch.MTE2)
-        tla.cross_core_set_flag(aiv_ibarrier, tla.arch.MTE2)
-        tla.cross_core_wait_flag(aiv_ibarrier, tla.arch.MTE2)
+        tla.cross_core_wait_flag(aic_finish, tla.pipes.MTE2)
+        tla.cross_core_set_flag(aiv_ibarrier, tla.pipes.MTE2)
+        tla.cross_core_wait_flag(aiv_ibarrier, tla.pipes.MTE2)
         # MIX: block_idx=AIC id, sub_block_idx=AIV half → CPP GetBlockIdx().
         aiv_id = tla.arch.block_idx()
         aiv_sub = tla.arch.sub_block_idx()

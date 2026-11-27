@@ -31,9 +31,9 @@ def load_and_store_scalar_after_reduction(
     mem_reduced: tla.Tensor,
 ) -> None:
     """Exercise UB scalar accesses both inside and outside ``tla.vec.func``."""
-    loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    vec_func_done = tla.flag("vec_func_done", tla.arch.VECTOR, tla.arch.SCALAR)
-    scalar_to_mte3 = tla.flag("scalar_to_mte3", tla.arch.SCALAR, tla.arch.MTE3)
+    loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    vec_func_done = tla.flag("vec_func_done", tla.pipes.VECTOR, tla.pipes.SCALAR)
+    scalar_to_mte3 = tla.flag("scalar_to_mte3", tla.pipes.SCALAR, tla.pipes.MTE3)
 
     x_gm = tla.tile_view(mem_x, tla.make_shape(VECTOR_ELE), tla.make_coord(0))
     stored_gm = tla.tile_view(mem_stored, tla.make_shape(VECTOR_ELE), tla.make_coord(0))

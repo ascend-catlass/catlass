@@ -65,10 +65,10 @@ def block_mean_attention_score_kernel(
 
     with tla.vector():
         initialize_counts(counts, vbufs, blocks, counts_cache_elems, cache_counts)
-        tla.cross_core_set_flag(free0, tla.arch.VECTOR, aiv_id=0)
-        tla.cross_core_set_flag(free0, tla.arch.VECTOR, aiv_id=1)
-        tla.cross_core_set_flag(free1, tla.arch.VECTOR, aiv_id=0)
-        tla.cross_core_set_flag(free1, tla.arch.VECTOR, aiv_id=1)
+        tla.cross_core_set_flag(free0, tla.pipes.VECTOR, aiv_id=0)
+        tla.cross_core_set_flag(free0, tla.pipes.VECTOR, aiv_id=1)
+        tla.cross_core_set_flag(free1, tla.pipes.VECTOR, aiv_id=0)
+        tla.cross_core_set_flag(free1, tla.pipes.VECTOR, aiv_id=1)
 
     for task in tla.range(tla.arch.block_idx(), _h * query_tiles, tla.arch.block_num()):
         # Keep consecutive Query tiles of one head together for K-cache reuse.
@@ -83,7 +83,7 @@ def block_mean_attention_score_kernel(
             prepare_vector(counts, vbufs, query_start, nq, nq_pad, cache_counts)
             # One GM statistics region is shared by all tasks of this group.
             # Hold its write ownership until the last phase-one DMA is issued.
-            workspace_mutex.lock(pipe=tla.arch.MTE3)
+            workspace_mutex.lock(pipe=tla.pipes.MTE3)
         for key_tile in tla.range(key_tiles):
             key_start = key_tile * _tiling.l1_tm
             mk = _s - key_start if _s - key_start < _tiling.l1_tm else _tiling.l1_tm
@@ -117,8 +117,8 @@ def block_mean_attention_score_kernel(
                             slice_serial,
                         )
                         if cpart == 0:
-                            tla.cross_core_wait_flag(free, tla.arch.FIX, aiv_id=0)
-                            tla.cross_core_wait_flag(free, tla.arch.FIX, aiv_id=1)
+                            tla.cross_core_wait_flag(free, tla.pipes.FIX, aiv_id=0)
+                            tla.cross_core_wait_flag(free, tla.pipes.FIX, aiv_id=1)
                         copy_scores(
                             qbufs,
                             score_ptr + cpart * C_SLICE_ROWS * UB_SCORE_STRIDE,
@@ -126,11 +126,11 @@ def block_mean_attention_score_kernel(
                             nq_pad,
                             slice_serial,
                         )
-                tla.cross_core_set_flag(ready, tla.arch.FIX, aiv_id=0)
-                tla.cross_core_set_flag(ready, tla.arch.FIX, aiv_id=1)
+                tla.cross_core_set_flag(ready, tla.pipes.FIX, aiv_id=0)
+                tla.cross_core_set_flag(ready, tla.pipes.FIX, aiv_id=1)
             with tla.vector():
-                tla.cross_core_wait_flag(ready, tla.arch.VECTOR, aiv_id=0)
-                tla.cross_core_wait_flag(ready, tla.arch.VECTOR, aiv_id=1)
+                tla.cross_core_wait_flag(ready, tla.pipes.VECTOR, aiv_id=0)
+                tla.cross_core_wait_flag(ready, tla.pipes.VECTOR, aiv_id=1)
                 phase_one(
                     counts,
                     ws,
@@ -146,10 +146,10 @@ def block_mean_attention_score_kernel(
                     cache_counts,
                     _tiling.l1_tm,
                 )
-                tla.cross_core_set_flag(free, tla.arch.VECTOR, aiv_id=0)
-                tla.cross_core_set_flag(free, tla.arch.VECTOR, aiv_id=1)
+                tla.cross_core_set_flag(free, tla.pipes.VECTOR, aiv_id=0)
+                tla.cross_core_set_flag(free, tla.pipes.VECTOR, aiv_id=1)
         with tla.vector():
-            workspace_mutex.unlock(pipe=tla.arch.MTE3)
+            workspace_mutex.unlock(pipe=tla.pipes.MTE3)
             finalize(
                 counts,
                 ws,
@@ -166,17 +166,17 @@ def block_mean_attention_score_kernel(
             )
 
     with tla.cube():
-        tla.cross_core_wait_flag(free0, tla.arch.FIX, aiv_id=0)
-        tla.cross_core_wait_flag(free0, tla.arch.FIX, aiv_id=1)
-        tla.cross_core_wait_flag(free1, tla.arch.FIX, aiv_id=0)
-        tla.cross_core_wait_flag(free1, tla.arch.FIX, aiv_id=1)
+        tla.cross_core_wait_flag(free0, tla.pipes.FIX, aiv_id=0)
+        tla.cross_core_wait_flag(free0, tla.pipes.FIX, aiv_id=1)
+        tla.cross_core_wait_flag(free1, tla.pipes.FIX, aiv_id=0)
+        tla.cross_core_wait_flag(free1, tla.pipes.FIX, aiv_id=1)
         # All scores have been consumed. Join the two L0C owners explicitly.
         for mutex in (qbufs.mc0, qbufs.mc1):
-            mutex.lock(pipe=tla.arch.SCALAR)
-            mutex.unlock(pipe=tla.arch.SCALAR)
+            mutex.lock(pipe=tla.pipes.SCALAR)
+            mutex.unlock(pipe=tla.pipes.SCALAR)
     with tla.vector():
         # Resource-specific joins finish staging, output DMA, workspace reads,
         # and running statistics without draining unrelated pipelines.
         for mutex in (vbufs.mo0, vbufs.mo1, vbufs.ms0, vbufs.ms1, vbufs.mw, vbufs.mr):
-            mutex.lock(pipe=tla.arch.SCALAR)
-            mutex.unlock(pipe=tla.arch.SCALAR)
+            mutex.lock(pipe=tla.pipes.SCALAR)
+            mutex.unlock(pipe=tla.pipes.SCALAR)

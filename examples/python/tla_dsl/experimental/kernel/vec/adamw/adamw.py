@@ -97,14 +97,14 @@ def adamw_kernel(
                     gmo = tla.make_tensor(gm_mo + off, layout)
                     gvo = tla.make_tensor(gm_vo + off, layout)
 
-                    tile_slot.lock(pipe=tla.arch.MTE2)
+                    tile_slot.lock(pipe=tla.pipes.MTE2)
                     tla.copy(ub_p, gp)
                     tla.copy(ub_g, gg)
                     tla.copy(ub_m, gm)
                     tla.copy(ub_v, gv)
-                    tile_slot.unlock(pipe=tla.arch.MTE2)
+                    tile_slot.unlock(pipe=tla.pipes.MTE2)
 
-                    tile_slot.lock(pipe=tla.arch.VECTOR)
+                    tile_slot.lock(pipe=tla.pipes.VECTOR)
                     with tla.vec.func(mode="simd"):
                         full_mask = tla.create_mask(
                             pattern=tla.mask.ALL, dtype=tla.Float32
@@ -170,13 +170,13 @@ def adamw_kernel(
                             mc.store(mom)
                             vc.store(vel)
 
-                    tile_slot.unlock(pipe=tla.arch.VECTOR)
+                    tile_slot.unlock(pipe=tla.pipes.VECTOR)
 
-                    tile_slot.lock(pipe=tla.arch.MTE3)
+                    tile_slot.lock(pipe=tla.pipes.MTE3)
                     tla.copy(gpo, ub_p)
                     tla.copy(gmo, ub_m)
                     tla.copy(gvo, ub_v)
-                    tile_slot.unlock(pipe=tla.arch.MTE3)
+                    tile_slot.unlock(pipe=tla.pipes.MTE3)
 
 
 # ======================================================================================

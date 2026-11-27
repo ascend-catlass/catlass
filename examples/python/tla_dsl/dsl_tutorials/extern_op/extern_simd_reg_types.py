@@ -58,8 +58,8 @@ def invert_register(
     y = tla.make_tensor_like(
         tla.allocate(256, tla.UInt8, tla.AddressSpace.ub, 256), dst, tla.arch.RowMajor
     )
-    loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    done = tla.flag("done", tla.arch.VECTOR, tla.arch.MTE3)
+    loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    done = tla.flag("done", tla.pipes.VECTOR, tla.pipes.MTE3)
     with tla.vector():
         tla.copy(x, src)
         tla.set_flag(loaded)

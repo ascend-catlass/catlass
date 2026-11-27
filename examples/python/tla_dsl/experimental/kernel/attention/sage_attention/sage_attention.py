@@ -285,11 +285,11 @@ def sage_attention_kernel(
     blocks = (nq + bm - 1) // bm
     total = batch * hq * blocks
     with tla.vector():
-        tla.cross_core_set_flag(qready, tla.arch.VECTOR)
-        tla.cross_core_set_flag(oready, tla.arch.VECTOR)
+        tla.cross_core_set_flag(qready, tla.pipes.VECTOR)
+        tla.cross_core_set_flag(oready, tla.pipes.VECTOR)
     with tla.cube():
-        tla.cross_core_set_flag(pready, tla.arch.MTE1)
-        tla.cross_core_set_flag(pready_alt, tla.arch.MTE1)
+        tla.cross_core_set_flag(pready, tla.pipes.MTE1)
+        tla.cross_core_set_flag(pready_alt, tla.pipes.MTE1)
     for task in tla.range(tla.arch.block_idx(), total, tla.arch.block_num()):
         # Zig-zag complete waves, then visit high-causal-cost tiles first.
         wave = task // tla.arch.block_num()
@@ -359,25 +359,25 @@ def sage_attention_kernel(
                 qdst = tla.tile_view(
                     q1, tla.make_shape(dim, rows), tla.make_coord(0, 0)
                 )
-                m_q1.lock(pipe=tla.arch.MTE2)
+                m_q1.lock(pipe=tla.pipes.MTE2)
                 tla.copy(qdst, qgm)
-                m_q1.unlock(pipe=tla.arch.MTE2)
-                m_q1.lock(pipe=tla.arch.MTE1)
-                m_q0.lock(pipe=tla.arch.MTE1)
+                m_q1.unlock(pipe=tla.pipes.MTE2)
+                m_q1.lock(pipe=tla.pipes.MTE1)
+                m_q0.lock(pipe=tla.pipes.MTE1)
                 tla.copy(q0, q1)
-                m_q0.unlock(pipe=tla.arch.MTE1)
-                m_q1.unlock(pipe=tla.arch.MTE1)
+                m_q0.unlock(pipe=tla.pipes.MTE1)
+                m_q1.unlock(pipe=tla.pipes.MTE1)
             with tla.vector():
                 vsgm = tla.make_tensor(
                     vs.ptr + (b * hk + kh) * dim,
                     tla.make_layout(tla.make_shape(1, dim), tla.make_stride(dim, 1)),
                 )
-                m_vscale.lock(pipe=tla.arch.MTE2)
+                m_vscale.lock(pipe=tla.pipes.MTE2)
                 tla.copy(vscale, vsgm)
-                m_vscale.unlock(pipe=tla.arch.MTE2)
+                m_vscale.unlock(pipe=tla.pipes.MTE2)
                 # The final epilogue reads the scale and the accumulator tile;
                 # hold the output mutex until both stores have retired.
-                m_out.lock(pipe=tla.arch.VECTOR)
+                m_out.lock(pipe=tla.pipes.VECTOR)
                 with tla.vec.func(mode="simd"):
                     init_full = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
                     zero = tla.full(0.0, dtype=tla.Float32)
@@ -394,7 +394,7 @@ def sage_attention_kernel(
                     tla.local_mem_bar(
                         tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD
                     )
-                m_out.unlock(pipe=tla.arch.VECTOR)
+                m_out.unlock(pipe=tla.pipes.VECTOR)
             # One-block lookahead: QK/softmax(t), then PV/rescale(t-1).
             # P and alpha retain their own generation until delayed consumption.
             for ki in tla.range(steps + 1):
@@ -441,21 +441,21 @@ def sage_attention_kernel(
                                 tla.make_shape(cols, dim), tla.make_stride(kstride, 1)
                             ),
                         )
-                        m_k1.lock(pipe=tla.arch.MTE2)
+                        m_k1.lock(pipe=tla.pipes.MTE2)
                         tla.copy(
                             tla.tile_view(
                                 k1, tla.make_shape(cols, dim), tla.make_coord(0, 0)
                             ),
                             kgm,
                         )
-                        m_k1.unlock(pipe=tla.arch.MTE2)
-                        tla.cross_core_wait_flag(qready, tla.arch.FIX)
-                        m_k1.lock(pipe=tla.arch.MTE1)
+                        m_k1.unlock(pipe=tla.pipes.MTE2)
+                        tla.cross_core_wait_flag(qready, tla.pipes.FIX)
+                        m_k1.lock(pipe=tla.pipes.MTE1)
                         for qpart in tla.range_constexpr(bn // kc):
                             schunk = tla.make_tensor_like(
                                 s0p + qpart * bm * kc, s0, tla.arch.L0Clayout
                             )
-                            m_k0.lock(pipe=tla.arch.MTE1)
+                            m_k0.lock(pipe=tla.pipes.MTE1)
                             tla.copy(
                                 k0,
                                 tla.tile_view(
@@ -464,17 +464,17 @@ def sage_attention_kernel(
                                     tla.make_coord(qpart, 0),
                                 ),
                             )
-                            m_k0.unlock(pipe=tla.arch.MTE1)
-                            m_q0.lock(pipe=tla.arch.CUBE)
-                            m_k0.lock(pipe=tla.arch.CUBE)
+                            m_k0.unlock(pipe=tla.pipes.MTE1)
+                            m_q0.lock(pipe=tla.pipes.CUBE)
+                            m_k0.lock(pipe=tla.pipes.CUBE)
                             # Each L0C chunk owns its own mutex, so the other
                             # chunk's Fixpipe can drain concurrently.
                             schunk_lock = m_s0 if qpart == 0 else m_s1
-                            schunk_lock.lock(pipe=tla.arch.CUBE)
+                            schunk_lock.lock(pipe=tla.pipes.CUBE)
                             tla.mmad(schunk, k0, q0, init_c=True)
-                            schunk_lock.unlock(pipe=tla.arch.CUBE)
-                            m_k0.unlock(pipe=tla.arch.CUBE)
-                            m_q0.unlock(pipe=tla.arch.CUBE)
+                            schunk_lock.unlock(pipe=tla.pipes.CUBE)
+                            m_k0.unlock(pipe=tla.pipes.CUBE)
+                            m_q0.unlock(pipe=tla.pipes.CUBE)
                             # SPLIT_N writes 64 query columns per AIV.
                             chunk_sfix = tla.make_tensor(
                                 sp + qpart * kc * half,
@@ -482,15 +482,15 @@ def sage_attention_kernel(
                                     tla.make_shape(kc, bm), tla.make_stride(half, 1)
                                 ),
                             )
-                            schunk_lock.lock(pipe=tla.arch.FIX)
+                            schunk_lock.lock(pipe=tla.pipes.FIX)
                             tla.copy(chunk_sfix, schunk, split_s)
-                            schunk_lock.unlock(pipe=tla.arch.FIX)
-                        m_k1.unlock(pipe=tla.arch.MTE1)
-                        tla.cross_core_set_flag(qready, tla.arch.FIX)
+                            schunk_lock.unlock(pipe=tla.pipes.FIX)
+                        m_k1.unlock(pipe=tla.pipes.MTE1)
+                        tla.cross_core_set_flag(qready, tla.pipes.FIX)
                     with tla.vector():
-                        tla.cross_core_wait_flag(qready, tla.arch.VECTOR)
+                        tla.cross_core_wait_flag(qready, tla.pipes.VECTOR)
                         # Bounded-register native softmax + FP8 quantization.
-                        m_pp.lock(pipe=tla.arch.VECTOR)
+                        m_pp.lock(pipe=tla.pipes.VECTOR)
                         alu = tla.make_tensor(
                             rp + write_slot * half,
                             tla.make_layout(tla.make_shape(half), tla.make_stride(1)),
@@ -578,12 +578,12 @@ def sage_attention_kernel(
                                     m_hi,
                                 )
                             sums.store(denom, mask=mask32)
-                        m_pp.unlock(pipe=tla.arch.VECTOR)
-                        tla.cross_core_set_flag(qready, tla.arch.VECTOR)
+                        m_pp.unlock(pipe=tla.pipes.VECTOR)
+                        tla.cross_core_set_flag(qready, tla.pipes.VECTOR)
                         if write_slot == 0:
-                            tla.cross_core_wait_flag(pready, tla.arch.MTE3)
+                            tla.cross_core_wait_flag(pready, tla.pipes.MTE3)
                         else:
-                            tla.cross_core_wait_flag(pready_alt, tla.arch.MTE3)
+                            tla.cross_core_wait_flag(pready_alt, tla.pipes.MTE3)
                         pslot_storage = tla.make_tensor_like(
                             tla.recast_ptr(
                                 p1p + write_slot * bm * bn, dtype=tla.Float16
@@ -591,7 +591,7 @@ def sage_attention_kernel(
                             p1storage,
                             tla.arch.zN,
                         )
-                        m_pp.lock(pipe=tla.arch.MTE3)
+                        m_pp.lock(pipe=tla.pipes.MTE3)
                         tla.copy(
                             tla.tile_view(
                                 pslot_storage,
@@ -604,11 +604,11 @@ def sage_attention_kernel(
                                 tla.make_coord(0, 0),
                             ),
                         )
-                        m_pp.unlock(pipe=tla.arch.MTE3)
+                        m_pp.unlock(pipe=tla.pipes.MTE3)
                         if write_slot == 0:
-                            tla.cross_core_set_flag(pready, tla.arch.MTE3)
+                            tla.cross_core_set_flag(pready, tla.pipes.MTE3)
                         else:
-                            tla.cross_core_set_flag(pready_alt, tla.arch.MTE3)
+                            tla.cross_core_set_flag(pready_alt, tla.pipes.MTE3)
                 if ki > 0:
                     read_ki = ki - 1
                     read_slot = read_ki % 2
@@ -617,7 +617,7 @@ def sage_attention_kernel(
                     # masked zero P must never multiply uninitialized NaN padding.
                     if pv_cols < bn:
                         with tla.vector():
-                            m_pp.lock(pipe=tla.arch.VECTOR)
+                            m_pp.lock(pipe=tla.pipes.VECTOR)
                             with tla.vec.func(mode="simd"):
                                 vzmask = tla.update_mask(dim // 2, dtype=tla.Float16)[0]
                                 vzreg = tla.full(0.0, dtype=tla.Float16)
@@ -633,8 +633,8 @@ def sage_attention_kernel(
                                             block_stride=bn // 2 + 1
                                         ),
                                     )
-                            m_pp.unlock(pipe=tla.arch.VECTOR)
-                            m_pp.lock(pipe=tla.arch.MTE3)
+                            m_pp.unlock(pipe=tla.pipes.VECTOR)
+                            m_pp.lock(pipe=tla.pipes.MTE3)
                             tla.copy(
                                 tla.tile_view(
                                     v1storage,
@@ -647,11 +647,11 @@ def sage_attention_kernel(
                                     tla.make_coord(0, 0),
                                 ),
                             )
-                            m_pp.unlock(pipe=tla.arch.MTE3)
-                            tla.cross_core_set_flag(vzero_ready, tla.arch.MTE3)
+                            m_pp.unlock(pipe=tla.pipes.MTE3)
+                            tla.cross_core_set_flag(vzero_ready, tla.pipes.MTE3)
                     with tla.cube():
                         if pv_cols < bn:
-                            tla.cross_core_wait_flag(vzero_ready, tla.arch.MTE2)
+                            tla.cross_core_wait_flag(vzero_ready, tla.pipes.MTE2)
                         pv_vgm = tla.make_tensor(
                             v.ptr + kbase + read_ki * bn * kstride,
                             tla.make_layout(
@@ -659,25 +659,25 @@ def sage_attention_kernel(
                                 tla.make_stride(kstride, 1),
                             ),
                         )
-                        m_v1.lock(pipe=tla.arch.MTE2)
+                        m_v1.lock(pipe=tla.pipes.MTE2)
                         tla.copy(
                             tla.tile_view(
                                 v1, tla.make_shape(pv_cols, dim), tla.make_coord(0, 0)
                             ),
                             pv_vgm,
                         )
-                        m_v1.unlock(pipe=tla.arch.MTE2)
+                        m_v1.unlock(pipe=tla.pipes.MTE2)
                         if read_slot == 0:
-                            tla.cross_core_wait_flag(pready, tla.arch.MTE1)
+                            tla.cross_core_wait_flag(pready, tla.pipes.MTE1)
                         else:
-                            tla.cross_core_wait_flag(pready_alt, tla.arch.MTE1)
+                            tla.cross_core_wait_flag(pready_alt, tla.pipes.MTE1)
                         pslot_read = tla.make_tensor_like(
                             p1p + read_slot * bm * bn, p1t, tla.arch.nZ
                         )
-                        m_v1.lock(pipe=tla.arch.MTE1)
+                        m_v1.lock(pipe=tla.pipes.MTE1)
                         for ppart in tla.range_constexpr(bn // kc):
-                            m_v0.lock(pipe=tla.arch.MTE1)
-                            m_p0.lock(pipe=tla.arch.MTE1)
+                            m_v0.lock(pipe=tla.pipes.MTE1)
+                            m_p0.lock(pipe=tla.pipes.MTE1)
                             tla.copy(
                                 v0,
                                 tla.tile_view(
@@ -694,27 +694,27 @@ def sage_attention_kernel(
                                     tla.make_coord(0, ppart),
                                 ),
                             )
-                            m_p0.unlock(pipe=tla.arch.MTE1)
-                            m_v0.unlock(pipe=tla.arch.MTE1)
-                            m_v0.lock(pipe=tla.arch.CUBE)
-                            m_p0.lock(pipe=tla.arch.CUBE)
-                            m_s0.lock(pipe=tla.arch.CUBE)
+                            m_p0.unlock(pipe=tla.pipes.MTE1)
+                            m_v0.unlock(pipe=tla.pipes.MTE1)
+                            m_v0.lock(pipe=tla.pipes.CUBE)
+                            m_p0.lock(pipe=tla.pipes.CUBE)
+                            m_s0.lock(pipe=tla.pipes.CUBE)
                             tla.mmad(o0, p0, v0, init_c=(ppart == 0))
-                            m_s0.unlock(pipe=tla.arch.CUBE)
-                            m_p0.unlock(pipe=tla.arch.CUBE)
-                            m_v0.unlock(pipe=tla.arch.CUBE)
-                        m_v1.unlock(pipe=tla.arch.MTE1)
+                            m_s0.unlock(pipe=tla.pipes.CUBE)
+                            m_p0.unlock(pipe=tla.pipes.CUBE)
+                            m_v0.unlock(pipe=tla.pipes.CUBE)
+                        m_v1.unlock(pipe=tla.pipes.MTE1)
                         if read_slot == 0:
-                            tla.cross_core_set_flag(pready, tla.arch.MTE1)
+                            tla.cross_core_set_flag(pready, tla.pipes.MTE1)
                         else:
-                            tla.cross_core_set_flag(pready_alt, tla.arch.MTE1)
-                        tla.cross_core_wait_flag(oready, tla.arch.FIX)
-                        m_s0.lock(pipe=tla.arch.FIX)
+                            tla.cross_core_set_flag(pready_alt, tla.pipes.MTE1)
+                        tla.cross_core_wait_flag(oready, tla.pipes.FIX)
+                        m_s0.lock(pipe=tla.pipes.FIX)
                         tla.copy(ofix, o0, split)
-                        m_s0.unlock(pipe=tla.arch.FIX)
-                        tla.cross_core_set_flag(oready, tla.arch.FIX)
+                        m_s0.unlock(pipe=tla.pipes.FIX)
+                        tla.cross_core_set_flag(oready, tla.pipes.FIX)
                     with tla.vector():
-                        tla.cross_core_wait_flag(oready, tla.arch.VECTOR)
+                        tla.cross_core_wait_flag(oready, tla.pipes.VECTOR)
                         rread = tla.make_tensor(
                             rp + read_slot * half,
                             tla.make_layout(tla.make_shape(half), tla.make_stride(1)),
@@ -742,12 +742,12 @@ def sage_attention_kernel(
                                 tla.params.MemType.VEC_STORE,
                                 tla.params.MemType.VEC_LOAD,
                             )
-                        tla.cross_core_set_flag(oready, tla.arch.VECTOR)
+                        tla.cross_core_set_flag(oready, tla.pipes.VECTOR)
             with tla.vector():
                 # acc aliases yu, and the scale is read one last time here; both
                 # must wait for the previous task's MTE3 stores to retire.
-                m_out.lock(pipe=tla.arch.VECTOR)
-                m_vscale.lock(pipe=tla.arch.VECTOR)
+                m_out.lock(pipe=tla.pipes.VECTOR)
+                m_vscale.lock(pipe=tla.pipes.VECTOR)
                 with tla.vec.func(mode="simd"):
                     output_mask = tla.update_mask(64, dtype=out_dtype)[0]
                     for yr in tla.range(valid):
@@ -775,8 +775,8 @@ def sage_attention_kernel(
                                 tla.tile_view(
                                     yu, tla.make_shape(1, 64), tla.make_coord(yr, yd)
                                 ).store(ypck, mask=output_mask)
-                m_vscale.unlock(pipe=tla.arch.VECTOR)
-                m_out.unlock(pipe=tla.arch.VECTOR)
+                m_vscale.unlock(pipe=tla.pipes.VECTOR)
+                m_out.unlock(pipe=tla.pipes.VECTOR)
                 if valid > 0:
                     ogm = tla.make_tensor(
                         out.ptr + qbase + (qb * bm + sub * half) * qstride,
@@ -784,16 +784,16 @@ def sage_attention_kernel(
                             tla.make_shape(valid, dim), tla.make_stride(qstride, 1)
                         ),
                     )
-                    m_out.lock(pipe=tla.arch.MTE3)
+                    m_out.lock(pipe=tla.pipes.MTE3)
                     tla.copy(
                         ogm,
                         tla.tile_view(
                             yu, tla.make_shape(valid, dim), tla.make_coord(0, 0)
                         ),
                     )
-                    m_out.unlock(pipe=tla.arch.MTE3)
+                    m_out.unlock(pipe=tla.pipes.MTE3)
                     if want_lse:
-                        m_out.lock(pipe=tla.arch.VECTOR)
+                        m_out.lock(pipe=tla.pipes.VECTOR)
                         with tla.vec.func(mode="simd"):
                             for lr in tla.range(valid):
                                 m = tla.tile_view(
@@ -806,25 +806,25 @@ def sage_attention_kernel(
                                 tla.tile_view(
                                     elu, tla.make_shape(1), tla.make_coord(lr)
                                 ).store(e, params=us)
-                        m_out.unlock(pipe=tla.arch.VECTOR)
+                        m_out.unlock(pipe=tla.pipes.VECTOR)
                         egm = tla.make_tensor(
                             lse.ptr + (b * hq + h) * nq + qb * bm + sub * half,
                             tla.make_layout(tla.make_shape(valid), tla.make_stride(1)),
                         )
-                        m_out.lock(pipe=tla.arch.MTE3)
+                        m_out.lock(pipe=tla.pipes.MTE3)
                         tla.copy(
                             egm,
                             tla.tile_view(
                                 elu, tla.make_shape(valid), tla.make_coord(0)
                             ),
                         )
-                        m_out.unlock(pipe=tla.arch.MTE3)
+                        m_out.unlock(pipe=tla.pipes.MTE3)
     with tla.cube():
-        tla.cross_core_wait_flag(qready, tla.arch.FIX)
-        tla.cross_core_wait_flag(oready, tla.arch.FIX)
+        tla.cross_core_wait_flag(qready, tla.pipes.FIX)
+        tla.cross_core_wait_flag(oready, tla.pipes.FIX)
     with tla.vector():
-        tla.cross_core_wait_flag(pready, tla.arch.MTE3)
-        tla.cross_core_wait_flag(pready_alt, tla.arch.MTE3)
+        tla.cross_core_wait_flag(pready, tla.pipes.MTE3)
+        tla.cross_core_wait_flag(pready_alt, tla.pipes.MTE3)
 
 
 def run(

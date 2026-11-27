@@ -32,8 +32,8 @@ def _kernel(mask_mode="explicit", lhs_lanes=None, rhs_lanes=None):
         local_masks = tla.make_tensor_like(mask_ptr, masks, tla.arch.RowMajor)
         local_out0 = tla.make_tensor_like(out0_ptr, part0, tla.arch.RowMajor)
         local_out1 = tla.make_tensor_like(out1_ptr, part1, tla.arch.RowMajor)
-        loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.VECTOR)
-        stored = tla.flag("stored", tla.arch.VECTOR, tla.arch.MTE3)
+        loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+        stored = tla.flag("stored", tla.pipes.VECTOR, tla.pipes.MTE3)
         with tla.vector():
             tla.copy(local_lhs, lhs)
             tla.copy(local_rhs, rhs)

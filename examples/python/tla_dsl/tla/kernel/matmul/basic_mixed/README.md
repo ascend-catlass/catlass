@@ -186,9 +186,9 @@ import catlass.tla as tla
 mutex_l1a = tla.mutex(resource="l1a", id=0)
 
 # ...
-mutex_l1a.lock(pipe=tla.arch.MTE2)
+mutex_l1a.lock(pipe=tla.pipes.MTE2)
 tla.copy(l1_a, gm_a)
-mutex_l1a.unlock(pipe=tla.arch.MTE2)
+mutex_l1a.unlock(pipe=tla.pipes.MTE2)
 ```
 
 ## basic_mixed_fixpipe_nz2dn
@@ -284,9 +284,9 @@ import catlass.tla as tla
 
 # ...
 tla.copy(ub_a, gm_a)                                   # GM -> UB
-tla.cross_core_wait_flag(ub2l1_ready, tla.arch.MTE3)
+tla.cross_core_wait_flag(ub2l1_ready, tla.pipes.MTE3)
 tla.copy(l1_a, ub_a)                                   # UB -> L1
-tla.cross_core_set_flag(ub2l1_done, tla.arch.MTE3)
+tla.cross_core_set_flag(ub2l1_done, tla.pipes.MTE3)
 ```
 
 ## basic_mixed_store_zN

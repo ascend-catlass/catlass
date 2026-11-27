@@ -71,8 +71,8 @@ def make_kernel(dtype, *, masked, source_lanes, sparse=False, iterations=1):
             saved_ptr + GUARD,
             tla.make_layout(tla.make_shape(source_lanes), tla.make_stride(1)),
         )
-        ready = tla.flag("ready", tla.arch.MTE2, tla.arch.VECTOR)
-        done = tla.flag("done", tla.arch.VECTOR, tla.arch.MTE3)
+        ready = tla.flag("ready", tla.pipes.MTE2, tla.pipes.VECTOR)
+        done = tla.flag("done", tla.pipes.VECTOR, tla.pipes.MTE3)
         with tla.vector():
             tla.copy(acc_ub, accumulator)
             tla.copy(left_ub, left)

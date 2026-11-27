@@ -48,8 +48,8 @@ def transform_with_jit_epilogue(
     epilogue: tla.Constexpr,
 ) -> None:
     n_ele = gm_src.origin_shape[0]
-    ub_loaded = tla.flag("ub_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    vec_done = tla.flag("vec_done", tla.arch.VECTOR, tla.arch.MTE3)
+    ub_loaded = tla.flag("ub_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    vec_done = tla.flag("vec_done", tla.pipes.VECTOR, tla.pipes.MTE3)
 
     ub_ptr_src = tla.allocate(VECTOR_ELE, _KERNEL_DTYPE, tla.AddressSpace.ub, 256)
     ub_ptr_dst = tla.allocate(VECTOR_ELE, _KERNEL_DTYPE, tla.AddressSpace.ub, 256)

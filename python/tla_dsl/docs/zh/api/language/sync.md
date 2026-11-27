@@ -51,7 +51,7 @@ tla.flag(name: str, src_pipe: PipeLike, dst_pipe: PipeLike, id: int = -1) -> Tla
 
 ```python
 # MTE2 完成 GM→UB 拷贝后，VECTOR 侧才可消费该 UB tile。
-ub_loaded = tla.flag("ub_loaded", src_pipe=tla.arch.MTE2, dst_pipe=tla.arch.VECTOR)
+ub_loaded = tla.flag("ub_loaded", src_pipe=tla.pipes.MTE2, dst_pipe=tla.pipes.VECTOR)
 with tla.vector():
     tla.copy(dst=x_ub, src=x_gm)
     tla.set_flag(ub_loaded)   # 拷贝后：标记 UB 数据就绪
@@ -121,8 +121,8 @@ tla.cross_core_set_flag(cross_flag_value: CrossFlagLike, pipe: PipeLike, aiv_id:
 
 ```python
 with tla.cube():
-    tla.cross_core_set_flag(cf, tla.arch.CUBE)
-    # mode=4: tla.cross_core_set_flag(cf, tla.arch.CUBE, aiv_id=0)
+    tla.cross_core_set_flag(cf, tla.pipes.CUBE)
+    # mode=4: tla.cross_core_set_flag(cf, tla.pipes.CUBE, aiv_id=0)
 ```
 
 ---
@@ -156,7 +156,7 @@ tla.cross_core_wait_flag(cross_flag_value: CrossFlagLike, pipe: PipeLike, aiv_id
 
 ```python
 with tla.vector():
-    tla.cross_core_wait_flag(cf, tla.arch.VECTOR)
+    tla.cross_core_wait_flag(cf, tla.pipes.VECTOR)
 ```
 
 ---
@@ -255,7 +255,7 @@ tla.pipe_barrier(pipe: PipeLike) -> None
 
 ```python
 with tla.vector():
-    tla.pipe_barrier(tla.arch.MTE2)
+    tla.pipe_barrier(tla.pipes.MTE2)
 ```
 
 ---
@@ -438,10 +438,10 @@ tla.mutex_lock(mutex_value: MutexLike, *, pipe: PipeLike) -> None
 调用示例：
 
 ```python
-tla.mutex_lock(mtx, pipe=tla.arch.MTE2)
+tla.mutex_lock(mtx, pipe=tla.pipes.MTE2)
 # scalar pipe，用于保护标量单元读写的 buffer。
 # `tla.mutex` 返回值提供该方法形式：
-mtx.lock(pipe=tla.arch.SCALAR)
+mtx.lock(pipe=tla.pipes.SCALAR)
 ```
 
 ---
@@ -474,10 +474,10 @@ tla.mutex_unlock(mutex_value: MutexLike, *, pipe: PipeLike) -> None
 调用示例：
 
 ```python
-tla.mutex_unlock(mtx, pipe=tla.arch.MTE2)
+tla.mutex_unlock(mtx, pipe=tla.pipes.MTE2)
 # scalar pipe，用于保护标量单元读写的 buffer。
 # `tla.mutex` 返回值提供该方法形式：
-mtx.unlock(pipe=tla.arch.SCALAR)
+mtx.unlock(pipe=tla.pipes.SCALAR)
 ```
 
 ---

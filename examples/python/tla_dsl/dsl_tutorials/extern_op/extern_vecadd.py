@@ -49,8 +49,8 @@ def extern_vecadd(
     gm_b: tla.Tensor,
     gm_c: tla.Tensor,
 ) -> None:
-    ub_loaded = tla.flag("ub_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    vec_done = tla.flag("vec_done", tla.arch.VECTOR, tla.arch.MTE3)
+    ub_loaded = tla.flag("ub_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    vec_done = tla.flag("vec_done", tla.pipes.VECTOR, tla.pipes.MTE3)
 
     ub_ptr_a = tla.allocate(TILE_ELE, tla.Float32, tla.AddressSpace.ub, 256)
     ub_ptr_b = tla.allocate(TILE_ELE, tla.Float32, tla.AddressSpace.ub, 256)

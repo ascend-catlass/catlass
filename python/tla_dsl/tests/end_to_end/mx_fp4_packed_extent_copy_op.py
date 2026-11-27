@@ -95,7 +95,7 @@ def store_kernel(fp4_name: str):
         ub = tla.allocate(ROWS * PITCH_B, tla.Int8, tla.AddressSpace.ub, 512)
         # Three pipes again: the fill lands on MTE2, nothing computes, and the
         # store runs on MTE3, so the two hand-offs each need their own flag.
-        filled = tla.flag("filled", tla.arch.MTE2, tla.arch.MTE3)
+        filled = tla.flag("filled", tla.pipes.MTE2, tla.pipes.MTE3)
         with tla.vector():
             tla.copy(_int8_view(ub, ROWS, PITCH_B), gm_fill)
             tla.set_flag(filled)
@@ -118,8 +118,8 @@ def load_kernel(fp4_name: str):
     @tla.kernel
     def k(gm_fill, gm_src, gm_out, gm_len):
         ub = tla.allocate(ROWS * PITCH_B, tla.Int8, tla.AddressSpace.ub, 512)
-        filled = tla.flag("filled", tla.arch.MTE2, tla.arch.MTE3)
-        loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.MTE3)
+        filled = tla.flag("filled", tla.pipes.MTE2, tla.pipes.MTE3)
+        loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.MTE3)
         with tla.vector():
             tla.copy(_int8_view(ub, ROWS, PITCH_B), gm_fill)
             tla.set_flag(filled)
@@ -131,7 +131,7 @@ def load_kernel(fp4_name: str):
             # brought in, and the script reports a stale 0x55 as a dropped
             # element -- a synchronisation bug wearing the costume of the fp4
             # bug this file exists to catch.
-            tla.pipe_barrier(tla.arch.MTE2)
+            tla.pipe_barrier(tla.pipes.MTE2)
             extent = gm_len.origin_shape[1]
             tla.copy(
                 _fp4_view(ub, fp4_dtype, extent),

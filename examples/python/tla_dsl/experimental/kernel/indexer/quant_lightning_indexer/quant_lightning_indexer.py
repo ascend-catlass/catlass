@@ -167,22 +167,22 @@ def qli_scores(
             )
             l1_q_t = tla.make_tensor_like(l1_q, gm_q, tla.arch.zN)
             l1_sq_t = tla.make_tensor_like(l1_sq, gm_sq, tla.arch.zZMxScale)
-            mutex_l1q.lock(pipe=tla.arch.MTE2)
+            mutex_l1q.lock(pipe=tla.pipes.MTE2)
             tla.copy(l1_q_t, gm_q)
-            mutex_l1q.unlock(pipe=tla.arch.MTE2)
-            mutex_l1sq.lock(pipe=tla.arch.MTE2)
+            mutex_l1q.unlock(pipe=tla.pipes.MTE2)
+            mutex_l1sq.lock(pipe=tla.pipes.MTE2)
             tla.copy(l1_sq_t, gm_sq)
-            mutex_l1sq.unlock(pipe=tla.arch.MTE2)
+            mutex_l1sq.unlock(pipe=tla.pipes.MTE2)
             l0_q_t = tla.make_tensor_like(l0_q, l1_q_t, tla.arch.zN)
             # Q and its E8M0 scale move L1->L0A once per task; the three
             # mutexes state that both L1 buffers are consumed and L0A written.
-            mutex_l1q.lock(pipe=tla.arch.MTE1)
-            mutex_l1sq.lock(pipe=tla.arch.MTE1)
-            mutex_l0q.lock(pipe=tla.arch.MTE1)
+            mutex_l1q.lock(pipe=tla.pipes.MTE1)
+            mutex_l1sq.lock(pipe=tla.pipes.MTE1)
+            mutex_l0q.lock(pipe=tla.pipes.MTE1)
             tla.copy(l0_q_t, l1_q_t, scale=l1_sq_t)
-            mutex_l0q.unlock(pipe=tla.arch.MTE1)
-            mutex_l1sq.unlock(pipe=tla.arch.MTE1)
-            mutex_l1q.unlock(pipe=tla.arch.MTE1)
+            mutex_l0q.unlock(pipe=tla.pipes.MTE1)
+            mutex_l1sq.unlock(pipe=tla.pipes.MTE1)
+            mutex_l1q.unlock(pipe=tla.pipes.MTE1)
             l0_c_t = tla.make_tensor_like(l0_c, gm_q, tla.arch.L0Clayout)
             page_n = page_end - page_begin
             pair_n = (page_n + 1) // 2
@@ -193,8 +193,8 @@ def qli_scores(
                         cube_page = page_end - 1
                     # Wait until both AIVs have consumed the previous page of
                     # this slot before the FIX copy overwrites raw_ub[slot].
-                    tla.cross_core_wait_flag(free_flags[slot], tla.arch.FIX, aiv_id=0)
-                    tla.cross_core_wait_flag(free_flags[slot], tla.arch.FIX, aiv_id=1)
+                    tla.cross_core_wait_flag(free_flags[slot], tla.pipes.FIX, aiv_id=0)
+                    tla.cross_core_wait_flag(free_flags[slot], tla.pipes.FIX, aiv_id=1)
                     physical_page = block_table[0, cube_page]
                     gm_k = tla.tile_view(
                         k,
@@ -208,31 +208,31 @@ def qli_scores(
                     )
                     l1_k_t = tla.make_tensor_like(l1_k, gm_k, tla.arch.nZ)
                     l1_sk_t = tla.make_tensor_like(l1_sk, gm_sk, tla.arch.nNMxScale)
-                    mutex_l1k.lock(pipe=tla.arch.MTE2)
+                    mutex_l1k.lock(pipe=tla.pipes.MTE2)
                     tla.copy(l1_k_t, gm_k)
-                    mutex_l1k.unlock(pipe=tla.arch.MTE2)
-                    mutex_l1sk.lock(pipe=tla.arch.MTE2)
+                    mutex_l1k.unlock(pipe=tla.pipes.MTE2)
+                    mutex_l1sk.lock(pipe=tla.pipes.MTE2)
                     tla.copy(l1_sk_t, gm_sk)
-                    mutex_l1sk.unlock(pipe=tla.arch.MTE2)
+                    mutex_l1sk.unlock(pipe=tla.pipes.MTE2)
 
                     l0_k_t = tla.make_tensor_like(l0_k, l1_k_t, tla.arch.nZ)
-                    mutex_l1k.lock(pipe=tla.arch.MTE1)
-                    mutex_l1sk.lock(pipe=tla.arch.MTE1)
-                    mutex_l0k.lock(pipe=tla.arch.MTE1)
+                    mutex_l1k.lock(pipe=tla.pipes.MTE1)
+                    mutex_l1sk.lock(pipe=tla.pipes.MTE1)
+                    mutex_l0k.lock(pipe=tla.pipes.MTE1)
                     tla.copy(l0_k_t, l1_k_t, scale=l1_sk_t)
-                    mutex_l0k.unlock(pipe=tla.arch.MTE1)
-                    mutex_l1sk.unlock(pipe=tla.arch.MTE1)
-                    mutex_l1k.unlock(pipe=tla.arch.MTE1)
+                    mutex_l0k.unlock(pipe=tla.pipes.MTE1)
+                    mutex_l1sk.unlock(pipe=tla.pipes.MTE1)
+                    mutex_l1k.unlock(pipe=tla.pipes.MTE1)
 
                     # mmad_mx is not recognised by mutex_guard, so lock the
                     # three L0 tiles explicitly on the CUBE pipe.
-                    mutex_l0q.lock(pipe=tla.arch.CUBE)
-                    mutex_l0k.lock(pipe=tla.arch.CUBE)
-                    mutex_l0c.lock(pipe=tla.arch.CUBE)
+                    mutex_l0q.lock(pipe=tla.pipes.CUBE)
+                    mutex_l0k.lock(pipe=tla.pipes.CUBE)
+                    mutex_l0c.lock(pipe=tla.pipes.CUBE)
                     tla.mmad_mx(l0_c_t, l0_q_t, l0_k_t, init_c=True)
-                    mutex_l0c.unlock(pipe=tla.arch.CUBE)
-                    mutex_l0k.unlock(pipe=tla.arch.CUBE)
-                    mutex_l0q.unlock(pipe=tla.arch.CUBE)
+                    mutex_l0c.unlock(pipe=tla.pipes.CUBE)
+                    mutex_l0k.unlock(pipe=tla.pipes.CUBE)
+                    mutex_l0q.unlock(pipe=tla.pipes.CUBE)
 
                     # L0C -> UB on FIX; the mutex makes the next MMAD wait for
                     # this fixpipe read before it overwrites L0C.
@@ -244,7 +244,7 @@ def qli_scores(
                             layoutTag=tla.arch.RowMajor,
                         ),
                     )
-                    mutex_l0c.lock(pipe=tla.arch.FIX)
+                    mutex_l0c.lock(pipe=tla.pipes.FIX)
                     tla.copy(
                         raw_ub_t,
                         l0_c_t,
@@ -252,17 +252,17 @@ def qli_scores(
                             l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M
                         ),
                     )
-                    mutex_l0c.unlock(pipe=tla.arch.FIX)
-                    tla.cross_core_set_flag(ready_flags[slot], tla.arch.FIX, aiv_id=0)
-                    tla.cross_core_set_flag(ready_flags[slot], tla.arch.FIX, aiv_id=1)
+                    mutex_l0c.unlock(pipe=tla.pipes.FIX)
+                    tla.cross_core_set_flag(ready_flags[slot], tla.pipes.FIX, aiv_id=0)
+                    tla.cross_core_set_flag(ready_flags[slot], tla.pipes.FIX, aiv_id=1)
         tla.pipe_barrier(tla.pipes.ALL)
 
     with tla.vector():
         sub = tla.arch.sub_block_idx()
         # Both slots start free, matching the first two AIC waits.
         for prime_slot in (0, 1):
-            tla.cross_core_set_flag(free_flags[prime_slot], tla.arch.VECTOR, aiv_id=0)
-            tla.cross_core_set_flag(free_flags[prime_slot], tla.arch.VECTOR, aiv_id=1)
+            tla.cross_core_set_flag(free_flags[prime_slot], tla.pipes.VECTOR, aiv_id=0)
+            tla.cross_core_set_flag(free_flags[prime_slot], tla.pipes.VECTOR, aiv_id=1)
         for vector_task in tla.range(
             tla.arch.block_idx(), task_count, tla.arch.block_num()
         ):
@@ -297,9 +297,9 @@ def qli_scores(
                     origin_shape=tla.make_shape(aiv_m, query_heads),
                 ),
             )
-            mutex_w.lock(pipe=tla.arch.MTE2)
+            mutex_w.lock(pipe=tla.pipes.MTE2)
             tla.copy(w_ub_t, gm_w)
-            mutex_w.unlock(pipe=tla.arch.MTE2)
+            mutex_w.unlock(pipe=tla.pipes.MTE2)
             w_flat = tla.make_tensor(
                 w_ub,
                 tla.make_layout(
@@ -309,7 +309,7 @@ def qli_scores(
             # Hold the weight tile on VECTOR for the whole task: it is read
             # (broadcast) by every page of this task, so MTE2 must not reload
             # it until the last page is done.
-            mutex_w.lock(pipe=tla.arch.VECTOR)
+            mutex_w.lock(pipe=tla.pipes.VECTOR)
             with tla.vec.func(mode="simd"):
                 w_cast_rint = tla.params.CastParams(
                     reg_slot=tla.params.RegSlot.ZERO,
@@ -341,10 +341,10 @@ def qli_scores(
                     if vector_page >= page_end:
                         vector_page = page_end - 1
                     tla.cross_core_wait_flag(
-                        ready_flags[slot], tla.arch.VECTOR, aiv_id=0
+                        ready_flags[slot], tla.pipes.VECTOR, aiv_id=0
                     )
                     tla.cross_core_wait_flag(
-                        ready_flags[slot], tla.arch.VECTOR, aiv_id=1
+                        ready_flags[slot], tla.pipes.VECTOR, aiv_id=1
                     )
                     raw_aiv = tla.make_tensor(
                         raw_slots[slot],
@@ -365,7 +365,7 @@ def qli_scores(
                     # Vector owns score_ub[slot] until the stores retire; the
                     # same mutex on MTE3 orders the DMA read after them.
                     mutex_score = score_mutexes[slot]
-                    mutex_score.lock(pipe=tla.arch.VECTOR)
+                    mutex_score.lock(pipe=tla.pipes.VECTOR)
                     with tla.vec.func(mode="simd"):
                         zero_f = tla.full(0.0, tla.Float32)
                         cast_rint = tla.params.CastParams(
@@ -498,11 +498,15 @@ def qli_scores(
                                     pack_store,
                                     mask=mask_b0,
                                 )
-                    mutex_score.unlock(pipe=tla.arch.VECTOR)
+                    mutex_score.unlock(pipe=tla.pipes.VECTOR)
                     # raw_ub[slot] is no longer read past this point: release
                     # the slot before the slower UB->GM copy of score_ub.
-                    tla.cross_core_set_flag(free_flags[slot], tla.arch.VECTOR, aiv_id=0)
-                    tla.cross_core_set_flag(free_flags[slot], tla.arch.VECTOR, aiv_id=1)
+                    tla.cross_core_set_flag(
+                        free_flags[slot], tla.pipes.VECTOR, aiv_id=0
+                    )
+                    tla.cross_core_set_flag(
+                        free_flags[slot], tla.pipes.VECTOR, aiv_id=1
+                    )
                     score_gm = tla.make_tensor(
                         scores.ptr
                         + aiv_row_start * max_blocks
@@ -522,10 +526,10 @@ def qli_scores(
                             origin_shape=tla.make_shape(aiv_m, page_size),
                         ),
                     )
-                    mutex_score.lock(pipe=tla.arch.MTE3)
+                    mutex_score.lock(pipe=tla.pipes.MTE3)
                     tla.copy(score_gm, score_ub_t)
-                    mutex_score.unlock(pipe=tla.arch.MTE3)
-            mutex_w.unlock(pipe=tla.arch.VECTOR)
+                    mutex_score.unlock(pipe=tla.pipes.MTE3)
+            mutex_w.unlock(pipe=tla.pipes.VECTOR)
         tla.pipe_barrier(tla.pipes.ALL)
 
 

@@ -749,10 +749,10 @@ def issue_cached_score_mmads(
                 left_ptr + kind * 2048, row_major(left_ptr, 16, 128), tla.arch.zN
             )
             if tla.const_expr(row != 0):
-                mutex_event(_mutex_left_free, tla.arch.MTE1)
+                mutex_event(_mutex_left_free, tla.pipes.MTE1)
             tla.copy(left, source)
-            mutex_event(_mutex_loaded, tla.arch.MTE1)
-            mutex_event(_mutex_loaded, tla.arch.CUBE)
+            mutex_event(_mutex_loaded, tla.pipes.MTE1)
+            mutex_event(_mutex_loaded, tla.pipes.CUBE)
             for col in tla.range_constexpr(row + 1):
                 index = col
                 if tla.const_expr(row >= 2):
@@ -772,7 +772,7 @@ def issue_cached_score_mmads(
                 )
                 tla.mmad(result, left, right, init_c=True)
             if tla.const_expr(row != 3):
-                mutex_event(_mutex_left_free, tla.arch.CUBE)
+                mutex_event(_mutex_left_free, tla.pipes.CUBE)
 
 
 @tla.jit
@@ -785,7 +785,7 @@ def load_inverse_operands(left, right, a, b, zero, ready, free, diagonal_only, c
     """Reference full64 double-buffer load, optionally replace diagonal fractals."""
     _mutex_free = tla.mutex("load_inverse_operands_782_free", id=0)
     _mutex_ready = tla.mutex("load_inverse_operands_782_ready", id=1)
-    mutex_event(_mutex_free, tla.arch.MTE1)
+    mutex_event(_mutex_free, tla.pipes.MTE1)
     if tla.const_expr(diagonal_only):
         if tla.const_expr(clear):
             tla.copy(a, zero)
@@ -803,16 +803,16 @@ def load_inverse_operands(left, right, a, b, zero, ready, free, diagonal_only, c
     else:
         tla.copy(a, left)
         tla.copy(b, right)
-    mutex_event(_mutex_ready, tla.arch.MTE1)
+    mutex_event(_mutex_ready, tla.pipes.MTE1)
 
 
 @tla.jit
 def inverse_mmad(c, a, b, ready, free, initialize, unit):
     _mutex_ready = tla.mutex("inverse_mmad_806_ready", id=0)
     _mutex_free = tla.mutex("inverse_mmad_806_free", id=1)
-    mutex_event(_mutex_ready, tla.arch.CUBE)
+    mutex_event(_mutex_ready, tla.pipes.CUBE)
     tla.mmad(c, a, b, init_c=initialize, unit_flag=unit)
-    mutex_event(_mutex_free, tla.arch.CUBE)
+    mutex_event(_mutex_free, tla.pipes.CUBE)
 
 
 @tla.jit
@@ -820,10 +820,10 @@ def inverse_fix(destination, c, fix_ready, accumulator_free):
     _mutex_fix_ready = tla.mutex("inverse_fix_813_fix_ready", id=0)
     _mutex_accumulator_free = tla.mutex("inverse_fix_813_accumulator_free", id=1)
     tla.copy(destination, c, tla.params.CopyL0C2DstParams(unit_flag=3))
-    mutex_event(_mutex_fix_ready, tla.arch.FIX)
-    mutex_event(_mutex_fix_ready, tla.arch.MTE1)
-    mutex_event(_mutex_accumulator_free, tla.arch.FIX)
-    mutex_event(_mutex_accumulator_free, tla.arch.CUBE)
+    mutex_event(_mutex_fix_ready, tla.pipes.FIX)
+    mutex_event(_mutex_fix_ready, tla.pipes.MTE1)
+    mutex_event(_mutex_accumulator_free, tla.pipes.FIX)
+    mutex_event(_mutex_accumulator_free, tla.pipes.CUBE)
 
 
 @tla.jit
@@ -913,12 +913,12 @@ def copy_selected_fractals(destination, source, mode):
 def load_selected_pair(left, right, a, b, zero, ready, free, left_mode, right_mode):
     _mutex_free = tla.mutex("load_selected_pair_905_free", id=0)
     _mutex_ready = tla.mutex("load_selected_pair_905_ready", id=1)
-    mutex_event(_mutex_free, tla.arch.MTE1)
+    mutex_event(_mutex_free, tla.pipes.MTE1)
     tla.copy(a, zero)
     tla.copy(b, zero)
     copy_selected_fractals(a, left, left_mode)
     copy_selected_fractals(b, right, right_mode)
-    mutex_event(_mutex_ready, tla.arch.MTE1)
+    mutex_event(_mutex_ready, tla.pipes.MTE1)
 
 
 @tla.jit
@@ -952,14 +952,14 @@ def compose_packed64_inverse(
     load_selected_pair(scratch, inverse, a1, b1, zero, ready1, free1, 0, 4)
     # Preserve source overlap: prepare the second pair's independent LHS before
     # the first MMAD and FIX produce its RHS.
-    mutex_event(_mutex_free0, tla.arch.MTE1)
+    mutex_event(_mutex_free0, tla.pipes.MTE1)
     tla.copy(a0, zero)
     tla.copy(b0, zero)
     tla.copy(a0, inverse)
     inverse_mmad(c_power, a1, b1, ready1, free1, True, 3)
     inverse_fix(temporary, c_power, fix_ready, accumulator_free)
     copy_selected_fractals(b0, temporary, 5)
-    mutex_event(_mutex_ready0, tla.arch.MTE1)
+    mutex_event(_mutex_ready0, tla.pipes.MTE1)
     inverse_mmad(c_inverse, a0, b0, ready0, free0, False, 3)
 
 
@@ -1177,16 +1177,16 @@ def compute_state_projections(
     co = tla.make_tensor_like(co_ptr, row_major(co_ptr, 64, dv), tla.arch.L0Clayout)
     tla.copy(b, state_transposed)
     tla.copy(a0, w)
-    mutex_event(_mutex_loaded, tla.arch.MTE1)
-    mutex_event(_mutex_loaded, tla.arch.CUBE)
+    mutex_event(_mutex_loaded, tla.pipes.MTE1)
+    mutex_event(_mutex_loaded, tla.pipes.CUBE)
     tla.mmad(cu, a0, b, init_c=True)
     if tla.const_expr(projection_done is not None):
-        mutex_event(_mutex_projection_done, tla.arch.CUBE)
+        mutex_event(_mutex_projection_done, tla.pipes.CUBE)
     tla.copy(a1, q)
-    mutex_event(_mutex_loaded, tla.arch.MTE1)
-    mutex_event(_mutex_loaded, tla.arch.CUBE)
+    mutex_event(_mutex_loaded, tla.pipes.MTE1)
+    mutex_event(_mutex_loaded, tla.pipes.CUBE)
     if tla.const_expr(output_free is not None):
-        mutex_event(_mutex_output_free, tla.arch.CUBE)
+        mutex_event(_mutex_output_free, tla.pipes.CUBE)
     tla.mmad(co, a1, b, init_c=True)
 
 
@@ -1197,7 +1197,7 @@ def load_recurrent_operands(kg, aqk, ka_ptr, aq_ptr, dv, loaded):
     qa = tla.make_tensor_like(aq_ptr, row_major(aq_ptr, 64, 64), tla.arch.zN)
     tla.copy(kb, kg)
     tla.copy(qa, aqk)
-    mutex_event(_mutex_loaded, tla.arch.MTE1)
+    mutex_event(_mutex_loaded, tla.pipes.MTE1)
 
 
 @tla.jit
@@ -1209,8 +1209,8 @@ def compute_state_delta(vnew, ka_ptr, ua_ptr, ch_ptr, dv, loaded):
     kb = tla.make_tensor_like(ka_ptr, row_major(ka_ptr, 64, 128), tla.arch.nZ)
     ch = tla.make_tensor_like(ch_ptr, row_major(ch_ptr, dv, 128), tla.arch.L0Clayout)
     tla.copy(ua, vt)
-    mutex_event(_mutex_loaded, tla.arch.MTE1)
-    mutex_event(_mutex_loaded, tla.arch.CUBE)
+    mutex_event(_mutex_loaded, tla.pipes.MTE1)
+    mutex_event(_mutex_loaded, tla.pipes.CUBE)
     tla.mmad(ch, ua, kb, init_c=True)
 
 
@@ -1222,8 +1222,8 @@ def accumulate_output(vnew, aq_ptr, ub_ptr, co_ptr, dv, loaded):
     qa = tla.make_tensor_like(aq_ptr, row_major(aq_ptr, 64, 64), tla.arch.zN)
     co = tla.make_tensor_like(co_ptr, row_major(co_ptr, 64, dv), tla.arch.L0Clayout)
     tla.copy(ub, vnew)
-    mutex_event(_mutex_loaded, tla.arch.MTE1)
-    mutex_event(_mutex_loaded, tla.arch.CUBE)
+    mutex_event(_mutex_loaded, tla.pipes.MTE1)
+    mutex_event(_mutex_loaded, tla.pipes.CUBE)
     tla.mmad(co, qa, ub, init_c=False)
 
 
@@ -1379,35 +1379,35 @@ def prefix_inputs(
                 beta_pitch,
                 first_chunk,
             )
-        mutex_event(_mutex_gm_loaded, tla.arch.MTE2)
-        mutex_event(_mutex_gm_loaded, tla.arch.VECTOR)
+        mutex_event(_mutex_gm_loaded, tla.pipes.MTE2)
+        mutex_event(_mutex_gm_loaded, tla.pipes.VECTOR)
         if valid < 64:
             zero_qkv_tail(input_q, input_k, uv, valid)
         if tla.const_expr(beta.ptr.dtype != tla.Float32):
             prepare_beta_input(beta_io, raw_beta, valid, beta_pitch)
         if tla.const_expr(normalize):
             compute_qk_partial_sums(input_q, input_k, at(stats, 0, 128))
-            mutex_event(_mutex_v_done, tla.arch.VECTOR)
-            mutex_event(_mutex_v_done, tla.arch.MTE3)
+            mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+            mutex_event(_mutex_v_done, tla.pipes.MTE3)
             tla.copy(
                 row_major(exchange.ptr + aiv * 128, 1, 128),
                 row_major(stats.ptr, 1, 128),
             )
-            tla.cross_core_set_flag(published, tla.arch.MTE3)
-            tla.cross_core_wait_flag(published, tla.arch.MTE2)
+            tla.cross_core_set_flag(published, tla.pipes.MTE3)
+            tla.cross_core_wait_flag(published, tla.pipes.MTE2)
             tla.copy(
                 row_major(stats.ptr + 128, 1, 128),
                 row_major(exchange.ptr + (1 - aiv) * 128, 1, 128),
             )
-            mutex_event(_mutex_peer_loaded, tla.arch.MTE2)
+            mutex_event(_mutex_peer_loaded, tla.pipes.MTE2)
         if valid == 64:
             activate_gate(raw_gate, bias_ub, alpha_ub, ug, 64, mode, lower, True)
         else:
             activate_gate(raw_gate, bias_ub, alpha_ub, ug, valid, mode, lower, True)
         if tla.const_expr(normalize):
-            mutex_event(_mutex_peer_loaded, tla.arch.VECTOR)
-            tla.cross_core_set_flag(consumed, tla.arch.MTE2)
-            tla.cross_core_wait_flag(consumed, tla.arch.MTE3)
+            mutex_event(_mutex_peer_loaded, tla.pipes.VECTOR)
+            tla.cross_core_set_flag(consumed, tla.pipes.MTE2)
+            tla.cross_core_wait_flag(consumed, tla.pipes.MTE3)
             compute_qk_inverse_vectors(
                 at(stats, 0, 128), at(stats, 128, 128), at(stats, 256, 128)
             )
@@ -1421,8 +1421,8 @@ def prefix_inputs(
             )
         else:
             activate_beta(raw_beta, ub, valid, beta_sigmoid, allow_negative)
-        mutex_event(_mutex_v_done, tla.arch.VECTOR)
-        mutex_event(_mutex_v_done, tla.arch.MTE3)
+        mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+        mutex_event(_mutex_v_done, tla.pipes.MTE3)
         if tla.const_expr(save_norm and not defer_norm):
             if norm_owner:
                 tla.copy(
@@ -1446,8 +1446,8 @@ def prefix_inputs(
                     tla.copy(row_major(bact.ptr, 1, valid), row_major(ub.ptr, 1, valid))
                 else:
                     beta_to_column(ub, beta_column)
-                    mutex_event(_mutex_v_done, tla.arch.VECTOR)
-                    mutex_event(_mutex_v_done, tla.arch.MTE3)
+                    mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+                    mutex_event(_mutex_v_done, tla.pipes.MTE3)
                     tla.copy(
                         strided_rows(bact.ptr, valid, 1, beta_out_stride),
                         strided_rows(beta_column.ptr, valid, 1, 8),
@@ -1464,20 +1464,20 @@ def prefix_inputs(
                             row_major(stats.ptr + 320, 1, valid),
                         )
                     else:
-                        mutex_event(_mutex_cast_free, tla.arch.MTE3)
-                        mutex_event(_mutex_cast_free, tla.arch.VECTOR)
+                        mutex_event(_mutex_cast_free, tla.pipes.MTE3)
+                        mutex_event(_mutex_cast_free, tla.pipes.VECTOR)
                         beta_to_column(at(stats, 256, 64), beta_column)
-                        mutex_event(_mutex_v_done, tla.arch.VECTOR)
-                        mutex_event(_mutex_v_done, tla.arch.MTE3)
+                        mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+                        mutex_event(_mutex_v_done, tla.pipes.MTE3)
                         tla.copy(
                             strided_rows(rstd.ptr, valid, 1, rstd_stride),
                             strided_rows(beta_column.ptr, valid, 1, 8),
                         )
-                        mutex_event(_mutex_cast_free, tla.arch.MTE3)
-                        mutex_event(_mutex_cast_free, tla.arch.VECTOR)
+                        mutex_event(_mutex_cast_free, tla.pipes.MTE3)
+                        mutex_event(_mutex_cast_free, tla.pipes.VECTOR)
                         beta_to_column(at(stats, 320, 64), beta_column)
-                        mutex_event(_mutex_v_done, tla.arch.VECTOR)
-                        mutex_event(_mutex_v_done, tla.arch.MTE3)
+                        mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+                        mutex_event(_mutex_v_done, tla.pipes.MTE3)
                         tla.copy(
                             strided_rows(
                                 rstd.ptr + rstd_k_offset, valid, 1, rstd_stride
@@ -1579,13 +1579,13 @@ def publish_operand(nd, nz_ptr, l1_ptr, step, ready0, ready1, free0, free1, v_do
     _mutex_v_done = tla.mutex("publish_operand_1554_v_done", id=0)
     slot = step % 2
     if slot == 0:
-        tla.cross_core_wait_flag(free0, tla.arch.VECTOR)
+        tla.cross_core_wait_flag(free0, tla.pipes.VECTOR)
     else:
-        tla.cross_core_wait_flag(free1, tla.arch.VECTOR)
+        tla.cross_core_wait_flag(free1, tla.pipes.VECTOR)
     nz = flat(nz_ptr + slot * 1088, 1088)
     nd2nz_tile(nd, nz, 16, 64)
-    mutex_event(_mutex_v_done, tla.arch.VECTOR)
-    mutex_event(_mutex_v_done, tla.arch.MTE3)
+    mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+    mutex_event(_mutex_v_done, tla.pipes.MTE3)
     l1 = tla.make_tensor_like(
         l1_ptr + slot * 2048, row_major(l1_ptr, 16, 128), tla.arch.zN
     )
@@ -1596,18 +1596,18 @@ def publish_operand(nd, nz_ptr, l1_ptr, step, ready0, ready1, free0, free1, v_do
         padded_nz(nz.ptr, 16),
     )
     if slot == 0:
-        tla.cross_core_set_flag(ready0, tla.arch.MTE3)
+        tla.cross_core_set_flag(ready0, tla.pipes.MTE3)
     else:
-        tla.cross_core_set_flag(ready1, tla.arch.MTE3)
+        tla.cross_core_set_flag(ready1, tla.pipes.MTE3)
 
 
 @tla.jit
 def consume_operand(dst, l1_ptr, step, ready0, ready1, free0, free1, transpose):
     slot = step % 2
     if slot == 0:
-        tla.cross_core_wait_flag(ready0, tla.arch.MTE1)
+        tla.cross_core_wait_flag(ready0, tla.pipes.MTE1)
     else:
-        tla.cross_core_wait_flag(ready1, tla.arch.MTE1)
+        tla.cross_core_wait_flag(ready1, tla.pipes.MTE1)
     src = tla.make_tensor_like(
         l1_ptr + slot * 2048, row_major(l1_ptr, 16, 128), tla.arch.zN
     )
@@ -1617,9 +1617,9 @@ def consume_operand(dst, l1_ptr, step, ready0, ready1, free0, free1, transpose):
         )
     tla.copy(dst, src)
     if slot == 0:
-        tla.cross_core_set_flag(free0, tla.arch.MTE1)
+        tla.cross_core_set_flag(free0, tla.pipes.MTE1)
     else:
-        tla.cross_core_set_flag(free1, tla.arch.MTE1)
+        tla.cross_core_set_flag(free1, tla.pipes.MTE1)
 
 
 @tla.jit
@@ -1652,33 +1652,33 @@ def per_d_scores(
     ready1 = tla.cross_flag("pd_ready1", mode=2)
     free0 = tla.cross_flag("pd_free0", mode=2)
     free1 = tla.cross_flag("pd_free1", mode=2)
-    v_done = tla.flag("pd_v_done", tla.arch.VECTOR, tla.arch.MTE3)
-    loaded = tla.flag("pd_loaded", tla.arch.MTE1, tla.arch.CUBE)
-    op_free = tla.flag("pd_op_free", tla.arch.CUBE, tla.arch.MTE1)
+    v_done = tla.flag("pd_v_done", tla.pipes.VECTOR, tla.pipes.MTE3)
+    loaded = tla.flag("pd_loaded", tla.pipes.MTE1, tla.pipes.CUBE)
+    op_free = tla.flag("pd_op_free", tla.pipes.CUBE, tla.pipes.MTE1)
     with tla.cube():
         ka = tla.make_tensor_like(a_ptr, row_major(a_ptr, 16, 128), tla.arch.zN)
         qa = tla.make_tensor_like(a_ptr + 2048, row_major(a_ptr, 16, 128), tla.arch.zN)
         kb = tla.make_tensor_like(b_ptr, row_major(b_ptr, 128, 16), tla.arch.nZ)
-        tla.cross_core_set_flag(free0, tla.arch.MTE1)
-        tla.cross_core_set_flag(free1, tla.arch.MTE1)
-        mutex_event(_mutex_op_free, tla.arch.CUBE)
+        tla.cross_core_set_flag(free0, tla.pipes.MTE1)
+        tla.cross_core_set_flag(free1, tla.pipes.MTE1)
+        mutex_event(_mutex_op_free, tla.pipes.CUBE)
         step = 0
         for rb in tla.range_constexpr(4):
             if tla.const_expr(rb > 0 or bounded):
-                mutex_event(_mutex_op_free, tla.arch.MTE1)
+                mutex_event(_mutex_op_free, tla.pipes.MTE1)
                 consume_operand(ka, l1_ptr, step, ready0, ready1, free0, free1, False)
                 step = step + 1
                 consume_operand(qa, l1_ptr, step, ready0, ready1, free0, free1, False)
                 step = step + 1
                 for cb in tla.range_constexpr(rb + int(bounded)):
                     if tla.const_expr(cb > 0):
-                        mutex_event(_mutex_op_free, tla.arch.MTE1)
+                        mutex_event(_mutex_op_free, tla.pipes.MTE1)
                     consume_operand(
                         kb, l1_ptr, step, ready0, ready1, free0, free1, True
                     )
                     step = step + 1
-                    mutex_event(_mutex_loaded, tla.arch.MTE1)
-                    mutex_event(_mutex_loaded, tla.arch.CUBE)
+                    mutex_event(_mutex_loaded, tla.pipes.MTE1)
+                    mutex_event(_mutex_loaded, tla.pipes.CUBE)
                     c0 = tla.make_tensor_like(
                         ck + rb * 256 + cb * 1024,
                         row_major(ck, 16, 16),
@@ -1691,7 +1691,7 @@ def per_d_scores(
                     )
                     tla.mmad(c0, ka, kb, init_c=True)
                     tla.mmad(c1, qa, kb, init_c=True)
-                    mutex_event(_mutex_op_free, tla.arch.CUBE)
+                    mutex_event(_mutex_op_free, tla.pipes.CUBE)
             if tla.const_expr(not bounded):
                 diag0 = tla.make_tensor_like(
                     ck + rb * 256 + rb * 1024, row_major(ck, 16, 16), tla.arch.L0Clayout
@@ -1700,7 +1700,7 @@ def per_d_scores(
                     cq + rb * 256 + rb * 1024, row_major(cq, 16, 16), tla.arch.L0Clayout
                 )
                 for active in tla.range(16):
-                    mutex_event(_mutex_op_free, tla.arch.MTE1)
+                    mutex_event(_mutex_op_free, tla.pipes.MTE1)
                     consume_operand(
                         ka, l1_ptr, step, ready0, ready1, free0, free1, False
                     )
@@ -1713,12 +1713,12 @@ def per_d_scores(
                         kb, l1_ptr, step, ready0, ready1, free0, free1, True
                     )
                     step = step + 1
-                    mutex_event(_mutex_loaded, tla.arch.MTE1)
-                    mutex_event(_mutex_loaded, tla.arch.CUBE)
+                    mutex_event(_mutex_loaded, tla.pipes.MTE1)
+                    mutex_event(_mutex_loaded, tla.pipes.CUBE)
                     tla.mmad(diag0, ka, kb, init_c=active == 0)
                     tla.mmad(diag1, qa, kb, init_c=active == 0)
-                    mutex_event(_mutex_op_free, tla.arch.CUBE)
-        mutex_event(_mutex_op_free, tla.arch.MTE1)
+                    mutex_event(_mutex_op_free, tla.pipes.CUBE)
+        mutex_event(_mutex_op_free, tla.pipes.MTE1)
     with tla.vector():
         step = 0
         for rb in tla.range_constexpr(4):
@@ -1780,8 +1780,8 @@ def per_d_scores(
                         v_done,
                     )
                     step = step + 1
-        tla.cross_core_wait_flag(free0, tla.arch.VECTOR)
-        tla.cross_core_wait_flag(free1, tla.arch.VECTOR)
+        tla.cross_core_wait_flag(free0, tla.pipes.VECTOR)
+        tla.cross_core_wait_flag(free1, tla.pipes.VECTOR)
 
 
 # -----------------------------------------------------------------------------
@@ -1801,11 +1801,11 @@ def publish_resident_inverse(
         "publish_resident_inverse_1766_resident_ready", id=1
     )
     if tla.const_expr(save):
-        mutex_event(_mutex_cube_done, tla.arch.CUBE)
-        mutex_event(_mutex_cube_done, tla.arch.FIX)
+        mutex_event(_mutex_cube_done, tla.pipes.CUBE)
+        mutex_event(_mutex_cube_done, tla.pipes.FIX)
         tla.copy(public_inverse, acc)
     tla.copy(resident, acc, tla.params.CopyL0C2DstParams(unit_flag=3))
-    mutex_event(_mutex_resident_ready, tla.arch.FIX)
+    mutex_event(_mutex_resident_ready, tla.pipes.FIX)
 
 
 @tla.jit
@@ -1836,25 +1836,25 @@ def compute_u_pre_and_w(
     cu = tla.make_tensor_like(
         c_ptr + 8192, row_major(c_ptr, 64, 128), tla.arch.L0Clayout
     )
-    mutex_event(_mutex_resident_ready, tla.arch.MTE1)
+    mutex_event(_mutex_resident_ready, tla.pipes.MTE1)
     tla.copy(a, resident)
-    tla.cross_core_wait_flag(k_ready, tla.arch.MTE1)
+    tla.cross_core_wait_flag(k_ready, tla.pipes.MTE1)
     tla.copy(b, k_beta)
-    mutex_event(_mutex_loaded, tla.arch.MTE1)
-    mutex_event(_mutex_loaded, tla.arch.CUBE)
+    mutex_event(_mutex_loaded, tla.pipes.MTE1)
+    mutex_event(_mutex_loaded, tla.pipes.CUBE)
     tla.mmad(cw, a, b, init_c=True)
-    mutex_event(_mutex_b_free, tla.arch.CUBE)
-    mutex_event(_mutex_result_ready, tla.arch.MTE1)
-    mutex_event(_mutex_result_ready, tla.arch.CUBE)
+    mutex_event(_mutex_b_free, tla.pipes.CUBE)
+    mutex_event(_mutex_result_ready, tla.pipes.MTE1)
+    mutex_event(_mutex_result_ready, tla.pipes.CUBE)
     tla.copy(out_w, cw)
-    mutex_event(_mutex_b_free, tla.arch.MTE1)
-    tla.cross_core_wait_flag(v_ready, tla.arch.MTE1)
+    mutex_event(_mutex_b_free, tla.pipes.MTE1)
+    tla.cross_core_wait_flag(v_ready, tla.pipes.MTE1)
     tla.copy(b, v_beta)
-    mutex_event(_mutex_loaded, tla.arch.MTE1)
-    mutex_event(_mutex_loaded, tla.arch.CUBE)
+    mutex_event(_mutex_loaded, tla.pipes.MTE1)
+    mutex_event(_mutex_loaded, tla.pipes.CUBE)
     tla.mmad(cu, a, b, init_c=True)
-    mutex_event(_mutex_result_ready, tla.arch.MTE1)
-    mutex_event(_mutex_result_ready, tla.arch.CUBE)
+    mutex_event(_mutex_result_ready, tla.pipes.MTE1)
+    mutex_event(_mutex_result_ready, tla.pipes.CUBE)
     tla.copy(out_u, cu)
 
 
@@ -1958,20 +1958,20 @@ def stage_one_chunk(
         nt_ready = tla.cross_flag("nt_ready", mode=2)
     else:
         kb_ready, vb_ready, score_ready, score_done, nt_ready = phase_flags
-    resident_ready = tla.flag("resident_ready", tla.arch.FIX, tla.arch.MTE1)
-    cast_free = tla.flag("cast_free", tla.arch.MTE3, tla.arch.VECTOR)
-    gm_loaded = tla.flag("gm_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    v_done = tla.flag("v_done", tla.arch.VECTOR, tla.arch.MTE3)
-    l0_loaded = tla.flag("l0_loaded", tla.arch.MTE1, tla.arch.CUBE)
-    left_free = tla.flag("left_free", tla.arch.CUBE, tla.arch.MTE1)
-    cube_done = tla.flag("cube_done", tla.arch.CUBE, tla.arch.FIX)
-    gm_ready = tla.flag("gm_ready", tla.arch.MTE2, tla.arch.MTE1)
-    ready0 = tla.flag("ready0", tla.arch.MTE1, tla.arch.CUBE)
-    ready1 = tla.flag("ready1", tla.arch.MTE1, tla.arch.CUBE)
-    free0 = tla.flag("free0", tla.arch.CUBE, tla.arch.MTE1)
-    free1 = tla.flag("free1", tla.arch.CUBE, tla.arch.MTE1)
-    fix_ready = tla.flag("fix_ready", tla.arch.FIX, tla.arch.MTE1)
-    acc_free = tla.flag("acc_free", tla.arch.FIX, tla.arch.CUBE)
+    resident_ready = tla.flag("resident_ready", tla.pipes.FIX, tla.pipes.MTE1)
+    cast_free = tla.flag("cast_free", tla.pipes.MTE3, tla.pipes.VECTOR)
+    gm_loaded = tla.flag("gm_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    v_done = tla.flag("v_done", tla.pipes.VECTOR, tla.pipes.MTE3)
+    l0_loaded = tla.flag("l0_loaded", tla.pipes.MTE1, tla.pipes.CUBE)
+    left_free = tla.flag("left_free", tla.pipes.CUBE, tla.pipes.MTE1)
+    cube_done = tla.flag("cube_done", tla.pipes.CUBE, tla.pipes.FIX)
+    gm_ready = tla.flag("gm_ready", tla.pipes.MTE2, tla.pipes.MTE1)
+    ready0 = tla.flag("ready0", tla.pipes.MTE1, tla.pipes.CUBE)
+    ready1 = tla.flag("ready1", tla.pipes.MTE1, tla.pipes.CUBE)
+    free0 = tla.flag("free0", tla.pipes.CUBE, tla.pipes.MTE1)
+    free1 = tla.flag("free1", tla.pipes.CUBE, tla.pipes.MTE1)
+    fix_ready = tla.flag("fix_ready", tla.pipes.FIX, tla.pipes.MTE1)
+    acc_free = tla.flag("acc_free", tla.pipes.FIX, tla.pipes.CUBE)
     raw_gate = flat(tla.recast_ptr(ubase + 37248, dtype=g.ptr.dtype), 4096)
     gate_bf16 = flat(tla.recast_ptr(ubase + 41344, dtype=tla.BFloat16), 4096)
     raw_beta = flat(ubase + 43392, 64)
@@ -1986,7 +1986,7 @@ def stage_one_chunk(
             beta_pitch = 8
         else:
             beta_pitch = 16
-    peer_loaded = tla.flag("s1_peer_loaded", tla.arch.MTE2, tla.arch.VECTOR)
+    peer_loaded = tla.flag("s1_peer_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
     published = tla.cross_flag("s1_partial_ready", mode=1)
     consumed = tla.cross_flag("s1_partial_free", mode=1)
     negative = matrix64(lp, tla.arch.zN)
@@ -2005,13 +2005,13 @@ def stage_one_chunk(
     with tla.cube():
         identity.fill(0)
         zero.fill(0)
-        tla.pipe_barrier(tla.arch.MTE2)
+        tla.pipe_barrier(tla.pipes.MTE2)
         for i in tla.range_constexpr(4):
             tla.copy(
                 tla.tile_view(identity, tla.make_shape(16, 16), tla.make_coord(i, i)),
                 row_major(identity16.ptr, 16, 16),
             )
-        mutex_event(_mutex_gm_ready, tla.arch.MTE2)
+        mutex_event(_mutex_gm_ready, tla.pipes.MTE2)
     with tla.vector():
         aiv = tla.arch.sub_block_idx()
         tla.copy(
@@ -2039,38 +2039,38 @@ def stage_one_chunk(
             )
         tla.copy(row_major(bias_ub.ptr, 1, 64), row_major(bias.ptr + aiv * 64, 1, 64))
         tla.copy(row_major(alpha_ub.ptr, 1, 1), row_major(alpha.ptr, 1, 1))
-        mutex_event(_mutex_gm_loaded, tla.arch.MTE2)
-        mutex_event(_mutex_gm_loaded, tla.arch.VECTOR)
+        mutex_event(_mutex_gm_loaded, tla.pipes.MTE2)
+        mutex_event(_mutex_gm_loaded, tla.pipes.VECTOR)
         zero_qkv_tail(uq, uk, uv, valid)
         prepare_gate_input(raw_gate, gate_bf16, valid)
         prepare_beta_input(beta_io, raw_beta, valid, beta_pitch)
         if tla.const_expr(normalize):
             compute_qk_partial_sums(uq, uk, at(stats, 0, 128))
-            mutex_event(_mutex_v_done, tla.arch.VECTOR)
-            mutex_event(_mutex_v_done, tla.arch.MTE3)
+            mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+            mutex_event(_mutex_v_done, tla.pipes.MTE3)
             tla.copy(
                 row_major(exchange.ptr + aiv * 128, 1, 128),
                 row_major(stats.ptr, 1, 128),
             )
-            tla.cross_core_set_flag(published, tla.arch.MTE3)
-            tla.cross_core_wait_flag(published, tla.arch.MTE2)
+            tla.cross_core_set_flag(published, tla.pipes.MTE3)
+            tla.cross_core_wait_flag(published, tla.pipes.MTE2)
             tla.copy(
                 row_major(stats.ptr + 128, 1, 128),
                 row_major(exchange.ptr + (1 - aiv) * 128, 1, 128),
             )
-            mutex_event(_mutex_peer_loaded, tla.arch.MTE2)
+            mutex_event(_mutex_peer_loaded, tla.pipes.MTE2)
         activate_gate(gate_bf16, bias_ub, alpha_ub, ug, valid, mode, lower, True)
         if tla.const_expr(normalize):
-            mutex_event(_mutex_peer_loaded, tla.arch.VECTOR)
-            tla.cross_core_set_flag(consumed, tla.arch.MTE2)
-            tla.cross_core_wait_flag(consumed, tla.arch.MTE3)
+            mutex_event(_mutex_peer_loaded, tla.pipes.VECTOR)
+            tla.cross_core_set_flag(consumed, tla.pipes.MTE2)
+            tla.cross_core_wait_flag(consumed, tla.pipes.MTE3)
             compute_qk_inverse_vectors(
                 at(stats, 0, 128), at(stats, 128, 128), at(stats, 256, 128)
             )
             normalize_local_qk(uq, uk, at(stats, 256, 128))
         activate_beta(raw_beta, ub, valid, beta_sigmoid, allow_negative)
-        mutex_event(_mutex_v_done, tla.arch.VECTOR)
-        mutex_event(_mutex_v_done, tla.arch.MTE3)
+        mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+        mutex_event(_mutex_v_done, tla.pipes.MTE3)
         if norm_owner:
             tla.copy(
                 strided_rows(qn.ptr + aiv * 64, valid, 64, norm_stride),
@@ -2089,8 +2089,8 @@ def stage_one_chunk(
                 tla.copy(row_major(bact.ptr, 1, valid), row_major(ub.ptr, 1, valid))
             else:
                 beta_to_column(ub, beta_column)
-                mutex_event(_mutex_v_done, tla.arch.VECTOR)
-                mutex_event(_mutex_v_done, tla.arch.MTE3)
+                mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+                mutex_event(_mutex_v_done, tla.pipes.MTE3)
                 tla.copy(
                     strided_rows(bact.ptr, valid, 1, beta_out_stride),
                     strided_rows(beta_column.ptr, valid, 1, 8),
@@ -2107,20 +2107,20 @@ def stage_one_chunk(
                             row_major(stats.ptr + 320, 1, valid),
                         )
                     else:
-                        mutex_event(_mutex_cast_free, tla.arch.MTE3)
-                        mutex_event(_mutex_cast_free, tla.arch.VECTOR)
+                        mutex_event(_mutex_cast_free, tla.pipes.MTE3)
+                        mutex_event(_mutex_cast_free, tla.pipes.VECTOR)
                         beta_to_column(at(stats, 256, 64), beta_column)
-                        mutex_event(_mutex_v_done, tla.arch.VECTOR)
-                        mutex_event(_mutex_v_done, tla.arch.MTE3)
+                        mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+                        mutex_event(_mutex_v_done, tla.pipes.MTE3)
                         tla.copy(
                             strided_rows(rstd.ptr, valid, 1, rstd_stride),
                             strided_rows(beta_column.ptr, valid, 1, 8),
                         )
-                        mutex_event(_mutex_cast_free, tla.arch.MTE3)
-                        mutex_event(_mutex_cast_free, tla.arch.VECTOR)
+                        mutex_event(_mutex_cast_free, tla.pipes.MTE3)
+                        mutex_event(_mutex_cast_free, tla.pipes.VECTOR)
                         beta_to_column(at(stats, 320, 64), beta_column)
-                        mutex_event(_mutex_v_done, tla.arch.VECTOR)
-                        mutex_event(_mutex_v_done, tla.arch.MTE3)
+                        mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+                        mutex_event(_mutex_v_done, tla.pipes.MTE3)
                         tla.copy(
                             strided_rows(
                                 rstd.ptr + rstd_k_offset, valid, 1, rstd_stride
@@ -2129,7 +2129,7 @@ def stage_one_chunk(
                         )
     if tla.const_expr(shared):
         with tla.cube():
-            tla.cross_core_wait_flag(score_ready, tla.arch.MTE1)
+            tla.cross_core_wait_flag(score_ready, tla.pipes.MTE1)
             issue_cached_score_mmads(
                 shared_score_l1(score_ptr),
                 left,
@@ -2143,8 +2143,8 @@ def stage_one_chunk(
             aiv = tla.arch.sub_block_idx()
             pack_shared_score_panel(uq, uk, ug, packed, 0, scale)
             pack_shared_score_panel(uq, uk, ug, packed, 1, scale)
-            mutex_event(_mutex_v_done, tla.arch.VECTOR)
-            mutex_event(_mutex_v_done, tla.arch.MTE3)
+            mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+            mutex_event(_mutex_v_done, tla.pipes.MTE3)
             tla.copy(
                 tla.tile_view(
                     shared_score_l1(score_ptr),
@@ -2153,7 +2153,7 @@ def stage_one_chunk(
                 ),
                 padded_nz(packed.ptr, 224),
             )
-            tla.cross_core_set_flag(score_ready, tla.arch.MTE3)
+            tla.cross_core_set_flag(score_ready, tla.pipes.MTE3)
     else:
         per_d_scores(
             uq,
@@ -2174,8 +2174,8 @@ def stage_one_chunk(
             mode == 1,
         )
     with tla.cube():
-        mutex_event(_mutex_cube_done, tla.arch.CUBE)
-        mutex_event(_mutex_cube_done, tla.arch.FIX)
+        mutex_event(_mutex_cube_done, tla.pipes.CUBE)
+        mutex_event(_mutex_cube_done, tla.pipes.FIX)
         tla.copy(
             row_major(kkt.ptr, 64, 64),
             ci,
@@ -2186,11 +2186,11 @@ def stage_one_chunk(
             ct,
             tla.params.CopyL0C2DstParams(l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M),
         )
-        tla.cross_core_set_flag(score_done, tla.arch.FIX)
-        tla.cross_core_wait_flag(nt_ready, tla.arch.MTE1)
-        mutex_event(_mutex_gm_ready, tla.arch.MTE1)
-        mutex_event(_mutex_free0, tla.arch.CUBE)
-        mutex_event(_mutex_free1, tla.arch.CUBE)
+        tla.cross_core_set_flag(score_done, tla.pipes.FIX)
+        tla.cross_core_wait_flag(nt_ready, tla.pipes.MTE1)
+        mutex_event(_mutex_gm_ready, tla.pipes.MTE1)
+        mutex_event(_mutex_free0, tla.pipes.CUBE)
+        mutex_event(_mutex_free1, tla.pipes.CUBE)
         neumann_packed64_leaves(
             negative,
             identity,
@@ -2257,16 +2257,16 @@ def stage_one_chunk(
             left_free,
             cube_done,
         )
-        mutex_event(_mutex_free0, tla.arch.MTE1)
-        mutex_event(_mutex_free1, tla.arch.MTE1)
+        mutex_event(_mutex_free0, tla.pipes.MTE1)
+        mutex_event(_mutex_free1, tla.pipes.MTE1)
         tla.pipe_barrier(tla.pipes.ALL)
     with tla.vector():
         aiv = tla.arch.sub_block_idx()
-        tla.cross_core_wait_flag(score_done, tla.arch.VECTOR)
+        tla.cross_core_wait_flag(score_done, tla.pipes.VECTOR)
         apply_beta_and_finish_t(kkt, ub, nt, aiv)
         nd2nz_tile(nt, ntnz, 32, 64)
-        mutex_event(_mutex_v_done, tla.arch.VECTOR)
-        mutex_event(_mutex_v_done, tla.arch.MTE3)
+        mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+        mutex_event(_mutex_v_done, tla.pipes.MTE3)
         tla.copy(
             tla.tile_view(
                 matrix64(lp, tla.arch.zN),
@@ -2275,33 +2275,33 @@ def stage_one_chunk(
             ),
             padded_nz(ntnz.ptr, 32),
         )
-        tla.cross_core_set_flag(nt_ready, tla.arch.MTE3)
+        tla.cross_core_set_flag(nt_ready, tla.pipes.MTE3)
         beta_weighted_operand(uk, ub, ug, cast, True)
         nd2nz_tile(cast, nz0, 64, 64)
-        mutex_event(_mutex_v_done, tla.arch.VECTOR)
-        mutex_event(_mutex_v_done, tla.arch.MTE3)
+        mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+        mutex_event(_mutex_v_done, tla.pipes.MTE3)
         kb = tla.make_tensor_like(kb_ptr, row_major(kb_ptr, 64, 128), tla.arch.zN)
         vb = tla.make_tensor_like(vb_ptr, row_major(vb_ptr, 64, 128), tla.arch.zN)
         tla.copy(
             tla.tile_view(kb, tla.make_shape(64, 64), tla.make_coord(0, aiv)),
             padded_nz(nz0.ptr, 64),
         )
-        tla.cross_core_set_flag(kb_ready, tla.arch.MTE3)
-        mutex_event(_mutex_cast_free, tla.arch.MTE3)
-        mutex_event(_mutex_cast_free, tla.arch.VECTOR)
+        tla.cross_core_set_flag(kb_ready, tla.pipes.MTE3)
+        mutex_event(_mutex_cast_free, tla.pipes.MTE3)
+        mutex_event(_mutex_cast_free, tla.pipes.VECTOR)
         beta_weighted_operand(uv, ub, ug, cast, False)
         nd2nz_tile(cast, nz1, 64, 64)
-        mutex_event(_mutex_v_done, tla.arch.VECTOR)
-        mutex_event(_mutex_v_done, tla.arch.MTE3)
+        mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+        mutex_event(_mutex_v_done, tla.pipes.MTE3)
         tla.copy(
             tla.tile_view(vb, tla.make_shape(64, 64), tla.make_coord(0, aiv)),
             padded_nz(nz1.ptr, 64),
         )
-        tla.cross_core_set_flag(vb_ready, tla.arch.MTE3)
+        tla.cross_core_set_flag(vb_ready, tla.pipes.MTE3)
         prepare_decayed_q(uq, ug, uqg, uqs, scale)
         restored_state_inputs(uk, ug, ukg, ugamma)
-        mutex_event(_mutex_v_done, tla.arch.VECTOR)
-        mutex_event(_mutex_v_done, tla.arch.MTE3)
+        mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+        mutex_event(_mutex_v_done, tla.pipes.MTE3)
         tla.copy(
             strided_rows(qg.ptr + aiv * 64, output_rows, 64, v_stride),
             row_major(uqg.ptr, output_rows, 64),
@@ -2320,8 +2320,8 @@ def stage_one_chunk(
         )
         tla.copy(row_major(gamma.ptr + aiv * 64, 1, 64), row_major(ugamma.ptr, 1, 64))
         mask_mqk(mqk, aq, aiv)
-        mutex_event(_mutex_v_done, tla.arch.VECTOR)
-        mutex_event(_mutex_v_done, tla.arch.MTE3)
+        mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+        mutex_event(_mutex_v_done, tla.pipes.MTE3)
         rows = output_rows - aiv * 32
         if rows > 32:
             rows = 32
@@ -2515,23 +2515,23 @@ def stage_one_pipeline(
     c3_free = tla.cross_flag("pipeline_c3_free", mode=2)
     published = tla.cross_flag("pipeline_partial_ready", mode=1)
     consumed = tla.cross_flag("pipeline_partial_free", mode=1)
-    resident_ready = tla.flag("pipeline_resident", tla.arch.FIX, tla.arch.MTE1)
-    cast_free = tla.flag("pipeline_cast_free", tla.arch.MTE3, tla.arch.VECTOR)
-    gm_loaded = tla.flag("pipeline_gm_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    v_done = tla.flag("pipeline_v_done", tla.arch.VECTOR, tla.arch.MTE3)
-    v_input_free = tla.flag("pipeline_v_input_free", tla.arch.VECTOR, tla.arch.MTE2)
-    qk_input_free = tla.flag("pipeline_qk_input_free", tla.arch.MTE3, tla.arch.MTE2)
-    l0_loaded = tla.flag("pipeline_l0_loaded", tla.arch.MTE1, tla.arch.CUBE)
-    left_free = tla.flag("pipeline_left_free", tla.arch.CUBE, tla.arch.MTE1)
-    cube_done = tla.flag("pipeline_cube_done", tla.arch.CUBE, tla.arch.FIX)
-    gm_ready = tla.flag("pipeline_gm_ready", tla.arch.MTE2, tla.arch.MTE1)
-    ready0 = tla.flag("pipeline_ready0", tla.arch.MTE1, tla.arch.CUBE)
-    ready1 = tla.flag("pipeline_ready1", tla.arch.MTE1, tla.arch.CUBE)
-    free0 = tla.flag("pipeline_free0", tla.arch.CUBE, tla.arch.MTE1)
-    free1 = tla.flag("pipeline_free1", tla.arch.CUBE, tla.arch.MTE1)
-    fix_ready = tla.flag("pipeline_fix_ready", tla.arch.FIX, tla.arch.MTE1)
-    acc_free = tla.flag("pipeline_acc_free", tla.arch.FIX, tla.arch.CUBE)
-    peer_loaded = tla.flag("pipeline_peer_loaded", tla.arch.MTE2, tla.arch.VECTOR)
+    resident_ready = tla.flag("pipeline_resident", tla.pipes.FIX, tla.pipes.MTE1)
+    cast_free = tla.flag("pipeline_cast_free", tla.pipes.MTE3, tla.pipes.VECTOR)
+    gm_loaded = tla.flag("pipeline_gm_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    v_done = tla.flag("pipeline_v_done", tla.pipes.VECTOR, tla.pipes.MTE3)
+    v_input_free = tla.flag("pipeline_v_input_free", tla.pipes.VECTOR, tla.pipes.MTE2)
+    qk_input_free = tla.flag("pipeline_qk_input_free", tla.pipes.MTE3, tla.pipes.MTE2)
+    l0_loaded = tla.flag("pipeline_l0_loaded", tla.pipes.MTE1, tla.pipes.CUBE)
+    left_free = tla.flag("pipeline_left_free", tla.pipes.CUBE, tla.pipes.MTE1)
+    cube_done = tla.flag("pipeline_cube_done", tla.pipes.CUBE, tla.pipes.FIX)
+    gm_ready = tla.flag("pipeline_gm_ready", tla.pipes.MTE2, tla.pipes.MTE1)
+    ready0 = tla.flag("pipeline_ready0", tla.pipes.MTE1, tla.pipes.CUBE)
+    ready1 = tla.flag("pipeline_ready1", tla.pipes.MTE1, tla.pipes.CUBE)
+    free0 = tla.flag("pipeline_free0", tla.pipes.CUBE, tla.pipes.MTE1)
+    free1 = tla.flag("pipeline_free1", tla.pipes.CUBE, tla.pipes.MTE1)
+    fix_ready = tla.flag("pipeline_fix_ready", tla.pipes.FIX, tla.pipes.MTE1)
+    acc_free = tla.flag("pipeline_acc_free", tla.pipes.FIX, tla.pipes.CUBE)
+    peer_loaded = tla.flag("pipeline_peer_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
     negative = matrix64(lp, tla.arch.zN)
     identity = matrix64(lp + 4096, tla.arch.zN)
     zero = matrix64(lp + 8192, tla.arch.zN)
@@ -2551,14 +2551,14 @@ def stage_one_pipeline(
     with tla.cube():
         identity.fill(0)
         zero.fill(0)
-        tla.pipe_barrier(tla.arch.MTE2)
+        tla.pipe_barrier(tla.pipes.MTE2)
         for i in tla.range_constexpr(4):
             tla.copy(
                 tla.tile_view(identity, tla.make_shape(16, 16), tla.make_coord(i, i)),
                 row_major(identity16.ptr, 16, 16),
             )
-        mutex_event(_mutex_gm_ready, tla.arch.MTE2)
-        mutex_event(_mutex_gm_ready, tla.arch.MTE1)
+        mutex_event(_mutex_gm_ready, tla.pipes.MTE2)
+        mutex_event(_mutex_gm_ready, tla.pipes.MTE1)
     for tick in tla.range(lo.to(tla.Int32), (hi + tla.Int64(1)).to(tla.Int32)):
         task = tla.Int64(tick)
         parity = (task % tla.Int64(2)).to(tla.Int32)
@@ -2612,8 +2612,8 @@ def stage_one_pipeline(
             with tla.vector():
                 aiv_0 = tla.arch.sub_block_idx()
                 # Raw gate arrives while the delayed inverse runs on Cube.
-                mutex_event(_mutex_v_input_free, tla.arch.VECTOR)
-                mutex_event(_mutex_v_input_free, tla.arch.MTE2)
+                mutex_event(_mutex_v_input_free, tla.pipes.VECTOR)
+                mutex_event(_mutex_v_input_free, tla.pipes.MTE2)
                 tla.copy(
                     row_major(raw_gate.ptr, valid, 64),
                     strided_rows(g.ptr + vo + aiv_0 * 64, valid, 64, v_stride),
@@ -2646,45 +2646,45 @@ def stage_one_pipeline(
         if task > lo:
             with tla.vector():
                 aiv_1 = tla.arch.sub_block_idx()
-                tla.cross_core_wait_flag(score_done, tla.arch.VECTOR)
+                tla.cross_core_wait_flag(score_done, tla.pipes.VECTOR)
                 if task > lo + tla.Int64(1):
-                    tla.cross_core_wait_flag(c3_free, tla.arch.MTE3)
+                    tla.cross_core_wait_flag(c3_free, tla.pipes.MTE3)
                 finish_t_nz(kkt, ub, ntnz, aiv_1)
-                mutex_event(_mutex_v_done, tla.arch.VECTOR)
-                mutex_event(_mutex_v_done, tla.arch.MTE3)
+                mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+                mutex_event(_mutex_v_done, tla.pipes.MTE3)
                 tla.copy(
                     tla.tile_view(
                         negative, tla.make_shape(32, 64), tla.make_coord(aiv_1, 0)
                     ),
                     padded_nz(ntnz.ptr, 32),
                 )
-                tla.cross_core_set_flag(nt_ready, tla.arch.MTE3)
-                mutex_event(_mutex_cast_free, tla.arch.MTE3)
-                mutex_event(_mutex_cast_free, tla.arch.VECTOR)
+                tla.cross_core_set_flag(nt_ready, tla.pipes.MTE3)
+                mutex_event(_mutex_cast_free, tla.pipes.MTE3)
+                mutex_event(_mutex_cast_free, tla.pipes.VECTOR)
                 beta_weighted_nz(old_k, ub, old_g, nz0, True)
-                mutex_event(_mutex_v_done, tla.arch.VECTOR)
-                mutex_event(_mutex_v_done, tla.arch.MTE3)
+                mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+                mutex_event(_mutex_v_done, tla.pipes.MTE3)
                 tla.copy(
                     tla.tile_view(kb, tla.make_shape(64, 64), tla.make_coord(0, aiv_1)),
                     padded_nz(nz0.ptr, 64),
                 )
-                tla.cross_core_set_flag(kb_ready, tla.arch.MTE3)
-                mutex_event(_mutex_cast_free, tla.arch.MTE3)
-                mutex_event(_mutex_cast_free, tla.arch.VECTOR)
+                tla.cross_core_set_flag(kb_ready, tla.pipes.MTE3)
+                mutex_event(_mutex_cast_free, tla.pipes.MTE3)
+                mutex_event(_mutex_cast_free, tla.pipes.VECTOR)
                 beta_weighted_nz(uv, ub, old_g, nz1, False)
-                mutex_event(_mutex_v_done, tla.arch.VECTOR)
-                mutex_event(_mutex_v_done, tla.arch.MTE3)
+                mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+                mutex_event(_mutex_v_done, tla.pipes.MTE3)
                 tla.copy(
                     tla.tile_view(vb, tla.make_shape(64, 64), tla.make_coord(0, aiv_1)),
                     padded_nz(nz1.ptr, 64),
                 )
-                tla.cross_core_set_flag(vb_ready, tla.arch.MTE3)
-                mutex_event(_mutex_v_input_free, tla.arch.VECTOR)
-                mutex_event(_mutex_v_input_free, tla.arch.MTE2)
+                tla.cross_core_set_flag(vb_ready, tla.pipes.MTE3)
+                mutex_event(_mutex_v_input_free, tla.pipes.VECTOR)
+                mutex_event(_mutex_v_input_free, tla.pipes.MTE2)
             with tla.cube():
-                tla.cross_core_wait_flag(nt_ready, tla.arch.MTE1)
-                mutex_event(_mutex_free0, tla.arch.CUBE)
-                mutex_event(_mutex_free1, tla.arch.CUBE)
+                tla.cross_core_wait_flag(nt_ready, tla.pipes.MTE1)
+                mutex_event(_mutex_free0, tla.pipes.CUBE)
+                mutex_event(_mutex_free1, tla.pipes.CUBE)
                 neumann_packed64_leaves(
                     negative,
                     identity,
@@ -2732,10 +2732,10 @@ def stage_one_pipeline(
                     cube_done,
                     resident_ready,
                 )
-                mutex_event(_mutex_free0, tla.arch.MTE1)
-                mutex_event(_mutex_free1, tla.arch.MTE1)
-                mutex_event(_mutex_acc_free, tla.arch.FIX)
-                mutex_event(_mutex_acc_free, tla.arch.CUBE)
+                mutex_event(_mutex_free0, tla.pipes.MTE1)
+                mutex_event(_mutex_free1, tla.pipes.MTE1)
+                mutex_event(_mutex_acc_free, tla.pipes.FIX)
+                mutex_event(_mutex_acc_free, tla.pipes.CUBE)
         if task < hi:
             with tla.vector():
                 aiv_2 = tla.arch.sub_block_idx()
@@ -2755,27 +2755,27 @@ def stage_one_pipeline(
                             beta.ptr + vo // tla.Int64(128), valid, 1, beta_stride
                         ),
                     )
-                mutex_event(_mutex_gm_loaded, tla.arch.MTE2)
-                mutex_event(_mutex_gm_loaded, tla.arch.VECTOR)
+                mutex_event(_mutex_gm_loaded, tla.pipes.MTE2)
+                mutex_event(_mutex_gm_loaded, tla.pipes.VECTOR)
                 if valid < 64:
                     zero_qkv_tail(uq, uk, uv, valid)
                 if tla.const_expr(not direct_beta):
                     prepare_beta_input(beta_io, raw_beta, valid, beta_pitch)
                 if tla.const_expr(normalize):
                     compute_qk_partial_sums(uq, uk, at(stats, 0, 128))
-                    mutex_event(_mutex_v_done, tla.arch.VECTOR)
-                    mutex_event(_mutex_v_done, tla.arch.MTE3)
+                    mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+                    mutex_event(_mutex_v_done, tla.pipes.MTE3)
                     tla.copy(
                         row_major(exchange.ptr + aiv_2 * 128, 1, 128),
                         row_major(stats.ptr, 1, 128),
                     )
-                    tla.cross_core_set_flag(published, tla.arch.MTE3)
-                    tla.cross_core_wait_flag(published, tla.arch.MTE2)
+                    tla.cross_core_set_flag(published, tla.pipes.MTE3)
+                    tla.cross_core_wait_flag(published, tla.pipes.MTE2)
                     tla.copy(
                         row_major(stats.ptr + 128, 1, 128),
                         row_major(exchange.ptr + (1 - aiv_2) * 128, 1, 128),
                     )
-                    mutex_event(_mutex_peer_loaded, tla.arch.MTE2)
+                    mutex_event(_mutex_peer_loaded, tla.pipes.MTE2)
                 if valid == 64:
                     activate_gate(
                         raw_gate, bias_ub, alpha_ub, ug, 64, mode, lower, True
@@ -2785,9 +2785,9 @@ def stage_one_pipeline(
                         raw_gate, bias_ub, alpha_ub, ug, valid, mode, lower, True
                     )
                 if tla.const_expr(normalize):
-                    mutex_event(_mutex_peer_loaded, tla.arch.VECTOR)
-                    tla.cross_core_set_flag(consumed, tla.arch.MTE2)
-                    tla.cross_core_wait_flag(consumed, tla.arch.MTE3)
+                    mutex_event(_mutex_peer_loaded, tla.pipes.VECTOR)
+                    tla.cross_core_set_flag(consumed, tla.pipes.MTE2)
+                    tla.cross_core_wait_flag(consumed, tla.pipes.MTE3)
                     normalize_and_snapshot(
                         uq,
                         uk,
@@ -2798,8 +2798,8 @@ def stage_one_pipeline(
                     )
                 else:
                     copy_k_snapshot(uk, uk_snapshot)
-                mutex_event(_mutex_v_done, tla.arch.VECTOR)
-                mutex_event(_mutex_v_done, tla.arch.MTE3)
+                mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+                mutex_event(_mutex_v_done, tla.pipes.MTE3)
                 if tla.const_expr(save_norm):
                     if head % tla.Int64(nv // nq) == tla.Int64(0):
                         tla.copy(
@@ -2845,11 +2845,11 @@ def stage_one_pipeline(
                                     row_major(stats.ptr + 320, 1, valid),
                                 )
                             else:
-                                mutex_event(_mutex_cast_free, tla.arch.MTE3)
-                                mutex_event(_mutex_cast_free, tla.arch.VECTOR)
+                                mutex_event(_mutex_cast_free, tla.pipes.MTE3)
+                                mutex_event(_mutex_cast_free, tla.pipes.VECTOR)
                                 beta_to_column(at(stats, 256, 64), beta_column)
-                                mutex_event(_mutex_v_done, tla.arch.VECTOR)
-                                mutex_event(_mutex_v_done, tla.arch.MTE3)
+                                mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+                                mutex_event(_mutex_v_done, tla.pipes.MTE3)
                                 tla.copy(
                                     strided_rows(
                                         rstd.ptr + no // tla.Int64(128),
@@ -2859,11 +2859,11 @@ def stage_one_pipeline(
                                     ),
                                     strided_rows(beta_column.ptr, valid, 1, 8),
                                 )
-                                mutex_event(_mutex_cast_free, tla.arch.MTE3)
-                                mutex_event(_mutex_cast_free, tla.arch.VECTOR)
+                                mutex_event(_mutex_cast_free, tla.pipes.MTE3)
+                                mutex_event(_mutex_cast_free, tla.pipes.VECTOR)
                                 beta_to_column(at(stats, 320, 64), beta_column)
-                                mutex_event(_mutex_v_done, tla.arch.VECTOR)
-                                mutex_event(_mutex_v_done, tla.arch.MTE3)
+                                mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+                                mutex_event(_mutex_v_done, tla.pipes.MTE3)
                                 tla.copy(
                                     strided_rows(
                                         rstd.ptr
@@ -2875,11 +2875,11 @@ def stage_one_pipeline(
                                     ),
                                     strided_rows(beta_column.ptr, valid, 1, 8),
                                 )
-                mutex_event(_mutex_cast_free, tla.arch.MTE3)
-                mutex_event(_mutex_cast_free, tla.arch.VECTOR)
+                mutex_event(_mutex_cast_free, tla.pipes.MTE3)
+                mutex_event(_mutex_cast_free, tla.pipes.VECTOR)
                 prepare_decayed_q(uq, ug, uqg, uqs, scale)
-                mutex_event(_mutex_v_done, tla.arch.VECTOR)
-                mutex_event(_mutex_v_done, tla.arch.MTE3)
+                mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+                mutex_event(_mutex_v_done, tla.pipes.MTE3)
                 if tla.const_expr(save_cache):
                     tla.copy(
                         strided_rows(qg.ptr + vo + aiv_2 * 64, valid, 64, v_stride),
@@ -2927,8 +2927,8 @@ def stage_one_pipeline(
                         ),
                         4096,
                     )
-                    mutex_event(_mutex_qk_input_free, tla.arch.MTE3)
-                    mutex_event(_mutex_qk_input_free, tla.arch.MTE2)
+                    mutex_event(_mutex_qk_input_free, tla.pipes.MTE3)
+                    mutex_event(_mutex_qk_input_free, tla.pipes.MTE2)
                     tla.copy(
                         row_major(next_q.ptr, next_valid, 64),
                         strided_rows(
@@ -2943,7 +2943,7 @@ def stage_one_pipeline(
                     )
             if tla.const_expr(shared):
                 with tla.cube():
-                    tla.cross_core_wait_flag(score_ready, tla.arch.MTE1)
+                    tla.cross_core_wait_flag(score_ready, tla.pipes.MTE1)
                     issue_cached_score_mmads(
                         shared_score_l1(score_ptr),
                         left,
@@ -2957,8 +2957,8 @@ def stage_one_pipeline(
                     aiv_3 = tla.arch.sub_block_idx()
                     pack_shared_score_panel(uq, uk, ug, packed, 0, scale)
                     pack_shared_score_panel(uq, uk, ug, packed, 1, scale)
-                    mutex_event(_mutex_v_done, tla.arch.VECTOR)
-                    mutex_event(_mutex_v_done, tla.arch.MTE3)
+                    mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+                    mutex_event(_mutex_v_done, tla.pipes.MTE3)
                     tla.copy(
                         tla.tile_view(
                             shared_score_l1(score_ptr),
@@ -2967,7 +2967,7 @@ def stage_one_pipeline(
                         ),
                         padded_nz(packed.ptr, 224),
                     )
-                    tla.cross_core_set_flag(score_ready, tla.arch.MTE3)
+                    tla.cross_core_set_flag(score_ready, tla.pipes.MTE3)
             else:
                 per_d_scores(
                     uq,
@@ -2988,8 +2988,8 @@ def stage_one_pipeline(
                     mode == 1,
                 )
             with tla.cube():
-                mutex_event(_mutex_cube_done, tla.arch.CUBE)
-                mutex_event(_mutex_cube_done, tla.arch.FIX)
+                mutex_event(_mutex_cube_done, tla.pipes.CUBE)
+                mutex_event(_mutex_cube_done, tla.pipes.FIX)
                 tla.copy(
                     row_major(kkt.ptr, 64, 64),
                     ci,
@@ -3004,7 +3004,7 @@ def stage_one_pipeline(
                         l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M
                     ),
                 )
-                tla.cross_core_set_flag(score_done, tla.arch.FIX)
+                tla.cross_core_set_flag(score_done, tla.pipes.FIX)
             with tla.vector():
                 aiv_4 = tla.arch.sub_block_idx()
                 if tla.const_expr(direct_beta):
@@ -3015,11 +3015,11 @@ def stage_one_pipeline(
                     activate_beta(raw_beta, ub, valid, beta_sigmoid, allow_negative)
                 if tla.const_expr(save_beta):
                     if aiv_4 == 0:
-                        mutex_event(_mutex_cast_free, tla.arch.MTE3)
-                        mutex_event(_mutex_cast_free, tla.arch.VECTOR)
+                        mutex_event(_mutex_cast_free, tla.pipes.MTE3)
+                        mutex_event(_mutex_cast_free, tla.pipes.VECTOR)
                         beta_to_column(ub, beta_column)
-                        mutex_event(_mutex_v_done, tla.arch.VECTOR)
-                        mutex_event(_mutex_v_done, tla.arch.MTE3)
+                        mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+                        mutex_event(_mutex_v_done, tla.pipes.MTE3)
                         tla.copy(
                             strided_rows(bact.ptr + bo, valid, 1, nv),
                             strided_rows(beta_column.ptr, valid, 1, 8),
@@ -3042,15 +3042,15 @@ def stage_one_pipeline(
                     left_free,
                     cube_done,
                 )
-                tla.cross_core_set_flag(c3_free, tla.arch.MTE1)
-                mutex_event(_mutex_acc_free, tla.arch.FIX)
-                mutex_event(_mutex_acc_free, tla.arch.CUBE)
+                tla.cross_core_set_flag(c3_free, tla.pipes.MTE1)
+                mutex_event(_mutex_acc_free, tla.pipes.FIX)
+                mutex_event(_mutex_acc_free, tla.pipes.CUBE)
             with tla.vector():
                 aiv_5 = tla.arch.sub_block_idx()
                 restored_state_inputs(old_k, old_g, ukg, ugamma)
                 mask_mqk(old_mqk, aq, aiv_5)
-                mutex_event(_mutex_v_done, tla.arch.VECTOR)
-                mutex_event(_mutex_v_done, tla.arch.MTE3)
+                mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+                mutex_event(_mutex_v_done, tla.pipes.MTE3)
                 tla.copy(
                     strided_rows(kg.ptr + old_vo + aiv_5 * 64, old_valid, 64, v_stride),
                     row_major(ukg.ptr, old_valid, 64),
@@ -3075,7 +3075,7 @@ def stage_one_pipeline(
                     )
     with tla.vector():
         if hi > lo:
-            tla.cross_core_wait_flag(c3_free, tla.arch.MTE3)
+            tla.cross_core_wait_flag(c3_free, tla.pipes.MTE3)
         tla.pipe_barrier(tla.pipes.ALL)
     with tla.cube():
         tla.pipe_barrier(tla.pipes.ALL)
@@ -3091,7 +3091,7 @@ def load_chunk_l1(destination, source, valid, columns, stride):
     """Source _load_chunk_rows: zero a tail slot, then copy each 16-column tile."""
     if valid < 64:
         destination.fill(0)
-        tla.pipe_barrier(tla.arch.MTE2)
+        tla.pipe_barrier(tla.pipes.MTE2)
         for col in tla.range_constexpr(columns // 16):
             tla.copy(
                 tla.tile_view(
@@ -3118,18 +3118,18 @@ def load_u_rows(destination, source, valid, dv, dv_idx, aiv, stride):
 @tla.jit
 def state_local_flags():
     return (
-        tla.flag("s2_gm_l1", tla.arch.MTE2, tla.arch.MTE1),
-        tla.flag("s2_gm_ub", tla.arch.MTE2, tla.arch.VECTOR),
-        tla.flag("s2_input_free0", tla.arch.VECTOR, tla.arch.MTE2),
-        tla.flag("s2_input_free1", tla.arch.VECTOR, tla.arch.MTE2),
-        tla.flag("s2_l1_free0", tla.arch.MTE1, tla.arch.MTE2),
-        tla.flag("s2_l1_free1", tla.arch.MTE1, tla.arch.MTE2),
-        tla.flag("s2_v_done", tla.arch.VECTOR, tla.arch.MTE3),
-        tla.flag("s2_history_free", tla.arch.MTE3, tla.arch.VECTOR),
-        tla.flag("s2_loaded", tla.arch.MTE1, tla.arch.CUBE),
-        tla.flag("s2_cube_done", tla.arch.CUBE, tla.arch.FIX),
-        tla.flag("s2_acc_free", tla.arch.FIX, tla.arch.CUBE),
-        tla.flag("s2_output_operands_free", tla.arch.CUBE, tla.arch.MTE1),
+        tla.flag("s2_gm_l1", tla.pipes.MTE2, tla.pipes.MTE1),
+        tla.flag("s2_gm_ub", tla.pipes.MTE2, tla.pipes.VECTOR),
+        tla.flag("s2_input_free0", tla.pipes.VECTOR, tla.pipes.MTE2),
+        tla.flag("s2_input_free1", tla.pipes.VECTOR, tla.pipes.MTE2),
+        tla.flag("s2_l1_free0", tla.pipes.MTE1, tla.pipes.MTE2),
+        tla.flag("s2_l1_free1", tla.pipes.MTE1, tla.pipes.MTE2),
+        tla.flag("s2_v_done", tla.pipes.VECTOR, tla.pipes.MTE3),
+        tla.flag("s2_history_free", tla.pipes.MTE3, tla.pipes.VECTOR),
+        tla.flag("s2_loaded", tla.pipes.MTE1, tla.pipes.CUBE),
+        tla.flag("s2_cube_done", tla.pipes.CUBE, tla.pipes.FIX),
+        tla.flag("s2_acc_free", tla.pipes.FIX, tla.pipes.CUBE),
+        tla.flag("s2_output_operands_free", tla.pipes.CUBE, tla.pipes.MTE1),
     )
 
 
@@ -3237,9 +3237,9 @@ def stage_two_group(
         load_chunk_l1(wl, w, first_valid, 128, token_stride)
         load_chunk_l1(kl, kg, first_valid, 128, token_stride)
         load_chunk_l1(al, aqk, first_valid, 64, 64)
-        mutex_event(_mutex_gm_l1, tla.arch.MTE2)
-        mutex_event(_mutex_acc_free, tla.arch.FIX)
-        mutex_event(_mutex_output_operands_free, tla.arch.CUBE)
+        mutex_event(_mutex_gm_l1, tla.pipes.MTE2)
+        mutex_event(_mutex_acc_free, tla.pipes.FIX)
+        mutex_event(_mutex_output_operands_free, tla.pipes.CUBE)
         for chunk in tla.range(chunks):
             slot = chunk % 2
             next_slot = (chunk + 1) % 2
@@ -3264,25 +3264,25 @@ def stage_two_group(
             ul = tla.make_tensor_like(
                 lbase + 90112 + slot * 8192, row_major(lbase, 64, dv), tla.arch.zN
             )
-            mutex_event(_mutex_gm_l1, tla.arch.MTE1)
-            tla.cross_core_wait_flag(h_ready, tla.arch.MTE1)
+            mutex_event(_mutex_gm_l1, tla.pipes.MTE1)
+            tla.cross_core_wait_flag(h_ready, tla.pipes.MTE1)
             compute_state_projections(
                 ql, wl, hl, a0, a1, hb, cu, co, dv, loaded, cube_done, acc_free
             )
-            mutex_event(_mutex_output_operands_free, tla.arch.MTE1)
+            mutex_event(_mutex_output_operands_free, tla.pipes.MTE1)
             load_recurrent_operands(kl, al, kb, qa, dv, loaded)
-            mutex_event(_mutex_loaded, tla.arch.CUBE)
+            mutex_event(_mutex_loaded, tla.pipes.CUBE)
             if chunk + 2 < chunks:
                 if slot == 0:
-                    mutex_event(_mutex_l1_free0, tla.arch.MTE1)
+                    mutex_event(_mutex_l1_free0, tla.pipes.MTE1)
                 else:
-                    mutex_event(_mutex_l1_free1, tla.arch.MTE1)
+                    mutex_event(_mutex_l1_free1, tla.pipes.MTE1)
             if chunk + 1 < chunks:
                 if chunk > 0:
                     if next_slot == 0:
-                        mutex_event(_mutex_l1_free0, tla.arch.MTE2)
+                        mutex_event(_mutex_l1_free0, tla.pipes.MTE2)
                     else:
-                        mutex_event(_mutex_l1_free1, tla.arch.MTE2)
+                        mutex_event(_mutex_l1_free1, tla.pipes.MTE2)
                 next_q = tla.make_tensor_like(
                     lbase + next_slot * 8192, row_major(lbase, 64, 128), tla.arch.zN
                 )
@@ -3299,26 +3299,26 @@ def stage_two_group(
                     128,
                     token_stride,
                 )
-            mutex_event(_mutex_cube_done, tla.arch.FIX)
+            mutex_event(_mutex_cube_done, tla.pipes.FIX)
             tla.copy(
                 row_major(du, 64, dv),
                 tla.make_tensor_like(cu, row_major(cu, 64, dv), tla.arch.L0Clayout),
                 tla.params.CopyL0C2DstParams(l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M),
             )
-            tla.cross_core_set_flag(du_ready, tla.arch.FIX)
-            tla.cross_core_wait_flag(u_ready, tla.arch.MTE1)
+            tla.cross_core_set_flag(du_ready, tla.pipes.FIX)
+            tla.cross_core_wait_flag(u_ready, tla.pipes.MTE1)
             compute_state_delta(ul, kb, ua, ch, dv, loaded)
-            mutex_event(_mutex_cube_done, tla.arch.CUBE)
-            mutex_event(_mutex_cube_done, tla.arch.FIX)
+            mutex_event(_mutex_cube_done, tla.pipes.CUBE)
+            mutex_event(_mutex_cube_done, tla.pipes.FIX)
             tla.copy(
                 strided_rows(delta.ptr, dv, 128, 64),
                 tla.make_tensor_like(ch, row_major(ch, dv, 128), tla.arch.L0Clayout),
                 tla.params.CopyL0C2DstParams(l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_N),
             )
-            tla.cross_core_set_flag(dh_ready, tla.arch.FIX)
+            tla.cross_core_set_flag(dh_ready, tla.pipes.FIX)
             accumulate_output(ul, qa, vb, co, dv, loaded)
-            mutex_event(_mutex_output_operands_free, tla.arch.CUBE)
-            mutex_event(_mutex_cube_done, tla.arch.CUBE)
+            mutex_event(_mutex_output_operands_free, tla.pipes.CUBE)
+            mutex_event(_mutex_cube_done, tla.pipes.CUBE)
             if chunk + 1 < chunks:
                 next_k = tla.make_tensor_like(
                     lbase + 32768 + next_slot * 8192,
@@ -3340,11 +3340,11 @@ def stage_two_group(
                 load_chunk_l1(
                     next_a, aqk + (chunk + 1) * matrix_chunk_stride, next_valid, 64, 64
                 )
-                mutex_event(_mutex_gm_l1, tla.arch.MTE2)
+                mutex_event(_mutex_gm_l1, tla.pipes.MTE2)
             valid = 64
             if chunk + 1 == chunks:
                 valid = valid_last
-            mutex_event(_mutex_cube_done, tla.arch.FIX)
+            mutex_event(_mutex_cube_done, tla.pipes.FIX)
             tla.copy(
                 strided_rows(
                     out + chunk * 64 * output_stride + dv_idx * dv,
@@ -3354,9 +3354,9 @@ def stage_two_group(
                 ),
                 tla.make_tensor_like(co, row_major(co, 64, dv), tla.arch.L0Clayout),
             )
-            mutex_event(_mutex_acc_free, tla.arch.FIX)
-        mutex_event(_mutex_acc_free, tla.arch.CUBE)
-        mutex_event(_mutex_output_operands_free, tla.arch.MTE1)
+            mutex_event(_mutex_acc_free, tla.pipes.FIX)
+        mutex_event(_mutex_acc_free, tla.pipes.CUBE)
+        mutex_event(_mutex_output_operands_free, tla.pipes.MTE1)
         tla.pipe_barrier(tla.pipes.ALL)
     with tla.vector():
         aiv = tla.arch.sub_block_idx()
@@ -3369,18 +3369,18 @@ def stage_two_group(
         if chunks == 1:
             first_valid = valid_last
         load_u_rows(uin_ptr, u, first_valid, dv, dv_idx, aiv, token_stride)
-        mutex_event(_mutex_gm_ub, tla.arch.MTE2)
-        mutex_event(_mutex_gm_ub, tla.arch.VECTOR)
+        mutex_event(_mutex_gm_ub, tla.pipes.MTE2)
+        mutex_event(_mutex_gm_ub, tla.pipes.VECTOR)
         cast_state_nz(state, snz, dv)
-        mutex_event(_mutex_v_done, tla.arch.VECTOR)
-        mutex_event(_mutex_v_done, tla.arch.MTE3)
+        mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+        mutex_event(_mutex_v_done, tla.pipes.MTE3)
         hl = tla.make_tensor_like(lbase + 57344, row_major(lbase, dv, 128), tla.arch.zN)
         tla.copy(
             tla.tile_view(hl, tla.make_shape(dv, 64), tla.make_coord(0, aiv)),
             padded_nz(snz.ptr, dv),
         )
-        tla.cross_core_set_flag(h_ready, tla.arch.MTE3)
-        mutex_event(_mutex_history_free, tla.arch.MTE3)
+        tla.cross_core_set_flag(h_ready, tla.pipes.MTE3)
+        mutex_event(_mutex_history_free, tla.pipes.MTE3)
         for chunk in tla.range(chunks):
             slot = chunk % 2
             next_slot = (chunk + 1) % 2
@@ -3391,13 +3391,13 @@ def stage_two_group(
             if chunk + 2 == chunks:
                 next_valid = valid_last
             if chunk > 0:
-                mutex_event(_mutex_gm_ub, tla.arch.VECTOR)
+                mutex_event(_mutex_gm_ub, tla.pipes.VECTOR)
             if chunk + 1 < chunks:
                 if chunk > 0:
                     if next_slot == 0:
-                        mutex_event(_mutex_input_free0, tla.arch.MTE2)
+                        mutex_event(_mutex_input_free0, tla.pipes.MTE2)
                     else:
-                        mutex_event(_mutex_input_free1, tla.arch.MTE2)
+                        mutex_event(_mutex_input_free1, tla.pipes.MTE2)
                 tla.copy(
                     row_major(gamma_ptr + next_slot * 64, 1, 64),
                     row_major(gamma + (chunk + 1) * 128 + aiv * 64, 1, 64),
@@ -3411,8 +3411,8 @@ def stage_two_group(
                     aiv,
                     token_stride,
                 )
-                mutex_event(_mutex_gm_ub, tla.arch.MTE2)
-            tla.cross_core_wait_flag(du_ready, tla.arch.VECTOR)
+                mutex_event(_mutex_gm_ub, tla.pipes.MTE2)
+            tla.cross_core_wait_flag(du_ready, tla.pipes.VECTOR)
             finish_u_delta_nz(
                 row_major(uin_ptr + slot * 4096, 32, dv),
                 row_major(du, 32, dv),
@@ -3423,8 +3423,8 @@ def stage_two_group(
                 valid,
                 save_vnew,
             )
-            mutex_event(_mutex_v_done, tla.arch.VECTOR)
-            mutex_event(_mutex_v_done, tla.arch.MTE3)
+            mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+            mutex_event(_mutex_v_done, tla.pipes.MTE3)
             ul = tla.make_tensor_like(
                 lbase + 90112 + slot * 8192, row_major(lbase, 64, dv), tla.arch.zN
             )
@@ -3432,7 +3432,7 @@ def stage_two_group(
                 tla.tile_view(ul, tla.make_shape(32, dv), tla.make_coord(aiv, 0)),
                 padded_nz(unz.ptr, 32, dv),
             )
-            tla.cross_core_set_flag(u_ready, tla.arch.MTE3)
+            tla.cross_core_set_flag(u_ready, tla.pipes.MTE3)
             rows = valid - aiv * 32
             if rows > 32:
                 rows = 32
@@ -3451,12 +3451,12 @@ def stage_two_group(
                         ),
                         row_major(uv, rows, dv),
                     )
-            tla.cross_core_wait_flag(dh_ready, tla.arch.VECTOR)
-            mutex_event(_mutex_history_free, tla.arch.VECTOR)
+            tla.cross_core_wait_flag(dh_ready, tla.pipes.VECTOR)
+            mutex_event(_mutex_history_free, tla.pipes.VECTOR)
             if tla.const_expr(save_history):
                 tla.copy(row_major(history_copy, dv, 64), row_major(state.ptr, dv, 64))
-                mutex_event(_mutex_v_done, tla.arch.VECTOR)
-                mutex_event(_mutex_v_done, tla.arch.MTE3)
+                mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+                mutex_event(_mutex_v_done, tla.pipes.MTE3)
                 tla.copy(
                     strided_rows(
                         history
@@ -3469,16 +3469,16 @@ def stage_two_group(
                     ),
                     row_major(history_copy, dv, 64),
                 )
-            mutex_event(_mutex_history_free, tla.arch.MTE3)
+            mutex_event(_mutex_history_free, tla.pipes.MTE3)
             update_state_nz(state, delta, flat(gamma_ptr + slot * 64, 64), snz, dv)
             if chunk + 2 < chunks:
                 if slot == 0:
-                    mutex_event(_mutex_input_free0, tla.arch.VECTOR)
+                    mutex_event(_mutex_input_free0, tla.pipes.VECTOR)
                 else:
-                    mutex_event(_mutex_input_free1, tla.arch.VECTOR)
+                    mutex_event(_mutex_input_free1, tla.pipes.VECTOR)
             if chunk + 1 < chunks:
-                mutex_event(_mutex_v_done, tla.arch.VECTOR)
-                mutex_event(_mutex_v_done, tla.arch.MTE3)
+                mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+                mutex_event(_mutex_v_done, tla.pipes.MTE3)
                 hl = tla.make_tensor_like(
                     lbase + 57344 + next_slot * 16384,
                     row_major(lbase, dv, 128),
@@ -3488,10 +3488,10 @@ def stage_two_group(
                     tla.tile_view(hl, tla.make_shape(dv, 64), tla.make_coord(0, aiv)),
                     padded_nz(snz.ptr, dv),
                 )
-                tla.cross_core_set_flag(h_ready, tla.arch.MTE3)
-        mutex_event(_mutex_history_free, tla.arch.VECTOR)
-        mutex_event(_mutex_v_done, tla.arch.VECTOR)
-        mutex_event(_mutex_v_done, tla.arch.MTE3)
+                tla.cross_core_set_flag(h_ready, tla.pipes.MTE3)
+        mutex_event(_mutex_history_free, tla.pipes.VECTOR)
+        mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+        mutex_event(_mutex_v_done, tla.pipes.MTE3)
         tla.copy(
             strided_rows(final + dv_idx * dv * 128 + aiv * 64, dv, 64, 128),
             row_major(state.ptr, dv, 64),
@@ -3508,14 +3508,14 @@ def stage_two_group(
 def stage_boundary(aiv_ready, aic_all, aic_release):
     with tla.cube():
         tla.pipe_barrier(tla.pipes.ALL)
-        tla.cross_core_wait_flag(aiv_ready, tla.arch.SCALAR)
-        tla.cross_core_set_flag(aic_all, tla.arch.FIX)
-        tla.cross_core_wait_flag(aic_all, tla.arch.SCALAR)
-        tla.cross_core_set_flag(aic_release, tla.arch.MTE3)
+        tla.cross_core_wait_flag(aiv_ready, tla.pipes.SCALAR)
+        tla.cross_core_set_flag(aic_all, tla.pipes.FIX)
+        tla.cross_core_wait_flag(aic_all, tla.pipes.SCALAR)
+        tla.cross_core_set_flag(aic_release, tla.pipes.MTE3)
     with tla.vector():
         tla.pipe_barrier(tla.pipes.ALL)
-        tla.cross_core_set_flag(aiv_ready, tla.arch.MTE3)
-        tla.cross_core_wait_flag(aic_release, tla.arch.SCALAR)
+        tla.cross_core_set_flag(aiv_ready, tla.pipes.MTE3)
+        tla.cross_core_wait_flag(aic_release, tla.pipes.SCALAR)
 
 
 # -----------------------------------------------------------------------------
@@ -4477,21 +4477,21 @@ def compose_persistent_inverse(
     load_selected_pair(negative, diagonal, a1, b1, zero, ready1, free1, 3, 1)
     inverse_mmad(ct, a1, b1, ready1, free1, True, 3)
     inverse_fix(temporary, ct, fix_ready, acc_free)
-    mutex_event(_mutex_free0, tla.arch.MTE1)
+    mutex_event(_mutex_free0, tla.pipes.MTE1)
     tla.copy(a0, diagonal)
     tla.copy(b0, identity)
     copy_selected_fractals(b0, temporary, 3)
-    mutex_event(_mutex_ready0, tla.arch.MTE1)
+    mutex_event(_mutex_ready0, tla.pipes.MTE1)
     inverse_mmad(ci, a0, b0, ready0, free0, True, 3)
     inverse_fix(inverse, ci, fix_ready, acc_free)
     load_selected_pair(negative, inverse, a1, b1, zero, ready1, free1, 0, 4)
-    mutex_event(_mutex_free0, tla.arch.MTE1)
+    mutex_event(_mutex_free0, tla.pipes.MTE1)
     tla.copy(a0, inverse)
     tla.copy(b0, zero)
     inverse_mmad(ct, a1, b1, ready1, free1, True, 3)
     inverse_fix(temporary, ct, fix_ready, acc_free)
     copy_selected_fractals(b0, temporary, 5)
-    mutex_event(_mutex_ready0, tla.arch.MTE1)
+    mutex_event(_mutex_ready0, tla.pipes.MTE1)
     inverse_mmad(ci, a0, b0, ready0, free0, False, 3)
 
 
@@ -4562,8 +4562,8 @@ def prefetch_half(q, k, qraw, kraw, next_valid, stride, half, free):
             rows = 32
         if rows > 0:
             # Raw Q/K have already been consumed by normalization/panel packing.
-            mutex_event(_mutex_free, tla.arch.VECTOR)
-            mutex_event(_mutex_free, tla.arch.MTE2)
+            mutex_event(_mutex_free, tla.pipes.VECTOR)
+            mutex_event(_mutex_free, tla.pipes.MTE2)
             source = tla.Int64((64 + half * 32) * stride) + tla.Int64(aiv * 64)
             tla.copy(
                 row_major(qraw.ptr + half * 2048, rows, 64),
@@ -4728,24 +4728,24 @@ def persistent_score_mmads(
     _mutex_ready0 = tla.mutex("persistent_score_mmads_4639_ready0", id=3)
     _mutex_ready1 = tla.mutex("persistent_score_mmads_4639_ready1", id=4)
     _mutex_cube_done = tla.mutex("persistent_score_mmads_4639_cube_done", id=5)
-    ready0 = tla.flag("ps_left_ready0", tla.arch.MTE1, tla.arch.CUBE)
-    ready1 = tla.flag("ps_left_ready1", tla.arch.MTE1, tla.arch.CUBE)
-    free0 = tla.flag("ps_left_free0", tla.arch.CUBE, tla.arch.MTE1)
-    free1 = tla.flag("ps_left_free1", tla.arch.CUBE, tla.arch.MTE1)
-    mutex_event(_mutex_free0, tla.arch.CUBE)
-    mutex_event(_mutex_free1, tla.arch.CUBE)
+    ready0 = tla.flag("ps_left_ready0", tla.pipes.MTE1, tla.pipes.CUBE)
+    ready1 = tla.flag("ps_left_ready1", tla.pipes.MTE1, tla.pipes.CUBE)
+    free0 = tla.flag("ps_left_free0", tla.pipes.CUBE, tla.pipes.MTE1)
+    free1 = tla.flag("ps_left_free1", tla.pipes.CUBE, tla.pipes.MTE1)
+    mutex_event(_mutex_free0, tla.pipes.CUBE)
+    mutex_event(_mutex_free1, tla.pipes.CUBE)
     for kind in tla.range_constexpr(2):
         # This CUBE->MTE1 edge also releases the previous chunk's output
         # operands at bp[0:8192]. All RHS preloads must follow it.
-        mutex_event(_mutex_free0, tla.arch.MTE1)
+        mutex_event(_mutex_free0, tla.pipes.MTE1)
         if tla.const_expr(shared and kind == 0):
             for j in tla.range_constexpr(6):
                 right = tla.make_tensor_like(
                     right_ptr + j * 2048, row_major(right_ptr, 128, 16), tla.arch.nZ
                 )
                 tla.copy(right, right_transpose(cache.ptr, j, True))
-            mutex_event(_mutex_loaded, tla.arch.MTE1)
-            mutex_event(_mutex_loaded, tla.arch.CUBE)
+            mutex_event(_mutex_loaded, tla.pipes.MTE1)
+            mutex_event(_mutex_loaded, tla.pipes.CUBE)
         left0 = tla.make_tensor_like(
             left_ptr, row_major(left_ptr, 16, 128), tla.arch.zN
         )
@@ -4753,15 +4753,15 @@ def persistent_score_mmads(
             left0,
             tla.tile_view(cache, tla.make_shape(16, 128), tla.make_coord(kind, 0)),
         )
-        mutex_event(_mutex_ready0, tla.arch.MTE1)
+        mutex_event(_mutex_ready0, tla.pipes.MTE1)
         for row in tla.range_constexpr(4):
             left = tla.make_tensor_like(
                 left_ptr + (row % 2) * 2048, row_major(left_ptr, 16, 128), tla.arch.zN
             )
             if tla.const_expr(row % 2 == 0):
-                mutex_event(_mutex_ready0, tla.arch.CUBE)
+                mutex_event(_mutex_ready0, tla.pipes.CUBE)
             else:
-                mutex_event(_mutex_ready1, tla.arch.CUBE)
+                mutex_event(_mutex_ready1, tla.pipes.CUBE)
             for col in tla.range_constexpr(row + 1):
                 index = (
                     (col if row < 2 else 2 + col)
@@ -4788,8 +4788,8 @@ def persistent_score_mmads(
                                 tla.arch.nZ,
                             )
                             tla.copy(right, right_transpose(cache.ptr, j))
-                        mutex_event(_mutex_loaded, tla.arch.MTE1)
-                        mutex_event(_mutex_loaded, tla.arch.CUBE)
+                        mutex_event(_mutex_loaded, tla.pipes.MTE1)
+                        mutex_event(_mutex_loaded, tla.pipes.CUBE)
                 right = tla.make_tensor_like(
                     right_ptr + index * 2048, row_major(right_ptr, 128, 16), tla.arch.nZ
                 )
@@ -4804,9 +4804,9 @@ def persistent_score_mmads(
                 tla.mmad(acc, left, right, init_c=True)
                 if tla.const_expr(row < 3 and col == 0):
                     if tla.const_expr(row % 2 == 0):
-                        mutex_event(_mutex_free1, tla.arch.MTE1)
+                        mutex_event(_mutex_free1, tla.pipes.MTE1)
                     else:
-                        mutex_event(_mutex_free0, tla.arch.MTE1)
+                        mutex_event(_mutex_free0, tla.pipes.MTE1)
                     next_left = tla.make_tensor_like(
                         left_ptr + ((row + 1) % 2) * 2048,
                         row_major(left_ptr, 16, 128),
@@ -4821,13 +4821,13 @@ def persistent_score_mmads(
                         ),
                     )
                     if tla.const_expr(row % 2 == 0):
-                        mutex_event(_mutex_ready1, tla.arch.MTE1)
+                        mutex_event(_mutex_ready1, tla.pipes.MTE1)
                     else:
-                        mutex_event(_mutex_ready0, tla.arch.MTE1)
+                        mutex_event(_mutex_ready0, tla.pipes.MTE1)
             if tla.const_expr(row % 2 == 0):
-                mutex_event(_mutex_free0, tla.arch.CUBE)
+                mutex_event(_mutex_free0, tla.pipes.CUBE)
             else:
-                mutex_event(_mutex_free1, tla.arch.CUBE)
+                mutex_event(_mutex_free1, tla.pipes.CUBE)
         if tla.const_expr(kk is not None):
             result = ck
             output = kk
@@ -4836,8 +4836,8 @@ def persistent_score_mmads(
                 result = cq
                 output = mq
                 notification = mq_ready
-            mutex_event(_mutex_cube_done, tla.arch.CUBE)
-            mutex_event(_mutex_cube_done, tla.arch.FIX)
+            mutex_event(_mutex_cube_done, tla.pipes.CUBE)
+            mutex_event(_mutex_cube_done, tla.pipes.FIX)
             tla.copy(
                 row_major(output.ptr, 64, 64),
                 tla.make_tensor_like(
@@ -4845,9 +4845,9 @@ def persistent_score_mmads(
                 ),
                 tla.params.CopyL0C2DstParams(l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M),
             )
-            tla.cross_core_set_flag(notification, tla.arch.FIX)
-    mutex_event(_mutex_free0, tla.arch.MTE1)
-    mutex_event(_mutex_free1, tla.arch.MTE1)
+            tla.cross_core_set_flag(notification, tla.pipes.FIX)
+    mutex_event(_mutex_free0, tla.pipes.MTE1)
+    mutex_event(_mutex_free1, tla.pipes.MTE1)
 
 
 # -----------------------------------------------------------------------------
@@ -4905,29 +4905,29 @@ def persistent_products_and_state(
     )
     _mutex_vnew_ready = tla.mutex("persistent_products_and_state_4782_vnew_ready", id=7)
     _mutex_delta_read = tla.mutex("persistent_products_and_state_4782_delta_read", id=8)
-    w_ready = tla.flag("pr_w_ready", tla.arch.FIX, tla.arch.MTE1)
-    vnew_ready = tla.flag("pr_vnew_ready", tla.arch.FIX, tla.arch.MTE1)
-    output_read = tla.flag("pr_output_read", tla.arch.FIX, tla.arch.CUBE)
-    output_done = tla.flag("pr_output_done", tla.arch.CUBE, tla.arch.FIX)
-    b_free = tla.flag("pr_b_free", tla.arch.CUBE, tla.arch.MTE1)
-    output_free = tla.flag("pr_output_free", tla.arch.FIX, tla.arch.CUBE)
-    delta_read = tla.flag("pr_delta_read", tla.arch.FIX, tla.arch.CUBE)
+    w_ready = tla.flag("pr_w_ready", tla.pipes.FIX, tla.pipes.MTE1)
+    vnew_ready = tla.flag("pr_vnew_ready", tla.pipes.FIX, tla.pipes.MTE1)
+    output_read = tla.flag("pr_output_read", tla.pipes.FIX, tla.pipes.CUBE)
+    output_done = tla.flag("pr_output_done", tla.pipes.CUBE, tla.pipes.FIX)
+    b_free = tla.flag("pr_b_free", tla.pipes.CUBE, tla.pipes.MTE1)
+    output_free = tla.flag("pr_output_free", tla.pipes.FIX, tla.pipes.CUBE)
+    delta_read = tla.flag("pr_delta_read", tla.pipes.FIX, tla.pipes.CUBE)
     inverse_a = tla.make_tensor_like(ap + 12288, row_major(ap, 64, 64), tla.arch.zN)
     beta_b = tla.make_tensor_like(bp, row_major(bp, 64, 128), tla.arch.nZ)
     cw = tla.make_tensor_like(cp, row_major(cp, 64, 128), tla.arch.L0Clayout)
     cu = tla.make_tensor_like(cp + 8192, row_major(cp, 64, 128), tla.arch.L0Clayout)
     co = tla.make_tensor_like(cp + 16384, row_major(cp, 64, 128), tla.arch.L0Clayout)
-    mutex_event(_mutex_resident_ready, tla.arch.MTE1)
+    mutex_event(_mutex_resident_ready, tla.pipes.MTE1)
     tla.copy(inverse_a, resident)
     if tla.const_expr(not inputs_ready):
-        tla.cross_core_wait_flag(k_ready, tla.arch.MTE1)
+        tla.cross_core_wait_flag(k_ready, tla.pipes.MTE1)
     tla.copy(beta_b, kbeta)
-    mutex_event(_mutex_loaded, tla.arch.MTE1)
-    mutex_event(_mutex_loaded, tla.arch.CUBE)
+    mutex_event(_mutex_loaded, tla.pipes.MTE1)
+    mutex_event(_mutex_loaded, tla.pipes.CUBE)
     tla.mmad(cw, inverse_a, beta_b, init_c=True)
-    mutex_event(_mutex_b_free, tla.arch.CUBE)
-    mutex_event(_mutex_cube_done, tla.arch.CUBE)
-    mutex_event(_mutex_cube_done, tla.arch.FIX)
+    mutex_event(_mutex_b_free, tla.pipes.CUBE)
+    mutex_event(_mutex_cube_done, tla.pipes.CUBE)
+    mutex_event(_mutex_cube_done, tla.pipes.FIX)
     if tla.const_expr(save_cache):
         tla.copy(
             strided_rows(out_w, valid, 128, stride),
@@ -4937,86 +4937,86 @@ def persistent_products_and_state(
             ),
         )
     tla.copy(negative_w, cw)
-    mutex_event(_mutex_w_ready, tla.arch.FIX)
-    mutex_event(_mutex_b_free, tla.arch.MTE1)
+    mutex_event(_mutex_w_ready, tla.pipes.FIX)
+    mutex_event(_mutex_b_free, tla.pipes.MTE1)
     if tla.const_expr(not inputs_ready):
-        tla.cross_core_wait_flag(v_ready, tla.arch.MTE1)
+        tla.cross_core_wait_flag(v_ready, tla.pipes.MTE1)
     tla.copy(beta_b, vbeta)
-    mutex_event(_mutex_loaded, tla.arch.MTE1)
-    mutex_event(_mutex_loaded, tla.arch.CUBE)
+    mutex_event(_mutex_loaded, tla.pipes.MTE1)
+    mutex_event(_mutex_loaded, tla.pipes.CUBE)
     tla.mmad(cu, inverse_a, beta_b, init_c=True)
     if tla.const_expr(save_cache):
-        mutex_event(_mutex_cube_done, tla.arch.CUBE)
-        mutex_event(_mutex_cube_done, tla.arch.FIX)
+        mutex_event(_mutex_cube_done, tla.pipes.CUBE)
+        mutex_event(_mutex_cube_done, tla.pipes.FIX)
         tla.copy(strided_rows(out_u, valid, 128, stride), cu)
-        mutex_event(_mutex_output_read, tla.arch.FIX)
+        mutex_event(_mutex_output_read, tla.pipes.FIX)
     state_b = tla.make_tensor_like(bp + 8192, row_major(bp, 128, 128), tla.arch.nZ)
     state_t = tla.make_tensor_like(
         state.ptr, row_major(state.ptr, 128, 128), tla.arch.nZ
     )
     wa = tla.make_tensor_like(ap + 16384, row_major(ap, 64, 128), tla.arch.zN)
     qa = tla.make_tensor_like(ap + 24576, row_major(ap, 64, 128), tla.arch.zN)
-    tla.cross_core_wait_flag(state_ready, tla.arch.MTE1)
+    tla.cross_core_wait_flag(state_ready, tla.pipes.MTE1)
     tla.copy(state_b, state_t)
-    mutex_event(_mutex_w_ready, tla.arch.MTE1)
+    mutex_event(_mutex_w_ready, tla.pipes.MTE1)
     tla.copy(wa, negative_w)
-    mutex_event(_mutex_loaded, tla.arch.MTE1)
-    mutex_event(_mutex_loaded, tla.arch.CUBE)
+    mutex_event(_mutex_loaded, tla.pipes.MTE1)
+    mutex_event(_mutex_loaded, tla.pipes.CUBE)
     if tla.const_expr(save_cache):
-        mutex_event(_mutex_output_read, tla.arch.CUBE)
+        mutex_event(_mutex_output_read, tla.pipes.CUBE)
     tla.mmad(cu, wa, state_b, init_c=False)
-    mutex_event(_mutex_cube_done, tla.arch.CUBE)
+    mutex_event(_mutex_cube_done, tla.pipes.CUBE)
     tla.copy(qa, qs)
-    mutex_event(_mutex_loaded, tla.arch.MTE1)
-    mutex_event(_mutex_loaded, tla.arch.CUBE)
+    mutex_event(_mutex_loaded, tla.pipes.MTE1)
+    mutex_event(_mutex_loaded, tla.pipes.CUBE)
     if tla.const_expr(output_overlap):
         if first_chunk:
-            mutex_event(_mutex_output_free, tla.arch.FIX)
-        mutex_event(_mutex_output_free, tla.arch.CUBE)
+            mutex_event(_mutex_output_free, tla.pipes.FIX)
+        mutex_event(_mutex_output_free, tla.pipes.CUBE)
     tla.mmad(co, qa, state_b, init_c=True)
-    mutex_event(_mutex_cube_done, tla.arch.FIX)
+    mutex_event(_mutex_cube_done, tla.pipes.FIX)
     if tla.const_expr(save_cache):
         tla.copy(strided_rows(out_vnew, valid, 128, stride), cu)
     tla.copy(vnew, cu)
-    mutex_event(_mutex_vnew_ready, tla.arch.FIX)
+    mutex_event(_mutex_vnew_ready, tla.pipes.FIX)
     kb = tla.make_tensor_like(bp + 24576, row_major(bp, 64, 128), tla.arch.nZ)
     aq = tla.make_tensor_like(ap + 8192, row_major(ap, 64, 64), tla.arch.zN)
     vt = tla.make_tensor_like(vnew.ptr, row_major(vnew.ptr, 128, 64), tla.arch.nZ)
     va = tla.make_tensor_like(ap, row_major(ap, 128, 64), tla.arch.zN)
     vb = tla.make_tensor_like(bp, row_major(bp, 64, 128), tla.arch.nZ)
     tla.copy(kb, kg)
-    mutex_event(_mutex_vnew_ready, tla.arch.MTE1)
+    mutex_event(_mutex_vnew_ready, tla.pipes.MTE1)
     tla.copy(va, vt)
-    mutex_event(_mutex_loaded, tla.arch.MTE1)
-    mutex_event(_mutex_loaded, tla.arch.CUBE)
+    mutex_event(_mutex_loaded, tla.pipes.MTE1)
+    mutex_event(_mutex_loaded, tla.pipes.CUBE)
     # vnew_ready -> MTE1 loads -> loaded already closes FIX's cu reader.
     ch = tla.make_tensor_like(cp, row_major(cp, 128, 128), tla.arch.L0Clayout)
     tla.mmad(ch, va, kb, init_c=True)
-    mutex_event(_mutex_cube_done, tla.arch.CUBE)
-    mutex_event(_mutex_cube_done, tla.arch.FIX)
+    mutex_event(_mutex_cube_done, tla.pipes.CUBE)
+    mutex_event(_mutex_cube_done, tla.pipes.FIX)
     tla.copy(
         strided_rows(delta, 128, 128, 64),
         ch,
         tla.params.CopyL0C2DstParams(l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_N),
     )
-    tla.cross_core_set_flag(delta_ready, tla.arch.FIX)
+    tla.cross_core_set_flag(delta_ready, tla.pipes.FIX)
     if tla.const_expr(output_overlap):
-        mutex_event(_mutex_delta_read, tla.arch.FIX)
+        mutex_event(_mutex_delta_read, tla.pipes.FIX)
     # Only Aqk depends on recur_ready; Qs and Kg were acquired in the bulk bank.
-    tla.cross_core_wait_flag(recurrent_ready, tla.arch.MTE1)
+    tla.cross_core_wait_flag(recurrent_ready, tla.pipes.MTE1)
     tla.copy(aq, aqk)
     tla.copy(vb, vnew)
-    mutex_event(_mutex_loaded, tla.arch.MTE1)
-    mutex_event(_mutex_loaded, tla.arch.CUBE)
+    mutex_event(_mutex_loaded, tla.pipes.MTE1)
+    mutex_event(_mutex_loaded, tla.pipes.CUBE)
     _mutex_output_path = tla.mutex("pr_output_path", id=0)
-    _mutex_output_path.lock(pipe=tla.arch.CUBE)
+    _mutex_output_path.lock(pipe=tla.pipes.CUBE)
     tla.mmad(co, aq, vb, init_c=False)
-    _mutex_output_path.unlock(pipe=tla.arch.CUBE)
-    _mutex_output_path.lock(pipe=tla.arch.FIX)
+    _mutex_output_path.unlock(pipe=tla.pipes.CUBE)
+    _mutex_output_path.lock(pipe=tla.pipes.FIX)
     tla.copy(strided_rows(out, valid, 128, stride), co)
-    _mutex_output_path.unlock(pipe=tla.arch.FIX)
+    _mutex_output_path.unlock(pipe=tla.pipes.FIX)
     if tla.const_expr(output_overlap):
-        mutex_event(_mutex_delta_read, tla.arch.CUBE)
+        mutex_event(_mutex_delta_read, tla.pipes.CUBE)
 
 
 # -----------------------------------------------------------------------------
@@ -5118,7 +5118,7 @@ def persistent_chunk(
         if tla.const_expr(bulk_operands):
             raw_q = flat(tla.recast_ptr(ubase + 47776, dtype=tla.BFloat16), 4096)
             raw_k = flat(tla.recast_ptr(ubase + 49824, dtype=tla.BFloat16), 4096)
-    prefetch_free = tla.flag("pc_prefetch_free", tla.arch.VECTOR, tla.arch.MTE2)
+    prefetch_free = tla.flag("pc_prefetch_free", tla.pipes.VECTOR, tla.pipes.MTE2)
     # Packed score bytes are free after score_done; leaf reads only nt32.
     nt32 = flat(ubase + 18496, 2048)
     # Raw gate is dead after prefix; these vector exits share its storage.
@@ -5165,22 +5165,22 @@ def persistent_chunk(
         ugamma = flat(ubase + 43616, 64)
         saved_qg = flat(tla.recast_ptr(ubase + 43680, dtype=tla.BFloat16), 4096)
         saved_kg = flat(tla.recast_ptr(ubase + 45728, dtype=tla.BFloat16), 4096)
-    gm_loaded = tla.flag("pc_gm_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    cast_free = tla.flag("pc_cast_free", tla.arch.MTE3, tla.arch.VECTOR)
-    peer_loaded = tla.flag("pc_peer_loaded", tla.arch.MTE2, tla.arch.VECTOR)
+    gm_loaded = tla.flag("pc_gm_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    cast_free = tla.flag("pc_cast_free", tla.pipes.MTE3, tla.pipes.VECTOR)
+    peer_loaded = tla.flag("pc_peer_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
     published = tla.cross_flag("pc_partial_ready", mode=1)
     consumed = tla.cross_flag("pc_partial_free", mode=1)
-    identity_ready = tla.flag("pc_identity_ready", tla.arch.MTE2, tla.arch.MTE1)
-    loaded = tla.flag("pc_loaded", tla.arch.MTE1, tla.arch.CUBE)
-    cube_done = tla.flag("pc_cube_done", tla.arch.CUBE, tla.arch.FIX)
-    v_done = tla.flag("pc_v_done", tla.arch.VECTOR, tla.arch.MTE3)
-    ready0 = tla.flag("pc_ready0", tla.arch.MTE1, tla.arch.CUBE)
-    ready1 = tla.flag("pc_ready1", tla.arch.MTE1, tla.arch.CUBE)
-    free0 = tla.flag("pc_free0", tla.arch.CUBE, tla.arch.MTE1)
-    free1 = tla.flag("pc_free1", tla.arch.CUBE, tla.arch.MTE1)
-    fix_ready = tla.flag("pc_fix_ready", tla.arch.FIX, tla.arch.MTE1)
-    acc_free = tla.flag("pc_acc_free", tla.arch.FIX, tla.arch.CUBE)
-    resident_ready = tla.flag("pc_resident_ready", tla.arch.FIX, tla.arch.MTE1)
+    identity_ready = tla.flag("pc_identity_ready", tla.pipes.MTE2, tla.pipes.MTE1)
+    loaded = tla.flag("pc_loaded", tla.pipes.MTE1, tla.pipes.CUBE)
+    cube_done = tla.flag("pc_cube_done", tla.pipes.CUBE, tla.pipes.FIX)
+    v_done = tla.flag("pc_v_done", tla.pipes.VECTOR, tla.pipes.MTE3)
+    ready0 = tla.flag("pc_ready0", tla.pipes.MTE1, tla.pipes.CUBE)
+    ready1 = tla.flag("pc_ready1", tla.pipes.MTE1, tla.pipes.CUBE)
+    free0 = tla.flag("pc_free0", tla.pipes.CUBE, tla.pipes.MTE1)
+    free1 = tla.flag("pc_free1", tla.pipes.CUBE, tla.pipes.MTE1)
+    fix_ready = tla.flag("pc_fix_ready", tla.pipes.FIX, tla.pipes.MTE1)
+    acc_free = tla.flag("pc_acc_free", tla.pipes.FIX, tla.pipes.CUBE)
+    resident_ready = tla.flag("pc_resident_ready", tla.pipes.FIX, tla.pipes.MTE1)
     scores_ready = tla.cross_flag("pc_scores_ready", mode=2)
     scores_done = tla.cross_flag("pc_scores_done", mode=2)
     inverse_ready = tla.cross_flag("pc_inverse_ready", mode=2)
@@ -5198,19 +5198,19 @@ def persistent_chunk(
     with tla.cube():
         identity.fill(0)
         zero.fill(0)
-        tla.pipe_barrier(tla.arch.MTE2)
+        tla.pipe_barrier(tla.pipes.MTE2)
         for j in tla.range_constexpr(4):
             tla.copy(
                 tla.tile_view(identity, tla.make_shape(16, 16), tla.make_coord(j, j)),
                 row_major(identity16.ptr, 16, 16),
             )
-        mutex_event(_mutex_identity_ready, tla.arch.MTE2)
+        mutex_event(_mutex_identity_ready, tla.pipes.MTE2)
     with tla.vector():
         aiv = tla.arch.sub_block_idx()
         # Incoming state is ready on V, so publish the transitive MTE2->V->MTE3
         # edge before a history DMA reads the same UB allocation.
-        mutex_event(_mutex_v_done, tla.arch.VECTOR)
-        mutex_event(_mutex_v_done, tla.arch.MTE3)
+        mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+        mutex_event(_mutex_v_done, tla.pipes.MTE3)
         if tla.const_expr(save_history):
             tla.copy(
                 strided_rows(history.ptr + aiv * 64, 128, 64, 128),
@@ -5280,19 +5280,19 @@ def persistent_chunk(
         with tla.vector():
             aiv = tla.arch.sub_block_idx()
             pack_persistent_panel(uq, uk, ug, packed, 1, scale)
-            mutex_event(_mutex_v_done, tla.arch.VECTOR)
-            mutex_event(_mutex_v_done, tla.arch.MTE3)
+            mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+            mutex_event(_mutex_v_done, tla.pipes.MTE3)
             tla.copy(
                 tla.tile_view(
                     score_l1(lp), tla.make_shape(288, 64), tla.make_coord(0, aiv)
                 ),
                 padded_nz(packed.ptr, 288),
             )
-            tla.cross_core_set_flag(scores_ready, tla.arch.MTE3)
+            tla.cross_core_set_flag(scores_ready, tla.pipes.MTE3)
         if tla.const_expr(prefetch):
             prefetch_half(q, k, raw_q, raw_k, next_valid, q_stride, 1, prefetch_free)
         with tla.cube():
-            tla.cross_core_wait_flag(scores_ready, tla.arch.MTE1)
+            tla.cross_core_wait_flag(scores_ready, tla.pipes.MTE1)
             persistent_score_mmads(score_l1(lp), ap, bp, cp, cp + 4096, loaded)
     else:
         per_d_scores(
@@ -5316,8 +5316,8 @@ def persistent_chunk(
     if tla.const_expr(bulk_operands):
         with tla.vector():
             aiv_recurrent = tla.arch.sub_block_idx()
-            mutex_event(_mutex_cast_free, tla.arch.MTE3)
-            mutex_event(_mutex_cast_free, tla.arch.VECTOR)
+            mutex_event(_mutex_cast_free, tla.pipes.MTE3)
+            mutex_event(_mutex_cast_free, tla.pipes.VECTOR)
             pack_recurrent(
                 uq,
                 uk,
@@ -5331,16 +5331,16 @@ def persistent_chunk(
                 scale,
                 save_cache,
             )
-            mutex_event(_mutex_v_done, tla.arch.VECTOR)
-            mutex_event(_mutex_v_done, tla.arch.MTE3)
+            mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+            mutex_event(_mutex_v_done, tla.pipes.MTE3)
             tla.copy(
                 tla.tile_view(
                     recurrent, tla.make_shape(256, 64), tla.make_coord(0, aiv_recurrent)
                 ),
                 padded_nz(recurrent_nz.ptr, 256),
             )
-            tla.cross_core_set_flag(k_ready, tla.arch.MTE3)
-            tla.cross_core_set_flag(v_ready, tla.arch.MTE3)
+            tla.cross_core_set_flag(k_ready, tla.pipes.MTE3)
+            tla.cross_core_set_flag(v_ready, tla.pipes.MTE3)
             if tla.const_expr(save_cache):
                 tla.copy(
                     strided_rows(qg.ptr + aiv_recurrent * 64, valid, 64, v_stride),
@@ -5351,8 +5351,8 @@ def persistent_chunk(
                     row_major(saved_kg.ptr, valid, 64),
                 )
     with tla.cube():
-        mutex_event(_mutex_cube_done, tla.arch.CUBE)
-        mutex_event(_mutex_cube_done, tla.arch.FIX)
+        mutex_event(_mutex_cube_done, tla.pipes.CUBE)
+        mutex_event(_mutex_cube_done, tla.pipes.FIX)
         tla.copy(
             row_major(kk.ptr, 64, 64),
             ci,
@@ -5363,11 +5363,11 @@ def persistent_chunk(
             ct,
             tla.params.CopyL0C2DstParams(l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M),
         )
-        tla.cross_core_set_flag(scores_done, tla.arch.FIX)
-        tla.cross_core_wait_flag(inverse_ready, tla.arch.MTE1)
-        mutex_event(_mutex_identity_ready, tla.arch.MTE1)
-        mutex_event(_mutex_free0, tla.arch.CUBE)
-        mutex_event(_mutex_free1, tla.arch.CUBE)
+        tla.cross_core_set_flag(scores_done, tla.pipes.FIX)
+        tla.cross_core_wait_flag(inverse_ready, tla.pipes.MTE1)
+        mutex_event(_mutex_identity_ready, tla.pipes.MTE1)
+        mutex_event(_mutex_free0, tla.pipes.CUBE)
+        mutex_event(_mutex_free1, tla.pipes.CUBE)
         compose_persistent_inverse(
             nt_l1,
             diagonal,
@@ -5396,8 +5396,8 @@ def persistent_chunk(
             cube_done,
             resident_ready,
         )
-        mutex_event(_mutex_free0, tla.arch.MTE1)
-        mutex_event(_mutex_free1, tla.arch.MTE1)
+        mutex_event(_mutex_free0, tla.pipes.MTE1)
+        mutex_event(_mutex_free1, tla.pipes.MTE1)
         persistent_products_and_state(
             resident,
             kl,
@@ -5431,7 +5431,7 @@ def persistent_chunk(
         tla.pipe_barrier(tla.pipes.ALL)
     with tla.vector():
         aiv = tla.arch.sub_block_idx()
-        tla.cross_core_wait_flag(scores_done, tla.arch.VECTOR)
+        tla.cross_core_wait_flag(scores_done, tla.pipes.VECTOR)
         apply_beta_and_finish_t(kk, ub, nt, aiv)
         nd2nz_tile(nt, ntnz, 32, 64)
         with tla.vec.func(mode="simd"):
@@ -5447,8 +5447,8 @@ def persistent_chunk(
         prefetch_half(q, k, raw_q, raw_k, next_valid, q_stride, 1, prefetch_free)
     with tla.vector():
         aiv = tla.arch.sub_block_idx()
-        mutex_event(_mutex_v_done, tla.arch.VECTOR)
-        mutex_event(_mutex_v_done, tla.arch.MTE3)
+        mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+        mutex_event(_mutex_v_done, tla.pipes.MTE3)
         tla.copy(
             tla.tile_view(nt_l1, tla.make_shape(32, 64), tla.make_coord(aiv, 0)),
             padded_nz(ntnz.ptr, 32),
@@ -5457,36 +5457,36 @@ def persistent_chunk(
             tla.tile_view(diagonal, tla.make_shape(32, 64), tla.make_coord(aiv, 0)),
             padded_nz(dnz.ptr, 32),
         )
-        tla.cross_core_set_flag(inverse_ready, tla.arch.MTE3)
+        tla.cross_core_set_flag(inverse_ready, tla.pipes.MTE3)
         if tla.const_expr(not bulk_operands):
             # API-062: no scaled FIX to L1. Negate K_beta exactly before BF16
             # packing, so Cube produces -W; the public W FIX reverses the sign.
             beta_weighted_operand(uk, ub, ug, cast, True, True)
             nd2nz_tile(cast, nz, 64, 64)
-            mutex_event(_mutex_v_done, tla.arch.VECTOR)
-            mutex_event(_mutex_v_done, tla.arch.MTE3)
+            mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+            mutex_event(_mutex_v_done, tla.pipes.MTE3)
             tla.copy(
                 tla.tile_view(kl, tla.make_shape(64, 64), tla.make_coord(0, aiv)),
                 padded_nz(nz.ptr, 64),
             )
-            tla.cross_core_set_flag(k_ready, tla.arch.MTE3)
-            mutex_event(_mutex_cast_free, tla.arch.MTE3)
-            mutex_event(_mutex_cast_free, tla.arch.VECTOR)
+            tla.cross_core_set_flag(k_ready, tla.pipes.MTE3)
+            mutex_event(_mutex_cast_free, tla.pipes.MTE3)
+            mutex_event(_mutex_cast_free, tla.pipes.VECTOR)
             beta_weighted_operand(uv, ub, ug, cast, False)
             nd2nz_tile(cast, nz, 64, 64)
-            mutex_event(_mutex_v_done, tla.arch.VECTOR)
-            mutex_event(_mutex_v_done, tla.arch.MTE3)
+            mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+            mutex_event(_mutex_v_done, tla.pipes.MTE3)
             tla.copy(
                 tla.tile_view(vl, tla.make_shape(64, 64), tla.make_coord(0, aiv)),
                 padded_nz(nz.ptr, 64),
             )
-            tla.cross_core_set_flag(v_ready, tla.arch.MTE3)
-            mutex_event(_mutex_cast_free, tla.arch.MTE3)
-            mutex_event(_mutex_cast_free, tla.arch.VECTOR)
+            tla.cross_core_set_flag(v_ready, tla.pipes.MTE3)
+            mutex_event(_mutex_cast_free, tla.pipes.MTE3)
+            mutex_event(_mutex_cast_free, tla.pipes.VECTOR)
             prepare_decayed_q(uq, ug, cast, decayed, scale)
             nd2nz_tile(decayed, nz, 64, 64)
-            mutex_event(_mutex_v_done, tla.arch.VECTOR)
-            mutex_event(_mutex_v_done, tla.arch.MTE3)
+            mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+            mutex_event(_mutex_v_done, tla.pipes.MTE3)
             if tla.const_expr(save_cache):
                 tla.copy(
                     strided_rows(qg.ptr + aiv * 64, valid, 64, v_stride),
@@ -5496,12 +5496,12 @@ def persistent_chunk(
                 tla.tile_view(ql, tla.make_shape(64, 64), tla.make_coord(0, aiv)),
                 padded_nz(nz.ptr, 64),
             )
-            mutex_event(_mutex_cast_free, tla.arch.MTE3)
-            mutex_event(_mutex_cast_free, tla.arch.VECTOR)
+            mutex_event(_mutex_cast_free, tla.pipes.MTE3)
+            mutex_event(_mutex_cast_free, tla.pipes.VECTOR)
             restored_state_inputs(uk, ug, cast, ugamma)
             nd2nz_tile(cast, nz, 64, 64)
-            mutex_event(_mutex_v_done, tla.arch.VECTOR)
-            mutex_event(_mutex_v_done, tla.arch.MTE3)
+            mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+            mutex_event(_mutex_v_done, tla.pipes.MTE3)
             if tla.const_expr(save_cache):
                 tla.copy(
                     strided_rows(kg.ptr + aiv * 64, valid, 64, v_stride),
@@ -5511,12 +5511,12 @@ def persistent_chunk(
                 tla.tile_view(kgl, tla.make_shape(64, 64), tla.make_coord(0, aiv)),
                 padded_nz(nz.ptr, 64),
             )
-            mutex_event(_mutex_cast_free, tla.arch.MTE3)
-            mutex_event(_mutex_cast_free, tla.arch.VECTOR)
+            mutex_event(_mutex_cast_free, tla.pipes.MTE3)
+            mutex_event(_mutex_cast_free, tla.pipes.VECTOR)
         mask_mqk(mq, public, aiv)
         nd2nz_tile(public, aq_nz, 32, 64)
-        mutex_event(_mutex_v_done, tla.arch.VECTOR)
-        mutex_event(_mutex_v_done, tla.arch.MTE3)
+        mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+        mutex_event(_mutex_v_done, tla.pipes.MTE3)
         rows = valid - aiv * 32
         if rows > 32:
             rows = 32
@@ -5530,17 +5530,17 @@ def persistent_chunk(
             tla.tile_view(al, tla.make_shape(32, 64), tla.make_coord(aiv, 0)),
             padded_nz(aq_nz.ptr, 32),
         )
-        tla.cross_core_set_flag(recur_ready, tla.arch.MTE3)
+        tla.cross_core_set_flag(recur_ready, tla.pipes.MTE3)
         cast_state_snapshot(state, snapshot, 128)
         nd2nz_tile(snapshot, snz, 128, 64)
-        mutex_event(_mutex_v_done, tla.arch.VECTOR)
-        mutex_event(_mutex_v_done, tla.arch.MTE3)
+        mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+        mutex_event(_mutex_v_done, tla.pipes.MTE3)
         tla.copy(
             tla.tile_view(hl, tla.make_shape(128, 64), tla.make_coord(0, aiv)),
             padded_nz(snz.ptr, 128),
         )
-        tla.cross_core_set_flag(h_ready, tla.arch.MTE3)
-        tla.cross_core_wait_flag(delta_ready, tla.arch.VECTOR)
+        tla.cross_core_set_flag(h_ready, tla.pipes.MTE3)
+        tla.cross_core_wait_flag(delta_ready, tla.pipes.VECTOR)
         scale_and_add_delta(state, delta, ugamma, 128)
         tla.pipe_barrier(tla.pipes.ALL)
 
@@ -5654,7 +5654,7 @@ def persistent_pipeline_chunk(
         if tla.const_expr(bulk_operands):
             raw_q = flat(tla.recast_ptr(ubase + 47840, dtype=tla.BFloat16), 4096)
             raw_k = flat(tla.recast_ptr(ubase + 49888, dtype=tla.BFloat16), 4096)
-    prefetch_free = tla.flag("pc_prefetch_free", tla.arch.VECTOR, tla.arch.MTE2)
+    prefetch_free = tla.flag("pc_prefetch_free", tla.pipes.VECTOR, tla.pipes.MTE2)
     # Packed score bytes are free after score_done; leaf reads only nt32.
     nt32 = flat(ubase + 18496, 2048)
     # Raw gate is dead after prefix; these vector exits share its storage.
@@ -5702,23 +5702,23 @@ def persistent_pipeline_chunk(
         ugamma = flat(ubase + 43616 + parity * 64, 64)
         saved_qg = flat(tla.recast_ptr(ubase + 43744, dtype=tla.BFloat16), 4096)
         saved_kg = flat(tla.recast_ptr(ubase + 45792, dtype=tla.BFloat16), 4096)
-    gm_loaded = tla.flag("pc_gm_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    cast_free = tla.flag("pc_cast_free", tla.arch.MTE3, tla.arch.VECTOR)
-    input_dma_free = tla.flag("pc_input_dma_free", tla.arch.MTE3, tla.arch.MTE2)
-    peer_loaded = tla.flag("pc_peer_loaded", tla.arch.MTE2, tla.arch.VECTOR)
+    gm_loaded = tla.flag("pc_gm_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    cast_free = tla.flag("pc_cast_free", tla.pipes.MTE3, tla.pipes.VECTOR)
+    input_dma_free = tla.flag("pc_input_dma_free", tla.pipes.MTE3, tla.pipes.MTE2)
+    peer_loaded = tla.flag("pc_peer_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
     published = tla.cross_flag("pc_partial_ready", mode=1)
     consumed = tla.cross_flag("pc_partial_free", mode=1)
-    identity_ready = tla.flag("pc_identity_ready", tla.arch.MTE2, tla.arch.MTE1)
-    loaded = tla.flag("pc_loaded", tla.arch.MTE1, tla.arch.CUBE)
-    cube_done = tla.flag("pc_cube_done", tla.arch.CUBE, tla.arch.FIX)
-    v_done = tla.flag("pc_v_done", tla.arch.VECTOR, tla.arch.MTE3)
-    ready0 = tla.flag("pc_ready0", tla.arch.MTE1, tla.arch.CUBE)
-    ready1 = tla.flag("pc_ready1", tla.arch.MTE1, tla.arch.CUBE)
-    free0 = tla.flag("pc_free0", tla.arch.CUBE, tla.arch.MTE1)
-    free1 = tla.flag("pc_free1", tla.arch.CUBE, tla.arch.MTE1)
-    fix_ready = tla.flag("pc_fix_ready", tla.arch.FIX, tla.arch.MTE1)
-    acc_free = tla.flag("pc_acc_free", tla.arch.FIX, tla.arch.CUBE)
-    resident_ready = tla.flag("pc_resident_ready", tla.arch.FIX, tla.arch.MTE1)
+    identity_ready = tla.flag("pc_identity_ready", tla.pipes.MTE2, tla.pipes.MTE1)
+    loaded = tla.flag("pc_loaded", tla.pipes.MTE1, tla.pipes.CUBE)
+    cube_done = tla.flag("pc_cube_done", tla.pipes.CUBE, tla.pipes.FIX)
+    v_done = tla.flag("pc_v_done", tla.pipes.VECTOR, tla.pipes.MTE3)
+    ready0 = tla.flag("pc_ready0", tla.pipes.MTE1, tla.pipes.CUBE)
+    ready1 = tla.flag("pc_ready1", tla.pipes.MTE1, tla.pipes.CUBE)
+    free0 = tla.flag("pc_free0", tla.pipes.CUBE, tla.pipes.MTE1)
+    free1 = tla.flag("pc_free1", tla.pipes.CUBE, tla.pipes.MTE1)
+    fix_ready = tla.flag("pc_fix_ready", tla.pipes.FIX, tla.pipes.MTE1)
+    acc_free = tla.flag("pc_acc_free", tla.pipes.FIX, tla.pipes.CUBE)
+    resident_ready = tla.flag("pc_resident_ready", tla.pipes.FIX, tla.pipes.MTE1)
     scores_ready = tla.cross_flag("pc_scores_ready", mode=2)
     scores_done = tla.cross_flag("pc_scores_done", mode=2)
     mq_done = tla.cross_flag("pc_mq_done", mode=2)
@@ -5741,7 +5741,7 @@ def persistent_pipeline_chunk(
         with tla.cube():
             identity.fill(0)
             zero.fill(0)
-            tla.pipe_barrier(tla.arch.MTE2)
+            tla.pipe_barrier(tla.pipes.MTE2)
             for j in tla.range_constexpr(4):
                 tla.copy(
                     tla.tile_view(
@@ -5749,13 +5749,13 @@ def persistent_pipeline_chunk(
                     ),
                     row_major(identity16.ptr, 16, 16),
                 )
-            mutex_event(_mutex_identity_ready, tla.arch.MTE2)
+            mutex_event(_mutex_identity_ready, tla.pipes.MTE2)
     with tla.vector():
         aiv_entry = tla.arch.sub_block_idx()
         # Incoming state is ready on V, so publish the transitive MTE2->V->MTE3
         # edge before a history DMA reads the same UB allocation.
-        mutex_event(_mutex_v_done, tla.arch.VECTOR)
-        mutex_event(_mutex_v_done, tla.arch.MTE3)
+        mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+        mutex_event(_mutex_v_done, tla.pipes.MTE3)
         if tla.const_expr(save_history):
             tla.copy(
                 strided_rows(history.ptr + aiv_entry * 64, 128, 64, 128),
@@ -5763,15 +5763,15 @@ def persistent_pipeline_chunk(
             )
         if first_chunk:
             cast_state_nz(state, snz, 128)
-            mutex_event(_mutex_v_done, tla.arch.VECTOR)
-            mutex_event(_mutex_v_done, tla.arch.MTE3)
+            mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+            mutex_event(_mutex_v_done, tla.pipes.MTE3)
             tla.copy(
                 tla.tile_view(
                     hl, tla.make_shape(128, 64), tla.make_coord(0, aiv_entry)
                 ),
                 padded_nz(snz.ptr, 128),
             )
-            tla.cross_core_set_flag(h_ready, tla.arch.MTE3)
+            tla.cross_core_set_flag(h_ready, tla.pipes.MTE3)
     if first_chunk:
         prefix_inputs(
             q,
@@ -5832,8 +5832,8 @@ def persistent_pipeline_chunk(
     if first_chunk:
         if tla.const_expr(mode == 1):
             with tla.vector():
-                mutex_event(_mutex_cast_free, tla.arch.MTE3)
-                mutex_event(_mutex_cast_free, tla.arch.VECTOR)
+                mutex_event(_mutex_cast_free, tla.pipes.MTE3)
+                mutex_event(_mutex_cast_free, tla.pipes.VECTOR)
                 pack_persistent_panel(
                     uq,
                     uk,
@@ -5864,8 +5864,8 @@ def persistent_pipeline_chunk(
                     inverse_norm,
                     shared_scores,
                 )
-                mutex_event(_mutex_v_done, tla.arch.VECTOR)
-                mutex_event(_mutex_v_done, tla.arch.MTE3)
+                mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+                mutex_event(_mutex_v_done, tla.pipes.MTE3)
                 tla.copy(
                     tla.tile_view(
                         score_l1(lp, shared_scores),
@@ -5874,7 +5874,7 @@ def persistent_pipeline_chunk(
                     ),
                     padded_nz(packed.ptr, score_rows),
                 )
-                tla.cross_core_set_flag(scores_ready, tla.arch.MTE3)
+                tla.cross_core_set_flag(scores_ready, tla.pipes.MTE3)
                 if tla.const_expr(save_norm):
                     if norm_owner:
                         tla.copy(
@@ -5895,7 +5895,7 @@ def persistent_pipeline_chunk(
                 )
     if tla.const_expr(mode == 1):
         with tla.cube():
-            tla.cross_core_wait_flag(scores_ready, tla.arch.MTE1)
+            tla.cross_core_wait_flag(scores_ready, tla.pipes.MTE1)
             persistent_score_mmads(
                 score_l1(lp, shared_scores),
                 ap,
@@ -5912,8 +5912,8 @@ def persistent_pipeline_chunk(
             )
     else:
         with tla.vector():
-            mutex_event(_mutex_cast_free, tla.arch.MTE3)
-            mutex_event(_mutex_cast_free, tla.arch.VECTOR)
+            mutex_event(_mutex_cast_free, tla.pipes.MTE3)
+            mutex_event(_mutex_cast_free, tla.pipes.VECTOR)
         per_d_scores(
             uq,
             uk,
@@ -5936,8 +5936,8 @@ def persistent_pipeline_chunk(
         if tla.const_expr(bulk_operands):
             with tla.vector():
                 aiv_recurrent = tla.arch.sub_block_idx()
-                mutex_event(_mutex_cast_free, tla.arch.MTE3)
-                mutex_event(_mutex_cast_free, tla.arch.VECTOR)
+                mutex_event(_mutex_cast_free, tla.pipes.MTE3)
+                mutex_event(_mutex_cast_free, tla.pipes.VECTOR)
                 pack_recurrent(
                     uq,
                     uk,
@@ -5951,8 +5951,8 @@ def persistent_pipeline_chunk(
                     scale,
                     save_cache,
                 )
-                mutex_event(_mutex_v_done, tla.arch.VECTOR)
-                mutex_event(_mutex_v_done, tla.arch.MTE3)
+                mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+                mutex_event(_mutex_v_done, tla.pipes.MTE3)
                 tla.copy(
                     tla.tile_view(
                         recurrent,
@@ -5962,9 +5962,9 @@ def persistent_pipeline_chunk(
                     padded_nz(recurrent_nz.ptr, 256),
                 )
                 if parity == 0:
-                    tla.cross_core_set_flag(k_ready, tla.arch.MTE3)
+                    tla.cross_core_set_flag(k_ready, tla.pipes.MTE3)
                 else:
-                    tla.cross_core_set_flag(v_ready, tla.arch.MTE3)
+                    tla.cross_core_set_flag(v_ready, tla.pipes.MTE3)
                 if tla.const_expr(save_cache):
                     tla.copy(
                         strided_rows(qg.ptr + aiv_recurrent * 64, valid, 64, v_stride),
@@ -5978,8 +5978,8 @@ def persistent_pipeline_chunk(
         with tla.vector():
             # Current raw V/g/beta have already become independent L1 operands.
             # Close all previous MTE3 readers before reusing their UB aliases.
-            mutex_event(_mutex_input_dma_free, tla.arch.MTE3)
-            mutex_event(_mutex_input_dma_free, tla.arch.MTE2)
+            mutex_event(_mutex_input_dma_free, tla.pipes.MTE3)
+            mutex_event(_mutex_input_dma_free, tla.pipes.MTE2)
             load_raw_prefix_inputs(
                 q,
                 k,
@@ -6005,8 +6005,8 @@ def persistent_pipeline_chunk(
             )
     with tla.cube():
         if tla.const_expr(mode != 1):
-            mutex_event(_mutex_cube_done, tla.arch.CUBE)
-            mutex_event(_mutex_cube_done, tla.arch.FIX)
+            mutex_event(_mutex_cube_done, tla.pipes.CUBE)
+            mutex_event(_mutex_cube_done, tla.pipes.FIX)
             tla.copy(
                 row_major(kk.ptr, 64, 64),
                 ci,
@@ -6017,13 +6017,13 @@ def persistent_pipeline_chunk(
                 ct,
                 tla.params.CopyL0C2DstParams(l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M),
             )
-            tla.cross_core_set_flag(scores_done, tla.arch.FIX)
-            tla.cross_core_set_flag(mq_done, tla.arch.FIX)
-        tla.cross_core_wait_flag(inverse_ready, tla.arch.MTE1)
+            tla.cross_core_set_flag(scores_done, tla.pipes.FIX)
+            tla.cross_core_set_flag(mq_done, tla.pipes.FIX)
+        tla.cross_core_wait_flag(inverse_ready, tla.pipes.MTE1)
         if first_chunk:
-            mutex_event(_mutex_identity_ready, tla.arch.MTE1)
-        mutex_event(_mutex_free0, tla.arch.CUBE)
-        mutex_event(_mutex_free1, tla.arch.CUBE)
+            mutex_event(_mutex_identity_ready, tla.pipes.MTE1)
+        mutex_event(_mutex_free0, tla.pipes.CUBE)
+        mutex_event(_mutex_free1, tla.pipes.CUBE)
         compose_persistent_inverse(
             nt_l1,
             diagonal,
@@ -6052,12 +6052,12 @@ def persistent_pipeline_chunk(
             cube_done,
             resident_ready,
         )
-        mutex_event(_mutex_free0, tla.arch.MTE1)
-        mutex_event(_mutex_free1, tla.arch.MTE1)
+        mutex_event(_mutex_free0, tla.pipes.MTE1)
+        mutex_event(_mutex_free1, tla.pipes.MTE1)
         if parity == 0:
-            tla.cross_core_wait_flag(k_ready, tla.arch.MTE1)
+            tla.cross_core_wait_flag(k_ready, tla.pipes.MTE1)
         else:
-            tla.cross_core_wait_flag(v_ready, tla.arch.MTE1)
+            tla.cross_core_wait_flag(v_ready, tla.pipes.MTE1)
         persistent_products_and_state(
             resident,
             kl,
@@ -6094,23 +6094,23 @@ def persistent_pipeline_chunk(
         )
     with tla.vector():
         aiv_leaf = tla.arch.sub_block_idx()
-        tla.cross_core_wait_flag(scores_done, tla.arch.VECTOR)
+        tla.cross_core_wait_flag(scores_done, tla.pipes.VECTOR)
         # Snapshot NZ and leaf workspace alias; close its MTE3 reader first.
-        mutex_event(_mutex_cast_free, tla.arch.MTE3)
-        mutex_event(_mutex_cast_free, tla.arch.VECTOR)
+        mutex_event(_mutex_cast_free, tla.pipes.MTE3)
+        mutex_event(_mutex_cast_free, tla.pipes.VECTOR)
         persistent_negative_t(kk, ub, nt32, ntnz, aiv_leaf)
         persistent_diagonal_inverse(
             nt32, prefix, padded_nz(dnz.ptr, 32), aiv_leaf, first_chunk
         )
         # QK must finish before inverse reuses L0C or next score replaces L1.
-        tla.cross_core_wait_flag(mq_done, tla.arch.VECTOR)
+        tla.cross_core_wait_flag(mq_done, tla.pipes.VECTOR)
     if tla.const_expr(prefetch and mode != 1):
         prefetch_half(q, k, raw_q, raw_k, next_valid, q_stride, 0, prefetch_free)
         prefetch_half(q, k, raw_q, raw_k, next_valid, q_stride, 1, prefetch_free)
     with tla.vector():
         aiv_inverse = tla.arch.sub_block_idx()
-        mutex_event(_mutex_v_done, tla.arch.VECTOR)
-        mutex_event(_mutex_v_done, tla.arch.MTE3)
+        mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+        mutex_event(_mutex_v_done, tla.pipes.MTE3)
         tla.copy(
             tla.tile_view(
                 nt_l1, tla.make_shape(32, 64), tla.make_coord(aiv_inverse, 0)
@@ -6123,13 +6123,13 @@ def persistent_pipeline_chunk(
             ),
             padded_nz(dnz.ptr, 32),
         )
-        tla.cross_core_set_flag(inverse_ready, tla.arch.MTE3)
+        tla.cross_core_set_flag(inverse_ready, tla.pipes.MTE3)
     if tla.const_expr(bulk_operands):
         with tla.vector():
             aiv_aq = tla.arch.sub_block_idx()
             mask_mqk_nz(mq, public, aq_nz, aiv_aq, save_matrices)
-            mutex_event(_mutex_v_done, tla.arch.VECTOR)
-            mutex_event(_mutex_v_done, tla.arch.MTE3)
+            mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+            mutex_event(_mutex_v_done, tla.pipes.MTE3)
             rows = valid - aiv_aq * 32
             if rows > 32:
                 rows = 32
@@ -6143,7 +6143,7 @@ def persistent_pipeline_chunk(
                 tla.tile_view(al, tla.make_shape(32, 64), tla.make_coord(aiv_aq, 0)),
                 padded_nz(aq_nz.ptr, 32),
             )
-            tla.cross_core_set_flag(recur_ready, tla.arch.MTE3)
+            tla.cross_core_set_flag(recur_ready, tla.pipes.MTE3)
     if next_valid > 0:
         prefix_inputs(
             flat(q.ptr + tla.Int64(64 * q_stride), 1),
@@ -6241,8 +6241,8 @@ def persistent_pipeline_chunk(
                     inverse_norm,
                     shared_scores,
                 )
-                mutex_event(_mutex_v_done, tla.arch.VECTOR)
-                mutex_event(_mutex_v_done, tla.arch.MTE3)
+                mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+                mutex_event(_mutex_v_done, tla.pipes.MTE3)
                 tla.copy(
                     tla.tile_view(
                         score_l1(lp, shared_scores),
@@ -6251,7 +6251,7 @@ def persistent_pipeline_chunk(
                     ),
                     padded_nz(packed.ptr, score_rows),
                 )
-                tla.cross_core_set_flag(scores_ready, tla.arch.MTE3)
+                tla.cross_core_set_flag(scores_ready, tla.pipes.MTE3)
                 if tla.const_expr(save_norm):
                     if norm_owner:
                         tla.copy(
@@ -6290,30 +6290,30 @@ def persistent_pipeline_chunk(
             # packing, so Cube produces -W; the public W FIX reverses the sign.
             beta_weighted_operand(uk, ub, ug, cast, True, True)
             nd2nz_tile(cast, nz, 64, 64)
-            mutex_event(_mutex_v_done, tla.arch.VECTOR)
-            mutex_event(_mutex_v_done, tla.arch.MTE3)
+            mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+            mutex_event(_mutex_v_done, tla.pipes.MTE3)
             tla.copy(
                 tla.tile_view(kl, tla.make_shape(64, 64), tla.make_coord(0, aiv_tail)),
                 padded_nz(nz.ptr, 64),
             )
-            tla.cross_core_set_flag(k_ready, tla.arch.MTE3)
-            mutex_event(_mutex_cast_free, tla.arch.MTE3)
-            mutex_event(_mutex_cast_free, tla.arch.VECTOR)
+            tla.cross_core_set_flag(k_ready, tla.pipes.MTE3)
+            mutex_event(_mutex_cast_free, tla.pipes.MTE3)
+            mutex_event(_mutex_cast_free, tla.pipes.VECTOR)
             beta_weighted_operand(uv, ub, ug, cast, False)
             nd2nz_tile(cast, nz, 64, 64)
-            mutex_event(_mutex_v_done, tla.arch.VECTOR)
-            mutex_event(_mutex_v_done, tla.arch.MTE3)
+            mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+            mutex_event(_mutex_v_done, tla.pipes.MTE3)
             tla.copy(
                 tla.tile_view(vl, tla.make_shape(64, 64), tla.make_coord(0, aiv_tail)),
                 padded_nz(nz.ptr, 64),
             )
-            tla.cross_core_set_flag(v_ready, tla.arch.MTE3)
-            mutex_event(_mutex_cast_free, tla.arch.MTE3)
-            mutex_event(_mutex_cast_free, tla.arch.VECTOR)
+            tla.cross_core_set_flag(v_ready, tla.pipes.MTE3)
+            mutex_event(_mutex_cast_free, tla.pipes.MTE3)
+            mutex_event(_mutex_cast_free, tla.pipes.VECTOR)
             prepare_decayed_q(uq, ug, cast, decayed, scale)
             nd2nz_tile(decayed, nz, 64, 64)
-            mutex_event(_mutex_v_done, tla.arch.VECTOR)
-            mutex_event(_mutex_v_done, tla.arch.MTE3)
+            mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+            mutex_event(_mutex_v_done, tla.pipes.MTE3)
             if tla.const_expr(save_cache):
                 tla.copy(
                     strided_rows(qg.ptr + aiv_tail * 64, valid, 64, v_stride),
@@ -6323,12 +6323,12 @@ def persistent_pipeline_chunk(
                 tla.tile_view(ql, tla.make_shape(64, 64), tla.make_coord(0, aiv_tail)),
                 padded_nz(nz.ptr, 64),
             )
-            mutex_event(_mutex_cast_free, tla.arch.MTE3)
-            mutex_event(_mutex_cast_free, tla.arch.VECTOR)
+            mutex_event(_mutex_cast_free, tla.pipes.MTE3)
+            mutex_event(_mutex_cast_free, tla.pipes.VECTOR)
             restored_state_inputs(uk, ug, cast, ugamma)
             nd2nz_tile(cast, nz, 64, 64)
-            mutex_event(_mutex_v_done, tla.arch.VECTOR)
-            mutex_event(_mutex_v_done, tla.arch.MTE3)
+            mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+            mutex_event(_mutex_v_done, tla.pipes.MTE3)
             if tla.const_expr(save_cache):
                 tla.copy(
                     strided_rows(kg.ptr + aiv_tail * 64, valid, 64, v_stride),
@@ -6338,12 +6338,12 @@ def persistent_pipeline_chunk(
                 tla.tile_view(kgl, tla.make_shape(64, 64), tla.make_coord(0, aiv_tail)),
                 padded_nz(nz.ptr, 64),
             )
-            mutex_event(_mutex_cast_free, tla.arch.MTE3)
-            mutex_event(_mutex_cast_free, tla.arch.VECTOR)
+            mutex_event(_mutex_cast_free, tla.pipes.MTE3)
+            mutex_event(_mutex_cast_free, tla.pipes.VECTOR)
         if tla.const_expr(not bulk_operands):
             mask_mqk_nz(mq, public, aq_nz, aiv_tail, save_matrices)
-            mutex_event(_mutex_v_done, tla.arch.VECTOR)
-            mutex_event(_mutex_v_done, tla.arch.MTE3)
+            mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+            mutex_event(_mutex_v_done, tla.pipes.MTE3)
             rows = valid - aiv_tail * 32
             if rows > 32:
                 rows = 32
@@ -6357,14 +6357,14 @@ def persistent_pipeline_chunk(
                 tla.tile_view(al, tla.make_shape(32, 64), tla.make_coord(aiv_tail, 0)),
                 padded_nz(aq_nz.ptr, 32),
             )
-            tla.cross_core_set_flag(recur_ready, tla.arch.MTE3)
+            tla.cross_core_set_flag(recur_ready, tla.pipes.MTE3)
     if next_valid > 0:
         next_recurrent = recurrent_l1(lp + 65536 + (1 - parity) * 32768)
         next_gamma = flat(ubase + 43616 + (1 - parity) * 64, 64)
         with tla.vector():
             aiv_pack = tla.arch.sub_block_idx()
-            mutex_event(_mutex_cast_free, tla.arch.MTE3)
-            mutex_event(_mutex_cast_free, tla.arch.VECTOR)
+            mutex_event(_mutex_cast_free, tla.pipes.MTE3)
+            mutex_event(_mutex_cast_free, tla.pipes.VECTOR)
             pack_recurrent(
                 uq,
                 uk,
@@ -6378,8 +6378,8 @@ def persistent_pipeline_chunk(
                 scale,
                 save_cache,
             )
-            mutex_event(_mutex_v_done, tla.arch.VECTOR)
-            mutex_event(_mutex_v_done, tla.arch.MTE3)
+            mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+            mutex_event(_mutex_v_done, tla.pipes.MTE3)
             tla.copy(
                 tla.tile_view(
                     next_recurrent, tla.make_shape(256, 64), tla.make_coord(0, aiv_pack)
@@ -6387,9 +6387,9 @@ def persistent_pipeline_chunk(
                 padded_nz(recurrent_nz.ptr, 256),
             )
             if parity == 0:
-                tla.cross_core_set_flag(v_ready, tla.arch.MTE3)
+                tla.cross_core_set_flag(v_ready, tla.pipes.MTE3)
             else:
-                tla.cross_core_set_flag(k_ready, tla.arch.MTE3)
+                tla.cross_core_set_flag(k_ready, tla.pipes.MTE3)
             if tla.const_expr(save_cache):
                 tla.copy(
                     strided_rows(
@@ -6410,21 +6410,21 @@ def persistent_pipeline_chunk(
                     row_major(saved_kg.ptr, next_valid, 64),
                 )
     with tla.vector():
-        tla.cross_core_wait_flag(delta_ready, tla.arch.VECTOR)
+        tla.cross_core_wait_flag(delta_ready, tla.pipes.VECTOR)
         if next_valid > 0:
             aiv_update = tla.arch.sub_block_idx()
             # cast_free before next recurrent packing has released score's
             # MTE3 read of the SNZ alias; the recurrent buffer is disjoint.
             update_state_nz(state, delta, ugamma, snz, 128)
-            mutex_event(_mutex_v_done, tla.arch.VECTOR)
-            mutex_event(_mutex_v_done, tla.arch.MTE3)
+            mutex_event(_mutex_v_done, tla.pipes.VECTOR)
+            mutex_event(_mutex_v_done, tla.pipes.MTE3)
             tla.copy(
                 tla.tile_view(
                     hl, tla.make_shape(128, 64), tla.make_coord(0, aiv_update)
                 ),
                 padded_nz(snz.ptr, 128),
             )
-            tla.cross_core_set_flag(h_ready, tla.arch.MTE3)
+            tla.cross_core_set_flag(h_ready, tla.pipes.MTE3)
         else:
             scale_and_add_delta(state, delta, ugamma, 128)
 
@@ -6595,8 +6595,8 @@ class PersistentMetadataKernel:
         a = tla.allocate(32768, tla.BFloat16, tla.AddressSpace.l0a, 512)
         b = tla.allocate(32768, tla.BFloat16, tla.AddressSpace.l0b, 512)
         c = tla.allocate(32768, tla.Float32, tla.AddressSpace.l0c, 1024)
-        load_state = tla.flag("ps_load_state", tla.arch.MTE2, tla.arch.VECTOR)
-        save_state = tla.flag("ps_save_state", tla.arch.VECTOR, tla.arch.MTE3)
+        load_state = tla.flag("ps_load_state", tla.pipes.MTE2, tla.pipes.VECTOR)
+        save_state = tla.flag("ps_save_state", tla.pipes.VECTOR, tla.pipes.MTE3)
         block = i64(tla.arch.block_idx())
         task = meta[i64(11) + block]
         while task != i64(0):
@@ -6614,8 +6614,8 @@ class PersistentMetadataKernel:
                     row_major(ub, 128, 64),
                     strided_rows(initial.ptr + si + i64(aiv * 64), 128, 64, 128),
                 )
-                mutex_event(_mutex_load_state, tla.arch.MTE2)
-                mutex_event(_mutex_load_state, tla.arch.VECTOR)
+                mutex_event(_mutex_load_state, tla.pipes.MTE2)
+                mutex_event(_mutex_load_state, tla.pipes.VECTOR)
             for chunk in tla.range(total):
                 ci = i64(chunk)
                 valid = i64(64)
@@ -6781,8 +6781,8 @@ class PersistentMetadataKernel:
                     )
             with tla.vector():
                 aiv = tla.arch.sub_block_idx()
-                mutex_event(_mutex_save_state, tla.arch.VECTOR)
-                mutex_event(_mutex_save_state, tla.arch.MTE3)
+                mutex_event(_mutex_save_state, tla.pipes.VECTOR)
+                mutex_event(_mutex_save_state, tla.pipes.MTE3)
                 tla.copy(
                     strided_rows(final.ptr + si + i64(aiv * 64), 128, 64, 128),
                     row_major(ub, 128, 64),

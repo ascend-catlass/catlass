@@ -39,8 +39,8 @@ def extern_simd_reg_add(a: tla.Tensor, b: tla.Tensor, c: tla.Tensor) -> None:
     z = tla.make_tensor_like(
         tla.allocate(TILE, tla.Float32, tla.AddressSpace.ub, 256), c, tla.arch.RowMajor
     )
-    loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    done = tla.flag("done", tla.arch.VECTOR, tla.arch.MTE3)
+    loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    done = tla.flag("done", tla.pipes.VECTOR, tla.pipes.MTE3)
     with tla.vector():
         tla.copy(x, a)
         tla.copy(y, b)

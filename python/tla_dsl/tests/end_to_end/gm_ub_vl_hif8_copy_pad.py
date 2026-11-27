@@ -30,7 +30,7 @@ _ALIGN = 256
 @tla.kernel
 def gm_ub_vl_hif8_pad_then_writeback(gm_src: tla.Tensor, gm_dst: tla.Tensor) -> None:
     ub_ptr = tla.allocate(_DST_ELEMS, tla.HiFloat8, tla.AddressSpace.ub, _ALIGN)
-    loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.MTE3)
+    loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.MTE3)
     with tla.vector():
         ub = tla.make_tensor(
             ub_ptr,

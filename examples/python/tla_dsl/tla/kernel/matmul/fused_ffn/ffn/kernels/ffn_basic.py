@@ -158,13 +158,13 @@ def ffn_basic_kernel(
     # SyncAll — mirrors CPP sequential BlockMmad HardEvent lifetimes.
     if tla.const_expr(USE_BIAS):
         l1_bias_data_ready = tla.flag(
-            "ffn_bias_l1_data_ready", tla.arch.MTE2, tla.arch.MTE1, id=4
+            "ffn_bias_l1_data_ready", tla.pipes.MTE2, tla.pipes.MTE1, id=4
         )
         l1_bias_available = tla.flag(
-            "ffn_bias_l1_available", tla.arch.MTE1, tla.arch.MTE2, id=4
+            "ffn_bias_l1_available", tla.pipes.MTE1, tla.pipes.MTE2, id=4
         )
         l0_bias_available = tla.flag(
-            "ffn_bias_l0_available", tla.arch.CUBE, tla.arch.MTE1, id=0
+            "ffn_bias_l0_available", tla.pipes.CUBE, tla.pipes.MTE1, id=0
         )
     else:
         l1_bias_data_ready = None

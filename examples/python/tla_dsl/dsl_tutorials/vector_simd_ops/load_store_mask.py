@@ -63,8 +63,8 @@ _apply_dtype("f32")
 
 @tla.kernel
 def load_store_mask(mem_src: tla.Tensor, mem_out: tla.Tensor) -> None:
-    ub_loaded = tla.flag("ub_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    vec_done = tla.flag("vec_done", tla.arch.VECTOR, tla.arch.MTE3)
+    ub_loaded = tla.flag("ub_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    vec_done = tla.flag("vec_done", tla.pipes.VECTOR, tla.pipes.MTE3)
 
     src_ub = _make_ub_tensor(mem_src)
     out_ub = _make_ub_tensor(mem_out)

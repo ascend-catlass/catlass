@@ -32,7 +32,7 @@ CASES = ("rowmajor", "vector")
 @tla.kernel
 def bool_rowmajor_roundtrip(gm_src: tla.Tensor, gm_dst: tla.Tensor) -> None:
     ub_ptr = tla.allocate(_N, tla.Bool, tla.AddressSpace.ub, _ALIGN)
-    loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.MTE3)
+    loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.MTE3)
     with tla.vector():
         ub = tla.make_tensor(
             ub_ptr,
@@ -54,7 +54,7 @@ def bool_rowmajor_roundtrip(gm_src: tla.Tensor, gm_dst: tla.Tensor) -> None:
 @tla.kernel
 def bool_vector_roundtrip(gm_src: tla.Tensor, gm_dst: tla.Tensor) -> None:
     ub_ptr = tla.allocate(_N, tla.Bool, tla.AddressSpace.ub, _ALIGN)
-    loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.MTE3)
+    loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.MTE3)
     with tla.vector():
         ub_vec = tla.make_tensor(
             ub_ptr,

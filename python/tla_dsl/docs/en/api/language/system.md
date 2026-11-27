@@ -12,7 +12,7 @@ Do not edit manually. Update docstrings/Examples in catlass/core_api.py
 
 [Language Reference](index.md) | [API Quick Reference](../quick_reference.md)
 
-Architecture attributes on `tla.arch` / `tla.AddressSpace` (layout tags, pipes, on-chip address spaces, block helpers).
+Layout tags and block helpers on `tla.arch`, pipe identifiers on `tla.pipes`, and on-chip address spaces on `tla.AddressSpace`.
 
 ## Layout Tags
 
@@ -49,29 +49,29 @@ tag = tla.arch.RowMajor
 
 ## Pipes
 
-Pipe identifiers under `tla.arch`, used by `flag` / `pipe_barrier` / `mutex_*` / cross-core sync.
+Pipe identifiers under `tla.pipes`, used by `flag` / `pipe_barrier` / `mutex_*` / cross-core sync.
 
-**Source:** [`catlass.core_api.arch`](../../../../catlass/core_api.py)
+**Source:** [`catlass.runtime.pipes`](../../../../catlass/runtime.py)
 
 | Pipe | Role |
 |---|---|
-| `tla.arch.SCALAR` | Scalar pipe |
-| `tla.arch.VECTOR` | Vector pipe |
-| `tla.arch.CUBE` | Cube pipe |
-| `tla.arch.MTE1` | MTE1 |
-| `tla.arch.MTE2` | MTE2 |
-| `tla.arch.MTE3` | MTE3 |
-| `tla.arch.FIX` | Fixpipe |
+| `tla.pipes.SCALAR` | Scalar pipe |
+| `tla.pipes.VECTOR` | Vector pipe |
+| `tla.pipes.CUBE` | Cube pipe |
+| `tla.pipes.MTE1` | MTE1 |
+| `tla.pipes.MTE2` | MTE2 |
+| `tla.pipes.MTE3` | MTE3 |
+| `tla.pipes.FIX` | Fixpipe |
+| `tla.pipes.ALL` | All pipes for `pipe_barrier` |
 
 Constraints:
 
 - Available pipes depend on the enclosing `tla.cube()` / `tla.vector()` region; see each sync API's Constraints.
-- `ALL` is not exposed on `tla.arch` for these APIs.
 
 Example:
 
 ```python
-pipe = tla.arch.MTE2
+pipe = tla.pipes.MTE2
 ```
 
 ## On-chip Address Spaces
@@ -1186,7 +1186,7 @@ Constraints:
 Example:
 
 ```python
-count_ready = tla.flag("count_ready", tla.arch.VECTOR, tla.arch.SCALAR)
+count_ready = tla.flag("count_ready", tla.pipes.VECTOR, tla.pipes.SCALAR)
 with tla.vector():
     with tla.vec.func(mode="simd"):
         tla.arch.clear_ar()

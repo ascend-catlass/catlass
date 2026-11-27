@@ -64,7 +64,7 @@ def gm_fractal_to_l1_copy(
     # Byte-addressed L1 base so C0 strides stay 32B (same pattern as fill_op).
     l1_bytes = tla.allocate(_ELEMS * 2, tla.Int8, tla.AddressSpace.l1, 512)
     l1_ptr = tla.recast_ptr(l1_bytes, dtype=tla.Float16)
-    copied = tla.flag("gm_fractal_l1_copied", tla.arch.MTE2, tla.arch.MTE1)
+    copied = tla.flag("gm_fractal_l1_copied", tla.pipes.MTE2, tla.pipes.MTE1)
     with tla.cube():
         l1 = tla.make_tensor_like(l1_ptr, gm_src, layout_tag)
         tla.copy(l1, gm_src)

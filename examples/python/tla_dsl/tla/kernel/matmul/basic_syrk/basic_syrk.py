@@ -464,26 +464,26 @@ def _syrk_impl(
     batch_count = gm_y.origin_shape[0] // m
 
     # ---- intra-core pipe flags (cube side) -------------------------------
-    l1x0_ready = tla.flag("l1x0_ready", tla.arch.MTE2, tla.arch.MTE1)
-    l1x1_ready = tla.flag("l1x1_ready", tla.arch.MTE2, tla.arch.MTE1)
-    l1t0_ready = tla.flag("l1t0_ready", tla.arch.MTE2, tla.arch.MTE1)
-    l1t1_ready = tla.flag("l1t1_ready", tla.arch.MTE2, tla.arch.MTE1)
-    l1x0_free = tla.flag("l1x0_free", tla.arch.MTE1, tla.arch.MTE2)
-    l1x1_free = tla.flag("l1x1_free", tla.arch.MTE1, tla.arch.MTE2)
-    l1t0_free = tla.flag("l1t0_free", tla.arch.MTE1, tla.arch.MTE2)
-    l1t1_free = tla.flag("l1t1_free", tla.arch.MTE1, tla.arch.MTE2)
-    l0a0_free = tla.flag("l0a0_free", tla.arch.CUBE, tla.arch.MTE1)
-    l0a1_free = tla.flag("l0a1_free", tla.arch.CUBE, tla.arch.MTE1)
-    l0b0_free = tla.flag("l0b0_free", tla.arch.CUBE, tla.arch.MTE1)
-    l0b1_free = tla.flag("l0b1_free", tla.arch.CUBE, tla.arch.MTE1)
-    l0ab_ready = tla.flag("l0ab_ready", tla.arch.MTE1, tla.arch.CUBE)
-    mmad_done = tla.flag("mmad_done", tla.arch.CUBE, tla.arch.FIX)
-    l0c_free = tla.flag("l0c_free", tla.arch.FIX, tla.arch.CUBE)
+    l1x0_ready = tla.flag("l1x0_ready", tla.pipes.MTE2, tla.pipes.MTE1)
+    l1x1_ready = tla.flag("l1x1_ready", tla.pipes.MTE2, tla.pipes.MTE1)
+    l1t0_ready = tla.flag("l1t0_ready", tla.pipes.MTE2, tla.pipes.MTE1)
+    l1t1_ready = tla.flag("l1t1_ready", tla.pipes.MTE2, tla.pipes.MTE1)
+    l1x0_free = tla.flag("l1x0_free", tla.pipes.MTE1, tla.pipes.MTE2)
+    l1x1_free = tla.flag("l1x1_free", tla.pipes.MTE1, tla.pipes.MTE2)
+    l1t0_free = tla.flag("l1t0_free", tla.pipes.MTE1, tla.pipes.MTE2)
+    l1t1_free = tla.flag("l1t1_free", tla.pipes.MTE1, tla.pipes.MTE2)
+    l0a0_free = tla.flag("l0a0_free", tla.pipes.CUBE, tla.pipes.MTE1)
+    l0a1_free = tla.flag("l0a1_free", tla.pipes.CUBE, tla.pipes.MTE1)
+    l0b0_free = tla.flag("l0b0_free", tla.pipes.CUBE, tla.pipes.MTE1)
+    l0b1_free = tla.flag("l0b1_free", tla.pipes.CUBE, tla.pipes.MTE1)
+    l0ab_ready = tla.flag("l0ab_ready", tla.pipes.MTE1, tla.pipes.CUBE)
+    mmad_done = tla.flag("mmad_done", tla.pipes.CUBE, tla.pipes.FIX)
+    l0c_free = tla.flag("l0c_free", tla.pipes.FIX, tla.pipes.CUBE)
     # AIV side
-    res_loaded = tla.flag("res_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    out_ready = tla.flag("out_ready", tla.arch.VECTOR, tla.arch.MTE3)
-    tr_ready = tla.flag("tr_ready", tla.arch.VECTOR, tla.arch.MTE3)
-    ub_free = tla.flag("ub_free", tla.arch.MTE3, tla.arch.MTE2)
+    res_loaded = tla.flag("res_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    out_ready = tla.flag("out_ready", tla.pipes.VECTOR, tla.pipes.MTE3)
+    tr_ready = tla.flag("tr_ready", tla.pipes.VECTOR, tla.pipes.MTE3)
+    ub_free = tla.flag("ub_free", tla.pipes.MTE3, tla.pipes.MTE2)
 
     # ---- flags between the AIC and the two AIVs, one pair per chunk -------
     aic_ready0 = tla.cross_flag("syrk_aic_ready0", mode=2)
@@ -497,8 +497,8 @@ def _syrk_impl(
 
     split_done = tla.cross_flag("syrk_split_done", mode=2)
     split_barrier = tla.cross_flag("syrk_split_barrier", mode=0)
-    reduce_ready = tla.flag("syrk_reduce_ready", tla.arch.MTE2, tla.arch.VECTOR)
-    reduce_free = tla.flag("syrk_reduce_free", tla.arch.VECTOR, tla.arch.MTE2)
+    reduce_ready = tla.flag("syrk_reduce_ready", tla.pipes.MTE2, tla.pipes.VECTOR)
+    reduce_free = tla.flag("syrk_reduce_free", tla.pipes.VECTOR, tla.pipes.MTE2)
 
     # ---- on-chip buffers --------------------------------------------------
     l1x0_ptr = tla.allocate(
@@ -781,7 +781,7 @@ def _syrk_impl(
                     ready_flag = (aic_ready0, aic_ready1, aic_ready2, aic_ready3)[chunk]
                     prod_ptr = ub_p0_ptr if (chunk // 2) % 2 == 0 else ub_p1_ptr
 
-                    tla.cross_core_wait_flag(free_flag, tla.arch.FIX)
+                    tla.cross_core_wait_flag(free_flag, tla.pipes.FIX)
                     if row_base < m_actual:
                         rows_view = tla.tile_view(
                             l0_c,
@@ -812,7 +812,7 @@ def _syrk_impl(
                                     l0c2ub_mode=L0C2UBMode.NO_SPLIT_VEC_1
                                 ),
                             )
-                    tla.cross_core_set_flag(ready_flag, tla.arch.FIX)
+                    tla.cross_core_set_flag(ready_flag, tla.pipes.FIX)
 
             tla.set_flag(l0c_free)
 
@@ -826,14 +826,14 @@ def _syrk_impl(
         tla.wait_flag(l0b1_free)
         tla.wait_flag(l0c_free)
         if tla.const_expr(_splitk > 1):
-            tla.cross_core_set_flag(split_done, tla.arch.FIX)
+            tla.cross_core_set_flag(split_done, tla.pipes.FIX)
         else:
             # The AIVs pre-set their free flags before their loop starts,
             # so the AIC can issue a full tile of fixpipes without stalling.
-            tla.cross_core_wait_flag(aiv_free0, tla.arch.FIX)
-            tla.cross_core_wait_flag(aiv_free1, tla.arch.FIX)
-            tla.cross_core_wait_flag(aiv_free2, tla.arch.FIX)
-            tla.cross_core_wait_flag(aiv_free3, tla.arch.FIX)
+            tla.cross_core_wait_flag(aiv_free0, tla.pipes.FIX)
+            tla.cross_core_wait_flag(aiv_free1, tla.pipes.FIX)
+            tla.cross_core_wait_flag(aiv_free2, tla.pipes.FIX)
+            tla.cross_core_wait_flag(aiv_free3, tla.pipes.FIX)
         tla.pipe_barrier(tla.pipes.ALL)
 
     with tla.vector():
@@ -843,9 +843,9 @@ def _syrk_impl(
         if tla.const_expr(_splitk > 1):
             # The paired AIC has finished all its partials. The all-core
             # barrier ensures every core's workspace writes are visible.
-            tla.cross_core_wait_flag(split_done, tla.arch.MTE2)
-            tla.cross_core_set_flag(split_barrier, tla.arch.MTE2)
-            tla.cross_core_wait_flag(split_barrier, tla.arch.MTE2)
+            tla.cross_core_wait_flag(split_done, tla.pipes.MTE2)
+            tla.cross_core_set_flag(split_barrier, tla.pipes.MTE2)
+            tla.cross_core_wait_flag(split_barrier, tla.pipes.MTE2)
             tla.set_flag(reduce_free)
             aiv_id = tla.arch.block_idx() * 2 + sub_idx
             aiv_count = tla.arch.block_num() * 2
@@ -954,10 +954,10 @@ def _syrk_impl(
                     )
             tla.wait_flag(reduce_free)
         else:
-            tla.cross_core_set_flag(aiv_free0, tla.arch.MTE3)
-            tla.cross_core_set_flag(aiv_free1, tla.arch.MTE3)
-            tla.cross_core_set_flag(aiv_free2, tla.arch.MTE3)
-            tla.cross_core_set_flag(aiv_free3, tla.arch.MTE3)
+            tla.cross_core_set_flag(aiv_free0, tla.pipes.MTE3)
+            tla.cross_core_set_flag(aiv_free1, tla.pipes.MTE3)
+            tla.cross_core_set_flag(aiv_free2, tla.pipes.MTE3)
+            tla.cross_core_set_flag(aiv_free3, tla.pipes.MTE3)
 
             for task in tla.range(
                 tla.arch.block_idx(), total_tasks, tla.arch.block_num()
@@ -994,7 +994,7 @@ def _syrk_impl(
                     prod_ptr = ub_p0_ptr if (chunk // 2) % 2 == 0 else ub_p1_ptr
                     owner = chunk % 2
 
-                    tla.cross_core_wait_flag(ready_flag, tla.arch.MTE2)
+                    tla.cross_core_wait_flag(ready_flag, tla.pipes.MTE2)
 
                     if sub_idx == owner:
                         if row_base < m_actual:
@@ -1024,7 +1024,7 @@ def _syrk_impl(
                     # Ensure GM stores (MTE3) complete before releasing the
                     # free flag, so this AIV doesn't outpace the AIC.
                     tla.pipe_barrier(tla.pipes.ALL)
-                    tla.cross_core_set_flag(free_flag, tla.arch.MTE3)
+                    tla.cross_core_set_flag(free_flag, tla.pipes.MTE3)
 
         tla.wait_flag(ub_free)
         tla.pipe_barrier(tla.pipes.ALL)

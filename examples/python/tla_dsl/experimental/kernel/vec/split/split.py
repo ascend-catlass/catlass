@@ -100,7 +100,7 @@ def split_kernel(
                         # MTE2 publishes the source tile. MTE3 then locks the
                         # same slot for RAW consumption; the next MTE2 lifetime
                         # forms WAR after the MTE3 copy releases the slot.
-                        mutexes[bi].lock(pipe=tla.arch.MTE2)
+                        mutexes[bi].lock(pipe=tla.pipes.MTE2)
                         tla.copy(
                             ub,
                             tla.make_tensor(
@@ -110,12 +110,12 @@ def split_kernel(
                                 src_lay,
                             ),
                         )
-                        mutexes[bi].unlock(pipe=tla.arch.MTE2)
+                        mutexes[bi].unlock(pipe=tla.pipes.MTE2)
 
                         # Destination tiles are disjoint, so no cross-core sync
                         # is needed. The other slot can load while this MTE3
                         # write-back is in flight.
-                        mutexes[bi].lock(pipe=tla.arch.MTE3)
+                        mutexes[bi].lock(pipe=tla.pipes.MTE3)
                         tla.copy(
                             tla.make_tensor(
                                 gm_dst.ptr
@@ -125,7 +125,7 @@ def split_kernel(
                             ),
                             ub,
                         )
-                        mutexes[bi].unlock(pipe=tla.arch.MTE3)
+                        mutexes[bi].unlock(pipe=tla.pipes.MTE3)
 
         # Tail rows use the same slots and ownership protocol. Flattening
         # (part, tail_row) distributes short remainders across AIV blocks.
@@ -138,7 +138,7 @@ def split_kernel(
                         t = work % tail
                         ub_row = tla.make_tensor(ub_ptrs[bi], row_lay)
 
-                        mutexes[bi].lock(pipe=tla.arch.MTE2)
+                        mutexes[bi].lock(pipe=tla.pipes.MTE2)
                         tla.copy(
                             ub_row,
                             tla.make_tensor(
@@ -149,9 +149,9 @@ def split_kernel(
                                 row_src_lay,
                             ),
                         )
-                        mutexes[bi].unlock(pipe=tla.arch.MTE2)
+                        mutexes[bi].unlock(pipe=tla.pipes.MTE2)
 
-                        mutexes[bi].lock(pipe=tla.arch.MTE3)
+                        mutexes[bi].lock(pipe=tla.pipes.MTE3)
                         tla.copy(
                             tla.make_tensor(
                                 gm_dst.ptr
@@ -162,7 +162,7 @@ def split_kernel(
                             ),
                             ub_row,
                         )
-                        mutexes[bi].unlock(pipe=tla.arch.MTE3)
+                        mutexes[bi].unlock(pipe=tla.pipes.MTE3)
 
         # A single drain after both task loops makes the final write visible.
         tla.pipe_barrier(tla.pipes.ALL)

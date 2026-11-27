@@ -43,8 +43,8 @@ def cast_round_modes_op(
     mem_round: tla.Tensor,
     mem_odd: tla.Tensor,
 ) -> None:
-    ub_loaded = tla.flag("ub_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    vec_done = tla.flag("vec_done", tla.arch.VECTOR, tla.arch.MTE3)
+    ub_loaded = tla.flag("ub_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    vec_done = tla.flag("vec_done", tla.pipes.VECTOR, tla.pipes.MTE3)
 
     a_ub = _make_ub_tensor(mem_a)
     rint_ub = _make_ub_tensor(mem_rint)
@@ -234,8 +234,8 @@ def _make_e8m0_kernel(source_type, slot=RegSlot.ZERO, partial=False):
             dst,
             tla.arch.RowMajor,
         )
-        ready = tla.flag("ready", tla.arch.MTE2, tla.arch.VECTOR)
-        done = tla.flag("done", tla.arch.VECTOR, tla.arch.MTE3)
+        ready = tla.flag("ready", tla.pipes.MTE2, tla.pipes.VECTOR)
+        done = tla.flag("done", tla.pipes.VECTOR, tla.pipes.MTE3)
         with tla.vector():
             tla.copy(src_ub, src)
             tla.set_flag(ready)
@@ -385,8 +385,8 @@ def _make_masked_cast_kernel(src_type, dst_type, traits, tiles):
         )
         src_ub = tla.make_tensor_like(src_ptr, src, tla.arch.RowMajor)
         dst_ub = tla.make_tensor_like(dst_ptr, dst, tla.arch.RowMajor)
-        ready = tla.flag("ready", tla.arch.MTE2, tla.arch.VECTOR)
-        done = tla.flag("done", tla.arch.VECTOR, tla.arch.MTE3)
+        ready = tla.flag("ready", tla.pipes.MTE2, tla.pipes.VECTOR)
+        done = tla.flag("done", tla.pipes.VECTOR, tla.pipes.MTE3)
         with tla.vector():
             tla.arch.set_ctrl(
                 tla.params.CTRLValue(

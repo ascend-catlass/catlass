@@ -895,9 +895,9 @@ def sparse_flash_mla_ori_cmp_sparse_kernel(
     # 此处复用 m_init(id=31)：输出初始化在主循环前已完成且 lock/unlock 配平，
     # 退出阶段可安全借它完成 MTE3 -> V 排空，避免与 Q/S 的 mutex 共享 id。
     with tla.vector():
-        sync.m_init.lock(pipe=tla.arch.MTE3)
-        sync.m_init.unlock(pipe=tla.arch.MTE3)
-        sync.m_init.lock(pipe=tla.arch.VECTOR)
+        sync.m_init.lock(pipe=tla.pipes.MTE3)
+        sync.m_init.unlock(pipe=tla.pipes.MTE3)
+        sync.m_init.lock(pipe=tla.pipes.VECTOR)
 
     # ---- 追踪期闭合校验（F45）：承诺开共享臂却一次没发射 ⇒ 编译失败 ----
     _bv.verify_trace_closed("ocs")

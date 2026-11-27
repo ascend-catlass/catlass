@@ -20,9 +20,9 @@ VECTOR_ELE = 64
 
 @tla.kernel
 def gather_op(mem_src: tla.Tensor, mem_idx: tla.Tensor, mem_dst: tla.Tensor) -> None:
-    x_loaded = tla.flag("x_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    idx_loaded = tla.flag("idx_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    done = tla.flag("done", tla.arch.VECTOR, tla.arch.MTE3)
+    x_loaded = tla.flag("x_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    idx_loaded = tla.flag("idx_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    done = tla.flag("done", tla.pipes.VECTOR, tla.pipes.MTE3)
     src_gm = tla.tile_view(mem_src, tla.make_shape(VECTOR_ELE), tla.make_coord(0))
     idx_gm = tla.tile_view(mem_idx, tla.make_shape(VECTOR_ELE), tla.make_coord(0))
     dst_gm = tla.tile_view(mem_dst, tla.make_shape(VECTOR_ELE), tla.make_coord(0))

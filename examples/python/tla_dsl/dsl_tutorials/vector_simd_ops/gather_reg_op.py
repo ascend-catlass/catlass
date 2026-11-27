@@ -33,8 +33,8 @@ CUBE_N = 16
 def gather_reg_op(
     mem_src: tla.Tensor, mem_idx: tla.Tensor, mem_dst: tla.Tensor
 ) -> None:
-    ub_loaded = tla.flag("ub_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    vec_done = tla.flag("vec_done", tla.arch.VECTOR, tla.arch.MTE3)
+    ub_loaded = tla.flag("ub_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    vec_done = tla.flag("vec_done", tla.pipes.VECTOR, tla.pipes.MTE3)
 
     src_gm = tla.tile_view(mem_src, tla.make_shape(VL_ELE), tla.make_coord(0))
     idx_gm = tla.tile_view(mem_idx, tla.make_shape(VL_ELE), tla.make_coord(0))
@@ -86,8 +86,8 @@ def gather_reg_mixed_op(
     mem_dst: tla.Tensor,
     mem_cube: tla.Tensor,
 ) -> None:
-    ub_loaded = tla.flag("ub_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    vec_done = tla.flag("vec_done", tla.arch.VECTOR, tla.arch.MTE3)
+    ub_loaded = tla.flag("ub_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    vec_done = tla.flag("vec_done", tla.pipes.VECTOR, tla.pipes.MTE3)
 
     src_gm = tla.tile_view(mem_src, tla.make_shape(VL_ELE), tla.make_coord(0))
     idx_gm = tla.tile_view(mem_idx, tla.make_shape(VL_ELE), tla.make_coord(0))

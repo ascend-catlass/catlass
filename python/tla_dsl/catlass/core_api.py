@@ -8924,7 +8924,7 @@ def flag(
         Example:
         ```python
         # MTE2 finishes a GM→UB copy, then VECTOR may consume the UB tile.
-        ub_loaded = tla.flag("ub_loaded", src_pipe=tla.arch.MTE2, dst_pipe=tla.arch.VECTOR)
+        ub_loaded = tla.flag("ub_loaded", src_pipe=tla.pipes.MTE2, dst_pipe=tla.pipes.VECTOR)
         with tla.vector():
             tla.copy(dst=x_ub, src=x_gm)
             tla.set_flag(ub_loaded)   # after copy: mark UB data ready
@@ -9091,8 +9091,8 @@ def cross_core_set_flag(
         Example:
         ```python
         with tla.cube():
-            tla.cross_core_set_flag(cf, tla.arch.CUBE)
-            # mode=4: tla.cross_core_set_flag(cf, tla.arch.CUBE, aiv_id=0)
+            tla.cross_core_set_flag(cf, tla.pipes.CUBE)
+            # mode=4: tla.cross_core_set_flag(cf, tla.pipes.CUBE, aiv_id=0)
         ```
     """
     _require_category("cross_core_set_flag", "flag", cross_flag_value, "cross_flag", 0)
@@ -9126,14 +9126,14 @@ def cross_core_wait_flag(
         Parameters:
         - `cross_flag_value` (`CrossFlagLike`): Cross-core flag from `tla.cross_flag`. Required.
         - `pipe` (`PipeLike`): Pipe that performs the wait. Required.
-          Use `tla.arch.SCALAR` for `PIPE_S`, `tla.arch.VECTOR` for `PIPE_V`, etc.
+          Use `tla.pipes.SCALAR` for `PIPE_S`, `tla.pipes.VECTOR` for `PIPE_V`, etc.
         - `aiv_id` (`int | None`): Target AIV id; omit for broadcast/default routing. Optional, default `None`.
 
         Constraints:
         - Must be called inside a `@tla.kernel`-decorated kernel function.
         - Must be called inside `tla.cube()` or `tla.vector()`; when `mode=4`, `aiv_id` must be 0 or 1.
         - Under `@tla.kernel(core_ratio=tla.arch.C1V1)`, Ascend 950 CV 1:1
-          handshakes expect `pipe=tla.arch.SCALAR` (`PIPE_S`), matching AscendC
+          handshakes expect `pipe=tla.pipes.SCALAR` (`PIPE_S`), matching AscendC
           SyncAll. The compiler does not rewrite a wrong wait pipe; the caller
           must pass `SCALAR` explicitly (see
           `python/tla_dsl/tests/end_to_end/basic_mixed_core_ratio_11.py`).
@@ -9142,9 +9142,9 @@ def cross_core_wait_flag(
         ```python
         with tla.vector():
             # Default MIX 1:2 often waits on VECTOR:
-            tla.cross_core_wait_flag(cf, tla.arch.VECTOR)
+            tla.cross_core_wait_flag(cf, tla.pipes.VECTOR)
             # CV 1:1 (core_ratio=C1V1): wait on SCALAR / PIPE_S, aiv_id=0 only:
-            # tla.cross_core_wait_flag(cf, tla.arch.SCALAR, aiv_id=0)
+            # tla.cross_core_wait_flag(cf, tla.pipes.SCALAR, aiv_id=0)
         ```
     """
     _require_category("cross_core_wait_flag", "flag", cross_flag_value, "cross_flag", 0)
@@ -9235,7 +9235,7 @@ def pipe_barrier(pipe: PipeLike, *, loc: mlir_ir.Location | None = None) -> None
         Example:
         ```python
         with tla.vector():
-            tla.pipe_barrier(tla.arch.MTE2)
+            tla.pipe_barrier(tla.pipes.MTE2)
         ```
     """
     _require_pipe("pipe_barrier", "pipe", pipe, 0)
@@ -9563,10 +9563,10 @@ def mutex_lock(
 
         Example:
         ```python
-        tla.mutex_lock(mtx, pipe=tla.arch.MTE2)
+        tla.mutex_lock(mtx, pipe=tla.pipes.MTE2)
         # Scalar pipe, to guard a buffer the scalar unit reads or writes.
         # `tla.mutex` returns a value with this method form:
-        mtx.lock(pipe=tla.arch.SCALAR)
+        mtx.lock(pipe=tla.pipes.SCALAR)
         ```
     """
     _ensure_no_explicit_mutex_access_in_guard()
@@ -9601,10 +9601,10 @@ def mutex_unlock(
 
         Example:
         ```python
-        tla.mutex_unlock(mtx, pipe=tla.arch.MTE2)
+        tla.mutex_unlock(mtx, pipe=tla.pipes.MTE2)
         # Scalar pipe, to guard a buffer the scalar unit reads or writes.
         # `tla.mutex` returns a value with this method form:
-        mtx.unlock(pipe=tla.arch.SCALAR)
+        mtx.unlock(pipe=tla.pipes.SCALAR)
         ```
     """
     _ensure_no_explicit_mutex_access_in_guard()
@@ -15932,7 +15932,7 @@ def arch_get_ar(*, loc: mlir_ir.Location | None = None) -> Int64:
 
         Example:
         ```python
-        count_ready = tla.flag("count_ready", tla.arch.VECTOR, tla.arch.SCALAR)
+        count_ready = tla.flag("count_ready", tla.pipes.VECTOR, tla.pipes.SCALAR)
         with tla.vector():
             with tla.vec.func(mode="simd"):
                 tla.arch.clear_ar()
@@ -17615,13 +17615,6 @@ arch._set("get_capacity_in_bytes", arch_get_capacity_in_bytes)
 arch._set("get_vec_len_in_bytes", arch_get_vec_len_in_bytes)
 arch._set("get_datablock_size_in_bytes", arch_get_datablock_size_in_bytes)
 arch._set("get_dyn_ub", arch_get_dyn_ub)
-arch._set("SCALAR", _runtime.pipes.SCALAR)
-arch._set("VECTOR", _runtime.pipes.VECTOR)
-arch._set("CUBE", _runtime.pipes.CUBE)
-arch._set("MTE1", _runtime.pipes.MTE1)
-arch._set("MTE2", _runtime.pipes.MTE2)
-arch._set("MTE3", _runtime.pipes.MTE3)
-arch._set("FIX", _runtime.pipes.FIX)
 arch._set("zN", _LayoutTag("zN"))
 arch._set("nZ", _LayoutTag("nZ"))
 arch._set("zZMxScale", _LayoutTag("zZMxScale"))

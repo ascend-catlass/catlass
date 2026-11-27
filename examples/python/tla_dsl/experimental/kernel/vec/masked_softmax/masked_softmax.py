@@ -80,19 +80,19 @@ def masked_softmax_kernel(
             gm_row_y = tla.make_tensor(gm_y.ptr + row_off, row_layout)
 
             # MTE2 owns ub_x until both x and (when present) add are resident.
-            mutex_x.lock(pipe=tla.arch.MTE2)
+            mutex_x.lock(pipe=tla.pipes.MTE2)
             tla.copy(ub_x, gm_row_x)
-            mutex_x.unlock(pipe=tla.arch.MTE2)
+            mutex_x.unlock(pipe=tla.pipes.MTE2)
             if tla.const_expr(HAS_ADD == 1):
                 gm_row_add = tla.make_tensor(gm_add.ptr + row_off, row_layout)
-                mutex_add.lock(pipe=tla.arch.MTE2)
+                mutex_add.lock(pipe=tla.pipes.MTE2)
                 tla.copy(ub_add, gm_row_add)
-                mutex_add.unlock(pipe=tla.arch.MTE2)
+                mutex_add.unlock(pipe=tla.pipes.MTE2)
 
             # Acquire both inputs before the three-pass register computation.
-            mutex_x.lock(pipe=tla.arch.VECTOR)
+            mutex_x.lock(pipe=tla.pipes.VECTOR)
             if tla.const_expr(HAS_ADD == 1):
-                mutex_add.lock(pipe=tla.arch.VECTOR)
+                mutex_add.lock(pipe=tla.pipes.VECTOR)
             with tla.vec.func(mode="simd"):
                 mask = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
 
@@ -151,14 +151,14 @@ def masked_softmax_kernel(
             # Release add after its last VECTOR read. ub_x remains owned until
             # MTE3 has drained it because the normalized row aliases ub_x.
             if tla.const_expr(HAS_ADD == 1):
-                mutex_add.unlock(pipe=tla.arch.VECTOR)
-            mutex_x.unlock(pipe=tla.arch.VECTOR)
+                mutex_add.unlock(pipe=tla.pipes.VECTOR)
+            mutex_x.unlock(pipe=tla.pipes.VECTOR)
 
             # MTE3 takes ownership of ub_x and releases it after the row store,
             # which also protects the next iteration's MTE2 fill.
-            mutex_x.lock(pipe=tla.arch.MTE3)
+            mutex_x.lock(pipe=tla.pipes.MTE3)
             tla.copy(gm_row_y, ub_x)
-            mutex_x.unlock(pipe=tla.arch.MTE3)
+            mutex_x.unlock(pipe=tla.pipes.MTE3)
 
 
 # ======================================================================================

@@ -199,9 +199,9 @@ v1同时把显式flag改为按资源管理的mutex，因此v0→v1的整体耗�
 例如A的搬入被包在对应流水的`lock/unlock`之间：
 
 ```python
-mutex_ub_a.lock(pipe=tla.arch.MTE2)
+mutex_ub_a.lock(pipe=tla.pipes.MTE2)
 tla.copy(ub_a_tile, gm_a_tile)
-mutex_ub_a.unlock(pipe=tla.arch.MTE2)
+mutex_ub_a.unlock(pipe=tla.pipes.MTE2)
 ```
 
 计算阶段再使用同一个`mutex_ub_a`在VECTOR流水上声明读取区间，B与C分别使用各自的mutex，关注的是“哪块资源由哪个流水使用”，而非把mutex看作Host线程锁

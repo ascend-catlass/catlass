@@ -70,8 +70,8 @@ def make_layout_kernel(
             tla.recast_ptr(destination_ptr + GUARD, dtype=tla.UInt32),
             tla.make_layout(tla.make_shape(64), tla.make_stride(1)),
         )
-        ready = tla.flag("ready", tla.arch.MTE2, tla.arch.VECTOR)
-        done = tla.flag("done", tla.arch.VECTOR, tla.arch.MTE3)
+        ready = tla.flag("ready", tla.pipes.MTE2, tla.pipes.VECTOR)
+        done = tla.flag("done", tla.pipes.VECTOR, tla.pipes.MTE3)
         with tla.vector():
             tla.copy(source_buffer, source)
             tla.copy(destination_buffer, destination)
@@ -158,8 +158,8 @@ def make_fp8_kernel(
             destination_ptr + GUARD,
             tla.make_layout(tla.make_shape(count), tla.make_stride(1)),
         )
-        ready = tla.flag("ready", tla.arch.MTE2, tla.arch.VECTOR)
-        done = tla.flag("done", tla.arch.VECTOR, tla.arch.MTE3)
+        ready = tla.flag("ready", tla.pipes.MTE2, tla.pipes.VECTOR)
+        done = tla.flag("done", tla.pipes.VECTOR, tla.pipes.MTE3)
         with tla.vector():
             tla.arch.set_ctrl(tla.params.CTRLValue(saturation_strategy=tla.params.OverrideStrategy.USE_API))
             tla.copy(source_buffer, source)

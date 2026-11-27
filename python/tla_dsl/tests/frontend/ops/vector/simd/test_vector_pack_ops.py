@@ -114,8 +114,8 @@ def _mask_pack_compile_kernel(
     source_mask_dtype: tla.Constexpr[type],
     lanes: tla.Constexpr[int],
 ) -> None:
-    loaded = tla.flag("mask_pack_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    computed = tla.flag("mask_pack_computed", tla.arch.VECTOR, tla.arch.MTE3)
+    loaded = tla.flag("mask_pack_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    computed = tla.flag("mask_pack_computed", tla.pipes.VECTOR, tla.pipes.MTE3)
     src_ptr = tla.allocate(lanes, value_dtype, tla.AddressSpace.ub, 256)
     dst_ptr = tla.allocate(lanes, value_dtype, tla.AddressSpace.ub, 256)
     ub_src = tla.make_tensor_like(src_ptr, src, tla.arch.RowMajor)
@@ -253,8 +253,8 @@ def _pack_compile_kernel(
     dst_lanes: tla.Constexpr[int],
     part: tla.Constexpr[object],
 ) -> None:
-    loaded = tla.flag("pack_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    computed = tla.flag("pack_computed", tla.arch.VECTOR, tla.arch.MTE3)
+    loaded = tla.flag("pack_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    computed = tla.flag("pack_computed", tla.pipes.VECTOR, tla.pipes.MTE3)
     src_ptr = tla.allocate(src_lanes, src_storage_dtype, tla.AddressSpace.ub, 256)
     dst_ptr = tla.allocate(dst_lanes, dst_storage_dtype, tla.AddressSpace.ub, 256)
     ub_src = tla.make_tensor_like(src_ptr, src, tla.arch.RowMajor)
@@ -285,8 +285,8 @@ def _unpack_compile_kernel(
     dst_lanes: tla.Constexpr[int],
     part: tla.Constexpr[object],
 ) -> None:
-    loaded = tla.flag("unpack_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    computed = tla.flag("unpack_computed", tla.arch.VECTOR, tla.arch.MTE3)
+    loaded = tla.flag("unpack_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    computed = tla.flag("unpack_computed", tla.pipes.VECTOR, tla.pipes.MTE3)
     src_ptr = tla.allocate(src_lanes, src_storage_dtype, tla.AddressSpace.ub, 256)
     dst_ptr = tla.allocate(dst_lanes, dst_storage_dtype, tla.AddressSpace.ub, 256)
     ub_src = tla.make_tensor_like(src_ptr, src, tla.arch.RowMajor)

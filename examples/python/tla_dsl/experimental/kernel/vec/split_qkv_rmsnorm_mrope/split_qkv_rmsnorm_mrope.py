@@ -140,7 +140,7 @@ def split_qkv_rmsnorm_mrope_kernel(
     )
     with tla.vector():
         # Q/K parameters are immutable for the whole invocation and private per AIV.
-        weights_mutex.lock(pipe=tla.arch.MTE2)
+        weights_mutex.lock(pipe=tla.pipes.MTE2)
         tla.copy(
             tla.tile_view(w, tla.make_shape(d), tla.make_coord(0)),
             tla.make_tensor(pqw.ptr, layout_d),
@@ -158,10 +158,10 @@ def split_qkv_rmsnorm_mrope_kernel(
                 tla.tile_view(b, tla.make_shape(d), tla.make_coord(1)),
                 tla.make_tensor(pkb.ptr, layout_d),
             )
-        weights_mutex.unlock(pipe=tla.arch.MTE2)
+        weights_mutex.unlock(pipe=tla.pipes.MTE2)
         # Hold the slot until the parameters are visible to the vector pipe.
-        weights_mutex.lock(pipe=tla.arch.VECTOR)
-        weights_mutex.unlock(pipe=tla.arch.VECTOR)
+        weights_mutex.lock(pipe=tla.pipes.VECTOR)
+        weights_mutex.unlock(pipe=tla.pipes.VECTOR)
         buffer = 0
         # O(T*(HQ+HK)*D). Groups own disjoint complete heads, including all D lanes.
         for task in tla.range(
@@ -170,7 +170,7 @@ def split_qkv_rmsnorm_mrope_kernel(
             # The slot is released by its final user (MTE3) and by the vector
             # pipe, so one mutex per slot expresses the whole reuse chain.
             mutex = stage0 if buffer == 0 else (stage1 if buffer == 1 else stage2)
-            mutex.lock(pipe=tla.arch.MTE2)
+            mutex.lock(pipe=tla.pipes.MTE2)
             x = tla.make_tensor(x_storage + buffer * gq * d * qstride, layout_q)
             c = tla.make_tensor(c_storage + buffer * 3 * r, layout_c)
             y = tla.make_tensor(y_storage + buffer * gq * d, layout_yq)
@@ -210,8 +210,8 @@ def split_qkv_rmsnorm_mrope_kernel(
                     tla.tile_view(c, tla.make_shape(r), tla.make_coord(axis)),
                     tla.make_tensor(pc.ptr + (axis * tokens + token) * r, layout_cs),
                 )
-            mutex.unlock(pipe=tla.arch.MTE2)
-            mutex.lock(pipe=tla.arch.VECTOR)
+            mutex.unlock(pipe=tla.pipes.MTE2)
+            mutex.lock(pipe=tla.pipes.VECTOR)
             with tla.vec.func(mode="simd"):
                 # Accumulate all D lanes in FP32 before normalizing complete heads.
                 if tla.const_expr(r == 64):
@@ -1919,8 +1919,8 @@ def split_qkv_rmsnorm_mrope_kernel(
                                     (h1 * d + r // 2 + rp * 64) // min(64, r // 2)
                                 ),
                             ).store(narrow(right, dtype), pack)
-            mutex.unlock(pipe=tla.arch.VECTOR)
-            mutex.lock(pipe=tla.arch.MTE3)
+            mutex.unlock(pipe=tla.pipes.VECTOR)
+            mutex.lock(pipe=tla.pipes.MTE3)
             if slot < nq:
                 tla.copy(
                     tla.make_tensor(pq.ptr + (token * hq + base) * d, layout_yq), y
@@ -1939,7 +1939,7 @@ def split_qkv_rmsnorm_mrope_kernel(
                     tla.make_tensor(pv.ptr + (token * hk + base) * d, layout_yk),
                     tla.tile_view(aux, tla.make_shape(gk * d), tla.make_coord(0)),
                 )
-            mutex.unlock(pipe=tla.arch.MTE3)
+            mutex.unlock(pipe=tla.pipes.MTE3)
             buffer = buffer + 1
             if buffer == 3:
                 buffer = 0

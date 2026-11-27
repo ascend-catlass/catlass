@@ -81,7 +81,7 @@ def test_core_ratio_c1v1_rejects_aiv_id_1() -> None:
     def bad_aiv() -> None:
         with tla.cube():
             flag = tla.cross_flag("done", mode=4)
-            tla.cross_core_set_flag(flag, tla.arch.FIX, aiv_id=1)
+            tla.cross_core_set_flag(flag, tla.pipes.FIX, aiv_id=1)
         with tla.vector():
             pass
 
@@ -94,7 +94,7 @@ def test_core_ratio_c1v1_allows_aiv_id_0() -> None:
     def ok_aiv() -> None:
         with tla.cube():
             flag = tla.cross_flag("done", mode=4)
-            tla.cross_core_set_flag(flag, tla.arch.FIX, aiv_id=0)
+            tla.cross_core_set_flag(flag, tla.pipes.FIX, aiv_id=0)
         with tla.vector():
             pass
 

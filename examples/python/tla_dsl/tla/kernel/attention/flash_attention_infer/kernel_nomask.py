@@ -375,20 +375,20 @@ def _softmax_wrap_nomask(
         )
         if m == c0:
             if ubSBufId == 0:
-                tla.cross_core_wait_flag(sync.ub_s_cross_ready_0, tla.arch.VECTOR)
-                tla.cross_core_set_flag(sync.ub_s_cross_ready_0, tla.arch.VECTOR)
+                tla.cross_core_wait_flag(sync.ub_s_cross_ready_0, tla.pipes.VECTOR)
+                tla.cross_core_set_flag(sync.ub_s_cross_ready_0, tla.pipes.VECTOR)
             else:
-                tla.cross_core_wait_flag(sync.ub_s_cross_ready_1, tla.arch.VECTOR)
-                tla.cross_core_set_flag(sync.ub_s_cross_ready_1, tla.arch.VECTOR)
+                tla.cross_core_wait_flag(sync.ub_s_cross_ready_1, tla.pipes.VECTOR)
+                tla.cross_core_set_flag(sync.ub_s_cross_ready_1, tla.pipes.VECTOR)
             if l1PBufId == c0:
-                tla.cross_core_wait_flag(sync.ub_p_cross_ready_0, tla.arch.MTE3)
-                tla.cross_core_set_flag(sync.ub_p_cross_ready_0, tla.arch.MTE3)
+                tla.cross_core_wait_flag(sync.ub_p_cross_ready_0, tla.pipes.MTE3)
+                tla.cross_core_set_flag(sync.ub_p_cross_ready_0, tla.pipes.MTE3)
             elif l1PBufId == c1:
-                tla.cross_core_wait_flag(sync.ub_p_cross_ready_1, tla.arch.MTE3)
-                tla.cross_core_set_flag(sync.ub_p_cross_ready_1, tla.arch.MTE3)
+                tla.cross_core_wait_flag(sync.ub_p_cross_ready_1, tla.pipes.MTE3)
+                tla.cross_core_set_flag(sync.ub_p_cross_ready_1, tla.pipes.MTE3)
             else:
-                tla.cross_core_wait_flag(sync.ub_p_cross_ready_2, tla.arch.MTE3)
-                tla.cross_core_set_flag(sync.ub_p_cross_ready_2, tla.arch.MTE3)
+                tla.cross_core_wait_flag(sync.ub_p_cross_ready_2, tla.pipes.MTE3)
+                tla.cross_core_set_flag(sync.ub_p_cross_ready_2, tla.pipes.MTE3)
         else:
             # 标量参数
             n = kvSTileSizeAct
@@ -422,9 +422,9 @@ def _softmax_wrap_nomask(
             )
             # 等 QK Fixpipe 完成
             if ubSBufId == 0:
-                tla.cross_core_wait_flag(sync.ub_s_cross_ready_0, tla.arch.VECTOR)
+                tla.cross_core_wait_flag(sync.ub_s_cross_ready_0, tla.pipes.VECTOR)
             else:
-                tla.cross_core_wait_flag(sync.ub_s_cross_ready_1, tla.arch.VECTOR)
+                tla.cross_core_wait_flag(sync.ub_s_cross_ready_1, tla.pipes.VECTOR)
             if ubSBufId == c0:
                 tla.wait_flag(sync.ub_p_available_0)
             else:
@@ -466,21 +466,21 @@ def _softmax_wrap_nomask(
             if ubSBufId == c0:
                 tla.set_flag(sync.ub_p_data_ready_0)
                 tla.wait_flag(sync.ub_p_data_ready_0)
-                tla.cross_core_set_flag(sync.ub_s_cross_ready_0, tla.arch.VECTOR)
+                tla.cross_core_set_flag(sync.ub_s_cross_ready_0, tla.pipes.VECTOR)
             else:
                 tla.set_flag(sync.ub_p_data_ready_1)
                 tla.wait_flag(sync.ub_p_data_ready_1)
-                tla.cross_core_set_flag(sync.ub_s_cross_ready_1, tla.arch.VECTOR)
+                tla.cross_core_set_flag(sync.ub_s_cross_ready_1, tla.pipes.VECTOR)
             # P(UB) -> L1
             l1P_tile = tla.tile_view(
                 l1PTensorTla, tla.make_shape(mHalf, n), tla.make_coord(subIdxEff, c0)
             )
             if l1PBufId == c0:
-                tla.cross_core_wait_flag(sync.ub_p_cross_ready_0, tla.arch.MTE3)
+                tla.cross_core_wait_flag(sync.ub_p_cross_ready_0, tla.pipes.MTE3)
             elif l1PBufId == c1:
-                tla.cross_core_wait_flag(sync.ub_p_cross_ready_1, tla.arch.MTE3)
+                tla.cross_core_wait_flag(sync.ub_p_cross_ready_1, tla.pipes.MTE3)
             else:
-                tla.cross_core_wait_flag(sync.ub_p_cross_ready_2, tla.arch.MTE3)
+                tla.cross_core_wait_flag(sync.ub_p_cross_ready_2, tla.pipes.MTE3)
             tla.copy(l1P_tile, ub_p_zN)  # CopyPUbToPL1
             # 通知 P buffer 已写完可复用
             if ubSBufId == c0:
@@ -489,8 +489,8 @@ def _softmax_wrap_nomask(
                 tla.set_flag(sync.ub_p_available_1)
             # 通知 PV
             if l1PBufId == c0:
-                tla.cross_core_set_flag(sync.ub_p_cross_ready_0, tla.arch.MTE3)
+                tla.cross_core_set_flag(sync.ub_p_cross_ready_0, tla.pipes.MTE3)
             elif l1PBufId == c1:
-                tla.cross_core_set_flag(sync.ub_p_cross_ready_1, tla.arch.MTE3)
+                tla.cross_core_set_flag(sync.ub_p_cross_ready_1, tla.pipes.MTE3)
             else:
-                tla.cross_core_set_flag(sync.ub_p_cross_ready_2, tla.arch.MTE3)
+                tla.cross_core_set_flag(sync.ub_p_cross_ready_2, tla.pipes.MTE3)

@@ -36,8 +36,8 @@ def _binary_kernel(
     lhs_ub = _ub_tensor(lanes, dtype)
     rhs_ub = _ub_tensor(lanes, dtype)
     out_ub = _ub_tensor(lanes, dtype)
-    loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    computed = tla.flag("computed", tla.arch.VECTOR, tla.arch.MTE3)
+    loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    computed = tla.flag("computed", tla.pipes.VECTOR, tla.pipes.MTE3)
     with tla.vector():
         tla.copy(lhs_ub, lhs)
         tla.copy(rhs_ub, rhs)
@@ -75,8 +75,8 @@ def _muls_cast_kernel(
     src_ub = _ub_tensor(64, tla.Float32)
     even_ub = _ub_tensor(128, tla.Float16)
     odd_ub = _ub_tensor(128, tla.Float16)
-    loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    computed = tla.flag("computed", tla.arch.VECTOR, tla.arch.MTE3)
+    loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    computed = tla.flag("computed", tla.pipes.VECTOR, tla.pipes.MTE3)
     with tla.vector():
         tla.copy(src_ub, src)
         tla.set_flag(loaded)

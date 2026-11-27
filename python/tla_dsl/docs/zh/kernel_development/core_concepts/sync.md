@@ -28,13 +28,13 @@ set/wait 顺序反了、漏了环前 prime 或环后 drain、同一 flag 生命�
 
 | 流水 | TLA 标识 | 负责的指令 |
 | --- | --- | --- |
-| PIPE_S | `tla.arch.SCALAR` | 标量运算、张量下标读写、`vec.func` 内的标量 load/store |
-| PIPE_V | `tla.arch.VECTOR` | 向量计算（SIMD 算术、`tile.load/store` 等） |
-| PIPE_M | `tla.arch.CUBE` | `tla.mmad` 矩阵乘 |
-| PIPE_MTE1 | `tla.arch.MTE1` | L1 -> L0A/L0B 搬运 |
-| PIPE_MTE2 | `tla.arch.MTE2` | GM -> L1/L0/UB 搬运（含 GM -> L1 的 im2col 等） |
-| PIPE_MTE3 | `tla.arch.MTE3` | UB -> GM 搬运 |
-| PIPE_FIX | `tla.arch.FIX` | L0C -> GM/UB 搬运 |
+| PIPE_S | `tla.pipes.SCALAR` | 标量运算、张量下标读写、`vec.func` 内的标量 load/store |
+| PIPE_V | `tla.pipes.VECTOR` | 向量计算（SIMD 算术、`tile.load/store` 等） |
+| PIPE_M | `tla.pipes.CUBE` | `tla.mmad` 矩阵乘 |
+| PIPE_MTE1 | `tla.pipes.MTE1` | L1 -> L0A/L0B 搬运 |
+| PIPE_MTE2 | `tla.pipes.MTE2` | GM -> L1/L0/UB 搬运（含 GM -> L1 的 im2col 等） |
+| PIPE_MTE3 | `tla.pipes.MTE3` | UB -> GM 搬运 |
+| PIPE_FIX | `tla.pipes.FIX` | L0C -> GM/UB 搬运 |
 
 同一条流水内的指令天然有序，**跨流水才有依赖问题**。`tla.vec.func` 内部的向量/标量
 可见性不属这一层，需要时按第 8 节的 `local_mem_bar` 处理。
@@ -99,9 +99,9 @@ set/wait 顺序反了、漏了环前 prime 或环后 drain、同一 flag 生命�
 def vadd(x: tla.Tensor, y: tla.Tensor, out: tla.Tensor) -> None:
     # 省略 buffer 与 tile view 的创建：x_ub / y_ub / out_ub 由 tla.make_tensor_like 得到
     # 数据就绪：MTE2 写完 UB 后，VECTOR 才能读
-    ub_loaded = tla.flag("ub_loaded", tla.arch.MTE2, tla.arch.VECTOR)
+    ub_loaded = tla.flag("ub_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
     # 计算完成：VECTOR 写完 UB 后，MTE3 才能读
-    vec_done = tla.flag("vec_done", tla.arch.VECTOR, tla.arch.MTE3)
+    vec_done = tla.flag("vec_done", tla.pipes.VECTOR, tla.pipes.MTE3)
 
     with tla.vector():
         tla.copy(x_ub, x_gm)          # MTE2
@@ -123,7 +123,7 @@ WAR 的场景（消费者先读完，生产者才能覆盖）：
 
 ```python
 # VECTOR 读完 ub 之后，MTE2 才能写下一轮
-ub_free = tla.flag("ub_free", tla.arch.VECTOR, tla.arch.MTE2)
+ub_free = tla.flag("ub_free", tla.pipes.VECTOR, tla.pipes.MTE2)
 ...
 tla.set_flag(ub_free)
 tla.wait_flag(ub_free)
@@ -148,16 +148,16 @@ def vadd_pingpong(x: tla.Tensor, y: tla.Tensor, out: tla.Tensor) -> None:
     num_tiles = 4
 
     loaded = (
-        tla.flag("loaded_0", tla.arch.MTE2, tla.arch.VECTOR, id=0),
-        tla.flag("loaded_1", tla.arch.MTE2, tla.arch.VECTOR, id=1),
+        tla.flag("loaded_0", tla.pipes.MTE2, tla.pipes.VECTOR, id=0),
+        tla.flag("loaded_1", tla.pipes.MTE2, tla.pipes.VECTOR, id=1),
     )
     store_done = (
-        tla.flag("store_done_0", tla.arch.VECTOR, tla.arch.MTE3, id=0),
-        tla.flag("store_done_1", tla.arch.VECTOR, tla.arch.MTE3, id=1),
+        tla.flag("store_done_0", tla.pipes.VECTOR, tla.pipes.MTE3, id=0),
+        tla.flag("store_done_1", tla.pipes.VECTOR, tla.pipes.MTE3, id=1),
     )
     available = (
-        tla.flag("available_0", tla.arch.MTE3, tla.arch.MTE2, id=0),
-        tla.flag("available_1", tla.arch.MTE3, tla.arch.MTE2, id=1),
+        tla.flag("available_0", tla.pipes.MTE3, tla.pipes.MTE2, id=0),
+        tla.flag("available_1", tla.pipes.MTE3, tla.pipes.MTE2, id=1),
     )
 
     with tla.vector():
@@ -223,36 +223,36 @@ AIC 与 AIV 之间、不同 AIV 之间共享数据时，核内 flag 无效，必
 - mode 0/1/2 的 flag id 范围是 0..15；mode 4 下 AIC<->AIV0 占 0..15、AIC<->AIV1 占 16..31；
   一个 kernel 最多 **16 个 cross flag**，否则报 `cross flag id exhausted`；
 - `cross_core_set_flag` / `cross_core_wait_flag` 的 `pipe` 不支持 `ALL`；
-  常用 `tla.arch.CUBE`、`tla.arch.FIX`、`tla.arch.VECTOR`、`tla.arch.MTE2`；
+  常用 `tla.pipes.CUBE`、`tla.pipes.FIX`、`tla.pipes.VECTOR`、`tla.pipes.MTE2`；
 - mode 4 必须显式给出 `aiv_id=0/1`。AIC 侧写 `aiv_id=i`，AIV 侧对 0 和 1 各写一次，
   编译器会按 `sub_block_idx` 生成 guard，运行期只执行属于本 AIV 的那一条；
 - `@tla.kernel(core_ratio=tla.arch.C1V1)` 时：mode 4 只允许 `aiv_id=0`；
-  `cross_core_wait_flag` 必须用 `tla.arch.SCALAR`；L0C 结果要先 `L0C->GM->UB`，
+  `cross_core_wait_flag` 必须用 `tla.pipes.SCALAR`；L0C 结果要先 `L0C->GM->UB`，
   不能紧耦合 `L0C->UB`。编译器不会替你改写错误的 wait pipe，也不会在编译期强制这条
   约束：写错 pipe 一般仍能编过，但会在设备侧握手失败或卡死（参考
   `basic_mixed_core_ratio_11.py`）。
 
 mode 4 的两段式握手（AIC 交付 token -> AIV 回 ack -> AIC 再放行）。
 下面是双 AIV（非 `C1V1`）示例；`C1V1` 下按上文改为只对 `aiv_id=0` 操作，
-且 `cross_core_wait_flag` 用 `tla.arch.SCALAR`：
+且 `cross_core_wait_flag` 用 `tla.pipes.SCALAR`：
 
 ```python
 aic_to_aiv = tla.cross_flag("aic_to_aiv", mode=4)
 aiv_to_aic = tla.cross_flag("aiv_to_aic", mode=4)
 
 with tla.cube():
-    tla.cross_core_set_flag(aic_to_aiv, tla.arch.FIX, aiv_id=0)
-    tla.cross_core_set_flag(aic_to_aiv, tla.arch.FIX, aiv_id=1)
+    tla.cross_core_set_flag(aic_to_aiv, tla.pipes.FIX, aiv_id=0)
+    tla.cross_core_set_flag(aic_to_aiv, tla.pipes.FIX, aiv_id=1)
     # 两个 AIV 都确认后才继续
-    tla.cross_core_wait_flag(aiv_to_aic, tla.arch.FIX, aiv_id=0)
-    tla.cross_core_wait_flag(aiv_to_aic, tla.arch.FIX, aiv_id=1)
+    tla.cross_core_wait_flag(aiv_to_aic, tla.pipes.FIX, aiv_id=0)
+    tla.cross_core_wait_flag(aiv_to_aic, tla.pipes.FIX, aiv_id=1)
 
 with tla.vector():
-    tla.cross_core_wait_flag(aic_to_aiv, tla.arch.VECTOR, aiv_id=0)
-    tla.cross_core_wait_flag(aic_to_aiv, tla.arch.VECTOR, aiv_id=1)
+    tla.cross_core_wait_flag(aic_to_aiv, tla.pipes.VECTOR, aiv_id=0)
+    tla.cross_core_wait_flag(aic_to_aiv, tla.pipes.VECTOR, aiv_id=1)
     ...
-    tla.cross_core_set_flag(aiv_to_aic, tla.arch.VECTOR, aiv_id=0)
-    tla.cross_core_set_flag(aiv_to_aic, tla.arch.VECTOR, aiv_id=1)
+    tla.cross_core_set_flag(aiv_to_aic, tla.pipes.VECTOR, aiv_id=0)
+    tla.cross_core_set_flag(aiv_to_aic, tla.pipes.VECTOR, aiv_id=1)
 ```
 
 完整可运行版本见
@@ -321,7 +321,7 @@ with tla.cube():
 | `tla.cube()` | `CUBE`、`MTE1`、`MTE2`、`FIX`、`ALL` |
 | `tla.vector()` | `MTE2`、`MTE3`、`ALL`（不支持 `pipe_barrier<PIPE_V>`） |
 
-因此 vector 区域里不要写 `tla.pipe_barrier(tla.arch.VECTOR)`，需要全流水等待时用
+因此 vector 区域里不要写 `tla.pipe_barrier(tla.pipes.VECTOR)`，需要全流水等待时用
 `tla.pipe_barrier(tla.pipes.ALL)`。
 
 `tla.data_sync_barrier(domain)` 是单条 `dsb` 指令：阻止后续指令执行，直至发往指定

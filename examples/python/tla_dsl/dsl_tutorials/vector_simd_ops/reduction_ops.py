@@ -38,8 +38,8 @@ def reduction_op(mem_x: tla.Tensor, mem_z: tla.Tensor) -> None:
     Tile 1 (last  64 ele): result at z coord 1 (unaligned) → UnalignStoreParams.
     """
     TILE_ELE = 64
-    loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    done = tla.flag("done", tla.arch.VECTOR, tla.arch.MTE3)
+    loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    done = tla.flag("done", tla.pipes.VECTOR, tla.pipes.MTE3)
     x_gm = tla.tile_view(mem_x, tla.make_shape(VECTOR_ELE), tla.make_coord(0))
     z_gm = tla.tile_view(mem_z, tla.make_shape(2), tla.make_coord(0))
     x_ptr = tla.allocate(VECTOR_ELE, tla.Float32, tla.AddressSpace.ub, 256)
@@ -78,8 +78,8 @@ def _batch_reduce_value(value: Any, mask: Any, op: Any) -> Any:
 def reduction_op_batch(mem_x: tla.Tensor, mem_z: tla.Tensor) -> None:
     tile_ele = 64
     block_idx = tla.arch.block_idx()
-    loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    done = tla.flag("done", tla.arch.VECTOR, tla.arch.MTE3)
+    loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    done = tla.flag("done", tla.pipes.VECTOR, tla.pipes.MTE3)
     x_gm = tla.tile_view(mem_x, tla.make_shape(VECTOR_ELE), tla.make_coord(block_idx))
     z_gm = tla.tile_view(mem_z, tla.make_shape(2), tla.make_coord(block_idx))
     x_ptr = tla.allocate(VECTOR_ELE, tla.Float32, tla.AddressSpace.ub, 256)

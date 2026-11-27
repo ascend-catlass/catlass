@@ -50,8 +50,8 @@ _BATCH_OPS = ("vector_vector_lt",) * 4
 
 @tla.kernel
 def compare_mask(mem_a: tla.Tensor, mem_b: tla.Tensor, mem_out: tla.Tensor) -> None:
-    ub_loaded = tla.flag("ub_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    vec_done = tla.flag("vec_done", tla.arch.VECTOR, tla.arch.MTE3)
+    ub_loaded = tla.flag("ub_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    vec_done = tla.flag("vec_done", tla.pipes.VECTOR, tla.pipes.MTE3)
 
     a_gm = tla.tile_view(mem_a, tla.make_shape(VECTOR_ELE), tla.make_coord(0))
     b_gm = tla.tile_view(mem_b, tla.make_shape(VECTOR_ELE), tla.make_coord(0))
@@ -125,8 +125,8 @@ def _batch_compare_chunk(
 def compare_mask_batch(
     mem_a: tla.Tensor, mem_b: tla.Tensor, mem_out: tla.Tensor
 ) -> None:
-    ub_loaded = tla.flag("ub_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    vec_done = tla.flag("vec_done", tla.arch.VECTOR, tla.arch.MTE3)
+    ub_loaded = tla.flag("ub_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    vec_done = tla.flag("vec_done", tla.pipes.VECTOR, tla.pipes.MTE3)
     block_idx = tla.arch.block_idx()
     a_gm = tla.tile_view(mem_a, tla.make_shape(VECTOR_ELE), tla.make_coord(block_idx))
     b_gm = tla.tile_view(mem_b, tla.make_shape(VECTOR_ELE), tla.make_coord(block_idx))

@@ -74,22 +74,22 @@ def matmul_evg_add_ub_kernel(
     k = gm_a.origin_shape[1]
 
     # ---- soft-flags (cube pingpong) ----
-    l1a0_data_ready = tla.flag("l1a0_data_ready", tla.arch.MTE2, tla.arch.MTE1)
-    l1a1_data_ready = tla.flag("l1a1_data_ready", tla.arch.MTE2, tla.arch.MTE1)
-    l1b0_data_ready = tla.flag("l1b0_data_ready", tla.arch.MTE2, tla.arch.MTE1)
-    l1b1_data_ready = tla.flag("l1b1_data_ready", tla.arch.MTE2, tla.arch.MTE1)
-    l1a0_available = tla.flag("l1a0_available", tla.arch.MTE1, tla.arch.MTE2)
-    l1a1_available = tla.flag("l1a1_available", tla.arch.MTE1, tla.arch.MTE2)
-    l1b0_available = tla.flag("l1b0_available", tla.arch.MTE1, tla.arch.MTE2)
-    l1b1_available = tla.flag("l1b1_available", tla.arch.MTE1, tla.arch.MTE2)
-    l0a0_available = tla.flag("l0a0_available", tla.arch.CUBE, tla.arch.MTE1)
-    l0a1_available = tla.flag("l0a1_available", tla.arch.CUBE, tla.arch.MTE1)
-    l0b0_available = tla.flag("l0b0_available", tla.arch.CUBE, tla.arch.MTE1)
-    l0b1_available = tla.flag("l0b1_available", tla.arch.CUBE, tla.arch.MTE1)
-    l0_ab_data_ready = tla.flag("l0_ab_data_ready", tla.arch.MTE1, tla.arch.CUBE)
-    l0c_data_ready = tla.flag("l0c_data_ready", tla.arch.CUBE, tla.arch.FIX)
+    l1a0_data_ready = tla.flag("l1a0_data_ready", tla.pipes.MTE2, tla.pipes.MTE1)
+    l1a1_data_ready = tla.flag("l1a1_data_ready", tla.pipes.MTE2, tla.pipes.MTE1)
+    l1b0_data_ready = tla.flag("l1b0_data_ready", tla.pipes.MTE2, tla.pipes.MTE1)
+    l1b1_data_ready = tla.flag("l1b1_data_ready", tla.pipes.MTE2, tla.pipes.MTE1)
+    l1a0_available = tla.flag("l1a0_available", tla.pipes.MTE1, tla.pipes.MTE2)
+    l1a1_available = tla.flag("l1a1_available", tla.pipes.MTE1, tla.pipes.MTE2)
+    l1b0_available = tla.flag("l1b0_available", tla.pipes.MTE1, tla.pipes.MTE2)
+    l1b1_available = tla.flag("l1b1_available", tla.pipes.MTE1, tla.pipes.MTE2)
+    l0a0_available = tla.flag("l0a0_available", tla.pipes.CUBE, tla.pipes.MTE1)
+    l0a1_available = tla.flag("l0a1_available", tla.pipes.CUBE, tla.pipes.MTE1)
+    l0b0_available = tla.flag("l0b0_available", tla.pipes.CUBE, tla.pipes.MTE1)
+    l0b1_available = tla.flag("l0b1_available", tla.pipes.CUBE, tla.pipes.MTE1)
+    l0_ab_data_ready = tla.flag("l0_ab_data_ready", tla.pipes.MTE1, tla.pipes.CUBE)
+    l0c_data_ready = tla.flag("l0c_data_ready", tla.pipes.CUBE, tla.pipes.FIX)
     # FIX↔CUBE token used only when unit_flag is off.
-    l0c_available = tla.flag("l0c_available", tla.arch.FIX, tla.arch.CUBE)
+    l0c_available = tla.flag("l0c_available", tla.pipes.FIX, tla.pipes.CUBE)
 
     # ---- EVG/UB soft-flags ----
     #   MTE2_V  (ub_aux*_data_ready): MTE2 load done → Vector may compute
@@ -97,14 +97,22 @@ def matmul_evg_add_ub_kernel(
     #   V_MTE2  (ub_aux*_available):  Vector frees X/aux slot for MTE2 load (cross-tile)
     #   MTE3_V  (ub_out*_available):  MTE3 store done → Vector may reuse D/out slot (cross-tile)
     # Soft-flags are primed on AIV entry and drained on AIV exit.
-    ub_aux0_data_ready = tla.flag("ub_aux0_data_ready", tla.arch.MTE2, tla.arch.VECTOR)
-    ub_aux1_data_ready = tla.flag("ub_aux1_data_ready", tla.arch.MTE2, tla.arch.VECTOR)
-    ub_out0_data_ready = tla.flag("ub_out0_data_ready", tla.arch.VECTOR, tla.arch.MTE3)
-    ub_out1_data_ready = tla.flag("ub_out1_data_ready", tla.arch.VECTOR, tla.arch.MTE3)
-    ub_aux0_available = tla.flag("ub_aux0_available", tla.arch.VECTOR, tla.arch.MTE2)
-    ub_aux1_available = tla.flag("ub_aux1_available", tla.arch.VECTOR, tla.arch.MTE2)
-    ub_out0_available = tla.flag("ub_out0_available", tla.arch.MTE3, tla.arch.VECTOR)
-    ub_out1_available = tla.flag("ub_out1_available", tla.arch.MTE3, tla.arch.VECTOR)
+    ub_aux0_data_ready = tla.flag(
+        "ub_aux0_data_ready", tla.pipes.MTE2, tla.pipes.VECTOR
+    )
+    ub_aux1_data_ready = tla.flag(
+        "ub_aux1_data_ready", tla.pipes.MTE2, tla.pipes.VECTOR
+    )
+    ub_out0_data_ready = tla.flag(
+        "ub_out0_data_ready", tla.pipes.VECTOR, tla.pipes.MTE3
+    )
+    ub_out1_data_ready = tla.flag(
+        "ub_out1_data_ready", tla.pipes.VECTOR, tla.pipes.MTE3
+    )
+    ub_aux0_available = tla.flag("ub_aux0_available", tla.pipes.VECTOR, tla.pipes.MTE2)
+    ub_aux1_available = tla.flag("ub_aux1_available", tla.pipes.VECTOR, tla.pipes.MTE2)
+    ub_out0_available = tla.flag("ub_out0_available", tla.pipes.MTE3, tla.pipes.VECTOR)
+    ub_out1_available = tla.flag("ub_out1_available", tla.pipes.MTE3, tla.pipes.VECTOR)
 
     # ---- cross-core flags ----
     # AIC waits/sets both AIV0 and AIV1; AIV side is guarded by aiv_id.
@@ -245,8 +253,8 @@ def matmul_evg_add_ub_kernel(
             l0_c = tla.make_tensor_like(l0c_ptr, gm_d_by_core)
 
             # Wait both AIVs to free UB before overwriting (or priming on first tile).
-            tla.cross_core_wait_flag(aiv_finish, tla.arch.FIX, aiv_id=0)
-            tla.cross_core_wait_flag(aiv_finish, tla.arch.FIX, aiv_id=1)
+            tla.cross_core_wait_flag(aiv_finish, tla.pipes.FIX, aiv_id=0)
+            tla.cross_core_wait_flag(aiv_finish, tla.pipes.FIX, aiv_id=1)
 
             if tla.const_expr(not ENABLE_UNIT_FLAG):
                 tla.wait_flag(l0c_available)
@@ -397,8 +405,8 @@ def matmul_evg_add_ub_kernel(
                     ),
                 )
 
-            tla.cross_core_set_flag(aic_finish, tla.arch.FIX, aiv_id=0)
-            tla.cross_core_set_flag(aic_finish, tla.arch.FIX, aiv_id=1)
+            tla.cross_core_set_flag(aic_finish, tla.pipes.FIX, aiv_id=0)
+            tla.cross_core_set_flag(aic_finish, tla.pipes.FIX, aiv_id=1)
 
         tla.wait_flag(l1a0_available)
         tla.wait_flag(l1a1_available)
@@ -410,8 +418,8 @@ def matmul_evg_add_ub_kernel(
         tla.wait_flag(l0b1_available)
         tla.wait_flag(l0c_available)
         # Drain last AIV0/AIV1 tiles before cube exit.
-        tla.cross_core_wait_flag(aiv_finish, tla.arch.FIX, aiv_id=0)
-        tla.cross_core_wait_flag(aiv_finish, tla.arch.FIX, aiv_id=1)
+        tla.cross_core_wait_flag(aiv_finish, tla.pipes.FIX, aiv_id=0)
+        tla.cross_core_wait_flag(aiv_finish, tla.pipes.FIX, aiv_id=1)
         tla.pipe_barrier(tla.pipes.ALL)
 
     # ---- vector: prime flags; MN loop; load / compute / store epilogue ----
@@ -428,8 +436,8 @@ def matmul_evg_add_ub_kernel(
             tla.set_flag(ub_aux1_available)
             tla.set_flag(ub_out1_available)
 
-        tla.cross_core_set_flag(aiv_finish, tla.arch.VECTOR, aiv_id=0)
-        tla.cross_core_set_flag(aiv_finish, tla.arch.VECTOR, aiv_id=1)
+        tla.cross_core_set_flag(aiv_finish, tla.pipes.VECTOR, aiv_id=0)
+        tla.cross_core_set_flag(aiv_finish, tla.pipes.VECTOR, aiv_id=1)
         for block_linear in block_range:
             # Same MN swizzle as cube path (AIC/AIV must visit identical tiles).
             block_row = c0
@@ -471,8 +479,8 @@ def matmul_evg_add_ub_kernel(
                     else block_row
                 )
 
-            tla.cross_core_wait_flag(aic_finish, tla.arch.VECTOR, aiv_id=0)
-            tla.cross_core_wait_flag(aic_finish, tla.arch.VECTOR, aiv_id=1)
+            tla.cross_core_wait_flag(aic_finish, tla.pipes.VECTOR, aiv_id=0)
+            tla.cross_core_wait_flag(aic_finish, tla.pipes.VECTOR, aiv_id=1)
 
             # In-place GM C: load addend X from gm_c, store D=A@B+X back to gm_c
             # gm_c is both the addend source and the final output destination.
@@ -716,8 +724,8 @@ def matmul_evg_add_ub_kernel(
                     if tla.const_expr(EVG_UB_STAGES >= 2):
                         ub_stage_idx = c1 - ub_stage_idx
 
-            tla.cross_core_set_flag(aiv_finish, tla.arch.VECTOR, aiv_id=0)
-            tla.cross_core_set_flag(aiv_finish, tla.arch.VECTOR, aiv_id=1)
+            tla.cross_core_set_flag(aiv_finish, tla.pipes.VECTOR, aiv_id=0)
+            tla.cross_core_set_flag(aiv_finish, tla.pipes.VECTOR, aiv_id=1)
 
         # Drain remaining load-ready / store-done credits before AIV exit.
         tla.wait_flag(ub_aux0_available)

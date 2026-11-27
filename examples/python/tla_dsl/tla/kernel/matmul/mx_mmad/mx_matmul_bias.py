@@ -125,16 +125,16 @@ def mx_mmad_bias_kernel(
     l1_bias = tla.allocate(tn, tla.Float32, tla.AddressSpace.l1, 512)
     l0_bias = tla.allocate(tn, tla.Float32, tla.AddressSpace.biasbuf, 512)
 
-    ab_ready = tla.flag("ab_ready", tla.arch.MTE2, tla.arch.MTE1)
-    l0_ready = tla.flag("l0_ready", tla.arch.MTE1, tla.arch.CUBE)
+    ab_ready = tla.flag("ab_ready", tla.pipes.MTE2, tla.pipes.MTE1)
+    l0_ready = tla.flag("l0_ready", tla.pipes.MTE1, tla.pipes.CUBE)
     # Single-buffered L1/L0, so each stage must be told when its buffer is free
     # again: MTE1 releases L1 back to MTE2, and the cube releases L0 back to MTE1.
-    l1_avail = tla.flag("l1_avail", tla.arch.MTE1, tla.arch.MTE2)
-    l0_avail = tla.flag("l0_avail", tla.arch.CUBE, tla.arch.MTE1)
+    l1_avail = tla.flag("l1_avail", tla.pipes.MTE1, tla.pipes.MTE2)
+    l0_avail = tla.flag("l0_avail", tla.pipes.CUBE, tla.pipes.MTE1)
     # Bias pipeline: GM -> L1 (MTE2), L1 -> biasbuf (MTE1), biasbuf read by CUBE.
-    l1_bias_data_ready = tla.flag("l1_bias_data_ready", tla.arch.MTE2, tla.arch.MTE1)
-    l1_bias_available = tla.flag("l1_bias_available", tla.arch.MTE1, tla.arch.MTE2)
-    l0_bias_available = tla.flag("l0_bias_available", tla.arch.CUBE, tla.arch.MTE1)
+    l1_bias_data_ready = tla.flag("l1_bias_data_ready", tla.pipes.MTE2, tla.pipes.MTE1)
+    l1_bias_available = tla.flag("l1_bias_available", tla.pipes.MTE1, tla.pipes.MTE2)
+    l0_bias_available = tla.flag("l0_bias_available", tla.pipes.CUBE, tla.pipes.MTE1)
 
     with tla.cube():
         # Armed once here rather than per block: every block waits for the

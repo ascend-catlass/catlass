@@ -70,14 +70,14 @@ def conv_k_windows(
     m_fractals = M // 16
     k_fractals = k_window // 16
 
-    band_ready = tla.flag("band_ready", tla.arch.MTE2, tla.arch.MTE1)
-    filt_ready = tla.flag("filt_ready", tla.arch.MTE2, tla.arch.MTE1)
-    filt_free = tla.flag("filt_free", tla.arch.MTE1, tla.arch.MTE2)
-    l0a_ready = tla.flag("l0a_ready", tla.arch.MTE1, tla.arch.CUBE)
-    l0a_free = tla.flag("l0a_free", tla.arch.CUBE, tla.arch.MTE1)
-    l0b_ready = tla.flag("l0b_ready", tla.arch.MTE1, tla.arch.CUBE)
-    l0b_free = tla.flag("l0b_free", tla.arch.CUBE, tla.arch.MTE1)
-    l0c_ready = tla.flag("l0c_ready", tla.arch.CUBE, tla.arch.FIX)
+    band_ready = tla.flag("band_ready", tla.pipes.MTE2, tla.pipes.MTE1)
+    filt_ready = tla.flag("filt_ready", tla.pipes.MTE2, tla.pipes.MTE1)
+    filt_free = tla.flag("filt_free", tla.pipes.MTE1, tla.pipes.MTE2)
+    l0a_ready = tla.flag("l0a_ready", tla.pipes.MTE1, tla.pipes.CUBE)
+    l0a_free = tla.flag("l0a_free", tla.pipes.CUBE, tla.pipes.MTE1)
+    l0b_ready = tla.flag("l0b_ready", tla.pipes.MTE1, tla.pipes.CUBE)
+    l0b_free = tla.flag("l0b_free", tla.pipes.CUBE, tla.pipes.MTE1)
+    l0c_ready = tla.flag("l0c_ready", tla.pipes.CUBE, tla.pipes.FIX)
 
     l1a_ptr = tla.allocate(C1 * PLANE * C0, tla.Float16, tla.AddressSpace.l1, 512)
     l1b_ptr = tla.allocate(k_window * COUT, tla.Float16, tla.AddressSpace.l1, 512)

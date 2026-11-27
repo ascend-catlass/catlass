@@ -90,7 +90,7 @@ def extern_multi_ops(gm_src: tla.Tensor, gm_dst: tla.Tensor) -> None:
     """Copy GM -> UB -> GM using two different external operations."""
 
     ub_ptr = tla.allocate(TILE_ELE, tla.Float32, tla.AddressSpace.ub, 256)
-    load_done = tla.flag("load_done", tla.arch.MTE2, tla.arch.MTE3)
+    load_done = tla.flag("load_done", tla.pipes.MTE2, tla.pipes.MTE3)
 
     with tla.vector():
         extern_gm_to_ub_f32(gm_src.ptr, ub_ptr, TILE_ELE)

@@ -82,11 +82,11 @@ def basic_mixed_l0c2ub_b8_unitflag_pad_kernel(
     dst_is_b8 = dtype_c in (tla.Int8, tla.UInt8)
     acc_dtype = tla.Float32
 
-    l1_full = tla.flag("l1_full", tla.arch.MTE2, tla.arch.MTE1)
-    l1_free = tla.flag("l1_free", tla.arch.MTE1, tla.arch.MTE2)
-    l0_full = tla.flag("l0_full", tla.arch.MTE1, tla.arch.CUBE)
-    l0_free = tla.flag("l0_free", tla.arch.CUBE, tla.arch.MTE1)
-    l0c_available = tla.flag("l0c_available", tla.arch.FIX, tla.arch.CUBE)
+    l1_full = tla.flag("l1_full", tla.pipes.MTE2, tla.pipes.MTE1)
+    l1_free = tla.flag("l1_free", tla.pipes.MTE1, tla.pipes.MTE2)
+    l0_full = tla.flag("l0_full", tla.pipes.MTE1, tla.pipes.CUBE)
+    l0_free = tla.flag("l0_free", tla.pipes.CUBE, tla.pipes.MTE1)
+    l0c_available = tla.flag("l0c_available", tla.pipes.FIX, tla.pipes.CUBE)
     fix_done = tla.cross_flag("fix_done", mode=4)
     fix_ready = tla.cross_flag("fix_ready", mode=4)
 
@@ -194,7 +194,7 @@ def basic_mixed_l0c2ub_b8_unitflag_pad_kernel(
                 layoutTag=c_tag,
             ),
         )
-        tla.cross_core_wait_flag(fix_ready, tla.arch.FIX, aiv_id=0)
+        tla.cross_core_wait_flag(fix_ready, tla.pipes.FIX, aiv_id=0)
         tla.copy(
             ub_c,
             l0_c,
@@ -207,9 +207,9 @@ def basic_mixed_l0c2ub_b8_unitflag_pad_kernel(
             ),
         )
         tla.set_flag(l0c_available)
-        tla.cross_core_set_flag(fix_done, tla.arch.FIX, aiv_id=0)
+        tla.cross_core_set_flag(fix_done, tla.pipes.FIX, aiv_id=0)
 
-        tla.cross_core_wait_flag(fix_ready, tla.arch.FIX, aiv_id=0)
+        tla.cross_core_wait_flag(fix_ready, tla.pipes.FIX, aiv_id=0)
         tla.wait_flag(l1_free)
         tla.wait_flag(l0_free)
         tla.wait_flag(l0c_available)
@@ -218,7 +218,7 @@ def basic_mixed_l0c2ub_b8_unitflag_pad_kernel(
     with tla.vector():
         vec_idx = tla.arch.sub_block_idx()
         if vec_idx == c0:
-            tla.cross_core_set_flag(fix_ready, tla.arch.MTE3, aiv_id=0)
+            tla.cross_core_set_flag(fix_ready, tla.pipes.MTE3, aiv_id=0)
 
             # Fixpipe Col UB is (n_cube, m_cube) RowMajor; Row is (m_cube, n_cube).
             # Store only the GM-valid crop.
@@ -248,9 +248,9 @@ def basic_mixed_l0c2ub_b8_unitflag_pad_kernel(
                     layoutTag=tla.arch.RowMajor,
                 ),
             )
-            tla.cross_core_wait_flag(fix_done, tla.arch.MTE3, aiv_id=0)
+            tla.cross_core_wait_flag(fix_done, tla.pipes.MTE3, aiv_id=0)
             tla.copy(gm_out, ub_src)
-            tla.cross_core_set_flag(fix_ready, tla.arch.MTE3, aiv_id=0)
+            tla.cross_core_set_flag(fix_ready, tla.pipes.MTE3, aiv_id=0)
 
         tla.pipe_barrier(tla.pipes.ALL)
 

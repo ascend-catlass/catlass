@@ -403,68 +403,72 @@ def declare_sync(
         #   dst=S: phy_m3s 0, phy_vs 1 /
         #   dst=CUBE 补充（F10 步骤 2）：ab_ready 4-5（AB 槽 MTE1→CUBE）/
         #   dst=MTE1 补充（F10 步骤 2）：ab_free 4-5（AB 槽 CUBE→MTE1）
-        q_l1_ready=tla.flag("smla_q_l1_ready", tla.arch.MTE2, tla.arch.MTE1, id=0),
-        q_l0a_free=tla.flag("smla_q_l0a_free", tla.arch.MTE1, tla.arch.MTE2, id=0),
-        k_l1_ready0=tla.flag("smla_k_l1_ready0", tla.arch.MTE2, tla.arch.MTE1, id=1),
-        k_l1_ready1=tla.flag("smla_k_l1_ready1", tla.arch.MTE2, tla.arch.MTE1, id=2),
-        k_l1_ready2=tla.flag("smla_k_l1_ready2", tla.arch.MTE2, tla.arch.MTE1, id=3),
-        k_l0b_free0=tla.flag("smla_k_l0b_free0", tla.arch.MTE1, tla.arch.MTE2, id=1),
-        k_l0b_free1=tla.flag("smla_k_l0b_free1", tla.arch.MTE1, tla.arch.MTE2, id=2),
-        k_l0b_free2=tla.flag("smla_k_l0b_free2", tla.arch.MTE1, tla.arch.MTE2, id=3),
-        s_mm_ready=tla.flag("smla_s_mm_ready", tla.arch.CUBE, tla.arch.FIX, id=0),
-        s_mm_ready1=tla.flag("smla_s_mm_ready1", tla.arch.CUBE, tla.arch.FIX, id=3),
-        s_fix_done=tla.flag("smla_s_fix_done", tla.arch.FIX, tla.arch.CUBE, id=0),
-        s_fix_done1=tla.flag("smla_s_fix_done1", tla.arch.FIX, tla.arch.CUBE, id=3),
-        o_mm_ready0=tla.flag("smla_o_mm_ready0", tla.arch.CUBE, tla.arch.FIX, id=1),
-        o_mm_ready1=tla.flag("smla_o_mm_ready1", tla.arch.CUBE, tla.arch.FIX, id=2),
-        o_fix_done0=tla.flag("smla_o_fix_done0", tla.arch.FIX, tla.arch.CUBE, id=1),
-        o_fix_done1=tla.flag("smla_o_fix_done1", tla.arch.FIX, tla.arch.CUBE, id=2),
+        q_l1_ready=tla.flag("smla_q_l1_ready", tla.pipes.MTE2, tla.pipes.MTE1, id=0),
+        q_l0a_free=tla.flag("smla_q_l0a_free", tla.pipes.MTE1, tla.pipes.MTE2, id=0),
+        k_l1_ready0=tla.flag("smla_k_l1_ready0", tla.pipes.MTE2, tla.pipes.MTE1, id=1),
+        k_l1_ready1=tla.flag("smla_k_l1_ready1", tla.pipes.MTE2, tla.pipes.MTE1, id=2),
+        k_l1_ready2=tla.flag("smla_k_l1_ready2", tla.pipes.MTE2, tla.pipes.MTE1, id=3),
+        k_l0b_free0=tla.flag("smla_k_l0b_free0", tla.pipes.MTE1, tla.pipes.MTE2, id=1),
+        k_l0b_free1=tla.flag("smla_k_l0b_free1", tla.pipes.MTE1, tla.pipes.MTE2, id=2),
+        k_l0b_free2=tla.flag("smla_k_l0b_free2", tla.pipes.MTE1, tla.pipes.MTE2, id=3),
+        s_mm_ready=tla.flag("smla_s_mm_ready", tla.pipes.CUBE, tla.pipes.FIX, id=0),
+        s_mm_ready1=tla.flag("smla_s_mm_ready1", tla.pipes.CUBE, tla.pipes.FIX, id=3),
+        s_fix_done=tla.flag("smla_s_fix_done", tla.pipes.FIX, tla.pipes.CUBE, id=0),
+        s_fix_done1=tla.flag("smla_s_fix_done1", tla.pipes.FIX, tla.pipes.CUBE, id=3),
+        o_mm_ready0=tla.flag("smla_o_mm_ready0", tla.pipes.CUBE, tla.pipes.FIX, id=1),
+        o_mm_ready1=tla.flag("smla_o_mm_ready1", tla.pipes.CUBE, tla.pipes.FIX, id=2),
+        o_fix_done0=tla.flag("smla_o_fix_done0", tla.pipes.FIX, tla.pipes.CUBE, id=1),
+        o_fix_done1=tla.flag("smla_o_fix_done1", tla.pipes.FIX, tla.pipes.CUBE, id=2),
         p_data_ready=tla.flag(
-            "smla_p_data_ready", tla.arch.VECTOR, tla.arch.MTE3, id=2
+            "smla_p_data_ready", tla.pipes.VECTOR, tla.pipes.MTE3, id=2
         ),
-        lse_v_mte3=tla.flag("smla_lse_v_mte3", tla.arch.VECTOR, tla.arch.MTE3, id=3),
+        lse_v_mte3=tla.flag("smla_lse_v_mte3", tla.pipes.VECTOR, tla.pipes.MTE3, id=3),
         lse_mte3_v=(
-            tla.flag("smla_lse_mte3_v", tla.arch.MTE3, tla.arch.VECTOR, id=6)
+            tla.flag("smla_lse_mte3_v", tla.pipes.MTE3, tla.pipes.VECTOR, id=6)
             if need_lse_war
             else None
         ),
-        kv_mte2_mte3_0=tla.flag("smla_kv_m2m3_0", tla.arch.MTE2, tla.arch.MTE3, id=0),
-        kv_mte2_mte3_1=tla.flag("smla_kv_m2m3_1", tla.arch.MTE2, tla.arch.MTE3, id=1),
-        kv_mte3_mte2_0=tla.flag("smla_kv_m3m2_0", tla.arch.MTE3, tla.arch.MTE2, id=4),
-        kv_mte3_mte2_1=tla.flag("smla_kv_m3m2_1", tla.arch.MTE3, tla.arch.MTE2, id=5),
-        init_mte3_v=tla.flag("smla_init_mte3_v", tla.arch.MTE3, tla.arch.VECTOR, id=0),
-        init_v_mte3=tla.flag("smla_init_v_mte3", tla.arch.VECTOR, tla.arch.MTE3, id=4),
-        phy_m2v=tla.flag("smla_phy_m2v", tla.arch.MTE2, tla.arch.VECTOR, id=1),
-        phy_s2v=tla.flag("smla_phy_s2v", tla.arch.SCALAR, tla.arch.VECTOR, id=2),
-        phy_v_mte3=tla.flag("smla_phy_v_mte3", tla.arch.VECTOR, tla.arch.MTE3, id=5),
-        phy_m3v=tla.flag("smla_phy_m3v", tla.arch.MTE3, tla.arch.VECTOR, id=4),
-        phy_m3s=tla.flag("smla_phy_m3s", tla.arch.MTE3, tla.arch.SCALAR, id=0),
-        phy_vs=tla.flag("smla_phy_vs", tla.arch.VECTOR, tla.arch.SCALAR, id=1),
+        kv_mte2_mte3_0=tla.flag("smla_kv_m2m3_0", tla.pipes.MTE2, tla.pipes.MTE3, id=0),
+        kv_mte2_mte3_1=tla.flag("smla_kv_m2m3_1", tla.pipes.MTE2, tla.pipes.MTE3, id=1),
+        kv_mte3_mte2_0=tla.flag("smla_kv_m3m2_0", tla.pipes.MTE3, tla.pipes.MTE2, id=4),
+        kv_mte3_mte2_1=tla.flag("smla_kv_m3m2_1", tla.pipes.MTE3, tla.pipes.MTE2, id=5),
+        init_mte3_v=tla.flag(
+            "smla_init_mte3_v", tla.pipes.MTE3, tla.pipes.VECTOR, id=0
+        ),
+        init_v_mte3=tla.flag(
+            "smla_init_v_mte3", tla.pipes.VECTOR, tla.pipes.MTE3, id=4
+        ),
+        phy_m2v=tla.flag("smla_phy_m2v", tla.pipes.MTE2, tla.pipes.VECTOR, id=1),
+        phy_s2v=tla.flag("smla_phy_s2v", tla.pipes.SCALAR, tla.pipes.VECTOR, id=2),
+        phy_v_mte3=tla.flag("smla_phy_v_mte3", tla.pipes.VECTOR, tla.pipes.MTE3, id=5),
+        phy_m3v=tla.flag("smla_phy_m3v", tla.pipes.MTE3, tla.pipes.VECTOR, id=4),
+        phy_m3s=tla.flag("smla_phy_m3s", tla.pipes.MTE3, tla.pipes.SCALAR, id=0),
+        phy_vs=tla.flag("smla_phy_vs", tla.pipes.VECTOR, tla.pipes.SCALAR, id=1),
         # T1-1（r10）：索引环事件对，按 need_idx_ring 按需创建（见 Sync 注释）。
         idx_m2s0=(
-            tla.flag("smla_idx_m2s0", tla.arch.MTE2, tla.arch.SCALAR, id=2)
+            tla.flag("smla_idx_m2s0", tla.pipes.MTE2, tla.pipes.SCALAR, id=2)
             if need_idx_ring
             else None
         ),
         idx_m2s1=(
-            tla.flag("smla_idx_m2s1", tla.arch.MTE2, tla.arch.SCALAR, id=3)
+            tla.flag("smla_idx_m2s1", tla.pipes.MTE2, tla.pipes.SCALAR, id=3)
             if need_idx_ring
             else None
         ),
         idx_s2m0=(
-            tla.flag("smla_idx_s2m0", tla.arch.SCALAR, tla.arch.MTE2, id=6)
+            tla.flag("smla_idx_s2m0", tla.pipes.SCALAR, tla.pipes.MTE2, id=6)
             if need_idx_ring
             else None
         ),
         idx_s2m1=(
-            tla.flag("smla_idx_s2m1", tla.arch.SCALAR, tla.arch.MTE2, id=7)
+            tla.flag("smla_idx_s2m1", tla.pipes.SCALAR, tla.pipes.MTE2, id=7)
             if need_idx_ring
             else None
         ),
-        bc_m3m2=tla.flag("smla_bc_m3m2", tla.arch.MTE3, tla.arch.MTE2, id=6),
-        bc_m3v=tla.flag("smla_bc_m3v", tla.arch.MTE3, tla.arch.VECTOR, id=5),
-        bc_m2v=tla.flag("smla_bc_m2v", tla.arch.MTE2, tla.arch.VECTOR, id=3),
-        bc_v2m=tla.flag("smla_bc_v2m", tla.arch.VECTOR, tla.arch.MTE2, id=7),
+        bc_m3m2=tla.flag("smla_bc_m3m2", tla.pipes.MTE3, tla.pipes.MTE2, id=6),
+        bc_m3v=tla.flag("smla_bc_m3v", tla.pipes.MTE3, tla.pipes.VECTOR, id=5),
+        bc_m2v=tla.flag("smla_bc_m2v", tla.pipes.MTE2, tla.pipes.VECTOR, id=3),
+        bc_v2m=tla.flag("smla_bc_v2m", tla.pipes.VECTOR, tla.pipes.MTE2, id=7),
         # F6 流水版：AIC(MTE1) -> AIV(MTE3) 的 l1P 槽读完成归还 flag。F14 步骤
         # A：回执已去除（set/wait 调用点删除，OT IterateBmm2Impl 同款无回执），
         # flag 对象保留占位（sync 结构布局不变）。跨核 flag 必须用
@@ -472,14 +476,14 @@ def declare_sync(
         # in-pipe tla.flag(...) 的句柄经 jit 参数边界会物化成 OpResult 而被拒
         # （实测 expected cross_flag, got OpResult）。
         p_free=cross("smla_p_free"),
-        bc_v3m=tla.flag("smla_bc_v3m", tla.arch.VECTOR, tla.arch.MTE3, id=6),
+        bc_v3m=tla.flag("smla_bc_v3m", tla.pipes.VECTOR, tla.pipes.MTE3, id=6),
         # F10 步骤 2：AB 槽 flag 对（dst=CUBE 已用 0-3 → 4/5；dst=MTE1 已用
         # 0-3 → 4/5）。ab_ready：MTE1→CUBE（数据就绪）；ab_free：CUBE→MTE1
         # （槽释放）。L0A/L0B 合并单 bufferId（A/B 成对）。
-        ab_ready0=tla.flag("smla_ab_ready0", tla.arch.MTE1, tla.arch.CUBE, id=4),
-        ab_ready1=tla.flag("smla_ab_ready1", tla.arch.MTE1, tla.arch.CUBE, id=5),
-        ab_free0=tla.flag("smla_ab_free0", tla.arch.CUBE, tla.arch.MTE1, id=4),
-        ab_free1=tla.flag("smla_ab_free1", tla.arch.CUBE, tla.arch.MTE1, id=5),
+        ab_ready0=tla.flag("smla_ab_ready0", tla.pipes.MTE1, tla.pipes.CUBE, id=4),
+        ab_ready1=tla.flag("smla_ab_ready1", tla.pipes.MTE1, tla.pipes.CUBE, id=5),
+        ab_free0=tla.flag("smla_ab_free0", tla.pipes.CUBE, tla.pipes.MTE1, id=4),
+        ab_free1=tla.flag("smla_ab_free1", tla.pipes.CUBE, tla.pipes.MTE1, id=5),
         # F27：IS_SPLIT_G 核间 MTE2 屏障（全核，mode=0；无 aiv_id）
         s2_mte2=cross("smla_s2_mte2", mode=0),
         m_l0a0=tla.mutex("smla_l0a0", id=0),
@@ -543,11 +547,11 @@ def init_sync(
     """
     with tla.vector():
         # gather 的 UB 复用信用（MTE3->MTE2），ping-pong 两块各一份
-        tla.cross_core_set_flag(sync.s_free, tla.arch.VECTOR, aiv_id=0)
-        tla.cross_core_set_flag(sync.s_free, tla.arch.VECTOR, aiv_id=1)
+        tla.cross_core_set_flag(sync.s_free, tla.pipes.VECTOR, aiv_id=0)
+        tla.cross_core_set_flag(sync.s_free, tla.pipes.VECTOR, aiv_id=1)
         if not defer_ofree:
-            tla.cross_core_set_flag(sync.o_free, tla.arch.VECTOR, aiv_id=0)
-            tla.cross_core_set_flag(sync.o_free, tla.arch.VECTOR, aiv_id=1)
+            tla.cross_core_set_flag(sync.o_free, tla.pipes.VECTOR, aiv_id=0)
+            tla.cross_core_set_flag(sync.o_free, tla.pipes.VECTOR, aiv_id=1)
 
 
 @tla.jit
@@ -563,8 +567,8 @@ def init_sync_preload(sync: Sync) -> None:
       vec1(t) 归还、bmm1(t+2) 消费 ⇒ init_sync 的 1 份之外再 +1/AIV。
     """
     with tla.vector():
-        tla.cross_core_set_flag(sync.s_free, tla.arch.VECTOR, aiv_id=0)
-        tla.cross_core_set_flag(sync.s_free, tla.arch.VECTOR, aiv_id=1)
+        tla.cross_core_set_flag(sync.s_free, tla.pipes.VECTOR, aiv_id=0)
+        tla.cross_core_set_flag(sync.s_free, tla.pipes.VECTOR, aiv_id=1)
 
 
 @tla.jit

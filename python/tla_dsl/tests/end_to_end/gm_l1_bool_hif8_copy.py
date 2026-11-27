@@ -60,7 +60,7 @@ def vector_gm_to_l1(
     # Byte-addressed L1 storage (same pattern as fill_op); logical dtype via recast.
     l1_bytes = tla.allocate(n_elems, tla.Int8, tla.AddressSpace.l1, 512)
     l1_ptr = tla.recast_ptr(l1_bytes, dtype=dtype)
-    copied = tla.flag("vl_copied", tla.arch.MTE2, tla.arch.MTE1)
+    copied = tla.flag("vl_copied", tla.pipes.MTE2, tla.pipes.MTE1)
     with tla.cube():
         l1 = tla.make_tensor_like(l1_ptr, gm_src, tla.arch.VectorLayout)
         tla.copy(l1, gm_src)
@@ -84,7 +84,7 @@ def nd2nz_gm_to_l1(
     n_elems = rows * cols
     l1_bytes = tla.allocate(n_elems, tla.Int8, tla.AddressSpace.l1, 512)
     l1_ptr = tla.recast_ptr(l1_bytes, dtype=dtype)
-    copied = tla.flag("nd_copied", tla.arch.MTE2, tla.arch.MTE1)
+    copied = tla.flag("nd_copied", tla.pipes.MTE2, tla.pipes.MTE1)
     with tla.cube():
         l1 = tla.make_tensor(
             l1_ptr, tla.make_layout_with_tag((rows, cols), dtype, tla.arch.zN)

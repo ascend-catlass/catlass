@@ -22,10 +22,10 @@ def _aic_arrive_handshake(aiv_arrive, aic_ffts, aic_done) -> None:
     # CPP SyncAllImpl: PipeBarrier<ALL> on both sides, then AIC wait arrive →
     # FFTS → publish done. AIV sets arrive after its ALL.
     tla.pipe_barrier(tla.pipes.ALL)
-    _aic_wait_both_arrive(aiv_arrive, tla.arch.SCALAR)
-    tla.cross_core_set_flag(aic_ffts, tla.arch.FIX)
-    tla.cross_core_wait_flag(aic_ffts, tla.arch.SCALAR)
-    tla.cross_core_set_flag(aic_done, tla.arch.SCALAR)
+    _aic_wait_both_arrive(aiv_arrive, tla.pipes.SCALAR)
+    tla.cross_core_set_flag(aic_ffts, tla.pipes.FIX)
+    tla.cross_core_wait_flag(aic_ffts, tla.pipes.SCALAR)
+    tla.cross_core_set_flag(aic_done, tla.pipes.SCALAR)
 
 
 @tla.jit
@@ -52,7 +52,7 @@ def stage_barrier_hard(
         tla.pipe_barrier(tla.pipes.ALL)
         aiv_sub = tla.arch.sub_block_idx()
         if aiv_sub == 0:
-            tla.cross_core_set_flag(aiv_arrive, tla.arch.MTE3, aiv_id=0)
+            tla.cross_core_set_flag(aiv_arrive, tla.pipes.MTE3, aiv_id=0)
         else:
-            tla.cross_core_set_flag(aiv_arrive, tla.arch.MTE3, aiv_id=1)
-        tla.cross_core_wait_flag(aic_done, tla.arch.SCALAR)
+            tla.cross_core_set_flag(aiv_arrive, tla.pipes.MTE3, aiv_id=1)
+        tla.cross_core_wait_flag(aic_done, tla.pipes.SCALAR)

@@ -177,11 +177,11 @@ def moe_route_kernel(
                     gm_row_w = tla.make_tensor(gm_w.ptr + out_off, pack_gm)
                     gm_row_i = tla.make_tensor(gm_idx.ptr + out_off, pack_gm)
 
-                    tok_mutex[bi].lock(pipe=tla.arch.MTE2)
+                    tok_mutex[bi].lock(pipe=tla.pipes.MTE2)
                     tla.copy(ub_x[bi], gm_row_x)
-                    tok_mutex[bi].unlock(pipe=tla.arch.MTE2)
+                    tok_mutex[bi].unlock(pipe=tla.pipes.MTE2)
 
-                    tok_mutex[bi].lock(pipe=tla.arch.VECTOR)
+                    tok_mutex[bi].lock(pipe=tla.pipes.VECTOR)
                     with tla.vec.func(mode="simd"):
                         mask = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
                         if tla.const_expr(TAIL != 0):
@@ -457,14 +457,14 @@ def moe_route_kernel(
                         tla.local_mem_bar(
                             tla.params.MemType.VEC_STORE, tla.params.MemType.SCALAR_LOAD
                         )
-                    tok_mutex[bi].unlock(pipe=tla.arch.VECTOR)
+                    tok_mutex[bi].unlock(pipe=tla.pipes.VECTOR)
 
                     # ---- 标量段：读回 top-k id，用 id 直接算专家行的 GM 地址。
                     # 数据相关的 gather 全部交给 MTE2 的整行 DMA，vector 核不做
                     # 逐元素 4 B GM 读。锁在 SCALAR 上，保证标量读等的是上一段
                     # vector store 完成；K 条 DMA 依赖标量读结果，解锁放在 MTE2
                     # 上，下一段 VECTOR 因此等的是 DMA 落地。
-                    tok_mutex[bi].lock(pipe=tla.arch.SCALAR)
+                    tok_mutex[bi].lock(pipe=tla.pipes.SCALAR)
                     for j in tla.range_constexpr(K):
                         src = ub_pi[bi][0, j].to(tla.Int64) * tla.Int64(B) + r.to(
                             tla.Int64
@@ -473,12 +473,12 @@ def moe_route_kernel(
                             gm_e.ptr + src * tla.Int64(D), erow_gm
                         )
                         tla.copy(ub_r[bi][j], gm_row_e)
-                    tok_mutex[bi].unlock(pipe=tla.arch.MTE2)
+                    tok_mutex[bi].unlock(pipe=tla.pipes.MTE2)
 
                     # ---- 加权累加：每个 chunk 的累加器留在寄存器里，K 条行读进来
                     # 乘加后只写回行 0，避免 K 次 UB 往返；权重用 gather 广播成
                     # 全 lane 向量（lane j 即 w[b, j]）。
-                    tok_mutex[bi].lock(pipe=tla.arch.VECTOR)
+                    tok_mutex[bi].lock(pipe=tla.pipes.VECTOR)
                     with tla.vec.func(mode="simd"):
                         # 上一段的标量读必须早于本段（以及后面 token）的 vector store。
                         tla.local_mem_bar(
@@ -547,16 +547,16 @@ def moe_route_kernel(
                                     mask=dmask,
                                 )
                             tt0.store(tacc, mask=dtail_mask)
-                    tok_mutex[bi].unlock(pipe=tla.arch.VECTOR)
+                    tok_mutex[bi].unlock(pipe=tla.pipes.VECTOR)
 
-                    tok_mutex[bi].lock(pipe=tla.arch.MTE3)
+                    tok_mutex[bi].lock(pipe=tla.pipes.MTE3)
                     gm_row_y = tla.make_tensor(
                         gm_y.ptr + r.to(tla.Int64) * tla.Int64(D), erow_gm
                     )
                     tla.copy(gm_row_y, ub_r[bi][0])
                     tla.copy(gm_row_w, ub_pv[bi])
                     tla.copy(gm_row_i, ub_pi[bi])
-                    tok_mutex[bi].unlock(pipe=tla.arch.MTE3)
+                    tok_mutex[bi].unlock(pipe=tla.pipes.MTE3)
 
         tla.pipe_barrier(tla.pipes.ALL)
 

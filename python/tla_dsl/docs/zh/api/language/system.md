@@ -14,8 +14,8 @@ Do not regenerate this file from a glossary.
 
 [语言参考](index.md) | [API 速查](../quick_reference.md)
 
-`tla.arch` / `tla.AddressSpace` 上的架构属性（布局标签、pipe、片上地址空间、
-block 辅助等）。
+`tla.arch` 提供布局标签和 block 辅助接口，`tla.pipes` 提供 pipe 标识，
+`tla.AddressSpace` 提供片上地址空间。
 
 ## 布局标签
 
@@ -53,29 +53,29 @@ tag = tla.arch.RowMajor
 
 ## Pipe
 
-`tla.arch` 上的 pipe 标识，供 `flag` / `pipe_barrier` / `mutex_*` / 跨核同步使用。
+`tla.pipes` 上的 pipe 标识，供 `flag` / `pipe_barrier` / `mutex_*` / 跨核同步使用。
 
-**源码：** [`catlass.core_api.arch`](../../../../catlass/core_api.py)
+**源码：** [`catlass.runtime.pipes`](../../../../catlass/runtime.py)
 
 | Pipe | 用途 |
 | --- | --- |
-| `tla.arch.SCALAR` | Scalar pipe |
-| `tla.arch.VECTOR` | Vector pipe |
-| `tla.arch.CUBE` | Cube pipe |
-| `tla.arch.MTE1` | MTE1 |
-| `tla.arch.MTE2` | MTE2 |
-| `tla.arch.MTE3` | MTE3 |
-| `tla.arch.FIX` | Fixpipe |
+| `tla.pipes.SCALAR` | Scalar pipe |
+| `tla.pipes.VECTOR` | Vector pipe |
+| `tla.pipes.CUBE` | Cube pipe |
+| `tla.pipes.MTE1` | MTE1 |
+| `tla.pipes.MTE2` | MTE2 |
+| `tla.pipes.MTE3` | MTE3 |
+| `tla.pipes.FIX` | Fixpipe |
+| `tla.pipes.ALL` | `pipe_barrier` 使用的所有 pipe |
 
 约束说明：
 
 - 可用 pipe 取决于所在 `tla.cube()` / `tla.vector()` 区域，见各同步接口约束。
-- 这些接口不通过 `tla.arch` 暴露 `ALL`。
 
 调用示例：
 
 ```python
-pipe = tla.arch.MTE2
+pipe = tla.pipes.MTE2
 ```
 
 ## 片上 AddressSpace
@@ -1112,7 +1112,7 @@ tla.arch.get_ar() -> Int64
 调用示例：
 
 ```python
-count_ready = tla.flag("count_ready", tla.arch.VECTOR, tla.arch.SCALAR)
+count_ready = tla.flag("count_ready", tla.pipes.VECTOR, tla.pipes.SCALAR)
 with tla.vector():
     with tla.vec.func(mode="simd"):
         tla.arch.clear_ar()

@@ -8,7 +8,7 @@ import catlass.tla as tla
 @tla.kernel
 def default_flag_kernel() -> None:
     with tla.vector():
-        ready = tla.flag("ready", tla.arch.MTE2, tla.arch.VECTOR)
+        ready = tla.flag("ready", tla.pipes.MTE2, tla.pipes.VECTOR)
         tla.set_flag(ready)
         tla.wait_flag(ready)
 
@@ -24,7 +24,7 @@ def test_flag_accepts_explicit_id(value: int, compiler_tlair) -> None:
     @tla.kernel
     def kernel() -> None:
         with tla.vector():
-            ready = tla.flag("ready", tla.arch.MTE2, tla.arch.VECTOR, id=value)
+            ready = tla.flag("ready", tla.pipes.MTE2, tla.pipes.VECTOR, id=value)
             tla.set_flag(ready)
             tla.wait_flag(ready)
 
@@ -35,7 +35,7 @@ def test_flag_accepts_positional_id(compiler_tlair) -> None:
     @tla.kernel
     def kernel() -> None:
         with tla.vector():
-            ready = tla.flag("ready", tla.arch.MTE2, tla.arch.VECTOR, 5)
+            ready = tla.flag("ready", tla.pipes.MTE2, tla.pipes.VECTOR, 5)
             tla.set_flag(ready)
             tla.wait_flag(ready)
 
@@ -46,7 +46,7 @@ def test_flag_accepts_positional_id(compiler_tlair) -> None:
 def test_flag_rejects_out_of_range_id(value: int) -> None:
     @tla.kernel
     def kernel() -> None:
-        tla.flag("ready", tla.arch.MTE2, tla.arch.VECTOR, id=value)
+        tla.flag("ready", tla.pipes.MTE2, tla.pipes.VECTOR, id=value)
 
     with pytest.raises(tla.TlaCoreAPIError, match="id must be -1 or in range 0..7"):
         kernel.dump_mlir()
@@ -56,7 +56,7 @@ def test_flag_rejects_out_of_range_id(value: int) -> None:
 def test_flag_rejects_non_integer_id(value: object) -> None:
     @tla.kernel
     def kernel() -> None:
-        tla.flag("ready", tla.arch.MTE2, tla.arch.VECTOR, id=value)
+        tla.flag("ready", tla.pipes.MTE2, tla.pipes.VECTOR, id=value)
 
     with pytest.raises(tla.TlaCoreAPIError, match="expected int"):
         kernel.dump_mlir()

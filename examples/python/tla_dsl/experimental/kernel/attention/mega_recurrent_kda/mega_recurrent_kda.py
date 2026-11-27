@@ -107,7 +107,7 @@ def conv_consume(
     weight_all = flat(weightp, 512)
     out_all = flat(outputp, 8192)
     cast_all = flat(castp, 8192)
-    conv_mutex.lock(pipe=tla.arch.MTE2)
+    conv_mutex.lock(pipe=tla.pipes.MTE2)
     meta_src = flat(ci.ptr + first_row // 8, batches)
     meta_dst = tla.make_tensor(
         metap,
@@ -140,8 +140,8 @@ def conv_consume(
         weightp, tla.make_layout(tla.make_shape(4, 128), tla.make_stride(128, 1))
     )
     tla.copy(wu, weights)
-    conv_mutex.unlock(pipe=tla.arch.MTE2)
-    conv_mutex.lock(pipe=tla.arch.VECTOR)
+    conv_mutex.unlock(pipe=tla.pipes.MTE2)
+    conv_mutex.lock(pipe=tla.pipes.VECTOR)
     with tla.vec.func(mode="simd"):
         for lane in tla.range_constexpr(2):
             col = lane * 64
@@ -187,8 +187,8 @@ def conv_consume(
                     history0 = history1
                     history1 = history2
                     history2 = current_value
-    conv_mutex.unlock(pipe=tla.arch.VECTOR)
-    conv_mutex.lock(pipe=tla.arch.MTE3)
+    conv_mutex.unlock(pipe=tla.pipes.VECTOR)
+    conv_mutex.lock(pipe=tla.pipes.MTE3)
     output = tla.make_tensor(
         outputp, tla.make_layout(tla.make_shape(half, 128), tla.make_stride(128, 1))
     )
@@ -219,7 +219,7 @@ def conv_consume(
                 tla.make_layout(tla.make_shape(8, 128), tla.make_stride(channels, 1)),
             )
             tla.copy(raw_dst, current)
-    conv_mutex.unlock(pipe=tla.arch.MTE3)
+    conv_mutex.unlock(pipe=tla.pipes.MTE3)
 
 
 @tla.jit
@@ -314,10 +314,10 @@ def recurrent_stage(
     NB = beta.origin_shape[1]
     with tla.cube():
         if tla.const_expr(PIPELINED):
-            tla.cross_core_set_flag(chunk_ack0, tla.arch.MTE2)
-            tla.cross_core_set_flag(chunk_ack1, tla.arch.MTE2)
+            tla.cross_core_set_flag(chunk_ack0, tla.pipes.MTE2)
+            tla.cross_core_set_flag(chunk_ack1, tla.pipes.MTE2)
         else:
-            tla.cross_core_wait_flag(finished, tla.arch.SCALAR)
+            tla.cross_core_wait_flag(finished, tla.pipes.SCALAR)
             tla.pipe_barrier(tla.pipes.ALL)
     with tla.vector():
         for bh in tla.range(
@@ -353,7 +353,7 @@ def recurrent_stage(
             oa = flat(op, 128)
             ua = flat(up, 1024)
             delta_rows = flat(arena + 36864, 128)
-            ub_mutex.lock(pipe=tla.arch.MTE2)
+            ub_mutex.lock(pipe=tla.pipes.MTE2)
             tla.copy(
                 matrix(qptr, 8, 128, 128),
                 matrix(qkv.ptr + b * 8 * 3 * P + h * 128, 8, 128, 3 * P),
@@ -402,7 +402,7 @@ def recurrent_stage(
                         128,
                     ),
                 )
-            ub_mutex.unlock(pipe=tla.arch.MTE2)
+            ub_mutex.unlock(pipe=tla.pipes.MTE2)
             # loaded precedes this DMA, so current VECTOR work can overlap it.
             next_bh = bh + 2 * tla.arch.block_num()
             if next_bh < B * N:
@@ -422,7 +422,7 @@ def recurrent_stage(
                         128,
                     ),
                 )
-            ub_mutex.lock(pipe=tla.arch.VECTOR)
+            ub_mutex.lock(pipe=tla.pipes.VECTOR)
             for t in tla.range(8):
                 parity = t % 2
                 srcp = active_state if parity == 0 else arena + 16384
@@ -430,9 +430,9 @@ def recurrent_stage(
                 old = flat(srcp, 16384)
                 new = flat(dstp, 16384)
                 if parity == 0:
-                    snap1_mutex.lock(pipe=tla.arch.VECTOR)
+                    snap1_mutex.lock(pipe=tla.pipes.VECTOR)
                 else:
-                    snap0_mutex.lock(pipe=tla.arch.VECTOR)
+                    snap0_mutex.lock(pipe=tla.pipes.VECTOR)
                 with tla.vec.func(mode="simd"):
                     mask = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
                     q0 = load_bf64(segment(qa, t * 128, 64))
@@ -547,11 +547,11 @@ def recurrent_stage(
                     store_bf64(segment(ua, t * 128, 64), u0)
                     store_bf64(segment(ua, t * 128 + 64, 64), u1)
                 if parity == 0:
-                    snap1_mutex.unlock(pipe=tla.arch.VECTOR)
-                    snap1_mutex.lock(pipe=tla.arch.MTE3)
+                    snap1_mutex.unlock(pipe=tla.pipes.VECTOR)
+                    snap1_mutex.lock(pipe=tla.pipes.MTE3)
                 else:
-                    snap0_mutex.unlock(pipe=tla.arch.VECTOR)
-                    snap0_mutex.lock(pipe=tla.arch.MTE3)
+                    snap0_mutex.unlock(pipe=tla.pipes.VECTOR)
+                    snap0_mutex.lock(pipe=tla.pipes.MTE3)
                 target_slot = tla.Int64(indices[b * 8 + t])
                 tla.copy(
                     matrix(
@@ -565,10 +565,10 @@ def recurrent_stage(
                     matrix(dstp, 128, 128, 128),
                 )
                 if parity == 0:
-                    snap1_mutex.unlock(pipe=tla.arch.MTE3)
+                    snap1_mutex.unlock(pipe=tla.pipes.MTE3)
                 else:
-                    snap0_mutex.unlock(pipe=tla.arch.MTE3)
-            ub_mutex.unlock(pipe=tla.arch.VECTOR)
+                    snap0_mutex.unlock(pipe=tla.pipes.MTE3)
+            ub_mutex.unlock(pipe=tla.pipes.VECTOR)
             tla.copy(
                 matrix(u.ptr + b * 8 * P + h * 128, 8, 128, P), matrix(up, 8, 128, 128)
             )
@@ -577,16 +577,16 @@ def recurrent_stage(
                 if next_bh >= B * N or next_bh // (16 * N) != bh // (16 * N):
                     publish_slot = (bh // (16 * N)) % 2
                     if publish_slot == 0:
-                        tla.cross_core_wait_flag(chunk_ack0, tla.arch.MTE3)
-                        tla.cross_core_set_flag(finished, tla.arch.MTE3)
+                        tla.cross_core_wait_flag(chunk_ack0, tla.pipes.MTE3)
+                        tla.cross_core_set_flag(finished, tla.pipes.MTE3)
                     else:
-                        tla.cross_core_wait_flag(chunk_ack1, tla.arch.MTE3)
-                        tla.cross_core_set_flag(chunk_ready1, tla.arch.MTE3)
+                        tla.cross_core_wait_flag(chunk_ack1, tla.pipes.MTE3)
+                        tla.cross_core_set_flag(chunk_ready1, tla.pipes.MTE3)
         if tla.const_expr(PIPELINED):
-            tla.cross_core_wait_flag(chunk_ack0, tla.arch.MTE3)
-            tla.cross_core_wait_flag(chunk_ack1, tla.arch.MTE3)
+            tla.cross_core_wait_flag(chunk_ack0, tla.pipes.MTE3)
+            tla.cross_core_wait_flag(chunk_ack1, tla.pipes.MTE3)
         else:
-            tla.cross_core_set_flag(finished, tla.arch.MTE3)
+            tla.cross_core_set_flag(finished, tla.pipes.MTE3)
         tla.pipe_barrier(tla.pipes.ALL)
 
 
@@ -636,7 +636,7 @@ def resident_projection_tile(
     K = x.origin_shape[1]
     N = out.origin_shape[1]
     cvslot = (work // tla.arch.block_num()) % 2
-    cf.lock(pipe=tla.arch.CUBE)
+    cf.lock(pipe=tla.pipes.CUBE)
     for kb in tla.range((K + 255) // 256):
         slot = kb % 2
         a_src = tla.tile_view(x, tla.make_shape(TM, 256), tla.make_coord(mi, kb))
@@ -668,15 +668,15 @@ def resident_projection_tile(
             ),
         )
         if slot == 0:
-            lf0.lock(pipe=tla.arch.MTE2)
+            lf0.lock(pipe=tla.pipes.MTE2)
         else:
-            lf1.lock(pipe=tla.arch.MTE2)
+            lf1.lock(pipe=tla.pipes.MTE2)
         tla.copy(a_l1, a_src)
         tla.copy(w_l1, w_src)
         if slot == 0:
-            ld0.unlock(pipe=tla.arch.MTE2)
+            ld0.unlock(pipe=tla.pipes.MTE2)
         else:
-            ld1.unlock(pipe=tla.arch.MTE2)
+            ld1.unlock(pipe=tla.pipes.MTE2)
         kcount = (a_src.origin_shape[1] + 127) // 128
         for ki in tla.range(kcount):
             aslot = ki % 2
@@ -684,22 +684,22 @@ def resident_projection_tile(
             al0 = tla.make_tensor_like(l0ap + aslot * 16384, aa, tla.arch.zN)
             if ki == 0:
                 if slot == 0:
-                    ld0.lock(pipe=tla.arch.MTE1)
+                    ld0.lock(pipe=tla.pipes.MTE1)
                 else:
-                    ld1.lock(pipe=tla.arch.MTE1)
+                    ld1.lock(pipe=tla.pipes.MTE1)
             if aslot == 0:
-                af0.lock(pipe=tla.arch.MTE1)
+                af0.lock(pipe=tla.pipes.MTE1)
             else:
-                af1.lock(pipe=tla.arch.MTE1)
+                af1.lock(pipe=tla.pipes.MTE1)
             tla.copy(al0, aa)
             if aslot == 0:
-                af0.unlock(pipe=tla.arch.MTE1)
+                af0.unlock(pipe=tla.pipes.MTE1)
             else:
-                af1.unlock(pipe=tla.arch.MTE1)
+                af1.unlock(pipe=tla.pipes.MTE1)
             if aslot == 0:
-                af0.lock(pipe=tla.arch.CUBE)
+                af0.lock(pipe=tla.pipes.CUBE)
             else:
-                af1.lock(pipe=tla.arch.CUBE)
+                af1.lock(pipe=tla.pipes.CUBE)
             for panel in tla.range_constexpr(3):
                 bslot = (ki * 3 + panel) % 2
                 bb = tla.tile_view(
@@ -707,24 +707,24 @@ def resident_projection_tile(
                 )
                 bl0 = tla.make_tensor_like(l0bp + bslot * 16384, bb, tla.arch.nZ)
                 if bslot == 0:
-                    bf0.lock(pipe=tla.arch.MTE1)
+                    bf0.lock(pipe=tla.pipes.MTE1)
                 else:
-                    bf1.lock(pipe=tla.arch.MTE1)
+                    bf1.lock(pipe=tla.pipes.MTE1)
                 tla.copy(bl0, bb)
                 if bslot == 0:
-                    bf0.unlock(pipe=tla.arch.MTE1)
+                    bf0.unlock(pipe=tla.pipes.MTE1)
                 else:
-                    bf1.unlock(pipe=tla.arch.MTE1)
+                    bf1.unlock(pipe=tla.pipes.MTE1)
                 if tla.const_expr(panel == 2):
                     if ki == kcount - 1:
                         if slot == 0:
-                            lf0.unlock(pipe=tla.arch.MTE1)
+                            lf0.unlock(pipe=tla.pipes.MTE1)
                         else:
-                            lf1.unlock(pipe=tla.arch.MTE1)
+                            lf1.unlock(pipe=tla.pipes.MTE1)
                 if bslot == 0:
-                    bf0.lock(pipe=tla.arch.CUBE)
+                    bf0.lock(pipe=tla.pipes.CUBE)
                 else:
-                    bf1.lock(pipe=tla.arch.CUBE)
+                    bf1.lock(pipe=tla.pipes.CUBE)
                 target = tla.tile_view(
                     out, tla.make_shape(TM, 128), tla.make_coord(mi, macro * 3 + panel)
                 )
@@ -733,22 +733,22 @@ def resident_projection_tile(
                 )
                 tla.mmad(acc, al0, bl0, init_c=(kb == 0 and ki == 0), unit_flag=0)
                 if bslot == 0:
-                    bf0.unlock(pipe=tla.arch.CUBE)
+                    bf0.unlock(pipe=tla.pipes.CUBE)
                 else:
-                    bf1.unlock(pipe=tla.arch.CUBE)
+                    bf1.unlock(pipe=tla.pipes.CUBE)
                 if tla.const_expr(panel == 2):
                     if aslot == 0:
-                        af0.unlock(pipe=tla.arch.CUBE)
+                        af0.unlock(pipe=tla.pipes.CUBE)
                     else:
-                        af1.unlock(pipe=tla.arch.CUBE)
+                        af1.unlock(pipe=tla.pipes.CUBE)
             if kb == (K + 255) // 256 - 1 and ki == kcount - 1:
-                cf.unlock(pipe=tla.arch.CUBE)
+                cf.unlock(pipe=tla.pipes.CUBE)
                 if tla.const_expr(CV):
                     if cvslot == 0:
-                        tla.cross_core_wait_flag(free0, tla.arch.FIX)
+                        tla.cross_core_wait_flag(free0, tla.pipes.FIX)
                     else:
-                        tla.cross_core_wait_flag(free1, tla.arch.FIX)
-                cf.lock(pipe=tla.arch.FIX)
+                        tla.cross_core_wait_flag(free1, tla.pipes.FIX)
+                cf.lock(pipe=tla.pipes.FIX)
                 for panel in tla.range_constexpr(3):
                     target = tla.tile_view(
                         out,
@@ -771,12 +771,12 @@ def resident_projection_tile(
                         )
                     else:
                         tla.copy(target, acc, tla.params.CopyL0C2DstParams(unit_flag=0))
-                cf.unlock(pipe=tla.arch.FIX)
+                cf.unlock(pipe=tla.pipes.FIX)
                 if tla.const_expr(CV):
                     if cvslot == 0:
-                        tla.cross_core_set_flag(ready0, tla.arch.FIX)
+                        tla.cross_core_set_flag(ready0, tla.pipes.FIX)
                     else:
-                        tla.cross_core_set_flag(ready1, tla.arch.FIX)
+                        tla.cross_core_set_flag(ready1, tla.pipes.FIX)
 
 
 @tla.jit
@@ -823,7 +823,7 @@ def dual_projection_tile(
     K = x.origin_shape[1]
     N = out.origin_shape[1]
     second = (mi + 1) * 128 < M
-    cf.lock(pipe=tla.arch.CUBE)
+    cf.lock(pipe=tla.pipes.CUBE)
     for kb in tla.range((K + 255) // 256):
         slot = kb % 2
         a_src = tla.tile_view(x, tla.make_shape(128, 256), tla.make_coord(mi, kb))
@@ -855,9 +855,9 @@ def dual_projection_tile(
             ),
         )
         if slot == 0:
-            lf0.lock(pipe=tla.arch.MTE2)
+            lf0.lock(pipe=tla.pipes.MTE2)
         else:
-            lf1.lock(pipe=tla.arch.MTE2)
+            lf1.lock(pipe=tla.pipes.MTE2)
         tla.copy(a_l1, a_src)
         if second:
             gm_source1 = tla.tile_view(
@@ -869,22 +869,22 @@ def dual_projection_tile(
             tla.copy(gm_panel1, gm_source1)
         tla.copy(w_l1, w_src)
         if slot == 0:
-            ld0.unlock(pipe=tla.arch.MTE2)
+            ld0.unlock(pipe=tla.pipes.MTE2)
         else:
-            ld1.unlock(pipe=tla.arch.MTE2)
+            ld1.unlock(pipe=tla.pipes.MTE2)
         kcount = (a_src.origin_shape[1] + 127) // 128
         for ki in tla.range(kcount):
             if ki == 0:
                 if slot == 0:
-                    ld0.lock(pipe=tla.arch.MTE1)
+                    ld0.lock(pipe=tla.pipes.MTE1)
                 else:
-                    ld1.lock(pipe=tla.arch.MTE1)
+                    ld1.lock(pipe=tla.pipes.MTE1)
             aa = tla.tile_view(a_l1, tla.make_shape(128, 128), tla.make_coord(0, ki))
             al0 = tla.make_tensor_like(l0ap, aa, tla.arch.zN)
-            af0.lock(pipe=tla.arch.MTE1)
+            af0.lock(pipe=tla.pipes.MTE1)
             tla.copy(al0, aa)
-            af0.unlock(pipe=tla.arch.MTE1)
-            af1.lock(pipe=tla.arch.MTE1)
+            af0.unlock(pipe=tla.pipes.MTE1)
+            af1.lock(pipe=tla.pipes.MTE1)
             if second:
                 load_source1 = tla.tile_view(
                     x, tla.make_shape(128, 256), tla.make_coord(mi + 1, kb)
@@ -897,33 +897,33 @@ def dual_projection_tile(
                 )
                 load_al1 = tla.make_tensor_like(l0ap + 16384, load_aa1, tla.arch.zN)
                 tla.copy(load_al1, load_aa1)
-            af1.unlock(pipe=tla.arch.MTE1)
-            af0.lock(pipe=tla.arch.CUBE)
-            af1.lock(pipe=tla.arch.CUBE)
+            af1.unlock(pipe=tla.pipes.MTE1)
+            af0.lock(pipe=tla.pipes.CUBE)
+            af1.lock(pipe=tla.pipes.CUBE)
             for head in tla.range_constexpr(HEADS):
                 bb = tla.tile_view(
                     wt_l1, tla.make_shape(128, TN), tla.make_coord(ki, head)
                 )
                 bl0 = tla.make_tensor_like(l0bp + head * 16384, bb, tla.arch.nZ)
                 if tla.const_expr(head == 0):
-                    bf0.lock(pipe=tla.arch.MTE1)
+                    bf0.lock(pipe=tla.pipes.MTE1)
                 else:
-                    bf1.lock(pipe=tla.arch.MTE1)
+                    bf1.lock(pipe=tla.pipes.MTE1)
                 tla.copy(bl0, bb)
                 if tla.const_expr(head == 0):
-                    bf0.unlock(pipe=tla.arch.MTE1)
+                    bf0.unlock(pipe=tla.pipes.MTE1)
                 else:
-                    bf1.unlock(pipe=tla.arch.MTE1)
+                    bf1.unlock(pipe=tla.pipes.MTE1)
                 if tla.const_expr(head == HEADS - 1):
                     if ki == kcount - 1:
                         if slot == 0:
-                            lf0.unlock(pipe=tla.arch.MTE1)
+                            lf0.unlock(pipe=tla.pipes.MTE1)
                         else:
-                            lf1.unlock(pipe=tla.arch.MTE1)
+                            lf1.unlock(pipe=tla.pipes.MTE1)
                 if tla.const_expr(head == 0):
-                    bf0.lock(pipe=tla.arch.CUBE)
+                    bf0.lock(pipe=tla.pipes.CUBE)
                 else:
-                    bf1.lock(pipe=tla.arch.CUBE)
+                    bf1.lock(pipe=tla.pipes.CUBE)
                 target = tla.tile_view(
                     out,
                     tla.make_shape(128, TN),
@@ -957,20 +957,20 @@ def dual_projection_tile(
                         acc1, mma_al1, bl0, init_c=(kb == 0 and ki == 0), unit_flag=0
                     )
                 if tla.const_expr(head == 0):
-                    bf0.unlock(pipe=tla.arch.CUBE)
+                    bf0.unlock(pipe=tla.pipes.CUBE)
                 else:
-                    bf1.unlock(pipe=tla.arch.CUBE)
-            af0.unlock(pipe=tla.arch.CUBE)
-            af1.unlock(pipe=tla.arch.CUBE)
-    cf.unlock(pipe=tla.arch.CUBE)
-    cf.lock(pipe=tla.arch.FIX)
+                    bf1.unlock(pipe=tla.pipes.CUBE)
+            af0.unlock(pipe=tla.pipes.CUBE)
+            af1.unlock(pipe=tla.pipes.CUBE)
+    cf.unlock(pipe=tla.pipes.CUBE)
+    cf.lock(pipe=tla.pipes.FIX)
     for row_panel in tla.range_constexpr(2):
         if (mi + row_panel) * 128 < M:
             if tla.const_expr(CV):
                 if tla.const_expr(row_panel == 0):
-                    tla.cross_core_wait_flag(free0, tla.arch.FIX)
+                    tla.cross_core_wait_flag(free0, tla.pipes.FIX)
                 else:
-                    tla.cross_core_wait_flag(free1, tla.arch.FIX)
+                    tla.cross_core_wait_flag(free1, tla.pipes.FIX)
             for output_head in tla.range_constexpr(HEADS):
                 output_target = tla.tile_view(
                     out,
@@ -1003,10 +1003,10 @@ def dual_projection_tile(
                     )
             if tla.const_expr(CV):
                 if tla.const_expr(row_panel == 0):
-                    tla.cross_core_set_flag(ready0, tla.arch.FIX)
+                    tla.cross_core_set_flag(ready0, tla.pipes.FIX)
                 else:
-                    tla.cross_core_set_flag(ready1, tla.arch.FIX)
-    cf.unlock(pipe=tla.arch.FIX)
+                    tla.cross_core_set_flag(ready1, tla.pipes.FIX)
+    cf.unlock(pipe=tla.pipes.FIX)
 
 
 def allocate_projection_resources(max_n=128, dual_m=False):
@@ -1114,7 +1114,7 @@ def projection_tile(
     K0 = 64 if TN == 256 else 128
     target = tla.tile_view(out, tla.make_shape(TM, TN), tla.make_coord(mi, ni))
     acc = tla.make_tensor_like(l0cp, target, tla.arch.L0Clayout)
-    cf.lock(pipe=tla.arch.CUBE)
+    cf.lock(pipe=tla.pipes.CUBE)
     for kb in tla.range((K + TK - 1) // TK):
         slot = kb % 2
         a_src = tla.tile_view(x, tla.make_shape(TM, TK), tla.make_coord(mi, kb))
@@ -1152,15 +1152,15 @@ def projection_tile(
             ),
         )
         if slot == 0:
-            lf0.lock(pipe=tla.arch.MTE2)
+            lf0.lock(pipe=tla.pipes.MTE2)
         else:
-            lf1.lock(pipe=tla.arch.MTE2)
+            lf1.lock(pipe=tla.pipes.MTE2)
         tla.copy(a_l1, a_src)
         tla.copy(w_l1, w_src)
         if slot == 0:
-            ld0.unlock(pipe=tla.arch.MTE2)
+            ld0.unlock(pipe=tla.pipes.MTE2)
         else:
-            ld1.unlock(pipe=tla.arch.MTE2)
+            ld1.unlock(pipe=tla.pipes.MTE2)
         kcount = (a_src.origin_shape[1] + K0 - 1) // K0
         for ki in tla.range(kcount):
             lslot = ki % 2
@@ -1170,53 +1170,53 @@ def projection_tile(
             bl0 = tla.make_tensor_like(l0bp + lslot * 16384, bb, tla.arch.nZ)
             if ki == 0:
                 if slot == 0:
-                    ld0.lock(pipe=tla.arch.MTE1)
+                    ld0.lock(pipe=tla.pipes.MTE1)
                 else:
-                    ld1.lock(pipe=tla.arch.MTE1)
+                    ld1.lock(pipe=tla.pipes.MTE1)
             if lslot == 0:
-                af0.lock(pipe=tla.arch.MTE1)
-                bf0.lock(pipe=tla.arch.MTE1)
+                af0.lock(pipe=tla.pipes.MTE1)
+                bf0.lock(pipe=tla.pipes.MTE1)
             else:
-                af1.lock(pipe=tla.arch.MTE1)
-                bf1.lock(pipe=tla.arch.MTE1)
+                af1.lock(pipe=tla.pipes.MTE1)
+                bf1.lock(pipe=tla.pipes.MTE1)
             tla.copy(al0, aa)
             tla.copy(bl0, bb)
             if ki == kcount - 1:
                 if slot == 0:
-                    lf0.unlock(pipe=tla.arch.MTE1)
+                    lf0.unlock(pipe=tla.pipes.MTE1)
                 else:
-                    lf1.unlock(pipe=tla.arch.MTE1)
+                    lf1.unlock(pipe=tla.pipes.MTE1)
             if lslot == 0:
-                af0.unlock(pipe=tla.arch.MTE1)
-                bf0.unlock(pipe=tla.arch.MTE1)
+                af0.unlock(pipe=tla.pipes.MTE1)
+                bf0.unlock(pipe=tla.pipes.MTE1)
             else:
-                af1.unlock(pipe=tla.arch.MTE1)
-                bf1.unlock(pipe=tla.arch.MTE1)
+                af1.unlock(pipe=tla.pipes.MTE1)
+                bf1.unlock(pipe=tla.pipes.MTE1)
             if lslot == 0:
-                af0.lock(pipe=tla.arch.CUBE)
-                bf0.lock(pipe=tla.arch.CUBE)
+                af0.lock(pipe=tla.pipes.CUBE)
+                bf0.lock(pipe=tla.pipes.CUBE)
             else:
-                af1.lock(pipe=tla.arch.CUBE)
-                bf1.lock(pipe=tla.arch.CUBE)
+                af1.lock(pipe=tla.pipes.CUBE)
+                bf1.lock(pipe=tla.pipes.CUBE)
             last = (kb == (K + TK - 1) // TK - 1) and (ki == kcount - 1)
             uf = 3 if last else 2
             init = (kb == 0) and (ki == 0)
             tla.mmad(acc, al0, bl0, init_c=init, unit_flag=uf)
             if lslot == 0:
-                bf0.unlock(pipe=tla.arch.CUBE)
-                af0.unlock(pipe=tla.arch.CUBE)
+                bf0.unlock(pipe=tla.pipes.CUBE)
+                af0.unlock(pipe=tla.pipes.CUBE)
             else:
-                bf1.unlock(pipe=tla.arch.CUBE)
-                af1.unlock(pipe=tla.arch.CUBE)
-    cf.unlock(pipe=tla.arch.CUBE)
+                bf1.unlock(pipe=tla.pipes.CUBE)
+                af1.unlock(pipe=tla.pipes.CUBE)
+    cf.unlock(pipe=tla.pipes.CUBE)
     if tla.const_expr(CV):
         cvslot = (work // tla.arch.block_num()) % 2
         if cvslot == 0:
-            tla.cross_core_wait_flag(free0, tla.arch.FIX)
+            tla.cross_core_wait_flag(free0, tla.pipes.FIX)
         else:
-            tla.cross_core_wait_flag(free1, tla.arch.FIX)
+            tla.cross_core_wait_flag(free1, tla.pipes.FIX)
         raw = tla.make_tensor_like(rawp + cvslot * 64 * TN, acc, tla.arch.RowMajor)
-        cf.lock(pipe=tla.arch.FIX)
+        cf.lock(pipe=tla.pipes.FIX)
         tla.copy(
             raw,
             acc,
@@ -1224,15 +1224,15 @@ def projection_tile(
                 unit_flag=3, l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M
             ),
         )
-        cf.unlock(pipe=tla.arch.FIX)
+        cf.unlock(pipe=tla.pipes.FIX)
         if cvslot == 0:
-            tla.cross_core_set_flag(ready0, tla.arch.FIX)
+            tla.cross_core_set_flag(ready0, tla.pipes.FIX)
         else:
-            tla.cross_core_set_flag(ready1, tla.arch.FIX)
+            tla.cross_core_set_flag(ready1, tla.pipes.FIX)
     else:
-        cf.lock(pipe=tla.arch.FIX)
+        cf.lock(pipe=tla.pipes.FIX)
         tla.copy(target, acc, tla.params.CopyL0C2DstParams(unit_flag=3))
-        cf.unlock(pipe=tla.arch.FIX)
+        cf.unlock(pipe=tla.pipes.FIX)
 
 
 @tla.jit
@@ -1294,14 +1294,14 @@ def projection_stage(
             else:
                 projection_tile(x, w_raw, out, resources, mi, ni, work, TM, TN, CV)
         if tla.const_expr(CV):
-            tla.cross_core_wait_flag(free0, tla.arch.FIX)
-            tla.cross_core_wait_flag(free1, tla.arch.FIX)
+            tla.cross_core_wait_flag(free0, tla.pipes.FIX)
+            tla.cross_core_wait_flag(free1, tla.pipes.FIX)
         tla.pipe_barrier(tla.pipes.ALL)
 
     if tla.const_expr(CV):
         with tla.vector():
-            tla.cross_core_set_flag(free0, tla.arch.MTE3)
-            tla.cross_core_set_flag(free1, tla.arch.MTE3)
+            tla.cross_core_set_flag(free0, tla.pipes.MTE3)
+            tla.cross_core_set_flag(free1, tla.pipes.MTE3)
             for work in tla.range(tla.arch.block_idx(), nwork, tla.arch.block_num()):
                 mi = work // gridn
                 ni = work % gridn
@@ -1318,9 +1318,9 @@ def projection_stage(
                 )
                 if tla.const_expr(CONV):
                     if cvslot == 0:
-                        tla.cross_core_wait_flag(ready0, tla.arch.VECTOR)
+                        tla.cross_core_wait_flag(ready0, tla.pipes.VECTOR)
                     else:
-                        tla.cross_core_wait_flag(ready1, tla.arch.VECTOR)
+                        tla.cross_core_wait_flag(ready1, tla.pipes.VECTOR)
                     first_row = mi * TM + tla.arch.sub_block_idx() * half
                     for head_lane in tla.range_constexpr(TN // 128):
                         conv_dst = tla.make_tensor(
@@ -1365,14 +1365,14 @@ def projection_stage(
                                 TN,
                             )
                     if cvslot == 0:
-                        tla.cross_core_set_flag(free0, tla.arch.VECTOR)
+                        tla.cross_core_set_flag(free0, tla.pipes.VECTOR)
                     else:
-                        tla.cross_core_set_flag(free1, tla.arch.VECTOR)
+                        tla.cross_core_set_flag(free1, tla.pipes.VECTOR)
                 else:
                     if cvslot == 0:
-                        tla.cross_core_wait_flag(ready0, tla.arch.MTE3)
+                        tla.cross_core_wait_flag(ready0, tla.pipes.MTE3)
                     else:
-                        tla.cross_core_wait_flag(ready1, tla.arch.MTE3)
+                        tla.cross_core_wait_flag(ready1, tla.pipes.MTE3)
                     if tla.const_expr(TN == 384):
                         for output_panel in tla.range_constexpr(3):
                             raw_panel = tla.make_tensor(
@@ -1394,9 +1394,9 @@ def projection_stage(
                     else:
                         tla.copy(dst, raw)
                     if cvslot == 0:
-                        tla.cross_core_set_flag(free0, tla.arch.MTE3)
+                        tla.cross_core_set_flag(free0, tla.pipes.MTE3)
                     else:
-                        tla.cross_core_set_flag(free1, tla.arch.MTE3)
+                        tla.cross_core_set_flag(free1, tla.pipes.MTE3)
             tla.pipe_barrier(tla.pipes.ALL)
 
 
@@ -1495,12 +1495,12 @@ def initial_stage(
                         INIT_N,
                         False,
                     )
-        tla.cross_core_wait_flag(free0, tla.arch.FIX)
-        tla.cross_core_wait_flag(free1, tla.arch.FIX)
+        tla.cross_core_wait_flag(free0, tla.pipes.FIX)
+        tla.cross_core_wait_flag(free1, tla.pipes.FIX)
         tla.pipe_barrier(tla.pipes.ALL)
     with tla.vector():
-        tla.cross_core_set_flag(free0, tla.arch.MTE3)
-        tla.cross_core_set_flag(free1, tla.arch.MTE3)
+        tla.cross_core_set_flag(free0, tla.pipes.MTE3)
+        tla.cross_core_set_flag(free1, tla.pipes.MTE3)
         for vwork in tla.range(tla.arch.block_idx(), works, tla.arch.block_num()):
             vmi = vwork // group
             vchannel = vwork % group
@@ -1511,9 +1511,9 @@ def initial_stage(
                 half = valid // 2
                 first_row = vmi * TM + tla.arch.sub_block_idx() * half
                 if cvslot == 0:
-                    tla.cross_core_wait_flag(ready0, tla.arch.VECTOR)
+                    tla.cross_core_wait_flag(ready0, tla.pipes.VECTOR)
                 else:
-                    tla.cross_core_wait_flag(ready1, tla.arch.VECTOR)
+                    tla.cross_core_wait_flag(ready1, tla.pipes.VECTOR)
                 for head_lane in tla.range_constexpr(heads_per_tile):
                     channel_start = vchannel * INIT_N + head_lane * 128
                     dst = tla.make_tensor(
@@ -1558,9 +1558,9 @@ def initial_stage(
                             INIT_N,
                         )
                 if cvslot == 0:
-                    tla.cross_core_set_flag(free0, tla.arch.VECTOR)
+                    tla.cross_core_set_flag(free0, tla.pipes.VECTOR)
                 else:
-                    tla.cross_core_set_flag(free1, tla.arch.VECTOR)
+                    tla.cross_core_set_flag(free1, tla.pipes.VECTOR)
         tla.pipe_barrier(tla.pipes.ALL)
 
 
@@ -1573,8 +1573,8 @@ def prime_dual(resources):
 @tla.jit
 def drain_dual(resources, CV: tla.Constexpr[bool] = True):
     if tla.const_expr(CV):
-        tla.cross_core_wait_flag(resources[14], tla.arch.FIX)
-        tla.cross_core_wait_flag(resources[15], tla.arch.FIX)
+        tla.cross_core_wait_flag(resources[14], tla.pipes.FIX)
+        tla.cross_core_wait_flag(resources[15], tla.pipes.FIX)
     tla.pipe_barrier(tla.pipes.ALL)
 
 
@@ -1604,11 +1604,11 @@ def consume_dual(
             first_row = (mi + row_panel) * 128 + tla.arch.sub_block_idx() * half
             if tla.const_expr(row_panel == 0):
                 tla.cross_core_wait_flag(
-                    resources[12], tla.arch.VECTOR if CONV else tla.arch.MTE3
+                    resources[12], tla.pipes.VECTOR if CONV else tla.pipes.MTE3
                 )
             else:
                 tla.cross_core_wait_flag(
-                    resources[13], tla.arch.VECTOR if CONV else tla.arch.MTE3
+                    resources[13], tla.pipes.VECTOR if CONV else tla.pipes.MTE3
                 )
             for head in tla.range_constexpr(HEADS):
                 channel = (macro * HEADS + head) * TN
@@ -1646,11 +1646,11 @@ def consume_dual(
                     tla.copy(dst, raw)
             if tla.const_expr(row_panel == 0):
                 tla.cross_core_set_flag(
-                    resources[14], tla.arch.VECTOR if CONV else tla.arch.MTE3
+                    resources[14], tla.pipes.VECTOR if CONV else tla.pipes.MTE3
                 )
             else:
                 tla.cross_core_set_flag(
-                    resources[15], tla.arch.VECTOR if CONV else tla.arch.MTE3
+                    resources[15], tla.pipes.VECTOR if CONV else tla.pipes.MTE3
                 )
 
 
@@ -1695,8 +1695,8 @@ def initial_dual_stage(
                 )
         drain_dual(resources)
     with tla.vector():
-        tla.cross_core_set_flag(resources[14], tla.arch.MTE3)
-        tla.cross_core_set_flag(resources[15], tla.arch.MTE3)
+        tla.cross_core_set_flag(resources[14], tla.pipes.MTE3)
+        tla.cross_core_set_flag(resources[15], tla.pipes.MTE3)
         for work in tla.range(tla.arch.block_idx(), works, tla.arch.block_num()):
             mi = 2 * (work % m_groups)
             channel = work // m_groups
@@ -1724,11 +1724,11 @@ def prefetch_output_weight(w, resources):
         resources[0] + 65536,
         tla.make_layout_with_tag((256, 768), tla.BFloat16, tla.arch.zNUnAlign),
     )
-    resources[4].lock(pipe=tla.arch.MTE2)
+    resources[4].lock(pipe=tla.pipes.MTE2)
     tla.copy(resident, source)
-    resources[4].unlock(pipe=tla.arch.MTE2)
-    resources[4].lock(pipe=tla.arch.MTE1)
-    resources[4].unlock(pipe=tla.arch.MTE1)
+    resources[4].unlock(pipe=tla.pipes.MTE2)
+    resources[4].lock(pipe=tla.pipes.MTE1)
+    resources[4].unlock(pipe=tla.pipes.MTE1)
 
 
 @tla.jit
@@ -1754,20 +1754,20 @@ def output_resident_tile(x, out, resources, mi):
     weight = tla.make_tensor(
         l1p + 65536, tla.make_layout_with_tag((768, 256), tla.BFloat16, tla.arch.nZ)
     )
-    cf.lock(pipe=tla.arch.CUBE)
+    cf.lock(pipe=tla.pipes.CUBE)
     for kb in tla.range(3):
         slot = kb % 2
         source = tla.tile_view(x, tla.make_shape(128, 256), tla.make_coord(mi, kb))
         panel = tla.make_tensor_like(l1p + slot * 32768, source, tla.arch.zN)
         if slot == 0:
-            lf0.lock(pipe=tla.arch.MTE2)
+            lf0.lock(pipe=tla.pipes.MTE2)
         else:
-            lf1.lock(pipe=tla.arch.MTE2)
+            lf1.lock(pipe=tla.pipes.MTE2)
         tla.copy(panel, source)
         if slot == 0:
-            ld0.unlock(pipe=tla.arch.MTE2)
+            ld0.unlock(pipe=tla.pipes.MTE2)
         else:
-            ld1.unlock(pipe=tla.arch.MTE2)
+            ld1.unlock(pipe=tla.pipes.MTE2)
         for ki in tla.range(4):
             lslot = ki % 2
             a = tla.tile_view(panel, tla.make_shape(128, 64), tla.make_coord(0, ki))
@@ -1778,48 +1778,48 @@ def output_resident_tile(x, out, resources, mi):
             bl0 = tla.make_tensor_like(l0bp + lslot * 16384, b, tla.arch.nZ)
             if ki == 0:
                 if slot == 0:
-                    ld0.lock(pipe=tla.arch.MTE1)
+                    ld0.lock(pipe=tla.pipes.MTE1)
                 else:
-                    ld1.lock(pipe=tla.arch.MTE1)
+                    ld1.lock(pipe=tla.pipes.MTE1)
             if lslot == 0:
-                af0.lock(pipe=tla.arch.MTE1)
-                bf0.lock(pipe=tla.arch.MTE1)
+                af0.lock(pipe=tla.pipes.MTE1)
+                bf0.lock(pipe=tla.pipes.MTE1)
             else:
-                af1.lock(pipe=tla.arch.MTE1)
-                bf1.lock(pipe=tla.arch.MTE1)
+                af1.lock(pipe=tla.pipes.MTE1)
+                bf1.lock(pipe=tla.pipes.MTE1)
             tla.copy(al0, a)
             tla.copy(bl0, b)
             if ki == 3:
                 if slot == 0:
-                    lf0.unlock(pipe=tla.arch.MTE1)
+                    lf0.unlock(pipe=tla.pipes.MTE1)
                 else:
-                    lf1.unlock(pipe=tla.arch.MTE1)
+                    lf1.unlock(pipe=tla.pipes.MTE1)
             if lslot == 0:
-                af0.unlock(pipe=tla.arch.MTE1)
-                bf0.unlock(pipe=tla.arch.MTE1)
+                af0.unlock(pipe=tla.pipes.MTE1)
+                bf0.unlock(pipe=tla.pipes.MTE1)
             else:
-                af1.unlock(pipe=tla.arch.MTE1)
-                bf1.unlock(pipe=tla.arch.MTE1)
+                af1.unlock(pipe=tla.pipes.MTE1)
+                bf1.unlock(pipe=tla.pipes.MTE1)
             if lslot == 0:
-                af0.lock(pipe=tla.arch.CUBE)
-                bf0.lock(pipe=tla.arch.CUBE)
+                af0.lock(pipe=tla.pipes.CUBE)
+                bf0.lock(pipe=tla.pipes.CUBE)
             else:
-                af1.lock(pipe=tla.arch.CUBE)
-                bf1.lock(pipe=tla.arch.CUBE)
+                af1.lock(pipe=tla.pipes.CUBE)
+                bf1.lock(pipe=tla.pipes.CUBE)
             last = kb == 2 and ki == 3
             tla.mmad(
                 acc, al0, bl0, init_c=(kb == 0 and ki == 0), unit_flag=3 if last else 2
             )
             if lslot == 0:
-                bf0.unlock(pipe=tla.arch.CUBE)
-                af0.unlock(pipe=tla.arch.CUBE)
+                bf0.unlock(pipe=tla.pipes.CUBE)
+                af0.unlock(pipe=tla.pipes.CUBE)
             else:
-                bf1.unlock(pipe=tla.arch.CUBE)
-                af1.unlock(pipe=tla.arch.CUBE)
-    cf.unlock(pipe=tla.arch.CUBE)
-    cf.lock(pipe=tla.arch.FIX)
+                bf1.unlock(pipe=tla.pipes.CUBE)
+                af1.unlock(pipe=tla.pipes.CUBE)
+    cf.unlock(pipe=tla.pipes.CUBE)
+    cf.lock(pipe=tla.pipes.FIX)
     tla.copy(target, acc, tla.params.CopyL0C2DstParams(unit_flag=3))
-    cf.unlock(pipe=tla.arch.FIX)
+    cf.unlock(pipe=tla.pipes.FIX)
 
 
 @tla.jit
@@ -1850,16 +1850,16 @@ def projection_chunks(
         # MTE1 primes lf only after consuming the resident weight's ld0.
         for chunk in tla.range((M + 127) // 128):
             if chunk % 2 == 0:
-                tla.cross_core_wait_flag(ready0, tla.arch.MTE2)
+                tla.cross_core_wait_flag(ready0, tla.pipes.MTE2)
             else:
-                tla.cross_core_wait_flag(ready1, tla.arch.MTE2)
-            tla.cross_core_set_flag(cube_bar, tla.arch.MTE2)
-            tla.cross_core_wait_flag(cube_bar, tla.arch.MTE2)
+                tla.cross_core_wait_flag(ready1, tla.pipes.MTE2)
+            tla.cross_core_set_flag(cube_bar, tla.pipes.MTE2)
+            tla.cross_core_wait_flag(cube_bar, tla.pipes.MTE2)
             # The full GM u buffer is never reused; ack frees only this notification.
             if chunk % 2 == 0:
-                tla.cross_core_set_flag(ack0, tla.arch.MTE2)
+                tla.cross_core_set_flag(ack0, tla.pipes.MTE2)
             else:
-                tla.cross_core_set_flag(ack1, tla.arch.MTE2)
+                tla.cross_core_set_flag(ack1, tla.pipes.MTE2)
             if tla.const_expr(RESIDENT_WEIGHT):
                 output_resident_tile(u, out, pr, chunk)
             else:
@@ -1950,17 +1950,17 @@ def mega_kernel(
             INIT_N,
         )
     with tla.cube():
-        tla.cross_core_set_flag(cube_bar, tla.arch.MTE2)
-        tla.cross_core_wait_flag(cube_bar, tla.arch.MTE2)
+        tla.cross_core_set_flag(cube_bar, tla.pipes.MTE2)
+        tla.cross_core_wait_flag(cube_bar, tla.pipes.MTE2)
     projection_stage(a, wb, g, cw, cs, ci, ca, pr, TM, 128, False, False, L)
     with tla.cube():
-        tla.cross_core_set_flag(cube_bar, tla.arch.MTE2)
-        tla.cross_core_wait_flag(cube_bar, tla.arch.MTE2)
-        tla.cross_core_set_flag(projections_done, tla.arch.MTE2)
+        tla.cross_core_set_flag(cube_bar, tla.pipes.MTE2)
+        tla.cross_core_wait_flag(cube_bar, tla.pipes.MTE2)
+        tla.cross_core_set_flag(projections_done, tla.pipes.MTE2)
     with tla.vector():
-        tla.cross_core_wait_flag(projections_done, tla.arch.MTE2)
-        tla.cross_core_set_flag(vector_bar, tla.arch.MTE2)
-        tla.cross_core_wait_flag(vector_bar, tla.arch.MTE2)
+        tla.cross_core_wait_flag(projections_done, tla.pipes.MTE2)
+        tla.cross_core_set_flag(vector_bar, tla.pipes.MTE2)
+        tla.cross_core_wait_flag(vector_bar, tla.pipes.MTE2)
     recurrent_stage(
         qkv,
         g,
@@ -1984,8 +1984,8 @@ def mega_kernel(
         projection_chunks(u, wo, out, pr, rr, cube_bar, OUTPUT_N, OUTPUT_RESIDENT)
     else:
         with tla.cube():
-            tla.cross_core_set_flag(cube_bar, tla.arch.MTE2)
-            tla.cross_core_wait_flag(cube_bar, tla.arch.MTE2)
+            tla.cross_core_set_flag(cube_bar, tla.pipes.MTE2)
+            tla.cross_core_wait_flag(cube_bar, tla.pipes.MTE2)
         projection_stage(u, wo, out, cw, cs, ci, ca, pr, TM, 128, False, False, L)
 
 

@@ -51,7 +51,7 @@ def _make_tensor(length: int, dtype: type[Any]) -> tla.Tensor:
 
 @tla.kernel
 def mask_pack_op(mem_out: tla.Tensor) -> None:
-    done = tla.flag("mask_done", tla.arch.VECTOR, tla.arch.MTE3)
+    done = tla.flag("mask_done", tla.pipes.VECTOR, tla.pipes.MTE3)
 
     out_gm = tla.tile_view(mem_out, tla.make_shape(_MASK_DST_LANES), tla.make_coord(0))
     out_ub = _make_tensor(_MASK_DST_LANES, _MASK_DST_DTYPE)
@@ -143,8 +143,8 @@ def vector_pack_unpack_op(
     part: tla.Constexpr[object],
     lanes: tla.Constexpr[int],
 ) -> None:
-    loaded = tla.flag("vector_pack_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    done = tla.flag("vector_pack_done", tla.arch.VECTOR, tla.arch.MTE3)
+    loaded = tla.flag("vector_pack_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    done = tla.flag("vector_pack_done", tla.pipes.VECTOR, tla.pipes.MTE3)
     src_ptr = tla.allocate(lanes, wide_dtype, tla.AddressSpace.ub, 256)
     dst_ptr = tla.allocate(lanes, wide_dtype, tla.AddressSpace.ub, 256)
     ub_src = tla.make_tensor_like(src_ptr, src, tla.arch.RowMajor)

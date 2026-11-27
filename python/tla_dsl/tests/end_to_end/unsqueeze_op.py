@@ -52,7 +52,7 @@ _TORCH_DTYPE: Any = None
 
 @tla.kernel
 def unsqueeze_op(mem_dst: tla.Tensor) -> None:
-    vec_done = tla.flag("vec_done", tla.arch.VECTOR, tla.arch.MTE3)
+    vec_done = tla.flag("vec_done", tla.pipes.VECTOR, tla.pipes.MTE3)
 
     dst_gm = tla.tile_view(mem_dst, tla.make_shape(VECTOR_ELE), tla.make_coord(0))
 

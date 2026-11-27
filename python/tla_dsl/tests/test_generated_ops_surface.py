@@ -40,7 +40,7 @@ def _ops_surface_kernel(src: tla.Tensor, dst: tla.Tensor) -> None:
     _ = local_ptr
 
     with tla.vector():
-        ready = tla.flag("ready", tla.arch.MTE2, tla.arch.VECTOR)
+        ready = tla.flag("ready", tla.pipes.MTE2, tla.pipes.VECTOR)
         tla.set_flag(ready)
         tla.copy(dst_tile, src_tile)
         tla.wait_flag(ready)
@@ -53,8 +53,8 @@ def _ops_surface_kernel(src: tla.Tensor, dst: tla.Tensor) -> None:
         block_range = tla.range(0, 10, 1)
         for idx in block_range:
             mutex = mutex_ping if idx % 2 == 0 else mutex_pong
-            mutex.lock(pipe=tla.arch.MTE2)
-            mutex.unlock(pipe=tla.arch.MTE2)
+            mutex.lock(pipe=tla.pipes.MTE2)
+            mutex.unlock(pipe=tla.pipes.MTE2)
 
 
 def test_generated_binding_symbols_exist_for_wrapped_ops() -> None:
@@ -218,7 +218,7 @@ def test_public_api_exports_representative_helpers() -> None:
     assert callable(tla.bitwise_xor)
     assert callable(tla.shift_left)
     assert callable(tla.shift_right)
-    assert tla.arch.FIX is tla.pipes.FIX
+    assert tla.pipes.FIX is tla.pipes.FIX
     assert tla.pipes.ALL is not None
 
 

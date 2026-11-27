@@ -231,20 +231,20 @@ def basic_matmul_l0c2l1_fixpipe_per_channel(
     src_is_int = dtype_a == tla.Int8
     acc1 = tla.Int32 if src_is_int else tla.Float32
 
-    l1a0_data_ready = tla.flag("l1a0_data_ready", tla.arch.MTE2, tla.arch.MTE1)
-    l1b0_data_ready = tla.flag("l1b0_data_ready", tla.arch.MTE2, tla.arch.MTE1)
-    l1a0_available = tla.flag("l1a0_available", tla.arch.MTE1, tla.arch.MTE2)
-    l1b0_available = tla.flag("l1b0_available", tla.arch.MTE1, tla.arch.MTE2)
-    l0a0_available = tla.flag("l0a0_available", tla.arch.CUBE, tla.arch.MTE1)
-    l0b0_available = tla.flag("l0b0_available", tla.arch.CUBE, tla.arch.MTE1)
-    l0_ab_data_ready = tla.flag("l0_ab_data_ready", tla.arch.MTE1, tla.arch.CUBE)
-    l0_loaded = tla.flag("l0_loaded", tla.arch.MTE1, tla.arch.CUBE)
-    mmad_done = tla.flag("mmad_done", tla.arch.CUBE, tla.arch.FIX)
-    fixl1_done = tla.flag("fixl1_done", tla.arch.FIX, tla.arch.MTE1)
-    l1d_done = tla.flag("l1d_done", tla.arch.MTE2, tla.arch.MTE1)
+    l1a0_data_ready = tla.flag("l1a0_data_ready", tla.pipes.MTE2, tla.pipes.MTE1)
+    l1b0_data_ready = tla.flag("l1b0_data_ready", tla.pipes.MTE2, tla.pipes.MTE1)
+    l1a0_available = tla.flag("l1a0_available", tla.pipes.MTE1, tla.pipes.MTE2)
+    l1b0_available = tla.flag("l1b0_available", tla.pipes.MTE1, tla.pipes.MTE2)
+    l0a0_available = tla.flag("l0a0_available", tla.pipes.CUBE, tla.pipes.MTE1)
+    l0b0_available = tla.flag("l0b0_available", tla.pipes.CUBE, tla.pipes.MTE1)
+    l0_ab_data_ready = tla.flag("l0_ab_data_ready", tla.pipes.MTE1, tla.pipes.CUBE)
+    l0_loaded = tla.flag("l0_loaded", tla.pipes.MTE1, tla.pipes.CUBE)
+    mmad_done = tla.flag("mmad_done", tla.pipes.CUBE, tla.pipes.FIX)
+    fixl1_done = tla.flag("fixl1_done", tla.pipes.FIX, tla.pipes.MTE1)
+    l1d_done = tla.flag("l1d_done", tla.pipes.MTE2, tla.pipes.MTE1)
     # The per-channel scale is staged GM -> L1 before the fixpipe consumes it:
     # MTE2 writes the L1 tile, FIX reads it as the dequant tensor.
-    quant_ready = tla.flag("quant_ready", tla.arch.MTE2, tla.arch.FIX)
+    quant_ready = tla.flag("quant_ready", tla.pipes.MTE2, tla.pipes.FIX)
 
     l1a_ptr = tla.allocate(L1A_SIZE, dtype_a, tla.AddressSpace.l1, 512)
     l1b_ptr = tla.allocate(L1B_SIZE, dtype_a, tla.AddressSpace.l1, 512)

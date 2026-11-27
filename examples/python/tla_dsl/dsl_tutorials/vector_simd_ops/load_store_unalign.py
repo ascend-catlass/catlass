@@ -75,8 +75,8 @@ def _window(ub, offset: int):
 def load_store_unalign_op(
     mem_x: tla.Tensor, mem_y: tla.Tensor, mem_z: tla.Tensor
 ) -> None:
-    ub_loaded = tla.flag("ub_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    vec_done = tla.flag("vec_done", tla.arch.VECTOR, tla.arch.MTE3)
+    ub_loaded = tla.flag("ub_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    vec_done = tla.flag("vec_done", tla.pipes.VECTOR, tla.pipes.MTE3)
 
     x_gm = tla.tile_view(mem_x, tla.make_shape(N_ELE), tla.make_coord(0))
     y_gm = tla.tile_view(mem_y, tla.make_shape(N_ELE), tla.make_coord(0))
@@ -119,8 +119,8 @@ def load_store_unalign_op(
 @tla.kernel
 def load_store_unalign_inplace_op(mem_x: tla.Tensor, mem_z: tla.Tensor) -> None:
     """In-place ``z += x``: UnAlign load+store UPDATE share ``z`` storage identity."""
-    ub_loaded = tla.flag("ub_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    vec_done = tla.flag("vec_done", tla.arch.VECTOR, tla.arch.MTE3)
+    ub_loaded = tla.flag("ub_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    vec_done = tla.flag("vec_done", tla.pipes.VECTOR, tla.pipes.MTE3)
 
     x_gm = tla.tile_view(mem_x, tla.make_shape(N_ELE), tla.make_coord(0))
     z_gm = tla.tile_view(mem_z, tla.make_shape(N_ELE), tla.make_coord(0))

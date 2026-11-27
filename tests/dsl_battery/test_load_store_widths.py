@@ -52,8 +52,8 @@ def _register_move(
         typed_src = typed_src + 1
         typed_dst = typed_dst + 1
 
-    loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    stored = tla.flag("stored", tla.arch.VECTOR, tla.arch.MTE3)
+    loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    stored = tla.flag("stored", tla.pipes.VECTOR, tla.pipes.MTE3)
     with tla.vector():
         tla.copy(src_bytes, src)
         tla.copy(dst_bytes, dst)
@@ -209,8 +209,8 @@ def _dual_update(
     dst_ptr = tla.allocate(2304, tla.UInt8, tla.AddressSpace.ub, 32)
     src_bytes = tla.make_tensor_like(src_ptr, src, tla.arch.RowMajor)
     dst_bytes = tla.make_tensor_like(dst_ptr, dst, tla.arch.RowMajor)
-    loaded = tla.flag("dual_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    stored = tla.flag("dual_stored", tla.arch.VECTOR, tla.arch.MTE3)
+    loaded = tla.flag("dual_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    stored = tla.flag("dual_stored", tla.pipes.VECTOR, tla.pipes.MTE3)
     layout = tla.make_layout(tla.make_shape(512 // width), tla.make_stride(1))
     stride = transfer_bytes // width
     if tla.const_expr(dynamic_stride):

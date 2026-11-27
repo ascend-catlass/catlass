@@ -5,7 +5,7 @@ import catlass.tla as tla
 def outer_pair() -> None:
     with tla.prof_scope():
         with tla.cube():
-            tla.pipe_barrier(tla.arch.CUBE)
+            tla.pipe_barrier(tla.pipes.CUBE)
         with tla.vector():
             tla.pipe_barrier(tla.pipes.ALL)
 

@@ -18,8 +18,8 @@ from catlass.tla.runtime import make_fake_tensor
 
 @tla.kernel
 def vf_print(source: tla.Tensor, destination: tla.Tensor, case_id: tla.Int32):
-    loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    done = tla.flag("done", tla.arch.VECTOR, tla.arch.MTE3)
+    loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    done = tla.flag("done", tla.pipes.VECTOR, tla.pipes.MTE3)
     source_ub_ptr = tla.allocate(64, tla.Float32, tla.AddressSpace.ub, 256)
     destination_ub_ptr = tla.allocate(64, tla.Float32, tla.AddressSpace.ub, 256)
     source_ub = tla.make_tensor_like(source_ub_ptr, source, tla.arch.RowMajor)

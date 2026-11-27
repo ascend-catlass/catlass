@@ -64,7 +64,7 @@ class CatlassBaseDSL(BaseDSL):
             - With `core_ratio=tla.arch.C1V1` the programmer owns the Ascend 950
               CV 1:1 contract (compiler does not rewrite pipes or data paths):
               stage cube results L0C→GM→UB (tightly coupled L0C→UB is illegal);
-              `cross_core_wait_flag` must use `tla.arch.SCALAR` (`PIPE_S`);
+              `cross_core_wait_flag` must use `tla.pipes.SCALAR` (`PIPE_S`);
               mode-4 flags must use `aiv_id=0` only. Writing `VECTOR`/`FIX` on
               the wait is not corrected silently and may fail to handshake.
             - With `auto_sync="v0"`:

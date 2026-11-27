@@ -115,11 +115,11 @@ def row_reduce_kernel(
                     out_off = tile.to(tla.Int64) * tla.Int64(TILE_ROWS)
                     gm_tile_s = tla.make_tensor(gm_out.ptr + out_off, pack_gm)
 
-                    tile_mtx[bi].lock(pipe=tla.arch.MTE2)
+                    tile_mtx[bi].lock(pipe=tla.pipes.MTE2)
                     tla.copy(ub_tile[bi], gm_tile_x)
-                    tile_mtx[bi].unlock(pipe=tla.arch.MTE2)
+                    tile_mtx[bi].unlock(pipe=tla.pipes.MTE2)
 
-                    tile_mtx[bi].lock(pipe=tla.arch.VECTOR)
+                    tile_mtx[bi].lock(pipe=tla.pipes.VECTOR)
                     with tla.vec.func(mode="simd"):
                         mask = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
                         if tla.const_expr(TAIL != 0):
@@ -836,11 +836,11 @@ def row_reduce_kernel(
                                 tla.make_shape(1, 1),
                                 tla.make_coord(0, 0),
                             ).store(l0)
-                    tile_mtx[bi].unlock(pipe=tla.arch.VECTOR)
+                    tile_mtx[bi].unlock(pipe=tla.pipes.VECTOR)
 
-                    tile_mtx[bi].lock(pipe=tla.arch.MTE3)
+                    tile_mtx[bi].lock(pipe=tla.pipes.MTE3)
                     tla.copy(gm_tile_s, ub_s[bi])
-                    tile_mtx[bi].unlock(pipe=tla.arch.MTE3)
+                    tile_mtx[bi].unlock(pipe=tla.pipes.MTE3)
 
 
 # ======================================================================================

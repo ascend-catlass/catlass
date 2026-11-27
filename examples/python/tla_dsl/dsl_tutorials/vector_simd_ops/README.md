@@ -23,8 +23,8 @@ _DTYPE = tla.Float32
 def vector_op(mem_in: tla.Tensor, mem_out: tla.Tensor) -> None:
     # 跨流水同步 flag：MTE2->VECTOR 表示“UB 数据已就绪”，
     # VECTOR->MTE3 表示“寄存器计算已完成”。
-    ub_loaded = tla.flag("ub_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    vec_done = tla.flag("vec_done", tla.arch.VECTOR, tla.arch.MTE3)
+    ub_loaded = tla.flag("ub_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    vec_done = tla.flag("vec_done", tla.pipes.VECTOR, tla.pipes.MTE3)
 
     # 在 GM 上建立输入/输出视图：形状 VECTOR_ELE，坐标从 0 开始。
     gm_in = tla.tile_view(mem_in, tla.make_shape(VECTOR_ELE), tla.make_coord(0))

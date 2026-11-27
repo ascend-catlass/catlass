@@ -34,8 +34,8 @@ def _kernel(params, masked=False, lanes=128):
             dst_t,
             tla.arch.RowMajor,
         )
-        loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.VECTOR)
-        converted = tla.flag("converted", tla.arch.VECTOR, tla.arch.MTE3)
+        loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+        converted = tla.flag("converted", tla.pipes.VECTOR, tla.pipes.MTE3)
         with tla.vector():
             tla.copy(src_ub, src_t)
             tla.set_flag(loaded)

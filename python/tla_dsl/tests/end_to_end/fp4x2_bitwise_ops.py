@@ -59,8 +59,8 @@ def fp4x2_bitwise_ops(
     mem_c: tla.Tensor,
     mem_out: tla.Tensor,
 ) -> None:
-    loaded = tla.flag("fp4x2_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    done = tla.flag("fp4x2_done", tla.arch.VECTOR, tla.arch.MTE3)
+    loaded = tla.flag("fp4x2_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    done = tla.flag("fp4x2_done", tla.pipes.VECTOR, tla.pipes.MTE3)
     a_gm = tla.tile_view(mem_a, tla.make_shape(TOTAL_PAIRS), tla.make_coord(0))
     b_gm = tla.tile_view(mem_b, tla.make_shape(TOTAL_PAIRS), tla.make_coord(0))
     c_gm = tla.tile_view(mem_c, tla.make_shape(TOTAL_PAIRS), tla.make_coord(0))

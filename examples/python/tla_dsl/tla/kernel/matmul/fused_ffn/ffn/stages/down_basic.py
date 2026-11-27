@@ -77,25 +77,37 @@ def stage_down_basic(
     # SoftFlags: same HardEvent IDs as Up / CPP BlockMmad WithoutQue.
     # CPP ctor: MTE1_MTE2 0..3, M_MTE1 6/7, FIX_M 0/1. Up ~drain before
     # SyncAll frees them for Down (sequential BlockMmad lifetimes).
-    l0_0_available = tla.flag("down_l0_0_available", tla.arch.CUBE, tla.arch.MTE1, id=6)
-    l0_1_available = tla.flag("down_l0_1_available", tla.arch.CUBE, tla.arch.MTE1, id=7)
+    l0_0_available = tla.flag(
+        "down_l0_0_available", tla.pipes.CUBE, tla.pipes.MTE1, id=6
+    )
+    l0_1_available = tla.flag(
+        "down_l0_1_available", tla.pipes.CUBE, tla.pipes.MTE1, id=7
+    )
     l0_0_data_ready = tla.flag(
-        "down_l0_0_data_ready", tla.arch.MTE1, tla.arch.CUBE, id=6
+        "down_l0_0_data_ready", tla.pipes.MTE1, tla.pipes.CUBE, id=6
     )
     l0_1_data_ready = tla.flag(
-        "down_l0_1_data_ready", tla.arch.MTE1, tla.arch.CUBE, id=7
+        "down_l0_1_data_ready", tla.pipes.MTE1, tla.pipes.CUBE, id=7
     )
     # A∥B L1: one ID per buf covers A+B; IDs 2/3 credit-only (CPP SECOND/THIRD).
     l1_0_data_ready = tla.flag(
-        "down_l1_0_data_ready", tla.arch.MTE2, tla.arch.MTE1, id=0
+        "down_l1_0_data_ready", tla.pipes.MTE2, tla.pipes.MTE1, id=0
     )
     l1_1_data_ready = tla.flag(
-        "down_l1_1_data_ready", tla.arch.MTE2, tla.arch.MTE1, id=1
+        "down_l1_1_data_ready", tla.pipes.MTE2, tla.pipes.MTE1, id=1
     )
-    l1_0_available = tla.flag("down_l1_0_available", tla.arch.MTE1, tla.arch.MTE2, id=0)
-    l1_1_available = tla.flag("down_l1_1_available", tla.arch.MTE1, tla.arch.MTE2, id=1)
-    l1_2_available = tla.flag("down_l1_2_available", tla.arch.MTE1, tla.arch.MTE2, id=2)
-    l1_3_available = tla.flag("down_l1_3_available", tla.arch.MTE1, tla.arch.MTE2, id=3)
+    l1_0_available = tla.flag(
+        "down_l1_0_available", tla.pipes.MTE1, tla.pipes.MTE2, id=0
+    )
+    l1_1_available = tla.flag(
+        "down_l1_1_available", tla.pipes.MTE1, tla.pipes.MTE2, id=1
+    )
+    l1_2_available = tla.flag(
+        "down_l1_2_available", tla.pipes.MTE1, tla.pipes.MTE2, id=2
+    )
+    l1_3_available = tla.flag(
+        "down_l1_3_available", tla.pipes.MTE1, tla.pipes.MTE2, id=3
+    )
     # CPP ctor always Sets FIX_M(0) and FIX_M(1).
     _l0c_db = tla.const_expr(_tiling.l0c_db > 1)
     # CPP: unitFlag = l0cDB ? 0 : (last ? 3 : 2); FixPipe unitFlag = l0cDB ? 0 : 3.
@@ -107,13 +119,17 @@ def stage_down_basic(
         _uf_fin = 0
     _l0c_slot_elems = _tiling.l0_tm * _tiling.l0_tn
     l0c0_data_ready = tla.flag(
-        "down_l0c0_data_ready", tla.arch.CUBE, tla.arch.FIX, id=0
+        "down_l0c0_data_ready", tla.pipes.CUBE, tla.pipes.FIX, id=0
     )
-    l0c0_available = tla.flag("down_l0c0_available", tla.arch.FIX, tla.arch.CUBE, id=0)
+    l0c0_available = tla.flag(
+        "down_l0c0_available", tla.pipes.FIX, tla.pipes.CUBE, id=0
+    )
     l0c1_data_ready = tla.flag(
-        "down_l0c1_data_ready", tla.arch.CUBE, tla.arch.FIX, id=1
+        "down_l0c1_data_ready", tla.pipes.CUBE, tla.pipes.FIX, id=1
     )
-    l0c1_available = tla.flag("down_l0c1_available", tla.arch.FIX, tla.arch.CUBE, id=1)
+    l0c1_available = tla.flag(
+        "down_l0c1_available", tla.pipes.FIX, tla.pipes.CUBE, id=1
+    )
     # CPP WithoutQue: one SoftFlag ID per L1 buf covers A+B (no separate A/B
     # HardEvents). Always alias l1a/l1b → l1_0/l1_1.
     l1a0_data_ready = l1_0_data_ready

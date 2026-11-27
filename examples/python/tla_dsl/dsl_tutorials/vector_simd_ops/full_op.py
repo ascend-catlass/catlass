@@ -142,8 +142,8 @@ def full_op(
     mem_fragment: tla.Tensor,
     mem_fragment_masked: tla.Tensor,
 ) -> None:
-    ub_loaded = tla.flag("full_ub_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    vec_done = tla.flag("full_vec_done", tla.arch.VECTOR, tla.arch.MTE3)
+    ub_loaded = tla.flag("full_ub_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    vec_done = tla.flag("full_vec_done", tla.pipes.VECTOR, tla.pipes.MTE3)
 
     x_ub = _make_ub(mem_x)
     scalar_ub = _make_ub(mem_scalar)

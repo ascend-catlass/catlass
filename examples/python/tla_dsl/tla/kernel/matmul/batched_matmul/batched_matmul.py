@@ -54,19 +54,19 @@ def batched_matmul_kernel(
     batch_cnt = gm_b.origin_shape[0] // k_dim
     m_dim = gm_a.origin_shape[0] // batch_cnt
 
-    l1a0_copy_end = tla.flag("l1a0_copy_end", tla.arch.MTE2, tla.arch.MTE1)
-    l1a1_copy_end = tla.flag("l1a1_copy_end", tla.arch.MTE2, tla.arch.MTE1)
-    l1b0_copy_end = tla.flag("l1b0_copy_end", tla.arch.MTE2, tla.arch.MTE1)
-    l1b1_copy_end = tla.flag("l1b1_copy_end", tla.arch.MTE2, tla.arch.MTE1)
-    l1a0_copy_start = tla.flag("l1a0_copy_start", tla.arch.MTE1, tla.arch.MTE2)
-    l1a1_copy_start = tla.flag("l1a1_copy_start", tla.arch.MTE1, tla.arch.MTE2)
-    l1b0_copy_start = tla.flag("l1b0_copy_start", tla.arch.MTE1, tla.arch.MTE2)
-    l1b1_copy_start = tla.flag("l1b1_copy_start", tla.arch.MTE1, tla.arch.MTE2)
-    l0a0_copy_start = tla.flag("l0a0_copy_start", tla.arch.CUBE, tla.arch.MTE1)
-    l0a1_copy_start = tla.flag("l0a1_copy_start", tla.arch.CUBE, tla.arch.MTE1)
-    l0b0_copy_start = tla.flag("l0b0_copy_start", tla.arch.CUBE, tla.arch.MTE1)
-    l0b1_copy_start = tla.flag("l0b1_copy_start", tla.arch.CUBE, tla.arch.MTE1)
-    l0_copy_end = tla.flag("l0_copy_end", tla.arch.MTE1, tla.arch.CUBE)
+    l1a0_copy_end = tla.flag("l1a0_copy_end", tla.pipes.MTE2, tla.pipes.MTE1)
+    l1a1_copy_end = tla.flag("l1a1_copy_end", tla.pipes.MTE2, tla.pipes.MTE1)
+    l1b0_copy_end = tla.flag("l1b0_copy_end", tla.pipes.MTE2, tla.pipes.MTE1)
+    l1b1_copy_end = tla.flag("l1b1_copy_end", tla.pipes.MTE2, tla.pipes.MTE1)
+    l1a0_copy_start = tla.flag("l1a0_copy_start", tla.pipes.MTE1, tla.pipes.MTE2)
+    l1a1_copy_start = tla.flag("l1a1_copy_start", tla.pipes.MTE1, tla.pipes.MTE2)
+    l1b0_copy_start = tla.flag("l1b0_copy_start", tla.pipes.MTE1, tla.pipes.MTE2)
+    l1b1_copy_start = tla.flag("l1b1_copy_start", tla.pipes.MTE1, tla.pipes.MTE2)
+    l0a0_copy_start = tla.flag("l0a0_copy_start", tla.pipes.CUBE, tla.pipes.MTE1)
+    l0a1_copy_start = tla.flag("l0a1_copy_start", tla.pipes.CUBE, tla.pipes.MTE1)
+    l0b0_copy_start = tla.flag("l0b0_copy_start", tla.pipes.CUBE, tla.pipes.MTE1)
+    l0b1_copy_start = tla.flag("l0b1_copy_start", tla.pipes.CUBE, tla.pipes.MTE1)
+    l0_copy_end = tla.flag("l0_copy_end", tla.pipes.MTE1, tla.pipes.CUBE)
 
     l1a0_ptr = tla.allocate(
         _tiling.l1_tm * _tiling.l1_tk, dtype_a, tla.AddressSpace.l1, 512

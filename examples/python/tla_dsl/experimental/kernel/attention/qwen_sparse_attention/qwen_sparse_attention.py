@@ -141,8 +141,8 @@ def qwen_sparse_attention_kernel(
 
     # 消费侧预置 token：首个 tile 的 producer 不会阻塞。
     with tla.vector():
-        tla.cross_core_set_flag(s_free, tla.arch.VECTOR)
-        tla.cross_core_set_flag(o_free, tla.arch.VECTOR)
+        tla.cross_core_set_flag(s_free, tla.pipes.VECTOR)
+        tla.cross_core_set_flag(o_free, tla.pipes.VECTOR)
 
     task_range = tla.range(
         tla.arch.block_idx(),
@@ -305,11 +305,11 @@ def qwen_sparse_attention_kernel(
                 tla.make_shape(q_tile_size, head_dim),
                 tla.make_coord(c0, c0),
             )
-            mutex_l1_q.lock(pipe=tla.arch.MTE2)
+            mutex_l1_q.lock(pipe=tla.pipes.MTE2)
             tla.copy(l1_q_valid, q_gm)
-            mutex_l1_q.unlock(pipe=tla.arch.MTE2)
+            mutex_l1_q.unlock(pipe=tla.pipes.MTE2)
             # Q remains resident until all QK tiles in this task have read it.
-            mutex_l1_q.lock(pipe=tla.arch.MTE1)
+            mutex_l1_q.lock(pipe=tla.pipes.MTE1)
 
         for tile in tla.range(num_tiles):
             tile_base = tile * kv_block
@@ -319,7 +319,7 @@ def qwen_sparse_attention_kernel(
 
             with tla.cube():
                 # ---- 逐 token gather：K 列(ColumnMajor->nZ) 与 V 行(RowMajor) ----
-                mutex_l1_k.lock(pipe=tla.arch.MTE2)
+                mutex_l1_k.lock(pipe=tla.pipes.MTE2)
                 for j in tla.range(kv_tile_size):
                     tok = mem_idx[row * width + tile_base + j]
                     if tok >= c0:
@@ -342,7 +342,7 @@ def qwen_sparse_attention_kernel(
                             tla.make_coord(c0, j),
                         )
                         tla.copy(k_dst, k_src)
-                mutex_l1_k.unlock(pipe=tla.arch.MTE2)
+                mutex_l1_k.unlock(pipe=tla.pipes.MTE2)
 
                 # ---- QK：沿 head_dim 拆两段 mmad ----
                 l0c_s = tla.make_tensor(
@@ -357,25 +357,25 @@ def qwen_sparse_attention_kernel(
                     tla.make_coord(c0, c0),
                 )
                 l0_q_c0 = tla.make_tensor_like(l0a_q_ptr, l1_q_c0)
-                mutex_l0a_q.lock(pipe=tla.arch.MTE1)
+                mutex_l0a_q.lock(pipe=tla.pipes.MTE1)
                 tla.copy(l0_q_c0, l1_q_c0)
-                mutex_l0a_q.unlock(pipe=tla.arch.MTE1)
+                mutex_l0a_q.unlock(pipe=tla.pipes.MTE1)
                 l1_k_c0 = tla.tile_view(
                     l1_k,
                     tla.make_shape(half_dim, kv_block),
                     tla.make_coord(c0, c0),
                 )
                 l0_k_c0 = tla.make_tensor_like(l0b_ptr, l1_k_c0)
-                mutex_l1_k.lock(pipe=tla.arch.MTE1)
-                mutex_l0b.lock(pipe=tla.arch.MTE1)
+                mutex_l1_k.lock(pipe=tla.pipes.MTE1)
+                mutex_l0b.lock(pipe=tla.pipes.MTE1)
                 tla.copy(l0_k_c0, l1_k_c0)
-                mutex_l0b.unlock(pipe=tla.arch.MTE1)
-                mutex_l0a_q.lock(pipe=tla.arch.CUBE)
-                mutex_l0b.lock(pipe=tla.arch.CUBE)
-                mutex_l0c_s.lock(pipe=tla.arch.CUBE)
+                mutex_l0b.unlock(pipe=tla.pipes.MTE1)
+                mutex_l0a_q.lock(pipe=tla.pipes.CUBE)
+                mutex_l0b.lock(pipe=tla.pipes.CUBE)
+                mutex_l0c_s.lock(pipe=tla.pipes.CUBE)
                 tla.mmad(l0c_s, l0_q_c0, l0_k_c0, init_c=True)
-                mutex_l0a_q.unlock(pipe=tla.arch.CUBE)
-                mutex_l0b.unlock(pipe=tla.arch.CUBE)
+                mutex_l0a_q.unlock(pipe=tla.pipes.CUBE)
+                mutex_l0b.unlock(pipe=tla.pipes.CUBE)
 
                 l1_q_c1 = tla.tile_view(
                     l1_q,
@@ -383,29 +383,29 @@ def qwen_sparse_attention_kernel(
                     tla.make_coord(c0, c1),
                 )
                 l0_q_c1 = tla.make_tensor_like(l0a_q_ptr, l1_q_c1)
-                mutex_l0a_q.lock(pipe=tla.arch.MTE1)
+                mutex_l0a_q.lock(pipe=tla.pipes.MTE1)
                 tla.copy(l0_q_c1, l1_q_c1)
-                mutex_l0a_q.unlock(pipe=tla.arch.MTE1)
+                mutex_l0a_q.unlock(pipe=tla.pipes.MTE1)
                 l1_k_c1 = tla.tile_view(
                     l1_k,
                     tla.make_shape(half_dim, kv_block),
                     tla.make_coord(c1, c0),
                 )
                 l0_k_c1 = tla.make_tensor_like(l0b_ptr, l1_k_c1)
-                mutex_l0b.lock(pipe=tla.arch.MTE1)
+                mutex_l0b.lock(pipe=tla.pipes.MTE1)
                 tla.copy(l0_k_c1, l1_k_c1)
-                mutex_l0b.unlock(pipe=tla.arch.MTE1)
-                mutex_l1_k.unlock(pipe=tla.arch.MTE1)
-                mutex_l0a_q.lock(pipe=tla.arch.CUBE)
-                mutex_l0b.lock(pipe=tla.arch.CUBE)
+                mutex_l0b.unlock(pipe=tla.pipes.MTE1)
+                mutex_l1_k.unlock(pipe=tla.pipes.MTE1)
+                mutex_l0a_q.lock(pipe=tla.pipes.CUBE)
+                mutex_l0b.lock(pipe=tla.pipes.CUBE)
                 tla.mmad(l0c_s, l0_q_c1, l0_k_c1, init_c=False)
-                mutex_l0a_q.unlock(pipe=tla.arch.CUBE)
-                mutex_l0b.unlock(pipe=tla.arch.CUBE)
-                mutex_l0c_s.unlock(pipe=tla.arch.CUBE)
+                mutex_l0a_q.unlock(pipe=tla.pipes.CUBE)
+                mutex_l0b.unlock(pipe=tla.pipes.CUBE)
+                mutex_l0c_s.unlock(pipe=tla.pipes.CUBE)
 
                 # ---- FIX: S -> UB（两个 AIV 各 64 行）----
-                tla.cross_core_wait_flag(s_free, tla.arch.FIX)
-                mutex_l0c_s.lock(pipe=tla.arch.FIX)
+                tla.cross_core_wait_flag(s_free, tla.pipes.FIX)
+                mutex_l0c_s.lock(pipe=tla.pipes.FIX)
                 ub_s_fix = tla.make_tensor(
                     ub_s_ptr,
                     tla.make_layout(
@@ -421,12 +421,12 @@ def qwen_sparse_attention_kernel(
                         l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M
                     ),
                 )
-                mutex_l0c_s.unlock(pipe=tla.arch.FIX)
-                tla.cross_core_set_flag(s_ready, tla.arch.FIX)
+                mutex_l0c_s.unlock(pipe=tla.pipes.FIX)
+                tla.cross_core_set_flag(s_ready, tla.pipes.FIX)
 
             with tla.cube():
                 # ---- V gather 后移：与 AIV 的 softmax 重叠（l1_v 独立 allocation）----
-                mutex_l1_v.lock(pipe=tla.arch.MTE2)
+                mutex_l1_v.lock(pipe=tla.pipes.MTE2)
                 for jv in tla.range(kv_tile_size):
                     tokv = mem_idx[row * width + tile_base + jv]
                     if tokv >= c0:
@@ -447,10 +447,10 @@ def qwen_sparse_attention_kernel(
                             tla.make_coord(jv, c0),
                         )
                         tla.copy(v_dst, v_src)
-                mutex_l1_v.unlock(pipe=tla.arch.MTE2)
+                mutex_l1_v.unlock(pipe=tla.pipes.MTE2)
 
             with tla.vector():
-                tla.cross_core_wait_flag(s_ready, tla.arch.VECTOR)
+                tla.cross_core_wait_flag(s_ready, tla.pipes.VECTOR)
 
                 # index tile: GM -> UB（int32）
                 idx_gm = tla.make_tensor(
@@ -472,9 +472,9 @@ def qwen_sparse_attention_kernel(
                     tla.make_shape(c1, kv_tile_size),
                     tla.make_coord(c0, c0),
                 )
-                mutex_ub_idx.lock(pipe=tla.arch.MTE2)
+                mutex_ub_idx.lock(pipe=tla.pipes.MTE2)
                 tla.copy(ub_idx_valid, idx_gm)
-                mutex_ub_idx.unlock(pipe=tla.arch.MTE2)
+                mutex_ub_idx.unlock(pipe=tla.pipes.MTE2)
 
                 n0 = kv_tile_size
                 if n0 > vl_f32:
@@ -486,7 +486,7 @@ def qwen_sparse_attention_kernel(
                     n1 = tla.as_numeric(vl_f32)
 
                 # ---- pass1: scale + 逐列掩码 + 行 max ----
-                mutex_ub_idx.lock(pipe=tla.arch.VECTOR)
+                mutex_ub_idx.lock(pipe=tla.pipes.VECTOR)
                 with tla.vec.func(mode="simd"):
                     pregFull = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
                     mask_n0 = tla.update_mask(n0, dtype=tla.Float32)[0]
@@ -535,7 +535,7 @@ def qwen_sparse_attention_kernel(
                         tla.params.MemType.VEC_STORE,
                         tla.params.MemType.VEC_LOAD,
                     )
-                mutex_ub_idx.unlock(pipe=tla.arch.VECTOR)
+                mutex_ub_idx.unlock(pipe=tla.pipes.VECTOR)
 
                 # ---- 合并 running max / dm / running sum ----
                 with tla.vec.func(mode="simd"):
@@ -578,7 +578,7 @@ def qwen_sparse_attention_kernel(
                     )
 
                 # ---- pass2: exp + P(f16) 落盘 + 块内 sum ----
-                mutex_ub_p.lock(pipe=tla.arch.VECTOR)
+                mutex_ub_p.lock(pipe=tla.pipes.VECTOR)
                 with tla.vec.func(mode="simd"):
                     pregFull3 = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
                     preg_all_b16 = tla.create_mask(pattern=tla.mask.ALL, dtype=io_dtype)
@@ -634,7 +634,7 @@ def qwen_sparse_attention_kernel(
                         tla.params.MemType.VEC_STORE,
                         tla.params.MemType.VEC_LOAD,
                     )
-                mutex_ub_p.unlock(pipe=tla.arch.VECTOR)
+                mutex_ub_p.unlock(pipe=tla.pipes.VECTOR)
 
                 # ---- 合并 running sum ----
                 with tla.vec.func(mode="simd"):
@@ -660,16 +660,16 @@ def qwen_sparse_attention_kernel(
                     )
 
                 # S 已消费完，释放给下一个 tile 的 FIX
-                tla.cross_core_set_flag(s_free, tla.arch.VECTOR)
+                tla.cross_core_set_flag(s_free, tla.pipes.VECTOR)
 
                 # ---- UB P -> L1 P (zN) ----
-                mutex_ub_p.lock(pipe=tla.arch.MTE3)
+                mutex_ub_p.lock(pipe=tla.pipes.MTE3)
                 tla.copy(l1_p_sub, ub_p_copy)
-                mutex_ub_p.unlock(pipe=tla.arch.MTE3)
-                tla.cross_core_set_flag(p_ready, tla.arch.MTE3)
+                mutex_ub_p.unlock(pipe=tla.pipes.MTE3)
+                tla.cross_core_set_flag(p_ready, tla.pipes.MTE3)
 
                 # ---- 等待 PV，做 O rescale ----
-                tla.cross_core_wait_flag(o_ready, tla.arch.VECTOR)
+                tla.cross_core_wait_flag(o_ready, tla.pipes.VECTOR)
                 ub_dm_re = tla.make_tensor(
                     ub_dm_ptr,
                     tla.make_layout(tla.make_shape(q_sub), tla.make_stride(c1)),
@@ -706,38 +706,38 @@ def qwen_sparse_attention_kernel(
                         tla.params.MemType.VEC_LOAD,
                     )
                 if tile + c1 < num_tiles:
-                    tla.cross_core_set_flag(o_free, tla.arch.VECTOR)
+                    tla.cross_core_set_flag(o_free, tla.pipes.VECTOR)
 
             with tla.cube():
                 # ---- PV ----
-                tla.cross_core_wait_flag(p_ready, tla.arch.MTE1)
+                tla.cross_core_wait_flag(p_ready, tla.pipes.MTE1)
                 l0_p = tla.make_tensor_like(l0a_p_ptr, l1_p)
-                mutex_l0a_p.lock(pipe=tla.arch.MTE1)
+                mutex_l0a_p.lock(pipe=tla.pipes.MTE1)
                 tla.copy(l0_p, l1_p)
-                mutex_l0a_p.unlock(pipe=tla.arch.MTE1)
+                mutex_l0a_p.unlock(pipe=tla.pipes.MTE1)
                 l1_v_pv = tla.make_tensor_like(l1_v_ptr, l1_v)
                 l0_v = tla.make_tensor_like(l0b_ptr, l1_v_pv)
-                mutex_l1_v.lock(pipe=tla.arch.MTE1)
-                mutex_l0b.lock(pipe=tla.arch.MTE1)
+                mutex_l1_v.lock(pipe=tla.pipes.MTE1)
+                mutex_l0b.lock(pipe=tla.pipes.MTE1)
                 tla.copy(l0_v, l1_v_pv)
-                mutex_l0b.unlock(pipe=tla.arch.MTE1)
-                mutex_l1_v.unlock(pipe=tla.arch.MTE1)
+                mutex_l0b.unlock(pipe=tla.pipes.MTE1)
+                mutex_l1_v.unlock(pipe=tla.pipes.MTE1)
                 l0c_o = tla.make_tensor(
                     l0c_o_ptr,
                     tla.make_layout_with_tag(
                         (q_block, head_dim), tla.Float32, tla.arch.L0Clayout
                     ),
                 )
-                mutex_l0a_p.lock(pipe=tla.arch.CUBE)
-                mutex_l0b.lock(pipe=tla.arch.CUBE)
-                mutex_l0c_o.lock(pipe=tla.arch.CUBE)
+                mutex_l0a_p.lock(pipe=tla.pipes.CUBE)
+                mutex_l0b.lock(pipe=tla.pipes.CUBE)
+                mutex_l0c_o.lock(pipe=tla.pipes.CUBE)
                 tla.mmad(l0c_o, l0_p, l0_v, init_c=True)
-                mutex_l0a_p.unlock(pipe=tla.arch.CUBE)
-                mutex_l0b.unlock(pipe=tla.arch.CUBE)
-                mutex_l0c_o.unlock(pipe=tla.arch.CUBE)
+                mutex_l0a_p.unlock(pipe=tla.pipes.CUBE)
+                mutex_l0b.unlock(pipe=tla.pipes.CUBE)
+                mutex_l0c_o.unlock(pipe=tla.pipes.CUBE)
 
-                tla.cross_core_wait_flag(o_free, tla.arch.FIX)
-                mutex_l0c_o.lock(pipe=tla.arch.FIX)
+                tla.cross_core_wait_flag(o_free, tla.pipes.FIX)
+                mutex_l0c_o.lock(pipe=tla.pipes.FIX)
                 ub_otmp_fix = tla.make_tensor(
                     ub_otmp_ptr,
                     tla.make_layout(
@@ -753,11 +753,11 @@ def qwen_sparse_attention_kernel(
                         l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M
                     ),
                 )
-                mutex_l0c_o.unlock(pipe=tla.arch.FIX)
-                tla.cross_core_set_flag(o_ready, tla.arch.FIX)
+                mutex_l0c_o.unlock(pipe=tla.pipes.FIX)
+                tla.cross_core_set_flag(o_ready, tla.pipes.FIX)
 
         with tla.cube():
-            mutex_l1_q.unlock(pipe=tla.arch.MTE1)
+            mutex_l1_q.unlock(pipe=tla.pipes.MTE1)
 
         # ------------------------------------------------------ 输出（每 task 一次）
         with tla.vector():
@@ -772,7 +772,7 @@ def qwen_sparse_attention_kernel(
                     tla.make_stride(head_dim, c1),
                 ),
             )
-            mutex_ub_out.lock(pipe=tla.arch.VECTOR)
+            mutex_ub_out.lock(pipe=tla.pipes.VECTOR)
             with tla.vec.func(mode="simd"):
                 pregFull6 = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
                 preg_all_b16_6 = tla.create_mask(pattern=tla.mask.ALL, dtype=io_dtype)
@@ -827,8 +827,8 @@ def qwen_sparse_attention_kernel(
                         packed7, _ = tla.deinterleave(out_reg7_0, out_reg7_1)
                         out_tile7.store(packed7, mask=preg_all_b16_6)
 
-            mutex_ub_out.unlock(pipe=tla.arch.VECTOR)
-            mutex_ub_out.lock(pipe=tla.arch.MTE3)
+            mutex_ub_out.unlock(pipe=tla.pipes.VECTOR)
+            mutex_ub_out.lock(pipe=tla.pipes.MTE3)
             if rows_here > c0:
                 o_gm = tla.make_tensor(
                     mem_o.ptr + (row * heads + head_base + vec_idx * q_sub) * head_dim,
@@ -838,15 +838,15 @@ def qwen_sparse_attention_kernel(
                     ),
                 )
                 tla.copy(o_gm, ub_out_t)
-            mutex_ub_out.unlock(pipe=tla.arch.MTE3)
+            mutex_ub_out.unlock(pipe=tla.pipes.MTE3)
             # ub_out aliases ub_otmp: release the last tile only after MTE3 has
             # consumed the output, before the next task's FIX can reuse it.
-            tla.cross_core_set_flag(o_free, tla.arch.MTE3)
+            tla.cross_core_set_flag(o_free, tla.pipes.MTE3)
 
     # 排空 prologue 预置的两个 token
     with tla.cube():
-        tla.cross_core_wait_flag(s_free, tla.arch.FIX)
-        tla.cross_core_wait_flag(o_free, tla.arch.FIX)
+        tla.cross_core_wait_flag(s_free, tla.pipes.FIX)
+        tla.cross_core_wait_flag(o_free, tla.pipes.FIX)
         tla.pipe_barrier(tla.pipes.ALL)
     with tla.vector():
         tla.pipe_barrier(tla.pipes.ALL)

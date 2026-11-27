@@ -114,13 +114,13 @@ def row_gather_kernel(
             for out_row in tla.range(gid, n_out, aiv_num):
                 # Row 0 overwrites the accumulator, so no zero-fill pass is needed.
                 src0 = gm_w.ptr + gm_idx[out_row, 0].to(tla.Int64) * tla.Int64(D)
-                acc_mtx.lock(pipe=tla.arch.MTE2)
+                acc_mtx.lock(pipe=tla.pipes.MTE2)
                 tla.copy(ub_acc, tla.make_tensor(src0, row_gm))
-                acc_mtx.unlock(pipe=tla.arch.MTE2)
+                acc_mtx.unlock(pipe=tla.pipes.MTE2)
 
                 # Wait for the row-0 transfer before the vector pipe reads it.
-                acc_mtx.lock(pipe=tla.arch.VECTOR)
-                acc_mtx.unlock(pipe=tla.arch.VECTOR)
+                acc_mtx.lock(pipe=tla.pipes.VECTOR)
+                acc_mtx.unlock(pipe=tla.pipes.VECTOR)
 
                 # Rows 1 .. L-1 are folded into the accumulator, one buffer each.
                 for grp in tla.range((L - 1 + BUFS - 1) // BUFS):
@@ -130,11 +130,11 @@ def row_gather_kernel(
                             src = gm_w.ptr + gm_idx[out_row, row].to(
                                 tla.Int64
                             ) * tla.Int64(D)
-                            mtx[bi].lock(pipe=tla.arch.MTE2)
+                            mtx[bi].lock(pipe=tla.pipes.MTE2)
                             tla.copy(ub_row[bi], tla.make_tensor(src, row_gm))
-                            mtx[bi].unlock(pipe=tla.arch.MTE2)
+                            mtx[bi].unlock(pipe=tla.pipes.MTE2)
 
-                            mtx[bi].lock(pipe=tla.arch.VECTOR)
+                            mtx[bi].lock(pipe=tla.pipes.VECTOR)
                             with tla.vec.func(mode="simd"):
                                 mask = tla.create_mask(
                                     pattern=tla.mask.ALL, dtype=tla.Float32
@@ -180,14 +180,14 @@ def row_gather_kernel(
                                     tla.params.MemType.VEC_STORE,
                                     tla.params.MemType.VEC_LOAD,
                                 )
-                            mtx[bi].unlock(pipe=tla.arch.VECTOR)
+                            mtx[bi].unlock(pipe=tla.pipes.VECTOR)
 
-                acc_mtx.lock(pipe=tla.arch.VECTOR)
-                acc_mtx.unlock(pipe=tla.arch.VECTOR)
+                acc_mtx.lock(pipe=tla.pipes.VECTOR)
+                acc_mtx.unlock(pipe=tla.pipes.VECTOR)
                 dst = gm_out.ptr + out_row.to(tla.Int64) * tla.Int64(D)
-                acc_mtx.lock(pipe=tla.arch.MTE3)
+                acc_mtx.lock(pipe=tla.pipes.MTE3)
                 tla.copy(tla.make_tensor(dst, row_gm), ub_acc)
-                acc_mtx.unlock(pipe=tla.arch.MTE3)
+                acc_mtx.unlock(pipe=tla.pipes.MTE3)
         else:
             # Copy mode (``L == 1``): each block owns a contiguous slice of the
             # output rows and every row runs a full MTE2 -> MTE3 chain, so the
@@ -200,12 +200,12 @@ def row_gather_kernel(
                     if r < n_out:
                         src = gm_w.ptr + gm_idx[r, 0].to(tla.Int64) * tla.Int64(D)
                         dst = gm_out.ptr + r.to(tla.Int64) * tla.Int64(D)
-                        mtx[bi].lock(pipe=tla.arch.MTE2)
+                        mtx[bi].lock(pipe=tla.pipes.MTE2)
                         tla.copy(ub_row[bi], tla.make_tensor(src, row_gm))
-                        mtx[bi].unlock(pipe=tla.arch.MTE2)
-                        mtx[bi].lock(pipe=tla.arch.MTE3)
+                        mtx[bi].unlock(pipe=tla.pipes.MTE2)
+                        mtx[bi].lock(pipe=tla.pipes.MTE3)
                         tla.copy(tla.make_tensor(dst, row_gm), ub_row[bi])
-                        mtx[bi].unlock(pipe=tla.arch.MTE3)
+                        mtx[bi].unlock(pipe=tla.pipes.MTE3)
 
 
 # ======================================================================================

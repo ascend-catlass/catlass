@@ -63,18 +63,18 @@ def stage_down_full_a(
     n = gm_c.origin_shape[1]
     k = gm_a.origin_shape[1]
 
-    l0_0_available = tla.flag("dnfa_l0_0_av", tla.arch.CUBE, tla.arch.MTE1)
-    l0_1_available = tla.flag("dnfa_l0_1_av", tla.arch.CUBE, tla.arch.MTE1)
-    l0_0_data_ready = tla.flag("dnfa_l0_0_dr", tla.arch.MTE1, tla.arch.CUBE)
-    l0_1_data_ready = tla.flag("dnfa_l0_1_dr", tla.arch.MTE1, tla.arch.CUBE)
-    l1_0_data_ready = tla.flag("dnfa_l1_0_dr", tla.arch.MTE2, tla.arch.MTE1)
-    l1_1_data_ready = tla.flag("dnfa_l1_1_dr", tla.arch.MTE2, tla.arch.MTE1)
-    l1_0_available = tla.flag("dnfa_l1_0_av", tla.arch.MTE1, tla.arch.MTE2)
-    l1_1_available = tla.flag("dnfa_l1_1_av", tla.arch.MTE1, tla.arch.MTE2)
-    l1a_data_ready = tla.flag("dnfa_l1a_dr", tla.arch.MTE2, tla.arch.MTE1)
-    l1a_available = tla.flag("dnfa_l1a_av", tla.arch.MTE1, tla.arch.MTE2)
-    l0c_data_ready = tla.flag("dnfa_l0c_dr", tla.arch.CUBE, tla.arch.FIX)
-    l0c_available = tla.flag("dnfa_l0c_av", tla.arch.FIX, tla.arch.CUBE)
+    l0_0_available = tla.flag("dnfa_l0_0_av", tla.pipes.CUBE, tla.pipes.MTE1)
+    l0_1_available = tla.flag("dnfa_l0_1_av", tla.pipes.CUBE, tla.pipes.MTE1)
+    l0_0_data_ready = tla.flag("dnfa_l0_0_dr", tla.pipes.MTE1, tla.pipes.CUBE)
+    l0_1_data_ready = tla.flag("dnfa_l0_1_dr", tla.pipes.MTE1, tla.pipes.CUBE)
+    l1_0_data_ready = tla.flag("dnfa_l1_0_dr", tla.pipes.MTE2, tla.pipes.MTE1)
+    l1_1_data_ready = tla.flag("dnfa_l1_1_dr", tla.pipes.MTE2, tla.pipes.MTE1)
+    l1_0_available = tla.flag("dnfa_l1_0_av", tla.pipes.MTE1, tla.pipes.MTE2)
+    l1_1_available = tla.flag("dnfa_l1_1_av", tla.pipes.MTE1, tla.pipes.MTE2)
+    l1a_data_ready = tla.flag("dnfa_l1a_dr", tla.pipes.MTE2, tla.pipes.MTE1)
+    l1a_available = tla.flag("dnfa_l1a_av", tla.pipes.MTE1, tla.pipes.MTE2)
+    l0c_data_ready = tla.flag("dnfa_l0c_dr", tla.pipes.CUBE, tla.pipes.FIX)
+    l0c_available = tla.flag("dnfa_l0c_av", tla.pipes.FIX, tla.pipes.CUBE)
 
     l1_tm = _tiling.l1_tm
     l1_tn = _tiling.l1_tn

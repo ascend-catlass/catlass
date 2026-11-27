@@ -1912,8 +1912,8 @@ def cross_flag_statement_if_kernel() -> None:
     else:
         selected = pong
     with tla.vector():
-        tla.cross_core_set_flag(selected, tla.arch.FIX)
-        tla.cross_core_wait_flag(selected, tla.arch.VECTOR)
+        tla.cross_core_set_flag(selected, tla.pipes.FIX)
+        tla.cross_core_wait_flag(selected, tla.pipes.VECTOR)
 
 @tla.kernel
 def cross_flag_inline_if_kernel() -> None:
@@ -1921,8 +1921,8 @@ def cross_flag_inline_if_kernel() -> None:
     pong = tla.cross_flag("pong")
     selected = ping if tla.arch.block_idx() == 0 else pong
     with tla.vector():
-        tla.cross_core_set_flag(selected, tla.arch.FIX)
-        tla.cross_core_wait_flag(selected, tla.arch.VECTOR)
+        tla.cross_core_set_flag(selected, tla.pipes.FIX)
+        tla.cross_core_wait_flag(selected, tla.pipes.VECTOR)
 
 @pytest.mark.parametrize(
     "kernel", (cross_flag_statement_if_kernel, cross_flag_inline_if_kernel)

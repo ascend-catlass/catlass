@@ -59,9 +59,9 @@ _TORCH_DTYPE_MAP: dict[str, str] = {
 def load_mask_dist_kernel(
     mem_src: tla.Tensor, mem_mask: tla.Tensor, mem_dst: tla.Tensor
 ) -> None:
-    src_loaded = tla.flag("src_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    mask_loaded = tla.flag("mask_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    done = tla.flag("done", tla.arch.VECTOR, tla.arch.MTE3)
+    src_loaded = tla.flag("src_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    mask_loaded = tla.flag("mask_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    done = tla.flag("done", tla.pipes.VECTOR, tla.pipes.MTE3)
 
     src_gm = tla.tile_view(mem_src, tla.make_shape(VECTOR_ELE), tla.make_coord(0))
     mask_gm = tla.tile_view(mem_mask, tla.make_shape(VECTOR_ELE), tla.make_coord(0))

@@ -86,13 +86,13 @@ def basic_mixed_mutex(
         l1_a = tla.make_tensor_like(l1a_ptr, gm_a, tla.arch.zN)
         l1_b = tla.make_tensor_like(l1b_ptr, gm_b, tla.arch.zN)
 
-        mutex_l1a.lock(pipe=tla.arch.MTE2)
+        mutex_l1a.lock(pipe=tla.pipes.MTE2)
         tla.copy(l1_a, gm_a)
-        mutex_l1a.unlock(pipe=tla.arch.MTE2)
+        mutex_l1a.unlock(pipe=tla.pipes.MTE2)
 
-        mutex_l1b.lock(pipe=tla.arch.MTE2)
+        mutex_l1b.lock(pipe=tla.pipes.MTE2)
         tla.copy(l1_b, gm_b)
-        mutex_l1b.unlock(pipe=tla.arch.MTE2)
+        mutex_l1b.unlock(pipe=tla.pipes.MTE2)
 
         l1_a_l0 = tla.tile_view(l1_a, tla.make_shape(m, k), tla.make_coord(0, 0))
         l1_b_l0 = tla.tile_view(l1_b, tla.make_shape(k, n), tla.make_coord(0, 0))
@@ -100,29 +100,29 @@ def basic_mixed_mutex(
         l0_b = tla.make_tensor_like(l0b_ptr, l1_b_l0, tla.arch.nZ)
         l0_c = tla.make_tensor_like(l0c_ptr, gm_c, tla.arch.L0Clayout)
 
-        mutex_l1a.lock(pipe=tla.arch.MTE1)
-        mutex_l0a.lock(pipe=tla.arch.MTE1)
+        mutex_l1a.lock(pipe=tla.pipes.MTE1)
+        mutex_l0a.lock(pipe=tla.pipes.MTE1)
         tla.copy(l0_a, l1_a_l0)
-        mutex_l0a.unlock(pipe=tla.arch.MTE1)
-        mutex_l1a.unlock(pipe=tla.arch.MTE1)
+        mutex_l0a.unlock(pipe=tla.pipes.MTE1)
+        mutex_l1a.unlock(pipe=tla.pipes.MTE1)
 
-        mutex_l1b.lock(pipe=tla.arch.MTE1)
-        mutex_l0b.lock(pipe=tla.arch.MTE1)
+        mutex_l1b.lock(pipe=tla.pipes.MTE1)
+        mutex_l0b.lock(pipe=tla.pipes.MTE1)
         tla.copy(l0_b, l1_b_l0)
-        mutex_l0b.unlock(pipe=tla.arch.MTE1)
-        mutex_l1b.unlock(pipe=tla.arch.MTE1)
+        mutex_l0b.unlock(pipe=tla.pipes.MTE1)
+        mutex_l1b.unlock(pipe=tla.pipes.MTE1)
 
-        mutex_l0a.lock(pipe=tla.arch.CUBE)
-        mutex_l0b.lock(pipe=tla.arch.CUBE)
-        mutex_l0c.lock(pipe=tla.arch.CUBE)
+        mutex_l0a.lock(pipe=tla.pipes.CUBE)
+        mutex_l0b.lock(pipe=tla.pipes.CUBE)
+        mutex_l0c.lock(pipe=tla.pipes.CUBE)
         tla.mmad(l0_c, l0_a, l0_b, init_c=True)
-        mutex_l0c.unlock(pipe=tla.arch.CUBE)
-        mutex_l0b.unlock(pipe=tla.arch.CUBE)
-        mutex_l0a.unlock(pipe=tla.arch.CUBE)
+        mutex_l0c.unlock(pipe=tla.pipes.CUBE)
+        mutex_l0b.unlock(pipe=tla.pipes.CUBE)
+        mutex_l0a.unlock(pipe=tla.pipes.CUBE)
 
         ub_c = tla.make_tensor_like(c_ub_ptr, l0_c, tla.arch.RowMajor)
-        mutex_l0c.lock(pipe=tla.arch.FIX)
-        mutex_c_ub.lock(pipe=tla.arch.FIX)
+        mutex_l0c.lock(pipe=tla.pipes.FIX)
+        mutex_c_ub.lock(pipe=tla.pipes.FIX)
         tla.copy(
             ub_c,
             l0_c,
@@ -130,10 +130,10 @@ def basic_mixed_mutex(
                 l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M,
             ),
         )
-        mutex_c_ub.unlock(pipe=tla.arch.FIX)
-        mutex_l0c.unlock(pipe=tla.arch.FIX)
+        mutex_c_ub.unlock(pipe=tla.pipes.FIX)
+        mutex_l0c.unlock(pipe=tla.pipes.FIX)
 
-        tla.cross_core_set_flag(fix_done, tla.arch.FIX)
+        tla.cross_core_set_flag(fix_done, tla.pipes.FIX)
         tla.pipe_barrier(tla.pipes.ALL)
 
     with tla.vector():
@@ -152,17 +152,17 @@ def basic_mixed_mutex(
         ub_result = tla.make_tensor_like(result_ub_ptr, gm_result, tla.arch.RowMajor)
         ub_addend = tla.make_tensor_like(addend_ub_ptr, gm_addend, tla.arch.RowMajor)
 
-        mutex_addend_ub.lock(pipe=tla.arch.MTE2)
+        mutex_addend_ub.lock(pipe=tla.pipes.MTE2)
         tla.copy(ub_addend, gm_addend)
-        mutex_addend_ub.unlock(pipe=tla.arch.MTE2)
+        mutex_addend_ub.unlock(pipe=tla.pipes.MTE2)
 
         ub_c = tla.make_tensor_like(c_ub_ptr, gm_result, tla.arch.RowMajor)
-        tla.cross_core_wait_flag(fix_done, tla.arch.VECTOR)
+        tla.cross_core_wait_flag(fix_done, tla.pipes.VECTOR)
 
         for row_tile_idx in tla.range(0, VECTOR_TILE_M // VECTOR_REG_TILE_M, 1):
-            mutex_c_ub.lock(pipe=tla.arch.VECTOR)
-            mutex_addend_ub.lock(pipe=tla.arch.VECTOR)
-            mutex_result_ub.lock(pipe=tla.arch.VECTOR)
+            mutex_c_ub.lock(pipe=tla.pipes.VECTOR)
+            mutex_addend_ub.lock(pipe=tla.pipes.VECTOR)
+            mutex_result_ub.lock(pipe=tla.pipes.VECTOR)
             with tla.vec.func(mode="simd"):
                 c_chunk = tla.tile_view(
                     ub_c,
@@ -180,13 +180,13 @@ def basic_mixed_mutex(
                     tla.make_coord(row_tile_idx, 0),
                 )
                 result_chunk.store(c_chunk.load() + addend_chunk.load())
-            mutex_result_ub.unlock(pipe=tla.arch.VECTOR)
-            mutex_addend_ub.unlock(pipe=tla.arch.VECTOR)
-            mutex_c_ub.unlock(pipe=tla.arch.VECTOR)
+            mutex_result_ub.unlock(pipe=tla.pipes.VECTOR)
+            mutex_addend_ub.unlock(pipe=tla.pipes.VECTOR)
+            mutex_c_ub.unlock(pipe=tla.pipes.VECTOR)
 
-        mutex_result_ub.lock(pipe=tla.arch.MTE3)
+        mutex_result_ub.lock(pipe=tla.pipes.MTE3)
         tla.copy(gm_result, ub_result)
-        mutex_result_ub.unlock(pipe=tla.arch.MTE3)
+        mutex_result_ub.unlock(pipe=tla.pipes.MTE3)
 
         tla.pipe_barrier(tla.pipes.ALL)
 

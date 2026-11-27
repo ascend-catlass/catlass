@@ -326,33 +326,33 @@ def qk_kernel(
                 t_l0b = tla.make_tensor_like(l0b, t_l1b, tla.arch.nZ)
                 t_l0c = tla.make_tensor_like(l0c, gm_c)
 
-                mutex_l1.lock(pipe=tla.arch.MTE2)
+                mutex_l1.lock(pipe=tla.pipes.MTE2)
                 tla.copy(t_l1a, gm_a)
                 tla.copy(t_l1b, gm_b)
                 tla.copy(t_l1sa, gm_sa)
                 tla.copy(t_l1sb, gm_sb)
-                mutex_l1.unlock(pipe=tla.arch.MTE2)
+                mutex_l1.unlock(pipe=tla.pipes.MTE2)
 
-                mutex_l1.lock(pipe=tla.arch.MTE1)
-                mutex_l0.lock(pipe=tla.arch.MTE1)
+                mutex_l1.lock(pipe=tla.pipes.MTE1)
+                mutex_l0.lock(pipe=tla.pipes.MTE1)
                 tla.copy(t_l0a, t_l1a, scale=t_l1sa)
                 tla.copy(t_l0b, t_l1b, scale=t_l1sb)
-                mutex_l0.unlock(pipe=tla.arch.MTE1)
-                mutex_l1.unlock(pipe=tla.arch.MTE1)
+                mutex_l0.unlock(pipe=tla.pipes.MTE1)
+                mutex_l1.unlock(pipe=tla.pipes.MTE1)
 
-                mutex_l0.lock(pipe=tla.arch.CUBE)
-                mutex_l0c.lock(pipe=tla.arch.CUBE)
+                mutex_l0.lock(pipe=tla.pipes.CUBE)
+                mutex_l0c.lock(pipe=tla.pipes.CUBE)
                 tla.mmad_mx(t_l0c, t_l0a, t_l0b, init_c=True, unit_flag=0b11)
-                mutex_l0c.unlock(pipe=tla.arch.CUBE)
-                mutex_l0.unlock(pipe=tla.arch.CUBE)
+                mutex_l0c.unlock(pipe=tla.pipes.CUBE)
+                mutex_l0.unlock(pipe=tla.pipes.CUBE)
 
-                mutex_l0c.lock(pipe=tla.arch.FIX)
+                mutex_l0c.lock(pipe=tla.pipes.FIX)
                 tla.copy(
                     gm_c,
                     t_l0c,
                     tla.params.CopyL0C2DstParams(unit_flag=0b11),
                 )
-                mutex_l0c.unlock(pipe=tla.arch.FIX)
+                mutex_l0c.unlock(pipe=tla.pipes.FIX)
 
 
 @tla.kernel
@@ -461,30 +461,30 @@ def qk2_kernel(
                     t_l0a = tla.make_tensor_like(l0a, t_l1a, tla.arch.zN)
                     t_l0b = tla.make_tensor_like(l0b, t_l1b, tla.arch.nZ)
                     t_l0c = tla.make_tensor_like(l0c, gm_c)
-                    mutex_l1.lock(pipe=tla.arch.MTE2)
+                    mutex_l1.lock(pipe=tla.pipes.MTE2)
                     tla.copy(t_l1a, gm_a)
                     tla.copy(t_l1b, gm_b)
                     tla.copy(t_l1sa, gm_sa)
                     tla.copy(t_l1sb, gm_sb)
-                    mutex_l1.unlock(pipe=tla.arch.MTE2)
-                    mutex_l1.lock(pipe=tla.arch.MTE1)
-                    mutex_l0.lock(pipe=tla.arch.MTE1)
+                    mutex_l1.unlock(pipe=tla.pipes.MTE2)
+                    mutex_l1.lock(pipe=tla.pipes.MTE1)
+                    mutex_l0.lock(pipe=tla.pipes.MTE1)
                     tla.copy(t_l0a, t_l1a, scale=t_l1sa)
                     tla.copy(t_l0b, t_l1b, scale=t_l1sb)
-                    mutex_l0.unlock(pipe=tla.arch.MTE1)
-                    mutex_l1.unlock(pipe=tla.arch.MTE1)
-                    mutex_l0.lock(pipe=tla.arch.CUBE)
-                    mutex_l0c.lock(pipe=tla.arch.CUBE)
+                    mutex_l0.unlock(pipe=tla.pipes.MTE1)
+                    mutex_l1.unlock(pipe=tla.pipes.MTE1)
+                    mutex_l0.lock(pipe=tla.pipes.CUBE)
+                    mutex_l0c.lock(pipe=tla.pipes.CUBE)
                     tla.mmad_mx(t_l0c, t_l0a, t_l0b, init_c=True, unit_flag=0b11)
-                    mutex_l0c.unlock(pipe=tla.arch.CUBE)
-                    mutex_l0.unlock(pipe=tla.arch.CUBE)
-                    mutex_l0c.lock(pipe=tla.arch.FIX)
+                    mutex_l0c.unlock(pipe=tla.pipes.CUBE)
+                    mutex_l0.unlock(pipe=tla.pipes.CUBE)
+                    mutex_l0c.lock(pipe=tla.pipes.FIX)
                     tla.copy(
                         gm_c,
                         t_l0c,
                         tla.params.CopyL0C2DstParams(unit_flag=0b11),
                     )
-                    mutex_l0c.unlock(pipe=tla.arch.FIX)
+                    mutex_l0c.unlock(pipe=tla.pipes.FIX)
             else:
                 gm_a = tla.tile_view(
                     q_row1,
@@ -526,30 +526,30 @@ def qk2_kernel(
                     t_l0a = tla.make_tensor_like(l0a, t_l1a, tla.arch.zN)
                     t_l0b = tla.make_tensor_like(l0b, t_l1b, tla.arch.nZ)
                     t_l0c = tla.make_tensor_like(l0c, gm_c)
-                    mutex_l1.lock(pipe=tla.arch.MTE2)
+                    mutex_l1.lock(pipe=tla.pipes.MTE2)
                     tla.copy(t_l1a, gm_a)
                     tla.copy(t_l1b, gm_b)
                     tla.copy(t_l1sa, gm_sa)
                     tla.copy(t_l1sb, gm_sb)
-                    mutex_l1.unlock(pipe=tla.arch.MTE2)
-                    mutex_l1.lock(pipe=tla.arch.MTE1)
-                    mutex_l0.lock(pipe=tla.arch.MTE1)
+                    mutex_l1.unlock(pipe=tla.pipes.MTE2)
+                    mutex_l1.lock(pipe=tla.pipes.MTE1)
+                    mutex_l0.lock(pipe=tla.pipes.MTE1)
                     tla.copy(t_l0a, t_l1a, scale=t_l1sa)
                     tla.copy(t_l0b, t_l1b, scale=t_l1sb)
-                    mutex_l0.unlock(pipe=tla.arch.MTE1)
-                    mutex_l1.unlock(pipe=tla.arch.MTE1)
-                    mutex_l0.lock(pipe=tla.arch.CUBE)
-                    mutex_l0c.lock(pipe=tla.arch.CUBE)
+                    mutex_l0.unlock(pipe=tla.pipes.MTE1)
+                    mutex_l1.unlock(pipe=tla.pipes.MTE1)
+                    mutex_l0.lock(pipe=tla.pipes.CUBE)
+                    mutex_l0c.lock(pipe=tla.pipes.CUBE)
                     tla.mmad_mx(t_l0c, t_l0a, t_l0b, init_c=True, unit_flag=0b11)
-                    mutex_l0c.unlock(pipe=tla.arch.CUBE)
-                    mutex_l0.unlock(pipe=tla.arch.CUBE)
-                    mutex_l0c.lock(pipe=tla.arch.FIX)
+                    mutex_l0c.unlock(pipe=tla.pipes.CUBE)
+                    mutex_l0.unlock(pipe=tla.pipes.CUBE)
+                    mutex_l0c.lock(pipe=tla.pipes.FIX)
                     tla.copy(
                         gm_c,
                         t_l0c,
                         tla.params.CopyL0C2DstParams(unit_flag=0b11),
                     )
-                    mutex_l0c.unlock(pipe=tla.arch.FIX)
+                    mutex_l0c.unlock(pipe=tla.pipes.FIX)
 
 
 @tla.kernel

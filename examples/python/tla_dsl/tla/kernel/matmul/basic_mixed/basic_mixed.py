@@ -62,13 +62,13 @@ def basic_mixed(
     k = lhs.origin_shape[1]
     n = rhs.origin_shape[1]
 
-    mmad_done = tla.flag("mmad_done", tla.arch.CUBE, tla.arch.FIX)
-    l1_loaded = tla.flag("l1_loaded", tla.arch.MTE2, tla.arch.MTE1)
-    l0_loaded = tla.flag("l0_loaded", tla.arch.MTE1, tla.arch.CUBE)
+    mmad_done = tla.flag("mmad_done", tla.pipes.CUBE, tla.pipes.FIX)
+    l1_loaded = tla.flag("l1_loaded", tla.pipes.MTE2, tla.pipes.MTE1)
+    l0_loaded = tla.flag("l0_loaded", tla.pipes.MTE1, tla.pipes.CUBE)
 
-    ub_load_ready = tla.flag("ub_load_ready", tla.arch.VECTOR, tla.arch.MTE2)
-    ub_loaded = tla.flag("ub_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    vec_done = tla.flag("vec_done", tla.arch.VECTOR, tla.arch.MTE3)
+    ub_load_ready = tla.flag("ub_load_ready", tla.pipes.VECTOR, tla.pipes.MTE2)
+    ub_loaded = tla.flag("ub_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    vec_done = tla.flag("vec_done", tla.pipes.VECTOR, tla.pipes.MTE3)
 
     fix_done = tla.cross_flag("fix_done")
 
@@ -123,7 +123,7 @@ def basic_mixed(
             ),
         )
 
-        tla.cross_core_set_flag(fix_done, tla.arch.FIX)
+        tla.cross_core_set_flag(fix_done, tla.pipes.FIX)
         tla.pipe_barrier(tla.pipes.ALL)
 
     with tla.vector():
@@ -149,7 +149,7 @@ def basic_mixed(
         tla.wait_flag(ub_loaded)
 
         ub_c = tla.make_tensor_like(c_ub_ptr, gm_result, tla.arch.RowMajor)
-        tla.cross_core_wait_flag(fix_done, tla.arch.VECTOR)
+        tla.cross_core_wait_flag(fix_done, tla.pipes.VECTOR)
 
         for row_tile_idx in tla.range(0, VECTOR_TILE_M // VECTOR_REG_TILE_M, 1):
             with tla.vec.func(mode="simd"):

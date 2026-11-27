@@ -46,8 +46,8 @@ def shift_op(
     mem_shift: tla.Tensor,
     mem_output: tla.Tensor,
 ) -> None:
-    ub_loaded = tla.flag("ub_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    vec_done = tla.flag("vec_done", tla.arch.VECTOR, tla.arch.MTE3)
+    ub_loaded = tla.flag("ub_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    vec_done = tla.flag("vec_done", tla.pipes.VECTOR, tla.pipes.MTE3)
 
     source_gm = tla.tile_view(mem_source, tla.make_shape(VECTOR_ELE), tla.make_coord(0))
     shift_gm = tla.tile_view(mem_shift, tla.make_shape(VECTOR_ELE), tla.make_coord(0))
@@ -120,20 +120,20 @@ def _shift_vv64_pipeline(
     output_ub: Any,
 ) -> None:
     ready = (
-        tla.flag("vv64_ready_even", tla.arch.MTE2, tla.arch.VECTOR),
-        tla.flag("vv64_ready_odd", tla.arch.MTE2, tla.arch.VECTOR),
+        tla.flag("vv64_ready_even", tla.pipes.MTE2, tla.pipes.VECTOR),
+        tla.flag("vv64_ready_odd", tla.pipes.MTE2, tla.pipes.VECTOR),
     )
     input_free = (
-        tla.flag("vv64_input_free_even", tla.arch.VECTOR, tla.arch.MTE2),
-        tla.flag("vv64_input_free_odd", tla.arch.VECTOR, tla.arch.MTE2),
+        tla.flag("vv64_input_free_even", tla.pipes.VECTOR, tla.pipes.MTE2),
+        tla.flag("vv64_input_free_odd", tla.pipes.VECTOR, tla.pipes.MTE2),
     )
     done = (
-        tla.flag("vv64_done_even", tla.arch.VECTOR, tla.arch.MTE3),
-        tla.flag("vv64_done_odd", tla.arch.VECTOR, tla.arch.MTE3),
+        tla.flag("vv64_done_even", tla.pipes.VECTOR, tla.pipes.MTE3),
+        tla.flag("vv64_done_odd", tla.pipes.VECTOR, tla.pipes.MTE3),
     )
     output_free = (
-        tla.flag("vv64_output_free_even", tla.arch.MTE3, tla.arch.VECTOR),
-        tla.flag("vv64_output_free_odd", tla.arch.MTE3, tla.arch.VECTOR),
+        tla.flag("vv64_output_free_even", tla.pipes.MTE3, tla.pipes.VECTOR),
+        tla.flag("vv64_output_free_odd", tla.pipes.MTE3, tla.pipes.VECTOR),
     )
     tile_count = (VECTOR_ELE + _VV64_TILE_ELE - 1) // _VV64_TILE_ELE
     registers_per_tile = _VV64_TILE_ELE // VL_ELE

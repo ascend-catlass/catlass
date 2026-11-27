@@ -84,12 +84,12 @@ def dynamic_quant_kernel(
             gm_row_deq = tla.make_tensor(gm_deq + row_offset, row_layout)
             gm_row_scale = tla.make_tensor(gm_scale + row.to(tla.Int64), scale_layout)
 
-            input_slot.lock(pipe=tla.arch.MTE2)
+            input_slot.lock(pipe=tla.pipes.MTE2)
             tla.copy(ub_x, gm_row_x)
-            input_slot.unlock(pipe=tla.arch.MTE2)
+            input_slot.unlock(pipe=tla.pipes.MTE2)
 
-            input_slot.lock(pipe=tla.arch.VECTOR)
-            output_slot.lock(pipe=tla.arch.VECTOR)
+            input_slot.lock(pipe=tla.pipes.VECTOR)
+            output_slot.lock(pipe=tla.pipes.VECTOR)
             with tla.vec.func(mode="simd"):
                 mask = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
 
@@ -135,14 +135,14 @@ def dynamic_quant_kernel(
                         tla.mul(q_float, scale_vec, mask=mask)
                     )
 
-            output_slot.unlock(pipe=tla.arch.VECTOR)
-            input_slot.unlock(pipe=tla.arch.VECTOR)
+            output_slot.unlock(pipe=tla.pipes.VECTOR)
+            input_slot.unlock(pipe=tla.pipes.VECTOR)
 
-            output_slot.lock(pipe=tla.arch.MTE3)
+            output_slot.lock(pipe=tla.pipes.MTE3)
             tla.copy(gm_row_q, ub_q)
             tla.copy(gm_row_deq, ub_deq)
             tla.copy(gm_row_scale, ub_scale)
-            output_slot.unlock(pipe=tla.arch.MTE3)
+            output_slot.unlock(pipe=tla.pipes.MTE3)
 
 
 # ======================================================================================

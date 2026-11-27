@@ -280,19 +280,19 @@ mutex_l1a = tla.mutex(resource="l1a", id=0)
 # ...
 
 # 启动 MTE2 源流水的数据搬运 (GM->L1A)
-mutex_l1a.lock(pipe=tla.arch.MTE2)
+mutex_l1a.lock(pipe=tla.pipes.MTE2)
 tla.copy(l1_a, gm_a_by_l1)
-mutex_l1a.unlock(pipe=tla.arch.MTE2)
+mutex_l1a.unlock(pipe=tla.pipes.MTE2)
 
 # ...
 
 # mutext_l1a 释放后（L1A数据准备完成）
 # 可以启动 MTE1 源流水的数据搬运 (L1A->L0A)
-mutex_l1a.lock(pipe=tla.arch.MTE1)
-mutex_l0a.lock(pipe=tla.arch.MTE1)
+mutex_l1a.lock(pipe=tla.pipes.MTE1)
+mutex_l0a.lock(pipe=tla.pipes.MTE1)
 tla.copy(l0_a, l1_a_by_l0)
-mutex_l0a.unlock(pipe=tla.arch.MTE1)
-mutex_l1a.unlock(pipe=tla.arch.MTE1)
+mutex_l0a.unlock(pipe=tla.pipes.MTE1)
+mutex_l1a.unlock(pipe=tla.pipes.MTE1)
 ```
 
 ---

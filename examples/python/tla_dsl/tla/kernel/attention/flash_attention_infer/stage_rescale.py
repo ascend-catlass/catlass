@@ -64,11 +64,11 @@ def _rescale_stage(
         # SubCoreCompute
         if rowNumCurSubCore == c0:
             if ubOTmpBufId == c0:
-                tla.cross_core_wait_flag(sync.ub_otmp_cross_ready_0, tla.arch.VECTOR)
-                tla.cross_core_set_flag(sync.ub_otmp_cross_ready_0, tla.arch.VECTOR)
+                tla.cross_core_wait_flag(sync.ub_otmp_cross_ready_0, tla.pipes.VECTOR)
+                tla.cross_core_set_flag(sync.ub_otmp_cross_ready_0, tla.pipes.VECTOR)
             else:
-                tla.cross_core_wait_flag(sync.ub_otmp_cross_ready_1, tla.arch.VECTOR)
-                tla.cross_core_set_flag(sync.ub_otmp_cross_ready_1, tla.arch.VECTOR)
+                tla.cross_core_wait_flag(sync.ub_otmp_cross_ready_1, tla.pipes.VECTOR)
+                tla.cross_core_set_flag(sync.ub_otmp_cross_ready_1, tla.pipes.VECTOR)
         else:
             # SubCoreCompute 标量参数
             mDe = rowNumCurSubCore
@@ -97,9 +97,9 @@ def _rescale_stage(
             )
             # 等 PV fixpipe 完成
             if ubOTmpBufId == c0:
-                tla.cross_core_wait_flag(sync.ub_otmp_cross_ready_0, tla.arch.VECTOR)
+                tla.cross_core_wait_flag(sync.ub_otmp_cross_ready_0, tla.pipes.VECTOR)
             else:
-                tla.cross_core_wait_flag(sync.ub_otmp_cross_ready_1, tla.arch.VECTOR)
+                tla.cross_core_wait_flag(sync.ub_otmp_cross_ready_1, tla.pipes.VECTOR)
             tla.wait_flag(sync.mte3_ready_rescale)
             # 四分支 rescale
             if isFirstKvSTileDe and isLastKvSTileDe:
@@ -348,9 +348,9 @@ def _rescale_stage(
                             add_reg_0 = tla.add(mul_reg_0, lo_reg_0, mask=pregFullDee3)
                             ub_go_0.store(add_reg_0, mask=pregFullDee3)
             if ubOTmpBufId == c0:
-                tla.cross_core_set_flag(sync.ub_otmp_cross_ready_0, tla.arch.VECTOR)
+                tla.cross_core_set_flag(sync.ub_otmp_cross_ready_0, tla.pipes.VECTOR)
             else:
-                tla.cross_core_set_flag(sync.ub_otmp_cross_ready_1, tla.arch.VECTOR)
+                tla.cross_core_set_flag(sync.ub_otmp_cross_ready_1, tla.pipes.VECTOR)
             if isLastKvSTileDe:
                 if nDe > 64:
                     with tla.vec.func(mode="simd"):
@@ -457,10 +457,10 @@ def _drain(sync):
         tla.wait_flag(sync.l0c_available_1)
         tla.wait_flag(sync.l0c_available_2)
         tla.wait_flag(sync.l0c_available_3)
-        tla.cross_core_wait_flag(sync.ub_s_cross_ready_0, tla.arch.FIX)
-        tla.cross_core_wait_flag(sync.ub_s_cross_ready_1, tla.arch.FIX)
-        tla.cross_core_wait_flag(sync.ub_otmp_cross_ready_0, tla.arch.FIX)
-        tla.cross_core_wait_flag(sync.ub_otmp_cross_ready_1, tla.arch.FIX)
+        tla.cross_core_wait_flag(sync.ub_s_cross_ready_0, tla.pipes.FIX)
+        tla.cross_core_wait_flag(sync.ub_s_cross_ready_1, tla.pipes.FIX)
+        tla.cross_core_wait_flag(sync.ub_otmp_cross_ready_0, tla.pipes.FIX)
+        tla.cross_core_wait_flag(sync.ub_otmp_cross_ready_1, tla.pipes.FIX)
         tla.pipe_barrier(tla.pipes.ALL)
     with tla.vector():
         tla.wait_flag(sync.vec_ready_mte2_0)
@@ -470,7 +470,7 @@ def _drain(sync):
         tla.wait_flag(sync.ub_p_available_0)
         tla.wait_flag(sync.ub_p_available_1)
         tla.wait_flag(sync.mte3_ready_rescale)
-        tla.cross_core_wait_flag(sync.ub_p_cross_ready_0, tla.arch.MTE3)
-        tla.cross_core_wait_flag(sync.ub_p_cross_ready_1, tla.arch.MTE3)
-        tla.cross_core_wait_flag(sync.ub_p_cross_ready_2, tla.arch.MTE3)
+        tla.cross_core_wait_flag(sync.ub_p_cross_ready_0, tla.pipes.MTE3)
+        tla.cross_core_wait_flag(sync.ub_p_cross_ready_1, tla.pipes.MTE3)
+        tla.cross_core_wait_flag(sync.ub_p_cross_ready_2, tla.pipes.MTE3)
         tla.pipe_barrier(tla.pipes.ALL)

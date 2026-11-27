@@ -160,7 +160,7 @@ def fused_kernel(
             block_col = block_linear // grid_m
             block_row = block_linear % grid_m
 
-            mtx_l0c.lock(pipe=tla.arch.CUBE)
+            mtx_l0c.lock(pipe=tla.pipes.CUBE)
 
             # ---- prologue: K tile 0 -> L1 stage 0 ----
             gm_a_p = tla.get_tile(
@@ -217,7 +217,7 @@ def fused_kernel(
                 l1sb_gate0,
                 tla.make_layout_with_tag((sk, tn), tla.Float8E8M0, tla.arch.nNMxScale),
             )
-            mtx_l1_0.lock(pipe=tla.arch.MTE2)
+            mtx_l1_0.lock(pipe=tla.pipes.MTE2)
             tla.copy(
                 tla.get_tile(
                     t_l1a0, tla.make_coord(0, 0), tla.make_shape(m_valid, k_valid)
@@ -268,7 +268,7 @@ def fused_kernel(
                     tla.make_coord(k_valid, 0),
                     tla.make_shape(tk - k_valid, n_valid),
                 ).fill(0)
-            mtx_l1_0.unlock(pipe=tla.arch.MTE2)
+            mtx_l1_0.unlock(pipe=tla.pipes.MTE2)
 
             pair_range = tla.range(c0, (k_tiles + 1) // 2, c1)
             for pair in pair_range:
@@ -340,7 +340,7 @@ def fused_kernel(
                             (sk, tn), tla.Float8E8M0, tla.arch.nNMxScale
                         ),
                     )
-                    mtx_l1_1.lock(pipe=tla.arch.MTE2)
+                    mtx_l1_1.lock(pipe=tla.pipes.MTE2)
                     tla.copy(
                         tla.get_tile(
                             t_l1a1,
@@ -405,7 +405,7 @@ def fused_kernel(
                             tla.make_coord(k_valid_o, 0),
                             tla.make_shape(tk - k_valid_o, n_valid_o),
                         ).fill(0)
-                    mtx_l1_1.unlock(pipe=tla.arch.MTE2)
+                    mtx_l1_1.unlock(pipe=tla.pipes.MTE2)
 
                 # compute even from stage 0
                 gm_a_e = tla.get_tile(
@@ -468,7 +468,7 @@ def fused_kernel(
                         (sk, tn), tla.Float8E8M0, tla.arch.nNMxScale
                     ),
                 )
-                mtx_l1_0.lock(pipe=tla.arch.MTE1)
+                mtx_l1_0.lock(pipe=tla.pipes.MTE1)
                 s_a0 = tla.get_tile(t_l1a0_e, tla.make_coord(0, 0), tla.make_shape(tm, tk // 2))
                 s_ba0 = tla.get_tile(t_l1b_act0_e, tla.make_coord(0, 0), tla.make_shape(tk // 2, tn))
                 s_bg0 = tla.get_tile(t_l1b_gate0_e, tla.make_coord(0, 0), tla.make_shape(tk // 2, tn))
@@ -478,15 +478,15 @@ def fused_kernel(
                 t_l0a_0 = tla.make_tensor_like(l0a0, s_a0, tla.arch.zN)
                 t_l0ba_0 = tla.make_tensor_like(l0b_act0, s_ba0, tla.arch.nZ)
                 t_l0bg_0 = tla.make_tensor_like(l0b_gate0, s_bg0, tla.arch.nZ)
-                mtx_l0_0.lock(pipe=tla.arch.MTE1)
+                mtx_l0_0.lock(pipe=tla.pipes.MTE1)
                 tla.copy(t_l0a_0, s_a0, scale=s_sa0)
                 tla.copy(t_l0ba_0, s_ba0, scale=s_sba0)
                 tla.copy(t_l0bg_0, s_bg0, scale=s_sbg0)
-                mtx_l0_0.unlock(pipe=tla.arch.MTE1)
-                mtx_l0_0.lock(pipe=tla.arch.CUBE)
+                mtx_l0_0.unlock(pipe=tla.pipes.MTE1)
+                mtx_l0_0.lock(pipe=tla.pipes.CUBE)
                 tla.mmad_mx(t_l0c_act, t_l0a_0, t_l0ba_0, init_c=(even == c0))
                 tla.mmad_mx(t_l0c_gate, t_l0a_0, t_l0bg_0, init_c=(even == c0))
-                mtx_l0_0.unlock(pipe=tla.arch.CUBE)
+                mtx_l0_0.unlock(pipe=tla.pipes.CUBE)
 
                 s_a1 = tla.get_tile(t_l1a0_e, tla.make_coord(0, tk // 2), tla.make_shape(tm, tk // 2))
                 s_ba1 = tla.get_tile(t_l1b_act0_e, tla.make_coord(tk // 2, 0), tla.make_shape(tk // 2, tn))
@@ -497,16 +497,16 @@ def fused_kernel(
                 t_l0a_1 = tla.make_tensor_like(l0a1, s_a1, tla.arch.zN)
                 t_l0ba_1 = tla.make_tensor_like(l0b_act1, s_ba1, tla.arch.nZ)
                 t_l0bg_1 = tla.make_tensor_like(l0b_gate1, s_bg1, tla.arch.nZ)
-                mtx_l0_1.lock(pipe=tla.arch.MTE1)
+                mtx_l0_1.lock(pipe=tla.pipes.MTE1)
                 tla.copy(t_l0a_1, s_a1, scale=s_sa1)
                 tla.copy(t_l0ba_1, s_ba1, scale=s_sba1)
                 tla.copy(t_l0bg_1, s_bg1, scale=s_sbg1)
-                mtx_l1_0.unlock(pipe=tla.arch.MTE1)
-                mtx_l0_1.unlock(pipe=tla.arch.MTE1)
-                mtx_l0_1.lock(pipe=tla.arch.CUBE)
+                mtx_l1_0.unlock(pipe=tla.pipes.MTE1)
+                mtx_l0_1.unlock(pipe=tla.pipes.MTE1)
+                mtx_l0_1.lock(pipe=tla.pipes.CUBE)
                 tla.mmad_mx(t_l0c_act, t_l0a_1, t_l0ba_1, init_c=False)
                 tla.mmad_mx(t_l0c_gate, t_l0a_1, t_l0bg_1, init_c=False)
-                mtx_l0_1.unlock(pipe=tla.arch.CUBE)
+                mtx_l0_1.unlock(pipe=tla.pipes.CUBE)
 
                 # prefetch next even -> stage 0
                 if (even + 2) < k_tiles:
@@ -573,7 +573,7 @@ def fused_kernel(
                             (sk, tn), tla.Float8E8M0, tla.arch.nNMxScale
                         ),
                     )
-                    mtx_l1_0.lock(pipe=tla.arch.MTE2)
+                    mtx_l1_0.lock(pipe=tla.pipes.MTE2)
                     tla.copy(
                         tla.get_tile(
                             t_l1a0_n,
@@ -638,7 +638,7 @@ def fused_kernel(
                             tla.make_coord(k_valid_n, 0),
                             tla.make_shape(tk - k_valid_n, n_valid_n),
                         ).fill(0)
-                    mtx_l1_0.unlock(pipe=tla.arch.MTE2)
+                    mtx_l1_0.unlock(pipe=tla.pipes.MTE2)
 
                 # compute odd from stage 1
                 if odd < k_tiles:
@@ -702,7 +702,7 @@ def fused_kernel(
                             (sk, tn), tla.Float8E8M0, tla.arch.nNMxScale
                         ),
                     )
-                    mtx_l1_1.lock(pipe=tla.arch.MTE1)
+                    mtx_l1_1.lock(pipe=tla.pipes.MTE1)
                     o_a0 = tla.get_tile(t_l1a1_o, tla.make_coord(0, 0), tla.make_shape(tm, tk // 2))
                     o_ba0 = tla.get_tile(t_l1b_act1_o, tla.make_coord(0, 0), tla.make_shape(tk // 2, tn))
                     o_bg0 = tla.get_tile(t_l1b_gate1_o, tla.make_coord(0, 0), tla.make_shape(tk // 2, tn))
@@ -712,15 +712,15 @@ def fused_kernel(
                     t_l0a_o0 = tla.make_tensor_like(l0a0, o_a0, tla.arch.zN)
                     t_l0ba_o0 = tla.make_tensor_like(l0b_act0, o_ba0, tla.arch.nZ)
                     t_l0bg_o0 = tla.make_tensor_like(l0b_gate0, o_bg0, tla.arch.nZ)
-                    mtx_l0_0.lock(pipe=tla.arch.MTE1)
+                    mtx_l0_0.lock(pipe=tla.pipes.MTE1)
                     tla.copy(t_l0a_o0, o_a0, scale=o_sa0)
                     tla.copy(t_l0ba_o0, o_ba0, scale=o_sba0)
                     tla.copy(t_l0bg_o0, o_bg0, scale=o_sbg0)
-                    mtx_l0_0.unlock(pipe=tla.arch.MTE1)
-                    mtx_l0_0.lock(pipe=tla.arch.CUBE)
+                    mtx_l0_0.unlock(pipe=tla.pipes.MTE1)
+                    mtx_l0_0.lock(pipe=tla.pipes.CUBE)
                     tla.mmad_mx(t_l0c_act, t_l0a_o0, t_l0ba_o0, init_c=False)
                     tla.mmad_mx(t_l0c_gate, t_l0a_o0, t_l0bg_o0, init_c=False)
-                    mtx_l0_0.unlock(pipe=tla.arch.CUBE)
+                    mtx_l0_0.unlock(pipe=tla.pipes.CUBE)
 
                     o_a1 = tla.get_tile(t_l1a1_o, tla.make_coord(0, tk // 2), tla.make_shape(tm, tk // 2))
                     o_ba1 = tla.get_tile(t_l1b_act1_o, tla.make_coord(tk // 2, 0), tla.make_shape(tk // 2, tn))
@@ -731,18 +731,18 @@ def fused_kernel(
                     t_l0a_o1 = tla.make_tensor_like(l0a1, o_a1, tla.arch.zN)
                     t_l0ba_o1 = tla.make_tensor_like(l0b_act1, o_ba1, tla.arch.nZ)
                     t_l0bg_o1 = tla.make_tensor_like(l0b_gate1, o_bg1, tla.arch.nZ)
-                    mtx_l0_1.lock(pipe=tla.arch.MTE1)
+                    mtx_l0_1.lock(pipe=tla.pipes.MTE1)
                     tla.copy(t_l0a_o1, o_a1, scale=o_sa1)
                     tla.copy(t_l0ba_o1, o_ba1, scale=o_sba1)
                     tla.copy(t_l0bg_o1, o_bg1, scale=o_sbg1)
-                    mtx_l1_1.unlock(pipe=tla.arch.MTE1)
-                    mtx_l0_1.unlock(pipe=tla.arch.MTE1)
-                    mtx_l0_1.lock(pipe=tla.arch.CUBE)
+                    mtx_l1_1.unlock(pipe=tla.pipes.MTE1)
+                    mtx_l0_1.unlock(pipe=tla.pipes.MTE1)
+                    mtx_l0_1.lock(pipe=tla.pipes.CUBE)
                     tla.mmad_mx(t_l0c_act, t_l0a_o1, t_l0ba_o1, init_c=False)
                     tla.mmad_mx(t_l0c_gate, t_l0a_o1, t_l0bg_o1, init_c=False)
-                    mtx_l0_1.unlock(pipe=tla.arch.CUBE)
+                    mtx_l0_1.unlock(pipe=tla.pipes.CUBE)
 
-            mtx_l0c.unlock(pipe=tla.arch.CUBE)
+            mtx_l0c.unlock(pipe=tla.pipes.CUBE)
 
             ub_act_cube = tla.make_tensor_like(ub_act, t_l0c_act, tla.arch.RowMajor)
             ub_gate_cube = tla.make_tensor_like(ub_gate, t_l0c_gate, tla.arch.RowMajor)
@@ -755,12 +755,12 @@ def fused_kernel(
                 l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M
             )
             if block_linear != tla.arch.block_idx():
-                tla.cross_core_wait_flag(ub_free, tla.arch.FIX)
-            mtx_l0c.lock(pipe=tla.arch.FIX)
+                tla.cross_core_wait_flag(ub_free, tla.pipes.FIX)
+            mtx_l0c.lock(pipe=tla.pipes.FIX)
             tla.copy(ub_act_cube, t_l0c_act, l0c2ub)
             tla.copy(ub_gate_cube, t_l0c_gate, l0c2ub)
-            mtx_l0c.unlock(pipe=tla.arch.FIX)
-            tla.cross_core_set_flag(ub_ready, tla.arch.FIX)
+            mtx_l0c.unlock(pipe=tla.pipes.FIX)
+            tla.cross_core_set_flag(ub_ready, tla.pipes.FIX)
 
     # =====================================================================
     # Vector: bf16 RNE -> SwiGLU -> MX quant
@@ -779,7 +779,7 @@ def fused_kernel(
             block_row = block_linear % grid_m
             out_row = block_row * tm + sub_idx * half
 
-            tla.cross_core_wait_flag(ub_ready, tla.arch.VECTOR)
+            tla.cross_core_wait_flag(ub_ready, tla.pipes.VECTOR)
 
             gm_b_ref = tla.make_tensor(
                 gm_b.ptr,
@@ -817,7 +817,7 @@ def fused_kernel(
             if rows > 0:
                 if rows > half:
                     rows = half
-                mtx_ub_out.lock(pipe=tla.arch.VECTOR)
+                mtx_ub_out.lock(pipe=tla.pipes.VECTOR)
                 gm_y_cols = tn // 2 if out_fp4 else tn // 4
                 gm_y_t = tla.get_tile(
                     gm_y,
@@ -1362,12 +1362,12 @@ def fused_kernel(
                             )
                     tla.pipe_barrier(tla.pipes.ALL)
 
-                mtx_ub_out.unlock(pipe=tla.arch.VECTOR)
-                mtx_ub_out.lock(pipe=tla.arch.MTE3)
+                mtx_ub_out.unlock(pipe=tla.pipes.VECTOR)
+                mtx_ub_out.lock(pipe=tla.pipes.MTE3)
                 tla.copy(gm_y_t, ub_y_half)
                 tla.copy(gm_sy_t, ub_sy_half)
-                mtx_ub_out.unlock(pipe=tla.arch.MTE3)
-            tla.cross_core_set_flag(ub_free, tla.arch.VECTOR)
+                mtx_ub_out.unlock(pipe=tla.pipes.MTE3)
+            tla.cross_core_set_flag(ub_free, tla.pipes.VECTOR)
 
 
 @tla.kernel
@@ -1446,7 +1446,7 @@ def mm_partial(
             block_row = tile_lin % grid_m
             kb_local = split_idx * per
 
-            mtx_p_l0c.lock(pipe=tla.arch.CUBE)
+            mtx_p_l0c.lock(pipe=tla.pipes.CUBE)
 
             # ---- prologue: K tile 0 -> L1 stage 0 ----
             gm_a_p = tla.get_tile(
@@ -1503,7 +1503,7 @@ def mm_partial(
                 l1sb_gate0,
                 tla.make_layout_with_tag((sk, tn), tla.Float8E8M0, tla.arch.nNMxScale),
             )
-            mtx_p_l1_0.lock(pipe=tla.arch.MTE2)
+            mtx_p_l1_0.lock(pipe=tla.pipes.MTE2)
             tla.copy(
                 tla.get_tile(
                     t_l1a0, tla.make_coord(0, 0), tla.make_shape(m_valid, k_valid)
@@ -1554,7 +1554,7 @@ def mm_partial(
                     tla.make_coord(k_valid, 0),
                     tla.make_shape(tk - k_valid, n_valid),
                 ).fill(0)
-            mtx_p_l1_0.unlock(pipe=tla.arch.MTE2)
+            mtx_p_l1_0.unlock(pipe=tla.pipes.MTE2)
 
             pair_range = tla.range(c0, (per + 1) // 2, c1)
             for pair in pair_range:
@@ -1626,7 +1626,7 @@ def mm_partial(
                             (sk, tn), tla.Float8E8M0, tla.arch.nNMxScale
                         ),
                     )
-                    mtx_p_l1_1.lock(pipe=tla.arch.MTE2)
+                    mtx_p_l1_1.lock(pipe=tla.pipes.MTE2)
                     tla.copy(
                         tla.get_tile(
                             t_l1a1,
@@ -1691,7 +1691,7 @@ def mm_partial(
                             tla.make_coord(k_valid_o, 0),
                             tla.make_shape(tk - k_valid_o, n_valid_o),
                         ).fill(0)
-                    mtx_p_l1_1.unlock(pipe=tla.arch.MTE2)
+                    mtx_p_l1_1.unlock(pipe=tla.pipes.MTE2)
 
                 # compute even from stage 0
                 gm_a_e = tla.get_tile(
@@ -1754,7 +1754,7 @@ def mm_partial(
                         (sk, tn), tla.Float8E8M0, tla.arch.nNMxScale
                     ),
                 )
-                mtx_p_l1_0.lock(pipe=tla.arch.MTE1)
+                mtx_p_l1_0.lock(pipe=tla.pipes.MTE1)
                 s_a0 = tla.get_tile(t_l1a0_e, tla.make_coord(0, 0), tla.make_shape(tm, tk // 2))
                 s_ba0 = tla.get_tile(t_l1b_act0_e, tla.make_coord(0, 0), tla.make_shape(tk // 2, tn))
                 s_bg0 = tla.get_tile(t_l1b_gate0_e, tla.make_coord(0, 0), tla.make_shape(tk // 2, tn))
@@ -1764,15 +1764,15 @@ def mm_partial(
                 t_l0a_0 = tla.make_tensor_like(l0a0, s_a0, tla.arch.zN)
                 t_l0ba_0 = tla.make_tensor_like(l0b_act0, s_ba0, tla.arch.nZ)
                 t_l0bg_0 = tla.make_tensor_like(l0b_gate0, s_bg0, tla.arch.nZ)
-                mtx_p_l0_0.lock(pipe=tla.arch.MTE1)
+                mtx_p_l0_0.lock(pipe=tla.pipes.MTE1)
                 tla.copy(t_l0a_0, s_a0, scale=s_sa0)
                 tla.copy(t_l0ba_0, s_ba0, scale=s_sba0)
                 tla.copy(t_l0bg_0, s_bg0, scale=s_sbg0)
-                mtx_p_l0_0.unlock(pipe=tla.arch.MTE1)
-                mtx_p_l0_0.lock(pipe=tla.arch.CUBE)
+                mtx_p_l0_0.unlock(pipe=tla.pipes.MTE1)
+                mtx_p_l0_0.lock(pipe=tla.pipes.CUBE)
                 tla.mmad_mx(t_l0c_act, t_l0a_0, t_l0ba_0, init_c=(even == kb_local))
                 tla.mmad_mx(t_l0c_gate, t_l0a_0, t_l0bg_0, init_c=(even == kb_local))
-                mtx_p_l0_0.unlock(pipe=tla.arch.CUBE)
+                mtx_p_l0_0.unlock(pipe=tla.pipes.CUBE)
 
                 s_a1 = tla.get_tile(t_l1a0_e, tla.make_coord(0, tk // 2), tla.make_shape(tm, tk // 2))
                 s_ba1 = tla.get_tile(t_l1b_act0_e, tla.make_coord(tk // 2, 0), tla.make_shape(tk // 2, tn))
@@ -1783,16 +1783,16 @@ def mm_partial(
                 t_l0a_1 = tla.make_tensor_like(l0a1, s_a1, tla.arch.zN)
                 t_l0ba_1 = tla.make_tensor_like(l0b_act1, s_ba1, tla.arch.nZ)
                 t_l0bg_1 = tla.make_tensor_like(l0b_gate1, s_bg1, tla.arch.nZ)
-                mtx_p_l0_1.lock(pipe=tla.arch.MTE1)
+                mtx_p_l0_1.lock(pipe=tla.pipes.MTE1)
                 tla.copy(t_l0a_1, s_a1, scale=s_sa1)
                 tla.copy(t_l0ba_1, s_ba1, scale=s_sba1)
                 tla.copy(t_l0bg_1, s_bg1, scale=s_sbg1)
-                mtx_p_l1_0.unlock(pipe=tla.arch.MTE1)
-                mtx_p_l0_1.unlock(pipe=tla.arch.MTE1)
-                mtx_p_l0_1.lock(pipe=tla.arch.CUBE)
+                mtx_p_l1_0.unlock(pipe=tla.pipes.MTE1)
+                mtx_p_l0_1.unlock(pipe=tla.pipes.MTE1)
+                mtx_p_l0_1.lock(pipe=tla.pipes.CUBE)
                 tla.mmad_mx(t_l0c_act, t_l0a_1, t_l0ba_1, init_c=False)
                 tla.mmad_mx(t_l0c_gate, t_l0a_1, t_l0bg_1, init_c=False)
-                mtx_p_l0_1.unlock(pipe=tla.arch.CUBE)
+                mtx_p_l0_1.unlock(pipe=tla.pipes.CUBE)
 
                 # prefetch next even -> stage 0
                 if (even + 2) < kb_local + per:
@@ -1859,7 +1859,7 @@ def mm_partial(
                             (sk, tn), tla.Float8E8M0, tla.arch.nNMxScale
                         ),
                     )
-                    mtx_p_l1_0.lock(pipe=tla.arch.MTE2)
+                    mtx_p_l1_0.lock(pipe=tla.pipes.MTE2)
                     tla.copy(
                         tla.get_tile(
                             t_l1a0_n,
@@ -1924,7 +1924,7 @@ def mm_partial(
                             tla.make_coord(k_valid_n, 0),
                             tla.make_shape(tk - k_valid_n, n_valid_n),
                         ).fill(0)
-                    mtx_p_l1_0.unlock(pipe=tla.arch.MTE2)
+                    mtx_p_l1_0.unlock(pipe=tla.pipes.MTE2)
 
                 # compute odd from stage 1
                 if odd < kb_local + per:
@@ -1988,7 +1988,7 @@ def mm_partial(
                             (sk, tn), tla.Float8E8M0, tla.arch.nNMxScale
                         ),
                     )
-                    mtx_p_l1_1.lock(pipe=tla.arch.MTE1)
+                    mtx_p_l1_1.lock(pipe=tla.pipes.MTE1)
                     o_a0 = tla.get_tile(t_l1a1_o, tla.make_coord(0, 0), tla.make_shape(tm, tk // 2))
                     o_ba0 = tla.get_tile(t_l1b_act1_o, tla.make_coord(0, 0), tla.make_shape(tk // 2, tn))
                     o_bg0 = tla.get_tile(t_l1b_gate1_o, tla.make_coord(0, 0), tla.make_shape(tk // 2, tn))
@@ -1998,15 +1998,15 @@ def mm_partial(
                     t_l0a_o0 = tla.make_tensor_like(l0a0, o_a0, tla.arch.zN)
                     t_l0ba_o0 = tla.make_tensor_like(l0b_act0, o_ba0, tla.arch.nZ)
                     t_l0bg_o0 = tla.make_tensor_like(l0b_gate0, o_bg0, tla.arch.nZ)
-                    mtx_p_l0_0.lock(pipe=tla.arch.MTE1)
+                    mtx_p_l0_0.lock(pipe=tla.pipes.MTE1)
                     tla.copy(t_l0a_o0, o_a0, scale=o_sa0)
                     tla.copy(t_l0ba_o0, o_ba0, scale=o_sba0)
                     tla.copy(t_l0bg_o0, o_bg0, scale=o_sbg0)
-                    mtx_p_l0_0.unlock(pipe=tla.arch.MTE1)
-                    mtx_p_l0_0.lock(pipe=tla.arch.CUBE)
+                    mtx_p_l0_0.unlock(pipe=tla.pipes.MTE1)
+                    mtx_p_l0_0.lock(pipe=tla.pipes.CUBE)
                     tla.mmad_mx(t_l0c_act, t_l0a_o0, t_l0ba_o0, init_c=False)
                     tla.mmad_mx(t_l0c_gate, t_l0a_o0, t_l0bg_o0, init_c=False)
-                    mtx_p_l0_0.unlock(pipe=tla.arch.CUBE)
+                    mtx_p_l0_0.unlock(pipe=tla.pipes.CUBE)
 
                     o_a1 = tla.get_tile(t_l1a1_o, tla.make_coord(0, tk // 2), tla.make_shape(tm, tk // 2))
                     o_ba1 = tla.get_tile(t_l1b_act1_o, tla.make_coord(tk // 2, 0), tla.make_shape(tk // 2, tn))
@@ -2017,18 +2017,18 @@ def mm_partial(
                     t_l0a_o1 = tla.make_tensor_like(l0a1, o_a1, tla.arch.zN)
                     t_l0ba_o1 = tla.make_tensor_like(l0b_act1, o_ba1, tla.arch.nZ)
                     t_l0bg_o1 = tla.make_tensor_like(l0b_gate1, o_bg1, tla.arch.nZ)
-                    mtx_p_l0_1.lock(pipe=tla.arch.MTE1)
+                    mtx_p_l0_1.lock(pipe=tla.pipes.MTE1)
                     tla.copy(t_l0a_o1, o_a1, scale=o_sa1)
                     tla.copy(t_l0ba_o1, o_ba1, scale=o_sba1)
                     tla.copy(t_l0bg_o1, o_bg1, scale=o_sbg1)
-                    mtx_p_l1_1.unlock(pipe=tla.arch.MTE1)
-                    mtx_p_l0_1.unlock(pipe=tla.arch.MTE1)
-                    mtx_p_l0_1.lock(pipe=tla.arch.CUBE)
+                    mtx_p_l1_1.unlock(pipe=tla.pipes.MTE1)
+                    mtx_p_l0_1.unlock(pipe=tla.pipes.MTE1)
+                    mtx_p_l0_1.lock(pipe=tla.pipes.CUBE)
                     tla.mmad_mx(t_l0c_act, t_l0a_o1, t_l0ba_o1, init_c=False)
                     tla.mmad_mx(t_l0c_gate, t_l0a_o1, t_l0bg_o1, init_c=False)
-                    mtx_p_l0_1.unlock(pipe=tla.arch.CUBE)
+                    mtx_p_l0_1.unlock(pipe=tla.pipes.CUBE)
 
-            mtx_p_l0c.unlock(pipe=tla.arch.CUBE)
+            mtx_p_l0c.unlock(pipe=tla.pipes.CUBE)
             ca_t = tla.get_tile(
                 gm_ca,
                 tla.make_coord(split_idx * tm + block_row * tm, block_col * tn),
@@ -2039,7 +2039,7 @@ def mm_partial(
                 tla.make_coord(split_idx * tm + block_row * tm, block_col * tn),
                 tla.make_shape(tm, n_valid),
             )
-            mtx_p_l0c.lock(pipe=tla.arch.FIX)
+            mtx_p_l0c.lock(pipe=tla.pipes.FIX)
             tla.copy(
                 ca_t,
                 tla.get_tile(t_l0c_act, tla.make_coord(0, 0), tla.make_shape(tm, n_valid)),
@@ -2048,7 +2048,7 @@ def mm_partial(
                 cg_t,
                 tla.get_tile(t_l0c_gate, tla.make_coord(0, 0), tla.make_shape(tm, n_valid)),
             )
-            mtx_p_l0c.unlock(pipe=tla.arch.FIX)
+            mtx_p_l0c.unlock(pipe=tla.pipes.FIX)
 
 
 @tla.kernel
@@ -2140,7 +2140,7 @@ def reduce_epi(
             if rows > 0:
                 if rows > half:
                     rows = half
-                mtx_r_out.lock(pipe=tla.arch.VECTOR)
+                mtx_r_out.lock(pipe=tla.pipes.VECTOR)
                 gm_y_cols = tn // 2 if out_fp4 else tn // 4
                 gm_y_t = tla.get_tile(
                     gm_y,
@@ -2184,7 +2184,7 @@ def reduce_epi(
                                 tla.make_shape(1, 64),
                             ).store(vzero)
                 for sp in tla.range(c0, SPLIT, c1):
-                    mtx_r_tmp.lock(pipe=tla.arch.MTE2)
+                    mtx_r_tmp.lock(pipe=tla.pipes.MTE2)
                     row0 = sp * tm + out_row
                     tla.copy(
                         ub_tmp_a_half,
@@ -2202,8 +2202,8 @@ def reduce_epi(
                             tla.make_shape(half, tn),
                         ),
                     )
-                    mtx_r_tmp.unlock(pipe=tla.arch.MTE2)
-                    mtx_r_tmp.lock(pipe=tla.arch.VECTOR)
+                    mtx_r_tmp.unlock(pipe=tla.pipes.MTE2)
+                    mtx_r_tmp.lock(pipe=tla.pipes.VECTOR)
                     with tla.vec.func(mode="simd"):
                         for sr in tla.range(c0, half, c1):
                             for sc in tla.range(c0, tn // 64, c1):
@@ -2229,7 +2229,7 @@ def reduce_epi(
                                     tla.make_shape(1, 64),
                                 )
                                 og.store(tla.add(og.load(), vg.load()))
-                    mtx_r_tmp.unlock(pipe=tla.arch.VECTOR)
+                    mtx_r_tmp.unlock(pipe=tla.pipes.VECTOR)
 
                 with tla.vec.func(mode="simd"):
                     m_src = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
@@ -2756,11 +2756,11 @@ def reduce_epi(
                             )
                     tla.pipe_barrier(tla.pipes.ALL)
 
-                mtx_r_out.unlock(pipe=tla.arch.VECTOR)
-                mtx_r_out.lock(pipe=tla.arch.MTE3)
+                mtx_r_out.unlock(pipe=tla.pipes.VECTOR)
+                mtx_r_out.lock(pipe=tla.pipes.MTE3)
                 tla.copy(gm_y_t, ub_y_half)
                 tla.copy(gm_sy_t, ub_sy_half)
-                mtx_r_out.unlock(pipe=tla.arch.MTE3)
+                mtx_r_out.unlock(pipe=tla.pipes.MTE3)
 
 
 # ---------------------------------------------------------------------------

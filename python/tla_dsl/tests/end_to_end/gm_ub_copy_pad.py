@@ -33,7 +33,7 @@ _UB_ELEMS = _ROWS * _DST_COLS
 @tla.kernel
 def gm_ub_pad_then_writeback(gm_src: tla.Tensor, gm_dst: tla.Tensor) -> None:
     ub_ptr = tla.allocate(_UB_ELEMS, tla.Float32, tla.AddressSpace.ub, _ALIGN)
-    loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.MTE3)
+    loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.MTE3)
     with tla.vector():
         ub = tla.make_tensor(
             ub_ptr,

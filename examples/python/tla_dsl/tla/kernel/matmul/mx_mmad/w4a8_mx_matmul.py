@@ -74,15 +74,15 @@ def w4a8_mx_matmul(
     l0a = tla.allocate(tm * tk, tla.Float8E4M3FN, tla.AddressSpace.l0a, 1024)
     l0b = tla.allocate(tk * tn, tla.Float8E4M3FN, tla.AddressSpace.l0b, 1024)
     l0c = tla.allocate(tm * tn, tla.Float32, tla.AddressSpace.l0c, 1024)
-    b4_in_ub = tla.flag("b4_in_ub", tla.arch.MTE2, tla.arch.VECTOR)
-    b8_ready = tla.flag("b8_ready", tla.arch.VECTOR, tla.arch.MTE3)
-    ub_free = tla.flag("ub_free", tla.arch.MTE3, tla.arch.MTE2)
+    b4_in_ub = tla.flag("b4_in_ub", tla.pipes.MTE2, tla.pipes.VECTOR)
+    b8_ready = tla.flag("b8_ready", tla.pipes.VECTOR, tla.pipes.MTE3)
+    ub_free = tla.flag("ub_free", tla.pipes.MTE3, tla.pipes.MTE2)
     l1b_full = tla.cross_flag("l1b_full", mode=4)
     l1b_free = tla.cross_flag("l1b_free", mode=4)
-    a_ready = tla.flag("a_ready", tla.arch.MTE2, tla.arch.MTE1)
-    l0_ready = tla.flag("l0_ready", tla.arch.MTE1, tla.arch.CUBE)
-    l1a_avail = tla.flag("l1a_avail", tla.arch.MTE1, tla.arch.MTE2)
-    l0_avail = tla.flag("l0_avail", tla.arch.CUBE, tla.arch.MTE1)
+    a_ready = tla.flag("a_ready", tla.pipes.MTE2, tla.pipes.MTE1)
+    l0_ready = tla.flag("l0_ready", tla.pipes.MTE1, tla.pipes.CUBE)
+    l1a_avail = tla.flag("l1a_avail", tla.pipes.MTE1, tla.pipes.MTE2)
+    l0_avail = tla.flag("l0_avail", tla.pipes.CUBE, tla.pipes.MTE1)
     ks = 2 if dual else 1
     with tla.vector():
         # The cube loads the actual scales separately; widening preserves them.
@@ -147,10 +147,10 @@ def w4a8_mx_matmul(
                     tla.wait_flag(b8_ready)
                     l1b_half = l1b + kk % 2 * (tk * tn) + 0 * (tn * kn)
                     t_l1b = tla.make_tensor_like(l1b_half, t_ub_b8, tla.arch.zN)
-                    tla.cross_core_wait_flag(l1b_free, tla.arch.MTE3, aiv_id=0)
+                    tla.cross_core_wait_flag(l1b_free, tla.pipes.MTE3, aiv_id=0)
                     tla.copy(t_l1b, t_ub_b8)
                     tla.set_flag(ub_free)
-                    tla.cross_core_set_flag(l1b_full, tla.arch.MTE3, aiv_id=0)
+                    tla.cross_core_set_flag(l1b_full, tla.pipes.MTE3, aiv_id=0)
         if dual:  # noqa: SIM102 -- dual is constexpr, sub_block_idx is runtime.
             if tla.arch.sub_block_idx() == 1:
                 kb_b = tk // 2 // ks
@@ -215,20 +215,20 @@ def w4a8_mx_matmul(
                         t_l1b_b = tla.make_tensor_like(
                             l1b_half_b, t_ub_b8_b, tla.arch.zN
                         )
-                        tla.cross_core_wait_flag(l1b_free, tla.arch.MTE3, aiv_id=1)
+                        tla.cross_core_wait_flag(l1b_free, tla.pipes.MTE3, aiv_id=1)
                         tla.copy(t_l1b_b, t_ub_b8_b)
                         tla.set_flag(ub_free)
-                        tla.cross_core_set_flag(l1b_full, tla.arch.MTE3, aiv_id=1)
+                        tla.cross_core_set_flag(l1b_full, tla.pipes.MTE3, aiv_id=1)
     # Double-buffered L1 lets the vector core widen the next weight tile
     # while the cube consumes the previous tile.
     with tla.cube():
-        tla.cross_core_set_flag(l1b_free, tla.arch.MTE1, aiv_id=0)
+        tla.cross_core_set_flag(l1b_free, tla.pipes.MTE1, aiv_id=0)
         if dual:
-            tla.cross_core_set_flag(l1b_free, tla.arch.MTE1, aiv_id=1)
+            tla.cross_core_set_flag(l1b_free, tla.pipes.MTE1, aiv_id=1)
         if credits >= 2:
-            tla.cross_core_set_flag(l1b_free, tla.arch.MTE1, aiv_id=0)
+            tla.cross_core_set_flag(l1b_free, tla.pipes.MTE1, aiv_id=0)
             if dual:
-                tla.cross_core_set_flag(l1b_free, tla.arch.MTE1, aiv_id=1)
+                tla.cross_core_set_flag(l1b_free, tla.pipes.MTE1, aiv_id=1)
         cblocks = tla.range(tla.arch.block_idx(), total_blocks, tla.arch.block_num())
         for block_linear in cblocks:
             block_row = block_linear // grid_n
@@ -268,15 +268,15 @@ def w4a8_mx_matmul(
                 t_l0a = tla.make_tensor_like(l0a, t_l1a, tla.arch.zN)
                 t_l0b = tla.make_tensor_like(l0b, t_l1b, tla.arch.nZ)
                 tla.wait_flag(l0_avail)
-                tla.cross_core_wait_flag(l1b_full, tla.arch.MTE1, aiv_id=0)
+                tla.cross_core_wait_flag(l1b_full, tla.pipes.MTE1, aiv_id=0)
                 if dual:
-                    tla.cross_core_wait_flag(l1b_full, tla.arch.MTE1, aiv_id=1)
+                    tla.cross_core_wait_flag(l1b_full, tla.pipes.MTE1, aiv_id=1)
                 tla.copy(t_l0a, t_l1a, scale=t_l1sa)
                 tla.copy(t_l0b, t_l1b, scale=t_l1sb)
                 tla.set_flag(l1a_avail)
-                tla.cross_core_set_flag(l1b_free, tla.arch.MTE1, aiv_id=0)
+                tla.cross_core_set_flag(l1b_free, tla.pipes.MTE1, aiv_id=0)
                 if dual:
-                    tla.cross_core_set_flag(l1b_free, tla.arch.MTE1, aiv_id=1)
+                    tla.cross_core_set_flag(l1b_free, tla.pipes.MTE1, aiv_id=1)
                 tla.set_flag(l0_ready)
                 tla.wait_flag(l0_ready)
                 init_c = True if kk == 0 else False  # noqa: SIM210 -- traced TLA control flow.

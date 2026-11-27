@@ -69,9 +69,9 @@ def host_make_tensor_torch_vadd(
     rhs: tla.Tensor,
     out: tla.Tensor,
 ) -> None:
-    ub_load_ready = tla.flag("ub_load_ready", tla.arch.VECTOR, tla.arch.MTE2)
-    ub_loaded = tla.flag("ub_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    vec_done = tla.flag("vec_done", tla.arch.VECTOR, tla.arch.MTE3)
+    ub_load_ready = tla.flag("ub_load_ready", tla.pipes.VECTOR, tla.pipes.MTE2)
+    ub_loaded = tla.flag("ub_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    vec_done = tla.flag("vec_done", tla.pipes.VECTOR, tla.pipes.MTE3)
 
     a_ub_ptr = tla.allocate(UB_TILE_BYTES // 2, tla.Float16, tla.AddressSpace.ub, 256)
     b_ub_ptr = tla.allocate(UB_TILE_BYTES // 2, tla.Float16, tla.AddressSpace.ub, 256)

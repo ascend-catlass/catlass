@@ -413,7 +413,7 @@ def split_qkv_rmsnorm_rope_kernel(
                     cs_ub = cs_bufs[slot]
 
                     # --- MTE2: stage the group ------------------------------
-                    m_row[slot].lock(pipe=tla.arch.MTE2)
+                    m_row[slot].lock(pipe=tla.pipes.MTE2)
                     tla.copy(
                         row_ub,
                         tla.tile_view(gm_input, group_in_shape, tla.make_coord(group)),
@@ -428,12 +428,12 @@ def split_qkv_rmsnorm_rope_kernel(
                             ),
                             tla.tile_view(gm_cache, row_cs_shape, tla.make_coord(pos)),
                         )
-                    m_row[slot].unlock(pipe=tla.arch.MTE2)
+                    m_row[slot].unlock(pipe=tla.pipes.MTE2)
 
                     # --- VECTOR: RMSNorm + RoPE -----------------------------
-                    m_row[slot].lock(pipe=tla.arch.VECTOR)
-                    m_q[slot].lock(pipe=tla.arch.VECTOR)
-                    m_k[slot].lock(pipe=tla.arch.VECTOR)
+                    m_row[slot].lock(pipe=tla.pipes.VECTOR)
+                    m_q[slot].lock(pipe=tla.pipes.VECTOR)
+                    m_k[slot].lock(pipe=tla.pipes.VECTOR)
                     with tla.vec.func(mode="simd"):
                         qw_even, qw_odd, qb_even, qb_odd = _weight_parity(
                             ub_q_weight, ub_q_bias, head_shape
@@ -643,22 +643,22 @@ def split_qkv_rmsnorm_rope_kernel(
                                         sin_even,
                                         sin_odd,
                                     )
-                    m_k[slot].unlock(pipe=tla.arch.VECTOR)
-                    m_q[slot].unlock(pipe=tla.arch.VECTOR)
-                    m_row[slot].unlock(pipe=tla.arch.VECTOR)
+                    m_k[slot].unlock(pipe=tla.pipes.VECTOR)
+                    m_q[slot].unlock(pipe=tla.pipes.VECTOR)
+                    m_row[slot].unlock(pipe=tla.pipes.VECTOR)
 
                     # --- MTE3: write Q / K / V back -------------------------
-                    m_q[slot].lock(pipe=tla.arch.MTE3)
+                    m_q[slot].lock(pipe=tla.pipes.MTE3)
                     tla.copy(
                         tla.tile_view(gm_q, group_q_shape, tla.make_coord(group)), q_ub
                     )
-                    m_q[slot].unlock(pipe=tla.arch.MTE3)
-                    m_k[slot].lock(pipe=tla.arch.MTE3)
+                    m_q[slot].unlock(pipe=tla.pipes.MTE3)
+                    m_k[slot].lock(pipe=tla.pipes.MTE3)
                     tla.copy(
                         tla.tile_view(gm_k, group_kv_shape, tla.make_coord(group)), k_ub
                     )
-                    m_k[slot].unlock(pipe=tla.arch.MTE3)
-                    m_row[slot].lock(pipe=tla.arch.MTE3)
+                    m_k[slot].unlock(pipe=tla.pipes.MTE3)
+                    m_row[slot].lock(pipe=tla.pipes.MTE3)
                     for v_row in tla.range(rows_per_group):
                         tla.copy(
                             tla.tile_view(
@@ -672,7 +672,7 @@ def split_qkv_rmsnorm_rope_kernel(
                                 tla.make_coord(v_row * kv_per_row + v_tile),
                             ),
                         )
-                    m_row[slot].unlock(pipe=tla.arch.MTE3)
+                    m_row[slot].unlock(pipe=tla.pipes.MTE3)
 
         # Drain the group pipeline before slot 0 is reused for the tail rows.
         tla.pipe_barrier(tla.pipes.ALL)

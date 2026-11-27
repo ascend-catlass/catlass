@@ -38,7 +38,7 @@ SIDE = 32
 @tla.kernel
 def vector_writeback(src: tla.Tensor, out: tla.Tensor) -> None:
     ptr = tla.allocate(SIDE * SIDE, src.ptr.dtype, tla.AddressSpace.ub, 256)
-    loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.MTE3)
+    loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.MTE3)
     with tla.vector():
         block = tla.arch.block_idx()
         shape = tla.make_shape(SIDE, SIDE)
@@ -119,9 +119,9 @@ def cube_writeback(
     b0 = tla.allocate(size, dtype, tla.AddressSpace.l0b, 512)
     c0 = tla.allocate(size, acc_dtype, tla.AddressSpace.l0c, 1024)
     q1 = tla.allocate(SIDE, tla.UInt64, tla.AddressSpace.l1, 512)
-    loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.MTE1)
-    staged = tla.flag("staged", tla.arch.MTE1, tla.arch.CUBE)
-    ready = tla.flag("ready", tla.arch.CUBE, tla.arch.FIX)
+    loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.MTE1)
+    staged = tla.flag("staged", tla.pipes.MTE1, tla.pipes.CUBE)
+    ready = tla.flag("ready", tla.pipes.CUBE, tla.pipes.FIX)
     with tla.cube():
         block = tla.arch.block_idx()
         shape = tla.make_shape(SIDE, SIDE)

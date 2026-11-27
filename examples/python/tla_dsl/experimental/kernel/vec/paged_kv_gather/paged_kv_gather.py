@@ -149,7 +149,7 @@ def paged_kv_gather_kernel(
     begin = gid * per
 
     with tla.vector():
-        zero_mtx.lock(pipe=tla.arch.VECTOR)
+        zero_mtx.lock(pipe=tla.pipes.VECTOR)
         with tla.vec.func(mode="simd"):
             for r in tla.range_constexpr(TR):
                 for c in tla.range_constexpr(N_PAD // VL_ELE):
@@ -158,9 +158,9 @@ def paged_kv_gather_kernel(
                         tla.make_shape(1, VL_ELE),
                         tla.make_coord(r, c),
                     ).store(tla.full(0.0, tla.Float32))
-        zero_mtx.unlock(pipe=tla.arch.VECTOR)
-        zero_mtx.lock(pipe=tla.arch.MTE3)
-        zero_mtx.unlock(pipe=tla.arch.MTE3)
+        zero_mtx.unlock(pipe=tla.pipes.VECTOR)
+        zero_mtx.lock(pipe=tla.pipes.MTE3)
+        zero_mtx.unlock(pipe=tla.pipes.MTE3)
 
         for grp in tla.range((per + BUFS - 1) // BUFS):
             for bi in tla.range_constexpr(BUFS):
@@ -190,26 +190,26 @@ def paged_kv_gather_kernel(
                                     tla.Int64
                                 )
                                 src = row * tla.Int64(HD)
-                                mtx[bi].lock(pipe=tla.arch.MTE2)
+                                mtx[bi].lock(pipe=tla.pipes.MTE2)
                                 tla.copy(
                                     ub_k[bi], tla.make_tensor(gm_ck.ptr + src, tile_gm)
                                 )
                                 tla.copy(
                                     ub_v[bi], tla.make_tensor(gm_cv.ptr + src, tile_gm)
                                 )
-                                mtx[bi].unlock(pipe=tla.arch.MTE2)
-                                mtx[bi].lock(pipe=tla.arch.MTE3)
+                                mtx[bi].unlock(pipe=tla.pipes.MTE2)
+                                mtx[bi].lock(pipe=tla.pipes.MTE3)
                                 tla.copy(
                                     tla.make_tensor(gm_ok.ptr + dst, tile_gm), ub_k[bi]
                                 )
                                 tla.copy(
                                     tla.make_tensor(gm_ov.ptr + dst, tile_gm), ub_v[bi]
                                 )
-                                mtx[bi].unlock(pipe=tla.arch.MTE3)
+                                mtx[bi].unlock(pipe=tla.pipes.MTE3)
                             else:
                                 # Tail tile: the rows with ``t0 + r < seq_len[b]``
                                 # are gathered, the remaining lines are zeroed.
-                                mtx[bi].lock(pipe=tla.arch.MTE2)
+                                mtx[bi].lock(pipe=tla.pipes.MTE2)
                                 for r in tla.range_constexpr(TR):
                                     if t0 + r < gm_lens[b]:
                                         row = blk.to(tla.Int64) * tla.Int64(BS) + (
@@ -234,8 +234,8 @@ def paged_kv_gather_kernel(
                                             ub_rv,
                                             tla.make_tensor(gm_cv.ptr + src, row_gm),
                                         )
-                                mtx[bi].unlock(pipe=tla.arch.MTE2)
-                                mtx[bi].lock(pipe=tla.arch.MTE3)
+                                mtx[bi].unlock(pipe=tla.pipes.MTE2)
+                                mtx[bi].lock(pipe=tla.pipes.MTE3)
                                 for r in tla.range_constexpr(TR):
                                     row_dst = dst + tla.Int64(r * HD)
                                     if t0 + r < gm_lens[b]:
@@ -279,7 +279,7 @@ def paged_kv_gather_kernel(
                                             ),
                                             ub_zk,
                                         )
-                                mtx[bi].unlock(pipe=tla.arch.MTE3)
+                                mtx[bi].unlock(pipe=tla.pipes.MTE3)
                         else:
                             # Whole tile past the sequence: zeros only.
                             tla.copy(tla.make_tensor(gm_ok.ptr + dst, tile_gm), zero_ub)

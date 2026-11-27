@@ -120,12 +120,12 @@ def mx_mmad_kernel(
     l0b = tla.allocate(tk * tn, dtype_b, tla.AddressSpace.l0b, 1024)
     l0c = tla.allocate(tm * tn, tla.Float32, tla.AddressSpace.l0c, 1024)
 
-    ab_ready = tla.flag("ab_ready", tla.arch.MTE2, tla.arch.MTE1)
-    l0_ready = tla.flag("l0_ready", tla.arch.MTE1, tla.arch.CUBE)
+    ab_ready = tla.flag("ab_ready", tla.pipes.MTE2, tla.pipes.MTE1)
+    l0_ready = tla.flag("l0_ready", tla.pipes.MTE1, tla.pipes.CUBE)
     # Single-buffered L1/L0, so each stage must be told when its buffer is free
     # again: MTE1 releases L1 back to MTE2, and the cube releases L0 back to MTE1.
-    l1_avail = tla.flag("l1_avail", tla.arch.MTE1, tla.arch.MTE2)
-    l0_avail = tla.flag("l0_avail", tla.arch.CUBE, tla.arch.MTE1)
+    l1_avail = tla.flag("l1_avail", tla.pipes.MTE1, tla.pipes.MTE2)
+    l0_avail = tla.flag("l0_avail", tla.pipes.CUBE, tla.pipes.MTE1)
 
     with tla.cube():
         # One linear pass over the M x N tiles, strided by the core count, so a

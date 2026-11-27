@@ -41,7 +41,7 @@ def make_fill_kernel(out_dtype, vl):
     def fill_kernel(gm_out: tla.Tensor, flag: out_dtype) -> None:
         p_out = tla.allocate(vl, out_dtype, tla.AddressSpace.ub, 512)
         ub_out = _flat(p_out, vl)
-        st = tla.flag("fsb_st", tla.arch.VECTOR, tla.arch.MTE3)
+        st = tla.flag("fsb_st", tla.pipes.VECTOR, tla.pipes.MTE3)
         with tla.vector():
             with tla.vec.func(mode="simd"):
                 out_tile = tla.tile_view(ub_out, tla.make_shape(vl), tla.make_coord(0))
@@ -62,7 +62,7 @@ def make_fill_from_tensor_kernel(out_dtype, vl):
     def fill_from_tensor(gm_scale: tla.Tensor, gm_out: tla.Tensor) -> None:
         p_out = tla.allocate(vl, out_dtype, tla.AddressSpace.ub, 512)
         ub_out = _flat(p_out, vl)
-        st = tla.flag("fsb_t_st", tla.arch.VECTOR, tla.arch.MTE3)
+        st = tla.flag("fsb_t_st", tla.pipes.VECTOR, tla.pipes.MTE3)
         with tla.vector():
             with tla.vec.func(mode="simd"):
                 scale = gm_scale[0]

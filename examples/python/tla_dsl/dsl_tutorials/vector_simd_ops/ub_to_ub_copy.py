@@ -216,8 +216,8 @@ def _as_tla(tensors):
 
 @tla.kernel
 def ub_to_ub_copy(mem_x: tla.Tensor, mem_y: tla.Tensor) -> None:
-    loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    done = tla.flag("done", tla.arch.VECTOR, tla.arch.MTE3)
+    loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    done = tla.flag("done", tla.pipes.VECTOR, tla.pipes.MTE3)
 
     rows, sc, dc, vc = _ROWS, _SRC_COLS, _DST_COLS, _VIEW_COLS
 
@@ -247,8 +247,8 @@ def ub_to_ub_copy(mem_x: tla.Tensor, mem_y: tla.Tensor) -> None:
 
 @tla.kernel
 def ub_to_ub_copy_offset(mem_x: tla.Tensor, mem_y: tla.Tensor) -> None:
-    loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    done = tla.flag("done", tla.arch.VECTOR, tla.arch.MTE3)
+    loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    done = tla.flag("done", tla.pipes.VECTOR, tla.pipes.MTE3)
 
     pr, sc, dc = _P_ROWS, _P_SRC, _P_DST
     vr, vc = _V_ROWS, _V_COLS
@@ -441,8 +441,8 @@ def _repeat_transpose(dst, src, reps: int) -> None:
 
 @tla.kernel
 def ub_to_ub_transpose(mem_x: tla.Tensor, mem_y: tla.Tensor) -> None:
-    loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    done = tla.flag("done", tla.arch.VECTOR, tla.arch.MTE3)
+    loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    done = tla.flag("done", tla.pipes.VECTOR, tla.pipes.MTE3)
 
     m, n = _M, _N
 
@@ -471,8 +471,8 @@ def ub_to_ub_transpose(mem_x: tla.Tensor, mem_y: tla.Tensor) -> None:
 
 @tla.kernel
 def ub_to_ub_transpose_offset(mem_x: tla.Tensor, mem_y: tla.Tensor) -> None:
-    loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    done = tla.flag("done", tla.arch.VECTOR, tla.arch.MTE3)
+    loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    done = tla.flag("done", tla.pipes.VECTOR, tla.pipes.MTE3)
 
     pm, pn = _PM, _PN
     vm, vn = _TM, _TN

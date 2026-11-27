@@ -8,9 +8,9 @@ def mixed_markers(selected: tla.Constexpr[int]) -> None:
     with tla.cube():
         if tla.const_expr(selected == 0):
             with tla.prof_scope():
-                tla.pipe_barrier(tla.arch.CUBE)
+                tla.pipe_barrier(tla.pipes.CUBE)
         else:
-            tla.pipe_barrier(tla.arch.CUBE)
+            tla.pipe_barrier(tla.pipes.CUBE)
     with tla.vector():
         p = tla.allocate(64, tla.Float32, tla.AddressSpace.ub, 256)
         t = tla.make_tensor(p, tla.make_layout(tla.make_shape(64), tla.make_stride(1)))

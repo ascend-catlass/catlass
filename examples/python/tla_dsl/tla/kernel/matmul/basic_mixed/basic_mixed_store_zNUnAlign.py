@@ -64,13 +64,13 @@ def basic_mixed_store_zNUnAlign(
     rhs: tla.Tensor,
     out: tla.Tensor,
 ) -> None:
-    mmad_done = tla.flag("mmad_done", tla.arch.CUBE, tla.arch.FIX)
-    l1b_done = tla.flag("l1b_done", tla.arch.MTE2, tla.arch.MTE1)
-    l0_loaded = tla.flag("l0_loaded", tla.arch.MTE1, tla.arch.CUBE)
+    mmad_done = tla.flag("mmad_done", tla.pipes.CUBE, tla.pipes.FIX)
+    l1b_done = tla.flag("l1b_done", tla.pipes.MTE2, tla.pipes.MTE1)
+    l0_loaded = tla.flag("l0_loaded", tla.pipes.MTE1, tla.pipes.CUBE)
 
-    ub_loaded = tla.flag("ub_loaded", tla.arch.MTE2, tla.arch.VECTOR)
+    ub_loaded = tla.flag("ub_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
 
-    store_done = tla.flag("store_done", tla.arch.VECTOR, tla.arch.MTE3)
+    store_done = tla.flag("store_done", tla.pipes.VECTOR, tla.pipes.MTE3)
 
     ub2l1_done = tla.cross_flag("ub2l1_done")
 
@@ -100,7 +100,7 @@ def basic_mixed_store_zNUnAlign(
         l1_a_l0 = tla.tile_view(l1_a, tla.make_shape(M_L1, K_L1), tla.make_coord(0, 0))
         l0_a = tla.make_tensor_like(l0a_ptr, l1_a_l0, tla.arch.zN)
 
-        tla.cross_core_wait_flag(ub2l1_done, tla.arch.MTE1)
+        tla.cross_core_wait_flag(ub2l1_done, tla.pipes.MTE1)
         tla.copy(l0_a, l1_a_l0)
 
         tla.set_flag(l0_loaded)
@@ -183,7 +183,7 @@ def basic_mixed_store_zNUnAlign(
         )
 
         tla.copy(l1_a, ub_a_zN)
-        tla.cross_core_set_flag(ub2l1_done, tla.arch.MTE3)
+        tla.cross_core_set_flag(ub2l1_done, tla.pipes.MTE3)
 
         tla.pipe_barrier(tla.pipes.ALL)
 

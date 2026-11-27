@@ -53,9 +53,9 @@ def load_tile(
         rows * padded_channels, accumulator_dtype, tla.AddressSpace.l0c, 1024
     )
 
-    inputs_ready = tla.flag("inputs_ready", tla.arch.MTE2, tla.arch.MTE1)
-    operands_ready = tla.flag("operands_ready", tla.arch.MTE1, tla.arch.CUBE)
-    result_ready = tla.flag("result_ready", tla.arch.CUBE, tla.arch.FIX)
+    inputs_ready = tla.flag("inputs_ready", tla.pipes.MTE2, tla.pipes.MTE1)
+    operands_ready = tla.flag("operands_ready", tla.pipes.MTE1, tla.pipes.CUBE)
+    result_ready = tla.flag("result_ready", tla.pipes.CUBE, tla.pipes.FIX)
 
     with tla.cube():
         fmap_layout = tla.make_layout(

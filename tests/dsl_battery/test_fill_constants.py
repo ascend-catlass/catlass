@@ -37,8 +37,8 @@ def _kernel_for(dtype, a_value, b_value, a_scale, b_scale, pattern):
         c0 = tla.make_tensor(
             p0c, tla.make_layout_with_tag((m, n), tla.Float32, tla.arch.L0Clayout)
         )
-        filled = tla.flag("filled", tla.arch.MTE2, tla.arch.MTE1)
-        loaded = tla.flag("loaded", tla.arch.MTE1, tla.arch.CUBE)
+        filled = tla.flag("filled", tla.pipes.MTE2, tla.pipes.MTE1)
+        loaded = tla.flag("loaded", tla.pipes.MTE1, tla.pipes.CUBE)
         with tla.cube():
             a.fill(a_value)
             b.fill(b_value)

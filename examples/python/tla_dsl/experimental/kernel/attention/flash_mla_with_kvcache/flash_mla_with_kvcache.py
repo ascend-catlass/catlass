@@ -300,8 +300,8 @@ def flash_mla_with_kvcache_kernel(
                         tla.make_coord(i_seed, j_seed),
                     )
                     tile_seed.store(zero_seed, mask=preg_seed)
-        tla.cross_core_set_flag(s_free, tla.arch.VECTOR)
-        tla.cross_core_set_flag(o_free, tla.arch.VECTOR)
+        tla.cross_core_set_flag(s_free, tla.pipes.VECTOR)
+        tla.cross_core_set_flag(o_free, tla.pipes.VECTOR)
 
     task_range = tla.range(
         tla.arch.block_idx(),
@@ -613,9 +613,9 @@ def flash_mla_with_kvcache_kernel(
                 tla.make_shape(q_tile_size, d_qk),
                 tla.make_coord(c0, c0),
             )
-            mtx_q.lock(pipe=tla.arch.MTE2)
+            mtx_q.lock(pipe=tla.pipes.MTE2)
             tla.copy(l1_q_valid, q_gm)
-            mtx_q.unlock(pipe=tla.arch.MTE2)
+            mtx_q.unlock(pipe=tla.pipes.MTE2)
 
         # S 的 L0C/UB 视图在 prologue 与循环体间复用。
         l0c_s_tile = tla.make_tensor(
@@ -653,7 +653,7 @@ def flash_mla_with_kvcache_kernel(
                 phys0 = mem_bt[req * num_pages + chunk_start + stagger]
                 page_base0 = phys0 * kv_blk_stride
                 if self_k == c0:
-                    mtx_k.lock(pipe=tla.arch.MTE2)
+                    mtx_k.lock(pipe=tla.pipes.MTE2)
                     if nz_layout == 0:
                         k_src0 = tla.make_tensor(
                             mem_k.ptr + page_base0,
@@ -679,8 +679,8 @@ def flash_mla_with_kvcache_kernel(
                             tla.make_tensor(k_dst_ptr0, k_flat_layout0),
                             tla.make_tensor(k_src_ptr0, k_flat_layout0),
                         )
-                    mtx_k.unlock(pipe=tla.arch.MTE2)
-                    mtx_kh.lock(pipe=tla.arch.MTE2)
+                    mtx_k.unlock(pipe=tla.pipes.MTE2)
+                    mtx_kh.lock(pipe=tla.pipes.MTE2)
                     if nz_layout == 0:
                         k_src0h = tla.make_tensor(
                             mem_k.ptr + page_base0 + k_split,
@@ -709,16 +709,16 @@ def flash_mla_with_kvcache_kernel(
                             tla.make_tensor(k_dst_ptr0h, k_flat_layout0h),
                             tla.make_tensor(k_src_ptr0h, k_flat_layout0h),
                         )
-                    mtx_kh.unlock(pipe=tla.arch.MTE2)
+                    mtx_kh.unlock(pipe=tla.pipes.MTE2)
 
                 l0c_s0 = l0c_s_tile
-                mtx_l0c_s.lock(pipe=tla.arch.CUBE)
-                mtx_q.lock(pipe=tla.arch.MTE1)
-                mtx_k.lock(pipe=tla.arch.MTE1)
+                mtx_l0c_s.lock(pipe=tla.pipes.CUBE)
+                mtx_q.lock(pipe=tla.pipes.MTE1)
+                mtx_k.lock(pipe=tla.pipes.MTE1)
                 for ci in tla.range_constexpr(qk_full_chunks):
                     if ci == qk_half_chunks:
-                        mtx_k.unlock(pipe=tla.arch.MTE1)
-                        mtx_kh.lock(pipe=tla.arch.MTE1)
+                        mtx_k.unlock(pipe=tla.pipes.MTE1)
+                        mtx_kh.lock(pipe=tla.pipes.MTE1)
                     l1_q_c = tla.tile_view(
                         l1_q,
                         tla.make_shape(q_block, qk_chunk),
@@ -731,19 +731,19 @@ def flash_mla_with_kvcache_kernel(
                         tla.make_coord(ci, c0),
                     )
                     l0_k = tla.make_tensor_like(l0b_ptrs[ci % 2], l1_k_c)
-                    mtx_l0s[ci % 2].lock(pipe=tla.arch.MTE1)
+                    mtx_l0s[ci % 2].lock(pipe=tla.pipes.MTE1)
                     tla.copy(l0_q, l1_q_c)
                     tla.copy(l0_k, l1_k_c)
-                    mtx_l0s[ci % 2].unlock(pipe=tla.arch.MTE1)
-                    mtx_l0s[ci % 2].lock(pipe=tla.arch.CUBE)
+                    mtx_l0s[ci % 2].unlock(pipe=tla.pipes.MTE1)
+                    mtx_l0s[ci % 2].lock(pipe=tla.pipes.CUBE)
                     tla.mmad(l0c_s0, l0_q, l0_k, init_c=(ci == 0))
-                    mtx_l0s[ci % 2].unlock(pipe=tla.arch.CUBE)
-                mtx_kh.unlock(pipe=tla.arch.MTE1)
-                mtx_q.unlock(pipe=tla.arch.MTE1)
-                mtx_l0c_s.unlock(pipe=tla.arch.CUBE)
+                    mtx_l0s[ci % 2].unlock(pipe=tla.pipes.CUBE)
+                mtx_kh.unlock(pipe=tla.pipes.MTE1)
+                mtx_q.unlock(pipe=tla.pipes.MTE1)
+                mtx_l0c_s.unlock(pipe=tla.pipes.CUBE)
 
-                mtx_l0c_s.lock(pipe=tla.arch.FIX)
-                tla.cross_core_wait_flag(s_free, tla.arch.FIX)
+                mtx_l0c_s.lock(pipe=tla.pipes.FIX)
+                tla.cross_core_wait_flag(s_free, tla.pipes.FIX)
                 tla.copy(
                     ub_s_fix_tile,
                     l0c_s_tile,
@@ -751,8 +751,8 @@ def flash_mla_with_kvcache_kernel(
                         l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M
                     ),
                 )
-                mtx_l0c_s.unlock(pipe=tla.arch.FIX)
-                tla.cross_core_set_flag(s_ready, tla.arch.FIX)
+                mtx_l0c_s.unlock(pipe=tla.pipes.FIX)
+                tla.cross_core_set_flag(s_ready, tla.pipes.FIX)
 
         for it in tla.range(num_tiles):
             tile = chunk_start + (it + stagger) % num_tiles
@@ -784,8 +784,8 @@ def flash_mla_with_kvcache_kernel(
                             if it + c1 == num_tiles:
                                 if nx_tiles > c0:
                                     page_base_n = nx_page * kv_blk_stride
-                                    mtx_k.lock(pipe=tla.arch.MTE2)
-                                    mtx_kh.lock(pipe=tla.arch.MTE2)
+                                    mtx_k.lock(pipe=tla.pipes.MTE2)
+                                    mtx_kh.lock(pipe=tla.pipes.MTE2)
                                     k_src_n = tla.make_tensor(
                                         mem_k.ptr + page_base_n,
                                         tla.make_layout(
@@ -795,8 +795,8 @@ def flash_mla_with_kvcache_kernel(
                                         ),
                                     )
                                     tla.copy(l1_k, k_src_n)
-                                    mtx_kh.unlock(pipe=tla.arch.MTE2)
-                                    mtx_k.unlock(pipe=tla.arch.MTE2)
+                                    mtx_kh.unlock(pipe=tla.pipes.MTE2)
+                                    mtx_k.unlock(pipe=tla.pipes.MTE2)
                 with tla.cube():
                     # ---- 预取 K(tile+1) 并计算 QK(tile+1) ----
                     # tile 的 QK 已在上一次迭代（或 prologue）算完，这里把下一
@@ -811,7 +811,7 @@ def flash_mla_with_kvcache_kernel(
                         # K 分半搬运：低半（dims 0~287）先行，QK 的前 3 个
                         # chunk 只等它；高半的 MTE2 与前三 chunk 的 MTE1/MMAD
                         # 重叠，消掉整页 DMA 的串行等待。
-                        mtx_k.lock(pipe=tla.arch.MTE2)
+                        mtx_k.lock(pipe=tla.pipes.MTE2)
                         if nz_layout == 0:
                             # PA_BBND 页内是 [token, 576]；按 (d, token) 列主序读入 nZ。
                             k_src = tla.make_tensor(
@@ -839,8 +839,8 @@ def flash_mla_with_kvcache_kernel(
                             k_src = tla.make_tensor(k_src_ptr, k_flat_layout)
                             k_dst = tla.make_tensor(k_dst_ptr, k_flat_layout)
                             tla.copy(k_dst, k_src)
-                        mtx_k.unlock(pipe=tla.arch.MTE2)
-                        mtx_kh.lock(pipe=tla.arch.MTE2)
+                        mtx_k.unlock(pipe=tla.pipes.MTE2)
+                        mtx_kh.lock(pipe=tla.pipes.MTE2)
                         if nz_layout == 0:
                             k_srch = tla.make_tensor(
                                 mem_k.ptr + page_base + k_split,
@@ -869,16 +869,16 @@ def flash_mla_with_kvcache_kernel(
                             k_srch = tla.make_tensor(k_src_ptrh, k_flat_layouth)
                             k_dsth = tla.make_tensor(k_dst_ptrh, k_flat_layouth)
                             tla.copy(k_dsth, k_srch)
-                        mtx_kh.unlock(pipe=tla.arch.MTE2)
+                        mtx_kh.unlock(pipe=tla.pipes.MTE2)
 
                         # ---- QK：576 维拆成 6 x 96，L0A/L0B 双槽 ping-pong ----
-                        mtx_l0c_s.lock(pipe=tla.arch.CUBE)
-                        mtx_q.lock(pipe=tla.arch.MTE1)
-                        mtx_k.lock(pipe=tla.arch.MTE1)
+                        mtx_l0c_s.lock(pipe=tla.pipes.CUBE)
+                        mtx_q.lock(pipe=tla.pipes.MTE1)
+                        mtx_k.lock(pipe=tla.pipes.MTE1)
                         for ci in tla.range_constexpr(qk_full_chunks):
                             if ci == qk_half_chunks:
-                                mtx_k.unlock(pipe=tla.arch.MTE1)
-                                mtx_kh.lock(pipe=tla.arch.MTE1)
+                                mtx_k.unlock(pipe=tla.pipes.MTE1)
+                                mtx_kh.lock(pipe=tla.pipes.MTE1)
                             l1_q_c = tla.tile_view(
                                 l1_q,
                                 tla.make_shape(q_block, qk_chunk),
@@ -891,17 +891,17 @@ def flash_mla_with_kvcache_kernel(
                                 tla.make_coord(ci, c0),
                             )
                             l0_k = tla.make_tensor_like(l0b_ptrs[ci % 2], l1_k_c)
-                            mtx_l0s[ci % 2].lock(pipe=tla.arch.MTE1)
+                            mtx_l0s[ci % 2].lock(pipe=tla.pipes.MTE1)
                             tla.copy(l0_q, l1_q_c)
                             tla.copy(l0_k, l1_k_c)
-                            mtx_l0s[ci % 2].unlock(pipe=tla.arch.MTE1)
-                            mtx_l0s[ci % 2].lock(pipe=tla.arch.CUBE)
+                            mtx_l0s[ci % 2].unlock(pipe=tla.pipes.MTE1)
+                            mtx_l0s[ci % 2].lock(pipe=tla.pipes.CUBE)
                             tla.mmad(l0c_s_tile, l0_q, l0_k, init_c=(ci == 0))
-                            mtx_l0s[ci % 2].unlock(pipe=tla.arch.CUBE)
+                            mtx_l0s[ci % 2].unlock(pipe=tla.pipes.CUBE)
 
-                        mtx_kh.unlock(pipe=tla.arch.MTE1)
-                        mtx_q.unlock(pipe=tla.arch.MTE1)
-                        mtx_l0c_s.unlock(pipe=tla.arch.CUBE)
+                        mtx_kh.unlock(pipe=tla.pipes.MTE1)
+                        mtx_q.unlock(pipe=tla.pipes.MTE1)
+                        mtx_l0c_s.unlock(pipe=tla.pipes.CUBE)
 
                 with tla.cube():
                     # ---- 整页 gather V（cache 前 512 维），列对半分两次 ----
@@ -910,7 +910,7 @@ def flash_mla_with_kvcache_kernel(
                     phys_v = mem_bt[req * num_pages + tile]
                     page_base_v = phys_v * kv_blk_stride
                     if split_v:
-                        mtx_v.lock(pipe=tla.arch.MTE2)
+                        mtx_v.lock(pipe=tla.pipes.MTE2)
                         if nz_layout == 0:
                             v_src = tla.make_tensor(
                                 mem_k.ptr + page_base_v,
@@ -937,8 +937,8 @@ def flash_mla_with_kvcache_kernel(
                             v_src = tla.make_tensor(v_src_ptr, v_flat_layout)
                             v_dst = tla.make_tensor(v_dst_ptr, v_flat_layout)
                             tla.copy(v_dst, v_src)
-                        mtx_v.unlock(pipe=tla.arch.MTE2)
-                        mtx_vh.lock(pipe=tla.arch.MTE2)
+                        mtx_v.unlock(pipe=tla.pipes.MTE2)
+                        mtx_vh.lock(pipe=tla.pipes.MTE2)
                         if nz_layout == 0:
                             v_srch = tla.make_tensor(
                                 mem_k.ptr + page_base_v + d_v // 2,
@@ -966,10 +966,10 @@ def flash_mla_with_kvcache_kernel(
                             v_srch = tla.make_tensor(v_src_ptrh, v_flat_layouth)
                             v_dsth = tla.make_tensor(v_dst_ptrh, v_flat_layouth)
                             tla.copy(v_dsth, v_srch)
-                        mtx_vh.unlock(pipe=tla.arch.MTE2)
+                        mtx_vh.unlock(pipe=tla.pipes.MTE2)
                     else:
                         # 单 tile task：无重叠窗口，整页一次搬完（与 R3 相同）。
-                        mtx_v.lock(pipe=tla.arch.MTE2)
+                        mtx_v.lock(pipe=tla.pipes.MTE2)
                         if nz_layout == 0:
                             v_src = tla.make_tensor(
                                 mem_k.ptr + page_base_v,
@@ -994,11 +994,11 @@ def flash_mla_with_kvcache_kernel(
                             v_src = tla.make_tensor(v_src_ptr, v_flat_layout)
                             v_dst = tla.make_tensor(v_dst_ptr, v_flat_layout)
                             tla.copy(v_dst, v_src)
-                        mtx_v.unlock(pipe=tla.arch.MTE2)
+                        mtx_v.unlock(pipe=tla.pipes.MTE2)
 
             with tla.vector():
                 if col_limit > c0:
-                    tla.cross_core_wait_flag(s_ready, tla.arch.VECTOR)
+                    tla.cross_core_wait_flag(s_ready, tla.pipes.VECTOR)
 
                     n0 = col_limit_vec
                     if n0 > vl_f32:
@@ -1112,7 +1112,7 @@ def flash_mla_with_kvcache_kernel(
                         )
 
                     # ---- pass2: exp + P(f16) 落盘 + 块内 sum ----
-                    mtx_ub_p.lock(pipe=tla.arch.VECTOR)
+                    mtx_ub_p.lock(pipe=tla.pipes.VECTOR)
                     with tla.vec.func(mode="simd"):
                         preg_full3 = tla.create_mask(
                             pattern=tla.mask.ALL, dtype=tla.Float32
@@ -1176,7 +1176,7 @@ def flash_mla_with_kvcache_kernel(
                             tla.params.MemType.VEC_STORE,
                             tla.params.MemType.VEC_LOAD,
                         )
-                    mtx_ub_p.unlock(pipe=tla.arch.VECTOR)
+                    mtx_ub_p.unlock(pipe=tla.pipes.VECTOR)
 
                     # ---- 合并 running sum ----
                     with tla.vec.func(mode="simd"):
@@ -1208,20 +1208,20 @@ def flash_mla_with_kvcache_kernel(
                         ub_sum_v2.store(new_sum_v, mask=preg_full4)
 
                     # S 已消费完，释放给下一个 tile 的 FIX
-                    tla.cross_core_set_flag(s_free, tla.arch.VECTOR)
+                    tla.cross_core_set_flag(s_free, tla.pipes.VECTOR)
 
                     # ---- UB P -> L1 P (zN) ----
-                    mtx_ub_p.lock(pipe=tla.arch.MTE3)
+                    mtx_ub_p.lock(pipe=tla.pipes.MTE3)
                     tla.copy(l1_p_sub, ub_p_copy)
-                    mtx_ub_p.unlock(pipe=tla.arch.MTE3)
-                    tla.cross_core_set_flag(p_ready, tla.arch.MTE3)
+                    mtx_ub_p.unlock(pipe=tla.pipes.MTE3)
+                    tla.cross_core_set_flag(p_ready, tla.pipes.MTE3)
 
             with tla.cube():
                 if col_limit > c0:
                     if it + c1 < num_tiles:
                         # FIX S(下一个迭代的 tile)：AIV 已在 softmax(tile) 中释放 UB S。
-                        mtx_l0c_s.lock(pipe=tla.arch.FIX)
-                        tla.cross_core_wait_flag(s_free, tla.arch.FIX)
+                        mtx_l0c_s.lock(pipe=tla.pipes.FIX)
+                        tla.cross_core_wait_flag(s_free, tla.pipes.FIX)
                         tla.copy(
                             ub_s_fix_tile,
                             l0c_s_tile,
@@ -1229,31 +1229,31 @@ def flash_mla_with_kvcache_kernel(
                                 l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M
                             ),
                         )
-                        mtx_l0c_s.unlock(pipe=tla.arch.FIX)
-                        tla.cross_core_set_flag(s_ready, tla.arch.FIX)
-                    tla.cross_core_wait_flag(p_ready, tla.arch.MTE1)
+                        mtx_l0c_s.unlock(pipe=tla.pipes.FIX)
+                        tla.cross_core_set_flag(s_ready, tla.pipes.FIX)
+                    tla.cross_core_wait_flag(p_ready, tla.pipes.MTE1)
                     # 每个 half 独占 otmp 槽时，整 tile 只需一次 o_free 握手。
                     if tla.const_expr(otmp_n >= pv_splits):
-                        tla.cross_core_wait_flag(o_free, tla.arch.FIX)
+                        tla.cross_core_wait_flag(o_free, tla.pipes.FIX)
                     l0_p = tla.make_tensor_like(l0a_p_ptr, l1_p)
-                    mtx_l0p.lock(pipe=tla.arch.MTE1)
+                    mtx_l0p.lock(pipe=tla.pipes.MTE1)
                     tla.copy(l0_p, l1_p)
-                    mtx_l0p.unlock(pipe=tla.arch.MTE1)
-                    mtx_v.lock(pipe=tla.arch.MTE1)
+                    mtx_l0p.unlock(pipe=tla.pipes.MTE1)
+                    mtx_v.lock(pipe=tla.pipes.MTE1)
                     for half in tla.range_constexpr(pv_splits):
                         if half == pv_splits // 2:
                             if split_v:
-                                mtx_v.unlock(pipe=tla.arch.MTE1)
-                                mtx_vh.lock(pipe=tla.arch.MTE1)
+                                mtx_v.unlock(pipe=tla.pipes.MTE1)
+                                mtx_vh.lock(pipe=tla.pipes.MTE1)
                         l1_v_half = tla.get_tile(
                             l1_v,
                             tla.make_coord(c0, half * pv_width),
                             tla.make_shape(kv_block, pv_width),
                         )
                         l0_v = tla.make_tensor_like(l0b_ptrs[half % 2], l1_v_half)
-                        mtx_l0s[half % 2].lock(pipe=tla.arch.MTE1)
+                        mtx_l0s[half % 2].lock(pipe=tla.pipes.MTE1)
                         tla.copy(l0_v, l1_v_half)
-                        mtx_l0s[half % 2].unlock(pipe=tla.arch.MTE1)
+                        mtx_l0s[half % 2].unlock(pipe=tla.pipes.MTE1)
                         o_slot = half % c2
                         otmp_slot = half if otmp_n > c1 else c0
                         l0c_o = tla.make_tensor(
@@ -1265,17 +1265,17 @@ def flash_mla_with_kvcache_kernel(
                             ),
                         )
                         mtx_l0c_o_cur = mtx_l0c_o_s[o_slot]
-                        mtx_l0s[half % 2].lock(pipe=tla.arch.CUBE)
-                        mtx_l0p.lock(pipe=tla.arch.CUBE)
-                        mtx_l0c_o_cur.lock(pipe=tla.arch.CUBE)
+                        mtx_l0s[half % 2].lock(pipe=tla.pipes.CUBE)
+                        mtx_l0p.lock(pipe=tla.pipes.CUBE)
+                        mtx_l0c_o_cur.lock(pipe=tla.pipes.CUBE)
                         tla.mmad(l0c_o, l0_p, l0_v, init_c=True)
-                        mtx_l0c_o_cur.unlock(pipe=tla.arch.CUBE)
-                        mtx_l0p.unlock(pipe=tla.arch.CUBE)
-                        mtx_l0s[half % 2].unlock(pipe=tla.arch.CUBE)
+                        mtx_l0c_o_cur.unlock(pipe=tla.pipes.CUBE)
+                        mtx_l0p.unlock(pipe=tla.pipes.CUBE)
+                        mtx_l0s[half % 2].unlock(pipe=tla.pipes.CUBE)
 
-                        mtx_l0c_o_cur.lock(pipe=tla.arch.FIX)
+                        mtx_l0c_o_cur.lock(pipe=tla.pipes.FIX)
                         if tla.const_expr(otmp_n < pv_splits):
-                            tla.cross_core_wait_flag(o_free, tla.arch.FIX)
+                            tla.cross_core_wait_flag(o_free, tla.pipes.FIX)
                         ub_otmp_fix = tla.make_tensor(
                             ub_otmp_ptr
                             + (otmp_slot if otmp_n > c1 else c0) * otmp_stride,
@@ -1292,15 +1292,15 @@ def flash_mla_with_kvcache_kernel(
                                 l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M
                             ),
                         )
-                        mtx_l0c_o_cur.unlock(pipe=tla.arch.FIX)
+                        mtx_l0c_o_cur.unlock(pipe=tla.pipes.FIX)
                         if tla.const_expr(otmp_n < pv_splits):
-                            tla.cross_core_set_flag(o_ready, tla.arch.FIX)
+                            tla.cross_core_set_flag(o_ready, tla.pipes.FIX)
                     if split_v:
-                        mtx_vh.unlock(pipe=tla.arch.MTE1)
+                        mtx_vh.unlock(pipe=tla.pipes.MTE1)
                     else:
-                        mtx_v.unlock(pipe=tla.arch.MTE1)
+                        mtx_v.unlock(pipe=tla.pipes.MTE1)
                     if tla.const_expr(otmp_n >= pv_splits):
-                        tla.cross_core_set_flag(o_ready, tla.arch.FIX)
+                        tla.cross_core_set_flag(o_ready, tla.pipes.FIX)
 
             with tla.vector():
                 if col_limit > c0:
@@ -1314,10 +1314,10 @@ def flash_mla_with_kvcache_kernel(
                             tla.make_layout(tla.make_shape(q_sub), tla.make_stride(c1)),
                         )
                         if tla.const_expr(otmp_n >= pv_splits):
-                            tla.cross_core_wait_flag(o_ready, tla.arch.VECTOR)
+                            tla.cross_core_wait_flag(o_ready, tla.pipes.VECTOR)
                         for half in tla.range_constexpr(pv_splits):
                             if tla.const_expr(otmp_n < pv_splits):
-                                tla.cross_core_wait_flag(o_ready, tla.arch.VECTOR)
+                                tla.cross_core_wait_flag(o_ready, tla.pipes.VECTOR)
                             ub_otmp_cur = otmp_slots[half % len(otmp_slots)]
                             with tla.vec.func(mode="simd"):
                                 preg_full5 = tla.create_mask(
@@ -1355,9 +1355,9 @@ def flash_mla_with_kvcache_kernel(
                                         )
                                         acc_tile.store(merged, mask=preg_full5)
                             if tla.const_expr(otmp_n < pv_splits):
-                                tla.cross_core_set_flag(o_free, tla.arch.VECTOR)
+                                tla.cross_core_set_flag(o_free, tla.pipes.VECTOR)
                         if tla.const_expr(otmp_n >= pv_splits):
-                            tla.cross_core_set_flag(o_free, tla.arch.VECTOR)
+                            tla.cross_core_set_flag(o_free, tla.pipes.VECTOR)
 
         if tla.const_expr(q_block == 96 and kvsplit == 1):
             if nz_layout == 0:
@@ -1368,8 +1368,8 @@ def flash_mla_with_kvcache_kernel(
                     if nx_tiles > c0:
                         with tla.cube():
                             page_base_z = nx_page * kv_blk_stride
-                            mtx_k.lock(pipe=tla.arch.MTE2)
-                            mtx_kh.lock(pipe=tla.arch.MTE2)
+                            mtx_k.lock(pipe=tla.pipes.MTE2)
+                            mtx_kh.lock(pipe=tla.pipes.MTE2)
                             k_src_z = tla.make_tensor(
                                 mem_k.ptr + page_base_z,
                                 tla.make_layout(
@@ -1379,8 +1379,8 @@ def flash_mla_with_kvcache_kernel(
                                 ),
                             )
                             tla.copy(l1_k, k_src_z)
-                            mtx_kh.unlock(pipe=tla.arch.MTE2)
-                            mtx_k.unlock(pipe=tla.arch.MTE2)
+                            mtx_kh.unlock(pipe=tla.pipes.MTE2)
+                            mtx_k.unlock(pipe=tla.pipes.MTE2)
 
         # ------------------------------------------------------ 输出 + LSE（每 task 一次）
         with tla.vector():
@@ -1411,7 +1411,7 @@ def flash_mla_with_kvcache_kernel(
                 ub_inv_ptr,
                 tla.make_layout(tla.make_shape(q_sub), tla.make_stride(c1)),
             )
-            mtx_ub_lse.lock(pipe=tla.arch.VECTOR)
+            mtx_ub_lse.lock(pipe=tla.pipes.VECTOR)
             with tla.vec.func(mode="simd"):
                 preg_full6 = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
                 preg_all_b16_6 = tla.create_mask(pattern=tla.mask.ALL, dtype=io_dtype)
@@ -1458,15 +1458,15 @@ def flash_mla_with_kvcache_kernel(
                     tla.params.MemType.VEC_STORE,
                     tla.params.MemType.VEC_LOAD,
                 )
-            mtx_ub_lse.unlock(pipe=tla.arch.VECTOR)
+            mtx_ub_lse.unlock(pipe=tla.pipes.VECTOR)
             # 128 列一块输出：最后 tile 的 O 重缩放、归一化、cast 与 DMA 合成
             # 一个 pass，ub_o 在 task 收尾只读写一遍。
             if num_tiles > c0:
                 if tla.const_expr(otmp_n >= pv_splits):
-                    tla.cross_core_wait_flag(o_ready, tla.arch.VECTOR)
+                    tla.cross_core_wait_flag(o_ready, tla.pipes.VECTOR)
                 for oc in tla.range_constexpr(out_chunks):
                     if tla.const_expr(otmp_n < pv_splits):
-                        tla.cross_core_wait_flag(o_ready, tla.arch.VECTOR)
+                        tla.cross_core_wait_flag(o_ready, tla.pipes.VECTOR)
                     ub_otmp_ep = otmp_slots[oc % len(otmp_slots)]
                     o_gm = tla.make_tensor(
                         mem_o.ptr
@@ -1478,7 +1478,7 @@ def flash_mla_with_kvcache_kernel(
                             tla.make_stride(total_q * d_v, c1),
                         ),
                     )
-                    mtx_ub_out.lock(pipe=tla.arch.VECTOR)
+                    mtx_ub_out.lock(pipe=tla.pipes.VECTOR)
                     with tla.vec.func(mode="simd"):
                         preg_full7 = tla.create_mask(
                             pattern=tla.mask.ALL, dtype=tla.Float32
@@ -1552,17 +1552,17 @@ def flash_mla_with_kvcache_kernel(
                             if tla.const_expr(kvsplit == 1):
                                 packed7, _ = tla.deinterleave(out_reg7_0, out_reg7_1)
                                 out_tile7.store(packed7, mask=preg_all_b16_7)
-                    mtx_ub_out.unlock(pipe=tla.arch.VECTOR)
+                    mtx_ub_out.unlock(pipe=tla.pipes.VECTOR)
 
                     # kvsplit > 1 时本 task 的输出是 FP32 partial（写 mem_po），
                     # ub_out_t 里此刻装的是 P，不能当作 O 写到 mem_o。
                     if tla.const_expr(kvsplit == 1):
                         if rows_here > c0:
-                            mtx_ub_out.lock(pipe=tla.arch.MTE3)
+                            mtx_ub_out.lock(pipe=tla.pipes.MTE3)
                             tla.copy(o_gm, ub_out_t)
-                            mtx_ub_out.unlock(pipe=tla.arch.MTE3)
+                            mtx_ub_out.unlock(pipe=tla.pipes.MTE3)
                     if tla.const_expr(otmp_n < pv_splits):
-                        tla.cross_core_set_flag(o_free, tla.arch.VECTOR)
+                        tla.cross_core_set_flag(o_free, tla.pipes.VECTOR)
                 if tla.const_expr(kvsplit > c1):
                     po_gm = tla.make_tensor(
                         mem_po.ptr
@@ -1575,12 +1575,12 @@ def flash_mla_with_kvcache_kernel(
                         ),
                     )
                     if rows_here > c0:
-                        mtx_ub_out.lock(pipe=tla.arch.MTE3)
+                        mtx_ub_out.lock(pipe=tla.pipes.MTE3)
                         tla.copy(po_gm, ub_o_re)
-                        mtx_ub_out.unlock(pipe=tla.arch.MTE3)
+                        mtx_ub_out.unlock(pipe=tla.pipes.MTE3)
                 # 最后一个 tile 的 otmp 已全部消费完，释放给 AIC 的下一 FIX。
                 if tla.const_expr(otmp_n >= pv_splits):
-                    tla.cross_core_set_flag(o_free, tla.arch.VECTOR)
+                    tla.cross_core_set_flag(o_free, tla.pipes.VECTOR)
             else:
                 # 没有有效 KV tile：正常输出全 0，不必等 otmp。
                 for oc in tla.range_constexpr(out_chunks):
@@ -1594,7 +1594,7 @@ def flash_mla_with_kvcache_kernel(
                             tla.make_stride(total_q * d_v, c1),
                         ),
                     )
-                    mtx_ub_out.lock(pipe=tla.arch.VECTOR)
+                    mtx_ub_out.lock(pipe=tla.pipes.VECTOR)
                     with tla.vec.func(mode="simd"):
                         preg_all_b16_8 = tla.create_mask(
                             pattern=tla.mask.ALL, dtype=io_dtype
@@ -1607,9 +1607,9 @@ def flash_mla_with_kvcache_kernel(
                                 tla.make_coord(i8, c0),
                             )
                             out_tile8.store(zero_b16, mask=preg_all_b16_8)
-                    mtx_ub_out.unlock(pipe=tla.arch.VECTOR)
+                    mtx_ub_out.unlock(pipe=tla.pipes.VECTOR)
                     if tla.const_expr(kvsplit > c1):
-                        mtx_ub_out.lock(pipe=tla.arch.VECTOR)
+                        mtx_ub_out.lock(pipe=tla.pipes.VECTOR)
                         with tla.vec.func(mode="simd"):
                             preg_z9 = tla.create_mask(
                                 pattern=tla.mask.ALL, dtype=tla.Float32
@@ -1624,10 +1624,10 @@ def flash_mla_with_kvcache_kernel(
                                     ),
                                 )
                                 acc_z9.store(zero_z9, mask=preg_z9)
-                        mtx_ub_out.unlock(pipe=tla.arch.VECTOR)
+                        mtx_ub_out.unlock(pipe=tla.pipes.VECTOR)
 
                     if rows_here > c0:
-                        mtx_ub_out.lock(pipe=tla.arch.MTE3)
+                        mtx_ub_out.lock(pipe=tla.pipes.MTE3)
                         if tla.const_expr(kvsplit == 1):
                             tla.copy(o_gm, ub_out_t)
                         else:
@@ -1642,7 +1642,7 @@ def flash_mla_with_kvcache_kernel(
                                 ),
                             )
                             tla.copy(po_gm_z, ub_o_re)
-                        mtx_ub_out.unlock(pipe=tla.arch.MTE3)
+                        mtx_ub_out.unlock(pipe=tla.pipes.MTE3)
 
             # LSE is written once per task (TND layout); the host converts it
             # to the official NTD (heads, total_q) layout. Keep the same
@@ -1663,7 +1663,7 @@ def flash_mla_with_kvcache_kernel(
                         tla.make_stride(c1),
                     ),
                 )
-                mtx_ub_lse.lock(pipe=tla.arch.MTE3)
+                mtx_ub_lse.lock(pipe=tla.pipes.MTE3)
                 if tla.const_expr(kvsplit == 1):
                     lse_gm = tla.make_tensor(
                         mem_lse.ptr + row_here * heads + head_base + head_off,
@@ -1686,11 +1686,11 @@ def flash_mla_with_kvcache_kernel(
                         ),
                     )
                 tla.copy(lse_gm, lse_ub)
-                mtx_ub_lse.unlock(pipe=tla.arch.MTE3)
+                mtx_ub_lse.unlock(pipe=tla.pipes.MTE3)
 
     with tla.cube():
-        tla.cross_core_wait_flag(s_free, tla.arch.FIX)
-        tla.cross_core_wait_flag(o_free, tla.arch.FIX)
+        tla.cross_core_wait_flag(s_free, tla.pipes.FIX)
+        tla.cross_core_wait_flag(o_free, tla.pipes.FIX)
 
 
 # =========================================================================
@@ -1802,7 +1802,7 @@ def flash_mla_kvsplit_reduce_kernel(
         )
         with tla.vector():
             # ---------------- 权重（每 task 一次，lane 维 = head）
-            mtx_l.lock(pipe=tla.arch.MTE2)
+            mtx_l.lock(pipe=tla.pipes.MTE2)
             for ic in tla.range_constexpr(kvsplit):
                 gm_lc = tla.make_tensor(
                     mem_pl.ptr + (ic * total_q + row) * heads + head0,
@@ -1814,8 +1814,8 @@ def flash_mla_kvsplit_reduce_kernel(
                     ubl, tla.make_shape(c1, lse_group), tla.make_coord(ic, c0)
                 )
                 tla.copy(l_ic_t, gm_lc)
-            mtx_l.unlock(pipe=tla.arch.MTE2)
-            mtx_l.lock(pipe=tla.arch.VECTOR)
+            mtx_l.unlock(pipe=tla.pipes.MTE2)
+            mtx_l.lock(pipe=tla.pipes.VECTOR)
             with tla.vec.func(mode="simd"):
                 pm = tla.update_mask(lse_group, dtype=tla.Float32)[0]
                 one_reg = tla.full(1.0, dtype=tla.Float32)
@@ -1868,10 +1868,10 @@ def flash_mla_kvsplit_reduce_kernel(
                 tla.local_mem_bar(
                     tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD
                 )
-            mtx_l.unlock(pipe=tla.arch.VECTOR)
-            mtx_l.lock(pipe=tla.arch.MTE3)
+            mtx_l.unlock(pipe=tla.pipes.VECTOR)
+            mtx_l.lock(pipe=tla.pipes.MTE3)
             tla.copy(gm_lg, ublg)
-            mtx_l.unlock(pipe=tla.arch.MTE3)
+            mtx_l.unlock(pipe=tla.pipes.MTE3)
 
             # ---------------- 逐 head：累加（持 mtx_p）→ 打包（持 mtx_o）→ 落盘
             for ih in tla.range(lse_group):
@@ -1886,10 +1886,10 @@ def flash_mla_kvsplit_reduce_kernel(
                     mem_o.ptr + (head * total_q + row) * d_v,
                     tla.make_layout(tla.make_shape(c1, d_v), tla.make_stride(d_v, c1)),
                 )
-                mtx_p.lock(pipe=tla.arch.MTE2)
+                mtx_p.lock(pipe=tla.pipes.MTE2)
                 tla.copy(ubp_flat, gm_p)
-                mtx_p.unlock(pipe=tla.arch.MTE2)
-                mtx_p.lock(pipe=tla.arch.VECTOR)
+                mtx_p.unlock(pipe=tla.pipes.MTE2)
+                mtx_p.lock(pipe=tla.pipes.VECTOR)
                 with tla.vec.func(mode="simd"):
                     pf = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
                     idx_ih = tla.full(ih, dtype=tla.Int32)
@@ -1939,8 +1939,8 @@ def flash_mla_kvsplit_reduce_kernel(
                     tla.local_mem_bar(
                         tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD
                     )
-                mtx_p.unlock(pipe=tla.arch.VECTOR)
-                mtx_o.lock(pipe=tla.arch.VECTOR)
+                mtx_p.unlock(pipe=tla.pipes.VECTOR)
+                mtx_o.lock(pipe=tla.pipes.VECTOR)
                 with tla.vec.func(mode="simd"):
                     pf2 = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
                     p16 = tla.create_mask(pattern=tla.mask.ALL, dtype=io_dtype)
@@ -1957,10 +1957,10 @@ def flash_mla_kvsplit_reduce_kernel(
                         o_16 = so.to(io_dtype, cast_zero, mask=pf2)
                         e_16 = se.to(io_dtype, cast_one, mask=pf2)
                         o_t.store(tla.bitwise_or(e_16, o_16, mask=p16), mask=p16)
-                mtx_o.unlock(pipe=tla.arch.VECTOR)
-                mtx_o.lock(pipe=tla.arch.MTE3)
+                mtx_o.unlock(pipe=tla.pipes.VECTOR)
+                mtx_o.lock(pipe=tla.pipes.MTE3)
                 tla.copy(gm_o, ubo_flat)
-                mtx_o.unlock(pipe=tla.arch.MTE3)
+                mtx_o.unlock(pipe=tla.pipes.MTE3)
 
 
 _EXECUTOR_CACHE = {}

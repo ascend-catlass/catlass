@@ -336,10 +336,10 @@ def histc_hist(
                 ub_tile = _dyn_tensor(ub_x, tile_ele, rem)
                 ngroups = (rem + group_ele - 1) // group_ele
 
-                mtx_tile.lock(pipe=tla.arch.MTE2)
+                mtx_tile.lock(pipe=tla.pipes.MTE2)
                 tla.copy(ub_tile, gm_tile)
-                mtx_tile.unlock(pipe=tla.arch.MTE2)
-                mtx_tile.lock(pipe=tla.arch.VECTOR)
+                mtx_tile.unlock(pipe=tla.pipes.MTE2)
+                mtx_tile.lock(pipe=tla.pipes.VECTOR)
                 with tla.vec.func(mode="simd"):
                     lo_v = tla.full(gm_range[0], dtype=tla.Float32)
                     hi_v = tla.full(gm_range[1], dtype=tla.Float32)
@@ -373,7 +373,7 @@ def histc_hist(
                 tla.pipe_barrier(tla.pipes.ALL)
                 with tla.vec.func(mode="simd"):
                     _acc_from_h16(ub_h16, ub_acc)
-                mtx_tile.unlock(pipe=tla.arch.VECTOR)
+                mtx_tile.unlock(pipe=tla.pipes.VECTOR)
 
             # acc(i32) -> f32 -> ub_out -> partials[bid, base:base+window]
             with tla.vec.func(mode="simd"):
@@ -435,10 +435,10 @@ def histc_tail(
                 tla.make_shape(1, group_ele), tla.make_stride(group_ele, 1)
             ),
         )
-        mtx_stage.lock(pipe=tla.arch.MTE2)
+        mtx_stage.lock(pipe=tla.pipes.MTE2)
         tla.copy(ub2, gm2)
-        mtx_stage.unlock(pipe=tla.arch.MTE2)
-        mtx_stage.lock(pipe=tla.arch.VECTOR)
+        mtx_stage.unlock(pipe=tla.pipes.MTE2)
+        mtx_stage.lock(pipe=tla.pipes.VECTOR)
         for w in tla.range(passes):
             base = w * window
             with tla.vec.func(mode="simd"):
@@ -482,7 +482,7 @@ def histc_tail(
                 tla.tile_view(ub_out, tla.make_shape(window), tla.make_coord(0)),
             )
             tla.pipe_barrier(tla.pipes.ALL)
-        mtx_stage.unlock(pipe=tla.arch.VECTOR)
+        mtx_stage.unlock(pipe=tla.pipes.VECTOR)
 
 
 @tla.kernel
@@ -520,7 +520,7 @@ def histc_range(gm_x: tla.Tensor, gm_pm: tla.Tensor) -> None:
     with tla.vector():
         # 用 x[0] 预填 tile 缓冲：非对齐尾块残留的 lane 只会是 x 自身的元素，
         # 不会污染 min/max（避免在 SIMD region 内使用动态 mask）。
-        mtx_x.lock(pipe=tla.arch.VECTOR)
+        mtx_x.lock(pipe=tla.pipes.VECTOR)
         with tla.vec.func(mode="simd"):
             seed_x = tla.full(gm_x[0], dtype=dtype_x)
             for i in range(tile_ele // 64):
@@ -533,7 +533,7 @@ def histc_range(gm_x: tla.Tensor, gm_pm: tla.Tensor) -> None:
                 tla.full(-big, dtype=tla.Float32)
             )
         tla.pipe_barrier(tla.pipes.ALL)
-        mtx_x.unlock(pipe=tla.arch.VECTOR)
+        mtx_x.unlock(pipe=tla.pipes.VECTOR)
         for ti in tla.range(n_tiles):
             here = start + ti * tile_ele
             rem = end - here
@@ -548,10 +548,10 @@ def histc_range(gm_x: tla.Tensor, gm_pm: tla.Tensor) -> None:
             )
             ub_tile = _dyn_tensor(ub_x, tile_ele, rem)
             nregs = (rem + per_reg - 1) // per_reg
-            mtx_x.lock(pipe=tla.arch.MTE2)
+            mtx_x.lock(pipe=tla.pipes.MTE2)
             tla.copy(ub_tile, gm_tile)
-            mtx_x.unlock(pipe=tla.arch.MTE2)
-            mtx_x.lock(pipe=tla.arch.VECTOR)
+            mtx_x.unlock(pipe=tla.pipes.MTE2)
+            mtx_x.lock(pipe=tla.pipes.VECTOR)
             with tla.vec.func(mode="simd"):
                 acc_max = tla.full(-big, dtype=tla.Float32)
                 acc_min = tla.full(big, dtype=tla.Float32)
@@ -583,7 +583,7 @@ def histc_range(gm_x: tla.Tensor, gm_pm: tla.Tensor) -> None:
                         dtype=tla.Float32,
                     )
                 )
-            mtx_x.unlock(pipe=tla.arch.VECTOR)
+            mtx_x.unlock(pipe=tla.pipes.VECTOR)
         tla.pipe_barrier(tla.pipes.ALL)
 
         tla.copy(
@@ -677,10 +677,10 @@ def histc_reduce(
                 ub_tail.ptr,
                 tla.make_layout(tla.make_shape(1, ch), tla.make_stride(ch, 1)),
             )
-            mtx_tile.lock(pipe=tla.arch.MTE2)
+            mtx_tile.lock(pipe=tla.pipes.MTE2)
             tla.copy(ub2, gm2)
-            mtx_tile.unlock(pipe=tla.arch.MTE2)
-            mtx_tile.lock(pipe=tla.arch.VECTOR)
+            mtx_tile.unlock(pipe=tla.pipes.MTE2)
+            mtx_tile.lock(pipe=tla.pipes.VECTOR)
             with tla.vec.func(mode="simd"):
                 lo_v = tla.full(gm_range[0], dtype=tla.Float32)
                 hi_v = tla.full(gm_range[1], dtype=tla.Float32)
@@ -715,7 +715,7 @@ def histc_reduce(
             with tla.vec.func(mode="simd"):
                 _acc_from_h16(ub_th16, ub_tacc)
             tla.pipe_barrier(tla.pipes.ALL)
-            mtx_tile.unlock(pipe=tla.arch.VECTOR)
+            mtx_tile.unlock(pipe=tla.pipes.VECTOR)
         for c in tla.range(nchunks):
             col = c * ch
             gm_tile = tla.make_tensor(
@@ -726,10 +726,10 @@ def histc_reduce(
                 ub_blk.ptr,
                 tla.make_layout(tla.make_shape(nrow, ch), tla.make_stride(ch, 1)),
             )
-            mtx_tile.lock(pipe=tla.arch.MTE2)
+            mtx_tile.lock(pipe=tla.pipes.MTE2)
             tla.copy(ub_tile, gm_tile)
-            mtx_tile.unlock(pipe=tla.arch.MTE2)
-            mtx_tile.lock(pipe=tla.arch.VECTOR)
+            mtx_tile.unlock(pipe=tla.pipes.MTE2)
+            mtx_tile.lock(pipe=tla.pipes.VECTOR)
             with tla.vec.func(mode="simd"):
                 _sum_rows(ub_blk, ub_acc, nrow, nsub)
             tla.pipe_barrier(tla.pipes.ALL)
@@ -759,7 +759,7 @@ def histc_reduce(
                     origin_shape=tla.make_shape(left),
                 ),
             )
-            mtx_tile.unlock(pipe=tla.arch.VECTOR)
+            mtx_tile.unlock(pipe=tla.pipes.VECTOR)
             tla.copy(dst, src)
             tla.pipe_barrier(tla.pipes.ALL)
 

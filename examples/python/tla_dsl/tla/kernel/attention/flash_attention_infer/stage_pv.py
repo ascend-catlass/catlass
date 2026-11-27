@@ -115,11 +115,11 @@ def _pv_cube_stage(
             tla.set_flag(sync.v_l1_data_ready_1)
             tla.wait_flag(sync.v_l1_data_ready_1)
         if l1PBufIdDe == c0:
-            tla.cross_core_wait_flag(sync.ub_p_cross_ready_0, tla.arch.MTE1)
+            tla.cross_core_wait_flag(sync.ub_p_cross_ready_0, tla.pipes.MTE1)
         elif l1PBufIdDe == c1:
-            tla.cross_core_wait_flag(sync.ub_p_cross_ready_1, tla.arch.MTE1)
+            tla.cross_core_wait_flag(sync.ub_p_cross_ready_1, tla.pipes.MTE1)
         else:
-            tla.cross_core_wait_flag(sync.ub_p_cross_ready_2, tla.arch.MTE1)
+            tla.cross_core_wait_flag(sync.ub_p_cross_ready_2, tla.pipes.MTE1)
         # copy L1 to l0
         nLoopCounter = validIdxDe
         l0CBufIdDe = nLoopCounter % L0_STAGES  # l0C 只按 n 分 buffer
@@ -166,11 +166,11 @@ def _pv_cube_stage(
         else:
             tla.set_flag(sync.l0a_data_ready_1)
         if l1PBufIdDe == c0:
-            tla.cross_core_set_flag(sync.ub_p_cross_ready_0, tla.arch.MTE1)
+            tla.cross_core_set_flag(sync.ub_p_cross_ready_0, tla.pipes.MTE1)
         elif l1PBufIdDe == c1:
-            tla.cross_core_set_flag(sync.ub_p_cross_ready_1, tla.arch.MTE1)
+            tla.cross_core_set_flag(sync.ub_p_cross_ready_1, tla.pipes.MTE1)
         else:
-            tla.cross_core_set_flag(sync.ub_p_cross_ready_2, tla.arch.MTE1)
+            tla.cross_core_set_flag(sync.ub_p_cross_ready_2, tla.pipes.MTE1)
         if l0ABufIdDe == c0:
             tla.wait_flag(sync.l0a_data_ready_0)  # MTE1_CUBE
         else:
@@ -193,9 +193,9 @@ def _pv_cube_stage(
         else:
             tla.set_flag(sync.l0b_available_1)
         if ubOTmpBufId == c0:
-            tla.cross_core_wait_flag(sync.ub_otmp_cross_ready_0, tla.arch.FIX)
+            tla.cross_core_wait_flag(sync.ub_otmp_cross_ready_0, tla.pipes.FIX)
         else:
-            tla.cross_core_wait_flag(sync.ub_otmp_cross_ready_1, tla.arch.FIX)
+            tla.cross_core_wait_flag(sync.ub_otmp_cross_ready_1, tla.pipes.FIX)
         if l0CBufIdDe == c0:
             tla.set_flag(sync.l0c_data_ready_2)  # CUBE_FIX
             tla.wait_flag(sync.l0c_data_ready_2)  # CUBE_FIX
@@ -212,6 +212,6 @@ def _pv_cube_stage(
         else:
             tla.set_flag(sync.l0c_available_3)
         if ubOTmpBufId == c0:
-            tla.cross_core_set_flag(sync.ub_otmp_cross_ready_0, tla.arch.FIX)
+            tla.cross_core_set_flag(sync.ub_otmp_cross_ready_0, tla.pipes.FIX)
         else:
-            tla.cross_core_set_flag(sync.ub_otmp_cross_ready_1, tla.arch.FIX)
+            tla.cross_core_set_flag(sync.ub_otmp_cross_ready_1, tla.pipes.FIX)

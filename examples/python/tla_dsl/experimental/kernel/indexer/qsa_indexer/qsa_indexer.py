@@ -255,8 +255,8 @@ def _qsa_indexer_mixed_topk_stage(
             cube_page_count = (cube_max_visible + page_size - 1) // page_size
             for cube_page in tla.range(0, cube_page_count, 1):
                 physical_page = block_table[0, cube_page]
-                tla.cross_core_wait_flag(aiv_to_aic, tla.arch.FIX, aiv_id=0)
-                tla.cross_core_wait_flag(aiv_to_aic, tla.arch.FIX, aiv_id=1)
+                tla.cross_core_wait_flag(aiv_to_aic, tla.pipes.FIX, aiv_id=0)
+                tla.cross_core_wait_flag(aiv_to_aic, tla.pipes.FIX, aiv_id=1)
 
                 raw_gm_tile = tla.tile_view(
                     raw_workspace,
@@ -324,17 +324,17 @@ def _qsa_indexer_mixed_topk_stage(
                         l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M
                     ),
                 )
-                tla.cross_core_set_flag(aic_to_aiv, tla.arch.FIX, aiv_id=0)
-                tla.cross_core_set_flag(aic_to_aiv, tla.arch.FIX, aiv_id=1)
+                tla.cross_core_set_flag(aic_to_aiv, tla.pipes.FIX, aiv_id=0)
+                tla.cross_core_set_flag(aic_to_aiv, tla.pipes.FIX, aiv_id=1)
 
-        tla.cross_core_wait_flag(aiv_to_aic, tla.arch.FIX, aiv_id=0)
-        tla.cross_core_wait_flag(aiv_to_aic, tla.arch.FIX, aiv_id=1)
+        tla.cross_core_wait_flag(aiv_to_aic, tla.pipes.FIX, aiv_id=0)
+        tla.cross_core_wait_flag(aiv_to_aic, tla.pipes.FIX, aiv_id=1)
         tla.pipe_barrier(tla.pipes.ALL)
 
     with tla.vector():
         aiv_subblock = tla.arch.sub_block_idx()
-        tla.cross_core_set_flag(aiv_to_aic, tla.arch.VECTOR, aiv_id=0)
-        tla.cross_core_set_flag(aiv_to_aic, tla.arch.VECTOR, aiv_id=1)
+        tla.cross_core_set_flag(aiv_to_aic, tla.pipes.VECTOR, aiv_id=0)
+        tla.cross_core_set_flag(aiv_to_aic, tla.pipes.VECTOR, aiv_id=1)
 
         for vector_task in tla.range(
             tla.arch.block_idx(), task_count, tla.arch.block_num()
@@ -369,8 +369,8 @@ def _qsa_indexer_mixed_topk_stage(
             vector_page_count = (vector_max_visible + page_size - 1) // page_size
 
             for vector_page in tla.range(0, vector_page_count, 1):
-                tla.cross_core_wait_flag(aic_to_aiv, tla.arch.VECTOR, aiv_id=0)
-                tla.cross_core_wait_flag(aic_to_aiv, tla.arch.VECTOR, aiv_id=1)
+                tla.cross_core_wait_flag(aic_to_aiv, tla.pipes.VECTOR, aiv_id=0)
+                tla.cross_core_wait_flag(aic_to_aiv, tla.pipes.VECTOR, aiv_id=1)
                 raw_aiv = tla.make_tensor(
                     raw_ub_ptr,
                     tla.make_layout(
@@ -642,8 +642,8 @@ def _qsa_indexer_mixed_topk_stage(
                 tla.pipe_barrier(tla.pipes.ALL)
 
                 if vector_page + 1 < vector_page_count:
-                    tla.cross_core_set_flag(aiv_to_aic, tla.arch.VECTOR, aiv_id=0)
-                    tla.cross_core_set_flag(aiv_to_aic, tla.arch.VECTOR, aiv_id=1)
+                    tla.cross_core_set_flag(aiv_to_aic, tla.pipes.VECTOR, aiv_id=0)
+                    tla.cross_core_set_flag(aiv_to_aic, tla.pipes.VECTOR, aiv_id=1)
 
             tla.pipe_barrier(tla.pipes.ALL)
 
@@ -1414,6 +1414,6 @@ def _qsa_indexer_mixed_topk_stage(
                                 ).to(tla.Int32)
                             tla.arch.sync_threads()
                         tla.pipe_barrier(tla.pipes.ALL)
-            tla.cross_core_set_flag(aiv_to_aic, tla.arch.VECTOR, aiv_id=0)
-            tla.cross_core_set_flag(aiv_to_aic, tla.arch.VECTOR, aiv_id=1)
+            tla.cross_core_set_flag(aiv_to_aic, tla.pipes.VECTOR, aiv_id=0)
+            tla.cross_core_set_flag(aiv_to_aic, tla.pipes.VECTOR, aiv_id=1)
         tla.pipe_barrier(tla.pipes.ALL)

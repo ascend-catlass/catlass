@@ -34,13 +34,13 @@ execute in order; different pipes have no ordering guarantee.
 
 | Pipe | TLA token | Instructions |
 | --- | --- | --- |
-| PIPE_S | `tla.arch.SCALAR` | Scalar arithmetic, tensor subscript access, scalar load/store in `vec.func` |
-| PIPE_V | `tla.arch.VECTOR` | Vector compute (SIMD arithmetic, `tile.load/store`, ...) |
-| PIPE_M | `tla.arch.CUBE` | `tla.mmad` |
-| PIPE_MTE1 | `tla.arch.MTE1` | L1 -> L0A/L0B movement |
-| PIPE_MTE2 | `tla.arch.MTE2` | GM -> L1/L0/UB movement |
-| PIPE_MTE3 | `tla.arch.MTE3` | UB -> GM movement |
-| PIPE_FIX | `tla.arch.FIX` | L0C -> GM/UB movement |
+| PIPE_S | `tla.pipes.SCALAR` | Scalar arithmetic, tensor subscript access, scalar load/store in `vec.func` |
+| PIPE_V | `tla.pipes.VECTOR` | Vector compute (SIMD arithmetic, `tile.load/store`, ...) |
+| PIPE_M | `tla.pipes.CUBE` | `tla.mmad` |
+| PIPE_MTE1 | `tla.pipes.MTE1` | L1 -> L0A/L0B movement |
+| PIPE_MTE2 | `tla.pipes.MTE2` | GM -> L1/L0/UB movement |
+| PIPE_MTE3 | `tla.pipes.MTE3` | UB -> GM movement |
+| PIPE_FIX | `tla.pipes.FIX` | L0C -> GM/UB movement |
 
 Instructions on one pipe are naturally ordered, so **only cross-pipe accesses need
 attention**. Vector/scalar visibility inside `tla.vec.func` is a different layer; use
@@ -116,9 +116,9 @@ Minimal example (GM -> UB -> compute -> GM):
 def vadd(x: tla.Tensor, y: tla.Tensor, out: tla.Tensor) -> None:
     # Buffer and tile-view creation omitted: x_ub / y_ub / out_ub come from tla.make_tensor_like
     # Data ready: after MTE2 writes UB, VECTOR may read it.
-    ub_loaded = tla.flag("ub_loaded", tla.arch.MTE2, tla.arch.VECTOR)
+    ub_loaded = tla.flag("ub_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
     # Compute done: after VECTOR writes UB, MTE3 may read it.
-    vec_done = tla.flag("vec_done", tla.arch.VECTOR, tla.arch.MTE3)
+    vec_done = tla.flag("vec_done", tla.pipes.VECTOR, tla.pipes.MTE3)
 
     with tla.vector():
         tla.copy(x_ub, x_gm)          # MTE2
@@ -140,7 +140,7 @@ WAR case (producer may overwrite only after the consumer is done):
 
 ```python
 # Only after VECTOR has read ub may MTE2 write the next tile.
-ub_free = tla.flag("ub_free", tla.arch.VECTOR, tla.arch.MTE2)
+ub_free = tla.flag("ub_free", tla.pipes.VECTOR, tla.pipes.MTE2)
 ...
 tla.set_flag(ub_free)
 tla.wait_flag(ub_free)
@@ -168,16 +168,16 @@ def vadd_pingpong(x: tla.Tensor, y: tla.Tensor, out: tla.Tensor) -> None:
     num_tiles = 4
 
     loaded = (
-        tla.flag("loaded_0", tla.arch.MTE2, tla.arch.VECTOR, id=0),
-        tla.flag("loaded_1", tla.arch.MTE2, tla.arch.VECTOR, id=1),
+        tla.flag("loaded_0", tla.pipes.MTE2, tla.pipes.VECTOR, id=0),
+        tla.flag("loaded_1", tla.pipes.MTE2, tla.pipes.VECTOR, id=1),
     )
     store_done = (
-        tla.flag("store_done_0", tla.arch.VECTOR, tla.arch.MTE3, id=0),
-        tla.flag("store_done_1", tla.arch.VECTOR, tla.arch.MTE3, id=1),
+        tla.flag("store_done_0", tla.pipes.VECTOR, tla.pipes.MTE3, id=0),
+        tla.flag("store_done_1", tla.pipes.VECTOR, tla.pipes.MTE3, id=1),
     )
     available = (
-        tla.flag("available_0", tla.arch.MTE3, tla.arch.MTE2, id=0),
-        tla.flag("available_1", tla.arch.MTE3, tla.arch.MTE2, id=1),
+        tla.flag("available_0", tla.pipes.MTE3, tla.pipes.MTE2, id=0),
+        tla.flag("available_1", tla.pipes.MTE3, tla.pipes.MTE2, id=1),
     )
 
     with tla.vector():
@@ -248,38 +248,38 @@ Rules and limits:
 - Modes 0/1/2 use cross flag ids 0..15. In mode 4, AIC<->AIV0 uses 0..15 and AIC<->AIV1 uses
   16..31. A kernel may have at most **16 cross flags**, otherwise compilation fails with
   `cross flag id exhausted`;
-- `pipe` for set/wait does not support `ALL`; common choices are `tla.arch.CUBE`,
-  `tla.arch.FIX`, `tla.arch.VECTOR`, `tla.arch.MTE2`;
+- `pipe` for set/wait does not support `ALL`; common choices are `tla.pipes.CUBE`,
+  `tla.pipes.FIX`, `tla.pipes.VECTOR`, `tla.pipes.MTE2`;
 - Mode 4 requires an explicit `aiv_id=0/1`. Write `aiv_id=i` on the AIC side, and write both
   0 and 1 on the AIV side; the compiler generates a `sub_block_idx` guard so each AIV only
   executes its own instruction at runtime;
 - With `@tla.kernel(core_ratio=tla.arch.C1V1)`: mode 4 allows only `aiv_id=0`;
-  `cross_core_wait_flag` must use `tla.arch.SCALAR`; cube results must stage
+  `cross_core_wait_flag` must use `tla.pipes.SCALAR`; cube results must stage
   `L0C -> GM -> UB` (tightly coupled `L0C -> UB` is illegal). The compiler neither rewrites a
   wrong wait pipe nor enforces this rule at compile time: a wrong pipe usually still compiles,
   then fails or hangs on device (see `basic_mixed_core_ratio_11.py`).
 
 Two-phase mode-4 handshake (AIC delivers a token -> AIV acks -> AIC releases again). The
 example below is for two AIVs (not `C1V1`); under `C1V1`, follow the rules above and address
-only `aiv_id=0` with `tla.arch.SCALAR` on the wait:
+only `aiv_id=0` with `tla.pipes.SCALAR` on the wait:
 
 ```python
 aic_to_aiv = tla.cross_flag("aic_to_aiv", mode=4)
 aiv_to_aic = tla.cross_flag("aiv_to_aic", mode=4)
 
 with tla.cube():
-    tla.cross_core_set_flag(aic_to_aiv, tla.arch.FIX, aiv_id=0)
-    tla.cross_core_set_flag(aic_to_aiv, tla.arch.FIX, aiv_id=1)
+    tla.cross_core_set_flag(aic_to_aiv, tla.pipes.FIX, aiv_id=0)
+    tla.cross_core_set_flag(aic_to_aiv, tla.pipes.FIX, aiv_id=1)
     # Proceed only after both AIVs have acknowledged.
-    tla.cross_core_wait_flag(aiv_to_aic, tla.arch.FIX, aiv_id=0)
-    tla.cross_core_wait_flag(aiv_to_aic, tla.arch.FIX, aiv_id=1)
+    tla.cross_core_wait_flag(aiv_to_aic, tla.pipes.FIX, aiv_id=0)
+    tla.cross_core_wait_flag(aiv_to_aic, tla.pipes.FIX, aiv_id=1)
 
 with tla.vector():
-    tla.cross_core_wait_flag(aic_to_aiv, tla.arch.VECTOR, aiv_id=0)
-    tla.cross_core_wait_flag(aic_to_aiv, tla.arch.VECTOR, aiv_id=1)
+    tla.cross_core_wait_flag(aic_to_aiv, tla.pipes.VECTOR, aiv_id=0)
+    tla.cross_core_wait_flag(aic_to_aiv, tla.pipes.VECTOR, aiv_id=1)
     ...
-    tla.cross_core_set_flag(aiv_to_aic, tla.arch.VECTOR, aiv_id=0)
-    tla.cross_core_set_flag(aiv_to_aic, tla.arch.VECTOR, aiv_id=1)
+    tla.cross_core_set_flag(aiv_to_aic, tla.pipes.VECTOR, aiv_id=0)
+    tla.cross_core_set_flag(aiv_to_aic, tla.pipes.VECTOR, aiv_id=1)
 ```
 
 For a complete runnable version see
@@ -353,7 +353,7 @@ set of pipes:
 | `tla.cube()` | `CUBE`, `MTE1`, `MTE2`, `FIX`, `ALL` |
 | `tla.vector()` | `MTE2`, `MTE3`, `ALL` (no `pipe_barrier<PIPE_V>`) |
 
-Therefore do not write `tla.pipe_barrier(tla.arch.VECTOR)` inside a vector region; use
+Therefore do not write `tla.pipe_barrier(tla.pipes.VECTOR)` inside a vector region; use
 `tla.pipe_barrier(tla.pipes.ALL)` when you need a full drain.
 
 `tla.data_sync_barrier(domain)` is a single `dsb` instruction that blocks subsequent

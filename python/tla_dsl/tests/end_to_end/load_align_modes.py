@@ -130,8 +130,8 @@ def make_kernel(case, iterations):
         )
         # Convert units once; signed division in the VF loop adds address work.
         source_offset_elements = source_offset // element_bytes
-        ready = tla.flag("ready", tla.arch.MTE2, tla.arch.VECTOR)
-        done = tla.flag("done", tla.arch.VECTOR, tla.arch.MTE3)
+        ready = tla.flag("ready", tla.pipes.MTE2, tla.pipes.VECTOR)
+        done = tla.flag("done", tla.pipes.VECTOR, tla.pipes.MTE3)
         with tla.vector():
             tla.copy(source_buffer, source)
             tla.set_flag(ready)

@@ -372,7 +372,7 @@ class _StableOnlineSoftmaxVector:
         rows = self.tile_vec_m
         src_row_stride = self.tile_n
         # V 写 p_ub，MTE3 在 store_p 读。
-        self.mtx_p.lock(pipe=tla.arch.VECTOR)
+        self.mtx_p.lock(pipe=tla.pipes.VECTOR)
         with tla.vec.func(mode="simd"):
             pass_a_row = self._pass_a_row  # tla.range 体内不得调用 host 对象方法
             for row in tla.range(rows):  # 运行期行循环
@@ -412,7 +412,7 @@ class _StableOnlineSoftmaxVector:
                 s_m0,
                 block_stride,
             )
-        self.mtx_p.unlock(pipe=tla.arch.VECTOR)
+        self.mtx_p.unlock(pipe=tla.pipes.VECTOR)
 
     # --- softmax_rest：后续 n-tile 的 softmax ----------------------------------------------
     @tla.jit
@@ -431,7 +431,7 @@ class _StableOnlineSoftmaxVector:
         rows = self.tile_vec_m
         src_row_stride = self.tile_n
         # V 写 p_ub，MTE3 在 store_p 读。
-        self.mtx_p.lock(pipe=tla.arch.VECTOR)
+        self.mtx_p.lock(pipe=tla.pipes.VECTOR)
         with tla.vec.func(mode="simd"):
             pass_a_row = self._pass_a_row  # tla.range 体内不得调用 host 对象方法
             for row in tla.range(rows):  # 运行期行循环
@@ -484,7 +484,7 @@ class _StableOnlineSoftmaxVector:
                 block_stride,
             )
             self._softmax_rest_tail(sm_max, sm_sum, sm_exp, rowmask)
-        self.mtx_p.unlock(pipe=tla.arch.VECTOR)
+        self.mtx_p.unlock(pipe=tla.pipes.VECTOR)
 
     # --- store_p：p_ub → L1 的逐带写出 ---------------------------------------------------
     @tla.jit
@@ -511,7 +511,7 @@ class _StableOnlineSoftmaxVector:
         # 每条 1 KiB burst。
         slot_base = self.p_ub.ptr + p_slot * self.p_slot_elems
         # MTE3 读 V 写好的 p_ub。
-        self.mtx_p.lock(pipe=tla.arch.MTE3)
+        self.mtx_p.lock(pipe=tla.pipes.MTE3)
         for j1 in tla.range_constexpr(self.tile_n // 16):
             tla.copy(
                 tla.make_tensor(
@@ -523,7 +523,7 @@ class _StableOnlineSoftmaxVector:
                     tla.make_layout_with_tag((rows, 16), self.dtype_16, tla.arch.zN),
                 ),
             )
-        self.mtx_p.unlock(pipe=tla.arch.MTE3)
+        self.mtx_p.unlock(pipe=tla.pipes.MTE3)
 
     # --- init_o：首块 PV 初始化输出累加器 --------------------------------------------------
     @tla.jit
@@ -727,7 +727,7 @@ class _SFAOnlineSoftmaxVector(_StableOnlineSoftmaxVector):
                 nrows = tla.as_numeric(self.tile_vec_m)
             if nrows < 0:
                 nrows = tla.as_numeric(0)
-            mtx_o.lock(pipe=tla.arch.VECTOR)
+            mtx_o.lock(pipe=tla.pipes.VECTOR)
             with tla.vec.func(mode="simd"):
                 full, _ = tla.update_mask(VL_T, dtype=tla.Float32)
                 b16_full, _ = tla.update_mask(2 * VL_T, dtype=self.dtype_16)
@@ -791,9 +791,9 @@ class _SFAOnlineSoftmaxVector(_StableOnlineSoftmaxVector):
             # 若改成动态 `tla.range`，MTE3 拷贝会在部分 query 上整段不发射
             # （实测同一 case 两次运行的 NaN 行集合不同，attn 按 query 随机缺写），
             # 因此这里回到静态循环。
-            mtx_o.unlock(pipe=tla.arch.VECTOR)
+            mtx_o.unlock(pipe=tla.pipes.VECTOR)
         else:
-            mtx_o.lock(pipe=tla.arch.VECTOR)
+            mtx_o.lock(pipe=tla.pipes.VECTOR)
             with tla.vec.func(mode="simd"):
                 full, _ = tla.update_mask(VL_T, dtype=tla.Float32)
                 b16_full, _ = tla.update_mask(2 * VL_T, dtype=self.dtype_16)
@@ -857,7 +857,7 @@ class _SFAOnlineSoftmaxVector(_StableOnlineSoftmaxVector):
             # 若改成动态 `tla.range`，MTE3 拷贝会在部分 query 上整段不发射
             # （实测同一 case 两次运行的 NaN 行集合不同，attn 按 query 随机缺写），
             # 因此这里回到静态循环。
-            mtx_o.unlock(pipe=tla.arch.VECTOR)
+            mtx_o.unlock(pipe=tla.pipes.VECTOR)
         head_rows = self.head_count
         group_rows = self.tile_m
         # 动态 if 内不得出现 `self.`（前端限制）：先提到本地名字。
@@ -891,9 +891,9 @@ class _SFAOnlineSoftmaxVector(_StableOnlineSoftmaxVector):
                                 tla.make_coord(c * vec_m, 0),
                                 tla.make_shape(n, tile_d),
                             )
-                            mtx_o.lock(pipe=tla.arch.MTE3)
+                            mtx_o.lock(pipe=tla.pipes.MTE3)
                             tla.copy(dst, src)
-                            mtx_o.unlock(pipe=tla.arch.MTE3)
+                            mtx_o.unlock(pipe=tla.pipes.MTE3)
 
     # --- _pass_a_row：单行缩放与尾块安全 max 归约 ------------------------------------------
     @tla.jit
@@ -1069,33 +1069,33 @@ class _SparseMatmul:
     def _l0c_wait_free(self, slot):
         """写侧等该 L0C 槽空闲（FIX 已读完上一任）。"""
         if slot == 0:
-            self.mtx_l0c[0].lock(pipe=tla.arch.CUBE)
+            self.mtx_l0c[0].lock(pipe=tla.pipes.CUBE)
         else:
-            self.mtx_l0c[1].lock(pipe=tla.arch.CUBE)
+            self.mtx_l0c[1].lock(pipe=tla.pipes.CUBE)
 
     @tla.jit
     def _l0c_signal_ready(self, slot):
         """写侧交棒：该 L0C 槽已写完。"""
         if slot == 0:
-            self.mtx_l0c[0].unlock(pipe=tla.arch.CUBE)
+            self.mtx_l0c[0].unlock(pipe=tla.pipes.CUBE)
         else:
-            self.mtx_l0c[1].unlock(pipe=tla.arch.CUBE)
+            self.mtx_l0c[1].unlock(pipe=tla.pipes.CUBE)
 
     @tla.jit
     def _l0c_wait_ready(self, slot):
         """FixPipe 侧等该 L0C 槽写完。"""
         if slot == 0:
-            self.mtx_l0c[0].lock(pipe=tla.arch.FIX)
+            self.mtx_l0c[0].lock(pipe=tla.pipes.FIX)
         else:
-            self.mtx_l0c[1].lock(pipe=tla.arch.FIX)
+            self.mtx_l0c[1].lock(pipe=tla.pipes.FIX)
 
     @tla.jit
     def _l0c_signal_free(self, slot):
         """FixPipe 侧交棒：该 L0C 槽已读完。"""
         if slot == 0:
-            self.mtx_l0c[0].unlock(pipe=tla.arch.FIX)
+            self.mtx_l0c[0].unlock(pipe=tla.pipes.FIX)
         else:
-            self.mtx_l0c[1].unlock(pipe=tla.arch.FIX)
+            self.mtx_l0c[1].unlock(pipe=tla.pipes.FIX)
 
     @tla.jit
     def _pick3(self, items, slot):
@@ -1143,13 +1143,13 @@ class _SparseMatmul:
     # load_q：把本 Query 的 Q / Q-RoPE 装入 L1
     def load_q(self, query_token, query_rope_token):
         # MTE2 写 L1，MTE1 在 compute_qk 读同一缓冲。
-        self.mtx_qn.lock(pipe=tla.arch.MTE2)
+        self.mtx_qn.lock(pipe=tla.pipes.MTE2)
         tla.copy(self.q_nope_l1, query_token)
-        self.mtx_qn.unlock(pipe=tla.arch.MTE2)
+        self.mtx_qn.unlock(pipe=tla.pipes.MTE2)
         if tla.const_expr(self.has_rope):
-            self.mtx_qr.lock(pipe=tla.arch.MTE2)
+            self.mtx_qr.lock(pipe=tla.pipes.MTE2)
             tla.copy(self.q_rope_l1, query_rope_token)
-            self.mtx_qr.unlock(pipe=tla.arch.MTE2)
+            self.mtx_qr.unlock(pipe=tla.pipes.MTE2)
 
     # load_sparse_kv：把 KV tile 装入 L1（按 feature 分段）
     def load_sparse_kv(self, workspace_tile, valid_n, slot):
@@ -1161,12 +1161,12 @@ class _SparseMatmul:
         dest = self.right_tile(slot)
         # MTE2 写 L1 KV，MTE1 在 compute_qk（k^T 视图）/ compute_pv（v）读。
         # 这里顺带把 RoPE 列（offset=DIM_NOPE）装进 k_rope_l1。
-        self.mtx_kv.lock(pipe=tla.arch.MTE2)
-        self.mtx_kt.lock(pipe=tla.arch.MTE2)
+        self.mtx_kv.lock(pipe=tla.pipes.MTE2)
+        self.mtx_kt.lock(pipe=tla.pipes.MTE2)
         # 按 feature 段拆成 4 次拷贝，每段在自己的信用上发布；QK 的第 seg
         # 条 mmad 只需等该段。段宽 128 与 compute_qk 的 feature 步长一致。
         for seg, feature in enumerate((0, 128, 256, 384)):
-            self.mtx_ktseg[seg].lock(pipe=tla.arch.MTE2)
+            self.mtx_ktseg[seg].lock(pipe=tla.pipes.MTE2)
             tla.copy(
                 tla.get_tile(
                     dest,
@@ -1179,7 +1179,7 @@ class _SparseMatmul:
                     tla.make_shape(valid_n, 128),
                 ),
             )
-            self.mtx_ktseg[seg].unlock(pipe=tla.arch.MTE2)
+            self.mtx_ktseg[seg].unlock(pipe=tla.pipes.MTE2)
         if tla.const_expr(self.has_rope):
             rope = tla.get_tile(
                 workspace_tile,
@@ -1188,8 +1188,8 @@ class _SparseMatmul:
             )
             tla.copy(self.k_rope_l1, rope)
         # 两个块都落 L1 之后再放 QK 的读侧进去（写侧 unlock 即发布）。
-        self.mtx_kt.unlock(pipe=tla.arch.MTE2)
-        self.mtx_kv.unlock(pipe=tla.arch.MTE2)
+        self.mtx_kt.unlock(pipe=tla.pipes.MTE2)
+        self.mtx_kv.unlock(pipe=tla.pipes.MTE2)
         return dest
 
     # compute_qk：4 段 NoPE + 可选 RoPE 尾巴的 QK 累加
@@ -1205,7 +1205,7 @@ class _SparseMatmul:
         # 下一个 Query 的 `load_q`（MTE2）就能在中间把 q_nope_l1 覆盖掉（两个 pipe
         # 只在 mutex 上排队）。这里把 MTE1 侧的读锁扩到整个 4 段，与 load_q 的一次
         # MTE2 加锁严格交替。
-        self.mtx_qn.lock(pipe=tla.arch.MTE1)
+        self.mtx_qn.lock(pipe=tla.pipes.MTE1)
         # k^T 的读信用按段拆（见 load_sparse_kv）；这里不整块加锁，
         # 每段只等自己那 32 KiB 落 L1，RoPE 尾巴仍用 mtx_kt。
         for seg, feature in enumerate((0, 128, 256, 384)):
@@ -1244,23 +1244,23 @@ class _SparseMatmul:
                 tla.make_layout_with_tag((width, valid_n), self.dtype_16, tla.arch.nZ),
             )
             # L1→L0 由 MTE1 写、L0 由 CUBE 读；两侧各自在自己的流水线上加锁。
-            self.mtx_l0a[buf].lock(pipe=tla.arch.MTE1)
+            self.mtx_l0a[buf].lock(pipe=tla.pipes.MTE1)
             tla.copy(a, q)
-            self.mtx_l0a[buf].unlock(pipe=tla.arch.MTE1)
-            self.mtx_l0b[buf].lock(pipe=tla.arch.MTE1)
+            self.mtx_l0a[buf].unlock(pipe=tla.pipes.MTE1)
+            self.mtx_l0b[buf].lock(pipe=tla.pipes.MTE1)
             # 本段 K^T 的 L1 数据到位即可下发 L0B 拷贝（不整块等）。
-            self.mtx_ktseg[seg].lock(pipe=tla.arch.MTE1)
+            self.mtx_ktseg[seg].lock(pipe=tla.pipes.MTE1)
             tla.copy(b, kt)
-            self.mtx_ktseg[seg].unlock(pipe=tla.arch.MTE1)
-            self.mtx_l0b[buf].unlock(pipe=tla.arch.MTE1)
+            self.mtx_ktseg[seg].unlock(pipe=tla.pipes.MTE1)
+            self.mtx_l0b[buf].unlock(pipe=tla.pipes.MTE1)
             # unit flag：统一置 0b00（与 store_score 的 FixPipe 参数一致）。
             unit = 0b00
-            self.mtx_l0a[buf].lock(pipe=tla.arch.CUBE)
-            self.mtx_l0b[buf].lock(pipe=tla.arch.CUBE)
+            self.mtx_l0a[buf].lock(pipe=tla.pipes.CUBE)
+            self.mtx_l0b[buf].lock(pipe=tla.pipes.CUBE)
             tla.mmad(score, a, b, init_c=(feature == 0), unit_flag=unit)
-            self.mtx_l0b[buf].unlock(pipe=tla.arch.CUBE)
-            self.mtx_l0a[buf].unlock(pipe=tla.arch.CUBE)
-        self.mtx_qn.unlock(pipe=tla.arch.MTE1)
+            self.mtx_l0b[buf].unlock(pipe=tla.pipes.CUBE)
+            self.mtx_l0a[buf].unlock(pipe=tla.pipes.CUBE)
+        self.mtx_qn.unlock(pipe=tla.pipes.MTE1)
         if tla.const_expr(self.has_rope):
             q = tla.get_tile(
                 self.q_rope_l1,
@@ -1285,21 +1285,21 @@ class _SparseMatmul:
                     (DIM_ROPE, valid_n), self.dtype_16, tla.arch.nZ
                 ),
             )
-            self.mtx_qr.lock(pipe=tla.arch.MTE1)
-            self.mtx_l0a[0].lock(pipe=tla.arch.MTE1)
+            self.mtx_qr.lock(pipe=tla.pipes.MTE1)
+            self.mtx_l0a[0].lock(pipe=tla.pipes.MTE1)
             tla.copy(a, q)
-            self.mtx_l0a[0].unlock(pipe=tla.arch.MTE1)
-            self.mtx_qr.unlock(pipe=tla.arch.MTE1)
-            self.mtx_l0b[0].lock(pipe=tla.arch.MTE1)
-            self.mtx_kt.lock(pipe=tla.arch.MTE1)
+            self.mtx_l0a[0].unlock(pipe=tla.pipes.MTE1)
+            self.mtx_qr.unlock(pipe=tla.pipes.MTE1)
+            self.mtx_l0b[0].lock(pipe=tla.pipes.MTE1)
+            self.mtx_kt.lock(pipe=tla.pipes.MTE1)
             tla.copy(b, kt)
-            self.mtx_kt.unlock(pipe=tla.arch.MTE1)
-            self.mtx_l0b[0].unlock(pipe=tla.arch.MTE1)
-            self.mtx_l0a[0].lock(pipe=tla.arch.CUBE)
-            self.mtx_l0b[0].lock(pipe=tla.arch.CUBE)
+            self.mtx_kt.unlock(pipe=tla.pipes.MTE1)
+            self.mtx_l0b[0].unlock(pipe=tla.pipes.MTE1)
+            self.mtx_l0a[0].lock(pipe=tla.pipes.CUBE)
+            self.mtx_l0b[0].lock(pipe=tla.pipes.CUBE)
             tla.mmad(score, a, b, init_c=False, unit_flag=0b00)
-            self.mtx_l0b[0].unlock(pipe=tla.arch.CUBE)
-            self.mtx_l0a[0].unlock(pipe=tla.arch.CUBE)
+            self.mtx_l0b[0].unlock(pipe=tla.pipes.CUBE)
+            self.mtx_l0a[0].unlock(pipe=tla.pipes.CUBE)
         self._l0c_signal_ready(slot)
 
     # compute_pv：P @ V 的 4 段累加
@@ -1322,15 +1322,15 @@ class _SparseMatmul:
         l0b_phase = 1 if self.has_rope else 0
         a = _bounded_local(self.l0a_tile(a_buf), (m, k_dim), (m, TILE_S2))
         self._l0c_wait_free(slot)
-        self.mtx_l0a[a_buf].lock(pipe=tla.arch.MTE1)
+        self.mtx_l0a[a_buf].lock(pipe=tla.pipes.MTE1)
         tla.copy(a, p)
-        self.mtx_l0a[a_buf].unlock(pipe=tla.arch.MTE1)
-        self.mtx_l0a[a_buf].lock(pipe=tla.arch.CUBE)
+        self.mtx_l0a[a_buf].unlock(pipe=tla.pipes.MTE1)
+        self.mtx_l0a[a_buf].lock(pipe=tla.pipes.CUBE)
         pv_segs = (0, 128, 256, 384)
         # V 的 L1 槽被 4 段共用，段间解锁会让下一块 tile 的 MTE2 写入在
         # 中途覆盖它（实测 q0 首块对得上、后续 query 的 PV 逐渐退化成无关数据）。
         # 把 MTE1 侧读锁扩到整个 4 段，与 load_sparse_kv 的一次 MTE2 写严格交替。
-        self.mtx_kv.lock(pipe=tla.arch.MTE1)
+        self.mtx_kv.lock(pipe=tla.pipes.MTE1)
         for seg, feature in enumerate(pv_segs):
             # L0B keeps the same rotation phase (decoupled from the P buffer).
             buf = (1 - (seg % 2)) if l0b_phase == 1 else (seg % 2)
@@ -1342,9 +1342,9 @@ class _SparseMatmul:
             v = _bounded_local(v_root, (k_dim, TILE_S2), (TILE_S2, TILE_S2))
             b = _bounded_local(self.l0b_tile(buf), (k_dim, TILE_S2), (TILE_S2, TILE_S2))
             # L1→L0B 的转置由 L0B 的 nZ tag 承担。
-            self.mtx_l0b[buf].lock(pipe=tla.arch.MTE1)
+            self.mtx_l0b[buf].lock(pipe=tla.pipes.MTE1)
             tla.copy(b, v)
-            self.mtx_l0b[buf].unlock(pipe=tla.arch.MTE1)
+            self.mtx_l0b[buf].unlock(pipe=tla.pipes.MTE1)
             # 4 段结果写进宽 (TILE_M,DIM_NOPE) L0C 的 4 个独立块（每块
             # (TILE_M,TILE_S2)）。在该缓冲上用列坐标取子块会被硬件判成非法
             # CUBE 指令（AIC errcode 11 / "set and wait do not match"；
@@ -1356,11 +1356,11 @@ class _SparseMatmul:
             )
             # 与 compute_qk 相同：统一 unit_flag=0b00。
             unit = 0b00
-            self.mtx_l0b[buf].lock(pipe=tla.arch.CUBE)
+            self.mtx_l0b[buf].lock(pipe=tla.pipes.CUBE)
             tla.mmad(dst, a, b, init_c=True, unit_flag=unit)
-            self.mtx_l0b[buf].unlock(pipe=tla.arch.CUBE)
-        self.mtx_kv.unlock(pipe=tla.arch.MTE1)
-        self.mtx_l0a[a_buf].unlock(pipe=tla.arch.CUBE)
+            self.mtx_l0b[buf].unlock(pipe=tla.pipes.CUBE)
+        self.mtx_kv.unlock(pipe=tla.pipes.MTE1)
+        self.mtx_l0a[a_buf].unlock(pipe=tla.pipes.CUBE)
         self._l0c_signal_ready(slot)
 
     # store_score：L0C 分数按 AIV 拆分落 UB
@@ -1668,7 +1668,7 @@ class _SparseFlashAttentionKernel:
         # 锁读 sm_*_tb 落 GM（对应 asc_sync_intra_wait(PIPE_V,2) +
         # asc_lock(PIPE_MTE3,7)）。
         mtx_o = self.vector.mtx_o
-        mtx_o.lock(pipe=tla.arch.VECTOR)
+        mtx_o.lock(pipe=tla.pipes.VECTOR)
         tla.copy(
             self.vector._state_flat(self.lse_max_state, 0),
             self.vector._state_flat(self.vector.sm_max_tb, state_slot),
@@ -1677,12 +1677,12 @@ class _SparseFlashAttentionKernel:
             self.vector._state_flat(self.lse_sum_state, 0),
             self.vector._state_flat(self.vector.sm_sum_tb, state_slot),
         )
-        mtx_o.unlock(pipe=tla.arch.VECTOR)
+        mtx_o.unlock(pipe=tla.pipes.VECTOR)
         src_layout = tla.make_layout(
             tla.make_shape(1, self.vector.tile_vec_m),
             tla.make_stride(self.vector.tile_vec_m, 1),
         )
-        mtx_o.lock(pipe=tla.arch.MTE3)
+        mtx_o.lock(pipe=tla.pipes.MTE3)
         tla.copy(
             max_token,
             tla.make_tensor(
@@ -1697,7 +1697,7 @@ class _SparseFlashAttentionKernel:
                 src_layout,
             ),
         )
-        mtx_o.unlock(pipe=tla.arch.MTE3)
+        mtx_o.unlock(pipe=tla.pipes.MTE3)
 
     # --- _kv_token：按存储布局取一条物理 KV 行 --------------------------------------------
     @tla.jit
@@ -1821,9 +1821,9 @@ class _SparseFlashAttentionKernel:
             stage = stage0_slot(chunk_slot)
             # MTE2 写 stage0、MTE3 随后读它搬 workspace；锁按槽取。
             if chunk_slot == 0:
-                mtx_stage0_0.lock(pipe=tla.arch.MTE2)
+                mtx_stage0_0.lock(pipe=tla.pipes.MTE2)
             else:
-                mtx_stage0_1.lock(pipe=tla.arch.MTE2)
+                mtx_stage0_1.lock(pipe=tla.pipes.MTE2)
             row = tla.as_numeric(0)
             while row < chunk_rows:
                 index_pos = sparse_idx + local_cursor + row
@@ -1897,9 +1897,9 @@ class _SparseFlashAttentionKernel:
                         _copy_kv_token_no_rope(stage, kv_token(key, token0), row)
                     row = row + 1
             if chunk_slot == 0:
-                mtx_stage0_0.unlock(pipe=tla.arch.MTE2)
+                mtx_stage0_0.unlock(pipe=tla.pipes.MTE2)
             else:
-                mtx_stage0_1.unlock(pipe=tla.arch.MTE2)
+                mtx_stage0_1.unlock(pipe=tla.pipes.MTE2)
             ready = stage
             dst = tla.make_tensor(
                 workspace.ptr + slot_base + local_cursor * qk_dim,
@@ -1916,56 +1916,56 @@ class _SparseFlashAttentionKernel:
                 stride=(qk_dim, 1),
             )
             if chunk_slot == 0:
-                mtx_stage0_0.lock(pipe=tla.arch.MTE3)
+                mtx_stage0_0.lock(pipe=tla.pipes.MTE3)
             else:
-                mtx_stage0_1.lock(pipe=tla.arch.MTE3)
+                mtx_stage0_1.lock(pipe=tla.pipes.MTE3)
             tla.copy(dst, src)
             if chunk_slot == 0:
-                mtx_stage0_0.unlock(pipe=tla.arch.MTE3)
+                mtx_stage0_0.unlock(pipe=tla.pipes.MTE3)
             else:
-                mtx_stage0_1.unlock(pipe=tla.arch.MTE3)
+                mtx_stage0_1.unlock(pipe=tla.pipes.MTE3)
             local_cursor = local_cursor + chunk_rows
         if notify != 0:
             if tile_rows > 0:
                 # Notify AIC only after the whole tile's workspace writes are issued.
-                set3(self.ws_ready, slot, tla.arch.MTE3)
+                set3(self.ws_ready, slot, tla.pipes.MTE3)
 
     # --- _stage_qk：从 gather 好的 KV tile 计算 QK ---------------------------------------
     @tla.jit
     def _stage_qk(self, slot, workspace, valid_n, qk_slot):
         """Compute QK scores from the gathered KV tile."""
         # Wait for the AIV workspace write before reading it on AIC.
-        self._wait3(self.ws_ready, slot, tla.arch.MTE2)
+        self._wait3(self.ws_ready, slot, tla.pipes.MTE2)
         workspace_tile = self._workspace_tile(workspace, slot)
         shared_k = self.matmul.load_sparse_kv(workspace_tile, valid_n, slot)
         self.matmul.compute_qk(shared_k, valid_n, qk_slot)
         # qk_ub 是双槽缓冲：写槽前必须等该槽上一任被 softmax 消费。
         # 空槽令牌在 `__call__` 进入 tick 循环前预置。
-        self._wait2(self.qk_free, qk_slot, tla.arch.FIX)
+        self._wait2(self.qk_free, qk_slot, tla.pipes.FIX)
         self.matmul.store_score(self.qk_ub_base(qk_slot), valid_n, qk_slot)
-        self._set3(self.ws_free, slot, tla.arch.MTE2)
-        self._set2(self.qk_ready, qk_slot, tla.arch.FIX)
+        self._set3(self.ws_free, slot, tla.pipes.MTE2)
+        self._set2(self.qk_ready, qk_slot, tla.pipes.FIX)
 
     # --- _store_p：把 p_ub 写入共享 L1 -----------------------------------------------
     @tla.jit
     def _store_p(self, p_slot):
         # P 的 L1 槽只有一块：写 L1 前必须等 AIC 消费完上一块 P。
         # 空槽令牌在 `__call__` 进入 tick 循环前预置。
-        tla.cross_core_wait_flag(self.p_free, tla.arch.MTE3)
+        tla.cross_core_wait_flag(self.p_free, tla.pipes.MTE3)
         self.vector.store_p(self.p_l1, p_slot)
-        tla.cross_core_set_flag(self.p_ready, tla.arch.MTE3)
+        tla.cross_core_set_flag(self.p_ready, tla.pipes.MTE3)
 
     # --- _stage_pv：P @ V 与结果搬出 ------------------------------------------------
     @tla.jit
     def _stage_pv(self, k_slot, valid_n, pv_slot):
-        tla.cross_core_wait_flag(self.p_ready, tla.arch.MTE1)
+        tla.cross_core_wait_flag(self.p_ready, tla.pipes.MTE1)
         shared_k = self.matmul.right_tile(k_slot)
         self.matmul.compute_pv(shared_k, self.p_l1, valid_n, pv_slot)
-        tla.cross_core_set_flag(self.p_free, tla.arch.MTE1)
+        tla.cross_core_set_flag(self.p_free, tla.pipes.MTE1)
         # pv_ub 单槽：store 前等 AIV 消费完上一块。
-        tla.cross_core_wait_flag(self.pv_free, tla.arch.FIX)
+        tla.cross_core_wait_flag(self.pv_free, tla.pipes.FIX)
         self.matmul.store_pv(self.pv_ub_ptr, pv_slot)
-        tla.cross_core_set_flag(self.pv_ready, tla.arch.FIX)
+        tla.cross_core_set_flag(self.pv_ready, tla.pipes.FIX)
 
     # --- _cross_init_state：重置一个状态槽的 running max/sum -----------------------------
     @tla.jit
@@ -2216,13 +2216,13 @@ class _SparseFlashAttentionKernel:
             zero_row_base, tla.make_shape(1, DIM_NOPE), tla.make_coord(0, 0)
         )
         # V 写 zero_row、MTE3 随后逐行搬 GM。
-        mtx_zero.lock(pipe=tla.arch.VECTOR)
+        mtx_zero.lock(pipe=tla.pipes.VECTOR)
         with tla.vec.func(mode="simd"):
             mask, _ = tla.update_mask(2 * VL_T, dtype=dtype_16)
             zeros = tla.full(0.0, dtype_16, mask=mask)
             for col in tla.range_constexpr(0, DIM_NOPE, 2 * VL_T):
                 _vec_view(zero_row, 0, col, 2 * VL_T).store(zeros, mask=mask)
-        mtx_zero.unlock(pipe=tla.arch.VECTOR)
+        mtx_zero.unlock(pipe=tla.pipes.VECTOR)
         # head = head_offset + subblock*32 + row >= row，故 row >= head_count 的行
         # 不可能满足 head < head_count；head_count 是 trace 期常量，可直接裁掉
         # 这些行，免去 32 行展开在前导里构造永远不成立的地址/守卫。
@@ -2230,9 +2230,9 @@ class _SparseFlashAttentionKernel:
         for row in tla.range_constexpr(empty_rows):
             head = head_offset + subblock_idx * vec_m + row
             if head < head_count:
-                mtx_zero.lock(pipe=tla.arch.MTE3)
+                mtx_zero.lock(pipe=tla.pipes.MTE3)
                 tla.copy(output_tile(output, query_id, head, 1), zero_row)
-                mtx_zero.unlock(pipe=tla.arch.MTE3)
+                mtx_zero.unlock(pipe=tla.pipes.MTE3)
 
     # --- _stage_softmax：在线 softmax 并输出非归一化权重 --------------------------------
     @tla.jit
@@ -2248,7 +2248,7 @@ class _SparseFlashAttentionKernel:
         # `slot` 是 sm_exp 的 3 槽轮转；QK 缓冲只有 2 槽，索引必须由调用方按
         # tile 序号给出（qk_ub 双槽，槽由入队顺序决定）。
         qk = self.qk_slot(qk_slot)
-        wait2(self.qk_ready, qk_slot, tla.arch.VECTOR)
+        wait2(self.qk_ready, qk_slot, tla.pipes.VECTOR)
         if tla.const_expr(not use_sinks):
             if first != 0:
                 softmax_first(qk, valid_n, scale, state_slot, p_slot)
@@ -2256,7 +2256,7 @@ class _SparseFlashAttentionKernel:
                 softmax_rest(qk, valid_n, scale, state_slot, slot, p_slot)
         else:
             softmax_rest(qk, valid_n, scale, state_slot, slot, p_slot)
-        set2(self.qk_free, qk_slot, tla.arch.VECTOR)
+        set2(self.qk_free, qk_slot, tla.pipes.VECTOR)
         store_p(p_slot)
 
     # --- _stage_output：累加或收尾一块 PV 输出 -------------------------------------------
@@ -2298,7 +2298,7 @@ class _SparseFlashAttentionKernel:
             emit_stats(maxima, sums, query_id, head_offset, state_slot)
         if valid_n > 0:
             pv = pv_slot_of()
-            tla.cross_core_wait_flag(pv_ready, tla.arch.VECTOR)
+            tla.cross_core_wait_flag(pv_ready, tla.pipes.VECTOR)
             if last != 0:
                 if first != 0:
                     finish_o_cast(
@@ -2319,7 +2319,7 @@ class _SparseFlashAttentionKernel:
                 init_o(pv)
             else:
                 update_o(pv, state_slot_of(sm_exp_tb, slot))
-            tla.cross_core_set_flag(pv_free, tla.arch.VECTOR)
+            tla.cross_core_set_flag(pv_free, tla.pipes.VECTOR)
         if last != 0:
             if valid_n == 0:
                 if first != 0:
@@ -2505,7 +2505,7 @@ class _SparseFlashAttentionKernel:
                 with tla.vector():
                     # 三槽环形工作区的空槽令牌由 AIC 在循环前预置，
                     # 因此每次 gather 都无条件等待。
-                    wait3(self.ws_free, gather_slot, tla.arch.MTE3)
+                    wait3(self.ws_free, gather_slot, tla.pipes.MTE3)
                     stage_gather(
                         gather_slot,
                         gather_query,
@@ -3131,7 +3131,7 @@ class _SparseFlashAttentionKernel:
                     with tla.vector():
                         # 三槽环形工作区的空槽令牌由 AIC 在循环前预置，
                         # 因此每次 gather 都无条件等待。
-                        wait3(self.ws_free, gather_slot, tla.arch.MTE3)
+                        wait3(self.ws_free, gather_slot, tla.pipes.MTE3)
                         stage_gather(
                             gather_slot,
                             gather_query,
@@ -3364,7 +3364,7 @@ class _SparseFlashAttentionKernel:
                     with tla.vector():
                         # 三槽环形工作区的空槽令牌由 AIC 在循环前预置，
                         # 因此每次 gather 都无条件等待。
-                        wait3(self.ws_free, gather_slot, tla.arch.MTE3)
+                        wait3(self.ws_free, gather_slot, tla.pipes.MTE3)
                         stage_gather(
                             gather_slot,
                             gather_query,
@@ -3919,14 +3919,14 @@ class _SparseFlashAttentionKernel:
         # 再抽干，使每个 cross flag 的 set/wait 计数严格相等（计数不为零时
         # 硬件报 "The set and wait instructions do not match"）。
         with tla.cube():
-            tla.cross_core_set_flag(self.ws_free[0], tla.arch.MTE2)
-            tla.cross_core_set_flag(self.ws_free[1], tla.arch.MTE2)
-            tla.cross_core_set_flag(self.ws_free[2], tla.arch.MTE2)
-            tla.cross_core_set_flag(self.p_free, tla.arch.MTE1)
+            tla.cross_core_set_flag(self.ws_free[0], tla.pipes.MTE2)
+            tla.cross_core_set_flag(self.ws_free[1], tla.pipes.MTE2)
+            tla.cross_core_set_flag(self.ws_free[2], tla.pipes.MTE2)
+            tla.cross_core_set_flag(self.p_free, tla.pipes.MTE1)
         with tla.vector():
-            tla.cross_core_set_flag(self.qk_free[0], tla.arch.VECTOR)
-            tla.cross_core_set_flag(self.qk_free[1], tla.arch.VECTOR)
-            tla.cross_core_set_flag(self.pv_free, tla.arch.VECTOR)
+            tla.cross_core_set_flag(self.qk_free[0], tla.pipes.VECTOR)
+            tla.cross_core_set_flag(self.qk_free[1], tla.pipes.VECTOR)
+            tla.cross_core_set_flag(self.pv_free, tla.pipes.VECTOR)
 
         # trip count 为编译期常量时的静态展开。
         # `work_ticks = queries_per_group * ceil(sparse_count/TILE_S2)` 只由两个
@@ -4067,7 +4067,7 @@ class _SparseFlashAttentionKernel:
                         with tla.vector():
                             # 三槽环形工作区的空槽令牌由 AIC 在循环前预置，
                             # 因此每次 gather 都无条件等待。
-                            wait3(self.ws_free, gather_slot, tla.arch.MTE3)
+                            wait3(self.ws_free, gather_slot, tla.pipes.MTE3)
                             stage_gather(
                                 gather_slot,
                                 gather_query,
@@ -4312,14 +4312,14 @@ class _SparseFlashAttentionKernel:
 
         # 抽干预置令牌：生产者侧多等 depth 次，使计数归零。
         with tla.cube():
-            self._wait2(self.qk_free, 0, tla.arch.FIX)
-            self._wait2(self.qk_free, 1, tla.arch.FIX)
-            tla.cross_core_wait_flag(self.pv_free, tla.arch.FIX)
+            self._wait2(self.qk_free, 0, tla.pipes.FIX)
+            self._wait2(self.qk_free, 1, tla.pipes.FIX)
+            tla.cross_core_wait_flag(self.pv_free, tla.pipes.FIX)
         with tla.vector():
-            self._wait3(self.ws_free, 0, tla.arch.MTE3)
-            self._wait3(self.ws_free, 1, tla.arch.MTE3)
-            self._wait3(self.ws_free, 2, tla.arch.MTE3)
-            tla.cross_core_wait_flag(self.p_free, tla.arch.MTE3)
+            self._wait3(self.ws_free, 0, tla.pipes.MTE3)
+            self._wait3(self.ws_free, 1, tla.pipes.MTE3)
+            self._wait3(self.ws_free, 2, tla.pipes.MTE3)
+            tla.cross_core_wait_flag(self.p_free, tla.pipes.MTE3)
 
 
 # ---------------------------------------------------------------------------------------------

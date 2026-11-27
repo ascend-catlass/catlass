@@ -52,8 +52,8 @@ def data_movement_roundtrip(
         gm_dst,
         tla.arch.RowMajor,
     )
-    loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    stored = tla.flag("stored", tla.arch.VECTOR, tla.arch.MTE3)
+    loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    stored = tla.flag("stored", tla.pipes.VECTOR, tla.pipes.MTE3)
 
     with tla.vector():
         tla.copy(ub_src, gm_src)

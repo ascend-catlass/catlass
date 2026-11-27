@@ -73,10 +73,10 @@ def chunk_local_cumsum_kernel(mem_g: tla.Tensor, mem_o: tla.Tensor) -> None:
             acc_gm = tla.make_tensor(mem_o.ptr + output_base, _flat_layout(DIM))
             acc_ub = tla.make_tensor_like(acc_ptr, acc_gm, tla.arch.RowMajor)
 
-            mtx_ub.lock(pipe=tla.arch.MTE2)
+            mtx_ub.lock(pipe=tla.pipes.MTE2)
             tla.copy(g_ub, g_gm)
-            mtx_ub.unlock(pipe=tla.arch.MTE2)
-            mtx_ub.lock(pipe=tla.arch.VECTOR)
+            mtx_ub.unlock(pipe=tla.pipes.MTE2)
+            mtx_ub.lock(pipe=tla.pipes.VECTOR)
             # BT=128 uses two vector functions sharing the UB accumulator.
             for row_base in tla.range_constexpr(0, CHUNK, 64):
                 with tla.vec.func(mode="simd"):
@@ -94,12 +94,12 @@ def chunk_local_cumsum_kernel(mem_g: tla.Tensor, mem_o: tla.Tensor) -> None:
                         )
                         acc_ub.store(prefix)
                         out_row.store(prefix * SCALE_VALUE if HAS_SCALE else prefix)
-            mtx_ub.unlock(pipe=tla.arch.VECTOR)
-            mtx_ub.lock(pipe=tla.arch.MTE3)
+            mtx_ub.unlock(pipe=tla.pipes.VECTOR)
+            mtx_ub.lock(pipe=tla.pipes.MTE3)
             tla.copy(out_gm, out_ub)
-            mtx_ub.unlock(pipe=tla.arch.MTE3)
+            mtx_ub.unlock(pipe=tla.pipes.MTE3)
 
-        mtx_ub.lock(pipe=tla.arch.MTE2)
+        mtx_ub.lock(pipe=tla.pipes.MTE2)
         tla.pipe_barrier(tla.pipes.ALL)
 
 

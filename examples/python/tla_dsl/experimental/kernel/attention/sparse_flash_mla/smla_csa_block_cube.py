@@ -98,7 +98,7 @@ def load_q(sync, bufs, q_tensor, task, m, dtype, row_base=None, slot_a=0, slot_b
     c0 = 0
     base = task * m if row_base is None else row_base
     with tla.cube():
-        mutex_lock(sync.m_q_l1, tla.arch.MTE2)
+        mutex_lock(sync.m_q_l1, tla.pipes.MTE2)
         gm_q = tla.make_tensor(
             q_tensor.ptr + base * HEAD_DIM,
             tla.make_layout(
@@ -113,47 +113,47 @@ def load_q(sync, bufs, q_tensor, task, m, dtype, row_base=None, slot_a=0, slot_b
         l1q1 = l1_q_tensor(_q_slot_ptr(bufs, slot_b), dtype, m)
         tla.copy(l1q0, gm0)
         tla.copy(l1q1, gm1)
-        mutex_unlock(sync.m_q_l1, tla.arch.MTE2)
+        mutex_unlock(sync.m_q_l1, tla.pipes.MTE2)
 
 
 @tla.jit
 def _k_slot_wait(k0, k1, k2, slot):
     if slot == 0:
-        k0.lock(pipe=tla.arch.MTE2)
+        k0.lock(pipe=tla.pipes.MTE2)
     if slot == 1:
-        k1.lock(pipe=tla.arch.MTE2)
+        k1.lock(pipe=tla.pipes.MTE2)
     if slot == 2:
-        k2.lock(pipe=tla.arch.MTE2)
+        k2.lock(pipe=tla.pipes.MTE2)
 
 
 @tla.jit
 def _k_slot_free(k0, k1, k2, slot):
     if slot == 0:
-        k0.unlock(pipe=tla.arch.MTE1)
+        k0.unlock(pipe=tla.pipes.MTE1)
     if slot == 1:
-        k1.unlock(pipe=tla.arch.MTE1)
+        k1.unlock(pipe=tla.pipes.MTE1)
     if slot == 2:
-        k2.unlock(pipe=tla.arch.MTE1)
+        k2.unlock(pipe=tla.pipes.MTE1)
 
 
 @tla.jit
 def _k_slot_ready_wait(k0, k1, k2, slot):
     if slot == 0:
-        k0.lock(pipe=tla.arch.MTE1)
+        k0.lock(pipe=tla.pipes.MTE1)
     if slot == 1:
-        k1.lock(pipe=tla.arch.MTE1)
+        k1.lock(pipe=tla.pipes.MTE1)
     if slot == 2:
-        k2.lock(pipe=tla.arch.MTE1)
+        k2.lock(pipe=tla.pipes.MTE1)
 
 
 @tla.jit
 def _k_slot_ready_set(k0, k1, k2, slot):
     if slot == 0:
-        k0.unlock(pipe=tla.arch.MTE2)
+        k0.unlock(pipe=tla.pipes.MTE2)
     if slot == 1:
-        k1.unlock(pipe=tla.arch.MTE2)
+        k1.unlock(pipe=tla.pipes.MTE2)
     if slot == 2:
-        k2.unlock(pipe=tla.arch.MTE2)
+        k2.unlock(pipe=tla.pipes.MTE2)
 
 
 @tla.jit
@@ -330,15 +330,15 @@ def wait_kv_stage(sync):
     仍保证每条 load 消费 id0/id1 各一条信用，与 AIV 侧每 task 各发一条完全对齐。
     """
     with tla.cube():
-        tla.cross_core_wait_flag(sync.kv_stage_ready, tla.arch.MTE2, aiv_id=0)
-        tla.cross_core_wait_flag(sync.kv_stage_ready, tla.arch.MTE2, aiv_id=1)
+        tla.cross_core_wait_flag(sync.kv_stage_ready, tla.pipes.MTE2, aiv_id=0)
+        tla.cross_core_wait_flag(sync.kv_stage_ready, tla.pipes.MTE2, aiv_id=1)
 
 
 @tla.jit
 def wait_p_ready(sync):
     with tla.cube():
-        tla.cross_core_wait_flag(sync.p_ready, tla.arch.MTE1, aiv_id=0)
-        tla.cross_core_wait_flag(sync.p_ready, tla.arch.MTE1, aiv_id=1)
+        tla.cross_core_wait_flag(sync.p_ready, tla.pipes.MTE1, aiv_id=0)
+        tla.cross_core_wait_flag(sync.p_ready, tla.pipes.MTE1, aiv_id=1)
 
 
 @tla.jit
@@ -380,7 +380,7 @@ def iterate_bmm1(
     with tla.cube():
         _k_slot_ready_wait(sync.m_k_l1_0, sync.m_k_l1_1, sync.m_k_l1_2, slot)
         if first_tile:
-            mutex_lock(sync.m_q_l1, tla.arch.MTE1)
+            mutex_lock(sync.m_q_l1, tla.pipes.MTE1)
         l1k = l1_k_tensor(_k_slot_ptr(bufs, slot), dtype)
         # F6 双槽：连续分配（OT bmm1Buffers[2]），槽 stride = Q_ROWS//2*KV_BLOCK。
         ub_s_full = tla.make_tensor(
@@ -395,9 +395,9 @@ def iterate_bmm1(
             bufs.l0c_s + slot_s * (Q_ROWS * KV_BLOCK), ub_s_full, tla.arch.L0Clayout
         )
         if slot_s == 0:
-            mutex_lock(sync.m_s_l0c0, tla.arch.CUBE)
+            mutex_lock(sync.m_s_l0c0, tla.pipes.CUBE)
         if slot_s == 1:
-            mutex_lock(sync.m_s_l0c1, tla.arch.CUBE)
+            mutex_lock(sync.m_s_l0c1, tla.pipes.CUBE)
         for c in (0, 1, 2, 3):
             half = c // 2
             l1q = l1_q_tensor(
@@ -421,19 +421,19 @@ def iterate_bmm1(
             # mmad → set ab_free{slot}（释放）。管道事件替代 mutex 互斥区间，
             # MTE1 可领先 CUBE 一槽（ping-pong）。
             if slot_l0 == 0:
-                mutex_lock(sync.m_ab0, tla.arch.MTE1)
+                mutex_lock(sync.m_ab0, tla.pipes.MTE1)
                 tla.copy(l0_q, q_chunk)
                 tla.copy(l0_k, k_chunk)
-                mutex_unlock(sync.m_ab0, tla.arch.MTE1)
+                mutex_unlock(sync.m_ab0, tla.pipes.MTE1)
             else:
-                mutex_lock(sync.m_ab1, tla.arch.MTE1)
+                mutex_lock(sync.m_ab1, tla.pipes.MTE1)
                 tla.copy(l0_q, q_chunk)
                 tla.copy(l0_k, k_chunk)
-                mutex_unlock(sync.m_ab1, tla.arch.MTE1)
+                mutex_unlock(sync.m_ab1, tla.pipes.MTE1)
             if slot_l0 == 0:
-                mutex_lock(sync.m_ab0, tla.arch.CUBE)
+                mutex_lock(sync.m_ab0, tla.pipes.CUBE)
             else:
-                mutex_lock(sync.m_ab1, tla.arch.CUBE)
+                mutex_lock(sync.m_ab1, tla.pipes.CUBE)
             tla.mmad(
                 l0c_s,
                 l0_q,
@@ -441,31 +441,31 @@ def iterate_bmm1(
                 init_c=(c == 0),
             )
             if slot_l0 == 0:
-                mutex_unlock(sync.m_ab0, tla.arch.CUBE)
+                mutex_unlock(sync.m_ab0, tla.pipes.CUBE)
             else:
-                mutex_unlock(sync.m_ab1, tla.arch.CUBE)
+                mutex_unlock(sync.m_ab1, tla.pipes.CUBE)
         if slot_s == 0:
-            mutex_unlock(sync.m_s_l0c0, tla.arch.CUBE)
-            mutex_lock(sync.m_s_l0c0, tla.arch.FIX)
+            mutex_unlock(sync.m_s_l0c0, tla.pipes.CUBE)
+            mutex_lock(sync.m_s_l0c0, tla.pipes.FIX)
         if slot_s == 1:
-            mutex_unlock(sync.m_s_l0c1, tla.arch.CUBE)
-            mutex_lock(sync.m_s_l0c1, tla.arch.FIX)
-        tla.cross_core_wait_flag(sync.s_free, tla.arch.FIX, aiv_id=0)
-        tla.cross_core_wait_flag(sync.s_free, tla.arch.FIX, aiv_id=1)
+            mutex_unlock(sync.m_s_l0c1, tla.pipes.CUBE)
+            mutex_lock(sync.m_s_l0c1, tla.pipes.FIX)
+        tla.cross_core_wait_flag(sync.s_free, tla.pipes.FIX, aiv_id=0)
+        tla.cross_core_wait_flag(sync.s_free, tla.pipes.FIX, aiv_id=1)
         tla.copy(
             ub_s_full,
             l0c_s,
             tla.params.CopyL0C2DstParams(l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M),
         )
         if slot_s == 0:
-            mutex_unlock(sync.m_s_l0c0, tla.arch.FIX)
+            mutex_unlock(sync.m_s_l0c0, tla.pipes.FIX)
         if slot_s == 1:
-            mutex_unlock(sync.m_s_l0c1, tla.arch.FIX)
-        tla.cross_core_set_flag(sync.s_ready, tla.arch.FIX, aiv_id=0)
-        tla.cross_core_set_flag(sync.s_ready, tla.arch.FIX, aiv_id=1)
+            mutex_unlock(sync.m_s_l0c1, tla.pipes.FIX)
+        tla.cross_core_set_flag(sync.s_ready, tla.pipes.FIX, aiv_id=0)
+        tla.cross_core_set_flag(sync.s_ready, tla.pipes.FIX, aiv_id=1)
         if is_last_tile:
             # 闸门②变体 B：归还 x1（原始握手）。
-            mutex_unlock(sync.m_q_l1, tla.arch.MTE1)
+            mutex_unlock(sync.m_q_l1, tla.pipes.MTE1)
 
 
 @tla.jit
@@ -519,7 +519,7 @@ def iterate_bmm2_seg(sync, bufs, seg, slot_k, m, dtype, slot_p=0):
         # F17 步骤 B：l0c_o 单槽链——只 seg0 等 FIX 释放（窗口 0 与上一 tile
         # fixpipe 的读构成 WAR；窗口 1-3 依赖同 tile seg0 之后的程序序）。
         if seg == 0:
-            mutex_lock(sync.m_l0c_o0, tla.arch.CUBE)
+            mutex_lock(sync.m_l0c_o0, tla.pipes.CUBE)
         # F10 步骤 2c：P 复用（OT MatmulNStatic n==0||n==1 才 LoadDataToL0A，
         # "每个 ping-pong slot 首次访问各装一份 A，之后复用不再覆盖"）。4 个
         # seg 的 p_tile 是同一块 l1_p 视图，seg0/1 各装一槽后 seg2/3 复用；
@@ -527,33 +527,33 @@ def iterate_bmm2_seg(sync, bufs, seg, slot_k, m, dtype, slot_p=0):
         # 信用链保证后续覆盖（如 bmm1(t+1,c0)）在 seg{2,3} mmad 完成之后。
         if seg < 2:
             if slot == 0:
-                mutex_lock(sync.m_ab0, tla.arch.MTE1)
+                mutex_lock(sync.m_ab0, tla.pipes.MTE1)
                 tla.copy(l0_p, p_tile)
                 tla.copy(l0_v, v_seg)
-                mutex_unlock(sync.m_ab0, tla.arch.MTE1)
+                mutex_unlock(sync.m_ab0, tla.pipes.MTE1)
             else:
-                mutex_lock(sync.m_ab1, tla.arch.MTE1)
+                mutex_lock(sync.m_ab1, tla.pipes.MTE1)
                 tla.copy(l0_p, p_tile)
                 tla.copy(l0_v, v_seg)
-                mutex_unlock(sync.m_ab1, tla.arch.MTE1)
+                mutex_unlock(sync.m_ab1, tla.pipes.MTE1)
         else:
             if slot == 0:
-                mutex_lock(sync.m_ab0, tla.arch.MTE1)
+                mutex_lock(sync.m_ab0, tla.pipes.MTE1)
                 tla.copy(l0_v, v_seg)
-                mutex_unlock(sync.m_ab0, tla.arch.MTE1)
+                mutex_unlock(sync.m_ab0, tla.pipes.MTE1)
             else:
-                mutex_lock(sync.m_ab1, tla.arch.MTE1)
+                mutex_lock(sync.m_ab1, tla.pipes.MTE1)
                 tla.copy(l0_v, v_seg)
-                mutex_unlock(sync.m_ab1, tla.arch.MTE1)
+                mutex_unlock(sync.m_ab1, tla.pipes.MTE1)
         if slot == 0:
-            mutex_lock(sync.m_ab0, tla.arch.CUBE)
+            mutex_lock(sync.m_ab0, tla.pipes.CUBE)
         else:
-            mutex_lock(sync.m_ab1, tla.arch.CUBE)
+            mutex_lock(sync.m_ab1, tla.pipes.CUBE)
         tla.mmad(l0c_seg, l0_p, l0_v, init_c=True, unit_flag=0)
         if slot == 0:
-            mutex_unlock(sync.m_ab0, tla.arch.CUBE)
+            mutex_unlock(sync.m_ab0, tla.pipes.CUBE)
         else:
-            mutex_unlock(sync.m_ab1, tla.arch.CUBE)
+            mutex_unlock(sync.m_ab1, tla.pipes.CUBE)
 
 
 @tla.jit
@@ -586,18 +586,18 @@ def iterate_bmm2_fixpipe(sync, bufs, m):
             bufs.l0c_o,
             tla.make_layout_with_tag((m, HEAD_DIM), tla.Float32, tla.arch.L0Clayout),
         )
-        mutex_unlock(sync.m_l0c_o0, tla.arch.CUBE)
-        mutex_lock(sync.m_l0c_o0, tla.arch.FIX)
-        tla.cross_core_wait_flag(sync.o_free, tla.arch.FIX, aiv_id=0)
-        tla.cross_core_wait_flag(sync.o_free, tla.arch.FIX, aiv_id=1)
+        mutex_unlock(sync.m_l0c_o0, tla.pipes.CUBE)
+        mutex_lock(sync.m_l0c_o0, tla.pipes.FIX)
+        tla.cross_core_wait_flag(sync.o_free, tla.pipes.FIX, aiv_id=0)
+        tla.cross_core_wait_flag(sync.o_free, tla.pipes.FIX, aiv_id=1)
         tla.copy(
             ub_full,
             l0c_full,
             tla.params.CopyL0C2DstParams(l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M),
         )
-        mutex_unlock(sync.m_l0c_o0, tla.arch.FIX)
-        tla.cross_core_set_flag(sync.o_ready, tla.arch.FIX, aiv_id=0)
-        tla.cross_core_set_flag(sync.o_ready, tla.arch.FIX, aiv_id=1)
+        mutex_unlock(sync.m_l0c_o0, tla.pipes.FIX)
+        tla.cross_core_set_flag(sync.o_ready, tla.pipes.FIX, aiv_id=0)
+        tla.cross_core_set_flag(sync.o_ready, tla.pipes.FIX, aiv_id=1)
 
 
 @tla.jit
@@ -633,8 +633,8 @@ def split_g_mte2_pair(sync):
     同一个值，恒等性不依赖 host 算得准）。
     """
     with tla.cube():
-        tla.cross_core_set_flag(sync.s2_mte2, tla.arch.MTE2)
-        tla.cross_core_wait_flag(sync.s2_mte2, tla.arch.MTE2)
+        tla.cross_core_set_flag(sync.s2_mte2, tla.pipes.MTE2)
+        tla.cross_core_wait_flag(sync.s2_mte2, tla.pipes.MTE2)
 
 
 @tla.jit
@@ -664,8 +664,8 @@ def pair_rendezvous(sync):
     """
     with tla.cube():
         tla.pipe_barrier(tla.pipes.ALL)
-        tla.cross_core_set_flag(sync.s2_rendezvous, tla.arch.FIX)
-        tla.cross_core_wait_flag(sync.s2_rendezvous, tla.arch.SCALAR)
+        tla.cross_core_set_flag(sync.s2_rendezvous, tla.pipes.FIX)
+        tla.cross_core_wait_flag(sync.s2_rendezvous, tla.pipes.SCALAR)
 
 
 # F14 步骤 A：p_release 已删除（p_free 回执去除；OT IterateBmm2Impl 无 C→V

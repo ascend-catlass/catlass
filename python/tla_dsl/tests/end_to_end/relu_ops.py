@@ -32,8 +32,8 @@ def _relu(
     masked: tla.Constexpr[bool],
 ) -> None:
     buf = _ub_tensor(lanes, dtype)
-    loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    computed = tla.flag("computed", tla.arch.VECTOR, tla.arch.MTE3)
+    loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    computed = tla.flag("computed", tla.pipes.VECTOR, tla.pipes.MTE3)
     with tla.vector():
         tla.copy(buf, src)
         tla.set_flag(loaded)
@@ -63,8 +63,8 @@ def _max_int64(
     rhs_ub = _ub_tensor(32, tla.Int64)
     vector_ub = _ub_tensor(32, tla.Int64)
     scalar_ub = _ub_tensor(32, tla.Int64)
-    loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    computed = tla.flag("computed", tla.arch.VECTOR, tla.arch.MTE3)
+    loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    computed = tla.flag("computed", tla.pipes.VECTOR, tla.pipes.MTE3)
     with tla.vector():
         tla.copy(lhs_ub, lhs)
         tla.copy(rhs_ub, rhs)
@@ -102,8 +102,8 @@ def _relu_kernel(
     slope_ub = _ub_tensor(lanes, dtype)
     prelu_ub = _ub_tensor(lanes, dtype)
     leaky_ub = _ub_tensor(lanes, dtype)
-    loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    computed = tla.flag("computed", tla.arch.VECTOR, tla.arch.MTE3)
+    loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    computed = tla.flag("computed", tla.pipes.VECTOR, tla.pipes.MTE3)
     with tla.vector():
         tla.copy(src_ub, src)
         tla.copy(slope_ub, slopes)

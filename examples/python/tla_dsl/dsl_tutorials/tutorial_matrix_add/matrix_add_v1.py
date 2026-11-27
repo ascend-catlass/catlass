@@ -46,18 +46,18 @@ def matrix_add_v1(
             ub_c_tile = tla.make_tensor_like(ub_ptr_c, gm_c_tile, tla.arch.RowMajor)
 
             # copy in
-            mutex_ub_a.lock(pipe=tla.arch.MTE2)
+            mutex_ub_a.lock(pipe=tla.pipes.MTE2)
             tla.copy(ub_a_tile, gm_a_tile)
-            mutex_ub_a.unlock(pipe=tla.arch.MTE2)
+            mutex_ub_a.unlock(pipe=tla.pipes.MTE2)
 
-            mutex_ub_b.lock(pipe=tla.arch.MTE2)
+            mutex_ub_b.lock(pipe=tla.pipes.MTE2)
             tla.copy(ub_b_tile, gm_b_tile)
-            mutex_ub_b.unlock(pipe=tla.arch.MTE2)
+            mutex_ub_b.unlock(pipe=tla.pipes.MTE2)
 
             # compute
-            mutex_ub_a.lock(pipe=tla.arch.VECTOR)
-            mutex_ub_b.lock(pipe=tla.arch.VECTOR)
-            mutex_ub_c.lock(pipe=tla.arch.VECTOR)
+            mutex_ub_a.lock(pipe=tla.pipes.VECTOR)
+            mutex_ub_b.lock(pipe=tla.pipes.VECTOR)
+            mutex_ub_c.lock(pipe=tla.pipes.VECTOR)
             with tla.vec.func(mode="simd"):
                 valid_len = gm_a_tile.origin_shape[0]
                 for j in range(ceil_div(valid_len, config.VL_LEN)):
@@ -81,15 +81,15 @@ def matrix_add_v1(
                     # reg store
                     ub_vl_c.store(reg_c)
 
-            mutex_ub_c.unlock(pipe=tla.arch.VECTOR)
-            mutex_ub_b.unlock(pipe=tla.arch.VECTOR)
-            mutex_ub_a.unlock(pipe=tla.arch.VECTOR)
+            mutex_ub_c.unlock(pipe=tla.pipes.VECTOR)
+            mutex_ub_b.unlock(pipe=tla.pipes.VECTOR)
+            mutex_ub_a.unlock(pipe=tla.pipes.VECTOR)
 
             # copy out
 
-            mutex_ub_c.lock(pipe=tla.arch.MTE3)
+            mutex_ub_c.lock(pipe=tla.pipes.MTE3)
             tla.copy(gm_c_tile, ub_c_tile)
-            mutex_ub_c.unlock(pipe=tla.arch.MTE3)
+            mutex_ub_c.unlock(pipe=tla.pipes.MTE3)
 
         tla.pipe_barrier(tla.pipes.ALL)
     return

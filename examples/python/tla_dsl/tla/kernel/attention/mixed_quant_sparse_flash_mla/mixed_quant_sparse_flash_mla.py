@@ -234,82 +234,86 @@ def declare_sync(
         #          o_fix_done 1-2 /
         #   dst=S: phy_m3s 0, phy_vs 1 /
         q_second_free=(
-            tla.flag("q_second_free", tla.arch.MTE1, tla.arch.MTE2, id=4)
+            tla.flag("q_second_free", tla.pipes.MTE1, tla.pipes.MTE2, id=4)
             if two_q_slots
             else None
         ),
         q_second_ready=(
-            tla.flag("q_second_ready", tla.arch.MTE2, tla.arch.MTE1, id=6)
+            tla.flag("q_second_ready", tla.pipes.MTE2, tla.pipes.MTE1, id=6)
             if two_q_slots
             else None
         ),
-        q_l1_ready=tla.flag("smla_q_l1_ready", tla.arch.MTE2, tla.arch.MTE1, id=0),
-        q_l0a_free=tla.flag("smla_q_l0a_free", tla.arch.MTE1, tla.arch.MTE2, id=0),
-        k_l1_ready0=tla.flag("smla_k_l1_ready0", tla.arch.MTE2, tla.arch.MTE1, id=1),
-        k_l1_ready1=tla.flag("smla_k_l1_ready1", tla.arch.MTE2, tla.arch.MTE1, id=2),
-        k_l1_ready2=tla.flag("smla_k_l1_ready2", tla.arch.MTE2, tla.arch.MTE1, id=3),
-        k_l0b_free0=tla.flag("smla_k_l0b_free0", tla.arch.MTE1, tla.arch.MTE2, id=1),
-        k_l0b_free1=tla.flag("smla_k_l0b_free1", tla.arch.MTE1, tla.arch.MTE2, id=2),
-        k_l0b_free2=tla.flag("smla_k_l0b_free2", tla.arch.MTE1, tla.arch.MTE2, id=3),
-        s_mm_ready=tla.flag("smla_s_mm_ready", tla.arch.CUBE, tla.arch.FIX, id=0),
-        s_mm_ready1=tla.flag("smla_s_mm_ready1", tla.arch.CUBE, tla.arch.FIX, id=3),
-        s_fix_done=tla.flag("smla_s_fix_done", tla.arch.FIX, tla.arch.CUBE, id=0),
-        s_fix_done1=tla.flag("smla_s_fix_done1", tla.arch.FIX, tla.arch.CUBE, id=3),
-        o_mm_ready0=tla.flag("smla_o_mm_ready0", tla.arch.CUBE, tla.arch.FIX, id=1),
-        o_mm_ready1=tla.flag("smla_o_mm_ready1", tla.arch.CUBE, tla.arch.FIX, id=2),
-        o_fix_done0=tla.flag("smla_o_fix_done0", tla.arch.FIX, tla.arch.CUBE, id=1),
-        o_fix_done1=tla.flag("smla_o_fix_done1", tla.arch.FIX, tla.arch.CUBE, id=2),
+        q_l1_ready=tla.flag("smla_q_l1_ready", tla.pipes.MTE2, tla.pipes.MTE1, id=0),
+        q_l0a_free=tla.flag("smla_q_l0a_free", tla.pipes.MTE1, tla.pipes.MTE2, id=0),
+        k_l1_ready0=tla.flag("smla_k_l1_ready0", tla.pipes.MTE2, tla.pipes.MTE1, id=1),
+        k_l1_ready1=tla.flag("smla_k_l1_ready1", tla.pipes.MTE2, tla.pipes.MTE1, id=2),
+        k_l1_ready2=tla.flag("smla_k_l1_ready2", tla.pipes.MTE2, tla.pipes.MTE1, id=3),
+        k_l0b_free0=tla.flag("smla_k_l0b_free0", tla.pipes.MTE1, tla.pipes.MTE2, id=1),
+        k_l0b_free1=tla.flag("smla_k_l0b_free1", tla.pipes.MTE1, tla.pipes.MTE2, id=2),
+        k_l0b_free2=tla.flag("smla_k_l0b_free2", tla.pipes.MTE1, tla.pipes.MTE2, id=3),
+        s_mm_ready=tla.flag("smla_s_mm_ready", tla.pipes.CUBE, tla.pipes.FIX, id=0),
+        s_mm_ready1=tla.flag("smla_s_mm_ready1", tla.pipes.CUBE, tla.pipes.FIX, id=3),
+        s_fix_done=tla.flag("smla_s_fix_done", tla.pipes.FIX, tla.pipes.CUBE, id=0),
+        s_fix_done1=tla.flag("smla_s_fix_done1", tla.pipes.FIX, tla.pipes.CUBE, id=3),
+        o_mm_ready0=tla.flag("smla_o_mm_ready0", tla.pipes.CUBE, tla.pipes.FIX, id=1),
+        o_mm_ready1=tla.flag("smla_o_mm_ready1", tla.pipes.CUBE, tla.pipes.FIX, id=2),
+        o_fix_done0=tla.flag("smla_o_fix_done0", tla.pipes.FIX, tla.pipes.CUBE, id=1),
+        o_fix_done1=tla.flag("smla_o_fix_done1", tla.pipes.FIX, tla.pipes.CUBE, id=2),
         p_data_ready=tla.flag(
-            "smla_p_data_ready", tla.arch.VECTOR, tla.arch.MTE3, id=2
+            "smla_p_data_ready", tla.pipes.VECTOR, tla.pipes.MTE3, id=2
         ),
-        lse_v_mte3=tla.flag("smla_lse_v_mte3", tla.arch.VECTOR, tla.arch.MTE3, id=3),
+        lse_v_mte3=tla.flag("smla_lse_v_mte3", tla.pipes.VECTOR, tla.pipes.MTE3, id=3),
         lse_mte3_v=(
-            tla.flag("smla_lse_mte3_v", tla.arch.MTE3, tla.arch.VECTOR, id=6)
+            tla.flag("smla_lse_mte3_v", tla.pipes.MTE3, tla.pipes.VECTOR, id=6)
             if need_lse_war
             else None
         ),
-        kv_mte2_mte3_0=tla.flag("smla_kv_m2m3_0", tla.arch.MTE2, tla.arch.MTE3, id=0),
-        kv_mte2_mte3_1=tla.flag("smla_kv_m2m3_1", tla.arch.MTE2, tla.arch.MTE3, id=1),
-        kv_mte3_mte2_0=tla.flag("smla_kv_m3m2_0", tla.arch.MTE3, tla.arch.MTE2, id=4),
-        kv_mte3_mte2_1=tla.flag("smla_kv_m3m2_1", tla.arch.MTE3, tla.arch.MTE2, id=5),
-        init_mte3_v=tla.flag("smla_init_mte3_v", tla.arch.MTE3, tla.arch.VECTOR, id=0),
-        init_v_mte3=tla.flag("smla_init_v_mte3", tla.arch.VECTOR, tla.arch.MTE3, id=4),
-        phy_m2v=tla.flag("smla_phy_m2v", tla.arch.MTE2, tla.arch.VECTOR, id=1),
-        phy_s2v=tla.flag("smla_phy_s2v", tla.arch.SCALAR, tla.arch.VECTOR, id=2),
-        phy_v_mte3=tla.flag("smla_phy_v_mte3", tla.arch.VECTOR, tla.arch.MTE3, id=5),
-        phy_m3v=tla.flag("smla_phy_m3v", tla.arch.MTE3, tla.arch.VECTOR, id=4),
-        phy_m3s=tla.flag("smla_phy_m3s", tla.arch.MTE3, tla.arch.SCALAR, id=0),
-        phy_vs=tla.flag("smla_phy_vs", tla.arch.VECTOR, tla.arch.SCALAR, id=1),
+        kv_mte2_mte3_0=tla.flag("smla_kv_m2m3_0", tla.pipes.MTE2, tla.pipes.MTE3, id=0),
+        kv_mte2_mte3_1=tla.flag("smla_kv_m2m3_1", tla.pipes.MTE2, tla.pipes.MTE3, id=1),
+        kv_mte3_mte2_0=tla.flag("smla_kv_m3m2_0", tla.pipes.MTE3, tla.pipes.MTE2, id=4),
+        kv_mte3_mte2_1=tla.flag("smla_kv_m3m2_1", tla.pipes.MTE3, tla.pipes.MTE2, id=5),
+        init_mte3_v=tla.flag(
+            "smla_init_mte3_v", tla.pipes.MTE3, tla.pipes.VECTOR, id=0
+        ),
+        init_v_mte3=tla.flag(
+            "smla_init_v_mte3", tla.pipes.VECTOR, tla.pipes.MTE3, id=4
+        ),
+        phy_m2v=tla.flag("smla_phy_m2v", tla.pipes.MTE2, tla.pipes.VECTOR, id=1),
+        phy_s2v=tla.flag("smla_phy_s2v", tla.pipes.SCALAR, tla.pipes.VECTOR, id=2),
+        phy_v_mte3=tla.flag("smla_phy_v_mte3", tla.pipes.VECTOR, tla.pipes.MTE3, id=5),
+        phy_m3v=tla.flag("smla_phy_m3v", tla.pipes.MTE3, tla.pipes.VECTOR, id=4),
+        phy_m3s=tla.flag("smla_phy_m3s", tla.pipes.MTE3, tla.pipes.SCALAR, id=0),
+        phy_vs=tla.flag("smla_phy_vs", tla.pipes.VECTOR, tla.pipes.SCALAR, id=1),
         idx_m2s0=(
-            tla.flag("smla_idx_m2s0", tla.arch.MTE2, tla.arch.SCALAR, id=2)
+            tla.flag("smla_idx_m2s0", tla.pipes.MTE2, tla.pipes.SCALAR, id=2)
             if need_idx_ring
             else None
         ),
         idx_m2s1=(
-            tla.flag("smla_idx_m2s1", tla.arch.MTE2, tla.arch.SCALAR, id=3)
+            tla.flag("smla_idx_m2s1", tla.pipes.MTE2, tla.pipes.SCALAR, id=3)
             if need_idx_ring
             else None
         ),
         idx_s2m0=(
-            tla.flag("smla_idx_s2m0", tla.arch.SCALAR, tla.arch.MTE2, id=6)
+            tla.flag("smla_idx_s2m0", tla.pipes.SCALAR, tla.pipes.MTE2, id=6)
             if need_idx_ring
             else None
         ),
         idx_s2m1=(
-            tla.flag("smla_idx_s2m1", tla.arch.SCALAR, tla.arch.MTE2, id=7)
+            tla.flag("smla_idx_s2m1", tla.pipes.SCALAR, tla.pipes.MTE2, id=7)
             if need_idx_ring
             else None
         ),
-        bc_m3m2=tla.flag("smla_bc_m3m2", tla.arch.MTE3, tla.arch.MTE2, id=6),
-        bc_m3v=tla.flag("smla_bc_m3v", tla.arch.MTE3, tla.arch.VECTOR, id=5),
-        bc_m2v=tla.flag("smla_bc_m2v", tla.arch.MTE2, tla.arch.VECTOR, id=3),
-        bc_v2m=tla.flag("smla_bc_v2m", tla.arch.VECTOR, tla.arch.MTE2, id=7),
+        bc_m3m2=tla.flag("smla_bc_m3m2", tla.pipes.MTE3, tla.pipes.MTE2, id=6),
+        bc_m3v=tla.flag("smla_bc_m3v", tla.pipes.MTE3, tla.pipes.VECTOR, id=5),
+        bc_m2v=tla.flag("smla_bc_m2v", tla.pipes.MTE2, tla.pipes.VECTOR, id=3),
+        bc_v2m=tla.flag("smla_bc_v2m", tla.pipes.VECTOR, tla.pipes.MTE2, id=7),
         p_free=cross("smla_p_free"),
-        bc_v3m=tla.flag("smla_bc_v3m", tla.arch.VECTOR, tla.arch.MTE3, id=6),
-        ab_ready0=tla.flag("smla_ab_ready0", tla.arch.MTE1, tla.arch.CUBE, id=4),
-        ab_ready1=tla.flag("smla_ab_ready1", tla.arch.MTE1, tla.arch.CUBE, id=5),
-        ab_free0=tla.flag("smla_ab_free0", tla.arch.CUBE, tla.arch.MTE1, id=4),
-        ab_free1=tla.flag("smla_ab_free1", tla.arch.CUBE, tla.arch.MTE1, id=5),
+        bc_v3m=tla.flag("smla_bc_v3m", tla.pipes.VECTOR, tla.pipes.MTE3, id=6),
+        ab_ready0=tla.flag("smla_ab_ready0", tla.pipes.MTE1, tla.pipes.CUBE, id=4),
+        ab_ready1=tla.flag("smla_ab_ready1", tla.pipes.MTE1, tla.pipes.CUBE, id=5),
+        ab_free0=tla.flag("smla_ab_free0", tla.pipes.CUBE, tla.pipes.MTE1, id=4),
+        ab_free1=tla.flag("smla_ab_free1", tla.pipes.CUBE, tla.pipes.MTE1, id=5),
         s2_mte2=cross("smla_s2_mte2", mode=0),
         decode_exchange=cross("smla_decode_exchange", mode=0),
         m_dq_rec0=(tla.mutex("smla_dq_rec0", id=9) if need_fused_dequant else None),
@@ -359,18 +363,18 @@ def init_sync(
             tla.set_flag(sync.idx_s2m1)
         if pre_bc:
             tla.set_flag(sync.bc_v2m)
-        tla.cross_core_set_flag(sync.s_free, tla.arch.VECTOR, aiv_id=0)
-        tla.cross_core_set_flag(sync.s_free, tla.arch.VECTOR, aiv_id=1)
+        tla.cross_core_set_flag(sync.s_free, tla.pipes.VECTOR, aiv_id=0)
+        tla.cross_core_set_flag(sync.s_free, tla.pipes.VECTOR, aiv_id=1)
         if not defer_ofree:
-            tla.cross_core_set_flag(sync.o_free, tla.arch.VECTOR, aiv_id=0)
-            tla.cross_core_set_flag(sync.o_free, tla.arch.VECTOR, aiv_id=1)
+            tla.cross_core_set_flag(sync.o_free, tla.pipes.VECTOR, aiv_id=0)
+            tla.cross_core_set_flag(sync.o_free, tla.pipes.VECTOR, aiv_id=1)
 
 
 @tla.jit
 def init_sync_preload(sync: Sync) -> None:
     with tla.vector():
-        tla.cross_core_set_flag(sync.s_free, tla.arch.VECTOR, aiv_id=0)
-        tla.cross_core_set_flag(sync.s_free, tla.arch.VECTOR, aiv_id=1)
+        tla.cross_core_set_flag(sync.s_free, tla.pipes.VECTOR, aiv_id=0)
+        tla.cross_core_set_flag(sync.s_free, tla.pipes.VECTOR, aiv_id=1)
 
 
 @tla.jit
@@ -635,7 +639,7 @@ def dequant_kv_records(
         for blk in tla.range(tla.arch.block_idx(), n_blocks, tla.arch.block_num()):
             r0 = blk * rows
 
-            m_nope.lock(pipe=tla.arch.MTE2)
+            m_nope.lock(pipe=tla.pipes.MTE2)
             tla.copy(
                 ub_n,
                 tla.get_tile(
@@ -644,8 +648,8 @@ def dequant_kv_records(
                     tla.make_shape(rows, REC_BYTES),
                 ),
             )
-            m_nope.unlock(pipe=tla.arch.MTE2)
-            m_rope.lock(pipe=tla.arch.MTE2)
+            m_nope.unlock(pipe=tla.pipes.MTE2)
+            m_rope.lock(pipe=tla.pipes.MTE2)
             tla.copy(
                 ub_r,
                 tla.get_tile(
@@ -654,8 +658,8 @@ def dequant_kv_records(
                     tla.make_shape(rows, ROPE_DIM),
                 ),
             )
-            m_rope.unlock(pipe=tla.arch.MTE2)
-            m_scale.lock(pipe=tla.arch.MTE2)
+            m_rope.unlock(pipe=tla.pipes.MTE2)
+            m_scale.lock(pipe=tla.pipes.MTE2)
             tla.copy(
                 ub_s,
                 tla.get_tile(
@@ -664,12 +668,12 @@ def dequant_kv_records(
                     tla.make_shape(rows, SCALE_STRIDE),
                 ),
             )
-            m_scale.unlock(pipe=tla.arch.MTE2)
+            m_scale.unlock(pipe=tla.pipes.MTE2)
 
-            m_nope.lock(pipe=tla.arch.VECTOR)
-            m_rope.lock(pipe=tla.arch.VECTOR)
-            m_scale.lock(pipe=tla.arch.VECTOR)
-            m_out.lock(pipe=tla.arch.VECTOR)
+            m_nope.lock(pipe=tla.pipes.VECTOR)
+            m_rope.lock(pipe=tla.pipes.VECTOR)
+            m_scale.lock(pipe=tla.pipes.VECTOR)
+            m_out.lock(pipe=tla.pipes.VECTOR)
             with tla.vec.func(mode="simd"):
                 m8 = tla.create_mask(pattern=tla.mask.ALL, dtype=gm_nope.ptr.dtype)
                 preg = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
@@ -751,12 +755,12 @@ def dequant_kv_records(
                 tla.local_mem_bar(
                     tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD
                 )
-            m_out.unlock(pipe=tla.arch.VECTOR)
-            m_rope.unlock(pipe=tla.arch.VECTOR)
-            m_scale.unlock(pipe=tla.arch.VECTOR)
-            m_nope.unlock(pipe=tla.arch.VECTOR)
+            m_out.unlock(pipe=tla.pipes.VECTOR)
+            m_rope.unlock(pipe=tla.pipes.VECTOR)
+            m_scale.unlock(pipe=tla.pipes.VECTOR)
+            m_nope.unlock(pipe=tla.pipes.VECTOR)
 
-            m_out.lock(pipe=tla.arch.MTE3)
+            m_out.lock(pipe=tla.pipes.MTE3)
             tla.copy(
                 tla.get_tile(
                     gm_out,
@@ -765,7 +769,7 @@ def dequant_kv_records(
                 ),
                 ub_o,
             )
-            m_out.unlock(pipe=tla.arch.MTE3)
+            m_out.unlock(pipe=tla.pipes.MTE3)
         tla.pipe_barrier(tla.pipes.ALL)
 
 
@@ -819,7 +823,7 @@ def dequant_kv_pages(
             r0 = page * rpp + s * rows
             rs = p * rpp + s * rows
 
-            m_nope.lock(pipe=tla.arch.MTE2)
+            m_nope.lock(pipe=tla.pipes.MTE2)
             tla.copy(
                 ub_n,
                 tla.get_tile(
@@ -828,8 +832,8 @@ def dequant_kv_pages(
                     tla.make_shape(rows, REC_BYTES),
                 ),
             )
-            m_nope.unlock(pipe=tla.arch.MTE2)
-            m_rope.lock(pipe=tla.arch.MTE2)
+            m_nope.unlock(pipe=tla.pipes.MTE2)
+            m_rope.lock(pipe=tla.pipes.MTE2)
             tla.copy(
                 ub_r,
                 tla.get_tile(
@@ -838,8 +842,8 @@ def dequant_kv_pages(
                     tla.make_shape(rows, ROPE_DIM),
                 ),
             )
-            m_rope.unlock(pipe=tla.arch.MTE2)
-            m_scale.lock(pipe=tla.arch.MTE2)
+            m_rope.unlock(pipe=tla.pipes.MTE2)
+            m_scale.lock(pipe=tla.pipes.MTE2)
             tla.copy(
                 ub_s,
                 tla.get_tile(
@@ -848,12 +852,12 @@ def dequant_kv_pages(
                     tla.make_shape(rows, SCALE_STRIDE),
                 ),
             )
-            m_scale.unlock(pipe=tla.arch.MTE2)
+            m_scale.unlock(pipe=tla.pipes.MTE2)
 
-            m_nope.lock(pipe=tla.arch.VECTOR)
-            m_rope.lock(pipe=tla.arch.VECTOR)
-            m_scale.lock(pipe=tla.arch.VECTOR)
-            m_out.lock(pipe=tla.arch.VECTOR)
+            m_nope.lock(pipe=tla.pipes.VECTOR)
+            m_rope.lock(pipe=tla.pipes.VECTOR)
+            m_scale.lock(pipe=tla.pipes.VECTOR)
+            m_out.lock(pipe=tla.pipes.VECTOR)
             with tla.vec.func(mode="simd"):
                 m8 = tla.create_mask(pattern=tla.mask.ALL, dtype=gm_nope.ptr.dtype)
                 preg = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
@@ -935,12 +939,12 @@ def dequant_kv_pages(
                 tla.local_mem_bar(
                     tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD
                 )
-            m_out.unlock(pipe=tla.arch.VECTOR)
-            m_rope.unlock(pipe=tla.arch.VECTOR)
-            m_scale.unlock(pipe=tla.arch.VECTOR)
-            m_nope.unlock(pipe=tla.arch.VECTOR)
+            m_out.unlock(pipe=tla.pipes.VECTOR)
+            m_rope.unlock(pipe=tla.pipes.VECTOR)
+            m_scale.unlock(pipe=tla.pipes.VECTOR)
+            m_nope.unlock(pipe=tla.pipes.VECTOR)
 
-            m_out.lock(pipe=tla.arch.MTE3)
+            m_out.lock(pipe=tla.pipes.MTE3)
             tla.copy(
                 tla.get_tile(
                     gm_out,
@@ -949,7 +953,7 @@ def dequant_kv_pages(
                 ),
                 ub_o,
             )
-            m_out.unlock(pipe=tla.arch.MTE3)
+            m_out.unlock(pipe=tla.pipes.MTE3)
         tla.pipe_barrier(tla.pipes.ALL)
 
 
@@ -973,35 +977,35 @@ def _dv_block(
     raw_records: tla.Constexpr[bool] = False,
 ):
     c0 = 0
-    m_nope.lock(pipe=tla.arch.MTE2)
+    m_nope.lock(pipe=tla.pipes.MTE2)
     tla.copy(
         ub_n,
         tla.get_tile(gm_nope, tla.make_coord(r0, c0), tla.make_shape(rows, REC_BYTES)),
     )
-    m_nope.unlock(pipe=tla.arch.MTE2)
+    m_nope.unlock(pipe=tla.pipes.MTE2)
     if not raw_records:
-        m_rope.lock(pipe=tla.arch.MTE2)
+        m_rope.lock(pipe=tla.pipes.MTE2)
         tla.copy(
             ub_r,
             tla.get_tile(
                 gm_rope, tla.make_coord(r0, c0), tla.make_shape(rows, ROPE_DIM)
             ),
         )
-        m_rope.unlock(pipe=tla.arch.MTE2)
-        m_scale.lock(pipe=tla.arch.MTE2)
+        m_rope.unlock(pipe=tla.pipes.MTE2)
+        m_scale.lock(pipe=tla.pipes.MTE2)
         tla.copy(
             ub_s,
             tla.get_tile(
                 gm_scale, tla.make_coord(rs, c0), tla.make_shape(rows, SCALE_STRIDE)
             ),
         )
-        m_scale.unlock(pipe=tla.arch.MTE2)
+        m_scale.unlock(pipe=tla.pipes.MTE2)
 
-    m_nope.lock(pipe=tla.arch.VECTOR)
+    m_nope.lock(pipe=tla.pipes.VECTOR)
     if not raw_records:
-        m_rope.lock(pipe=tla.arch.VECTOR)
-        m_scale.lock(pipe=tla.arch.VECTOR)
-    m_out.lock(pipe=tla.arch.VECTOR)
+        m_rope.lock(pipe=tla.pipes.VECTOR)
+        m_scale.lock(pipe=tla.pipes.VECTOR)
+    m_out.lock(pipe=tla.pipes.VECTOR)
     if raw_records:
         _dequant_fp8_records_nd(
             tla.recast_ptr(ub_n.ptr, dtype=tla.UInt8), ub_o.ptr, rows
@@ -1084,18 +1088,18 @@ def _dv_block(
                     ub_r, ub_o, r, preg, output_mask, cast_pack, pack_store
                 )
             tla.local_mem_bar(tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD)
-    m_out.unlock(pipe=tla.arch.VECTOR)
+    m_out.unlock(pipe=tla.pipes.VECTOR)
     if not raw_records:
-        m_rope.unlock(pipe=tla.arch.VECTOR)
-        m_scale.unlock(pipe=tla.arch.VECTOR)
-    m_nope.unlock(pipe=tla.arch.VECTOR)
+        m_rope.unlock(pipe=tla.pipes.VECTOR)
+        m_scale.unlock(pipe=tla.pipes.VECTOR)
+    m_nope.unlock(pipe=tla.pipes.VECTOR)
 
-    m_out.lock(pipe=tla.arch.MTE3)
+    m_out.lock(pipe=tla.pipes.MTE3)
     tla.copy(
         tla.get_tile(gm_out, tla.make_coord(r0, c0), tla.make_shape(rows, HEAD_DIM)),
         ub_o,
     )
-    m_out.unlock(pipe=tla.arch.MTE3)
+    m_out.unlock(pipe=tla.pipes.MTE3)
 
 
 def _dv_buffers(rows, dtype_in, dtype_out, shared=None):
@@ -1535,20 +1539,20 @@ def _swa_load_query_vector(sync, bufs, q, task, slot):
         ub = tla.make_tensor(raw, layout)
         raw_lock = sync.m_dq_rec0
         packed_lock = sync.m_dq_out0
-        raw_lock.lock(pipe=tla.arch.MTE2)
+        raw_lock.lock(pipe=tla.pipes.MTE2)
         tla.copy(ub, gm, cache_policy=tla.params.CachePolicy.DISABLE)
-        raw_lock.unlock(pipe=tla.arch.MTE2)
-        raw_lock.lock(pipe=tla.arch.VECTOR)
-        packed_lock.lock(pipe=tla.arch.VECTOR)
+        raw_lock.unlock(pipe=tla.pipes.MTE2)
+        raw_lock.lock(pipe=tla.pipes.VECTOR)
+        packed_lock.lock(pipe=tla.pipes.VECTOR)
         _pack_swa_query(
             tla.recast_ptr(packed, dtype=tla.UInt16),
             tla.recast_ptr(raw, dtype=tla.UInt16),
         )
-        packed_lock.unlock(pipe=tla.arch.VECTOR)
-        raw_lock.unlock(pipe=tla.arch.VECTOR)
-        packed_lock.lock(pipe=tla.arch.MTE3)
-        tla.cross_core_wait_flag(sync.q_vector_free, tla.arch.MTE3, aiv_id=0)
-        tla.cross_core_wait_flag(sync.q_vector_free, tla.arch.MTE3, aiv_id=1)
+        packed_lock.unlock(pipe=tla.pipes.VECTOR)
+        raw_lock.unlock(pipe=tla.pipes.VECTOR)
+        packed_lock.lock(pipe=tla.pipes.MTE3)
+        tla.cross_core_wait_flag(sync.q_vector_free, tla.pipes.MTE3, aiv_id=0)
+        tla.cross_core_wait_flag(sync.q_vector_free, tla.pipes.MTE3, aiv_id=1)
         l1 = _q_slot_ptr(bufs, 2 * slot) + sub * rows * 16
         _single_query_insert_nz(
             tla.recast_ptr(l1, dtype=tla.UInt16),
@@ -1558,9 +1562,9 @@ def _swa_load_query_vector(sync, bufs, q, task, slot):
             rows,
             HEAD_DIM,
         )
-        packed_lock.unlock(pipe=tla.arch.MTE3)
-        tla.cross_core_set_flag(sync.q_vector_ready, tla.arch.MTE3, aiv_id=0)
-        tla.cross_core_set_flag(sync.q_vector_ready, tla.arch.MTE3, aiv_id=1)
+        packed_lock.unlock(pipe=tla.pipes.MTE3)
+        tla.cross_core_set_flag(sync.q_vector_ready, tla.pipes.MTE3, aiv_id=0)
+        tla.cross_core_set_flag(sync.q_vector_ready, tla.pipes.MTE3, aiv_id=1)
 
 
 @tla.jit
@@ -1648,15 +1652,15 @@ def load_rolling_window(
 @tla.jit
 def wait_kv_stage(sync):
     with tla.cube():
-        tla.cross_core_wait_flag(sync.kv_stage_ready, tla.arch.MTE2, aiv_id=0)
-        tla.cross_core_wait_flag(sync.kv_stage_ready, tla.arch.MTE2, aiv_id=1)
+        tla.cross_core_wait_flag(sync.kv_stage_ready, tla.pipes.MTE2, aiv_id=0)
+        tla.cross_core_wait_flag(sync.kv_stage_ready, tla.pipes.MTE2, aiv_id=1)
 
 
 @tla.jit
 def wait_p_ready(sync):
     with tla.cube():
-        tla.cross_core_wait_flag(sync.p_ready, tla.arch.MTE1, aiv_id=0)
-        tla.cross_core_wait_flag(sync.p_ready, tla.arch.MTE1, aiv_id=1)
+        tla.cross_core_wait_flag(sync.p_ready, tla.pipes.MTE1, aiv_id=0)
+        tla.cross_core_wait_flag(sync.p_ready, tla.pipes.MTE1, aiv_id=1)
 
 
 @tla.jit
@@ -1711,8 +1715,8 @@ def iterate_bmm1(
     c1 = 1
     with tla.cube():
         if direct_kv:
-            tla.cross_core_wait_flag(sync.kv_stage_ready, tla.arch.MTE1, aiv_id=0)
-            tla.cross_core_wait_flag(sync.kv_stage_ready, tla.arch.MTE1, aiv_id=1)
+            tla.cross_core_wait_flag(sync.kv_stage_ready, tla.pipes.MTE1, aiv_id=0)
+            tla.cross_core_wait_flag(sync.kv_stage_ready, tla.pipes.MTE1, aiv_id=1)
         elif phase0 is not None and phased:
             if slot == 1:
                 tla.wait_flag(phase1)
@@ -1727,10 +1731,10 @@ def iterate_bmm1(
                     tla.wait_flag(sync.q_l1_ready)
                 elif vector_query:
                     tla.cross_core_wait_flag(
-                        sync.q_vector_ready, tla.arch.MTE1, aiv_id=0
+                        sync.q_vector_ready, tla.pipes.MTE1, aiv_id=0
                     )
                     tla.cross_core_wait_flag(
-                        sync.q_vector_ready, tla.arch.MTE1, aiv_id=1
+                        sync.q_vector_ready, tla.pipes.MTE1, aiv_id=1
                     )
                 else:
                     tla.wait_flag(sync.q_second_ready)
@@ -1871,8 +1875,8 @@ def iterate_bmm1(
             if slot_s == 1:
                 tla.set_flag(sync.s_mm_ready1)
                 tla.wait_flag(sync.s_mm_ready1)
-        tla.cross_core_wait_flag(sync.s_free, tla.arch.FIX, aiv_id=0)
-        tla.cross_core_wait_flag(sync.s_free, tla.arch.FIX, aiv_id=1)
+        tla.cross_core_wait_flag(sync.s_free, tla.pipes.FIX, aiv_id=0)
+        tla.cross_core_wait_flag(sync.s_free, tla.pipes.FIX, aiv_id=1)
         tla.copy(
             ub_s_dst,
             l0c_s,
@@ -1885,15 +1889,19 @@ def iterate_bmm1(
             tla.set_flag(sync.s_fix_done)
         if slot_s == 1:
             tla.set_flag(sync.s_fix_done1)
-        tla.cross_core_set_flag(sync.s_ready, tla.arch.FIX, aiv_id=0)
-        tla.cross_core_set_flag(sync.s_ready, tla.arch.FIX, aiv_id=1)
+        tla.cross_core_set_flag(sync.s_ready, tla.pipes.FIX, aiv_id=0)
+        tla.cross_core_set_flag(sync.s_ready, tla.pipes.FIX, aiv_id=1)
         if is_last_tile and not keep_q:
             if two_q_slots:
                 if q_slot_a == 0:
                     tla.set_flag(sync.q_l0a_free)
                 elif vector_query:
-                    tla.cross_core_set_flag(sync.q_vector_free, tla.arch.MTE1, aiv_id=0)
-                    tla.cross_core_set_flag(sync.q_vector_free, tla.arch.MTE1, aiv_id=1)
+                    tla.cross_core_set_flag(
+                        sync.q_vector_free, tla.pipes.MTE1, aiv_id=0
+                    )
+                    tla.cross_core_set_flag(
+                        sync.q_vector_free, tla.pipes.MTE1, aiv_id=1
+                    )
                 else:
                     tla.set_flag(sync.q_second_free)
             else:
@@ -1966,8 +1974,8 @@ def iterate_bmm2_seg(
                         tla.copy(l0_v, v_seg)
                         if cached_ori:
                             tla.set_flag(ori_free)
-                    tla.cross_core_wait_flag(sync.p_ready, tla.arch.MTE1, aiv_id=0)
-                    tla.cross_core_wait_flag(sync.p_ready, tla.arch.MTE1, aiv_id=1)
+                    tla.cross_core_wait_flag(sync.p_ready, tla.pipes.MTE1, aiv_id=0)
+                    tla.cross_core_wait_flag(sync.p_ready, tla.pipes.MTE1, aiv_id=1)
                     if single_p_free is not None and wait_single_p:
                         tla.wait_flag(single_p_free)
                     tla.copy(l0_p, p_tile)
@@ -2025,16 +2033,16 @@ def iterate_bmm2_fixpipe(sync, bufs, m, start_output=False):
         )
         tla.set_flag(sync.o_mm_ready0)
         tla.wait_flag(sync.o_mm_ready0)
-        tla.cross_core_wait_flag(sync.o_free, tla.arch.FIX, aiv_id=0)
-        tla.cross_core_wait_flag(sync.o_free, tla.arch.FIX, aiv_id=1)
+        tla.cross_core_wait_flag(sync.o_free, tla.pipes.FIX, aiv_id=0)
+        tla.cross_core_wait_flag(sync.o_free, tla.pipes.FIX, aiv_id=1)
         tla.copy(
             ub_full,
             l0c_full,
             tla.params.CopyL0C2DstParams(l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M),
         )
         tla.set_flag(sync.o_fix_done0)
-        tla.cross_core_set_flag(sync.o_ready, tla.arch.FIX, aiv_id=0)
-        tla.cross_core_set_flag(sync.o_ready, tla.arch.FIX, aiv_id=1)
+        tla.cross_core_set_flag(sync.o_ready, tla.pipes.FIX, aiv_id=0)
+        tla.cross_core_set_flag(sync.o_ready, tla.pipes.FIX, aiv_id=1)
 
 
 @tla.jit
@@ -2056,8 +2064,8 @@ def _csa_fix_pv_half(sync, bufs, m, rows, part, fresh, free_flag, ready_flag):
             tla.make_layout_with_tag((m, width), tla.Float32, tla.arch.L0Clayout),
         )
         done = sync.o_fix_done0 if part == 0 else sync.o_fix_done1
-        tla.cross_core_wait_flag(free_flag, tla.arch.FIX, aiv_id=0)
-        tla.cross_core_wait_flag(free_flag, tla.arch.FIX, aiv_id=1)
+        tla.cross_core_wait_flag(free_flag, tla.pipes.FIX, aiv_id=0)
+        tla.cross_core_wait_flag(free_flag, tla.pipes.FIX, aiv_id=1)
         if fresh:
             result = tla.make_tensor(bufs.ub_o + part * width, gm_layout)
             tla.copy(
@@ -2079,8 +2087,8 @@ def _csa_fix_pv_half(sync, bufs, m, rows, part, fresh, free_flag, ready_flag):
                 ),
             )
         tla.set_flag(done)
-        tla.cross_core_set_flag(ready_flag, tla.arch.FIX, aiv_id=0)
-        tla.cross_core_set_flag(ready_flag, tla.arch.FIX, aiv_id=1)
+        tla.cross_core_set_flag(ready_flag, tla.pipes.FIX, aiv_id=0)
+        tla.cross_core_set_flag(ready_flag, tla.pipes.FIX, aiv_id=1)
 
 
 @tla.jit
@@ -2092,16 +2100,16 @@ def release_k(sync, slot):
 @tla.jit
 def split_g_mte2_pair(sync):
     with tla.cube():
-        tla.cross_core_set_flag(sync.s2_mte2, tla.arch.MTE2)
-        tla.cross_core_wait_flag(sync.s2_mte2, tla.arch.MTE2)
+        tla.cross_core_set_flag(sync.s2_mte2, tla.pipes.MTE2)
+        tla.cross_core_wait_flag(sync.s2_mte2, tla.pipes.MTE2)
 
 
 @tla.jit
 def pair_rendezvous(sync):
     with tla.cube():
         tla.pipe_barrier(tla.pipes.ALL)
-        tla.cross_core_set_flag(sync.s2_rendezvous, tla.arch.FIX)
-        tla.cross_core_wait_flag(sync.s2_rendezvous, tla.arch.SCALAR)
+        tla.cross_core_set_flag(sync.s2_rendezvous, tla.pipes.FIX)
+        tla.cross_core_wait_flag(sync.s2_rendezvous, tla.pipes.SCALAR)
 
 
 VL = 64
@@ -2294,7 +2302,7 @@ def vec_init_from_sinks(
             sinks.ptr, tla.make_layout(tla.make_shape(sink_len), tla.make_stride(1))
         )
         if has_sinks == 1:
-            sync.m_sink.lock(pipe=tla.arch.MTE2)
+            sync.m_sink.lock(pipe=tla.pipes.MTE2)
             if sink_cap == 0:
                 s_off = sink_off + sub * rows
                 if sub * rows >= m:
@@ -2306,8 +2314,8 @@ def vec_init_from_sinks(
                 tla.copy(ub_sink, gm_sink)
             else:
                 tla.copy(ub_sink, gm_sink_all)
-            sync.m_sink.unlock(pipe=tla.arch.MTE2)
-        sync.m_sink.lock(pipe=tla.arch.VECTOR)
+            sync.m_sink.unlock(pipe=tla.pipes.MTE2)
+        sync.m_sink.lock(pipe=tla.pipes.VECTOR)
         ub_max = _max(bufs, rows, slot_max)
         ub_sum = _sum(bufs, rows, slot_sum)
         ub_o = tla.make_tensor(
@@ -2349,7 +2357,7 @@ def vec_init_from_sinks(
                         )
                         ub_o_c.store(zero)
             tla.local_mem_bar(tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD)
-        sync.m_sink.unlock(pipe=tla.arch.VECTOR)
+        sync.m_sink.unlock(pipe=tla.pipes.VECTOR)
 
 
 @tla.jit
@@ -2379,9 +2387,9 @@ def process_vec1(
         ub_sum = _sum(bufs, rows, slot_s)
         ub_sum_rd = _sum(bufs, rows, slot_sum_rd)
         ub_dm = _dm(bufs, rows, slot_s)
-        tla.cross_core_wait_flag(sync.s_ready, tla.arch.VECTOR, aiv_id=0)
-        tla.cross_core_wait_flag(sync.s_ready, tla.arch.VECTOR, aiv_id=1)
-        sync.m_p.lock(pipe=tla.arch.VECTOR)
+        tla.cross_core_wait_flag(sync.s_ready, tla.pipes.VECTOR, aiv_id=0)
+        tla.cross_core_wait_flag(sync.s_ready, tla.pipes.VECTOR, aiv_id=1)
+        sync.m_p.lock(pipe=tla.pipes.VECTOR)
 
         n0 = tail_n
         if n0 > VL:
@@ -2654,8 +2662,8 @@ def process_vec1(
                     tla.local_mem_bar(
                         tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD
                     )
-        tla.cross_core_set_flag(sync.s_free, tla.arch.VECTOR, aiv_id=0)
-        tla.cross_core_set_flag(sync.s_free, tla.arch.VECTOR, aiv_id=1)
+        tla.cross_core_set_flag(sync.s_free, tla.pipes.VECTOR, aiv_id=0)
+        tla.cross_core_set_flag(sync.s_free, tla.pipes.VECTOR, aiv_id=1)
         l1p = tla.make_tensor(
             bufs.l1_p + slot_p * (Q_ROWS * KV_BLOCK),
             tla.make_layout_with_tag((m, KV_BLOCK), dtype_in, tla.arch.zN),
@@ -2663,14 +2671,14 @@ def process_vec1(
         l1p_rows = tla.tile_view(
             l1p, tla.make_shape(rows, KV_BLOCK), tla.make_coord(sub, 0)
         )
-        sync.m_p.unlock(pipe=tla.arch.VECTOR)
-        sync.m_p.lock(pipe=tla.arch.MTE3)
+        sync.m_p.unlock(pipe=tla.pipes.VECTOR)
+        sync.m_p.lock(pipe=tla.pipes.MTE3)
         tla.set_flag(sync.p_data_ready)
         tla.wait_flag(sync.p_data_ready)
         tla.copy(l1p_rows, ub_p)
-        sync.m_p.unlock(pipe=tla.arch.MTE3)
-        tla.cross_core_set_flag(sync.p_ready, tla.arch.MTE3, aiv_id=0)
-        tla.cross_core_set_flag(sync.p_ready, tla.arch.MTE3, aiv_id=1)
+        sync.m_p.unlock(pipe=tla.pipes.MTE3)
+        tla.cross_core_set_flag(sync.p_ready, tla.pipes.MTE3, aiv_id=0)
+        tla.cross_core_set_flag(sync.p_ready, tla.pipes.MTE3, aiv_id=1)
 
 
 _FOLD_CMP_SOURCE = r"""
@@ -2866,18 +2874,18 @@ def fold_cmp_indices(
     weights1 = tla.allocate(size, tla.Float32, tla.AddressSpace.ub, 256)
     output0 = tla.allocate(chunk_rows, tla.Int32, tla.AddressSpace.ub, 256)
     output1 = tla.allocate(chunk_rows, tla.Int32, tla.AddressSpace.ub, 256)
-    released0 = tla.flag("cmp_fold_empty0", tla.arch.MTE3, tla.arch.SCALAR, id=0)
-    released1 = tla.flag("cmp_fold_empty1", tla.arch.MTE3, tla.arch.SCALAR, id=1)
+    released0 = tla.flag("cmp_fold_empty0", tla.pipes.MTE3, tla.pipes.SCALAR, id=0)
+    released1 = tla.flag("cmp_fold_empty1", tla.pipes.MTE3, tla.pipes.SCALAR, id=1)
     input_ready = tla.flag(
-        "cmp_fold_record_ready", tla.arch.MTE2, tla.arch.SCALAR, id=0
+        "cmp_fold_record_ready", tla.pipes.MTE2, tla.pipes.SCALAR, id=0
     )
     source_ready = tla.flag(
-        "cmp_fold_source_ready", tla.arch.MTE2, tla.arch.VECTOR, id=0
+        "cmp_fold_source_ready", tla.pipes.MTE2, tla.pipes.VECTOR, id=0
     )
     lengths_ready = tla.flag(
-        "cmp_fold_lengths_ready", tla.arch.SCALAR, tla.arch.MTE3, id=0
+        "cmp_fold_lengths_ready", tla.pipes.SCALAR, tla.pipes.MTE3, id=0
     )
-    rows_ready = tla.flag("cmp_fold_rows_ready", tla.arch.VECTOR, tla.arch.MTE3, id=0)
+    rows_ready = tla.flag("cmp_fold_rows_ready", tla.pipes.VECTOR, tla.pipes.MTE3, id=0)
     with tla.vector():
         limit = cu_cmp[1] - cu_cmp[0]
         limit = limit if limit < width else width
@@ -3470,18 +3478,26 @@ def _fold_and_pair_ring_indices(
     maps = tla.allocate(span, tla.Int32, tla.AddressSpace.ub, 256)
     event0 = 0 if prep_ready is None else 4
     event1 = event0 + 1
-    released0 = tla.flag("fold_pair_buffer0", tla.arch.MTE3, tla.arch.SCALAR, id=event0)
-    released1 = tla.flag("fold_pair_buffer1", tla.arch.MTE3, tla.arch.SCALAR, id=event1)
-    input_s = tla.flag("fold_pair_source", tla.arch.MTE2, tla.arch.SCALAR, id=event0)
+    released0 = tla.flag(
+        "fold_pair_buffer0", tla.pipes.MTE3, tla.pipes.SCALAR, id=event0
+    )
+    released1 = tla.flag(
+        "fold_pair_buffer1", tla.pipes.MTE3, tla.pipes.SCALAR, id=event1
+    )
+    input_s = tla.flag("fold_pair_source", tla.pipes.MTE2, tla.pipes.SCALAR, id=event0)
     input_v = tla.flag(
-        "fold_pair_vector_source", tla.arch.MTE2, tla.arch.VECTOR, id=event0
+        "fold_pair_vector_source", tla.pipes.MTE2, tla.pipes.VECTOR, id=event0
     )
-    input_s1 = tla.flag("fold_pair_source1", tla.arch.MTE2, tla.arch.SCALAR, id=event1)
+    input_s1 = tla.flag(
+        "fold_pair_source1", tla.pipes.MTE2, tla.pipes.SCALAR, id=event1
+    )
     input_v1 = tla.flag(
-        "fold_pair_vector_source1", tla.arch.MTE2, tla.arch.VECTOR, id=event1
+        "fold_pair_vector_source1", tla.pipes.MTE2, tla.pipes.VECTOR, id=event1
     )
-    output_s = tla.flag("fold_pair_marks", tla.arch.SCALAR, tla.arch.MTE3, id=event0)
-    output_v = tla.flag("fold_pair_results", tla.arch.VECTOR, tla.arch.MTE3, id=event0)
+    output_s = tla.flag("fold_pair_marks", tla.pipes.SCALAR, tla.pipes.MTE3, id=event0)
+    output_v = tla.flag(
+        "fold_pair_results", tla.pipes.VECTOR, tla.pipes.MTE3, id=event0
+    )
     with tla.vector():
         keys = cu_cmp[1] - cu_cmp[0]
         if prep_ready is None:
@@ -3766,7 +3782,7 @@ def dequant_and_fold_indices(
         prefetch_indices and packed_rows * bytes_per_row <= 16 * batch_pairs * width
     )
     prep_ready = (
-        tla.flag("dequant_for_fold", tla.arch.MTE3, tla.arch.SCALAR, id=7)
+        tla.flag("dequant_for_fold", tla.pipes.MTE3, tla.pipes.SCALAR, id=7)
         if overlap
         else None
     )
@@ -3914,7 +3930,7 @@ def gather_folded_to_workspace(
         if last_rows > 0:
             # The second gather chunk shares the output's BF16 staging buffer.
             start_last = start + chunk_rows
-            output_lock.lock(pipe=tla.arch.MTE2)
+            output_lock.lock(pipe=tla.pipes.MTE2)
             _fold_gather_rows(
                 tla.recast_ptr(bufs.ub_kv1, dtype=tla.UInt8),
                 tla.recast_ptr(kv.ptr, dtype=tla.UInt8),
@@ -3925,8 +3941,8 @@ def gather_folded_to_workspace(
                 last_rows,
                 shift,
             )
-            output_lock.unlock(pipe=tla.arch.MTE2)
-            output_lock.lock(pipe=tla.arch.MTE3)
+            output_lock.unlock(pipe=tla.pipes.MTE2)
+            output_lock.lock(pipe=tla.pipes.MTE3)
             last_view = tla.make_layout(
                 tla.make_shape(last_rows * HEAD_DIM), tla.make_stride(1)
             )
@@ -3935,9 +3951,9 @@ def gather_folded_to_workspace(
                 last_view,
             )
             tla.copy(last_dst, tla.make_tensor(bufs.ub_kv1, last_view))
-            output_lock.unlock(pipe=tla.arch.MTE3)
-        tla.cross_core_set_flag(sync.kv_stage_ready, tla.arch.MTE3, aiv_id=0)
-        tla.cross_core_set_flag(sync.kv_stage_ready, tla.arch.MTE3, aiv_id=1)
+            output_lock.unlock(pipe=tla.pipes.MTE3)
+        tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=0)
+        tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=1)
 
 
 _CSA_VEC1_SOURCE = r"""
@@ -4346,16 +4362,16 @@ def process_vec1_csa(
         )
         weight = tla.make_tensor(weight_ptr, weight_shape)
         if use_weights:
-            sync.m_sink.lock(pipe=tla.arch.MTE2)
+            sync.m_sink.lock(pipe=tla.pipes.MTE2)
             if is_cmp:
                 tla.copy(
                     weight, tla.make_tensor(weights.ptr + weight_offset, weight_shape)
                 )
-            sync.m_sink.unlock(pipe=tla.arch.MTE2)
-            sync.m_sink.lock(pipe=tla.arch.VECTOR)
-        tla.cross_core_wait_flag(sync.s_ready, tla.arch.VECTOR, aiv_id=0)
-        tla.cross_core_wait_flag(sync.s_ready, tla.arch.VECTOR, aiv_id=1)
-        sync.m_p.lock(pipe=tla.arch.VECTOR)
+            sync.m_sink.unlock(pipe=tla.pipes.MTE2)
+            sync.m_sink.lock(pipe=tla.pipes.VECTOR)
+        tla.cross_core_wait_flag(sync.s_ready, tla.pipes.VECTOR, aiv_id=0)
+        tla.cross_core_wait_flag(sync.s_ready, tla.pipes.VECTOR, aiv_id=1)
+        sync.m_p.lock(pipe=tla.pipes.VECTOR)
         _csa_vec1(
             ub_s.ptr,
             ub_p.ptr,
@@ -4370,15 +4386,15 @@ def process_vec1_csa(
             is_cmp.to(tla.Int32) if use_weights else tla.as_numeric(0),
         )
         if use_weights:
-            sync.m_sink.unlock(pipe=tla.arch.VECTOR)
-        tla.cross_core_set_flag(sync.s_free, tla.arch.VECTOR, aiv_id=0)
-        tla.cross_core_set_flag(sync.s_free, tla.arch.VECTOR, aiv_id=1)
+            sync.m_sink.unlock(pipe=tla.pipes.VECTOR)
+        tla.cross_core_set_flag(sync.s_free, tla.pipes.VECTOR, aiv_id=0)
+        tla.cross_core_set_flag(sync.s_free, tla.pipes.VECTOR, aiv_id=1)
         l1p = l1_p_tensor(bufs.l1_p + slot_p * (Q_ROWS * KV_BLOCK), dtype_in, m)
         sink = tla.tile_view(
             l1p, tla.make_shape(rows, KV_BLOCK), tla.make_coord(sub, 0)
         )
-        sync.m_p.unlock(pipe=tla.arch.VECTOR)
-        sync.m_p.lock(pipe=tla.arch.MTE3)
+        sync.m_p.unlock(pipe=tla.pipes.VECTOR)
+        sync.m_p.lock(pipe=tla.pipes.MTE3)
         tla.set_flag(sync.p_data_ready)
         tla.wait_flag(sync.p_data_ready)
         if compact_probabilities:
@@ -4393,9 +4409,9 @@ def process_vec1_csa(
                 tla.copy(sink, ub_p)
         else:
             tla.copy(sink, ub_p)
-        sync.m_p.unlock(pipe=tla.arch.MTE3)
-        tla.cross_core_set_flag(sync.p_ready, tla.arch.MTE3, aiv_id=0)
-        tla.cross_core_set_flag(sync.p_ready, tla.arch.MTE3, aiv_id=1)
+        sync.m_p.unlock(pipe=tla.pipes.MTE3)
+        tla.cross_core_set_flag(sync.p_ready, tla.pipes.MTE3, aiv_id=0)
+        tla.cross_core_set_flag(sync.p_ready, tla.pipes.MTE3, aiv_id=1)
 
 
 _CSA_PV_SOURCE = r"""
@@ -4621,22 +4637,22 @@ def _csa_pv_update(
     """Consume PV and return its Fixpipe credit before the GM write."""
     with tla.vector():
         output_lock = sync.m_o16
-        tla.cross_core_wait_flag(sync.o_ready, tla.arch.VECTOR, aiv_id=0)
-        tla.cross_core_wait_flag(sync.o_ready, tla.arch.VECTOR, aiv_id=1)
+        tla.cross_core_wait_flag(sync.o_ready, tla.pipes.VECTOR, aiv_id=0)
+        tla.cross_core_wait_flag(sync.o_ready, tla.pipes.VECTOR, aiv_id=1)
         if write_output:
-            output_lock.lock(pipe=tla.arch.VECTOR)
+            output_lock.lock(pipe=tla.pipes.VECTOR)
             if first_tile:
                 _csa_pv_rows(bufs, bufs.ub_o, rows, slot, dtype, False, True, emit_lse)
             else:
                 _csa_pv_rows(
                     bufs, bufs.ub_otmp_full, rows, slot, dtype, True, True, emit_lse
                 )
-            output_lock.unlock(pipe=tla.arch.VECTOR)
+            output_lock.unlock(pipe=tla.pipes.VECTOR)
         else:
             if not first_tile:
                 _csa_pv_rows(bufs, bufs.ub_otmp_full, rows, slot, dtype, True, False)
-        tla.cross_core_set_flag(sync.o_free, tla.arch.VECTOR, aiv_id=0)
-        tla.cross_core_set_flag(sync.o_free, tla.arch.VECTOR, aiv_id=1)
+        tla.cross_core_set_flag(sync.o_free, tla.pipes.VECTOR, aiv_id=0)
+        tla.cross_core_set_flag(sync.o_free, tla.pipes.VECTOR, aiv_id=1)
         if write_output:
             sub = tla.arch.sub_block_idx()
             row = task * m + sub * rows
@@ -4645,7 +4661,7 @@ def _csa_pv_update(
             )
             gm = tla.make_tensor(out.ptr + row * HEAD_DIM, layout)
             ub = tla.make_tensor(bufs.ub_o16, layout)
-            output_lock.lock(pipe=tla.arch.MTE3)
+            output_lock.lock(pipe=tla.pipes.MTE3)
             if bypass_cache:
                 tla.copy(gm, ub, cache_policy=tla.params.CachePolicy.DISABLE)
             else:
@@ -4654,7 +4670,7 @@ def _csa_pv_update(
                 ld = tla.make_layout(tla.make_shape(rows), tla.make_stride(1))
                 gm_lse = tla.make_tensor(lse.ptr + row, ld)
                 tla.copy(gm_lse, _stats(bufs.ub_pv_stats + VL, rows))
-            output_lock.unlock(pipe=tla.arch.MTE3)
+            output_lock.unlock(pipe=tla.pipes.MTE3)
 
 
 @tla.extern(source=_CSA_PV_SOURCE, name="csa_finish_pv_half")
@@ -4719,8 +4735,8 @@ def _csa_consume_pv_half(
 ):
     with tla.vector():
         output_lock = sync.m_o16
-        tla.cross_core_wait_flag(ready_flag, tla.arch.VECTOR, aiv_id=0)
-        tla.cross_core_wait_flag(ready_flag, tla.arch.VECTOR, aiv_id=1)
+        tla.cross_core_wait_flag(ready_flag, tla.pipes.VECTOR, aiv_id=0)
+        tla.cross_core_wait_flag(ready_flag, tla.pipes.VECTOR, aiv_id=1)
         if last or not first:
             current = (
                 bufs.ub_o
@@ -4730,7 +4746,7 @@ def _csa_consume_pv_half(
             mode = 2 if first else (1 if last else 0)
             acquire_output = (last and part == 0) if stream_output else last
             if acquire_output:
-                output_lock.lock(pipe=tla.arch.VECTOR)
+                output_lock.lock(pipe=tla.pipes.VECTOR)
             if terminal_output_event:
                 _csa_finish_pv_half_terminal(
                     bufs.ub_o,
@@ -4759,9 +4775,9 @@ def _csa_consume_pv_half(
                 )
             release_output = (last and part == 1) if stream_output else last
             if release_output:
-                output_lock.unlock(pipe=tla.arch.VECTOR)
-        tla.cross_core_set_flag(free_flag, tla.arch.VECTOR, aiv_id=0)
-        tla.cross_core_set_flag(free_flag, tla.arch.VECTOR, aiv_id=1)
+                output_lock.unlock(pipe=tla.pipes.VECTOR)
+        tla.cross_core_set_flag(free_flag, tla.pipes.VECTOR, aiv_id=0)
+        tla.cross_core_set_flag(free_flag, tla.pipes.VECTOR, aiv_id=1)
         if stream_output and part == 0 and last:
             # The two Vector results occupy disjoint columns in UB. Start
             # the left copy while the right half is still being computed.
@@ -4789,7 +4805,7 @@ def _csa_consume_pv_half(
         if part == 1 and last:
             row = task * m + tla.arch.sub_block_idx() * rows
             if stream_output:
-                output_lock.lock(pipe=tla.arch.MTE3)
+                output_lock.lock(pipe=tla.pipes.MTE3)
                 layout = tla.make_layout(
                     tla.make_shape(rows, HEAD_DIM // 2), tla.make_stride(HEAD_DIM, 1)
                 )
@@ -4802,7 +4818,7 @@ def _csa_consume_pv_half(
                 layout = tla.make_layout_with_tag(
                     (rows, HEAD_DIM), dtype, tla.arch.RowMajor
                 )
-                output_lock.lock(pipe=tla.arch.MTE3)
+                output_lock.lock(pipe=tla.pipes.MTE3)
                 tla.copy(
                     tla.make_tensor(out.ptr + row * HEAD_DIM, layout),
                     tla.make_tensor(bufs.ub_o16, layout),
@@ -4814,7 +4830,7 @@ def _csa_consume_pv_half(
                     tla.make_tensor(lse.ptr + row, ld),
                     _stats(bufs.ub_pv_stats + VL, rows),
                 )
-            output_lock.unlock(pipe=tla.arch.MTE3)
+            output_lock.unlock(pipe=tla.pipes.MTE3)
 
 
 @tla.jit
@@ -4836,8 +4852,8 @@ def process_vec2_seg(sync, bufs, seg, m, rows, dtype_in, fresh=0, slot_dm=0):
             ),
         )
         if seg == 0:
-            tla.cross_core_wait_flag(sync.o_ready, tla.arch.VECTOR, aiv_id=0)
-            tla.cross_core_wait_flag(sync.o_ready, tla.arch.VECTOR, aiv_id=1)
+            tla.cross_core_wait_flag(sync.o_ready, tla.pipes.VECTOR, aiv_id=0)
+            tla.cross_core_wait_flag(sync.o_ready, tla.pipes.VECTOR, aiv_id=1)
         with tla.vec.func(mode="simd"):
             preg = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
             brc = tla.params.NormalLoadParams(
@@ -4873,8 +4889,8 @@ def process_vec2_seg(sync, bufs, seg, m, rows, dtype_in, fresh=0, slot_dm=0):
                         dst.store(acc)
             tla.local_mem_bar(tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD)
         if seg == 3:
-            tla.cross_core_set_flag(sync.o_free, tla.arch.VECTOR, aiv_id=0)
-            tla.cross_core_set_flag(sync.o_free, tla.arch.VECTOR, aiv_id=1)
+            tla.cross_core_set_flag(sync.o_free, tla.pipes.VECTOR, aiv_id=0)
+            tla.cross_core_set_flag(sync.o_free, tla.pipes.VECTOR, aiv_id=1)
 
 
 def _bc_rows8(rows):
@@ -5111,8 +5127,8 @@ def bmm2_data_copy_out(
     with tla.vector():
         sub = tla.arch.sub_block_idx()
         if fresh_from_cube:
-            tla.cross_core_wait_flag(sync.o_ready, tla.arch.VECTOR, aiv_id=0)
-            tla.cross_core_wait_flag(sync.o_ready, tla.arch.VECTOR, aiv_id=1)
+            tla.cross_core_wait_flag(sync.o_ready, tla.pipes.VECTOR, aiv_id=0)
+            tla.cross_core_wait_flag(sync.o_ready, tla.pipes.VECTOR, aiv_id=1)
         ub_o = tla.make_tensor(
             bufs.ub_otmp_full if fresh_from_cube else bufs.ub_o,
             tla.make_layout(
@@ -5124,7 +5140,7 @@ def bmm2_data_copy_out(
             tla.make_layout_with_tag((rows, HEAD_DIM), dtype_in, tla.arch.RowMajor),
         )
         ub_sum = _sum(bufs, rows, slot_sum)
-        sync.m_o16.lock(pipe=tla.arch.VECTOR)
+        sync.m_o16.lock(pipe=tla.pipes.VECTOR)
         with tla.vec.func(mode="simd"):
             preg = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
             preg_b16 = tla.create_mask(pattern=tla.mask.ALL, dtype=dtype_in)
@@ -5158,11 +5174,11 @@ def bmm2_data_copy_out(
                         mask=preg_b16,
                     )
             tla.local_mem_bar(tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD)
-        sync.m_o16.unlock(pipe=tla.arch.VECTOR)
+        sync.m_o16.unlock(pipe=tla.pipes.VECTOR)
         if fresh_from_cube:
-            tla.cross_core_set_flag(sync.o_free, tla.arch.VECTOR, aiv_id=0)
-            tla.cross_core_set_flag(sync.o_free, tla.arch.VECTOR, aiv_id=1)
-        sync.m_o16.lock(pipe=tla.arch.MTE3)
+            tla.cross_core_set_flag(sync.o_free, tla.pipes.VECTOR, aiv_id=0)
+            tla.cross_core_set_flag(sync.o_free, tla.pipes.VECTOR, aiv_id=1)
+        sync.m_o16.lock(pipe=tla.pipes.MTE3)
         if odd_mode == 0:
             if sub * rows < m:
                 gm_o = tla.make_tensor(
@@ -5193,7 +5209,7 @@ def bmm2_data_copy_out(
                     ub_o16, tla.make_shape(1, HEAD_DIM), tla.make_coord(r, c0)
                 )
                 tla.copy(gm_r, src_r)
-        sync.m_o16.unlock(pipe=tla.arch.MTE3)
+        sync.m_o16.unlock(pipe=tla.pipes.MTE3)
 
 
 @tla.jit
@@ -5991,8 +6007,8 @@ def gather_kv_rows(
                 )
                 tla.set_flag(sync.kv_mte3_mte2_1)
         if announce:
-            tla.cross_core_set_flag(sync.kv_stage_ready, tla.arch.MTE3, aiv_id=0)
-            tla.cross_core_set_flag(sync.kv_stage_ready, tla.arch.MTE3, aiv_id=1)
+            tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=0)
+            tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=1)
 
 
 @tla.jit
@@ -6153,8 +6169,8 @@ def gather_kv_rows_pa_pairwise(
                 )
                 tla.set_flag(sync.kv_mte3_mte2_1)
         if announce:
-            tla.cross_core_set_flag(sync.kv_stage_ready, tla.arch.MTE3, aiv_id=0)
-            tla.cross_core_set_flag(sync.kv_stage_ready, tla.arch.MTE3, aiv_id=1)
+            tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=0)
+            tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=1)
 
 
 @tla.jit
@@ -6295,7 +6311,7 @@ def _emit_group_rec(
 
 @tla.jit
 def _dequant_rec_block(ub_rec, ub_rec_bf, ub_o, rec_dtype, rows, m_rec, m_out):
-    m_out.lock(pipe=tla.arch.VECTOR)
+    m_out.lock(pipe=tla.pipes.VECTOR)
     with tla.vec.func(mode="simd"):
         m8 = tla.create_mask(pattern=tla.mask.ALL, dtype=rec_dtype)
         preg = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
@@ -6382,7 +6398,7 @@ def _dequant_rec_block(ub_rec, ub_rec_bf, ub_o, rec_dtype, rows, m_rec, m_out):
                 tla.make_coord(r, SCALE_GROUPS * GROUP_SIZE),
                 tla.make_shape(1, ROPE_DIM),
             ).store(rreg)
-    m_out.unlock(pipe=tla.arch.VECTOR)
+    m_out.unlock(pipe=tla.pipes.VECTOR)
 
 
 @tla.jit
@@ -6545,7 +6561,7 @@ def _rec_chunk(
         rows_out = tla.as_numeric(REC_ROWS)
     if rows_out < 0:
         rows_out = tla.as_numeric(0)
-    m_rec_s.lock(pipe=tla.arch.MTE2)
+    m_rec_s.lock(pipe=tla.pipes.MTE2)
     _pa_rec_fill(
         ub_rec,
         rec,
@@ -6568,13 +6584,13 @@ def _rec_chunk(
         pair_hi,
         m_rec_s,
     )
-    m_rec_s.unlock(pipe=tla.arch.MTE2)
-    m_rec_s.lock(pipe=tla.arch.VECTOR)
+    m_rec_s.unlock(pipe=tla.pipes.MTE2)
+    m_rec_s.lock(pipe=tla.pipes.VECTOR)
     _dequant_rec_block(
         ub_rec, ub_rec_bf, ub_out, rec.ptr.dtype, REC_ROWS, m_rec_s, m_out_s
     )
-    m_rec_s.unlock(pipe=tla.arch.VECTOR)
-    m_out_s.lock(pipe=tla.arch.MTE3)
+    m_rec_s.unlock(pipe=tla.pipes.VECTOR)
+    m_out_s.lock(pipe=tla.pipes.MTE3)
     gm_chunk = tla.make_tensor(
         ws.ptr + ws_base + slot * slot_stride + line0 * HEAD_DIM,
         tla.make_layout(
@@ -6587,7 +6603,7 @@ def _rec_chunk(
         gm_chunk,
         tla.tile_view(ub_out, tla.make_shape(rows_out, HEAD_DIM), tla.make_coord(0, 0)),
     )
-    m_out_s.unlock(pipe=tla.arch.MTE3)
+    m_out_s.unlock(pipe=tla.pipes.MTE3)
 
 
 @tla.jit
@@ -6768,8 +6784,8 @@ def gather_kv_rows_pa_dequant(
                     sync.m_dq_out1,
                 )
         if announce:
-            tla.cross_core_set_flag(sync.kv_stage_ready, tla.arch.MTE3, aiv_id=0)
-            tla.cross_core_set_flag(sync.kv_stage_ready, tla.arch.MTE3, aiv_id=1)
+            tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=0)
+            tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=1)
 
 
 @tla.jit
@@ -7098,8 +7114,8 @@ def gather_kv_rows_vec(
                 )
                 tla.set_flag(sync.kv_mte3_mte2_1)
         if announce:
-            tla.cross_core_set_flag(sync.kv_stage_ready, tla.arch.MTE3, aiv_id=0)
-            tla.cross_core_set_flag(sync.kv_stage_ready, tla.arch.MTE3, aiv_id=1)
+            tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=0)
+            tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=1)
 
 
 @tla.jit
@@ -7425,8 +7441,8 @@ def gather_kv_rows_ring(
             else:
                 tla.set_flag(sync.idx_s2m1)
         if announce:
-            tla.cross_core_set_flag(sync.kv_stage_ready, tla.arch.MTE3, aiv_id=0)
-            tla.cross_core_set_flag(sync.kv_stage_ready, tla.arch.MTE3, aiv_id=1)
+            tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=0)
+            tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=1)
 
 
 KV_STAGE_STRIDE = KV_BLOCK * 512
@@ -7439,9 +7455,9 @@ CSA_PRELOAD_NUM = 3
 @tla.jit
 def _decode_vector_barrier(sync) -> None:
     with tla.vector():
-        tla.pipe_barrier(tla.arch.MTE3)
-        tla.cross_core_set_flag(sync.decode_exchange, tla.arch.MTE3)
-        tla.cross_core_wait_flag(sync.decode_exchange, tla.arch.MTE2)
+        tla.pipe_barrier(tla.pipes.MTE3)
+        tla.cross_core_set_flag(sync.decode_exchange, tla.pipes.MTE3)
+        tla.cross_core_wait_flag(sync.decode_exchange, tla.pipes.MTE2)
 
 
 @tla.jit
@@ -7514,7 +7530,7 @@ def _merge_decode_partition(
         gm_o = tla.make_tensor(partial.ptr + head_base * HEAD_DIM, shape)
         # The final local PV update still reads this UB region on Vector.
         pv_consumed = tla.flag(
-            "decode_local_pv_consumed", tla.arch.VECTOR, tla.arch.MTE2, id=0
+            "decode_local_pv_consumed", tla.pipes.VECTOR, tla.pipes.MTE2, id=0
         )
         tla.set_flag(pv_consumed)
         tla.wait_flag(pv_consumed)
@@ -7837,25 +7853,25 @@ def _store_decode_guard(guard, shared, from_vector):
         sub = tla.arch.sub_block_idx()
         view = tla.make_layout(tla.make_shape(8), tla.make_stride(1))
         out = tla.recast_ptr(shared + 8 * sub, dtype=tla.Int32)
-        ready = tla.flag("decode_guard_stored", tla.arch.VECTOR, tla.arch.MTE3, id=7)
+        ready = tla.flag("decode_guard_stored", tla.pipes.VECTOR, tla.pipes.MTE3, id=7)
         tla.set_flag(ready)
         tla.wait_flag(ready)
         tla.copy(tla.make_tensor(out, view), tla.make_tensor(guard, view))
-        tla.cross_core_set_flag(from_vector, tla.arch.MTE3, aiv_id=0)
-        tla.cross_core_set_flag(from_vector, tla.arch.MTE3, aiv_id=1)
+        tla.cross_core_set_flag(from_vector, tla.pipes.MTE3, aiv_id=0)
+        tla.cross_core_set_flag(from_vector, tla.pipes.MTE3, aiv_id=1)
 
 
 @tla.jit
 def _wait_decode_guard(shared, from_vector, to_vector):
     with tla.cube():
-        tla.cross_core_wait_flag(from_vector, tla.arch.SCALAR, aiv_id=0)
-        tla.cross_core_wait_flag(from_vector, tla.arch.SCALAR, aiv_id=1)
+        tla.cross_core_wait_flag(from_vector, tla.pipes.SCALAR, aiv_id=0)
+        tla.cross_core_wait_flag(from_vector, tla.pipes.SCALAR, aiv_id=1)
         _refresh_decode_guard_aic(shared)
-        tla.cross_core_set_flag(to_vector, tla.arch.SCALAR, aiv_id=0)
-        tla.cross_core_set_flag(to_vector, tla.arch.SCALAR, aiv_id=1)
+        tla.cross_core_set_flag(to_vector, tla.pipes.SCALAR, aiv_id=0)
+        tla.cross_core_set_flag(to_vector, tla.pipes.SCALAR, aiv_id=1)
     with tla.vector():
-        tla.cross_core_wait_flag(to_vector, tla.arch.SCALAR, aiv_id=0)
-        tla.cross_core_wait_flag(to_vector, tla.arch.SCALAR, aiv_id=1)
+        tla.cross_core_wait_flag(to_vector, tla.pipes.SCALAR, aiv_id=0)
+        tla.cross_core_wait_flag(to_vector, tla.pipes.SCALAR, aiv_id=1)
         _refresh_decode_guard_aiv(shared)
 
 
@@ -7890,9 +7906,9 @@ def _csa_decode_fixed_vec1(sync, bufs, scale, count, slot, previous_slot, guard)
         maximum = _max(bufs, rows, slot)
         total = _sum(bufs, rows, slot)
         previous = _sum(bufs, rows, previous_slot)
-        tla.cross_core_wait_flag(sync.s_ready, tla.arch.VECTOR, aiv_id=0)
-        tla.cross_core_wait_flag(sync.s_ready, tla.arch.VECTOR, aiv_id=1)
-        sync.m_p.lock(pipe=tla.arch.VECTOR)
+        tla.cross_core_wait_flag(sync.s_ready, tla.pipes.VECTOR, aiv_id=0)
+        tla.cross_core_wait_flag(sync.s_ready, tla.pipes.VECTOR, aiv_id=1)
+        sync.m_p.lock(pipe=tla.pipes.VECTOR)
         _csa_fixed_exp(
             score.ptr,
             prob.ptr,
@@ -7903,20 +7919,20 @@ def _csa_decode_fixed_vec1(sync, bufs, scale, count, slot, previous_slot, guard)
             scale,
             guard,
         )
-        tla.cross_core_set_flag(sync.s_free, tla.arch.VECTOR, aiv_id=0)
-        tla.cross_core_set_flag(sync.s_free, tla.arch.VECTOR, aiv_id=1)
+        tla.cross_core_set_flag(sync.s_free, tla.pipes.VECTOR, aiv_id=0)
+        tla.cross_core_set_flag(sync.s_free, tla.pipes.VECTOR, aiv_id=1)
         target = l1_p_tensor(bufs.l1_p + slot * Q_ROWS * KV_BLOCK, tla.BFloat16, Q_ROWS)
         target_half = tla.tile_view(
             target, tla.make_shape(rows, KV_BLOCK), tla.make_coord(sub, 0)
         )
-        sync.m_p.unlock(pipe=tla.arch.VECTOR)
-        sync.m_p.lock(pipe=tla.arch.MTE3)
+        sync.m_p.unlock(pipe=tla.pipes.VECTOR)
+        sync.m_p.lock(pipe=tla.pipes.MTE3)
         tla.set_flag(sync.p_data_ready)
         tla.wait_flag(sync.p_data_ready)
         tla.copy(target_half, prob)
-        sync.m_p.unlock(pipe=tla.arch.MTE3)
-        tla.cross_core_set_flag(sync.p_ready, tla.arch.MTE3, aiv_id=0)
-        tla.cross_core_set_flag(sync.p_ready, tla.arch.MTE3, aiv_id=1)
+        sync.m_p.unlock(pipe=tla.pipes.MTE3)
+        tla.cross_core_set_flag(sync.p_ready, tla.pipes.MTE3, aiv_id=0)
+        tla.cross_core_set_flag(sync.p_ready, tla.pipes.MTE3, aiv_id=1)
 
 
 @tla.jit
@@ -7960,8 +7976,8 @@ def _csa_decode_fixed_pv(
         tla.wait_flag(free)
         if seg == 0:
             tla.copy(v_l0, v_slice)
-            tla.cross_core_wait_flag(sync.p_ready, tla.arch.MTE1, aiv_id=0)
-            tla.cross_core_wait_flag(sync.p_ready, tla.arch.MTE1, aiv_id=1)
+            tla.cross_core_wait_flag(sync.p_ready, tla.pipes.MTE1, aiv_id=0)
+            tla.cross_core_wait_flag(sync.p_ready, tla.pipes.MTE1, aiv_id=1)
             tla.copy(p_l0, p_slice)
         else:
             if seg == 1:
@@ -8278,8 +8294,8 @@ def _csa_decode_schedule(
                                 preload_v=True,
                             )
                 with tla.cube():
-                    tla.cross_core_set_flag(sync.kv_l1_free, tla.arch.MTE1, aiv_id=0)
-                    tla.cross_core_set_flag(sync.kv_l1_free, tla.arch.MTE1, aiv_id=1)
+                    tla.cross_core_set_flag(sync.kv_l1_free, tla.pipes.MTE1, aiv_id=0)
+                    tla.cross_core_set_flag(sync.kv_l1_free, tla.pipes.MTE1, aiv_id=1)
                 write_output = end and pv_task < core_count
                 if fixed:
                     if end:
@@ -8383,11 +8399,11 @@ def sparse_flash_mla_csa_bounded_decode_kernel(
     )
     init_sync(sync, pre_phy_vs=False, pre_l0c2=True, pre_idx_ring=False)
     init_sync_preload(sync)
-    q_prefix_free = tla.flag("csa_q_prefix_free", tla.arch.MTE1, tla.arch.MTE2, id=4)
+    q_prefix_free = tla.flag("csa_q_prefix_free", tla.pipes.MTE1, tla.pipes.MTE2, id=4)
     with tla.cube():
         for _ in tla.range_constexpr(KV_SLOTS):
-            tla.cross_core_set_flag(sync.kv_l1_free, tla.arch.MTE1, aiv_id=0)
-            tla.cross_core_set_flag(sync.kv_l1_free, tla.arch.MTE1, aiv_id=1)
+            tla.cross_core_set_flag(sync.kv_l1_free, tla.pipes.MTE1, aiv_id=0)
+            tla.cross_core_set_flag(sync.kv_l1_free, tla.pipes.MTE1, aiv_id=1)
 
     guard = tla.allocate(64, tla.Int32, tla.AddressSpace.ub, 256)
     guard_written = tla.cross_flag("decode_range_written", mode=4)
@@ -8701,7 +8717,7 @@ def sparse_flash_mla_csa_kernel(
         tla.cross_flag("csa_o_ready_right", mode=4) if overlap_folded_pv else None
     )
     single_p_free = (
-        tla.flag("csa_single_p_free", tla.arch.CUBE, tla.arch.MTE1, id=6)
+        tla.flag("csa_single_p_free", tla.pipes.CUBE, tla.pipes.MTE1, id=6)
         if single_probability_bank
         else None
     )
@@ -8715,32 +8731,34 @@ def sparse_flash_mla_csa_kernel(
             tla.set_flag(single_p_free)
     if overlap_folded_pv:
         with tla.vector():
-            tla.cross_core_set_flag(o_free_right, tla.arch.VECTOR, aiv_id=0)
-            tla.cross_core_set_flag(o_free_right, tla.arch.VECTOR, aiv_id=1)
+            tla.cross_core_set_flag(o_free_right, tla.pipes.VECTOR, aiv_id=0)
+            tla.cross_core_set_flag(o_free_right, tla.pipes.VECTOR, aiv_id=1)
     q_prefix_free = (
-        tla.flag("csa_q_prefix_free", tla.arch.MTE1, tla.arch.MTE2, id=4)
+        tla.flag("csa_q_prefix_free", tla.pipes.MTE1, tla.pipes.MTE2, id=4)
         if folded
         else None
     )
     ori_free = (
-        tla.flag("csa_ori_free", tla.arch.MTE1, tla.arch.MTE2, id=5) if folded else None
+        tla.flag("csa_ori_free", tla.pipes.MTE1, tla.pipes.MTE2, id=5)
+        if folded
+        else None
     )
     if folded:
         with tla.cube():
             tla.set_flag(ori_free)
     phase0 = (
-        tla.flag("csa_k_first_half0", tla.arch.MTE2, tla.arch.MTE1, id=6)
+        tla.flag("csa_k_first_half0", tla.pipes.MTE2, tla.pipes.MTE1, id=6)
         if folded
         else None
     )
     phase1 = (
-        tla.flag("csa_k_first_half1", tla.arch.MTE2, tla.arch.MTE1, id=7)
+        tla.flag("csa_k_first_half1", tla.pipes.MTE2, tla.pipes.MTE1, id=7)
         if folded
         else None
     )
     # Slots 0 and 2 share one early event. Publish it after its previous receiver consumes it.
     phase0_free = (
-        tla.flag("csa_k_first_half_free", tla.arch.MTE1, tla.arch.MTE2, id=6)
+        tla.flag("csa_k_first_half_free", tla.pipes.MTE1, tla.pipes.MTE2, id=6)
         if folded
         else None
     )
@@ -8764,8 +8782,8 @@ def sparse_flash_mla_csa_kernel(
         # loaded all V segments, and MTE3 consumes it before reusing the slot.
         with tla.cube():
             for _ in tla.range_constexpr(KV_SLOTS):
-                tla.cross_core_set_flag(sync.kv_l1_free, tla.arch.MTE1, aiv_id=0)
-                tla.cross_core_set_flag(sync.kv_l1_free, tla.arch.MTE1, aiv_id=1)
+                tla.cross_core_set_flag(sync.kv_l1_free, tla.pipes.MTE1, aiv_id=0)
+                tla.cross_core_set_flag(sync.kv_l1_free, tla.pipes.MTE1, aiv_id=1)
     if not local_init:
         need_init = compute_need_init(cu_q, cu_kv, num_seqs, ori_mask_mode, 0)
         clean_output(
@@ -8787,18 +8805,18 @@ def sparse_flash_mla_csa_kernel(
         if need_init == 1:
             with tla.cube():
                 tla.pipe_barrier(tla.pipes.ALL)
-                tla.cross_core_wait_flag(init_aiv_arrive, tla.arch.SCALAR, aiv_id=0)
-                tla.cross_core_wait_flag(init_aiv_arrive, tla.arch.SCALAR, aiv_id=1)
-                tla.cross_core_set_flag(init_aic_ffts, tla.arch.FIX)
-                tla.cross_core_wait_flag(init_aic_ffts, tla.arch.SCALAR)
-                tla.cross_core_set_flag(init_aic_done, tla.arch.SCALAR)
+                tla.cross_core_wait_flag(init_aiv_arrive, tla.pipes.SCALAR, aiv_id=0)
+                tla.cross_core_wait_flag(init_aiv_arrive, tla.pipes.SCALAR, aiv_id=1)
+                tla.cross_core_set_flag(init_aic_ffts, tla.pipes.FIX)
+                tla.cross_core_wait_flag(init_aic_ffts, tla.pipes.SCALAR)
+                tla.cross_core_set_flag(init_aic_done, tla.pipes.SCALAR)
             with tla.vector():
                 tla.pipe_barrier(tla.pipes.ALL)
                 if tla.arch.sub_block_idx() == 0:
-                    tla.cross_core_set_flag(init_aiv_arrive, tla.arch.MTE3, aiv_id=0)
+                    tla.cross_core_set_flag(init_aiv_arrive, tla.pipes.MTE3, aiv_id=0)
                 else:
-                    tla.cross_core_set_flag(init_aiv_arrive, tla.arch.MTE3, aiv_id=1)
-                tla.cross_core_wait_flag(init_aic_done, tla.arch.SCALAR)
+                    tla.cross_core_set_flag(init_aiv_arrive, tla.pipes.MTE3, aiv_id=1)
+                tla.cross_core_wait_flag(init_aic_done, tla.pipes.SCALAR)
 
     total_tasks = (
         tla.as_numeric(linear_pair_rows)
@@ -9987,10 +10005,10 @@ def sparse_flash_mla_csa_kernel(
                 if direct_kv:
                     with tla.cube():
                         tla.cross_core_set_flag(
-                            sync.kv_l1_free, tla.arch.MTE1, aiv_id=0
+                            sync.kv_l1_free, tla.pipes.MTE1, aiv_id=0
                         )
                         tla.cross_core_set_flag(
-                            sync.kv_l1_free, tla.arch.MTE1, aiv_id=1
+                            sync.kv_l1_free, tla.pipes.MTE1, aiv_id=1
                         )
                 if folded or direct_kv:
                     if folded and r3_link != 1:
@@ -10225,18 +10243,18 @@ def sparse_flash_mla_hca_kernel(
         init_aic_done = tla.cross_flag("smla_init_aic_done", mode=2)
         with tla.cube():
             tla.pipe_barrier(tla.pipes.ALL)
-            tla.cross_core_wait_flag(init_aiv_arrive, tla.arch.SCALAR, aiv_id=0)
-            tla.cross_core_wait_flag(init_aiv_arrive, tla.arch.SCALAR, aiv_id=1)
-            tla.cross_core_set_flag(init_aic_ffts, tla.arch.FIX)
-            tla.cross_core_wait_flag(init_aic_ffts, tla.arch.SCALAR)
-            tla.cross_core_set_flag(init_aic_done, tla.arch.SCALAR)
+            tla.cross_core_wait_flag(init_aiv_arrive, tla.pipes.SCALAR, aiv_id=0)
+            tla.cross_core_wait_flag(init_aiv_arrive, tla.pipes.SCALAR, aiv_id=1)
+            tla.cross_core_set_flag(init_aic_ffts, tla.pipes.FIX)
+            tla.cross_core_wait_flag(init_aic_ffts, tla.pipes.SCALAR)
+            tla.cross_core_set_flag(init_aic_done, tla.pipes.SCALAR)
         with tla.vector():
             tla.pipe_barrier(tla.pipes.ALL)
             if tla.arch.sub_block_idx() == 0:
-                tla.cross_core_set_flag(init_aiv_arrive, tla.arch.MTE3, aiv_id=0)
+                tla.cross_core_set_flag(init_aiv_arrive, tla.pipes.MTE3, aiv_id=0)
             else:
-                tla.cross_core_set_flag(init_aiv_arrive, tla.arch.MTE3, aiv_id=1)
-            tla.cross_core_wait_flag(init_aic_done, tla.arch.SCALAR)
+                tla.cross_core_set_flag(init_aiv_arrive, tla.pipes.MTE3, aiv_id=1)
+            tla.cross_core_wait_flag(init_aic_done, tla.pipes.SCALAR)
 
     total_tasks = cu_q[num_seqs] * g_split
     task0 = tla.arch.block_idx()
@@ -10738,20 +10756,20 @@ def _swa_load_quantized_window(
                 count = half - done
                 count = count if count < group else group
                 count = count if count < KV_BLOCK - offset else KV_BLOCK - offset
-                input_lock.lock(pipe=tla.arch.MTE2)
+                input_lock.lock(pipe=tla.pipes.MTE2)
                 _single_query_load_records(
                     raw, kv.ptr, bt.ptr, start + done, count, page_size
                 )
-                input_lock.unlock(pipe=tla.arch.MTE2)
-                input_lock.lock(pipe=tla.arch.VECTOR)
-                packed_lock.lock(pipe=tla.arch.VECTOR)
+                input_lock.unlock(pipe=tla.pipes.MTE2)
+                input_lock.lock(pipe=tla.pipes.VECTOR)
+                packed_lock.lock(pipe=tla.pipes.VECTOR)
                 _single_query_dequant_nz(packed, raw, count, pitch)
-                input_lock.unlock(pipe=tla.arch.VECTOR)
-                packed_lock.unlock(pipe=tla.arch.VECTOR)
-                packed_lock.lock(pipe=tla.arch.MTE3)
+                input_lock.unlock(pipe=tla.pipes.VECTOR)
+                packed_lock.unlock(pipe=tla.pipes.VECTOR)
+                packed_lock.lock(pipe=tla.pipes.MTE3)
                 if step == 0:
-                    tla.cross_core_wait_flag(sync.kv_l1_free, tla.arch.MTE3, aiv_id=0)
-                    tla.cross_core_wait_flag(sync.kv_l1_free, tla.arch.MTE3, aiv_id=1)
+                    tla.cross_core_wait_flag(sync.kv_l1_free, tla.pipes.MTE3, aiv_id=0)
+                    tla.cross_core_wait_flag(sync.kv_l1_free, tla.pipes.MTE3, aiv_id=1)
                 _single_query_insert_nz(
                     tla.recast_ptr(out + offset * 16, dtype=tla.UInt16),
                     packed,
@@ -10760,10 +10778,10 @@ def _swa_load_quantized_window(
                     pitch,
                     HEAD_DIM,
                 )
-                packed_lock.unlock(pipe=tla.arch.MTE3)
+                packed_lock.unlock(pipe=tla.pipes.MTE3)
                 done = done + count
-        tla.cross_core_set_flag(sync.kv_stage_ready, tla.arch.MTE3, aiv_id=0)
-        tla.cross_core_set_flag(sync.kv_stage_ready, tla.arch.MTE3, aiv_id=1)
+        tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=0)
+        tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=1)
 
 
 _SWA_NORMALIZED_SOURCE = r"""
@@ -10892,9 +10910,9 @@ def _swa_process_normalized(sync, bufs, scale, valid, m, rows, dt, slot):
     with tla.vector():
         sub = tla.arch.sub_block_idx()
         prob = _ub_p(bufs, rows)
-        tla.cross_core_wait_flag(sync.s_ready, tla.arch.VECTOR, aiv_id=0)
-        tla.cross_core_wait_flag(sync.s_ready, tla.arch.VECTOR, aiv_id=1)
-        sync.m_p.lock(pipe=tla.arch.VECTOR)
+        tla.cross_core_wait_flag(sync.s_ready, tla.pipes.VECTOR, aiv_id=0)
+        tla.cross_core_wait_flag(sync.s_ready, tla.pipes.VECTOR, aiv_id=1)
+        sync.m_p.lock(pipe=tla.pipes.VECTOR)
         _swa_normalize(
             _ub_s(bufs, rows, slot).ptr,
             bufs.ub_sink,
@@ -10904,18 +10922,18 @@ def _swa_process_normalized(sync, bufs, scale, valid, m, rows, dt, slot):
             valid,
             scale,
         )
-        tla.cross_core_set_flag(sync.s_free, tla.arch.VECTOR, aiv_id=0)
-        tla.cross_core_set_flag(sync.s_free, tla.arch.VECTOR, aiv_id=1)
-        sync.m_p.unlock(pipe=tla.arch.VECTOR)
+        tla.cross_core_set_flag(sync.s_free, tla.pipes.VECTOR, aiv_id=0)
+        tla.cross_core_set_flag(sync.s_free, tla.pipes.VECTOR, aiv_id=1)
+        sync.m_p.unlock(pipe=tla.pipes.VECTOR)
         l1p = l1_p_tensor(bufs.l1_p + slot * Q_ROWS * KV_BLOCK, dt, m)
         dst = tla.tile_view(l1p, tla.make_shape(rows, KV_BLOCK), tla.make_coord(sub, 0))
-        sync.m_p.lock(pipe=tla.arch.MTE3)
+        sync.m_p.lock(pipe=tla.pipes.MTE3)
         tla.set_flag(sync.p_data_ready)
         tla.wait_flag(sync.p_data_ready)
         tla.copy(dst, prob)
-        sync.m_p.unlock(pipe=tla.arch.MTE3)
-        tla.cross_core_set_flag(sync.p_ready, tla.arch.MTE3, aiv_id=0)
-        tla.cross_core_set_flag(sync.p_ready, tla.arch.MTE3, aiv_id=1)
+        sync.m_p.unlock(pipe=tla.pipes.MTE3)
+        tla.cross_core_set_flag(sync.p_ready, tla.pipes.MTE3, aiv_id=0)
+        tla.cross_core_set_flag(sync.p_ready, tla.pipes.MTE3, aiv_id=1)
 
 
 @tla.jit
@@ -11014,13 +11032,13 @@ def sparse_flash_mla_swa_kernel(
     init_sync_preload(sync)
     if rolling:
         with tla.cube():
-            tla.cross_core_set_flag(sync.q_vector_free, tla.arch.MTE1, aiv_id=0)
-            tla.cross_core_set_flag(sync.q_vector_free, tla.arch.MTE1, aiv_id=1)
+            tla.cross_core_set_flag(sync.q_vector_free, tla.pipes.MTE1, aiv_id=0)
+            tla.cross_core_set_flag(sync.q_vector_free, tla.pipes.MTE1, aiv_id=1)
     if rolling_records:
         with tla.cube():
             for _ in tla.range_constexpr(2):
-                tla.cross_core_set_flag(sync.kv_l1_free, tla.arch.MTE1, aiv_id=0)
-                tla.cross_core_set_flag(sync.kv_l1_free, tla.arch.MTE1, aiv_id=1)
+                tla.cross_core_set_flag(sync.kv_l1_free, tla.pipes.MTE1, aiv_id=0)
+                tla.cross_core_set_flag(sync.kv_l1_free, tla.pipes.MTE1, aiv_id=1)
     if rolling_records:
         _swa_cache_sinks(sync, bufs, sinks, rows, has_sinks)
     # F4（OT swa_kernel_arch35.h:154 CleanOutput）
@@ -11044,18 +11062,18 @@ def sparse_flash_mla_swa_kernel(
         init_aic_done = tla.cross_flag("smla_init_aic_done", mode=2)
         with tla.cube():
             tla.pipe_barrier(tla.pipes.ALL)
-            tla.cross_core_wait_flag(init_aiv_arrive, tla.arch.SCALAR, aiv_id=0)
-            tla.cross_core_wait_flag(init_aiv_arrive, tla.arch.SCALAR, aiv_id=1)
-            tla.cross_core_set_flag(init_aic_ffts, tla.arch.FIX)
-            tla.cross_core_wait_flag(init_aic_ffts, tla.arch.SCALAR)
-            tla.cross_core_set_flag(init_aic_done, tla.arch.SCALAR)
+            tla.cross_core_wait_flag(init_aiv_arrive, tla.pipes.SCALAR, aiv_id=0)
+            tla.cross_core_wait_flag(init_aiv_arrive, tla.pipes.SCALAR, aiv_id=1)
+            tla.cross_core_set_flag(init_aic_ffts, tla.pipes.FIX)
+            tla.cross_core_wait_flag(init_aic_ffts, tla.pipes.SCALAR)
+            tla.cross_core_set_flag(init_aic_done, tla.pipes.SCALAR)
         with tla.vector():
             tla.pipe_barrier(tla.pipes.ALL)
             if tla.arch.sub_block_idx() == 0:
-                tla.cross_core_set_flag(init_aiv_arrive, tla.arch.MTE3, aiv_id=0)
+                tla.cross_core_set_flag(init_aiv_arrive, tla.pipes.MTE3, aiv_id=0)
             else:
-                tla.cross_core_set_flag(init_aiv_arrive, tla.arch.MTE3, aiv_id=1)
-            tla.cross_core_wait_flag(init_aic_done, tla.arch.SCALAR)
+                tla.cross_core_set_flag(init_aiv_arrive, tla.pipes.MTE3, aiv_id=1)
+            tla.cross_core_wait_flag(init_aic_done, tla.pipes.SCALAR)
 
     total_tasks = cu_q[num_seqs] * g_split
     task0 = tla.arch.block_idx()
@@ -11425,10 +11443,10 @@ def sparse_flash_mla_swa_kernel(
                 if rolling_records:
                     with tla.cube():
                         tla.cross_core_set_flag(
-                            sync.kv_l1_free, tla.arch.MTE1, aiv_id=0
+                            sync.kv_l1_free, tla.pipes.MTE1, aiv_id=0
                         )
                         tla.cross_core_set_flag(
-                            sync.kv_l1_free, tla.arch.MTE1, aiv_id=1
+                            sync.kv_l1_free, tla.pipes.MTE1, aiv_id=1
                         )
                 if rolling_records:
                     _swa_store_normalized_output(sync, bufs, out, task2, m)
@@ -11586,18 +11604,18 @@ def sparse_flash_mla_ori_sparse_kernel(
         init_aic_done = tla.cross_flag("smla_init_aic_done", mode=2)
         with tla.cube():
             tla.pipe_barrier(tla.pipes.ALL)
-            tla.cross_core_wait_flag(init_aiv_arrive, tla.arch.SCALAR, aiv_id=0)
-            tla.cross_core_wait_flag(init_aiv_arrive, tla.arch.SCALAR, aiv_id=1)
-            tla.cross_core_set_flag(init_aic_ffts, tla.arch.FIX)
-            tla.cross_core_wait_flag(init_aic_ffts, tla.arch.SCALAR)
-            tla.cross_core_set_flag(init_aic_done, tla.arch.SCALAR)
+            tla.cross_core_wait_flag(init_aiv_arrive, tla.pipes.SCALAR, aiv_id=0)
+            tla.cross_core_wait_flag(init_aiv_arrive, tla.pipes.SCALAR, aiv_id=1)
+            tla.cross_core_set_flag(init_aic_ffts, tla.pipes.FIX)
+            tla.cross_core_wait_flag(init_aic_ffts, tla.pipes.SCALAR)
+            tla.cross_core_set_flag(init_aic_done, tla.pipes.SCALAR)
         with tla.vector():
             tla.pipe_barrier(tla.pipes.ALL)
             if tla.arch.sub_block_idx() == 0:
-                tla.cross_core_set_flag(init_aiv_arrive, tla.arch.MTE3, aiv_id=0)
+                tla.cross_core_set_flag(init_aiv_arrive, tla.pipes.MTE3, aiv_id=0)
             else:
-                tla.cross_core_set_flag(init_aiv_arrive, tla.arch.MTE3, aiv_id=1)
-            tla.cross_core_wait_flag(init_aic_done, tla.arch.SCALAR)
+                tla.cross_core_set_flag(init_aiv_arrive, tla.pipes.MTE3, aiv_id=1)
+            tla.cross_core_wait_flag(init_aic_done, tla.pipes.SCALAR)
     else:
         init_aiv_arrive = tla.cross_flag("smla_init_aiv_arrive", mode=4)
         init_aic_ffts = tla.cross_flag("smla_init_aic_ffts", mode=0)
@@ -11605,18 +11623,18 @@ def sparse_flash_mla_ori_sparse_kernel(
         if need_init == 1:
             with tla.cube():
                 tla.pipe_barrier(tla.pipes.ALL)
-                tla.cross_core_wait_flag(init_aiv_arrive, tla.arch.SCALAR, aiv_id=0)
-                tla.cross_core_wait_flag(init_aiv_arrive, tla.arch.SCALAR, aiv_id=1)
-                tla.cross_core_set_flag(init_aic_ffts, tla.arch.FIX)
-                tla.cross_core_wait_flag(init_aic_ffts, tla.arch.SCALAR)
-                tla.cross_core_set_flag(init_aic_done, tla.arch.SCALAR)
+                tla.cross_core_wait_flag(init_aiv_arrive, tla.pipes.SCALAR, aiv_id=0)
+                tla.cross_core_wait_flag(init_aiv_arrive, tla.pipes.SCALAR, aiv_id=1)
+                tla.cross_core_set_flag(init_aic_ffts, tla.pipes.FIX)
+                tla.cross_core_wait_flag(init_aic_ffts, tla.pipes.SCALAR)
+                tla.cross_core_set_flag(init_aic_done, tla.pipes.SCALAR)
             with tla.vector():
                 tla.pipe_barrier(tla.pipes.ALL)
                 if tla.arch.sub_block_idx() == 0:
-                    tla.cross_core_set_flag(init_aiv_arrive, tla.arch.MTE3, aiv_id=0)
+                    tla.cross_core_set_flag(init_aiv_arrive, tla.pipes.MTE3, aiv_id=0)
                 else:
-                    tla.cross_core_set_flag(init_aiv_arrive, tla.arch.MTE3, aiv_id=1)
-                tla.cross_core_wait_flag(init_aic_done, tla.arch.SCALAR)
+                    tla.cross_core_set_flag(init_aiv_arrive, tla.pipes.MTE3, aiv_id=1)
+                tla.cross_core_wait_flag(init_aic_done, tla.pipes.SCALAR)
 
     total_tasks = cu_q[num_seqs] * g_split
     task0 = tla.arch.block_idx()
@@ -12106,34 +12124,34 @@ def sparse_flash_mla_ori_cmp_sparse_kernel(
     if is_vec_s2phyaddr == 1:
         with tla.cube():
             tla.pipe_barrier(tla.pipes.ALL)
-            tla.cross_core_wait_flag(init_aiv_arrive, tla.arch.SCALAR, aiv_id=0)
-            tla.cross_core_wait_flag(init_aiv_arrive, tla.arch.SCALAR, aiv_id=1)
-            tla.cross_core_set_flag(init_aic_ffts, tla.arch.FIX)
-            tla.cross_core_wait_flag(init_aic_ffts, tla.arch.SCALAR)
-            tla.cross_core_set_flag(init_aic_done, tla.arch.SCALAR)
+            tla.cross_core_wait_flag(init_aiv_arrive, tla.pipes.SCALAR, aiv_id=0)
+            tla.cross_core_wait_flag(init_aiv_arrive, tla.pipes.SCALAR, aiv_id=1)
+            tla.cross_core_set_flag(init_aic_ffts, tla.pipes.FIX)
+            tla.cross_core_wait_flag(init_aic_ffts, tla.pipes.SCALAR)
+            tla.cross_core_set_flag(init_aic_done, tla.pipes.SCALAR)
         with tla.vector():
             tla.pipe_barrier(tla.pipes.ALL)
             if tla.arch.sub_block_idx() == 0:
-                tla.cross_core_set_flag(init_aiv_arrive, tla.arch.MTE3, aiv_id=0)
+                tla.cross_core_set_flag(init_aiv_arrive, tla.pipes.MTE3, aiv_id=0)
             else:
-                tla.cross_core_set_flag(init_aiv_arrive, tla.arch.MTE3, aiv_id=1)
-            tla.cross_core_wait_flag(init_aic_done, tla.arch.SCALAR)
+                tla.cross_core_set_flag(init_aiv_arrive, tla.pipes.MTE3, aiv_id=1)
+            tla.cross_core_wait_flag(init_aic_done, tla.pipes.SCALAR)
     else:
         if need_init == 1:
             with tla.cube():
                 tla.pipe_barrier(tla.pipes.ALL)
-                tla.cross_core_wait_flag(init_aiv_arrive, tla.arch.SCALAR, aiv_id=0)
-                tla.cross_core_wait_flag(init_aiv_arrive, tla.arch.SCALAR, aiv_id=1)
-                tla.cross_core_set_flag(init_aic_ffts, tla.arch.FIX)
-                tla.cross_core_wait_flag(init_aic_ffts, tla.arch.SCALAR)
-                tla.cross_core_set_flag(init_aic_done, tla.arch.SCALAR)
+                tla.cross_core_wait_flag(init_aiv_arrive, tla.pipes.SCALAR, aiv_id=0)
+                tla.cross_core_wait_flag(init_aiv_arrive, tla.pipes.SCALAR, aiv_id=1)
+                tla.cross_core_set_flag(init_aic_ffts, tla.pipes.FIX)
+                tla.cross_core_wait_flag(init_aic_ffts, tla.pipes.SCALAR)
+                tla.cross_core_set_flag(init_aic_done, tla.pipes.SCALAR)
             with tla.vector():
                 tla.pipe_barrier(tla.pipes.ALL)
                 if tla.arch.sub_block_idx() == 0:
-                    tla.cross_core_set_flag(init_aiv_arrive, tla.arch.MTE3, aiv_id=0)
+                    tla.cross_core_set_flag(init_aiv_arrive, tla.pipes.MTE3, aiv_id=0)
                 else:
-                    tla.cross_core_set_flag(init_aiv_arrive, tla.arch.MTE3, aiv_id=1)
-                tla.cross_core_wait_flag(init_aic_done, tla.arch.SCALAR)
+                    tla.cross_core_set_flag(init_aiv_arrive, tla.pipes.MTE3, aiv_id=1)
+                tla.cross_core_wait_flag(init_aic_done, tla.pipes.SCALAR)
 
     total_tasks = cu_q[num_seqs] * g_split
     task0 = tla.arch.block_idx()
@@ -12143,18 +12161,18 @@ def sparse_flash_mla_ori_cmp_sparse_kernel(
     if is_vec_s2phyaddr == 1:
         with tla.cube():
             tla.pipe_barrier(tla.pipes.ALL)
-            tla.cross_core_wait_flag(init_aiv_arrive, tla.arch.SCALAR, aiv_id=0)
-            tla.cross_core_wait_flag(init_aiv_arrive, tla.arch.SCALAR, aiv_id=1)
-            tla.cross_core_set_flag(init_aic_ffts, tla.arch.FIX)
-            tla.cross_core_wait_flag(init_aic_ffts, tla.arch.SCALAR)
-            tla.cross_core_set_flag(init_aic_done, tla.arch.SCALAR)
+            tla.cross_core_wait_flag(init_aiv_arrive, tla.pipes.SCALAR, aiv_id=0)
+            tla.cross_core_wait_flag(init_aiv_arrive, tla.pipes.SCALAR, aiv_id=1)
+            tla.cross_core_set_flag(init_aic_ffts, tla.pipes.FIX)
+            tla.cross_core_wait_flag(init_aic_ffts, tla.pipes.SCALAR)
+            tla.cross_core_set_flag(init_aic_done, tla.pipes.SCALAR)
         with tla.vector():
             tla.pipe_barrier(tla.pipes.ALL)
             if tla.arch.sub_block_idx() == 0:
-                tla.cross_core_set_flag(init_aiv_arrive, tla.arch.MTE3, aiv_id=0)
+                tla.cross_core_set_flag(init_aiv_arrive, tla.pipes.MTE3, aiv_id=0)
             else:
-                tla.cross_core_set_flag(init_aiv_arrive, tla.arch.MTE3, aiv_id=1)
-            tla.cross_core_wait_flag(init_aic_done, tla.arch.SCALAR)
+                tla.cross_core_set_flag(init_aiv_arrive, tla.pipes.MTE3, aiv_id=1)
+            tla.cross_core_wait_flag(init_aic_done, tla.pipes.SCALAR)
 
     s2_budget = tla.as_numeric(0)
     c_one = 1
@@ -13074,21 +13092,21 @@ def _insert_decode_chunk(
     record = tla.recast_ptr(input_ptr, dtype=tla.UInt8)
     source = tla.recast_ptr(kv.ptr, dtype=tla.UInt8)
     packed = tla.recast_ptr(packed_ptr, dtype=tla.UInt16)
-    record_lock.lock(pipe=tla.arch.MTE2)
+    record_lock.lock(pipe=tla.pipes.MTE2)
     if sparse:
         _gather_fp8_records(record, source, indices + offset, table, count, page_size)
     else:
         _single_query_load_records(record, source, table, start + row, count, page_size)
-    record_lock.unlock(pipe=tla.arch.MTE2)
-    record_lock.lock(pipe=tla.arch.VECTOR)
-    packed_lock.lock(pipe=tla.arch.VECTOR)
+    record_lock.unlock(pipe=tla.pipes.MTE2)
+    record_lock.lock(pipe=tla.pipes.VECTOR)
+    packed_lock.lock(pipe=tla.pipes.VECTOR)
     _decode_fp8_to_nz(packed, record, count, _DECODE_CHUNK_PITCH)
-    record_lock.unlock(pipe=tla.arch.VECTOR)
-    packed_lock.unlock(pipe=tla.arch.VECTOR)
-    packed_lock.lock(pipe=tla.arch.MTE3)
+    record_lock.unlock(pipe=tla.pipes.VECTOR)
+    packed_lock.unlock(pipe=tla.pipes.VECTOR)
+    packed_lock.lock(pipe=tla.pipes.MTE3)
     if first_chunk:
-        tla.cross_core_wait_flag(slot_free, tla.arch.MTE3, aiv_id=0)
-        tla.cross_core_wait_flag(slot_free, tla.arch.MTE3, aiv_id=1)
+        tla.cross_core_wait_flag(slot_free, tla.pipes.MTE3, aiv_id=0)
+        tla.cross_core_wait_flag(slot_free, tla.pipes.MTE3, aiv_id=1)
     _single_query_insert_nz(
         tla.recast_ptr(l1 + row * 16, dtype=tla.UInt16),
         packed,
@@ -13097,7 +13115,7 @@ def _insert_decode_chunk(
         _DECODE_CHUNK_PITCH,
         HEAD_DIM,
     )
-    packed_lock.unlock(pipe=tla.arch.MTE3)
+    packed_lock.unlock(pipe=tla.pipes.MTE3)
 
 
 @tla.jit
@@ -13182,8 +13200,8 @@ def gather_decode_kv_to_l1(
                     sync.kv_l1_free,
                     False,
                 )
-        tla.cross_core_set_flag(sync.kv_stage_ready, tla.arch.MTE3, aiv_id=0)
-        tla.cross_core_set_flag(sync.kv_stage_ready, tla.arch.MTE3, aiv_id=1)
+        tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=0)
+        tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=1)
 
 
 @tla.jit
@@ -13208,7 +13226,7 @@ def _single_query_load_segment(
         count = valid - offset
         count = count if count < half else half
         count = count if count > 0 else 0
-        sync.m_dq_rec0.lock(pipe=tla.arch.MTE2)
+        sync.m_dq_rec0.lock(pipe=tla.pipes.MTE2)
         _single_query_load_records(
             ub_record,
             kv.ptr,
@@ -13217,15 +13235,15 @@ def _single_query_load_segment(
             count,
             page_size,
         )
-        sync.m_dq_rec0.unlock(pipe=tla.arch.MTE2)
-        sync.m_dq_rec0.lock(pipe=tla.arch.VECTOR)
-        sync.m_dq_out0.lock(pipe=tla.arch.VECTOR)
+        sync.m_dq_rec0.unlock(pipe=tla.pipes.MTE2)
+        sync.m_dq_rec0.lock(pipe=tla.pipes.VECTOR)
+        sync.m_dq_out0.lock(pipe=tla.pipes.VECTOR)
         _single_query_dequant_nz(
             tla.recast_ptr(ub_nz, dtype=tla.UInt16), ub_record, count, half + 1
         )
-        sync.m_dq_rec0.unlock(pipe=tla.arch.VECTOR)
-        sync.m_dq_out0.unlock(pipe=tla.arch.VECTOR)
-        sync.m_dq_out0.lock(pipe=tla.arch.MTE3)
+        sync.m_dq_rec0.unlock(pipe=tla.pipes.VECTOR)
+        sync.m_dq_out0.unlock(pipe=tla.pipes.VECTOR)
+        sync.m_dq_out0.lock(pipe=tla.pipes.MTE3)
         _single_query_insert_nz(
             tla.recast_ptr(l1 + (base + offset) * 16, dtype=tla.UInt16),
             tla.recast_ptr(ub_nz, dtype=tla.UInt16),
@@ -13234,7 +13252,7 @@ def _single_query_load_segment(
             half + 1,
             HEAD_DIM,
         )
-        sync.m_dq_out0.unlock(pipe=tla.arch.MTE3)
+        sync.m_dq_out0.unlock(pipe=tla.pipes.MTE3)
 
 
 @tla.jit
@@ -13278,9 +13296,9 @@ def _single_query_softmax(
             tla.copy(sink_tile, sink_gm)
             tla.set_flag(sync.phy_m2v)
             tla.wait_flag(sync.phy_m2v)
-        tla.cross_core_wait_flag(sync.s_ready, tla.arch.VECTOR, aiv_id=0)
-        tla.cross_core_wait_flag(sync.s_ready, tla.arch.VECTOR, aiv_id=1)
-        sync.m_p.lock(pipe=tla.arch.VECTOR)
+        tla.cross_core_wait_flag(sync.s_ready, tla.pipes.VECTOR, aiv_id=0)
+        tla.cross_core_wait_flag(sync.s_ready, tla.pipes.VECTOR, aiv_id=1)
+        sync.m_p.lock(pipe=tla.pipes.VECTOR)
         sb = tla.make_tensor(
             scores,
             tla.make_layout(tla.make_shape(rows, pitch), tla.make_stride(pitch, 1)),
@@ -13383,10 +13401,10 @@ def _single_query_softmax(
                     max_val, tla.params.UnalignStoreParams()
                 )
         if release_scores:
-            tla.cross_core_set_flag(sync.s_free, tla.arch.VECTOR, aiv_id=0)
-            tla.cross_core_set_flag(sync.s_free, tla.arch.VECTOR, aiv_id=1)
-        sync.m_p.unlock(pipe=tla.arch.VECTOR)
-        sync.m_p.lock(pipe=tla.arch.MTE3)
+            tla.cross_core_set_flag(sync.s_free, tla.pipes.VECTOR, aiv_id=0)
+            tla.cross_core_set_flag(sync.s_free, tla.pipes.VECTOR, aiv_id=1)
+        sync.m_p.unlock(pipe=tla.pipes.VECTOR)
+        sync.m_p.lock(pipe=tla.pipes.MTE3)
         _single_query_insert_nz(
             tla.recast_ptr(pc.ptr + sub * rows * 16, dtype=tla.UInt16),
             tla.recast_ptr(ub_p.ptr, dtype=tla.UInt16),
@@ -13395,9 +13413,9 @@ def _single_query_softmax(
             p_pitch,
             n,
         )
-        sync.m_p.unlock(pipe=tla.arch.MTE3)
-        tla.cross_core_set_flag(sync.p_ready, tla.arch.MTE3, aiv_id=0)
-        tla.cross_core_set_flag(sync.p_ready, tla.arch.MTE3, aiv_id=1)
+        sync.m_p.unlock(pipe=tla.pipes.MTE3)
+        tla.cross_core_set_flag(sync.p_ready, tla.pipes.MTE3, aiv_id=0)
+        tla.cross_core_set_flag(sync.p_ready, tla.pipes.MTE3, aiv_id=1)
 
 
 @dataclass
@@ -13489,8 +13507,8 @@ def sparse_flash_mla_single_query_kernel(
             sync,
         )
     with tla.vector():
-        tla.cross_core_set_flag(sync.kv_stage_ready, tla.arch.MTE3, aiv_id=0)
-        tla.cross_core_set_flag(sync.kv_stage_ready, tla.arch.MTE3, aiv_id=1)
+        tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=0)
+        tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=1)
     with tla.cube():
         q_l1 = tla.make_tensor(
             q_mem, tla.make_layout_with_tag((m, HEAD_DIM), dt, tla.arch.zN)
@@ -13517,8 +13535,8 @@ def sparse_flash_mla_single_query_kernel(
         tla.copy(q_l1, q_gm)
         tla.set_flag(sync.q_l1_ready)
         tla.wait_flag(sync.q_l1_ready)
-        tla.cross_core_wait_flag(sync.kv_stage_ready, tla.arch.MTE1, aiv_id=0)
-        tla.cross_core_wait_flag(sync.kv_stage_ready, tla.arch.MTE1, aiv_id=1)
+        tla.cross_core_wait_flag(sync.kv_stage_ready, tla.pipes.MTE1, aiv_id=0)
+        tla.cross_core_wait_flag(sync.kv_stage_ready, tla.pipes.MTE1, aiv_id=1)
         for d in static_range(HEAD_DIM // d_step):
             a = tla.tile_view(q_l1, tla.make_shape(m, d_step), tla.make_coord(0, d))
             b = tla.tile_view(k_l1, tla.make_shape(d_step, n), tla.make_coord(d, 0))
@@ -13538,8 +13556,8 @@ def sparse_flash_mla_single_query_kernel(
             s_l0,
             tla.params.CopyL0C2DstParams(l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M),
         )
-        tla.cross_core_set_flag(sync.s_ready, tla.arch.FIX, aiv_id=0)
-        tla.cross_core_set_flag(sync.s_ready, tla.arch.FIX, aiv_id=1)
+        tla.cross_core_set_flag(sync.s_ready, tla.pipes.FIX, aiv_id=0)
+        tla.cross_core_set_flag(sync.s_ready, tla.pipes.FIX, aiv_id=1)
 
     _single_query_softmax(
         p_mem,
@@ -13640,7 +13658,7 @@ def _single_query_load_csa(
         cmp_rows = cmp_half + 1
         nz_o = tla.recast_ptr(nz, dtype=tla.UInt16)
         nz_c = nz_o + ori_rows * HEAD_DIM
-        sync.m_dq_rec0.lock(pipe=tla.arch.MTE2)
+        sync.m_dq_rec0.lock(pipe=tla.pipes.MTE2)
         _single_query_load_records(
             raw, ori.ptr, ori_table.ptr, start + ori_offset, ori_count, page_o
         )
@@ -13669,14 +13687,14 @@ def _single_query_load_csa(
                 cmp_count,
                 page_c,
             )
-        sync.m_dq_rec0.unlock(pipe=tla.arch.MTE2)
-        sync.m_dq_rec0.lock(pipe=tla.arch.VECTOR)
-        sync.m_dq_out0.lock(pipe=tla.arch.VECTOR)
+        sync.m_dq_rec0.unlock(pipe=tla.pipes.MTE2)
+        sync.m_dq_rec0.lock(pipe=tla.pipes.VECTOR)
+        sync.m_dq_out0.lock(pipe=tla.pipes.VECTOR)
         _single_query_dequant_nz(nz_o, raw, ori_count, ori_rows)
         _single_query_dequant_nz(nz_c, raw_cmp, cmp_count, cmp_rows)
-        sync.m_dq_rec0.unlock(pipe=tla.arch.VECTOR)
-        sync.m_dq_out0.unlock(pipe=tla.arch.VECTOR)
-        sync.m_dq_out0.lock(pipe=tla.arch.MTE3)
+        sync.m_dq_rec0.unlock(pipe=tla.pipes.VECTOR)
+        sync.m_dq_out0.unlock(pipe=tla.pipes.VECTOR)
+        sync.m_dq_out0.lock(pipe=tla.pipes.MTE3)
         _single_query_insert_nz(
             tla.recast_ptr(l1 + ori_offset * 16, dtype=tla.UInt16),
             nz_o,
@@ -13693,7 +13711,7 @@ def _single_query_load_csa(
             cmp_rows,
             HEAD_DIM,
         )
-        sync.m_dq_out0.unlock(pipe=tla.arch.MTE3)
+        sync.m_dq_out0.unlock(pipe=tla.pipes.MTE3)
 
 
 _CSA_SHORT_NORM = r"""
@@ -13843,15 +13861,15 @@ def _normalize_csa_short(
             prob_ub, tla.make_layout_with_tag((rows, pitch), dt, tla.arch.zN)
         )
         pc = tla.make_tensor(l1p, tla.make_layout_with_tag((m, n), dt, tla.arch.zN))
-        tla.cross_core_wait_flag(sync.s_ready, tla.arch.VECTOR, aiv_id=0)
-        tla.cross_core_wait_flag(sync.s_ready, tla.arch.VECTOR, aiv_id=1)
+        tla.cross_core_wait_flag(sync.s_ready, tla.pipes.VECTOR, aiv_id=0)
+        tla.cross_core_wait_flag(sync.s_ready, tla.pipes.VECTOR, aiv_id=1)
         groups = tla.as_numeric(0)
         if n_cmp > 0:
             count = tla.make_tensor(
                 compact_count, tla.make_layout(tla.make_shape(1), tla.make_stride(1))
             )[0]
             groups = count if count >= 0 else -count
-        sync.m_p.lock(pipe=tla.arch.VECTOR)
+        sync.m_p.lock(pipe=tla.pipes.VECTOR)
         _csa_short_norm(
             ub_p.ptr,
             scores,
@@ -13864,8 +13882,8 @@ def _normalize_csa_short(
             scale,
             tla.as_numeric(int(has_sinks)),
         )
-        sync.m_p.unlock(pipe=tla.arch.VECTOR)
-        sync.m_p.lock(pipe=tla.arch.MTE3)
+        sync.m_p.unlock(pipe=tla.pipes.VECTOR)
+        sync.m_p.lock(pipe=tla.pipes.MTE3)
         _single_query_insert_nz(
             tla.recast_ptr(pc.ptr + sub * rows * 16, dtype=tla.UInt16),
             tla.recast_ptr(ub_p.ptr, dtype=tla.UInt16),
@@ -13874,9 +13892,9 @@ def _normalize_csa_short(
             p_pitch,
             n,
         )
-        sync.m_p.unlock(pipe=tla.arch.MTE3)
-        tla.cross_core_set_flag(sync.p_ready, tla.arch.MTE3, aiv_id=0)
-        tla.cross_core_set_flag(sync.p_ready, tla.arch.MTE3, aiv_id=1)
+        sync.m_p.unlock(pipe=tla.pipes.MTE3)
+        tla.cross_core_set_flag(sync.p_ready, tla.pipes.MTE3, aiv_id=0)
+        tla.cross_core_set_flag(sync.p_ready, tla.pipes.MTE3, aiv_id=1)
 
 
 @tla.kernel
@@ -13974,8 +13992,8 @@ def sparse_flash_mla_csa_short_kernel(
         sync,
     )
     with tla.vector():
-        tla.cross_core_set_flag(sync.kv_stage_ready, tla.arch.MTE3, aiv_id=0)
-        tla.cross_core_set_flag(sync.kv_stage_ready, tla.arch.MTE3, aiv_id=1)
+        tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=0)
+        tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=1)
     with tla.cube():
         q_l1 = tla.make_tensor(
             q_mem, tla.make_layout_with_tag((m, HEAD_DIM), dt, tla.arch.zN)
@@ -14003,8 +14021,8 @@ def sparse_flash_mla_csa_short_kernel(
         tla.copy(q_l1, q_gm)
         tla.set_flag(sync.q_l1_ready)
         tla.wait_flag(sync.q_l1_ready)
-        tla.cross_core_wait_flag(sync.kv_stage_ready, tla.arch.MTE1, aiv_id=0)
-        tla.cross_core_wait_flag(sync.kv_stage_ready, tla.arch.MTE1, aiv_id=1)
+        tla.cross_core_wait_flag(sync.kv_stage_ready, tla.pipes.MTE1, aiv_id=0)
+        tla.cross_core_wait_flag(sync.kv_stage_ready, tla.pipes.MTE1, aiv_id=1)
         for offset, depth, alternate in (
             (0, 128, False),
             (128, 64, True),
@@ -14032,8 +14050,8 @@ def sparse_flash_mla_csa_short_kernel(
             s_l0,
             tla.params.CopyL0C2DstParams(l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M),
         )
-        tla.cross_core_set_flag(sync.s_ready, tla.arch.FIX, aiv_id=0)
-        tla.cross_core_set_flag(sync.s_ready, tla.arch.FIX, aiv_id=1)
+        tla.cross_core_set_flag(sync.s_ready, tla.pipes.FIX, aiv_id=0)
+        tla.cross_core_set_flag(sync.s_ready, tla.pipes.FIX, aiv_id=1)
 
     _normalize_csa_short(
         p_mem,
@@ -14079,8 +14097,8 @@ def sparse_flash_mla_csa_short_kernel(
             tla.wait_flag(free)
             tla.copy(vb, v)
             if offset == 128:
-                tla.cross_core_wait_flag(sync.p_ready, tla.arch.MTE1, aiv_id=0)
-                tla.cross_core_wait_flag(sync.p_ready, tla.arch.MTE1, aiv_id=1)
+                tla.cross_core_wait_flag(sync.p_ready, tla.pipes.MTE1, aiv_id=0)
+                tla.cross_core_wait_flag(sync.p_ready, tla.pipes.MTE1, aiv_id=1)
                 tla.copy(pa, p_l1)
             tla.set_flag(ready)
             tla.wait_flag(ready)
@@ -14229,8 +14247,8 @@ def _rolling_hca_qk(buf, slot, cmp_width, sync):
         else:
             tla.set_flag(sync.q_second_free)
             tla.set_flag(sync.s_mm_ready1)
-        tla.cross_core_wait_flag(sync.s_free, tla.arch.FIX, aiv_id=0)
-        tla.cross_core_wait_flag(sync.s_free, tla.arch.FIX, aiv_id=1)
+        tla.cross_core_wait_flag(sync.s_free, tla.pipes.FIX, aiv_id=0)
+        tla.cross_core_wait_flag(sync.s_free, tla.pipes.FIX, aiv_id=1)
         if slot == 0:
             tla.wait_flag(sync.s_mm_ready)
         else:
@@ -14244,8 +14262,8 @@ def _rolling_hca_qk(buf, slot, cmp_width, sync):
             tla.set_flag(sync.s_fix_done)
         else:
             tla.set_flag(sync.s_fix_done1)
-        tla.cross_core_set_flag(sync.s_ready, tla.arch.FIX, aiv_id=0)
-        tla.cross_core_set_flag(sync.s_ready, tla.arch.FIX, aiv_id=1)
+        tla.cross_core_set_flag(sync.s_ready, tla.pipes.FIX, aiv_id=0)
+        tla.cross_core_set_flag(sync.s_ready, tla.pipes.FIX, aiv_id=1)
 
 
 @tla.jit
@@ -14475,7 +14493,7 @@ def _load_grouped_hca(
         n_last = 0
         if row + n_first == n_ori:
             n_last = n_cmp if n_cmp < half - n_first else half - n_first
-        sync.m_dq_rec0.lock(pipe=tla.arch.MTE2)
+        sync.m_dq_rec0.lock(pipe=tla.pipes.MTE2)
         _single_query_load_records(
             record,
             kv.ptr,
@@ -14493,16 +14511,16 @@ def _load_grouped_hca(
                 n_last,
                 cmp_page_size,
             )
-        sync.m_dq_rec0.unlock(pipe=tla.arch.MTE2)
-        sync.m_dq_rec0.lock(pipe=tla.arch.VECTOR)
+        sync.m_dq_rec0.unlock(pipe=tla.pipes.MTE2)
+        sync.m_dq_rec0.lock(pipe=tla.pipes.VECTOR)
         for slab in static_range(HEAD_DIM // D_CHUNK):
             slot = slab % 2
             lease = sync.m_dq_out0 if slot == 0 else sync.m_dq_out1
             dst = tla.recast_ptr(packed + slot * (half + 1) * D_CHUNK, dtype=tla.UInt16)
-            lease.lock(pipe=tla.arch.VECTOR)
+            lease.lock(pipe=tla.pipes.VECTOR)
             _pack_fp8_columns(dst, record, n_first + n_last, half + 1, slab * 2)
-            lease.unlock(pipe=tla.arch.VECTOR)
-            lease.lock(pipe=tla.arch.MTE3)
+            lease.unlock(pipe=tla.pipes.VECTOR)
+            lease.lock(pipe=tla.pipes.MTE3)
             _single_query_insert_nz(
                 tla.recast_ptr(l1 + slab * n * D_CHUNK + row * 16, dtype=tla.UInt16),
                 dst,
@@ -14511,10 +14529,10 @@ def _load_grouped_hca(
                 half + 1,
                 D_CHUNK,
             )
-            lease.unlock(pipe=tla.arch.MTE3)
-            tla.cross_core_set_flag(sync.kv_stage_ready, tla.arch.MTE3, aiv_id=0)
-            tla.cross_core_set_flag(sync.kv_stage_ready, tla.arch.MTE3, aiv_id=1)
-        sync.m_dq_rec0.unlock(pipe=tla.arch.VECTOR)
+            lease.unlock(pipe=tla.pipes.MTE3)
+            tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=0)
+            tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=1)
+        sync.m_dq_rec0.unlock(pipe=tla.pipes.VECTOR)
 
 
 @tla.jit
@@ -14561,8 +14579,8 @@ def _grouped_softmax(
             tla.set_flag(sync.phy_m2v)
             tla.wait_flag(sync.phy_m2v)
         stats = _stats(lse_ub, rows)
-        tla.cross_core_wait_flag(sync.s_ready, tla.arch.VECTOR, aiv_id=0)
-        tla.cross_core_wait_flag(sync.s_ready, tla.arch.VECTOR, aiv_id=1)
+        tla.cross_core_wait_flag(sync.s_ready, tla.pipes.VECTOR, aiv_id=0)
+        tla.cross_core_wait_flag(sync.s_ready, tla.pipes.VECTOR, aiv_id=1)
         with tla.vec.func(mode="simd"):
             all32 = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
             one, _ = tla.update_mask(1, dtype=tla.Float32)
@@ -14670,8 +14688,8 @@ def _grouped_softmax(
             p_pitch,
             n,
         )
-        tla.cross_core_set_flag(sync.p_ready, tla.arch.MTE3, aiv_id=0)
-        tla.cross_core_set_flag(sync.p_ready, tla.arch.MTE3, aiv_id=1)
+        tla.cross_core_set_flag(sync.p_ready, tla.pipes.MTE3, aiv_id=0)
+        tla.cross_core_set_flag(sync.p_ready, tla.pipes.MTE3, aiv_id=1)
         if enable_lse:
             shape = tla.make_shape(q_count // 2, 16)
             dest = tla.make_tensor(
@@ -14779,8 +14797,8 @@ def sparse_flash_mla_grouped_dense_kernel(
             table_start=seq * table_width,
         )
         with tla.vector():
-            tla.cross_core_set_flag(sync.kv_stage_ready, tla.arch.MTE3, aiv_id=0)
-            tla.cross_core_set_flag(sync.kv_stage_ready, tla.arch.MTE3, aiv_id=1)
+            tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=0)
+            tla.cross_core_set_flag(sync.kv_stage_ready, tla.pipes.MTE3, aiv_id=1)
     with tla.cube():
         q_l1 = tla.make_tensor(
             q_l1_ptr, tla.make_layout_with_tag((m, HEAD_DIM), dt, tla.arch.zN)
@@ -14805,13 +14823,13 @@ def sparse_flash_mla_grouped_dense_kernel(
         tla.set_flag(sync.q_l1_ready)
         tla.wait_flag(sync.q_l1_ready)
         if not has_cmp:
-            tla.cross_core_wait_flag(sync.kv_stage_ready, tla.arch.MTE1, aiv_id=0)
-            tla.cross_core_wait_flag(sync.kv_stage_ready, tla.arch.MTE1, aiv_id=1)
+            tla.cross_core_wait_flag(sync.kv_stage_ready, tla.pipes.MTE1, aiv_id=0)
+            tla.cross_core_wait_flag(sync.kv_stage_ready, tla.pipes.MTE1, aiv_id=1)
         for d in static_range(HEAD_DIM // d_step):
             # Vector publishes one slab as soon as its segment is in L1.
             if has_cmp and d * d_step % D_CHUNK == 0:
-                tla.cross_core_wait_flag(sync.kv_stage_ready, tla.arch.MTE1, aiv_id=0)
-                tla.cross_core_wait_flag(sync.kv_stage_ready, tla.arch.MTE1, aiv_id=1)
+                tla.cross_core_wait_flag(sync.kv_stage_ready, tla.pipes.MTE1, aiv_id=0)
+                tla.cross_core_wait_flag(sync.kv_stage_ready, tla.pipes.MTE1, aiv_id=1)
             a = tla.tile_view(q_l1, tla.make_shape(m, d_step), tla.make_coord(0, d))
             b = tla.tile_view(k_l1, tla.make_shape(d_step, n), tla.make_coord(d, 0))
             slot = d % 2
@@ -14833,8 +14851,8 @@ def sparse_flash_mla_grouped_dense_kernel(
             scores,
             tla.params.CopyL0C2DstParams(l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M),
         )
-        tla.cross_core_set_flag(sync.s_ready, tla.arch.FIX, aiv_id=0)
-        tla.cross_core_set_flag(sync.s_ready, tla.arch.FIX, aiv_id=1)
+        tla.cross_core_set_flag(sync.s_ready, tla.pipes.FIX, aiv_id=0)
+        tla.cross_core_set_flag(sync.s_ready, tla.pipes.FIX, aiv_id=1)
     _grouped_softmax(
         p_l1_ptr,
         p_ub,

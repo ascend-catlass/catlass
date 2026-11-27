@@ -848,19 +848,19 @@ def quant_block_sparse_attention_kernel(
     with tla.vector():
         # Partial Q/K/V copies leave some MX scale bytes untouched. E8M0
         # 0xff is NaN, so zero data alone does not make padding harmless.
-        m_p1.lock(pipe=tla.arch.VECTOR)
+        m_p1.lock(pipe=tla.pipes.VECTOR)
         mx_zero_ub(pp, half * (bn + 1))
-        m_p1.unlock(pipe=tla.arch.VECTOR)
-        m_pad.lock(pipe=tla.arch.VECTOR)
+        m_p1.unlock(pipe=tla.pipes.VECTOR)
+        m_pad.lock(pipe=tla.pipes.VECTOR)
         mx_pad(padp, pads)
-        m_pad.unlock(pipe=tla.arch.VECTOR)
-        m_p1.lock(pipe=tla.arch.MTE3)
+        m_pad.unlock(pipe=tla.pipes.VECTOR)
+        m_p1.lock(pipe=tla.pipes.MTE3)
         if tla.arch.sub_block_idx() == 0:
             mx_zero_scale_l1(qs1p, pp, bm * (dim // 32))
             mx_zero_scale_l1(ks1p, pp, bn * (dim // 32))
             mx_zero_scale_l1(vs1p, pp, dv * (bn // 32))
-        m_p1.unlock(pipe=tla.arch.MTE3)
-        m_pad.lock(pipe=tla.arch.MTE3)
+        m_p1.unlock(pipe=tla.pipes.MTE3)
+        m_pad.lock(pipe=tla.pipes.MTE3)
         tla.copy(
             tla.tile_view(
                 pad1,
@@ -877,16 +877,16 @@ def quant_block_sparse_attention_kernel(
             ),
             padsu,
         )
-        m_pad.unlock(pipe=tla.arch.MTE3)
-        tla.cross_core_set_flag(padready, tla.arch.MTE3)
+        m_pad.unlock(pipe=tla.pipes.MTE3)
+        tla.cross_core_set_flag(padready, tla.pipes.MTE3)
     with tla.cube():
-        tla.cross_core_wait_flag(padready, tla.arch.MTE2)
+        tla.cross_core_wait_flag(padready, tla.pipes.MTE2)
     with tla.vector():
-        tla.cross_core_set_flag(sr, tla.arch.VECTOR)
-        tla.cross_core_set_flag(ore, tla.arch.VECTOR)
+        tla.cross_core_set_flag(sr, tla.pipes.VECTOR)
+        tla.cross_core_set_flag(ore, tla.pipes.VECTOR)
     with tla.cube():
-        tla.cross_core_set_flag(pr, tla.arch.MTE1)
-        tla.cross_core_set_flag(pr_alt, tla.arch.MTE1)
+        tla.cross_core_set_flag(pr, tla.pipes.MTE1)
+        tla.cross_core_set_flag(pr_alt, tla.pipes.MTE1)
     blocks = (nq + xb - 1) // xb
     subtiles = xb // qm
     total = batch * hq * blocks * subtiles
@@ -927,7 +927,7 @@ def quant_block_sparse_attention_kernel(
                         layoutTag=tla.arch.ColumnMajor,
                     ),
                 )
-                m_q1.lock(pipe=tla.arch.MTE2)
+                m_q1.lock(pipe=tla.pipes.MTE2)
                 tla.copy(
                     tla.tile_view(q1, tla.make_shape(dim, rows), tla.make_coord(0, 0)),
                     qgm,
@@ -941,12 +941,12 @@ def quant_block_sparse_attention_kernel(
                     ),
                     qsgm,
                 )
-                m_q1.unlock(pipe=tla.arch.MTE2)
-                m_q1.lock(pipe=tla.arch.MTE1)
-                m_q0.lock(pipe=tla.arch.MTE1)
+                m_q1.unlock(pipe=tla.pipes.MTE2)
+                m_q1.lock(pipe=tla.pipes.MTE1)
+                m_q0.lock(pipe=tla.pipes.MTE1)
                 tla.copy(q0, q1, scale=qs1)
-                m_q0.unlock(pipe=tla.arch.MTE1)
-                m_q1.unlock(pipe=tla.arch.MTE1)
+                m_q0.unlock(pipe=tla.pipes.MTE1)
+                m_q1.unlock(pipe=tla.pipes.MTE1)
             with tla.vector():
                 mx_epilogue(
                     ap,
@@ -982,7 +982,7 @@ def quant_block_sparse_attention_kernel(
                             cols = bn if yb - ki * bn >= bn else yb - ki * bn
                             cols = cols if nk - start >= cols else nk - start
                             with tla.cube():
-                                m_k1.lock(pipe=tla.arch.MTE2)
+                                m_k1.lock(pipe=tla.pipes.MTE2)
                                 if cols < bn:
                                     k1.fill(0)
                                 kgm = tla.make_tensor(
@@ -1013,27 +1013,27 @@ def quant_block_sparse_attention_kernel(
                                     ),
                                     ksgm,
                                 )
-                                m_k1.unlock(pipe=tla.arch.MTE2)
-                                m_k1.lock(pipe=tla.arch.MTE1)
-                                m_k0.lock(pipe=tla.arch.MTE1)
+                                m_k1.unlock(pipe=tla.pipes.MTE2)
+                                m_k1.lock(pipe=tla.pipes.MTE1)
+                                m_k0.lock(pipe=tla.pipes.MTE1)
                                 tla.copy(k0, k1, scale=ks1)
-                                m_k0.unlock(pipe=tla.arch.MTE1)
-                                m_k1.unlock(pipe=tla.arch.MTE1)
-                                m_q0.lock(pipe=tla.arch.CUBE)
-                                m_k0.lock(pipe=tla.arch.CUBE)
-                                m_s0.lock(pipe=tla.arch.CUBE)
+                                m_k0.unlock(pipe=tla.pipes.MTE1)
+                                m_k1.unlock(pipe=tla.pipes.MTE1)
+                                m_q0.lock(pipe=tla.pipes.CUBE)
+                                m_k0.lock(pipe=tla.pipes.CUBE)
+                                m_s0.lock(pipe=tla.pipes.CUBE)
                                 tla.mmad_mx(s0, k0, q0, init_c=True)
-                                m_s0.unlock(pipe=tla.arch.CUBE)
-                                m_k0.unlock(pipe=tla.arch.CUBE)
-                                m_q0.unlock(pipe=tla.arch.CUBE)
-                                tla.cross_core_wait_flag(sr, tla.arch.FIX)
-                                m_s0.lock(pipe=tla.arch.FIX)
+                                m_s0.unlock(pipe=tla.pipes.CUBE)
+                                m_k0.unlock(pipe=tla.pipes.CUBE)
+                                m_q0.unlock(pipe=tla.pipes.CUBE)
+                                tla.cross_core_wait_flag(sr, tla.pipes.FIX)
+                                m_s0.lock(pipe=tla.pipes.FIX)
                                 mx_score_fix(sp, s0p, scale)
-                                m_s0.unlock(pipe=tla.arch.FIX)
-                                tla.cross_core_set_flag(sr, tla.arch.FIX)
+                                m_s0.unlock(pipe=tla.pipes.FIX)
+                                tla.cross_core_set_flag(sr, tla.pipes.FIX)
                             with tla.vector():
-                                tla.cross_core_wait_flag(sr, tla.arch.VECTOR)
-                                m_p1.lock(pipe=tla.arch.VECTOR)
+                                tla.cross_core_wait_flag(sr, tla.pipes.VECTOR)
+                                m_p1.lock(pipe=tla.pipes.VECTOR)
                                 mx_softmax(
                                     sp,
                                     pp,
@@ -1046,12 +1046,12 @@ def quant_block_sparse_attention_kernel(
                                     cols,
                                     svp,
                                 )
-                                m_p1.unlock(pipe=tla.arch.VECTOR)
-                                tla.cross_core_set_flag(sr, tla.arch.VECTOR)
+                                m_p1.unlock(pipe=tla.pipes.VECTOR)
+                                tla.cross_core_set_flag(sr, tla.pipes.VECTOR)
                                 if count % 2 == 0:
-                                    tla.cross_core_wait_flag(pr, tla.arch.MTE3)
+                                    tla.cross_core_wait_flag(pr, tla.pipes.MTE3)
                                 else:
-                                    tla.cross_core_wait_flag(pr_alt, tla.arch.MTE3)
+                                    tla.cross_core_wait_flag(pr_alt, tla.pipes.MTE3)
                                 write_p = tla.make_tensor_like(
                                     tla.recast_ptr(
                                         p1p + (count % 2) * bm * bn, dtype=tla.Float16
@@ -1066,7 +1066,7 @@ def quant_block_sparse_attention_kernel(
                                     psflat,
                                     tla.arch.zN,
                                 )
-                                m_p1.lock(pipe=tla.arch.MTE3)
+                                m_p1.lock(pipe=tla.pipes.MTE3)
                                 tla.copy(
                                     tla.tile_view(
                                         write_p,
@@ -1087,14 +1087,14 @@ def quant_block_sparse_attention_kernel(
                                     ),
                                     psu,
                                 )
-                                m_p1.unlock(pipe=tla.arch.MTE3)
+                                m_p1.unlock(pipe=tla.pipes.MTE3)
                                 if count % 2 == 0:
-                                    tla.cross_core_set_flag(pr, tla.arch.MTE3)
+                                    tla.cross_core_set_flag(pr, tla.pipes.MTE3)
                                 else:
-                                    tla.cross_core_set_flag(pr_alt, tla.arch.MTE3)
+                                    tla.cross_core_set_flag(pr_alt, tla.pipes.MTE3)
                             if count > 0:
                                 with tla.cube():
-                                    m_v1.lock(pipe=tla.arch.MTE2)
+                                    m_v1.lock(pipe=tla.pipes.MTE2)
                                     if pending_cols < bn:
                                         tla.get_tile(
                                             v1,
@@ -1133,14 +1133,14 @@ def quant_block_sparse_attention_kernel(
                                         ),
                                         vsgm_pv,
                                     )
-                                    m_v1.unlock(pipe=tla.arch.MTE2)
-                                    m_v1.lock(pipe=tla.arch.MTE1)
-                                    m_pv0.lock(pipe=tla.arch.MTE1)
+                                    m_v1.unlock(pipe=tla.pipes.MTE2)
+                                    m_v1.lock(pipe=tla.pipes.MTE1)
+                                    m_pv0.lock(pipe=tla.pipes.MTE1)
                                     read_slot = (count - 1) % 2
                                     if read_slot == 0:
-                                        tla.cross_core_wait_flag(pr, tla.arch.MTE1)
+                                        tla.cross_core_wait_flag(pr, tla.pipes.MTE1)
                                     else:
-                                        tla.cross_core_wait_flag(pr_alt, tla.arch.MTE1)
+                                        tla.cross_core_wait_flag(pr_alt, tla.pipes.MTE1)
                                     read_p = tla.make_tensor_like(
                                         p1p + read_slot * bm * bn, p1, tla.arch.zN
                                     )
@@ -1152,23 +1152,23 @@ def quant_block_sparse_attention_kernel(
                                     tla.copy(p0, read_p, scale=read_ps)
                                     tla.copy(v0, v1, scale=vs1)
                                     if read_slot == 0:
-                                        tla.cross_core_set_flag(pr, tla.arch.MTE1)
+                                        tla.cross_core_set_flag(pr, tla.pipes.MTE1)
                                     else:
-                                        tla.cross_core_set_flag(pr_alt, tla.arch.MTE1)
-                                    m_pv0.unlock(pipe=tla.arch.MTE1)
-                                    m_v1.unlock(pipe=tla.arch.MTE1)
-                                    m_pv0.lock(pipe=tla.arch.CUBE)
-                                    m_o0.lock(pipe=tla.arch.CUBE)
+                                        tla.cross_core_set_flag(pr_alt, tla.pipes.MTE1)
+                                    m_pv0.unlock(pipe=tla.pipes.MTE1)
+                                    m_v1.unlock(pipe=tla.pipes.MTE1)
+                                    m_pv0.lock(pipe=tla.pipes.CUBE)
+                                    m_o0.lock(pipe=tla.pipes.CUBE)
                                     tla.mmad_mx(o0, v0, p0, init_c=True)
-                                    m_o0.unlock(pipe=tla.arch.CUBE)
-                                    m_pv0.unlock(pipe=tla.arch.CUBE)
-                                    tla.cross_core_wait_flag(ore, tla.arch.FIX)
-                                    m_o0.lock(pipe=tla.arch.FIX)
+                                    m_o0.unlock(pipe=tla.pipes.CUBE)
+                                    m_pv0.unlock(pipe=tla.pipes.CUBE)
+                                    tla.cross_core_wait_flag(ore, tla.pipes.FIX)
+                                    m_o0.lock(pipe=tla.pipes.FIX)
                                     tla.copy(ofix, o0, split_o)
-                                    m_o0.unlock(pipe=tla.arch.FIX)
-                                    tla.cross_core_set_flag(ore, tla.arch.FIX)
+                                    m_o0.unlock(pipe=tla.pipes.FIX)
+                                    tla.cross_core_set_flag(ore, tla.pipes.FIX)
                                 with tla.vector():
-                                    tla.cross_core_wait_flag(ore, tla.arch.VECTOR)
+                                    tla.cross_core_wait_flag(ore, tla.pipes.VECTOR)
                                     mx_epilogue(
                                         ap,
                                         op,
@@ -1182,14 +1182,14 @@ def quant_block_sparse_attention_kernel(
                                         1,
                                         od_code,
                                     )
-                                    tla.cross_core_set_flag(ore, tla.arch.VECTOR)
+                                    tla.cross_core_set_flag(ore, tla.pipes.VECTOR)
                             pending_start = start
                             pending_cols = cols
                             count = count + 1
             # Drain the final PV tile left by the one-tile lookahead.
             if count > 0:
                 with tla.cube():
-                    m_v1.lock(pipe=tla.arch.MTE2)
+                    m_v1.lock(pipe=tla.pipes.MTE2)
                     if pending_cols < bn:
                         tla.get_tile(
                             v1, tla.make_coord(0, 0), tla.make_shape(dim, bn)
@@ -1222,14 +1222,14 @@ def quant_block_sparse_attention_kernel(
                         ),
                         vsgm_drain,
                     )
-                    m_v1.unlock(pipe=tla.arch.MTE2)
-                    m_v1.lock(pipe=tla.arch.MTE1)
-                    m_pv0.lock(pipe=tla.arch.MTE1)
+                    m_v1.unlock(pipe=tla.pipes.MTE2)
+                    m_v1.lock(pipe=tla.pipes.MTE1)
+                    m_pv0.lock(pipe=tla.pipes.MTE1)
                     drain_slot = (count - 1) % 2
                     if drain_slot == 0:
-                        tla.cross_core_wait_flag(pr, tla.arch.MTE1)
+                        tla.cross_core_wait_flag(pr, tla.pipes.MTE1)
                     else:
-                        tla.cross_core_wait_flag(pr_alt, tla.arch.MTE1)
+                        tla.cross_core_wait_flag(pr_alt, tla.pipes.MTE1)
                     drain_p = tla.make_tensor_like(
                         p1p + drain_slot * bm * bn, p1, tla.arch.zN
                     )
@@ -1239,23 +1239,23 @@ def quant_block_sparse_attention_kernel(
                     tla.copy(p0, drain_p, scale=drain_ps)
                     tla.copy(v0, v1, scale=vs1)
                     if drain_slot == 0:
-                        tla.cross_core_set_flag(pr, tla.arch.MTE1)
+                        tla.cross_core_set_flag(pr, tla.pipes.MTE1)
                     else:
-                        tla.cross_core_set_flag(pr_alt, tla.arch.MTE1)
-                    m_pv0.unlock(pipe=tla.arch.MTE1)
-                    m_v1.unlock(pipe=tla.arch.MTE1)
-                    m_pv0.lock(pipe=tla.arch.CUBE)
-                    m_o0.lock(pipe=tla.arch.CUBE)
+                        tla.cross_core_set_flag(pr_alt, tla.pipes.MTE1)
+                    m_pv0.unlock(pipe=tla.pipes.MTE1)
+                    m_v1.unlock(pipe=tla.pipes.MTE1)
+                    m_pv0.lock(pipe=tla.pipes.CUBE)
+                    m_o0.lock(pipe=tla.pipes.CUBE)
                     tla.mmad_mx(o0, v0, p0, init_c=True)
-                    m_o0.unlock(pipe=tla.arch.CUBE)
-                    m_pv0.unlock(pipe=tla.arch.CUBE)
-                    tla.cross_core_wait_flag(ore, tla.arch.FIX)
-                    m_o0.lock(pipe=tla.arch.FIX)
+                    m_o0.unlock(pipe=tla.pipes.CUBE)
+                    m_pv0.unlock(pipe=tla.pipes.CUBE)
+                    tla.cross_core_wait_flag(ore, tla.pipes.FIX)
+                    m_o0.lock(pipe=tla.pipes.FIX)
                     tla.copy(ofix, o0, split_o)
-                    m_o0.unlock(pipe=tla.arch.FIX)
-                    tla.cross_core_set_flag(ore, tla.arch.FIX)
+                    m_o0.unlock(pipe=tla.pipes.FIX)
+                    tla.cross_core_set_flag(ore, tla.pipes.FIX)
                 with tla.vector():
-                    tla.cross_core_wait_flag(ore, tla.arch.VECTOR)
+                    tla.cross_core_wait_flag(ore, tla.pipes.VECTOR)
                     mx_epilogue(
                         ap,
                         op,
@@ -1269,9 +1269,9 @@ def quant_block_sparse_attention_kernel(
                         1,
                         od_code,
                     )
-                    tla.cross_core_set_flag(ore, tla.arch.VECTOR)
+                    tla.cross_core_set_flag(ore, tla.pipes.VECTOR)
             with tla.vector():
-                m_out.lock(pipe=tla.arch.VECTOR)
+                m_out.lock(pipe=tla.pipes.VECTOR)
                 mx_epilogue(
                     ap,
                     op,
@@ -1285,9 +1285,9 @@ def quant_block_sparse_attention_kernel(
                     2,
                     od_code,
                 )
-                m_out.unlock(pipe=tla.arch.VECTOR)
+                m_out.unlock(pipe=tla.pipes.VECTOR)
                 if valid > 0:
-                    m_out.lock(pipe=tla.arch.MTE3)
+                    m_out.lock(pipe=tla.pipes.MTE3)
                     ogm = tla.make_tensor(
                         out.ptr + qbase + sub * half * dim,
                         tla.make_layout(
@@ -1309,13 +1309,13 @@ def quant_block_sparse_attention_kernel(
                             egm,
                             tla.tile_view(eu, tla.make_shape(valid), tla.make_coord(0)),
                         )
-                    m_out.unlock(pipe=tla.arch.MTE3)
+                    m_out.unlock(pipe=tla.pipes.MTE3)
     with tla.cube():
-        tla.cross_core_wait_flag(sr, tla.arch.FIX)
-        tla.cross_core_wait_flag(ore, tla.arch.FIX)
+        tla.cross_core_wait_flag(sr, tla.pipes.FIX)
+        tla.cross_core_wait_flag(ore, tla.pipes.FIX)
     with tla.vector():
-        tla.cross_core_wait_flag(pr, tla.arch.MTE3)
-        tla.cross_core_wait_flag(pr_alt, tla.arch.MTE3)
+        tla.cross_core_wait_flag(pr, tla.pipes.MTE3)
+        tla.cross_core_wait_flag(pr_alt, tla.pipes.MTE3)
 
 
 # Attention kernel: pipeline_mxfp8.
@@ -1496,18 +1496,18 @@ def quant_block_sparse_attention_mxfp8_kernel(
     padready = tla.cross_flag("pad_ready")
     split_o = tla.params.CopyL0C2DstParams(l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_N)
     with tla.vector():
-        m_pp_0.lock(pipe=tla.arch.VECTOR)
-        m_pp_1.lock(pipe=tla.arch.VECTOR)
+        m_pp_0.lock(pipe=tla.pipes.VECTOR)
+        m_pp_1.lock(pipe=tla.pipes.VECTOR)
         mx_zero_ub(pp, half * (bn + 1))
         mx_zero_ub(pp + pp_stride, half * (bn + 1))
-        m_pp_1.unlock(pipe=tla.arch.VECTOR)
-        m_pp_0.unlock(pipe=tla.arch.VECTOR)
-        m_pad.lock(pipe=tla.arch.VECTOR)
+        m_pp_1.unlock(pipe=tla.pipes.VECTOR)
+        m_pp_0.unlock(pipe=tla.pipes.VECTOR)
+        m_pad.lock(pipe=tla.pipes.VECTOR)
         mx_pad(padp, pads)
-        m_pad.unlock(pipe=tla.arch.VECTOR)
-        m_pp_0.lock(pipe=tla.arch.MTE3)
-        m_pp_1.lock(pipe=tla.arch.MTE3)
-        m_pad.lock(pipe=tla.arch.MTE3)
+        m_pad.unlock(pipe=tla.pipes.VECTOR)
+        m_pp_0.lock(pipe=tla.pipes.MTE3)
+        m_pp_1.lock(pipe=tla.pipes.MTE3)
+        m_pad.lock(pipe=tla.pipes.MTE3)
         if tla.arch.sub_block_idx() == 0:
             mx_zero_scale_l1(ks1p, pp, 2 * bn * (dim // 32))
             mx_zero_scale_l1(vs1p, pp, vring * dv * 4)
@@ -1539,15 +1539,15 @@ def quant_block_sparse_attention_mxfp8_kernel(
                         ),
                         padsu,
                     )
-        m_pad.unlock(pipe=tla.arch.MTE3)
-        m_pp_1.unlock(pipe=tla.arch.MTE3)
-        m_pp_0.unlock(pipe=tla.arch.MTE3)
-        tla.cross_core_set_flag(padready, tla.arch.MTE3)
-        tla.cross_core_set_flag(sr, tla.arch.VECTOR)
-        tla.cross_core_set_flag(sr_second, tla.arch.VECTOR)
-        tla.cross_core_set_flag(ore, tla.arch.VECTOR)
+        m_pad.unlock(pipe=tla.pipes.MTE3)
+        m_pp_1.unlock(pipe=tla.pipes.MTE3)
+        m_pp_0.unlock(pipe=tla.pipes.MTE3)
+        tla.cross_core_set_flag(padready, tla.pipes.MTE3)
+        tla.cross_core_set_flag(sr, tla.pipes.VECTOR)
+        tla.cross_core_set_flag(sr_second, tla.pipes.VECTOR)
+        tla.cross_core_set_flag(ore, tla.pipes.VECTOR)
     with tla.cube():
-        tla.cross_core_wait_flag(padready, tla.arch.MTE2)
+        tla.cross_core_wait_flag(padready, tla.pipes.MTE2)
     blocks = (nq + 127) // 128
     total = batch * hq * blocks
     core = tla.arch.block_idx()
@@ -1616,8 +1616,8 @@ def quant_block_sparse_attention_mxfp8_kernel(
                             qordered = tla.as_numeric(0)
                         qprevious = qvalue
                 with tla.cube():
-                    m_q0.lock(pipe=tla.arch.MTE1)
-                    m_q1.lock(pipe=tla.arch.MTE2)
+                    m_q0.lock(pipe=tla.pipes.MTE1)
+                    m_q1.lock(pipe=tla.pipes.MTE2)
                     qgm = tla.make_tensor(
                         q.ptr + qbase,
                         tla.make_layout(
@@ -1643,12 +1643,12 @@ def quant_block_sparse_attention_mxfp8_kernel(
                         ),
                         qsgm,
                     )
-                    m_q1.unlock(pipe=tla.arch.MTE2)
-                    m_q1.lock(pipe=tla.arch.MTE1)
+                    m_q1.unlock(pipe=tla.pipes.MTE2)
+                    m_q1.lock(pipe=tla.pipes.MTE1)
                     tla.copy(q0, q1, scale=qs1)
-                    m_q1.unlock(pipe=tla.arch.MTE1)
-                    m_q0.unlock(pipe=tla.arch.MTE1)
-                    m_q0.lock(pipe=tla.arch.CUBE)
+                    m_q1.unlock(pipe=tla.pipes.MTE1)
+                    m_q0.unlock(pipe=tla.pipes.MTE1)
+                    m_q0.lock(pipe=tla.pipes.CUBE)
                 with tla.vector():
                     _mx_group_scales_fullstore(psp, qmp, lp, rp, gp, -2)
         if pi >= 0:
@@ -1697,9 +1697,9 @@ def quant_block_sparse_attention_mxfp8_kernel(
         with tla.cube():
             if step < total_tiles:
                 if step % 2 == 0:
-                    m_k1_0.lock(pipe=tla.arch.MTE2)
+                    m_k1_0.lock(pipe=tla.pipes.MTE2)
                 else:
-                    m_k1_1.lock(pipe=tla.arch.MTE2)
+                    m_k1_1.lock(pipe=tla.pipes.MTE2)
                 current_k1 = tla.make_tensor_like(
                     k1p + (step % 2) * bn * dim, k1, tla.arch.zN
                 )
@@ -1738,14 +1738,14 @@ def quant_block_sparse_attention_mxfp8_kernel(
                         ksgm,
                     )
                 if step % 2 == 0:
-                    m_k1_0.unlock(pipe=tla.arch.MTE2)
+                    m_k1_0.unlock(pipe=tla.pipes.MTE2)
                 else:
-                    m_k1_1.unlock(pipe=tla.arch.MTE2)
+                    m_k1_1.unlock(pipe=tla.pipes.MTE2)
             if pi >= 0:
                 if pi % 2 == 0:
-                    m_v1_0.lock(pipe=tla.arch.MTE2)
+                    m_v1_0.lock(pipe=tla.pipes.MTE2)
                 else:
-                    m_v1_1.lock(pipe=tla.arch.MTE2)
+                    m_v1_1.lock(pipe=tla.pipes.MTE2)
                 preload_vlong = tla.make_tensor_like(
                     v1p + (pi % 2) * bn * dv, v1, tla.arch.nZ
                 )
@@ -1789,15 +1789,15 @@ def quant_block_sparse_attention_mxfp8_kernel(
                         long_vsgm,
                     )
                 if pi % 2 == 0:
-                    m_v1_0.unlock(pipe=tla.arch.MTE2)
+                    m_v1_0.unlock(pipe=tla.pipes.MTE2)
                 else:
-                    m_v1_1.unlock(pipe=tla.arch.MTE2)
+                    m_v1_1.unlock(pipe=tla.pipes.MTE2)
             if step < total_tiles:
                 if step % 2 == 0:
-                    m_k1_0.lock(pipe=tla.arch.MTE1)
+                    m_k1_0.lock(pipe=tla.pipes.MTE1)
                 else:
-                    m_k1_1.lock(pipe=tla.arch.MTE1)
-                m_k0.lock(pipe=tla.arch.MTE1)
+                    m_k1_1.lock(pipe=tla.pipes.MTE1)
+                m_k0.lock(pipe=tla.pipes.MTE1)
                 current_k0 = tla.make_tensor_like(k0p, k0, tla.arch.zN)
                 read_k1 = tla.make_tensor_like(
                     k1p + (step % 2) * bn * dim, k1, tla.arch.zN
@@ -1807,29 +1807,29 @@ def quant_block_sparse_attention_mxfp8_kernel(
                 )
                 tla.copy(current_k0, read_k1, scale=read_ks1)
                 if step % 2 == 0:
-                    m_k1_0.unlock(pipe=tla.arch.MTE1)
+                    m_k1_0.unlock(pipe=tla.pipes.MTE1)
                 else:
-                    m_k1_1.unlock(pipe=tla.arch.MTE1)
-                m_k0.unlock(pipe=tla.arch.MTE1)
-                m_k0.lock(pipe=tla.arch.CUBE)
+                    m_k1_1.unlock(pipe=tla.pipes.MTE1)
+                m_k0.unlock(pipe=tla.pipes.MTE1)
+                m_k0.lock(pipe=tla.pipes.CUBE)
                 current_s0 = tla.make_tensor_like(
                     s0p + (step % 2) * bm * bn, s0, tla.arch.L0Clayout
                 )
                 # Matched with unitFlag=3 in mx_score_unit; synchronization
                 # is per L0C unit instead of a whole-tile CUBE/FIX event.
                 tla.mmad_mx(current_s0, current_k0, q0, init_c=True, unit_flag=3)
-                m_k0.unlock(pipe=tla.arch.CUBE)
+                m_k0.unlock(pipe=tla.pipes.CUBE)
                 if qtile == selected - 1:
-                    m_q0.unlock(pipe=tla.arch.CUBE)
+                    m_q0.unlock(pipe=tla.pipes.CUBE)
             if pi >= 0:
                 if pi % 2 == 0:
-                    m_v1_0.lock(pipe=tla.arch.MTE1)
+                    m_v1_0.lock(pipe=tla.pipes.MTE1)
                 else:
-                    m_v1_1.lock(pipe=tla.arch.MTE1)
+                    m_v1_1.lock(pipe=tla.pipes.MTE1)
                 if pi % 2 == 0:
-                    m_pv_0.lock(pipe=tla.arch.MTE1)
+                    m_pv_0.lock(pipe=tla.pipes.MTE1)
                 else:
-                    m_pv_1.lock(pipe=tla.arch.MTE1)
+                    m_pv_1.lock(pipe=tla.pipes.MTE1)
                 pv_v0 = tla.make_tensor_like(v0p + (pi % 2) * bn * dv, v0, tla.arch.zN)
                 pv_p0 = tla.make_tensor_like(p0p + (pi % 2) * bm * bn, p0, tla.arch.nZ)
                 read_v1 = tla.make_tensor_like(
@@ -1856,60 +1856,60 @@ def quant_block_sparse_attention_mxfp8_kernel(
                     ),
                 )
                 if pi % 2 == 0:
-                    m_v1_0.unlock(pipe=tla.arch.MTE1)
+                    m_v1_0.unlock(pipe=tla.pipes.MTE1)
                 else:
-                    m_v1_1.unlock(pipe=tla.arch.MTE1)
+                    m_v1_1.unlock(pipe=tla.pipes.MTE1)
                 if ptile % group == 0:
-                    tla.cross_core_wait_flag(psready, tla.arch.MTE1)
+                    tla.cross_core_wait_flag(psready, tla.pipes.MTE1)
                 tla.copy(pv_p0, read_p1, scale=read_ps1)
-                tla.cross_core_set_flag(pfree, tla.arch.MTE1)
+                tla.cross_core_set_flag(pfree, tla.pipes.MTE1)
                 if pi % 2 == 0:
-                    m_pv_0.unlock(pipe=tla.arch.MTE1)
-                    m_pv_0.lock(pipe=tla.arch.CUBE)
+                    m_pv_0.unlock(pipe=tla.pipes.MTE1)
+                    m_pv_0.lock(pipe=tla.pipes.CUBE)
                 else:
-                    m_pv_1.unlock(pipe=tla.arch.MTE1)
-                    m_pv_1.lock(pipe=tla.arch.CUBE)
+                    m_pv_1.unlock(pipe=tla.pipes.MTE1)
+                    m_pv_1.lock(pipe=tla.pipes.CUBE)
                 if ptile % group == 0:
-                    m_o0.lock(pipe=tla.arch.CUBE)
+                    m_o0.lock(pipe=tla.pipes.CUBE)
                 tla.mmad_mx(o0, pv_v0, pv_p0, init_c=ptile % group == 0)
                 if pi % 2 == 0:
-                    m_pv_0.unlock(pipe=tla.arch.CUBE)
+                    m_pv_0.unlock(pipe=tla.pipes.CUBE)
                 else:
-                    m_pv_1.unlock(pipe=tla.arch.CUBE)
+                    m_pv_1.unlock(pipe=tla.pipes.CUBE)
                 if ptile % group == group - 1 or ptile == selected - 1:
-                    m_o0.unlock(pipe=tla.arch.CUBE)
+                    m_o0.unlock(pipe=tla.pipes.CUBE)
             if step < total_tiles:
                 if step % 2 == 0:
-                    tla.cross_core_wait_flag(sr, tla.arch.FIX)
+                    tla.cross_core_wait_flag(sr, tla.pipes.FIX)
                 else:
-                    tla.cross_core_wait_flag(sr_second, tla.arch.FIX)
+                    tla.cross_core_wait_flag(sr_second, tla.pipes.FIX)
                 mx_score_unit(
                     sp + (step % 2) * 2 * half * bn, s0p + (step % 2) * bm * bn, scale
                 )
                 if step % 2 == 0:
-                    tla.cross_core_set_flag(sr, tla.arch.FIX)
+                    tla.cross_core_set_flag(sr, tla.pipes.FIX)
                 else:
-                    tla.cross_core_set_flag(sr_second, tla.arch.FIX)
+                    tla.cross_core_set_flag(sr_second, tla.pipes.FIX)
             if pi >= 0:
                 if ptile % group == group - 1 or ptile == selected - 1:
-                    m_o0.lock(pipe=tla.arch.FIX)
-                    tla.cross_core_wait_flag(ore, tla.arch.FIX)
+                    m_o0.lock(pipe=tla.pipes.FIX)
+                    tla.cross_core_wait_flag(ore, tla.pipes.FIX)
                     if ptile < group:
                         tla.copy(afix, o0, split_o)
                     else:
                         tla.copy(ofix, o0, split_o)
-                    tla.cross_core_set_flag(ore, tla.arch.FIX)
-                    m_o0.unlock(pipe=tla.arch.FIX)
+                    tla.cross_core_set_flag(ore, tla.pipes.FIX)
+                    m_o0.unlock(pipe=tla.pipes.FIX)
         with tla.vector():
             if step < total_tiles:
                 if step % 2 == 0:
-                    tla.cross_core_wait_flag(sr, tla.arch.VECTOR)
+                    tla.cross_core_wait_flag(sr, tla.pipes.VECTOR)
                 else:
-                    tla.cross_core_wait_flag(sr_second, tla.arch.VECTOR)
+                    tla.cross_core_wait_flag(sr_second, tla.pipes.VECTOR)
                 if step % 2 == 0:
-                    m_pp_0.lock(pipe=tla.arch.VECTOR)
+                    m_pp_0.lock(pipe=tla.pipes.VECTOR)
                 else:
-                    m_pp_1.lock(pipe=tla.arch.VECTOR)
+                    m_pp_1.lock(pipe=tla.pipes.VECTOR)
                 if qtile % group == 0:
                     _mx_group_scales_fullstore(psp, qmp, lp, rp, gp, -1)
                 _mx_group_softmax_store_fast(
@@ -1924,18 +1924,18 @@ def quant_block_sparse_attention_mxfp8_kernel(
                     qcols,
                 )
                 if step % 2 == 0:
-                    tla.cross_core_set_flag(sr, tla.arch.VECTOR)
+                    tla.cross_core_set_flag(sr, tla.pipes.VECTOR)
                 else:
-                    tla.cross_core_set_flag(sr_second, tla.arch.VECTOR)
+                    tla.cross_core_set_flag(sr_second, tla.pipes.VECTOR)
             if pi >= 0:
-                tla.cross_core_wait_flag(pfree, tla.arch.MTE3)
+                tla.cross_core_wait_flag(pfree, tla.pipes.MTE3)
             if step < total_tiles:
                 if step % 2 == 0:
-                    m_pp_0.unlock(pipe=tla.arch.VECTOR)
-                    m_pp_0.lock(pipe=tla.arch.MTE3)
+                    m_pp_0.unlock(pipe=tla.pipes.VECTOR)
+                    m_pp_0.lock(pipe=tla.pipes.MTE3)
                 else:
-                    m_pp_1.unlock(pipe=tla.arch.VECTOR)
-                    m_pp_1.lock(pipe=tla.arch.MTE3)
+                    m_pp_1.unlock(pipe=tla.pipes.VECTOR)
+                    m_pp_1.lock(pipe=tla.pipes.MTE3)
                 write_p = tla.make_tensor_like(
                     tla.recast_ptr(p1p + (step % ring) * bm * bn, dtype=tla.Float16),
                     p1storage,
@@ -1957,13 +1957,13 @@ def quant_block_sparse_attention_mxfp8_kernel(
                     ),
                 )
                 if step % 2 == 0:
-                    m_pp_0.unlock(pipe=tla.arch.MTE3)
+                    m_pp_0.unlock(pipe=tla.pipes.MTE3)
                 else:
-                    m_pp_1.unlock(pipe=tla.arch.MTE3)
+                    m_pp_1.unlock(pipe=tla.pipes.MTE3)
                 if qtile % group == group - 1 or qtile == selected - 1:
                     group_count = qtile % group + 1
                     group_start = step - qtile % group
-                    m_ps.lock(pipe=tla.arch.VECTOR)
+                    m_ps.lock(pipe=tla.pipes.VECTOR)
                     _mx_group_scales_fullstore(
                         psp,
                         qmp,
@@ -1980,14 +1980,14 @@ def quant_block_sparse_attention_mxfp8_kernel(
                         gp,
                         group_count,
                     )
-                    m_ps.unlock(pipe=tla.arch.VECTOR)
-                    m_ps.lock(pipe=tla.arch.MTE3)
+                    m_ps.unlock(pipe=tla.pipes.VECTOR)
+                    m_ps.lock(pipe=tla.pipes.MTE3)
                     mx_ps64_to_l1(ps1p, psp, group_start % ring, group_count, ring, sub)
-                    m_ps.unlock(pipe=tla.arch.MTE3)
-                    tla.cross_core_set_flag(psready, tla.arch.MTE3)
+                    m_ps.unlock(pipe=tla.pipes.MTE3)
+                    tla.cross_core_set_flag(psready, tla.pipes.MTE3)
             if pi >= 0:
                 if ptile % group == group - 1 or ptile == selected - 1:
-                    tla.cross_core_wait_flag(ore, tla.arch.VECTOR)
+                    tla.cross_core_wait_flag(ore, tla.pipes.VECTOR)
                     if ptile >= group:
                         mx_epilogue(
                             ap,
@@ -2011,7 +2011,7 @@ def quant_block_sparse_attention_mxfp8_kernel(
                             od_code,
                         )
                     if ptile == selected - 1:
-                        m_out.lock(pipe=tla.arch.VECTOR)
+                        m_out.lock(pipe=tla.pipes.VECTOR)
                         mx_epilogue(
                             ap,
                             op,
@@ -2025,9 +2025,9 @@ def quant_block_sparse_attention_mxfp8_kernel(
                             2,
                             od_code,
                         )
-                        m_out.unlock(pipe=tla.arch.VECTOR)
+                        m_out.unlock(pipe=tla.pipes.VECTOR)
                         if valid > 0:
-                            m_out.lock(pipe=tla.arch.MTE3)
+                            m_out.lock(pipe=tla.pipes.MTE3)
                             ogm = tla.make_tensor(
                                 out.ptr + pqbase + sub * half * dim,
                                 tla.make_layout(
@@ -2053,12 +2053,12 @@ def quant_block_sparse_attention_mxfp8_kernel(
                                         eu, tla.make_shape(valid), tla.make_coord(0)
                                     ),
                                 )
-                            m_out.unlock(pipe=tla.arch.MTE3)
-                    tla.cross_core_set_flag(ore, tla.arch.VECTOR)
+                            m_out.unlock(pipe=tla.pipes.MTE3)
+                    tla.cross_core_set_flag(ore, tla.pipes.VECTOR)
     with tla.cube():
-        tla.cross_core_wait_flag(sr, tla.arch.FIX)
-        tla.cross_core_wait_flag(sr_second, tla.arch.FIX)
-        tla.cross_core_wait_flag(ore, tla.arch.FIX)
+        tla.cross_core_wait_flag(sr, tla.pipes.FIX)
+        tla.cross_core_wait_flag(sr_second, tla.pipes.FIX)
+        tla.cross_core_wait_flag(ore, tla.pipes.FIX)
 
 
 # Attention kernel: pipeline_bounded.
@@ -2239,18 +2239,18 @@ def quant_block_sparse_attention_bounded_kernel(
     padready = tla.cross_flag("pad_ready")
     split_o = tla.params.CopyL0C2DstParams(l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_N)
     with tla.vector():
-        m_pp_0.lock(pipe=tla.arch.VECTOR)
-        m_pp_1.lock(pipe=tla.arch.VECTOR)
+        m_pp_0.lock(pipe=tla.pipes.VECTOR)
+        m_pp_1.lock(pipe=tla.pipes.VECTOR)
         mx_zero_ub(pp, half * (bn + 1))
         mx_zero_ub(pp + pp_stride, half * (bn + 1))
-        m_pp_1.unlock(pipe=tla.arch.VECTOR)
-        m_pp_0.unlock(pipe=tla.arch.VECTOR)
-        m_pad.lock(pipe=tla.arch.VECTOR)
+        m_pp_1.unlock(pipe=tla.pipes.VECTOR)
+        m_pp_0.unlock(pipe=tla.pipes.VECTOR)
+        m_pad.lock(pipe=tla.pipes.VECTOR)
         mx_pad(padp, pads)
-        m_pad.unlock(pipe=tla.arch.VECTOR)
-        m_pp_0.lock(pipe=tla.arch.MTE3)
-        m_pp_1.lock(pipe=tla.arch.MTE3)
-        m_pad.lock(pipe=tla.arch.MTE3)
+        m_pad.unlock(pipe=tla.pipes.VECTOR)
+        m_pp_0.lock(pipe=tla.pipes.MTE3)
+        m_pp_1.lock(pipe=tla.pipes.MTE3)
+        m_pad.lock(pipe=tla.pipes.MTE3)
         if tla.arch.sub_block_idx() == 0:
             mx_zero_scale_l1(ks1p, pp, 2 * bn * (dim // 32))
             mx_zero_scale_l1(vs1p, pp, vring * dv * 4)
@@ -2282,15 +2282,15 @@ def quant_block_sparse_attention_bounded_kernel(
                         ),
                         padsu,
                     )
-        m_pad.unlock(pipe=tla.arch.MTE3)
-        m_pp_1.unlock(pipe=tla.arch.MTE3)
-        m_pp_0.unlock(pipe=tla.arch.MTE3)
-        tla.cross_core_set_flag(padready, tla.arch.MTE3)
-        tla.cross_core_set_flag(sr, tla.arch.VECTOR)
-        tla.cross_core_set_flag(sr_second, tla.arch.VECTOR)
-        tla.cross_core_set_flag(ore, tla.arch.VECTOR)
+        m_pad.unlock(pipe=tla.pipes.MTE3)
+        m_pp_1.unlock(pipe=tla.pipes.MTE3)
+        m_pp_0.unlock(pipe=tla.pipes.MTE3)
+        tla.cross_core_set_flag(padready, tla.pipes.MTE3)
+        tla.cross_core_set_flag(sr, tla.pipes.VECTOR)
+        tla.cross_core_set_flag(sr_second, tla.pipes.VECTOR)
+        tla.cross_core_set_flag(ore, tla.pipes.VECTOR)
     with tla.cube():
-        tla.cross_core_wait_flag(padready, tla.arch.MTE2)
+        tla.cross_core_wait_flag(padready, tla.pipes.MTE2)
     blocks = (nq + 127) // 128
     total = batch * hq * blocks
     core = tla.arch.block_idx()
@@ -2359,8 +2359,8 @@ def quant_block_sparse_attention_bounded_kernel(
                             qordered = tla.as_numeric(0)
                         qprevious = qvalue
                 with tla.cube():
-                    m_q0.lock(pipe=tla.arch.MTE1)
-                    m_q1.lock(pipe=tla.arch.MTE2)
+                    m_q0.lock(pipe=tla.pipes.MTE1)
+                    m_q1.lock(pipe=tla.pipes.MTE2)
                     qgm = tla.make_tensor(
                         q.ptr + qbase,
                         tla.make_layout(
@@ -2386,12 +2386,12 @@ def quant_block_sparse_attention_bounded_kernel(
                         ),
                         qsgm,
                     )
-                    m_q1.unlock(pipe=tla.arch.MTE2)
-                    m_q1.lock(pipe=tla.arch.MTE1)
+                    m_q1.unlock(pipe=tla.pipes.MTE2)
+                    m_q1.lock(pipe=tla.pipes.MTE1)
                     tla.copy(q0, q1, scale=qs1)
-                    m_q1.unlock(pipe=tla.arch.MTE1)
-                    m_q0.unlock(pipe=tla.arch.MTE1)
-                    m_q0.lock(pipe=tla.arch.CUBE)
+                    m_q1.unlock(pipe=tla.pipes.MTE1)
+                    m_q0.unlock(pipe=tla.pipes.MTE1)
+                    m_q0.lock(pipe=tla.pipes.CUBE)
                 with tla.vector():
                     _mx_group_scales_bounded(psp, qmp, lp, rp, gp, -2)
         if pi >= 0:
@@ -2440,9 +2440,9 @@ def quant_block_sparse_attention_bounded_kernel(
         with tla.cube():
             if step < total_tiles:
                 if step % 2 == 0:
-                    m_k1_0.lock(pipe=tla.arch.MTE2)
+                    m_k1_0.lock(pipe=tla.pipes.MTE2)
                 else:
-                    m_k1_1.lock(pipe=tla.arch.MTE2)
+                    m_k1_1.lock(pipe=tla.pipes.MTE2)
                 current_k1 = tla.make_tensor_like(
                     k1p + (step % 2) * bn * dim, k1, tla.arch.zN
                 )
@@ -2481,14 +2481,14 @@ def quant_block_sparse_attention_bounded_kernel(
                         ksgm,
                     )
                 if step % 2 == 0:
-                    m_k1_0.unlock(pipe=tla.arch.MTE2)
+                    m_k1_0.unlock(pipe=tla.pipes.MTE2)
                 else:
-                    m_k1_1.unlock(pipe=tla.arch.MTE2)
+                    m_k1_1.unlock(pipe=tla.pipes.MTE2)
             if pi >= 0:
                 if pi % 2 == 0:
-                    m_v1_0.lock(pipe=tla.arch.MTE2)
+                    m_v1_0.lock(pipe=tla.pipes.MTE2)
                 else:
-                    m_v1_1.lock(pipe=tla.arch.MTE2)
+                    m_v1_1.lock(pipe=tla.pipes.MTE2)
                 preload_vlong = tla.make_tensor_like(
                     v1p + (pi % 2) * bn * dv, v1, tla.arch.nZ
                 )
@@ -2532,15 +2532,15 @@ def quant_block_sparse_attention_bounded_kernel(
                         long_vsgm,
                     )
                 if pi % 2 == 0:
-                    m_v1_0.unlock(pipe=tla.arch.MTE2)
+                    m_v1_0.unlock(pipe=tla.pipes.MTE2)
                 else:
-                    m_v1_1.unlock(pipe=tla.arch.MTE2)
+                    m_v1_1.unlock(pipe=tla.pipes.MTE2)
             if step < total_tiles:
                 if step % 2 == 0:
-                    m_k1_0.lock(pipe=tla.arch.MTE1)
+                    m_k1_0.lock(pipe=tla.pipes.MTE1)
                 else:
-                    m_k1_1.lock(pipe=tla.arch.MTE1)
-                m_k0.lock(pipe=tla.arch.MTE1)
+                    m_k1_1.lock(pipe=tla.pipes.MTE1)
+                m_k0.lock(pipe=tla.pipes.MTE1)
                 current_k0 = tla.make_tensor_like(k0p, k0, tla.arch.zN)
                 read_k1 = tla.make_tensor_like(
                     k1p + (step % 2) * bn * dim, k1, tla.arch.zN
@@ -2550,29 +2550,29 @@ def quant_block_sparse_attention_bounded_kernel(
                 )
                 tla.copy(current_k0, read_k1, scale=read_ks1)
                 if step % 2 == 0:
-                    m_k1_0.unlock(pipe=tla.arch.MTE1)
+                    m_k1_0.unlock(pipe=tla.pipes.MTE1)
                 else:
-                    m_k1_1.unlock(pipe=tla.arch.MTE1)
-                m_k0.unlock(pipe=tla.arch.MTE1)
-                m_k0.lock(pipe=tla.arch.CUBE)
+                    m_k1_1.unlock(pipe=tla.pipes.MTE1)
+                m_k0.unlock(pipe=tla.pipes.MTE1)
+                m_k0.lock(pipe=tla.pipes.CUBE)
                 current_s0 = tla.make_tensor_like(
                     s0p + (step % 2) * bm * bn, s0, tla.arch.L0Clayout
                 )
                 # Matched with unitFlag=3 in mx_score_unit; synchronization
                 # is per L0C unit instead of a whole-tile CUBE/FIX event.
                 tla.mmad_mx(current_s0, current_k0, q0, init_c=True, unit_flag=3)
-                m_k0.unlock(pipe=tla.arch.CUBE)
+                m_k0.unlock(pipe=tla.pipes.CUBE)
                 if qtile == selected - 1:
-                    m_q0.unlock(pipe=tla.arch.CUBE)
+                    m_q0.unlock(pipe=tla.pipes.CUBE)
             if pi >= 0:
                 if pi % 2 == 0:
-                    m_v1_0.lock(pipe=tla.arch.MTE1)
+                    m_v1_0.lock(pipe=tla.pipes.MTE1)
                 else:
-                    m_v1_1.lock(pipe=tla.arch.MTE1)
+                    m_v1_1.lock(pipe=tla.pipes.MTE1)
                 if pi % 2 == 0:
-                    m_pv_0.lock(pipe=tla.arch.MTE1)
+                    m_pv_0.lock(pipe=tla.pipes.MTE1)
                 else:
-                    m_pv_1.lock(pipe=tla.arch.MTE1)
+                    m_pv_1.lock(pipe=tla.pipes.MTE1)
                 pv_v0 = tla.make_tensor_like(v0p + (pi % 2) * bn * dv, v0, tla.arch.zN)
                 pv_p0 = tla.make_tensor_like(p0p + (pi % 2) * bm * bn, p0, tla.arch.nZ)
                 read_v1 = tla.make_tensor_like(
@@ -2599,57 +2599,57 @@ def quant_block_sparse_attention_bounded_kernel(
                     ),
                 )
                 if pi % 2 == 0:
-                    m_v1_0.unlock(pipe=tla.arch.MTE1)
+                    m_v1_0.unlock(pipe=tla.pipes.MTE1)
                 else:
-                    m_v1_1.unlock(pipe=tla.arch.MTE1)
+                    m_v1_1.unlock(pipe=tla.pipes.MTE1)
                 if ptile % group == 0:
-                    tla.cross_core_wait_flag(psready, tla.arch.MTE1)
+                    tla.cross_core_wait_flag(psready, tla.pipes.MTE1)
                 tla.copy(pv_p0, read_p1, scale=read_ps1)
-                tla.cross_core_set_flag(pfree, tla.arch.MTE1)
+                tla.cross_core_set_flag(pfree, tla.pipes.MTE1)
                 if pi % 2 == 0:
-                    m_pv_0.unlock(pipe=tla.arch.MTE1)
-                    m_pv_0.lock(pipe=tla.arch.CUBE)
+                    m_pv_0.unlock(pipe=tla.pipes.MTE1)
+                    m_pv_0.lock(pipe=tla.pipes.CUBE)
                 else:
-                    m_pv_1.unlock(pipe=tla.arch.MTE1)
-                    m_pv_1.lock(pipe=tla.arch.CUBE)
+                    m_pv_1.unlock(pipe=tla.pipes.MTE1)
+                    m_pv_1.lock(pipe=tla.pipes.CUBE)
                 if ptile == 0:
-                    m_o0.lock(pipe=tla.arch.CUBE)
+                    m_o0.lock(pipe=tla.pipes.CUBE)
                 tla.mmad_mx(o0, pv_v0, pv_p0, init_c=ptile == 0)
                 if pi % 2 == 0:
-                    m_pv_0.unlock(pipe=tla.arch.CUBE)
+                    m_pv_0.unlock(pipe=tla.pipes.CUBE)
                 else:
-                    m_pv_1.unlock(pipe=tla.arch.CUBE)
+                    m_pv_1.unlock(pipe=tla.pipes.CUBE)
                 if ptile == selected - 1:
-                    m_o0.unlock(pipe=tla.arch.CUBE)
+                    m_o0.unlock(pipe=tla.pipes.CUBE)
             if step < total_tiles:
                 if step % 2 == 0:
-                    tla.cross_core_wait_flag(sr, tla.arch.FIX)
+                    tla.cross_core_wait_flag(sr, tla.pipes.FIX)
                 else:
-                    tla.cross_core_wait_flag(sr_second, tla.arch.FIX)
+                    tla.cross_core_wait_flag(sr_second, tla.pipes.FIX)
                 mx_score_unit(
                     sp + (step % 2) * 2 * half * bn, s0p + (step % 2) * bm * bn, scale
                 )
                 if step % 2 == 0:
-                    tla.cross_core_set_flag(sr, tla.arch.FIX)
+                    tla.cross_core_set_flag(sr, tla.pipes.FIX)
                 else:
-                    tla.cross_core_set_flag(sr_second, tla.arch.FIX)
+                    tla.cross_core_set_flag(sr_second, tla.pipes.FIX)
             if pi >= 0:
                 if ptile == selected - 1:
-                    m_o0.lock(pipe=tla.arch.FIX)
-                    tla.cross_core_wait_flag(ore, tla.arch.FIX)
+                    m_o0.lock(pipe=tla.pipes.FIX)
+                    tla.cross_core_wait_flag(ore, tla.pipes.FIX)
                     tla.copy(afix, o0, split_o)
-                    tla.cross_core_set_flag(ore, tla.arch.FIX)
-                    m_o0.unlock(pipe=tla.arch.FIX)
+                    tla.cross_core_set_flag(ore, tla.pipes.FIX)
+                    m_o0.unlock(pipe=tla.pipes.FIX)
         with tla.vector():
             if step < total_tiles:
                 if step % 2 == 0:
-                    tla.cross_core_wait_flag(sr, tla.arch.VECTOR)
+                    tla.cross_core_wait_flag(sr, tla.pipes.VECTOR)
                 else:
-                    tla.cross_core_wait_flag(sr_second, tla.arch.VECTOR)
+                    tla.cross_core_wait_flag(sr_second, tla.pipes.VECTOR)
                 if step % 2 == 0:
-                    m_pp_0.lock(pipe=tla.arch.VECTOR)
+                    m_pp_0.lock(pipe=tla.pipes.VECTOR)
                 else:
-                    m_pp_1.lock(pipe=tla.arch.VECTOR)
+                    m_pp_1.lock(pipe=tla.pipes.VECTOR)
                 if qtile % group == 0:
                     _mx_group_scales_bounded(psp, qmp, lp, rp, gp, -1)
                 _mx_group_softmax_store_fast(
@@ -2664,18 +2664,18 @@ def quant_block_sparse_attention_bounded_kernel(
                     qcols,
                 )
                 if step % 2 == 0:
-                    tla.cross_core_set_flag(sr, tla.arch.VECTOR)
+                    tla.cross_core_set_flag(sr, tla.pipes.VECTOR)
                 else:
-                    tla.cross_core_set_flag(sr_second, tla.arch.VECTOR)
+                    tla.cross_core_set_flag(sr_second, tla.pipes.VECTOR)
             if pi >= 0:
-                tla.cross_core_wait_flag(pfree, tla.arch.MTE3)
+                tla.cross_core_wait_flag(pfree, tla.pipes.MTE3)
             if step < total_tiles:
                 if step % 2 == 0:
-                    m_pp_0.unlock(pipe=tla.arch.VECTOR)
-                    m_pp_0.lock(pipe=tla.arch.MTE3)
+                    m_pp_0.unlock(pipe=tla.pipes.VECTOR)
+                    m_pp_0.lock(pipe=tla.pipes.MTE3)
                 else:
-                    m_pp_1.unlock(pipe=tla.arch.VECTOR)
-                    m_pp_1.lock(pipe=tla.arch.MTE3)
+                    m_pp_1.unlock(pipe=tla.pipes.VECTOR)
+                    m_pp_1.lock(pipe=tla.pipes.MTE3)
                 write_p = tla.make_tensor_like(
                     tla.recast_ptr(p1p + (step % ring) * bm * bn, dtype=tla.Float16),
                     p1storage,
@@ -2697,13 +2697,13 @@ def quant_block_sparse_attention_bounded_kernel(
                     ),
                 )
                 if step % 2 == 0:
-                    m_pp_0.unlock(pipe=tla.arch.MTE3)
+                    m_pp_0.unlock(pipe=tla.pipes.MTE3)
                 else:
-                    m_pp_1.unlock(pipe=tla.arch.MTE3)
+                    m_pp_1.unlock(pipe=tla.pipes.MTE3)
                 if qtile % group == group - 1 or qtile == selected - 1:
                     group_count = qtile % group + 1
                     group_start = step - qtile % group
-                    m_ps.lock(pipe=tla.arch.VECTOR)
+                    m_ps.lock(pipe=tla.pipes.VECTOR)
                     _mx_group_scales_bounded(
                         psp,
                         qmp,
@@ -2720,16 +2720,16 @@ def quant_block_sparse_attention_bounded_kernel(
                         gp,
                         group_count,
                     )
-                    m_ps.unlock(pipe=tla.arch.VECTOR)
-                    m_ps.lock(pipe=tla.arch.MTE3)
+                    m_ps.unlock(pipe=tla.pipes.VECTOR)
+                    m_ps.lock(pipe=tla.pipes.MTE3)
                     mx_ps64_to_l1(ps1p, psp, group_start % ring, group_count, ring, sub)
-                    m_ps.unlock(pipe=tla.arch.MTE3)
-                    tla.cross_core_set_flag(psready, tla.arch.MTE3)
+                    m_ps.unlock(pipe=tla.pipes.MTE3)
+                    tla.cross_core_set_flag(psready, tla.pipes.MTE3)
             if pi >= 0:
                 if ptile == selected - 1:
-                    tla.cross_core_wait_flag(ore, tla.arch.VECTOR)
+                    tla.cross_core_wait_flag(ore, tla.pipes.VECTOR)
                     if ptile == selected - 1:
-                        m_out.lock(pipe=tla.arch.VECTOR)
+                        m_out.lock(pipe=tla.pipes.VECTOR)
                         mx_epilogue(
                             ap,
                             op,
@@ -2743,9 +2743,9 @@ def quant_block_sparse_attention_bounded_kernel(
                             2,
                             od_code,
                         )
-                        m_out.unlock(pipe=tla.arch.VECTOR)
+                        m_out.unlock(pipe=tla.pipes.VECTOR)
                         if valid > 0:
-                            m_out.lock(pipe=tla.arch.MTE3)
+                            m_out.lock(pipe=tla.pipes.MTE3)
                             ogm = tla.make_tensor(
                                 out.ptr + pqbase + sub * half * dim,
                                 tla.make_layout(
@@ -2771,12 +2771,12 @@ def quant_block_sparse_attention_bounded_kernel(
                                         eu, tla.make_shape(valid), tla.make_coord(0)
                                     ),
                                 )
-                            m_out.unlock(pipe=tla.arch.MTE3)
-                    tla.cross_core_set_flag(ore, tla.arch.VECTOR)
+                            m_out.unlock(pipe=tla.pipes.MTE3)
+                    tla.cross_core_set_flag(ore, tla.pipes.VECTOR)
     with tla.cube():
-        tla.cross_core_wait_flag(sr, tla.arch.FIX)
-        tla.cross_core_wait_flag(sr_second, tla.arch.FIX)
-        tla.cross_core_wait_flag(ore, tla.arch.FIX)
+        tla.cross_core_wait_flag(sr, tla.pipes.FIX)
+        tla.cross_core_wait_flag(sr_second, tla.pipes.FIX)
+        tla.cross_core_wait_flag(ore, tla.pipes.FIX)
 
 
 # Attention kernel: pipeline_continuous.
@@ -2957,14 +2957,14 @@ def quant_block_sparse_attention_continuous_kernel(
     padready = tla.cross_flag("pad_ready")
     split_o = tla.params.CopyL0C2DstParams(l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_N)
     with tla.vector():
-        m_pp.lock(pipe=tla.arch.VECTOR)
+        m_pp.lock(pipe=tla.pipes.VECTOR)
         mx_zero_ub(pp, half * (bn + 1))
-        m_pp.unlock(pipe=tla.arch.VECTOR)
-        m_pad.lock(pipe=tla.arch.VECTOR)
+        m_pp.unlock(pipe=tla.pipes.VECTOR)
+        m_pad.lock(pipe=tla.pipes.VECTOR)
         mx_pad(padp, pads)
-        m_pad.unlock(pipe=tla.arch.VECTOR)
-        m_pad.lock(pipe=tla.arch.MTE3)
-        m_pp.lock(pipe=tla.arch.MTE3)
+        m_pad.unlock(pipe=tla.pipes.VECTOR)
+        m_pad.lock(pipe=tla.pipes.MTE3)
+        m_pp.lock(pipe=tla.pipes.MTE3)
         if tla.arch.sub_block_idx() == 0:
             mx_zero_scale_l1(ks1p, pp, 2 * bn * (dim // 32))
             mx_zero_scale_l1(vs1p, pp, vring * dv * 4)
@@ -2996,14 +2996,14 @@ def quant_block_sparse_attention_continuous_kernel(
                         ),
                         padsu,
                     )
-        m_pp.unlock(pipe=tla.arch.MTE3)
-        m_pad.unlock(pipe=tla.arch.MTE3)
-        tla.cross_core_set_flag(padready, tla.arch.MTE3)
-        tla.cross_core_set_flag(sr, tla.arch.VECTOR)
-        tla.cross_core_set_flag(sr_second, tla.arch.VECTOR)
-        tla.cross_core_set_flag(ore, tla.arch.VECTOR)
+        m_pp.unlock(pipe=tla.pipes.MTE3)
+        m_pad.unlock(pipe=tla.pipes.MTE3)
+        tla.cross_core_set_flag(padready, tla.pipes.MTE3)
+        tla.cross_core_set_flag(sr, tla.pipes.VECTOR)
+        tla.cross_core_set_flag(sr_second, tla.pipes.VECTOR)
+        tla.cross_core_set_flag(ore, tla.pipes.VECTOR)
     with tla.cube():
-        tla.cross_core_wait_flag(padready, tla.arch.MTE2)
+        tla.cross_core_wait_flag(padready, tla.pipes.MTE2)
     blocks = (nq + 127) // 128
     total = batch * hq * blocks
     core = tla.arch.block_idx()
@@ -3059,8 +3059,8 @@ def quant_block_sparse_attention_continuous_kernel(
                             qordered = tla.as_numeric(0)
                         qprevious = qvalue
                 with tla.cube():
-                    m_q0.lock(pipe=tla.arch.MTE1)
-                    m_q1.lock(pipe=tla.arch.MTE2)
+                    m_q0.lock(pipe=tla.pipes.MTE1)
+                    m_q1.lock(pipe=tla.pipes.MTE2)
                     qgm = tla.make_tensor(
                         q.ptr + qbase,
                         tla.make_layout(
@@ -3086,12 +3086,12 @@ def quant_block_sparse_attention_continuous_kernel(
                         ),
                         qsgm,
                     )
-                    m_q1.unlock(pipe=tla.arch.MTE2)
-                    m_q1.lock(pipe=tla.arch.MTE1)
+                    m_q1.unlock(pipe=tla.pipes.MTE2)
+                    m_q1.lock(pipe=tla.pipes.MTE1)
                     tla.copy(q0, q1, scale=qs1)
-                    m_q1.unlock(pipe=tla.arch.MTE1)
-                    m_q0.unlock(pipe=tla.arch.MTE1)
-                    m_q0.lock(pipe=tla.arch.CUBE)
+                    m_q1.unlock(pipe=tla.pipes.MTE1)
+                    m_q0.unlock(pipe=tla.pipes.MTE1)
+                    m_q0.lock(pipe=tla.pipes.CUBE)
                 with tla.vector():
                     _mx_group_scales_basic(psp, qmp, lp, rp, gp, -2)
         if pi >= 0:
@@ -3140,9 +3140,9 @@ def quant_block_sparse_attention_continuous_kernel(
         with tla.cube():
             if step < total_tiles:
                 if step % 2 == 0:
-                    m_k1_0.lock(pipe=tla.arch.MTE2)
+                    m_k1_0.lock(pipe=tla.pipes.MTE2)
                 else:
-                    m_k1_1.lock(pipe=tla.arch.MTE2)
+                    m_k1_1.lock(pipe=tla.pipes.MTE2)
                 current_k1 = tla.make_tensor_like(
                     k1p + (step % 2) * bn * dim, k1, tla.arch.zN
                 )
@@ -3181,14 +3181,14 @@ def quant_block_sparse_attention_continuous_kernel(
                         ksgm,
                     )
                 if step % 2 == 0:
-                    m_k1_0.unlock(pipe=tla.arch.MTE2)
+                    m_k1_0.unlock(pipe=tla.pipes.MTE2)
                 else:
-                    m_k1_1.unlock(pipe=tla.arch.MTE2)
+                    m_k1_1.unlock(pipe=tla.pipes.MTE2)
             if pi >= 0:
                 if pi % 2 == 0:
-                    m_v1_0.lock(pipe=tla.arch.MTE2)
+                    m_v1_0.lock(pipe=tla.pipes.MTE2)
                 else:
-                    m_v1_1.lock(pipe=tla.arch.MTE2)
+                    m_v1_1.lock(pipe=tla.pipes.MTE2)
                 preload_vlong = tla.make_tensor_like(
                     v1p + (pi % 2) * bn * dv, v1, tla.arch.nZ
                 )
@@ -3232,15 +3232,15 @@ def quant_block_sparse_attention_continuous_kernel(
                         long_vsgm,
                     )
                 if pi % 2 == 0:
-                    m_v1_0.unlock(pipe=tla.arch.MTE2)
+                    m_v1_0.unlock(pipe=tla.pipes.MTE2)
                 else:
-                    m_v1_1.unlock(pipe=tla.arch.MTE2)
+                    m_v1_1.unlock(pipe=tla.pipes.MTE2)
             if step < total_tiles:
                 if step % 2 == 0:
-                    m_k1_0.lock(pipe=tla.arch.MTE1)
+                    m_k1_0.lock(pipe=tla.pipes.MTE1)
                 else:
-                    m_k1_1.lock(pipe=tla.arch.MTE1)
-                m_k0.lock(pipe=tla.arch.MTE1)
+                    m_k1_1.lock(pipe=tla.pipes.MTE1)
+                m_k0.lock(pipe=tla.pipes.MTE1)
                 current_k0 = tla.make_tensor_like(k0p, k0, tla.arch.zN)
                 read_k1 = tla.make_tensor_like(
                     k1p + (step % 2) * bn * dim, k1, tla.arch.zN
@@ -3250,38 +3250,38 @@ def quant_block_sparse_attention_continuous_kernel(
                 )
                 tla.copy(current_k0, read_k1, scale=read_ks1)
                 if step % 2 == 0:
-                    m_k1_0.unlock(pipe=tla.arch.MTE1)
+                    m_k1_0.unlock(pipe=tla.pipes.MTE1)
                 else:
-                    m_k1_1.unlock(pipe=tla.arch.MTE1)
-                m_k0.unlock(pipe=tla.arch.MTE1)
-                m_k0.lock(pipe=tla.arch.CUBE)
+                    m_k1_1.unlock(pipe=tla.pipes.MTE1)
+                m_k0.unlock(pipe=tla.pipes.MTE1)
+                m_k0.lock(pipe=tla.pipes.CUBE)
                 if step % 2 == 0:
-                    m_s0_0.lock(pipe=tla.arch.CUBE)
+                    m_s0_0.lock(pipe=tla.pipes.CUBE)
                 else:
-                    m_s0_1.lock(pipe=tla.arch.CUBE)
+                    m_s0_1.lock(pipe=tla.pipes.CUBE)
                 current_s0 = tla.make_tensor_like(
                     s0p + (step % 2) * bm * bn, s0, tla.arch.L0Clayout
                 )
                 tla.mmad_mx(current_s0, current_k0, q0, init_c=True)
-                m_k0.unlock(pipe=tla.arch.CUBE)
+                m_k0.unlock(pipe=tla.pipes.CUBE)
                 if step % 2 == 0:
-                    m_s0_0.unlock(pipe=tla.arch.CUBE)
+                    m_s0_0.unlock(pipe=tla.pipes.CUBE)
                 else:
-                    m_s0_1.unlock(pipe=tla.arch.CUBE)
+                    m_s0_1.unlock(pipe=tla.pipes.CUBE)
                 if qtile == selected - 1:
-                    m_q0.unlock(pipe=tla.arch.CUBE)
+                    m_q0.unlock(pipe=tla.pipes.CUBE)
             if pi >= 0:
                 if pi >= 0:
                     if pi % 2 == 0:
-                        m_v1_0.lock(pipe=tla.arch.MTE1)
+                        m_v1_0.lock(pipe=tla.pipes.MTE1)
                     else:
-                        m_v1_1.lock(pipe=tla.arch.MTE1)
+                        m_v1_1.lock(pipe=tla.pipes.MTE1)
                 if ptile % group == 0:
-                    tla.cross_core_wait_flag(psready, tla.arch.MTE1)
+                    tla.cross_core_wait_flag(psready, tla.pipes.MTE1)
                 if pi % 2 == 0:
-                    m_pv_0.lock(pipe=tla.arch.MTE1)
+                    m_pv_0.lock(pipe=tla.pipes.MTE1)
                 else:
-                    m_pv_1.lock(pipe=tla.arch.MTE1)
+                    m_pv_1.lock(pipe=tla.pipes.MTE1)
                 pv_v0 = tla.make_tensor_like(v0p + (pi % 2) * bn * dv, v0, tla.arch.zN)
                 pv_p0 = tla.make_tensor_like(p0p + (pi % 2) * bm * bn, p0, tla.arch.nZ)
                 read_v1 = tla.make_tensor_like(
@@ -3307,62 +3307,62 @@ def quant_block_sparse_attention_continuous_kernel(
                 )
                 tla.copy(pv_p0, read_p1, scale=read_ps1)
                 if pi % 2 == 0:
-                    m_v1_0.unlock(pipe=tla.arch.MTE1)
+                    m_v1_0.unlock(pipe=tla.pipes.MTE1)
                 else:
-                    m_v1_1.unlock(pipe=tla.arch.MTE1)
-                tla.cross_core_set_flag(pfree, tla.arch.MTE1)
+                    m_v1_1.unlock(pipe=tla.pipes.MTE1)
+                tla.cross_core_set_flag(pfree, tla.pipes.MTE1)
                 if pi % 2 == 0:
-                    m_pv_0.unlock(pipe=tla.arch.MTE1)
-                    m_pv_0.lock(pipe=tla.arch.CUBE)
+                    m_pv_0.unlock(pipe=tla.pipes.MTE1)
+                    m_pv_0.lock(pipe=tla.pipes.CUBE)
                 else:
-                    m_pv_1.unlock(pipe=tla.arch.MTE1)
-                    m_pv_1.lock(pipe=tla.arch.CUBE)
+                    m_pv_1.unlock(pipe=tla.pipes.MTE1)
+                    m_pv_1.lock(pipe=tla.pipes.CUBE)
                 if ptile % group == 0:
-                    m_o0.lock(pipe=tla.arch.CUBE)
+                    m_o0.lock(pipe=tla.pipes.CUBE)
                 tla.mmad_mx(o0, pv_v0, pv_p0, init_c=ptile % group == 0)
                 if pi % 2 == 0:
-                    m_pv_0.unlock(pipe=tla.arch.CUBE)
+                    m_pv_0.unlock(pipe=tla.pipes.CUBE)
                 else:
-                    m_pv_1.unlock(pipe=tla.arch.CUBE)
+                    m_pv_1.unlock(pipe=tla.pipes.CUBE)
                 if ptile % group == group - 1 or ptile == selected - 1:
-                    m_o0.unlock(pipe=tla.arch.CUBE)
+                    m_o0.unlock(pipe=tla.pipes.CUBE)
             if step < total_tiles:
                 if step % 2 == 0:
-                    m_s0_0.lock(pipe=tla.arch.FIX)
+                    m_s0_0.lock(pipe=tla.pipes.FIX)
                 else:
-                    m_s0_1.lock(pipe=tla.arch.FIX)
+                    m_s0_1.lock(pipe=tla.pipes.FIX)
                 if step % 2 == 0:
-                    tla.cross_core_wait_flag(sr, tla.arch.FIX)
+                    tla.cross_core_wait_flag(sr, tla.pipes.FIX)
                 else:
-                    tla.cross_core_wait_flag(sr_second, tla.arch.FIX)
+                    tla.cross_core_wait_flag(sr_second, tla.pipes.FIX)
                 mx_score_fix(
                     sp + (step % 2) * 2 * half * bn, s0p + (step % 2) * bm * bn, scale
                 )
                 if step % 2 == 0:
-                    tla.cross_core_set_flag(sr, tla.arch.FIX)
+                    tla.cross_core_set_flag(sr, tla.pipes.FIX)
                 else:
-                    tla.cross_core_set_flag(sr_second, tla.arch.FIX)
+                    tla.cross_core_set_flag(sr_second, tla.pipes.FIX)
                 if step % 2 == 0:
-                    m_s0_0.unlock(pipe=tla.arch.FIX)
+                    m_s0_0.unlock(pipe=tla.pipes.FIX)
                 else:
-                    m_s0_1.unlock(pipe=tla.arch.FIX)
+                    m_s0_1.unlock(pipe=tla.pipes.FIX)
             if pi >= 0:
                 if ptile % group == group - 1 or ptile == selected - 1:
-                    m_o0.lock(pipe=tla.arch.FIX)
-                    tla.cross_core_wait_flag(ore, tla.arch.FIX)
+                    m_o0.lock(pipe=tla.pipes.FIX)
+                    tla.cross_core_wait_flag(ore, tla.pipes.FIX)
                     if ptile < group:
                         tla.copy(afix, o0, split_o)
                     else:
                         tla.copy(ofix, o0, split_o)
-                    tla.cross_core_set_flag(ore, tla.arch.FIX)
-                    m_o0.unlock(pipe=tla.arch.FIX)
+                    tla.cross_core_set_flag(ore, tla.pipes.FIX)
+                    m_o0.unlock(pipe=tla.pipes.FIX)
         with tla.vector():
             if step < total_tiles:
                 if step % 2 == 0:
-                    tla.cross_core_wait_flag(sr, tla.arch.VECTOR)
+                    tla.cross_core_wait_flag(sr, tla.pipes.VECTOR)
                 else:
-                    tla.cross_core_wait_flag(sr_second, tla.arch.VECTOR)
-                m_pp.lock(pipe=tla.arch.VECTOR)
+                    tla.cross_core_wait_flag(sr_second, tla.pipes.VECTOR)
+                m_pp.lock(pipe=tla.pipes.VECTOR)
                 if qtile % group == 0:
                     _mx_group_scales_basic(psp, qmp, lp, rp, gp, -1)
                 _mx_group_softmax_store_basic(
@@ -3377,14 +3377,14 @@ def quant_block_sparse_attention_continuous_kernel(
                     qcols,
                 )
                 if step % 2 == 0:
-                    tla.cross_core_set_flag(sr, tla.arch.VECTOR)
+                    tla.cross_core_set_flag(sr, tla.pipes.VECTOR)
                 else:
-                    tla.cross_core_set_flag(sr_second, tla.arch.VECTOR)
+                    tla.cross_core_set_flag(sr_second, tla.pipes.VECTOR)
             if pi >= 0:
-                tla.cross_core_wait_flag(pfree, tla.arch.MTE3)
+                tla.cross_core_wait_flag(pfree, tla.pipes.MTE3)
             if step < total_tiles:
-                m_pp.unlock(pipe=tla.arch.VECTOR)
-                m_pp.lock(pipe=tla.arch.MTE3)
+                m_pp.unlock(pipe=tla.pipes.VECTOR)
+                m_pp.lock(pipe=tla.pipes.MTE3)
                 write_p = tla.make_tensor_like(
                     tla.recast_ptr(p1p + (step % ring) * bm * bn, dtype=tla.Float16),
                     p1storage,
@@ -3400,11 +3400,11 @@ def quant_block_sparse_attention_continuous_kernel(
                         pu, tla.make_shape(bn, half // 2), tla.make_coord(0, 0)
                     ),
                 )
-                m_pp.unlock(pipe=tla.arch.MTE3)
+                m_pp.unlock(pipe=tla.pipes.MTE3)
                 if qtile % group == group - 1 or qtile == selected - 1:
                     group_count = qtile % group + 1
                     group_start = step - qtile % group
-                    m_ps.lock(pipe=tla.arch.VECTOR)
+                    m_ps.lock(pipe=tla.pipes.VECTOR)
                     _mx_group_scales_basic(
                         psp,
                         qmp,
@@ -3421,14 +3421,14 @@ def quant_block_sparse_attention_continuous_kernel(
                         gp,
                         group_count,
                     )
-                    m_ps.unlock(pipe=tla.arch.VECTOR)
-                    m_ps.lock(pipe=tla.arch.MTE3)
+                    m_ps.unlock(pipe=tla.pipes.VECTOR)
+                    m_ps.lock(pipe=tla.pipes.MTE3)
                     mx_ps64_to_l1(ps1p, psp, group_start % ring, group_count, ring, sub)
-                    m_ps.unlock(pipe=tla.arch.MTE3)
-                    tla.cross_core_set_flag(psready, tla.arch.MTE3)
+                    m_ps.unlock(pipe=tla.pipes.MTE3)
+                    tla.cross_core_set_flag(psready, tla.pipes.MTE3)
             if pi >= 0:
                 if ptile % group == group - 1 or ptile == selected - 1:
-                    tla.cross_core_wait_flag(ore, tla.arch.VECTOR)
+                    tla.cross_core_wait_flag(ore, tla.pipes.VECTOR)
                     if ptile >= group:
                         mx_epilogue(
                             ap,
@@ -3452,7 +3452,7 @@ def quant_block_sparse_attention_continuous_kernel(
                             od_code,
                         )
                     if ptile == selected - 1:
-                        m_out.lock(pipe=tla.arch.VECTOR)
+                        m_out.lock(pipe=tla.pipes.VECTOR)
                         mx_epilogue(
                             ap,
                             op,
@@ -3466,9 +3466,9 @@ def quant_block_sparse_attention_continuous_kernel(
                             2,
                             od_code,
                         )
-                        m_out.unlock(pipe=tla.arch.VECTOR)
+                        m_out.unlock(pipe=tla.pipes.VECTOR)
                         if valid > 0:
-                            m_out.lock(pipe=tla.arch.MTE3)
+                            m_out.lock(pipe=tla.pipes.MTE3)
                             ogm = tla.make_tensor(
                                 out.ptr + pqbase + sub * half * dim,
                                 tla.make_layout(
@@ -3494,12 +3494,12 @@ def quant_block_sparse_attention_continuous_kernel(
                                         eu, tla.make_shape(valid), tla.make_coord(0)
                                     ),
                                 )
-                            m_out.unlock(pipe=tla.arch.MTE3)
-                    tla.cross_core_set_flag(ore, tla.arch.VECTOR)
+                            m_out.unlock(pipe=tla.pipes.MTE3)
+                    tla.cross_core_set_flag(ore, tla.pipes.VECTOR)
     with tla.cube():
-        tla.cross_core_wait_flag(sr, tla.arch.FIX)
-        tla.cross_core_wait_flag(sr_second, tla.arch.FIX)
-        tla.cross_core_wait_flag(ore, tla.arch.FIX)
+        tla.cross_core_wait_flag(sr, tla.pipes.FIX)
+        tla.cross_core_wait_flag(sr_second, tla.pipes.FIX)
+        tla.cross_core_wait_flag(ore, tla.pipes.FIX)
 
 
 # Attention kernel: pipeline_short.
@@ -3679,14 +3679,14 @@ def quant_block_sparse_attention_short_kernel(
     padready = tla.cross_flag("pad_ready")
     split_o = tla.params.CopyL0C2DstParams(l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_N)
     with tla.vector():
-        m_pp.lock(pipe=tla.arch.VECTOR)
+        m_pp.lock(pipe=tla.pipes.VECTOR)
         mx_zero_ub(pp, half * (bn + 1))
-        m_pp.unlock(pipe=tla.arch.VECTOR)
-        m_pad.lock(pipe=tla.arch.VECTOR)
+        m_pp.unlock(pipe=tla.pipes.VECTOR)
+        m_pad.lock(pipe=tla.pipes.VECTOR)
         mx_pad(padp, pads)
-        m_pad.unlock(pipe=tla.arch.VECTOR)
-        m_pad.lock(pipe=tla.arch.MTE3)
-        m_pp.lock(pipe=tla.arch.MTE3)
+        m_pad.unlock(pipe=tla.pipes.VECTOR)
+        m_pad.lock(pipe=tla.pipes.MTE3)
+        m_pp.lock(pipe=tla.pipes.MTE3)
         if tla.arch.sub_block_idx() == 0:
             mx_zero_scale_l1(ks1p, pp, 2 * bn * (dim // 32))
             mx_zero_scale_l1(vs1p, pp, vring * dv * 4)
@@ -3718,13 +3718,13 @@ def quant_block_sparse_attention_short_kernel(
                         ),
                         padsu,
                     )
-        m_pp.unlock(pipe=tla.arch.MTE3)
-        m_pad.unlock(pipe=tla.arch.MTE3)
-        tla.cross_core_set_flag(padready, tla.arch.MTE3)
-        tla.cross_core_set_flag(sr, tla.arch.VECTOR)
-        tla.cross_core_set_flag(ore, tla.arch.VECTOR)
+        m_pp.unlock(pipe=tla.pipes.MTE3)
+        m_pad.unlock(pipe=tla.pipes.MTE3)
+        tla.cross_core_set_flag(padready, tla.pipes.MTE3)
+        tla.cross_core_set_flag(sr, tla.pipes.VECTOR)
+        tla.cross_core_set_flag(ore, tla.pipes.VECTOR)
     with tla.cube():
-        tla.cross_core_wait_flag(padready, tla.arch.MTE2)
+        tla.cross_core_wait_flag(padready, tla.pipes.MTE2)
     blocks = (nq + xb - 1) // xb
     subtiles = xb // qm
     total = batch * hq * blocks * subtiles
@@ -3765,7 +3765,7 @@ def quant_block_sparse_attention_short_kernel(
                         layoutTag=tla.arch.ColumnMajor,
                     ),
                 )
-                m_q1.lock(pipe=tla.arch.MTE2)
+                m_q1.lock(pipe=tla.pipes.MTE2)
                 tla.copy(
                     tla.tile_view(q1, tla.make_shape(dim, rows), tla.make_coord(0, 0)),
                     qgm,
@@ -3779,17 +3779,17 @@ def quant_block_sparse_attention_short_kernel(
                     ),
                     qsgm,
                 )
-                m_q1.unlock(pipe=tla.arch.MTE2)
-                m_q1.lock(pipe=tla.arch.MTE1)
-                m_q0.lock(pipe=tla.arch.MTE1)
+                m_q1.unlock(pipe=tla.pipes.MTE2)
+                m_q1.lock(pipe=tla.pipes.MTE1)
+                m_q0.lock(pipe=tla.pipes.MTE1)
                 tla.copy(q0, q1, scale=qs1)
-                m_q0.unlock(pipe=tla.arch.MTE1)
-                m_q1.unlock(pipe=tla.arch.MTE1)
+                m_q0.unlock(pipe=tla.pipes.MTE1)
+                m_q1.unlock(pipe=tla.pipes.MTE1)
             with tla.vector():
                 _mx_group_scales_basic(psp, mp, lp, rp, gp, -2)
             if selected > 0 and selected <= 1:
                 with tla.cube():
-                    m_v1s.lock(pipe=tla.arch.MTE2)
+                    m_v1s.lock(pipe=tla.pipes.MTE2)
             qlast = tla.as_numeric(-1)
             vlast = tla.as_numeric(-1)
             for step in tla.range_constexpr(selected + delay):
@@ -3829,9 +3829,9 @@ def quant_block_sparse_attention_short_kernel(
                 with tla.cube():
                     if step < selected:
                         if step % 2 == 0:
-                            m_k1_0.lock(pipe=tla.arch.MTE2)
+                            m_k1_0.lock(pipe=tla.pipes.MTE2)
                         else:
-                            m_k1_1.lock(pipe=tla.arch.MTE2)
+                            m_k1_1.lock(pipe=tla.pipes.MTE2)
                         current_k1 = tla.make_tensor_like(
                             k1p + (step % 2) * bn * dim, k1, tla.arch.zN
                         )
@@ -3873,9 +3873,9 @@ def quant_block_sparse_attention_short_kernel(
                                 ksgm,
                             )
                         if step % 2 == 0:
-                            m_k1_0.unlock(pipe=tla.arch.MTE2)
+                            m_k1_0.unlock(pipe=tla.pipes.MTE2)
                         else:
-                            m_k1_1.unlock(pipe=tla.arch.MTE2)
+                            m_k1_1.unlock(pipe=tla.pipes.MTE2)
                     if selected <= 1:
                         if step < selected:
                             preload_v = tla.make_tensor_like(
@@ -3922,13 +3922,13 @@ def quant_block_sparse_attention_short_kernel(
                                     short_vsgm,
                                 )
                         if step == selected - 1:
-                            m_v1s.unlock(pipe=tla.arch.MTE2)
+                            m_v1s.unlock(pipe=tla.pipes.MTE2)
                     else:
                         if pi >= 0:
                             if pi % 2 == 0:
-                                m_v1_0.lock(pipe=tla.arch.MTE2)
+                                m_v1_0.lock(pipe=tla.pipes.MTE2)
                             else:
-                                m_v1_1.lock(pipe=tla.arch.MTE2)
+                                m_v1_1.lock(pipe=tla.pipes.MTE2)
                             preload_vlong = tla.make_tensor_like(
                                 v1p + (pi % 2) * bn * dv, v1, tla.arch.nZ
                             )
@@ -3974,18 +3974,18 @@ def quant_block_sparse_attention_short_kernel(
                                     long_vsgm,
                                 )
                             if pi % 2 == 0:
-                                m_v1_0.unlock(pipe=tla.arch.MTE2)
+                                m_v1_0.unlock(pipe=tla.pipes.MTE2)
                             else:
-                                m_v1_1.unlock(pipe=tla.arch.MTE2)
+                                m_v1_1.unlock(pipe=tla.pipes.MTE2)
                     if step < selected:
                         if step % 2 == 0:
-                            m_k1_0.lock(pipe=tla.arch.MTE1)
+                            m_k1_0.lock(pipe=tla.pipes.MTE1)
                         else:
-                            m_k1_1.lock(pipe=tla.arch.MTE1)
+                            m_k1_1.lock(pipe=tla.pipes.MTE1)
                         if step % 2 == 0:
-                            m_k0_0.lock(pipe=tla.arch.MTE1)
+                            m_k0_0.lock(pipe=tla.pipes.MTE1)
                         else:
-                            m_k0_1.lock(pipe=tla.arch.MTE1)
+                            m_k0_1.lock(pipe=tla.pipes.MTE1)
                         current_k0 = tla.make_tensor_like(
                             k0p + (step % 2) * bn * dim, k0, tla.arch.zN
                         )
@@ -3999,37 +3999,37 @@ def quant_block_sparse_attention_short_kernel(
                         )
                         tla.copy(current_k0, read_k1, scale=read_ks1)
                         if step % 2 == 0:
-                            m_k1_0.unlock(pipe=tla.arch.MTE1)
+                            m_k1_0.unlock(pipe=tla.pipes.MTE1)
                         else:
-                            m_k1_1.unlock(pipe=tla.arch.MTE1)
+                            m_k1_1.unlock(pipe=tla.pipes.MTE1)
                         if step % 2 == 0:
-                            m_k0_0.unlock(pipe=tla.arch.MTE1)
+                            m_k0_0.unlock(pipe=tla.pipes.MTE1)
                         else:
-                            m_k0_1.unlock(pipe=tla.arch.MTE1)
+                            m_k0_1.unlock(pipe=tla.pipes.MTE1)
                         if step % 2 == 0:
-                            m_k0_0.lock(pipe=tla.arch.CUBE)
+                            m_k0_0.lock(pipe=tla.pipes.CUBE)
                         else:
-                            m_k0_1.lock(pipe=tla.arch.CUBE)
-                        m_q0.lock(pipe=tla.arch.CUBE)
-                        m_s0.lock(pipe=tla.arch.CUBE)
+                            m_k0_1.lock(pipe=tla.pipes.CUBE)
+                        m_q0.lock(pipe=tla.pipes.CUBE)
+                        m_s0.lock(pipe=tla.pipes.CUBE)
                         tla.mmad_mx(s0, current_k0, q0, init_c=True)
-                        m_s0.unlock(pipe=tla.arch.CUBE)
-                        m_q0.unlock(pipe=tla.arch.CUBE)
+                        m_s0.unlock(pipe=tla.pipes.CUBE)
+                        m_q0.unlock(pipe=tla.pipes.CUBE)
                         if step % 2 == 0:
-                            m_k0_0.unlock(pipe=tla.arch.CUBE)
+                            m_k0_0.unlock(pipe=tla.pipes.CUBE)
                         else:
-                            m_k0_1.unlock(pipe=tla.arch.CUBE)
+                            m_k0_1.unlock(pipe=tla.pipes.CUBE)
                     if pi >= 0:
                         if selected > 1 or pi == 0:
                             if pi % 2 == 0 and selected > 1:
-                                m_v1_0.lock(pipe=tla.arch.MTE1)
+                                m_v1_0.lock(pipe=tla.pipes.MTE1)
                             elif selected > 1:
-                                m_v1_1.lock(pipe=tla.arch.MTE1)
+                                m_v1_1.lock(pipe=tla.pipes.MTE1)
                             else:
-                                m_v1s.lock(pipe=tla.arch.MTE1)
+                                m_v1s.lock(pipe=tla.pipes.MTE1)
                         if pi % group == 0:
-                            tla.cross_core_wait_flag(psready, tla.arch.MTE1)
-                        m_pv.lock(pipe=tla.arch.MTE1)
+                            tla.cross_core_wait_flag(psready, tla.pipes.MTE1)
+                        m_pv.lock(pipe=tla.pipes.MTE1)
                         read_v1 = tla.make_tensor_like(
                             v1p + (pi % vring) * bn * dv, v1, tla.arch.nZ
                         )
@@ -4056,40 +4056,40 @@ def quant_block_sparse_attention_short_kernel(
                         tla.copy(p0, read_p1, scale=read_ps1)
                         if selected > 1:
                             if pi % 2 == 0:
-                                m_v1_0.unlock(pipe=tla.arch.MTE1)
+                                m_v1_0.unlock(pipe=tla.pipes.MTE1)
                             else:
-                                m_v1_1.unlock(pipe=tla.arch.MTE1)
+                                m_v1_1.unlock(pipe=tla.pipes.MTE1)
                         elif pi == selected - 1:
-                            m_v1s.unlock(pipe=tla.arch.MTE1)
-                        tla.cross_core_set_flag(pfree, tla.arch.MTE1)
-                        m_pv.unlock(pipe=tla.arch.MTE1)
-                        m_pv.lock(pipe=tla.arch.CUBE)
+                            m_v1s.unlock(pipe=tla.pipes.MTE1)
+                        tla.cross_core_set_flag(pfree, tla.pipes.MTE1)
+                        m_pv.unlock(pipe=tla.pipes.MTE1)
+                        m_pv.lock(pipe=tla.pipes.CUBE)
                         if pi % group == 0:
-                            m_o0.lock(pipe=tla.arch.CUBE)
+                            m_o0.lock(pipe=tla.pipes.CUBE)
                         tla.mmad_mx(o0, v0, p0, init_c=pi % group == 0)
-                        m_pv.unlock(pipe=tla.arch.CUBE)
+                        m_pv.unlock(pipe=tla.pipes.CUBE)
                         if pi % group == group - 1 or pi == selected - 1:
-                            m_o0.unlock(pipe=tla.arch.CUBE)
+                            m_o0.unlock(pipe=tla.pipes.CUBE)
                     if step < selected:
-                        m_s0.lock(pipe=tla.arch.FIX)
-                        tla.cross_core_wait_flag(sr, tla.arch.FIX)
+                        m_s0.lock(pipe=tla.pipes.FIX)
+                        tla.cross_core_wait_flag(sr, tla.pipes.FIX)
                         mx_score_fix(sp, s0p, scale)
-                        tla.cross_core_set_flag(sr, tla.arch.FIX)
-                        m_s0.unlock(pipe=tla.arch.FIX)
+                        tla.cross_core_set_flag(sr, tla.pipes.FIX)
+                        m_s0.unlock(pipe=tla.pipes.FIX)
                     if pi >= 0:
                         if pi % group == group - 1 or pi == selected - 1:
-                            m_o0.lock(pipe=tla.arch.FIX)
-                            tla.cross_core_wait_flag(ore, tla.arch.FIX)
+                            m_o0.lock(pipe=tla.pipes.FIX)
+                            tla.cross_core_wait_flag(ore, tla.pipes.FIX)
                             if pi < group:
                                 tla.copy(afix, o0, split_o)
                             else:
                                 tla.copy(ofix, o0, split_o)
-                            tla.cross_core_set_flag(ore, tla.arch.FIX)
-                            m_o0.unlock(pipe=tla.arch.FIX)
+                            tla.cross_core_set_flag(ore, tla.pipes.FIX)
+                            m_o0.unlock(pipe=tla.pipes.FIX)
                 with tla.vector():
                     if step < selected:
-                        tla.cross_core_wait_flag(sr, tla.arch.VECTOR)
-                        m_pp.lock(pipe=tla.arch.VECTOR)
+                        tla.cross_core_wait_flag(sr, tla.pipes.VECTOR)
+                        m_pp.lock(pipe=tla.pipes.VECTOR)
                         if step % group == 0:
                             _mx_group_scales_basic(psp, mp, lp, rp, gp, -1)
                         _mx_group_softmax_store_basic(
@@ -4103,12 +4103,12 @@ def quant_block_sparse_attention_short_kernel(
                             scale,
                             qcols,
                         )
-                        tla.cross_core_set_flag(sr, tla.arch.VECTOR)
+                        tla.cross_core_set_flag(sr, tla.pipes.VECTOR)
                     if pi >= 0:
-                        tla.cross_core_wait_flag(pfree, tla.arch.MTE3)
+                        tla.cross_core_wait_flag(pfree, tla.pipes.MTE3)
                     if step < selected:
-                        m_pp.unlock(pipe=tla.arch.VECTOR)
-                        m_pp.lock(pipe=tla.arch.MTE3)
+                        m_pp.unlock(pipe=tla.pipes.VECTOR)
+                        m_pp.lock(pipe=tla.pipes.MTE3)
                         write_p = tla.make_tensor_like(
                             tla.recast_ptr(
                                 p1p + (step % ring) * bm * bn, dtype=tla.Float16
@@ -4128,11 +4128,11 @@ def quant_block_sparse_attention_short_kernel(
                                 tla.make_coord(0, 0),
                             ),
                         )
-                        m_pp.unlock(pipe=tla.arch.MTE3)
+                        m_pp.unlock(pipe=tla.pipes.MTE3)
                         if step % group == group - 1 or step == selected - 1:
                             group_count = step % group + 1
                             group_start = step - step % group
-                            m_ps.lock(pipe=tla.arch.VECTOR)
+                            m_ps.lock(pipe=tla.pipes.VECTOR)
                             _mx_group_scales_basic(
                                 psp,
                                 mp,
@@ -4141,8 +4141,8 @@ def quant_block_sparse_attention_short_kernel(
                                 gp,
                                 group_count,
                             )
-                            m_ps.unlock(pipe=tla.arch.VECTOR)
-                            m_ps.lock(pipe=tla.arch.MTE3)
+                            m_ps.unlock(pipe=tla.pipes.VECTOR)
+                            m_ps.lock(pipe=tla.pipes.MTE3)
                             for scale_slot in tla.range(group_count):
                                 write_ps = tla.make_tensor_like(
                                     tla.recast_ptr(
@@ -4168,11 +4168,11 @@ def quant_block_sparse_attention_short_kernel(
                                     ),
                                     read_ps,
                                 )
-                            m_ps.unlock(pipe=tla.arch.MTE3)
-                            tla.cross_core_set_flag(psready, tla.arch.MTE3)
+                            m_ps.unlock(pipe=tla.pipes.MTE3)
+                            tla.cross_core_set_flag(psready, tla.pipes.MTE3)
                     if pi >= 0:
                         if pi % group == group - 1 or pi == selected - 1:
-                            tla.cross_core_wait_flag(ore, tla.arch.VECTOR)
+                            tla.cross_core_wait_flag(ore, tla.pipes.VECTOR)
                             if pi >= group:
                                 mx_epilogue(
                                     ap,
@@ -4187,9 +4187,9 @@ def quant_block_sparse_attention_short_kernel(
                                     1,
                                     od_code,
                                 )
-                            tla.cross_core_set_flag(ore, tla.arch.VECTOR)
+                            tla.cross_core_set_flag(ore, tla.pipes.VECTOR)
             with tla.vector():
-                m_out.lock(pipe=tla.arch.VECTOR)
+                m_out.lock(pipe=tla.pipes.VECTOR)
                 if selected == 0:
                     mx_epilogue(
                         ap,
@@ -4217,9 +4217,9 @@ def quant_block_sparse_attention_short_kernel(
                     2,
                     od_code,
                 )
-                m_out.unlock(pipe=tla.arch.VECTOR)
+                m_out.unlock(pipe=tla.pipes.VECTOR)
                 if valid > 0:
-                    m_out.lock(pipe=tla.arch.MTE3)
+                    m_out.lock(pipe=tla.pipes.MTE3)
                     ogm = tla.make_tensor(
                         out.ptr + qbase + sub * half * dim,
                         tla.make_layout(
@@ -4241,10 +4241,10 @@ def quant_block_sparse_attention_short_kernel(
                             egm,
                             tla.tile_view(eu, tla.make_shape(valid), tla.make_coord(0)),
                         )
-                    m_out.unlock(pipe=tla.arch.MTE3)
+                    m_out.unlock(pipe=tla.pipes.MTE3)
     with tla.cube():
-        tla.cross_core_wait_flag(sr, tla.arch.FIX)
-        tla.cross_core_wait_flag(ore, tla.arch.FIX)
+        tla.cross_core_wait_flag(sr, tla.pipes.FIX)
+        tla.cross_core_wait_flag(ore, tla.pipes.FIX)
 
 
 # Runtime score bound for the fixed-exponent specialization.
@@ -4373,22 +4373,22 @@ def row_norm_kernel(
                 if rows - t * _NORM_TILE >= _NORM_TILE
                 else rows - t * _NORM_TILE
             )
-            mutex_x.lock(pipe=tla.arch.MTE2)
-            mutex_s.lock(pipe=tla.arch.MTE2)
+            mutex_x.lock(pipe=tla.pipes.MTE2)
+            mutex_s.lock(pipe=tla.pipes.MTE2)
             mx_guard_load(xp, x.ptr + t * _NORM_TILE * 128, count * 128)
             mx_guard_load(sp, scales.ptr + t * _NORM_TILE * 4, count * 4)
-            mutex_s.unlock(pipe=tla.arch.MTE2)
-            mutex_x.unlock(pipe=tla.arch.MTE2)
-            mutex_x.lock(pipe=tla.arch.VECTOR)
-            mutex_s.lock(pipe=tla.arch.VECTOR)
-            mutex_o.lock(pipe=tla.arch.VECTOR)
+            mutex_s.unlock(pipe=tla.pipes.MTE2)
+            mutex_x.unlock(pipe=tla.pipes.MTE2)
+            mutex_x.lock(pipe=tla.pipes.VECTOR)
+            mutex_s.lock(pipe=tla.pipes.VECTOR)
+            mutex_o.lock(pipe=tla.pipes.VECTOR)
             _mx_row_norm(xp, sp, op, count)
-            mutex_o.unlock(pipe=tla.arch.VECTOR)
-            mutex_s.unlock(pipe=tla.arch.VECTOR)
-            mutex_x.unlock(pipe=tla.arch.VECTOR)
-            mutex_o.lock(pipe=tla.arch.MTE3)
+            mutex_o.unlock(pipe=tla.pipes.VECTOR)
+            mutex_s.unlock(pipe=tla.pipes.VECTOR)
+            mutex_x.unlock(pipe=tla.pipes.VECTOR)
+            mutex_o.lock(pipe=tla.pipes.MTE3)
             mx_guard_store(out.ptr + t, op)
-            mutex_o.unlock(pipe=tla.arch.MTE3)
+            mutex_o.unlock(pipe=tla.pipes.MTE3)
 
 
 _NORM_EXECUTORS = {}

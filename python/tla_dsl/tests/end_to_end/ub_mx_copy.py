@@ -122,8 +122,8 @@ def make_kernel(bits, element_type, guard, rows, cols, src_pitch, dst_pitch, sto
                 layoutTag=tla.arch.RowMajor,
             ),
         )
-        ready = tla.flag("ready", tla.arch.MTE2, tla.arch.VECTOR)
-        done = tla.flag("done", tla.arch.VECTOR, tla.arch.MTE3)
+        ready = tla.flag("ready", tla.pipes.MTE2, tla.pipes.VECTOR)
+        done = tla.flag("done", tla.pipes.VECTOR, tla.pipes.MTE3)
         with tla.vector():
             tla.copy(source_buffer, source)
             tla.copy(destination_buffer, destination)

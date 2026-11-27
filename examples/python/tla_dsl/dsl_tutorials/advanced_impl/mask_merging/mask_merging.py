@@ -50,8 +50,8 @@ def mask_merging(
     ub_a = ub_like(mem_a)
     ub_b = ub_like(mem_b)
     output_buffer = ub_like(mem_out)
-    loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    done = tla.flag("done", tla.arch.VECTOR, tla.arch.MTE3)
+    loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    done = tla.flag("done", tla.pipes.VECTOR, tla.pipes.MTE3)
     with tla.vector():
         tla.copy(ub_a, mem_a)
         tla.copy(ub_b, mem_b)
@@ -77,8 +77,8 @@ def mask_merging_full(
 ) -> None:
     ub_b = ub_like(mem_b)
     output_buffer = ub_like(mem_out)
-    loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    done = tla.flag("done", tla.arch.VECTOR, tla.arch.MTE3)
+    loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    done = tla.flag("done", tla.pipes.VECTOR, tla.pipes.MTE3)
     with tla.vector():
         tla.copy(ub_b, mem_b)
         tla.copy(output_buffer, mem_initial)

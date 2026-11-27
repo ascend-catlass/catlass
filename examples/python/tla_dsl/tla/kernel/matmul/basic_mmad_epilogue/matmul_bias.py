@@ -76,31 +76,39 @@ def matmul_evg_bias_kernel(
     k = gm_a.origin_shape[1]
 
     # ---- soft-flags (cube pingpong) ----
-    l1a0_data_ready = tla.flag("l1a0_data_ready", tla.arch.MTE2, tla.arch.MTE1)
-    l1a1_data_ready = tla.flag("l1a1_data_ready", tla.arch.MTE2, tla.arch.MTE1)
-    l1b0_data_ready = tla.flag("l1b0_data_ready", tla.arch.MTE2, tla.arch.MTE1)
-    l1b1_data_ready = tla.flag("l1b1_data_ready", tla.arch.MTE2, tla.arch.MTE1)
-    l1a0_available = tla.flag("l1a0_available", tla.arch.MTE1, tla.arch.MTE2)
-    l1a1_available = tla.flag("l1a1_available", tla.arch.MTE1, tla.arch.MTE2)
-    l1b0_available = tla.flag("l1b0_available", tla.arch.MTE1, tla.arch.MTE2)
-    l1b1_available = tla.flag("l1b1_available", tla.arch.MTE1, tla.arch.MTE2)
-    l0a0_available = tla.flag("l0a0_available", tla.arch.CUBE, tla.arch.MTE1)
-    l0a1_available = tla.flag("l0a1_available", tla.arch.CUBE, tla.arch.MTE1)
-    l0b0_available = tla.flag("l0b0_available", tla.arch.CUBE, tla.arch.MTE1)
-    l0b1_available = tla.flag("l0b1_available", tla.arch.CUBE, tla.arch.MTE1)
-    l0_ab_data_ready = tla.flag("l0_ab_data_ready", tla.arch.MTE1, tla.arch.CUBE)
-    l0c_data_ready = tla.flag("l0c_data_ready", tla.arch.CUBE, tla.arch.FIX)
-    l0c_available = tla.flag("l0c_available", tla.arch.FIX, tla.arch.CUBE)
+    l1a0_data_ready = tla.flag("l1a0_data_ready", tla.pipes.MTE2, tla.pipes.MTE1)
+    l1a1_data_ready = tla.flag("l1a1_data_ready", tla.pipes.MTE2, tla.pipes.MTE1)
+    l1b0_data_ready = tla.flag("l1b0_data_ready", tla.pipes.MTE2, tla.pipes.MTE1)
+    l1b1_data_ready = tla.flag("l1b1_data_ready", tla.pipes.MTE2, tla.pipes.MTE1)
+    l1a0_available = tla.flag("l1a0_available", tla.pipes.MTE1, tla.pipes.MTE2)
+    l1a1_available = tla.flag("l1a1_available", tla.pipes.MTE1, tla.pipes.MTE2)
+    l1b0_available = tla.flag("l1b0_available", tla.pipes.MTE1, tla.pipes.MTE2)
+    l1b1_available = tla.flag("l1b1_available", tla.pipes.MTE1, tla.pipes.MTE2)
+    l0a0_available = tla.flag("l0a0_available", tla.pipes.CUBE, tla.pipes.MTE1)
+    l0a1_available = tla.flag("l0a1_available", tla.pipes.CUBE, tla.pipes.MTE1)
+    l0b0_available = tla.flag("l0b0_available", tla.pipes.CUBE, tla.pipes.MTE1)
+    l0b1_available = tla.flag("l0b1_available", tla.pipes.CUBE, tla.pipes.MTE1)
+    l0_ab_data_ready = tla.flag("l0_ab_data_ready", tla.pipes.MTE1, tla.pipes.CUBE)
+    l0c_data_ready = tla.flag("l0c_data_ready", tla.pipes.CUBE, tla.pipes.FIX)
+    l0c_available = tla.flag("l0c_available", tla.pipes.FIX, tla.pipes.CUBE)
 
     # ---- EVG/UB soft-flags ----
-    ub_aux0_data_ready = tla.flag("ub_aux0_data_ready", tla.arch.MTE2, tla.arch.VECTOR)
-    ub_aux1_data_ready = tla.flag("ub_aux1_data_ready", tla.arch.MTE2, tla.arch.VECTOR)
-    ub_out0_data_ready = tla.flag("ub_out0_data_ready", tla.arch.VECTOR, tla.arch.MTE3)
-    ub_out1_data_ready = tla.flag("ub_out1_data_ready", tla.arch.VECTOR, tla.arch.MTE3)
-    ub_aux0_available = tla.flag("ub_aux0_available", tla.arch.VECTOR, tla.arch.MTE2)
-    ub_aux1_available = tla.flag("ub_aux1_available", tla.arch.VECTOR, tla.arch.MTE2)
-    ub_out0_available = tla.flag("ub_out0_available", tla.arch.MTE3, tla.arch.VECTOR)
-    ub_out1_available = tla.flag("ub_out1_available", tla.arch.MTE3, tla.arch.VECTOR)
+    ub_aux0_data_ready = tla.flag(
+        "ub_aux0_data_ready", tla.pipes.MTE2, tla.pipes.VECTOR
+    )
+    ub_aux1_data_ready = tla.flag(
+        "ub_aux1_data_ready", tla.pipes.MTE2, tla.pipes.VECTOR
+    )
+    ub_out0_data_ready = tla.flag(
+        "ub_out0_data_ready", tla.pipes.VECTOR, tla.pipes.MTE3
+    )
+    ub_out1_data_ready = tla.flag(
+        "ub_out1_data_ready", tla.pipes.VECTOR, tla.pipes.MTE3
+    )
+    ub_aux0_available = tla.flag("ub_aux0_available", tla.pipes.VECTOR, tla.pipes.MTE2)
+    ub_aux1_available = tla.flag("ub_aux1_available", tla.pipes.VECTOR, tla.pipes.MTE2)
+    ub_out0_available = tla.flag("ub_out0_available", tla.pipes.MTE3, tla.pipes.VECTOR)
+    ub_out1_available = tla.flag("ub_out1_available", tla.pipes.MTE3, tla.pipes.VECTOR)
 
     # ---- cross-core flags ----
     # AIC FixPipe → set forward; AIV MTE2 → wait forward; every REVERSE_DEPTH tiles reverse.
@@ -369,12 +377,12 @@ def matmul_evg_bias_kernel(
                 )
 
             # Notify AIV that this MN tile is ready in GM workspace; reverse every REVERSE_DEPTH tiles.
-            tla.cross_core_set_flag(aic_finish, tla.arch.FIX)
+            tla.cross_core_set_flag(aic_finish, tla.pipes.FIX)
             per_core_tile_idx = (
                 block_linear - tla.arch.block_idx()
             ) // tla.arch.block_num()
             if (per_core_tile_idx + 1) % REVERSE_DEPTH == 0:
-                tla.cross_core_wait_flag(aic_finish_rv, tla.arch.FIX)
+                tla.cross_core_wait_flag(aic_finish_rv, tla.pipes.FIX)
 
         tla.wait_flag(l1a0_available)
         tla.wait_flag(l1a1_available)
@@ -443,12 +451,12 @@ def matmul_evg_bias_kernel(
 
             # Wait until AIC has written this tile to GM workspace (MTE2).
             # Every REVERSE_DEPTH tiles, set the reverse cross-core flag.
-            tla.cross_core_wait_flag(aic_finish, tla.arch.MTE2)
+            tla.cross_core_wait_flag(aic_finish, tla.pipes.MTE2)
             per_core_tile_idx = (
                 block_linear - tla.arch.block_idx()
             ) // tla.arch.block_num()
             if (per_core_tile_idx + 1) % REVERSE_DEPTH == 0:
-                tla.cross_core_set_flag(aic_finish_rv, tla.arch.MTE2)
+                tla.cross_core_set_flag(aic_finish_rv, tla.pipes.MTE2)
 
             gm_workspace_by_core = tla.tile_view(
                 gm_wks,

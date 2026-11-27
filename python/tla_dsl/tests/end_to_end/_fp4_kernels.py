@@ -46,8 +46,8 @@ def make_native_kernel(
 
     @tla.kernel
     def convert(source: tla.Tensor, dest: tla.Tensor):
-        loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.VECTOR)
-        done = tla.flag("done", tla.arch.VECTOR, tla.arch.MTE3)
+        loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+        done = tla.flag("done", tla.pipes.VECTOR, tla.pipes.MTE3)
         if tla.const_expr(direction == "narrow"):
             source_ub_ptr = tla.allocate(
                 compute_capacity, compute_type, tla.AddressSpace.ub, 256
@@ -250,8 +250,8 @@ def make_composed_kernel(
             packed_ub_ptr + GUARD,
             tla.make_layout(tla.make_shape(row_count * byte_pitch), tla.make_stride(1)),
         )
-        loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.VECTOR)
-        done = tla.flag("done", tla.arch.VECTOR, tla.arch.MTE3)
+        loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+        done = tla.flag("done", tla.pipes.VECTOR, tla.pipes.MTE3)
         with tla.vector():
             tla.copy(source_ub, source)
             tla.copy(destination_ub, destination)
@@ -457,8 +457,8 @@ def make_slot_kernel(
                 tla.make_stride(1),
             ),
         )
-        ready = tla.flag("ready", tla.arch.MTE2, tla.arch.VECTOR)
-        done = tla.flag("done", tla.arch.VECTOR, tla.arch.MTE3)
+        ready = tla.flag("ready", tla.pipes.MTE2, tla.pipes.VECTOR)
+        done = tla.flag("done", tla.pipes.VECTOR, tla.pipes.MTE3)
         with tla.vector():
             tla.copy(source_buffer, source)
             tla.copy(destination_buffer, destination)

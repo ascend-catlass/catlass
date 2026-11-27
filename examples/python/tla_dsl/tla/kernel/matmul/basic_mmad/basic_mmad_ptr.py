@@ -47,9 +47,9 @@ L0C_BYTES = 32 * 32 * 4
 
 @tla.kernel
 def basic_mmad_ptr(lhs: tla.Tensor, rhs: tla.Tensor, out: tla.Tensor) -> None:
-    l0c_data_ready = tla.flag("l0c_data_ready", tla.arch.CUBE, tla.arch.FIX)
-    l1_loaded = tla.flag("l1_loaded", tla.arch.MTE2, tla.arch.MTE1)
-    l0_loaded = tla.flag("l0_loaded", tla.arch.MTE1, tla.arch.CUBE)
+    l0c_data_ready = tla.flag("l0c_data_ready", tla.pipes.CUBE, tla.pipes.FIX)
+    l1_loaded = tla.flag("l1_loaded", tla.pipes.MTE2, tla.pipes.MTE1)
+    l0_loaded = tla.flag("l0_loaded", tla.pipes.MTE1, tla.pipes.CUBE)
 
     l1a_ptr = tla.allocate(L1_M_DIM * L1_K_DIM, tla.Float32, tla.AddressSpace.l1, 512)
     l1b_ptr = tla.allocate(L1_K_DIM * L1_N_DIM, tla.Float32, tla.AddressSpace.l1, 512)

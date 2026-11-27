@@ -96,8 +96,8 @@ def make_kernel(type_name, iterations):
         output_layout = tla.make_layout(
             tla.make_shape(output_capacity), tla.make_stride(1)
         )
-        ready = tla.flag("ready", tla.arch.MTE2, tla.arch.VECTOR)
-        done = tla.flag("done", tla.arch.VECTOR, tla.arch.MTE3)
+        ready = tla.flag("ready", tla.pipes.MTE2, tla.pipes.VECTOR)
+        done = tla.flag("done", tla.pipes.VECTOR, tla.pipes.MTE3)
         with tla.vector():
             tla.copy(source_buffer, source)
             tla.set_flag(ready)

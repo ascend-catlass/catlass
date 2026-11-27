@@ -45,8 +45,8 @@ _KERNEL_DTYPE = tla.Float32
 def copy_with_l2_cache_hint(gm_src: tla.Tensor, gm_dst: tla.Tensor) -> None:
     """GM→UB→GM identity copy with DISABLE hint on the GM→UB copy."""
     n_ele = gm_src.origin_shape[0]
-    ub_loaded = tla.flag("ub_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    vec_done = tla.flag("vec_done", tla.arch.VECTOR, tla.arch.MTE3)
+    ub_loaded = tla.flag("ub_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    vec_done = tla.flag("vec_done", tla.pipes.VECTOR, tla.pipes.MTE3)
 
     ub_ptr = tla.allocate(VECTOR_ELE, _KERNEL_DTYPE, tla.AddressSpace.ub, 256)
     ub = tla.make_tensor_like(ub_ptr, gm_src, tla.arch.RowMajor)

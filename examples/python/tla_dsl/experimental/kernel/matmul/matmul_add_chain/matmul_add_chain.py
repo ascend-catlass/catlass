@@ -120,10 +120,10 @@ def matmul_add_chain_kernel(
                 )
                 l0_c = tla.make_tensor_like(l0c_ptr, gm_d_tile)
 
-                tla.cross_core_wait_flag(aiv_finish, tla.arch.FIX, aiv_id=0)
-                tla.cross_core_wait_flag(aiv_finish, tla.arch.FIX, aiv_id=1)
+                tla.cross_core_wait_flag(aiv_finish, tla.pipes.FIX, aiv_id=0)
+                tla.cross_core_wait_flag(aiv_finish, tla.pipes.FIX, aiv_id=1)
 
-                mutex_l0c.lock(pipe=tla.arch.CUBE)
+                mutex_l0c.lock(pipe=tla.pipes.CUBE)
 
                 for k_l1 in tla.range(c0, k1_l1_count, c1):
                     gm_a_l1 = tla.tile_view(
@@ -143,24 +143,24 @@ def matmul_add_chain_kernel(
                         l1b0_ptr if (l1_buf_idx == c0) else l1b1_ptr, gm_b_l1
                     )
                     if l1_buf_idx == c0:
-                        mutex_l1a0.lock(pipe=tla.arch.MTE2)
+                        mutex_l1a0.lock(pipe=tla.pipes.MTE2)
                     else:
-                        mutex_l1a1.lock(pipe=tla.arch.MTE2)
+                        mutex_l1a1.lock(pipe=tla.pipes.MTE2)
                     tla.copy(l1_a, gm_a_l1)
                     if l1_buf_idx == c0:
-                        mutex_l1a0.unlock(pipe=tla.arch.MTE2)
+                        mutex_l1a0.unlock(pipe=tla.pipes.MTE2)
                     else:
-                        mutex_l1a1.unlock(pipe=tla.arch.MTE2)
+                        mutex_l1a1.unlock(pipe=tla.pipes.MTE2)
 
                     if l1_buf_idx == c0:
-                        mutex_l1b0.lock(pipe=tla.arch.MTE2)
+                        mutex_l1b0.lock(pipe=tla.pipes.MTE2)
                     else:
-                        mutex_l1b1.lock(pipe=tla.arch.MTE2)
+                        mutex_l1b1.lock(pipe=tla.pipes.MTE2)
                     tla.copy(l1_b, gm_b_l1)
                     if l1_buf_idx == c0:
-                        mutex_l1b0.unlock(pipe=tla.arch.MTE2)
+                        mutex_l1b0.unlock(pipe=tla.pipes.MTE2)
                     else:
-                        mutex_l1b1.unlock(pipe=tla.arch.MTE2)
+                        mutex_l1b1.unlock(pipe=tla.pipes.MTE2)
 
                     k_l0_count = (l1_a.origin_shape[1] + _l0_tk - 1) // _l0_tk
                     for k_l0 in tla.range(c0, k_l0_count, c1):
@@ -182,50 +182,50 @@ def matmul_add_chain_kernel(
                         )
                         if k_l0 == 0:
                             if l1_buf_idx == c0:
-                                mutex_l1a0.lock(pipe=tla.arch.MTE1)
+                                mutex_l1a0.lock(pipe=tla.pipes.MTE1)
                             else:
-                                mutex_l1a1.lock(pipe=tla.arch.MTE1)
+                                mutex_l1a1.lock(pipe=tla.pipes.MTE1)
                         if l0_buf_idx == c0:
-                            mutex_l0a0.lock(pipe=tla.arch.MTE1)
+                            mutex_l0a0.lock(pipe=tla.pipes.MTE1)
                         else:
-                            mutex_l0a1.lock(pipe=tla.arch.MTE1)
+                            mutex_l0a1.lock(pipe=tla.pipes.MTE1)
                         tla.copy(l0_a, l1_a_l0)
                         if l0_buf_idx == c0:
-                            mutex_l0a0.unlock(pipe=tla.arch.MTE1)
+                            mutex_l0a0.unlock(pipe=tla.pipes.MTE1)
                         else:
-                            mutex_l0a1.unlock(pipe=tla.arch.MTE1)
+                            mutex_l0a1.unlock(pipe=tla.pipes.MTE1)
                         if k_l0 == k_l0_count - 1:
                             if l1_buf_idx == c0:
-                                mutex_l1a0.unlock(pipe=tla.arch.MTE1)
+                                mutex_l1a0.unlock(pipe=tla.pipes.MTE1)
                             else:
-                                mutex_l1a1.unlock(pipe=tla.arch.MTE1)
+                                mutex_l1a1.unlock(pipe=tla.pipes.MTE1)
 
                         if k_l0 == 0:
                             if l1_buf_idx == c0:
-                                mutex_l1b0.lock(pipe=tla.arch.MTE1)
+                                mutex_l1b0.lock(pipe=tla.pipes.MTE1)
                             else:
-                                mutex_l1b1.lock(pipe=tla.arch.MTE1)
+                                mutex_l1b1.lock(pipe=tla.pipes.MTE1)
                         if l0_buf_idx == c0:
-                            mutex_l0b0.lock(pipe=tla.arch.MTE1)
+                            mutex_l0b0.lock(pipe=tla.pipes.MTE1)
                         else:
-                            mutex_l0b1.lock(pipe=tla.arch.MTE1)
+                            mutex_l0b1.lock(pipe=tla.pipes.MTE1)
                         tla.copy(l0_b, l1_b_l0)
                         if l0_buf_idx == c0:
-                            mutex_l0b0.unlock(pipe=tla.arch.MTE1)
+                            mutex_l0b0.unlock(pipe=tla.pipes.MTE1)
                         else:
-                            mutex_l0b1.unlock(pipe=tla.arch.MTE1)
+                            mutex_l0b1.unlock(pipe=tla.pipes.MTE1)
                         if k_l0 == k_l0_count - 1:
                             if l1_buf_idx == c0:
-                                mutex_l1b0.unlock(pipe=tla.arch.MTE1)
+                                mutex_l1b0.unlock(pipe=tla.pipes.MTE1)
                             else:
-                                mutex_l1b1.unlock(pipe=tla.arch.MTE1)
+                                mutex_l1b1.unlock(pipe=tla.pipes.MTE1)
 
                         if l0_buf_idx == c0:
-                            mutex_l0a0.lock(pipe=tla.arch.CUBE)
-                            mutex_l0b0.lock(pipe=tla.arch.CUBE)
+                            mutex_l0a0.lock(pipe=tla.pipes.CUBE)
+                            mutex_l0b0.lock(pipe=tla.pipes.CUBE)
                         else:
-                            mutex_l0a1.lock(pipe=tla.arch.CUBE)
-                            mutex_l0b1.lock(pipe=tla.arch.CUBE)
+                            mutex_l0a1.lock(pipe=tla.pipes.CUBE)
+                            mutex_l0b1.lock(pipe=tla.pipes.CUBE)
 
                         unit_flag = 0
                         if (k_l1 == k1_l1_count - 1) and (k_l0 == k_l0_count - 1):
@@ -235,27 +235,27 @@ def matmul_add_chain_kernel(
                         init_c = True if k_l1 == 0 and k_l0 == 0 else False
                         tla.mmad(l0_c, l0_a, l0_b, init_c=init_c, unit_flag=unit_flag)
                         if l0_buf_idx == c0:
-                            mutex_l0a0.unlock(pipe=tla.arch.CUBE)
-                            mutex_l0b0.unlock(pipe=tla.arch.CUBE)
+                            mutex_l0a0.unlock(pipe=tla.pipes.CUBE)
+                            mutex_l0b0.unlock(pipe=tla.pipes.CUBE)
                         else:
-                            mutex_l0a1.unlock(pipe=tla.arch.CUBE)
-                            mutex_l0b1.unlock(pipe=tla.arch.CUBE)
+                            mutex_l0a1.unlock(pipe=tla.pipes.CUBE)
+                            mutex_l0b1.unlock(pipe=tla.pipes.CUBE)
                         l0_buf_idx = c1 - l0_buf_idx
                     l1_buf_idx = c1 - l1_buf_idx
 
-                mutex_l0c.unlock(pipe=tla.arch.CUBE)
-                mutex_l0c.lock(pipe=tla.arch.FIX)
+                mutex_l0c.unlock(pipe=tla.pipes.CUBE)
+                mutex_l0c.lock(pipe=tla.pipes.FIX)
                 tla.copy(
                     gm_d_tile,
                     l0_c,
                     tla.params.CopyL0C2DstParams(unit_flag=0b11),
                 )
-                mutex_l0c.unlock(pipe=tla.arch.FIX)
-                tla.cross_core_set_flag(aic_finish, tla.arch.FIX, aiv_id=0)
-                tla.cross_core_set_flag(aic_finish, tla.arch.FIX, aiv_id=1)
+                mutex_l0c.unlock(pipe=tla.pipes.FIX)
+                tla.cross_core_set_flag(aic_finish, tla.pipes.FIX, aiv_id=0)
+                tla.cross_core_set_flag(aic_finish, tla.pipes.FIX, aiv_id=1)
 
-            tla.cross_core_wait_flag(v1_published, tla.arch.MTE2, aiv_id=0)
-            tla.cross_core_wait_flag(v1_published, tla.arch.MTE2, aiv_id=1)
+            tla.cross_core_wait_flag(v1_published, tla.pipes.MTE2, aiv_id=0)
+            tla.cross_core_wait_flag(v1_published, tla.pipes.MTE2, aiv_id=1)
 
             gm_w_strip = tla.tile_view(
                 gm_wks, tla.make_shape(_tm, n1), tla.make_coord(m_tile, c0)
@@ -269,10 +269,10 @@ def matmul_add_chain_kernel(
                 )
                 l0_c2 = tla.make_tensor_like(l0c_ptr, gm_o_tile)
 
-                tla.cross_core_wait_flag(aiv_finish, tla.arch.FIX, aiv_id=0)
-                tla.cross_core_wait_flag(aiv_finish, tla.arch.FIX, aiv_id=1)
+                tla.cross_core_wait_flag(aiv_finish, tla.pipes.FIX, aiv_id=0)
+                tla.cross_core_wait_flag(aiv_finish, tla.pipes.FIX, aiv_id=1)
 
-                mutex_l0c.lock(pipe=tla.arch.CUBE)
+                mutex_l0c.lock(pipe=tla.pipes.CUBE)
 
                 for k2_l1 in tla.range(c0, k2_l1_count, c1):
                     gm_a2_l1 = tla.tile_view(
@@ -292,24 +292,24 @@ def matmul_add_chain_kernel(
                         l1b0_ptr if (l1_buf_idx == c0) else l1b1_ptr, gm_b2_l1
                     )
                     if l1_buf_idx == c0:
-                        mutex_l1a0.lock(pipe=tla.arch.MTE2)
+                        mutex_l1a0.lock(pipe=tla.pipes.MTE2)
                     else:
-                        mutex_l1a1.lock(pipe=tla.arch.MTE2)
+                        mutex_l1a1.lock(pipe=tla.pipes.MTE2)
                     tla.copy(l1_a2, gm_a2_l1)
                     if l1_buf_idx == c0:
-                        mutex_l1a0.unlock(pipe=tla.arch.MTE2)
+                        mutex_l1a0.unlock(pipe=tla.pipes.MTE2)
                     else:
-                        mutex_l1a1.unlock(pipe=tla.arch.MTE2)
+                        mutex_l1a1.unlock(pipe=tla.pipes.MTE2)
 
                     if l1_buf_idx == c0:
-                        mutex_l1b0.lock(pipe=tla.arch.MTE2)
+                        mutex_l1b0.lock(pipe=tla.pipes.MTE2)
                     else:
-                        mutex_l1b1.lock(pipe=tla.arch.MTE2)
+                        mutex_l1b1.lock(pipe=tla.pipes.MTE2)
                     tla.copy(l1_b2, gm_b2_l1)
                     if l1_buf_idx == c0:
-                        mutex_l1b0.unlock(pipe=tla.arch.MTE2)
+                        mutex_l1b0.unlock(pipe=tla.pipes.MTE2)
                     else:
-                        mutex_l1b1.unlock(pipe=tla.arch.MTE2)
+                        mutex_l1b1.unlock(pipe=tla.pipes.MTE2)
 
                     k2_l0_count = (l1_a2.origin_shape[1] + _l0_tk - 1) // _l0_tk
                     for k2_l0 in tla.range(c0, k2_l0_count, c1):
@@ -331,50 +331,50 @@ def matmul_add_chain_kernel(
                         )
                         if k2_l0 == 0:
                             if l1_buf_idx == c0:
-                                mutex_l1a0.lock(pipe=tla.arch.MTE1)
+                                mutex_l1a0.lock(pipe=tla.pipes.MTE1)
                             else:
-                                mutex_l1a1.lock(pipe=tla.arch.MTE1)
+                                mutex_l1a1.lock(pipe=tla.pipes.MTE1)
                         if l0_buf_idx == c0:
-                            mutex_l0a0.lock(pipe=tla.arch.MTE1)
+                            mutex_l0a0.lock(pipe=tla.pipes.MTE1)
                         else:
-                            mutex_l0a1.lock(pipe=tla.arch.MTE1)
+                            mutex_l0a1.lock(pipe=tla.pipes.MTE1)
                         tla.copy(l0_a2, l1_a2_l0)
                         if l0_buf_idx == c0:
-                            mutex_l0a0.unlock(pipe=tla.arch.MTE1)
+                            mutex_l0a0.unlock(pipe=tla.pipes.MTE1)
                         else:
-                            mutex_l0a1.unlock(pipe=tla.arch.MTE1)
+                            mutex_l0a1.unlock(pipe=tla.pipes.MTE1)
                         if k2_l0 == k2_l0_count - 1:
                             if l1_buf_idx == c0:
-                                mutex_l1a0.unlock(pipe=tla.arch.MTE1)
+                                mutex_l1a0.unlock(pipe=tla.pipes.MTE1)
                             else:
-                                mutex_l1a1.unlock(pipe=tla.arch.MTE1)
+                                mutex_l1a1.unlock(pipe=tla.pipes.MTE1)
 
                         if k2_l0 == 0:
                             if l1_buf_idx == c0:
-                                mutex_l1b0.lock(pipe=tla.arch.MTE1)
+                                mutex_l1b0.lock(pipe=tla.pipes.MTE1)
                             else:
-                                mutex_l1b1.lock(pipe=tla.arch.MTE1)
+                                mutex_l1b1.lock(pipe=tla.pipes.MTE1)
                         if l0_buf_idx == c0:
-                            mutex_l0b0.lock(pipe=tla.arch.MTE1)
+                            mutex_l0b0.lock(pipe=tla.pipes.MTE1)
                         else:
-                            mutex_l0b1.lock(pipe=tla.arch.MTE1)
+                            mutex_l0b1.lock(pipe=tla.pipes.MTE1)
                         tla.copy(l0_b2, l1_b2_l0)
                         if l0_buf_idx == c0:
-                            mutex_l0b0.unlock(pipe=tla.arch.MTE1)
+                            mutex_l0b0.unlock(pipe=tla.pipes.MTE1)
                         else:
-                            mutex_l0b1.unlock(pipe=tla.arch.MTE1)
+                            mutex_l0b1.unlock(pipe=tla.pipes.MTE1)
                         if k2_l0 == k2_l0_count - 1:
                             if l1_buf_idx == c0:
-                                mutex_l1b0.unlock(pipe=tla.arch.MTE1)
+                                mutex_l1b0.unlock(pipe=tla.pipes.MTE1)
                             else:
-                                mutex_l1b1.unlock(pipe=tla.arch.MTE1)
+                                mutex_l1b1.unlock(pipe=tla.pipes.MTE1)
 
                         if l0_buf_idx == c0:
-                            mutex_l0a0.lock(pipe=tla.arch.CUBE)
-                            mutex_l0b0.lock(pipe=tla.arch.CUBE)
+                            mutex_l0a0.lock(pipe=tla.pipes.CUBE)
+                            mutex_l0b0.lock(pipe=tla.pipes.CUBE)
                         else:
-                            mutex_l0a1.lock(pipe=tla.arch.CUBE)
-                            mutex_l0b1.lock(pipe=tla.arch.CUBE)
+                            mutex_l0a1.lock(pipe=tla.pipes.CUBE)
+                            mutex_l0b1.lock(pipe=tla.pipes.CUBE)
 
                         unit_flag2 = 0
                         if (k2_l1 == k2_l1_count - 1) and (k2_l0 == k2_l0_count - 1):
@@ -386,24 +386,24 @@ def matmul_add_chain_kernel(
                             l0_c2, l0_a2, l0_b2, init_c=init_c2, unit_flag=unit_flag2
                         )
                         if l0_buf_idx == c0:
-                            mutex_l0a0.unlock(pipe=tla.arch.CUBE)
-                            mutex_l0b0.unlock(pipe=tla.arch.CUBE)
+                            mutex_l0a0.unlock(pipe=tla.pipes.CUBE)
+                            mutex_l0b0.unlock(pipe=tla.pipes.CUBE)
                         else:
-                            mutex_l0a1.unlock(pipe=tla.arch.CUBE)
-                            mutex_l0b1.unlock(pipe=tla.arch.CUBE)
+                            mutex_l0a1.unlock(pipe=tla.pipes.CUBE)
+                            mutex_l0b1.unlock(pipe=tla.pipes.CUBE)
                         l0_buf_idx = c1 - l0_buf_idx
                     l1_buf_idx = c1 - l1_buf_idx
 
-                mutex_l0c.unlock(pipe=tla.arch.CUBE)
-                mutex_l0c.lock(pipe=tla.arch.FIX)
+                mutex_l0c.unlock(pipe=tla.pipes.CUBE)
+                mutex_l0c.lock(pipe=tla.pipes.FIX)
                 tla.copy(
                     gm_o_tile,
                     l0_c2,
                     tla.params.CopyL0C2DstParams(unit_flag=0b11),
                 )
-                mutex_l0c.unlock(pipe=tla.arch.FIX)
-                tla.cross_core_set_flag(aic_finish, tla.arch.FIX, aiv_id=0)
-                tla.cross_core_set_flag(aic_finish, tla.arch.FIX, aiv_id=1)
+                mutex_l0c.unlock(pipe=tla.pipes.FIX)
+                tla.cross_core_set_flag(aic_finish, tla.pipes.FIX, aiv_id=0)
+                tla.cross_core_set_flag(aic_finish, tla.pipes.FIX, aiv_id=1)
 
         tla.pipe_barrier(tla.pipes.ALL)
 
@@ -411,16 +411,16 @@ def matmul_add_chain_kernel(
         aiv_sub_idx = tla.arch.sub_block_idx()
         block_range = tla.range(tla.arch.block_idx(), grid_m, tla.arch.block_num())
 
-        tla.cross_core_set_flag(aiv_finish, tla.arch.VECTOR, aiv_id=0)
-        tla.cross_core_set_flag(aiv_finish, tla.arch.VECTOR, aiv_id=1)
+        tla.cross_core_set_flag(aiv_finish, tla.pipes.VECTOR, aiv_id=0)
+        tla.cross_core_set_flag(aiv_finish, tla.pipes.VECTOR, aiv_id=1)
 
         for block_linear in block_range:
             m_tile = block_linear
             ub_stage_idx = c0
 
             for n1i in tla.range(c0, n1_count, c1):
-                tla.cross_core_wait_flag(aic_finish, tla.arch.MTE2, aiv_id=0)
-                tla.cross_core_wait_flag(aic_finish, tla.arch.MTE2, aiv_id=1)
+                tla.cross_core_wait_flag(aic_finish, tla.pipes.MTE2, aiv_id=0)
+                tla.cross_core_wait_flag(aic_finish, tla.pipes.MTE2, aiv_id=1)
 
                 gm_x_tile = tla.tile_view(
                     gm_x1, tla.make_shape(_tm, _tn), tla.make_coord(m_tile, n1i)
@@ -484,19 +484,19 @@ def matmul_add_chain_kernel(
                     )
 
                     if use_ub_stage1:
-                        mutex_ub_aux1.lock(pipe=tla.arch.MTE2)
+                        mutex_ub_aux1.lock(pipe=tla.pipes.MTE2)
                     else:
-                        mutex_ub_aux0.lock(pipe=tla.arch.MTE2)
+                        mutex_ub_aux0.lock(pipe=tla.pipes.MTE2)
                     tla.copy(ub_acc, gm_acc_rt)
                     tla.copy(ub_addend, gm_x_rt)
                     if use_ub_stage1:
-                        mutex_ub_aux1.unlock(pipe=tla.arch.MTE2)
-                        mutex_ub_aux1.lock(pipe=tla.arch.VECTOR)
-                        mutex_ub_out1.lock(pipe=tla.arch.VECTOR)
+                        mutex_ub_aux1.unlock(pipe=tla.pipes.MTE2)
+                        mutex_ub_aux1.lock(pipe=tla.pipes.VECTOR)
+                        mutex_ub_out1.lock(pipe=tla.pipes.VECTOR)
                     else:
-                        mutex_ub_aux0.unlock(pipe=tla.arch.MTE2)
-                        mutex_ub_aux0.lock(pipe=tla.arch.VECTOR)
-                        mutex_ub_out0.lock(pipe=tla.arch.VECTOR)
+                        mutex_ub_aux0.unlock(pipe=tla.pipes.MTE2)
+                        mutex_ub_aux0.lock(pipe=tla.pipes.VECTOR)
+                        mutex_ub_out0.lock(pipe=tla.pipes.VECTOR)
 
                     with tla.vec.func(mode="simd"):
                         for row_i in tla.range(c0, tile_rows, c1):
@@ -525,31 +525,31 @@ def matmul_add_chain_kernel(
                                 )
 
                     if use_ub_stage1:
-                        mutex_ub_aux1.unlock(pipe=tla.arch.VECTOR)
-                        mutex_ub_out1.unlock(pipe=tla.arch.VECTOR)
-                        mutex_ub_out1.lock(pipe=tla.arch.MTE3)
+                        mutex_ub_aux1.unlock(pipe=tla.pipes.VECTOR)
+                        mutex_ub_out1.unlock(pipe=tla.pipes.VECTOR)
+                        mutex_ub_out1.lock(pipe=tla.pipes.MTE3)
                     else:
-                        mutex_ub_aux0.unlock(pipe=tla.arch.VECTOR)
-                        mutex_ub_out0.unlock(pipe=tla.arch.VECTOR)
-                        mutex_ub_out0.lock(pipe=tla.arch.MTE3)
+                        mutex_ub_aux0.unlock(pipe=tla.pipes.VECTOR)
+                        mutex_ub_out0.unlock(pipe=tla.pipes.VECTOR)
+                        mutex_ub_out0.lock(pipe=tla.pipes.MTE3)
                     tla.copy(gm_acc_rt, ub_result)
                     if use_ub_stage1:
-                        mutex_ub_out1.unlock(pipe=tla.arch.MTE3)
+                        mutex_ub_out1.unlock(pipe=tla.pipes.MTE3)
                     else:
-                        mutex_ub_out0.unlock(pipe=tla.arch.MTE3)
+                        mutex_ub_out0.unlock(pipe=tla.pipes.MTE3)
 
                     if tla.const_expr(_evg_stages >= 2):
                         ub_stage_idx = c1 - ub_stage_idx
 
-                tla.cross_core_set_flag(aiv_finish, tla.arch.VECTOR, aiv_id=0)
-                tla.cross_core_set_flag(aiv_finish, tla.arch.VECTOR, aiv_id=1)
+                tla.cross_core_set_flag(aiv_finish, tla.pipes.VECTOR, aiv_id=0)
+                tla.cross_core_set_flag(aiv_finish, tla.pipes.VECTOR, aiv_id=1)
 
-            tla.cross_core_set_flag(v1_published, tla.arch.MTE3, aiv_id=0)
-            tla.cross_core_set_flag(v1_published, tla.arch.MTE3, aiv_id=1)
+            tla.cross_core_set_flag(v1_published, tla.pipes.MTE3, aiv_id=0)
+            tla.cross_core_set_flag(v1_published, tla.pipes.MTE3, aiv_id=1)
 
             for n2i in tla.range(c0, n2_count, c1):
-                tla.cross_core_wait_flag(aic_finish, tla.arch.MTE2, aiv_id=0)
-                tla.cross_core_wait_flag(aic_finish, tla.arch.MTE2, aiv_id=1)
+                tla.cross_core_wait_flag(aic_finish, tla.pipes.MTE2, aiv_id=0)
+                tla.cross_core_wait_flag(aic_finish, tla.pipes.MTE2, aiv_id=1)
 
                 gm_x2_tile = tla.tile_view(
                     gm_x2, tla.make_shape(_tm, _tn), tla.make_coord(m_tile, n2i)
@@ -615,19 +615,19 @@ def matmul_add_chain_kernel(
                     )
 
                     if use_stage1_p2:
-                        mutex_ub_aux1.lock(pipe=tla.arch.MTE2)
+                        mutex_ub_aux1.lock(pipe=tla.pipes.MTE2)
                     else:
-                        mutex_ub_aux0.lock(pipe=tla.arch.MTE2)
+                        mutex_ub_aux0.lock(pipe=tla.pipes.MTE2)
                     tla.copy(ub_acc2, gm_acc2_rt)
                     tla.copy(ub_addend2, gm_x2_rt)
                     if use_stage1_p2:
-                        mutex_ub_aux1.unlock(pipe=tla.arch.MTE2)
-                        mutex_ub_aux1.lock(pipe=tla.arch.VECTOR)
-                        mutex_ub_out1.lock(pipe=tla.arch.VECTOR)
+                        mutex_ub_aux1.unlock(pipe=tla.pipes.MTE2)
+                        mutex_ub_aux1.lock(pipe=tla.pipes.VECTOR)
+                        mutex_ub_out1.lock(pipe=tla.pipes.VECTOR)
                     else:
-                        mutex_ub_aux0.unlock(pipe=tla.arch.MTE2)
-                        mutex_ub_aux0.lock(pipe=tla.arch.VECTOR)
-                        mutex_ub_out0.lock(pipe=tla.arch.VECTOR)
+                        mutex_ub_aux0.unlock(pipe=tla.pipes.MTE2)
+                        mutex_ub_aux0.lock(pipe=tla.pipes.VECTOR)
+                        mutex_ub_out0.lock(pipe=tla.pipes.VECTOR)
 
                     with tla.vec.func(mode="simd"):
                         for row2_i in tla.range(c0, tile_rows2, c1):
@@ -656,24 +656,24 @@ def matmul_add_chain_kernel(
                                 )
 
                     if use_stage1_p2:
-                        mutex_ub_aux1.unlock(pipe=tla.arch.VECTOR)
-                        mutex_ub_out1.unlock(pipe=tla.arch.VECTOR)
-                        mutex_ub_out1.lock(pipe=tla.arch.MTE3)
+                        mutex_ub_aux1.unlock(pipe=tla.pipes.VECTOR)
+                        mutex_ub_out1.unlock(pipe=tla.pipes.VECTOR)
+                        mutex_ub_out1.lock(pipe=tla.pipes.MTE3)
                     else:
-                        mutex_ub_aux0.unlock(pipe=tla.arch.VECTOR)
-                        mutex_ub_out0.unlock(pipe=tla.arch.VECTOR)
-                        mutex_ub_out0.lock(pipe=tla.arch.MTE3)
+                        mutex_ub_aux0.unlock(pipe=tla.pipes.VECTOR)
+                        mutex_ub_out0.unlock(pipe=tla.pipes.VECTOR)
+                        mutex_ub_out0.lock(pipe=tla.pipes.MTE3)
                     tla.copy(gm_acc2_rt, ub_result2)
                     if use_stage1_p2:
-                        mutex_ub_out1.unlock(pipe=tla.arch.MTE3)
+                        mutex_ub_out1.unlock(pipe=tla.pipes.MTE3)
                     else:
-                        mutex_ub_out0.unlock(pipe=tla.arch.MTE3)
+                        mutex_ub_out0.unlock(pipe=tla.pipes.MTE3)
 
                     if tla.const_expr(_evg_stages >= 2):
                         ub_stage_idx = c1 - ub_stage_idx
 
-                tla.cross_core_set_flag(aiv_finish, tla.arch.VECTOR, aiv_id=0)
-                tla.cross_core_set_flag(aiv_finish, tla.arch.VECTOR, aiv_id=1)
+                tla.cross_core_set_flag(aiv_finish, tla.pipes.VECTOR, aiv_id=0)
+                tla.cross_core_set_flag(aiv_finish, tla.pipes.VECTOR, aiv_id=1)
 
         tla.pipe_barrier(tla.pipes.ALL)
 

@@ -149,9 +149,9 @@ def _kernel(dtype, scale_column):
         c = tla.make_tensor(
             c_ptr, tla.make_layout_with_tag((m, n), tla.Float32, tla.arch.L0Clayout)
         )
-        filled = tla.flag("batch_filled", tla.arch.MTE2, tla.arch.MTE1)
-        loaded = tla.flag("batch_loaded", tla.arch.MTE1, tla.arch.CUBE)
-        consumed = tla.flag("batch_consumed", tla.arch.CUBE, tla.arch.MTE1)
+        filled = tla.flag("batch_filled", tla.pipes.MTE2, tla.pipes.MTE1)
+        loaded = tla.flag("batch_loaded", tla.pipes.MTE1, tla.pipes.CUBE)
+        consumed = tla.flag("batch_consumed", tla.pipes.CUBE, tla.pipes.MTE1)
         with tla.cube():
             all_a.fill(0)
             tla.copy(all_sa, unit_sa_gm)
@@ -324,9 +324,9 @@ def _kernel_b(dtype, scale_column):
         c = tla.make_tensor(
             cp, tla.make_layout_with_tag((m, extent), tla.Float32, tla.arch.L0Clayout)
         )
-        filled = tla.flag("batch_b_filled", tla.arch.MTE2, tla.arch.MTE1)
-        loaded = tla.flag("batch_b_loaded", tla.arch.MTE1, tla.arch.CUBE)
-        consumed = tla.flag("batch_b_consumed", tla.arch.CUBE, tla.arch.MTE1)
+        filled = tla.flag("batch_b_filled", tla.pipes.MTE2, tla.pipes.MTE1)
+        loaded = tla.flag("batch_b_loaded", tla.pipes.MTE1, tla.pipes.CUBE)
+        consumed = tla.flag("batch_b_consumed", tla.pipes.CUBE, tla.pipes.MTE1)
         with tla.cube():
             all_b.fill(0)
             tla.copy(all_s, unit_sb_gm)

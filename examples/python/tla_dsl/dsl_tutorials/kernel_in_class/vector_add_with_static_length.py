@@ -53,8 +53,8 @@ class VectorAddWithStaticLength:
 
     @tla.kernel
     def kernel(self, gm_a, gm_b, gm_c):
-        ub_loaded = tla.flag("ub_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-        vec_done = tla.flag("vec_done", tla.arch.VECTOR, tla.arch.MTE3)
+        ub_loaded = tla.flag("ub_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+        vec_done = tla.flag("vec_done", tla.pipes.VECTOR, tla.pipes.MTE3)
 
         ub_a = tla.make_tensor_like(
             tla.allocate(self.n_ele, tla.Float32, tla.AddressSpace.ub, 256),

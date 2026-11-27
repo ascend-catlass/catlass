@@ -248,12 +248,12 @@ def fafq_kernel(
     task_v_done = tla.cross_flag("task_v_done")
 
     with tla.cube():
-        tla.cross_core_set_flag(p_cross, tla.arch.MTE1)
-        tla.cross_core_set_flag(task_c_done, tla.arch.CUBE)
+        tla.cross_core_set_flag(p_cross, tla.pipes.MTE1)
+        tla.cross_core_set_flag(task_c_done, tla.pipes.CUBE)
     with tla.vector():
-        tla.cross_core_set_flag(s_cross, tla.arch.VECTOR)
-        tla.cross_core_set_flag(o_cross, tla.arch.VECTOR)
-        tla.cross_core_set_flag(task_v_done, tla.arch.VECTOR)
+        tla.cross_core_set_flag(s_cross, tla.pipes.VECTOR)
+        tla.cross_core_set_flag(o_cross, tla.pipes.VECTOR)
+        tla.cross_core_set_flag(task_v_done, tla.pipes.VECTOR)
 
     total_tasks = batch * hq * max_q_blocks
     for task in tla.range(tla.arch.block_idx(), total_tasks, tla.arch.block_num()):
@@ -291,9 +291,9 @@ def fafq_kernel(
                 tla.make_layout(tla.make_shape(Q_BLOCK, D), tla.make_stride(D, 1)),
             )
             with tla.cube():
-                tla.cross_core_wait_flag(task_v_done, tla.arch.CUBE)
+                tla.cross_core_wait_flag(task_v_done, tla.pipes.CUBE)
             with tla.vector():
-                tla.cross_core_wait_flag(task_c_done, tla.arch.VECTOR)
+                tla.cross_core_wait_flag(task_c_done, tla.pipes.VECTOR)
             with tla.vector():
                 sub0 = tla.arch.sub_block_idx()
                 m_half0 = (pipe_rows + 1) // 2
@@ -345,15 +345,15 @@ def fafq_kernel(
                 kv_off = (phys * PAGE) * hkv * D + kv_head * D
                 # ---- QK: Q x K^T -> S (FP8 MMAD, FP32 accumulate) ----
                 with tla.cube():
-                    mtx_q.lock(pipe=tla.arch.MTE2)
+                    mtx_q.lock(pipe=tla.pipes.MTE2)
                     l1_q_t2 = tla.make_tensor_like(l1_q, gm_q_t, tla.arch.zN)
                     tla.copy(l1_q_t2, gm_q_t)
-                    mtx_q.unlock(pipe=tla.arch.MTE2)
-                    mtx_q.lock(pipe=tla.arch.MTE1)
+                    mtx_q.unlock(pipe=tla.pipes.MTE2)
+                    mtx_q.lock(pipe=tla.pipes.MTE1)
                     l0a_q = tla.make_tensor_like(l0a, l1_q_t2, tla.arch.zN)
-                    mtx_l0a.lock(pipe=tla.arch.MTE1)
+                    mtx_l0a.lock(pipe=tla.pipes.MTE1)
                     tla.copy(l0a_q, l1_q_t2)
-                    mtx_l0a.unlock(pipe=tla.arch.MTE1)
+                    mtx_l0a.unlock(pipe=tla.pipes.MTE1)
                     gm_k_t = tla.make_tensor(
                         gm_k.ptr + kv_off,
                         tla.make_layout(
@@ -363,15 +363,15 @@ def fafq_kernel(
                         ),
                     )
                     l1_k_t = tla.make_tensor_like(l1_k, gm_k_t, tla.arch.nZ)
-                    mtx_k.lock(pipe=tla.arch.MTE2)
+                    mtx_k.lock(pipe=tla.pipes.MTE2)
                     tla.copy(l1_k_t, gm_k_t)
-                    mtx_k.unlock(pipe=tla.arch.MTE2)
+                    mtx_k.unlock(pipe=tla.pipes.MTE2)
                     l0b_k = tla.make_tensor_like(l0b, l1_k_t)
-                    mtx_l0b.lock(pipe=tla.arch.MTE1)
-                    mtx_k.lock(pipe=tla.arch.MTE1)
+                    mtx_l0b.lock(pipe=tla.pipes.MTE1)
+                    mtx_k.lock(pipe=tla.pipes.MTE1)
                     tla.copy(l0b_k, l1_k_t)
-                    mtx_l0b.unlock(pipe=tla.arch.MTE1)
-                    mtx_k.unlock(pipe=tla.arch.MTE1)
+                    mtx_l0b.unlock(pipe=tla.pipes.MTE1)
+                    mtx_k.unlock(pipe=tla.pipes.MTE1)
                     ub_s_full = tla.make_tensor(
                         ub_s,
                         tla.make_layout(
@@ -380,16 +380,16 @@ def fafq_kernel(
                         ),
                     )
                     l0c_s_t = tla.make_tensor_like(l0c_s, ub_s_full, tla.arch.L0Clayout)
-                    mtx_l0a.lock(pipe=tla.arch.CUBE)
-                    mtx_l0b.lock(pipe=tla.arch.CUBE)
-                    mtx_l0cs.lock(pipe=tla.arch.CUBE)
+                    mtx_l0a.lock(pipe=tla.pipes.CUBE)
+                    mtx_l0b.lock(pipe=tla.pipes.CUBE)
+                    mtx_l0cs.lock(pipe=tla.pipes.CUBE)
                     tla.mmad(l0c_s_t, l0a_q, l0b_k, init_c=True)
-                    mtx_l0a.unlock(pipe=tla.arch.CUBE)
-                    mtx_l0b.unlock(pipe=tla.arch.CUBE)
-                    mtx_q.unlock(pipe=tla.arch.MTE1)
-                    tla.cross_core_wait_flag(s_cross, tla.arch.FIX)
-                    mtx_l0cs.unlock(pipe=tla.arch.CUBE)
-                    mtx_l0cs.lock(pipe=tla.arch.FIX)
+                    mtx_l0a.unlock(pipe=tla.pipes.CUBE)
+                    mtx_l0b.unlock(pipe=tla.pipes.CUBE)
+                    mtx_q.unlock(pipe=tla.pipes.MTE1)
+                    tla.cross_core_wait_flag(s_cross, tla.pipes.FIX)
+                    mtx_l0cs.unlock(pipe=tla.pipes.CUBE)
+                    mtx_l0cs.lock(pipe=tla.pipes.FIX)
                     ub_s_view = tla.make_tensor(
                         ub_s,
                         tla.make_layout(
@@ -403,8 +403,8 @@ def fafq_kernel(
                             l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M
                         ),
                     )
-                    mtx_l0cs.unlock(pipe=tla.arch.FIX)
-                    tla.cross_core_set_flag(s_cross, tla.arch.FIX)
+                    mtx_l0cs.unlock(pipe=tla.pipes.FIX)
+                    tla.cross_core_set_flag(s_cross, tla.pipes.FIX)
 
                 # ---- online softmax + P quantize (AIV halves rows) ----
                 with tla.vector():
@@ -412,9 +412,9 @@ def fafq_kernel(
                     m_half = (pipe_rows + 1) // 2
                     m_sub = m_half if sub == 0 else pipe_rows - m_half
                     if m_sub > 0:
-                        tla.cross_core_wait_flag(s_cross, tla.arch.VECTOR)
-                        mtx_ubp.lock(pipe=tla.arch.VECTOR)
-                        mtx_sc.lock(pipe=tla.arch.MTE2)
+                        tla.cross_core_wait_flag(s_cross, tla.pipes.VECTOR)
+                        mtx_ubp.lock(pipe=tla.pipes.VECTOR)
+                        mtx_sc.lock(pipe=tla.pipes.MTE2)
                         gm_qs = tla.make_tensor(
                             gm_qscale.ptr + q_start + sub * m_half,
                             tla.make_layout(tla.make_shape(m_sub), tla.make_stride(1)),
@@ -439,8 +439,8 @@ def fafq_kernel(
                         )
                         tla.copy(ub_qs_t, gm_qs)
                         tla.copy(ub_ks_t, gm_ks)
-                        mtx_sc.unlock(pipe=tla.arch.MTE2)
-                        mtx_sc.lock(pipe=tla.arch.VECTOR)
+                        mtx_sc.unlock(pipe=tla.pipes.MTE2)
+                        mtx_sc.lock(pipe=tla.pipes.VECTOR)
                         ub_s_sub = tla.make_tensor(
                             ub_s,
                             tla.make_layout(
@@ -486,10 +486,10 @@ def fafq_kernel(
                             full_vis,
                             first,
                         )
-                        mtx_sc.unlock(pipe=tla.arch.VECTOR)
-                        tla.cross_core_set_flag(s_cross, tla.arch.VECTOR)
-                        mtx_ubp.unlock(pipe=tla.arch.VECTOR)
-                        mtx_ubp.lock(pipe=tla.arch.MTE3)
+                        mtx_sc.unlock(pipe=tla.pipes.VECTOR)
+                        tla.cross_core_set_flag(s_cross, tla.pipes.VECTOR)
+                        mtx_ubp.unlock(pipe=tla.pipes.VECTOR)
+                        mtx_ubp.lock(pipe=tla.pipes.MTE3)
                         l1_p_ref = tla.make_tensor(
                             ub_s,
                             tla.make_layout(
@@ -508,13 +508,13 @@ def fafq_kernel(
                             tla.make_shape(m_sub, PAGE),
                             tla.make_coord(0, 0),
                         )
-                        tla.cross_core_wait_flag(p_cross, tla.arch.MTE3)
+                        tla.cross_core_wait_flag(p_cross, tla.pipes.MTE3)
                         tla.copy(l1_p_tile, ub_p_send)
-                        mtx_ubp.unlock(pipe=tla.arch.MTE3)
-                        tla.cross_core_set_flag(p_cross, tla.arch.MTE3)
+                        mtx_ubp.unlock(pipe=tla.pipes.MTE3)
+                        tla.cross_core_set_flag(p_cross, tla.pipes.MTE3)
                     else:
-                        tla.cross_core_wait_flag(s_cross, tla.arch.VECTOR)
-                        tla.cross_core_set_flag(s_cross, tla.arch.VECTOR)
+                        tla.cross_core_wait_flag(s_cross, tla.pipes.VECTOR)
+                        tla.cross_core_set_flag(s_cross, tla.pipes.VECTOR)
 
                 # ---- PV: P x V -> O (FP8 MMAD, FP32 accumulate) ----
                 with tla.cube():
@@ -526,16 +526,16 @@ def fafq_kernel(
                         ),
                     )
                     l1_v_t = tla.make_tensor_like(l1_v, gm_v_t, tla.arch.zN)
-                    mtx_v.lock(pipe=tla.arch.MTE2)
+                    mtx_v.lock(pipe=tla.pipes.MTE2)
                     tla.copy(l1_v_t, gm_v_t)
-                    mtx_v.unlock(pipe=tla.arch.MTE2)
+                    mtx_v.unlock(pipe=tla.pipes.MTE2)
                     l0b_v = tla.make_tensor_like(l0b, l1_v_t, tla.arch.nZ)
-                    mtx_l0b.lock(pipe=tla.arch.MTE1)
-                    mtx_v.lock(pipe=tla.arch.MTE1)
+                    mtx_l0b.lock(pipe=tla.pipes.MTE1)
+                    mtx_v.lock(pipe=tla.pipes.MTE1)
                     tla.copy(l0b_v, l1_v_t)
-                    mtx_l0b.unlock(pipe=tla.arch.MTE1)
-                    mtx_v.unlock(pipe=tla.arch.MTE1)
-                    tla.cross_core_wait_flag(p_cross, tla.arch.MTE1)
+                    mtx_l0b.unlock(pipe=tla.pipes.MTE1)
+                    mtx_v.unlock(pipe=tla.pipes.MTE1)
+                    tla.cross_core_wait_flag(p_cross, tla.pipes.MTE1)
                     l1_p_ref2 = tla.make_tensor(
                         ub_s,
                         tla.make_layout(
@@ -545,10 +545,10 @@ def fafq_kernel(
                     )
                     l1_p_full2 = tla.make_tensor_like(l1_p, l1_p_ref2, tla.arch.zN)
                     l0a_p = tla.make_tensor_like(l0a, l1_p_full2, tla.arch.zN)
-                    mtx_l0a.lock(pipe=tla.arch.MTE1)
+                    mtx_l0a.lock(pipe=tla.pipes.MTE1)
                     tla.copy(l0a_p, l1_p_full2)
-                    mtx_l0a.unlock(pipe=tla.arch.MTE1)
-                    tla.cross_core_set_flag(p_cross, tla.arch.MTE1)
+                    mtx_l0a.unlock(pipe=tla.pipes.MTE1)
+                    tla.cross_core_set_flag(p_cross, tla.pipes.MTE1)
                     ub_o_full = tla.make_tensor(
                         ub_o,
                         tla.make_layout(
@@ -556,15 +556,15 @@ def fafq_kernel(
                         ),
                     )
                     l0c_o_t = tla.make_tensor_like(l0c_o, ub_o_full, tla.arch.L0Clayout)
-                    mtx_l0a.lock(pipe=tla.arch.CUBE)
-                    mtx_l0b.lock(pipe=tla.arch.CUBE)
-                    mtx_l0co.lock(pipe=tla.arch.CUBE)
+                    mtx_l0a.lock(pipe=tla.pipes.CUBE)
+                    mtx_l0b.lock(pipe=tla.pipes.CUBE)
+                    mtx_l0co.lock(pipe=tla.pipes.CUBE)
                     tla.mmad(l0c_o_t, l0a_p, l0b_v, init_c=True)
-                    mtx_l0a.unlock(pipe=tla.arch.CUBE)
-                    mtx_l0b.unlock(pipe=tla.arch.CUBE)
-                    tla.cross_core_wait_flag(o_cross, tla.arch.FIX)
-                    mtx_l0co.unlock(pipe=tla.arch.CUBE)
-                    mtx_l0co.lock(pipe=tla.arch.FIX)
+                    mtx_l0a.unlock(pipe=tla.pipes.CUBE)
+                    mtx_l0b.unlock(pipe=tla.pipes.CUBE)
+                    tla.cross_core_wait_flag(o_cross, tla.pipes.FIX)
+                    mtx_l0co.unlock(pipe=tla.pipes.CUBE)
+                    mtx_l0co.lock(pipe=tla.pipes.FIX)
                     ub_o_view = tla.make_tensor(
                         ub_o,
                         tla.make_layout(
@@ -578,8 +578,8 @@ def fafq_kernel(
                             l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M
                         ),
                     )
-                    mtx_l0co.unlock(pipe=tla.arch.FIX)
-                    tla.cross_core_set_flag(o_cross, tla.arch.FIX)
+                    mtx_l0co.unlock(pipe=tla.pipes.FIX)
+                    tla.cross_core_set_flag(o_cross, tla.pipes.FIX)
 
                 # ---- rescale: acc = acc*dm + O ----
                 with tla.vector():
@@ -587,7 +587,7 @@ def fafq_kernel(
                     m_half_r = (pipe_rows + 1) // 2
                     m_sub_r = m_half_r if sub_r == 0 else pipe_rows - m_half_r
                     if m_sub_r > 0:
-                        tla.cross_core_wait_flag(o_cross, tla.arch.VECTOR)
+                        tla.cross_core_wait_flag(o_cross, tla.pipes.VECTOR)
                         ub_o_sub = tla.make_tensor(
                             ub_o,
                             tla.make_layout(
@@ -674,20 +674,20 @@ def fafq_kernel(
                                 tla.params.MemType.VEC_STORE,
                                 tla.params.MemType.VEC_LOAD,
                             )
-                        tla.cross_core_set_flag(o_cross, tla.arch.VECTOR)
+                        tla.cross_core_set_flag(o_cross, tla.pipes.VECTOR)
                     else:
-                        tla.cross_core_wait_flag(o_cross, tla.arch.VECTOR)
-                        tla.cross_core_set_flag(o_cross, tla.arch.VECTOR)
+                        tla.cross_core_wait_flag(o_cross, tla.pipes.VECTOR)
+                        tla.cross_core_set_flag(o_cross, tla.pipes.VECTOR)
 
             with tla.cube():
-                tla.cross_core_set_flag(task_c_done, tla.arch.CUBE)
+                tla.cross_core_set_flag(task_c_done, tla.pipes.CUBE)
             # ---- final normalize + FP16 output ----
             with tla.vector():
                 sub_f = tla.arch.sub_block_idx()
                 m_half_f = (rows + 1) // 2
                 m_sub_f = m_half_f if sub_f == 0 else rows - m_half_f
                 if m_sub_f > 0:
-                    mtx_out.lock(pipe=tla.arch.VECTOR)
+                    mtx_out.lock(pipe=tla.pipes.VECTOR)
                     ub_acc_f = tla.make_tensor(
                         ub_acc,
                         tla.make_layout(tla.make_shape(HALF, D), tla.make_stride(D, 1)),
@@ -768,8 +768,8 @@ def fafq_kernel(
                             tla.params.MemType.VEC_STORE,
                             tla.params.MemType.VEC_LOAD,
                         )
-                    mtx_out.unlock(pipe=tla.arch.VECTOR)
-                    mtx_out.lock(pipe=tla.arch.MTE3)
+                    mtx_out.unlock(pipe=tla.pipes.VECTOR)
+                    mtx_out.lock(pipe=tla.pipes.MTE3)
                     gm_o = tla.make_tensor(
                         gm_out.ptr + (h * out_tokens + q_start + sub_f * m_half_f) * D,
                         tla.make_layout(
@@ -784,27 +784,27 @@ def fafq_kernel(
                         ),
                     )
                     tla.copy(gm_o, ub_out_g)
-                    mtx_out.unlock(pipe=tla.arch.MTE3)
+                    mtx_out.unlock(pipe=tla.pipes.MTE3)
             with tla.vector():
-                tla.cross_core_set_flag(task_v_done, tla.arch.VECTOR)
+                tla.cross_core_set_flag(task_v_done, tla.pipes.VECTOR)
 
     with tla.cube():
-        mtx_q.lock(pipe=tla.arch.MTE2)
-        mtx_k.lock(pipe=tla.arch.MTE2)
-        mtx_v.lock(pipe=tla.arch.MTE2)
-        mtx_l0a.lock(pipe=tla.arch.MTE1)
-        mtx_l0b.lock(pipe=tla.arch.MTE1)
-        mtx_l0cs.lock(pipe=tla.arch.CUBE)
-        mtx_l0co.lock(pipe=tla.arch.CUBE)
-        tla.cross_core_wait_flag(s_cross, tla.arch.FIX)
-        tla.cross_core_wait_flag(o_cross, tla.arch.FIX)
-        tla.cross_core_wait_flag(task_v_done, tla.arch.CUBE)
+        mtx_q.lock(pipe=tla.pipes.MTE2)
+        mtx_k.lock(pipe=tla.pipes.MTE2)
+        mtx_v.lock(pipe=tla.pipes.MTE2)
+        mtx_l0a.lock(pipe=tla.pipes.MTE1)
+        mtx_l0b.lock(pipe=tla.pipes.MTE1)
+        mtx_l0cs.lock(pipe=tla.pipes.CUBE)
+        mtx_l0co.lock(pipe=tla.pipes.CUBE)
+        tla.cross_core_wait_flag(s_cross, tla.pipes.FIX)
+        tla.cross_core_wait_flag(o_cross, tla.pipes.FIX)
+        tla.cross_core_wait_flag(task_v_done, tla.pipes.CUBE)
         tla.pipe_barrier(tla.pipes.ALL)
     with tla.vector():
-        mtx_ubp.lock(pipe=tla.arch.VECTOR)
-        mtx_sc.lock(pipe=tla.arch.MTE2)
-        tla.cross_core_wait_flag(p_cross, tla.arch.MTE3)
-        tla.cross_core_wait_flag(task_c_done, tla.arch.VECTOR)
+        mtx_ubp.lock(pipe=tla.pipes.VECTOR)
+        mtx_sc.lock(pipe=tla.pipes.MTE2)
+        tla.cross_core_wait_flag(p_cross, tla.pipes.MTE3)
+        tla.cross_core_wait_flag(task_c_done, tla.pipes.VECTOR)
         tla.pipe_barrier(tla.pipes.ALL)
 
 

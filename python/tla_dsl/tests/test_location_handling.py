@@ -73,7 +73,7 @@ def test_representative_ops_work_without_explicit_loc() -> None:
         tla.make_coord(0, 0)
         st = tla.make_stride(1, 100)
         tla.make_layout(sh, st)
-        tla.flag("ready", tla.arch.MTE2, tla.arch.VECTOR)
+        tla.flag("ready", tla.pipes.MTE2, tla.pipes.VECTOR)
         tla.cross_flag("x")
         tla.mutex(resource="l0a_ping", id=-1)
 

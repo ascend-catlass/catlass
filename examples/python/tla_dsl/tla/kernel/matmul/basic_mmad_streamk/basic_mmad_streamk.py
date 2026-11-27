@@ -91,20 +91,20 @@ def streamk_mmad_kernel(
     )
     streamk_cores = core_loops - normal_blocks
 
-    l1a0_data_ready = tla.flag("l1a0_data_ready", tla.arch.MTE2, tla.arch.MTE1)
-    l1a1_data_ready = tla.flag("l1a1_data_ready", tla.arch.MTE2, tla.arch.MTE1)
-    l1b0_data_ready = tla.flag("l1b0_data_ready", tla.arch.MTE2, tla.arch.MTE1)
-    l1b1_data_ready = tla.flag("l1b1_data_ready", tla.arch.MTE2, tla.arch.MTE1)
-    l1a0_available = tla.flag("l1a0_available", tla.arch.MTE1, tla.arch.MTE2)
-    l1a1_available = tla.flag("l1a1_available", tla.arch.MTE1, tla.arch.MTE2)
-    l1b0_available = tla.flag("l1b0_available", tla.arch.MTE1, tla.arch.MTE2)
-    l1b1_available = tla.flag("l1b1_available", tla.arch.MTE1, tla.arch.MTE2)
-    l0a0_available = tla.flag("l0a0_available", tla.arch.CUBE, tla.arch.MTE1)
-    l0a1_available = tla.flag("l0a1_available", tla.arch.CUBE, tla.arch.MTE1)
-    l0b0_available = tla.flag("l0b0_available", tla.arch.CUBE, tla.arch.MTE1)
-    l0b1_available = tla.flag("l0b1_available", tla.arch.CUBE, tla.arch.MTE1)
-    l0_ab_data_ready = tla.flag("l0_ab_data_ready", tla.arch.MTE1, tla.arch.CUBE)
-    l0c_available = tla.flag("l0c_available", tla.arch.FIX, tla.arch.CUBE)
+    l1a0_data_ready = tla.flag("l1a0_data_ready", tla.pipes.MTE2, tla.pipes.MTE1)
+    l1a1_data_ready = tla.flag("l1a1_data_ready", tla.pipes.MTE2, tla.pipes.MTE1)
+    l1b0_data_ready = tla.flag("l1b0_data_ready", tla.pipes.MTE2, tla.pipes.MTE1)
+    l1b1_data_ready = tla.flag("l1b1_data_ready", tla.pipes.MTE2, tla.pipes.MTE1)
+    l1a0_available = tla.flag("l1a0_available", tla.pipes.MTE1, tla.pipes.MTE2)
+    l1a1_available = tla.flag("l1a1_available", tla.pipes.MTE1, tla.pipes.MTE2)
+    l1b0_available = tla.flag("l1b0_available", tla.pipes.MTE1, tla.pipes.MTE2)
+    l1b1_available = tla.flag("l1b1_available", tla.pipes.MTE1, tla.pipes.MTE2)
+    l0a0_available = tla.flag("l0a0_available", tla.pipes.CUBE, tla.pipes.MTE1)
+    l0a1_available = tla.flag("l0a1_available", tla.pipes.CUBE, tla.pipes.MTE1)
+    l0b0_available = tla.flag("l0b0_available", tla.pipes.CUBE, tla.pipes.MTE1)
+    l0b1_available = tla.flag("l0b1_available", tla.pipes.CUBE, tla.pipes.MTE1)
+    l0_ab_data_ready = tla.flag("l0_ab_data_ready", tla.pipes.MTE1, tla.pipes.CUBE)
+    l0c_available = tla.flag("l0c_available", tla.pipes.FIX, tla.pipes.CUBE)
     # AIC→AIV handoff (mode 2) plus an all-AIV barrier (mode 0).
     aic_finish = tla.cross_flag("aic_finish", mode=2)
     aiv_ibarrier = tla.cross_flag("aiv_ibarrier", mode=0)
@@ -152,9 +152,9 @@ def streamk_mmad_kernel(
     aiv_temp_ub = tla.make_tensor(aiv_temp_ptr, aiv_ub_layout)
     aiv_out_ub = tla.make_tensor(aiv_out_ptr, aiv_ub_layout)
 
-    aiv_loaded = tla.flag("aiv_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    aiv_vec_to_mte2 = tla.flag("aiv_vec_to_mte2", tla.arch.VECTOR, tla.arch.MTE2)
-    aiv_done = tla.flag("aiv_done", tla.arch.VECTOR, tla.arch.MTE3)
+    aiv_loaded = tla.flag("aiv_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    aiv_vec_to_mte2 = tla.flag("aiv_vec_to_mte2", tla.pipes.VECTOR, tla.pipes.MTE2)
+    aiv_done = tla.flag("aiv_done", tla.pipes.VECTOR, tla.pipes.MTE3)
 
     with tla.cube():
         # Drain pipe state left behind by a previous launch.
@@ -177,7 +177,7 @@ def streamk_mmad_kernel(
         # Cores without a StreamK task write only GM C, so nothing in the vector
         # section depends on them: release the paired AIV up front.
         if block_idx >= streamk_cores:
-            tla.cross_core_set_flag(aic_finish, tla.arch.FIX)
+            tla.cross_core_set_flag(aic_finish, tla.pipes.FIX)
 
         # Unified AIC schedule matching C++ streamk_matmul_tla:
         # remap loopIdx → actualLoopIdx (swap last normal with StreamK), then
@@ -456,9 +456,9 @@ def streamk_mmad_kernel(
                 if normal_blocks > 0:
                     if block_idx < streamk_cores:
                         if loop_idx == normal_blocks - tla.arch.block_num() + block_idx:
-                            tla.cross_core_set_flag(aic_finish, tla.arch.FIX)
+                            tla.cross_core_set_flag(aic_finish, tla.pipes.FIX)
                 if normal_blocks == 0:
-                    tla.cross_core_set_flag(aic_finish, tla.arch.FIX)
+                    tla.cross_core_set_flag(aic_finish, tla.pipes.FIX)
 
         tla.wait_flag(l1a0_available)
         tla.wait_flag(l1a1_available)
@@ -473,9 +473,9 @@ def streamk_mmad_kernel(
 
     with tla.vector():
         # Wait for the paired AIC, then for every AIC through the all-AIV barrier.
-        tla.cross_core_wait_flag(aic_finish, tla.arch.MTE2)
-        tla.cross_core_set_flag(aiv_ibarrier, tla.arch.MTE2)
-        tla.cross_core_wait_flag(aiv_ibarrier, tla.arch.MTE2)
+        tla.cross_core_wait_flag(aic_finish, tla.pipes.MTE2)
+        tla.cross_core_set_flag(aiv_ibarrier, tla.pipes.MTE2)
+        tla.cross_core_wait_flag(aiv_ibarrier, tla.pipes.MTE2)
         # In a mix kernel block_idx() is the AIC id and sub_block_idx() the AIV half.
         aiv_id = tla.arch.block_idx()
         aiv_sub = tla.arch.sub_block_idx()

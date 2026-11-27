@@ -23,9 +23,9 @@ def matrix_add_v0(
 
     totalBlocks = ceil_div(core_data_len, config.dataBlockLen)
 
-    ub_loaded = tla.flag("ub_loaded", tla.arch.MTE2, tla.arch.SCALAR)
-    scalar_done = tla.flag("scalar_done", tla.arch.SCALAR, tla.arch.MTE3)
-    ub_stored = tla.flag("ub_stored", tla.arch.MTE3, tla.arch.MTE2)
+    ub_loaded = tla.flag("ub_loaded", tla.pipes.MTE2, tla.pipes.SCALAR)
+    scalar_done = tla.flag("scalar_done", tla.pipes.SCALAR, tla.pipes.MTE3)
+    ub_stored = tla.flag("ub_stored", tla.pipes.MTE3, tla.pipes.MTE2)
     with tla.vector():
         # 数据切分成多块从GM搬运到UB
         for i in tla.range(totalBlocks):

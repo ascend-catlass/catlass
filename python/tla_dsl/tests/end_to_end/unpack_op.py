@@ -59,8 +59,8 @@ def make_unpack_kernel(src_storage, src_dtype, dst_storage, dst_dtype, src_lanes
 
     @tla.kernel
     def unpack_kernel(gm_in: tla.Tensor, gm_out: tla.Tensor) -> None:
-        loaded = tla.flag("unpack_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-        computed = tla.flag("unpack_computed", tla.arch.VECTOR, tla.arch.MTE3)
+        loaded = tla.flag("unpack_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+        computed = tla.flag("unpack_computed", tla.pipes.VECTOR, tla.pipes.MTE3)
         p_in = tla.allocate(src_lanes, src_storage, tla.AddressSpace.ub, 256)
         p_out = tla.allocate(dst_lanes, dst_storage, tla.AddressSpace.ub, 256)
         ub_in = _flat(p_in, src_lanes)

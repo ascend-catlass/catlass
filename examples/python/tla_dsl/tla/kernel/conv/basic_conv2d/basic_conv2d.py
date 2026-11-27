@@ -53,9 +53,9 @@ FMAP_ROWS = HI * WI
 def basic_conv2d(
     fmap: tla.Tensor, filt: tla.Tensor, out: tla.Tensor, pad_value: tla.Constexpr = 0
 ) -> None:
-    l1_loaded = tla.flag("l1_loaded", tla.arch.MTE2, tla.arch.MTE1)
-    l0_loaded = tla.flag("l0_loaded", tla.arch.MTE1, tla.arch.CUBE)
-    l0c_ready = tla.flag("l0c_ready", tla.arch.CUBE, tla.arch.FIX)
+    l1_loaded = tla.flag("l1_loaded", tla.pipes.MTE2, tla.pipes.MTE1)
+    l0_loaded = tla.flag("l0_loaded", tla.pipes.MTE1, tla.pipes.CUBE)
+    l0c_ready = tla.flag("l0c_ready", tla.pipes.CUBE, tla.pipes.FIX)
 
     l1a_ptr = tla.allocate(CIN1 * HI * WI * C0, tla.Float16, tla.AddressSpace.l1, 512)
     l1b_ptr = tla.allocate(K * N, tla.Float16, tla.AddressSpace.l1, 512)

@@ -91,31 +91,31 @@ def cat_dim0_kernel(
         # stream.  Each unit is 192 KiB and has exactly one reader/writer.
         for u in tla.range(gid, n_units, aiv_num):
             off = tla.Int64(u) * tla.Int64(FLAT_CHUNK)
-            mutex_ub.lock(pipe=tla.arch.MTE2)
+            mutex_ub.lock(pipe=tla.pipes.MTE2)
             tla.copy(ub_full, tla.make_tensor(gm_src.ptr + off, full_lay))
-            mutex_ub.unlock(pipe=tla.arch.MTE2)
+            mutex_ub.unlock(pipe=tla.pipes.MTE2)
 
-            mutex_ub.lock(pipe=tla.arch.MTE3)
+            mutex_ub.lock(pipe=tla.pipes.MTE3)
             tla.copy(
                 tla.make_tensor(gm_dst.ptr + tla.Int64(DST_ELEM) + off, full_lay),
                 ub_full,
             )
-            mutex_ub.unlock(pipe=tla.arch.MTE3)
+            mutex_ub.unlock(pipe=tla.pipes.MTE3)
 
         # The partial tail is assigned to one block only.  Avoiding a launch per
         # row/chunk keeps the expensive path at exactly one extra short DMA.
         if tla.const_expr(rem != 0):
             for t in tla.range(gid, 1, aiv_num):
-                mutex_ub.lock(pipe=tla.arch.MTE2)
+                mutex_ub.lock(pipe=tla.pipes.MTE2)
                 tla.copy(
                     ub_rem,
                     tla.make_tensor(
                         gm_src.ptr + tla.Int64(n_units * FLAT_CHUNK), rem_lay
                     ),
                 )
-                mutex_ub.unlock(pipe=tla.arch.MTE2)
+                mutex_ub.unlock(pipe=tla.pipes.MTE2)
 
-                mutex_ub.lock(pipe=tla.arch.MTE3)
+                mutex_ub.lock(pipe=tla.pipes.MTE3)
                 tla.copy(
                     tla.make_tensor(
                         gm_dst.ptr + tla.Int64(DST_ELEM + n_units * FLAT_CHUNK),
@@ -123,7 +123,7 @@ def cat_dim0_kernel(
                     ),
                     ub_rem,
                 )
-                mutex_ub.unlock(pipe=tla.arch.MTE3)
+                mutex_ub.unlock(pipe=tla.pipes.MTE3)
 
 
 @tla.kernel
@@ -172,25 +172,25 @@ def cat_dim1_kernel(
         for b in tla.range(gid, n_groups, aiv_num):
             src_off = tla.Int64(b) * tla.Int64(BR * NS)
             dst_off = tla.Int64(b) * tla.Int64(BR * NT) + tla.Int64(COL)
-            mutex_ub.lock(pipe=tla.arch.MTE2)
+            mutex_ub.lock(pipe=tla.pipes.MTE2)
             tla.copy(
                 ub,
                 tla.make_tensor(gm_src.ptr + src_off, ub_lay),
             )
-            mutex_ub.unlock(pipe=tla.arch.MTE2)
+            mutex_ub.unlock(pipe=tla.pipes.MTE2)
 
-            mutex_ub.lock(pipe=tla.arch.MTE3)
+            mutex_ub.lock(pipe=tla.pipes.MTE3)
             tla.copy(
                 tla.make_tensor(gm_dst.ptr + dst_off, dst_lay),
                 ub,
             )
-            mutex_ub.unlock(pipe=tla.arch.MTE3)
+            mutex_ub.unlock(pipe=tla.pipes.MTE3)
 
         # Tail rows remain one DMA each.  There are at most BR-1 <= 63 rows, so
         # this bounded serial path does not dominate any meaningful batch.
         if tla.const_expr(tail != 0):
             for t in tla.range(gid, tail, aiv_num):
-                mutex_ub.lock(pipe=tla.arch.MTE2)
+                mutex_ub.lock(pipe=tla.pipes.MTE2)
                 tla.copy(
                     ub_row,
                     tla.make_tensor(
@@ -199,9 +199,9 @@ def cat_dim1_kernel(
                         row_lay,
                     ),
                 )
-                mutex_ub.unlock(pipe=tla.arch.MTE2)
+                mutex_ub.unlock(pipe=tla.pipes.MTE2)
 
-                mutex_ub.lock(pipe=tla.arch.MTE3)
+                mutex_ub.lock(pipe=tla.pipes.MTE3)
                 tla.copy(
                     tla.make_tensor(
                         gm_dst.ptr
@@ -211,7 +211,7 @@ def cat_dim1_kernel(
                     ),
                     ub_row,
                 )
-                mutex_ub.unlock(pipe=tla.arch.MTE3)
+                mutex_ub.unlock(pipe=tla.pipes.MTE3)
 
 
 @tla.kernel
@@ -271,15 +271,15 @@ def cat_dim0_3_kernel(
         if tla.const_expr(TOTAL0 != 0):
             for u in tla.range(gid, n_units0, aiv_num):
                 off = tla.Int64(u) * tla.Int64(CHUNK)
-                mutex_ub.lock(pipe=tla.arch.MTE2)
+                mutex_ub.lock(pipe=tla.pipes.MTE2)
                 tla.copy(ub_full, tla.make_tensor(gm_src0.ptr + off, full_lay))
-                mutex_ub.unlock(pipe=tla.arch.MTE2)
-                mutex_ub.lock(pipe=tla.arch.MTE3)
+                mutex_ub.unlock(pipe=tla.pipes.MTE2)
+                mutex_ub.lock(pipe=tla.pipes.MTE3)
                 tla.copy(tla.make_tensor(gm_dst.ptr + off, full_lay), ub_full)
-                mutex_ub.unlock(pipe=tla.arch.MTE3)
+                mutex_ub.unlock(pipe=tla.pipes.MTE3)
             if tla.const_expr(rem0 != 0):
                 for t in tla.range(gid, 1, aiv_num):
-                    mutex_ub.lock(pipe=tla.arch.MTE2)
+                    mutex_ub.lock(pipe=tla.pipes.MTE2)
                     tla.copy(
                         ub_rem0,
                         tla.make_tensor(
@@ -287,8 +287,8 @@ def cat_dim0_3_kernel(
                             rem_lay0,
                         ),
                     )
-                    mutex_ub.unlock(pipe=tla.arch.MTE2)
-                    mutex_ub.lock(pipe=tla.arch.MTE3)
+                    mutex_ub.unlock(pipe=tla.pipes.MTE2)
+                    mutex_ub.lock(pipe=tla.pipes.MTE3)
                     tla.copy(
                         tla.make_tensor(
                             gm_dst.ptr + tla.Int64(n_units0 * CHUNK),
@@ -296,21 +296,21 @@ def cat_dim0_3_kernel(
                         ),
                         ub_rem0,
                     )
-                    mutex_ub.unlock(pipe=tla.arch.MTE3)
+                    mutex_ub.unlock(pipe=tla.pipes.MTE3)
 
         if tla.const_expr(TOTAL1 != 0):
             dst1 = tla.Int64(TOTAL0)
             for u in tla.range(gid, n_units1, aiv_num):
                 off = tla.Int64(u) * tla.Int64(CHUNK)
-                mutex_ub.lock(pipe=tla.arch.MTE2)
+                mutex_ub.lock(pipe=tla.pipes.MTE2)
                 tla.copy(ub_full, tla.make_tensor(gm_src1.ptr + off, full_lay))
-                mutex_ub.unlock(pipe=tla.arch.MTE2)
-                mutex_ub.lock(pipe=tla.arch.MTE3)
+                mutex_ub.unlock(pipe=tla.pipes.MTE2)
+                mutex_ub.lock(pipe=tla.pipes.MTE3)
                 tla.copy(tla.make_tensor(gm_dst.ptr + dst1 + off, full_lay), ub_full)
-                mutex_ub.unlock(pipe=tla.arch.MTE3)
+                mutex_ub.unlock(pipe=tla.pipes.MTE3)
             if tla.const_expr(rem1 != 0):
                 for t in tla.range(gid, 1, aiv_num):
-                    mutex_ub.lock(pipe=tla.arch.MTE2)
+                    mutex_ub.lock(pipe=tla.pipes.MTE2)
                     tla.copy(
                         ub_rem1,
                         tla.make_tensor(
@@ -318,8 +318,8 @@ def cat_dim0_3_kernel(
                             rem_lay1,
                         ),
                     )
-                    mutex_ub.unlock(pipe=tla.arch.MTE2)
-                    mutex_ub.lock(pipe=tla.arch.MTE3)
+                    mutex_ub.unlock(pipe=tla.pipes.MTE2)
+                    mutex_ub.lock(pipe=tla.pipes.MTE3)
                     tla.copy(
                         tla.make_tensor(
                             gm_dst.ptr + dst1 + tla.Int64(n_units1 * CHUNK),
@@ -327,21 +327,21 @@ def cat_dim0_3_kernel(
                         ),
                         ub_rem1,
                     )
-                    mutex_ub.unlock(pipe=tla.arch.MTE3)
+                    mutex_ub.unlock(pipe=tla.pipes.MTE3)
 
         if tla.const_expr(TOTAL2 != 0):
             dst2 = tla.Int64(TOTAL0 + TOTAL1)
             for u in tla.range(gid, n_units2, aiv_num):
                 off = tla.Int64(u) * tla.Int64(CHUNK)
-                mutex_ub.lock(pipe=tla.arch.MTE2)
+                mutex_ub.lock(pipe=tla.pipes.MTE2)
                 tla.copy(ub_full, tla.make_tensor(gm_src2.ptr + off, full_lay))
-                mutex_ub.unlock(pipe=tla.arch.MTE2)
-                mutex_ub.lock(pipe=tla.arch.MTE3)
+                mutex_ub.unlock(pipe=tla.pipes.MTE2)
+                mutex_ub.lock(pipe=tla.pipes.MTE3)
                 tla.copy(tla.make_tensor(gm_dst.ptr + dst2 + off, full_lay), ub_full)
-                mutex_ub.unlock(pipe=tla.arch.MTE3)
+                mutex_ub.unlock(pipe=tla.pipes.MTE3)
             if tla.const_expr(rem2 != 0):
                 for t in tla.range(gid, 1, aiv_num):
-                    mutex_ub.lock(pipe=tla.arch.MTE2)
+                    mutex_ub.lock(pipe=tla.pipes.MTE2)
                     tla.copy(
                         ub_rem2,
                         tla.make_tensor(
@@ -349,8 +349,8 @@ def cat_dim0_3_kernel(
                             rem_lay2,
                         ),
                     )
-                    mutex_ub.unlock(pipe=tla.arch.MTE2)
-                    mutex_ub.lock(pipe=tla.arch.MTE3)
+                    mutex_ub.unlock(pipe=tla.pipes.MTE2)
+                    mutex_ub.lock(pipe=tla.pipes.MTE3)
                     tla.copy(
                         tla.make_tensor(
                             gm_dst.ptr + dst2 + tla.Int64(n_units2 * CHUNK),
@@ -358,7 +358,7 @@ def cat_dim0_3_kernel(
                         ),
                         ub_rem2,
                     )
-                    mutex_ub.unlock(pipe=tla.arch.MTE3)
+                    mutex_ub.unlock(pipe=tla.pipes.MTE3)
 
 
 @tla.kernel
@@ -411,16 +411,16 @@ def cat_dim1_3_kernel(
             for b in tla.range(gid, groups0, aiv_num):
                 src_off = tla.Int64(b) * tla.Int64(BR0 * NS0)
                 dst_off = tla.Int64(b) * tla.Int64(BR0 * NT) + tla.Int64(COL0)
-                mutex_ub.lock(pipe=tla.arch.MTE2)
+                mutex_ub.lock(pipe=tla.pipes.MTE2)
                 tla.copy(ub0, tla.make_tensor(gm_src0.ptr + src_off, lay0))
-                mutex_ub.unlock(pipe=tla.arch.MTE2)
-                mutex_ub.lock(pipe=tla.arch.MTE3)
+                mutex_ub.unlock(pipe=tla.pipes.MTE2)
+                mutex_ub.lock(pipe=tla.pipes.MTE3)
                 tla.copy(tla.make_tensor(gm_dst.ptr + dst_off, dst0), ub0)
-                mutex_ub.unlock(pipe=tla.arch.MTE3)
+                mutex_ub.unlock(pipe=tla.pipes.MTE3)
             if tla.const_expr(tail0 != 0):
                 for t in tla.range(gid, tail0, aiv_num):
                     row = t + tla.Int32(groups0 * BR0)
-                    mutex_ub.lock(pipe=tla.arch.MTE2)
+                    mutex_ub.lock(pipe=tla.pipes.MTE2)
                     tla.copy(
                         ub_row0,
                         tla.make_tensor(
@@ -428,8 +428,8 @@ def cat_dim1_3_kernel(
                             row0,
                         ),
                     )
-                    mutex_ub.unlock(pipe=tla.arch.MTE2)
-                    mutex_ub.lock(pipe=tla.arch.MTE3)
+                    mutex_ub.unlock(pipe=tla.pipes.MTE2)
+                    mutex_ub.lock(pipe=tla.pipes.MTE3)
                     tla.copy(
                         tla.make_tensor(
                             gm_dst.ptr
@@ -439,7 +439,7 @@ def cat_dim1_3_kernel(
                         ),
                         ub_row0,
                     )
-                    mutex_ub.unlock(pipe=tla.arch.MTE3)
+                    mutex_ub.unlock(pipe=tla.pipes.MTE3)
 
         if tla.const_expr(NS1 != 0 and M != 0):
             lay1 = tla.make_layout(
@@ -464,16 +464,16 @@ def cat_dim1_3_kernel(
             for b in tla.range(gid, groups1, aiv_num):
                 src_off = tla.Int64(b) * tla.Int64(BR1 * NS1)
                 dst_off = tla.Int64(b) * tla.Int64(BR1 * NT) + tla.Int64(COL1)
-                mutex_ub.lock(pipe=tla.arch.MTE2)
+                mutex_ub.lock(pipe=tla.pipes.MTE2)
                 tla.copy(ub1, tla.make_tensor(gm_src1.ptr + src_off, lay1))
-                mutex_ub.unlock(pipe=tla.arch.MTE2)
-                mutex_ub.lock(pipe=tla.arch.MTE3)
+                mutex_ub.unlock(pipe=tla.pipes.MTE2)
+                mutex_ub.lock(pipe=tla.pipes.MTE3)
                 tla.copy(tla.make_tensor(gm_dst.ptr + dst_off, dst1), ub1)
-                mutex_ub.unlock(pipe=tla.arch.MTE3)
+                mutex_ub.unlock(pipe=tla.pipes.MTE3)
             if tla.const_expr(tail1 != 0):
                 for t in tla.range(gid, tail1, aiv_num):
                     row = t + tla.Int32(groups1 * BR1)
-                    mutex_ub.lock(pipe=tla.arch.MTE2)
+                    mutex_ub.lock(pipe=tla.pipes.MTE2)
                     tla.copy(
                         ub_row1,
                         tla.make_tensor(
@@ -481,8 +481,8 @@ def cat_dim1_3_kernel(
                             row1,
                         ),
                     )
-                    mutex_ub.unlock(pipe=tla.arch.MTE2)
-                    mutex_ub.lock(pipe=tla.arch.MTE3)
+                    mutex_ub.unlock(pipe=tla.pipes.MTE2)
+                    mutex_ub.lock(pipe=tla.pipes.MTE3)
                     tla.copy(
                         tla.make_tensor(
                             gm_dst.ptr
@@ -492,7 +492,7 @@ def cat_dim1_3_kernel(
                         ),
                         ub_row1,
                     )
-                    mutex_ub.unlock(pipe=tla.arch.MTE3)
+                    mutex_ub.unlock(pipe=tla.pipes.MTE3)
 
         if tla.const_expr(NS2 != 0 and M != 0):
             lay2 = tla.make_layout(
@@ -517,16 +517,16 @@ def cat_dim1_3_kernel(
             for b in tla.range(gid, groups2, aiv_num):
                 src_off = tla.Int64(b) * tla.Int64(BR2 * NS2)
                 dst_off = tla.Int64(b) * tla.Int64(BR2 * NT) + tla.Int64(COL2)
-                mutex_ub.lock(pipe=tla.arch.MTE2)
+                mutex_ub.lock(pipe=tla.pipes.MTE2)
                 tla.copy(ub2, tla.make_tensor(gm_src2.ptr + src_off, lay2))
-                mutex_ub.unlock(pipe=tla.arch.MTE2)
-                mutex_ub.lock(pipe=tla.arch.MTE3)
+                mutex_ub.unlock(pipe=tla.pipes.MTE2)
+                mutex_ub.lock(pipe=tla.pipes.MTE3)
                 tla.copy(tla.make_tensor(gm_dst.ptr + dst_off, dst2), ub2)
-                mutex_ub.unlock(pipe=tla.arch.MTE3)
+                mutex_ub.unlock(pipe=tla.pipes.MTE3)
             if tla.const_expr(tail2 != 0):
                 for t in tla.range(gid, tail2, aiv_num):
                     row = t + tla.Int32(groups2 * BR2)
-                    mutex_ub.lock(pipe=tla.arch.MTE2)
+                    mutex_ub.lock(pipe=tla.pipes.MTE2)
                     tla.copy(
                         ub_row2,
                         tla.make_tensor(
@@ -534,8 +534,8 @@ def cat_dim1_3_kernel(
                             row2,
                         ),
                     )
-                    mutex_ub.unlock(pipe=tla.arch.MTE2)
-                    mutex_ub.lock(pipe=tla.arch.MTE3)
+                    mutex_ub.unlock(pipe=tla.pipes.MTE2)
+                    mutex_ub.lock(pipe=tla.pipes.MTE3)
                     tla.copy(
                         tla.make_tensor(
                             gm_dst.ptr
@@ -545,7 +545,7 @@ def cat_dim1_3_kernel(
                         ),
                         ub_row2,
                     )
-                    mutex_ub.unlock(pipe=tla.arch.MTE3)
+                    mutex_ub.unlock(pipe=tla.pipes.MTE3)
 
 
 # ======================================================================================

@@ -87,13 +87,13 @@ def basic_matmul_gemv_kernel(
     n = gm_b.origin_shape[1]
     l0_tn = _tiling.l1_tn
 
-    l1a_data_ready = tla.flag("l1a_data_ready", tla.arch.MTE2, tla.arch.MTE1)
-    l1b_data_ready = tla.flag("l1b_data_ready", tla.arch.MTE2, tla.arch.MTE1)
-    l1a_available = tla.flag("l1a_available", tla.arch.MTE1, tla.arch.MTE2)
-    l1b_available = tla.flag("l1b_available", tla.arch.MTE1, tla.arch.MTE2)
-    l0a_available = tla.flag("l0a_available", tla.arch.CUBE, tla.arch.MTE1)
-    l0b_available = tla.flag("l0b_available", tla.arch.CUBE, tla.arch.MTE1)
-    l0_ab_data_ready = tla.flag("l0_ab_data_ready", tla.arch.MTE1, tla.arch.CUBE)
+    l1a_data_ready = tla.flag("l1a_data_ready", tla.pipes.MTE2, tla.pipes.MTE1)
+    l1b_data_ready = tla.flag("l1b_data_ready", tla.pipes.MTE2, tla.pipes.MTE1)
+    l1a_available = tla.flag("l1a_available", tla.pipes.MTE1, tla.pipes.MTE2)
+    l1b_available = tla.flag("l1b_available", tla.pipes.MTE1, tla.pipes.MTE2)
+    l0a_available = tla.flag("l0a_available", tla.pipes.CUBE, tla.pipes.MTE1)
+    l0b_available = tla.flag("l0b_available", tla.pipes.CUBE, tla.pipes.MTE1)
+    l0_ab_data_ready = tla.flag("l0_ab_data_ready", tla.pipes.MTE1, tla.pipes.CUBE)
 
     l1a_ptr = tla.allocate(_tiling.l1_tk, dtype_a, tla.AddressSpace.l1, 512)
     l1b_ptr = tla.allocate(_tiling.l1_tk * l0_tn, dtype_b, tla.AddressSpace.l1, 512)

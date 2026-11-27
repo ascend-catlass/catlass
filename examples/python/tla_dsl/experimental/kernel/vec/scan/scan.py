@@ -196,14 +196,14 @@ def scan_kernel(
                     gm_row_x = tla.make_tensor(gm_x.ptr + row_off, row_gm)
                     gm_row_y = tla.make_tensor(gm_y.ptr + row_off, row_gm)
 
-                    row_mutex[bi].lock(pipe=tla.arch.MTE2)
+                    row_mutex[bi].lock(pipe=tla.pipes.MTE2)
                     tla.copy(ub_x[bi], gm_row_x)
                     if tla.const_expr(HAS_HEAD == 1):
                         gm_row_h = tla.make_tensor(gm_head.ptr + row_off, row_gm)
                         tla.copy(ub_h[bi], gm_row_h)
-                    row_mutex[bi].unlock(pipe=tla.arch.MTE2)
+                    row_mutex[bi].unlock(pipe=tla.pipes.MTE2)
 
-                    row_mutex[bi].lock(pipe=tla.arch.VECTOR)
+                    row_mutex[bi].lock(pipe=tla.pipes.VECTOR)
                     # 行扫描：chunk 顺序推进，chunk 内 64 lane 树形扫描，跨 chunk 只
                     # 折叠一次 lane63 -> lane0 的进位。
                     with tla.vec.func(mode="simd"):
@@ -309,11 +309,11 @@ def scan_kernel(
                                 vt = tla.where(first, tla.add(vt, carry, mask=mask), vt)
                                 vt = _scan_sum(vt, lane_i, lane_f, mask)
                             xt.store(vt, mask=tail_mask)
-                    row_mutex[bi].unlock(pipe=tla.arch.VECTOR)
+                    row_mutex[bi].unlock(pipe=tla.pipes.VECTOR)
 
-                    row_mutex[bi].lock(pipe=tla.arch.MTE3)
+                    row_mutex[bi].lock(pipe=tla.pipes.MTE3)
                     tla.copy(gm_row_y, ub_x[bi])
-                    row_mutex[bi].unlock(pipe=tla.arch.MTE3)
+                    row_mutex[bi].unlock(pipe=tla.pipes.MTE3)
 
         tla.pipe_barrier(tla.pipes.ALL)
 

@@ -171,7 +171,7 @@ def scatter_add_atomic_kernel(
                 batch_stage = tla.tile_view(
                     stage, tla.make_shape(_BATCH * _LANE), tla.make_coord(bi)
                 )
-                mutex_stage.lock(pipe=tla.arch.VECTOR)
+                mutex_stage.lock(pipe=tla.pipes.VECTOR)
                 with tla.vec.func(mode="simd"):
                     vv = tla.tile_view(
                         val_ub, tla.make_shape(_BATCH), tla.make_coord(0)
@@ -184,12 +184,12 @@ def scatter_add_atomic_kernel(
                     tla.local_mem_bar(
                         tla.params.MemType.VEC_ALL, tla.params.MemType.VEC_ALL
                     )
-                mutex_stage.unlock(pipe=tla.arch.VECTOR)
+                mutex_stage.unlock(pipe=tla.pipes.VECTOR)
 
                 # One 4-byte atomic add per element, at out[index[i]].  The
                 # MTE3 barrier drains this batch before the next one reuses
                 # val_ub (the stage slots themselves are never reused).
-                mutex_stage.lock(pipe=tla.arch.MTE3)
+                mutex_stage.lock(pipe=tla.pipes.MTE3)
                 for j in tla.range(_BATCH):
                     if base + j < hi:  # noqa: SIM102 - keep the two scalar guards separate for tracing
                         if base + j < m:
@@ -207,7 +207,7 @@ def scatter_add_atomic_kernel(
                                     atomic_mode=tla.params.AtomicMode.ADD
                                 ),
                             )
-                mutex_stage.unlock(pipe=tla.arch.MTE3)
+                mutex_stage.unlock(pipe=tla.pipes.MTE3)
                 tla.pipe_barrier(tla.pipes.MTE3)
 
 
@@ -283,7 +283,7 @@ def scatter_add_atomic_pipe_kernel(
                 base = lo + bi * _BATCH
 
                 # ---- batch 2*b2: value buffer 0, stage buffer 0 ----
-                mutex_val0.lock(pipe=tla.arch.MTE2)
+                mutex_val0.lock(pipe=tla.pipes.MTE2)
                 tla.copy(
                     val0,
                     tla.make_tensor(
@@ -295,10 +295,10 @@ def scatter_add_atomic_pipe_kernel(
                         ),
                     ),
                 )
-                mutex_val0.unlock(pipe=tla.arch.MTE2)
+                mutex_val0.unlock(pipe=tla.pipes.MTE2)
 
-                mutex_val0.lock(pipe=tla.arch.VECTOR)
-                mutex_stage0.lock(pipe=tla.arch.VECTOR)
+                mutex_val0.lock(pipe=tla.pipes.VECTOR)
+                mutex_stage0.lock(pipe=tla.pipes.VECTOR)
                 with tla.vec.func(mode="simd"):
                     vv = tla.tile_view(
                         val0, tla.make_shape(_BATCH), tla.make_coord(0)
@@ -318,10 +318,10 @@ def scatter_add_atomic_pipe_kernel(
                     tla.local_mem_bar(
                         tla.params.MemType.VEC_ALL, tla.params.MemType.VEC_ALL
                     )
-                mutex_stage0.unlock(pipe=tla.arch.VECTOR)
-                mutex_val0.unlock(pipe=tla.arch.VECTOR)
+                mutex_stage0.unlock(pipe=tla.pipes.VECTOR)
+                mutex_val0.unlock(pipe=tla.pipes.VECTOR)
 
-                mutex_stage0.lock(pipe=tla.arch.MTE3)
+                mutex_stage0.lock(pipe=tla.pipes.MTE3)
                 for j in tla.range(_BATCH):
                     if base + j < hi:  # noqa: SIM102 - keep the two scalar guards separate for tracing
                         if base + j < m:
@@ -339,11 +339,11 @@ def scatter_add_atomic_pipe_kernel(
                                     atomic_mode=tla.params.AtomicMode.ADD
                                 ),
                             )
-                mutex_stage0.unlock(pipe=tla.arch.MTE3)
+                mutex_stage0.unlock(pipe=tla.pipes.MTE3)
 
                 # ---- batch 2*b2+1: value buffer 1, stage buffer 1 ----
                 base1 = base + _BATCH
-                mutex_val1.lock(pipe=tla.arch.MTE2)
+                mutex_val1.lock(pipe=tla.pipes.MTE2)
                 tla.copy(
                     val1,
                     tla.make_tensor(
@@ -355,10 +355,10 @@ def scatter_add_atomic_pipe_kernel(
                         ),
                     ),
                 )
-                mutex_val1.unlock(pipe=tla.arch.MTE2)
+                mutex_val1.unlock(pipe=tla.pipes.MTE2)
 
-                mutex_val1.lock(pipe=tla.arch.VECTOR)
-                mutex_stage1.lock(pipe=tla.arch.VECTOR)
+                mutex_val1.lock(pipe=tla.pipes.VECTOR)
+                mutex_stage1.lock(pipe=tla.pipes.VECTOR)
                 with tla.vec.func(mode="simd"):
                     vv1 = tla.tile_view(
                         val1, tla.make_shape(_BATCH), tla.make_coord(0)
@@ -380,10 +380,10 @@ def scatter_add_atomic_pipe_kernel(
                     tla.local_mem_bar(
                         tla.params.MemType.VEC_ALL, tla.params.MemType.VEC_ALL
                     )
-                mutex_stage1.unlock(pipe=tla.arch.VECTOR)
-                mutex_val1.unlock(pipe=tla.arch.VECTOR)
+                mutex_stage1.unlock(pipe=tla.pipes.VECTOR)
+                mutex_val1.unlock(pipe=tla.pipes.VECTOR)
 
-                mutex_stage1.lock(pipe=tla.arch.MTE3)
+                mutex_stage1.lock(pipe=tla.pipes.MTE3)
                 for j2 in tla.range(_BATCH):
                     if base1 + j2 < hi:  # noqa: SIM102 - keep the two scalar guards separate for tracing
                         if base1 + j2 < m:
@@ -403,7 +403,7 @@ def scatter_add_atomic_pipe_kernel(
                                     atomic_mode=tla.params.AtomicMode.ADD
                                 ),
                             )
-                mutex_stage1.unlock(pipe=tla.arch.MTE3)
+                mutex_stage1.unlock(pipe=tla.pipes.MTE3)
             tla.pipe_barrier(tla.pipes.MTE3)
 
 

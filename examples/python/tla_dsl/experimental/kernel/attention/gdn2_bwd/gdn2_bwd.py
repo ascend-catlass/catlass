@@ -269,7 +269,7 @@ def prep_kernel(
             fo64 = tla.Int64(f) * tla.Int64(64) * tla.Int64(64)
 
             # ---- scores: Aq = Xq @ Ys^T, Lmat = Xk @ Ys^T ----
-            tla.cross_core_wait_flag(vf, tla.arch.MTE2)
+            tla.cross_core_wait_flag(vf, tla.pipes.MTE2)
             c_s = tensor(l0c + C_S, 64, 64, tla.Float32, tla.arch.L0Clayout)
             for product in tla.range_constexpr(2):
                 if tla.const_expr(product == 0):
@@ -304,10 +304,10 @@ def prep_kernel(
                         l0c2ub_mode=tla.params.L0C2UBMode.NO_SPLIT_VEC_1
                     ),
                 )
-            tla.cross_core_set_flag(cf, tla.arch.FIX)
+            tla.cross_core_set_flag(cf, tla.pipes.FIX)
 
             # ---- A = (I + L)^-1 by doubling on N = -strict_tril(L) ----
-            tla.cross_core_wait_flag(nf, tla.arch.MTE2)
+            tla.cross_core_wait_flag(nf, tla.pipes.MTE2)
             tla.copy(l1_n, gm_view(w_nm, fo64, 64, 64, 64))
             tla.copy(l1_p0, gm_view(w_nm, fo64, 64, 64, 64))
             c_a = tensor(l0c + C_A, 64, 64, tla.Float32, tla.arch.L0Clayout)
@@ -513,10 +513,10 @@ def prep_kernel(
                         sub(f2, r, pc * 64, 1, 64).store(tla.exp(tla.neg(gcr)))
             tla.copy(gm_view(w_eg, fo, 64, KD, KD), f1)
             tla.copy(gm_view(w_eng, fo, 64, KD, KD), f2)
-            tla.cross_core_set_flag(vf, tla.arch.MTE3)
+            tla.cross_core_set_flag(vf, tla.pipes.MTE3)
 
             # --- mask the two score tiles ---
-            tla.cross_core_wait_flag(cf, tla.arch.VECTOR)
+            tla.cross_core_wait_flag(cf, tla.pipes.VECTOR)
             with tla.vec.func(mode="simd"):
                 idx = tla.arange(0, dtype=tla.Int32)
                 z = tla.full(0.0, tla.Float32)
@@ -529,7 +529,7 @@ def prep_kernel(
                     )
             tla.copy(gm_view(w_aq, fo64, 64, 64, 64), s0)
             tla.copy(gm_view(w_nm, fo64, 64, 64, 64), s1)
-            tla.cross_core_set_flag(nf, tla.arch.MTE3)
+            tla.cross_core_set_flag(nf, tla.pipes.MTE3)
         tla.pipe_barrier(tla.pipes.ALL)
 
 
@@ -628,7 +628,7 @@ def fwd_kernel(
                 sbase = tla.Int64(t) * tla.Int64(64) * tla.Int64(KD)
 
                 # ---- U = A@(w*v), W@H ----
-                tla.cross_core_wait_flag(f1, tla.arch.MTE2)
+                tla.cross_core_wait_flag(f1, tla.pipes.MTE2)
                 tla.copy(l1_a64, gm_view(w_am, fo64, 64, 64, 64))
                 tla.copy(l1_b, gm_view(s_wv, sbase, 64, KD, KD))
                 tla.copy(tla.make_tensor_like(l0a, l1_a64, tla.arch.zN), l1_a64)
@@ -653,10 +653,10 @@ def fwd_kernel(
                 )
                 tla.copy(gm_view(s_u, sbase, 64, KD, KD), c_u)
                 tla.copy(gm_view(s_wh, sbase, 64, KD, KD), c_w)
-                tla.cross_core_set_flag(f2, tla.arch.FIX)
+                tla.cross_core_set_flag(f2, tla.pipes.FIX)
 
                 # ---- Kt^T @ v_new ----
-                tla.cross_core_wait_flag(f3, tla.arch.MTE2)
+                tla.cross_core_wait_flag(f3, tla.pipes.MTE2)
                 tla.copy(l1_kt, gm_view_t(w_kt, fo, 64, 64, KD))
                 tla.copy(l1_b, gm_view(vnbuf, vnbase, 64, KD, KD))
                 tla.copy(tla.make_tensor_like(l0a, l1_kt, tla.arch.zN), l1_kt)
@@ -682,7 +682,7 @@ def fwd_kernel(
                 tla.copy(
                     gm_view(s_hp, hp0 + tla.Int64(64) * tla.Int64(KD), 64, KD, KD), c_h1
                 )
-                tla.cross_core_set_flag(f4, tla.arch.FIX)
+                tla.cross_core_set_flag(f4, tla.pipes.FIX)
         tla.pipe_barrier(tla.pipes.ALL)
 
     with tla.vector():
@@ -733,10 +733,10 @@ def fwd_kernel(
                             vf = ld_f32(sub(nat_v, r, pc * 64, 1, 64), QMODE)
                             sub(ub_wv, r, pc * 64, 1, 64).store(wf * vf)
                 tla.copy(gm_view(s_wv, sbase, 64, KD, KD), ub_wv)
-                tla.cross_core_set_flag(f1, tla.arch.MTE3)
+                tla.cross_core_set_flag(f1, tla.pipes.MTE3)
 
                 # ---- v_new = U - W@H ----
-                tla.cross_core_wait_flag(f2, tla.arch.MTE2)
+                tla.cross_core_wait_flag(f2, tla.pipes.MTE2)
                 tla.copy(ub_u, gm_view(s_u, sbase, 64, KD, KD))
                 tla.copy(ub_w, gm_view(s_wh, sbase, 64, KD, KD))
                 with tla.vec.func(mode="simd"):
@@ -746,10 +746,10 @@ def fwd_kernel(
                             ww = sub(ub_w, r, pc * 64, 1, 64).load()
                             sub(ub_u, r, pc * 64, 1, 64).store(uu - ww)
                 tla.copy(gm_view(vnbuf, vnbase, 64, KD, KD), ub_u)
-                tla.cross_core_set_flag(f3, tla.arch.MTE3)
+                tla.cross_core_set_flag(f3, tla.pipes.MTE3)
 
                 # ---- H' = exp(gl)*H + Kt^T@v_new ----
-                tla.cross_core_wait_flag(f4, tla.arch.MTE2)
+                tla.cross_core_wait_flag(f4, tla.pipes.MTE2)
                 tla.copy(
                     vgl,
                     gm_view(
@@ -871,7 +871,7 @@ def fwd_kernel_pair(
                 fo64 = fi * tla.Int64(nt) * tla.Int64(64) * tla.Int64(64)
                 wvoff = tla.Int64(t) * tla.Int64(2) * tla.Int64(64) * tla.Int64(KD)
                 sbase = tla.Int64(t) * tla.Int64(2) * tla.Int64(64) * tla.Int64(KD)
-                tla.cross_core_wait_flag(fl1[j], tla.arch.MTE2)
+                tla.cross_core_wait_flag(fl1[j], tla.pipes.MTE2)
                 tla.copy(l1_a64, gm_view(w_am, fo64, 64, 64, 64))
                 tla.copy(l1_b, gm_view(s_wv, wvoff, 64, KD, KD))
                 tla.copy(tla.make_tensor_like(l0a, l1_a64, tla.arch.zN), l1_a64)
@@ -905,7 +905,7 @@ def fwd_kernel_pair(
                         * tla.Int64(KD)
                     )
                     sbase = tla.Int64(t) * tla.Int64(64) * tla.Int64(KD)
-                    tla.cross_core_wait_flag(fl5[j], tla.arch.MTE2)
+                    tla.cross_core_wait_flag(fl5[j], tla.pipes.MTE2)
                     tla.copy(l1_a128, gm_view(w_wy, fo, 64, KD, KD))
                     tla.copy(l1_h, gm_view(hbuf, hbase, KD, KD, KD))
                     tla.copy(tla.make_tensor_like(l0a, l1_a128, tla.arch.zN), l1_a128)
@@ -918,7 +918,7 @@ def fwd_kernel_pair(
                         hf32_mode=tla.params.HF32Mode.HF32_NEAREST_EVEN,
                     )
                     tla.copy(gm_view(s_wh, sbase, 64, KD, KD), c_w)
-                    tla.cross_core_set_flag(fl2[j], tla.arch.FIX)
+                    tla.cross_core_set_flag(fl2[j], tla.pipes.FIX)
                 # ---- Kt^T @ v_new ----
                 for j in tla.range_constexpr(2):
                     t = ta + j
@@ -938,7 +938,7 @@ def fwd_kernel_pair(
                         * tla.Int64(64)
                         * tla.Int64(KD)
                     )
-                    tla.cross_core_wait_flag(fl3[j], tla.arch.MTE2)
+                    tla.cross_core_wait_flag(fl3[j], tla.pipes.MTE2)
                     tla.copy(l1_kt128, gm_view_t(w_kt, fo, KD, 64, KD))
                     tla.copy(l1_b, gm_view(vnbuf, vnbase, 64, KD, KD))
                     tla.copy(tla.make_tensor_like(l0a, l1_kt128, tla.arch.zN), l1_kt128)
@@ -952,7 +952,7 @@ def fwd_kernel_pair(
                     )
                     hp0 = tla.Int64(t) * tla.Int64(KD) * tla.Int64(KD)
                     tla.copy(gm_view(s_hp, hp0, KD, KD, KD), c_h)
-                    tla.cross_core_set_flag(fl4[j], tla.arch.FIX)
+                    tla.cross_core_set_flag(fl4[j], tla.pipes.FIX)
                 # ---- R11: U(n+1) = A@(w*v)(n+1), issued before the next H wait ----
                 n1 = n + 1
                 if n1 >= nt:
@@ -975,7 +975,7 @@ def fwd_kernel_pair(
                         * tla.Int64(64)
                         * tla.Int64(KD)
                     )
-                    tla.cross_core_wait_flag(fl1[j], tla.arch.MTE2)
+                    tla.cross_core_wait_flag(fl1[j], tla.pipes.MTE2)
                     tla.copy(l1_a64, gm_view(w_am, fo64, 64, 64, 64))
                     tla.copy(l1_b, gm_view(s_wv, slot, 64, KD, KD))
                     tla.copy(tla.make_tensor_like(l0a, l1_a64, tla.arch.zN), l1_a64)
@@ -1024,10 +1024,10 @@ def fwd_kernel_pair(
                             vf = ld_f32(sub(nat_v, r, pc * 64, 1, 64), QMODE)
                             sub(ub_wv, r, pc * 64, 1, 64).store(wf * vf)
                 tla.copy(gm_view(s_wv, wvoff, 64, KD, KD), ub_wv)
-                tla.cross_core_set_flag(fl1[j], tla.arch.MTE3)
+                tla.cross_core_set_flag(fl1[j], tla.pipes.MTE3)
             # H(0) is the host-written initial state: prime the H flag once.
             for j in tla.range_constexpr(2):
-                tla.cross_core_set_flag(fl5[j], tla.arch.MTE3)
+                tla.cross_core_set_flag(fl5[j], tla.pipes.MTE3)
             for n in tla.range(nt):
                 valid = length - n * 64
                 if valid > 64:
@@ -1066,7 +1066,7 @@ def fwd_kernel_pair(
                                 vf = ld_f32(sub(nat_v, r, pc * 64, 1, 64), QMODE)
                                 sub(ub_wv, r, pc * 64, 1, 64).store(wf * vf)
                     tla.copy(gm_view(s_wv, wvoff, 64, KD, KD), ub_wv)
-                    tla.cross_core_set_flag(fl1[j], tla.arch.MTE3)
+                    tla.cross_core_set_flag(fl1[j], tla.pipes.MTE3)
                 # ---- v_new = U - W@H ----
                 for j in tla.range_constexpr(2):
                     t = ta + j
@@ -1076,7 +1076,7 @@ def fwd_kernel_pair(
                         * tla.Int64(64)
                         * tla.Int64(KD)
                     )
-                    tla.cross_core_wait_flag(fl2[j], tla.arch.MTE2)
+                    tla.cross_core_wait_flag(fl2[j], tla.pipes.MTE2)
                     sb_u = (
                         (tla.Int64(t) * tla.Int64(2) + tla.Int64(n % 2))
                         * tla.Int64(64)
@@ -1091,7 +1091,7 @@ def fwd_kernel_pair(
                                 ww = sub(ub_w, r, pc * 64, 1, 64).load()
                                 sub(ub_u, r, pc * 64, 1, 64).store(uu - ww)
                     tla.copy(gm_view(vnbuf, vnbase, 64, KD, KD), ub_u)
-                    tla.cross_core_set_flag(fl3[j], tla.arch.MTE3)
+                    tla.cross_core_set_flag(fl3[j], tla.pipes.MTE3)
                 # ---- H' = exp(gl)*H + Kt^T@v_new ----
                 for j in tla.range_constexpr(2):
                     t = ta + j
@@ -1107,7 +1107,7 @@ def fwd_kernel_pair(
                         * tla.Int64(KD)
                     )
                     hnext = hbase + tla.Int64(KD) * tla.Int64(KD)
-                    tla.cross_core_wait_flag(fl4[j], tla.arch.MTE2)
+                    tla.cross_core_wait_flag(fl4[j], tla.pipes.MTE2)
                     tla.copy(
                         vgl,
                         gm_view(
@@ -1153,7 +1153,7 @@ def fwd_kernel_pair(
                         sub(ub_h, 64, 0, 64, KD),
                     )
                     if n + 1 < nt:
-                        tla.cross_core_set_flag(fl5[j], tla.arch.MTE3)
+                        tla.cross_core_set_flag(fl5[j], tla.pipes.MTE3)
         tla.pipe_barrier(tla.pipes.ALL)
 
 
@@ -1254,7 +1254,7 @@ def bwd_kernel(
                 hcur = (n0h + tla.Int64(n)) * tla.Int64(KD) * tla.Int64(KD)
 
                 # ---- dv_new = Aq^T@do' + Kt@dh_out ----
-                tla.cross_core_wait_flag(f1, tla.arch.MTE2)
+                tla.cross_core_wait_flag(f1, tla.pipes.MTE2)
                 tla.copy(l1_a64, gm_view_t(w_aq, fo64, 64, 64, 64))
                 tla.copy(l1_b, gm_view(s_dop, sbase, 64, KD, KD))
                 tla.copy(tla.make_tensor_like(l0a, l1_a64, tla.arch.zN), l1_a64)
@@ -1278,10 +1278,10 @@ def bwd_kernel(
                     hf32_mode=tla.params.HF32Mode.HF32_NEAREST_EVEN,
                 )
                 tla.copy(gm_view(s_dvnk, sbase, 64, KD, KD), c_dvn)
-                tla.cross_core_set_flag(f2, tla.arch.FIX)
+                tla.cross_core_set_flag(f2, tla.pipes.FIX)
 
                 # ---- dh = exp(gl)*dh_out + Qs^T@do' - W^T@dv_new ----
-                tla.cross_core_wait_flag(f3, tla.arch.MTE2)
+                tla.cross_core_wait_flag(f3, tla.pipes.MTE2)
                 tla.copy(l1_aT, gm_view_t(w_qs, fo, KD, 64, KD))
                 tla.copy(l1_b, gm_view(s_dop, sbase, 64, KD, KD))
                 tla.copy(tla.make_tensor_like(l0a, l1_aT, tla.arch.zN), l1_aT)
@@ -1306,7 +1306,7 @@ def bwd_kernel(
                     hf32_mode=tla.params.HF32Mode.HF32_NEAREST_EVEN,
                 )
                 tla.copy(gm_view(s_dhb, hcur, KD, KD, KD), c_b)
-                tla.cross_core_set_flag(f4, tla.arch.FIX)
+                tla.cross_core_set_flag(f4, tla.pipes.FIX)
         tla.pipe_barrier(tla.pipes.ALL)
 
     with tla.vector():
@@ -1349,16 +1349,16 @@ def bwd_kernel(
                             dv = ld_f32(sub(nat_do, r, pc * 64, 1, 64), QMODE)
                             sub(ub_dop, r, pc * 64, 1, 64).store(dv * scale)
                 tla.copy(gm_view(s_dop, sbase, 64, KD, KD), ub_dop)
-                tla.cross_core_set_flag(f1, tla.arch.MTE3)
+                tla.cross_core_set_flag(f1, tla.pipes.MTE3)
 
                 # ---- dv_new ----
-                tla.cross_core_wait_flag(f2, tla.arch.MTE2)
+                tla.cross_core_wait_flag(f2, tla.pipes.MTE2)
                 tla.copy(ub_t, gm_view(s_dvnk, sbase, 64, KD, KD))
                 tla.copy(gm_view(s_dvn, sbase, 64, KD, KD), ub_t)
-                tla.cross_core_set_flag(f3, tla.arch.MTE3)
+                tla.cross_core_set_flag(f3, tla.pipes.MTE3)
 
                 # ---- dh ----
-                tla.cross_core_wait_flag(f4, tla.arch.MTE2)
+                tla.cross_core_wait_flag(f4, tla.pipes.MTE2)
                 for half in tla.range_constexpr(2):
                     hcol = hcur + tla.Int64(half * 64)
                     hprev = hcur + tla.Int64(KD * KD) + tla.Int64(half * 64)
@@ -1482,8 +1482,8 @@ def bwd_kernel_pair(
                         * tla.Int64(64)
                         * tla.Int64(KD)
                     )
-                    tla.cross_core_wait_flag(fl1[j], tla.arch.MTE2)
-                    tla.cross_core_wait_flag(fl5[j], tla.arch.MTE2)
+                    tla.cross_core_wait_flag(fl1[j], tla.pipes.MTE2)
+                    tla.cross_core_wait_flag(fl5[j], tla.pipes.MTE2)
                     tla.copy(l1_a64, gm_view_t(w_aq, fo64, 64, 64, 64))
                     tla.copy(l1_b, gm_view(s_dop, dopbase, 64, KD, KD))
                     tla.copy(tla.make_tensor_like(l0a, l1_a64, tla.arch.zN), l1_a64)
@@ -1556,7 +1556,7 @@ def bwd_kernel_pair(
                         hf32_mode=tla.params.HF32Mode.HF32_NEAREST_EVEN,
                     )
                     tla.copy(gm_view(s_dhb, hcur, KD, KD, KD), c_b)
-                    tla.cross_core_set_flag(fl4[j], tla.arch.FIX)
+                    tla.cross_core_set_flag(fl4[j], tla.pipes.FIX)
         tla.pipe_barrier(tla.pipes.ALL)
 
     with tla.vector():
@@ -1593,10 +1593,10 @@ def bwd_kernel_pair(
                             dv = ld_f32(sub(nat_do, r, pc * 64, 1, 64), QMODE)
                             sub(ub_dop, r, pc * 64, 1, 64).store(dv * scale)
                 tla.copy(gm_view(s_dop, dopbase, 64, KD, KD), ub_dop)
-                tla.cross_core_set_flag(fl1[j], tla.arch.MTE3)
+                tla.cross_core_set_flag(fl1[j], tla.pipes.MTE3)
             # dh(nt) is the host-written initial state: prime the dh flag once.
             for j in tla.range_constexpr(2):
-                tla.cross_core_set_flag(fl5[j], tla.arch.MTE3)
+                tla.cross_core_set_flag(fl5[j], tla.pipes.MTE3)
             for step in tla.range(nt):
                 n = nt - 1 - step
                 valid = length - n * 64
@@ -1631,7 +1631,7 @@ def bwd_kernel_pair(
                                 sub(ub_dop, r, pc * 64, 1, 64).store(dv * scale)
                     tla.copy(gm_view(s_dop, dopbase, 64, KD, KD), ub_dop)
                     if n1 < n:
-                        tla.cross_core_set_flag(fl1[j], tla.arch.MTE3)
+                        tla.cross_core_set_flag(fl1[j], tla.pipes.MTE3)
                 # ---- dh ----
                 for j in tla.range_constexpr(2):
                     t = ta + j
@@ -1646,7 +1646,7 @@ def bwd_kernel_pair(
                         * tla.Int64(KD)
                         * tla.Int64(KD)
                     )
-                    tla.cross_core_wait_flag(fl4[j], tla.arch.MTE2)
+                    tla.cross_core_wait_flag(fl4[j], tla.pipes.MTE2)
                     for half in tla.range_constexpr(2):
                         hcol = hcur + tla.Int64(half * 64)
                         hprev = hcur + tla.Int64(KD * KD) + tla.Int64(half * 64)
@@ -1673,7 +1673,7 @@ def bwd_kernel_pair(
                                 sub(ub_p, r, 0, 1, 64).store(pp * gl + aa - bb)
                         tla.copy(gm_view(dhbuf, hcol, KD, 64, KD), ub_p)
                     if n > 0:
-                        tla.cross_core_set_flag(fl5[j], tla.arch.MTE3)
+                        tla.cross_core_set_flag(fl5[j], tla.pipes.MTE3)
         tla.pipe_barrier(tla.pipes.ALL)
 
 
@@ -1840,7 +1840,7 @@ def grad_kernel(
             narbase = tt * tla.Int64(KD) * tla.Int64(KD)
 
             # ---- PH2 ----
-            tla.cross_core_wait_flag(fa, tla.arch.MTE2)
+            tla.cross_core_wait_flag(fa, tla.pipes.MTE2)
             # dv_new = Aq^T@do' + Kt@dh_out
             tla.copy(l1_nz64, gm_view_t(w_aq, fo64, 64, 64, 64))
             tla.copy(l1_b, gm_view(s_dop, sbase, 64, KD, KD))
@@ -1894,10 +1894,10 @@ def grad_kernel(
                 init_c=True,
                 hf32_mode=tla.params.HF32Mode.HF32_NEAREST_EVEN,
             )
-            tla.cross_core_set_flag(fb, tla.arch.FIX)
+            tla.cross_core_set_flag(fb, tla.pipes.FIX)
 
             # ---- PH4 ----
-            tla.cross_core_wait_flag(fc, tla.arch.MTE2)
+            tla.cross_core_wait_flag(fc, tla.pipes.MTE2)
             tla.copy(l1_a64, gm_view(s_daq, sbase64, 64, 64, 64))
             tla.copy(l1_ks, gm_view(w_ks, fo, 64, KD, KD))
             tla.copy(tla.make_tensor_like(l0a, l1_a64, tla.arch.zN), l1_a64)
@@ -2005,10 +2005,10 @@ def grad_kernel(
                 hf32_mode=tla.params.HF32Mode.HF32_NEAREST_EVEN,
             )
             tla.copy(gm_view(s_dlr, sbase64, 64, 64, 64), c_dl)
-            tla.cross_core_set_flag(fd, tla.arch.FIX)
+            tla.cross_core_set_flag(fd, tla.pipes.FIX)
 
             # ---- PH6 ----
-            tla.cross_core_wait_flag(fe, tla.arch.MTE2)
+            tla.cross_core_wait_flag(fe, tla.pipes.MTE2)
             tla.copy(tla.make_tensor_like(l0a, l1_amT, tla.arch.zN), l1_amT)
             tla.copy(tla.make_tensor_like(l0b, l1_dw, tla.arch.nZ), l1_dw)
             tla.mmad(
@@ -2042,7 +2042,7 @@ def grad_kernel(
                 hf32_mode=tla.params.HF32Mode.HF32_NEAREST_EVEN,
             )
             tla.copy(gm_view(r_dr, sbase, 64, KD, KD), c_kt)
-            tla.cross_core_set_flag(ff, tla.arch.FIX)
+            tla.cross_core_set_flag(ff, tla.pipes.FIX)
         tla.pipe_barrier(tla.pipes.ALL)
 
     with tla.vector():
@@ -2093,10 +2093,10 @@ def grad_kernel(
                         vf = ld_f32(sub(nat_c, r, pc * 64, 1, 64), QMODE)
                         sub(ub_b, r, pc * 64, 1, 64).store(wf * vf)
             tla.copy(gm_view(s_wv, sbase, 64, KD, KD), ub_b)
-            tla.cross_core_set_flag(fa, tla.arch.MTE3)
+            tla.cross_core_set_flag(fa, tla.pipes.MTE3)
 
             # ---- PH3: mask dAq ----
-            tla.cross_core_wait_flag(fb, tla.arch.MTE2)
+            tla.cross_core_wait_flag(fb, tla.pipes.MTE2)
             tla.copy(smat, gm_view(s_daqr, sbase64, 64, 64, 64))
             with tla.vec.func(mode="simd"):
                 idx = tla.arange(0, dtype=tla.Int32)
@@ -2105,10 +2105,10 @@ def grad_kernel(
                     a = sub(smat, r, 0, 1, 64).load()
                     sub(smat, r, 0, 1, 64).store(tla.where(tla.cmp(idx, r, "gt"), z, a))
             tla.copy(gm_view(s_daq, sbase64, 64, 64, 64), smat)
-            tla.cross_core_set_flag(fc, tla.arch.MTE3)
+            tla.cross_core_set_flag(fc, tla.pipes.MTE3)
 
             # ---- PH5: mask dL, and dv/dw ----
-            tla.cross_core_wait_flag(fd, tla.arch.MTE2)
+            tla.cross_core_wait_flag(fd, tla.pipes.MTE2)
             tla.copy(smat, gm_view(s_dlr, sbase64, 64, 64, 64))
             with tla.vec.func(mode="simd"):
                 idx2 = tla.arange(0, dtype=tla.Int32)
@@ -2134,7 +2134,7 @@ def grad_kernel(
                         du = sub(ub_b, r, pc * 64, 1, 64).load()
                         st_low(sub(ou_bf, r, pc * 64, 1, 64), vf * du, QMODE)
             tla.copy(gm_view(gm_dw, boff, valid, KD, KD), sub(ou_bf, 0, 0, valid, KD))
-            tla.cross_core_set_flag(fe, tla.arch.MTE3)
+            tla.cross_core_set_flag(fe, tla.pipes.MTE3)
         tla.pipe_barrier(tla.pipes.ALL)
 
 

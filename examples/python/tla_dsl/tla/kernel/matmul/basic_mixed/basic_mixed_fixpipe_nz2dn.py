@@ -56,9 +56,9 @@ def basic_mixed_fixpipe_nz2dn(
     rhs: tla.Tensor,
     out: tla.Tensor,
 ) -> None:
-    mmad_done = tla.flag("mmad_done", tla.arch.CUBE, tla.arch.FIX)
-    l1b_done = tla.flag("l1b_done", tla.arch.MTE2, tla.arch.MTE1)
-    l0_loaded = tla.flag("l0_loaded", tla.arch.MTE1, tla.arch.CUBE)
+    mmad_done = tla.flag("mmad_done", tla.pipes.CUBE, tla.pipes.FIX)
+    l1b_done = tla.flag("l1b_done", tla.pipes.MTE2, tla.pipes.MTE1)
+    l0_loaded = tla.flag("l0_loaded", tla.pipes.MTE1, tla.pipes.CUBE)
 
     fix_done = tla.cross_flag("fix_done", mode=4)
 
@@ -115,7 +115,7 @@ def basic_mixed_fixpipe_nz2dn(
             ub_c, l0_c, params=CopyL0C2DstParams(l0c2ub_mode=L0C2UBMode.NO_SPLIT_VEC_0)
         )
 
-        tla.cross_core_set_flag(fix_done, tla.arch.FIX, aiv_id=0)
+        tla.cross_core_set_flag(fix_done, tla.pipes.FIX, aiv_id=0)
         tla.pipe_barrier(tla.pipes.ALL)
 
     with tla.vector():
@@ -125,7 +125,7 @@ def basic_mixed_fixpipe_nz2dn(
         ub_c = tla.make_tensor_like(ub_c_ptr, gm_c, tla.arch.RowMajor)
 
         if vec_idx == 0:
-            tla.cross_core_wait_flag(fix_done, tla.arch.MTE3, aiv_id=0)
+            tla.cross_core_wait_flag(fix_done, tla.pipes.MTE3, aiv_id=0)
             tla.copy(gm_c, ub_c)  # copy to gm row->row
 
         tla.pipe_barrier(tla.pipes.ALL)

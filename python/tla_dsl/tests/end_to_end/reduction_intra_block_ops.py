@@ -37,8 +37,8 @@ def reduce_intra_block_op(mem_x: tla.Tensor, mem_z: tla.Tensor) -> None:
     out contiguously in the least-significant lanes and the remaining lanes
     zero. The whole packed vector is stored so the host can check both parts.
     """
-    loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    done = tla.flag("done", tla.arch.VECTOR, tla.arch.MTE3)
+    loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    done = tla.flag("done", tla.pipes.VECTOR, tla.pipes.MTE3)
     x_gm = tla.tile_view(mem_x, tla.make_shape(_VECTOR_ELE), tla.make_coord(0))
     z_gm = tla.tile_view(mem_z, tla.make_shape(_OUT_ELE), tla.make_coord(0))
     x_ptr = tla.allocate(_VECTOR_ELE, _DTYPE, tla.AddressSpace.ub, 256)

@@ -163,8 +163,8 @@ def check_case(torch, case, blocks, npu_arch):
 def make_ub_kernel(threads, dtype):
     @tla.kernel
     def kernel(source: tla.Tensor, output: tla.Tensor) -> None:
-        ub_loaded = tla.flag("ub_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-        vec_done = tla.flag("vec_done", tla.arch.VECTOR, tla.arch.MTE3)
+        ub_loaded = tla.flag("ub_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+        vec_done = tla.flag("vec_done", tla.pipes.VECTOR, tla.pipes.MTE3)
         out_ub_ptr = tla.allocate(OUTPUT_ELEMS, dtype, tla.AddressSpace.ub, 256)
         out_ub = tla.make_tensor_like(out_ub_ptr, output, tla.arch.RowMajor)
 
@@ -241,8 +241,8 @@ def make_tile_alias_kernel(threads, rows, cols):
 
     @tla.kernel
     def kernel(output: tla.Tensor) -> None:
-        ub_loaded = tla.flag("ub_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-        vec_done = tla.flag("vec_done", tla.arch.VECTOR, tla.arch.MTE3)
+        ub_loaded = tla.flag("ub_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+        vec_done = tla.flag("vec_done", tla.pipes.VECTOR, tla.pipes.MTE3)
         buf_ptr = tla.allocate(rows * cols, tla.Int32, tla.AddressSpace.ub, 256)
         buf = tla.make_tensor_like(buf_ptr, output, tla.arch.RowMajor)
         # All of these live outside the region, so their descriptors are ordinary
@@ -388,8 +388,8 @@ def make_shared_ptr_kernel(threads, elems):
 
     @tla.kernel
     def kernel(output: tla.Tensor) -> None:
-        ub_loaded = tla.flag("ub_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-        vec_done = tla.flag("vec_done", tla.arch.VECTOR, tla.arch.MTE3)
+        ub_loaded = tla.flag("ub_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+        vec_done = tla.flag("vec_done", tla.pipes.VECTOR, tla.pipes.MTE3)
         buf_ptr = tla.allocate(elems, tla.Int32, tla.AddressSpace.ub, 256)
         buf = tla.make_tensor_like(buf_ptr, output, tla.arch.RowMajor)
         with tla.vector():

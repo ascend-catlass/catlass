@@ -54,8 +54,8 @@ def _unalign_update_scatter(
             store_dist=StoreDist.DIST_INTLV_B32 if dual else StoreDist.DIST_NORM,
         )
 
-    loaded = tla.flag("scatter_update_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    stored = tla.flag("scatter_update_stored", tla.arch.VECTOR, tla.arch.MTE3)
+    loaded = tla.flag("scatter_update_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    stored = tla.flag("scatter_update_stored", tla.pipes.VECTOR, tla.pipes.MTE3)
     with tla.vector():
         tla.copy(scratch, initial)
         tla.set_flag(loaded)

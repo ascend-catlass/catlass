@@ -34,8 +34,8 @@ DST_ELE = 128  # full VL for i16 (one bin half)
 def histograms_frequency_bins_op(
     mem_src: tla.Tensor, mem_dst_lo: tla.Tensor, mem_dst_hi: tla.Tensor
 ) -> None:
-    ub_loaded = tla.flag("ub_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    vec_done = tla.flag("vec_done", tla.arch.VECTOR, tla.arch.MTE3)
+    ub_loaded = tla.flag("ub_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    vec_done = tla.flag("vec_done", tla.pipes.VECTOR, tla.pipes.MTE3)
 
     src_gm = tla.tile_view(mem_src, tla.make_shape(SRC_ELE), tla.make_coord(0))
     dst_lo_gm = tla.tile_view(mem_dst_lo, tla.make_shape(DST_ELE), tla.make_coord(0))
@@ -110,8 +110,8 @@ def histograms_frequency_bins_op(
 def histograms_accumulate_bins_op(
     mem_src: tla.Tensor, mem_dst_lo: tla.Tensor, mem_dst_hi: tla.Tensor
 ) -> None:
-    ub_loaded = tla.flag("ub_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    vec_done = tla.flag("vec_done", tla.arch.VECTOR, tla.arch.MTE3)
+    ub_loaded = tla.flag("ub_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    vec_done = tla.flag("vec_done", tla.pipes.VECTOR, tla.pipes.MTE3)
 
     src_gm = tla.tile_view(mem_src, tla.make_shape(SRC_ELE), tla.make_coord(0))
     dst_lo_gm = tla.tile_view(mem_dst_lo, tla.make_shape(DST_ELE), tla.make_coord(0))
@@ -184,8 +184,8 @@ def histograms_accumulate_bins_op(
 @tla.kernel
 def histograms_frequency_into_op(mem_src: tla.Tensor, mem_dst: tla.Tensor) -> None:
     """FREQUENCY into an existing dst (cross-call accumulate; required ``dst``)."""
-    ub_loaded = tla.flag("ub_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    vec_done = tla.flag("vec_done", tla.arch.VECTOR, tla.arch.MTE3)
+    ub_loaded = tla.flag("ub_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    vec_done = tla.flag("vec_done", tla.pipes.VECTOR, tla.pipes.MTE3)
 
     src_gm = tla.tile_view(mem_src, tla.make_shape(SRC_ELE), tla.make_coord(0))
     dst_gm = tla.tile_view(mem_dst, tla.make_shape(DST_ELE), tla.make_coord(0))

@@ -77,17 +77,17 @@ def matrix_add_v3(
                         ub_c_ptr[buffer_idx], gm_c_tile, tla.arch.RowMajor
                     )
 
-                    mutex_ub_a[buffer_idx].lock(pipe=tla.arch.MTE2)
+                    mutex_ub_a[buffer_idx].lock(pipe=tla.pipes.MTE2)
                     tla.copy(ub_a_tile, gm_a_tile)
-                    mutex_ub_a[buffer_idx].unlock(pipe=tla.arch.MTE2)
+                    mutex_ub_a[buffer_idx].unlock(pipe=tla.pipes.MTE2)
 
-                    mutex_ub_b[buffer_idx].lock(pipe=tla.arch.MTE2)
+                    mutex_ub_b[buffer_idx].lock(pipe=tla.pipes.MTE2)
                     tla.copy(ub_b_tile, gm_b_tile)
-                    mutex_ub_b[buffer_idx].unlock(pipe=tla.arch.MTE2)
+                    mutex_ub_b[buffer_idx].unlock(pipe=tla.pipes.MTE2)
 
-                    mutex_ub_a[buffer_idx].lock(pipe=tla.arch.VECTOR)
-                    mutex_ub_b[buffer_idx].lock(pipe=tla.arch.VECTOR)
-                    mutex_ub_c[buffer_idx].lock(pipe=tla.arch.VECTOR)
+                    mutex_ub_a[buffer_idx].lock(pipe=tla.pipes.VECTOR)
+                    mutex_ub_b[buffer_idx].lock(pipe=tla.pipes.VECTOR)
+                    mutex_ub_c[buffer_idx].lock(pipe=tla.pipes.VECTOR)
 
                     with tla.vec.func(mode="simd"):
                         valid_len = gm_c_tile.origin_shape[0]
@@ -113,13 +113,13 @@ def matrix_add_v3(
                             reg_c = tla.add(reg_a, reg_b)
                             ub_c_reg_tile.store(reg_c)
 
-                    mutex_ub_c[buffer_idx].unlock(pipe=tla.arch.VECTOR)
-                    mutex_ub_b[buffer_idx].unlock(pipe=tla.arch.VECTOR)
-                    mutex_ub_a[buffer_idx].unlock(pipe=tla.arch.VECTOR)
+                    mutex_ub_c[buffer_idx].unlock(pipe=tla.pipes.VECTOR)
+                    mutex_ub_b[buffer_idx].unlock(pipe=tla.pipes.VECTOR)
+                    mutex_ub_a[buffer_idx].unlock(pipe=tla.pipes.VECTOR)
 
-                    mutex_ub_c[buffer_idx].lock(pipe=tla.arch.MTE3)
+                    mutex_ub_c[buffer_idx].lock(pipe=tla.pipes.MTE3)
                     tla.copy(gm_c_tile, ub_c_tile)
-                    mutex_ub_c[buffer_idx].unlock(pipe=tla.arch.MTE3)
+                    mutex_ub_c[buffer_idx].unlock(pipe=tla.pipes.MTE3)
 
         tla.pipe_barrier(tla.pipes.ALL)
     return

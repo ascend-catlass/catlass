@@ -65,13 +65,13 @@ def basic_matmul_l0c2l1(
     mem_d: tla.Tensor,
     mem_e: tla.Tensor,
 ) -> None:
-    l1ab_done = tla.flag("l1ab_done", tla.arch.MTE2, tla.arch.MTE1)
-    l0_loaded = tla.flag("l0_loaded", tla.arch.MTE1, tla.arch.CUBE)
-    mmad_done = tla.flag("mmad_done", tla.arch.CUBE, tla.arch.FIX)
+    l1ab_done = tla.flag("l1ab_done", tla.pipes.MTE2, tla.pipes.MTE1)
+    l0_loaded = tla.flag("l0_loaded", tla.pipes.MTE1, tla.pipes.CUBE)
+    mmad_done = tla.flag("mmad_done", tla.pipes.CUBE, tla.pipes.FIX)
 
-    fixl1_done = tla.flag("fixl1_done", tla.arch.FIX, tla.arch.MTE1)
+    fixl1_done = tla.flag("fixl1_done", tla.pipes.FIX, tla.pipes.MTE1)
 
-    l1d_done = tla.flag("l1d_done", tla.arch.MTE2, tla.arch.MTE1)
+    l1d_done = tla.flag("l1d_done", tla.pipes.MTE2, tla.pipes.MTE1)
 
     l1a_ptr = tla.allocate(L1A_SIZE, tla.Float32, tla.AddressSpace.l1, 512)
     l1b_ptr = tla.allocate(L1B_SIZE, tla.Float32, tla.AddressSpace.l1, 512)

@@ -116,9 +116,9 @@ import catlass.tla as tla
 # ...
 mutex_ub_a = tla.mutex(resource="ub_a", id=0)
 
-mutex_ub_a.lock(pipe=tla.arch.MTE2)
+mutex_ub_a.lock(pipe=tla.pipes.MTE2)
 tla.copy(ub_a, gm_a)
-mutex_ub_a.unlock(pipe=tla.arch.MTE2)
+mutex_ub_a.unlock(pipe=tla.pipes.MTE2)
 ```
 
 ### basic_vadd_mutex_with

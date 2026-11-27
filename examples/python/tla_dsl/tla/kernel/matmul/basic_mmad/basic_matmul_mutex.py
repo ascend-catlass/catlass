@@ -144,14 +144,14 @@ def basic_mmad_mutex_kernel(
                 )
 
                 mutex_l1a = mutex_l1a0 if (l1_buf_idx == c0) else mutex_l1a1
-                mutex_l1a.lock(pipe=tla.arch.MTE2)
+                mutex_l1a.lock(pipe=tla.pipes.MTE2)
                 tla.copy(l1_a, gm_a_by_l1)
-                mutex_l1a.unlock(pipe=tla.arch.MTE2)
+                mutex_l1a.unlock(pipe=tla.pipes.MTE2)
 
                 mutex_l1b = mutex_l1b0 if (l1_buf_idx == c0) else mutex_l1b1
-                mutex_l1b.lock(pipe=tla.arch.MTE2)
+                mutex_l1b.lock(pipe=tla.pipes.MTE2)
                 tla.copy(l1_b, gm_b_by_l1)
-                mutex_l1b.unlock(pipe=tla.arch.MTE2)
+                mutex_l1b.unlock(pipe=tla.pipes.MTE2)
 
                 k_l0_count = (l1_a.origin_shape[1] + _tiling.l0_tk - 1) // _tiling.l0_tk
                 k_l0_range = tla.range(c0, k_l0_count, c1)
@@ -176,21 +176,21 @@ def basic_mmad_mutex_kernel(
                     )
 
                     mutex_l0a = mutex_l0a0 if (l0_buf_idx == c0) else mutex_l0a1
-                    mutex_l1a.lock(pipe=tla.arch.MTE1)
-                    mutex_l0a.lock(pipe=tla.arch.MTE1)
+                    mutex_l1a.lock(pipe=tla.pipes.MTE1)
+                    mutex_l0a.lock(pipe=tla.pipes.MTE1)
                     tla.copy(l0_a, l1_a_by_l0)
-                    mutex_l0a.unlock(pipe=tla.arch.MTE1)
-                    mutex_l1a.unlock(pipe=tla.arch.MTE1)
+                    mutex_l0a.unlock(pipe=tla.pipes.MTE1)
+                    mutex_l1a.unlock(pipe=tla.pipes.MTE1)
 
                     mutex_l0b = mutex_l0b0 if (l0_buf_idx == c0) else mutex_l0b1
-                    mutex_l1b.lock(pipe=tla.arch.MTE1)
-                    mutex_l0b.lock(pipe=tla.arch.MTE1)
+                    mutex_l1b.lock(pipe=tla.pipes.MTE1)
+                    mutex_l0b.lock(pipe=tla.pipes.MTE1)
                     tla.copy(l0_b, l1_b_by_l0)
-                    mutex_l0b.unlock(pipe=tla.arch.MTE1)
-                    mutex_l1b.unlock(pipe=tla.arch.MTE1)
+                    mutex_l0b.unlock(pipe=tla.pipes.MTE1)
+                    mutex_l1b.unlock(pipe=tla.pipes.MTE1)
 
-                    mutex_l0a.lock(pipe=tla.arch.CUBE)
-                    mutex_l0b.lock(pipe=tla.arch.CUBE)
+                    mutex_l0a.lock(pipe=tla.pipes.CUBE)
+                    mutex_l0b.lock(pipe=tla.pipes.CUBE)
 
                     init_c = True if k_l1 == 0 and k_l0 == 0 else False
                     unit_flag = (
@@ -201,8 +201,8 @@ def basic_mmad_mutex_kernel(
 
                     tla.mmad(l0_c, l0_a, l0_b, init_c=init_c, unit_flag=unit_flag)
 
-                    mutex_l0b.unlock(pipe=tla.arch.CUBE)
-                    mutex_l0a.unlock(pipe=tla.arch.CUBE)
+                    mutex_l0b.unlock(pipe=tla.pipes.CUBE)
+                    mutex_l0a.unlock(pipe=tla.pipes.CUBE)
 
                     l0_buf_idx = c1 - l0_buf_idx
                 l1_buf_idx = c1 - l1_buf_idx

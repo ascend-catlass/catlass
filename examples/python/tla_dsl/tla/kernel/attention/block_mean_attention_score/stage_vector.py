@@ -193,15 +193,15 @@ def _matrix(ptr, rows, cols, stride):
 
 @tla.jit
 def _load_counts(counts, ptr, mutex, start, count):
-    mutex.lock(pipe=tla.arch.MTE2)
+    mutex.lock(pipe=tla.pipes.MTE2)
     tla.copy(_vector(ptr, count), _vector(counts.ptr + start, count))
-    mutex.unlock(pipe=tla.arch.MTE2)
-    mutex.lock(pipe=tla.arch.VECTOR)
+    mutex.unlock(pipe=tla.pipes.MTE2)
+    mutex.lock(pipe=tla.pipes.VECTOR)
     full = _vector(ptr, COUNTS_LOAD_ELEMS)
     with tla.vec.func(mode="simd"):
         keep = tla.cmp(tla.arange(0, dtype=tla.Int32), count, "lt")
         full.store(tla.where(keep, full.load(), tla.full(0, dtype=tla.Int32)))
-    mutex.unlock(pipe=tla.arch.VECTOR)
+    mutex.unlock(pipe=tla.pipes.VECTOR)
 
 
 @tla.jit
@@ -215,10 +215,10 @@ def initialize_counts(
     mutex = bufs.mq
     qcounts = bufs.qcounts
     if _cached:
-        mutex.lock(pipe=tla.arch.MTE2)
+        mutex.lock(pipe=tla.pipes.MTE2)
         tla.copy(_vector(qcounts, _blocks), _vector(counts.ptr, _blocks))
-        mutex.unlock(pipe=tla.arch.MTE2)
-        mutex.lock(pipe=tla.arch.VECTOR)
+        mutex.unlock(pipe=tla.pipes.MTE2)
+        mutex.lock(pipe=tla.pipes.VECTOR)
         cache = _vector(qcounts, _cache_elems)
         with tla.vec.func(mode="simd"):
             lanes = tla.arange(0, dtype=tla.Int32)
@@ -233,10 +233,10 @@ def initialize_counts(
                 )
                 keep = tla.cmp(lanes + group * COUNTS_LOAD_ELEMS, _blocks, "lt")
                 part.store(tla.where(keep, part.load(), zero))
-        mutex.unlock(pipe=tla.arch.VECTOR)
+        mutex.unlock(pipe=tla.pipes.VECTOR)
         # Later scalar tile-count sums must observe the initialized cache.
-        mutex.lock(pipe=tla.arch.SCALAR)
-        mutex.unlock(pipe=tla.arch.SCALAR)
+        mutex.lock(pipe=tla.pipes.SCALAR)
+        mutex.unlock(pipe=tla.pipes.SCALAR)
 
 
 @tla.jit
@@ -271,8 +271,8 @@ def prepare_vector(counts, bufs, query_start, nq, nq_pad, _cached):
     masks = _vector(bufs.predicates, QUERY_MASK_WORDS)
     half = nq_pad // 2
     qoffset = tla.arch.sub_block_idx() * half
-    bufs.mq.lock(pipe=tla.arch.VECTOR)
-    bufs.mr.lock(pipe=tla.arch.VECTOR)
+    bufs.mq.lock(pipe=tla.pipes.VECTOR)
+    bufs.mr.lock(pipe=tla.pipes.VECTOR)
     with tla.vec.func(mode="simd"):
         lanes = tla.arange(0, dtype=tla.Int32)
         zero = tla.full(0.0, dtype=tla.Float32)
@@ -300,8 +300,8 @@ def prepare_vector(counts, bufs, query_start, nq, nq_pad, _cached):
             tla.tile_view(
                 run_sum, tla.make_shape(FP32_VECTOR_LANES), tla.make_coord(part)
             ).store(zero)
-    bufs.mr.unlock(pipe=tla.arch.VECTOR)
-    bufs.mq.unlock(pipe=tla.arch.VECTOR)
+    bufs.mr.unlock(pipe=tla.pipes.VECTOR)
+    bufs.mq.unlock(pipe=tla.pipes.VECTOR)
 
 
 @tla.jit
@@ -430,9 +430,9 @@ def _phase_one_exact(
     stage_m = _vector(stage_m_ptr, UB_SCORE_STRIDE)
     run_max = _vector(bufs.run_max, UB_SCORE_STRIDE)
     run_sum = _vector(bufs.run_sum, UB_SCORE_STRIDE)
-    bufs.mk.lock(pipe=tla.arch.VECTOR)
-    staging_mutex.lock(pipe=tla.arch.VECTOR)
-    bufs.mr.lock(pipe=tla.arch.VECTOR)
+    bufs.mk.lock(pipe=tla.pipes.VECTOR)
+    staging_mutex.lock(pipe=tla.pipes.VECTOR)
+    bufs.mr.lock(pipe=tla.pipes.VECTOR)
     with tla.vec.func(mode="simd"):
         zero = tla.full(0.0, dtype=tla.Float32)
         neg_inf = tla.full(NEG_INF, dtype=tla.Float32)
@@ -496,9 +496,9 @@ def _phase_one_exact(
                     tla.make_shape(FP32_VECTOR_LANES),
                     tla.make_coord(empty_part),
                 ).store(neg_inf)
-    bufs.mr.unlock(pipe=tla.arch.VECTOR)
-    staging_mutex.unlock(pipe=tla.arch.VECTOR)
-    bufs.mk.unlock(pipe=tla.arch.VECTOR)
+    bufs.mr.unlock(pipe=tla.pipes.VECTOR)
+    staging_mutex.unlock(pipe=tla.pipes.VECTOR)
+    bufs.mk.unlock(pipe=tla.pipes.VECTOR)
     # Workspace segments use UB_SCORE_STRIDE lanes, including short Query
     # tiles whose logical AIV offset is only nq_pad/2.
     ws_base = (
@@ -514,12 +514,12 @@ def _phase_one_exact(
     gm_m = _vector(
         ws.ptr + ws_base + (blocks + key_tile) * WORKSPACE_ROW_STRIDE, UB_SCORE_STRIDE
     )
-    staging_mutex.lock(pipe=tla.arch.MTE3)
+    staging_mutex.lock(pipe=tla.pipes.MTE3)
     tla.copy(
         gm_a, _matrix(stage_a_ptr, mk // BLOCK_TOKENS, UB_SCORE_STRIDE, UB_SCORE_STRIDE)
     )
     tla.copy(gm_m, stage_m)
-    staging_mutex.unlock(pipe=tla.arch.MTE3)
+    staging_mutex.unlock(pipe=tla.pipes.MTE3)
 
 
 @tla.jit
@@ -544,14 +544,14 @@ def phase_one(
         _load_counts(
             counts, bufs.kcounts, bufs.mk, key_start // BLOCK_TOKENS, mk // BLOCK_TOKENS
         )
-        key_mutex.lock(pipe=tla.arch.SCALAR)
+        key_mutex.lock(pipe=tla.pipes.SCALAR)
     scalar_counts = _vector(bufs.kcounts, COUNTS_CACHE_ELEMS)
     key_offset = key_start // BLOCK_TOKENS if _cached else 0
     total = tla.as_numeric(0)
     for total_kb in tla.range(mk // BLOCK_TOKENS):
         total = total + scalar_counts[key_offset + total_kb]
     if not _cached:
-        key_mutex.unlock(pipe=tla.arch.SCALAR)
+        key_mutex.unlock(pipe=tla.pipes.SCALAR)
     _phase_one_exact(
         counts,
         ws,
@@ -578,7 +578,7 @@ def finish_statistics(bufs, query_start, nq_pad, _cached):
     masks = _vector(bufs.predicates, QUERY_MASK_WORDS)
     qoffset = tla.arch.sub_block_idx() * (nq_pad // 2)
     # Counts are constant across all Key tiles consumed by this task.
-    bufs.mr.lock(pipe=tla.arch.VECTOR)
+    bufs.mr.lock(pipe=tla.pipes.VECTOR)
     with tla.vec.func(mode="simd"):
         zero = tla.full(0.0, dtype=tla.Float32)
         one = tla.full(1.0, dtype=tla.Float32)
@@ -613,7 +613,7 @@ def finish_statistics(bufs, query_start, nq_pad, _cached):
                     tla.full(-1.0, dtype=tla.Float32),
                 )
             )
-    bufs.mr.unlock(pipe=tla.arch.VECTOR)
+    bufs.mr.unlock(pipe=tla.pipes.VECTOR)
 
 
 @tla.jit
@@ -637,10 +637,10 @@ def _load_workspace_tile(ws, bufs, tile, blocks, key_tiles, _m1: tla.Constexpr[i
     gm_m = _vector(
         ws.ptr + base + (blocks + tile) * WORKSPACE_ROW_STRIDE, UB_SCORE_STRIDE
     )
-    mutex.lock(pipe=tla.arch.MTE2)
+    mutex.lock(pipe=tla.pipes.MTE2)
     tla.copy(_matrix(a_ptr, mk // BLOCK_TOKENS, UB_SCORE_STRIDE, UB_SCORE_STRIDE), gm_a)
     tla.copy(_vector(m_ptr, UB_SCORE_STRIDE), gm_m)
-    mutex.unlock(pipe=tla.arch.MTE2)
+    mutex.unlock(pipe=tla.pipes.MTE2)
 
 
 @tla.jit
@@ -661,7 +661,7 @@ def _finalize_impl(
     """Normalize deferred sums and reduce groups of sixteen Query lanes."""
     # The task-wide resource transfers the GM workspace from phase-one
     # MTE3 writes to finalize's MTE2 reads.
-    bufs.mw.lock(pipe=tla.arch.MTE2)
+    bufs.mw.lock(pipe=tla.pipes.MTE2)
     _load_workspace_tile(ws, bufs, 0, blocks, key_tiles, _m1)
     half = nq_pad // 2
     qbase = tla.arch.sub_block_idx() * half // BLOCK_TOKENS
@@ -700,11 +700,11 @@ def _finalize_impl(
         stage_a = _matrix(a_ptr, _m1 // BLOCK_TOKENS, UB_SCORE_STRIDE, UB_SCORE_STRIDE)
         stage_m = _vector(m_ptr, UB_SCORE_STRIDE)
         packed_output = _vector(output_ptr, QUERY_BLOCKS_PER_AIV * OUTPUT_ROW_STRIDE)
-        mutex.lock(pipe=tla.arch.VECTOR)
-        query_mutex.lock(pipe=tla.arch.VECTOR)
-        key_mutex.lock(pipe=tla.arch.VECTOR)
-        statistics_mutex.lock(pipe=tla.arch.VECTOR)
-        mo.lock(pipe=tla.arch.VECTOR)
+        mutex.lock(pipe=tla.pipes.VECTOR)
+        query_mutex.lock(pipe=tla.pipes.VECTOR)
+        key_mutex.lock(pipe=tla.pipes.VECTOR)
+        statistics_mutex.lock(pipe=tla.pipes.VECTOR)
+        mo.lock(pipe=tla.pipes.VECTOR)
         with tla.vec.func(mode="simd"):
             lanes = tla.arange(0, dtype=tla.Int32)
             zero = tla.full(0.0, dtype=tla.Float32)
@@ -828,11 +828,11 @@ def _finalize_impl(
                 tla.make_shape(FP32_VECTOR_LANES),
                 tla.make_coord(1),
             ).store(packed1, mask=output_store_mask)
-        mo.unlock(pipe=tla.arch.VECTOR)
-        statistics_mutex.unlock(pipe=tla.arch.VECTOR)
-        key_mutex.unlock(pipe=tla.arch.VECTOR)
-        query_mutex.unlock(pipe=tla.arch.VECTOR)
-        mutex.unlock(pipe=tla.arch.VECTOR)
+        mo.unlock(pipe=tla.pipes.VECTOR)
+        statistics_mutex.unlock(pipe=tla.pipes.VECTOR)
+        key_mutex.unlock(pipe=tla.pipes.VECTOR)
+        query_mutex.unlock(pipe=tla.pipes.VECTOR)
+        mutex.unlock(pipe=tla.pipes.VECTOR)
         if local_blocks > 0:
             gm_out = _matrix(
                 out.ptr
@@ -845,10 +845,10 @@ def _finalize_impl(
             ub_out = _matrix(
                 output_ptr, local_blocks, mk // BLOCK_TOKENS, OUTPUT_ROW_STRIDE
             )
-            mo.lock(pipe=tla.arch.MTE3)
+            mo.lock(pipe=tla.pipes.MTE3)
             tla.copy(gm_out, ub_out)
-            mo.unlock(pipe=tla.arch.MTE3)
-    bufs.mw.unlock(pipe=tla.arch.MTE2)
+            mo.unlock(pipe=tla.pipes.MTE3)
+    bufs.mw.unlock(pipe=tla.pipes.MTE2)
 
 
 @tla.jit

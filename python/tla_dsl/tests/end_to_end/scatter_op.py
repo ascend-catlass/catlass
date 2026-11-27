@@ -47,8 +47,8 @@ DST_ELE = 7 * WINDOW_ELE
 
 @tla.kernel
 def scatter_op(mem_src: tla.Tensor, mem_idx: tla.Tensor, mem_dst: tla.Tensor) -> None:
-    loaded = tla.flag("scatter_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    done = tla.flag("scatter_done", tla.arch.VECTOR, tla.arch.MTE3)
+    loaded = tla.flag("scatter_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    done = tla.flag("scatter_done", tla.pipes.VECTOR, tla.pipes.MTE3)
 
     src_ub = tla.make_tensor_like(
         tla.allocate(SRC_ELE, _DATA_DTYPE, tla.AddressSpace.ub, 256),

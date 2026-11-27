@@ -237,7 +237,7 @@ def print_tensor_ub_aligned_offset_kernel(value: tla.Tensor) -> None:
 def _prepare_ub_tensors(
     value: tla.Tensor, element_offset: int
 ) -> tuple[Any, Any, Any, Any]:
-    loaded = tla.flag("print_ub_loaded", tla.arch.MTE2, tla.arch.VECTOR)
+    loaded = tla.flag("print_ub_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
     allocation = tla.allocate(
         32 + element_offset, _KERNEL_COPY_DTYPE, tla.AddressSpace.ub, 256
     )
@@ -269,7 +269,7 @@ def _print_ub_tensor(
 def print_tensor_ub_dynamic_kernel(
     value: tla.Tensor, rows: tla.Int32, length: tla.Int32
 ) -> None:
-    loaded = tla.flag("print_ub_loaded", tla.arch.MTE2, tla.arch.VECTOR)
+    loaded = tla.flag("print_ub_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
     ptr = tla.allocate(32, tla.Float32, tla.AddressSpace.ub, 256)
     copy_layout = _ub_row_major_layout()
     gm = tla.make_tensor(value.ptr, copy_layout)
@@ -357,7 +357,7 @@ def _print_l1(
     calls: tla.Constexpr[int],
     block_dependent: tla.Constexpr[bool] = False,
 ) -> None:
-    loaded = tla.flag("print_l1_loaded", tla.arch.MTE2, tla.arch.MTE1)
+    loaded = tla.flag("print_l1_loaded", tla.pipes.MTE2, tla.pipes.MTE1)
     copy_l1, print_l1 = _prepare_l1_tensors(value, layout, 0)
     source = _make_l1_source(
         value, layout, _KERNEL_L1_COPY_DTYPE, _KERNEL_L1_COPY_ELEMENT_BYTES
@@ -405,9 +405,9 @@ def _print_l0c(
     calls: tla.Constexpr[int],
     dimension: tla.Constexpr[int] = 16,
 ) -> None:
-    l1_loaded = tla.flag("print_l0c_l1_loaded", tla.arch.MTE2, tla.arch.MTE1)
-    l0_loaded = tla.flag("print_l0c_l0_loaded", tla.arch.MTE1, tla.arch.CUBE)
-    mm_completed = tla.flag("print_l0c_mmad_done", tla.arch.CUBE, tla.arch.FIX)
+    l1_loaded = tla.flag("print_l0c_l1_loaded", tla.pipes.MTE2, tla.pipes.MTE1)
+    l0_loaded = tla.flag("print_l0c_l0_loaded", tla.pipes.MTE1, tla.pipes.CUBE)
+    mm_completed = tla.flag("print_l0c_mmad_done", tla.pipes.CUBE, tla.pipes.FIX)
     element_count = dimension * dimension
     l1a_ptr = tla.allocate(
         element_count, _KERNEL_L0C_INPUT_DTYPE, tla.AddressSpace.l1, 512

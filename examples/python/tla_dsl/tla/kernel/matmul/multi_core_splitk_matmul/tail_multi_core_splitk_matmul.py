@@ -88,29 +88,29 @@ def tail_multi_core_splitk_mmad_kernel(
     k = gm_a.origin_shape[1]
 
     # AIC pipeline flags: MTE2 ↔ MTE1 ↔ Cube ↔ FIX
-    l1a0_data_ready = tla.flag("l1a0_copy_end", tla.arch.MTE2, tla.arch.MTE1)
-    l1a1_data_ready = tla.flag("l1a1_copy_end", tla.arch.MTE2, tla.arch.MTE1)
-    l1b0_data_ready = tla.flag("l1b0_copy_end", tla.arch.MTE2, tla.arch.MTE1)
-    l1b1_data_ready = tla.flag("l1b1_copy_end", tla.arch.MTE2, tla.arch.MTE1)
-    l1a0_available = tla.flag("l1a0_copy_start", tla.arch.MTE1, tla.arch.MTE2)
-    l1a1_available = tla.flag("l1a1_copy_start", tla.arch.MTE1, tla.arch.MTE2)
-    l1b0_available = tla.flag("l1b0_copy_start", tla.arch.MTE1, tla.arch.MTE2)
-    l1b1_available = tla.flag("l1b1_copy_start", tla.arch.MTE1, tla.arch.MTE2)
-    l0a0_available = tla.flag("l0a0_copy_start", tla.arch.CUBE, tla.arch.MTE1)
-    l0a1_available = tla.flag("l0a1_copy_start", tla.arch.CUBE, tla.arch.MTE1)
-    l0b0_available = tla.flag("l0b0_copy_start", tla.arch.CUBE, tla.arch.MTE1)
-    l0b1_available = tla.flag("l0b1_copy_start", tla.arch.CUBE, tla.arch.MTE1)
-    l0_ab_data_ready = tla.flag("l0_copy_end", tla.arch.MTE1, tla.arch.CUBE)
-    l0c_available = tla.flag("fix_done", tla.arch.FIX, tla.arch.CUBE)
+    l1a0_data_ready = tla.flag("l1a0_copy_end", tla.pipes.MTE2, tla.pipes.MTE1)
+    l1a1_data_ready = tla.flag("l1a1_copy_end", tla.pipes.MTE2, tla.pipes.MTE1)
+    l1b0_data_ready = tla.flag("l1b0_copy_end", tla.pipes.MTE2, tla.pipes.MTE1)
+    l1b1_data_ready = tla.flag("l1b1_copy_end", tla.pipes.MTE2, tla.pipes.MTE1)
+    l1a0_available = tla.flag("l1a0_copy_start", tla.pipes.MTE1, tla.pipes.MTE2)
+    l1a1_available = tla.flag("l1a1_copy_start", tla.pipes.MTE1, tla.pipes.MTE2)
+    l1b0_available = tla.flag("l1b0_copy_start", tla.pipes.MTE1, tla.pipes.MTE2)
+    l1b1_available = tla.flag("l1b1_copy_start", tla.pipes.MTE1, tla.pipes.MTE2)
+    l0a0_available = tla.flag("l0a0_copy_start", tla.pipes.CUBE, tla.pipes.MTE1)
+    l0a1_available = tla.flag("l0a1_copy_start", tla.pipes.CUBE, tla.pipes.MTE1)
+    l0b0_available = tla.flag("l0b0_copy_start", tla.pipes.CUBE, tla.pipes.MTE1)
+    l0b1_available = tla.flag("l0b1_copy_start", tla.pipes.CUBE, tla.pipes.MTE1)
+    l0_ab_data_ready = tla.flag("l0_copy_end", tla.pipes.MTE1, tla.pipes.CUBE)
+    l0c_available = tla.flag("fix_done", tla.pipes.FIX, tla.pipes.CUBE)
 
     # Cross-core: paired AIC→AIV done (mode 2); AIV all-block barrier (mode 0).
     cross_aic_to_aiv_done = tla.cross_flag("aic_finish", mode=2)
     cross_aiv_barrier = tla.cross_flag("aiv_ibarrier", mode=0)
 
     # AIV reduce pipeline: MTE3 → MTE2 → vector → MTE3
-    reduce_mte3_mte2 = tla.flag("reduce_mte3_mte2", tla.arch.MTE3, tla.arch.MTE2)
-    reduce_mte2_v = tla.flag("reduce_mte2_v", tla.arch.MTE2, tla.arch.VECTOR)
-    reduce_v_mte3 = tla.flag("reduce_v_mte3", tla.arch.VECTOR, tla.arch.MTE3)
+    reduce_mte3_mte2 = tla.flag("reduce_mte3_mte2", tla.pipes.MTE3, tla.pipes.MTE2)
+    reduce_mte2_v = tla.flag("reduce_mte2_v", tla.pipes.MTE2, tla.pipes.VECTOR)
+    reduce_v_mte3 = tla.flag("reduce_v_mte3", tla.pipes.VECTOR, tla.pipes.MTE3)
 
     # L1 ping-pong tiles for A (M×K) and B (K×N)
     l1a0_ptr = tla.allocate(
@@ -198,7 +198,7 @@ def tail_multi_core_splitk_mmad_kernel(
 
         # Normal-only AICs signal completion once before the task loop.
         if bid >= tail_cores:
-            tla.cross_core_set_flag(cross_aic_to_aiv_done, tla.arch.FIX)
+            tla.cross_core_set_flag(cross_aic_to_aiv_done, tla.pipes.FIX)
 
         task_range = tla.range(bid, _tail_splitk.core_loops, bdim)
         for loop_idx in task_range:
@@ -438,10 +438,10 @@ def tail_multi_core_splitk_mmad_kernel(
                 if loop_idx == _tail_splitk.normal_block_num - bdim + bid:
                     if bid < tail_cores:
                         tla.pipe_barrier(tla.pipes.ALL)
-                        tla.cross_core_set_flag(cross_aic_to_aiv_done, tla.arch.FIX)
+                        tla.cross_core_set_flag(cross_aic_to_aiv_done, tla.pipes.FIX)
             else:
                 tla.pipe_barrier(tla.pipes.ALL)
-                tla.cross_core_set_flag(cross_aic_to_aiv_done, tla.arch.FIX)
+                tla.cross_core_set_flag(cross_aic_to_aiv_done, tla.pipes.FIX)
 
         tla.wait_flag(l1a0_available)
         tla.wait_flag(l1a1_available)
@@ -455,9 +455,9 @@ def tail_multi_core_splitk_mmad_kernel(
         tla.pipe_barrier(tla.pipes.ALL)
 
     with tla.vector():
-        tla.cross_core_wait_flag(cross_aic_to_aiv_done, tla.arch.MTE2)
-        tla.cross_core_set_flag(cross_aiv_barrier, tla.arch.MTE2)
-        tla.cross_core_wait_flag(cross_aiv_barrier, tla.arch.MTE2)
+        tla.cross_core_wait_flag(cross_aic_to_aiv_done, tla.pipes.MTE2)
+        tla.cross_core_set_flag(cross_aiv_barrier, tla.pipes.MTE2)
+        tla.cross_core_wait_flag(cross_aiv_barrier, tla.pipes.MTE2)
 
         sub = tla.arch.sub_block_idx()
         aic_id = tla.arch.block_idx()

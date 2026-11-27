@@ -211,7 +211,7 @@ def mutex_guard_explicit_lock_kernel(dst: tla.Tensor, src: tla.Tensor) -> None:
     dst_tile = tla.tile_view(dst, tla.make_shape(16, 16), tla.make_coord(0, 0))
     src_tile = tla.tile_view(src, tla.make_shape(16, 16), tla.make_coord(0, 0))
     with tla.mutex_guard(mutex):
-        mutex.lock(pipe=tla.arch.MTE2)
+        mutex.lock(pipe=tla.pipes.MTE2)
         tla.copy(dst_tile, src_tile)
 
 @tla.kernel

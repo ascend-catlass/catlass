@@ -14,7 +14,7 @@ Differences from ``basic_mixed.py``:
 - ``@tla.kernel(core_ratio=tla.arch.C1V1)``
 - one AIV owns the full MxN epilogue (no ``sub_block_idx`` half-split)
 - cross-core sync uses ``mode=4`` with ``aiv_id=0`` only; wait uses
-  ``tla.arch.SCALAR`` (CV 1:1 FFTS / SyncAll contract; lowers to
+  ``tla.pipes.SCALAR`` (CV 1:1 FFTS / SyncAll contract; lowers to
   ``SET.CROSS.CORE`` + ``WAIT.FLAG.DEV.S``, not INTRA)
 - cube result stages L0C→GM (CV 1:1 forbids tightly-coupled L0C→UB)
 """
@@ -63,13 +63,13 @@ def basic_mixed_core_ratio_11(
     k = lhs.origin_shape[1]
     n = rhs.origin_shape[1]
 
-    mmad_done = tla.flag("mmad_done", tla.arch.CUBE, tla.arch.FIX)
-    l1_loaded = tla.flag("l1_loaded", tla.arch.MTE2, tla.arch.MTE1)
-    l0_loaded = tla.flag("l0_loaded", tla.arch.MTE1, tla.arch.CUBE)
+    mmad_done = tla.flag("mmad_done", tla.pipes.CUBE, tla.pipes.FIX)
+    l1_loaded = tla.flag("l1_loaded", tla.pipes.MTE2, tla.pipes.MTE1)
+    l0_loaded = tla.flag("l0_loaded", tla.pipes.MTE1, tla.pipes.CUBE)
 
-    ub_load_ready = tla.flag("ub_load_ready", tla.arch.VECTOR, tla.arch.MTE2)
-    ub_loaded = tla.flag("ub_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    vec_done = tla.flag("vec_done", tla.arch.VECTOR, tla.arch.MTE3)
+    ub_load_ready = tla.flag("ub_load_ready", tla.pipes.VECTOR, tla.pipes.MTE2)
+    ub_loaded = tla.flag("ub_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    vec_done = tla.flag("vec_done", tla.pipes.VECTOR, tla.pipes.MTE3)
 
     fix_done = tla.cross_flag("fix_done", mode=4)
 
@@ -120,7 +120,7 @@ def basic_mixed_core_ratio_11(
         # AscendNPU-IR InsertLoadStoreForMixCV / AscendC SyncAll 数据通路）。
         tla.copy(gm_c, l0_c)
 
-        tla.cross_core_set_flag(fix_done, tla.arch.FIX, aiv_id=0)
+        tla.cross_core_set_flag(fix_done, tla.pipes.FIX, aiv_id=0)
         tla.pipe_barrier(tla.pipes.ALL)
 
     with tla.vector():
@@ -140,7 +140,7 @@ def basic_mixed_core_ratio_11(
 
         # CV 1:1 FFTS / SyncAll：wait 固定 PIPE_S（AscendC wait_flag_dev(PIPE_S)）。
         # mode=4 仅 aiv_id=0；pass 按 core_ratio 落 SET.CROSS.CORE + WAIT.FLAG.DEV。
-        tla.cross_core_wait_flag(fix_done, tla.arch.SCALAR, aiv_id=0)
+        tla.cross_core_wait_flag(fix_done, tla.pipes.SCALAR, aiv_id=0)
 
         tla.set_flag(ub_load_ready)
         tla.wait_flag(ub_load_ready)

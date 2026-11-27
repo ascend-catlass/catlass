@@ -21,8 +21,8 @@ from catlass.tla.runtime import make_fake_tensor
 def vf_print_mixed(source: tla.Tensor, destination: tla.Tensor):
     source_ptr = tla.allocate(64, tla.Float32, tla.AddressSpace.ub, 256)
     result_ptr = tla.allocate(64, tla.Float32, tla.AddressSpace.ub, 256)
-    loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    stored = tla.flag("stored", tla.arch.VECTOR, tla.arch.MTE3)
+    loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    stored = tla.flag("stored", tla.pipes.VECTOR, tla.pipes.MTE3)
     with tla.cube():
         tla.print("cube_block={}", tla.arch.block_idx())
         tla.print(source, 4)

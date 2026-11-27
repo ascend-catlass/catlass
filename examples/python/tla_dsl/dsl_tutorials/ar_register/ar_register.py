@@ -77,9 +77,9 @@ def clear_in_scalar(count_out: tla.Tensor) -> None:
 @tla.kernel
 def clear_then_squeeze(src: tla.Tensor, dst: tla.Tensor, count_out: tla.Tensor) -> None:
     """Record the byte count of a masked squeeze and read it after completion."""
-    loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    stored = tla.flag("stored", tla.arch.VECTOR, tla.arch.MTE3)
-    count_ready = tla.flag("count_ready", tla.arch.VECTOR, tla.arch.SCALAR)
+    loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    stored = tla.flag("stored", tla.pipes.VECTOR, tla.pipes.MTE3)
+    count_ready = tla.flag("count_ready", tla.pipes.VECTOR, tla.pipes.SCALAR)
 
     src_gm = tla.tile_view(src, tla.make_shape(LANES), tla.make_coord(0))
     dst_gm = tla.tile_view(dst, tla.make_shape(LANES), tla.make_coord(0))

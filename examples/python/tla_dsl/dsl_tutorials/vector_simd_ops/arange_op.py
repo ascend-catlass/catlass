@@ -37,8 +37,8 @@ _BATCH_OPS = ("increase",) * 4
 
 @tla.kernel
 def arange_op(mem_out: tla.Tensor) -> None:
-    ub_loaded = tla.flag("ub_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    vec_done = tla.flag("vec_done", tla.arch.VECTOR, tla.arch.MTE3)
+    ub_loaded = tla.flag("ub_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    vec_done = tla.flag("vec_done", tla.pipes.VECTOR, tla.pipes.MTE3)
 
     out_gm = tla.tile_view(mem_out, tla.make_shape(VECTOR_ELE), tla.make_coord(0))
     out_ub_ptr = tla.allocate(VECTOR_ELE, _KERNEL_DTYPE, tla.AddressSpace.ub, 256)
@@ -79,8 +79,8 @@ def _batch_arange_store(out_tile: Any, chunk_start: Any, op_name: str) -> None:
 
 @tla.kernel
 def arange_op_batch(mem_out: tla.Tensor) -> None:
-    ub_loaded = tla.flag("ub_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    vec_done = tla.flag("vec_done", tla.arch.VECTOR, tla.arch.MTE3)
+    ub_loaded = tla.flag("ub_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    vec_done = tla.flag("vec_done", tla.pipes.VECTOR, tla.pipes.MTE3)
     block_idx = tla.arch.block_idx()
     out_gm = tla.tile_view(
         mem_out, tla.make_shape(VECTOR_ELE), tla.make_coord(block_idx)

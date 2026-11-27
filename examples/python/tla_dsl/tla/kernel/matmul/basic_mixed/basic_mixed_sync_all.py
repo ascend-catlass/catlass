@@ -74,11 +74,11 @@ def _sync_all_impl(
     k = lhs.origin_shape[1]
     n = rhs.origin_shape[1]
 
-    mmad_done = tla.flag("mmad_done", tla.arch.CUBE, tla.arch.FIX)
-    l1_loaded = tla.flag("l1_loaded", tla.arch.MTE2, tla.arch.MTE1)
-    l0_loaded = tla.flag("l0_loaded", tla.arch.MTE1, tla.arch.CUBE)
-    wk_in_ub = tla.flag("wk_in_ub", tla.arch.MTE2, tla.arch.MTE3)
-    out_stored = tla.flag("out_stored", tla.arch.MTE3, tla.arch.MTE2)
+    mmad_done = tla.flag("mmad_done", tla.pipes.CUBE, tla.pipes.FIX)
+    l1_loaded = tla.flag("l1_loaded", tla.pipes.MTE2, tla.pipes.MTE1)
+    l0_loaded = tla.flag("l0_loaded", tla.pipes.MTE1, tla.pipes.CUBE)
+    wk_in_ub = tla.flag("wk_in_ub", tla.pipes.MTE2, tla.pipes.MTE3)
+    out_stored = tla.flag("out_stored", tla.pipes.MTE3, tla.pipes.MTE2)
 
     l1a_ptr = tla.allocate(L1_STAGE_BYTES // 4, tla.Float32, tla.AddressSpace.l1, 512)
     l1b_ptr = tla.allocate(L1_STAGE_BYTES // 4, tla.Float32, tla.AddressSpace.l1, 512)

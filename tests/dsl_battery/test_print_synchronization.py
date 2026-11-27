@@ -15,8 +15,8 @@ def _simd_snapshot_kernel():
     ):
         pointer = tla.allocate(64, tla.Float32, tla.AddressSpace.ub, 256)
         local = tla.make_tensor_like(pointer, source, tla.arch.RowMajor)
-        loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.VECTOR)
-        stored = tla.flag("stored", tla.arch.VECTOR, tla.arch.MTE3)
+        loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+        stored = tla.flag("stored", tla.pipes.VECTOR, tla.pipes.MTE3)
         with tla.vector():
             tla.copy(local, source)
             tla.set_flag(loaded)

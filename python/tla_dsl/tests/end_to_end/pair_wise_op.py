@@ -28,8 +28,8 @@ _BATCH_RUN = False
 def pair_wise_sum_op(mem_x: tla.Tensor, mem_y: tla.Tensor) -> None:
     """Store packed adjacent-lane sums and the zero-filled upper half."""
     block_idx = tla.arch.block_idx()
-    loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    done = tla.flag("done", tla.arch.VECTOR, tla.arch.MTE3)
+    loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    done = tla.flag("done", tla.pipes.VECTOR, tla.pipes.MTE3)
     x_gm = tla.tile_view(mem_x, tla.make_shape(_VECTOR_ELE), tla.make_coord(block_idx))
     y_gm = tla.tile_view(mem_y, tla.make_shape(_VECTOR_ELE), tla.make_coord(block_idx))
     x_ptr = tla.allocate(_VECTOR_ELE, _DTYPE, tla.AddressSpace.ub, 256)

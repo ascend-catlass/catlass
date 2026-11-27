@@ -495,14 +495,14 @@ def attn_fused_kernel(
         tla.cross_flag("p_cross_2"),
     ]
     with tla.cube():
-        tla.cross_core_set_flag(p_cross[0], tla.arch.MTE1)
-        tla.cross_core_set_flag(p_cross[1], tla.arch.MTE1)
-        tla.cross_core_set_flag(p_cross[2], tla.arch.MTE1)
+        tla.cross_core_set_flag(p_cross[0], tla.pipes.MTE1)
+        tla.cross_core_set_flag(p_cross[1], tla.pipes.MTE1)
+        tla.cross_core_set_flag(p_cross[2], tla.pipes.MTE1)
     with tla.vector():
-        tla.cross_core_set_flag(s_cross[0], tla.arch.VECTOR)
-        tla.cross_core_set_flag(s_cross[1], tla.arch.VECTOR)
-        tla.cross_core_set_flag(o_cross[0], tla.arch.VECTOR)
-        tla.cross_core_set_flag(o_cross[1], tla.arch.VECTOR)
+        tla.cross_core_set_flag(s_cross[0], tla.pipes.VECTOR)
+        tla.cross_core_set_flag(s_cross[1], tla.pipes.VECTOR)
+        tla.cross_core_set_flag(o_cross[0], tla.pipes.VECTOR)
+        tla.cross_core_set_flag(o_cross[1], tla.pipes.VECTOR)
 
     for task in tla.range(tla.arch.block_idx(), total, tla.arch.block_num()):
         m_blk = task // splits
@@ -521,14 +521,14 @@ def attn_fused_kernel(
                 tla.make_layout(tla.make_shape(M_BLOCK, D), tla.make_stride(D, 1)),
             )
             l1_q_t = tla.make_tensor_like(l1_q, gm_q, tla.arch.zN)
-            mutex_l1_q.lock(pipe=tla.arch.MTE2)
+            mutex_l1_q.lock(pipe=tla.pipes.MTE2)
             tla.copy(l1_q_t, gm_q)
-            mutex_l1_q.unlock(pipe=tla.arch.MTE2)
-            mutex_l1_q.lock(pipe=tla.arch.MTE1)
+            mutex_l1_q.unlock(pipe=tla.pipes.MTE2)
+            mutex_l1_q.lock(pipe=tla.pipes.MTE1)
         # ---- acc 生命周期：等上一任务 partial 的 MTE3 读完成 ----
         with tla.vector():
             if row_num > 1 or tla.arch.sub_block_idx() == 0:
-                mutex_acc.lock(pipe=tla.arch.VECTOR)
+                mutex_acc.lock(pipe=tla.pipes.VECTOR)
         # ---- 主循环：QK+softmax 超前，PV+rescale 滞后 PRE_LAUNCH ----
         launch_0 = tla.as_numeric(-1)
         launch_1 = tla.as_numeric(-2)
@@ -569,9 +569,9 @@ def attn_fused_kernel(
                     )
                     if buf == 0:
                         l1_k_t = tla.make_tensor_like(l1_k[0], gm_k, tla.arch.nZ)
-                        mutex_l1_k[0].lock(pipe=tla.arch.MTE2)
+                        mutex_l1_k[0].lock(pipe=tla.pipes.MTE2)
                         tla.copy(l1_k_t, gm_k)
-                        mutex_l1_k[0].unlock(pipe=tla.arch.MTE2)
+                        mutex_l1_k[0].unlock(pipe=tla.pipes.MTE2)
                         ub_s_full = tla.make_tensor(
                             ub_s[0],
                             tla.make_layout(
@@ -584,23 +584,23 @@ def attn_fused_kernel(
                         )
                         l0a_q = tla.make_tensor_like(l0a[0], l1_q_t2, tla.arch.zN)
                         l0b_k = tla.make_tensor_like(l0b[0], l1_k_t)
-                        mutex_l0a[0].lock(pipe=tla.arch.MTE1)
+                        mutex_l0a[0].lock(pipe=tla.pipes.MTE1)
                         tla.copy(l0a_q, l1_q_t2)
-                        mutex_l0a[0].unlock(pipe=tla.arch.MTE1)
-                        mutex_l0b[0].lock(pipe=tla.arch.MTE1)
-                        mutex_l1_k[0].lock(pipe=tla.arch.MTE1)
+                        mutex_l0a[0].unlock(pipe=tla.pipes.MTE1)
+                        mutex_l0b[0].lock(pipe=tla.pipes.MTE1)
+                        mutex_l1_k[0].lock(pipe=tla.pipes.MTE1)
                         tla.copy(l0b_k, l1_k_t)
-                        mutex_l0b[0].unlock(pipe=tla.arch.MTE1)
-                        mutex_l1_k[0].unlock(pipe=tla.arch.MTE1)
-                        mutex_l0a[0].lock(pipe=tla.arch.CUBE)
-                        mutex_l0b[0].lock(pipe=tla.arch.CUBE)
-                        mutex_l0c_s[0].lock(pipe=tla.arch.CUBE)
+                        mutex_l0b[0].unlock(pipe=tla.pipes.MTE1)
+                        mutex_l1_k[0].unlock(pipe=tla.pipes.MTE1)
+                        mutex_l0a[0].lock(pipe=tla.pipes.CUBE)
+                        mutex_l0b[0].lock(pipe=tla.pipes.CUBE)
+                        mutex_l0c_s[0].lock(pipe=tla.pipes.CUBE)
                         tla.mmad(l0c_s_t, l0a_q, l0b_k, init_c=True)
-                        mutex_l0a[0].unlock(pipe=tla.arch.CUBE)
-                        mutex_l0b[0].unlock(pipe=tla.arch.CUBE)
-                        tla.cross_core_wait_flag(s_cross[0], tla.arch.FIX)
-                        mutex_l0c_s[0].unlock(pipe=tla.arch.CUBE)
-                        mutex_l0c_s[0].lock(pipe=tla.arch.FIX)
+                        mutex_l0a[0].unlock(pipe=tla.pipes.CUBE)
+                        mutex_l0b[0].unlock(pipe=tla.pipes.CUBE)
+                        tla.cross_core_wait_flag(s_cross[0], tla.pipes.FIX)
+                        mutex_l0c_s[0].unlock(pipe=tla.pipes.CUBE)
+                        mutex_l0c_s[0].lock(pipe=tla.pipes.FIX)
                         ub_s_view = tla.make_tensor(
                             ub_s[0],
                             tla.make_layout(
@@ -615,13 +615,13 @@ def attn_fused_kernel(
                                 l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M
                             ),
                         )
-                        mutex_l0c_s[0].unlock(pipe=tla.arch.FIX)
-                        tla.cross_core_set_flag(s_cross[0], tla.arch.FIX)
+                        mutex_l0c_s[0].unlock(pipe=tla.pipes.FIX)
+                        tla.cross_core_set_flag(s_cross[0], tla.pipes.FIX)
                     else:
                         l1_k_t = tla.make_tensor_like(l1_k[1], gm_k, tla.arch.nZ)
-                        mutex_l1_k[1].lock(pipe=tla.arch.MTE2)
+                        mutex_l1_k[1].lock(pipe=tla.pipes.MTE2)
                         tla.copy(l1_k_t, gm_k)
-                        mutex_l1_k[1].unlock(pipe=tla.arch.MTE2)
+                        mutex_l1_k[1].unlock(pipe=tla.pipes.MTE2)
                         ub_s_full = tla.make_tensor(
                             ub_s[1],
                             tla.make_layout(
@@ -634,23 +634,23 @@ def attn_fused_kernel(
                         )
                         l0a_q = tla.make_tensor_like(l0a[1], l1_q_t2, tla.arch.zN)
                         l0b_k = tla.make_tensor_like(l0b[1], l1_k_t)
-                        mutex_l0a[1].lock(pipe=tla.arch.MTE1)
+                        mutex_l0a[1].lock(pipe=tla.pipes.MTE1)
                         tla.copy(l0a_q, l1_q_t2)
-                        mutex_l0a[1].unlock(pipe=tla.arch.MTE1)
-                        mutex_l0b[1].lock(pipe=tla.arch.MTE1)
-                        mutex_l1_k[1].lock(pipe=tla.arch.MTE1)
+                        mutex_l0a[1].unlock(pipe=tla.pipes.MTE1)
+                        mutex_l0b[1].lock(pipe=tla.pipes.MTE1)
+                        mutex_l1_k[1].lock(pipe=tla.pipes.MTE1)
                         tla.copy(l0b_k, l1_k_t)
-                        mutex_l0b[1].unlock(pipe=tla.arch.MTE1)
-                        mutex_l1_k[1].unlock(pipe=tla.arch.MTE1)
-                        mutex_l0a[1].lock(pipe=tla.arch.CUBE)
-                        mutex_l0b[1].lock(pipe=tla.arch.CUBE)
-                        mutex_l0c_s[1].lock(pipe=tla.arch.CUBE)
+                        mutex_l0b[1].unlock(pipe=tla.pipes.MTE1)
+                        mutex_l1_k[1].unlock(pipe=tla.pipes.MTE1)
+                        mutex_l0a[1].lock(pipe=tla.pipes.CUBE)
+                        mutex_l0b[1].lock(pipe=tla.pipes.CUBE)
+                        mutex_l0c_s[1].lock(pipe=tla.pipes.CUBE)
                         tla.mmad(l0c_s_t, l0a_q, l0b_k, init_c=True)
-                        mutex_l0a[1].unlock(pipe=tla.arch.CUBE)
-                        mutex_l0b[1].unlock(pipe=tla.arch.CUBE)
-                        tla.cross_core_wait_flag(s_cross[1], tla.arch.FIX)
-                        mutex_l0c_s[1].unlock(pipe=tla.arch.CUBE)
-                        mutex_l0c_s[1].lock(pipe=tla.arch.FIX)
+                        mutex_l0a[1].unlock(pipe=tla.pipes.CUBE)
+                        mutex_l0b[1].unlock(pipe=tla.pipes.CUBE)
+                        tla.cross_core_wait_flag(s_cross[1], tla.pipes.FIX)
+                        mutex_l0c_s[1].unlock(pipe=tla.pipes.CUBE)
+                        mutex_l0c_s[1].lock(pipe=tla.pipes.FIX)
                         ub_s_view = tla.make_tensor(
                             ub_s[1],
                             tla.make_layout(
@@ -665,10 +665,10 @@ def attn_fused_kernel(
                                 l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M
                             ),
                         )
-                        mutex_l0c_s[1].unlock(pipe=tla.arch.FIX)
-                        tla.cross_core_set_flag(s_cross[1], tla.arch.FIX)
+                        mutex_l0c_s[1].unlock(pipe=tla.pipes.FIX)
+                        tla.cross_core_set_flag(s_cross[1], tla.pipes.FIX)
                     if it == cnt - 1:
-                        mutex_l1_q.unlock(pipe=tla.arch.MTE1)
+                        mutex_l1_q.unlock(pipe=tla.pipes.MTE1)
                 # ---- online softmax + P（vector，AIV 分行） ----
                 with tla.vector():
                     sub_s = tla.arch.sub_block_idx()
@@ -676,18 +676,18 @@ def attn_fused_kernel(
                     m_sub_s = m_half_s if sub_s == 0 else (row_num - m_half_s)
                     if m_sub_s == 0:
                         if buf == 0:
-                            tla.cross_core_wait_flag(s_cross[0], tla.arch.VECTOR)
-                            tla.cross_core_set_flag(s_cross[0], tla.arch.VECTOR)
+                            tla.cross_core_wait_flag(s_cross[0], tla.pipes.VECTOR)
+                            tla.cross_core_set_flag(s_cross[0], tla.pipes.VECTOR)
                         else:
-                            tla.cross_core_wait_flag(s_cross[1], tla.arch.VECTOR)
-                            tla.cross_core_set_flag(s_cross[1], tla.arch.VECTOR)
+                            tla.cross_core_wait_flag(s_cross[1], tla.pipes.VECTOR)
+                            tla.cross_core_set_flag(s_cross[1], tla.pipes.VECTOR)
                     else:
                         if buf == 0:
-                            tla.cross_core_wait_flag(s_cross[0], tla.arch.VECTOR)
-                            mutex_ub_p[0].lock(pipe=tla.arch.VECTOR)
+                            tla.cross_core_wait_flag(s_cross[0], tla.pipes.VECTOR)
+                            mutex_ub_p[0].lock(pipe=tla.pipes.VECTOR)
                         else:
-                            tla.cross_core_wait_flag(s_cross[1], tla.arch.VECTOR)
-                            mutex_ub_p[1].lock(pipe=tla.arch.VECTOR)
+                            tla.cross_core_wait_flag(s_cross[1], tla.pipes.VECTOR)
+                            mutex_ub_p[1].lock(pipe=tla.pipes.VECTOR)
                         ub_s_ptr = ub_s[0] if buf == 0 else ub_s[1]
                         ub_p_ptr = ub_p[0] if buf == 0 else ub_p[1]
                         ub_s_sub = tla.make_tensor(
@@ -753,13 +753,13 @@ def attn_fused_kernel(
                                     exp_max[2],
                                 )
                         if buf == 0:
-                            mutex_ub_p[0].unlock(pipe=tla.arch.VECTOR)
-                            mutex_ub_p[0].lock(pipe=tla.arch.MTE3)
-                            tla.cross_core_set_flag(s_cross[0], tla.arch.VECTOR)
+                            mutex_ub_p[0].unlock(pipe=tla.pipes.VECTOR)
+                            mutex_ub_p[0].lock(pipe=tla.pipes.MTE3)
+                            tla.cross_core_set_flag(s_cross[0], tla.pipes.VECTOR)
                         else:
-                            mutex_ub_p[1].unlock(pipe=tla.arch.VECTOR)
-                            mutex_ub_p[1].lock(pipe=tla.arch.MTE3)
-                            tla.cross_core_set_flag(s_cross[1], tla.arch.VECTOR)
+                            mutex_ub_p[1].unlock(pipe=tla.pipes.VECTOR)
+                            mutex_ub_p[1].lock(pipe=tla.pipes.MTE3)
+                            tla.cross_core_set_flag(s_cross[1], tla.pipes.VECTOR)
                         # P(UB) -> L1
                         l1_p_ref = tla.make_tensor(
                             ub_s[0],
@@ -785,29 +785,29 @@ def attn_fused_kernel(
                             tla.make_coord(0, 0),
                         )
                         if l1p_id == 0:
-                            tla.cross_core_wait_flag(p_cross[0], tla.arch.MTE3)
+                            tla.cross_core_wait_flag(p_cross[0], tla.pipes.MTE3)
                             tla.copy(l1_p_tile, ub_p_send)
                             if buf == 0:
-                                mutex_ub_p[0].unlock(pipe=tla.arch.MTE3)
+                                mutex_ub_p[0].unlock(pipe=tla.pipes.MTE3)
                             else:
-                                mutex_ub_p[1].unlock(pipe=tla.arch.MTE3)
-                            tla.cross_core_set_flag(p_cross[0], tla.arch.MTE3)
+                                mutex_ub_p[1].unlock(pipe=tla.pipes.MTE3)
+                            tla.cross_core_set_flag(p_cross[0], tla.pipes.MTE3)
                         elif l1p_id == 1:
-                            tla.cross_core_wait_flag(p_cross[1], tla.arch.MTE3)
+                            tla.cross_core_wait_flag(p_cross[1], tla.pipes.MTE3)
                             tla.copy(l1_p_tile, ub_p_send)
                             if buf == 0:
-                                mutex_ub_p[0].unlock(pipe=tla.arch.MTE3)
+                                mutex_ub_p[0].unlock(pipe=tla.pipes.MTE3)
                             else:
-                                mutex_ub_p[1].unlock(pipe=tla.arch.MTE3)
-                            tla.cross_core_set_flag(p_cross[1], tla.arch.MTE3)
+                                mutex_ub_p[1].unlock(pipe=tla.pipes.MTE3)
+                            tla.cross_core_set_flag(p_cross[1], tla.pipes.MTE3)
                         else:
-                            tla.cross_core_wait_flag(p_cross[2], tla.arch.MTE3)
+                            tla.cross_core_wait_flag(p_cross[2], tla.pipes.MTE3)
                             tla.copy(l1_p_tile, ub_p_send)
                             if buf == 0:
-                                mutex_ub_p[0].unlock(pipe=tla.arch.MTE3)
+                                mutex_ub_p[0].unlock(pipe=tla.pipes.MTE3)
                             else:
-                                mutex_ub_p[1].unlock(pipe=tla.arch.MTE3)
-                            tla.cross_core_set_flag(p_cross[2], tla.arch.MTE3)
+                                mutex_ub_p[1].unlock(pipe=tla.pipes.MTE3)
+                            tla.cross_core_set_flag(p_cross[2], tla.pipes.MTE3)
             # ---- PV + rescale（滞后 PRE_LAUNCH） ----
             if it >= PRE_LAUNCH and launch_2 >= 0:
                 itd = launch_2
@@ -845,7 +845,7 @@ def attn_fused_kernel(
                     )
                     if bufd == 0:
                         l1_v_t = tla.make_tensor_like(l1_v[0], gm_v, tla.arch.zN)
-                        mutex_l1_v[0].lock(pipe=tla.arch.MTE2)
+                        mutex_l1_v[0].lock(pipe=tla.pipes.MTE2)
                         if kv_act_d < KV_BLOCK:
                             gm_z2 = tla.make_tensor(
                                 gm_zero.ptr,
@@ -858,19 +858,19 @@ def attn_fused_kernel(
                             )
                             tla.copy(l1_v_full, gm_z2)
                         tla.copy(l1_v_t, gm_v)
-                        mutex_l1_v[0].unlock(pipe=tla.arch.MTE2)
-                        mutex_l1_v[0].lock(pipe=tla.arch.MTE1)
+                        mutex_l1_v[0].unlock(pipe=tla.pipes.MTE2)
+                        mutex_l1_v[0].lock(pipe=tla.pipes.MTE1)
                         if l1p_id_d == 0:
-                            tla.cross_core_wait_flag(p_cross[0], tla.arch.MTE1)
+                            tla.cross_core_wait_flag(p_cross[0], tla.pipes.MTE1)
                         elif l1p_id_d == 1:
-                            tla.cross_core_wait_flag(p_cross[1], tla.arch.MTE1)
+                            tla.cross_core_wait_flag(p_cross[1], tla.pipes.MTE1)
                         else:
-                            tla.cross_core_wait_flag(p_cross[2], tla.arch.MTE1)
+                            tla.cross_core_wait_flag(p_cross[2], tla.pipes.MTE1)
                         l0b_v = tla.make_tensor_like(l0b[0], l1_v_t, tla.arch.nZ)
-                        mutex_l0b[0].lock(pipe=tla.arch.MTE1)
+                        mutex_l0b[0].lock(pipe=tla.pipes.MTE1)
                         tla.copy(l0b_v, l1_v_t)
-                        mutex_l0b[0].unlock(pipe=tla.arch.MTE1)
-                        mutex_l1_v[0].unlock(pipe=tla.arch.MTE1)
+                        mutex_l0b[0].unlock(pipe=tla.pipes.MTE1)
+                        mutex_l1_v[0].unlock(pipe=tla.pipes.MTE1)
                         l1p_ptr_d = (
                             l1_p[0]
                             if l1p_id_d == 0
@@ -880,24 +880,24 @@ def attn_fused_kernel(
                             l1p_ptr_d, l1_p_ref_d, tla.arch.zN
                         )
                         l0a_p = tla.make_tensor_like(l0a[0], l1_p_fd, tla.arch.zN)
-                        mutex_l0a[0].lock(pipe=tla.arch.MTE1)
+                        mutex_l0a[0].lock(pipe=tla.pipes.MTE1)
                         tla.copy(l0a_p, l1_p_fd)
-                        mutex_l0a[0].unlock(pipe=tla.arch.MTE1)
+                        mutex_l0a[0].unlock(pipe=tla.pipes.MTE1)
                         if l1p_id_d == 0:
-                            tla.cross_core_set_flag(p_cross[0], tla.arch.MTE1)
+                            tla.cross_core_set_flag(p_cross[0], tla.pipes.MTE1)
                         elif l1p_id_d == 1:
-                            tla.cross_core_set_flag(p_cross[1], tla.arch.MTE1)
+                            tla.cross_core_set_flag(p_cross[1], tla.pipes.MTE1)
                         else:
-                            tla.cross_core_set_flag(p_cross[2], tla.arch.MTE1)
-                        mutex_l0a[0].lock(pipe=tla.arch.CUBE)
-                        mutex_l0b[0].lock(pipe=tla.arch.CUBE)
-                        mutex_l0c_o.lock(pipe=tla.arch.CUBE)
+                            tla.cross_core_set_flag(p_cross[2], tla.pipes.MTE1)
+                        mutex_l0a[0].lock(pipe=tla.pipes.CUBE)
+                        mutex_l0b[0].lock(pipe=tla.pipes.CUBE)
+                        mutex_l0c_o.lock(pipe=tla.pipes.CUBE)
                         tla.mmad(l0c_o_t, l0a_p, l0b_v, init_c=True)
-                        mutex_l0a[0].unlock(pipe=tla.arch.CUBE)
-                        mutex_l0b[0].unlock(pipe=tla.arch.CUBE)
-                        tla.cross_core_wait_flag(o_cross[0], tla.arch.FIX)
-                        mutex_l0c_o.unlock(pipe=tla.arch.CUBE)
-                        mutex_l0c_o.lock(pipe=tla.arch.FIX)
+                        mutex_l0a[0].unlock(pipe=tla.pipes.CUBE)
+                        mutex_l0b[0].unlock(pipe=tla.pipes.CUBE)
+                        tla.cross_core_wait_flag(o_cross[0], tla.pipes.FIX)
+                        mutex_l0c_o.unlock(pipe=tla.pipes.CUBE)
+                        mutex_l0c_o.lock(pipe=tla.pipes.FIX)
                         ub_o_view = tla.make_tensor(
                             ub_otmp[0],
                             tla.make_layout(
@@ -911,11 +911,11 @@ def attn_fused_kernel(
                                 l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M
                             ),
                         )
-                        mutex_l0c_o.unlock(pipe=tla.arch.FIX)
-                        tla.cross_core_set_flag(o_cross[0], tla.arch.FIX)
+                        mutex_l0c_o.unlock(pipe=tla.pipes.FIX)
+                        tla.cross_core_set_flag(o_cross[0], tla.pipes.FIX)
                     else:
                         l1_v_t = tla.make_tensor_like(l1_v[1], gm_v, tla.arch.zN)
-                        mutex_l1_v[1].lock(pipe=tla.arch.MTE2)
+                        mutex_l1_v[1].lock(pipe=tla.pipes.MTE2)
                         if kv_act_d < KV_BLOCK:
                             gm_z2 = tla.make_tensor(
                                 gm_zero.ptr,
@@ -928,19 +928,19 @@ def attn_fused_kernel(
                             )
                             tla.copy(l1_v_full, gm_z2)
                         tla.copy(l1_v_t, gm_v)
-                        mutex_l1_v[1].unlock(pipe=tla.arch.MTE2)
-                        mutex_l1_v[1].lock(pipe=tla.arch.MTE1)
+                        mutex_l1_v[1].unlock(pipe=tla.pipes.MTE2)
+                        mutex_l1_v[1].lock(pipe=tla.pipes.MTE1)
                         if l1p_id_d == 0:
-                            tla.cross_core_wait_flag(p_cross[0], tla.arch.MTE1)
+                            tla.cross_core_wait_flag(p_cross[0], tla.pipes.MTE1)
                         elif l1p_id_d == 1:
-                            tla.cross_core_wait_flag(p_cross[1], tla.arch.MTE1)
+                            tla.cross_core_wait_flag(p_cross[1], tla.pipes.MTE1)
                         else:
-                            tla.cross_core_wait_flag(p_cross[2], tla.arch.MTE1)
+                            tla.cross_core_wait_flag(p_cross[2], tla.pipes.MTE1)
                         l0b_v = tla.make_tensor_like(l0b[1], l1_v_t, tla.arch.nZ)
-                        mutex_l0b[1].lock(pipe=tla.arch.MTE1)
+                        mutex_l0b[1].lock(pipe=tla.pipes.MTE1)
                         tla.copy(l0b_v, l1_v_t)
-                        mutex_l0b[1].unlock(pipe=tla.arch.MTE1)
-                        mutex_l1_v[1].unlock(pipe=tla.arch.MTE1)
+                        mutex_l0b[1].unlock(pipe=tla.pipes.MTE1)
+                        mutex_l1_v[1].unlock(pipe=tla.pipes.MTE1)
                         l1p_ptr_d = (
                             l1_p[0]
                             if l1p_id_d == 0
@@ -950,24 +950,24 @@ def attn_fused_kernel(
                             l1p_ptr_d, l1_p_ref_d, tla.arch.zN
                         )
                         l0a_p = tla.make_tensor_like(l0a[1], l1_p_fd, tla.arch.zN)
-                        mutex_l0a[1].lock(pipe=tla.arch.MTE1)
+                        mutex_l0a[1].lock(pipe=tla.pipes.MTE1)
                         tla.copy(l0a_p, l1_p_fd)
-                        mutex_l0a[1].unlock(pipe=tla.arch.MTE1)
+                        mutex_l0a[1].unlock(pipe=tla.pipes.MTE1)
                         if l1p_id_d == 0:
-                            tla.cross_core_set_flag(p_cross[0], tla.arch.MTE1)
+                            tla.cross_core_set_flag(p_cross[0], tla.pipes.MTE1)
                         elif l1p_id_d == 1:
-                            tla.cross_core_set_flag(p_cross[1], tla.arch.MTE1)
+                            tla.cross_core_set_flag(p_cross[1], tla.pipes.MTE1)
                         else:
-                            tla.cross_core_set_flag(p_cross[2], tla.arch.MTE1)
-                        mutex_l0a[1].lock(pipe=tla.arch.CUBE)
-                        mutex_l0b[1].lock(pipe=tla.arch.CUBE)
-                        mutex_l0c_o.lock(pipe=tla.arch.CUBE)
+                            tla.cross_core_set_flag(p_cross[2], tla.pipes.MTE1)
+                        mutex_l0a[1].lock(pipe=tla.pipes.CUBE)
+                        mutex_l0b[1].lock(pipe=tla.pipes.CUBE)
+                        mutex_l0c_o.lock(pipe=tla.pipes.CUBE)
                         tla.mmad(l0c_o_t, l0a_p, l0b_v, init_c=True)
-                        mutex_l0a[1].unlock(pipe=tla.arch.CUBE)
-                        mutex_l0b[1].unlock(pipe=tla.arch.CUBE)
-                        tla.cross_core_wait_flag(o_cross[1], tla.arch.FIX)
-                        mutex_l0c_o.unlock(pipe=tla.arch.CUBE)
-                        mutex_l0c_o.lock(pipe=tla.arch.FIX)
+                        mutex_l0a[1].unlock(pipe=tla.pipes.CUBE)
+                        mutex_l0b[1].unlock(pipe=tla.pipes.CUBE)
+                        tla.cross_core_wait_flag(o_cross[1], tla.pipes.FIX)
+                        mutex_l0c_o.unlock(pipe=tla.pipes.CUBE)
+                        mutex_l0c_o.lock(pipe=tla.pipes.FIX)
                         ub_o_view = tla.make_tensor(
                             ub_otmp[1],
                             tla.make_layout(
@@ -981,8 +981,8 @@ def attn_fused_kernel(
                                 l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_M
                             ),
                         )
-                        mutex_l0c_o.unlock(pipe=tla.arch.FIX)
-                        tla.cross_core_set_flag(o_cross[1], tla.arch.FIX)
+                        mutex_l0c_o.unlock(pipe=tla.pipes.FIX)
+                        tla.cross_core_set_flag(o_cross[1], tla.pipes.FIX)
                 # ---- rescale（vector） ----
                 with tla.vector():
                     sub_r = tla.arch.sub_block_idx()
@@ -990,16 +990,16 @@ def attn_fused_kernel(
                     m_sub_r = m_half_r if sub_r == 0 else (row_num - m_half_r)
                     if m_sub_r == 0:
                         if bufd == 0:
-                            tla.cross_core_wait_flag(o_cross[0], tla.arch.VECTOR)
-                            tla.cross_core_set_flag(o_cross[0], tla.arch.VECTOR)
+                            tla.cross_core_wait_flag(o_cross[0], tla.pipes.VECTOR)
+                            tla.cross_core_set_flag(o_cross[0], tla.pipes.VECTOR)
                         else:
-                            tla.cross_core_wait_flag(o_cross[1], tla.arch.VECTOR)
-                            tla.cross_core_set_flag(o_cross[1], tla.arch.VECTOR)
+                            tla.cross_core_wait_flag(o_cross[1], tla.pipes.VECTOR)
+                            tla.cross_core_set_flag(o_cross[1], tla.pipes.VECTOR)
                     else:
                         if bufd == 0:
-                            tla.cross_core_wait_flag(o_cross[0], tla.arch.VECTOR)
+                            tla.cross_core_wait_flag(o_cross[0], tla.pipes.VECTOR)
                         else:
-                            tla.cross_core_wait_flag(o_cross[1], tla.arch.VECTOR)
+                            tla.cross_core_wait_flag(o_cross[1], tla.pipes.VECTOR)
                         dm_ptr = (
                             exp_max[0]
                             if l1p_id_d == 0
@@ -1172,9 +1172,9 @@ def attn_fused_kernel(
                                 tla.params.MemType.VEC_LOAD,
                             )
                         if bufd == 0:
-                            tla.cross_core_set_flag(o_cross[0], tla.arch.VECTOR)
+                            tla.cross_core_set_flag(o_cross[0], tla.pipes.VECTOR)
                         else:
-                            tla.cross_core_set_flag(o_cross[1], tla.arch.VECTOR)
+                            tla.cross_core_set_flag(o_cross[1], tla.pipes.VECTOR)
         # ---- 任务收尾：写 partial 到 GM ----
         with tla.vector():
             sub_e = tla.arch.sub_block_idx()
@@ -1262,28 +1262,28 @@ def attn_fused_kernel(
                         tla.make_shape(m_sub_e, 264), tla.make_stride(264, 1)
                     ),
                 )
-                mutex_acc.unlock(pipe=tla.arch.VECTOR)
-                mutex_acc.lock(pipe=tla.arch.MTE3)
+                mutex_acc.unlock(pipe=tla.pipes.VECTOR)
+                mutex_acc.lock(pipe=tla.pipes.MTE3)
                 tla.copy(gm_po, acc_full)
-                mutex_acc.unlock(pipe=tla.arch.MTE3)
+                mutex_acc.unlock(pipe=tla.pipes.MTE3)
     # ---- 尾声排空 ----
     with tla.cube():
-        tla.cross_core_wait_flag(s_cross[0], tla.arch.FIX)
-        tla.cross_core_wait_flag(s_cross[1], tla.arch.FIX)
-        tla.cross_core_wait_flag(o_cross[0], tla.arch.FIX)
-        tla.cross_core_wait_flag(o_cross[1], tla.arch.FIX)
+        tla.cross_core_wait_flag(s_cross[0], tla.pipes.FIX)
+        tla.cross_core_wait_flag(s_cross[1], tla.pipes.FIX)
+        tla.cross_core_wait_flag(o_cross[0], tla.pipes.FIX)
+        tla.cross_core_wait_flag(o_cross[1], tla.pipes.FIX)
         tla.pipe_barrier(tla.pipes.ALL)
     with tla.vector():
-        tla.cross_core_wait_flag(p_cross[0], tla.arch.MTE3)
-        tla.cross_core_wait_flag(p_cross[1], tla.arch.MTE3)
-        tla.cross_core_wait_flag(p_cross[2], tla.arch.MTE3)
+        tla.cross_core_wait_flag(p_cross[0], tla.pipes.MTE3)
+        tla.cross_core_wait_flag(p_cross[1], tla.pipes.MTE3)
+        tla.cross_core_wait_flag(p_cross[2], tla.pipes.MTE3)
         tla.pipe_barrier(tla.pipes.ALL)
 
     # ---- phase1 -> phase2 全核屏障（所有 AIV 同步，保证 part_o 全部就绪） ----
     with tla.vector():
         tla.pipe_barrier(tla.pipes.ALL)
-        tla.cross_core_set_flag(ibarrier, tla.arch.MTE2)
-        tla.cross_core_wait_flag(ibarrier, tla.arch.MTE2)
+        tla.cross_core_set_flag(ibarrier, tla.pipes.MTE2)
+        tla.cross_core_wait_flag(ibarrier, tla.pipes.MTE2)
 
     # ---- phase2：归并（复用 phase1 的 UB） ----
     _combine_rows(
@@ -1377,7 +1377,7 @@ def _combine_rows(
                     tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD
                 )
             # ---- 相位 0.5：爆发式 copy 全部 split 的 (rows, 264) 块, 单次握手 ----
-            mutex_buf.lock(pipe=tla.arch.MTE2)
+            mutex_buf.lock(pipe=tla.pipes.MTE2)
             gm_c0 = tla.make_tensor(
                 part_o.ptr + ((m_blk * splits) * M_BLOCK + r_in) * W,
                 tla.make_layout(tla.make_shape(rows * W), tla.make_stride(1)),
@@ -1457,9 +1457,9 @@ def _combine_rows(
                     tla.make_layout(tla.make_shape(rows * W), tla.make_stride(1)),
                 )
                 tla.copy(ub_c7, gm_c7)
-            mutex_buf.unlock(pipe=tla.arch.MTE2)
-            mutex_buf.lock(pipe=tla.arch.VECTOR)
-            mutex_out.lock(pipe=tla.arch.VECTOR)
+            mutex_buf.unlock(pipe=tla.pipes.MTE2)
+            mutex_buf.lock(pipe=tla.pipes.VECTOR)
+            mutex_out.lock(pipe=tla.pipes.VECTOR)
             if splits == 1:
                 for i in range(GROUP):
                     with tla.vec.func(mode="simd"):
@@ -1883,9 +1883,9 @@ def _combine_rows(
                     tla.local_mem_bar(
                         tla.params.MemType.VEC_STORE, tla.params.MemType.VEC_LOAD
                     )
-            mutex_buf.unlock(pipe=tla.arch.VECTOR)
-            mutex_out.unlock(pipe=tla.arch.VECTOR)
-            mutex_out.lock(pipe=tla.arch.MTE3)
+            mutex_buf.unlock(pipe=tla.pipes.VECTOR)
+            mutex_out.unlock(pipe=tla.pipes.VECTOR)
+            mutex_out.lock(pipe=tla.pipes.MTE3)
             gm_o = tla.make_tensor(
                 gm_out.ptr + r0 * D,
                 tla.make_layout(tla.make_shape(rows, D), tla.make_stride(D, 1)),
@@ -1894,7 +1894,7 @@ def _combine_rows(
                 ub_ob, tla.make_layout(tla.make_shape(rows, D), tla.make_stride(D, 1))
             )
             tla.copy(gm_o, ob_w)
-            mutex_out.unlock(pipe=tla.arch.MTE3)
+            mutex_out.unlock(pipe=tla.pipes.MTE3)
     with tla.vector():
         tla.pipe_barrier(tla.pipes.ALL)
 

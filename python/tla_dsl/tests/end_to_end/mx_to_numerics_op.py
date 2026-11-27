@@ -76,8 +76,8 @@ def quantize_kernel(mx_name: str, round_mode: RoundMode):
         # The load, the conversion and the store sit on three different pipes
         # (MTE2, VECTOR, MTE3), so each hand-off needs its own flag or the
         # store races the conversion and reads whatever UB held before.
-        loaded = tla.flag("loaded", tla.arch.MTE2, tla.arch.VECTOR)
-        converted = tla.flag("converted", tla.arch.VECTOR, tla.arch.MTE3)
+        loaded = tla.flag("loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+        converted = tla.flag("converted", tla.pipes.VECTOR, tla.pipes.MTE3)
 
         with tla.vector():
             t_src = tla.make_tensor(ub_src, dense)

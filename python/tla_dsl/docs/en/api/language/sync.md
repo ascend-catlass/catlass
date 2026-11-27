@@ -48,7 +48,7 @@ Example:
 
 ```python
 # MTE2 finishes a GM→UB copy, then VECTOR may consume the UB tile.
-ub_loaded = tla.flag("ub_loaded", src_pipe=tla.arch.MTE2, dst_pipe=tla.arch.VECTOR)
+ub_loaded = tla.flag("ub_loaded", src_pipe=tla.pipes.MTE2, dst_pipe=tla.pipes.VECTOR)
 with tla.vector():
     tla.copy(dst=x_ub, src=x_gm)
     tla.set_flag(ub_loaded)   # after copy: mark UB data ready
@@ -118,8 +118,8 @@ Example:
 
 ```python
 with tla.cube():
-    tla.cross_core_set_flag(cf, tla.arch.CUBE)
-    # mode=4: tla.cross_core_set_flag(cf, tla.arch.CUBE, aiv_id=0)
+    tla.cross_core_set_flag(cf, tla.pipes.CUBE)
+    # mode=4: tla.cross_core_set_flag(cf, tla.pipes.CUBE, aiv_id=0)
 ```
 
 ---
@@ -142,7 +142,7 @@ Parameters:
 
 - `cross_flag_value` (`CrossFlagLike`): Cross-core flag from `tla.cross_flag`. Required.
 - `pipe` (`PipeLike`): Pipe that performs the wait. Required.
-  Use `tla.arch.SCALAR` for `PIPE_S`, `tla.arch.VECTOR` for `PIPE_V`, etc.
+  Use `tla.pipes.SCALAR` for `PIPE_S`, `tla.pipes.VECTOR` for `PIPE_V`, etc.
 - `aiv_id` (`int | None`): Target AIV id; omit for broadcast/default routing. Optional, default `None`.
 
 Constraints:
@@ -150,7 +150,7 @@ Constraints:
 - Must be called inside a `@tla.kernel`-decorated kernel function.
 - Must be called inside `tla.cube()` or `tla.vector()`; when `mode=4`, `aiv_id` must be 0 or 1.
 - Under `@tla.kernel(core_ratio=tla.arch.C1V1)`, Ascend 950 CV 1:1
-  handshakes expect `pipe=tla.arch.SCALAR` (`PIPE_S`), matching AscendC
+  handshakes expect `pipe=tla.pipes.SCALAR` (`PIPE_S`), matching AscendC
   SyncAll. The compiler does not rewrite a wrong wait pipe; the caller
   must pass `SCALAR` explicitly (see
   `python/tla_dsl/tests/end_to_end/basic_mixed_core_ratio_11.py`).
@@ -160,9 +160,9 @@ Example:
 ```python
 with tla.vector():
     # Default MIX 1:2 often waits on VECTOR:
-    tla.cross_core_wait_flag(cf, tla.arch.VECTOR)
+    tla.cross_core_wait_flag(cf, tla.pipes.VECTOR)
     # CV 1:1 (core_ratio=C1V1): wait on SCALAR / PIPE_S, aiv_id=0 only:
-    # tla.cross_core_wait_flag(cf, tla.arch.SCALAR, aiv_id=0)
+    # tla.cross_core_wait_flag(cf, tla.pipes.SCALAR, aiv_id=0)
 ```
 
 ---
@@ -262,7 +262,7 @@ Example:
 
 ```python
 with tla.vector():
-    tla.pipe_barrier(tla.arch.MTE2)
+    tla.pipe_barrier(tla.pipes.MTE2)
 ```
 
 ---
@@ -464,10 +464,10 @@ Constraints:
 Example:
 
 ```python
-tla.mutex_lock(mtx, pipe=tla.arch.MTE2)
+tla.mutex_lock(mtx, pipe=tla.pipes.MTE2)
 # Scalar pipe, to guard a buffer the scalar unit reads or writes.
 # `tla.mutex` returns a value with this method form:
-mtx.lock(pipe=tla.arch.SCALAR)
+mtx.lock(pipe=tla.pipes.SCALAR)
 ```
 
 ---
@@ -504,10 +504,10 @@ Constraints:
 Example:
 
 ```python
-tla.mutex_unlock(mtx, pipe=tla.arch.MTE2)
+tla.mutex_unlock(mtx, pipe=tla.pipes.MTE2)
 # Scalar pipe, to guard a buffer the scalar unit reads or writes.
 # `tla.mutex` returns a value with this method form:
-mtx.unlock(pipe=tla.arch.SCALAR)
+mtx.unlock(pipe=tla.pipes.SCALAR)
 ```
 
 ---

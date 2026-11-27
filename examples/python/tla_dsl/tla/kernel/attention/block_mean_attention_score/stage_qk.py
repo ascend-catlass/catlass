@@ -119,7 +119,7 @@ def _load_query(
         q_ptr, tla.make_layout_with_tag((dk, nq_pad), tla.BFloat16, tla.arch.nZ)
     )
     q_real = tla.tile_view(q_l1, tla.make_shape(dk, nq), tla.make_coord(0, 0))
-    mutex.lock(pipe=tla.arch.MTE2)
+    mutex.lock(pipe=tla.pipes.MTE2)
     tla.copy(q_real, q_gm)
     if nq_pad > nq:
         q_duplicate = tla.tile_view(
@@ -131,7 +131,7 @@ def _load_query(
             tla.make_coord(0, nq // QUERY_HALF_ALIGNMENT_TOKENS),
         )
         tla.copy(q_padding, q_duplicate)
-    mutex.unlock(pipe=tla.arch.MTE2)
+    mutex.unlock(pipe=tla.pipes.MTE2)
 
 
 @tla.jit
@@ -153,11 +153,11 @@ def prepare_query(q, bufs, head, query_start, nq, nq_pad, s, d):
                     bufs.b0 if part == 0 else bufs.b1, q_part, tla.arch.nZ
                 )
                 mb = bufs.mb0 if part == 0 else bufs.mb1
-                mq.lock(pipe=tla.arch.MTE1)
-                mb.lock(pipe=tla.arch.MTE1)
+                mq.lock(pipe=tla.pipes.MTE1)
+                mb.lock(pipe=tla.pipes.MTE1)
                 tla.copy(q_l0, q_part)
-                mb.unlock(pipe=tla.arch.MTE1)
-                mq.unlock(pipe=tla.arch.MTE1)
+                mb.unlock(pipe=tla.pipes.MTE1)
+                mq.unlock(pipe=tla.pipes.MTE1)
 
 
 @tla.jit
@@ -167,7 +167,7 @@ def produce_qk(
     """Accumulate one Key slice while FIX can drain the other L0C slot."""
     cptr = bufs.c if tile_serial % 2 == 0 else bufs.c1
     mutex_c = bufs.mc0 if tile_serial % 2 == 0 else bufs.mc1
-    mutex_c.lock(pipe=tla.arch.CUBE)
+    mutex_c.lock(pipe=tla.pipes.CUBE)
     score = tla.make_tensor(
         cptr, tla.make_layout_with_tag((mk, nq_pad), tla.Float32, tla.arch.L0Clayout)
     )
@@ -203,9 +203,9 @@ def produce_qk(
             tla.make_layout(tla.make_shape(mk, dk), tla.make_stride(d, 1)),
         )
         k_l1 = tla.make_tensor_like(k_ptr, k_gm, tla.arch.zN)
-        mutex_k.lock(pipe=tla.arch.MTE2)
+        mutex_k.lock(pipe=tla.pipes.MTE2)
         tla.copy(k_l1, k_gm)
-        mutex_k.unlock(pipe=tla.arch.MTE2)
+        mutex_k.unlock(pipe=tla.pipes.MTE2)
 
         for part in tla.range(0, (dk + K0 - 1) // K0, 1):
             l0_index = (
@@ -224,28 +224,28 @@ def produce_qk(
                 b_ptr = bufs.b0 if part == 0 else bufs.b1
             q_l0 = tla.make_tensor_like(b_ptr, q_part, tla.arch.nZ)
             if tla.const_expr(d > 2 * K0):
-                mutex_q.lock(pipe=tla.arch.MTE1)
-                mb.lock(pipe=tla.arch.MTE1)
+                mutex_q.lock(pipe=tla.pipes.MTE1)
+                mb.lock(pipe=tla.pipes.MTE1)
                 tla.copy(q_l0, q_part)
-                mb.unlock(pipe=tla.arch.MTE1)
-                mutex_q.unlock(pipe=tla.arch.MTE1)
+                mb.unlock(pipe=tla.pipes.MTE1)
+                mutex_q.unlock(pipe=tla.pipes.MTE1)
 
             ma = bufs.ma0 if l0_index == 0 else bufs.ma1
             k_l0 = tla.make_tensor_like(
                 bufs.a0 if l0_index == 0 else bufs.a1, k_part, tla.arch.zN
             )
-            mutex_k.lock(pipe=tla.arch.MTE1)
-            ma.lock(pipe=tla.arch.MTE1)
+            mutex_k.lock(pipe=tla.pipes.MTE1)
+            ma.lock(pipe=tla.pipes.MTE1)
             tla.copy(k_l0, k_part)
-            ma.unlock(pipe=tla.arch.MTE1)
-            mutex_k.unlock(pipe=tla.arch.MTE1)
-            ma.lock(pipe=tla.arch.CUBE)
-            mb.lock(pipe=tla.arch.CUBE)
+            ma.unlock(pipe=tla.pipes.MTE1)
+            mutex_k.unlock(pipe=tla.pipes.MTE1)
+            ma.lock(pipe=tla.pipes.CUBE)
+            mb.lock(pipe=tla.pipes.CUBE)
             init_c = True if feature_tile == 0 and part == 0 else False
             tla.mmad(score, k_l0, q_l0, init_c=init_c, unit_flag=0)
-            mb.unlock(pipe=tla.arch.CUBE)
-            ma.unlock(pipe=tla.arch.CUBE)
-    mutex_c.unlock(pipe=tla.arch.CUBE)
+            mb.unlock(pipe=tla.pipes.CUBE)
+            ma.unlock(pipe=tla.pipes.CUBE)
+    mutex_c.unlock(pipe=tla.pipes.CUBE)
 
 
 @tla.jit
@@ -253,7 +253,7 @@ def copy_scores(bufs, score_ub_ptr, mk, nq_pad, tile_serial):
     """Consume one L0C slice under FIX ownership, then release its slot."""
     cptr = bufs.c if tile_serial % 2 == 0 else bufs.c1
     mutex_c = bufs.mc0 if tile_serial % 2 == 0 else bufs.mc1
-    mutex_c.lock(pipe=tla.arch.FIX)
+    mutex_c.lock(pipe=tla.pipes.FIX)
     score = tla.make_tensor(
         cptr, tla.make_layout_with_tag((mk, nq_pad), tla.Float32, tla.arch.L0Clayout)
     )
@@ -270,4 +270,4 @@ def copy_scores(bufs, score_ub_ptr, mk, nq_pad, tile_serial):
             unit_flag=0, l0c2ub_mode=tla.params.L0C2UBMode.SPLIT_N
         ),
     )
-    mutex_c.unlock(pipe=tla.arch.FIX)
+    mutex_c.unlock(pipe=tla.pipes.FIX)

@@ -65,11 +65,11 @@ def fill_l1_kernel(
         l1_fill_ptr, tla.make_layout_with_tag(shape, dtype, layout_tag)
     )
     t_l1_fill = tla.get_tile(t_l1, coord, extent)
-    fill_done = tla.flag("fill_readback", tla.arch.MTE2, tla.arch.MTE1)
+    fill_done = tla.flag("fill_readback", tla.pipes.MTE2, tla.pipes.MTE1)
     with tla.cube():
         tla.copy(t_l1_copy, gm_input)
         # Order the DMA sentinel write before the overlapping Fill write.
-        tla.pipe_barrier(tla.arch.MTE2)
+        tla.pipe_barrier(tla.pipes.MTE2)
         # Each core checks one constant, using its own L1 allocation.
         for value_idx in tla.range_constexpr(len(values)):
             if tla.arch.block_idx() == value_idx:

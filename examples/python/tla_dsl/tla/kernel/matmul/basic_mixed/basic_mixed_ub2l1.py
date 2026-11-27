@@ -50,12 +50,12 @@ def basic_mixed_ub2l1(
     rhs: tla.Tensor,
     out: tla.Tensor,
 ) -> None:
-    mmad_done = tla.flag("mmad_done", tla.arch.CUBE, tla.arch.FIX)
-    l1_loaded = tla.flag("l1_loaded", tla.arch.MTE2, tla.arch.MTE1)
-    l0_loaded = tla.flag("l0_loaded", tla.arch.MTE1, tla.arch.CUBE)
+    mmad_done = tla.flag("mmad_done", tla.pipes.CUBE, tla.pipes.FIX)
+    l1_loaded = tla.flag("l1_loaded", tla.pipes.MTE2, tla.pipes.MTE1)
+    l0_loaded = tla.flag("l0_loaded", tla.pipes.MTE1, tla.pipes.CUBE)
 
-    ub_load_ready = tla.flag("ub_load_ready", tla.arch.MTE3, tla.arch.MTE2)
-    ub_loaded = tla.flag("ub_loaded", tla.arch.MTE2, tla.arch.MTE3)
+    ub_load_ready = tla.flag("ub_load_ready", tla.pipes.MTE3, tla.pipes.MTE2)
+    ub_loaded = tla.flag("ub_loaded", tla.pipes.MTE2, tla.pipes.MTE3)
 
     ub2l1_ready = tla.cross_flag("ub2l1_ready")
     ub2l1_done = tla.cross_flag("ub2l1_done")
@@ -71,7 +71,7 @@ def basic_mixed_ub2l1(
     ub_a_ptr = tla.allocate(M_DIM // 2 * K_DIM, elem_t, tla.AddressSpace.ub, 256)
 
     with tla.cube():
-        tla.cross_core_set_flag(ub2l1_ready, tla.arch.MTE1)
+        tla.cross_core_set_flag(ub2l1_ready, tla.pipes.MTE1)
 
         gm_a = tla.tile_view(lhs, tla.make_shape(M_DIM, K_DIM), tla.make_coord(0, 0))
         gm_b = tla.tile_view(rhs, tla.make_shape(K_DIM, N_DIM), tla.make_coord(0, 0))
@@ -84,7 +84,7 @@ def basic_mixed_ub2l1(
         tla.set_flag(l1_loaded)
         tla.wait_flag(l1_loaded)
 
-        tla.cross_core_wait_flag(ub2l1_done, tla.arch.MTE1)
+        tla.cross_core_wait_flag(ub2l1_done, tla.pipes.MTE1)
 
         l1_a_l0 = tla.tile_view(
             l1_a, tla.make_shape(M_DIM, K_DIM), tla.make_coord(0, 0)
@@ -133,9 +133,9 @@ def basic_mixed_ub2l1(
         l1_a = tla.tile_view(
             l1_a_full, tla.make_shape(M_DIM // 2, K_DIM), tla.make_coord(vec_idx, 0)
         )
-        tla.cross_core_wait_flag(ub2l1_ready, tla.arch.MTE3)
+        tla.cross_core_wait_flag(ub2l1_ready, tla.pipes.MTE3)
         tla.copy(l1_a, ub_a)
-        tla.cross_core_set_flag(ub2l1_done, tla.arch.MTE3)
+        tla.cross_core_set_flag(ub2l1_done, tla.pipes.MTE3)
 
         tla.pipe_barrier(tla.pipes.ALL)
 

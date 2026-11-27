@@ -84,12 +84,12 @@ def row_topk_kernel(
             gm_row_v = tla.make_tensor(gm_val + out_off, pack_gm)
             gm_row_i = tla.make_tensor(gm_idx + out_off, pack_gm)
 
-            input_slot.lock(pipe=tla.arch.MTE2)
+            input_slot.lock(pipe=tla.pipes.MTE2)
             tla.copy(ub_x, gm_row_x)
-            input_slot.unlock(pipe=tla.arch.MTE2)
+            input_slot.unlock(pipe=tla.pipes.MTE2)
 
-            input_slot.lock(pipe=tla.arch.VECTOR)
-            output_slot.lock(pipe=tla.arch.VECTOR)
+            input_slot.lock(pipe=tla.pipes.VECTOR)
+            output_slot.lock(pipe=tla.pipes.VECTOR)
             with tla.vec.func(mode="simd"):
                 mask = tla.create_mask(pattern=tla.mask.ALL, dtype=tla.Float32)
                 if tla.const_expr(TAIL != 0):
@@ -245,14 +245,14 @@ def row_topk_kernel(
                     packed_i
                 )
 
-            output_slot.unlock(pipe=tla.arch.VECTOR)
-            input_slot.unlock(pipe=tla.arch.VECTOR)
+            output_slot.unlock(pipe=tla.pipes.VECTOR)
+            input_slot.unlock(pipe=tla.pipes.VECTOR)
 
             # MTE3 holds the result slot while the next row can load into UB.
-            output_slot.lock(pipe=tla.arch.MTE3)
+            output_slot.lock(pipe=tla.pipes.MTE3)
             tla.copy(gm_row_v, ub_pv)
             tla.copy(gm_row_i, ub_pi)
-            output_slot.unlock(pipe=tla.arch.MTE3)
+            output_slot.unlock(pipe=tla.pipes.MTE3)
 
 
 # ======================================================================================

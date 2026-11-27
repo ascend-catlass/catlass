@@ -136,8 +136,8 @@ def _twiddle_out(v, sign_bit, all_f, zero):
 @tla.kernel
 def sort_kernel(mem_keys: tla.Tensor, mem_val: tla.Tensor, mem_idx: tla.Tensor) -> None:
     """每字节轮 4 个 2-bit pass。"""
-    loaded = tla.flag("l", tla.arch.MTE2, tla.arch.VECTOR)
-    done = tla.flag("d", tla.arch.VECTOR, tla.arch.MTE3)
+    loaded = tla.flag("l", tla.pipes.MTE2, tla.pipes.VECTOR)
+    done = tla.flag("d", tla.pipes.VECTOR, tla.pipes.MTE3)
     kg = tla.tile_view(mem_keys, tla.make_shape(N), tla.make_coord(0))
     vg = tla.tile_view(mem_val, tla.make_shape(N), tla.make_coord(0))
     ig = tla.tile_view(mem_idx, tla.make_shape(N), tla.make_coord(0))

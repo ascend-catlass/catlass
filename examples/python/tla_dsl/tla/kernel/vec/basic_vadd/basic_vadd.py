@@ -39,8 +39,8 @@ _KERNEL_DTYPE = tla.Float32
 @tla.kernel
 def basic_vadd(gm_a: tla.Tensor, gm_b: tla.Tensor, gm_c: tla.Tensor) -> None:
     n_ele = gm_a.origin_shape[0]
-    ub_loaded = tla.flag("ub_loaded", tla.arch.MTE2, tla.arch.VECTOR)
-    vec_done = tla.flag("vec_done", tla.arch.VECTOR, tla.arch.MTE3)
+    ub_loaded = tla.flag("ub_loaded", tla.pipes.MTE2, tla.pipes.VECTOR)
+    vec_done = tla.flag("vec_done", tla.pipes.VECTOR, tla.pipes.MTE3)
 
     ub_ptr_a = tla.allocate(VECTOR_ELE, _KERNEL_DTYPE, tla.AddressSpace.ub, 256)
     ub_ptr_b = tla.allocate(VECTOR_ELE, _KERNEL_DTYPE, tla.AddressSpace.ub, 256)
@@ -90,17 +90,17 @@ def basic_vadd_mutex(gm_a: tla.Tensor, gm_b: tla.Tensor, gm_c: tla.Tensor) -> No
     ub_c = tla.make_tensor_like(ub_ptr_c, gm_c, tla.arch.RowMajor)
 
     with tla.vector():
-        mutex_ub_a.lock(pipe=tla.arch.MTE2)
+        mutex_ub_a.lock(pipe=tla.pipes.MTE2)
         tla.copy(ub_a, gm_a)
-        mutex_ub_a.unlock(pipe=tla.arch.MTE2)
+        mutex_ub_a.unlock(pipe=tla.pipes.MTE2)
 
-        mutex_ub_b.lock(pipe=tla.arch.MTE2)
+        mutex_ub_b.lock(pipe=tla.pipes.MTE2)
         tla.copy(ub_b, gm_b)
-        mutex_ub_b.unlock(pipe=tla.arch.MTE2)
+        mutex_ub_b.unlock(pipe=tla.pipes.MTE2)
 
-        mutex_ub_a.lock(pipe=tla.arch.VECTOR)
-        mutex_ub_b.lock(pipe=tla.arch.VECTOR)
-        mutex_ub_c.lock(pipe=tla.arch.VECTOR)
+        mutex_ub_a.lock(pipe=tla.pipes.VECTOR)
+        mutex_ub_b.lock(pipe=tla.pipes.VECTOR)
+        mutex_ub_c.lock(pipe=tla.pipes.VECTOR)
         with tla.vec.func(mode="simd"):
             for i in tla.range((n_ele + VL_ELE - 1) // VL_ELE):
                 ub_vl_a = tla.tile_view(ub_a, tla.make_shape(VL_ELE), tla.make_coord(i))
@@ -111,13 +111,13 @@ def basic_vadd_mutex(gm_a: tla.Tensor, gm_b: tla.Tensor, gm_c: tla.Tensor) -> No
                 reg_b = ub_vl_b.load()
                 reg_c = tla.add(reg_a, reg_b)
                 ub_vl_c.store(reg_c)
-        mutex_ub_c.unlock(pipe=tla.arch.VECTOR)
-        mutex_ub_b.unlock(pipe=tla.arch.VECTOR)
-        mutex_ub_a.unlock(pipe=tla.arch.VECTOR)
+        mutex_ub_c.unlock(pipe=tla.pipes.VECTOR)
+        mutex_ub_b.unlock(pipe=tla.pipes.VECTOR)
+        mutex_ub_a.unlock(pipe=tla.pipes.VECTOR)
 
-        mutex_ub_c.lock(pipe=tla.arch.MTE3)
+        mutex_ub_c.lock(pipe=tla.pipes.MTE3)
         tla.copy(gm_c, ub_c)
-        mutex_ub_c.unlock(pipe=tla.arch.MTE3)
+        mutex_ub_c.unlock(pipe=tla.pipes.MTE3)
         tla.pipe_barrier(tla.pipes.ALL)
 
 
@@ -169,7 +169,7 @@ def basic_vadd_mutex_with(gm_a: tla.Tensor, gm_b: tla.Tensor, gm_c: tla.Tensor) 
 @tla.kernel
 def basic_vadd_atomic_add(gm_a: tla.Tensor, gm_b: tla.Tensor, gm_c: tla.Tensor) -> None:
     """C = A + B via plain A store then atomic B add (single AIV block)."""
-    ub_loaded = tla.flag("ub_loaded", tla.arch.MTE2, tla.arch.MTE3)
+    ub_loaded = tla.flag("ub_loaded", tla.pipes.MTE2, tla.pipes.MTE3)
 
     ub_ptr_a = tla.allocate(VECTOR_ELE, _KERNEL_DTYPE, tla.AddressSpace.ub, 256)
     ub_ptr_b = tla.allocate(VECTOR_ELE, _KERNEL_DTYPE, tla.AddressSpace.ub, 256)
