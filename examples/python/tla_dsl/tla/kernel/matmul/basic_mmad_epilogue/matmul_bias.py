@@ -818,7 +818,7 @@ def main() -> int:
     p.add_argument("--layout-b", choices=("row", "col"), default="row")
     p.add_argument("--dtype-a", choices=("f16", "bf16", "f32"), default="f32")
     p.add_argument("--dtype-b", choices=("f16", "bf16", "f32"), default="f32")
-    p.add_argument("--dtype-c", choices=("f16", "f32"), default="f32")
+    p.add_argument("--dtype-c", choices=("f32",), default="f32")
     p.add_argument("--block-num", type=int, default=-1)
     return run(p.parse_args())
 

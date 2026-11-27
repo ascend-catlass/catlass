@@ -37,7 +37,7 @@
 | `A` | Input | `(m,k)` | `float16/bfloat16/float32` | 左矩阵，layout 支持 `RowMajor`（默认）和 `ColumnMajor` |
 | `B` | Input | `(k,n)` | `float16/bfloat16/float32` | 右矩阵，layout 支持 `RowMajor`（默认）和 `ColumnMajor`，数据类型与左矩阵一致 |
 | `X` | Input | `(m,n)` | `float16/float32` | `matmul_add.py` / `matmul_add_ub.py` 的加法输入，layout 为 `RowMajor`，数据类型与输出 `D` 一致 |
-| `bias` | Input | `(1,n)` | `float16/float32` | `matmul_bias.py` 的偏置，沿 m 轴广播，数据类型与输出 `D` 一致 |
+| `bias` | Input | `(1,n)` | `float32` | `matmul_bias.py` 的偏置，沿 m 轴广播 |
 | `alpha` | 常量 | 标量 | `float32` | `matmul_leaky_relu.py` 的负半轴斜率，默认 `0.1` |
 | `quant_scale` | Input | 标量 | `float32` | `quant_matmul_gelu.py` 的 per-tensor 反量化系数，在 Vector 上与 int32 累加结果相乘 |
 | `kScale` / `kCubicCoef` | 常量 | 标量 | `float32` | `matmul_gelu.py` 的 GELU 系数，取 `1.59576912` 与 `0.044715`，与 `examples/common/golden/matmul.hpp` 中 `Gelu` 一致 |
@@ -50,6 +50,7 @@
 - 矩阵的 M/N/K 轴不超过 122880。
 - 在 GM 上 `A`/`B`/`C` 的总分配不超过 10 GiB（即 `M*K*sizeof(DTYPE_A) + K*N*sizeof(DTYPE_B) + M*N*sizeof(DTYPE_C) <= 10 GiB`）。
 - `A`/`B` 均为 `float32` 类型时，建议 `K` 小于 2048 以避免绝对误差超阈值（[阈值标准](https://gitcode.com/Ascend/ATK/blob/master/skill/atk-quality-guard/references/experimental_standard.md#22-%E6%B7%B7%E5%90%88%E5%AE%B9%E5%B7%AE%E9%98%88%E5%80%BC%E8%A1%A8)）上限。
+- 使用 `matmul_bias.py` 时，建议 `K < 1024`，且输出 `D` 的数据类型与 `bias` 保持一致。
 - `quant_matmul_gelu.py` 的 `A`、`B` 为 `int8`。样例输入取 `[-8, 8)`。`K <= 2048` 时，`127 * 127 * K` 小于 `2^31`，int32 累加不溢出。
 
 ## 代码组织
@@ -86,7 +87,8 @@
 
 | 算子 | `DTYPE_A` / `DTYPE_B` | `DTYPE_C` |
 |------|-------------------|---------|
-| add, bias, gelu, leaky_relu, sigmoid, silu | f16 / bf16 / f32 | f16 或 f32 |
+| add, gelu, leaky_relu, sigmoid, silu | f16 / bf16 / f32 | f16 或 f32 |
+| bias | f16 / bf16 / f32 | f32 |
 | add_ub, tanh | f16 / bf16 / f32 | f32 |
 | quant_matmul_gelu | i8 | f16 或 f32 |
 
@@ -106,7 +108,7 @@
 | `--k` | `256` | 矩阵乘累加轴的大小 |
 | `--layout-a` / `--layout-b` | `"row"` / `"row"` | 左、右矩阵 A、B 的数据排布格式，可选 `"row"` 或 `"col"`，表示行优先或列优先布局。 |
 | `--dtype-a` / `--dtype-b` | `"f32"` / `"f32"` | 左、右矩阵 A、B 的数据类型，可选范围参考约束说明。 |
-| `--dtype-c` | `"f32"` | 结果矩阵 D 的数据类型，可选范围参考约束说明（`add_ub` / `tanh` 仅支持 f32）。 |
+| `--dtype-c` | `"f32"` | 结果矩阵 D 的数据类型，可选范围参考约束说明（`add_ub` / `bias` / `tanh` 仅支持 f32）。 |
 | `--block-num` | `-1` | 启用的 AIC 核数，`-1` 表示自动探测可用核数（满核）。 |
 
 ### 执行示例

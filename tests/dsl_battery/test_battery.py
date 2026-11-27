@@ -1044,7 +1044,14 @@ def _cases(device: int) -> Iterator[tuple[str, list[list[str]]]]:
 
     # --- basic_mmad_epilogue: multiple epilogue examples ---
     for op in EVG_OPS:
-        if op in ("add_ub", "tanh"):
+        if op == "bias":
+            # Bias and output share the FP32 dtype; cover every input dtype.
+            triples = (
+                ("f16", "f32"),
+                ("bf16", "f32"),
+                ("f32", "f32"),
+            )
+        elif op in ("add_ub", "tanh"):
             # f32 (dtype-c) only examples
             triples = (
                 ("f16", "f32"),
